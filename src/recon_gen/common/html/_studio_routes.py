@@ -1503,6 +1503,7 @@ async def _render_etl_run_page(
     cfg: Config | None = None,
     demo_mode: bool = False,
     top_nav_html: str = "",
+    just_ran: bool = False,
 ) -> str:
     """BT.3 — ``/etl/run`` ETL execution + coverage report page.
 
@@ -1541,6 +1542,29 @@ async def _render_etl_run_page(
         last_summary=last_summary,
     )
 
+    # BTa.6 — `?just_ran=1` triggers a transient flash on the
+    # coverage section + a 5s tab-title pulse so an operator
+    # multi-tasking in another tab gets a visual nudge that the
+    # refresh finished.
+    flash_styles = "" if not just_ran else """
+    <style>
+      @keyframes etlRunFlash {
+        0% { background-color: rgba(34, 197, 94, 0.18); }
+        100% { background-color: transparent; }
+      }
+      #etl-coverage { animation: etlRunFlash 2s ease-out; }
+    </style>
+"""
+    flash_script = "" if not just_ran else f"""
+    <script>
+    (function() {{
+      const original = document.title;
+      document.title = '✓ Done · ' + original;
+      setTimeout(() => {{ document.title = original; }}, 5000);
+    }})();
+    </script>
+"""
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1548,6 +1572,7 @@ async def _render_etl_run_page(
   <title>Studio · ETL · Run — {prefix_label}</title>
   {devlog_meta}{studio_theme_head(instance)}
   <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
+  {flash_styles}
   {devlog_script}</head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
@@ -1559,6 +1584,7 @@ async def _render_etl_run_page(
   {run_form_html}
   {log_html}
   {coverage_html}
+  {flash_script}
 </body>
 </html>
 """
@@ -1637,22 +1663,63 @@ def _format_hook_attribution(etl_hook_command: str | None) -> str:
 
 
 def _render_etl_run_log(last_summary: DeploySummary | None) -> str:
-    """Per-step event log from the last run. Empty when no run yet."""
+    """Per-step event log from the last run. Empty when no run yet.
+
+    BTa.6 — renders per-event timing delta (Δms from prior event)
+    + an inferred level token (info/warn/error). Level is derived
+    from the event name suffix: ``*:halt`` ⇒ error, ``*:skip`` ⇒
+    warn, anything else ⇒ info. Color-coded so the operator can
+    scan for the first non-info event when triaging a failure.
+    """
     if last_summary is None or not last_summary.events:
         return ""
     log_lines: list[str] = []
+    prior_ts: float | None = None
     for event in last_summary.events:
-        kind = escape(str(event.get("kind", "")))
-        # Show every key apart from `kind` as a compact suffix; keeps
-        # the log readable without per-event special-casing.
+        # Pull and remove the timestamp before formatting so it
+        # renders as Δms instead of as a raw key=value.
+        raw_ts = event.get("ts_unix")
+        ts_unix: float | None = (
+            float(raw_ts) if isinstance(raw_ts, (int, float)) else None
+        )
+        # `event` is the human label (e.g. deploy:step1:done);
+        # legacy events used the `kind` key — support both.
+        event_name = str(event.get("event") or event.get("kind") or "")
+        # Inferred log level from the event-name suffix.
+        if event_name.endswith(":halt"):
+            level = "error"
+            level_class = "text-danger"
+        elif event_name.endswith(":skip"):
+            level = "warn"
+            level_class = "text-warning"
+        else:
+            level = "info"
+            level_class = "text-secondary-fg"
+        # Δms — relative to the prior event in the captured order.
+        delta_html = ""
+        if ts_unix is not None:
+            if prior_ts is not None:
+                delta_ms = int(round((ts_unix - prior_ts) * 1000))
+                delta_html = (
+                    f'<span class="text-secondary-fg text-[10px] mr-2">'
+                    f'+{delta_ms}ms</span>'
+                )
+            prior_ts = ts_unix
+        # Suffix: everything except `event`/`kind`/`ts_unix`.
         suffix_bits: list[str] = []
         for k, v in event.items():
-            if k == "kind":
+            if k in ("event", "kind", "ts_unix"):
                 continue
             suffix_bits.append(f"{escape(str(k))}={escape(str(v))}")
         suffix = " " + " ".join(suffix_bits) if suffix_bits else ""
         log_lines.append(
-            f'<div class="font-mono text-xs leading-relaxed">{kind}{suffix}</div>'
+            f'<div class="font-mono text-xs leading-relaxed" '
+            f'data-test-log-level="{level}">'
+            f'{delta_html}'
+            f'<span class="{level_class} mr-2 uppercase text-[10px]">'
+            f'[{level}]</span>'
+            f'{escape(event_name)}{suffix}'
+            f'</div>'
         )
     return f"""
   <section class="px-8 py-3 bg-surface-bg border-b border-surface-border" id="etl-run-log">
@@ -1716,7 +1783,37 @@ async def _render_etl_coverage_section(
 
     return f"""
   <section class="px-8 py-6" id="etl-coverage">
-    <h2 class="text-base font-semibold m-0 mb-3">Coverage</h2>
+    <div class="flex items-center gap-4 mb-3">
+      <h2 class="text-base font-semibold m-0">Coverage</h2>
+      <label class="text-xs text-secondary-fg flex items-center gap-1 cursor-pointer">
+        <input type="checkbox" id="etl-coverage-failures-only"
+               data-test-failures-toggle>
+        Show failures only
+      </label>
+    </div>
+    <style>
+      /* BTa.6 — when the toggle is on, hide every coverage row whose
+         status is "present" (green ✓). The metadata card uses
+         data-test-coverage-row-mark="text-success" for the same purpose. */
+      #etl-coverage[data-failures-only="1"] li[data-coverage-status="present"],
+      #etl-coverage[data-failures-only="1"] li[data-test-coverage-row-mark="text-success"] {{
+        display: none;
+      }}
+    </style>
+    <script>
+    (function() {{
+      const root = document.getElementById('etl-coverage');
+      const toggle = document.getElementById('etl-coverage-failures-only');
+      if (!root || !toggle) return;
+      toggle.addEventListener('change', () => {{
+        if (toggle.checked) {{
+          root.setAttribute('data-failures-only', '1');
+        }} else {{
+          root.removeAttribute('data-failures-only');
+        }}
+      }});
+    }})();
+    </script>
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
       {rails_card}
       {templates_card}
@@ -1734,7 +1831,12 @@ async def _render_etl_coverage_section(
 def _render_coverage_card_for_kind(
     title: str, entries: list[tuple[str, CoverageEntry | None]],
 ) -> str:
-    """One card: title + N/M tally + per-entity ✓/✗ list."""
+    """One card: title + N/M tally + per-entity ✓/✗ list.
+
+    BTa.6 — each `<li>` ships `data-coverage-status="present|missing"`
+    so the "Show failures only" toggle can hide the green rows via
+    CSS attribute selector (no per-row class munging).
+    """
     present_count = sum(1 for _n, e in entries if e is not None and e.present)
     total = len(entries)
     pct = (
@@ -1747,8 +1849,10 @@ def _render_coverage_card_for_kind(
             '<span class="text-success">✓</span>' if is_present
             else '<span class="text-danger">✗</span>'
         )
+        status = "present" if is_present else "missing"
         rows.append(
-            f'<li class="flex justify-between gap-2 text-xs font-mono py-0.5">'
+            f'<li class="flex justify-between gap-2 text-xs font-mono py-0.5" '
+            f'data-coverage-status="{status}">'
             f'<span>{escape(name)}</span>{mark}</li>'
         )
     return f"""
@@ -1782,7 +1886,17 @@ def _render_metadata_coverage_card(
     instance: L2Instance,
     md_map: Mapping[str, TemplateMetadataCoverage],
 ) -> str:
-    """Metadata card: per-template required-key landing tally."""
+    """Metadata card: per-template required-key landing tally.
+
+    BTa.6 — denominator now matches the displayed list. The prior
+    rollup excluded 0-row templates from `total_keys` while still
+    rendering them in the per-row list, producing an apparent
+    denominator drift to a careful reader (cold-read trust killer:
+    `headline says 3/4 but I count 5 rows`). Now every template the
+    operator can see contributes its `per_key_count` to the
+    denominator; 0-row templates contribute 0 to `landed_keys` so
+    the math reflects the visible reality.
+    """
     rows: list[str] = []
     total_keys = 0
     landed_keys = 0
@@ -1791,16 +1905,19 @@ def _render_metadata_coverage_card(
         if cov is None:
             continue
         per_key_count = len(cov.per_key)
+        # Every displayed template contributes its key-universe to
+        # the denominator — the headline must match the visible list.
+        total_keys += per_key_count
         # A key is "landed" if at least one row carries it AND the
-        # template has rows. No rows → all keys "no rows" (gray).
+        # template has rows. No rows → 0 landed, full denominator.
         if cov.row_count == 0:
             label = f"0/{per_key_count} keys ✗ no rows"
             mark_class = "text-danger"
+            # 0 contribution to landed_keys (no rows ⇒ no keys land).
         else:
             landed = sum(
                 1 for _k, count in cov.per_key.items() if count > 0
             )
-            total_keys += per_key_count
             landed_keys += landed
             if landed == per_key_count:
                 label = f"{landed}/{per_key_count} keys ✓"
@@ -1815,7 +1932,8 @@ def _render_metadata_coverage_card(
                 )
                 mark_class = "text-danger"
         rows.append(
-            f'<li class="flex justify-between gap-2 text-xs font-mono py-0.5">'
+            f'<li class="flex justify-between gap-2 text-xs font-mono py-0.5" '
+            f'data-test-coverage-row-mark="{mark_class}">'
             f'<span>{escape(str(template.name))}</span>'
             f'<span class="{mark_class}">{escape(label)}</span></li>'
         )
@@ -1828,7 +1946,7 @@ def _render_metadata_coverage_card(
       <h3 class="text-sm font-semibold m-0 mb-2">Metadata</h3>
       <p class="text-xs text-secondary-fg m-0 mb-3">
         <strong>{landed_keys}</strong> of <strong>{total_keys}</strong>
-        required metadata keys landed across non-empty templates ({pct})
+        required metadata keys landed ({pct})
       </p>
       <ul class="list-none m-0 p-0">{''.join(rows)}</ul>
     </div>
@@ -3532,7 +3650,11 @@ def make_studio_routes(
             )
             _etl_run_state["summary"] = summary
             _etl_run_state["at"] = datetime.now()  # typing-smell: ignore[no-datetime-now]: run-stamp for the operator-facing "last run at ..." banner — same wall-clock anchor as the trainer page; not a determinism path
-            return RedirectResponse(url="/etl/run", status_code=303)
+            # BTa.6 — ?just_ran=1 triggers the post-refresh flash +
+            # tab-title pulse on the GET render so the operator
+            # multi-tasking in another tab gets a visual nudge that
+            # the run finished.
+            return RedirectResponse(url="/etl/run?just_ran=1", status_code=303)
 
         last_summary = cast(
             "DeploySummary | None", _etl_run_state.get("summary"),
@@ -3540,6 +3662,7 @@ def make_studio_routes(
         last_run_at = cast(
             "datetime | None", _etl_run_state.get("at"),
         )
+        just_ran = request.query_params.get("just_ran") == "1"
         html = await _render_etl_run_page(
             cache, dev_log,
             last_summary=last_summary, last_run_at=last_run_at,
@@ -3547,6 +3670,7 @@ def make_studio_routes(
             prefix_override=prefix_override,
             cfg=cfg, demo_mode=demo_mode,
             top_nav_html=_top_nav_html("/etl/run"),
+            just_ran=just_ran,
         )
         return HTMLResponse(html)
 

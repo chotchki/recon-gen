@@ -66,7 +66,20 @@ DevLogWriter = Callable[[Mapping[str, object]], Awaitable[None]]
 async def _emit(
     dev_log: DevLogWriter | None, payload: Mapping[str, object],
 ) -> None:
+    """Emit a deploy event with a wall-clock timestamp.
+
+    BTa.6 — every event carries ``ts_unix`` (float seconds since
+    epoch) so the run-log renderer can compute per-step durations
+    by diffing consecutive events. Caller-provided ``ts_unix``
+    (uncommon) wins; usually we stamp at call time.
+    """
     if dev_log is None:
+        return
+    if "ts_unix" not in payload:
+        import time  # noqa: PLC0415
+
+        stamped: dict[str, object] = {"ts_unix": time.time(), **payload}
+        await dev_log(stamped)
         return
     await dev_log(payload)
 
