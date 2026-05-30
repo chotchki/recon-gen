@@ -1,5 +1,84 @@
 # QuickSight Generator — Active Plan
 
+## Phase BS - Studio + Dashboards rethink (scaffolding)
+
+Full design in `SPEC.md`. Trace: `docs/bs_design_thoughts.md`. Four-phase
+decomposition: **BS** (scaffolding — this) → BT (ETL Support surface) →
+BU (L2 plants + Training) → BV (dogfood cap-stone). BS is internal scope:
+nav cleanup, deploy-model shift, `_kv` static-collapse audit. No new
+user-facing surfaces beyond the nav reshape. No design-review cold-read
+needed for BS itself (deferred to BT).
+
+- [x] BS.0 - Locks (decisions before BS.1 fires) **— LOCKED 2026-05-29.**
+  - **Lock 1 — Navigation contract.** Top nav always present on App2. Studio is the only toggle, sourced from `cfg.yaml::studio_enabled: bool`. **Resolved:** default `true` (operators opt OUT for prod by setting `studio_enabled: false`). Field location in `common/config.py` is implementation detail, deferred to BS.2.
+  - **Lock 2 — Studio modes flat into top-nav.** Studio container intermediate goes away. Top-nav order: `L2 Editor <hr> ETL Support <hr> Training <hr> L1 Dashboard <hr> L2 Dashboard <hr> Investigation <hr> Executives <hr> Docs`. **Resolved:** divider style is `<hr>` vertical separator (styled-thin, between every entry — not just role-group boundaries). Studio entries hide when `studio_enabled=false`.
+  - **Lock 3 — D6 framing is static-collapse, not dynamic-expansion.** With `_kv` carrying runtime variation, emit layer becomes *more* static (one canonical SQL × N `_kv` fixtures vs N SQL × N L2s). Test surface shrinks. The audit (BS.1) is deep-work; land thorough inventory even if conversion itself slips. See SPEC.md::D6 reframe.
+  - **Lock 4 — D4.arch deploy-model shift in scope.** Drop `upstream → demo_db → matview` intermediate copy. New flow: `truncate(demo_db) → ETL hook (writes to demo_db) → matview refresh`. Touches `cli/data.py`, runner seed flow, existing `etl_hook` plumbing. Spike-before-implementing per `[[feedback_spike_before_locking_implementation]]`.
+  - **Lock 5 — BS scope boundary.** Phase ships when: shared top nav lands, deploy-model shift lands, `_kv` audit ships with explicit recommendation. **Excluded:** any ETL Support page implementation (BT scope), any new Training surfaces (BU scope), any new dogfood claim (BV scope).
+  - **Lock 6 — BS.5 conditional in-phase.** **Resolved:** if BS.1's audit produces a clear P0 list with low-friction conversions, BS.5 fires up-front (we want them while context is fresh). If audit is mixed or P0 items carry conversion cost, BS.5 defers to BT. Decision lands at BS.1 exit.
+- [x] BS.1 - `_config_kv` static-collapse audit (early spike) **— COMPLETE 2026-05-29.** Walked 4 apps' datasets.py + schema.py matviews via 5 parallel research agents. Output: `docs/audits/bs_6_kv_static_collapse_audit.md`. Headline: Exec / L1 / Investigation dataset layers all already-canonical (28 builders, all P2); L2FT is the action (10 P0 of 13); schema.py has 2 P0 matviews + 12 P2 (data-only). `_v_config_chain_children` is the single highest-leverage new view (unlocks 7 paths: 2 matviews + 3 L2FT + 2 immediate-win via existing views). BS.5 fires in-phase per Lock 6 with focused scope. Metadata-kv decomposition shelved indefinitely (Oracle 19c JSON_VALUE constraint not lifting soon).
+- [ ] BS.2 - D1 cfg `studio_enabled` toggle + always-on top nav.
+  - Add `Config.studio_enabled: bool` field per Lock 1 sub-decision.
+  - Update `common/html/` / Starlette routes to emit one shared chrome wrapper.
+  - Unit tests: chrome rendering with `studio_enabled=true` vs `false`.
+- [ ] BS.3 - D2 flat top-level nav, Studio container collapse.
+  - Inline nav entries per Lock 2 order, with dividers per Lock 6 sub-decision.
+  - Move/remove the existing `/studio` landing's "go to L2 editor / data / dashboards" panel — its job is now the top nav's.
+  - Closes BF.11 (dual-nav-shape bug) as byproduct; tick BF.11 in Phase BF when BS.3 lands.
+- [ ] BS.4 - D4.arch deploy-model shift.
+  - Spike first: `docs/audits/bs_4_arch_shift_spike.md` — what touches `cli/data.py::data_apply` + `etl_hook` plumbing + the runner's seed flow + tests assuming the upstream-copy step.
+  - Implementation: collapse to `truncate(demo_db) → etl_hook → refresh_matviews`. No intermediate upstream pull.
+  - Existing upstream-pull code: per SPEC.md::D4, decide delete-vs-keep-as-opt-in during implementation.
+- [ ] BS.5 - Dynamic SQL conversion per BS.1's P0 recommendation (scope-positive only).
+  - Gated on BS.1's audit landing an explicit "pursue these N P0 items in BS" recommendation.
+  - If audit says defer everything to BT, BS.5 ticks as deferred and BS.0 Lock 6 sub-decision (c) flips deferred.
+
+## Phase BT - ETL Support surface (provisional)
+
+Builds on BS.4's deploy-model shift. First new operator surface. **Provisional** — replan at BT.0 against post-BS state before any BT.1+ work fires. SPEC.md::Phase BT for the design. Agent-based design cold-read fires before BT exits.
+
+- [ ] BT.0 - **REPLAN.** Re-read SPEC.md::Phase BT against the BS exit state. Verify the BS.4 deploy-model shift matches the assumptions BT.2-BT.5 made. Inventory carry-over from BS.1's `_kv` audit — any P0 items the audit punted to BT? Lock BT's sub-decisions (canonical input shape, per-column-pair contract derivation source). Output: BT.0 lock list + BT.1-N task refinement.
+- [ ] BT.0.5 - **Agent-driven design mockup session.** Pair-with-agent flow: hand off SPEC.md::Phase BT + BT.0 lock list; agent produces concrete artifacts (ASCII wireframes / HTML mocks / sequence diagrams) for the L2-slice probe, ETL execution + coverage report, and exception-triage-with-handoff pages. Cycle 2-3 times with operator critique. Output: `docs/audits/bt_design_mockups.md` (or per-page if it sprawls) — a shared visual reference grounding BT.1+ implementation.
+- [ ] BT.1 - `/studio/etl` flat-nav entry + landing page.
+- [ ] BT.2 - D4.surface #1: L2-slice probe (per-rail / per-template / per-chain expectation viewer).
+- [ ] BT.3 - D4.surface #2: ETL execution + coverage report (per-kind tally including required-metadata-landed yes/no).
+- [ ] BT.4 - D4.surface #3: Exception triage + partial-match handoff back into `/studio/l2`.
+- [ ] BT.5 - Per-column-pair contract derivation in `common/l2/`.
+- [ ] BT.6 - Agent-based design cold-read against the implemented surface. Output: `docs/audits/bt_cold_read.md`. Operator iteration + sign-off after.
+
+## Phase BU - L2 plant generation + Training mode (provisional)
+
+**Provisional** — replan at BU.0. Could run in parallel with BT after BS; sequencing decided at BU.0. SPEC.md::Phase BU for the design.
+
+- [ ] BU.0 - **REPLAN.** Re-read SPEC.md::Phase BU against post-BS state. Decide sequencing vs BT (sequential or parallel). Inventory whether BT.3's coverage-report shape can be reused for BU.5's plant-presence reports. Lock BU.1's audit scope.
+- [ ] BU.0.5 - **Agent-driven design mockup session.** Hand off SPEC.md::Phase BU + BU.0 lock list; agent produces mocks for the Training landing, plant picker, and before/after dashboard tour (BU.5's load-bearing UX). Reuse BT's mockup format if BT shipped first. Cycle with operator critique. Output: `docs/audits/bu_design_mockups.md`.
+- [ ] BU.1 - D5 plant inventory audit. Output: `docs/audits/bs_5_l2_plant_inventory.md`.
+- [ ] BU.2 - Expose existing plants under `/studio/training`.
+- [ ] BU.3 - Add missing plants per BU.1's audit.
+- [ ] BU.4 - Training landing + sub-nav (D2's deferred sub-nav question lands here).
+- [ ] BU.5 - Per-invariant "before/after dashboard" tour: pick a plant, see the dashboard sheet that surfaces it, no-plant vs with-plant side-by-side.
+- [ ] BU.6 - Agent-based design cold-read. Output: `docs/audits/bu_cold_read.md`. Operator iteration + sign-off after.
+
+## Phase BV - Dogfood cap-stone (provisional)
+
+The full L2 + ETL + Training round-trip. Glues everything under one e2e test. **Provisional** — replan at BV.0 to confirm BT + BU shipped the parts BV.4 needs. SPEC.md::Phase BV for the design.
+
+- [ ] BV.0 - **REPLAN.** Re-read SPEC.md::Phase BV against post-BT + post-BU state. Inventory the parts BV.4 (the HUGE one) actually depends on. Decide e2e test infra: extend `tests/e2e/test_studio_dogfood_browser.py` or new file? AWS-deploy required or App2-only?
+- [ ] BV.1 - D3.1 L2 audit redux + per-primitive curriculum doc (the "what's persona for?" deliverable).
+- [ ] BV.2 - D3.2 ETL round-trip claim: test data generator hooked as ETL hook; BT.3's coverage report green per fuzz seed.
+- [ ] BV.3 - D3.3 Training round-trip claim: every plant kind surfaces correctly per fuzz seed.
+- [ ] BV.4 - **The HUGE one.** Take an L2 yaml → recreate in the editor → deploy via Training mode (all defaults) → assert dashboards match existing test deploys. Browser-layer e2e, parametrized over the fuzz pool.
+- [ ] BV.5 - Agent-based design cold-read against the dogfood + the HUGE test. Output: `docs/audits/bv_cold_read.md`. Operator iteration + sign-off.
+
+## Phase BW - Docs posture (deferred / follow-on)
+
+**Provisional + may not fire.** SPEC.md::Phase BW. Only schedule if an operator asks for the "your deployment overview" page; otherwise D7 ticks as "static-default locked, follow-on deferred" at BV exit.
+
+- [ ] BW.0 - **REPLAN.** Confirm operator demand for the `_kv`-templated docs page exists before scheduling BW.1+. If no demand, tick BW.0 as deferred-pending-demand and close Phase BW without further work.
+- [ ] BW.0.5 - **Agent-driven design mockup session** (only if BW.0 said yes). Mock the deployment-overview page reading from `_kv`.
+- [ ] BW.1 - D7 lock + minimal implementation (static-default, per SPEC).
+- [ ] BW.2 - "Your deployment overview" page reading from `_kv`, if BW.0 said yes.
+
 ## Phase AI
 
 Per `feedback_build_verbs_not_skip`: when an editor verb's underlying UI is missing, BUILD the UI (and the verb that wires to it), don't skip the test param.
