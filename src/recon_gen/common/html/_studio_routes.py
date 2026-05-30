@@ -40,6 +40,7 @@ from __future__ import annotations
 import json
 import secrets
 from collections.abc import Callable, Mapping
+from dataclasses import replace as dataclass_replace
 from html import escape
 from pathlib import Path
 from typing import Any, cast
@@ -67,10 +68,10 @@ def asset_url(path: str) -> str:
         return f"{path}?cb={_BOOT_ID}"
     return f"/studio/static/{path}?cb={_BOOT_ID}"
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -94,8 +95,18 @@ from recon_gen.common.l2.contract import (
     TemplateContract,
     derive_column_contracts,
 )
-from recon_gen.common.l2.coverage import CoverageEntry, coverage_for
-from recon_gen.common.l2.deploy_pipeline import run_deploy_pipeline
+from recon_gen.common.l2.coverage import (
+    CoverageEntry,
+    CoverageMap,
+    TemplateMetadataCoverage,
+    chain_edge_id,
+    coverage_for,
+    metadata_coverage_per_template,
+)
+from recon_gen.common.l2.deploy_pipeline import (
+    DeploySummary,
+    run_deploy_pipeline,
+)
 from recon_gen.common.l2.probe import (
     ProbeKind,
     ProbeResult,
@@ -111,6 +122,8 @@ from recon_gen.common.l2.trainer_timeline import (
     hits_by_kind,
 )
 from recon_gen.common.l2.topology import (
+    _rail_id,
+    _template_id,
     build_topology_graph_per_rail,
     topology_graph_for,
     visible_entities_for,
@@ -610,7 +623,7 @@ _ETL_LANDING_CARDS: tuple[tuple[str, str, str | None, str], ...] = (
     (
         "Run",
         "/etl/run",
-        "BT.3",
+        None,  # BT.3 landed; no "coming in" hint
         "Execute the ETL pipeline (wipe → hook → matview refresh) and "
         "render a per-kind coverage tally so you can confirm every "
         "declared primitive landed at least one row.",
@@ -1210,6 +1223,321 @@ def _parse_iso_date(value: str | None) -> date | None:
         return date.fromisoformat(value)
     except ValueError:
         return None
+
+
+# -- BT.3 — /studio/etl/run page --------------------------------------------
+
+
+async def _render_etl_run_page(
+    cache: L2InstanceCache,
+    dev_log: bool,
+    *,
+    last_summary: DeploySummary | None,
+    last_run_at: datetime | None,
+    db_pool: AsyncConnectionPool | None,
+    dialect: Dialect | None,
+    prefix_override: str | None,
+    cfg: Config | None = None,
+    demo_mode: bool = False,
+    top_nav_html: str = "",
+) -> str:
+    """BT.3 — ``/etl/run`` ETL execution + coverage report page.
+
+    Renders:
+      1. Run-ETL form (POSTs to /etl/run).
+      2. Last-run banner (status + duration + halt reason when halted).
+      3. Last-run event log (when a run has happened).
+      4. Coverage cards (rails / templates / chains via coverage_for;
+         metadata via metadata_coverage_per_template).
+      5. Empty-state when no run has happened AND no rows exist.
+
+    The "run" state is closure-scope (single Studio user, single
+    process); restart clears it.
+    """
+    instance = cache.get()
+    devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
+    demo_banner = _demo_mode_banner(demo_mode)
+    prefix_label = escape(
+        cfg.deployment_name if cfg is not None else cache.path.stem,
+    )
+    prefix = (
+        prefix_override
+        if prefix_override is not None
+        else (cfg.db_table_prefix if cfg is not None else cache.path.stem)
+    )
+
+    run_form_html = _render_etl_run_form(
+        last_summary=last_summary, last_run_at=last_run_at,
+    )
+    log_html = _render_etl_run_log(last_summary)
+    coverage_html = await _render_etl_coverage_section(
+        db_pool=db_pool, dialect=dialect,
+        prefix=prefix, instance=instance,
+        last_summary=last_summary,
+    )
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Studio · ETL · Run — {prefix_label}</title>
+  {devlog_meta}{studio_theme_head(instance)}
+  <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
+  {devlog_script}</head>
+<body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
+  {top_nav_html}
+  {demo_banner}
+  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
+    <h1>Studio · ETL · Run + coverage</h1>
+    <span class="text-sm text-secondary-fg font-mono">{prefix_label}</span>
+  </header>
+  {run_form_html}
+  {log_html}
+  {coverage_html}
+</body>
+</html>
+"""
+
+
+def _render_etl_run_form(
+    *, last_summary: DeploySummary | None, last_run_at: datetime | None,
+) -> str:
+    """Run-ETL button + last-run status sidebar."""
+    if last_summary is None:
+        status_html = (
+            '<p class="text-sm text-secondary-fg m-0">No runs yet.</p>'
+        )
+    elif last_summary.halted:
+        ts = last_run_at.isoformat(timespec="seconds") if last_run_at else "—"
+        status_html = (
+            '<p class="text-sm m-0 mb-1">'
+            f'<span class="text-danger font-semibold">● HALTED</span> '
+            f'at {ts}</p>'
+            f'<p class="text-xs text-secondary-fg m-0">'
+            f'reason: <code>{escape(last_summary.halt_reason or "—")}</code></p>'
+        )
+    else:
+        ts = last_run_at.isoformat(timespec="seconds") if last_run_at else "—"
+        tx_after = last_summary.step3_generator_transactions_after
+        status_html = (
+            '<p class="text-sm m-0 mb-1">'
+            f'<span class="text-success font-semibold">● success</span> '
+            f'at {ts}</p>'
+            f'<p class="text-xs text-secondary-fg m-0">'
+            f'gen {last_summary.step5_data_generation_id} · '
+            f'{tx_after:,} transactions</p>'
+        )
+    return f"""
+  <section class="flex items-center gap-6 px-8 pt-6 pb-3 bg-white border-b border-surface-border">
+    <form method="post" action="/etl/run">
+      <button type="submit" id="etl-run-btn" class="px-4 py-2 bg-accent text-accent-fg rounded-sm border border-accent text-sm font-semibold hover:opacity-85">
+        ▶ Run ETL
+      </button>
+    </form>
+    <div id="etl-last-run-status">
+      {status_html}
+    </div>
+  </section>
+"""
+
+
+def _render_etl_run_log(last_summary: DeploySummary | None) -> str:
+    """Per-step event log from the last run. Empty when no run yet."""
+    if last_summary is None or not last_summary.events:
+        return ""
+    log_lines: list[str] = []
+    for event in last_summary.events:
+        kind = escape(str(event.get("kind", "")))
+        # Show every key apart from `kind` as a compact suffix; keeps
+        # the log readable without per-event special-casing.
+        suffix_bits: list[str] = []
+        for k, v in event.items():
+            if k == "kind":
+                continue
+            suffix_bits.append(f"{escape(str(k))}={escape(str(v))}")
+        suffix = " " + " ".join(suffix_bits) if suffix_bits else ""
+        log_lines.append(
+            f'<div class="font-mono text-xs leading-relaxed">{kind}{suffix}</div>'
+        )
+    return f"""
+  <section class="px-8 py-3 bg-surface-bg border-b border-surface-border" id="etl-run-log">
+    <h2 class="text-base font-semibold m-0 mb-2">Last-run log</h2>
+    <div class="bg-white border border-surface-border rounded-md p-3 max-h-72 overflow-y-auto">
+      {''.join(log_lines)}
+    </div>
+  </section>
+"""
+
+
+async def _render_etl_coverage_section(
+    *,
+    db_pool: AsyncConnectionPool | None,
+    dialect: Dialect | None,
+    prefix: str,
+    instance: L2Instance,
+    last_summary: DeploySummary | None,
+) -> str:
+    """Coverage cards section — rails / templates / chains / metadata."""
+    if db_pool is None or dialect is None:
+        return (
+            '<section class="px-8 py-6">'
+            '<p class="text-sm text-secondary-fg m-0">'
+            '<strong>No DB pool wired.</strong> '
+            f'Connect Studio to <code>{escape(prefix)}_transactions</code> '
+            'to render coverage.</p></section>'
+        )
+
+    cov_map = await coverage_for(db_pool, prefix, instance, dialect=dialect)
+    md_map = await metadata_coverage_per_template(
+        db_pool, prefix, instance, dialect=dialect,
+    )
+
+    # Empty-state when no rows exist anywhere AND no run summary stored.
+    total_rows = sum(e.count for e in cov_map.by_node_id.values())
+    if total_rows == 0 and last_summary is None:
+        return """
+  <section class="px-8 py-10 text-center text-secondary-fg" id="etl-coverage-empty">
+    <p class="text-sm m-0 mb-2"><strong>No ETL has been run yet on this L2.</strong></p>
+    <p class="text-sm m-0">
+      Click <strong>▶ Run ETL</strong> above to invoke the configured
+      ETL hook against the demo DB. Coverage shows up here once the run
+      completes.
+    </p>
+  </section>
+"""
+
+    rails_card = _render_coverage_card_for_kind(
+        "Rails",
+        [(str(r.name), cov_map.by_node_id.get(_rail_id(r.name)))
+         for r in instance.rails],
+    )
+    templates_card = _render_coverage_card_for_kind(
+        "Templates",
+        [(str(t.name), cov_map.by_node_id.get(_template_id(t.name)))
+         for t in instance.transfer_templates],
+    )
+    chains_card = _render_chain_coverage_card(instance, cov_map)
+    metadata_card = _render_metadata_coverage_card(instance, md_map)
+
+    return f"""
+  <section class="px-8 py-6" id="etl-coverage">
+    <h2 class="text-base font-semibold m-0 mb-3">Coverage</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+      {rails_card}
+      {templates_card}
+      {chains_card}
+    </div>
+    {metadata_card}
+    <p class="text-xs text-secondary-fg mt-4 m-0">
+      Coverage report green = ETL contract satisfied.
+      Not green? → <a class="text-accent hover:underline" href="/etl/triage">Open Triage</a> to see specific gaps.
+    </p>
+  </section>
+"""
+
+
+def _render_coverage_card_for_kind(
+    title: str, entries: list[tuple[str, CoverageEntry | None]],
+) -> str:
+    """One card: title + N/M tally + per-entity ✓/✗ list."""
+    present_count = sum(1 for _n, e in entries if e is not None and e.present)
+    total = len(entries)
+    pct = (
+        f" ({(present_count / total * 100):.0f}%)" if total > 0 else ""
+    )
+    rows: list[str] = []
+    for name, entry in entries:
+        is_present = entry is not None and entry.present
+        mark = (
+            '<span class="text-success">✓</span>' if is_present
+            else '<span class="text-danger">✗</span>'
+        )
+        rows.append(
+            f'<li class="flex justify-between gap-2 text-xs font-mono py-0.5">'
+            f'<span>{escape(name)}</span>{mark}</li>'
+        )
+    return f"""
+      <div class="bg-white border border-surface-border rounded-md p-3" data-test-card="{escape(title.lower())}">
+        <h3 class="text-sm font-semibold m-0 mb-2">{escape(title)}</h3>
+        <p class="text-xs text-secondary-fg m-0 mb-2">
+          <strong>{present_count}</strong> of <strong>{total}</strong> declared{pct}
+        </p>
+        <ul class="list-none m-0 p-0">{''.join(rows)}</ul>
+      </div>
+"""
+
+
+def _render_chain_coverage_card(
+    instance: L2Instance, cov_map: CoverageMap,
+) -> str:
+    """Chains card — one row per chain edge (parent → child), ✓ when
+    both endpoints have data."""
+    entries: list[tuple[str, CoverageEntry | None]] = []
+    for chain in instance.chains:
+        for child_spec in chain.children:
+            edge_id = chain_edge_id(str(chain.parent), str(child_spec.name))
+            entries.append((
+                f"{chain.parent} → {child_spec.name}",
+                cov_map.by_chain_edge_id.get(edge_id),
+            ))
+    return _render_coverage_card_for_kind("Chains", entries)
+
+
+def _render_metadata_coverage_card(
+    instance: L2Instance,
+    md_map: Mapping[str, TemplateMetadataCoverage],
+) -> str:
+    """Metadata card: per-template required-key landing tally."""
+    rows: list[str] = []
+    total_keys = 0
+    landed_keys = 0
+    for template in instance.transfer_templates:
+        cov = md_map.get(str(template.name))
+        if cov is None:
+            continue
+        per_key_count = len(cov.per_key)
+        # A key is "landed" if at least one row carries it AND the
+        # template has rows. No rows → all keys "no rows" (gray).
+        if cov.row_count == 0:
+            label = f"0/{per_key_count} keys ✗ no rows"
+            mark_class = "text-danger"
+        else:
+            landed = sum(
+                1 for _k, count in cov.per_key.items() if count > 0
+            )
+            total_keys += per_key_count
+            landed_keys += landed
+            if landed == per_key_count:
+                label = f"{landed}/{per_key_count} keys ✓"
+                mark_class = "text-success"
+            else:
+                missing = [
+                    k for k, count in cov.per_key.items() if count == 0
+                ]
+                label = (
+                    f"{landed}/{per_key_count} keys ✗  "
+                    f"missing: {', '.join(missing)}"
+                )
+                mark_class = "text-danger"
+        rows.append(
+            f'<li class="flex justify-between gap-2 text-xs font-mono py-0.5">'
+            f'<span>{escape(str(template.name))}</span>'
+            f'<span class="{mark_class}">{escape(label)}</span></li>'
+        )
+    pct = (
+        f"{(landed_keys / total_keys * 100):.0f}%"
+        if total_keys > 0 else "—"
+    )
+    return f"""
+    <div class="bg-white border border-surface-border rounded-md p-4" id="etl-coverage-metadata">
+      <h3 class="text-sm font-semibold m-0 mb-2">Metadata</h3>
+      <p class="text-xs text-secondary-fg m-0 mb-3">
+        <strong>{landed_keys}</strong> of <strong>{total_keys}</strong>
+        required metadata keys landed across non-empty templates ({pct})
+      </p>
+      <ul class="list-none m-0 p-0">{''.join(rows)}</ul>
+    </div>
+"""
 
 
 def _render_diagram_page(
@@ -2537,6 +2865,52 @@ def make_studio_routes(
             ),
         )
 
+    # BT.3 — closure-scope "last run" state. Holds the most recent
+    # DeploySummary + its wall-clock timestamp so GET /etl/run can
+    # render the run-status banner after a POST 303s back to GET.
+    # Single-process / single-user Studio; restart wipes.
+    _etl_run_state: dict[str, object] = {
+        "summary": None, "at": None,
+    }
+
+    async def etl_run(request: Request) -> HTMLResponse | RedirectResponse:
+        """GET — render the run page; POST — invoke pipeline + 303 to GET.
+
+        POST disables ``test_generator`` per BT.0 lock 1 (pure-ETL
+        runs; generator overlay stays a Training-mode opt-in).
+        """
+        if request.method == "POST":
+            if cfg is None:
+                # Same gate as POST /deploy — pipeline needs cfg.
+                return RedirectResponse(url="/etl/", status_code=303)
+            patched_cfg = dataclass_replace(
+                cfg, test_generator=dataclass_replace(
+                    cfg.test_generator, enabled=False,
+                ),
+            )
+            summary = await run_deploy_pipeline(
+                patched_cfg, cache.get(), dev_log=None,
+            )
+            _etl_run_state["summary"] = summary
+            _etl_run_state["at"] = datetime.now()  # typing-smell: ignore[no-datetime-now]: run-stamp for the operator-facing "last run at ..." banner — same wall-clock anchor as the trainer page; not a determinism path
+            return RedirectResponse(url="/etl/run", status_code=303)
+
+        last_summary = cast(
+            "DeploySummary | None", _etl_run_state.get("summary"),
+        )
+        last_run_at = cast(
+            "datetime | None", _etl_run_state.get("at"),
+        )
+        html = await _render_etl_run_page(
+            cache, dev_log,
+            last_summary=last_summary, last_run_at=last_run_at,
+            db_pool=db_pool, dialect=dialect,
+            prefix_override=prefix_override,
+            cfg=cfg, demo_mode=demo_mode,
+            top_nav_html=_top_nav_html("/etl/run"),
+        )
+        return HTMLResponse(html)
+
     async def etl_probe(request: Request) -> HTMLResponse:
         # BT.2 — L2-slice probe. Reads (kind, name, date_from, date_to)
         # from query params; renders the L2-declared contract for the
@@ -2615,6 +2989,7 @@ def make_studio_routes(
         Route("/diagram", diagram, methods=["GET"]),
         Route("/etl/", etl_landing, methods=["GET"]),
         Route("/etl/probe", etl_probe, methods=["GET"]),
+        Route("/etl/run", etl_run, methods=["GET", "POST"]),
         Mount(
             "/studio/static",
             app=StaticFiles(directory=str(_STUDIO_ASSETS_DIR)),

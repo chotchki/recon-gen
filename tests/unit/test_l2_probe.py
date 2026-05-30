@@ -29,7 +29,12 @@ import pytest
 from recon_gen.common.db import AsyncConnectionPool, make_connection_pool
 from recon_gen.common.l2 import (
     ColumnPredicate,
+    Identifier,
+    L2Instance,
+    SingleLegRail,
+    TransferTemplate,
 )
+from recon_gen.common.l2.coverage import metadata_coverage_per_template
 from recon_gen.common.l2.probe import (
     ProbeKind,
     ProbeRow,
@@ -344,3 +349,100 @@ def test_evaluate_unrecognized_column_returns_none() -> None:
         column="bundle_id", kind="not_null", expected=None,
     )
     assert evaluate_predicate(pred, _row()) is None
+
+
+# -- metadata_coverage_per_template (BT.3 helper, shares the probe fixture) --
+
+
+def _make_l2_instance_with_templates() -> L2Instance:
+    """Minimal L2 referencing the seeded fixture's templates.
+
+    The probe-test ``seeded_pool`` carries one row tagged
+    ``template_name=merchant_cycle`` with ``metadata={"merchant_id":..,"trace_id":..}``.
+    This instance declares two templates:
+    - ``merchant_cycle`` with transfer_key=(merchant_id, trace_id) AND
+      one leg_rail (``ach_credit``) whose metadata_keys includes
+      ``trace_id``. The instance verifies the helper unions
+      transfer_key + leg_rails' metadata_keys.
+    - ``nonexistent_template`` with transfer_key=(other_key,) and
+      0 rows. Verifies "no rows" branch.
+    """
+    return L2Instance(
+        accounts=(),
+        account_templates=(),
+        rails=(
+            SingleLegRail(
+                name=Identifier("ach_credit"),
+                metadata_keys=(Identifier("trace_id"),),
+                leg_role=(Identifier("CustomerLedger"),),
+                leg_direction="Credit",
+                origin="InternalInitiated",
+            ),
+        ),
+        transfer_templates=(
+            TransferTemplate(
+                name=Identifier("merchant_cycle"),
+                expected_net=__import__("decimal").Decimal("0"),
+                transfer_key=(
+                    Identifier("merchant_id"), Identifier("trace_id"),
+                ),
+                completion="business_day_end",
+                leg_rails=(Identifier("ach_credit"),),
+            ),
+            TransferTemplate(
+                name=Identifier("nonexistent_template"),
+                expected_net=__import__("decimal").Decimal("0"),
+                transfer_key=(Identifier("other_key"),),
+                completion="business_day_end",
+                leg_rails=(),
+            ),
+        ),
+        chains=(),
+        limit_schedules=(),
+    )
+
+
+def test_metadata_coverage_emits_one_entry_per_l2_template(
+    seeded_pool: AsyncConnectionPool,
+) -> None:
+    """Every declared TransferTemplate gets an entry, even those with
+    zero rows in the table."""
+    inst = _make_l2_instance_with_templates()
+    cov = asyncio.run(metadata_coverage_per_template(
+        seeded_pool, _PREFIX, inst, dialect=Dialect.SQLITE,
+    ))
+    assert set(cov.keys()) == {"merchant_cycle", "nonexistent_template"}
+
+
+def test_metadata_coverage_counts_required_keys_landing_per_template(
+    seeded_pool: AsyncConnectionPool,
+) -> None:
+    """For ``merchant_cycle`` the fixture row carries both metadata
+    keys; the helper records per_key[k]=1 for each required key."""
+    inst = _make_l2_instance_with_templates()
+    cov = asyncio.run(metadata_coverage_per_template(
+        seeded_pool, _PREFIX, inst, dialect=Dialect.SQLITE,
+    ))
+    mc = cov["merchant_cycle"]
+    assert mc.row_count == 1
+    # transfer_key=(merchant_id, trace_id) ∪ leg_rails['ach_credit'].metadata_keys=(trace_id,)
+    # → required keys = {merchant_id, trace_id} (deduped)
+    assert set(mc.per_key.keys()) == {"merchant_id", "trace_id"}
+    # Both keys appear in the fixture row's metadata.
+    assert mc.per_key["merchant_id"] == 1
+    assert mc.per_key["trace_id"] == 1
+
+
+def test_metadata_coverage_zero_rows_branch_reports_empty_per_key(
+    seeded_pool: AsyncConnectionPool,
+) -> None:
+    """A template with no matching rows reports row_count=0 + per_key=0
+    for each required key (so the BT.3 card paints '0/N keys ✗ no rows')."""
+    inst = _make_l2_instance_with_templates()
+    cov = asyncio.run(metadata_coverage_per_template(
+        seeded_pool, _PREFIX, inst, dialect=Dialect.SQLITE,
+    ))
+    nt = cov["nonexistent_template"]
+    assert nt.row_count == 0
+    assert set(nt.per_key.keys()) == {"other_key"}
+    assert nt.per_key["other_key"] == 0

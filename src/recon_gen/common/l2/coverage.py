@@ -198,6 +198,155 @@ async def coverage_for(
     return CoverageMap(by_node_id=by_node_id, by_chain_edge_id=by_chain_edge_id)
 
 
+@dataclass(frozen=True, slots=True)
+class TemplateMetadataCoverage:
+    """Per-template required-metadata-key landing tally.
+
+    For one TransferTemplate, ``row_count`` is the total rows tagged
+    with that template_name; ``per_key`` maps each required key (from
+    ``TransferTemplate.transfer_key`` + each leg-rail's ``metadata_keys``)
+    to the count of rows whose metadata JSON contains the key. BT.3's
+    coverage card reads ``per_key[k] == row_count`` to paint
+    ✓-all-rows-have-it, ``per_key[k] == 0`` for ✗-missing, partial
+    counts for the "12/14 rows have it" middle.
+    """
+
+    template_name: str
+    row_count: int
+    per_key: Mapping[str, int]
+
+
+async def metadata_coverage_per_template(
+    pool: AsyncConnectionPool,
+    prefix: str,
+    instance: L2Instance,
+    *,
+    dialect: Dialect,
+) -> Mapping[str, TemplateMetadataCoverage]:
+    """For each TransferTemplate, count rows landing its required
+    metadata keys.
+
+    The required-keys set unions the template's own ``transfer_key``
+    plus each leg-rail's ``metadata_keys``. Counts use the same
+    JSON-text quoted-key heuristic ``probe.evaluate_predicate`` uses
+    (``"key"`` substring scan) — robust enough for the BT.3 coverage
+    card; BT.4's Triage will do proper JSON_VALUE / JSONPath
+    extraction when the gap shape needs it.
+
+    Iteration is over the L2's declared templates so an empty-data
+    instance still gets a complete result (every template returns a
+    ``row_count=0`` entry, ``per_key`` empty for each required key).
+
+    One query per template (per-template + per-key count is folded
+    into a single SELECT with N conditional SUMs); studio's audience
+    is one user iterating, so the per-call cost is negligible.
+    """
+    out: dict[str, TemplateMetadataCoverage] = {}
+    txns = f"{prefix}_transactions"
+    tmpl_col = column_name("template_name", dialect)
+    md_col = column_name("metadata", dialect)
+
+    rail_metadata_keys: dict[str, tuple[str, ...]] = {
+        str(r.name): tuple(str(k) for k in r.metadata_keys)
+        for r in instance.rails
+    }
+
+    for template in instance.transfer_templates:
+        required_keys: list[str] = list(str(k) for k in template.transfer_key)
+        for leg in template.leg_rails:
+            required_keys.extend(rail_metadata_keys.get(str(leg), ()))
+        # Dedupe + stable order — same key may appear via multiple paths.
+        seen: set[str] = set()
+        unique_keys: list[str] = []
+        for k in required_keys:
+            if k not in seen:
+                seen.add(k)
+                unique_keys.append(k)
+
+        if not unique_keys:
+            # Template with no required-metadata expectations — still
+            # report row_count so the card can show "no required keys."
+            count_sql = (
+                f"SELECT COUNT(*) FROM {txns} "
+                f"WHERE {tmpl_col} = "
+                + _string_literal(str(template.name), dialect)
+            )
+            count_rows = await _fetch_rows(pool, count_sql, dialect)
+            row_count = int(count_rows[0][0]) if count_rows else 0
+            out[str(template.name)] = TemplateMetadataCoverage(
+                template_name=str(template.name),
+                row_count=row_count,
+                per_key={},
+            )
+            continue
+
+        # One query: COUNT(*) + a conditional SUM per required key
+        # (1 when the key appears in the metadata JSON, 0 otherwise).
+        sum_clauses = ", ".join(
+            f"SUM(CASE WHEN {md_col} LIKE "
+            + _string_literal(f'%"{k}"%', dialect)
+            + " THEN 1 ELSE 0 END) AS k{i}"
+            .format(i=i)
+            for i, k in enumerate(unique_keys)
+        )
+        sql = (
+            f"SELECT COUNT(*), {sum_clauses} FROM {txns} "
+            f"WHERE {tmpl_col} = "
+            + _string_literal(str(template.name), dialect)
+        )
+        rows = await _fetch_rows(pool, sql, dialect)
+        if not rows:
+            row_count, per_key = 0, {k: 0 for k in unique_keys}
+        else:
+            row = rows[0]
+            row_count = int(row[0])
+            per_key = {
+                k: int(row[i + 1] or 0) for i, k in enumerate(unique_keys)
+            }
+        out[str(template.name)] = TemplateMetadataCoverage(
+            template_name=str(template.name),
+            row_count=row_count,
+            per_key=per_key,
+        )
+    return out
+
+
+def _string_literal(value: str, dialect: Dialect) -> str:
+    """SQL-quote a string literal with single-quote escaping.
+
+    The metadata-coverage helper builds SQL strings (LIKE patterns +
+    equality match) by inlining template names + key names. They come
+    from the L2-declared identifiers (constrained to
+    ``[A-Za-z_][A-Za-z0-9_]*`` per SPEC), so injection isn't an
+    attack surface — but escape anyway so a future YAML loader
+    relaxation can't sneak a `'` through.
+    """
+    del dialect  # PG / Oracle / SQLite all use single-quote string literals
+    return "'" + value.replace("'", "''") + "'"
+
+
+async def _fetch_rows(
+    pool: AsyncConnectionPool, query: str, dialect: Dialect,
+) -> list[tuple[Any, ...]]:  # typing-smell: ignore[explicit-any]: row tuples are heterogeneous; per-call shape lives in the SELECT contract
+    """Driver-uniform execute + fetchall. Sibling of ``_fetch_count_map``
+    that returns raw row tuples instead of a single-cell coercion."""
+    async with pool.acquire() as conn:
+        if dialect is Dialect.ORACLE:
+            cur: Any = cast(Any, conn).cursor()  # typing-smell: ignore[explicit-any]: per-driver cursor union has no shared Protocol
+            await cur.execute(query)
+        else:
+            cur = cast(Any, await conn.execute(query))  # typing-smell: ignore[explicit-any]: psycopg / aiosqlite cursor types not unified by a single Protocol
+        try:
+            rows: list[Any] = await cur.fetchall()  # typing-smell: ignore[explicit-any]: driver-typed row union widens to Any after Any cursor
+        finally:
+            close = getattr(cur, "close", None)
+            if close is not None:
+                result = close()
+                if hasattr(result, "__await__"):
+                    await result
+    return [tuple(r) for r in rows]
+
+
 async def _fetch_count_map(
     pool: AsyncConnectionPool, query: str, dialect: Dialect,
 ) -> dict[str, int]:

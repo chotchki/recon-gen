@@ -101,13 +101,11 @@ def test_etl_landing_cards_carry_coming_in_phase_hint_for_unshipped_pages(
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
         body = c.get("/etl/").text
 
-    # BT.3 (Run) + BT.4 (Triage) still ship "coming in" hints.
-    for phase in ("BT.3", "BT.4"):
-        assert f"coming in {phase}" in body, (
-            f"landing card should warn destination ships in {phase}"
-        )
-    # BT.2 (Probe) is shipped — no "coming in BT.2" hint.
+    # BT.4 (Triage) still ships a "coming in" hint.
+    assert "coming in BT.4" in body
+    # BT.2 (Probe) + BT.3 (Run) are shipped — no "coming in" hints.
     assert "coming in BT.2" not in body
+    assert "coming in BT.3" not in body
 
 
 def test_etl_landing_carries_top_nav_when_factory_provided(
