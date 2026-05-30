@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import json
 import secrets
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -208,7 +208,7 @@ def _demo_mode_banner(demo_mode: bool) -> str:
 
 def _render_home_page(
     cache: L2InstanceCache, dev_log: bool, *, cfg: Config | None = None,
-    demo_mode: bool = False,
+    demo_mode: bool = False, top_nav_html: str = "",
 ) -> str:
     """X.4.f.7 — unified Studio home page (diagram + every entity kind).
 
@@ -503,16 +503,15 @@ def _render_home_page(
   </script>
   {devlog_script}</head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
+  {top_nav_html}
   {demo_banner}
   <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
     <h1>Studio</h1>
     <span class="text-sm text-secondary-fg font-mono">{prefix}</span>
-    <!-- Phase BS.3 part 2b — inline navigation links removed.
-         BF.11 (dual-nav-shape) close: the shared top-nav (BS.2/BS.3
-         part 1) lives in the dashboards listing; the Studio home page
-         no longer renders a duplicate `→ diagram` / `→ data` /
-         `→ dashboards` link strip. Full shared-nav injection into
-         Studio pages is BS.3 part 3 work. -->
+    <!-- BS.3 part 3 (2026-05-29): shared top-nav injected before this
+         page-local header. Per-page navigation links live in
+         {top_nav_html} above; the page-local header now only carries
+         the Studio title + prefix + deploy controls. -->
     {deploy_controls}
   </header>
   <script>
@@ -583,6 +582,7 @@ def _render_diagram_page(
     embed: bool = False,
     cfg: Config | None = None,
     demo_mode: bool = False,
+    top_nav_html: str = "",
 ) -> str:
     """Render the L2 topology diagram (per-rail / dot, X.4.b spike winner).
 
@@ -743,15 +743,16 @@ def _render_diagram_page(
   <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
   {devlog_script}</head>
 <body class="{"flex flex-col m-0 p-0 font-sans bg-surface-bg text-primary-fg h-screen" if embed else "flex flex-col font-sans bg-surface-bg text-primary-fg h-screen"}">
+  {top_nav_html}
   {_demo_mode_banner(demo_mode and not embed)}
   {("" if embed else (
     '<header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">'
     f'<h1>Studio · diagram</h1>'
     f'<span class="text-sm text-secondary-fg font-mono">{prefix}</span>'
-    # Phase BS.3 part 2b — inline nav strip removed (BF.11 close).
-    # `← landing` / `→ data` / `→ dashboards` were duplicated against
-    # the shared top-nav and confused operators. Re-enter via
-    # browser back or via the shared nav in BS.3 part 3.
+    # BS.3 part 3 (2026-05-29): shared top-nav now injected above this
+    # page-local header (when not in iframe-embed mode). Per-page
+    # cross-links live in {top_nav_html}; the page-local header carries
+    # only the diagram title + prefix.
     '</header>'
   ))}
 
@@ -1649,6 +1650,7 @@ def _render_data_page(
     etl_hook_command: str | None = None,
     cfg: Config | None = None,
     demo_mode: bool = False,
+    top_nav_html: str = "",
 ) -> str:
     """X.4.h.1 — Studio "trainer mode" data-shaping panel shell.
 
@@ -1739,12 +1741,13 @@ def _render_data_page(
   {devlog_meta}{studio_theme_head(instance)}
   {devlog_script}</head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
+  {top_nav_html}
   {demo_banner}
   <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
     <h1>Studio · data shaping</h1>
     <span class="text-sm text-secondary-fg font-mono">{prefix}</span>
-    <!-- Phase BS.3 part 2b — inline nav strip removed (BF.11 close).
-         Shared top-nav lands in BS.3 part 3. -->
+    <!-- BS.3 part 3 (2026-05-29): shared top-nav injected above; this
+         header now only carries the page title + prefix + deploy. -->
     {deploy_controls}
   </header>
   <script>
@@ -1825,6 +1828,7 @@ def make_studio_routes(
     cfg: Config | None = None,
     tg_cache: TestGeneratorCache | None = None,
     demo_mode: bool = False,
+    top_nav_fn: Callable[[str], str] | None = None,
 ) -> list[Route | Mount]:
     """Build the Studio route list bound to ``cache``.
 
@@ -1867,9 +1871,24 @@ def make_studio_routes(
             None ⇒ POST /deploy is silently omitted (unit-test
             surface that doesn't exercise the pipeline).
     """
+    def _top_nav_html(active_href: str) -> str:
+        """BS.3 part 3: closure-wrap top_nav_fn so handlers stay terse.
+
+        Returns the shared top-nav HTML for the active page, or "" when
+        no factory was provided (unit-test surface / dashboards-only
+        embedding paths). The renderers' default ``top_nav_html=""``
+        kwarg keeps the layout valid in either case.
+        """
+        if top_nav_fn is None:
+            return ""
+        return top_nav_fn(active_href)
+
     async def landing(_request: Request) -> HTMLResponse:
         return HTMLResponse(
-            _render_home_page(cache, dev_log, cfg=cfg, demo_mode=demo_mode),
+            _render_home_page(
+                cache, dev_log, cfg=cfg, demo_mode=demo_mode,
+                top_nav_html=_top_nav_html("/"),
+            ),
         )
 
     async def data(request: Request) -> HTMLResponse:
@@ -1886,6 +1905,7 @@ def make_studio_routes(
             etl_hook_command=etl_hook_command,
             cfg=cfg,
             demo_mode=demo_mode,
+            top_nav_html=_top_nav_html("/data"),
         ))
 
     async def data_timeline(_request: Request) -> HTMLResponse:
@@ -1910,6 +1930,9 @@ def make_studio_routes(
         # iframe, drop the studio-header so the page doesn't carry two
         # nav bars (the home's + the diagram's).
         embed = request.query_params.get("embed") == "1"
+        # BS.3 part 3 — embedded diagram (inside the home iframe) skips
+        # the top nav too; the host page already carries it.
+        nav_html = "" if embed else _top_nav_html("/diagram")
         return HTMLResponse(
             _render_diagram_page(
                 cache, dev_log, focus_node_id, layer,
@@ -1917,6 +1940,7 @@ def make_studio_routes(
                 embed=embed,
                 cfg=cfg,
                 demo_mode=demo_mode,
+                top_nav_html=nav_html,
             ),
         )
 

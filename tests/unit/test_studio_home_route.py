@@ -444,3 +444,104 @@ def test_put_from_home_page_redirects_home(
         )
         assert resp.status_code == 303, resp.text
         assert resp.headers.get("location") == "/"
+
+
+# ---------------------------------------------------------------------------
+# BS.3 part 3 — shared top-nav injection into Studio pages.
+# ---------------------------------------------------------------------------
+
+
+def _build_app_with_top_nav(yaml_path: Path) -> object:
+    """Studio app wired with a top_nav_fn closure — same shape
+    ``cli/_html_serve.py`` builds in the real serve path."""
+    from recon_gen.common.html._studio_routes import make_studio_routes
+    from recon_gen.common.html.render import (
+        build_top_nav_entries,
+        emit_top_nav,
+    )
+    cache = L2InstanceCache.from_path(yaml_path)
+    cfg = make_test_config()
+    tree_app, sheet = build_smoke_app(cfg)
+    served = ServedDashboard(
+        tree_app=tree_app, sheet=sheet, title="Smoke",
+        data_fetcher=stub_money_trail_fetcher,
+        filter_specs=SMOKE_FILTER_SPECS,
+    )
+    nav_entries = build_top_nav_entries(
+        [("smoke", "Smoke")],
+        studio_enabled=True,
+        docs_url="/docs/",
+    )
+
+    def _top_nav(active_href: str) -> str:
+        return emit_top_nav(entries=nav_entries, active_href=active_href)
+
+    return make_app(
+        dashboards={"smoke": served},
+        studio_routes=make_studio_routes(cache, top_nav_fn=_top_nav),
+    )
+
+
+def test_studio_home_page_renders_shared_top_nav(
+    writable_l2_yaml: Path,
+) -> None:
+    """BS.3 part 3: GET / renders the shared top-nav before its
+    page-local header, with /  (the home page) flagged active."""
+    app = _build_app_with_top_nav(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/").text
+    assert ">L2 Editor<" in body
+    assert ">ETL Support<" in body
+    assert ">Training<" in body
+    assert ">Smoke<" in body
+    assert ">Docs<" in body
+
+
+def test_studio_diagram_page_renders_shared_top_nav_when_not_embedded(
+    writable_l2_yaml: Path,
+) -> None:
+    """BS.3 part 3: GET /diagram (standalone) renders the top-nav.
+    The ?embed=1 variant suppresses it (avoid double-stacking when
+    rendered inside the home page's iframe)."""
+    app = _build_app_with_top_nav(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        standalone = c.get("/diagram").text
+        embedded = c.get("/diagram?embed=1").text
+    assert ">L2 Editor<" in standalone
+    assert ">Smoke<" in standalone
+    # Embedded variant drops the nav (host page already carries it).
+    assert ">L2 Editor<" not in embedded
+
+
+def test_studio_data_page_renders_shared_top_nav(
+    writable_l2_yaml: Path,
+) -> None:
+    """BS.3 part 3: GET /data renders the top-nav."""
+    app = _build_app_with_top_nav(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/data").text
+    assert ">L2 Editor<" in body
+    assert ">Smoke<" in body
+    assert ">Docs<" in body
+
+
+def test_studio_pages_no_top_nav_when_factory_not_supplied(
+    writable_l2_yaml: Path,
+) -> None:
+    """The default (no top_nav_fn) path emits the same pages without the
+    shared nav — used by unit-test surfaces that don't construct the
+    closure. Verifies the kwarg is optional, not load-bearing."""
+    # Use the original _build_app helper (no top_nav_fn).
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        home = c.get("/").text
+        diagram = c.get("/diagram").text
+        data = c.get("/data").text
+    # No L2 Editor anchor (only present when top_nav_fn renders the
+    # shared nav). The page-local <h1>Studio</h1> still anchors home.
+    for body in (home, diagram, data):
+        assert ">L2 Editor<" not in body
+    # Sanity: pages still render their own chrome.
+    assert "Studio" in home
+    assert "Studio · diagram" in diagram
+    assert "Studio · data shaping" in data

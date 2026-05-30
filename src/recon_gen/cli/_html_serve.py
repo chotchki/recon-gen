@@ -36,7 +36,6 @@ from recon_gen.common.l2.cache import L2InstanceCache
 if TYPE_CHECKING:
     from starlette.routing import Mount, Route
 
-    from recon_gen.common.db import AsyncConnectionPool
     from recon_gen.common.html.server import ServedDashboard
 
 
@@ -173,7 +172,7 @@ def build_real_dashboards(
 # ``GET /diagram/coverage`` route can mount and the chrome toggle
 # (X.4.c.5.d) can light up.
 type StudioRoutesFactory = Callable[
-    [L2InstanceCache, bool, "AsyncConnectionPool | None"],
+    ...,  # noqa: PLE0307: BS.3 part 3 — accept kwargs (top_nav_fn) without losing the positional-3 contract; concrete shape enforced by make_studio_routes signature itself
     list[Route | Mount],
 ]
 
@@ -340,9 +339,30 @@ def run_html_server(
         # X.4.c.5.b — build studio_routes here, after the pool exists,
         # so the diagram chrome can light up the Coverage toggle. None
         # pool ⇒ chrome silently omits the toggle (graceful degrade).
+        #
+        # BS.3 part 3 (2026-05-29): build the top-nav closure here too —
+        # this scope knows the dashboards list + docs presence, which
+        # the Studio routes themselves shouldn't have to learn. The
+        # closure produces the shared <nav> HTML keyed off active_href;
+        # Studio pages inject it before their page-local headers so
+        # operators can hop to dashboards/docs from inside Studio.
         studio_routes: list[Route | Mount] | None = None
         if studio_routes_factory is not None and cache is not None:
-            studio_routes = studio_routes_factory(cache, dev_log, pool)
+            from recon_gen.common.html.render import (  # noqa: PLC0415
+                build_top_nav_entries,
+                emit_top_nav,
+            )
+            nav_entries = build_top_nav_entries(
+                [(dash_id, served.title) for dash_id, served in dashboards.items()],
+                studio_enabled=True,  # studio_routes spliced ⇒ enabled by construction
+                docs_url="/docs/" if docs_dir is not None else None,
+            )
+
+            def _studio_top_nav(active_href: str) -> str:
+                return emit_top_nav(entries=nav_entries, active_href=active_href)
+            studio_routes = studio_routes_factory(
+                cache, dev_log, pool, top_nav_fn=_studio_top_nav,
+            )
         try:
             asgi_app = make_app(
                 dashboards=dashboards, dev_log=dev_log, docs_dir=docs_dir,
