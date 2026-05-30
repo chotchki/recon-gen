@@ -87,19 +87,10 @@ class SigningConfig:
     signer_name: str | None = None
 
 
-# X.4.g.2 — Read-only source database the deploy pipeline pulls from
-# in step 2 (after wiping the demo DB). Step 2 copies `transactions` +
-# `daily_balances` rows filtered to `<= test_generator.end_date` from
-# this datasource into `demo_database_url`. The two table names are
-# REQUIRED — the operator's external system rarely uses our
-# `<prefix>_transactions` / `<prefix>_daily_balances` naming, so they
-# declare the actual table names verbatim. When the cfg block is
-# absent, step 2 is skipped entirely (per X.4.g.10's no-etl path).
-@dataclass(frozen=True)
-class EtlDatasourceConfig:
-    url: str
-    transactions_table: str
-    daily_balances_table: str
+# BS.4 (2026-05-29) removed EtlDatasourceConfig + the
+# Config.etl_datasource field. The legacy upstream→demo_db copy path
+# (X.4.g.2's step_2_pull) is gone; etl_hook now writes directly to
+# demo_db. See docs/audits/bs_4_arch_shift_spike.md.
 
 
 # X.4.g.3 — Step-3 synthetic-data overlay knobs.
@@ -356,11 +347,6 @@ class Config:
     # contract and ``recon-gen data etl-example`` for canonical
     # per-table INSERT patterns.
     etl_hook: str | None = None
-    # X.4.g.2 — When set, step 2 of the deploy pipeline pulls from
-    # this datasource into the demo DB after the wipe. When None, the
-    # pipeline runs etl-free (step 2 wipe still happens, then jumps
-    # to step 3 generator).
-    etl_datasource: EtlDatasourceConfig | None = None
     # X.4.g.3 — Step 3 (synthetic data overlay) knobs. Non-Optional
     # default-factory so the pipeline never None-checks; an absent
     # block in the cfg yaml resolves to `TestGeneratorConfig()`
@@ -482,8 +468,8 @@ _CONFIG_ALLOWED_KEYS: frozenset[str] = frozenset({
     "dialect", "signing", "tagging_enabled", "studio_enabled",
     "app2_db_pool_size", "auth",
     "default_l2_instance", "aws_pg_cluster_id", "aws_oracle_instance_id",
-    # X.4.g.1-3 — deploy pipeline knobs.
-    "etl_hook", "etl_datasource", "test_generator",
+    # X.4.g.1+3 — deploy pipeline knobs (etl_datasource removed in BS.4).
+    "etl_hook", "test_generator",
 })
 
 # Z.C — `instance` removed: the L2 yaml no longer has an `instance:` field
@@ -771,39 +757,9 @@ def load_config(path: str | Path | None = None) -> Config:
             f"studio_enabled must be a bool; got {raw_studio_enabled!r}."
         )
 
-    # X.4.g.2 — optional etl_datasource block.
-    raw_etl_ds = values.get("etl_datasource")
-    etl_datasource: EtlDatasourceConfig | None = None
-    if isinstance(raw_etl_ds, dict):
-        etl_typed = cast(dict[Any, Any], raw_etl_ds)
-        etl_dict: dict[str, object] = {
-            str(k): v for k, v in etl_typed.items()
-        }
-        unknown_etl = set(etl_dict) - {
-            "url", "transactions_table", "daily_balances_table",
-        }
-        if unknown_etl:
-            raise ValueError(
-                f"etl_datasource block contains unknown keys: "
-                f"{sorted(unknown_etl)}. Allowed: url, "
-                f"transactions_table, daily_balances_table."
-            )
-        try:
-            etl_datasource = EtlDatasourceConfig(
-                url=str(etl_dict["url"]),
-                transactions_table=str(etl_dict["transactions_table"]),
-                daily_balances_table=str(etl_dict["daily_balances_table"]),
-            )
-        except KeyError as exc:
-            raise ValueError(
-                f"etl_datasource block is missing required field: {exc}. "
-                f"Need url, transactions_table, daily_balances_table."
-            ) from exc
-    elif raw_etl_ds is not None:
-        raise ValueError(
-            f"etl_datasource must be a mapping; got "
-            f"{type(raw_etl_ds).__name__} ({raw_etl_ds!r})."
-        )
+    # BS.4 (2026-05-29): etl_datasource block removed from cfg — the
+    # legacy upstream→demo_db copy is gone (etl_hook writes directly).
+    # See docs/audits/bs_4_arch_shift_spike.md.
 
     # X.4.g.3 — optional test_generator block. Absent or None resolves
     # to TestGeneratorConfig() (byte-identical-to-locked-seeds output);
@@ -985,6 +941,5 @@ def load_config(path: str | Path | None = None) -> Config:
         aws_pg_cluster_id=_opt_str(values, "aws_pg_cluster_id"),
         aws_oracle_instance_id=_opt_str(values, "aws_oracle_instance_id"),
         etl_hook=_opt_str(values, "etl_hook"),
-        etl_datasource=etl_datasource,
         test_generator=test_generator,
     )

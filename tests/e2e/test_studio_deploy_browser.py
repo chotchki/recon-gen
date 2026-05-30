@@ -123,10 +123,12 @@ def test_deploy_button_drives_pipeline_and_dashboards_render(
     4. Navigate to each of the 4 dashboards; assert each renders
        at least one visual section.
     """
+    # BS.4 (2026-05-29): etl_datasource_url is gone — the etl_hook
+    # writes directly to demo_db now (no upstream pull).
+    del pg_container_url
     cfg, _sqlite_path = make_studio_cfg(
         tmp_path,
         etl_hook=etl_hook_script,
-        etl_datasource_url=pg_container_url,
     )
     apply_schema_to(cfg)
 
@@ -201,10 +203,10 @@ def test_dashboard_auto_reloads_when_data_generation_id_bumps(
     The tab's poller (3s interval) sees the bumped counter, reloads
     itself within ~6s.
 
-    Uses a no-op etl_hook (`true`) + no etl_datasource so the deploy
-    is fast (~10s, just generator + matview + reload bump). The full
-    cross-dialect path is X.4.j.2.b/c's job; this test isolates the
-    reload contract.
+    Uses a no-op etl_hook (`true`) so the deploy is fast (~10s, just
+    wipe + generator + matview + reload bump). The cross-dialect
+    upstream-pull path went away in BS.4 (only etl_hook ETL contract
+    now); this test isolates the auto-reload contract.
 
     Detection: the poller's `location.reload()` triggers a
     framenavigated event Playwright observes. We count navigations
@@ -218,7 +220,7 @@ def test_dashboard_auto_reloads_when_data_generation_id_bumps(
     noop_hook.chmod(noop_hook.stat().st_mode | stat.S_IEXEC)
 
     cfg, _sqlite_path = make_studio_cfg(
-        tmp_path, etl_hook=noop_hook,  # NO etl_datasource — generator only
+        tmp_path, etl_hook=noop_hook,
     )
     apply_schema_to(cfg)
 

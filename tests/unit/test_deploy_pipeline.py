@@ -23,7 +23,6 @@ import pytest
 from recon_gen.common.config import Config
 from recon_gen.common.db import connect_demo_db, execute_script
 from recon_gen.common.config import (
-    EtlDatasourceConfig,
     TestGeneratorConfig,
 )
 from recon_gen.common.l2.deploy_pipeline import (
@@ -31,7 +30,6 @@ from recon_gen.common.l2.deploy_pipeline import (
     get_data_generation_id,
     run_deploy_pipeline,
     step_1_etl_hook,
-    step_2_pull,
     step_2_wipe,
     step_3_5_derive_balances,
     step_3_generator,
@@ -41,8 +39,6 @@ from recon_gen.common.l2.deploy_pipeline import (
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.primitives import L2Instance
 from recon_gen.common.l2.schema import (
-    BASE_DAILY_BALANCES_COLUMNS,
-    BASE_TRANSACTIONS_COLUMNS,
     emit_schema,
     wipe_demo_data_sql,
 )
@@ -145,6 +141,27 @@ def _row_counts(cfg: Config, instance: L2Instance) -> tuple[int, int]:
             cur.execute(f"SELECT COUNT(*) FROM {p}_daily_balances")
             bal = int(cur.fetchone()[0])
             return tx, bal
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+
+
+def _apply_demo_schema_only(cfg: Config, instance: L2Instance) -> None:
+    """Apply the demo schema without planting any rows — the etl_hook /
+    generator path is what fills the base tables. (Pre-BS.4 this lived
+    in the step_2_pull section; BS.4 retained it since the orchestrator
+    tests still need to bootstrap an empty demo DB before running the
+    pipeline.)"""
+    schema_sql = emit_schema(
+        instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+    )
+    conn = connect_demo_db(cfg)
+    try:
+        cur = conn.cursor()
+        try:
+            execute_script(cur, schema_sql, dialect=cfg.dialect)
+            conn.commit()
         finally:
             cur.close()
     finally:
@@ -379,338 +396,6 @@ def test_step_2_wipe_idempotent_on_empty_tables(
         step_2_wipe(cfg, spec_example_instance, dev_log=None),
     )
     assert (tx, bal) == (0, 0)
-
-
-# ============================================================
-# step_2_pull (X.4.g.6)
-# ============================================================
-
-
-def _build_etl_source_sqlite(
-    src_path: Path,
-    *,
-    txn_rows: int,
-    bal_rows: int,
-    posting_dates: list[str] | None = None,
-    bd_end_dates: list[str] | None = None,
-) -> None:
-    """Provision a SQLite tempfile to act as an external etl_datasource.
-
-    Schema mirrors the v6 base tables (column-by-column). Default
-    posting/business_day_end dates are 2030-01-01 + i days; override
-    via parameters for end_date filter tests.
-    """
-    import sqlite3
-    conn = sqlite3.connect(src_path)
-    try:
-        cur = conn.cursor()
-        # Mirror just the columns the pull cares about; CHECK
-        # constraints would fail us in tests trying to assert "the
-        # source can have arbitrary shape", so they're omitted here.
-        cur.execute(
-            "CREATE TABLE etl_txns ("
-            + ", ".join(f"{c} TEXT" for c in BASE_TRANSACTIONS_COLUMNS)
-            + ")"
-        )
-        cur.execute(
-            "CREATE TABLE etl_balances ("
-            + ", ".join(f"{c} TEXT" for c in BASE_DAILY_BALANCES_COLUMNS)
-            + ")"
-        )
-        for i in range(txn_rows):
-            posting = (
-                posting_dates[i] if posting_dates
-                else f"2030-01-{(i % 28) + 1:02d}"
-            )
-            row = [
-                f"t{i}", f"a{i}", f"Acct {i}", "role",
-                "internal", None, "100.00", "Credit", "posted",
-                posting, f"g{i}", None, None,
-                "r1", None, None, None, "inbound", None,
-            ]
-            cur.execute(
-                "INSERT INTO etl_txns VALUES ("
-                + ", ".join(["?"] * len(BASE_TRANSACTIONS_COLUMNS))
-                + ")",
-                row,
-            )
-        for i in range(bal_rows):
-            bd_end = (
-                bd_end_dates[i] if bd_end_dates
-                else f"2030-01-{(i % 28) + 2:02d}"
-            )
-            row = [
-                f"a{i}", f"Acct {i}", "role", "internal", None,
-                None, f"2030-01-{(i % 28) + 1:02d}", bd_end,
-                "100.00", None, None,
-            ]
-            cur.execute(
-                "INSERT INTO etl_balances VALUES ("
-                + ", ".join(["?"] * len(BASE_DAILY_BALANCES_COLUMNS))
-                + ")",
-                row,
-            )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def _apply_demo_schema_only(
-    cfg: Config, instance: L2Instance,
-) -> None:
-    """Apply the demo schema without planting any rows — the pull is
-    what fills the base tables."""
-    schema_sql = emit_schema(
-        instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
-    )
-    conn = connect_demo_db(cfg)
-    try:
-        cur = conn.cursor()
-        try:
-            execute_script(cur, schema_sql, dialect=cfg.dialect)
-            conn.commit()
-        finally:
-            cur.close()
-    finally:
-        conn.close()
-
-
-# ---------- skip path ----------
-
-def test_step_2_pull_skip_when_etl_datasource_unset(
-    tmp_path: Path, spec_example_instance: L2Instance,
-) -> None:
-    cfg = _sqlite_cfg(tmp_path)
-    _apply_demo_schema_only(cfg, spec_example_instance)
-    sink = _EventCollector()
-    tx, bal = asyncio.run(
-        step_2_pull(cfg, spec_example_instance, dev_log=sink),
-    )
-    assert (tx, bal) == (0, 0)
-    assert sink.kinds() == ["deploy:step2:pull:skip"]
-
-
-# ---------- happy paths ----------
-
-def test_step_2_pull_sqlite_to_sqlite_no_filter(
-    tmp_path: Path, spec_example_instance: L2Instance,
-) -> None:
-    """Degenerate same-dialect pull. No end_date filter — all rows
-    flow through. Exercises the SELECT/INSERT plumbing."""
-    src_path = tmp_path / "etl.sqlite"
-    _build_etl_source_sqlite(src_path, txn_rows=3, bal_rows=2)
-    cfg = replace(
-        _sqlite_cfg(tmp_path),
-        etl_datasource=EtlDatasourceConfig(
-            url=f"sqlite:///{src_path}",
-            transactions_table="etl_txns",
-            daily_balances_table="etl_balances",
-        ),
-    )
-    _apply_demo_schema_only(cfg, spec_example_instance)
-    sink = _EventCollector()
-    tx, bal = asyncio.run(
-        step_2_pull(cfg, spec_example_instance, dev_log=sink),
-    )
-    assert (tx, bal) == (3, 2)
-    assert _row_counts(cfg, spec_example_instance) == (3, 2)
-    kinds = sink.kinds()
-    assert kinds == [
-        "deploy:step2:pull:start",
-        "deploy:step2:pull:done",
-    ]
-    start = sink.by_kind("deploy:step2:pull:start")[0]
-    assert start["source_dialect"] == "sqlite"
-    assert start["dest_dialect"] == "sqlite"
-    assert start["end_date"] is None
-    done = sink.by_kind("deploy:step2:pull:done")[0]
-    assert done["transactions_pulled"] == 3
-    assert done["daily_balances_pulled"] == 2
-
-
-def test_step_2_pull_end_date_filter_drops_future_rows(
-    tmp_path: Path, spec_example_instance: L2Instance,
-) -> None:
-    """end_date carves the source: rows after the cutoff aren't pulled."""
-    from datetime import date
-    from recon_gen.common.config import TestGeneratorConfig
-    src_path = tmp_path / "etl.sqlite"
-    _build_etl_source_sqlite(
-        src_path,
-        txn_rows=4,
-        bal_rows=4,
-        posting_dates=[
-            "2030-01-01", "2030-01-15", "2030-02-01", "2030-03-15",
-        ],
-        bd_end_dates=[
-            "2030-01-02", "2030-01-16", "2030-02-02", "2030-03-16",
-        ],
-    )
-    cfg = replace(
-        _sqlite_cfg(tmp_path),
-        etl_datasource=EtlDatasourceConfig(
-            url=f"sqlite:///{src_path}",
-            transactions_table="etl_txns",
-            daily_balances_table="etl_balances",
-        ),
-        test_generator=TestGeneratorConfig(end_date=date(2030, 1, 31)),
-    )
-    _apply_demo_schema_only(cfg, spec_example_instance)
-    tx, bal = asyncio.run(
-        step_2_pull(cfg, spec_example_instance, dev_log=None),
-    )
-    # Jan 1 + Jan 15 in; Feb 1 + Mar 15 out.
-    assert tx == 2
-    # Jan 2 + Jan 16 in; Feb 2 + Mar 16 out.
-    assert bal == 2
-
-
-def test_step_2_pull_empty_source(
-    tmp_path: Path, spec_example_instance: L2Instance,
-) -> None:
-    src_path = tmp_path / "etl.sqlite"
-    _build_etl_source_sqlite(src_path, txn_rows=0, bal_rows=0)
-    cfg = replace(
-        _sqlite_cfg(tmp_path),
-        etl_datasource=EtlDatasourceConfig(
-            url=f"sqlite:///{src_path}",
-            transactions_table="etl_txns",
-            daily_balances_table="etl_balances",
-        ),
-    )
-    _apply_demo_schema_only(cfg, spec_example_instance)
-    tx, bal = asyncio.run(
-        step_2_pull(cfg, spec_example_instance, dev_log=None),
-    )
-    assert (tx, bal) == (0, 0)
-
-
-def test_step_2_pull_multi_batch_completes(
-    tmp_path: Path, spec_example_instance: L2Instance,
-) -> None:
-    """12 rows with batch_size=5 → 3 fetchmany batches; all rows land."""
-    src_path = tmp_path / "etl.sqlite"
-    _build_etl_source_sqlite(src_path, txn_rows=12, bal_rows=8)
-    cfg = replace(
-        _sqlite_cfg(tmp_path),
-        etl_datasource=EtlDatasourceConfig(
-            url=f"sqlite:///{src_path}",
-            transactions_table="etl_txns",
-            daily_balances_table="etl_balances",
-        ),
-    )
-    _apply_demo_schema_only(cfg, spec_example_instance)
-    tx, bal = asyncio.run(
-        step_2_pull(
-            cfg, spec_example_instance, dev_log=None, batch_size=5,
-        ),
-    )
-    assert (tx, bal) == (12, 8)
-    assert _row_counts(cfg, spec_example_instance) == (12, 8)
-
-
-# ---------- failure modes ----------
-
-def test_step_2_pull_missing_source_column_loud_fails(
-    tmp_path: Path, spec_example_instance: L2Instance,
-) -> None:
-    """Source missing a v6 column → SELECT raises, contract violated."""
-    import sqlite3
-    src_path = tmp_path / "etl.sqlite"
-    conn = sqlite3.connect(src_path)
-    try:
-        cur = conn.cursor()
-        # Source has only id + account_id — no amount_money etc.
-        cur.execute(
-            "CREATE TABLE etl_txns (id TEXT, account_id TEXT)"
-        )
-        cur.execute(
-            "CREATE TABLE etl_balances ("
-            + ", ".join(f"{c} TEXT" for c in BASE_DAILY_BALANCES_COLUMNS)
-            + ")"
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    cfg = replace(
-        _sqlite_cfg(tmp_path),
-        etl_datasource=EtlDatasourceConfig(
-            url=f"sqlite:///{src_path}",
-            transactions_table="etl_txns",
-            daily_balances_table="etl_balances",
-        ),
-    )
-    _apply_demo_schema_only(cfg, spec_example_instance)
-    with pytest.raises(sqlite3.OperationalError, match="no such column"):
-        asyncio.run(
-            step_2_pull(cfg, spec_example_instance, dev_log=None),
-        )
-
-
-# ---------- column-list drift guard ----------
-
-def test_base_columns_match_emitted_schema(
-    tmp_path: Path, spec_example_instance: L2Instance,
-) -> None:
-    """BASE_*_COLUMNS must stay in sync with what emit_schema creates.
-
-    Apply the schema to a fresh sqlite and PRAGMA table_info to
-    extract the actual columns; assert the constants match (excluding
-    the auto-generated ``entry`` column the pull intentionally drops)."""
-    cfg = _sqlite_cfg(tmp_path)
-    _apply_demo_schema_only(cfg, spec_example_instance)
-    p = cfg.db_table_prefix
-    conn = connect_demo_db(cfg)
-    try:
-        cur = conn.cursor()
-        try:
-            cur.execute(f"PRAGMA table_info({p}_transactions)")
-            actual_tx = tuple(
-                row[1] for row in cur.fetchall() if row[1] != "entry"
-            )
-            cur.execute(f"PRAGMA table_info({p}_daily_balances)")
-            actual_bal = tuple(
-                row[1] for row in cur.fetchall() if row[1] != "entry"
-            )
-        finally:
-            cur.close()
-    finally:
-        conn.close()
-    assert actual_tx == BASE_TRANSACTIONS_COLUMNS, (
-        "BASE_TRANSACTIONS_COLUMNS drift vs emit_schema; update "
-        "common/l2/schema.py"
-    )
-    assert actual_bal == BASE_DAILY_BALANCES_COLUMNS, (
-        "BASE_DAILY_BALANCES_COLUMNS drift vs emit_schema; update "
-        "common/l2/schema.py"
-    )
-
-
-# ---------- dialect-from-url ----------
-
-def test_dialect_from_url_postgres() -> None:
-    from recon_gen.common.l2.deploy_pipeline import _dialect_from_url
-    assert _dialect_from_url("postgresql://u:p@h:5432/d") is Dialect.POSTGRES
-    assert _dialect_from_url("postgres://u:p@h:5432/d") is Dialect.POSTGRES
-
-
-def test_dialect_from_url_oracle() -> None:
-    from recon_gen.common.l2.deploy_pipeline import _dialect_from_url
-    assert _dialect_from_url("oracle://u:p@h:1521/svc") is Dialect.ORACLE
-    assert _dialect_from_url(
-        "oracle+oracledb://u:p@h:1521/svc",
-    ) is Dialect.ORACLE
-
-
-def test_dialect_from_url_sqlite() -> None:
-    from recon_gen.common.l2.deploy_pipeline import _dialect_from_url
-    assert _dialect_from_url("sqlite:///tmp/foo.db") is Dialect.SQLITE
-
-
-def test_dialect_from_url_unknown_rejects() -> None:
-    from recon_gen.common.l2.deploy_pipeline import _dialect_from_url
-    with pytest.raises(ValueError, match="Cannot infer dialect"):
-        _dialect_from_url("mysql://u:p@h:3306/d")
 
 
 # ============================================================
@@ -1702,8 +1387,9 @@ def test_step_5_reload_repeated_calls_increment_monotonically() -> None:
 def test_run_deploy_pipeline_no_etl_runs_all_steps(
     tmp_path: Path, spec_example_instance: L2Instance,
 ) -> None:
-    """No etl_hook configured: step 1 skips, steps 2-5 run, summary
-    reports per-step counts + the post-bump data_generation_id."""
+    """No etl_hook configured: wipe runs (BS.4 order: wipe FIRST),
+    step 1 etl_hook skips, steps 3-5 run. Summary reports per-step
+    counts + the post-bump data_generation_id."""
     cfg = _sqlite_cfg(tmp_path)
     _apply_demo_schema_only(cfg, spec_example_instance)
     sink = _EventCollector()
@@ -1720,9 +1406,13 @@ def test_run_deploy_pipeline_no_etl_runs_all_steps(
     assert summary.step3_generator_daily_balances_after > 0
     assert summary.step4_matviews_done is True
     assert summary.step5_data_generation_id > 0
-    # Event ordering — step 1's skip event must precede step 5's bump.
+    # Event ordering — BS.4 (2026-05-29): wipe runs FIRST, then
+    # etl_hook (here skipping since unset), then generator → matviews
+    # → reload. The skip event lands between wipe:done and step3:start.
     kinds = sink.kinds()
-    assert kinds[0] == "deploy:step1:skip"
+    assert kinds[0] == "deploy:step2:wipe:start"
+    assert "deploy:step1:skip" in kinds
+    assert kinds.index("deploy:step2:wipe:done") < kinds.index("deploy:step1:skip")
     assert kinds[-1] == "deploy:step5:reload:bump"
     # Captured events on the summary include every dev_log event too.
     assert len(summary.events) == len(sink.events)
@@ -1731,9 +1421,17 @@ def test_run_deploy_pipeline_no_etl_runs_all_steps(
 def test_run_deploy_pipeline_halts_on_etl_failure(
     tmp_path: Path, spec_example_instance: L2Instance,
 ) -> None:
-    """etl_hook returns non-zero exit ⇒ halt BEFORE step 2 wipes the
-    demo DB. Summary.halted=True, halt_reason populated, downstream
-    step counts at zero defaults."""
+    """etl_hook returns non-zero exit ⇒ halt AFTER the wipe but
+    BEFORE the generator + matview + reload. Summary.halted=True,
+    halt_reason populated, generator/matview/reload at zero defaults.
+
+    BS.4 (2026-05-29) reordered: wipe runs FIRST so etl_hook writes
+    into clean state. On etl_hook failure demo_db is left in whatever
+    partial state the hook wrote — operators wrap their hook in a
+    transaction to roll back to the post-wipe empty state on failure.
+    The pre-BS.4 "demo DB not touched on etl_hook failure" property
+    is gone (the test below now confirms the wipe RAN, not that it
+    was skipped)."""
     cfg = replace(
         _sqlite_cfg(tmp_path),
         etl_hook="false",  # POSIX `false` exits 1 — universally available
@@ -1749,15 +1447,18 @@ def test_run_deploy_pipeline_halts_on_etl_failure(
     assert summary.halt_reason is not None
     assert "etl_hook returned exit_code=1" in summary.halt_reason
     assert summary.step1_etl_hook_exit_code == 1
-    # CRITICAL: step 2's wipe MUST NOT have run — pre-existing rows
-    # are still there.
+    # BS.4: the wipe DID run (post-BS.4 the wipe is unconditional —
+    # it precedes etl_hook in the orchestration). The pre-existing
+    # rows are gone.
     post_tx, post_bal = _row_counts(cfg, spec_example_instance)
-    assert (post_tx, post_bal) == (1, 1), (
-        "etl_hook failure must NOT touch the demo DB — operator's "
-        "pre-pipeline state is preserved"
+    assert (post_tx, post_bal) == (0, 0), (
+        "BS.4: wipe runs before etl_hook, so a halted run still wipes "
+        "demo_db. Operators wrap etl_hook in a transaction for rollback."
     )
-    # Default zeros for downstream steps.
-    assert summary.step2_wipe_transactions_deleted == 0
+    # Summary reflects the wipe (rows deleted = pre-pipeline counts).
+    assert summary.step2_wipe_transactions_deleted == 1
+    assert summary.step2_wipe_daily_balances_deleted == 1
+    # But downstream steps (generator/matviews/reload) didn't run.
     assert summary.step3_generator_transactions_after == 0
     assert summary.step4_matviews_done is False
 
@@ -1795,12 +1496,15 @@ def test_deploy_summary_to_json_serializes_every_field(
 # the X.4.g.13 tests above; the three remaining shapes land here.
 # =====================================================================
 
-def test_orchestration_etl_only_path(
+def test_orchestration_etl_hook_path(
     tmp_path: Path, spec_example_instance: L2Instance,
 ) -> None:
-    """etl_hook present (succeeds) + no etl_datasource: step 1 runs +
-    succeeds, step 2 pull skips, step 3 generator (full scope)
-    populates the demo DB on its own."""
+    """etl_hook present (succeeds): step 1 (wipe) runs, step 2 etl_hook
+    runs + succeeds, step 3 generator (full scope) populates demo_db.
+
+    BS.4 (2026-05-29): the legacy etl_datasource branch is gone — the
+    only ETL contract is the etl_hook subprocess writing directly to
+    demo_db (no upstream copy)."""
     cfg = replace(
         _sqlite_cfg(tmp_path),
         etl_hook="true",  # POSIX `true` exits 0
@@ -1812,80 +1516,34 @@ def test_orchestration_etl_only_path(
     )
     assert summary.halted is False
     assert summary.step1_etl_hook_exit_code == 0
-    # Step 2 pull skipped (no etl_datasource).
-    assert summary.step2_pull_transactions_pulled == 0
-    assert summary.step2_pull_daily_balances_pulled == 0
-    # Step 3 generator (full scope) carried the load.
+    # Step 3 generator (full scope) carried the load — etl_hook is a
+    # no-op (`true`) so the rows came from the generator.
     assert summary.step3_generator_transactions_after > 0
     assert summary.step3_generator_daily_balances_after > 0
     assert summary.step4_matviews_done is True
-    # Step 1 actually ran (start + done events) — not the skip path.
+    # Step 1 etl_hook actually ran (start + done events) — not the skip path.
     kinds = sink.kinds()
     assert "deploy:step1:start" in kinds
     assert "deploy:step1:done" in kinds
     assert "deploy:step1:skip" not in kinds
 
 
-def test_orchestration_etl_then_generator_path(
+def test_orchestration_no_etl_hook_path(
     tmp_path: Path, spec_example_instance: L2Instance,
 ) -> None:
-    """etl_datasource set + scope:full generator: step 2's pull copies
-    rows from the source, then step 3 layers full-scope plants on top.
-    Final transactions count = pulled + generated."""
-    src_path = tmp_path / "source.sqlite"
-    _build_etl_source_sqlite(src_path, txn_rows=4, bal_rows=3)
-    cfg = replace(
-        _sqlite_cfg(tmp_path),
-        etl_datasource=EtlDatasourceConfig(
-            url=f"sqlite:///{src_path}",
-            transactions_table="etl_txns",
-            daily_balances_table="etl_balances",
-        ),
-        test_generator=TestGeneratorConfig(scope="full"),
-    )
+    """No etl_hook configured: step 1 skips, step 2 wipe runs, step 3
+    generator populates demo_db on its own. Default cfg path — the
+    pre-BS.4 "etl-free" mode is now the canonical mode."""
+    cfg = _sqlite_cfg(tmp_path)
+    assert cfg.etl_hook is None
     _apply_demo_schema_only(cfg, spec_example_instance)
     summary = asyncio.run(
         run_deploy_pipeline(cfg, spec_example_instance, dev_log=None),
     )
     assert summary.halted is False
-    # Step 2's pull moved the 4+3 rows from the source.
-    assert summary.step2_pull_transactions_pulled == 4
-    assert summary.step2_pull_daily_balances_pulled == 3
-    # Step 3 added more on top of those — final count strictly greater
-    # than the pulled row count.
-    assert summary.step3_generator_transactions_after > 4
-    assert summary.step3_generator_daily_balances_after > 3
-    assert summary.step4_matviews_done is True
-
-
-def test_orchestration_etl_then_uncovered_rails_path(
-    tmp_path: Path, spec_example_instance: L2Instance,
-) -> None:
-    """etl_datasource set + scope:uncovered_rails: step 2 pulls, then
-    step 3 only fills baseline for rails the source DIDN'T cover.
-    The pipeline composition matters here, not the exact row count —
-    the per-rail skip semantics are covered by the step 3 unit tests."""
-    src_path = tmp_path / "source.sqlite"
-    _build_etl_source_sqlite(src_path, txn_rows=2, bal_rows=2)
-    cfg = replace(
-        _sqlite_cfg(tmp_path),
-        etl_datasource=EtlDatasourceConfig(
-            url=f"sqlite:///{src_path}",
-            transactions_table="etl_txns",
-            daily_balances_table="etl_balances",
-        ),
-        test_generator=TestGeneratorConfig(scope="uncovered_rails"),
-    )
-    _apply_demo_schema_only(cfg, spec_example_instance)
-    summary = asyncio.run(
-        run_deploy_pipeline(cfg, spec_example_instance, dev_log=None),
-    )
-    assert summary.halted is False
-    assert summary.step2_pull_transactions_pulled == 2
-    assert summary.step2_pull_daily_balances_pulled == 2
-    # uncovered_rails still emits baseline for the (many) uncovered
-    # rails in spec_example — totals are >= the 2 pulled rows.
-    assert summary.step3_generator_transactions_after >= 2
+    assert summary.step1_etl_hook_exit_code == 0
+    assert summary.step3_generator_transactions_after > 0
+    assert summary.step3_generator_daily_balances_after > 0
     assert summary.step4_matviews_done is True
     assert summary.step5_data_generation_id > 0
 

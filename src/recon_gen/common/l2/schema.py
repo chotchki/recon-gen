@@ -230,31 +230,10 @@ def emit_schema_drop_sql(
     )
 
 
-# X.4.g.6 — Base-table column lists for the deploy pipeline's step 2
-# pull. Excludes ``entry`` (auto-generated identity column on every
-# dialect; the pull lets the destination assign its own). Order is
-# the canonical order the pipeline uses for both SELECT (against the
-# operator's etl_datasource) and INSERT (into the demo DB), so column
-# positions stay aligned across dialects.
-#
-# Source of truth: the CREATE TABLE blocks in ``_SCHEMA_TEMPLATE``
-# below — when those change, this constant must change too. The
-# `tests/unit/test_deploy_pipeline.py` snapshot test guards drift
-# by introspecting a fresh sqlite-applied schema and diffing.
-BASE_TRANSACTIONS_COLUMNS: tuple[str, ...] = (
-    "id", "account_id", "account_name", "account_role",
-    "account_scope", "account_parent_role", "amount_money",
-    "amount_direction", "status", "posting", "transfer_id",
-    "transfer_completion", "transfer_parent_id",
-    "rail_name", "template_name", "bundle_id", "supersedes",
-    "origin", "metadata",
-)
-
-BASE_DAILY_BALANCES_COLUMNS: tuple[str, ...] = (
-    "account_id", "account_name", "account_role", "account_scope",
-    "account_parent_role", "expected_eod_balance", "business_day_start",
-    "business_day_end", "money", "metadata", "supersedes",
-)
+# BS.4 (2026-05-29) removed BASE_TRANSACTIONS_COLUMNS +
+# BASE_DAILY_BALANCES_COLUMNS — the step_2_pull was the only consumer.
+# The schema's CREATE TABLE blocks (below) are the source of truth for
+# column shape; ETL authors read them or PRAGMA the live tables.
 
 
 def wipe_demo_data_sql(
@@ -262,11 +241,12 @@ def wipe_demo_data_sql(
 ) -> str:
     """Emit DELETE statements that empty the per-prefix base tables.
 
-    X.4.g.5 — step 2 of the deploy pipeline. After step 1's etl_hook
-    succeeds, the demo DB's `<prefix>_transactions` +
-    `<prefix>_daily_balances` are wiped so step 2's pull (when an
-    etl_datasource is configured) and step 3's generator both write
-    into clean state. Step 4's matview refresh then re-derives every
+    BS.4 (2026-05-29) — step 1 of the deploy pipeline (the wipe
+    swapped to first per the architecture shift; the etl_hook now
+    writes into the clean DB directly). The demo DB's
+    `<prefix>_transactions` + `<prefix>_daily_balances` are emptied so
+    the etl_hook (step 2) and the generator (step 3) both write into
+    clean state. Step 4's matview refresh then re-derives every
     Current* / L1 invariant / Inv matview from the new base data.
 
     Schema is preserved — this is row-level wipe, not DROP. The

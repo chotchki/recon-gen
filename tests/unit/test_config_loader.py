@@ -385,10 +385,11 @@ def test_datasource_arn_was_derived_flag(
     assert "recon-sasquatch-pr" in (cfg3.datasource_arn or "")
 
 
-# X.4.g.1+2+3 — Deploy-pipeline config schema. Three new fields on Config:
-# `etl_hook` (top-level optional str), `etl_datasource` (nested block,
-# Optional), `test_generator` (nested block, default-factory so the
-# pipeline never None-checks). All three are V.1.b-allowlisted.
+# X.4.g.1+3 — Deploy-pipeline config schema. Post-BS.4 two fields on
+# Config: `etl_hook` (top-level optional str) + `test_generator` (nested
+# block, default-factory so the pipeline never None-checks). The legacy
+# `etl_datasource` block was deleted in BS.4 (the upstream→demo_db copy
+# is gone; etl_hook writes directly to demo_db).
 
 def _base_cfg(extras: dict[str, object]) -> dict[str, object]:
     """Z.C: alias for ``_required_yaml`` — the deploy-pipeline test block
@@ -454,55 +455,18 @@ def test_etl_hook_passthrough(tmp_path: Path) -> None:
     assert cfg.etl_hook == "/usr/local/bin/refresh-demo --etl-only"
 
 
-def test_etl_datasource_defaults_none(tmp_path: Path) -> None:
-    cfg = load_config(_write_yaml(tmp_path, _base_cfg({})))
-    assert cfg.etl_datasource is None
-
-
-def test_etl_datasource_full_block_loads(tmp_path: Path) -> None:
-    cfg = load_config(_write_yaml(tmp_path, _base_cfg({
-        "etl_datasource": {
-            "url": "postgresql://prod-replica:5432/ledger",
-            "transactions_table": "ledger.txns",
-            "daily_balances_table": "ledger.balances_eod",
-        },
-    })))
-    assert cfg.etl_datasource is not None
-    assert cfg.etl_datasource.url == "postgresql://prod-replica:5432/ledger"
-    assert cfg.etl_datasource.transactions_table == "ledger.txns"
-    assert cfg.etl_datasource.daily_balances_table == "ledger.balances_eod"
-
-
-def test_etl_datasource_missing_required_field_rejects(tmp_path: Path) -> None:
+def test_etl_datasource_key_rejects_post_bs4(tmp_path: Path) -> None:
+    """BS.4 (2026-05-29) deleted the etl_datasource block. The cfg-key
+    allowlist no longer carries the name, so any operator yaml still
+    declaring it gets the standard 'unknown top-level keys' error
+    (no special-case migration banner — operators are expected to
+    move their ETL contract into the etl_hook subprocess)."""
     p = _write_yaml(tmp_path, _base_cfg({
         "etl_datasource": {
             "url": "postgresql://x:5432/y",
-            "transactions_table": "txns",
-            # daily_balances_table missing
         },
     }))
-    with pytest.raises(ValueError, match="missing required field"):
-        load_config(p)
-
-
-def test_etl_datasource_unknown_subkey_rejects(tmp_path: Path) -> None:
-    p = _write_yaml(tmp_path, _base_cfg({
-        "etl_datasource": {
-            "url": "postgresql://x:5432/y",
-            "transactions_table": "txns",
-            "daily_balances_table": "balances",
-            "schema": "ledger",  # not in the allowlist
-        },
-    }))
-    with pytest.raises(ValueError, match="unknown keys"):
-        load_config(p)
-
-
-def test_etl_datasource_non_mapping_rejects(tmp_path: Path) -> None:
-    p = _write_yaml(tmp_path, _base_cfg({
-        "etl_datasource": "postgresql://x:5432/y",
-    }))
-    with pytest.raises(ValueError, match="must be a mapping"):
+    with pytest.raises(ValueError, match="unknown.*etl_datasource"):
         load_config(p)
 
 
@@ -600,18 +564,13 @@ def test_test_generator_non_mapping_rejects(tmp_path: Path) -> None:
         load_config(p)
 
 
-def test_v1b_allowlist_includes_three_pipeline_keys(tmp_path: Path) -> None:
-    """Smoke: the three new keys + a base config load cleanly together —
-    proves the V.1.b allowlist actually carries them."""
+def test_v1b_allowlist_includes_pipeline_keys(tmp_path: Path) -> None:
+    """Smoke: the deploy-pipeline keys + a base config load cleanly together —
+    proves the V.1.b allowlist actually carries them. BS.4 dropped
+    etl_datasource (the legacy upstream→demo copy block)."""
     cfg = load_config(_write_yaml(tmp_path, _base_cfg({
         "etl_hook": "./etl.sh",
-        "etl_datasource": {
-            "url": "postgresql://x:5432/y",
-            "transactions_table": "txns",
-            "daily_balances_table": "balances",
-        },
         "test_generator": {"scope": "full"},
     })))
     assert cfg.etl_hook == "./etl.sh"
-    assert cfg.etl_datasource is not None
     assert cfg.test_generator.scope == "full"

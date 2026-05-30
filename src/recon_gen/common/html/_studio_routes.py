@@ -1060,16 +1060,13 @@ def _render_etl_hook_strip(
     command: str | None,
     enabled: bool,
 ) -> str:
-    """X.4.h.etl-toggle — render the upstream-re-seed enable/disable strip.
+    """X.4.h.etl-toggle — render the etl-hook enable/disable strip.
 
-    Surfaces ``cfg.etl_hook`` (the shell command) as the visible
-    representative of the "upstream re-seed" pair: step 1 (run the
-    hook) + step 2 pull (copy from ``cfg.etl_datasource`` into the
-    demo DB). The toggle disables BOTH for the next Deploy without
-    erasing either cfg field — flip back on later to restore the
-    whole pair without re-configuring. (The label says "etl hook"
-    because that's the operator-facing name for the workflow; the
-    implementation skips both halves.)
+    Surfaces ``cfg.etl_hook`` (the shell command). The toggle disables
+    the hook for the next Deploy without erasing the cfg field — flip
+    back on later to restore it. BS.4 (2026-05-29) dropped the legacy
+    ``etl_datasource`` half of the pair; the etl_hook is the sole ETL
+    contract now (writes directly to demo_db, no upstream copy).
 
     Three render states:
       - ``command is None`` ⇒ disabled toggle, "(not configured)"
@@ -1866,10 +1863,10 @@ def make_studio_routes(
             the coverage route (``db_pool=None``).
         cfg: Full Config dataclass; required for the X.4.g.13
             ``POST /deploy`` route (the deploy pipeline reads
-            ``cfg.etl_hook`` / ``cfg.etl_datasource`` /
-            ``cfg.test_generator`` plus DB connection knobs).
-            None ⇒ POST /deploy is silently omitted (unit-test
-            surface that doesn't exercise the pipeline).
+            ``cfg.etl_hook`` / ``cfg.test_generator`` plus DB
+            connection knobs). None ⇒ POST /deploy is silently
+            omitted (unit-test surface that doesn't exercise the
+            pipeline).
     """
     def _top_nav_html(active_href: str) -> str:
         """BS.3 part 3: closure-wrap top_nav_fn so handlers stay terse.

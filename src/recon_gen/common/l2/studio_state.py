@@ -98,8 +98,9 @@ class StudioState:
     # {start, end}`); parser/serializer converts at the boundary.
     window: DateInterval | None = None
 
-    # X.4.h.etl-toggle — etl_hook + etl_datasource pair enable/disable.
-    # None = "trainer never touched, use cfg-as-written behavior."
+    # X.4.h.etl-toggle (post-BS.4): gates only the etl_hook subprocess
+    # — the legacy etl_datasource field is gone. None = "trainer
+    # never touched, use cfg-as-written behavior."
     etl_hook_enabled: bool | None = None
 
 

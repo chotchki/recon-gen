@@ -1,25 +1,35 @@
-"""X.4.g — Studio "Deploy changes" pipeline.
+"""Studio "Deploy changes" pipeline (X.4.g + BS.4 architecture shift).
 
-Five-step orchestration that takes the operator's current `cfg` +
+Four-step orchestration that takes the operator's current `cfg` +
 `L2Instance` and refreshes the demo DB so the dashboards re-render
 against the new shape:
 
-1. **etl_hook gate** — run `cfg.etl_hook` as a subprocess; halt on
-   non-zero exit BEFORE step 2 touches the demo DB. (X.4.g.4)
-2. **wipe + pull** — wipe demo data, then if `cfg.etl_datasource` is
-   set, copy `transactions` + `daily_balances` rows filtered to
-   `<= cfg.test_generator.end_date`. (X.4.g.5 / X.4.g.6)
+1. **wipe** — TRUNCATE `<prefix>_transactions` + `<prefix>_daily_balances`
+   so step 2's etl_hook + step 3's generator both write into clean state.
+2. **etl_hook** — run `cfg.etl_hook` as a subprocess. The hook is
+   expected to write directly to demo_db (the BS.4 contract — see
+   `docs/audits/bs_4_arch_shift_spike.md`). Non-zero exit halts the
+   pipeline before steps 3-5 run; demo_db is left in whatever partial
+   state the hook produced (operator re-runs after fixing the hook).
 3. **generator** — `emit_full_seed` against the current
-   `cfg.test_generator` knobs; always additive. (X.4.g.7-10)
+   `cfg.test_generator` knobs; always additive overlay on top of the
+   etl_hook's rows.
 4. **matview refresh** — existing `refresh_matviews_sql(instance)`.
-   (X.4.g.11)
 5. **reload** — bump `data_generation_id`; Dashboards' open page
-   polls and reloads its current URL. (X.4.g.12)
+   polls and reloads its current URL.
 
-This module is HTTP-free. The studio's `POST /deploy` endpoint
-(X.4.g.13) wires up a `DevLogWriter` that emits via `_DEVLOG.info`;
-the CLI (a future `recon-gen deploy apply` subcommand) wires
-one that prints to stdout; tests wire one that appends to a list.
+BS.4 (2026-05-29) collapsed the pre-existing
+`upstream → demo_db → matview refresh` model to
+`truncate(demo_db) → ETL hook → matview refresh`. The legacy
+`step_2_pull` (cross-dialect copy from `cfg.etl_datasource`) was
+deleted along with `EtlDatasourceConfig`; etl_hook is the only
+ETL-load contract now. The step ordering also flipped — wipe now runs
+BEFORE etl_hook (the hook writes into a clean demo_db, not into a
+parallel upstream that gets copied over).
+
+This module is HTTP-free. The studio's `POST /deploy` endpoint wires
+up a `DevLogWriter` that emits via `_DEVLOG.info`; tests wire one
+that appends to a list.
 """
 from __future__ import annotations
 
@@ -27,19 +37,15 @@ import asyncio
 import shlex
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import date, timedelta
-from typing import TYPE_CHECKING, Any
+from datetime import timedelta
+from typing import TYPE_CHECKING
 
 from recon_gen.common.db import (
     connect_demo_db,
     execute_script,
-    oracle_dsn,
-    sqlite_path,
 )
 from recon_gen.common.l2.primitives import Identifier
 from recon_gen.common.l2.schema import (
-    BASE_DAILY_BALANCES_COLUMNS,
-    BASE_TRANSACTIONS_COLUMNS,
     refresh_matviews_sql,
     wipe_demo_data_sql,
 )
@@ -74,8 +80,16 @@ async def step_1_etl_hook(
 
     Returns the subprocess exit code, OR 0 when ``cfg.etl_hook`` is
     unset / empty (no-op skip). Caller checks the return value and
-    halts the pipeline if non-zero — step 2's wipe must NOT run when
-    the operator's ETL refresh failed.
+    halts the pipeline if non-zero — steps 3-5 (generator overlay,
+    matview refresh, reload) MUST NOT run when the operator's ETL
+    failed.
+
+    BS.4 (2026-05-29) reordered the pipeline so the wipe runs BEFORE
+    this step (the hook writes directly to demo_db, not to a parallel
+    upstream that gets copied over). On etl_hook failure, demo_db is
+    left in whatever partial state the hook produced — operators
+    re-run after fixing the hook (recommend wrapping hook writes in a
+    transaction so partial writes roll back automatically).
 
     The command is ``shlex.split`` then run via
     ``asyncio.create_subprocess_exec`` (NOT ``shell=True``). Stdout
@@ -148,11 +162,12 @@ async def step_2_wipe(
 ) -> tuple[int, int]:
     """Empty ``<prefix>_transactions`` + ``<prefix>_daily_balances``.
 
-    X.4.g.5 — runs unconditionally (when the pipeline reaches it),
-    AFTER step 1's etl_hook gate has succeeded. The matview re-derive
-    is step 4's job; this just clears the two base tables so step 2's
-    pull (etl_datasource) and step 3's generator both write into clean
-    state.
+    BS.4 (2026-05-29) — runs FIRST in the pipeline so the etl_hook
+    (step 1) and the synthetic-data generator (step 3) both write into
+    clean state. Pre-BS.4 this ran AFTER step 1's etl_hook (the hook
+    was assumed to write to upstream and step_2_pull copied to demo);
+    the pull step is gone and the order swapped accordingly. The
+    matview re-derive is step 4's job.
 
     Returns ``(transactions_deleted, daily_balances_deleted)`` row
     counts so the caller can surface "wiped 12,345 transactions" in
@@ -198,254 +213,13 @@ async def step_2_wipe(
     return tx_count, bal_count
 
 
-# X.4.g.6 — Step 2 pull: cross-dialect copy from etl_datasource.
-
-# Batch size for the source-to-dest fetch+insert loop. 5000 rows is
-# the operator-tested default — memory bounded, dashboards-load tested.
-# Tunable per-call for tests that want to exercise the multi-batch
-# path without seeding 10k+ rows.
-_PULL_BATCH_SIZE = 5000
+# BS.4 (2026-05-29) removed step_2_pull + EtlDatasourceConfig +
+# the cross-dialect upstream→demo_db copy path. The etl_hook is the
+# only ETL-load contract now — it writes directly to demo_db after
+# step 1's wipe. See docs/audits/bs_4_arch_shift_spike.md.
 
 
-def _dialect_from_url(url: str) -> Dialect:
-    """Infer the SQL dialect from a connection URL prefix.
-
-    Supports the same URL shapes ``connect_demo_db`` accepts. The
-    operator declares only the URL in ``cfg.etl_datasource``; we don't
-    require a redundant ``dialect:`` field there.
-    """
-    if url.startswith(("postgresql://", "postgres://")):
-        return Dialect.POSTGRES
-    if url.startswith(("oracle://", "oracle+oracledb://")):
-        return Dialect.ORACLE
-    if url.startswith("sqlite://"):
-        return Dialect.SQLITE
-    raise ValueError(
-        f"Cannot infer dialect from etl_datasource URL: {url!r}. "
-        f"Supported prefixes: postgresql://, oracle://, sqlite://."
-    )
-
-
-def _connect_etl_source(url: str) -> Any:  # pyright: ignore[reportExplicitAny]  # WHY: DB-API 2.0 sync connection has no shared Protocol across psycopg/oracledb/sqlite3
-    """Open a sync DB-API 2.0 connection to the etl_datasource URL.
-
-    Mirrors ``connect_demo_db`` but takes a URL directly so the source
-    DB doesn't share ``cfg.demo_database_url`` / ``cfg.dialect``.
-    """
-    dialect = _dialect_from_url(url)
-    if dialect is Dialect.POSTGRES:
-        import psycopg
-        return psycopg.connect(url)
-    if dialect is Dialect.ORACLE:
-        import oracledb
-        return oracledb.connect(oracle_dsn(url))
-    import sqlite3
-    return sqlite3.connect(sqlite_path(url))
-
-
-def _insert_paramstyle_sql(
-    table: str, columns: tuple[str, ...], dialect: Dialect,
-) -> str:
-    """Build an INSERT with the dialect's parameter placeholder style.
-
-    psycopg uses ``%s``, oracledb uses ``:1, :2, ...``, sqlite3 uses
-    ``?``. Single source of truth so the executemany call binds
-    correctly per dialect.
-    """
-    cols_csv = ", ".join(columns)
-    n = len(columns)
-    if dialect is Dialect.POSTGRES:
-        placeholders = ", ".join(["%s"] * n)
-    elif dialect is Dialect.ORACLE:
-        placeholders = ", ".join(f":{i + 1}" for i in range(n))
-    else:
-        placeholders = ", ".join(["?"] * n)
-    return f"INSERT INTO {table} ({cols_csv}) VALUES ({placeholders})"
-
-
-async def step_2_pull(
-    cfg: Config,
-    instance: L2Instance,
-    *,
-    dev_log: DevLogWriter | None = None,
-    batch_size: int = _PULL_BATCH_SIZE,
-) -> tuple[int, int]:
-    """Cross-dialect copy from ``cfg.etl_datasource`` into the demo DB.
-
-    X.4.g.6 — runs after step 2's wipe, BEFORE step 3's generator.
-    For each base table:
-      - SELECT mirrored columns from the source's declared
-        transactions / daily_balances table, optionally filtered to
-        ``cfg.test_generator.end_date`` (transactions: ``posting <=``;
-        daily_balances: ``business_day_end <=``).
-      - Fetch in ``batch_size`` chunks (default 5000).
-      - INSERT each batch into the demo's ``<prefix>_<table>``.
-
-    Skips entirely (no-op, returns ``(0, 0)``, emits a skip event)
-    when ``cfg.etl_datasource is None`` — operator's no-etl path.
-
-    Column mapping is by-name: the source must expose columns with
-    the same names the L2 v6 schema declares (``BASE_*_COLUMNS``).
-    Extra columns in the source are ignored; missing columns surface
-    as a loud "column not found" failure from the source DB. This is
-    the contract per the X.4.g.6 design — the operator's ETL is
-    responsible for landing v6-compliant column names.
-
-    Returns ``(transactions_pulled, daily_balances_pulled)`` row
-    counts so the caller can surface "pulled 12,345 transactions" in
-    the deploy summary.
-    """
-    if cfg.etl_datasource is None:
-        await _emit(dev_log, {
-            "event": "deploy:step2:pull:skip",
-            "reason": "etl_datasource not configured",
-        })
-        return 0, 0
-
-    src_cfg = cfg.etl_datasource
-    src_dialect = _dialect_from_url(src_cfg.url)
-    end_date = cfg.test_generator.end_date
-    p = cfg.db_table_prefix  # Z.C — was instance.instance
-
-    await _emit(dev_log, {
-        "event": "deploy:step2:pull:start",
-        "source_dialect": src_dialect.value,
-        "dest_dialect": cfg.dialect.value,
-        "db_table_prefix": p,
-        "end_date": end_date.isoformat() if end_date else None,
-    })
-
-    def _run_pull() -> tuple[int, int]:
-        src_conn = _connect_etl_source(src_cfg.url)
-        try:
-            dest_conn = connect_demo_db(cfg)
-            try:
-                tx_pulled = _pull_table(
-                    src_conn=src_conn,
-                    dest_conn=dest_conn,
-                    src_table=src_cfg.transactions_table,
-                    dest_table=f"{p}_transactions",
-                    columns=BASE_TRANSACTIONS_COLUMNS,
-                    filter_col="posting",
-                    end_date=end_date,
-                    dest_dialect=cfg.dialect,
-                    batch_size=batch_size,
-                )
-                bal_pulled = _pull_table(
-                    src_conn=src_conn,
-                    dest_conn=dest_conn,
-                    src_table=src_cfg.daily_balances_table,
-                    dest_table=f"{p}_daily_balances",
-                    columns=BASE_DAILY_BALANCES_COLUMNS,
-                    filter_col="business_day_end",
-                    end_date=end_date,
-                    dest_dialect=cfg.dialect,
-                    batch_size=batch_size,
-                )
-                dest_conn.commit()
-                return tx_pulled, bal_pulled
-            finally:
-                dest_conn.close()
-        finally:
-            src_conn.close()
-
-    tx_pulled, bal_pulled = await asyncio.to_thread(_run_pull)
-    await _emit(dev_log, {
-        "event": "deploy:step2:pull:done",
-        "transactions_pulled": tx_pulled,
-        "daily_balances_pulled": bal_pulled,
-    })
-    return tx_pulled, bal_pulled
-
-
-def _pull_table(
-    *,
-    src_conn: Any,  # pyright: ignore[reportExplicitAny]  # WHY: DB-API 2.0 sync connection has no shared Protocol across drivers
-    dest_conn: Any,  # pyright: ignore[reportExplicitAny]  # WHY: DB-API 2.0 sync connection has no shared Protocol across drivers
-    src_table: str,
-    dest_table: str,
-    columns: tuple[str, ...],
-    filter_col: str,
-    end_date: date | None,
-    dest_dialect: Dialect,
-    batch_size: int,
-) -> int:
-    """Stream rows from one source table into one dest table.
-
-    Returns the row count pulled. Source column order MUST match
-    ``columns``; the SELECT names them explicitly so the operator's
-    source can have extras + we still bind correctly to the INSERT.
-    """
-    cols_csv = ", ".join(columns)
-    select_sql = f"SELECT {cols_csv} FROM {src_table}"
-    if end_date is not None:
-        # ISO-8601 date string is always-safe to inline (operator-controlled
-        # via cfg.test_generator.end_date, typed `date`). DB-API param
-        # styles differ across drivers — inlining keeps the source-side
-        # path single-shape.
-        select_sql += f" WHERE {filter_col} <= '{end_date.isoformat()}'"
-
-    insert_sql = _insert_paramstyle_sql(dest_table, columns, dest_dialect)
-    coerce_row = _row_coercer_for(dest_dialect)
-
-    src_cur = src_conn.cursor()
-    try:
-        src_cur.execute(select_sql)
-        dest_cur = dest_conn.cursor()
-        try:
-            total = 0
-            while True:
-                batch = src_cur.fetchmany(batch_size)
-                if not batch:
-                    break
-                dest_cur.executemany(insert_sql, [coerce_row(r) for r in batch])
-                total += len(batch)
-            return total
-        finally:
-            dest_cur.close()
-    finally:
-        src_cur.close()
-
-
-def _row_coercer_for(
-    dest_dialect: Dialect,
-) -> Callable[[tuple[Any, ...]], tuple[Any, ...]]:  # pyright: ignore[reportExplicitAny]  # WHY: row tuple values are arbitrary DB-driver types
-    """Return a function that coerces source-row values to types the
-    destination DB driver accepts.
-
-    The cross-dialect pull path is the only place this matters: psycopg
-    returns ``decimal.Decimal`` for NUMERIC columns and stdlib
-    ``datetime.datetime`` for TIMESTAMP. sqlite3 (PEP 249) doesn't
-    register Decimal as a recognized parameter type — the executemany
-    raises ``ProgrammingError: type 'decimal.Decimal' is not
-    supported``. Convert on the way in so the source can be any dialect.
-
-    PG / Oracle destinations: identity. Their drivers accept Decimal +
-    datetime natively, so the per-row clone is wasted work but stays
-    correct.
-    """
-    if dest_dialect is not Dialect.SQLITE:
-        return lambda row: row
-    # Lazy decimal import — keep the cost off the hot PG path.
-    from decimal import Decimal
-
-    def _coerce(row: tuple[Any, ...]) -> tuple[Any, ...]:  # pyright: ignore[reportExplicitAny]  # WHY: see _row_coercer_for docstring
-        out: list[Any] = []  # pyright: ignore[reportExplicitAny]  # WHY: see _row_coercer_for docstring
-        for v in row:
-            if isinstance(v, Decimal):
-                # str preserves arbitrary precision; sqlite stores it
-                # in the TEXT affinity that the schema declares for
-                # money fields anyway (the JSON1 / SQL/JSON path
-                # contract per Schema_v6).
-                out.append(str(v))
-            else:
-                out.append(v)
-        return tuple(out)
-
-    return _coerce
-
-
-# X.4.g.7+8 — Step 3 generator: synthetic data overlay.
+# Step 3 generator: synthetic data overlay.
 
 async def step_3_generator(
     cfg: Config,
@@ -459,8 +233,8 @@ async def step_3_generator(
     X.4.g.7 — scaffolding. Honors ``cfg.test_generator``:
       - ``enabled = False`` ⇒ skip event + return ``(0, 0)``.
       - ``scope = "full"`` ⇒ X.4.g.8 — `build_full_seed_sql` (today's
-        behavior). Byte-identical to the locked seeds when no
-        ``etl_datasource`` AND knobs at defaults.
+        behavior). Byte-identical to the locked seeds when ``etl_hook``
+        is absent (or a no-op) AND knobs at defaults.
       - ``scope = "exceptions_only"`` ⇒ ships in X.4.g.9.
       - ``scope = "uncovered_rails"`` ⇒ ships in X.4.g.10.
 
@@ -558,8 +332,9 @@ def _emit_scope_sql(cfg: Config, instance: L2Instance) -> str:
         # X.4.g.8 — full scope. ``build_full_seed_sql`` is the same
         # entry point ``data apply --execute`` already uses, so the
         # locked-seed determinism contract carries over: no
-        # ``etl_datasource`` + default test_generator knobs ⇒
-        # byte-identical to ``tests/data/_locked_seeds/<inst>.<dialect>.sql``.
+        # ``etl_hook`` (post-BS.4 the only ETL knob) + default
+        # test_generator knobs ⇒ byte-identical to
+        # ``tests/data/_locked_seeds/<inst>.<dialect>.sql``.
         # build_full_seed_sql still carries a no-untyped-def waiver
         # (CLI-wide typing sweep is a separate task per its own
         # ignore comment); the call is still by-position-correct.
@@ -571,13 +346,13 @@ def _emit_scope_sql(cfg: Config, instance: L2Instance) -> str:
             base_seed=cfg.test_generator.seed,  # X.4.h.0.b — None ⇒ _BASELINE_BASE_SEED (locked-seed default)
         )
     if scope == "exceptions_only":
-        # X.4.g.9 — plants only, no baseline. The integrator's external
-        # data already lives in the demo DB (via step 2's etl_datasource
-        # pull); we just lay the L1/Investigation exception scenarios
-        # on top so the dashboards render planted violations against
-        # their data. ``emit_seed`` is the plants-only emitter that
-        # ``emit_full_seed`` wraps with a baseline; calling it directly
-        # skips the 90-day baseline insert.
+        # X.4.g.9 — plants only, no baseline. The integrator's data
+        # already lives in the demo DB (via the BS.4 etl_hook that ran
+        # in step 1); we just lay the L1/Investigation exception
+        # scenarios on top so the dashboards render planted violations
+        # against their data. ``emit_seed`` is the plants-only emitter
+        # that ``emit_full_seed`` wraps with a baseline; calling it
+        # directly skips the 90-day baseline insert.
         from recon_gen.cli._helpers import build_default_scenario  # pyright: ignore[reportUnknownVariableType]  # WHY: helper has pending untyped-def waiver in cli/_helpers.py
         from recon_gen.common.l2.seed import emit_seed
         scenario = build_default_scenario(  # pyright: ignore[reportUnknownVariableType]  # WHY: same helper-untyped waiver propagates to the call expression
@@ -687,9 +462,9 @@ def _covered_rail_names(
     DB's ``<prefix>_transactions`` table.
 
     X.4.g.10 — used by ``scope: uncovered_rails`` to decide which rails
-    to skip in the baseline emit. Covered = "operator's external data
-    populated this rail (via step 2's etl_datasource pull)";
-    uncovered = "no rows yet, fill the gap with baseline".
+    to skip in the baseline emit. Covered = "the BS.4 etl_hook
+    populated this rail directly into demo_db"; uncovered = "no rows
+    yet, fill the gap with baseline".
     """
     p = cfg.db_table_prefix  # Z.C — was instance.instance
     conn = connect_demo_db(cfg)
@@ -953,8 +728,6 @@ class DeploySummary:
     step1_etl_hook_exit_code: int = 0
     step2_wipe_transactions_deleted: int = 0
     step2_wipe_daily_balances_deleted: int = 0
-    step2_pull_transactions_pulled: int = 0
-    step2_pull_daily_balances_pulled: int = 0
     step3_generator_transactions_after: int = 0
     step3_generator_daily_balances_after: int = 0
     # X.4.i.2 — number of (account_id, balance_date) rows the
@@ -974,12 +747,6 @@ class DeploySummary:
                 "transactions_deleted": self.step2_wipe_transactions_deleted,
                 "daily_balances_deleted": (
                     self.step2_wipe_daily_balances_deleted
-                ),
-            },
-            "step2_pull": {
-                "transactions_pulled": self.step2_pull_transactions_pulled,
-                "daily_balances_pulled": (
-                    self.step2_pull_daily_balances_pulled
                 ),
             },
             "step3_generator": {
@@ -1003,14 +770,19 @@ async def run_deploy_pipeline(
     *,
     dev_log: DevLogWriter | None = None,
 ) -> DeploySummary:
-    """Orchestrate steps 1→5 of the X.4.g pipeline.
+    """Orchestrate the BS.4 4-step deploy pipeline (with the 3.5 derive
+    sub-step). Order: wipe → etl_hook → generator → matviews → reload.
 
-    Halt contract: step 1's ``etl_hook`` exit code gates everything
-    downstream. Non-zero ⇒ stop BEFORE step 2's wipe, return a
-    ``DeploySummary(halted=True, halt_reason=...)``. The whole point
-    of declaring an etl_hook is that the demo DB MUST NOT be touched
-    when the operator's ETL refresh failed (their data isn't where
-    they expect it).
+    BS.4 (2026-05-29) reordered + dropped the legacy `step_2_pull`.
+    The wipe now runs FIRST (clean slate for etl_hook + generator to
+    write into); etl_hook writes directly to demo_db (no parallel
+    upstream); pull is gone.
+
+    Halt contract: step 2's ``etl_hook`` exit code gates steps 3-5.
+    Non-zero ⇒ stop. demo_db is left in whatever state the hook
+    produced (the wipe ran; the hook may have written some / no /
+    partial rows). Operators are expected to wrap their hook in a
+    transaction so a failure rolls back to the post-wipe empty state.
 
     Every step shares one event-collecting writer that fans out to the
     caller's ``dev_log`` AND captures the events on the returned
@@ -1024,27 +796,32 @@ async def run_deploy_pipeline(
         if dev_log is not None:
             await dev_log(payload)
 
+    # BS.4: wipe FIRST so etl_hook + generator write into clean state.
+    tx_del, bal_del = await step_2_wipe(cfg, instance, dev_log=_tee)
+
     rc = await step_1_etl_hook(cfg, dev_log=_tee)
     if rc != 0:
         await _emit(_tee, {
             "event": "deploy:halt",
             "reason": (
                 f"etl_hook returned exit_code={rc}; "
-                "demo DB not touched"
+                "demo DB left in partial state (post-wipe + whatever "
+                "the hook wrote before failing)"
             ),
         })
         return DeploySummary(
             halted=True,
             halt_reason=(
                 f"etl_hook returned exit_code={rc}; "
-                "demo DB not touched"
+                "demo DB left in partial state (post-wipe + whatever "
+                "the hook wrote before failing)"
             ),
             step1_etl_hook_exit_code=rc,
+            step2_wipe_transactions_deleted=tx_del,
+            step2_wipe_daily_balances_deleted=bal_del,
             events=tuple(captured),
         )
 
-    tx_del, bal_del = await step_2_wipe(cfg, instance, dev_log=_tee)
-    tx_pull, bal_pull = await step_2_pull(cfg, instance, dev_log=_tee)
     tx_after, bal_after = await step_3_generator(
         cfg, instance, dev_log=_tee,
     )
@@ -1060,8 +837,6 @@ async def run_deploy_pipeline(
         step1_etl_hook_exit_code=rc,
         step2_wipe_transactions_deleted=tx_del,
         step2_wipe_daily_balances_deleted=bal_del,
-        step2_pull_transactions_pulled=tx_pull,
-        step2_pull_daily_balances_pulled=bal_pull,
         step3_generator_transactions_after=tx_after,
         step3_generator_daily_balances_after=bal_after,
         step3_5_derived_balance_rows=derived_rows,

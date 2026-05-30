@@ -39,7 +39,6 @@ from recon_gen.cli._html_serve import (
 )
 from recon_gen.common.config import (
     Config,
-    EtlDatasourceConfig,
     TestGeneratorConfig,
 )
 from recon_gen.common.db import (
@@ -151,10 +150,13 @@ def make_studio_cfg(
     tmp_path: Path,
     *,
     etl_hook: Path | None = None,
-    etl_datasource_url: str | None = None,
 ) -> tuple[Config, Path]:
     """Studio cfg: demo_database_url=sqlite tempfile under ``tmp_path``,
-    optional etl_hook + etl_datasource. Returns ``(cfg, sqlite_path)``."""
+    optional etl_hook. Returns ``(cfg, sqlite_path)``.
+
+    BS.4 (2026-05-29): the legacy ``etl_datasource_url`` kwarg was
+    dropped — the cross-dialect upstream-pull path is gone, so the
+    helper no longer needs to wire one."""
     sqlite_path = tmp_path / "demo.sqlite"
     # Z.C — deployment_name + db_table_prefix are required cfg fields.
     db_prefix = "sasquatch_pr"
@@ -172,12 +174,6 @@ def make_studio_cfg(
     }
     if etl_hook is not None:
         cfg_kwargs["etl_hook"] = str(etl_hook)
-    if etl_datasource_url is not None:
-        cfg_kwargs["etl_datasource"] = EtlDatasourceConfig(
-            url=etl_datasource_url,
-            transactions_table=f"{db_prefix}_transactions",
-            daily_balances_table=f"{db_prefix}_daily_balances",
-        )
     return Config(**cfg_kwargs), sqlite_path
 
 

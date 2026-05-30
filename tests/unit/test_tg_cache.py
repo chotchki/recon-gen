@@ -20,7 +20,6 @@ from pathlib import Path
 
 from recon_gen.common.intervals import DateInterval
 from recon_gen.common.config import (
-    EtlDatasourceConfig,
     PlantKind,
     TestGeneratorConfig,
 )
@@ -150,61 +149,45 @@ def test_init_kwarg_seeds_etl_hook_state() -> None:
     assert cache.is_etl_hook_enabled() is False
 
 
-def test_patched_config_keeps_etl_hook_pair_when_enabled() -> None:
-    """When the toggle is on, both cfg.etl_hook and cfg.etl_datasource
-    flow through unchanged — they're a coupled "upstream re-seed" pair
-    (step 1 fetch + step 2 pull)."""
-    etl_ds = EtlDatasourceConfig(
-        url="postgresql://localhost/upstream",
-        transactions_table="up_tx",
-        daily_balances_table="up_bal",
-    )
+def test_patched_config_keeps_etl_hook_when_enabled() -> None:
+    """When the toggle is on, cfg.etl_hook flows through unchanged.
+
+    BS.4 (2026-05-29): the legacy etl_datasource pair was deleted —
+    etl_hook is the only ETL knob now (it writes directly to demo_db,
+    so there's no upstream-source to coordinate)."""
     cfg = make_test_config(
         etl_hook="echo upstream-pull",
-        etl_datasource=etl_ds,
     )
     cache = TestGeneratorCache.from_config(cfg)
     assert cache.is_etl_hook_enabled() is True
     patched = cache.patched_config(cfg)
     assert patched.etl_hook == "echo upstream-pull"
-    assert patched.etl_datasource is etl_ds
 
 
-def test_patched_config_clears_etl_hook_pair_when_disabled() -> None:
-    """When the toggle is off, BOTH etl_hook and etl_datasource get
-    nuked on the patched cfg — step 1 + step 2-pull both no-op for
-    that deploy. Original cfg's stored fields are untouched (re-enable
-    + re-deploy gets the whole pair back)."""
-    etl_ds = EtlDatasourceConfig(
-        url="postgresql://localhost/upstream",
-        transactions_table="up_tx",
-        daily_balances_table="up_bal",
-    )
+def test_patched_config_clears_etl_hook_when_disabled() -> None:
+    """When the toggle is off, cfg.etl_hook gets nuked on the patched
+    cfg — step 1 (etl_hook subprocess) no-ops for that deploy. Original
+    cfg's stored field is untouched (re-enable + re-deploy restores)."""
     cfg = make_test_config(
         etl_hook="echo upstream-pull",
-        etl_datasource=etl_ds,
     )
     cache = TestGeneratorCache.from_config(cfg)
     cache.set_etl_hook_enabled(False)
     patched = cache.patched_config(cfg)
     assert patched.etl_hook is None
-    assert patched.etl_datasource is None
-    # Original cfg's fields preserved (no mutation).
+    # Original cfg's field preserved (no mutation).
     assert cfg.etl_hook == "echo upstream-pull"
-    assert cfg.etl_datasource is etl_ds
 
 
-def test_patched_config_disable_with_no_pair_is_noop() -> None:
-    """When neither field is configured, the toggle's disabled-arm
-    still produces None for both — no spurious churn."""
+def test_patched_config_disable_with_no_hook_is_noop() -> None:
+    """When etl_hook is not configured, the toggle's disabled-arm
+    still produces None — no spurious churn."""
     cfg = make_test_config()
     assert cfg.etl_hook is None
-    assert cfg.etl_datasource is None
     cache = TestGeneratorCache.from_config(cfg)
     cache.set_etl_hook_enabled(False)
     patched = cache.patched_config(cfg)
     assert patched.etl_hook is None
-    assert patched.etl_datasource is None
 
 
 # ----- X.4.h.7 — sidefile persistence wiring -----

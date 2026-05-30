@@ -356,26 +356,17 @@ class TestGeneratorCache:
             end_date=cfg_anchor,
             cutoff_date=cfg_cutoff,
         )
-        # X.4.h.etl-toggle — "upstream re-seed" is a coupled pair:
-        # step_1_etl_hook (the shell command, usually fetches /
-        # refreshes the upstream source) AND step_2_pull (copies
-        # from cfg.etl_datasource into the demo DB). When the
-        # trainer flips the toggle off, BOTH are nuked on the
-        # patched cfg — step 1 + step 2-pull both no-op for this
-        # deploy. Decoupling them produces 500s when the operator's
-        # etl_datasource only exists *because* the hook started it
-        # (e.g. local postgres the hook brings up). The original
-        # cfg's stored fields are untouched — re-enable + re-deploy
-        # restores both.
+        # X.4.h.etl-toggle (post-BS.4): the toggle now only gates the
+        # etl_hook subprocess — there's no longer an etl_datasource
+        # field to coordinate with. When the trainer flips the toggle
+        # off, the cfg passed to the deploy pipeline carries
+        # etl_hook=None, so step 1 (etl_hook subprocess) no-ops; the
+        # wipe + generator + matview steps still run.
         new_etl_hook = (
             cfg.etl_hook if self._etl_hook_enabled else None
-        )
-        new_etl_datasource = (
-            cfg.etl_datasource if self._etl_hook_enabled else None
         )
         return dataclasses.replace(
             cfg,
             test_generator=resolved,
             etl_hook=new_etl_hook,
-            etl_datasource=new_etl_datasource,
         )
