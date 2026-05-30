@@ -2955,40 +2955,20 @@ _SINGLETON_INTRO_BY_KIND: Mapping[EntityKind, tuple[str, str]] = {
         "chart-axis chips — with pair-previews showing the actual bg/fg "
         "combo so contrast issues surface before deploy.</p>"
     ),
-    "persona": (
-        "Persona",
-        "<p><strong>Persona</strong> is the institution's flavor strings "
-        "— name, acronym, upstream stakeholders, GL chart, merchant names, "
-        "free-form prose. The handbook templates read these to render "
-        "branded prose; save with every section blank ⇒ persona clears "
-        "and the templates fall back to neutral L2-primitive-derived "
-        "language.</p>"
-        "<p>The form below decomposes <code>DemoPersona</code> "
-        "(<code>common/persona.py</code>) into per-field controls. "
-        "Repeating list fields (stakeholders, merchants, flavor, "
-        "gl_accounts) carry one trailing empty slot for adding new "
-        "rows; blank rows are dropped on save. <code>institution</code> "
-        "is a positional tuple — fill name + acronym; region + legacy "
-        "entity are optional callouts.</p>"
-    ),
     "instance": (
-        "Instance settings",
-        "<p><strong>Instance settings</strong> are the two top-level "
-        "L2 fields that live alongside the entity collections: the "
-        "institution <code>description</code> (free-form prose the "
-        "handbook reads as the intro paragraph) and "
-        "<code>role_business_day_offsets</code> (an optional "
-        "<code>{role: hours}</code> map shifting a role's emitted "
-        "business-day window off midnight).</p>"
-        "<p>Edit the YAML below — the block IS the full state of both "
-        "fields, so an omitted key clears that field. Shape:</p>"
-        "<pre>description: One-line institution summary.\n"
-        "role_business_day_offsets:\n"
-        "  CustomerSubledger: 17\n"
-        "  ClearingSuspense: 0</pre>"
-        "<p><code>description</code> must be a non-blank string (omit "
-        "the key for none); each offset must be an int in "
-        "<code>[0, 24)</code> hours. An empty block clears both.</p>"
+        "Institution settings",
+        "<p><strong>Institution settings</strong> are the top-level "
+        "L2 fields that describe this institution: "
+        "<code>institution_name</code> (display name surfaced in the "
+        "audit PDF + Investigation app + handbook substitution), "
+        "<code>institution_acronym</code> (2-4 letter abbreviation), "
+        "and <code>description</code> (free-form prose the handbook "
+        "renders as the intro paragraph).</p>"
+        "<p>BXa.1 (2026-05-30) promoted institution_name + "
+        "institution_acronym out of the deleted <code>persona</code> "
+        "block. Leave any field blank to clear it (silent-fallback: "
+        "institution_name regex-extracts from the description when "
+        "absent; audit PDF falls back to <code>cfg.deployment_name</code>).</p>"
     ),
 }
 
@@ -3030,231 +3010,130 @@ def _singleton_yaml_text(instance: object, kind: EntityKind) -> str:
     return yaml.safe_dump(as_dict, default_flow_style=False, sort_keys=False).rstrip() + "\n"
 
 
-# BF.7 (2026-05-25) — labeled positional fields for the persona
-# `institution` tuple. The dataclass stores it as
-# `tuple[str, ...]` (per the persona doc: "name, acronym, optional
-# region and legacy_entity follow-ons") — the structured form
-# decomposes it into 4 labeled inputs at fixed positions.
-_PERSONA_INSTITUTION_FIELDS: tuple[tuple[str, str, str, bool], ...] = (
+# BXa.1 (2026-05-30) — _PERSONA_INSTITUTION_FIELDS + _persona_form_to_dict
+# + _persona_dict_from_instance + _render_persona_form deleted with the
+# DemoPersona nuke. Institution name + acronym now live on the
+# `instance` singleton's structured form (see _render_instance_form
+# below). What survives of the BF.7 design — labeled positional
+# inputs for institution identity — moves to the instance singleton.
+
+
+# BXa.1 — instance singleton's structured form fields (replaces the
+# raw YAML textarea per BX.0.5b cold-read P1.1). Three top-level
+# L2Instance fields edited per-input; description gets markdown
+# preview per BF.9; role_business_day_offsets stays as YAML for now
+# (rare-use, dev-flavored — operator can grow a structured form
+# later if needed).
+_INSTANCE_STRUCTURED_FIELDS: tuple[tuple[str, str, str, bool], ...] = (
     # (form-name, label, helper, required)
-    ("name", "Name", "Institution full name (e.g. \"South National Bank\").", True),
-    ("acronym", "Acronym", "Short label used in dashboard titles + audit footer.", False),
-    ("region", "Region", "Optional geographic descriptor (e.g. \"Pacific Northwest\").", False),
-    ("legacy_entity", "Legacy entity", "Optional pre-merger / legacy name callout.", False),
+    ("institution_name", "Institution name",
+     "Display name surfaced in the audit PDF header + Investigation "
+     "app landing prose + handbook substitution. Optional; falls back "
+     "to `cfg.deployment_name` when blank.", False),
+    ("institution_acronym", "Institution acronym",
+     "Short label (2-4 letters) used in dashboard titles + handbook "
+     "substitution. Optional; \"SNB\" toggles the bundled-fixture "
+     "Sasquatch concrete examples in the docs.", False),
 )
 
 
-def _persona_form_to_dict(form: Mapping[str, str]) -> dict[str, object]:
-    """BF.7 — read the structured persona form data + build the dict
-    shape `singleton_save_l2` expects (which then yaml.safe_load-s
-    + dispatches to `_load_persona`).
+def _instance_dict_from_instance(instance: Any) -> dict[str, str]:  # typing-smell: ignore[explicit-any]: L2Instance dataclass shape — getattr threads through
+    """Pre-populate the instance singleton structured form. BXa.1."""
+    import yaml as _yaml  # noqa: PLC0415 — lazy
+    offsets = getattr(instance, "role_business_day_offsets", None)
+    offsets_yaml = (
+        _yaml.safe_dump(dict(offsets), default_flow_style=False, sort_keys=True)
+        if offsets else ""
+    )
+    return {
+        "institution_name": str(getattr(instance, "institution_name", None) or ""),
+        "institution_acronym": str(getattr(instance, "institution_acronym", None) or ""),
+        "description": str(getattr(instance, "description", None) or ""),
+        "role_business_day_offsets_yaml": offsets_yaml,
+    }
 
-    Field naming convention:
-    - ``institution_name`` / ``institution_acronym`` / ``institution_region``
-      / ``institution_legacy_entity`` — positional fields per the
-      DemoPersona doc.
-    - ``stakeholders_<N>`` / ``merchants_<N>`` / ``flavor_<N>`` —
-      repeating string fields (operator types one per slot; trailing
-      always-empty slot lets them add without JS). Blanks filtered.
-    - ``gl_accounts_<N>_code`` / ``gl_accounts_<N>_name`` /
-      ``gl_accounts_<N>_note`` — repeating record fields. A row
-      with blank code is filtered.
-    - ``<field>__count`` — hidden int, the number of slots rendered
-      (so server knows how many positional indices to read).
 
-    Empty lists collapse cleanly — `DemoPersona` defaults all
-    fields to `tuple()`.
+def _instance_form_to_dict(form: Mapping[str, str]) -> dict[str, object]:
+    """BXa.1 — read the instance singleton structured form into a dict
+    `singleton_save_l2`'s yaml.safe_load path consumes.
+
+    Structured fields cover the 3 common ones (institution_name +
+    acronym + description); role_business_day_offsets stays as a YAML
+    escape hatch (rare-use + dev-flavored — no in-UI editor for
+    role → hours).
     """
+    import yaml as _yaml  # noqa: PLC0415 — lazy
     out: dict[str, object] = {}
-
-    # institution — fixed positional shape from
-    # _PERSONA_INSTITUTION_FIELDS. Trailing blanks trimmed.
-    institution: list[str] = []
-    for fname, _, _, _ in _PERSONA_INSTITUTION_FIELDS:
-        institution.append(str(form.get(f"institution_{fname}", "")).strip())
-    while institution and not institution[-1]:
-        institution.pop()
-    if institution:
-        out["institution"] = institution
-
-    for repeating in ("stakeholders", "merchants", "flavor"):
-        n_str = form.get(f"{repeating}__count", "0")
-        try:
-            n = int(str(n_str))
-        except ValueError:
-            n = 0
-        entries = [
-            str(form.get(f"{repeating}_{i}", "")).strip()
-            for i in range(n)
-        ]
-        entries = [e for e in entries if e]
-        if entries:
-            out[repeating] = entries
-
-    gl_n_str = form.get("gl_accounts__count", "0")
-    try:
-        gl_n = int(str(gl_n_str))
-    except ValueError:
-        gl_n = 0
-    gl_rows: list[dict[str, str]] = []
-    for i in range(gl_n):
-        code = str(form.get(f"gl_accounts_{i}_code", "")).strip()
-        name = str(form.get(f"gl_accounts_{i}_name", "")).strip()
-        note = str(form.get(f"gl_accounts_{i}_note", "")).strip()
-        if not code:
-            continue
-        row: dict[str, str] = {"code": code, "name": name}
-        if note:
-            row["note"] = note
-        gl_rows.append(row)
-    if gl_rows:
-        out["gl_accounts"] = gl_rows
-
+    for fname, _, _, _ in _INSTANCE_STRUCTURED_FIELDS:
+        v = str(form.get(fname, "")).strip()
+        if v:
+            out[fname] = v
+    # BXa.1: don't strip description — trailing newlines are
+    # semantically meaningful (YAML `description: |` block dumps them
+    # back); strip would break round-trip equality on fixtures whose
+    # description ends with a newline. Empty-string still treated as
+    # "clear" via the falsy check below.
+    description = str(form.get("description", ""))
+    if description.strip():
+        out["description"] = description
+    offsets_yaml = str(form.get("role_business_day_offsets_yaml", "")).strip()
+    if offsets_yaml:
+        parsed = _yaml.safe_load(offsets_yaml)
+        if parsed is not None:
+            out["role_business_day_offsets"] = parsed
     return out
 
 
-def _persona_dict_from_instance(instance: Any) -> dict[str, object]:  # typing-smell: ignore[explicit-any]: L2Instance dataclass shape
-    """BF.7 — extract the current persona's dict shape for pre-
-    populating the structured form. Mirror's _persona_form_to_dict's
-    key shape so the round-trip is byte-stable when the operator
-    doesn't change anything."""
-    import dataclasses as dc  # noqa: PLC0415 — lazy
-
-    persona = getattr(instance, "persona", None)
-    if persona is None:
-        return {}
-    raw = dc.asdict(persona)  # pyright: ignore[reportUnknownArgumentType,reportUnknownVariableType]  # WHY: DemoPersona dataclass; asdict returns plain dict[str, Any]
-    # Drop empty tuples so the form renders blank rather than
-    # showing "0 stakeholders" etc.
-    return {k: v for k, v in raw.items() if v}  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]  # WHY: dict[str, Any] from asdict
-
-
-def _render_persona_form(
-    persona_dict: Mapping[str, object],
-    *,
-    extra_slots: int = 1,
-) -> str:
-    """BF.7 — render the structured persona form body (everything
-    between the <form> tags, replacing the single yaml_block textarea).
-
-    ``persona_dict`` is the current persona's dict (from
-    ``_persona_dict_from_instance`` or a re-render override after
-    validation failure). ``extra_slots=1`` renders 1 trailing
-    always-empty slot per repeating field for add-row affordance.
-    """
+def _render_instance_form(values: Mapping[str, str]) -> str:
+    """BXa.1 — render the instance singleton structured form body."""
     row_cls = field_row_classes()
     input_cls = field_input_classes()
     label_cls = "font-semibold text-xs text-primary-fg"
     helper_cls = "text-xs text-secondary-fg"
-    section_cls = (
-        "border border-surface-border rounded-md p-4 mb-4 "
-        "bg-surface-bg flex flex-col gap-3"
-    )
-    section_label_cls = (
-        "font-semibold text-sm text-primary-fg flex items-center gap-2"
-    )
-
     parts: list[str] = []
-
-    # institution — 4 labeled positional inputs
-    inst = persona_dict.get("institution", [])
-    inst_values: list[str] = list(inst) if isinstance(inst, list) else []  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]  # WHY: from form-derived dict
-    inst_values += [""] * max(0, len(_PERSONA_INSTITUTION_FIELDS) - len(inst_values))
-    parts.append(
-        f'<fieldset class="{section_cls}">'
-        f'<legend class="{section_label_cls}">Institution</legend>'
-        f'<p class="{helper_cls} m-0">Identity fields the handbook templates substitute into per-institution prose.</p>'
-    )
-    for i, (fname, label, helper, required) in enumerate(_PERSONA_INSTITUTION_FIELDS):
+    for fname, label, helper, required in _INSTANCE_STRUCTURED_FIELDS:
         req = '<span class="text-danger"> *</span>' if required else ""
+        v = values.get(fname, "")
         parts.append(
             f'<div class="{row_cls}">'
-            f'<label for="field-institution_{fname}" class="{label_cls}">{escape(label)}{req}</label>'
-            f'<input type="text" id="field-institution_{fname}" '
-            f'name="institution_{fname}" '
-            f'value="{escape(inst_values[i])}" '
-            f'class="{input_cls}">'
+            f'<label for="field-{fname}" class="{label_cls}">{escape(label)}{req}</label>'
+            f'<input type="text" id="field-{fname}" name="{fname}" '
+            f'value="{escape(v)}" class="{input_cls}">'
             f'<small class="{helper_cls}">{escape(helper)}</small>'
             f'</div>'
         )
-    parts.append('</fieldset>')
-
-    for repeating, label, helper in (
-        ("stakeholders", "Stakeholders",
-         "Upstream-counterparty display strings (e.g. \"Federal Reserve Bank\", \"the Fed\"). One per row. Blank rows are dropped on save."),
-        ("merchants", "Merchants",
-         "Display names for merchant DDAs the seed plants. One per row. Blank rows are dropped on save."),
-        ("flavor", "Flavor",
-         "Free-form persona strings (sample customer name, region descriptor, legacy-entity callout). One per row. Blank rows are dropped on save."),
-    ):
-        values = persona_dict.get(repeating, [])
-        # WHY suppress: persona_dict carries Any-typed values; list() over
-        # the unknown sequence preserves the element-Unknown cascade.
-        items: list[object] = (
-            list(values) if isinstance(values, list)  # pyright: ignore[reportUnknownArgumentType]: persona_dict element type is Any
-            else []
-        )
-        total = len(items) + extra_slots
-        parts.append(
-            f'<fieldset class="{section_cls}">'
-            f'<legend class="{section_label_cls}">{escape(label)}</legend>'
-            f'<p class="{helper_cls} m-0">{escape(helper)}</p>'
-            f'<input type="hidden" name="{repeating}__count" value="{total}">'
-        )
-        for i in range(total):
-            v = items[i] if i < len(items) else ""
-            parts.append(
-                f'<input type="text" '
-                f'name="{repeating}_{i}" '
-                f'value="{escape(str(v))}" '
-                f'placeholder="(add row)" '
-                f'class="{input_cls}">'
-            )
-        parts.append('</fieldset>')
-
-    gl_values = persona_dict.get("gl_accounts", [])
-    # WHY: persona_dict is form-derived; element type is Any.
-    gl_items: list[object] = (
-        list(gl_values) if isinstance(gl_values, list)  # pyright: ignore[reportUnknownArgumentType]: persona_dict element type is Any
-        else []
-    )
-    gl_total = len(gl_items) + extra_slots
-    grid_cls = "grid grid-cols-[10rem_1fr_2fr] gap-2 items-center"
-    sub_label_cls = "font-mono text-xs text-secondary-fg uppercase tracking-wide"
+    desc = values.get("description", "")
     parts.append(
-        f'<fieldset class="{section_cls}">'
-        f'<legend class="{section_label_cls}">GL accounts</legend>'
-        f'<p class="{helper_cls} m-0">Chart-of-accounts display labels surfaced in handbook prose. Each row: <code>code</code> (joins to seed roster) / <code>name</code> (canonical display) / <code>note</code> (one-line hint). Rows with blank code are dropped on save.</p>'
-        f'<input type="hidden" name="gl_accounts__count" value="{gl_total}">'
-        f'<div class="{grid_cls}">'
-        f'<span class="{sub_label_cls}">code</span>'
-        f'<span class="{sub_label_cls}">name</span>'
-        f'<span class="{sub_label_cls}">note</span>'
+        f'<div class="{row_cls}">'
+        f'<label for="field-description" class="{label_cls}">Description</label>'
+        f'<textarea id="field-description" name="description" rows="10" '
+        f'class="{input_cls} font-mono whitespace-pre resize-y min-h-16">'
+        f'{escape(desc)}</textarea>'
+        f'<small class="{helper_cls}">'
+        f'Free-form prose (markdown OK). Handbook templates render this '
+        f'as the "what is this institution" intro paragraph; the '
+        f'institution_name regex extracts from here when not set above.'
+        f'</small>'
         f'</div>'
     )
-    for i in range(gl_total):
-        item: object = gl_items[i] if i < len(gl_items) else {}
-        if not isinstance(item, dict):
-            item = {}
-        code = str(item.get("code", ""))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]  # WHY: form-derived dict carries Any element type
-        name = str(item.get("name", ""))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]  # WHY: form-derived dict carries Any element type
-        note = str(item.get("note", ""))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]  # WHY: form-derived dict carries Any element type
-        parts.append(
-            f'<div class="{grid_cls}">'
-            f'<input type="text" name="gl_accounts_{i}_code" value="{escape(code)}" placeholder="gl-1010" class="{input_cls}">'
-            f'<input type="text" name="gl_accounts_{i}_name" value="{escape(name)}" placeholder="Cash" class="{input_cls}">'
-            f'<input type="text" name="gl_accounts_{i}_note" value="{escape(note)}" placeholder="optional hint" class="{input_cls}">'
-            f'</div>'
-        )
-    parts.append('</fieldset>')
-
+    offsets_yaml = values.get("role_business_day_offsets_yaml", "")
+    parts.append(
+        f'<div class="{row_cls}">'
+        f'<label for="field-rbdo" class="{label_cls}">Role business-day offsets (YAML)</label>'
+        f'<textarea id="field-rbdo" name="role_business_day_offsets_yaml" rows="5" '
+        f'class="{input_cls} font-mono whitespace-pre resize-y min-h-16">'
+        f'{escape(offsets_yaml)}</textarea>'
+        f'<small class="{helper_cls}">'
+        f'Optional <code>role → hours</code> map shifting a role\'s '
+        f'emitted business-day window off midnight. Each value must be '
+        f'an int in [0, 24). Empty ⇒ default midnight-aligned. Shape: '
+        f'<code>CustomerSubledger: 17</code>'
+        f'</small>'
+        f'</div>'
+    )
     return "".join(parts)
 
 
-# BF.8 (2026-05-25) — ThemePreset structured form. 18 hex-color
-# fields + a few text fields + the data_colors / gradient lists.
-# The hex inputs use `type="color"` for an OS-native picker;
-# fallback to `type="text"` would be a stretch (every modern
 # browser supports color inputs).
 _THEME_TEXT_FIELDS: tuple[tuple[str, str, str, bool], ...] = (
     # (form-name, label, helper, required)
@@ -3665,21 +3544,23 @@ def _render_singleton_page(
     primary_btn = primary_button_classes()
     input_cls = field_input_classes()
     row_cls = field_row_classes()
-    # BF.7 / BF.8 — persona + theme singletons render as structured
-    # forms. instance singleton stays as the YAML textarea (only two
-    # top-level scalars — structured form would be overkill).
-    if kind == "persona":
-        persona_dict = (
-            dict(structured_overrides) if structured_overrides is not None
-            else _persona_dict_from_instance(instance)
-        )
-        form_body = _render_persona_form(persona_dict)
-    elif kind == "theme":
+    # BXa.1 — persona singleton removed. theme + instance singletons
+    # render as structured forms (BF.8 + BXa.1 respectively);
+    # role_business_day_offsets falls back to YAML below since
+    # rare-use + dev-flavored.
+    if kind == "theme":
         theme_dict = (
             dict(structured_overrides) if structured_overrides is not None
             else _theme_dict_from_instance(instance)
         )
         form_body = _render_theme_form(theme_dict)
+    elif kind == "instance":
+        instance_dict = (
+            {str(k): str(v) for k, v in structured_overrides.items()}
+            if structured_overrides is not None
+            else _instance_dict_from_instance(instance)
+        )
+        form_body = _render_instance_form(instance_dict)
     else:
         current_yaml = yaml_text if yaml_text is not None else _singleton_yaml_text(instance, kind)
         form_body = (
@@ -4074,15 +3955,19 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
         if kind in SINGLETON_KINDS:
             import yaml as _yaml  # noqa: PLC0415
             structured_dict: dict[str, object] | None = None
-            if kind == "persona":
-                structured_dict = _persona_form_to_dict(
+            # BXa.1 — persona dispatch removed (kind no longer in
+            # SINGLETON_KINDS). theme + instance both render as
+            # structured forms; role_business_day_offsets falls back
+            # to the raw `yaml` field on the instance form.
+            if kind == "theme":
+                structured_dict = _theme_form_to_dict(
                     {k: str(v) for k, v in form.multi_items()},
                 )
                 yaml_text = _yaml.safe_dump(
                     structured_dict, default_flow_style=False, sort_keys=False,
                 ) if structured_dict else ""
-            elif kind == "theme":
-                structured_dict = _theme_form_to_dict(
+            elif kind == "instance":
+                structured_dict = _instance_form_to_dict(
                     {k: str(v) for k, v in form.multi_items()},
                 )
                 yaml_text = _yaml.safe_dump(

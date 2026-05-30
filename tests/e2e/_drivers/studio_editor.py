@@ -180,23 +180,11 @@ def edit_xor_groups_form_data(template: TransferTemplate) -> FormData:
     return data
 
 
-def instance_yaml_text(
-    description: str | None,
-    role_business_day_offsets: dict[str, int] | None,
-) -> str:
-    """Dump the top-level instance-settings singleton block (description
-    + role_business_day_offsets). Mirrors the editor's own
-    ``_singleton_yaml_text`` shape so it round-trips through
-    ``singleton_save_l2``'s instance branch.
-    """
-    block: dict[str, object] = {}
-    if description is not None:
-        block["description"] = description
-    if role_business_day_offsets:
-        block["role_business_day_offsets"] = dict(role_business_day_offsets)
-    if not block:
-        return ""
-    return yaml.safe_dump(block, default_flow_style=False, sort_keys=False)
+# BXa.1: `instance_yaml_text` removed — instance singleton is now
+# a structured form, drivers post field-by-field. Helper retained
+# briefly in commit history if a future operator needs the dump
+# shape; the studio_editor.py + studio_browser_editor.py
+# `set_instance_settings` impls do the field-by-field post directly.
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +215,8 @@ class StudioEditorDriver(Protocol):
         *,
         description: str | None,
         role_business_day_offsets: dict[str, int] | None,
+        institution_name: str | None,
+        institution_acronym: str | None,
     ) -> None: ...
     def create_l2(self, reference: L2Instance) -> None: ...
     def save_l2_to_path(self, path: Path) -> Path: ...
@@ -276,6 +266,8 @@ class _BaseStudioEditorDriver:
         *,
         description: str | None,
         role_business_day_offsets: dict[str, int] | None,
+        institution_name: str | None,
+        institution_acronym: str | None,
     ) -> None:
         raise NotImplementedError
 
@@ -447,10 +439,14 @@ class _BaseStudioEditorDriver:
         if (
             reference.description is not None
             or reference.role_business_day_offsets
+            or reference.institution_name is not None
+            or reference.institution_acronym is not None
         ):
             self.set_instance_settings(
                 description=reference.description,
                 role_business_day_offsets=reference.role_business_day_offsets,
+                institution_name=reference.institution_name,
+                institution_acronym=reference.institution_acronym,
             )
 
 
@@ -813,11 +809,28 @@ class StudioHttpEditorDriver(_BaseStudioEditorDriver):
         *,
         description: str | None,
         role_business_day_offsets: dict[str, int] | None,
+        institution_name: str | None,
+        institution_acronym: str | None,
     ) -> None:
-        yaml_text = instance_yaml_text(description, role_business_day_offsets)
+        # BXa.1 (2026-05-30): instance singleton is now a structured
+        # form (3 fields + YAML escape-hatch for role offsets). Pre-BXa
+        # the driver POSTed `{"yaml": ...}` to a single textarea; now
+        # we post the structured form fields directly.
+        offsets_yaml = (
+            yaml.safe_dump(
+                dict(role_business_day_offsets),
+                default_flow_style=False, sort_keys=True,
+            )
+            if role_business_day_offsets else ""
+        )
         resp = self._client.post(
             "/l2_shape/instance/",
-            data={"yaml": [yaml_text]},
+            data={
+                "institution_name": [institution_name or ""],
+                "institution_acronym": [institution_acronym or ""],
+                "description": [description or ""],
+                "role_business_day_offsets_yaml": [offsets_yaml],
+            },
             follow_redirects=False,
         )
         if resp.status_code != 303:

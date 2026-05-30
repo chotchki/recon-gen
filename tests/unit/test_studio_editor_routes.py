@@ -1588,40 +1588,32 @@ def test_singleton_theme_get_renders_structured_form(
     assert "UI palette — brand" in body
 
 
-def test_singleton_persona_save_round_trips(
+def test_singleton_instance_save_round_trips_with_new_top_level_fields(
     writable_l2_yaml: Path,
 ) -> None:
-    """X.4.f.12 + BF.7 (2026-05-25): POST /l2_shape/persona/ with
-    the structured form data updates L2Instance.persona; round-trip
-    survives reload. spec_example has no persona by default — this
-    exercises the create path through the new per-field controls."""
+    """BXa.1 (2026-05-30) replacement for the old persona-singleton
+    round-trip. POST /l2_shape/instance/ with the structured form
+    data updates L2Instance.institution_name + institution_acronym +
+    description; round-trip survives reload."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.post(
-            "/l2_shape/persona/",
+            "/l2_shape/instance/",
             data={
                 "institution_name": "Test Bank",
                 "institution_acronym": "TB",
-                "institution_region": "",
-                "institution_legacy_entity": "",
-                "stakeholders__count": "1",
-                "stakeholders_0": "Federal Reserve Bank",
-                "merchants__count": "2",
-                "merchants_0": "Acme Coffee",
-                "merchants_1": "Beta Bakery",
-                "flavor__count": "0",
-                "gl_accounts__count": "0",
+                "description": "Test institution prose for BXa.1 round-trip.",
             },
             follow_redirects=False,
         )
     assert resp.status_code == 303, resp.text
 
     reloaded = load_instance(writable_l2_yaml)
-    persona = reloaded.persona
-    assert persona is not None
-    assert list(persona.institution) == ["Test Bank", "TB"]
-    assert list(persona.stakeholders) == ["Federal Reserve Bank"]
-    assert list(persona.merchants) == ["Acme Coffee", "Beta Bakery"]
+    assert reloaded.institution_name == "Test Bank"
+    assert reloaded.institution_acronym == "TB"
+    assert reloaded.description == (
+        "Test institution prose for BXa.1 round-trip."
+    )
 
 
 def test_singleton_theme_missing_required_fields_returns_400(
@@ -1656,45 +1648,52 @@ def test_singleton_theme_missing_required_fields_returns_400(
 def test_singleton_instance_get_renders_description(
     writable_l2_yaml: Path,
 ) -> None:
-    """AI.2.c — GET /l2_shape/instance/ renders the top-level settings
-    singleton with the existing description + role_business_day_offsets
-    dumped into the YAML textarea. spec_example has a description, so it
-    prefills."""
+    """BXa.1 (2026-05-30): GET /l2_shape/instance/ renders the
+    structured form (institution_name + acronym text inputs +
+    description markdown textarea + role_business_day_offsets YAML
+    escape-hatch). spec_example carries a top-level description → it
+    prefills the description textarea."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.get("/l2_shape/instance/")
     assert resp.status_code == 200, resp.text
-    assert 'name="yaml"' in resp.text
-    # AM.1 step 7 (2026-05-25): `.yaml-block` semantic class retired;
-    # presence of the `<textarea>` is the stable shape.
-    assert '<textarea' in resp.text
-    # spec_example declares a top-level description → the key prefills.
-    assert "description" in resp.text
+    assert 'name="institution_name"' in resp.text
+    assert 'name="institution_acronym"' in resp.text
+    assert 'name="description"' in resp.text
+    assert 'name="role_business_day_offsets_yaml"' in resp.text
+    # spec_example declares a top-level description → the value lands
+    # inside the description textarea.
+    assert "Generic SPEC-shaped" in resp.text or "Generic" in resp.text
 
 
 def test_singleton_instance_save_round_trips(
     writable_l2_yaml: Path,
 ) -> None:
-    """AI.2.c — POST /l2_shape/instance/ writes both top-level fields
-    (description + role_business_day_offsets) and the round-trip survives
-    reload. This is the gap that blocked rebuilding any fuzz seed
-    (≈ every one emits role_business_day_offsets)."""
+    """BXa.1 (2026-05-30): POST /l2_shape/instance/ writes the new
+    top-level structured fields (institution_name / acronym /
+    description) PLUS the role_business_day_offsets YAML escape-hatch
+    (rare-use, no structured editor for the role-hours map). The
+    round-trip survives reload — fuzz seeds that emit
+    role_business_day_offsets still work."""
     app = _build_app(writable_l2_yaml)
-    yaml_text = (
-        "description: Independent reconciliation validator demo.\n"
-        "role_business_day_offsets:\n"
-        "  CustomerSubledger: 17\n"
-        "  ClearingSuspense: 0\n"
-    )
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.post(
             "/l2_shape/instance/",
-            data={"yaml": yaml_text},
+            data={
+                "institution_name": "Test Bank Two",
+                "institution_acronym": "TB2",
+                "description": "Independent reconciliation validator demo.",
+                "role_business_day_offsets_yaml": (
+                    "CustomerSubledger: 17\nClearingSuspense: 0\n"
+                ),
+            },
             follow_redirects=False,
         )
     assert resp.status_code == 303, resp.text
 
     reloaded = load_instance(writable_l2_yaml)
+    assert reloaded.institution_name == "Test Bank Two"
+    assert reloaded.institution_acronym == "TB2"
     assert reloaded.description == "Independent reconciliation validator demo."
     assert reloaded.role_business_day_offsets == {
         "CustomerSubledger": 17,
@@ -1705,13 +1704,19 @@ def test_singleton_instance_save_round_trips(
 def test_singleton_instance_empty_clears_both(
     writable_l2_yaml: Path,
 ) -> None:
-    """AI.2.c — an empty block clears BOTH top-level fields (the singleton
-    block IS the full state of description + role_business_day_offsets)."""
+    """BXa.1 (2026-05-30) — submitting all structured fields blank
+    clears every top-level field (description + institution_name +
+    institution_acronym + role_business_day_offsets)."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.post(
             "/l2_shape/instance/",
-            data={"yaml": ""},
+            data={
+                "institution_name": "",
+                "institution_acronym": "",
+                "description": "",
+                "role_business_day_offsets_yaml": "",
+            },
             follow_redirects=False,
         )
     assert resp.status_code == 303, resp.text
@@ -1719,27 +1724,29 @@ def test_singleton_instance_empty_clears_both(
     reloaded = load_instance(writable_l2_yaml)
     assert reloaded.description is None
     assert reloaded.role_business_day_offsets is None
+    assert reloaded.institution_name is None
+    assert reloaded.institution_acronym is None
 
 
 def test_singleton_instance_bad_offset_returns_400(
     writable_l2_yaml: Path,
 ) -> None:
-    """AI.2.c — the instance singleton reuses the loader's per-field
-    validators, so an out-of-range offset (hours must be in [0, 24))
-    returns 400 + the form re-rendered with the error inline — the same
-    rule a fresh YAML load enforces."""
+    """BXa.1 (2026-05-30) — the role_business_day_offsets YAML escape-
+    hatch reuses the loader's per-field validator, so an out-of-range
+    offset (hours must be in [0, 24)) returns 400 + the form
+    re-renders with the error inline."""
     app = _build_app(writable_l2_yaml)
-    bad_yaml = "role_business_day_offsets:\n  CustomerSubledger: 25\n"
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.post(
             "/l2_shape/instance/",
-            data={"yaml": bad_yaml},
+            data={
+                "role_business_day_offsets_yaml": (
+                    "CustomerSubledger: 25\n"
+                ),
+            },
             follow_redirects=False,
         )
     assert resp.status_code == 400, resp.text
-    # AM.1 step 5 (2026-05-25): `.form-global-error` class retired;
-    # the 400 + the operator's bad YAML round-tripping into the
-    # re-rendered textarea is the stable user-visible behavior.
     assert "CustomerSubledger" in resp.text
 
     # Disk unchanged — the bad save never reached cache.save().

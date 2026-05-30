@@ -39,7 +39,7 @@ from recon_gen.common.l2.primitives import (
     TwoLegRail,
 )
 from recon_gen.common.l2.theme import ThemePreset
-from recon_gen.common.persona import DemoPersona, GLAccount
+from recon_gen.common.l2.primitives import InvestigationPersona
 
 
 def serialize_l2(instance: L2Instance) -> str:
@@ -83,8 +83,14 @@ def serialize_l2(instance: L2Instance) -> str:
         out["role_business_day_offsets"] = dict(instance.role_business_day_offsets)
     if instance.theme is not None:
         out["theme"] = _dump_theme(instance.theme)
-    if instance.persona is not None:
-        out["persona"] = _dump_persona(instance.persona)
+    if instance.institution_name is not None:
+        out["institution_name"] = instance.institution_name
+    if instance.institution_acronym is not None:
+        out["institution_acronym"] = instance.institution_acronym
+    if instance.investigation_personas:
+        out["investigation_personas"] = [
+            _dump_investigation_persona(p) for p in instance.investigation_personas
+        ]
 
     return yaml.safe_dump(
         out,
@@ -334,28 +340,11 @@ def _dump_theme(theme: ThemePreset) -> dict[str, Any]:  # typing-smell: ignore[e
     return asdict(theme)
 
 
-def _dump_persona(persona: DemoPersona) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
-    """Serialize a DemoPersona back to YAML.
-
-    The persona's tuple-of-tuples for gl_accounts becomes a list of
-    ``{role, label}`` dicts to match the loader's expected shape.
-    """
-    out: dict[str, Any] = {}  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
-    if persona.institution:
-        out["institution"] = list(persona.institution)
-    if persona.stakeholders:
-        out["stakeholders"] = list(persona.stakeholders)
-    if persona.gl_accounts:
-        out["gl_accounts"] = [_dump_gl_account(g) for g in persona.gl_accounts]
-    if persona.merchants:
-        out["merchants"] = list(persona.merchants)
-    if persona.flavor:
-        out["flavor"] = list(persona.flavor)
-    return out
-
-
-def _dump_gl_account(g: GLAccount) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
-    return asdict(g)
+def _dump_investigation_persona(
+    p: InvestigationPersona,
+) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
+    """Serialize one InvestigationPersona back to YAML. BXa.1."""
+    return asdict(p)
 
 
 # ---------------------------------------------------------------------------

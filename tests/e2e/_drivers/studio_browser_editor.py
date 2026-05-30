@@ -349,25 +349,38 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         *,
         description: str | None,
         role_business_day_offsets: "dict[str, int] | None",
+        institution_name: str | None,
+        institution_acronym: str | None,
     ) -> None:
-        """Fill + submit the singleton instance form (description +
-        role_business_day_offsets). The editor renders this as a
-        YAML-block textarea named `yaml`; submit POSTs to
-        `/l2_shape/instance/` (with `_method=PUT` hidden) and
-        303s home on success.
+        """BXa.1 (2026-05-30): fill + submit the singleton instance
+        structured form. 3 text/textarea fields (institution_name +
+        institution_acronym + description) + a YAML escape-hatch for
+        role_business_day_offsets. POSTs to `/l2_shape/instance/`
+        (with `_method=PUT` hidden) and 303s home on success.
 
-        No-op when both args are None (no settings to set; preserves
-        the empty-block default)."""
-        from tests.e2e._drivers.studio_editor import (  # noqa: PLC0415 — lazy
-            instance_yaml_text,
-        )
-
-        yaml_text = instance_yaml_text(description, role_business_day_offsets)
-        if not yaml_text:
+        No-op when every arg is None (no settings to set)."""
+        import yaml as _yaml  # noqa: PLC0415 — lazy
+        if (
+            description is None
+            and not role_business_day_offsets
+            and institution_name is None
+            and institution_acronym is None
+        ):
             return
-        # Navigate to the instance singleton form via the home link.
+        offsets_yaml = (
+            _yaml.safe_dump(
+                dict(role_business_day_offsets),
+                default_flow_style=False, sort_keys=True,
+            )
+            if role_business_day_offsets else ""
+        )
         self._page.click('a[href="/l2_shape/instance/"]')
-        self._page.fill('textarea[name="yaml"]', yaml_text)
+        self._page.fill('input[name="institution_name"]', institution_name or "")
+        self._page.fill('input[name="institution_acronym"]', institution_acronym or "")
+        self._page.fill('textarea[name="description"]', description or "")
+        self._page.fill(
+            'textarea[name="role_business_day_offsets_yaml"]', offsets_yaml,
+        )
         self._submit_create_form("instance settings")
 
     def save_l2_to_path(self, path: Path) -> Path:

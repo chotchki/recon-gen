@@ -56,6 +56,7 @@ from .primitives import (
     Duration,
     FiringsTypicalPerPeriod,
     Identifier,
+    InvestigationPersona,
     L2Instance,
     LegDirection,
     LimitDirection,
@@ -73,7 +74,6 @@ from .primitives import (
     TwoLegRail,
 )
 from .theme import ThemePreset
-from recon_gen.common.persona import DemoPersona, GLAccount
 
 
 # -- Errors -------------------------------------------------------------------
@@ -503,78 +503,49 @@ def _load_optional_brand_asset(
     return str((base_dir / value).resolve())
 
 
-def _load_persona(raw: object, *, path: str) -> DemoPersona | None:
-    """Optional ``persona:`` block — institution flavor strings for handbook.
+def _load_investigation_personas(
+    raw: object, *, path: str,
+) -> tuple[InvestigationPersona, ...]:
+    """BXa.1 — optional ``investigation_personas:`` top-level YAML block.
 
-    YAML shape mirrors the ``DemoPersona`` dataclass:
+    Curated AML / compliance scenario actors used by the handbook's
+    Investigation walkthroughs. Promoted from the deleted hardcoded
+    table inside ``_sasquatch_pr_vocabulary``.
+
+    YAML shape:
 
     .. code-block:: yaml
 
-        persona:
-          institution: ["Sasquatch National Bank", "SNB"]
-          stakeholders: ["Federal Reserve Bank", "Fed", "..."]
-          gl_accounts:
-            - {code: "gl-1010", name: "Cash & Due From FRB", note: "..."}
-          merchants: ["Big Meadow Dairy", "Bigfoot Brews", "..."]
-          flavor: ["Margaret Hollowcreek", "Pacific Northwest", "..."]
+        investigation_personas:
+          - {name: "Juniper Ridge LLC", account_id: "cust-...", role: "convergence_anchor"}
+          - {name: "Shell Company A",   account_id: "cust-...", role: "shell_entity"}
 
-    Each top-level key is optional and defaults to an empty tuple.
-    Returns ``None`` when the entire ``persona:`` block is absent —
-    handbook templates render neutral prose in that case.
+    Empty / absent ⇒ empty tuple; the docs' ``{% if vocab.demo.investigation.layering_chain %}``
+    gates hide the walkthrough sections that depend on curated names.
     """
     if raw is None:
+        return ()
+    items = _as_list(raw, path=path)
+    out: list[InvestigationPersona] = []
+    for i, item in enumerate(items):
+        sub_path = f"{path}[{i}]"
+        sub_d = _as_mapping(item, path=sub_path, what="investigation_persona")
+        name_raw = _require(sub_d, "name", path=sub_path)
+        account_id_raw = _require(sub_d, "account_id", path=sub_path)
+        role_raw = _require(sub_d, "role", path=sub_path)
+        out.append(InvestigationPersona(
+            name=_load_string(name_raw, path=f"{sub_path}.name"),
+            account_id=_load_string(account_id_raw, path=f"{sub_path}.account_id"),
+            role=_load_string(role_raw, path=f"{sub_path}.role"),
+        ))
+    return tuple(out)
+
+
+def _load_optional_string(raw: object, *, path: str) -> str | None:
+    """Optional string field — None when absent, validated string when present."""
+    if raw is None:
         return None
-    raw_d = _as_mapping(raw, path=path, what="persona")
-
-    def _str_tuple(key: str) -> tuple[str, ...]:
-        sub = raw_d.get(key)
-        if sub is None:
-            return ()
-        items = _as_list(sub, path=f"{path}.{key}")
-        out: list[str] = []
-        for i, item in enumerate(items):
-            if not isinstance(item, str):
-                raise L2LoaderError(
-                    f"{path}.{key}[{i}]: must be a string, "
-                    f"got {type(item).__name__}"
-                )
-            out.append(item)
-        return tuple(out)
-
-    institution = _str_tuple("institution")
-    stakeholders = _str_tuple("stakeholders")
-    merchants = _str_tuple("merchants")
-    flavor = _str_tuple("flavor")
-
-    gl_accounts_raw = raw_d.get("gl_accounts")
-    gl_accounts: tuple[GLAccount, ...]
-    if gl_accounts_raw is None:
-        gl_accounts = ()
-    else:
-        items = _as_list(gl_accounts_raw, path=f"{path}.gl_accounts")
-        out_gl: list[GLAccount] = []
-        for i, item in enumerate(items):
-            sub_path = f"{path}.gl_accounts[{i}]"
-            sub_d = _as_mapping(item, path=sub_path, what="gl_account")
-            code_raw = _require(sub_d, "code", path=sub_path)
-            name_raw = _require(sub_d, "name", path=sub_path)
-            note_raw = sub_d.get("note", "")
-            code = _load_string(code_raw, path=f"{sub_path}.code")
-            name = _load_string(name_raw, path=f"{sub_path}.name")
-            note = (
-                _load_string(note_raw, path=f"{sub_path}.note")
-                if note_raw != "" else ""
-            )
-            out_gl.append(GLAccount(code=code, name=name, note=note))
-        gl_accounts = tuple(out_gl)
-
-    return DemoPersona(
-        institution=institution,
-        stakeholders=stakeholders,
-        gl_accounts=gl_accounts,
-        merchants=merchants,
-        flavor=flavor,
-    )
+    return _load_string(raw, path=path)
 
 
 def _load_description(raw: object, *, path: str) -> str | None:
@@ -1444,7 +1415,15 @@ def load_instance(path: Path | str, *, validate: bool = True) -> L2Instance:
         theme=_load_theme(
             raw_d.get("theme"), path="theme", base_dir=yaml_path.parent,
         ),
-        persona=_load_persona(raw_d.get("persona"), path="persona"),
+        institution_name=_load_optional_string(
+            raw_d.get("institution_name"), path="institution_name",
+        ),
+        institution_acronym=_load_optional_string(
+            raw_d.get("institution_acronym"), path="institution_acronym",
+        ),
+        investigation_personas=_load_investigation_personas(
+            raw_d.get("investigation_personas"), path="investigation_personas",
+        ),
     )
     if validate:
         # Local import dodges loader↔validate import-cycle.

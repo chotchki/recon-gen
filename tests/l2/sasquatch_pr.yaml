@@ -52,40 +52,39 @@ description: |
 # account roster. The five fields mirror DemoPersona on the Python
 # side.
 # ---------------------------------------------------------------------
-persona:
-  institution:
-    - "Sasquatch National Bank"
-    - "SNB"
-  stakeholders:
-    - "Federal Reserve Bank"
-    - "Fed"
-    - "Payment Gateway Processor"
-  gl_accounts:
-    - code: "gl-1010"
-      name: "Cash & Due From FRB"
-      note: "Cash & Due From FRB → (e.g., Open Loop Funds Pool)"
-    - code: "gl-1810"
-      name: "ACH Origination Settlement"
-      note: "ACH Origination Settlement → (e.g., Sweep Account for ACH)"
-    - code: "gl-1815"
-      name: "Card Acquiring Settlement"
-      note: "Card Acquiring Settlement"
-    - code: "gl-1830"
-      name: "Internal Transfer Suspense"
-      note: "Internal Transfer Suspense → (e.g., Open Loop Escrow)"
-    - code: "gl-1850"
-      name: "Cash Concentration Master"
-      note: "Cash Concentration Master (no real analogue)"
-  merchants:
-    - "Big Meadow Dairy"
-    - "Bigfoot Brews"
-    - "Cascade Timber Mill"
-    - "Pinecrest Vineyards LLC"
-    - "Harvest Moon Bakery"
-  flavor:
-    - "Margaret Hollowcreek"
-    - "Pacific Northwest"
-    - "Farmers Exchange Bank"
+# BXa.1 (2026-05-30): promoted from the deleted `persona:` block.
+# Read by handbook templates + Investigation app landing + audit PDF
+# header. The stakeholders / merchants / gl_accounts / flavor fields
+# were doubly-dead per `docs/audits/bx_persona_audit.md` (bypassed by
+# the production-code intercept AND not substituted in any docs page)
+# and went with the persona nuke.
+institution_name: "Sasquatch National Bank"
+institution_acronym: "SNB"
+
+# BXa.1: promoted from the hardcoded `_sasquatch_pr_vocabulary`
+# `investigation_personas` table. Drives the curated walkthrough
+# narrative in `docs/handbook/investigation.md` +
+# `docs/walkthroughs/investigation/what-does-this-accounts-money-network-look-like.md`
+# via `vocab.demo.investigation.{anchor, layering_chain, anomaly_pair_sender}`.
+investigation_personas:
+  - name: "Juniper Ridge LLC"
+    account_id: "cust-900-0007-juniper-ridge-llc"
+    role: "convergence_anchor"
+  - name: "Cascadia Trust Bank"
+    account_id: "ext-cascadia-trust-bank"
+    role: "counterparty_bank"
+  - name: "Cascadia Trust Bank — Operations"
+    account_id: "ext-cascadia-trust-bank-sub-ops"
+    role: "operations_account"
+  - name: "Shell Company A"
+    account_id: "cust-700-0010-shell-company-a"
+    role: "shell_entity"
+  - name: "Shell Company B"
+    account_id: "cust-700-0011-shell-company-b"
+    role: "shell_entity"
+  - name: "Shell Company C"
+    account_id: "cust-700-0012-shell-company-c"
+    role: "shell_entity"
 
 # ---------------------------------------------------------------------
 # Singleton accounts — SNB's chart of accounts.

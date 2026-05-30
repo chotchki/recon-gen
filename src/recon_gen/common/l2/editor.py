@@ -58,18 +58,16 @@ EntityKind: TypeAlias = Literal[
     "limit_schedule",
     # X.4.f.12 — singletons (one per L2 instance, not a list).
     # Routes mount at ``/l2_shape/<kind>/`` (no entity_id); each
-    # renders a single edit form. v1 ships as a yaml_block escape
-    # hatch — operator edits the entire ``theme:`` / ``persona:`` YAML
-    # subtree as text. Per-field color pickers / nested GLAccount
-    # editor are a polish follow-on.
+    # renders a single edit form.
     "theme",
-    "persona",
-    # AI.2.c — top-level L2Instance settings (``description`` +
-    # ``role_business_day_offsets``) edited as a single YAML block. Same
-    # singleton pattern as theme/persona, but the block maps to two
-    # scalar attributes rather than one nested dataclass — so the editor
-    # can rebuild fuzz seeds (≈ every one emits role_business_day_offsets)
-    # and the corpus descriptions, closing the last top-level gaps.
+    # BXa.1 (2026-05-30): the ``persona`` singleton + its structured
+    # form went with the deleted ``DemoPersona`` dataclass. Institution
+    # name + acronym now live on the instance singleton's structured
+    # form alongside ``description``.
+    # AI.2.c — top-level L2Instance settings (``description`` + new
+    # post-BXa.1 fields ``institution_name`` / ``institution_acronym`` +
+    # ``role_business_day_offsets``) edited via a structured form
+    # (BXa.1 upgraded from raw YAML textarea).
     "instance",
 ]
 
@@ -77,10 +75,8 @@ EntityKind: TypeAlias = Literal[
 # X.4.f.12 — kinds that exist as a single optional attribute on
 # L2Instance rather than a tuple. Routes / handlers branch on this
 # to skip list view, create page, delete, and per-id addressing.
-# AI.2.c — ``instance`` joins as a 2-attribute singleton (description +
-# role_business_day_offsets) sharing the same render/save plumbing.
 SINGLETON_KINDS: frozenset[EntityKind] = frozenset(
-    {"theme", "persona", "instance"},
+    {"theme", "instance"},
 )
 
 
@@ -613,21 +609,20 @@ def singleton_save_l2(
     kind: EntityKind,
     yaml_text: str,
 ) -> L2Instance:
-    """X.4.f.12 — write a singleton attribute (``theme`` / ``persona``)
-    from a raw YAML block.
+    """X.4.f.12 — write a singleton attribute from a raw YAML block.
 
-    The studio's singleton form is a single ``yaml_block`` field — the
-    operator types/edits the entire ``theme:`` or ``persona:`` subtree
-    as text. We parse with ``yaml.safe_load``, then dispatch to the
-    loader's per-kind helper to produce the typed dataclass and use
-    ``dataclasses.replace`` to swap it in. Empty / blank YAML clears
-    the attribute back to ``None`` (silent-fallback contract — N.4.k
-    for theme, equivalent for persona).
+    BXa.1 (2026-05-30) removed the ``persona`` singleton — its fields
+    promoted to top-level + nuked. Remaining singletons: ``theme``
+    (still YAML-textarea) + ``instance`` (new structured form per
+    BXa.1; the YAML-textarea path stays as a fallback).
 
-    Bad YAML / wrong shape raises ``ValueError`` (loader's own
-    exceptions inherit ``L2LoaderError`` which carries an actionable
-    message). The studio handler catches both and re-renders the form
-    with the operator's typed content + the inline error.
+    Empty / blank YAML clears the attribute back to ``None``
+    (silent-fallback contract — N.4.k for theme; equivalent for
+    instance). Bad YAML / wrong shape raises ``ValueError`` (loader's
+    own exceptions inherit ``L2LoaderError`` which carries an
+    actionable message). The studio handler catches both and
+    re-renders the form with the operator's typed content + the
+    inline error.
     """
     if kind not in SINGLETON_KINDS:
         raise ValueError(
@@ -637,7 +632,7 @@ def singleton_save_l2(
     from recon_gen.common.l2.loader import (  # noqa: PLC0415 — lazy to dodge cycle
         L2LoaderError,
         _load_description,
-        _load_persona,
+        _load_optional_string,
         _load_role_business_day_offsets,
         _load_theme,
     )
@@ -646,12 +641,15 @@ def singleton_save_l2(
         # Empty ⇒ clear the singleton; silent-fallback takes over.
         if kind == "theme":
             return dataclasses.replace(instance, theme=None)
-        if kind == "persona":
-            return dataclasses.replace(instance, persona=None)
-        # AI.2.c — instance settings: an empty block clears BOTH
-        # top-level fields (description + role_business_day_offsets).
+        # AI.2.c + BXa.1 — instance settings: empty block clears the
+        # top-level fields (description + role_business_day_offsets +
+        # institution_name + institution_acronym).
         return dataclasses.replace(
-            instance, description=None, role_business_day_offsets=None,
+            instance,
+            description=None,
+            role_business_day_offsets=None,
+            institution_name=None,
+            institution_acronym=None,
         )
     try:
         parsed = yaml.safe_load(raw)
@@ -666,26 +664,26 @@ def singleton_save_l2(
         if kind == "theme":
             new_theme = _load_theme(parsed_map, path=kind)
             return dataclasses.replace(instance, theme=new_theme)
-        if kind == "persona":
-            new_persona = _load_persona(parsed_map, path=kind)
-            return dataclasses.replace(instance, persona=new_persona)
-        # AI.2.c — instance settings: the block IS the full state of both
-        # top-level fields (an omitted key clears that field). Reuse the
-        # loader's per-field validators so the studio enforces exactly the
-        # same rules as a fresh YAML load — description must be a
-        # non-blank string; role_business_day_offsets must be a
-        # {role: hours-in-[0,24)} int map.
-        new_description = _load_description(
-            parsed_map.get("description"), path="description",
-        )
-        new_offsets = _load_role_business_day_offsets(
-            parsed_map.get("role_business_day_offsets"),
-            path="role_business_day_offsets",
-        )
+        # AI.2.c + BXa.1 — instance settings: the block IS the full
+        # state of the editable top-level fields (an omitted key clears
+        # that field). Reuse the loader's per-field validators.
         return dataclasses.replace(
             instance,
-            description=new_description,
-            role_business_day_offsets=new_offsets,
+            description=_load_description(
+                parsed_map.get("description"), path="description",
+            ),
+            role_business_day_offsets=_load_role_business_day_offsets(
+                parsed_map.get("role_business_day_offsets"),
+                path="role_business_day_offsets",
+            ),
+            institution_name=_load_optional_string(
+                parsed_map.get("institution_name"),
+                path="institution_name",
+            ),
+            institution_acronym=_load_optional_string(
+                parsed_map.get("institution_acronym"),
+                path="institution_acronym",
+            ),
         )
     except L2LoaderError as exc:
         raise ValueError(str(exc)) from exc

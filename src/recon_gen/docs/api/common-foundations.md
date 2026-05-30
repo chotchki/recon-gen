@@ -40,15 +40,18 @@ data filters but the on-screen widget label stays "All".)
 
 ::: recon_gen.common.drill
 
-## Demo persona
+## Institution identity
 
-`DemoPersona` is the typed skeleton for the per-institution flavor
-strings the handbook templates substitute (institution name +
-acronym, upstream stakeholders, GL account labels, merchant names,
-free-form flavor literals). Per-institution content lives in the L2
-YAML's `persona:` block and is loaded into `L2Instance.persona` by
-`common/l2/loader.py`. Empty-default fields are the "no flavor"
-shape — handbook templates render neutral prose derived from L2
-primitives in that case.
+BXa.1 (2026-05-30) replaced the prior `DemoPersona` block with
+three top-level `L2Instance` fields: `institution_name`,
+`institution_acronym`, and `description`. Handbook templates
+substitute `vocab.institution.name` / `vocab.institution.acronym`
+across ~20 pages; absent values fall back to a regex-extracted
+proper-noun run from `description` (or the `"Your Institution"`
+placeholder when no description either). See
+`common/handbook/vocabulary.py` for the full dispatch.
 
-::: recon_gen.common.persona
+For curated Investigation-walkthrough narrative (anchor account,
+shell-DDA layering chain, anomaly-pair sender), declare an
+`investigation_personas:` block on the L2 YAML with typed
+`InvestigationPersona(name, account_id, role)` entries.

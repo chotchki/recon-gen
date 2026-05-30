@@ -41,8 +41,6 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Literal, NewType, TypeAlias
 
-from recon_gen.common.persona import DemoPersona
-
 from .theme import ThemePreset
 
 
@@ -563,6 +561,34 @@ class LimitSchedule:
     description: str | None = None
 
 
+# -- Investigation persona (typed L2-input, was hardcoded in vocabulary.py) --
+
+
+@dataclass(frozen=True, slots=True)
+class InvestigationPersona:
+    """A curated AML / compliance scenario actor for handbook walkthroughs.
+
+    BXa.1 (2026-05-30): promoted from the hardcoded table that lived
+    inside ``common/handbook/vocabulary.py::_sasquatch_pr_vocabulary``.
+    The handbook's Investigation walkthroughs substitute these display
+    names (``{{ vocab.demo.investigation.layering_chain[0].name }}``
+    etc.) — curated narrative the L2 author writes, not deriveable
+    from L2 topology. Sasquatch fixture carries 6 entries (Juniper
+    Ridge LLC + Cascadia Trust Bank + Cascadia—Operations + Shell
+    Company A/B/C); other operator L2s default to empty tuple and
+    the existing ``{% if %}`` gates in the docs hide the walkthroughs
+    that depend on the curated names.
+
+    ``role`` values currently in use: ``convergence_anchor``,
+    ``counterparty_bank``, ``operations_account``, ``shell_entity``.
+    Open enum — handbook template gates on specific role strings.
+    """
+
+    name: str
+    account_id: str
+    role: str
+
+
 # -- Top-level instance ------------------------------------------------------
 
 
@@ -586,6 +612,12 @@ class L2Instance:
     # Top-level institution-level prose. Read by handbook templates as
     # the "what is this institution" introductory paragraph.
     description: str | None = None
+    # BXa.1 (2026-05-30): promoted from the deleted ``persona.institution``
+    # tuple. Read by Investigation app landing prose + audit PDF header +
+    # handbook templates. Optional; falls back to ``cfg.deployment_name``
+    # / regex-extracted-from-description / "Your Institution" downstream.
+    institution_name: str | None = None
+    institution_acronym: str | None = None
     # Optional per-role business-day offset in hours (M.4.4.14). When
     # set, an account whose role appears in this map gets its emitted
     # ``daily_balances.business_day_start`` shifted by the offset
@@ -603,10 +635,10 @@ class L2Instance:
     # alongside the institution's primitives. ``None`` means "fall back
     # to the registry default" (``common/theme.py::DEFAULT_PRESET``).
     theme: ThemePreset | None = None
-    # Optional ``persona:`` block (Q.5.e) — per-institution flavor
-    # strings for handbook templating: institution name + acronym,
-    # upstream stakeholders, GL account labels, merchant names, free-form
-    # flavor literals. ``None`` means "no flavor declared"; handbook
-    # templates render neutral prose derived from L2 primitive fields
-    # instead.
-    persona: DemoPersona | None = None
+    # BXa.1 (2026-05-30): promoted from the deleted hardcoded table inside
+    # ``_sasquatch_pr_vocabulary``. Curated AML / compliance scenario
+    # actors used by the handbook's Investigation walkthroughs (anchor +
+    # layering chain + anomaly pair sender). Empty tuple is the neutral
+    # default — the handbook's ``{% if vocab.demo.investigation.layering_chain %}``
+    # gates hide the curated walkthrough sections.
+    investigation_personas: tuple[InvestigationPersona, ...] = ()

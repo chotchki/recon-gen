@@ -1,28 +1,21 @@
 """Handbook substitution vocabulary, built per-render from an L2 instance.
 
-The Phase O unified mkdocs site renders against an L2 institution
-YAML. ``vocabulary_for(l2_instance)`` picks the right
-``HandbookVocabulary`` for that instance — either a built-in vocabulary
-(currently only ``sasquatch_pr`` ships one) or a neutral fallback
-derived from the L2's own structural data.
+BXa.1 (2026-05-30) collapsed the prior Sasquatch-specific intercept
+into a single ``vocabulary_for_l2`` builder. The institution name +
+acronym + curated investigation personas now live on the L2 YAML as
+top-level ``institution_name`` / ``institution_acronym`` /
+``investigation_personas`` fields; the deleted persona block's other
+slots (stakeholders, merchants, gl_accounts, flavor) were doubly
+dead — bypassed by the intercept AND not substituted in any docs
+page — so they went with the intercept.
 
-The neutral fallback exists so an integrator pointing at their own
-L2 instance gets a sensible handbook out of the box: the institution
-name comes from the L2's description; account labels come from the
-account roster; stakeholders come from the external accounts; no
-Sasquatch flavor leaks. As integrators want richer per-institution
-flavor (named compliance scenarios, regional voice, legacy entities),
-they can submit a built-in vocabulary the same way ``sasquatch_pr``
-ships one — or a future ``personas:`` YAML block (audit §5) can carry
-the data inline on the L2 itself.
-
-Q.5.a additions: ``vocab.fixture_name`` carries the active fixture
-name for "the bundled X fixture" sentences in the handbook; ``vocab.demo``
-carries plant-derived demo accounts + Investigation scenario data so
-walkthrough templates can render worked examples bound to the active
-L2's planted scenarios. When the active L2 has no plants of a given
-kind, the corresponding ``vocab.demo.*`` field is ``None`` and the
-template's ``{% if vocab.demo.X %}`` guard hides the worked example.
+The neutral fallback (regex-extracted institution name + "Your
+Institution" placeholder) survives for L2 YAMLs that omit
+``institution_name``. Empty `investigation_personas` is the same
+"no curated walkthrough content" signal the old empty-persona path
+carried — the handbook's ``{% if vocab.demo.investigation.layering_chain %}``
+gates already hide the walkthrough sections when no curated
+narrative is available.
 """
 
 from __future__ import annotations
@@ -30,8 +23,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from recon_gen.common.l2.primitives import L2Instance
-from recon_gen.common.persona import DemoPersona, GLAccount
+from recon_gen.common.l2.primitives import (
+    InvestigationPersona,
+    L2Instance,
+)
 
 
 # -- Sub-shapes -------------------------------------------------------------
@@ -49,57 +44,6 @@ class InstitutionVocabulary:
 
     description: str
     """One-paragraph intro for handbook landing pages."""
-
-    region: str | None = None
-    """Optional geographic flavor — ``"Pacific Northwest"``."""
-
-    legacy_entity: str | None = None
-    """Optional absorbed-institution name — ``"Farmers Exchange Bank"``."""
-
-
-@dataclass(frozen=True)
-class StakeholderVocabulary:
-    """A counterparty / external entity referenced in the handbook prose."""
-
-    name: str
-    """Full name — ``"Federal Reserve Bank"``."""
-
-    short_name: str
-    """How prose abbreviates it — ``"the Fed"``."""
-
-    role: str
-    """One-line role — ``"settlement authority"``."""
-
-
-@dataclass(frozen=True)
-class MerchantVocabulary:
-    """A merchant / commercial customer referenced by name in scenarios."""
-
-    name: str
-    """Display name — ``"Big Meadow Dairy"``."""
-
-    account_id: str
-    """Joins to the seed — ``"cust-900-0001-big-meadow-dairy"``."""
-
-    sector: str
-    """One-word industry hint — ``"agricultural"`` / ``"coffee retail"``."""
-
-
-@dataclass(frozen=True)
-class InvestigationPersonaVocabulary:
-    """Compliance / AML scenario actor — Investigation app uses these."""
-
-    name: str
-    """Display name — ``"Juniper Ridge LLC"``."""
-
-    account_id: str
-    """Joins to the seed — ``"cust-900-0007-juniper-ridge-llc"``."""
-
-    role: str
-    """Scenario role — ``"convergence_anchor"`` / ``"shell_entity"``."""
-
-
-# -- Demo scenario vocabulary (Q.5.a) ----------------------------------------
 
 
 @dataclass(frozen=True)
@@ -162,14 +106,20 @@ class DemoScenarioVocabulary:
 
 @dataclass(frozen=True)
 class HandbookVocabulary:
-    """Substitution vocabulary handed to mkdocs-macros at render time."""
+    """Substitution vocabulary handed to mkdocs-macros at render time.
+
+    BXa.1 (2026-05-30) trimmed ``stakeholders`` / ``merchants`` /
+    ``gl_accounts`` / ``flavor`` — never substituted in any rendered
+    page; the hardcoded production-code values that backed them
+    (``StakeholderVocabulary`` + ``MerchantVocabulary`` tables) went
+    with them. If a future custom-prose template needs per-institution
+    counterparty / merchant narrative, add a new top-level
+    ``L2Instance`` field + extend this dataclass; don't resurrect
+    the hardcoded vocab path.
+    """
 
     institution: InstitutionVocabulary
-    stakeholders: tuple[StakeholderVocabulary, ...]
-    gl_accounts: tuple[GLAccount, ...]
-    merchants: tuple[MerchantVocabulary, ...]
-    flavor: tuple[str, ...]
-    investigation_personas: tuple[InvestigationPersonaVocabulary, ...]
+    investigation_personas: tuple[InvestigationPersona, ...]
     fixture_name: str | None = None
     """Bundled fixture name (e.g. ``"sasquatch_pr"``) when the active L2 IS a bundled fixture; ``None`` for integrator-supplied YAMLs. Used by handbook prose that references "the bundled <X> fixture"."""
 
@@ -180,83 +130,64 @@ class HandbookVocabulary:
 # -- Public entry point ------------------------------------------------------
 
 
-_SASQUATCH_PERSONA_ACRONYM = "SNB"
+# BXa.1: kept as the one remaining hardcoded discriminator in
+# production code. The Sasquatch fixture's L2 yaml declares
+# ``institution_acronym: SNB``; this maps it to the bundled fixture
+# name docs/L1_Invariants.md gates on. If a customer forks the
+# fixture + changes the acronym, fixture_name becomes None and the
+# docs render the neutral prose branch.
+_BUNDLED_FIXTURE_ACRONYM_MAP: dict[str, str] = {
+    "SNB": "sasquatch_pr",
+}
 
 
 def vocabulary_for(l2_instance: L2Instance) -> HandbookVocabulary:
-    """Return the handbook vocabulary appropriate for ``l2_instance``.
+    """Return the handbook vocabulary for ``l2_instance``.
 
-    Built-in vocabularies take precedence (currently the Sasquatch
-    flavor — gated on the L2's persona acronym so any L2 yaml that
-    declares the SNB persona block routes here, not on db-prefix
-    sniffing). Anything else falls back to a neutral vocabulary
-    derived from the L2 instance's own fields — institution name
-    from the description, GL accounts + merchants from the account
-    roster, no flavor leaks.
+    Single dispatch path post-BXa.1. Institution name + acronym +
+    investigation-persona curated narrative all come from the L2 YAML
+    directly; no special-case branches for bundled fixtures vs operator
+    L2s.
     """
-    if _has_sasquatch_persona(l2_instance):
-        return _sasquatch_pr_vocabulary(l2_instance)
-    return _neutral_vocabulary_for(l2_instance)
-
-
-def _has_sasquatch_persona(l2_instance: L2Instance) -> bool:
-    """True iff the L2 yaml's persona block identifies as the SNB flavor.
-
-    Z.C — replaces the prior db-prefix sniff (``l2_instance.instance ==
-    "sasquatch_pr"``) with a persona-aware check. The L2 yaml's
-    ``persona.institution`` tuple is ``(name, acronym, ...)``; we
-    discriminate on the acronym slot because that's the stable
-    operator-chosen string a curated vocabulary keys off.
-    """
-    persona = l2_instance.persona
-    if persona is None or len(persona.institution) < 2:
-        return False
-    return persona.institution[1] == _SASQUATCH_PERSONA_ACRONYM
+    return vocabulary_for_l2(l2_instance)
 
 
 def _bundled_fixture_name(l2_instance: L2Instance) -> str | None:
-    """Return the bundled-fixture name when the L2 looks like a bundled
-    fixture; else None.
+    """Return the bundled-fixture name when the L2's acronym maps to one;
+    else None.
 
-    Z.C — the prior implementation read ``l2_instance.instance`` (the
-    db-table prefix) and matched against a hardcoded fixture-name set.
-    With ``instance`` gone, the only remaining persona-derived signal
-    for "is this the bundled Sasquatch fixture" is the persona acronym
-    itself. ``spec_example`` (the other bundled fixture) carries no
-    persona block, so it returns None — handbook prose that gates on
-    ``vocab.fixture_name`` simply suppresses its "the bundled X
-    fixture" sentence for spec_example, matching its actual unflavored
-    shape.
+    The handbook's ``L1_Invariants.md`` gates on
+    ``{% if vocab.fixture_name == "sasquatch_pr" %}`` to render
+    Sasquatch-specific concrete examples. The map is the one
+    remaining production-code literal tying the docs surface to a
+    fixture name; a future "drop bundled-fixture-specific docs"
+    pass eliminates it entirely.
     """
-    if _has_sasquatch_persona(l2_instance):
-        return "sasquatch_pr"
-    return None
+    if l2_instance.institution_acronym is None:
+        return None
+    return _BUNDLED_FIXTURE_ACRONYM_MAP.get(l2_instance.institution_acronym)
 
 
 def _build_demo_scenario(
     l2_instance: L2Instance,
-    *,
-    investigation_personas: tuple[InvestigationPersonaVocabulary, ...] = (),
 ) -> DemoScenarioVocabulary:
     """Derive ``DemoScenarioVocabulary`` from the L2's planted scenarios.
 
     Reads ``default_scenario_for(l2_instance)`` and pulls the FIRST
     plant of each kind (drift/overdraft/limit_breach/inv_fanout). Each
-    plant's ``account_id`` is resolved to a ``DemoAccount`` via the L2's
-    own account roster (description → name); falls back to the raw id
-    when no roster entry matches.
-
-    ``investigation_personas`` lets a built-in vocabulary supply
-    curated display names (e.g. ``Juniper Ridge LLC``) instead of the
-    raw ``cust-900-0007-juniper-ridge-llc`` id; the lookup is keyed on
-    account_id.
+    plant's ``account_id`` is resolved to a ``DemoAccount`` via the
+    L2's own ``investigation_personas`` (when set) for curated display
+    names, falling back to the account roster's description, then to
+    the raw id.
     """
     # Lazy import — auto_scenario imports a lot, and we don't want
     # vocabulary_for() to drag the seed pipeline in for callers that
     # only need the institution name.
     from recon_gen.common.l2.auto_scenario import default_scenario_for
 
-    persona_lookup = {p.account_id: p.name for p in investigation_personas}
+    persona_lookup = {
+        p.account_id: p.name for p in l2_instance.investigation_personas
+    }
 
     def _account_name(account_id: str) -> str:
         """Resolve a runtime account id to a human-readable name."""
@@ -264,7 +195,11 @@ def _build_demo_scenario(
             return persona_lookup[account_id]
         for acc in l2_instance.accounts:
             if str(acc.id) == account_id:
-                return acc.description.split(".")[0].strip() if acc.description else account_id
+                return (
+                    acc.description.split(".")[0].strip()
+                    if acc.description
+                    else account_id
+                )
         return account_id
 
     def _to_demo_account(account_id: str) -> DemoAccount:
@@ -288,17 +223,17 @@ def _build_demo_scenario(
 
     investigation: InvestigationScenarioVocabulary | None = None
     if plant.inv_fanout_plants:
-        # Curated personas (when present) override the raw plant
-        # data — the bundled fixture's seed plants a smaller raw
+        # Curated personas (when present in the L2) override the raw
+        # plant data — the bundled fixture's seed plants a smaller raw
         # fanout than the demo CLI eventually deploys, but the
         # hand-curated narrative (Juniper at 12 senders + Cascadia
-        # spike + Shell A-B-C layering chain) is what the
-        # walkthroughs are written around. For integrator L2s with
-        # no curated personas, fall back to the first plant.
+        # spike + Shell A-B-C layering chain) is what the walkthroughs
+        # are written around. For integrator L2s with no curated
+        # personas, fall back to the first plant.
         curated_anchor = next(
             (
                 _to_demo_account(p.account_id)
-                for p in investigation_personas
+                for p in l2_instance.investigation_personas
                 if p.role == "convergence_anchor"
             ),
             None,
@@ -312,13 +247,13 @@ def _build_demo_scenario(
             fanout_sender_count = len(first.sender_account_ids)
         chain = tuple(
             _to_demo_account(p.account_id)
-            for p in investigation_personas
+            for p in l2_instance.investigation_personas
             if p.role == "shell_entity"
         )
         anomaly_sender = next(
             (
                 _to_demo_account(p.account_id)
-                for p in investigation_personas
+                for p in l2_instance.investigation_personas
                 if p.role == "operations_account"
             ),
             None,
@@ -338,117 +273,7 @@ def _build_demo_scenario(
     )
 
 
-# -- Built-in vocabularies ---------------------------------------------------
-
-
-def _sasquatch_pr_vocabulary(l2_instance: L2Instance) -> HandbookVocabulary:
-    """The Sasquatch National Bank handbook flavor.
-
-    Reads ``l2_instance.persona`` for the strings the YAML now carries
-    (institution name, GL accounts, merchant names, flavor terms) and
-    layers Investigation personas on top — the latter aren't in the
-    YAML's ``persona:`` block because they're handbook-render-only
-    metadata (display names + scenario roles for the compliance demo
-    walkthroughs), not anything the L2 model itself uses.
-    """
-    persona = l2_instance.persona or DemoPersona()
-    description = (
-        l2_instance.description.strip()
-        if l2_instance.description
-        else "Sasquatch National Bank — combined treasury + merchant-acquiring."
-    )
-    investigation_personas = (
-        InvestigationPersonaVocabulary(
-            name="Juniper Ridge LLC",
-            account_id="cust-900-0007-juniper-ridge-llc",
-            role="convergence_anchor",
-        ),
-        InvestigationPersonaVocabulary(
-            name="Cascadia Trust Bank",
-            account_id="ext-cascadia-trust-bank",
-            role="counterparty_bank",
-        ),
-        InvestigationPersonaVocabulary(
-            name="Cascadia Trust Bank — Operations",
-            account_id="ext-cascadia-trust-bank-sub-ops",
-            role="operations_account",
-        ),
-        InvestigationPersonaVocabulary(
-            name="Shell Company A",
-            account_id="cust-700-0010-shell-company-a",
-            role="shell_entity",
-        ),
-        InvestigationPersonaVocabulary(
-            name="Shell Company B",
-            account_id="cust-700-0011-shell-company-b",
-            role="shell_entity",
-        ),
-        InvestigationPersonaVocabulary(
-            name="Shell Company C",
-            account_id="cust-700-0012-shell-company-c",
-            role="shell_entity",
-        ),
-    )
-    return HandbookVocabulary(
-        institution=InstitutionVocabulary(
-            name=persona.institution[0],
-            acronym=persona.institution[1],
-            description=description,
-            region=persona.flavor[1] if len(persona.flavor) > 1 else None,
-            legacy_entity=(
-                persona.flavor[2] if len(persona.flavor) > 2 else None
-            ),
-        ),
-        stakeholders=(
-            StakeholderVocabulary(
-                name="Federal Reserve Bank",
-                short_name="the Fed",
-                role="settlement authority for ACH, wire, and daily sweep flows",
-            ),
-            StakeholderVocabulary(
-                name="Payment Gateway Processor",
-                short_name="the processor",
-                role="card-network acquirer and merchant settlement counterparty",
-            ),
-        ),
-        gl_accounts=persona.gl_accounts,
-        merchants=(
-            MerchantVocabulary(
-                name="Big Meadow Dairy",
-                account_id="cust-900-0001-big-meadow-dairy",
-                sector="agricultural",
-            ),
-            MerchantVocabulary(
-                name="Bigfoot Brews",
-                account_id="cust-900-0002-bigfoot-brews",
-                sector="coffee retail",
-            ),
-            MerchantVocabulary(
-                name="Cascade Timber Mill",
-                account_id="cust-900-0003-cascade-timber-mill",
-                sector="industrial",
-            ),
-            MerchantVocabulary(
-                name="Pinecrest Vineyards LLC",
-                account_id="cust-900-0004-pinecrest-vineyards",
-                sector="agricultural",
-            ),
-            MerchantVocabulary(
-                name="Harvest Moon Bakery",
-                account_id="cust-900-0005-harvest-moon-bakery",
-                sector="food retail",
-            ),
-        ),
-        flavor=persona.flavor,
-        investigation_personas=investigation_personas,
-        fixture_name=_bundled_fixture_name(l2_instance),
-        demo=_build_demo_scenario(
-            l2_instance, investigation_personas=investigation_personas,
-        ),
-    )
-
-
-# -- Neutral fallback --------------------------------------------------------
+# -- Single builder (post-BXa.1) --------------------------------------------
 
 
 _INSTITUTION_NAME_RE = re.compile(
@@ -459,41 +284,46 @@ _INSTITUTION_NAME_RE = re.compile(
     # ``spec_example`` the description opens with "Generic SPEC-shaped
     # instance…", and we want that to fall through to the placeholder
     # rather than emit "Generic SPEC". Real bank names with all-caps
-    # tokens ("BMO Harris", "PNC Financial") need a built-in vocabulary
-    # or a future ``personas:`` YAML block — the regex isn't trying to
-    # cover the long tail.
+    # tokens ("BMO Harris", "PNC Financial") need to set
+    # ``institution_name`` on the L2 explicitly — the regex isn't
+    # trying to cover the long tail.
     r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,4})\b"
 )
 
 
-def _neutral_vocabulary_for(l2_instance: L2Instance) -> HandbookVocabulary:
-    """Derive a neutral vocabulary from the L2 instance's own data.
+def vocabulary_for_l2(l2_instance: L2Instance) -> HandbookVocabulary:
+    """Build the handbook vocabulary from the L2 instance directly.
 
-    No persona flavor — pulls institution name from the description's
-    first proper-noun run (or "Your Institution" if none), uses
-    ``Identifier``-shaped placeholders for stakeholders, merchants, and
-    Investigation personas, and lets ``flavor`` stay empty.
+    Precedence for the institution name:
+    1. ``l2_instance.institution_name`` if set (the BXa.1 promoted field
+       that operator L2s declare directly).
+    2. Regex-extracted from the L2's description (the neutral fallback
+       for L2s that omit ``institution_name``).
+    3. ``"Your Institution"`` placeholder (when no description either).
+
+    Same precedence for acronym (explicit field → derived-from-name →
+    ``"the institution"`` placeholder).
     """
     description = (
         l2_instance.description.strip()
         if l2_instance.description
         else "An L2-fed institution — handbook generated from the L2 YAML."
     )
-    inst_name = _extract_institution_name(description)
-    inst_acronym = _institution_acronym(inst_name)
+    if l2_instance.institution_name is not None:
+        name = l2_instance.institution_name
+    else:
+        name = _extract_institution_name(description)
+    if l2_instance.institution_acronym is not None:
+        acronym = l2_instance.institution_acronym
+    else:
+        acronym = _institution_acronym(name)
     return HandbookVocabulary(
         institution=InstitutionVocabulary(
-            name=inst_name,
-            acronym=inst_acronym,
+            name=name,
+            acronym=acronym,
             description=description,
-            region=None,
-            legacy_entity=None,
         ),
-        stakeholders=(),
-        gl_accounts=(),
-        merchants=(),
-        flavor=(),
-        investigation_personas=(),
+        investigation_personas=l2_instance.investigation_personas,
         fixture_name=_bundled_fixture_name(l2_instance),
         demo=_build_demo_scenario(l2_instance),
     )

@@ -308,6 +308,8 @@ concept names") is the seed for which terms ship; the inline
 parenthetical on `L2` directly addresses the cold-read's collision
 flag with the `L2 Flow Tracing` dashboard tab.
 
+- Comment: How can we minimize duplication of content? it will drift otherwise
+
 ### 2.c Entity diagram — chain parent→child visual
 
 Triggered from the Probe page's Chain section via a "view diagram"
@@ -1095,6 +1097,7 @@ confirms / flips before BTa.1 fires.
    in use (`text-success` / `text-warning` / `text-danger`).
    **Default if no override:** ship as proposed; revisit on BTa.7
    cold-read v3 if the four kinds still feel undifferentiated.
+   - Comment: I'm okay with those colors
 
 2. **Glossary trigger surface — top-nav `[?]` only, or also inline
    `[?]` next to every term mention?**
@@ -1106,6 +1109,7 @@ confirms / flips before BTa.1 fires.
    only on the Probe radio labels + the `LimitSchedule` mention in
    Triage section headers + the chain `kind` field. Other terms
    route via the top-nav.
+  - Comment: let's add them progressively as we get pushback, try to keep it to the first mention on a page.
 
 3. **Columnar sample format — metadata as one collapsed row, or
    each key as its own row?**
@@ -1119,6 +1123,7 @@ confirms / flips before BTa.1 fires.
    (often the most identifying one — `trace_id`, `originator_id`);
    collapse the rest with a `+N more metadata keys` footnote per
    sample. Operator opens the L2 editor for the full picture.
+    - Comment: I'm good
 
 4. **Audible bell on Run completion — default on or off?**
    §4.4 proposes the browser-tab title pulse always-on (visual);
@@ -1130,6 +1135,7 @@ confirms / flips before BTa.1 fires.
    OFF by default, toggleable via a preferences fragment (no new
    page; just a toggle in the side panel reachable via top-nav `[?]
    → Preferences`).
+   - Comment: Let's just do the title pulse
 
 5. **Tutorial banner — re-shown after L2 schema change, or only
    after deployment_name change?**
@@ -1142,6 +1148,7 @@ confirms / flips before BTa.1 fires.
    tutorial again" affordance, expose it in the top-nav `[?]` side
    panel as a "Reset onboarding" link (low-friction opt-in
    re-show).
+  - Comment: agreed
 
 6. **`?from=` validation — strict `/etl/` only, or also allow
    `/l2_shape/...` back-links for cross-editor flows?**
@@ -1151,6 +1158,7 @@ confirms / flips before BTa.1 fires.
    **Default if no override:** strict `/etl/` for BTa; expand the
    allowlist in a follow-on phase if a non-ETL caller actually
    needs the breadcrumb.
+  - Comment: I think we can just gate on same hostname and keep it open ended otherwise
 
 7. **Run page button colorway — keep accent or shift to muted?**
    §4.2 keeps the existing accent button styling. The rename to
@@ -1161,6 +1169,7 @@ confirms / flips before BTa.1 fires.
    **Default if no override:** keep the accent button. The operator
    explicitly rejected modal/confirm friction; further softening
    the button risks making it too hard to find on a busy page.
+   - Comment: agree, keep it strong
 
 ---
 

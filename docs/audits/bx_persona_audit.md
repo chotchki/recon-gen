@@ -94,6 +94,16 @@ collapses the conceptual ceremony.**
 | `description` | `str \| None` | already top-level — unchanged |
 | `institution_name` | `str \| None` | promoted from `persona.institution[0]` |
 | `institution_acronym` | `str \| None` | promoted from `persona.institution[1]` |
+| `investigation_personas` | `tuple[InvestigationPersonaSpec, ...]` | **NEW field** — promoted from the hardcoded table inside `_sasquatch_pr_vocabulary` (lines 360-391). Sasquatch fixture YAML grows an `investigation_personas:` block carrying the 6 curated entries (Juniper Ridge, Cascadia Trust Bank, Cascadia—Operations, Shell Company A/B/C). Other operator L2s default to empty tuple → existing `{% if vocab.demo.investigation.layering_chain %}` gates in the docs hide the walkthroughs that depend on these curated names. |
+
+> **Why investigation_personas survives (added on follow-up grep):**
+> `{{ vocab.demo.investigation.anchor.name }}`,
+> `{{ vocab.demo.investigation.layering_chain[0].name }}`,
+> `{{ vocab.demo.investigation.anomaly_pair_sender.name }}` are
+> substituted **~20 times across `docs/handbook/investigation.md` +
+> `docs/walkthroughs/investigation/what-does-this-accounts-money-network-look-like.md`**. The curated narrative IS load-bearing.
+> Different from stakeholders / merchants which were also hardcoded
+> in production code but are NEVER substituted in any rendered page.
 
 ### Die
 

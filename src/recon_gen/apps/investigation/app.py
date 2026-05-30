@@ -203,13 +203,10 @@ def _build_getting_started_sheet(
     """
     accent = theme.accent
 
-    # AO.3 — institution name from the persona; neutral when absent.
-    persona = l2_instance.persona
-    institution_name = (
-        persona.institution[0]
-        if persona is not None and persona.institution
-        else None
-    )
+    # AO.3 — institution name from L2 top-level; neutral when absent.
+    # BXa.1 (2026-05-30): was `l2_instance.persona.institution[0]`;
+    # promoted to top-level field.
+    institution_name = l2_instance.institution_name
     ledger_phrase = (
         f"the {institution_name} shared base ledger"
         if institution_name

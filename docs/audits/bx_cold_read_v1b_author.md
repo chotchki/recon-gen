@@ -36,6 +36,8 @@ BUILD vs VIEW separation matters. Today the top nav reads `Studio | Diagram | L1
 - **Build**: Studio, Diagram, Instance, Theme, Persona, Deploy
 - **View**: L1 Dashboard, L2 Flow Tracing, Investigation, Executives
 
+- Comment: I like this segementation, maybe group the top nav parts and color code?
+
 With a visible visual break (a separator pipe, a different background tint, or just spacing). Today a consultant clicks "L1 Dashboard" trying to find their declared institution's preview and ends up in a runtime tab that confuses the surface boundary.
 
 ---
@@ -45,6 +47,8 @@ With a visible visual break (a separator pipe, a different background tint, or j
 ### `03_list_account.png` — account
 
 Solid. Tabular, account_id + role + control_account + descriptor visible at a glance. Counts at the top (somewhere) would help — "13 accounts declared, 3 unmaterialized templates" gives me a completeness number I can quote to the CFO. No "incomplete" or "draft" signal — every row looks done, but I don't yet know how to *check* that, because I don't see required-field-missing badges or validation warnings on this surface.
+
+- Comment: This is showing that we're not saying that accounrts are DIFFERENT than templates (the 1:1 vs 1:N)
 
 ### `04_list_account_template.png` — account_template
 
@@ -419,34 +423,57 @@ Non-landing concept names: see vocabulary table in § 7. The big-five non-landin
 ### P1 — sign-off blockers (5)
 
 1. **Replace Instance singleton YAML textarea with a structured form** (`09`). Fields, types, validation per field, single Save with banner-on-failure.
+  - Comment: Agreed
 2. **Orphan-role guardrail** (`27`). Role inputs become typeaheads over declared roles only; save-time validation rejects orphan roles with banner; account list + diagram surface orphans with red badges.
+  - Comment: Agreed
 3. **Delete confirmation with reference-check** (`30`). Modal listing downstream references; block delete OR offer cascade/re-point; never silent-delete.
+  - Comment: I hate modals but this may be an exception I can live with, if we could design it inline with a timed auto cancel I'd be way happier.
 4. **Persona "Stakeholders" → "Correspondents" rename** (`11`, `29`). Vocabulary mismatch is causing miscategorization at fill time; the label drives the fill quality.
+  - Comment: Agreed BUT this needs the research on where Persona is even used... I'm still at a loss on where the app uses it and if its just in the docs its probably better to remove and replace with neutral filler than build something else.
 5. **Save-success always redirects to the new/edited entity's read card** (`21`, `27`). No more landing on `/` after save — consultant loses context.
+  - Comment: Agreed
 
 ### P2 — workflow improvements (8)
 
 1. **Home screen with "Start here" flow and singleton tiles** (`01`). Numbered dependency order, completeness checkmarks, singletons promoted out of the top nav.
+  - Comment: Agreed but we will need design work, especially where should this relate to the diagram?
 2. **Top nav BUILD/VIEW split** (`01`). Visual separator between editor surfaces and runtime dashboard tabs.
+  - Comment: Agreed, have comments above
 3. **Diagram nodes clickable-to-edit + inline mini-diagram on every edit page** (`02`, `24`). Single highest-leverage UX move.
+  - Comment: This WILL be hard, maybe a link to the edit page? the click to filter is in tension with this
 4. **Theme live-preview swatches + section-level save** (`10`). No more deploy-to-see-color-change loop.
+  - Comment: Agreed
 5. **Rail list collapse-to-table + group-by-source_role** (`05`). 21 dense cards become a scannable table; toggle to expanded card view.
+  - Comment: Agreed
 6. **Composite keys behind opaque IDs in URLs; keys stay in breadcrumbs/titles** (`24`, `25`). URL stability survives rename + non-ASCII chars.
+  - Comment: Agree but this has a deeper implied impact since the name is the id. May need some design work since I don't want this bleeding into the shape yaml
 7. **"Used by" back-references on every entity's read card** (`22`). Before edit/delete, consultant sees blast-radius.
+  - Comment: Agreed
 8. **Vocabulary pass** (rail's Posted requirements / Bundles activity / Cadence / Origin overrides; chain's XOR / fan-in / epc). Banker translations + worked examples per field.
+  - Good candidate for that sidebar doc item called out in BTa.
 
 ### P3 — polish (10)
 
 1. **Read-card visual upgrade** — match the edit form's sectioning (`22`).
+ - Comment: Agreed
 2. **Inline currency formatting** on Cap and similar `currency=True` fields (`25`).
+  - Comment: Sure
 3. **Duration picker for P1D / P3D / PT1H** fields instead of raw ISO-8601 (`15`, `16`, `23`).
+   - Comment: a couple common picks with the fallback of free form would be wise
 4. **`<details>` Reference panels default-open on first visit** (`17`, `26`); collapse-by-default after dismissal.
+  - Comment: Sure but the challenge will be where to persist that. Maybe as an MVP only show if NOTHING is defined yet.
 5. **Per-field "surfaces as:" pointers** on Persona Flavor/Stakeholders/Merchants (`29`), and on Theme fields (`10`).
+  - Comment: Good candidate for that sidebar doc item called out in BTa, persona still needs that research
 6. **"+ Add stakeholder" button styled as button**, not placeholder line (`29`).
+  - Comment: TBD depending on the persona research
 7. **Completion-expression DSL autocomplete** on transfer_template form (`17`).
+  - Comment: Probably would help the end user a lot
 8. **Inline shape-preview** on chain form when children toggled (`18`, `24`).
+  - Comment: Agreed
 9. **Plain-language error messages** with SPEC section pointers in parens, not as the entire message (`21`).
+  - Comment: is this a good sidebar doc help item?
 10. **Coverage / Trainer chip tooltips** on the diagram (`02`).
+  - Comment: is this a good sidebar doc help item?
 
 ---
 

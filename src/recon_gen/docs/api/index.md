@@ -25,8 +25,10 @@ documented here lives entirely in L1:
   about banks / accounts / specific institutions.
 - **L2 — `apps/<app>/app.py` + `apps/<app>/constants.py`.** Per-app
   tree assembly, in domain vocabulary.
-- **L3 — SQL strings + `apps/<app>/demo_data.py` + `common/persona.py`
-  + theme presets.** Persona / customer flavor.
+- **L3 — SQL strings + `apps/<app>/demo_data.py` + per-L2
+  `institution_name` / `institution_acronym` / `description` /
+  `investigation_personas` (top-level fields on `L2Instance`) +
+  theme presets.** Persona / customer flavor.
 
 When extending the API itself (rare), the L1 invariant is: zero hits
 when you grep `common/tree/` for any persona / institution name.

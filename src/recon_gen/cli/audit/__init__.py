@@ -197,14 +197,15 @@ def _resolve_frame(
 
 
 def _institution_name(instance: L2Instance, cfg: Config) -> str:
-    """Pull the institution display name from the L2 persona block.
+    """Pull the institution display name from the L2.
 
-    Falls back to the cfg's deployment name when no persona block is
-    declared — the report still renders cleanly against any L2 YAML.
+    BXa.1 (2026-05-30): was `instance.persona.institution[0]`;
+    promoted to top-level `institution_name`. Falls back to the cfg's
+    deployment name when no institution_name is declared — the report
+    still renders cleanly against any L2 YAML.
     """
-    persona = getattr(instance, "persona", None)
-    if persona is not None and persona.institution:
-        return str(persona.institution[0])
+    if instance.institution_name is not None:
+        return instance.institution_name
     return str(cfg.deployment_name)
 
 
