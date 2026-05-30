@@ -134,6 +134,9 @@ from recon_gen.common.l2.topology import (
 )
 from recon_gen.common.l2.trainer import plants_per_node
 from recon_gen.common.sql.dialect import Dialect
+from recon_gen.common.html._studio_side_panel import (
+    side_panel_routes as _side_panel_routes_imported,
+)
 from recon_gen.common.html._studio_training import render_training_pane
 from recon_gen.common.html.render import _emit_theme_style
 
@@ -3158,6 +3161,10 @@ def make_studio_routes(
             app=StaticFiles(directory=str(_STUDIO_ASSETS_DIR)),
             name="studio_static",
         ),
+        # BTa.1 — side-panel fragment routes (glossary + per-term).
+        # BX.12-15 + BTa.5 add more fragment routes alongside these
+        # as the per-page help text + entity diagrams land.
+        *_side_panel_routes_imported(),
         Mount(
             "/studio/wasm-graphviz",
             app=StaticFiles(directory=str(_WASM_GRAPHVIZ_DIR)),

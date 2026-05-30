@@ -523,7 +523,35 @@ def emit_top_nav(
         parts.append(
             f'  <a href="{esc_href}" class="{cls}">{esc_label}</a>'
         )
+    # BTa.1 (2026-05-30): always-on side-panel `[?]` trigger as the
+    # last nav element. Opens the glossary via the BTa.1 drawer chrome.
+    # The drawer container itself is injected separately at the page
+    # body level (see render_side_panel_drawer_container) — only the
+    # trigger lives in the nav.
+    # ml-auto pushes it to the far right; div wrapper avoids the
+    # divide-x stripe between it and the previous entry (since the
+    # ml-auto creates a visual gap already).
+    parts.append(
+        '  <div class="ml-auto px-4 py-3">'
+        '<button type="button" '
+        'class="text-primary-fg hover:text-accent font-semibold cursor-pointer" '
+        'data-side-panel-trigger '
+        'hx-get="/studio/side-panel/glossary" '
+        'hx-target="#side-panel-body" '
+        'hx-swap="innerHTML" '
+        'aria-label="Open glossary side panel" '
+        'title="Glossary (?)">[?]</button>'
+        '</div>'
+    )
     parts.append('</nav>')
+    # BTa.1 — render the side-panel drawer chrome alongside the nav
+    # (siblings, not nested — drawer is position: fixed so DOM
+    # nesting is cosmetic but semantically the drawer is a
+    # complementary landmark, not nav). Single instance per page.
+    from recon_gen.common.html._studio_side_panel import (  # noqa: PLC0415 — lazy to dodge any future circular
+        render_side_panel_drawer_container,
+    )
+    parts.append(render_side_panel_drawer_container())
     return "\n".join(parts)
 
 
