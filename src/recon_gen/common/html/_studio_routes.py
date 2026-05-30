@@ -619,32 +619,149 @@ def _render_home_page(
 # back to this list. Order: Probe (investigate) → Run (execute) →
 # Triage (find + fix) — matches the operator's natural flow per the
 # mockup's narrative.
+# BTa.3 — numbered loop (BTa.0 Lock 2). Tuple ordering IS the loop
+# order: Refresh Data → Triage gaps → Probe & fix. The render walks
+# in order + assigns 1./2./3. + a `→` arrow between cards.
 _ETL_LANDING_CARDS: tuple[tuple[str, str, str | None, str], ...] = (
     (
-        "Probe",
-        "/etl/probe",
-        None,  # BT.2 landed; no "coming in" hint
-        "Investigate one L2 slice — pick a rail, template, or chain "
-        "and see L2-declared column expectations side-by-side with "
-        "the runtime rows that match.",
-    ),
-    (
-        "Run",
+        "Refresh Data",
         "/etl/run",
-        None,  # BT.3 landed; no "coming in" hint
+        None,
         "Execute the ETL pipeline (wipe → hook → matview refresh) and "
         "render a per-kind coverage tally so you can confirm every "
         "declared primitive landed at least one row.",
     ),
     (
-        "Triage",
+        "Triage gaps",
         "/etl/triage",
-        None,  # BT.4 landed; no "coming in" hint
+        None,
         "Find + fix gaps — diff declared contracts against observed "
         "runtime; each gap renders a card with the diagnosis + a deep "
         "link to the relevant L2 editor page.",
     ),
+    (
+        "Probe & fix",
+        "/etl/probe",
+        None,
+        "Investigate one L2 slice — pick a rail, template, or chain "
+        "and see L2-declared column expectations side-by-side with "
+        "the runtime rows that match.",
+    ),
 )
+
+
+# BTa.3 — first-time tutorial banner content (BTa.0 Lock 2).
+# 5-step checklist surfaced inline in a collapsible details block;
+# dismissable via the X button. Dismissal persists in localStorage
+# keyed on deployment_name so each environment carries its own state.
+_TUTORIAL_STEPS: tuple[tuple[str, str], ...] = (
+    (
+        "Configure your ETL hook",
+        "Set <code>etl_hook</code> in your <code>config.yaml</code> "
+        "(or skip — the bundled demo regenerates Sasquatch data when "
+        "the hook is unset). The Refresh Data run-status banner tells "
+        "you which one fired last.",
+    ),
+    (
+        "Refresh Data",
+        "Click <strong>Refresh Data</strong> to run your hook, then "
+        "the matview refresh. The coverage report shows every "
+        "L2-declared primitive (rail / template / chain / metadata key) "
+        "with the observed row count.",
+    ),
+    (
+        "Triage the gaps",
+        "If anything missed, the Triage view groups gaps by kind. "
+        "Each card carries the diagnosis + a deep link to the L2 "
+        "editor's create-new form, with a one-click \"Back to Triage\" "
+        "breadcrumb that survives the save.",
+    ),
+    (
+        "Probe a single slice",
+        "Use Probe to investigate one specific entity — pick a rail "
+        "name, set the date window (defaults to All time), and see "
+        "the L2-declared contract next to the runtime rows. Faster "
+        "than running the whole pipeline when you're iterating on one "
+        "fixture.",
+    ),
+    (
+        "Re-run + repeat",
+        "Edit the L2, click Refresh Data again, watch the coverage "
+        "tally close. The loop tightens as you go — most operators "
+        "hit clean coverage on the third pass.",
+    ),
+)
+
+
+def _render_tutorial_banner(deployment_name: str) -> str:
+    """BTa.3 — dismissable "First time here?" tutorial banner.
+
+    Renders a collapsible 5-step checklist above the numbered loop
+    cards. Dismissal persists in ``localStorage`` keyed on
+    ``deployment_name`` (per BTa.0 Lock 2) so the operator sees it
+    once per environment + the dismissal survives navigation /
+    page-refresh / browser-restart.
+
+    Hidden by default until the JS shim checks localStorage — avoids
+    a one-frame flash for returning operators. The ``data-tutorial-
+    banner-key`` attribute lets the inline script (no module import,
+    no fetch) toggle visibility + write the dismissal back.
+    """
+    storage_key = f"recon_gen.tutorial_dismissed.{deployment_name}"
+    step_items = "\n      ".join(
+        f'<li class="mb-2 last:mb-0">'
+        f'<strong class="text-accent">{escape(title)}</strong> — {body}'
+        f'</li>'
+        for title, body in _TUTORIAL_STEPS
+    )
+    # Hidden on initial render; the inline script reveals it when the
+    # localStorage flag isn't set. Using inline style="display:none"
+    # rather than `hidden` attribute so the script's
+    # `style.display = ''` reveals it cleanly without attribute-toggle
+    # gymnastics.
+    return f"""
+  <aside id="etl-tutorial-banner"
+         class="mx-8 mt-6 bg-accent/5 border border-accent/30 rounded-md p-4"
+         style="display:none"
+         data-tutorial-banner-key="{escape(storage_key)}">
+    <div class="flex items-start justify-between gap-3 mb-2">
+      <h2 class="text-base font-semibold text-accent m-0">
+        First time here? Walk the loop ↓
+      </h2>
+      <button type="button"
+              class="text-secondary-fg hover:text-primary-fg text-sm leading-none p-1 -m-1"
+              aria-label="Dismiss tutorial banner"
+              data-tutorial-dismiss>×</button>
+    </div>
+    <details class="text-sm" open>
+      <summary class="cursor-pointer text-secondary-fg hover:text-accent mb-2">
+        Show the 5-step checklist
+      </summary>
+      <ol class="list-decimal pl-6 m-0 mt-2">
+      {step_items}
+      </ol>
+    </details>
+  </aside>
+  <script>
+  (function() {{
+    const banner = document.getElementById('etl-tutorial-banner');
+    if (!banner) return;
+    const key = banner.dataset.tutorialBannerKey;
+    let dismissed = false;
+    try {{ dismissed = localStorage.getItem(key) === '1'; }} catch (e) {{}}
+    if (!dismissed) {{
+      banner.style.display = '';
+    }}
+    const closeBtn = banner.querySelector('[data-tutorial-dismiss]');
+    if (closeBtn) {{
+      closeBtn.addEventListener('click', () => {{
+        banner.style.display = 'none';
+        try {{ localStorage.setItem(key, '1'); }} catch (e) {{}}
+      }});
+    }}
+  }})();
+  </script>
+"""
 
 
 def _render_etl_landing_page(
@@ -676,24 +793,44 @@ def _render_etl_landing_page(
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
     demo_banner = _demo_mode_banner(demo_mode)
 
+    # BTa.3 — numbered cards with arrows between them. The tuple
+    # order IS the loop order (Refresh Data → Triage → Probe), and
+    # the index becomes the visible step number.
     card_blocks: list[str] = []
-    for title, href, phase, description in _ETL_LANDING_CARDS:
+    for step_num, (title, href, phase, description) in enumerate(_ETL_LANDING_CARDS, start=1):
         phase_hint = (
             f"{escape(href)} · coming in {escape(phase)}"
             if phase is not None
             else escape(href)
         )
         card_blocks.append(
-            '<a class="block p-5 bg-white border border-surface-border '
-            'rounded-md shadow-sm hover:border-accent hover:shadow-md '
-            'transition-shadow no-underline text-primary-fg" '
-            f'href="{escape(href)}">'
-            f'<h2 class="text-xl font-semibold text-accent m-0 mb-1">{escape(title)}</h2>'
-            f'<p class="text-xs text-secondary-fg font-mono m-0 mb-2">{phase_hint}</p>'
-            f'<p class="text-sm text-primary-fg m-0">{escape(description)}</p>'
-            "</a>"
+            '<a class="etl-landing-card group block p-5 bg-white border '
+            'border-surface-border rounded-md shadow-sm hover:border-accent '
+            'hover:shadow-md transition-shadow no-underline text-primary-fg" '
+            f'href="{escape(href)}" data-step="{step_num}">'
+            '<div class="flex items-baseline gap-3 mb-1">'
+            '<span class="inline-flex items-center justify-center w-7 h-7 '
+            'rounded-full bg-accent text-accent-fg text-sm font-semibold '
+            'shrink-0" aria-hidden="true">'
+            f'{step_num}</span>'
+            f'<h2 class="text-xl font-semibold text-accent m-0">{escape(title)}</h2>'
+            '</div>'
+            f'<p class="text-xs text-secondary-fg font-mono m-0 mb-2 pl-10">{phase_hint}</p>'
+            f'<p class="text-sm text-primary-fg m-0 pl-10">{escape(description)}</p>'
+            '</a>'
         )
-    cards_html = "\n    ".join(card_blocks)
+    # Arrow between cards (visible on lg+, where the grid is single-row).
+    # On smaller screens the cards stack vertically; arrows hidden via
+    # `hidden lg:flex` to avoid awkward sideways arrows on stacked cards.
+    arrow_html = (
+        '<div class="hidden lg:flex items-center justify-center text-accent '
+        'text-3xl font-bold" aria-hidden="true">→</div>'
+    )
+    cards_with_arrows = f"\n    {arrow_html}\n    ".join(card_blocks)
+
+    tutorial_banner = _render_tutorial_banner(
+        cfg.deployment_name if cfg is not None else cache.path.stem,
+    )
 
     return f"""<!doctype html>
 <html lang="en">
@@ -710,16 +847,16 @@ def _render_etl_landing_page(
     <h1>Studio · ETL Support</h1>
     <span class="text-sm text-secondary-fg font-mono">{prefix}</span>
   </header>
+  {tutorial_banner}
   <section class="px-8 pt-6 pb-3">
     <p class="text-sm text-secondary-fg max-w-3xl m-0">
-      Three workflows for getting your customer's ETL feed landing
-      cleanly: <strong>Probe</strong> one slice, <strong>Run</strong>
-      the pipeline + score, <strong>Triage</strong> gaps + link back
-      to the L2 editor to close them.
+      Three steps to land your customer's ETL feed cleanly. Walk them
+      in order on a first pass; once you know the surface, jump
+      anywhere via the numbered cards.
     </p>
   </section>
-  <section class="px-8 pb-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3" id="etl-landing-cards">
-    {cards_html}
+  <section class="px-8 pb-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-[1fr_auto_1fr_auto_1fr] lg:items-stretch" id="etl-landing-cards">
+    {cards_with_arrows}
   </section>
 </body>
 </html>

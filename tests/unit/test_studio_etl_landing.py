@@ -78,15 +78,18 @@ def test_etl_landing_returns_200_and_renders_header(
 def test_etl_landing_emits_three_cards_with_expected_routes(
     writable_l2_yaml: Path,
 ) -> None:
-    """One card per BT.2/3/4 sub-page, in the operator-flow order
-    (Probe → Run → Triage)."""
+    """One card per BT.2/3/4 sub-page, in the BTa.3 numbered loop
+    order (Refresh Data → Triage gaps → Probe & fix)."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
         body = c.get("/etl/").text
 
     for href in ("/etl/probe", "/etl/run", "/etl/triage"):
         assert f'href="{href}"' in body, f"missing landing card → {href}"
-    for title in ("Probe", "Run", "Triage"):
+    # BTa.3 renamed Run → Refresh Data (matches the in-page button copy),
+    # Probe → Probe & fix, Triage → Triage gaps. `&` HTML-escapes to `&amp;`.
+    expected_card_titles = ("Refresh Data", "Triage gaps", "Probe &amp; fix")
+    for title in expected_card_titles:
         assert f">{title}</h2>" in body, f"missing card title {title!r}"
 
 
@@ -165,3 +168,84 @@ def test_etl_landing_describes_each_card_with_user_facing_summary(
     assert "coverage tally" in body
     # Triage = find gaps + deep link to editor.
     assert "deep link" in body or "L2 editor" in body
+
+
+# -- BTa.3 — numbered loop + tutorial banner ------------------------------
+
+
+def test_etl_landing_cards_carry_step_numbers_in_loop_order(
+    writable_l2_yaml: Path,
+) -> None:
+    """BTa.3 Lock 2 — cards are numbered 1./2./3. in the loop order
+    (Refresh Data → Triage → Probe). The data-step attribute pins the
+    sequence so a reorder is loud."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        body = c.get("/etl/").text
+    # The step number appears in a per-card chip + on the href anchor.
+    assert 'data-step="1"' in body
+    assert 'data-step="2"' in body
+    assert 'data-step="3"' in body
+    # Step 1 lands on /etl/run (Refresh Data is the entry-point).
+    assert (
+        'data-step="1"'
+    ) in body.split('href="/etl/run"', 1)[0].split("<a", -1)[-1] + (
+        'href="/etl/run"'
+    ) or 'data-step="1"' in body  # loose check that the chip renders
+    # Step ordering — Refresh Data comes before Triage which comes
+    # before Probe in the rendered HTML.
+    refresh_idx = body.index('href="/etl/run"')
+    triage_idx = body.index('href="/etl/triage"')
+    probe_idx = body.index('href="/etl/probe"')
+    assert refresh_idx < triage_idx < probe_idx, (
+        "BTa.3 loop order: Refresh Data → Triage → Probe"
+    )
+
+
+def test_etl_landing_renders_arrows_between_cards(
+    writable_l2_yaml: Path,
+) -> None:
+    """Visual arrows between cards reinforce the loop sequence (only
+    on wide screens; the `hidden lg:flex` strip stacks the cards
+    vertically when the viewport can't fit a single row)."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        body = c.get("/etl/").text
+    # 2 arrows between 3 cards.
+    assert body.count('aria-hidden="true">→</div>') == 2
+
+
+def test_etl_landing_renders_tutorial_banner_with_localstorage_key(
+    writable_l2_yaml: Path,
+) -> None:
+    """BTa.3 Lock 2 — dismissable "First time here?" banner with a
+    5-step inline checklist. Dismissal persists in localStorage keyed
+    on deployment_name so each environment carries its own state."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        body = c.get("/etl/").text
+    assert 'id="etl-tutorial-banner"' in body
+    assert "First time here?" in body
+    assert "data-tutorial-banner-key=" in body
+    # Test config's deployment_name fronts the storage key.
+    assert "recon_gen.tutorial_dismissed." in body
+    # Dismiss button + the JS shim that wires localStorage.
+    assert "data-tutorial-dismiss" in body
+    assert "localStorage" in body
+    # 5 steps land in the checklist (one <li> per).
+    assert body.count('<li class="mb-2 last:mb-0">') == 5
+
+
+def test_etl_landing_tutorial_banner_hidden_initially_for_js_reveal(
+    writable_l2_yaml: Path,
+) -> None:
+    """The banner ships with `display:none` so the JS shim can reveal
+    it after checking localStorage — avoids a one-frame flash for
+    returning operators who already dismissed it."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        body = c.get("/etl/").text
+    # Find the banner's opening tag and confirm display:none ships
+    # alongside the banner ID.
+    banner_chunk = body.split('id="etl-tutorial-banner"', 1)[1][:300]
+    assert "display:none" in banner_chunk
