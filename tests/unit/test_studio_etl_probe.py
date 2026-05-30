@@ -160,19 +160,21 @@ def test_etl_probe_chain_kind_lists_chain_parents_in_dropdown(
         )
 
 
-def test_etl_probe_date_range_defaults_to_last_seven_days(
+def test_etl_probe_date_range_defaults_to_all_time(
     writable_l2_yaml: Path,
 ) -> None:
-    """The from/to inputs default to (today-6, today) when no query
-    params land; the operator-controlled window per BT.0.5 mockup."""
-    from datetime import date, timedelta
+    """BTa.2 P1.1 — default window is "All time" (from=1900-01-01,
+    to=today). Replaces the earlier "last 7 days" default: the
+    cold-read showed first-time operators couldn't tell whether 0
+    rows meant "data missing" or "wrong window," so the trust-killer
+    fix is to start with the widest possible window."""
+    from datetime import date
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
         body = c.get("/etl/probe").text
     today = date.today().isoformat()  # typing-smell: ignore[no-datetime-now]: asserting against the same wall-clock the route renders; comparing today-to-today is the test's intent
-    week_ago = (date.today() - timedelta(days=6)).isoformat()  # typing-smell: ignore[no-datetime-now]: same wall-clock anchor as above; assertion shape is "default window matches today's date math"
-    assert f'value="{week_ago}"' in body, (
-        f"expected from-date default {week_ago} in form"
+    assert 'value="1900-01-01"' in body, (
+        "expected from-date default 1900-01-01 (All time) in form"
     )
     assert f'value="{today}"' in body, (
         f"expected to-date default {today} in form"

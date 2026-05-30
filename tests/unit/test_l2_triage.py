@@ -150,8 +150,9 @@ def test_detect_gaps_finds_unmatched_rail_name(
     assert g.evidence.row_count == 2
     # Sample id is one of the two rows.
     assert g.evidence.sample_transaction_id in {"tx-1", "tx-2"}
-    # Link points at the rail editor list page.
-    assert g.link_target == "/l2_shape/rail/"
+    # BTa.2 P1.4 — unmatched values aren't in the L2 yet, so deep-link
+    # straight to the create-new form rather than the list page.
+    assert g.link_target == "/l2_shape/rail/new"
     # Diagnosis names the offending value + the count.
     assert 'phantom_rail' in g.diagnosis
     assert '2 rows' in g.diagnosis
@@ -232,7 +233,7 @@ def test_detect_gaps_finds_unmatched_template_name(
     g = tmpl_gaps[0]
     assert g.observed_value == "ReturnReversal"
     assert g.evidence.row_count == 1
-    assert g.link_target == "/l2_shape/transfer_template/"
+    assert g.link_target == "/l2_shape/transfer_template/new"
 
 
 # -- Gap kind 3: missing_limit_schedule --------------------------------------

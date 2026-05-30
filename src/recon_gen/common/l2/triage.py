@@ -143,7 +143,7 @@ async def _detect_unmatched_rails(
                 sample_transaction_id=sample_ids.get(value),
                 extras={"declared_rails": declared_list},
             ),
-            link_target="/l2_shape/rail/",
+            link_target="/l2_shape/rail/new",
         ))
     return gaps
 
@@ -194,7 +194,7 @@ async def _detect_unmatched_templates(
                 sample_transaction_id=sample_ids.get(value),
                 extras={"declared_templates": declared_list},
             ),
-            link_target="/l2_shape/transfer_template/",
+            link_target="/l2_shape/transfer_template/new",
         ))
     return gaps
 
@@ -255,7 +255,7 @@ async def _detect_missing_limit_schedules(
                 row_count=count,
                 extras={f"existing_schedules_for_{parent_role}": siblings_label},
             ),
-            link_target="/l2_shape/limit_schedule/",
+            link_target="/l2_shape/limit_schedule/new",
         ))
     return gaps
 

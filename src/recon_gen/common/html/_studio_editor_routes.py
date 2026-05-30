@@ -2739,12 +2739,86 @@ def _render_reconciler_section(
     )
 
 
+_BACK_BREADCRUMB_LABELS: Mapping[str, str] = {
+    "/etl/triage": "Triage",
+    "/etl/probe": "Probe",
+    "/etl/run": "Refresh Data",
+    "/etl": "ETL Support",
+    "/diagram": "Diagram",
+}
+
+
+def _safe_back_target(from_param: str | None) -> str | None:
+    """Validate ``?from=`` for the back-breadcrumb (BTa.2 P1.5).
+
+    Operator's Q6 lock — same-hostname rather than strict /etl/.
+    Accept any same-origin path; reject anything that doesn't start
+    with ``/`` (open-redirect guard — full URLs / scheme-relative /
+    backslash bypasses all rejected).
+    """
+    if not from_param or not from_param.startswith("/"):
+        return None
+    if from_param.startswith("//") or from_param.startswith("/\\"):
+        return None
+    return from_param
+
+
+def _back_breadcrumb_html(from_param: str | None) -> str:
+    """Sticky back-breadcrumb header strip for BTa.2 P1.5.
+
+    Renders nothing when ``?from=`` is absent / unsafe — callers
+    safely concat unconditionally.
+    """
+    target = _safe_back_target(from_param)
+    if target is None:
+        return ""
+    # Label the destination when known; otherwise echo the path so
+    # the operator at least sees where they came from.
+    label = _BACK_BREADCRUMB_LABELS.get(target.split("?", 1)[0], target)
+    return (
+        '<div class="bg-accent/5 border-b border-accent/20 px-4 py-2 text-sm" '
+        'data-test-back-breadcrumb>'
+        f'<a class="text-accent no-underline hover:underline" '
+        f'href="{escape(target)}">← Back to {escape(label)}</a>'
+        '</div>'
+    )
+
+
+def _form_str(form: Any, key: str) -> str | None:  # typing-smell: ignore[explicit-any]: starlette FormData has heterogeneous .get() values; we only want str scalars
+    """Pull a string scalar out of a FormData payload.
+
+    Returns None when the key is absent OR the value isn't a plain
+    string (file uploads return UploadFile — those aren't ``?from=``
+    targets and should be ignored).
+    """
+    raw = form.get(key)
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        return None
+    return raw
+
+
+def _from_hidden_input(from_param: str | None) -> str:
+    """Hidden form input that carries ``?from=`` through a POST.
+
+    BTa.2 P1.5 — the save / create handlers read this on success and
+    redirect back to ``from`` instead of ``/`` so the loop is one
+    click: Triage → Edit → Save → back to Triage.
+    """
+    target = _safe_back_target(from_param)
+    if target is None:
+        return ""
+    return f'<input type="hidden" name="_back_from" value="{escape(target)}">'
+
+
 def _render_create_page(
     kind: EntityKind,
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed for select_from option resolution
     form_overrides: Mapping[str, str | tuple[str, ...]] | None = None,
     global_error: str | None = None,
     subtype: RailSubtype | None = None,
+    from_param: str | None = None,
 ) -> str:
     """X.4.f.9.create-page — full HTML page for creating a new entity.
 
@@ -2829,6 +2903,7 @@ def _render_create_page(
     <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
     <a class="text-accent no-underline text-sm hover:underline" href="/l2_shape/{escape(kind)}/">→ list all {escape(kind)}s</a>
   </header>
+  {_back_breadcrumb_html(from_param)}
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
     {_render_intro_details(intro_html)}
     {subtype_banner_html}
@@ -2836,6 +2911,7 @@ def _render_create_page(
       <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form">
         {global_err_html}
         {subtype_html}
+        {_from_hidden_input(from_param)}
         {fields_html}
         {reconciler_html}
         <div class="flex items-center gap-3 mt-4">
@@ -2856,6 +2932,7 @@ def _render_edit_page(
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed for select_from option resolution
     form_overrides: Mapping[str, str | tuple[str, ...]] | None = None,
     global_error: str | None = None,
+    from_param: str | None = None,
 ) -> str:
     """AI.2.e — full HTML page for editing an existing entity: the dedicated
     edit screen, symmetric with ``_render_create_page``. Replaces the X.4.e
@@ -2919,12 +2996,14 @@ def _render_edit_page(
     <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
     <a class="text-accent no-underline text-sm hover:underline" href="/l2_shape/{escape(kind)}/">→ list all {escape(kind)}s</a>
   </header>
+  {_back_breadcrumb_html(from_param)}
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
     {_render_intro_details(intro_html)}
     {subtype_banner_html}
     <section class="bg-white border border-surface-border rounded-md p-5">
       <form method="post" action="/l2_shape/{escape(kind)}/{escape(entity_id)}" class="edit-form">
         {global_err_html}
+        {_from_hidden_input(from_param)}
         {fields_html}
         <div class="flex items-center gap-3 mt-4">
           <button type="submit" class="{primary_btn}">Save</button>
@@ -3793,7 +3872,8 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
         entity = _find_entity_or_none(inst, kind, entity_id)
         if entity is None:
             return HTMLResponse("not found", status_code=404)
-        return HTMLResponse(_render_edit_page(kind, entity, inst))
+        from_param = request.query_params.get("from")
+        return HTMLResponse(_render_edit_page(kind, entity, inst, from_param=from_param))
 
     async def save(request: Request) -> Response:
         """AI.2.e — dedicated-screen save: coerce → mutate → validate →
@@ -3810,6 +3890,10 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
             return HTMLResponse("not editable", status_code=404)
 
         form = await request.form()
+        # BTa.2 P1.5 — `_back_from` hidden input round-trips the
+        # original ``?from=`` so save-then-redirect lands on the
+        # triage / probe / run page the operator came from.
+        from_param = _form_str(form, "_back_from")
         try:
             new_fields, coerced_overrides = _coerce_form(kind, form)
         except (ValueError, TypeError) as exc:
@@ -3825,6 +3909,7 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
                     inst,
                     form_overrides=best_effort,
                     global_error=f"Field coercion failed: {exc}",
+                    from_param=from_param,
                 ),
                 status_code=400,
             )
@@ -3880,6 +3965,7 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
                     inst,
                     form_overrides=coerced_overrides,
                     global_error=str(exc),
+                    from_param=from_param,
                 ),
                 status_code=400,
             )
@@ -3889,12 +3975,16 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
         # symmetric with the create POST. (Replaces the X.4.e inline
         # read-card swap + HX-Trigger cascade-reload; a full navigation back
         # to Studio re-renders the diagram + entity lists fresh anyway.)
-        return RedirectResponse("/", status_code=303)
+        # BTa.2 P1.5 — when `_back_from` carried in (Triage → Edit), prefer
+        # the carried target so save-then-redirect closes the loop.
+        redirect_target = _safe_back_target(from_param) or "/"
+        return RedirectResponse(redirect_target, status_code=303)
 
     async def new_form(request: Request) -> HTMLResponse:
         kind = _kind_from_path(request.path_params["kind"])
         if kind is None or kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse("not editable", status_code=404)
+        from_param = request.query_params.get("from")
         # X.4.f.11.5 — Rail is a discriminated union; the create flow
         # is 2-step. Step 1 (no ?subtype=) is the picker page; step 2
         # (?subtype=two_leg|single_leg) renders the create form
@@ -3915,9 +4005,13 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
                     status_code=400,
                 )
             return HTMLResponse(
-                _render_create_page(kind, cache.get(), subtype=subtype),
+                _render_create_page(
+                    kind, cache.get(), subtype=subtype, from_param=from_param,
+                ),
             )
-        return HTMLResponse(_render_create_page(kind, cache.get()))
+        return HTMLResponse(
+            _render_create_page(kind, cache.get(), from_param=from_param),
+        )
 
     async def create(request: Request) -> Response:
         """X.4.f.9.create — POST a new entity into the kind's collection.
@@ -3939,6 +4033,10 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
             return HTMLResponse("not editable", status_code=404)
 
         form = await request.form()
+        # BTa.2 P1.5 — `_back_from` round-trips ``?from=`` through the
+        # POST so save-then-redirect lands on the triage / probe / run
+        # page the operator came from (vs always bouncing to /).
+        from_param = _form_str(form, "_back_from")
 
         # X.4.f.12 — singleton POST (Theme / Persona / Instance).
         # The form's hidden ``_method=PUT`` confirms intent (browser
@@ -4035,6 +4133,7 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
                     form_overrides=best_effort,
                     global_error=f"Field coercion failed: {exc}",
                     subtype=rail_subtype,
+                    from_param=from_param,
                 ),
                 status_code=400,
             )
@@ -4171,6 +4270,7 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
                             "forever."
                         ),
                         subtype=rail_subtype,
+                        from_param=from_param,
                     ),
                     status_code=400,
                 )
@@ -4185,6 +4285,7 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
                             f"or 'aggregating_rail')"
                         ),
                         subtype=rail_subtype,
+                        from_param=from_param,
                     ),
                     status_code=400,
                 )
@@ -4198,6 +4299,7 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
                     form_overrides=coerced_overrides,
                     global_error=str(exc),
                     subtype=rail_subtype,
+                    from_param=from_param,
                 ),
                 status_code=400,
             )
@@ -4293,6 +4395,7 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
                     form_overrides=coerced_overrides,
                     global_error=str(exc),
                     subtype=rail_subtype,
+                    from_param=from_param,
                 ),
                 status_code=400,
             )
@@ -4301,8 +4404,10 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
         # Plain-form POST → 303 redirect back to home. Browser navigates;
         # the operator sees the new entity in its section. No HTMX
         # involvement here (the create page is full-page nav, not an
-        # in-place swap).
-        return RedirectResponse("/", status_code=303)
+        # in-place swap). BTa.2 P1.5 — `_back_from` short-circuits the
+        # default / so Triage → New → Save → Triage is one click.
+        redirect_target = _safe_back_target(from_param) or "/"
+        return RedirectResponse(redirect_target, status_code=303)
 
     async def delete_handler(request: Request) -> HTMLResponse:
         kind = _kind_from_path(request.path_params["kind"])

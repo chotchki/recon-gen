@@ -44,6 +44,7 @@ from dataclasses import replace as dataclass_replace
 from html import escape
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import quote
 
 
 # X.4.e cache-bust — boot-time random hex appended as `?cb=…` to every
@@ -728,7 +729,15 @@ def _render_etl_landing_page(
 # -- BT.2 — /studio/etl/probe page ------------------------------------------
 
 
-_PROBE_DEFAULT_WINDOW_DAYS = 7
+# BTa.2 P1.1 (operator-locked): Probe default window is "All time"
+# — the prior 7-day default created a trust-killer where Run-coverage
+# said a rail had data but Probe (defaulted to last-7-days) said "no
+# rows" because the seed-data anchor was years outside any reasonable
+# rolling window. "All" sentinel is 1900-01-01 → today; the SQL
+# fetcher's BETWEEN bind still works, just with a wide-enough window
+# to catch any reasonable historical data. Operators can narrow via
+# the date pickers.
+_PROBE_DEFAULT_FROM = date(1900, 1, 1)
 
 
 async def _render_etl_probe_page(
@@ -777,13 +786,10 @@ async def _render_etl_probe_page(
     qp = request.query_params
     kind = _validate_probe_kind(qp.get("kind"))
     name = (qp.get("name") or "").strip()
-    # BT.2 probe — wall-clock today anchors the "last 7 days" default
-    # window so the page mirrors the operator's mental model. Same
-    # justification as the trainer page's default anchor; not on a
-    # determinism path (deploy / seed locks key off explicit dates).
-    today = date.today()  # typing-smell: ignore[no-datetime-now]: probe page default-window anchor — operator-facing "last 7 days" reads wall-clock; explicit dates via ?date_from / ?date_to override
-    default_from = today - timedelta(days=_PROBE_DEFAULT_WINDOW_DAYS - 1)
-    date_from = _parse_iso_date(qp.get("date_from")) or default_from
+    # BTa.2 P1.1 — default window = All time (1900 → today). Eliminates
+    # the Run-vs-Probe disagreement the BT cold-read flagged as P1.
+    today = date.today()  # typing-smell: ignore[no-datetime-now]: probe page default-window anchor — wall-clock today is the operator-facing "to" endpoint; explicit ?date_to overrides
+    date_from = _parse_iso_date(qp.get("date_from")) or _PROBE_DEFAULT_FROM
     date_to = _parse_iso_date(qp.get("date_to")) or today
 
     contracts = derive_column_contracts(instance)
@@ -889,9 +895,9 @@ def _render_probe_picker(
       <button type="submit" class="px-3 py-1 bg-accent text-accent-fg rounded-sm border border-accent text-sm hover:opacity-85">Apply</button>
     </div>
     <p class="text-xs text-secondary-fg m-0">
-      Window defaults to last {_PROBE_DEFAULT_WINDOW_DAYS} days; widen for
-      backfill / mass-load scenarios where the data lives outside the
-      live window.
+      Window defaults to <strong>All time</strong> (1900-01-01 →
+      today). Narrow to debug recent activity; BTa.5 ships quick-pick
+      chips for the common cases.
     </p>
   </form>
 """
@@ -1274,7 +1280,9 @@ async def _render_etl_run_page(
     )
 
     run_form_html = _render_etl_run_form(
-        last_summary=last_summary, last_run_at=last_run_at,
+        last_summary=last_summary,
+        last_run_at=last_run_at,
+        etl_hook_command=cfg.etl_hook if cfg is not None else None,
     )
     log_html = _render_etl_run_log(last_summary)
     coverage_html = await _render_etl_coverage_section(
@@ -1307,38 +1315,56 @@ async def _render_etl_run_page(
 
 
 def _render_etl_run_form(
-    *, last_summary: DeploySummary | None, last_run_at: datetime | None,
+    *,
+    last_summary: DeploySummary | None,
+    last_run_at: datetime | None,
+    etl_hook_command: str | None = None,
 ) -> str:
-    """Run-ETL button + last-run status sidebar."""
+    """Refresh-Data button + last-run status sidebar.
+
+    BTa.2 P1.3 — last-run banner now surfaces hook attribution
+    (the command that ran + bundled-demo distinction + exit code)
+    so first-time operators can tell whether THEIR hook ran or
+    the bundled demo placeholder. ``etl_hook_command`` is
+    ``cfg.etl_hook`` (None → bundled demo hook ran).
+    """
     if last_summary is None:
         status_html = (
             '<p class="text-sm text-secondary-fg m-0">No runs yet.</p>'
         )
-    elif last_summary.halted:
-        ts = last_run_at.isoformat(timespec="seconds") if last_run_at else "—"
-        status_html = (
-            '<p class="text-sm m-0 mb-1">'
-            f'<span class="text-danger font-semibold">● HALTED</span> '
-            f'at {ts}</p>'
-            f'<p class="text-xs text-secondary-fg m-0">'
-            f'reason: <code>{escape(last_summary.halt_reason or "—")}</code></p>'
-        )
     else:
         ts = last_run_at.isoformat(timespec="seconds") if last_run_at else "—"
-        tx_after = last_summary.step3_generator_transactions_after
-        status_html = (
-            '<p class="text-sm m-0 mb-1">'
-            f'<span class="text-success font-semibold">● success</span> '
-            f'at {ts}</p>'
-            f'<p class="text-xs text-secondary-fg m-0">'
-            f'gen {last_summary.step5_data_generation_id} · '
-            f'{tx_after:,} transactions</p>'
-        )
+        hook_attr = _format_hook_attribution(etl_hook_command)
+        if last_summary.halted:
+            exit_code = last_summary.step1_etl_hook_exit_code
+            status_html = (
+                '<p class="text-sm m-0 mb-1">'
+                f'<span class="text-danger font-semibold">● HALTED</span> '
+                f'at {ts}</p>'
+                f'<p class="text-xs text-secondary-fg m-0 mb-1">'
+                f'reason: <code>{escape(last_summary.halt_reason or "—")}</code></p>'
+                f'<p class="text-xs text-secondary-fg m-0 mb-1">'
+                f'hook: {hook_attr}</p>'
+                f'<p class="text-xs text-secondary-fg m-0">'
+                f'exit code: <code>{exit_code}</code></p>'
+            )
+        else:
+            tx_after = last_summary.step3_generator_transactions_after
+            status_html = (
+                '<p class="text-sm m-0 mb-1">'
+                f'<span class="text-success font-semibold">● success</span> '
+                f'at {ts}</p>'
+                f'<p class="text-xs text-secondary-fg m-0 mb-1">'
+                f'gen {last_summary.step5_data_generation_id} · '
+                f'{tx_after:,} transactions</p>'
+                f'<p class="text-xs text-secondary-fg m-0">'
+                f'hook: {hook_attr}</p>'
+            )
     return f"""
   <section class="flex items-center gap-6 px-8 pt-6 pb-3 bg-white border-b border-surface-border">
     <form method="post" action="/etl/run">
       <button type="submit" id="etl-run-btn" class="px-4 py-2 bg-accent text-accent-fg rounded-sm border border-accent text-sm font-semibold hover:opacity-85">
-        ▶ Run ETL
+        ↻ Refresh Data
       </button>
     </form>
     <div id="etl-last-run-status">
@@ -1346,6 +1372,18 @@ def _render_etl_run_form(
     </div>
   </section>
 """
+
+
+def _format_hook_attribution(etl_hook_command: str | None) -> str:
+    """Hook label for the last-run status banner.
+
+    When the operator hasn't configured ``cfg.etl_hook``, the
+    deploy ran the bundled demo regen — make that visible so
+    "I ran ETL but my data isn't here" gets a faster diagnosis.
+    """
+    if not etl_hook_command:
+        return "<em>(bundled demo regeneration — no operator hook configured)</em>"
+    return f"<code>{escape(etl_hook_command)}</code>"
 
 
 def _render_etl_run_log(last_summary: DeploySummary | None) -> str:
@@ -1406,7 +1444,7 @@ async def _render_etl_coverage_section(
   <section class="px-8 py-10 text-center text-secondary-fg" id="etl-coverage-empty">
     <p class="text-sm m-0 mb-2"><strong>No ETL has been run yet on this L2.</strong></p>
     <p class="text-sm m-0">
-      Click <strong>▶ Run ETL</strong> above to invoke the configured
+      Click <strong>↻ Refresh Data</strong> above to invoke the configured
       ETL hook against the demo DB. Coverage shows up here once the run
       completes.
     </p>
@@ -1656,10 +1694,28 @@ def _render_triage_body(gaps: tuple[Gap, ...]) -> str:
 """
 
 
+def _append_from_query(target: str, from_path: str) -> str:
+    """Append ``?from=<path>`` (or ``&from=<path>``) for back-breadcrumbs.
+
+    BTa.2 P1.5 — preserves an existing query string and URL-encodes
+    the carried path so the editor's ``request.query_params.get("from")``
+    receives the original value verbatim.
+    """
+    separator = "&" if "?" in target else "?"
+    return f"{target}{separator}from={quote(from_path, safe='/')}"
+
+
 def _render_gap_card(gap: Gap) -> str:
-    """One decision card per gap."""
+    """One decision card per gap.
+
+    BTa.2 P1.4+P1.5 — appends ``?from=/etl/triage`` to the CTA so the
+    L2 editor can render a sticky "← Back to Triage" breadcrumb after
+    the operator lands there + survives the save-redirect for a
+    one-click "save then go back" loop.
+    """
     label = _GAP_KIND_LABELS.get(gap.kind, gap.kind)
     cta_label = _GAP_KIND_EDITOR_LABELS.get(gap.kind, "Open editor")
+    link_target = _append_from_query(gap.link_target, "/etl/triage")
     extras_html = ""
     if gap.evidence.extras:
         extras_lines = [
@@ -1685,7 +1741,7 @@ def _render_gap_card(gap: Gap) -> str:
       {sample_html}
       <p class="m-0">
         <a class="inline-block px-3 py-1 bg-accent text-accent-fg rounded-sm border border-accent text-sm hover:opacity-85"
-           href="{escape(gap.link_target)}">→ {escape(cta_label)}</a>
+           href="{escape(link_target)}">→ {escape(cta_label)}</a>
       </p>
     </article>
 """
