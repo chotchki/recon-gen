@@ -406,6 +406,44 @@ _THEME_TOKEN_MAP: list[tuple[str, str]] = [
 ]
 
 
+def _render_inline_markdown(text: str) -> str:
+    """Render prose with markdown formatting (``**bold**``, ``` `code` ```,
+    links, em-dashes) to inline HTML for use inside an existing block
+    container.
+
+    Sheet descriptions + visual subtitles carry markdown-flavored prose
+    authored in the Python tree (e.g. ``"**ledger drift** (computed = …)"``).
+    Pre-fix, ``html.escape(text)`` emitted raw asterisks; this helper
+    pipes through python-markdown so ``**foo**`` becomes
+    ``<strong>foo</strong>``, backticks become ``<code>``, etc.
+
+    XSS posture: ``html.escape`` runs BEFORE the markdown pass so any
+    raw ``<script>`` / ``<b>`` in the source becomes ``&lt;script&gt;``
+    before markdown sees it. Markdown's ``**...**`` / ``` `...` ``` /
+    ``[...]()`` tokens survive html-escape (they're plain ASCII), so
+    legitimate markdown still renders; HTML injection paths stay
+    blocked even when the source prose was author-typed and trusted.
+
+    Strategy: render with python-markdown, then strip the single outer
+    ``<p>...</p>`` it wraps a paragraph in (our caller's own ``<p>``
+    holds the styling). Multi-paragraph descriptions keep their ``<p>``
+    tags inside; callers wrap with a ``<div>`` accordingly.
+    """
+    import markdown as _md  # noqa: PLC0415 — lazy
+    escaped = html.escape(text)
+    rendered = _md.markdown(escaped, extensions=["fenced_code", "tables"])
+    # markdown.markdown wraps single-paragraph input in <p>...</p>;
+    # strip that one wrapper since the caller's container provides
+    # the styled <p>. Multi-paragraph content keeps its <p> tags.
+    if (
+        rendered.startswith("<p>")
+        and rendered.endswith("</p>")
+        and rendered.count("<p>") == 1
+    ):
+        return rendered[len("<p>"):-len("</p>")]
+    return rendered
+
+
 @dataclass(frozen=True)
 class TopNavEntry:
     """Phase BS.2/BS.3 (D1+D2 nav contract) — single nav entry.
@@ -461,12 +499,21 @@ def emit_top_nav(
         "flex items-center bg-surface border-b border-surface-border "
         "divide-x divide-surface-border text-sm"
     )
+    title_class = (
+        "px-4 py-3 font-semibold text-accent select-none"
+    )
     link_base = (
         "px-4 py-3 text-primary-fg hover:bg-accent hover:text-accent-fg "
         "transition-colors"
     )
     link_active = "font-bold text-accent"
-    parts: list[str] = [f'<nav class="{nav_class}" aria-label="App nav">']
+    # BS.3 follow-up (2026-05-30): brand title left of the nav entries.
+    # divide-x emits a vertical separator between the title and the
+    # first entry, which reads as "brand | nav" — the standard pattern.
+    parts: list[str] = [
+        f'<nav class="{nav_class}" aria-label="App nav">',
+        f'  <span class="{title_class}">Recon-Gen</span>',
+    ]
     for entry in entries:
         esc_href = html.escape(entry.href)
         esc_label = html.escape(entry.label)
@@ -1289,7 +1336,8 @@ def emit_html(
     ]
     if sheet.description:
         body_parts.append(
-            f'  <p class="{desc_class}">{html.escape(sheet.description)}</p>'
+            f'  <p class="{desc_class}">'
+            f'{_render_inline_markdown(sheet.description)}</p>'
         )
     visual_fetch_urls = [
         (
@@ -1591,7 +1639,8 @@ def _render_visual(
     parts.append(f'    <h2 class="{h2_class}">{html.escape(title)}</h2>')
     if subtitle:
         parts.append(
-            f'    <p class="{subtitle_class}">{html.escape(subtitle)}</p>'
+            f'    <p class="{subtitle_class}">'
+            f'{_render_inline_markdown(subtitle)}</p>'
         )
     # X.2.g.1.a — auto-fetch on load. Without ``hx-trigger="load"``
     # the section sits empty until the user clicks Refresh.

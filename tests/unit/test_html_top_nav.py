@@ -170,3 +170,20 @@ def test_divider_via_divide_x_class() -> None:
     ])
     assert "divide-x" in nav
     assert "divide-surface-border" in nav
+
+
+def test_nav_renders_recon_gen_brand_title_first() -> None:
+    """BS.3 follow-up (2026-05-30): "Recon-Gen" brand title sits left
+    of the first nav entry, separated from it by the same divide-x
+    border that separates entries. Reads as "Brand | nav links"."""
+    nav = emit_top_nav(entries=[
+        TopNavEntry("A", "/a"),
+        TopNavEntry("B", "/b"),
+    ])
+    # Brand title appears once + before any <a>.
+    assert nav.count(">Recon-Gen<") == 1
+    brand_idx = nav.index(">Recon-Gen<")
+    first_link_idx = nav.index('<a href="/a"')
+    assert brand_idx < first_link_idx
+    # Not a link — the brand is a <span>, not an <a> (no destination).
+    assert '<a href' not in nav[:brand_idx + len(">Recon-Gen<")]

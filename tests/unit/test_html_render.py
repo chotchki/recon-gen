@@ -82,6 +82,51 @@ def test_emit_html_includes_sheet_description() -> None:
     assert "A short description." in out
 
 
+def test_emit_html_renders_markdown_in_sheet_description() -> None:
+    """BS.3 follow-up (2026-05-30): sheet descriptions carry markdown
+    (``**bold**``, ``` `code` ``` etc.) authored in the Python tree.
+    The renderer pipes them through python-markdown so the formatting
+    surfaces in App2 instead of leaking raw asterisks."""
+    sheet = Sheet(
+        sheet_id=SheetId("md-sheet"),
+        name="md",
+        title="Markdown Description Test",
+        description="A **bold** word and `code` token.",
+    )
+    sheet.visuals.append(
+        KPI(title="K", subtitle="s", visual_id=VisualId("v-md-kpi")),
+    )
+    out = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+    )
+    assert "<strong>bold</strong>" in out
+    assert "<code>code</code>" in out
+    # Raw asterisks gone — the markdown pass consumed them.
+    assert "**bold**" not in out
+
+
+def test_emit_html_renders_markdown_in_visual_subtitle() -> None:
+    """Same markdown affordance applies to visual subtitles."""
+    sheet = Sheet(
+        sheet_id=SheetId("md-sub-sheet"),
+        name="md",
+        title="Subtitle Test",
+        description="Plain.",
+    )
+    sheet.visuals.append(
+        KPI(
+            title="K",
+            subtitle="Count of **open** violations.",
+            visual_id=VisualId("v-md-sub"),
+        ),
+    )
+    out = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+    )
+    assert "<strong>open</strong>" in out
+    assert "**open**" not in out
+
+
 def test_emit_html_includes_back_to_dashboards_link() -> None:
     """Sheet pages must surface a way back to the listing — without it,
     a dashboard tab is a dead end (sheet tabs only walk within the
