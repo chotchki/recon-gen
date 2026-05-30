@@ -170,31 +170,22 @@ def _fresh_db_with_full_l2() -> sqlite3.Connection:
         dialect=Dialect.SQLITE,
     )
     conn.commit()
+    # BS.5 (2026-05-29): the hand-crafted JSON shape (rails +
+    # limit_schedules only) used to suffice because the chain
+    # matviews baked instance.chains as SQL literals. BS.5 routes
+    # them through _v_config_chain_children, which means the kv
+    # MUST carry the chains too. Use the full serialized L2.
     import json
     from datetime import datetime
+
+    import yaml as _yaml
+
+    from recon_gen.common.l2.serializer import serialize_l2
+    l2_dict = _yaml.safe_load(serialize_l2(instance))
     replace_config(
         conn, prefix=_PREFIX,
         cfg_json="{}",
-        l2_json=json.dumps({
-            "rails": [
-                {"name": "ExternalRailInbound", "max_pending_age_seconds": 86400},
-                {"name": "SubledgerCharge", "max_unbundled_age_seconds": 14400},
-            ],
-            "limit_schedules": [
-                {
-                    "parent_role": "CustomerLedger",
-                    "rail": "ExternalRailOutbound",
-                    "direction": "Outbound",
-                    "cap": 5000,
-                },
-                {
-                    "parent_role": "CustomerLedger",
-                    "rail": "ExternalRailInbound",
-                    "direction": "Inbound",
-                    "cap": 3000,
-                },
-            ],
-        }),
+        l2_json=json.dumps(l2_dict, separators=(",", ":")),
         as_of=datetime(2030, 1, 1, 12, 0, 0),
     )
     return conn

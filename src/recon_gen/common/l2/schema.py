@@ -838,10 +838,15 @@ def _render_fan_in_disagreement_body(
     contribute their fan_in entries; the 1:1 siblings stay under
     AB.2.3's contract.
 
-    Joins AB.4.3's ``_transfer_parents`` matview against an inline
-    rowset of the L2's fan_in entries (``(chain_parent_name,
-    child_template_name, expected_parent_count)``). For each child
-    Transfer:
+    BS.5 (2026-05-29): the per-chain expected-set CTE no longer inlines
+    a VALUES/UNION-ALL-of-DUAL rowset built from ``instance.chains``;
+    instead it SELECTs from ``<prefix>_v_config_chain_children`` filtered
+    on ``fan_in = 1``. The matview body is now static (same SQL for
+    every L2) — the per-L2 variation lives in the kv table read by the
+    view. The ``instance`` parameter stays in the signature for caller
+    compatibility but is unused.
+
+    For each child Transfer:
 
     - **healthy** (no row): ``parent_count == expected`` (when set)
       OR ``parent_count >= 2`` (when unset). The matview emits no row.
@@ -852,74 +857,24 @@ def _render_fan_in_disagreement_body(
       ``expected_parent_count`` is unset (variable-batch-flow
       fallback per AB.4.0 lock).
 
-    Empty case: when no chain child declares ``fan_in=True``, the
-    matview body falls back to a typed-NULL placeholder with
-    ``WHERE 1=0``
-    (mirrors AB.3.3's empty-XOR pattern) so it parses + plans
-    cleanly on all 3 dialects and contributes zero rows.
+    Empty case: when no chain child declares ``fan_in=True``, the view
+    returns zero rows from its ``fan_in = 1`` filter and the matview
+    body produces zero output rows naturally. No typed-NULL placeholder
+    needed — the SQL parses + plans cleanly on every dialect even with
+    an empty filter result, because the JOIN to a possibly-empty CTE is
+    well-formed at compile time.
     """
-    fan_in_rows: list[tuple[str, str, int | None]] = []
-    for chain in instance.chains:
-        for child in chain.children:
-            if not child.fan_in:
-                continue
-            # C8a guarantees every fan_in child is a TransferTemplate.
-            fan_in_rows.append(
-                (str(chain.parent), str(child.name), child.expected_parent_count),
-            )
+    del instance  # BS.5: per-L2 chain fan_in walks moved into the view.
 
-    if not fan_in_rows:
-        null_varchar = typed_null("VARCHAR(100)", dialect)
-        null_int = typed_null("INTEGER", dialect)
-        null_ts = typed_null("TIMESTAMP", dialect)
-        if dialect is Dialect.ORACLE:
-            from_clause = "FROM dual"
-        else:
-            from_clause = ""
-        return (
-            f"SELECT {null_varchar} AS child_transfer_id,\n"
-            f"       {null_varchar} AS chain_parent_name,\n"
-            f"       {null_varchar} AS child_template_name,\n"
-            f"       {null_int} AS parent_count,\n"
-            f"       {null_int} AS expected_parent_count,\n"
-            f"       {null_varchar} AS disagreement_kind,\n"
-            f"       {null_ts} AS business_day\n"
-            f"{from_clause}\n"
-            f"WHERE 1=0"
-        )
-
-    # Inline the per-chain expected-set CTE. Oracle uses
-    # UNION-ALL-of-SELECT-FROM-DUAL; PG + SQLite use VALUES under a
-    # WITH column-list (the AB.3.3 portable shape). expected_parent_count
-    # may be NULL — both forms encode that as a typed-NULL.
-    null_int = typed_null("INTEGER", dialect)
-    if dialect is Dialect.ORACLE:
-        def fmt_expected(v: int | None) -> str:
-            return str(v) if v is not None else null_int
-        union_rows = "\n  UNION ALL ".join(
-            f"SELECT '{cp}' AS chain_parent_name, "
-            f"'{ct}' AS child_template_name, "
-            f"{fmt_expected(ex)} AS expected_parent_count FROM dual"
-            for cp, ct, ex in fan_in_rows
-        )
-        fan_in_chains_cte = (
-            f"fan_in_chains AS (\n"
-            f"  {union_rows}\n"
-            f")"
-        )
-    else:
-        def fmt_row(cp: str, ct: str, ex: int | None) -> str:
-            ex_sql = str(ex) if ex is not None else "NULL"
-            return f"('{cp}', '{ct}', {ex_sql})"
-        rows = ",\n    ".join(
-            fmt_row(cp, ct, ex) for cp, ct, ex in fan_in_rows
-        )
-        fan_in_chains_cte = (
-            f"fan_in_chains(chain_parent_name, child_template_name, "
-            f"expected_parent_count) AS (\n"
-            f"  VALUES\n    {rows}\n"
-            f")"
-        )
+    fan_in_chains_cte = (
+        f"fan_in_chains AS (\n"
+        f"  SELECT parent_name AS chain_parent_name,\n"
+        f"         child_name AS child_template_name,\n"
+        f"         expected_parent_count\n"
+        f"  FROM {p}_v_config_chain_children\n"
+        f"  WHERE fan_in = 1\n"
+        f")"
+    )
 
     return (
         f"WITH {fan_in_chains_cte},\n"
@@ -986,70 +941,46 @@ def _render_multi_xor_violation_body(
     cardinality chains contribute only their non-fan_in children to
     this matview; the fan_in entries are enforced by AB.4.7.
 
+    BS.5 (2026-05-29): the per-chain (parent, child) rowset CTE no
+    longer inlines a VALUES/UNION-ALL-of-DUAL built from
+    ``instance.chains``; instead it SELECTs from
+    ``<prefix>_v_config_chain_children`` filtered to ``fan_in = 0`` and
+    further constrained to parents whose non-fan_in sibling count is
+    ≥ 2 (the multi-XOR qualifier). The matview body is static (same
+    SQL for every L2). The ``instance`` parameter stays for caller
+    compatibility but is unused.
+
     For each parent firing under such a chain, LEFT JOIN against
     ``_current_transactions`` to count declared XOR siblings that
     fired (transfer_parent_id = parent.transfer_id AND
     name IN declared-siblings). HAVING ``COUNT(...) <> 1`` surfaces
     both the missed (count=0) and overlap (count≥2) cases.
 
-    Empty case: when no chain qualifies (no multi-children chain
-    without fan_in entries), the body falls back to a typed-NULL
-    placeholder SELECT with ``WHERE 1=0`` (mirrors AB.3.3 + AB.4.7).
+    Empty case: when no chain qualifies, the view-filtered CTE
+    returns zero rows naturally; the downstream JOINs propagate the
+    empty result without a typed-NULL fallback (the SQL still parses +
+    plans on every dialect).
     """
-    # Collect (chain_parent_name, child_name) pairs from every
-    # multi-children chain, SKIPPING per-child fan_in entries.
-    pairs: list[tuple[str, str]] = []
-    for chain in instance.chains:
-        # Skip singleton-children chains — those are 1:1 (required)
-        # semantics, not XOR.
-        if len(chain.children) < 2:
-            continue
-        # Skip per-child fan_in entries — their cardinality is the
-        # AB.4.7 _fan_in_disagreement matview's job.
-        non_fan_in_children = [c for c in chain.children if not c.fan_in]
-        # Need ≥2 non-fan_in children to qualify as multi-XOR. (A chain
-        # like [ChildA(1:1), ChildB(fan_in)] has only 1 non-fan_in child
-        # → AB.2.3's 1:1 enforcement covers it.)
-        if len(non_fan_in_children) < 2:
-            continue
-        for child in non_fan_in_children:
-            pairs.append((str(chain.parent), str(child.name)))
+    del instance  # BS.5: per-L2 multi-XOR walks moved into the view filter.
 
-    if not pairs:
-        null_varchar = typed_null("VARCHAR(100)", dialect)
-        null_int = typed_null("INTEGER", dialect)
-        null_ts = typed_null("TIMESTAMP", dialect)
-        from_clause = "FROM dual" if dialect is Dialect.ORACLE else ""
-        return (
-            f"SELECT {null_varchar} AS parent_transfer_id,\n"
-            f"       {null_varchar} AS parent_rail_or_template_name,\n"
-            f"       {null_int} AS child_count,\n"
-            f"       {null_varchar} AS fired_children,\n"
-            f"       {null_varchar} AS disagreement_kind,\n"
-            f"       {null_ts} AS business_day\n"
-            f"{from_clause}\n"
-            f"WHERE 1=0"
-        )
-
-    # Inline the (chain_parent_name, child_name) rowset.
-    if dialect is Dialect.ORACLE:
-        union_rows = "\n  UNION ALL ".join(
-            f"SELECT '{cp}' AS chain_parent_name, "
-            f"'{cn}' AS child_name FROM dual"
-            for cp, cn in pairs
-        )
-        multi_xor_chains_cte = (
-            f"multi_xor_chains AS (\n"
-            f"  {union_rows}\n"
-            f")"
-        )
-    else:
-        rows = ",\n    ".join(f"('{cp}', '{cn}')" for cp, cn in pairs)
-        multi_xor_chains_cte = (
-            f"multi_xor_chains(chain_parent_name, child_name) AS (\n"
-            f"  VALUES\n    {rows}\n"
-            f")"
-        )
+    multi_xor_chains_cte = (
+        f"multi_xor_chains AS (\n"
+        f"  -- Non-fan_in children of chains whose non-fan_in sibling\n"
+        f"  -- count is ≥ 2 (the multi-XOR qualifier). Singleton + fan_in\n"
+        f"  -- chains are handled by AB.2.3 + AB.4.7 respectively.\n"
+        f"  SELECT parent_name AS chain_parent_name,\n"
+        f"         child_name\n"
+        f"  FROM {p}_v_config_chain_children\n"
+        f"  WHERE fan_in = 0\n"
+        f"    AND parent_name IN (\n"
+        f"      SELECT parent_name\n"
+        f"      FROM {p}_v_config_chain_children\n"
+        f"      WHERE fan_in = 0\n"
+        f"      GROUP BY parent_name\n"
+        f"      HAVING COUNT(*) >= 2\n"
+        f"    )\n"
+        f")"
+    )
 
     fired_agg = concat_agg("fcd.matched_child_name", ",", dialect)
     return (
@@ -1790,6 +1721,7 @@ def _emit_l1_invariant_drops(p: str, dialect: Dialect) -> str:
 _TYPED_CONFIG_VIEW_NAMES: tuple[str, ...] = (
     "v_config_rails",
     "v_config_limit_schedules",
+    "v_config_chain_children",
 )
 
 
@@ -1830,7 +1762,13 @@ def _emit_typed_config_view_creates(p: str, dialect: Dialect) -> str:
     locked these shapes against Oracle 23 (the local test container)
     and confirmed matview build-time compatibility.
     """
-    return _render_v_config_rails(p, dialect) + "\n" + _render_v_config_limit_schedules(p, dialect)
+    return (
+        _render_v_config_rails(p, dialect)
+        + "\n"
+        + _render_v_config_limit_schedules(p, dialect)
+        + "\n"
+        + _render_v_config_chain_children(p, dialect)
+    )
 
 
 def _pivot_field(
@@ -1940,6 +1878,81 @@ def _render_v_config_limit_schedules(p: str, dialect: Dialect) -> str:
         f"WHERE root.parent_id IS NULL\n"
         f"  AND root.key = 'l2_yaml'\n"
         f"GROUP BY ls_obj.node_id;\n"
+    )
+
+
+def _render_v_config_chain_children(p: str, dialect: Dialect) -> str:
+    """``<prefix>_v_config_chain_children`` — one row per declared
+    ``Chain.children`` entry with the chain's parent name and the child's
+    fan_in / expected_parent_count flags projected to typed columns.
+
+    Columns:
+    - ``parent_name``  VARCHAR(100) — the ``Chain.parent``.
+    - ``child_name``   VARCHAR(100) — the ``ChainChildSpec.name``.
+    - ``fan_in``       INTEGER (0/1) — 1 iff this entry carries
+      ``fan_in=True`` (an N:1 batched-payout child); 0 otherwise.
+      Matches the ``fan_in_flag`` shape ``_declared_chains_cte`` emits.
+    - ``expected_parent_count`` INTEGER NULL — the per-entry exact-count
+      annotation; NULL when unset.
+
+    Heterogeneous YAML emit (AB.6.2): a bare-default child serializes as
+    a string (``children: [rail-x, rail-y]``) and a flagged child
+    serializes as a mapping (``children: [{name: ..., fan_in: true}]``).
+    The view absorbs both:
+
+    - **Mapping form** — ``child_obj`` is a container (``value IS NULL``);
+      its descendant ``field`` rows carry the typed fields.
+    - **Bare-string form** — ``child_obj.value`` IS the name; the child
+      has no descendant rows. The LEFT JOIN to ``field`` produces no
+      matches, the ``MAX(CASE ...)`` pivots return NULL, and ``child_name``
+      COALESCEs onto ``child_obj.value``. ``fan_in`` falls to 0
+      (NULL != 'true') and ``expected_parent_count`` stays NULL — which
+      matches the dataclass defaults.
+
+    Consumers: ``_fan_in_disagreement`` matview (filter ``fan_in = 1``,
+    project ``expected_parent_count``); ``_multi_xor_violation`` matview
+    (filter ``fan_in = 0`` AND parent has ≥2 non-fan_in siblings);
+    L2FT's ``_declared_chains_cte`` (window-count siblings for the
+    Required/Optional + xor_group derivation).
+    """
+    name_pivot = _pivot_field("name", project_n=100, cast_to=None, dialect=dialect)
+    bare_name = lob_substr("child_obj.value", 100, dialect)
+    parent_expr = (
+        f"MAX({lob_substr('chain_parent_field.value', 100, dialect)})"
+    )
+    fan_in_pivot = _pivot_field(
+        "fan_in", project_n=10, cast_to=None, dialect=dialect,
+    )
+    expected_inner = _pivot_field(
+        "expected_parent_count", project_n=50, cast_to=None, dialect=dialect,
+    )
+    expected_cast = cast(expected_inner, "integer", dialect)
+    return (
+        f"CREATE VIEW {p}_v_config_chain_children AS\n"
+        f"SELECT\n"
+        f"  {parent_expr} AS parent_name,\n"
+        f"  COALESCE({name_pivot}, MAX({bare_name})) AS child_name,\n"
+        f"  CASE WHEN {fan_in_pivot} = 'true' THEN 1 ELSE 0 END AS fan_in,\n"
+        f"  {expected_cast} AS expected_parent_count\n"
+        f"FROM {p}_config_kv root\n"
+        f"JOIN {p}_config_kv chains_arr\n"
+        f"  ON chains_arr.parent_id = root.node_id\n"
+        f" AND chains_arr.key = 'chains'\n"
+        f"JOIN {p}_config_kv chain_obj\n"
+        f"  ON chain_obj.parent_id = chains_arr.node_id\n"
+        f"JOIN {p}_config_kv chain_parent_field\n"
+        f"  ON chain_parent_field.parent_id = chain_obj.node_id\n"
+        f" AND chain_parent_field.key = 'parent'\n"
+        f"JOIN {p}_config_kv children_arr\n"
+        f"  ON children_arr.parent_id = chain_obj.node_id\n"
+        f" AND children_arr.key = 'children'\n"
+        f"JOIN {p}_config_kv child_obj\n"
+        f"  ON child_obj.parent_id = children_arr.node_id\n"
+        f"LEFT JOIN {p}_config_kv field\n"
+        f"  ON field.parent_id = child_obj.node_id\n"
+        f"WHERE root.parent_id IS NULL\n"
+        f"  AND root.key = 'l2_yaml'\n"
+        f"GROUP BY child_obj.node_id;\n"
     )
 
 

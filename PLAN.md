@@ -28,9 +28,7 @@ needed for BS itself (deferred to BT).
   - Spike first: `docs/audits/bs_4_arch_shift_spike.md` — what touches `cli/data.py::data_apply` + `etl_hook` plumbing + the runner's seed flow + tests assuming the upstream-copy step.
   - Implementation: collapse to `truncate(demo_db) → etl_hook → refresh_matviews`. No intermediate upstream pull.
   - Existing upstream-pull code: per SPEC.md::D4, decide delete-vs-keep-as-opt-in during implementation.
-- [ ] BS.5 - Dynamic SQL conversion per BS.1's P0 recommendation (scope-positive only).
-  - Gated on BS.1's audit landing an explicit "pursue these N P0 items in BS" recommendation.
-  - If audit says defer everything to BT, BS.5 ticks as deferred and BS.0 Lock 6 sub-decision (c) flips deferred.
+- [x] BS.5 - Dynamic SQL conversion per BS.1's P0 recommendation **— COMPLETE 2026-05-29.** Authored `_v_config_chain_children` view (relational walk over `_config_kv` mirroring `_v_config_rails`; handles both bare-string + mapping ChainChildSpec emits via COALESCE + LEFT-JOIN on field rows). Converted 7 emit paths to source from projection views: `_fan_in_disagreement` + `_multi_xor_violation` matview bodies (static-collapse — body identical regardless of L2 chain count); `_declared_chains_cte` + `_declared_rail_names_cte` + `_declared_limit_schedules_cte` L2FT helpers switched to `(cfg)` signature, SELECT from `_v_config_chain_children` / `_v_config_rails` / `_v_config_limit_schedules` (downstream consumers `build_chains_dataset` + `build_chain_instances_dataset` + `build_exc_chain_orphans_dataset` + `build_exc_unmatched_rail_name_dataset` + `build_exc_dead_limit_schedules_dataset` + `build_unified_l2_exceptions_dataset` + `build_tt_instances_dataset` + `build_tt_legs_dataset` all collapse together). Fixed pre-existing semantic_lock-builder bug: `_build_fresh_semantic_lock_sqlite` was passing `l2_json="{}"` which silently masked production-honest limit_breach + stuck_pending + stuck_unbundled violations (the AW projection views already existed but had nothing to read against). Re-locked spec_example + sasquatch_pr semantic locks. **Discovered baseline noise needing operator triage** (separate from BS, per `[[feedback_production_honest_invariants]]`): spec_example baseline now shows 185 limit_breach + 119 stuck_unbundled + 2 stuck_pending violations production has been seeing all along; sasquatch_pr shows 2 + 127 + 2. Tests touched: tests/unit/test_aw1_config_table.py (+2 BS.5 tests), tests/schema/test_l2_schema.py (3 string-walk tests → static-collapse + view-shape gates), tests/json/test_l2_flow_tracing.py (3 tests reshaped), 4 spine `_fresh_db` helpers populate kv with full L2.
 - [x] BS.6 - uv extras collapse — 8 → 3 (`prod` + `dev` + `e2e`) **— COMPLETE 2026-05-29.** Merged `deploy + serve + demo + demo-oracle + audit` → `prod`; merged `docs` → `dev`; kept `e2e`. Updated pyproject.toml + uv.lock + 4 GHA workflows (ci, e2e, release, pages) + CLAUDE.md + install.md. ci.yml + release.yml in parity per `[[feedback_ci_release_workflow_parity]]`. 2865 unit tests pass; `uv sync --all-extras` resolves cleanly.
 
 ## Phase BT - ETL Support surface (provisional)
@@ -260,6 +258,8 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 **Done when:** sq_pg_aw + sq_or_aw + sp_or_aw browser layers green on `./run_tests.sh up_to=browser` (no xfail-to-mute per `feedback_no_xfail_to_sweep_under_rug`); sweep to PLAN_ARCHIVE.
 
 - [ ] BN.0 - Triage spike: snapshot per-failure repro shape against sq_pg_aw, sq_or_aw, sp_or_aw. Output: `docs/audits/bn_0_sq_aw_flake_snapshot.md` with per-test root-cause hypothesis + reproduction recipe. Prereq for BN.1+ fixes.
+## Phase PLAN - Phase PLAN
+- [ ] PLAN.md - BS.5 — _v_config_chain_children + 7-path conversion
 
 # Backlog (not yet phased)
 

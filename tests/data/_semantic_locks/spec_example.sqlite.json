@@ -56917,7 +56917,1673 @@
         }
       }
     ],
-    "limit_breach": [],
+    "limit_breach": [
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-10-05",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-10-23",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-10-29",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-11-05",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-12-07",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-12-14",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-12-17",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-12-19",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-12-21",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-12-31",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-10-03",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-11-01",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-12-03",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-12-05",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-12-11",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-12-18",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-12-27",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-001",
+          "business_day": "2029-12-01",
+          "direction": "Outbound",
+          "rail_name": "ExternalRailOutbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-001",
+          "business_day": "2029-12-02",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-001",
+          "business_day": "2030-01-01",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
+          "business_day": "2029-10-19",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
+          "business_day": "2029-10-24",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
+          "business_day": "2029-11-01",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
+          "business_day": "2029-11-06",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
+          "business_day": "2029-11-12",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
+          "business_day": "2029-11-13",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
+          "business_day": "2029-12-07",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-10-03",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-10-17",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-11-01",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-11-14",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-11-16",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-11-19",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-11-22",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-12-04",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-12-05",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-10-09",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-10-19",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-11-05",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-11-15",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-11-22",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-11-27",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-12-11",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-12-14",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-12-17",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-12-18",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-10-09",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-10-10",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-10-12",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-10-17",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-11-06",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-11-13",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-11-23",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-11-28",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-11-30",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-12-06",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-10-05",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-10-15",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-10-16",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-10-23",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-11-07",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-11-08",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-11-22",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-12-12",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2029-10-04",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2029-10-17",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2029-10-18",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2029-10-19",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2029-12-03",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2029-12-05",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2029-12-14",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-10-23",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-11-06",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-11-12",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-11-19",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-11-21",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-12-14",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-12-19",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-12-20",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-12-26",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-12-27",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-10-09",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-11-13",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-11-16",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-11-19",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-11-26",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-11-28",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-12-04",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-12-17",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-10-08",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-10-10",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-10-17",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-10-25",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-11-30",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-12-12",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-12-17",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-12-19",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-12-26",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-12-28",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-020",
+          "business_day": "2029-10-12",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-020",
+          "business_day": "2029-10-16",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-020",
+          "business_day": "2029-10-23",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-020",
+          "business_day": "2029-12-07",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-020",
+          "business_day": "2029-12-14",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-020",
+          "business_day": "2029-12-26",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-10-17",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-10-30",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-11-02",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-11-07",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-11-14",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-11-23",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-11-29",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-12-11",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-12-20",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-10-05",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-10-16",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-10-22",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-10-26",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-11-01",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-11-22",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-11-27",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-12-20",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-12-26",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
+          "business_day": "2029-10-12",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
+          "business_day": "2029-10-24",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
+          "business_day": "2029-10-25",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
+          "business_day": "2029-11-14",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
+          "business_day": "2029-11-16",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
+          "business_day": "2029-11-26",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
+          "business_day": "2029-11-28",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
+          "business_day": "2029-12-19",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
+          "business_day": "2029-12-20",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
+          "business_day": "2029-12-31",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-10-05",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-10-08",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-10-12",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-10-22",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-10-25",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-11-14",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-11-19",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-12-06",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-12-20",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-12-26",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-10-05",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-10-09",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-10-15",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-11-21",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-12-13",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-12-31",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-026",
+          "business_day": "2029-10-12",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-026",
+          "business_day": "2029-10-17",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-026",
+          "business_day": "2029-10-23",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-026",
+          "business_day": "2029-10-30",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-026",
+          "business_day": "2029-11-16",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-026",
+          "business_day": "2029-12-21",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-026",
+          "business_day": "2029-12-26",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-10-16",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-10-19",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-10-29",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-11-12",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-12-05",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-12-20",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
+          "business_day": "2029-11-09",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
+          "business_day": "2029-11-16",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
+          "business_day": "2029-11-20",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
+          "business_day": "2029-12-06",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
+          "business_day": "2029-12-07",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
+          "business_day": "2029-12-25",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
+          "business_day": "2030-01-01",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-10-12",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-10-30",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-11-15",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-11-20",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-11-27",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-11-28",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-12-24",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-12-25",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2030-01-01",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-10-22",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-10-25",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-11-06",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-11-09",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-12-03",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-12-10",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-12-25",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      }
+    ],
     "multi_xor_violation": [
       {
         "kind": "rule_violation",
@@ -63482,8 +65148,857 @@
         }
       }
     ],
-    "stuck_pending": [],
-    "stuck_unbundled": [],
+    "stuck_pending": [
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "ExternalRailInbound",
+          "transaction_id": "tx-stuck-pending-ExternalRailInbound-tmpl-cust-001"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "ExternalRailInbound",
+          "transaction_id": "tx-stuck-pending-ExternalRailInbound-tmpl-cust-002"
+        }
+      }
+    ],
+    "stuck_unbundled": [
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005926"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005928"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005930"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005932"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005934"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005936"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005938"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005940"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005942"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005944"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005946"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005948"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005950"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005952"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005954"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005956"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005958"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005960"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005962"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005964"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005966"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005968"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005970"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005972"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005974"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005976"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005978"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005980"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005982"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005984"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005986"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005988"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005990"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005992"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005994"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005996"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-005998"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006000"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006002"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006004"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006006"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006008"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006010"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006012"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006014"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006016"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006018"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006020"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006022"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006024"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006026"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006028"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006030"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006032"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006034"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006036"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006038"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006040"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006048"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006050"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006052"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006054"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006056"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006058"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006060"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006062"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006064"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006066"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006068"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006070"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006072"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006074"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006076"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006078"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006080"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006082"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006084"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006086"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006088"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006090"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006092"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006094"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006096"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006098"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006100"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006102"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006104"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006106"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006108"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006110"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006112"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006114"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006116"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006118"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006120"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006122"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006124"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006126"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006128"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006130"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006132"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006134"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006136"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006138"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006140"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006142"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006144"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006146"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006148"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006150"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006152"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006154"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006156"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006158"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006160"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006162"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006164"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-base-chain-subledgercharge-006166"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "rail_name": "SubledgerCharge",
+          "transaction_id": "tx-stuck-unbundled-SubledgerCharge-tmpl-cust-002"
+        }
+      }
+    ],
     "xor_group_violation": [
       {
         "kind": "rule_violation",

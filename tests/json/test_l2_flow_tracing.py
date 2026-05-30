@@ -513,24 +513,32 @@ def test_chains_dataset_targets_prefixed_current_transactions() -> None:
     assert "FROM sasquatch_pr_current_transactions" in sql
 
 
-def test_chains_dataset_inlines_l2_chain_entries() -> None:
-    """The declared edges CTE inlines every ChainEntry as a SQL
-    string-literal SELECT row joined by N-1 UNION ALLs.
-    sasquatch_pr.yaml has 6 chains; the empty-chains path is
-    exercised in another test with a synthesized instance."""
-    inst = load_instance(SASQUATCH_PR_YAML)
+def test_chains_dataset_sources_chains_from_kv_projection_view() -> None:
+    """BS.5 (2026-05-29): the declared-edges CTE no longer inlines a
+    UNION-ALL-of-literal-rows built from Python-side ``instance.chains``;
+    it SELECTs from ``<prefix>_v_config_chain_children`` (the BS.5
+    projection view) and window-aggregates the sibling count to
+    compute Required/Optional + xor_group.
+
+    Static-collapse invariant: the SQL is the SAME regardless of how
+    many chains the L2 declares — the per-L2 variation lives in the
+    kv table that the view reads.
+    """
     sql = _chains_dataset_sql_against(SASQUATCH_PR_YAML)
+    # The CTE shape is preserved (downstream SQL still references
+    # `declared`), but the source is the BS.5 view, not UNION-ALL.
     assert "WITH declared AS" in sql
-    # Z.A: each Chain row contributes one CTE row per child; assert
-    # both endpoints serialize.
-    total_rows = 0
+    assert "_v_config_chain_children" in sql
+    # Window function computes Required/Optional gate from view rows.
+    assert "COUNT(*) OVER (PARTITION BY parent_name)" in sql
+    # No literal chain.parent or child.name baked into the dataset SQL
+    # — that would be a regression to the pre-BS.5 UNION-ALL shape.
+    inst = load_instance(SASQUATCH_PR_YAML)
     for c in inst.chains:
-        assert f"'{c.parent}'" in sql
-        for child in c.children:
-            assert f"'{child.name}'" in sql
-        total_rows += len(c.children)
-    # UNION ALL count = (per-child rows) - 1.
-    assert sql.count("UNION ALL") == max(0, total_rows - 1)
+        assert f"'{c.parent}'" not in sql, (
+            f"chain parent {c.parent!r} leaked into dataset SQL "
+            f"(BS.5 regression: should come from the projection view)"
+        )
 
 
 def test_chains_dataset_emits_required_optional_labels() -> None:
@@ -549,17 +557,24 @@ def test_chains_dataset_emits_required_optional_labels() -> None:
         assert "'Optional'" in sql
 
 
-def test_chains_dataset_xor_group_emits_null_for_singleton_rows() -> None:
-    """Z.A: singleton-children Chain rows serialize NULL in the
-    xor_group slot (no XOR alternation); multi-children rows
-    serialize the row's composite key as the group identifier.
-    Visuals can then treat NULL as 'no XOR group' explicitly."""
+def test_chains_dataset_xor_group_is_null_for_singleton_chains() -> None:
+    """Z.A semantics preserved post-BS.5: singleton-children chains
+    project NULL in the ``xor_group`` slot (no XOR alternation);
+    multi-children chains project a stable per-group key. Consumers
+    treat NULL as 'no XOR group'.
+
+    BS.5 (2026-05-29): instead of inlining ``NULL AS xor_group`` as a
+    SELECT literal per-row, the dataset SQL derives ``xor_group`` from
+    a CASE on the view's window-counted sibling count
+    (``sibling_count > 1`` ⇒ group key; singleton ⇒ NULL).
+    """
     inst = load_instance(SASQUATCH_PR_YAML)
     has_singleton = any(len(c.children) == 1 for c in inst.chains)
     assert has_singleton, "test fixture lost its singleton-children rows"
     sql = _chains_dataset_sql_against(SASQUATCH_PR_YAML)
-    # At least one CTE row must have NULL in the xor_group slot.
-    assert "NULL AS xor_group" in sql
+    # CASE expression gates xor_group on the sibling count; the
+    # ELSE branch is implicit NULL for the singleton case.
+    assert "CASE WHEN sibling_count > 1 THEN parent_name END AS xor_group" in sql
 
 
 def test_chains_dataset_orphan_rate_clamps_at_zero() -> None:
@@ -591,21 +606,34 @@ def test_chains_dataset_contract_columns_match_builder() -> None:
     assert cols == expected
 
 
-def test_chains_dataset_handles_empty_chains_list() -> None:
-    """An L2 instance with zero chains exercises the empty-CTE path
-    (WHERE 1=0) — the SQL stays valid and the visual harmless. (Every
-    bundled L2 declares at least one chain now, so synthesize the
-    no-chains case by stripping ``chains`` off a loaded instance.)"""
+def test_chains_dataset_emits_same_sql_regardless_of_l2_chain_count() -> None:
+    """BS.5 static-collapse: the dataset SQL is byte-identical whether
+    the L2 declares zero, one, or many chains — per-L2 variation has
+    moved into the kv table (which the view reads), out of the
+    dataset SQL. No special-case ``WHERE 1=0`` fallback is needed; an
+    empty view simply yields zero rows from the chains CTE, which
+    propagates to zero edge-runtime rows."""
     from dataclasses import replace
 
     from recon_gen.apps.l2_flow_tracing.datasets import (
         build_chains_dataset,
     )
-    no_chains = replace(default_l2_instance(), chains=())
-    aws_ds = build_chains_dataset(_CFG, no_chains)
-    sql = _ds_sql(aws_ds)
-    assert "WHERE 1=0" in sql
-    assert "WITH declared AS" in sql
+    no_chains_sql = _ds_sql(
+        build_chains_dataset(_CFG, replace(default_l2_instance(), chains=())),
+    )
+    full_sql = _ds_sql(
+        build_chains_dataset(_CFG, default_l2_instance()),
+    )
+    assert no_chains_sql == full_sql, (
+        "BS.5 regression: dataset SQL differs between empty + populated "
+        "chain instances. Per-L2 variation has leaked back into the "
+        "emit layer; check that _declared_chains_cte still sources "
+        "from <prefix>_v_config_chain_children only."
+    )
+    # The view JOIN is present (positive assertion — not a tautology over
+    # the empty case).
+    assert "_v_config_chain_children" in no_chains_sql
+    assert "WITH declared AS" in no_chains_sql
 
 
 def test_chains_dataset_id_uses_deployment_prefix() -> None:
@@ -1013,17 +1041,24 @@ def test_exc_chain_orphans_filters_required_only() -> None:
 
 def test_exc_unmatched_rail_name_excludes_declared() -> None:
     """L2.2 LEFT JOINs on declared rails and filters to the unmatched
-    side (NULL after join). All declared rail names appear as
-    SELECT-literal rows in the declared_types CTE."""
+    side (NULL after join). BS.5 (2026-05-29): declared rail names now
+    come from ``<prefix>_v_config_rails`` (the AW projection view) —
+    not from Python-baked SQL string literals. The LEFT-JOIN-to-NULL
+    semantics are unchanged."""
     sql = _exc_dataset_sql(
         "build_exc_unmatched_rail_name_dataset", SASQUATCH_PR_YAML,
     )
-    inst = load_instance(SASQUATCH_PR_YAML)
-    declared_types = {str(r.name) for r in inst.rails}
-    for t in declared_types:
-        assert f"'{t}'" in sql
+    assert "_v_config_rails" in sql
     assert "LEFT JOIN declared_types" in sql
     assert "WHERE d.rail_name IS NULL" in sql
+    # Negative regression: no rail name should leak as a SQL string
+    # literal — that would mean the inline UNION-ALL shape came back.
+    inst = load_instance(SASQUATCH_PR_YAML)
+    for r in inst.rails:
+        assert f"'{r.name}'" not in sql, (
+            f"rail name {r.name!r} leaked into dataset SQL "
+            f"(BS.5 regression: should come from _v_config_rails)"
+        )
 
 
 def test_exc_dead_rails_filters_zero_postings_only() -> None:

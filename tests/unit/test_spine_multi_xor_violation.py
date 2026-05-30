@@ -54,6 +54,24 @@ def _fresh_db() -> sqlite3.Connection:
         dialect=_DIALECT,
     )
     conn.commit()
+    # BS.5 (2026-05-29): populate config_kv so the multi_xor_violation
+    # matview's view-based multi_xor_chains CTE (sourced from
+    # <prefix>_v_config_chain_children) sees the L2's declared chains.
+    # Pre-BS.5 the matview baked instance.chains as SQL literals.
+    import json as _json
+    from datetime import datetime as _datetime
+
+    import yaml as _yaml
+
+    from recon_gen.common.l2.config_table import replace_config
+    from recon_gen.common.l2.serializer import serialize_l2
+    l2_dict = _yaml.safe_load(serialize_l2(instance))
+    replace_config(
+        conn, prefix=_PREFIX,
+        cfg_json="{}",
+        l2_json=_json.dumps(l2_dict, separators=(",", ":")),
+        as_of=_datetime(2030, 1, 1, 12, 0, 0),
+    )
     return conn
 
 

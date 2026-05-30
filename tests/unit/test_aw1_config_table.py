@@ -379,6 +379,9 @@ def test_emit_schema_includes_typed_projection_views() -> None:
         assert f"CREATE VIEW spec_example_v_config_limit_schedules AS" in sql, (
             f"missing limit_schedules view on {dialect}"
         )
+        assert f"CREATE VIEW spec_example_v_config_chain_children AS" in sql, (
+            f"missing chain_children view on {dialect}"
+        )
 
 
 def test_emit_schema_no_json_table_anywhere() -> None:
@@ -420,6 +423,7 @@ def test_full_schema_applies_cleanly_with_config_kv_table() -> None:
     assert "spec_example_daily_balances" in tables
     assert "spec_example_v_config_rails" in tables
     assert "spec_example_v_config_limit_schedules" in tables
+    assert "spec_example_v_config_chain_children" in tables
 
 
 def test_replace_config_works_against_full_schema() -> None:
@@ -450,6 +454,101 @@ def test_replace_config_works_against_full_schema() -> None:
         conn.close()
 
 
+def test_v_config_chain_children_projects_spec_example_chains() -> None:
+    """BS.5: ``<prefix>_v_config_chain_children`` projects one row per
+    declared ChainChildSpec across all spec_example chains. Validates
+    the heterogeneous YAML emit absorbs both bare-string children
+    (defaults) and mapping children (flagged with fan_in /
+    expected_parent_count) in the same view body."""
+    conn = _fresh_db_with_full_schema()
+    try:
+        instance = load_instance(_SPEC_EXAMPLE)
+        from recon_gen.common.l2.serializer import serialize_l2
+        import yaml
+        l2_dict = yaml.safe_load(serialize_l2(instance))
+        replace_config(
+            conn, prefix=_PREFIX,
+            cfg_json="{}",
+            l2_json=json.dumps(l2_dict),
+            as_of=datetime(2030, 1, 1),
+        )
+        rows = conn.execute(
+            "SELECT parent_name, child_name, fan_in, expected_parent_count "
+            f"FROM {_PREFIX}_v_config_chain_children "
+            "ORDER BY parent_name, child_name"
+        ).fetchall()
+        # Expected from spec_example.yaml chains: section:
+        # ExternalReconciliationCycle → ReconciliationClosing (bare, 0, NULL)
+        # ReconciliationLeg → MerchantSettlementCycle (bare, 0, NULL)
+        # BatchPayoutTrigger → BatchedPayoutBatch (mapping, 1, 2)
+        # SettlementTimingCycle → BatchedPayoutBatch (bare, 0, NULL)
+        # BulkAccrualSettlement → {BulkAccrualSettleACH, BulkAccrualSettleWire} (bare×2, 0, NULL)
+        # DisbursementCycle → {DisbursementSettleACH, DisbursementSettleCheck} (bare×2, 0, NULL)
+        assert ("BatchPayoutTrigger", "BatchedPayoutBatch", 1, 2) in rows, (
+            f"mapping-shape chain child missing or wrong: {rows}"
+        )
+        bare_row = ("ExternalReconciliationCycle", "ReconciliationClosing", 0, None)
+        assert bare_row in rows, (
+            f"bare-string chain child missing or wrong: {rows}"
+        )
+        # All 6 chains contribute their declared children:
+        # 1+1+1+1+2+2 = 8 rows total.
+        assert len(rows) == 8, f"expected 8 chain-child rows, got {len(rows)}: {rows}"
+        # Only ONE row has fan_in=1 (the BatchedPayoutBatch entry).
+        fan_in_rows = [r for r in rows if r[2] == 1]
+        assert len(fan_in_rows) == 1, f"expected 1 fan_in row, got {fan_in_rows}"
+        # That row also carries the expected_parent_count.
+        assert fan_in_rows[0][3] == 2
+        # Every other row has fan_in=0 and expected_parent_count NULL.
+        for parent, child, fan_in, expected in rows:
+            if fan_in == 0:
+                assert expected is None, (
+                    f"non-fan_in row should have NULL expected_parent_count: "
+                    f"{parent} → {child} got {expected}"
+                )
+    finally:
+        conn.close()
+
+
+def test_v_config_chain_children_empty_when_no_chains() -> None:
+    """An L2 with no chains projects zero rows — the JOIN tree finds no
+    chains_arr matches and the view yields empty. (Critical: no
+    NULL-row leakage from outer-join semantics.)"""
+    from recon_gen.common.l2 import L2Instance
+    conn = sqlite3.connect(":memory:")
+    _register_sqlite_aggregates(conn)
+    instance = L2Instance(
+        accounts=(),
+        account_templates=(),
+        rails=(),
+        transfer_templates=(),
+        chains=(),
+        limit_schedules=(),
+    )
+    try:
+        cur = conn.cursor()
+        execute_script(
+            cur, emit_schema(instance, prefix="nc", dialect=Dialect.SQLITE),
+            dialect=Dialect.SQLITE,
+        )
+        conn.commit()
+        from recon_gen.common.l2.serializer import serialize_l2
+        import yaml
+        l2_dict = yaml.safe_load(serialize_l2(instance))
+        replace_config(
+            conn, prefix="nc",
+            cfg_json="{}",
+            l2_json=json.dumps(l2_dict),
+            as_of=datetime(2030, 1, 1),
+        )
+        rows = conn.execute(
+            "SELECT * FROM nc_v_config_chain_children"
+        ).fetchall()
+        assert rows == []
+    finally:
+        conn.close()
+
+
 def test_drop_schema_includes_config_kv_drop_and_typed_view_drops() -> None:
     """Teardown drops both the kv table AND the typed views."""
     from recon_gen.common.l2.schema import emit_schema_drop_sql
@@ -460,6 +559,7 @@ def test_drop_schema_includes_config_kv_drop_and_typed_view_drops() -> None:
     assert "DROP TABLE IF EXISTS spec_example_config_kv" in sql
     assert "DROP VIEW IF EXISTS spec_example_v_config_rails" in sql
     assert "DROP VIEW IF EXISTS spec_example_v_config_limit_schedules" in sql
+    assert "DROP VIEW IF EXISTS spec_example_v_config_chain_children" in sql
 
 
 # ---------------------------------------------------------------------------

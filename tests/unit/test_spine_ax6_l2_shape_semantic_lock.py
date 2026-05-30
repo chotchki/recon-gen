@@ -65,7 +65,14 @@ _ANCHOR = date(2030, 1, 1)
 
 
 def _fresh_db() -> sqlite3.Connection:
-    """Fresh in-memory DB with schema + AW config row populated."""
+    """Fresh in-memory DB with schema + AW config row populated.
+
+    BS.5 (2026-05-29): populate the full L2 yaml into config_kv so the
+    BS.5 projection views (chain_children, rails, limit_schedules) see
+    the declared L2. The pre-BS.5 ``json.dumps({"rails": []})`` stub
+    masked chain/limit matview output (it left the view-derived CTEs
+    empty); post-BS.5 the matviews depend on the populated tree.
+    """
     conn = sqlite3.connect(":memory:")
     conn.execute("PRAGMA foreign_keys = ON;")
     _register_sqlite_aggregates(conn)
@@ -76,9 +83,13 @@ def _fresh_db() -> sqlite3.Connection:
         dialect=_DIALECT,
     )
     conn.commit()
+    import yaml as _yaml
+    from recon_gen.common.l2.serializer import serialize_l2
+    l2_dict = _yaml.safe_load(serialize_l2(instance))
     replace_config(
         conn, prefix=_PREFIX,
-        cfg_json="{}", l2_json=json.dumps({"rails": []}),
+        cfg_json="{}",
+        l2_json=json.dumps(l2_dict, separators=(",", ":")),
         as_of=datetime(2030, 1, 1, 12, 0, 0),
     )
     return conn

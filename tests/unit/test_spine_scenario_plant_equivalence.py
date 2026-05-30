@@ -108,32 +108,19 @@ def _fresh_db() -> sqlite3.Connection:
     )
     conn.commit()
     # Config row — many matviews + generators (stuck_pending,
-    # stuck_unbundled, limit_breach) read it post-AW. Populate with
-    # the L2 rails + limit_schedules the spec_example yaml declares
-    # so those matviews + generators resolve cleanly.
+    # stuck_unbundled, limit_breach) read it post-AW. BS.5 added the
+    # chain matview dependency on _v_config_chain_children too. The
+    # hand-crafted JSON shape from the AW era (rails + limit_schedules
+    # only) left chains empty — fine pre-BS.5 because those matviews
+    # baked instance.chains as SQL literals, regression post-BS.5.
+    # Use the full serialized L2 to feed every projection view.
+    import yaml as _yaml
+    from recon_gen.common.l2.serializer import serialize_l2
+    l2_dict = _yaml.safe_load(serialize_l2(instance))
     replace_config(
         conn, prefix=_PREFIX,
         cfg_json="{}",
-        l2_json=json.dumps({
-            "rails": [
-                {"name": "ExternalRailInbound", "max_pending_age_seconds": 86400},
-                {"name": "SubledgerCharge", "max_unbundled_age_seconds": 14400},
-            ],
-            "limit_schedules": [
-                {
-                    "parent_role": "CustomerLedger",
-                    "rail": "ExternalRailOutbound",
-                    "direction": "Outbound",
-                    "cap": 5000,
-                },
-                {
-                    "parent_role": "CustomerLedger",
-                    "rail": "ExternalRailInbound",
-                    "direction": "Inbound",
-                    "cap": 3000,
-                },
-            ],
-        }),
+        l2_json=json.dumps(l2_dict, separators=(",", ":")),
         as_of=_AS_OF,
     )
     return conn

@@ -217,12 +217,26 @@ def _build_fresh_semantic_lock_sqlite(
             dialect=Dialect.SQLITE,
         )
         conn.commit()
-        # Seed config row (matview reads as_of from here per AW).
+        # Seed config row (matview reads as_of + BS.5 chain children
+        # from here). Pre-BS.5 this passed l2_json="{}" because no matview
+        # body read chain data through the kv projection — they baked
+        # `instance.chains` as SQL literals. BS.5 (2026-05-29) moved that
+        # walk into `<prefix>_v_config_chain_children`, so the kv table
+        # MUST carry the actual L2 yaml or `_fan_in_disagreement` +
+        # `_multi_xor_violation` matviews silently produce zero rows.
         from datetime import datetime as _datetime
+        import json as _json
+
+        import yaml as _yaml
+
+        from recon_gen.common.l2.serializer import serialize_l2 as _serialize_l2
+        l2_dict = _yaml.safe_load(_serialize_l2(instance))
+        # Compact-JSON (no indent) — matches the production
+        # emit_config_populate_sql shape; the kv walker parses both.
         replace_config(
             conn, prefix=prefix,
             cfg_json="{}",
-            l2_json="{}",  # empty JSON object; bypasses the json.dumps round-trip + the typing-smells json-indent gate
+            l2_json=_json.dumps(l2_dict, separators=(",", ":")),
             as_of=_datetime(anchor.year, anchor.month, anchor.day, 12, 0, 0),
         )
         # AO.L.gate — emit the 90-day baseline BEFORE plants so the lock

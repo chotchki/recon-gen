@@ -940,7 +940,7 @@ def build_chains_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
     small (typically tens of entries), so the cost is bounded.
     """
     prefix = cfg.db_table_prefix
-    declared = _declared_chains_cte(l2_instance, cfg.dialect)
+    declared = _declared_chains_cte(cfg)
     sql = (
         f"WITH declared AS (\n{declared}\n),\n"
         f"edge_runtime AS (\n"
@@ -1046,7 +1046,7 @@ def build_chain_instances_dataset(
     parent_amt = cents_to_dollars_sql(
         "parent_amount_money", dialect=cfg.dialect,
     )
-    declared = _declared_chains_cte(l2_instance, cfg.dialect)
+    declared = _declared_chains_cte(cfg)
     sql = (
         f"WITH declared AS (\n{declared}\n),\n"
         f"parent_chains AS (\n"
@@ -1233,7 +1233,7 @@ def build_exc_chain_orphans_dataset(
     property of the L2, not a demo artifact.
     """
     prefix = cfg.db_table_prefix
-    declared = _declared_chains_cte(l2_instance, cfg.dialect)
+    declared = _declared_chains_cte(cfg)
     sql = (
         f"WITH declared AS (\n{declared}\n),\n"
         f"edge_runtime AS (\n"
@@ -1321,7 +1321,7 @@ def build_exc_unmatched_rail_name_dataset(
     that type — the table reveals what's leaking past the L2's rails.
     """
     prefix = cfg.db_table_prefix
-    declared = _declared_rail_names_cte(l2_instance, cfg.dialect)
+    declared = _declared_rail_names_cte(cfg)
     sql = (
         f"WITH declared_types AS (\n{declared}\n)\n"
         f"SELECT\n"
@@ -1457,7 +1457,7 @@ def build_exc_dead_limit_schedules_dataset(
     the query bounded by the (small) limit-schedule count.
     """
     prefix = cfg.db_table_prefix
-    declared = _declared_limit_schedules_cte(l2_instance, cfg.dialect)
+    declared = _declared_limit_schedules_cte(cfg)
     sql = (
         f"WITH declared_limits AS (\n{declared}\n)\n"
         f"SELECT\n"
@@ -1503,11 +1503,11 @@ def build_unified_l2_exceptions_dataset(
     CASTs + literal `check_type` labels.
     """
     prefix = cfg.db_table_prefix
-    declared_chains = _declared_chains_cte(l2_instance, cfg.dialect)
-    declared_types = _declared_rail_names_cte(l2_instance, cfg.dialect)
+    declared_chains = _declared_chains_cte(cfg)
+    declared_types = _declared_rail_names_cte(cfg)
     declared_rails = _declared_rails_cte(l2_instance, cfg.dialect)
     declared_bundles = _declared_bundles_activity_cte(l2_instance, cfg.dialect)
-    declared_limits = _declared_limit_schedules_cte(l2_instance, cfg.dialect)
+    declared_limits = _declared_limit_schedules_cte(cfg)
     dead_metadata_fragments = _dead_metadata_check_fragments(
         l2_instance, prefix, cfg.dialect,
     )
@@ -1723,73 +1723,51 @@ def _declared_rails_cte(l2_instance: L2Instance, dialect: Dialect) -> str:
     return "\n  UNION ALL\n".join(rows)
 
 
-def _declared_chains_cte(l2_instance: L2Instance, dialect: Dialect) -> str:
-    """Render the L2-declared Chain rows as a UNION ALL of SELECT-literal rows.
+def _declared_chains_cte(cfg: Config) -> str:
+    """Declared-chain-children CTE sourced from the BS.5 projection view.
 
-    Z.A grammar collapse: each Chain row contributes one CTE row per
-    child (singleton row = 1 row, multi-children row = N rows). The
-    ``required`` column reports ``Required`` for singleton-children
-    rows (Z.A's "always fires when parent fires" semantics) and
-    ``Optional`` for multi-children siblings. The ``xor_group``
-    column is the row's composite key
-    (``parent::sorted-children-csv``) for multi-children rows, NULL
-    for singletons — keeping the existing downstream
-    "GROUP BY xor_group" semantics intact.
+    Reads ``<prefix>_v_config_chain_children`` (BS.5 — itself a relational
+    walk over ``<prefix>_config_kv``) and decorates each row with the
+    Required/Optional + xor_group + source_node/target_node columns the
+    chain consumers expect.
 
-    ``source_node`` / ``target_node`` are the display strings the
-    Sankey reads — currently identical to the parent / child name,
-    but kept as separate columns so M.3.6+ can attach a "(Required)"
-    or "(XOR: <group>)" suffix without breaking the join semantics.
+    Column semantics (preserved from the pre-BS.5 UNION-ALL-of-literals
+    shape):
 
-    ``dialect`` selects the typed-NULL form for the empty-chains
-    fallback branch.
+    - ``required`` — ``'Required'`` when this child is the only sibling
+      under its chain parent (Z.A: singleton ⇒ required); ``'Optional'``
+      otherwise.
+    - ``xor_group`` — a stable per-group key (NULL for singletons,
+      ``parent_name`` itself for multi-children groups; consumers only
+      use it as a GROUP BY / DISTINCT key, not parsed for the literal
+      shape).
+    - ``source_node`` / ``target_node`` — Sankey display strings (still
+      identical to parent / child name; the seam exists so M.3.6+ can
+      decorate without breaking JOIN semantics).
+    - ``fan_in`` — INTEGER 0/1 (AJ.4 — chain_orphans uses this to bypass
+      naive parent-minus-child subtraction for N:1 children).
+
+    Static-collapse: emit no longer enumerates L2 chains in Python; the
+    same SQL ships regardless of how many chains the L2 declares. The
+    view's GROUP BY does the projection.
     """
-    df = dual_from(dialect)
-    if not l2_instance.chains:
-        nt = typed_null("varchar(4000)", dialect)
-        ni = typed_null("integer", dialect)
-        return (
-            "  SELECT\n"
-            f"    {nt} AS parent_name,\n"
-            f"    {nt} AS child_name,\n"
-            f"    {nt} AS required,\n"
-            f"    {nt} AS xor_group,\n"
-            f"    {nt} AS source_node,\n"
-            f"    {nt} AS target_node,\n"
-            f"    {ni} AS fan_in"
-            f"{df}\n"
-            "  WHERE 1=0"
-        )
-    rows: list[str] = []
-    for c in l2_instance.chains:
-        is_required = len(c.children) == 1
-        required_label = "Required" if is_required else "Optional"
-        xor_group: str | None = (
-            None
-            if is_required
-            else f"{c.parent}::{','.join(sorted(str(ch.name) for ch in c.children))}"
-        )
-        for child_spec in c.children:
-            child = child_spec.name
-            source_node = str(c.parent)
-            target_node = str(child)
-            # AJ.4 (Gap I): expose per-child fan_in so chain_orphans can
-            # compute N:1 participation correctly (a fan_in child is
-            # singleton ⇒ labeled Required, so without this flag it would
-            # take the naive parent−child subtraction path).
-            fan_in_flag = 1 if child_spec.fan_in else 0
-            rows.append(
-                "  SELECT "
-                f"{_sql_str(str(c.parent))} AS parent_name, "
-                f"{_sql_str(str(child))} AS child_name, "
-                f"{_sql_str(required_label)} AS required, "
-                f"{_sql_nullable_str(xor_group)} AS xor_group, "
-                f"{_sql_str(source_node)} AS source_node, "
-                f"{_sql_str(target_node)} AS target_node, "
-                f"{fan_in_flag} AS fan_in"
-                f"{df}"
-            )
-    return "\n  UNION ALL\n".join(rows)
+    p = cfg.db_table_prefix
+    return (
+        f"  SELECT\n"
+        f"    parent_name,\n"
+        f"    child_name,\n"
+        f"    CASE WHEN sibling_count = 1 THEN 'Required'\n"
+        f"         ELSE 'Optional' END AS required,\n"
+        f"    CASE WHEN sibling_count > 1 THEN parent_name END AS xor_group,\n"
+        f"    parent_name AS source_node,\n"
+        f"    child_name AS target_node,\n"
+        f"    fan_in\n"
+        f"  FROM (\n"
+        f"    SELECT parent_name, child_name, fan_in,\n"
+        f"           COUNT(*) OVER (PARTITION BY parent_name) AS sibling_count\n"
+        f"    FROM {p}_v_config_chain_children\n"
+        f"  ) chain_children_with_count"
+    )
 
 
 def _leg_shape(rail: TwoLegRail | SingleLegRail) -> str:
@@ -1852,32 +1830,18 @@ def _sql_nullable_str(value: str | None) -> str:
 # -- M.3.7 CTE helpers -------------------------------------------------------
 
 
-def _declared_rail_names_cte(
-    l2_instance: L2Instance, dialect: Dialect,
-) -> str:
-    """Distinct rail-type identifiers, one per SELECT row.
+def _declared_rail_names_cte(cfg: Config) -> str:
+    """Distinct rail-type identifiers sourced from the AW projection view.
 
-    Z.B (2026-05-15): under the symmetric collapse, ``Rail.name`` IS
-    the type identifier (the legacy ``Rail.rail_name`` field is
-    gone). Z.B.12 will rewrite the L2.2 / L2.6 dataset SQL strings
-    that key off the dropped ``transactions.rail_name`` column;
-    until then this helper emits the rail-name set under the legacy
-    ``rail_name`` column alias so the tree builder doesn't crash
-    at SQL-string-emit time. The dashboard SQL itself can't execute
-    against a real DB until Z.B.12 lands.
+    BS.5 (2026-05-29): swapped a UNION-ALL-of-literal-rows for a SELECT
+    against ``<prefix>_v_config_rails``. Each rail's ``name`` IS the
+    type identifier (Z.B 2026-05-15 symmetric collapse). The view's
+    GROUP BY emits one row per L2 Rail; this CTE re-projects the
+    ``name`` column under the legacy ``rail_name`` alias (Z.B.12
+    deferred — ``transactions.rail_name`` is still the column).
     """
-    df = dual_from(dialect)
-    types = sorted({str(r.name) for r in l2_instance.rails})
-    if not types:
-        return (
-            f"  SELECT {typed_null('varchar(4000)', dialect)} AS rail_name"
-            f"{df} WHERE 1=0"
-        )
-    rows = [
-        f"  SELECT {_sql_str(t)} AS rail_name{df}"
-        for t in types
-    ]
-    return "\n  UNION ALL\n".join(rows)
+    p = cfg.db_table_prefix
+    return f"  SELECT name AS rail_name FROM {p}_v_config_rails"
 
 
 def _declared_bundles_activity_cte(
@@ -1944,33 +1908,23 @@ def _dead_metadata_check_fragments(
     return fragments
 
 
-def _declared_limit_schedules_cte(
-    l2_instance: L2Instance, dialect: Dialect,
-) -> str:
-    """One SELECT row per LimitSchedule entry. The cap stays as a
-    numeric literal; the parent_role + rail_name are quoted
-    string literals (they're Identifiers in the L2 model)."""
-    df = dual_from(dialect)
-    if not l2_instance.limit_schedules:
-        nt = typed_null("varchar(4000)", dialect)
-        nn = typed_null("numeric", dialect)
-        return (
-            f"  SELECT {nt} AS parent_role, "
-            f"{nt} AS rail_name, "
-            f"{nn} AS cap{df} WHERE 1=0"
-        )
-    rows: list[str] = []
-    for ls in l2_instance.limit_schedules:
-        rows.append(
-            f"  SELECT {_sql_str(str(ls.parent_role))} AS parent_role, "
-            # Z.B (2026-05-15): LimitSchedule.rail_name → .rail under
-            # the symmetric collapse; emit the rail name under the legacy
-            # rail_name column alias until Z.B.12 retires the alias.
-            f"{_sql_str(str(ls.rail))} AS rail_name, "
-            # Cap is a Decimal; render as a SQL numeric literal.
-            f"CAST({ls.cap} AS DECIMAL(20,2)) AS cap{df}"
-        )
-    return "\n  UNION ALL\n".join(rows)
+def _declared_limit_schedules_cte(cfg: Config) -> str:
+    """Per-LimitSchedule rows sourced from the AW projection view.
+
+    BS.5 (2026-05-29): swapped a UNION-ALL-of-literal-rows for a SELECT
+    against ``<prefix>_v_config_limit_schedules``. The view projects
+    one row per L2 LimitSchedule with typed ``parent_role`` / ``rail``
+    / ``direction`` / ``cap``; this CTE re-aliases ``rail`` to
+    ``rail_name`` (Z.B.12 deferred) and downcasts ``cap`` to
+    ``DECIMAL(20,2)`` for the consumers' aggregation shape.
+    """
+    p = cfg.db_table_prefix
+    return (
+        f"  SELECT parent_role,\n"
+        f"         rail AS rail_name,\n"
+        f"         CAST(cap AS DECIMAL(20,2)) AS cap\n"
+        f"  FROM {p}_v_config_limit_schedules"
+    )
 
 
 # -- Transfer Templates sheet (M.3.10f) ------------------------------------
@@ -2054,7 +2008,7 @@ def build_tt_instances_dataset(
         "(actual_net - expected_net)", dialect=cfg.dialect,
     )
     declared_tt = _declared_templates_cte(l2_instance, cfg.dialect)
-    declared_ch = _declared_chains_cte(l2_instance, cfg.dialect)
+    declared_ch = _declared_chains_cte(cfg)
     sql = (
         f"WITH templates AS (\n{declared_tt}\n),\n"
         f"declared AS (\n{declared_ch}\n),\n"
@@ -2276,7 +2230,7 @@ def build_tt_legs_dataset(
     amount = cents_to_dollars_sql("amount_money", dialect=cfg.dialect)
     amount_abs = cents_to_dollars_sql("amount_abs", dialect=cfg.dialect)
     declared_tt = _declared_templates_cte(l2_instance, cfg.dialect)
-    declared_ch = _declared_chains_cte(l2_instance, cfg.dialect)
+    declared_ch = _declared_chains_cte(cfg)
     sql = (
         f"WITH templates AS (\n{declared_tt}\n),\n"
         f"declared AS (\n{declared_ch}\n),\n"
