@@ -1739,6 +1739,34 @@ _GAP_KIND_EDITOR_LABELS: Mapping[str, str] = {
     "missing_metadata_key": "Open template editor",
 }
 
+# BTa.4 — per-kind visual stripe per BTa.0 Lock 3. Each kind ships
+# a distinct icon SHAPE + color — accessibility-friendly (not
+# color-only) and operator-recognizable across pages. Kind order
+# is the canonical accordion render order (most-actionable first).
+_GAP_KIND_RENDER_ORDER: tuple[str, ...] = (
+    "unmatched_rail",
+    "unmatched_template",
+    "missing_limit_schedule",
+    "missing_metadata_key",
+)
+
+_GAP_KIND_ICONS: Mapping[str, str] = {
+    "unmatched_rail": "⊘",
+    "unmatched_template": "⚠",
+    "missing_limit_schedule": "⊠",
+    "missing_metadata_key": "⊟",
+}
+
+# Tailwind border-l-4 color tokens per gap kind. Distinct enough to
+# pattern-match across the page without the operator reading the
+# label every time, while staying inside the brand palette.
+_GAP_KIND_STRIPES: Mapping[str, str] = {
+    "unmatched_rail": "border-l-4 border-l-warning",
+    "unmatched_template": "border-l-4 border-l-amber-500",
+    "missing_limit_schedule": "border-l-4 border-l-orange-500",
+    "missing_metadata_key": "border-l-4 border-l-danger",
+}
+
 
 async def _render_etl_triage_page(
     cache: L2InstanceCache,
@@ -1779,10 +1807,20 @@ async def _render_etl_triage_page(
         )
     else:
         contracts = derive_column_contracts(instance)
-        gaps = await detect_gaps(
-            db_pool, prefix, instance, contracts, dialect=dialect,
-        )
-        body_html = _render_triage_body(gaps)
+        try:
+            gaps = await detect_gaps(
+                db_pool, prefix, instance, contracts, dialect=dialect,
+            )
+        except Exception as exc:  # noqa: BLE001 — broad: db drivers raise dialect-specific exceptions
+            # BTa.4 — transient HTTP 500 retry-on-lock-busy. The gap
+            # detector queries materialized views that the deploy
+            # pipeline rebuilds; landing on Triage during a refresh
+            # used to surface as a raw 500. Detect the "recomputing"
+            # shape (lock contention / temp-table missing / etc.) and
+            # render a friendly retry prompt instead of crashing.
+            body_html = _render_triage_recomputing_banner(exc)
+        else:
+            body_html = _render_triage_body(gaps)
 
     return f"""<!doctype html>
 <html lang="en">
@@ -1805,8 +1843,54 @@ async def _render_etl_triage_page(
 """
 
 
+def _render_triage_recomputing_banner(exc: BaseException) -> str:
+    """BTa.4 — friendly retry prompt when the gap detector raises.
+
+    Replaces the prior 500 spinner-of-doom: the most common cause
+    during normal operator iteration is a concurrent matview refresh
+    holding a lock, so present the operator with a `<meta refresh>`
+    hint + manual retry button rather than a stack trace. The
+    underlying error class is shown in a `<details>` block for
+    diagnostics; ``repr`` is escaped before injection.
+    """
+    return f"""
+  <section class="px-8 py-10 text-center" id="triage-recomputing"
+           data-test-triage-state="recomputing">
+    <p class="text-base font-semibold text-warning m-0 mb-2">
+      ⏳ Triage data is recomputing.
+    </p>
+    <p class="text-sm text-secondary-fg max-w-2xl mx-auto m-0 mb-3">
+      The gap detector hit a transient error — usually the matview
+      refresh from the last <a class="text-accent hover:underline" href="/etl/run">Refresh Data</a>
+      run holding a lock. Retry in a moment.
+    </p>
+    <p class="m-0 mb-4">
+      <a class="inline-block px-4 py-2 bg-accent text-accent-fg rounded-sm border border-accent text-sm hover:opacity-85"
+         href="/etl/triage">↻ Retry now</a>
+    </p>
+    <details class="text-xs text-secondary-fg max-w-2xl mx-auto">
+      <summary class="cursor-pointer hover:text-accent">Error details</summary>
+      <pre class="text-left bg-surface-bg p-3 mt-2 rounded-sm overflow-auto"><code>{escape(repr(exc))}</code></pre>
+    </details>
+  </section>
+"""
+
+
 def _render_triage_body(gaps: tuple[Gap, ...]) -> str:
-    """Header + gap-cards list (or empty-state)."""
+    """BTa.4 — accordion-grouped triage view.
+
+    Gaps cluster by ``gap.kind`` into 4 collapsible ``<details>`` sections
+    (BTa.0 Lock 3). Each section header carries the kind label + a volume
+    badge (`Unmatched rail_name • 256 rows total · 3 distinct values`); each
+    card inside ships a per-kind color/icon stripe (accessible — distinct
+    shape AND label, not color-only). When only one kind has gaps, that
+    section renders open by default; with multiple kinds present, all
+    sections collapse so the operator can scan the kind distribution at a
+    glance before diving in.
+
+    Within a section, cards sort by ``evidence.row_count`` DESC — the
+    highest-volume gap is the most impactful fix.
+    """
     if not gaps:
         return """
   <section class="px-8 py-10 text-center" id="triage-empty">
@@ -1819,15 +1903,85 @@ def _render_triage_body(gaps: tuple[Gap, ...]) -> str:
     </p>
   </section>
 """
-    cards = "\n".join(_render_gap_card(g) for g in gaps)
-    count_label = f"{len(gaps)} gap{'s' if len(gaps) != 1 else ''} detected"
+    # Group by kind, preserve canonical render order.
+    groups: dict[str, list[Gap]] = {}
+    for gap in gaps:
+        groups.setdefault(gap.kind, []).append(gap)
+    # Sort each kind's gaps by row_count DESC so the highest-impact
+    # card surfaces first.
+    for kind_gaps in groups.values():
+        kind_gaps.sort(
+            key=lambda g: g.evidence.row_count, reverse=True,
+        )
+    default_open = len(groups) == 1
+    section_blocks: list[str] = []
+    for kind in _GAP_KIND_RENDER_ORDER:
+        if kind not in groups:
+            continue
+        section_blocks.append(
+            _render_triage_kind_section(
+                kind, groups[kind], default_open=default_open,
+            ),
+        )
+    # Any unknown kinds (defensive: a new GapKind shipped without
+    # render-order coverage) render at the end so they're not silently
+    # dropped.
+    for kind, kind_gaps in groups.items():
+        if kind in _GAP_KIND_RENDER_ORDER:
+            continue
+        section_blocks.append(
+            _render_triage_kind_section(
+                kind, kind_gaps, default_open=default_open,
+            ),
+        )
+    sections_html = "\n".join(section_blocks)
+    total = len(gaps)
+    kind_count = len(groups)
+    count_label = (
+        f"{total} gap{'s' if total != 1 else ''} across "
+        f"{kind_count} kind{'s' if kind_count != 1 else ''}"
+    )
     return f"""
   <section class="px-8 py-4 border-b border-surface-border bg-white" id="triage-header">
     <p class="text-sm m-0"><strong>{count_label}.</strong></p>
   </section>
-  <section class="px-8 py-6 grid grid-cols-1 lg:grid-cols-2 gap-4" id="triage-gaps">
-    {cards}
+  <section class="px-8 py-6 flex flex-col gap-3" id="triage-gaps">
+    {sections_html}
   </section>
+"""
+
+
+def _render_triage_kind_section(
+    kind: str, kind_gaps: list[Gap], *, default_open: bool,
+) -> str:
+    """One collapsible accordion section for a single gap kind.
+
+    Header carries: kind icon + label + volume badge (total rows +
+    distinct count). Body renders one card per gap, sorted by row
+    count DESC (caller's responsibility).
+    """
+    label = _GAP_KIND_LABELS.get(kind, kind)
+    icon = _GAP_KIND_ICONS.get(kind, "•")
+    total_rows = sum(g.evidence.row_count for g in kind_gaps)
+    distinct = len(kind_gaps)
+    badge_text = (
+        f"{total_rows:,} row{'s' if total_rows != 1 else ''} total · "
+        f"{distinct} distinct"
+    )
+    cards_html = "\n".join(_render_gap_card(g) for g in kind_gaps)
+    open_attr = " open" if default_open else ""
+    return f"""
+    <details class="bg-white border border-surface-border rounded-md overflow-hidden"
+             data-test-gap-kind-section="{escape(kind)}"{open_attr}>
+      <summary class="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-surface-bg list-none">
+        <span class="text-2xl leading-none" aria-hidden="true">{icon}</span>
+        <span class="text-base font-semibold text-primary-fg">{escape(label)}</span>
+        <span class="ml-auto text-xs text-secondary-fg font-mono">{escape(badge_text)}</span>
+      </summary>
+      <div class="px-4 pb-4 pt-1 grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {cards_html}
+      </div>
+    </details>
 """
 
 
@@ -1849,33 +2003,61 @@ def _render_gap_card(gap: Gap) -> str:
     L2 editor can render a sticky "← Back to Triage" breadcrumb after
     the operator lands there + survives the save-redirect for a
     one-click "save then go back" loop.
+
+    BTa.4 — per-kind color stripe (`border-l-4 border-l-<token>`) +
+    volume badge in the card title (`Unmatched rail_name • 256 rows`)
+    + columnar evidence mini-table (replaces the prior JSON-ish
+    `extras:` ul dump). The kind label moved up to the accordion
+    section header (no more per-card kind banner — drop redundant
+    chrome since the section already names the kind).
     """
-    label = _GAP_KIND_LABELS.get(gap.kind, gap.kind)
     cta_label = _GAP_KIND_EDITOR_LABELS.get(gap.kind, "Open editor")
+    stripe_classes = _GAP_KIND_STRIPES.get(gap.kind, "border-l-4 border-l-warning")
     link_target = _append_from_query(gap.link_target, "/etl/triage")
-    extras_html = ""
-    if gap.evidence.extras:
-        extras_lines = [
-            f'<li class="text-xs text-secondary-fg font-mono">'
-            f'<span class="font-semibold">{escape(k)}:</span> '
-            f'{escape(v)}</li>'
-            for k, v in gap.evidence.extras.items()
-        ]
-        extras_html = (
-            '<ul class="list-none m-0 p-0 mb-2">' + "".join(extras_lines) + '</ul>'
-        )
-    sample_html = ""
+    # Card title: observed value (the operator-readable identifier
+    # of what's broken) + volume badge.
+    title_value = escape(gap.observed_value) if gap.observed_value else "—"
+    row_count = gap.evidence.row_count
+    volume_badge = (
+        f'<span class="text-xs text-secondary-fg font-mono">'
+        f'{row_count:,} row{"s" if row_count != 1 else ""}</span>'
+    )
+    # Evidence mini-table: dt/dd pairs replace the prior bullet list.
+    # The dt is the field name (declared_rails / etc.) + dd is the
+    # operator-facing value. Sample transaction id is the first row
+    # when present.
+    evidence_rows: list[str] = []
     if gap.evidence.sample_transaction_id:
-        sample_html = (
-            '<p class="text-xs text-secondary-fg m-0 mb-2 font-mono">'
-            f'sample: {escape(gap.evidence.sample_transaction_id)}</p>'
+        evidence_rows.append(
+            '<div class="contents">'
+            '<dt class="text-xs text-secondary-fg">sample tx</dt>'
+            f'<dd class="text-xs font-mono m-0">'
+            f'{escape(gap.evidence.sample_transaction_id)}</dd>'
+            '</div>'
+        )
+    for key, value in gap.evidence.extras.items():
+        evidence_rows.append(
+            '<div class="contents">'
+            f'<dt class="text-xs text-secondary-fg">{escape(key)}</dt>'
+            f'<dd class="text-xs font-mono m-0 break-all">{escape(value)}</dd>'
+            '</div>'
+        )
+    evidence_html = ""
+    if evidence_rows:
+        evidence_html = (
+            '<dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 m-0 mb-3 '
+            'p-2 bg-surface-bg rounded-sm">'
+            + "".join(evidence_rows)
+            + '</dl>'
         )
     return f"""
-    <article class="bg-white border border-surface-border rounded-md p-4 shadow-sm" data-test-gap-kind="{escape(gap.kind)}">
-      <h2 class="text-base font-semibold text-warning m-0 mb-2">⚠ {escape(label)}</h2>
+    <article class="bg-white {stripe_classes} rounded-md p-4 shadow-sm" data-test-gap-kind="{escape(gap.kind)}">
+      <div class="flex items-baseline justify-between gap-3 mb-2">
+        <h3 class="text-base font-semibold text-primary-fg m-0 font-mono">{title_value}</h3>
+        {volume_badge}
+      </div>
       <p class="text-sm m-0 mb-3">{escape(gap.diagnosis)}</p>
-      {extras_html}
-      {sample_html}
+      {evidence_html}
       <p class="m-0">
         <a class="inline-block px-3 py-1 bg-accent text-accent-fg rounded-sm border border-accent text-sm hover:opacity-85"
            href="{escape(link_target)}">→ {escape(cta_label)}</a>

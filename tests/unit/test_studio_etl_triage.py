@@ -181,8 +181,12 @@ def test_etl_triage_with_pool_renders_gap_cards(
     assert 'data-test-gap-kind="unmatched_rail"' in body
     assert 'phantom_rail' in body
     assert '/l2_shape/rail/' in body
-    # Header counts the gap.
-    assert '1 gap detected' in body
+    # BTa.4 — header counts gaps + kinds; sole kind ⇒ section open.
+    assert '1 gap across 1 kind' in body
+    # Accordion section per kind.
+    assert 'data-test-gap-kind-section="unmatched_rail"' in body
+    # Single kind ⇒ default-open <details>.
+    assert ' open>' in body or 'open data-test' in body
 
 
 def test_etl_triage_empty_state_when_no_gaps(
@@ -219,3 +223,163 @@ def test_etl_triage_empty_state_when_no_gaps(
             os.unlink(db_path)
     assert 'id="triage-empty"' in body
     assert 'No gaps detected' in body
+
+
+# -- BTa.4 — accordion shape + retry banner -------------------------------
+
+
+from recon_gen.common.html._studio_routes import (  # noqa: E402, PLC0415
+    _render_triage_body,
+    _render_triage_recomputing_banner,
+)
+from recon_gen.common.l2.triage import Gap, GapEvidence  # noqa: E402, PLC0415
+
+
+def _gap(kind: str, observed: str, row_count: int, **extras: str) -> Gap:
+    """Test factory — Gap.kind is a GapKind Literal in production, but
+    the test exercise needs to construct unknown kinds + arbitrary
+    strings on the fly. Cast at the construction boundary."""
+    from typing import cast  # noqa: PLC0415
+
+    from recon_gen.common.l2.triage import GapKind  # noqa: PLC0415
+
+    return Gap(
+        kind=cast(GapKind, kind),
+        diagnosis=f"{observed} not declared ({row_count} rows).",
+        observed_value=observed,
+        evidence=GapEvidence(
+            row_count=row_count,
+            sample_transaction_id=f"tx-{observed}",
+            extras=extras,
+        ),
+        link_target="/l2_shape/rail/new",
+    )
+
+
+def test_triage_body_groups_gaps_into_per_kind_accordion_sections() -> None:
+    """BTa.4 — 4 distinct kinds across the gaps tuple ⇒ 4 accordion
+    sections; multi-kind ⇒ all default-collapsed (so the operator
+    sees the kind distribution before drilling)."""
+    gaps = (
+        _gap("unmatched_rail", "phantom", 5),
+        _gap("unmatched_template", "phantom_tt", 2),
+    )
+    body = _render_triage_body(gaps)
+    assert 'data-test-gap-kind-section="unmatched_rail"' in body
+    assert 'data-test-gap-kind-section="unmatched_template"' in body
+    # Multi-kind ⇒ no `open` attribute on the details elements.
+    assert "open>" not in body.replace("<details", "<X")  # crude — no leftover " open>"
+
+
+def test_triage_body_sorts_within_kind_by_row_count_desc() -> None:
+    """High-volume gaps surface first within their kind — the cards
+    that fix the most rows get the operator's eye first."""
+    gaps = (
+        _gap("unmatched_rail", "low_volume", 1),
+        _gap("unmatched_rail", "high_volume", 999),
+        _gap("unmatched_rail", "mid_volume", 50),
+    )
+    body = _render_triage_body(gaps)
+    # high_volume card surfaces before mid_volume which surfaces before
+    # low_volume in the rendered HTML.
+    assert body.index("high_volume") < body.index("mid_volume") < body.index("low_volume")
+
+
+def test_triage_body_volume_badge_in_section_header() -> None:
+    """Section header carries the per-kind volume badge: total rows +
+    distinct count."""
+    gaps = (
+        _gap("unmatched_rail", "a", 10),
+        _gap("unmatched_rail", "b", 20),
+        _gap("unmatched_rail", "c", 30),
+    )
+    body = _render_triage_body(gaps)
+    # 60 rows total / 3 distinct gaps.
+    assert "60 rows total" in body
+    assert "3 distinct" in body
+
+
+def test_triage_body_header_counts_gaps_and_kinds() -> None:
+    """Top-of-page count says BOTH total + kind-count so the operator
+    knows the spread before they collapse / expand sections."""
+    gaps = (
+        _gap("unmatched_rail", "a", 5),
+        _gap("unmatched_template", "b", 3),
+    )
+    body = _render_triage_body(gaps)
+    assert "2 gaps across 2 kinds" in body
+
+
+def test_triage_gap_card_carries_per_kind_color_stripe() -> None:
+    """Each card ships a `border-l-4 border-l-<token>` stripe per
+    kind for visual scanning. Distinct kinds get distinct tokens."""
+    gaps = (
+        _gap("unmatched_rail", "a", 1),
+        _gap("missing_metadata_key", "b", 1),
+    )
+    body = _render_triage_body(gaps)
+    # Per-kind colors (defined in _GAP_KIND_STRIPES).
+    assert "border-l-warning" in body
+    assert "border-l-danger" in body
+
+
+def test_triage_gap_card_renders_observed_value_as_title() -> None:
+    """The card title IS the observed value (the operator-readable
+    identifier of what's broken). Kind label moved up to the
+    accordion section header — no redundant per-card banner."""
+    gaps = (_gap("unmatched_rail", "phantom_rail_name", 7),)
+    body = _render_triage_body(gaps)
+    # Observed value is the card's h3.
+    assert ">phantom_rail_name</h3>" in body
+    # Volume badge sits next to the title.
+    assert "7 rows" in body
+
+
+def test_triage_gap_card_renders_evidence_as_dl_table_not_ul() -> None:
+    """BTa.4 — evidence renders as a 2-column `<dl>` grid (key /
+    value pairs), replacing the prior JSON-style `<ul>` dump."""
+    gaps = (
+        _gap(
+            "unmatched_rail", "phantom", 3,
+            declared_rails="rail_a, rail_b",
+        ),
+    )
+    body = _render_triage_body(gaps)
+    assert "<dl" in body
+    assert ">declared_rails</dt>" in body
+    assert ">rail_a, rail_b</dd>" in body
+
+
+def test_triage_body_unknown_kind_still_renders() -> None:
+    """Defensive — a new GapKind that lands without `_GAP_KIND_RENDER_ORDER`
+    coverage falls through to a section at the end; never silently
+    dropped."""
+    gaps = (
+        _gap("unmatched_rail", "a", 1),
+        _gap("brand_new_kind", "b", 1),
+    )
+    body = _render_triage_body(gaps)
+    assert 'data-test-gap-kind-section="brand_new_kind"' in body
+
+
+def test_render_triage_recomputing_banner_renders_retry_link() -> None:
+    """BTa.4 — transient gap-detector failure surfaces as a retry
+    prompt rather than a raw 500 page."""
+    exc = RuntimeError("lock held by matview refresh")
+    html = _render_triage_recomputing_banner(exc)
+    assert 'data-test-triage-state="recomputing"' in html
+    assert "recomputing" in html
+    assert 'href="/etl/triage"' in html
+    assert "Retry now" in html
+    # Error details disclose in a <details> for diagnostics.
+    assert "<details" in html
+    assert "lock held by matview refresh" in html
+
+
+def test_render_triage_recomputing_banner_escapes_exception_repr() -> None:
+    """Defensive — exception messages can carry user-controlled
+    fragments (table names, SQL params). Escape before injection."""
+    exc = RuntimeError("<script>alert(1)</script>")
+    html = _render_triage_recomputing_banner(exc)
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
