@@ -337,19 +337,17 @@ def test_diagram_embed_mode_drops_studio_header(
         embedded = c.get("/diagram?embed=1").text
         standalone = c.get("/diagram").text
 
-    # Standalone diagram keeps the chrome. AM.2 step 1 (2026-05-25):
-    # `.studio-header` / `.diagram-embed` semantic classes retired in
-    # favor of raw Tailwind utilities. Check the stable user-facing
-    # behavior — standalone shows the "Studio · diagram" h1 + a back-
-    # link to landing; embedded variant shows neither (the iframe
-    # carries no nav chrome).
+    # Phase BS.3 part 2b (2026-05-29) — the inline `← landing` /
+    # `→ data` / `→ dashboards` nav strip in the diagram chrome was
+    # removed (BF.11 dual-nav close). Standalone diagram keeps a
+    # minimal chrome (header + Studio · diagram title); embedded
+    # diagram still drops the chrome entirely (no double-stack inside
+    # the home iframe).
     assert "<header" in standalone
     assert "Studio · diagram" in standalone
-    assert "← landing" in standalone
     # Embedded variant drops the chrome entirely.
     assert "<header" not in embedded
     assert "Studio · diagram" not in embedded
-    assert "← landing" not in embedded
 
 
 def test_home_page_carries_diagram_filter_listener(

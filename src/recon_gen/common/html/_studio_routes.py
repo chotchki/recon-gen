@@ -507,9 +507,12 @@ def _render_home_page(
   <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
     <h1>Studio</h1>
     <span class="text-sm text-secondary-fg font-mono">{prefix}</span>
-    <a class="text-accent no-underline text-sm hover:underline" href="/diagram">→ diagram (full)</a>
-    <a class="text-accent no-underline text-sm hover:underline" href="/data">→ data</a>
-    <a class="text-accent no-underline text-sm hover:underline" href="/dashboards">→ dashboards</a>
+    <!-- Phase BS.3 part 2b — inline navigation links removed.
+         BF.11 (dual-nav-shape) close: the shared top-nav (BS.2/BS.3
+         part 1) lives in the dashboards listing; the Studio home page
+         no longer renders a duplicate `→ diagram` / `→ data` /
+         `→ dashboards` link strip. Full shared-nav injection into
+         Studio pages is BS.3 part 3 work. -->
     {deploy_controls}
   </header>
   <script>
@@ -745,9 +748,10 @@ def _render_diagram_page(
     '<header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">'
     f'<h1>Studio · diagram</h1>'
     f'<span class="text-sm text-secondary-fg font-mono">{prefix}</span>'
-    '<a class="text-accent no-underline text-sm hover:underline" href="/">← landing</a>'
-    '<a class="text-accent no-underline text-sm hover:underline" href="/data">→ data</a>'
-    '<a class="text-accent no-underline text-sm hover:underline" href="/dashboards">→ dashboards</a>'
+    # Phase BS.3 part 2b — inline nav strip removed (BF.11 close).
+    # `← landing` / `→ data` / `→ dashboards` were duplicated against
+    # the shared top-nav and confused operators. Re-enter via
+    # browser back or via the shared nav in BS.3 part 3.
     '</header>'
   ))}
 
@@ -1739,9 +1743,8 @@ def _render_data_page(
   <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
     <h1>Studio · data shaping</h1>
     <span class="text-sm text-secondary-fg font-mono">{prefix}</span>
-    <a class="text-accent no-underline text-sm hover:underline" href="/">← landing</a>
-    <a class="text-accent no-underline text-sm hover:underline" href="/diagram">→ diagram</a>
-    <a class="text-accent no-underline text-sm hover:underline" href="/dashboards">→ dashboards</a>
+    <!-- Phase BS.3 part 2b — inline nav strip removed (BF.11 close).
+         Shared top-nav lands in BS.3 part 3. -->
     {deploy_controls}
   </header>
   <script>

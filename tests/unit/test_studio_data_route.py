@@ -113,18 +113,24 @@ def test_data_route_carries_deploy_button(
     assert 'function quicksightDeploy()' in body
 
 
-def test_data_route_carries_back_to_landing_link(
+def test_data_route_chrome_strip_no_legacy_nav(
     writable_l2_yaml: Path,
 ) -> None:
+    """Phase BS.3 part 2b (2026-05-29) — the redundant inline `← landing`
+    / `→ diagram` / `→ dashboards` link strip in the Studio data-page
+    chrome was removed (BF.11 dual-nav close). The header keeps the
+    page title + prefix + deploy controls only. Shared top-nav lands
+    in BS.3 part 3."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/data").text
 
-    # AM.2 step 1 (2026-05-25): `.nav-link` semantic class retired;
-    # check the href + visible text instead (what the operator
-    # actually clicks).
-    assert 'href="/">← landing</a>' in body
-    assert 'href="/diagram">→ diagram</a>' in body
+    # Page title + prefix still present in the header.
+    assert "Studio · data shaping" in body
+    # Legacy inline nav links removed.
+    assert 'href="/">← landing</a>' not in body
+    assert 'href="/diagram">→ diagram</a>' not in body
+    assert 'href="/dashboards">→ dashboards</a>' not in body
 
 
 def test_data_route_training_pane_replaces_x4_h9_placeholder(
@@ -178,23 +184,28 @@ def test_data_route_training_pane_links_to_app2_l1_dashboard(
     ), "supersession_audit card should deep-link to App2 sheet"
 
 
-def test_home_chrome_links_to_data(writable_l2_yaml: Path) -> None:
-    """X.4.h.1.b — landing page chrome carries a `→ data` link."""
+def test_home_chrome_strip_no_legacy_data_link(writable_l2_yaml: Path) -> None:
+    """Phase BS.3 part 2b — the landing page's inline `→ data` /
+    `→ diagram` / `→ dashboards` link strip in the Studio chrome was
+    removed (BF.11 close). Shared top-nav lands in BS.3 part 3 (the
+    dashboards listing already has it via emit_dashboards_list)."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/").text
 
-    # AM.2 step 1: same locator change as `_data_route_carries_back`.
-    assert 'href="/data">→ data</a>' in body
+    assert 'href="/data">→ data</a>' not in body
+    assert 'href="/diagram">→ diagram (full)</a>' not in body
+    assert 'href="/dashboards">→ dashboards</a>' not in body
 
 
-def test_diagram_chrome_links_to_data(writable_l2_yaml: Path) -> None:
-    """X.4.h.1.b — diagram page chrome carries a `→ data` link."""
+def test_diagram_chrome_strip_no_legacy_data_link(writable_l2_yaml: Path) -> None:
+    """Phase BS.3 part 2b — diagram chrome inline nav strip removed."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/diagram").text
 
-    assert 'href="/data">→ data</a>' in body
+    assert 'href="/data">→ data</a>' not in body
+    assert 'href="/dashboards">→ dashboards</a>' not in body
 
 
 def test_diagram_chrome_omits_data_link_in_embed_mode(
