@@ -256,6 +256,32 @@ def test_per_family_bulk_toggle_buttons_present() -> None:
         assert f'data-test-family-none="{fid}"' in html
 
 
+def test_card_short_statement_renders_markdown() -> None:
+    """BV.4.8 followup — Supersession Audit's `short_statement` was
+    being rendered with literal backticks + asterisks because the
+    template ``escape()``-d the markdown source straight through.
+    Cards must surface ``**bold**`` / `` `code` `` formatted, not raw."""
+    html = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=False,
+    )
+    # supersession_audit's short_statement carries inline `_supersession_*`
+    # and **not** — both must render through markdown, not as literal text.
+    sup_idx = html.find('data-test-training-kind="supersession_audit"')
+    assert sup_idx > 0, "supersession_audit card missing"
+    sup_card = html[sup_idx:sup_idx + 2500]
+    # The literal source markers must be absent.
+    assert "**not**" not in sup_card, (
+        "card still emits raw `**not**` — markdown isn't being rendered"
+    )
+    assert "`_supersession_*`" not in sup_card, (
+        "card still emits raw backticked text — markdown isn't being rendered"
+    )
+    # The rendered HTML must contain the formatted equivalents.
+    assert "<strong>not</strong>" in sup_card
+    assert "<code>_supersession_*</code>" in sup_card
+
+
 def test_renders_empty_state_for_zero_match_filter() -> None:
     """BV.4.8.P1.3 — when ``Show: Only enabled`` is set before any
     plant is checked, the page used to render as blank with just the

@@ -448,15 +448,27 @@ filter. Switch the **Show:** selector back to *All*, or click
 Anti-drift test pinned at
 `test_renders_empty_state_for_zero_match_filter`.
 
-### P1.2 — DEFERRED (screenshot-timing artifact suspected)
+### P1.2 — RESOLVED (operator-confirmed non-bug)
 
-The family-chip `[all]` click DID select all 3 checkboxes per the
-`_bvToggleFamily` code path — the screenshot evidence is
-inconsistent with what the JS demonstrably does on Select All.
-Live-poke on WebKit + Chrome before promoting to a code change.
-If reproducible against live browser, the fix is a tighter selector
-in `_bvToggleFamily` OR a `requestAnimationFrame` wrapper around
-`updateDensity()`. Queued for the BV.5 cold-read iteration.
+Operator live-poked 2026-05-31 — family-chip density badge DOES
+update on click. Screenshot 04 was a timing artifact (captured
+before the JS settled). No code change needed.
+
+### P1.4 — FIXED (card text rendered as raw markdown source)
+
+Operator-spotted post-merge: trainer → L1 Audit → Supersession Audit
+card was rendering its `short_statement` with literal backticks +
+`**asterisks**` instead of `<code>` / `<strong>`. Root: `_render_card`
+in `_studio_training_v3.py:400,407` was piping `section.short_statement`
++ `section.what_to_do` straight through `escape()`, which preserves
+the markdown source as displayed text. Fix: route both through the
+existing XSS-safe `_render_inline_markdown` helper (escapes-then-
+markdown). `what_to_do`'s wrapper switched `<p>` → `<div>` so
+multi-paragraph copy works without nesting `<p>` tags.
+
+Anti-drift test pinned at
+`test_card_short_statement_renders_markdown` — keys on `<strong>not</strong>`
++ `<code>_supersession_*</code>` against the supersession card.
 
 ### P2 / P3 — queued
 

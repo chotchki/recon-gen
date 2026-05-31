@@ -22,6 +22,7 @@ from html import escape
 from recon_gen.common.html._studio_training_v2 import (
     resolve_section,
 )
+from recon_gen.common.html.render import _render_inline_markdown
 from recon_gen.common.l2.plant_registry import (
     PLANT_REGISTRY, PlantCategory, PlantKindEntry,
     PrimitiveIntField, PrimitiveStringField,
@@ -397,14 +398,14 @@ def _render_card(
         {error_badge_html}
       </header>
       <p class="text-xs text-secondary-fg max-w-3xl m-0">
-        {escape(_first_sentence(section.short_statement))}
+        {_render_inline_markdown(_first_sentence(section.short_statement))}
       </p>
       <div class="mt-2 flex flex-wrap gap-3 items-end">
         {primitives_html}
       </div>
       <details class="mt-2 text-xs">
         <summary class="cursor-pointer text-secondary-fg">What to do about it</summary>
-        <p class="mt-1 m-0">{escape(section.what_to_do)}</p>
+        <div class="mt-1 prose prose-xs max-w-none">{_render_inline_markdown(section.what_to_do)}</div>
       </details>
       <div class="mt-2 flex items-center gap-4">
         {clean_link}

@@ -183,7 +183,7 @@ The full L2 + ETL + Training round-trip. Glues everything under one e2e test. **
   - [ ] BV.4.5 - Per-kind failure cards (DL.12) + L2-staleness banner (DL.14). ~0.5 d.
   - [x] BV.4.6 - Anti-drift tests (prefix-routing exhaustiveness; Info-sheet prefix row per DL.13). ~0.5 d.
   - [ ] BV.4.7 - BV.3.1 round-trip test extended over all 3 dialects (PG + Oracle Docker variants). ~0.5 d.
-  - [ ] BV.4.8 - Cold-read v2 against the full dual-prefix surface. BU.6's planned cold-read absorbed here. ~90 min.
+  - [x] BV.4.8 - Cold-read v2 against the full dual-prefix surface. BU.6's planned cold-read absorbed here. ~90 min.
 - [ ] BV.5 - Agent-based design cold-read against the dogfood + the HUGE test. Output: `docs/audits/bv_cold_read.md`. Operator iteration + sign-off.
 
 - [ ] BV.6 - BV.6 — PG matview refresh modernization (CONCURRENTLY); Oracle/SQLite unchanged
