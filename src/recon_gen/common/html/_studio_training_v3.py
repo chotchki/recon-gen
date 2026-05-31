@@ -210,6 +210,8 @@ def render_training_v3_landing(
                 {("" if v_overlay_exists else "disabled")}>
           ⚡ Apply selection
         </button>
+        <span id="bv-apply-diff" data-test-bv-apply-diff
+              class="text-xs text-secondary-fg">no changes pending</span>
         {("" if v_overlay_exists else '<span class="text-xs text-secondary-fg">Click Session Start first to populate the v overlay.</span>')}
       </div>
     </form>
@@ -394,6 +396,15 @@ def _render_card(
             f'title="{escape(failed_message)}" '
             f'data-test-error-badge-{escape(entry.kind)}>error planting</span>'
         )
+    # BV.4.10.a — currently-planted pill makes the v-overlay state
+    # obvious at a glance. The checkbox shows the same info implicitly
+    # via its `checked` state, but a green pill next to the title
+    # screams "this row is in v_<matview>" without requiring the
+    # operator to inspect each checkbox carefully.
+    planted_badge_html = (
+        '<span class="text-xs px-2 py-0.5 bg-success text-white rounded-sm" '
+        f'data-test-planted-badge-{escape(entry.kind)}>currently planted</span>'
+    ) if enabled else ""
     return f"""
     <article class="border border-surface-border rounded-md p-4 flex flex-col gap-2{card_bg}"
              data-test-training-kind="{escape(entry.kind)}"{error_attr}>
@@ -405,6 +416,7 @@ def _render_card(
         </label>
         {qualifier_html}
         <span class="text-xs text-secondary-fg font-mono">{escape(entry.kind)}</span>
+        {planted_badge_html}
         {error_badge_html}
       </header>
       <p class="text-xs text-secondary-fg max-w-3xl m-0">
@@ -548,11 +560,42 @@ _BV_LANDING_JS = """
       else empty.classList.remove('hidden');
     }
   };
-  // Live density updates on any checkbox toggle.
+  // BV.4.10.b — Apply diff preview. Walks all enabled_kinds
+  // checkboxes; for each, compares current `checked` vs
+  // `defaultChecked` (the initial state the server rendered with —
+  // which mirrors v_config_kv's `trainer_applied_plants` set).
+  // The diff drives the sticky-Apply-bar's "Will plant N, remove M"
+  // label so the operator can predict what Apply will do BEFORE
+  // clicking. DL.9 fast-path means "no changes pending" is a no-op
+  // Apply at the matview-refresh level.
+  function updateApplyDiff() {
+    const diff = root.querySelector('#bv-apply-diff');
+    if (!diff) return;
+    let added = 0, removed = 0;
+    root.querySelectorAll('input[type="checkbox"][name="enabled_kinds"]').forEach(cb => {
+      if (cb.checked && !cb.defaultChecked) added++;
+      else if (!cb.checked && cb.defaultChecked) removed++;
+    });
+    if (added === 0 && removed === 0) {
+      diff.textContent = 'no changes pending';
+      diff.className = 'text-xs text-secondary-fg';
+    } else {
+      const parts = [];
+      if (added > 0) parts.push(`+${added} new`);
+      if (removed > 0) parts.push(`−${removed} removed`);
+      diff.textContent = parts.join(', ') + ' — Apply to commit';
+      diff.className = 'text-xs text-accent font-semibold';
+    }
+  }
+  // Live density + diff updates on any checkbox toggle.
   root.addEventListener('change', e => {
     if (e.target && e.target.matches && e.target.matches('input[type="checkbox"][name="enabled_kinds"]')) {
       updateDensity();
+      updateApplyDiff();
     }
   });
+  // Initial sync — the page may render with prior pending changes
+  // if the operator's browser preserved form state across a reload.
+  updateApplyDiff();
 })();
 """

@@ -194,6 +194,10 @@ The full L2 + ETL + Training round-trip. Glues everything under one e2e test. **
   - [>] BV.4.7 - **DEFERRED-BY-DESIGN.** BV.3.1 round-trip already covers PG + Oracle Docker variants. Standalone BV.4.7 doc deferred until the BV.3.1 dialect axis surfaces a real divergence worth a dedicated test file.
   - [x] BV.4.8 - Cold-read v2 against the full dual-prefix surface. Output: `docs/audits/bv_4_8_full_surface_cold_read.md`. P1.1 + P1.3 + P1.4 fixed; P1.2 confirmed non-bug by operator.
   - [x] BV.4.9 - **Diff-only Apply (DL.9).** `compute_apply_diff` decides fast-path (no `to_remove` — skip clone, run only new plants) vs slow-path (reclone+replay). Brought Re-clone back as `↻ Force rebuild from base` outlined button — distinct visual weight from Session Start. Verified end-to-end on qsgen_sqlite: 2 Applies with same fingerprint = no double-plant (3 rows → 3 rows). 8 unit tests in `tests/unit/test_bv49_diff_apply.py`.
+  - [ ] BV.4.10 - **Trainer visibility cluster.** Operator-spotted (2026-05-31): too much hidden state. The /training/ page tells you 25 things you COULD do but nothing about (1) what's currently planted, (2) what would change if you click Apply, (3) whether long ops are still running.
+    - [x] BV.4.10.a - BV.4.10.a — Currently-planted badge per card
+    - [x] BV.4.10.b - BV.4.10.b — Apply diff preview (live client-side)
+    - [ ] BV.4.10.d - BV.4.10.d — Streaming progress page for Session Start
 - [ ] BV.5 - Agent-based design cold-read against the dogfood + the HUGE test. Output: `docs/audits/bv_cold_read.md`. Operator iteration + sign-off.
 
 - [ ] BV.6 - BV.6 — PG matview refresh modernization (CONCURRENTLY); Oracle/SQLite unchanged

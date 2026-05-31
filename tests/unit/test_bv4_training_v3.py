@@ -284,6 +284,43 @@ def test_card_short_statement_renders_markdown() -> None:
     assert "<code>_supersession_*</code>" in sup_card
 
 
+def test_planted_badge_renders_for_enabled_kinds() -> None:
+    """BV.4.10.a — currently-planted pill makes the v overlay state
+    obvious. Only kinds in `enabled_kinds` get the badge; not-applied
+    kinds show no badge so the green pill stays a high-signal cue."""
+    html = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=True,
+        enabled_kinds=("phantom_rail", "limit_breach_outbound"),
+    )
+    assert 'data-test-planted-badge-phantom_rail' in html
+    assert 'data-test-planted-badge-limit_breach_outbound' in html
+    # Not-enabled kind shouldn't have the badge.
+    assert 'data-test-planted-badge-overdraft' not in html
+
+
+def test_planted_badge_absent_when_no_kinds_enabled() -> None:
+    """Fresh post-Session-Start state — no plants applied, no badges."""
+    html = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=True,
+    )
+    assert 'data-test-planted-badge-' not in html
+
+
+def test_apply_diff_preview_element_rendered() -> None:
+    """BV.4.10.b — the sticky Apply bar carries a diff-preview span
+    the client-side JS updates on every checkbox toggle. The element
+    must always be present (default text is "no changes pending").
+    """
+    html = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=True,
+    )
+    assert 'data-test-bv-apply-diff' in html
+    assert 'no changes pending' in html
+
+
 def test_renders_empty_state_for_zero_match_filter() -> None:
     """BV.4.8.P1.3 — when ``Show: Only enabled`` is set before any
     plant is checked, the page used to render as blank with just the
