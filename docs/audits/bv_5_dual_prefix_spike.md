@@ -61,18 +61,141 @@ forever." That's the architectural unlock.
 `/training/plant/<kind>` button mutates *that one prefix*. Tour
 iframes the dashboard reading from *that one prefix*.
 
-**Dual-prefix proposal:** Trainer mode populates **N + 1 prefixes
-per L2 instance** at session entry. One is baseline-only
-(`<L2>__baseline_*`); each of N corresponds to one plant kind
-(`<L2>__planted_phantom_rail_*`, `<L2>__planted_drift_*`, …). Tour
-Before/After toggle is a `?state=before|after` URL param that picks
-which prefix the dashboard query reads.
+### 1.1 Round-1 sketch (REJECTED — disk cost)
 
-Per-toggle cost: ~zero. (One prefix-var swap + one dashboard
-re-render against the alternate prefix's matviews.)
+Original sketch: populate **N + 1 prefixes per L2** at trainer entry
+(1 baseline + 1 per plant kind = 26 total for sasquatch_pr × 25
+plants). Per-toggle cost ~zero (prefix flip), but disk cost grows
+26× baseline — and grows with every registry expansion. Operator
+flagged: **"prefix per plant will have a disk space storage
+[challenge]; I think we should plan to just have a clean data set
+and then a plant one that we've checked off what plants to enable."**
 
-Pre-cost: the N+1 setup pass at trainer session entry. Status
-indicator + progress bar required (especially Oracle's 17 min).
+### 1.2 Round-2 lock — TWO prefixes, multi-plant compose
+
+**Final shape:**
+- **`<L2>__baseline_*`** — clean baseline, ONE copy. Built once at
+  trainer entry, never mutated.
+- **`<L2>__planted_*`** — composite of all operator-enabled plants
+  applied on top of baseline. Re-built whenever the enabled set
+  changes.
+
+Disk cost: 2× baseline. Constant — independent of registry size.
+
+The Tour Before/After toggle still flips a `?state=before|after`
+URL param → resolves to one of the two prefixes. Same UX as the
+N+1 sketch; the difference is on the populate side.
+
+### 1.3 Landing UX consequence — cards collapse into checkboxes
+
+The current 25-card-per-kind landing accordion is the wrong shape
+for the new model. The operator's primary action is now **"pick
+which plants are enabled in this session,"** not "click into one
+kind at a time." Landing becomes:
+
+- A checkbox list (grouped by family — L1 Conservation / L1 Cap /
+  L2 Triage / etc.) where each row is one plant kind with an
+  on/off toggle.
+- An "Apply selection" button that re-builds the planted prefix
+  (drops planted-* tables; copies from baseline-*; applies each
+  enabled plant's SQL; refreshes matviews).
+- The Tour link goes to the dashboard with the toggle — `Before`
+  shows baseline (always clean); `After` shows the composite
+  effect of every enabled plant.
+
+This **collapses per-kind plant pages entirely.** The operator
+doesn't navigate per-kind — they pick a set, see the combined
+effect. To "study just chain_orphan in isolation," they enable
+ONLY chain_orphan and disable the rest. To compare two scenarios,
+they swap the checkbox set.
+
+What we lose: the per-kind plant page (form to tune a kind's
+specific knobs — count, days_ago, etc). For v1 every plant runs
+with its registered defaults; per-kind tuning becomes a stretch.
+Operator implication: BU's 25 plant-page mockups become 1 landing
++ 1 tour. Significant doc-versus-built drift here that BV.4
+absorbs.
+
+What we gain: cleaner mental model ("here's the demo state I want")
++ way less code + the toggle finally has a coherent backing model.
+
+### 1.4 Per-toggle (enable/disable) cost — and the real-data reality
+
+**Operator data point:** sasquatch_pr baseline at production
+density is **3-4 GB on sqlite** (the spec_example-sized data my
+probe ran against was much smaller — tens of MB). At that scale
+the clone + matview refresh costs are minutes, not seconds.
+
+When the operator checks/unchecks a plant + clicks Apply:
+1. DROP planted-* tables (schema + data).
+2. Clone from baseline-* (`CREATE TABLE planted_X AS SELECT * FROM
+   baseline_X` for each base table, plus the matview-as-table
+   shells).
+3. Apply each enabled plant's SQL in registry order.
+4. Refresh planted-* matviews.
+
+Per-dialect estimate for ~5 enabled plants against a **3-4 GB
+sqlite baseline** (very rough — needs measuring on the real data):
+
+- PG: clone ~10-30s (SELECT-INTO + indexes) + 5×3s plants +
+  matview refresh **probably 1-3 min on real data** ≈ **~3 min
+  per Apply**
+- sqlite: clone ~30-90s (3-4GB, disk-bound) + 5×13s plants +
+  matview refresh on the same volume ≈ **~3-5 min per Apply**
+- Oracle: clone ~30-60s (Oracle DDL still slow) + 5×17s plants
+  + matview refresh **likely 2-4 min on real data** ≈ **~4-6
+  min per Apply**
+
+**The Tour Before↔After toggle is still ~zero cost** — only the
+Apply (changing the enabled-plant set) pays the rebuild. So the
+flow becomes:
+
+1. Operator enters trainer mode → ~10 min baseline build (Oracle)
+   / ~30s (PG). Banner: "preparing your baseline data, this takes
+   ~10 min on Oracle…"
+2. Operator picks plants from checkboxes → click Apply → ~3-5 min
+   wait with progress. Banner: "applying 5 plants, refreshing
+   matviews…"
+3. Operator iterates Tour (Before/After) freely — instant.
+
+For "I want to try a different plant set" — they re-check and
+re-Apply, paying the per-Apply cost. This is the expensive step;
+the operator should expect to pick their session's plant set
+deliberately and Apply once, not iterate the checkboxes rapidly.
+
+**Pre-cost** (one-time at trainer entry, baseline only, 3-4GB
+sqlite-scale):
+- PG: probably ~1-2 min on real data (vs 28s on spec_example)
+- sqlite: ~1-3 min (vs 24s)
+- Oracle: ~10-15 min (vs 627s — Oracle's DDL cost is the floor)
+
+Disk: ~6-8 GB for sqlite (2 × 3-4 GB). PG / Oracle equivalent
+absent the matview-as-table sqlite overhead — call it 5-7 GB
+per dialect.
+
+### 1.5 Optimization sketches (deferred unless real-data measure
+confirms the pain)
+
+Possible reductions if the per-Apply cost is too high:
+
+- **Incremental matview refresh.** PG + Oracle support `REFRESH
+  MATERIALIZED VIEW CONCURRENTLY` (PG) and partial refresh
+  patterns. SQLite's DROP+CREATE-AS pattern can't be incremental.
+- **Diff-only Apply.** Track which plants are currently in
+  planted-*; on Apply, compute the diff (added/removed) and only
+  emit the added plants' SQL + undo the removed ones'. Skip the
+  full clone-from-baseline. Saves the clone cost but breaks if
+  any plant's SQL has subtle interactions with another's.
+- **Virtual planted layer.** Don't physically copy baseline →
+  planted. Have the dashboards query a VIEW that's
+  `baseline UNION ALL plant_overlay` where plant_overlay is the
+  small delta table. Reads stay fast (indexed); writes (Apply)
+  only mutate the small overlay. Requires the matview layer to
+  be view-aware — meaningful refactor on the schema side.
+
+Start with the naive clone-and-replay; measure the real cost;
+reach for optimization only if operator's per-Apply wait crosses
+the "go-make-coffee" threshold.
 
 ---
 
