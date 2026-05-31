@@ -96,6 +96,14 @@ kind at a time." Landing becomes:
 - A checkbox list (grouped by family — L1 Conservation / L1 Cap /
   L2 Triage / etc.) where each row is one plant kind with an
   on/off toggle.
+- **Bulk-toggle affordances** so the operator isn't clicking 25
+  boxes individually:
+  - Per-family `[Select all] [None]` chip pair on each
+    `<details>` accordion summary line.
+  - Top-level `[Select all] [None]` chip pair at the page header.
+  - Per-family + top-level current-state badge (e.g. `(7/9
+    enabled)` next to the family title) so the operator can see
+    selection density without expanding.
 - An "Apply selection" button that re-builds the planted prefix
   (drops planted-* tables; copies from baseline-*; applies each
   enabled plant's SQL; refreshes matviews).
