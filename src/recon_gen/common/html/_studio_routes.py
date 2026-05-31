@@ -4278,6 +4278,15 @@ def make_studio_routes(
 
             plant_instance = instance
 
+            # BU.4 P0 — refresh matviews after plant. Without this, the
+            # plant rows land in `<prefix>_transactions` but the L1 +
+            # L2FT dashboards read from refreshed matviews (e.g.
+            # `<prefix>_current_transactions`) which still hold the
+            # pre-plant state. Tour shows "no rows" even though the
+            # plant succeeded — exact bug the operator hit on
+            # chain_orphan.
+            from recon_gen.common.l2.schema import refresh_matviews_sql  # noqa: PLC0415
+
             def _do_plant() -> None:
                 sql = entry.plant_function(
                     prefix=plant_cfg.db_table_prefix,
@@ -4286,11 +4295,17 @@ def make_studio_routes(
                     instance=plant_instance,
                     **kwargs,
                 )
+                refresh_sql = refresh_matviews_sql(
+                    plant_instance,
+                    prefix=plant_cfg.db_table_prefix,
+                    dialect=plant_cfg.dialect,
+                )
                 conn = connect_demo_db(plant_cfg)
                 try:
                     cur = conn.cursor()
                     try:
                         execute_script(cur, sql, dialect=plant_cfg.dialect)
+                        execute_script(cur, refresh_sql, dialect=plant_cfg.dialect)
                         conn.commit()
                     finally:
                         cur.close()
@@ -4301,7 +4316,7 @@ def make_studio_routes(
             plant_status = (
                 f"Planted {kind} with "
                 + ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
-                + ". Tour the dashboard to see it surface."
+                + " — matviews refreshed. Tour the dashboard to see it surface."
             )
         return HTMLResponse(render_training_plant_page(
             entry,
