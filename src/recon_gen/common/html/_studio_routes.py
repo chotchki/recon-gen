@@ -4238,11 +4238,16 @@ def make_studio_routes(
         # BU's /training/plant/<kind> + /training/tour/<kind> routes
         # stay alive for now (orphaned — not linked from v3 landing);
         # BV.4.4 commits the v3 → primary migration + removes v2.
+        import os as _os  # noqa: PLC0415
+
         from recon_gen.common.html._studio_training_v3 import (  # noqa: PLC0415
             render_training_v3_landing,
         )
         from recon_gen.common.l2.v_overlay import (  # noqa: PLC0415
-            read_applied_state,
+            read_applied_state, read_failed_kinds,
+            read_session_metadata,
+            session_metadata_l2_mtime_key,
+            session_metadata_session_start_key,
         )
         instance = cache.get()
         base_prefix = cfg.db_table_prefix if cfg is not None else cache.path.stem
@@ -4250,12 +4255,29 @@ def make_studio_routes(
             cfg, instance, base_prefix,
         )
         session_status = request.query_params.get("status") or None
-        # BV.4.0 P1.2 fix — read the persisted applied-plants state from
-        # `<v>_config_kv` so checkboxes + form fields render as the
-        # operator left them after the last Apply.
         applied: dict[str, dict[str, str]] = {}
+        failed: dict[str, str] = {}
+        l2_stale = False
         if v_overlay_exists and cfg is not None:
             applied = await read_applied_state(cfg)
+            failed = await read_failed_kinds(cfg)
+            metadata = await read_session_metadata(cfg)
+            stored_mtime_str = metadata.get(session_metadata_l2_mtime_key(), "")
+            if stored_mtime_str:
+                try:
+                    stored_mtime = float(stored_mtime_str)
+                    current_mtime = _os.path.getmtime(str(cache.path))
+                    # 1-second tolerance so the same-second write doesn't
+                    # immediately scream stale.
+                    if current_mtime - stored_mtime > 1.0:
+                        l2_stale = True
+                except OSError:
+                    pass
+            session_start_time = metadata.get(
+                session_metadata_session_start_key(), "",
+            )
+        else:
+            session_start_time = ""
         return HTMLResponse(render_training_v3_landing(
             top_nav_html=_top_nav_html("/training/"),
             theme_head=studio_theme_head(instance),
@@ -4264,6 +4286,9 @@ def make_studio_routes(
             session_status=session_status,
             enabled_kinds=tuple(applied.keys()),
             form_values=applied,
+            failed_kinds=failed,
+            l2_stale=l2_stale,
+            session_start_time=session_start_time,
         ))
 
     async def training_plant(request: Request) -> HTMLResponse | RedirectResponse:
@@ -4395,7 +4420,10 @@ def make_studio_routes(
             return RedirectResponse(url="/training/", status_code=303)
         from recon_gen.common.l2.v_overlay import session_start  # noqa: PLC0415
 
-        await session_start(cfg, cache.get(), refresh_base=True)
+        await session_start(
+            cfg, cache.get(),
+            refresh_base=True, l2_yaml_path=cache.path,
+        )
         return RedirectResponse(
             url="/training/?status=Session+started+%E2%80%94+v+overlay+ready.",
             status_code=303,
@@ -4411,7 +4439,10 @@ def make_studio_routes(
             return RedirectResponse(url="/training/", status_code=303)
         from recon_gen.common.l2.v_overlay import session_start  # noqa: PLC0415
 
-        await session_start(cfg, cache.get(), refresh_base=False)
+        await session_start(
+            cfg, cache.get(),
+            refresh_base=False, l2_yaml_path=cache.path,
+        )
         return RedirectResponse(
             url="/training/?status=Re-cloned+from+base+%E2%80%94+v+overlay+reset.",
             status_code=303,

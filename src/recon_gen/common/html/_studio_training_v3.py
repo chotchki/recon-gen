@@ -53,6 +53,9 @@ def render_training_v3_landing(
     session_status: str | None = None,
     enabled_kinds: tuple[str, ...] = (),
     form_values: Mapping[str, Mapping[str, str]] | None = None,
+    failed_kinds: Mapping[str, str] | None = None,
+    l2_stale: bool = False,
+    session_start_time: str = "",
 ) -> str:
     """The /training/ landing.
 
@@ -68,6 +71,7 @@ def render_training_v3_landing(
     """
     enabled_set = set(enabled_kinds)
     fv = form_values or {}
+    failed = failed_kinds or {}
 
     # Group registry entries by family in display order.
     by_family: dict[str, list[PlantKindEntry]] = {}
@@ -83,6 +87,7 @@ def render_training_v3_landing(
             family, entries,
             enabled_set=enabled_set,
             form_values=fv,
+            failed=failed,
             base_prefix=base_prefix,
             v_overlay_exists=v_overlay_exists,
             open_by_default=(idx == 0),
@@ -96,6 +101,7 @@ def render_training_v3_landing(
             family, entries,
             enabled_set=enabled_set,
             form_values=fv,
+            failed=failed,
             base_prefix=base_prefix,
             v_overlay_exists=v_overlay_exists,
             open_by_default=False,
@@ -103,10 +109,33 @@ def render_training_v3_landing(
 
     banner_html = ""
     if session_status:
-        banner_html = (
+        banner_html += (
             '<div class="bg-success/10 border border-success rounded-md '
             'px-3 py-2 mb-3 text-sm" data-test-training-banner>'
             f'<strong class="text-success">✓</strong> {escape(session_status)}'
+            "</div>"
+        )
+    if l2_stale:
+        banner_html += (
+            '<div class="bg-warning/10 border border-warning rounded-md '
+            'px-3 py-2 mb-3 text-sm" data-test-l2-stale-banner>'
+            '<strong class="text-warning">⚠</strong> '
+            'Your L2 yaml has changed since this Session Start'
+            f'{f" ({escape(session_start_time)})" if session_start_time else ""}. '
+            'Click <strong>Session Start (re-fetch)</strong> to pick up the new schema '
+            '+ reseed the base + re-clone the v overlay.'
+            "</div>"
+        )
+    if failed:
+        failed_summary = ", ".join(sorted(failed.keys())[:5])
+        if len(failed) > 5:
+            failed_summary += f", … +{len(failed) - 5} more"
+        banner_html += (
+            '<div class="bg-danger/10 border border-danger rounded-md '
+            'px-3 py-2 mb-3 text-sm" data-test-failed-banner>'
+            f'<strong class="text-danger">✗</strong> {len(failed)} plant(s) '
+            f'failed on the last Apply: {escape(failed_summary)}. '
+            "Hover the card's error badge for the underlying message."
             "</div>"
         )
 
@@ -244,6 +273,7 @@ def _render_family_section(
     *,
     enabled_set: set[str],
     form_values: Mapping[str, Mapping[str, str]],
+    failed: Mapping[str, str],
     base_prefix: str,
     v_overlay_exists: bool,
     open_by_default: bool,
@@ -260,6 +290,7 @@ def _render_family_section(
             entry,
             enabled=(entry.kind in enabled_set),
             form_values=form_values.get(entry.kind, {}),
+            failed_message=failed.get(entry.kind),
             base_prefix=base_prefix,
             v_overlay_exists=v_overlay_exists,
         )
@@ -296,6 +327,7 @@ def _render_card(
     *,
     enabled: bool,
     form_values: Mapping[str, str],
+    failed_message: str | None,
     base_prefix: str,
     v_overlay_exists: bool,
 ) -> str:
@@ -334,9 +366,20 @@ def _render_card(
         f'<span class="text-xs text-secondary-fg">— {escape(entry.kind_qualifier)}</span>'
         if entry.kind_qualifier else ""
     )
+    error_badge_html = ""
+    error_attr = ""
+    card_bg = ""
+    if failed_message:
+        error_attr = ' data-error="1"'
+        card_bg = ' bg-danger/5'
+        error_badge_html = (
+            '<span class="text-xs px-2 py-0.5 bg-danger text-white rounded-sm" '
+            f'title="{escape(failed_message)}" '
+            f'data-test-error-badge-{escape(entry.kind)}>error planting</span>'
+        )
     return f"""
-    <article class="border border-surface-border rounded-md p-4 flex flex-col gap-2"
-             data-test-training-kind="{escape(entry.kind)}">
+    <article class="border border-surface-border rounded-md p-4 flex flex-col gap-2{card_bg}"
+             data-test-training-kind="{escape(entry.kind)}"{error_attr}>
       <header class="flex items-baseline gap-3 flex-wrap">
         <label class="flex items-center gap-2 cursor-pointer">
           <input type="checkbox" name="enabled_kinds" value="{escape(entry.kind)}"{checked_attr}
@@ -345,6 +388,7 @@ def _render_card(
         </label>
         {qualifier_html}
         <span class="text-xs text-secondary-fg font-mono">{escape(entry.kind)}</span>
+        {error_badge_html}
       </header>
       <p class="text-xs text-secondary-fg max-w-3xl m-0">
         {escape(_first_sentence(section.short_statement))}

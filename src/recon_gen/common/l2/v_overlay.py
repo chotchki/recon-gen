@@ -115,6 +115,7 @@ async def session_start(
     cfg: "Config", instance: "L2Instance",
     *,
     refresh_base: bool = True,
+    l2_yaml_path: object = None,
 ) -> None:
     """Orchestrates Session Start (DL.10):
 
@@ -143,6 +144,17 @@ async def session_start(
         )
 
     base_prefix = cfg.db_table_prefix
+    # DL.14 — capture L2 yaml mtime + clone time so the landing render
+    # can flag staleness when the operator edits the yaml mid-session.
+    import os  # noqa: PLC0415
+
+    session_start_str = datetime.now().isoformat(timespec="seconds")  # typing-smell: ignore[no-datetime-now]: session-start UI banner — wall clock IS the contract
+    l2_mtime_str = ""
+    if l2_yaml_path is not None:
+        try:
+            l2_mtime_str = str(os.path.getmtime(str(l2_yaml_path)))
+        except OSError:
+            pass
 
     def _run() -> None:
         conn = connect_demo_db(cfg)
@@ -171,6 +183,46 @@ async def session_start(
                     instance, base_prefix=base_prefix, dialect=cfg.dialect,
                 )
                 execute_script(cur, refresh_sql, dialect=cfg.dialect)
+
+                # DL.14 — record session-start metadata so the
+                # /training/ landing render can flag staleness when
+                # the L2 yaml mtime drifts vs this snapshot.
+                execute_script(
+                    cur,
+                    _kv_write_sql(
+                        base_prefix, _SESSION_START_KEY,
+                        session_start_str, "__bv_session_start__",
+                    ),
+                    dialect=cfg.dialect,
+                )
+                if l2_mtime_str:
+                    execute_script(
+                        cur,
+                        _kv_write_sql(
+                            base_prefix, _L2_YAML_MTIME_KEY,
+                            l2_mtime_str, "__bv_l2_mtime__",
+                        ),
+                        dialect=cfg.dialect,
+                    )
+
+                # Wipe stale applied / failed state from any prior
+                # session — fresh clone means no plants are applied yet.
+                execute_script(
+                    cur,
+                    _kv_write_sql(
+                        base_prefix, _APPLIED_STATE_KEY, "{}",
+                        "__bv_applied__",
+                    ),
+                    dialect=cfg.dialect,
+                )
+                execute_script(
+                    cur,
+                    _kv_write_sql(
+                        base_prefix, _FAILED_STATE_KEY, "{}",
+                        "__bv_failed__",
+                    ),
+                    dialect=cfg.dialect,
+                )
 
                 conn.commit()
             finally:
@@ -230,14 +282,16 @@ async def apply_plants(
     anchor_dt = anchor or datetime(2026, 5, 30, 12, 0, 0)
     plants_list = list(enabled_plants)
 
-    # Snapshot the applied state we're about to persist BEFORE the run
-    # (kwargs values are stringified for JSON-safety; consumers parse
-    # back into typed primitives via the registry).
-    applied_snapshot: dict[str, dict[str, str]] = {
-        entry.kind: {k: str(v) for k, v in kwargs.items()}
-        for entry, kwargs in plants_list
-    }
-    applied_json = json.dumps(applied_snapshot, separators=(",", ":"))
+    # applied_snapshot / applied_json moved INSIDE _run so we
+    # serialize the SUCCEEDED set, not the requested set. The
+    # `succeeded` dict (populated per-plant below) is what gets
+    # persisted.
+
+    # Track per-plant failures so the UI can render error badges
+    # (DL.12). The plant SQL emission is the most likely failure point
+    # (picker can't satisfy the L2 → ValueError from the adapter).
+    failures: dict[str, str] = {}
+    succeeded: dict[str, dict[str, str]] = {}
 
     def _run() -> None:
         conn = connect_demo_db(cfg)
@@ -248,32 +302,52 @@ async def apply_plants(
                 clone_sql = clone_base_to_v_sql(base_prefix)
                 execute_script(cur, clone_sql, dialect=cfg.dialect)
 
-                # Emit each enabled plant's SQL against the v prefix.
+                # Emit each enabled plant's SQL against the v prefix —
+                # per-plant try/except so one failure doesn't drop the
+                # whole batch.
                 for entry, kwargs in plants_list:
-                    plant_sql = entry.plant_function(
-                        prefix=v_prefix,
-                        dialect=cfg.dialect,
-                        anchor=anchor_dt,
-                        instance=instance,
-                        **kwargs,
-                    )
-                    if plant_sql:
-                        execute_script(cur, plant_sql, dialect=cfg.dialect)
+                    try:
+                        plant_sql = entry.plant_function(
+                            prefix=v_prefix,
+                            dialect=cfg.dialect,
+                            anchor=anchor_dt,
+                            instance=instance,
+                            **kwargs,
+                        )
+                        if plant_sql:
+                            execute_script(cur, plant_sql, dialect=cfg.dialect)
+                        succeeded[entry.kind] = {
+                            k: str(v) for k, v in kwargs.items()
+                        }
+                    except Exception as exc:  # noqa: BLE001 — surfaces per kind
+                        failures[entry.kind] = (
+                            f"{type(exc).__name__}: {exc}"
+                        )
 
                 # Refresh v matviews so the dashboards see the
-                # composite of (cloned baseline + applied plants).
+                # composite of (cloned baseline + succeeded plants).
                 refresh_sql = refresh_v_overlay_matviews_sql(
                     instance, base_prefix=base_prefix, dialect=cfg.dialect,
                 )
                 execute_script(cur, refresh_sql, dialect=cfg.dialect)
 
-                # Persist applied state AFTER matview refresh — the
-                # config_kv write doesn't go through clone_base_to_v_sql's
-                # `DELETE` since we just did a fresh clone above and the
-                # base prefix's config_kv doesn't carry the applied-state
-                # row (it's v-overlay-only state per DL.9).
-                state_sql = applied_state_write_sql(base_prefix, applied_json)
+                # Persist applied state — only includes kinds that
+                # actually emitted SQL successfully. Failed kinds
+                # surface in the parallel failed-state row so the UI
+                # can render error badges WITHOUT pretending the
+                # plant landed.
+                state_sql = applied_state_write_sql(
+                    base_prefix,
+                    json.dumps(succeeded, separators=(",", ":")),
+                )
                 execute_script(cur, state_sql, dialect=cfg.dialect)
+
+                failed_sql = _kv_write_sql(
+                    base_prefix, _FAILED_STATE_KEY,
+                    json.dumps(failures, separators=(",", ":")),
+                    "__bv_failed__",
+                )
+                execute_script(cur, failed_sql, dialect=cfg.dialect)
 
                 conn.commit()
             finally:
@@ -299,35 +373,127 @@ _ = date
 
 
 _APPLIED_STATE_KEY = "trainer_applied_plants"
+_FAILED_STATE_KEY = "trainer_failed_plants"
+_SESSION_START_KEY = "trainer_session_start_time"
+_L2_YAML_MTIME_KEY = "trainer_l2_yaml_mtime"
 
 
-def applied_state_read_sql(base_prefix: str) -> str:
-    """SELECT the JSON-encoded applied-plant set from `<v>_config_kv`."""
+def _kv_read_sql(base_prefix: str, key: str) -> str:
     v = v_overlay_prefix(base_prefix)
     return (
         f"SELECT value FROM {v}_config_kv "
-        f"WHERE parent_id = '__bv__' AND key = '{_APPLIED_STATE_KEY}'"
+        f"WHERE parent_id = '__bv__' AND key = '{key}'"
     )
 
 
-def applied_state_write_sql(base_prefix: str, json_payload: str) -> str:
-    """UPSERT the JSON-encoded applied-plant set into `<v>_config_kv`.
-
-    Two-statement shape (DELETE + INSERT) so it works on PG / Oracle /
-    sqlite without needing ON CONFLICT support."""
+def _kv_write_sql(base_prefix: str, key: str, payload: str, node_id: str) -> str:
+    """UPSERT shape — DELETE + INSERT works on PG / Oracle / sqlite
+    without needing ON CONFLICT support."""
     v = v_overlay_prefix(base_prefix)
-    escaped = json_payload.replace("'", "''")
+    escaped = payload.replace("'", "''")
     return "\n".join([
         (
             f"DELETE FROM {v}_config_kv "
-            f"WHERE parent_id = '__bv__' AND key = '{_APPLIED_STATE_KEY}';"
+            f"WHERE parent_id = '__bv__' AND key = '{key}';"
         ),
         (
             f"INSERT INTO {v}_config_kv "
             "(node_id, parent_id, key, value) VALUES "
-            f"('__bv_applied__', '__bv__', '{_APPLIED_STATE_KEY}', '{escaped}');"
+            f"('{node_id}', '__bv__', '{key}', '{escaped}');"
         ),
     ])
+
+
+def applied_state_read_sql(base_prefix: str) -> str:
+    """SELECT the JSON-encoded applied-plant set from `<v>_config_kv`."""
+    return _kv_read_sql(base_prefix, _APPLIED_STATE_KEY)
+
+
+def applied_state_write_sql(base_prefix: str, json_payload: str) -> str:
+    """UPSERT the JSON-encoded applied-plant set into `<v>_config_kv`."""
+    return _kv_write_sql(
+        base_prefix, _APPLIED_STATE_KEY, json_payload, "__bv_applied__",
+    )
+
+
+async def read_failed_kinds(cfg: "Config") -> dict[str, str]:
+    """`{kind: error_message}` for plants whose plant_function or
+    plant SQL raised in the last Apply. Empty when no Apply has
+    fired or all succeeded."""
+    import json  # noqa: PLC0415
+    from typing import cast  # noqa: PLC0415
+
+    base_prefix = cfg.db_table_prefix
+
+    def _run() -> dict[str, str]:
+        try:
+            conn = connect_demo_db(cfg)
+        except Exception:  # noqa: BLE001
+            return {}
+        try:
+            cur = conn.cursor()
+            try:
+                try:
+                    cur.execute(_kv_read_sql(base_prefix, _FAILED_STATE_KEY))
+                    row = cur.fetchone()
+                except Exception:  # noqa: BLE001
+                    return {}
+                if row is None or row[0] is None:
+                    return {}
+                try:
+                    raw: object = json.loads(str(row[0]))
+                except (ValueError, TypeError):
+                    return {}
+                if not isinstance(raw, dict):
+                    return {}
+                d = cast(dict[object, object], raw)
+                return {str(k): str(v) for k, v in d.items()}
+            finally:
+                cur.close()
+        finally:
+            conn.close()
+
+    return await asyncio.to_thread(_run)
+
+
+async def read_session_metadata(cfg: "Config") -> dict[str, str]:
+    """Session-start timestamp + L2 yaml mtime captured at Session
+    Start (DL.14 staleness banner). Empty when no Session Start has
+    fired."""
+    base_prefix = cfg.db_table_prefix
+
+    def _run() -> dict[str, str]:
+        try:
+            conn = connect_demo_db(cfg)
+        except Exception:  # noqa: BLE001
+            return {}
+        try:
+            cur = conn.cursor()
+            out: dict[str, str] = {}
+            for key in (_SESSION_START_KEY, _L2_YAML_MTIME_KEY):
+                try:
+                    cur.execute(_kv_read_sql(base_prefix, key))
+                    row = cur.fetchone()
+                    if row and row[0] is not None:
+                        out[key] = str(row[0])
+                except Exception:  # noqa: BLE001
+                    pass
+            cur.close()
+            return out
+        finally:
+            conn.close()
+
+    return await asyncio.to_thread(_run)
+
+
+def session_metadata_session_start_key() -> str:
+    """Constant exposing the session-start key name so render code
+    can pull it off the dict without re-hardcoding."""
+    return _SESSION_START_KEY
+
+
+def session_metadata_l2_mtime_key() -> str:
+    return _L2_YAML_MTIME_KEY
 
 
 async def read_applied_state(
