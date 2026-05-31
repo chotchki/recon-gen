@@ -126,10 +126,17 @@ def etl_hook(cfg, *, prefix: str) -> None:
 - Regular `data apply` calls with `prefix=cfg.db_table_prefix` —
   backward-compat shim if customers' existing hooks don't accept
   the kwarg.
-- Trainer entry calls ONCE with `prefix=<base>_prefix_b`. Never
-  calls it again during the session.
-- All Apply cycles after that operate on `prefix_v` (clone +
-  plants).
+- Trainer "Session start" populates `prefix_b` via etl_hook —
+  first time tables are made for the session. **Plus** an explicit
+  "Re-fetch baseline" button on the Trainer page so the operator
+  can re-pull from upstream mid-session (without re-entering the
+  full session). Re-fetch re-clones `prefix_b → prefix_v` + replays
+  enabled plants automatically.
+- All Apply cycles operate on `prefix_v` only (clone from
+  `prefix_b` + plants).
+- A "Cleanup" button on the Trainer page drops both `prefix_b_*`
+  and `prefix_v_*` tables for the session — reclaims the 2× disk
+  when the operator's done.
 
 ### 1.3 Landing UX consequence — cards collapse into checkboxes
 
@@ -168,21 +175,30 @@ kind at a time." Landing becomes:
     operator gets a prove-it-to-yourself reading even when no
     plants are enabled — confirms the dashboard doesn't lie.
 
-This **collapses per-kind plant pages entirely.** The operator
-doesn't navigate per-kind — they pick a set, see the combined
-effect. To "study just chain_orphan in isolation," they enable
-ONLY chain_orphan and disable the rest. To compare two scenarios,
-they swap the checkbox set.
+**Cards stay as the per-kind anchor** (operator-locked): each
+plant kind still gets its card on the landing — the card carries
+the title, description, "What to do about it" copy, and the two
+Tour links (Clean / Violation). What changes is that the card
+also has the checkbox + the form-tuning section goes away
+(defaults bake at populate time). The card is the instructional
+anchor and the navigation anchor; the checkbox is the compose
+control.
 
-What we lose: the per-kind plant page (form to tune a kind's
-specific knobs — count, days_ago, etc). For v1 every plant runs
-with its registered defaults; per-kind tuning becomes a stretch.
-Operator implication: BU's 25 plant-page mockups become 1 landing
-+ 1 tour. Significant doc-versus-built drift here that BV.4
-absorbs.
+**Active-plants filter** (top-level affordance): a "Show:
+[All / Only enabled / Only with errors]" filter at the page header
+collapses families that don't have any operator-enabled plants —
+so when the session settles on a 5-plant set the operator isn't
+scrolling past 4 disabled families to get to the active ones.
+
+What we lose: the per-kind plant page's tunable-form section
+(count, days_ago, etc). For v1 every plant runs with its
+registered defaults; per-kind tuning becomes a stretch. The
+card+checkbox replaces "click into a per-kind page, fill the form,
+submit" — operator composes via the landing's checkbox set + Apply.
 
 What we gain: cleaner mental model ("here's the demo state I want")
-+ way less code + the toggle finally has a coherent backing model.
++ no per-kind page navigation friction + the Tour Before/Violation
+links finally have a coherent backing model (zero per-toggle cost).
 
 ### 1.4 Per-toggle (enable/disable) cost — and the real-data reality
 
@@ -241,29 +257,72 @@ Disk: ~6-8 GB for sqlite (2 × 3-4 GB). PG / Oracle equivalent
 absent the matview-as-table sqlite overhead — call it 5-7 GB
 per dialect.
 
-### 1.5 Optimization sketches (deferred unless real-data measure
-confirms the pain)
+### 1.5 Optimizations — operator-graded
 
-Possible reductions if the per-Apply cost is too high:
+Re-read with operator triage:
 
-- **Incremental matview refresh.** PG + Oracle support `REFRESH
-  MATERIALIZED VIEW CONCURRENTLY` (PG) and partial refresh
-  patterns. SQLite's DROP+CREATE-AS pattern can't be incremental.
-- **Diff-only Apply.** Track which plants are currently in
-  planted-*; on Apply, compute the diff (added/removed) and only
-  emit the added plants' SQL + undo the removed ones'. Skip the
-  full clone-from-baseline. Saves the clone cost but breaks if
-  any plant's SQL has subtle interactions with another's.
+- **Incremental matview refresh — PROMOTE TO PRODUCTION MANDATE
+  (not trainer-only).** Operator: *"We should do this for ALL
+  postgres/oracle refreshes, its the only thing that will be sane
+  in a production environment and even dev should be better."*
+  Today's `refresh_matviews_sql` does DROP+CREATE-AS for SQLite
+  (correct — only path); PG/Oracle should swap to `REFRESH
+  MATERIALIZED VIEW CONCURRENTLY` (PG) and the equivalent
+  fast-refresh-on-commit / `REFRESH FAST` patterns on Oracle.
+  This benefits **every** matview refresh in production deploys,
+  not just trainer mode. Tracked as **BV.6 production matview
+  refresh modernization** (separate phase — orthogonal to BV.4
+  trainer work).
+- **Diff-only Apply — LOW-HANGING FRUIT.** Operator: *"this may
+  be VERY easy to do now (with the exception of the deletions)
+  due to our use of the metadata.plants fields. For deletes we
+  may need to save the deleted rows in the _kv table."*
+  Implementation shape:
+  - Track currently-applied plants in `<L2>_prefix_v_config_kv`
+    (the existing config_kv table, extended with a
+    `trainer_applied_plants` row).
+  - On Apply with new enabled-set: diff against the stored set
+    → `added`, `removed`.
+  - For each `added` plant: emit its plant_function SQL into
+    `prefix_v`. Plants use stable id-prefixes (`__demo_gap_*`,
+    `__demo_plant_*`) so they're cleanly recoverable. INSERT path.
+  - For each `removed` INSERT-style plant: `DELETE FROM
+    <prefix_v>_transactions WHERE id LIKE '__demo_<kind>%'`.
+    Clean undo via id-prefix namespace.
+  - For each `removed` DELETE-style plant (`uncovered_rail` /
+    `uncovered_template` / `dead_*` — emitters that DELETE rows
+    from baseline): **save the deleted-rowsets in
+    `<prefix_v>_config_kv` at plant-time** so undo can re-INSERT
+    them. Per-plant `trainer_undo_payload` rows.
+  - Refresh matviews (incremental once BV.6 lands; full now).
+  - Save the new applied-plants set back to `prefix_v_config_kv`.
+
+  **No clone-from-baseline cost.** Apply becomes O(delta) not
+  O(full baseline). Combined with BV.6 incremental matview
+  refresh: Apply on PG drops from ~3 min → maybe 5-10 s; sqlite
+  from ~3-5 min → maybe 30-60 s; Oracle from ~4-6 min → maybe
+  30-60 s.
+
+  Promote to **BV.4.4** alongside the Tour-link wiring — the
+  per-Apply latency goes from "click + go-make-coffee" to "click
+  + watch a progress bar for a few seconds." Materially changes
+  the operator UX from "compose then commit" to "iterate freely."
+
 - **Virtual planted layer.** Don't physically copy baseline →
   planted. Have the dashboards query a VIEW that's
   `baseline UNION ALL plant_overlay` where plant_overlay is the
   small delta table. Reads stay fast (indexed); writes (Apply)
   only mutate the small overlay. Requires the matview layer to
   be view-aware — meaningful refactor on the schema side.
+  **Defer** — diff-only Apply gets us most of the perf win without
+  the schema refactor.
 
-Start with the naive clone-and-replay; measure the real cost;
-reach for optimization only if operator's per-Apply wait crosses
-the "go-make-coffee" threshold.
+**Revised path:** start with **diff-only Apply (BV.4.4) +
+incremental matview refresh (BV.6 — parallel work, benefits
+prod)**; skip the naive clone-and-replay path entirely. The
+extra complexity is modest (deleted-rows config_kv stash for
+DELETE-shaped plants) and the operator UX improvement is the
+difference between "compose-and-wait" vs "iterate-freely."
 
 ---
 
@@ -288,9 +347,22 @@ the active prefix list.
 exposes a Trainer-only knob in the global cfg shape.
 
 **Recommendation:** Option A for v1. Avoid cfg.yaml shape changes
-until we see operator demand for kind-subsetting. Trainer mode
-detection lives at Studio start: `recon-gen studio --trainer-mode
---l2 <yaml>` flag.
+until we see operator demand for kind-subsetting.
+
+**Trainer-mode detection is intrinsic, not a flag.** No
+`--trainer-mode` CLI flag — Trainer mode "is on" once the operator
+clicks Session Start on the Trainer page. That action triggers
+schema creation (the base-table DDL) + config_kv populate + etl_hook
+invocation into `prefix_b`, then a clone of `prefix_b → prefix_v`.
+After that, Trainer-mode is implicit: the existence of
+`<base>_prefix_b_*` tables is the signal. A Cleanup button on the
+Trainer page drops both prefixes when the operator's done.
+
+This means **the Trainer surface is responsible for the entire
+schema lifecycle of its own prefixes** — not just data populate.
+The production schema (`<base>_*`) is created by `recon-gen
+schema apply --execute` as today; trainer schemas (`<base>_prefix_b`
++ `<base>_prefix_v`) are created by Session Start.
 
 ### 2.2 App2 (HTMX dashboards) — the cheap renderer
 
@@ -302,14 +374,16 @@ App2 reads `prefix` at request time from cfg or URL param. Survey:
   function param.
 
 **Change shape:**
-1. Add `?state=before|after` (or `?prefix=<explicit>`) URL param
-   support on `/dashboards/...` routes.
+1. Add `?prefix=<value>` URL param support on `/dashboards/...`
+   routes. (Per DL.7 — `?prefix=` is first-class; the abandoned
+   `?state=before|after` shim from the earlier draft is dropped.)
 2. Route handler resolves the URL param → active prefix → threads
-   through to data fetchers.
-3. Trainer's `/training/tour/<kind>` page iframes
-   `/dashboards/.../sheet?prefix=<L2>__planted_<kind>` (the
-   "after" view) by default, with a toggle that switches to
-   `?prefix=<L2>__baseline`.
+   through to data fetchers. Defaults to `cfg.db_table_prefix`
+   when the param is absent.
+3. Trainer's landing cards render the two Tour links per kind
+   with `?prefix=<base>_prefix_b` (Clean) and `?prefix=<base>_prefix_v`
+   (Violation). Operator follows the link → fully-formed dashboard
+   URL with prefix baked in → URL-as-truth (DL.10).
 
 **Risk:** prefix is widely passed; one missed callsite means the
 toggle silently shows the wrong data. Mitigation: anti-drift test
@@ -468,50 +542,39 @@ Out of scope (defer):
 
 ---
 
-## 5. Open questions for operator triage
+## 5. Open questions — RESOLVED 2026-05-31
 
-1. **Trainer mode entry surface.** `recon-gen studio --trainer-mode`
-   CLI flag, or a Studio in-app "Enter Trainer mode" button? CLI is
-   simpler; in-app gives the operator the choice mid-session.
-
-2. **Per-kind subset.** Start eager (all 25 kinds populated at
-   entry) or let operator pick which kinds matter? Eager wins on
-   teaching-flow simplicity; subset wins on Oracle's 17 min setup.
-
-3. **State of probe / triage / coverage** during trainer mode.
-   These look at the demo DB — should they keep pointing at the
-   baseline prefix, or at the currently-toured-plant prefix? My
-   read: always baseline (the "reality" reference); planted
-   prefixes are tour-only.
-
-4. **Failure mode when the populate fails.** A plant emitter
-   throws (e.g. picker can't satisfy on this L2) — does the
-   Trainer surface that kind as "✗ unavailable" and let the
-   operator iterate the others? Or block trainer entry until
-   every kind populates clean?
-
-5. **Memory / disk cost.** Each baseline copy = ~60k transactions
-   at sasquatch_pr's density. 26 copies = 1.5M rows per L2. PG
-   handles this fine; sqlite is local file so disk-bound;
-   Oracle's the same. No actual constraint at this scale, but
-   call out for very-large L2 instances later.
-
-6. **Tour iframe URL** — the toggle params need to survive the
-   dashboard's own state (date pickers, filter selections). Does
-   the toggle preserve operator-set filters? Probably yes — the
-   `?prefix=` is independent of `?param_*` filter overrides.
-
-7. **Trainer mode + the L2 Editor.** If the operator edits the L2
-   yaml during a trainer session, the populated prefixes go
-   stale. Either (a) re-populate on edit (re-pay setup cost), or
-   (b) flag staleness and require explicit re-enter. (b) wins
-   for predictability.
-
-8. **CLI vs Studio split** — `data apply --execute` currently
-   wipes + reseeds the single prefix. Trainer mode wants to NOT
-   touch the production prefix. New `recon-gen data apply
-   --trainer-populate` command that builds the N+1 prefixes,
-   leaving the operator's main prefix alone?
+1. **Trainer entry surface.** RESOLVED — Trainer page Session
+   Start button does the entire lifecycle (schema create + config_kv
+   populate + etl_hook for `prefix_b` + clone to `prefix_v`). A
+   Cleanup button drops both trainer prefixes when done. Promoted
+   to DL.10.
+2. **Per-kind subset / eager-vs-lazy.** RESOLVED — Session Start
+   sets up `prefix_b` AND a clean `prefix_v` (clone of baseline,
+   zero plants enabled). Operator then picks plants from
+   checkboxes; Select-all is their handy do-it-all. No CLI
+   subset; UI checkbox set IS the subset mechanism. Promoted to
+   DL.11.
+3. **Probe / Triage / Coverage state in trainer mode.** RESOLVED —
+   always baseline (`prefix_b`). Top nav routes also hit baseline.
+   Trainer baseline is always separate from the production prefix.
+   DL.4 already captured; restated for clarity.
+4. **Failure mode when plant populate fails.** RESOLVED — show
+   "error planting" on the kind card, still provide the
+   Violation link (so operator can navigate + see empty-state).
+   Promoted to DL.12.
+5. **Memory / disk cost.** RESOLVED — 2 copies (DL.3) bounds the
+   disk hit; no further concern.
+6. **URL-as-truth.** RESOLVED — everything drives off the URL.
+   Setting a filter and sharing the link reproduces the same
+   view. Info sheet shows what prefix the dashboard is hitting
+   so operators can always confirm. Promoted to DL.13.
+7. **L2 edit during trainer session.** RESOLVED — option (b):
+   flag staleness, suggest (don't demand) a re-setup. Soft
+   banner on the Trainer page when the L2 yaml has changed
+   since Session Start. Promoted to DL.14.
+8. **CLI `--trainer-populate` split.** BACKLOGGED — no direct
+   value at the moment; trainer mode is Studio-only by design.
 
 ---
 
@@ -557,25 +620,86 @@ Out of scope (defer):
 - **DL.8** — Landing UX: checkbox list per kind + per-family
   `[Select all] [None]` bulk-toggle chips + top-level
   `[Select all] [None]` + per-family/top selection-density
-  badges (`(7/9 enabled)`). Apply button at the bottom.
+  badges (`(7/9 enabled)`). Apply button at the bottom. Cards
+  stay as anchors (carry kind title + description + "What to do
+  about it" + the two Tour links); checkbox is the compose
+  control on the same card. Top-level "Show: [All / Only enabled
+  / Only with errors]" filter collapses inactive families when
+  the session settles on a small enabled set.
+- **DL.9** — **Diff-only Apply (not clone-and-replay).** Apply
+  computes the added/removed plant diff against the
+  currently-applied set (stored in `prefix_v_config_kv`) and emits
+  only the deltas. Added INSERT-style plants: run plant_function
+  SQL. Removed INSERT-style plants: `DELETE WHERE id LIKE
+  '__demo_<kind>%'` (the stable id-prefix namespace). Removed
+  DELETE-style plants (uncovered_*, dead_*): re-INSERT from the
+  saved-rowsets payload in `prefix_v_config_kv` (per-plant
+  `trainer_undo_payload`). Apply becomes O(delta) not O(baseline
+  copy). Per-Apply UX goes from "go-make-coffee" to "watch a
+  progress bar for a few seconds."
+- **DL.10** — **No `--trainer-mode` CLI flag.** Trainer mode is
+  intrinsic — detected by the existence of `<base>_prefix_b_*`
+  tables. Session Start button on the Trainer page creates the
+  schema + populates baseline + clones to `prefix_v`. Cleanup
+  button on the Trainer page drops both trainer prefixes. A
+  "Re-fetch baseline" button on the Trainer page re-runs etl_hook
+  into `prefix_b` then re-clones to `prefix_v` (preserving
+  enabled-plant state).
+- **DL.11** — **Initial state at Session Start: zero plants
+  enabled.** Both `prefix_b` and `prefix_v` ship a clean baseline.
+  Operator picks plants via checkboxes + Apply. Select-all chip is
+  the do-it-all shortcut.
+- **DL.12** — **Per-kind failure tolerates partial set.** A plant
+  that fails to apply (picker can't satisfy on this L2, plant SQL
+  raises) gets an "error planting" badge on its card; Apply
+  continues with the remaining enabled plants. Violation link on
+  the failing kind still renders — operator follows it to see
+  the empty-state (proves the failure didn't surface as a
+  silent-blank elsewhere).
+- **DL.13** — **URL-as-truth + Info-sheet-as-mirror.** Everything
+  drives off the URL (prefix, filters, date range). Sharing a
+  link reproduces the exact same view. Every app's Info sheet
+  carries a row reading the current `?prefix=` value so the
+  operator can always confirm which dataset they're hitting.
+- **DL.14** — **L2 edits flag staleness, don't force re-setup.**
+  When the operator edits the L2 yaml mid-session, the Trainer
+  page shows a soft "your baseline is from L2 yaml as-of
+  HH:MM; current L2 has changed since — `[Re-fetch baseline]` to
+  re-sync" banner. No force re-entry.
+- **DL.15** — **Promote incremental matview refresh to PRODUCTION
+  (parallel BV.6 phase).** Today's DROP+CREATE-AS matview refresh
+  pattern is the only sane shape on SQLite but is wrong-shaped on
+  PG / Oracle. Switch PG to `REFRESH MATERIALIZED VIEW
+  CONCURRENTLY` + Oracle to `REFRESH FAST` / on-commit refresh
+  semantics. Benefits **every** production deploy, not just
+  trainer mode. Tracked separately as BV.6; orthogonal to BV.4
+  trainer work but the BV.4 Apply-cost numbers improve materially
+  once BV.6 lands.
 
 ## 7. Estimated work
 
 | BV.4.x phase | Work | Estimate |
 |---|---|---|
-| BV.4.0 | Operator confirmation on §6 locks + §5 open Qs | 30 min |
-| BV.4.1 | `--trainer-mode` CLI + N+1 populate orchestrator | 1-2 d |
-| BV.4.2 | `/dashboards/*` accepts `?prefix=`; threading through | 1 d |
-| BV.4.3 | `/training/setup` progress page (BTa.9 shape) | 0.5 d |
-| BV.4.4 | `/training/tour/<kind>` Before/After toggle wiring | 0.5 d |
-| BV.4.5 | Re-design plant pages — no per-plant form (defaults baked in at populate) | 0.5 d |
-| BV.4.6 | Anti-drift tests (prefix-routing exhaustiveness) | 0.5 d |
-| BV.4.7 | BV.3.1 extension over all 3 dialects | 0.5 d |
+| BV.4.0 | Operator confirmation on §6 design locks | 15 min |
+| BV.4.1 | Trainer page Session Start (schema + config_kv + etl_hook into `prefix_b` + clone to `prefix_v`); Cleanup button; Re-fetch baseline button | 1-2 d |
+| BV.4.2 | `/dashboards/*` accepts `?prefix=`; threading through; default to `cfg.db_table_prefix` when absent | 1 d |
+| BV.4.3 | `/training/setup` streaming progress page (BTa.9 live-tail shape) | 0.5 d |
+| BV.4.4 | Diff-only Apply (DL.9) + Tour two-link wiring (DL.6) + landing checkbox UX (DL.8) | 1-1.5 d |
+| BV.4.5 | Per-kind failure cards (DL.12) + L2-staleness banner (DL.14) | 0.5 d |
+| BV.4.6 | Anti-drift tests (prefix-routing exhaustiveness; Info-sheet prefix row per DL.13) | 0.5 d |
+| BV.4.7 | BV.3.1 extension over all 3 dialects (PG + Oracle Docker variants) | 0.5 d |
 | BV.4.8 | Cold-read v2 against the dual-prefix surface | 90 min |
 
 Total: ~5-6 days. Cuts BU.4's remaining polish work that's
 trying-to-fix-around-the-cycle-cost (banner auto-dismiss, progress
-indicators, "Re-plant" CTA) because the cycle cost goes to zero.
+indicators, "Re-plant" CTA) because diff-only Apply makes the
+cycle cost approachable.
+
+**Parallel: BV.6 — production matview refresh modernization
+(DL.15).** ~1-2 days. PG `REFRESH MATERIALIZED VIEW CONCURRENTLY`
++ Oracle fast-refresh semantics. Benefits every production deploy
+on `data apply --execute` / `audit apply`. Orthogonal to BV.4 but
+the BV.4 Apply-cost numbers improve materially once BV.6 lands.
 
 ---
 
