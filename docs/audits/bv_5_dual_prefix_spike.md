@@ -667,14 +667,43 @@ Out of scope (defer):
   HH:MM; current L2 has changed since — `[Re-fetch baseline]` to
   re-sync" banner. No force re-entry.
 - **DL.15** — **Promote incremental matview refresh to PRODUCTION
-  (parallel BV.6 phase).** Today's DROP+CREATE-AS matview refresh
-  pattern is the only sane shape on SQLite but is wrong-shaped on
-  PG / Oracle. Switch PG to `REFRESH MATERIALIZED VIEW
-  CONCURRENTLY` + Oracle to `REFRESH FAST` / on-commit refresh
-  semantics. Benefits **every** production deploy, not just
-  trainer mode. Tracked separately as BV.6; orthogonal to BV.4
-  trainer work but the BV.4 Apply-cost numbers improve materially
-  once BV.6 lands.
+  (parallel BV.6 phase) — but ORACLE PATH IS NON-TRIVIAL.**
+  Today's DROP+CREATE-AS matview refresh pattern is the only sane
+  shape on SQLite but is wrong-shaped on PG. Three dialect paths
+  diverge:
+  - **PG**: `REFRESH MATERIALIZED VIEW CONCURRENTLY <name>` — clean
+    swap, requires a UNIQUE index on the matview. Existing matviews
+    likely have primary-key-equivalent indexes already; gap-check
+    + add where missing. Low complexity.
+  - **Oracle**: `REFRESH FAST` is the incremental verb but **requires
+    `CREATE MATERIALIZED VIEW LOG ON <every source table>` + the
+    matview DDL declared `WITH ROWID ... REFRESH FAST ON COMMIT`
+    (or ON DEMAND).** This is a real schema-emit change, not a
+    refresh-flag swap. Two sub-options:
+    - **(O.a) Add MV LOGs to every source.** Schema emit gains
+      `emit_materialized_view_log_for(source_table)` calls;
+      matview DDL declares `REFRESH FAST`. Operator pays:
+      tracking-log overhead on every base-table INSERT/UPDATE/DELETE
+      (modest write-side cost). Win: matview refresh becomes
+      delta-time on Oracle.
+    - **(O.b) Stay on `REFRESH COMPLETE` for Oracle.** Accept the
+      current Oracle full-rebuild cost. Document the constraint;
+      revisit if customer demand justifies the MV-log build-out.
+  - **SQLite**: DROP+CREATE-AS stays — no incremental refresh
+    primitive exists. App-level "delta refresh" (DELETE changed
+    rows + INSERT new ones) would work cross-dialect but is its
+    own large rewrite (`Path C` in §1.5 — virtual planted layer
+    territory). Defer.
+
+  **Recommendation:** v1 of BV.6 ships PG concurrent refresh only;
+  Oracle stays on full-rebuild with documented operator warning;
+  SQLite unchanged. Path (O.a) lives as BV.6.x sub-task if
+  Oracle's matview cost becomes the operator-pain bottleneck.
+
+  Tracked separately as BV.6; orthogonal to BV.4 trainer work.
+  BV.4 Apply-cost numbers improve on PG once BV.6 lands; sqlite
+  + Oracle Apply costs unchanged (still rely on diff-only Apply
+  per DL.9 for those).
 
 ## 7. Estimated work
 
@@ -696,10 +725,13 @@ indicators, "Re-plant" CTA) because diff-only Apply makes the
 cycle cost approachable.
 
 **Parallel: BV.6 — production matview refresh modernization
-(DL.15).** ~1-2 days. PG `REFRESH MATERIALIZED VIEW CONCURRENTLY`
-+ Oracle fast-refresh semantics. Benefits every production deploy
-on `data apply --execute` / `audit apply`. Orthogonal to BV.4 but
-the BV.4 Apply-cost numbers improve materially once BV.6 lands.
+(DL.15).** v1 ships PG concurrent refresh only (~1 day).
+Oracle's `REFRESH FAST` path requires materialized view logs +
+matview DDL rewrite — meaningful schema-emit work tracked as
+BV.6.x sub-task, deferred unless Oracle's matview refresh cost
+becomes operator-painful. SQLite unchanged (no incremental
+primitive). Benefits PG production deploys + the BV.4 trainer
+Apply-cost numbers on PG.
 
 ---
 
