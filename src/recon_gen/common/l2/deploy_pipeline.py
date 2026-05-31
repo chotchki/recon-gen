@@ -53,6 +53,7 @@ from recon_gen.common.sql import Dialect
 
 if TYPE_CHECKING:
     from recon_gen.common.config import Config
+    from recon_gen.common.l2.pipeline_overlays import PipelineOverlays
     from recon_gen.common.l2.primitives import L2Instance
 
 
@@ -782,14 +783,32 @@ async def run_deploy_pipeline(
     instance: L2Instance,
     *,
     dev_log: DevLogWriter | None = None,
+    overlays: "PipelineOverlays | None" = None,
 ) -> DeploySummary:
     """Orchestrate the BS.4 4-step deploy pipeline (with the 3.5 derive
-    sub-step). Order: wipe → etl_hook → generator → matviews → reload.
+    sub-step). Order: wipe → etl_hook → generator → overlays → matviews → reload.
 
     BS.4 (2026-05-29) reordered + dropped the legacy `step_2_pull`.
     The wipe now runs FIRST (clean slate for etl_hook + generator to
     write into); etl_hook writes directly to demo_db (no parallel
     upstream); pull is gone.
+
+    BU.1.8 — ``overlays`` is the typed surface for post-baseline plant
+    layers (replaces the round-1 ``cfg.test_generator.scope = "uncovered_rails"``
+    indirection). When ``None``, defaults are dialect-aware: ETL_DEBUG
+    (full noise) for studio Refresh Data callers, TRAINER_CLEAN for
+    Trainer reset, LOCKED_SEED for tests. See
+    ``common/l2/pipeline_overlays.py`` for the named flows.
+
+    When ``overlays`` is provided AND ``cfg.test_generator.scope`` is
+    the default ``"full"``, the generator step emits the BASELINE-only
+    SQL (`emit_baseline_seed`) + each overlay layer applies after.
+    This separates baseline-vs-plants so the Trainer can plant on a
+    quiet baseline without the L1-plant overlay firing.
+
+    Callers passing ``overlays=None`` get the legacy behavior
+    (build_full_seed_sql via scope-string dispatch) for CLI data apply
+    + locked-seed test back-compat.
 
     Halt contract: step 2's ``etl_hook`` exit code gates steps 3-5.
     Non-zero ⇒ stop. demo_db is left in whatever state the hook
@@ -802,6 +821,13 @@ async def run_deploy_pipeline(
     ``DeploySummary.events`` tuple — so the studio's POST /deploy can
     render a "what happened" timeline even if dev_log is off.
     """
+    # Avoid forward-ref-only import; lazy-import to dodge circular
+    # (pipeline_overlays imports cli/_helpers which imports here).
+    from recon_gen.common.l2.pipeline_overlays import (  # noqa: PLC0415
+        L1_INVARIANT_PLANTS,
+        OverlayContext,
+    )
+
     captured: list[Mapping[str, object]] = []
 
     async def _tee(payload: Mapping[str, object]) -> None:
@@ -809,10 +835,45 @@ async def run_deploy_pipeline(
         if dev_log is not None:
             await dev_log(payload)
 
-    # BS.4: wipe FIRST so etl_hook + generator write into clean state.
-    tx_del, bal_del = await step_2_wipe(cfg, instance, dev_log=_tee)
+    # BU.1.8 — when typed overlays are supplied, patch cfg.test_generator.scope
+    # so the step-3 generator emits baseline-only IFF the L1 plants overlay
+    # is NOT in the list. L1_INVARIANT_PLANTS as an overlay is implemented
+    # by the scope="full" path (preserves locked-seed bytes); other overlay
+    # layers (L2_DEMO_GAP_OVERLAY, future Trainer-mode amplification) apply
+    # post-pipeline via the loop below. Without overlays (default), legacy
+    # scope-string dispatch keeps the CLI + locked-seed behavior unchanged.
+    pipeline_cfg = cfg
+    post_pipeline_overlays: tuple[object, ...] = ()
+    if overlays is not None:
+        has_l1 = any(
+            layer.name == L1_INVARIANT_PLANTS.name
+            for layer in overlays.layers
+        )
+        if not has_l1 and cfg.test_generator.scope == "full":
+            from dataclasses import replace as _dr  # noqa: PLC0415
+            pipeline_cfg = _dr(
+                cfg, test_generator=_dr(
+                    cfg.test_generator, scope="uncovered_rails",
+                ),
+            )
+        # Non-L1 overlays apply AFTER the pipeline's baseline + step 3.5.
+        post_pipeline_overlays = tuple(
+            layer for layer in overlays.layers
+            if layer.name != L1_INVARIANT_PLANTS.name
+        )
+        await _emit(_tee, {
+            "event": "deploy:overlays:declared",
+            "overlay_names": list(overlays.names()),
+            "scope_override": (
+                pipeline_cfg.test_generator.scope
+                if pipeline_cfg is not cfg else None
+            ),
+        })
 
-    rc = await step_1_etl_hook(cfg, dev_log=_tee)
+    # BS.4: wipe FIRST so etl_hook + generator write into clean state.
+    tx_del, bal_del = await step_2_wipe(pipeline_cfg, instance, dev_log=_tee)
+
+    rc = await step_1_etl_hook(pipeline_cfg, dev_log=_tee)
     if rc != 0:
         await _emit(_tee, {
             "event": "deploy:halt",
@@ -836,12 +897,31 @@ async def run_deploy_pipeline(
         )
 
     tx_after, bal_after = await step_3_generator(
-        cfg, instance, dev_log=_tee,
+        pipeline_cfg, instance, dev_log=_tee,
     )
     derived_rows = await step_3_5_derive_balances(
-        cfg, instance, dev_log=_tee,
+        pipeline_cfg, instance, dev_log=_tee,
     )
-    await step_4_matviews(cfg, instance, dev_log=_tee)
+
+    # BU.1.8 — apply post-pipeline overlay layers (L2_DEMO_GAP_OVERLAY,
+    # future Trainer-mode amplification, etc) BEFORE matview refresh so
+    # the matviews see the overlay'd state.
+    if post_pipeline_overlays:
+        ctx = OverlayContext(
+            cfg=pipeline_cfg, instance=instance, dev_log=_tee,
+        )
+        for layer in post_pipeline_overlays:
+            # cast: post_pipeline_overlays carries OverlayLayer objects
+            # widened to object via the tuple-comprehension narrowing.
+            from recon_gen.common.l2.pipeline_overlays import (  # noqa: PLC0415
+                OverlayLayer,
+            )
+            assert isinstance(layer, OverlayLayer), (
+                f"post_pipeline_overlays must hold OverlayLayer, got {type(layer)}"
+            )
+            await layer.apply(ctx)
+
+    await step_4_matviews(pipeline_cfg, instance, dev_log=_tee)
     new_gen_id = await step_5_reload(dev_log=_tee)
 
     return DeploySummary(

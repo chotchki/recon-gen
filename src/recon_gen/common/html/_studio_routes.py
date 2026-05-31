@@ -3978,9 +3978,23 @@ def make_studio_routes(
         async def _tee(payload: Mapping[str, object]) -> None:
             live_events.append(dict(payload))
 
+        # BU.1.8 — typed overlay surface. ETL_DEBUG = baseline + L1
+        # plants + L2 demo-gap overlay. Replaces the BTa.8 inline
+        # overlay block that used to live below; the overlay layer
+        # is now applied inside run_deploy_pipeline before matview
+        # refresh so the matviews see the overlay'd state cleanly.
+        from recon_gen.common.l2.pipeline_overlays import (  # noqa: PLC0415
+            ETL_DEBUG, LOCKED_SEED,
+        )
+        # Real-hook deployments don't want the L2 demo overlay —
+        # their data is the source of truth. Use LOCKED_SEED
+        # (baseline + L1 plants only) so the L1 dashboards still
+        # have demo content but the L2 overlay stays off.
+        overlays = ETL_DEBUG if patched_cfg.etl_hook is None else LOCKED_SEED
         try:
             summary = await run_deploy_pipeline(
                 patched_cfg, cache.get(), dev_log=_tee,
+                overlays=overlays,
             )
         except asyncio.CancelledError:
             # BTa.9 — operator cancel. Don't roll back partial state
@@ -4003,46 +4017,11 @@ def make_studio_routes(
             _etl_run_state["task"] = None
             raise
 
-        # BTa.8 — bundled-demo gap overlay (only when no operator hook
-        # AND the main pipeline succeeded). Locks the demo Triage
-        # surface to a populated state.
-        if patched_cfg.etl_hook is None and not summary.halted:
-            from recon_gen.common.l2.demo_etl_gaps import (  # noqa: PLC0415
-                emit_demo_etl_gap_sql,
-            )
-            from recon_gen.common.db import (  # noqa: PLC0415
-                connect_demo_db, execute_script,
-            )
-
-            demo_prefix = patched_cfg.db_table_prefix
-            demo_dialect = patched_cfg.dialect
-
-            def _plant_gaps() -> None:
-                gap_sql = emit_demo_etl_gap_sql(
-                    cache.get(),
-                    prefix=demo_prefix,
-                    dialect=demo_dialect,
-                )
-                conn = connect_demo_db(patched_cfg)
-                try:
-                    cur = conn.cursor()
-                    try:
-                        execute_script(cur, gap_sql, dialect=demo_dialect)
-                        conn.commit()
-                    finally:
-                        cur.close()
-                finally:
-                    conn.close()
-
-            await _tee({
-                "event": "demo:gap_overlay:start",
-                "ts_unix": __import__("time").time(),
-            })
-            await asyncio.to_thread(_plant_gaps)
-            await _tee({
-                "event": "demo:gap_overlay:done",
-                "ts_unix": __import__("time").time(),
-            })
+        # BU.1.8 — the BTa.8 inline overlay block previously here
+        # moved INTO run_deploy_pipeline via the L2_DEMO_GAP_OVERLAY
+        # typed layer (selected via overlays=ETL_DEBUG above when
+        # cfg.etl_hook is None). Matview refresh now sees the
+        # overlay'd state cleanly.
 
         _etl_run_state["summary"] = summary
         _etl_run_state["at"] = datetime.now()  # typing-smell: ignore[no-datetime-now]: run-stamp for the operator-facing "last run at ..." banner — same wall-clock anchor as the trainer page; not a determinism path
@@ -4324,43 +4303,34 @@ def make_studio_routes(
         ))
 
     async def training_reset(_request: Request) -> RedirectResponse:
-        """BU.1.6 — Trainer clean-baseline reset.
+        """BU.1.6 + BU.1.8 — Trainer clean-baseline reset.
 
         Runs wipe + regenerate to a BASELINE-ONLY DB state — no L1
-        invariant plants (drift/overdraft/etc that `build_full_seed_sql`
-        bakes in) and no BTa.8 L2-feed gap overlay. The Trainer's
-        whole pedagogical premise is "plant ONE thing, see ONLY it
-        surface" so both plant layers have to go.
+        invariant plants (drift/overdraft/etc) and no BTa.8 L2-feed
+        gap overlay. The Trainer's whole pedagogical premise is
+        "plant ONE thing, see ONLY it surface" so both plant layers
+        have to stay off.
 
-        Implementation: patch ``cfg.test_generator.scope`` to
-        ``"uncovered_rails"``, which after the wipe queries an empty
-        ``<prefix>_transactions`` for covered rails (covered = {})
-        and emits ``emit_baseline_seed`` for ALL rails with NO plant
-        overlays. Indirect but uses the existing scope branch — no
-        new pipeline mode needed.
+        BU.1.8 — typed overlay surface. ``TRAINER_CLEAN`` is the
+        named flow (PipelineOverlays(layers=())) — empty layers tuple
+        means no L1 invariant plants + no L2 demo-gap overlay. The
+        pipeline detects the L1_INVARIANT_PLANTS layer is absent +
+        force-routes step_3_generator through scope="uncovered_rails"
+        (baseline-only emit_baseline_seed path). Replaces the
+        BU.1.6 inline cfg-scope hack — the typed name says what
+        the call does.
 
-        The /etl/run POST still uses the default ``"full"`` scope
-        (baseline + L1 plants + BTa.8 overlay), which is correct
-        for the ETL-debug demo flow where the operator wants noise
-        to debug against. Two demos, two scopes.
+        The /etl/run POST passes ETL_DEBUG / LOCKED_SEED instead;
+        two demos, two typed flows.
         """
         if cfg is None:
             return RedirectResponse(url="/training/", status_code=303)
-        # Force baseline-only scope so neither L1 plants nor the
-        # BTa.8 overlay fire. test_generator stays enabled (it has
-        # to be for the generator step to run); only the scope
-        # field changes. Hook stays disabled for the bundled-demo
-        # path; configured-hook deployments don't go through this
-        # button anyway (cfg.etl_hook would have written its own
-        # data; Trainer reset would clobber it).
-        patched_cfg = dataclass_replace(
-            cfg, test_generator=dataclass_replace(
-                cfg.test_generator,
-                scope="uncovered_rails",
-                enabled=True,
-            ),
+        from recon_gen.common.l2.pipeline_overlays import (  # noqa: PLC0415
+            TRAINER_CLEAN,
         )
-        await run_deploy_pipeline(patched_cfg, cache.get(), dev_log=None)
+        await run_deploy_pipeline(
+            cfg, cache.get(), dev_log=None, overlays=TRAINER_CLEAN,
+        )
         return RedirectResponse(
             url="/training/?reset=1", status_code=303,
         )
