@@ -181,7 +181,7 @@ The full L2 + ETL + Training round-trip. Glues everything under one e2e test. **
   - [ ] BV.4.3 - `/training/setup` streaming progress page wired into Session Start + Re-clone + Cleanup (BTa.9 live-tail shape). ~0.5 d.
   - [ ] BV.4.4 - Landing page redesign: per-kind cards (checkbox + inline form + Clean/Violation Tour links + What-to-do copy), per-family + top-level `[Select all] [None]` chips + selection-density badges, top-level "Show: [All / Only enabled / Only with errors]" filter, Apply button. Diff-only Apply (DL.9) using `<L2>_v_config_kv` to track currently-applied state as `dict[kind, form_values_fingerprint]`. 1-1.5 d.
   - [ ] BV.4.5 - Per-kind failure cards (DL.12) + L2-staleness banner (DL.14). ~0.5 d.
-  - [ ] BV.4.6 - Anti-drift tests (prefix-routing exhaustiveness; Info-sheet prefix row per DL.13). ~0.5 d.
+  - [x] BV.4.6 - Anti-drift tests (prefix-routing exhaustiveness; Info-sheet prefix row per DL.13). ~0.5 d.
   - [ ] BV.4.7 - BV.3.1 round-trip test extended over all 3 dialects (PG + Oracle Docker variants). ~0.5 d.
   - [ ] BV.4.8 - Cold-read v2 against the full dual-prefix surface. BU.6's planned cold-read absorbed here. ~90 min.
 - [ ] BV.5 - Agent-based design cold-read against the dogfood + the HUGE test. Output: `docs/audits/bv_cold_read.md`. Operator iteration + sign-off.

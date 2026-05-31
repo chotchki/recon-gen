@@ -197,6 +197,12 @@ def render_training_v3_landing(
       <div id="bv-families" class="flex flex-col gap-2">
         {chr(10).join(families_html)}
       </div>
+      <div id="bv-empty-state" data-test-empty-state
+           class="hidden bg-surface border border-surface-border rounded-md p-6 text-center text-sm text-secondary-fg">
+        <p class="font-semibold mb-1">No plants match this filter.</p>
+        <p>Switch the <strong>Show:</strong> selector back to <em>All</em>, or click
+        <strong>[Select all]</strong> on a family below to start a teaching session.</p>
+      </div>
       <div class="bg-white border border-surface-border rounded-md p-4 sticky bottom-0 flex items-center gap-3 z-10">
         <button type="submit" id="training-apply-btn"
                 class="px-4 py-2 bg-accent text-accent-fg rounded-sm border border-accent text-sm font-semibold hover:opacity-85"
@@ -503,13 +509,14 @@ _BV_LANDING_JS = """
     updateDensity();
   };
   window._bvApplyFilter = function (mode) {
+    let anyFamilyShown = false;
     root.querySelectorAll('[data-test-training-family]').forEach(fam => {
       const cards = fam.querySelectorAll('[data-test-training-kind]');
       let anyShown = false;
       cards.forEach(card => {
         const cb = card.querySelector('input[type="checkbox"][name="enabled_kinds"]');
         const enabled = cb && cb.checked;
-        // BV.4.5 will add per-card error state via a data-error attr.
+        // BV.4.5 — per-card error state via the data-error attr.
         const hasError = card.dataset.error === '1';
         let show = true;
         if (mode === 'enabled') show = !!enabled;
@@ -518,7 +525,17 @@ _BV_LANDING_JS = """
         if (show) anyShown = true;
       });
       fam.style.display = anyShown ? '' : 'none';
+      if (anyShown) anyFamilyShown = true;
     });
+    // BV.4.8.P1.3 — surface the empty-state hint when the filter
+    // hides every family (first-time-operator hits this on "Only
+    // enabled" before enabling anything; without copy the page
+    // reads as broken).
+    const empty = root.querySelector('#bv-empty-state');
+    if (empty) {
+      if (anyFamilyShown) empty.classList.add('hidden');
+      else empty.classList.remove('hidden');
+    }
   };
   // Live density updates on any checkbox toggle.
   root.addEventListener('change', e => {

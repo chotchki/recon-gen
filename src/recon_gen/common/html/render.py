@@ -857,6 +857,8 @@ def _render_parameter_number(spec: ParameterNumberSpec) -> str:
 def _render_filter_form(
     visual_fetch_urls: list[tuple[str, str]],
     filter_specs: Sequence[FilterSpec] = (),
+    *,
+    prefix_override: str | None = None,
 ) -> str:
     """Render the filter form (X.2.g.1.e: no buttons — auto-refresh).
 
@@ -876,6 +878,18 @@ def _render_filter_form(
         "bg-surface rounded-lg shadow-sm border border-surface-border"
     )
     parts = [f'  <form id="filter-form" class="{form_class}">']
+    # BV.4.8.P1.1 — when the page URL carries ``?prefix=<alt>``
+    # (typically ``<base>_v`` from the dual-prefix Trainer's Violation
+    # Tour link), embed it as a hidden form field so every visual's
+    # ``hx-include="#filter-form"`` fetch serializes it. The fetcher
+    # reads ``params["prefix"]`` and substitutes the alt prefix in the
+    # SQL at fetch time so the dashboard queries the v overlay
+    # tables/matviews instead of the cfg-bound base.
+    if prefix_override:
+        esc_prefix = html.escape(prefix_override)
+        parts.append(
+            f'    <input type="hidden" name="prefix" value="{esc_prefix}">'
+        )
     # Phase BM — the pre-BM hidden ``date_from`` / ``date_to`` block
     # for the universal date-RANGE dissolved. Each
     # ParameterDateTimePicker is now its own ParameterDateSpec entry
@@ -1352,6 +1366,7 @@ def emit_html(
     all_sheets: Sequence[Sheet] = (),
     data_generation_id: int | None = None,
     top_nav: str = "",
+    prefix_override: str | None = None,
 ) -> str:
     """Render a tree ``Sheet`` as a standalone HTML page.
 
@@ -1437,7 +1452,10 @@ def emit_html(
     # visuals to refresh. Text-box-only sheets (e.g. Executives' Getting
     # Started) used to show a vestigial date picker that did nothing.
     if sheet.visuals:
-        body_parts.append(_render_filter_form(visual_fetch_urls, filter_specs))
+        body_parts.append(_render_filter_form(
+            visual_fetch_urls, filter_specs,
+            prefix_override=prefix_override,
+        ))
     # X.2.g.1.d — wrap visuals + text boxes in a CSS grid that
     # respects the tree's GridSlot.col_span. The QS layout is a 36-col
     # grid (see common/tree/structure.py::_GRID_WIDTH_COLS); two

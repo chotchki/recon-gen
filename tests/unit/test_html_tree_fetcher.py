@@ -310,6 +310,69 @@ def test_make_tree_db_fetcher_sorts_table(
     assert again["total_rows"] == 4
 
 
+def test_make_tree_db_fetcher_retargets_to_alt_prefix(
+    tmp_path: Any,
+) -> None:
+    """BV.4.8.P1.1 — ``?prefix=<alt>`` URL param re-targets the SQL at
+    an alternate table prefix (the dual-prefix Trainer's Violation
+    Tour link writes ``?prefix=<base>_v``). The pre-resolved SQL has
+    ``cfg.db_table_prefix`` baked in; the fetcher substitutes the
+    leading ``<base>_`` token at request time. Without this, Clean
+    and Violation Tour links render identical data — the operator's
+    teaching comparison teaches nothing."""
+    import sqlite3
+
+    db_path = tmp_path / "alt_prefix.sqlite"
+    conn = sqlite3.connect(str(db_path))
+    # ``cfg.db_table_prefix == "test"`` (see make_test_config). Two
+    # tables: "test_t" (the cfg-bound base) holds the clean rows;
+    # "test_v_t" (the v overlay) holds the planted-violation rows.
+    conn.execute("CREATE TABLE test_t (status TEXT, amount INTEGER)")
+    conn.executemany(
+        "INSERT INTO test_t VALUES (?, ?)",
+        [("open", 100), ("open", 50)],  # base total 150
+    )
+    conn.execute("CREATE TABLE test_v_t (status TEXT, amount INTEGER)")
+    conn.executemany(
+        "INSERT INTO test_v_t VALUES (?, ?)",
+        [("open", 700), ("open", 300)],  # v overlay total 1000
+    )
+    conn.commit()
+    conn.close()
+
+    cfg = make_test_config(
+        dialect=Dialect.SQLITE,
+        demo_database_url=str(db_path),
+    )
+    pool = asyncio.run(make_connection_pool(cfg))
+    try:
+        # Dataset SQL references the BASE table (``test_t``) — the
+        # cfg-bound prefix is "test", so this is what production
+        # ``build_all_datasets(cfg)`` emits.
+        register_sql("x2g-test-ds", "SELECT status, amount FROM test_t")
+        app, _ds_node = _build_app_with_visuals()
+        fetcher = make_tree_db_fetcher(app, cfg, pool=pool)
+
+        # No prefix → cfg-bound base ⇒ 150.
+        base = _run_fetcher(fetcher, VisualId("v-kpi"), {})
+        assert base["values"][0]["value"] == 150
+
+        # ``?prefix=test_v`` ⇒ SQL re-targets at ``test_v_t`` ⇒ 1000.
+        violation = _run_fetcher(
+            fetcher, VisualId("v-kpi"), {"prefix": ["test_v"]},
+        )
+        assert violation["values"][0]["value"] == 1000, (
+            "?prefix=test_v should retarget SQL at test_v_t — got "
+            f"{violation['values'][0]['value']}, expected 1000"
+        )
+
+        # Echo of the cfg-bound prefix is a no-op (matches base).
+        echo = _run_fetcher(fetcher, VisualId("v-kpi"), {"prefix": ["test"]})
+        assert echo["values"][0]["value"] == 150
+    finally:
+        asyncio.run(pool.close())
+
+
 def test_make_tree_db_fetcher_substitutes_filters(
     aiosqlite_pool: AsyncConnectionPool,
 ) -> None:

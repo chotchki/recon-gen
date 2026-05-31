@@ -473,6 +473,11 @@ def make_app(
         from recon_gen.common.l2.deploy_pipeline import (  # noqa: PLC0415
             get_data_generation_id,
         )
+        # BV.4.8.P1.1 — Dual-prefix Trainer Tour link carries
+        # ``?prefix=<base>_v`` to point this page at the v overlay.
+        # Threaded into the filter form as a hidden input so every
+        # visual's hx-include="#filter-form" fetch carries it.
+        url_prefix = request.query_params.get("prefix") or None
         return HTMLResponse(emit_html(
             served.tree_app, served.sheet,
             dashboard_id=dash_id, dev_log=dev_log,
@@ -481,6 +486,7 @@ def make_app(
             filter_specs=filter_specs,
             data_generation_id=get_data_generation_id(),
             top_nav=_render_top_nav(active_href=f"/dashboards/{dash_id}"),
+            prefix_override=url_prefix,
         ))
 
     async def sheet_view(request: Request) -> Response:
@@ -518,6 +524,8 @@ def make_app(
         from recon_gen.common.l2.deploy_pipeline import (  # noqa: PLC0415
             get_data_generation_id,
         )
+        # BV.4.8.P1.1 — see dashboard_view.
+        url_prefix = request.query_params.get("prefix") or None
         return HTMLResponse(emit_html(
             served.tree_app, sheet_for_dash,
             dashboard_id=dash_id, dev_log=dev_log,
@@ -526,6 +534,7 @@ def make_app(
             filter_specs=filter_specs,
             data_generation_id=get_data_generation_id(),
             top_nav=_render_top_nav(active_href=f"/dashboards/{dash_id}"),
+            prefix_override=url_prefix,
         ))
 
     async def visual_data(request: Request) -> Response:

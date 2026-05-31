@@ -622,6 +622,9 @@ def make_tree_db_fetcher(
                 kpi_inflow_is_healthy=_kpi_inflow_is_healthy(visual),
             )
 
+    base_prefix = str(cfg.db_table_prefix)
+    base_prefix_tok = f"{base_prefix}_"
+
     async def fetcher(visual_id: VisualId, params: Mapping[str, list[str]]) -> Any:  # typing-smell: ignore[explicit-any]: per-visual-kind shape (KPI float, Sankey {nodes,links}, etc.) — JSON-serialized downstream, so a real union here would be every renderer's shape
         if visual_id not in visual_index:
             # Unknown visual_id — typically a stale URL from a
@@ -635,6 +638,21 @@ def make_tree_db_fetcher(
             # Empty payload renders as a blank visual — fine for
             # the page-chrome-only case.
             return {}
+        # BV.4.8.P1.1 — `?prefix=<alt>` URL param (typically
+        # `<base>_v` from the dual-prefix Trainer's Violation Tour
+        # link) re-targets the SQL at an alternate prefix at fetch
+        # time. The pre-resolved SQL string in ``plan.sql`` has the
+        # cfg base prefix baked in; we substitute the leading
+        # ``<base>_`` token with ``<alt>_`` so every referenced
+        # table/matview retargets together. Anchoring on the
+        # trailing underscore avoids accidental hits when one
+        # prefix is a substring of another (e.g. "recon" vs
+        # "recon-test"). No-op when ``prefix`` is absent, equals
+        # the base, or isn't a non-empty string.
+        prefix_vals = params.get("prefix") or []
+        alt_prefix = prefix_vals[-1].strip() if prefix_vals else ""
+        if alt_prefix and alt_prefix != base_prefix:
+            sql = sql.replace(base_prefix_tok, f"{alt_prefix}_")
         # Y.2.app2.cde — resolve `<<$paramName>>` defaults from the
         # dataset's QS parameters when the URL doesn't supply them
         # (keeps the freshly-loaded page consistent with QS). Phase BM —
