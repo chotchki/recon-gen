@@ -138,14 +138,15 @@ the operator re-sync when they want.
 ### 1.2.2 etl_hook signature unchanged
 
 `etl_hook(cfg)` keeps writing into `cfg.db_table_prefix` as
-today. The trainer page never calls etl_hook directly — it just
-clones from the base prefix. "Re-fetch baseline" on the trainer
-page triggers the existing /etl/run flow (which calls etl_hook
-into the base prefix) then re-clones to `v` + replays the
-enabled plant set. Two-step, separate concerns.
+today. The trainer page reaches etl_hook **indirectly** — Session
+Start triggers the existing /etl/run flow (which calls etl_hook
+into the base prefix) as step 1 of its sequence, then clones
+base → v + refreshes v matviews. Same etl_hook, same signature,
+same target prefix as a manual /etl/run click.
 
 **No new etl_hook kwarg.** Backward compat preserved for customer
-hooks.
+hooks; the trainer page is a Studio-route consumer of /etl/run,
+not a direct etl_hook caller.
 
 Operations on the /training/ page:
 - **Session Start** — does **everything to make the trainer surface
