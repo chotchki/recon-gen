@@ -4326,30 +4326,40 @@ def make_studio_routes(
     async def training_reset(_request: Request) -> RedirectResponse:
         """BU.1.6 — Trainer clean-baseline reset.
 
-        Runs the same wipe+regenerate pipeline as /etl/run's Refresh
-        Data BUT SKIPS the BTa.8 bundled-demo gap overlay so the
-        Trainer's destination dashboards start NOISE-FREE. The
-        operator then plants exactly one scenario via /training/plant/
-        and sees ONLY that violation surface on the tour — the
-        whole pedagogical premise.
+        Runs wipe + regenerate to a BASELINE-ONLY DB state — no L1
+        invariant plants (drift/overdraft/etc that `build_full_seed_sql`
+        bakes in) and no BTa.8 L2-feed gap overlay. The Trainer's
+        whole pedagogical premise is "plant ONE thing, see ONLY it
+        surface" so both plant layers have to go.
 
-        Compare with /etl/run's POST which appends the gap overlay
-        when `cfg.etl_hook is None` (intentional for the ETL-debug
-        demo flow); the Trainer needs the opposite.
+        Implementation: patch ``cfg.test_generator.scope`` to
+        ``"uncovered_rails"``, which after the wipe queries an empty
+        ``<prefix>_transactions`` for covered rails (covered = {})
+        and emits ``emit_baseline_seed`` for ALL rails with NO plant
+        overlays. Indirect but uses the existing scope branch — no
+        new pipeline mode needed.
+
+        The /etl/run POST still uses the default ``"full"`` scope
+        (baseline + L1 plants + BTa.8 overlay), which is correct
+        for the ETL-debug demo flow where the operator wants noise
+        to debug against. Two demos, two scopes.
         """
         if cfg is None:
             return RedirectResponse(url="/training/", status_code=303)
-        # Same generator-enabled-when-no-hook semantics as
-        # /etl/run, so the bundled-demo path still gets baseline
-        # data (just without the gap overlay).
-        if cfg.etl_hook is None:
-            patched_cfg = cfg
-        else:
-            patched_cfg = dataclass_replace(
-                cfg, test_generator=dataclass_replace(
-                    cfg.test_generator, enabled=False,
-                ),
-            )
+        # Force baseline-only scope so neither L1 plants nor the
+        # BTa.8 overlay fire. test_generator stays enabled (it has
+        # to be for the generator step to run); only the scope
+        # field changes. Hook stays disabled for the bundled-demo
+        # path; configured-hook deployments don't go through this
+        # button anyway (cfg.etl_hook would have written its own
+        # data; Trainer reset would clobber it).
+        patched_cfg = dataclass_replace(
+            cfg, test_generator=dataclass_replace(
+                cfg.test_generator,
+                scope="uncovered_rails",
+                enabled=True,
+            ),
+        )
         await run_deploy_pipeline(patched_cfg, cache.get(), dev_log=None)
         return RedirectResponse(
             url="/training/?reset=1", status_code=303,
