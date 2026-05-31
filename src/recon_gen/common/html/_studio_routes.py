@@ -4141,15 +4141,20 @@ def make_studio_routes(
             task_obj.cancel()
         return RedirectResponse(url="/etl/run", status_code=303)
 
-    async def etl_triage(_request: Request) -> HTMLResponse:
+    async def etl_triage(request: Request) -> HTMLResponse:
         # BT.4 — exception triage. Renders gap cards diffing the L2's
         # declared contracts (BT.5) against the observed runtime; each
         # card carries a deep link to the relevant editor list page
         # (link-only v1 per BT.0 lock 5).
+        # BV.4.2 (slice) — `?prefix=<value>` URL param routes the
+        # triage page at a different prefix (typically the v overlay).
+        # Defaults to the closure-captured prefix when absent.
+        url_prefix = request.query_params.get("prefix")
+        effective_prefix = url_prefix or prefix_override
         html = await _render_etl_triage_page(
             cache, dev_log,
             db_pool=db_pool, dialect=dialect,
-            prefix_override=prefix_override,
+            prefix_override=effective_prefix,
             cfg=cfg, demo_mode=demo_mode,
             top_nav_html=_top_nav_html("/etl/triage"),
         )
@@ -4229,18 +4234,25 @@ def make_studio_routes(
     # BU.1 vertical slice — Trainer surface (registry-driven, see
     # common/l2/plant_registry.py + common/html/_studio_training_v2.py).
     async def training_landing(request: Request) -> HTMLResponse:
-        from recon_gen.common.html._studio_training_v2 import (  # noqa: PLC0415
-            render_training_landing,
+        # BV.4.0 vertical slice — new landing surface from v3.
+        # BU's /training/plant/<kind> + /training/tour/<kind> routes
+        # stay alive for now (orphaned — not linked from v3 landing);
+        # BV.4.4 commits the v3 → primary migration + removes v2.
+        from recon_gen.common.html._studio_training_v3 import (  # noqa: PLC0415
+            render_training_v3_landing,
         )
         instance = cache.get()
-        # BU.1.6 — show a "reset complete" banner after the clean-
-        # baseline wipe completes (POST /training/reset 303s here
-        # with ?reset=1).
-        reset_done = request.query_params.get("reset") == "1"
-        return HTMLResponse(render_training_landing(
+        base_prefix = cfg.db_table_prefix if cfg is not None else cache.path.stem
+        v_overlay_exists = await _v_overlay_exists(
+            cfg, instance, base_prefix,
+        )
+        session_status = request.query_params.get("status") or None
+        return HTMLResponse(render_training_v3_landing(
             top_nav_html=_top_nav_html("/training/"),
             theme_head=studio_theme_head(instance),
-            reset_done=reset_done,
+            base_prefix=base_prefix,
+            v_overlay_exists=v_overlay_exists,
+            session_status=session_status,
         ))
 
     async def training_plant(request: Request) -> HTMLResponse | RedirectResponse:
@@ -4359,6 +4371,128 @@ def make_studio_routes(
             url="/training/?reset=1", status_code=303,
         )
 
+    # ---- BV.4.0 vertical slice — v-overlay POST handlers ----
+
+    async def training_session_start(
+        _request: Request,
+    ) -> RedirectResponse:
+        """POST /training/session-start — creates the v overlay
+        from base. Vertical-slice shape: drops + recreates v schema,
+        clones base data, refreshes v matviews. BV.4.1 final wires
+        in the /etl/run leg before the clone."""
+        if cfg is None:
+            return RedirectResponse(url="/training/", status_code=303)
+        from recon_gen.common.l2.v_overlay import session_start  # noqa: PLC0415
+
+        await session_start(cfg, cache.get())
+        return RedirectResponse(
+            url="/training/?status=Session+started+%E2%80%94+v+overlay+ready.",
+            status_code=303,
+        )
+
+    async def training_cleanup(_request: Request) -> RedirectResponse:
+        """POST /training/cleanup — drops the v overlay. Base prefix
+        untouched."""
+        if cfg is None:
+            return RedirectResponse(url="/training/", status_code=303)
+        from recon_gen.common.l2.v_overlay import cleanup as v_cleanup  # noqa: PLC0415
+
+        await v_cleanup(cfg, cache.get())
+        return RedirectResponse(
+            url="/training/?status=Cleanup+done+%E2%80%94+v+overlay+dropped.",
+            status_code=303,
+        )
+
+    async def training_apply(request: Request) -> RedirectResponse:
+        """POST /training/apply — naive clone-and-replay shape:
+        re-clone base → v, then emit enabled plants. BV.4.4 lands
+        DL.9 diff-only Apply."""
+        if cfg is None:
+            return RedirectResponse(url="/training/", status_code=303)
+        from recon_gen.common.l2.plant_registry import get_entry  # noqa: PLC0415
+        from recon_gen.common.l2.v_overlay import apply_plants  # noqa: PLC0415
+
+        form = await request.form()
+        enabled = {str(v) for v in form.getlist("enabled_kinds")}
+        form_kwargs_by_kind: dict[str, dict[str, object]] = {}
+        for key, value in form.items():
+            key_str = str(key)
+            if not key_str.startswith("form_"):
+                continue
+            field_name = key_str[len("form_"):]
+            # Vertical slice: assume single kind. Apply form values
+            # to every enabled kind that declares this field.
+            for kind in enabled:
+                entry = get_entry(kind)
+                if entry is None:
+                    continue
+                for primitive in entry.primitives:
+                    if primitive.name != field_name:
+                        continue
+                    bucket = form_kwargs_by_kind.setdefault(kind, {})
+                    if isinstance(primitive.default, int):
+                        try:
+                            bucket[field_name] = int(str(value))
+                        except ValueError:
+                            bucket[field_name] = primitive.default
+                    else:
+                        bucket[field_name] = str(value)
+
+        enabled_pairs: list[tuple[object, Mapping[str, object]]] = []
+        for kind in sorted(enabled):
+            entry = get_entry(kind)
+            if entry is None:
+                continue
+            kwargs = form_kwargs_by_kind.get(kind, {})
+            # Backfill missing primitives with defaults.
+            for primitive in entry.primitives:
+                if primitive.name not in kwargs:
+                    kwargs[primitive.name] = primitive.default
+            enabled_pairs.append((entry, kwargs))
+
+        await apply_plants(
+            cfg, cache.get(),
+            enabled_pairs,  # type: ignore[arg-type]: variance widening; apply_plants pulls .plant_function off first elt — relaxed typing fine at runtime
+        )
+        status_msg = f"Applied {len(enabled_pairs)} plant(s)."
+        return RedirectResponse(
+            url=f"/training/?status={status_msg.replace(' ', '+')}",
+            status_code=303,
+        )
+
+    async def _v_overlay_exists(
+        cfg_arg: Config | None, instance: L2Instance, base_prefix: str,
+    ) -> bool:
+        """Check if `<base>_v_transactions` exists. Cheap probe — the
+        v overlay's lifecycle is all-or-nothing so testing one table
+        is sufficient."""
+        import asyncio as _asyncio  # noqa: PLC0415
+
+        from recon_gen.common.db import connect_demo_db as _connect  # noqa: PLC0415
+
+        if cfg_arg is None:
+            return False
+
+        del instance  # closure captures base_prefix; instance unused
+        def _probe() -> bool:
+            try:
+                conn = _connect(cfg_arg)
+            except Exception:  # noqa: BLE001
+                return False
+            try:
+                cur = conn.cursor()
+                try:
+                    cur.execute(f"SELECT 1 FROM {base_prefix}_v_transactions LIMIT 1")
+                    return True
+                except Exception:  # noqa: BLE001
+                    return False
+                finally:
+                    cur.close()
+            finally:
+                conn.close()
+
+        return await _asyncio.to_thread(_probe)
+
     async def training_tour(request: Request) -> HTMLResponse:
         from recon_gen.common.html._studio_training_v2 import (  # noqa: PLC0415
             render_training_tour_page,
@@ -4385,6 +4519,16 @@ def make_studio_routes(
         Route("/data/timeline", data_timeline, methods=["GET"]),
         Route("/diagram", diagram, methods=["GET"]),
         Route("/training/", training_landing, methods=["GET"]),
+        Route(
+            "/training/session-start", training_session_start,
+            methods=["POST"],
+        ),
+        Route(
+            "/training/cleanup", training_cleanup, methods=["POST"],
+        ),
+        Route(
+            "/training/apply", training_apply, methods=["POST"],
+        ),
         Route(
             "/training/reset", training_reset, methods=["POST"],
         ),
