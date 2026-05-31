@@ -52,12 +52,6 @@ SECTION_TITLE_BY_KIND: Mapping[str, str] = {
 }
 
 
-# Backward-compat alias for the BU.2a-era name. Existing callers may
-# import KIND_TITLE_BY_GAP; new code SHOULD use SECTION_TITLE_BY_KIND
-# (the broader name reflecting both Triage and Coverage families).
-KIND_TITLE_BY_GAP: Mapping[str, str] = SECTION_TITLE_BY_KIND
-
-
 # Pin: per-kind editor CTA label rendered alongside the gap card.
 # Moved off ``common.html._studio_routes._GAP_KIND_EDITOR_LABELS``
 # into the typed catalogue so the editor copy + the section prose
@@ -71,10 +65,6 @@ EDITOR_LABEL_BY_KIND: Mapping[str, str] = {
     "uncovered_rail": "Open Rails editor",
     "uncovered_template": "Open Templates editor",
 }
-
-
-# Backward-compat alias for the BU.2a-era name.
-EDITOR_LABEL_BY_GAP: Mapping[str, str] = EDITOR_LABEL_BY_KIND
 
 
 @dataclass(frozen=True)

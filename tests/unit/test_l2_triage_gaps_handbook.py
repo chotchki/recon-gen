@@ -160,7 +160,7 @@ collapsed by the parser.
 
 
 def test_parser_loud_fails_on_unknown_title() -> None:
-    """Anti-drift: doc heading that doesn't match `KIND_TITLE_BY_GAP`
+    """Anti-drift: doc heading that doesn't match `SECTION_TITLE_BY_KIND`
     raises KeyError — protects against a heading rename divorced from
     a table update."""
     import pytest

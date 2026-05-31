@@ -2248,23 +2248,23 @@ def _render_metadata_coverage_card(
 
 # BU.2a — labels + editor CTAs migrated to typed handbook source.
 # `common.handbook.l2_triage_gaps` parses `docs/L2_Triage_Gaps.md`
-# + ships `KIND_TITLE_BY_GAP` (labels) + `EDITOR_LABEL_BY_GAP` (CTAs).
+# + ships `SECTION_TITLE_BY_KIND` (labels) + `EDITOR_LABEL_BY_KIND` (CTAs).
 # Helpers below cache the parsed sections so render isn't paying
 # parse cost per gap card.
 
 
 def _gap_kind_label(kind: str) -> str:
     from recon_gen.common.handbook.l2_triage_gaps import (  # noqa: PLC0415
-        KIND_TITLE_BY_GAP,
+        SECTION_TITLE_BY_KIND,
     )
-    return KIND_TITLE_BY_GAP.get(kind, kind)
+    return SECTION_TITLE_BY_KIND.get(kind, kind)
 
 
 def _gap_kind_editor_label(kind: str) -> str:
     from recon_gen.common.handbook.l2_triage_gaps import (  # noqa: PLC0415
-        EDITOR_LABEL_BY_GAP,
+        EDITOR_LABEL_BY_KIND,
     )
-    return EDITOR_LABEL_BY_GAP.get(kind, "Open editor")
+    return EDITOR_LABEL_BY_KIND.get(kind, "Open editor")
 
 # BTa.4 — per-kind visual stripe per BTa.0 Lock 3. Each kind ships
 # a distinct icon SHAPE + color — accessibility-friendly (not
