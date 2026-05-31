@@ -499,16 +499,24 @@ def _invoke_limit_breach_outbound_plant(
     dialect: object,
     anchor: datetime,
     days_ago: int,
-    cap_breach_amount: str,
     instance: object = None,
 ) -> str:
     """Adapter for ``LimitBreachPlant`` (outbound). Picker resolves the
     Outbound LimitSchedule + matching outbound 2-leg Rail + external
-    counter Account; the operator picks ``days_ago`` + the breach
-    amount (must exceed the cap)."""
-    from decimal import Decimal  # noqa: PLC0415
+    counter Account; the breach amount is auto-derived from the picked
+    schedule's cap via the same `_cap_breach_amount` helper the
+    auto-scenario seed uses (cap × 1.5, clamped to rail range). This
+    keeps the plant production-honest against any L2's cap values
+    without an operator-tuned magic number.
 
+    BV.3.2.a — pre-BV.3.2.a the operator picked `cap_breach_amount`
+    with a default of $15,000, which underflowed the spec_example's
+    $20,000 Inbound cap (and several Outbound caps). Removed the
+    primitive so a) the trainer surfaces a real breach by construction
+    and b) the same plant works against any L2 yaml the operator
+    points at."""
     from recon_gen.common.l2.auto_scenario import (  # noqa: PLC0415
+        _cap_breach_amount,
         _pick_breach_inputs,
     )
     from recon_gen.common.l2.seed import (  # noqa: PLC0415
@@ -524,7 +532,7 @@ def _invoke_limit_breach_outbound_plant(
             "whose rail matches an outbound 2-leg Rail with an "
             "external counterparty in this L2."
         )
-    _, rail, counter = picks
+    schedule, rail, counter = picks
     scenario = ScenarioPlant(
         template_instances=(cust1, cust2),
         limit_breach_plants=(
@@ -532,7 +540,7 @@ def _invoke_limit_breach_outbound_plant(
                 account_id=cust1.account_id,
                 days_ago=days_ago,
                 rail_name=rail.name,
-                amount=Decimal(cap_breach_amount),
+                amount=_cap_breach_amount(schedule.cap, rail),
                 counter_account_id=counter.id,
             ),
         ),
@@ -547,15 +555,14 @@ def _invoke_limit_breach_inbound_plant(
     dialect: object,
     anchor: datetime,
     days_ago: int,
-    cap_breach_amount: str,
     instance: object = None,
 ) -> str:
     """Adapter for ``InboundCapBreachPlant`` (AB.1 inbound mirror).
     Picker resolves the Inbound LimitSchedule + matching inbound 2-leg
-    Rail + external source Account."""
-    from decimal import Decimal  # noqa: PLC0415
-
+    Rail + external source Account; breach amount auto-derived from
+    the picked schedule's cap (see outbound variant)."""
     from recon_gen.common.l2.auto_scenario import (  # noqa: PLC0415
+        _cap_breach_amount,
         _pick_inbound_breach_inputs,
     )
     from recon_gen.common.l2.seed import (  # noqa: PLC0415
@@ -571,7 +578,7 @@ def _invoke_limit_breach_inbound_plant(
             "whose rail matches an inbound 2-leg Rail with an "
             "external counterparty in this L2."
         )
-    _, rail, counter = picks
+    schedule, rail, counter = picks
     scenario = ScenarioPlant(
         template_instances=(cust1, cust2),
         inbound_cap_breach_plants=(
@@ -579,7 +586,7 @@ def _invoke_limit_breach_inbound_plant(
                 account_id=cust1.account_id,
                 days_ago=days_ago,
                 rail_name=rail.name,
-                amount=Decimal(cap_breach_amount),
+                amount=_cap_breach_amount(schedule.cap, rail),
                 counter_account_id=counter.id,
             ),
         ),
@@ -1452,16 +1459,6 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
                 min_value=0,
                 max_value=90,
             ),
-            PrimitiveStringField(
-                name="cap_breach_amount",
-                label="Outbound flow ($)",
-                help_text=(
-                    "Daily outbound flow that MUST exceed the picked "
-                    "LimitSchedule.cap. Default $15,000 comfortably "
-                    "exceeds the standard demo cap of $10,000."
-                ),
-                default="15000.00",
-            ),
         ),
         tour_destination=TourDestination(
             primary_url=(
@@ -1488,16 +1485,6 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
                 default=3,
                 min_value=0,
                 max_value=90,
-            ),
-            PrimitiveStringField(
-                name="cap_breach_amount",
-                label="Inbound flow ($)",
-                help_text=(
-                    "Daily inbound flow that MUST exceed the picked "
-                    "Inbound LimitSchedule.cap. Default $15,000 "
-                    "comfortably exceeds the standard demo cap."
-                ),
-                default="15000.00",
             ),
         ),
         tour_destination=TourDestination(

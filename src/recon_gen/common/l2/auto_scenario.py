@@ -1938,10 +1938,19 @@ def _cap_breach_amount(
     ``range.max * 3``, pin to ``range.max * 3`` so the breach amount
     stays in a realistic ballpark relative to the rail's typical
     volume. Pre-AB.5 rails (no range): unchanged ``cap * 1.5``.
+
+    BV.3.2.a — the realism clamp could push the result BELOW the cap
+    when an L2 declares a high cap on a rail with a small typical
+    range (e.g. cap $20k, range max $5k ⇒ ceiling $15k → no breach
+    fires). Final floor at ``cap + $1`` guarantees the result
+    definitively exceeds the cap, preserving the plant's whole point.
     """
     breach = cap * Decimal("1.5")
     if rail is None or rail.amount_typical_range is None:
         return breach.quantize(Decimal("1"))
     _, hi = rail.amount_typical_range
     ceiling = hi * Decimal("3")
-    return min(breach, ceiling).quantize(Decimal("1"))
+    realistic = min(breach, ceiling)
+    # Floor: the breach must EXCEED the cap. $1 over is enough for the
+    # `outbound_total > cap` filter to fire on the matview.
+    return max(realistic, cap + Decimal("1")).quantize(Decimal("1"))

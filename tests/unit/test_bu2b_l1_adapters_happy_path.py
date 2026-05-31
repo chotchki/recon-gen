@@ -90,17 +90,15 @@ def test_overdraft_adapter_rejects_positive_money(instance: object) -> None:
 
 
 def test_limit_breach_outbound_adapter_happy_path(instance: object) -> None:
-    _invoke(
-        "limit_breach_outbound", instance=instance,
-        days_ago=4, cap_breach_amount="15000.00",
-    )
+    # BV.3.2.a — cap_breach_amount primitive dropped; breach amount
+    # auto-derives from the picked schedule's cap via
+    # `_cap_breach_amount` so the plant always surfaces against any
+    # L2's cap values.
+    _invoke("limit_breach_outbound", instance=instance, days_ago=4)
 
 
 def test_limit_breach_inbound_adapter_happy_path(instance: object) -> None:
-    _invoke(
-        "limit_breach_inbound", instance=instance,
-        days_ago=3, cap_breach_amount="15000.00",
-    )
+    _invoke("limit_breach_inbound", instance=instance, days_ago=3)
 
 
 # -- L1 Aging --------------------------------------------------------------

@@ -259,16 +259,23 @@ def test_cap_breach_amount_unbounded_falls_through_to_cap_times_1_5() -> None:
 
 
 def test_cap_breach_amount_clamps_to_range_max_times_3() -> None:
-    """AB.5: when ``cap * 1.5`` exceeds ``range.max * 3``, the breach
-    pins to ``range.max * 3`` so it stays in a realistic ballpark
-    relative to the rail's typical volume (rather than blowing past
-    the typical band by an absurd multiplier)."""
+    """AB.5 + BV.3.2.a: when ``cap * 1.5`` exceeds ``range.max * 3``,
+    the breach pins to ``range.max * 3`` for realism — UNLESS the
+    realism clamp would land BELOW the cap, in which case
+    ``cap + 1`` wins (the whole point of a cap-breach plant is to
+    exceed the cap; realism without a breach is a no-op plant).
+    """
     from recon_gen.common.l2.auto_scenario import _cap_breach_amount
 
-    # cap=100000, range=[5, 500] → cap*1.5=150000 vs range.max*3=1500
-    # → clamped to 1500.
+    # cap=1000, range=[5, 500] → cap*1.5=1500, range.max*3=1500
+    # → 1500 (clamp lands at exactly cap*1.5, no underflow).
     rail = _ranged_rail("5", "500")
-    assert _cap_breach_amount(Decimal("100000"), rail) == Decimal("1500")
+    assert _cap_breach_amount(Decimal("1000"), rail) == Decimal("1500")
+
+    # cap=100000, range=[5, 500] → cap*1.5=150000, range.max*3=1500
+    # → realism clamp would yield 1500 (BELOW cap=100000 → no breach!).
+    # BV.3.2.a floor wins: cap + 1 = 100001.
+    assert _cap_breach_amount(Decimal("100000"), rail) == Decimal("100001")
 
 
 def test_cap_breach_amount_uses_cap_when_below_range_cap() -> None:
