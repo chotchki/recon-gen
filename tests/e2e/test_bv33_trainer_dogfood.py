@@ -216,8 +216,10 @@ def test_bv33a_limit_breach_outbound_trainer_dogfood(
 ) -> None:
     """BV.3.3.a vertical slice — drive the Trainer end-to-end for
     `limit_breach_outbound` and assert the planted row surfaces in
-    the Limit Breach dashboard sheet AT the rendered HTML layer."""
-    from playwright.sync_api import sync_playwright  # noqa: PLC0415
+    the Limit Breach dashboard sheet AT the rendered HTML layer.
+
+    Drives through ``App2Driver``'s trainer verbs (BV.3.3.b)."""
+    from tests.e2e._drivers.app2 import App2Driver  # noqa: PLC0415
 
     cfg, sqlite_path = make_studio_cfg(tmp_path)
     _seed_demo_db(cfg)
@@ -225,98 +227,35 @@ def test_bv33a_limit_breach_outbound_trainer_dogfood(
     entry = _pick_kind("limit_breach_outbound")
     v_matview = f"{cfg.db_table_prefix}_v_limit_breach"
 
-    with studio_server(cfg) as base_url, sync_playwright() as pw:
-        browser = pw.webkit.launch(headless=True)
-        try:
-            ctx = browser.new_context()
-            page = ctx.new_page()
+    with studio_server(cfg) as base_url, App2Driver.attached_to(
+        base_url=base_url, cfg=cfg,
+    ) as driver:
+        driver.open_training()
+        driver.trainer_start_session()
 
-            # 1. Open /training/ — render pre-Session-Start.
-            page.goto(f"{base_url}/training/")
-            page.wait_for_selector("#training-session-start-btn")
+        before = _v_matview_account_ids(sqlite_path, v_matview)
+        driver.trainer_enable_plant(entry.kind, entry.family)
+        driver.trainer_apply()
 
-            # 2. Session Start — synchronous POST flips to a v overlay.
-            with page.expect_navigation():
-                page.click("#training-session-start-btn")
-            # Verify the v overlay's success banner rendered.
-            assert page.locator("[data-test-training-banner]").is_visible(), (
-                "Session Start should have landed a green success banner"
+        after = _v_matview_account_ids(sqlite_path, v_matview)
+        new_accounts = after - before
+        if not new_accounts:
+            diag = _diagnose_v_state(sqlite_path, cfg.db_table_prefix)
+            pytest.fail(
+                f"{entry.kind} plant didn't add a row to the v overlay's "
+                f"{v_matview}. before={sorted(before)} after={sorted(after)}. "
+                f"v_config_kv state: {diag}"
             )
 
-            # Snapshot the v matview's BEFORE-Apply account_ids.
-            before = _v_matview_account_ids(sqlite_path, v_matview)
-
-            # 3. Expand the kind's family accordion (operator clicks
-            # the family summary to reveal the cards). limit_breach_*
-            # lives under "L1 Cap" which is collapsed by default — only
-            # "L1 Conservation" opens at first render.
-            family_summary = page.locator(
-                f'[data-test-training-family="{entry.family}"] > summary'
-            ).first
-            family_summary.click()
-
-            # 4. Tick the kind's enable checkbox + click Apply. The
-            # form field name is `form_<kind>_<primitive>`; the
-            # checkbox carries `data-test-training-enable-<kind>`.
-            checkbox = page.locator(
-                f"[data-test-training-enable-{entry.kind}]"
-            )
-            checkbox.check()
-            assert checkbox.is_checked()
-
-            with page.expect_navigation():
-                page.click("#training-apply-btn")
-            # Apply redirects back to /training/?status=...
-            assert "/training" in page.url
-
-            # 4. Snapshot AFTER-Apply matview — identify the planted
-            # row by set difference.
-            after = _v_matview_account_ids(sqlite_path, v_matview)
-            new_accounts = after - before
-            if not new_accounts:
-                # Surface the v_config_kv failure ledger so the diagnostic
-                # tells us WHY the plant didn't materialize.
-                diag = _diagnose_v_state(sqlite_path, cfg.db_table_prefix)
-                pytest.fail(
-                    f"limit_breach_outbound plant didn't add a row to "
-                    f"the v overlay's {v_matview}. "
-                    f"before={sorted(before)} after={sorted(after)}. "
-                    f"v_config_kv state: {diag}"
-                )
-
-            # 5. Take the Violation Tour. The page re-rendered after
-            # Apply, so the accordion is collapsed again — re-expand
-            # before clicking the tour link (operator flow: scroll
-            # to the kind, click family, click violation link).
-            page.locator(
-                f'[data-test-training-family="{entry.family}"] > summary'
-            ).first.click()
-            v_prefix = f"{cfg.db_table_prefix}_v"
-            tour_link = page.locator(
-                f'[data-test-training-kind="{entry.kind}"] '
-                f'a[href*="?prefix={v_prefix}"]'
-            ).first
-            assert tour_link.count() > 0, (
-                "Violation Tour link missing on the limit_breach_outbound card"
-            )
-            tour_link.click()
-            page.wait_for_load_state("networkidle")
-
-            # 6. Read the dashboard surface — the limit-breach sheet
-            # renders a Table. Find any cell whose text matches one of
-            # the planted account_ids. The renderer paints `<td>` per
-            # row inside `.table-data`.
-            page.wait_for_selector(".table-data tbody tr", timeout=15000)
-            rendered_html = page.locator(".table-data").inner_html()
-            hit = next(
-                (acc for acc in new_accounts if acc in rendered_html),
-                None,
-            )
-            assert hit is not None, (
-                f"limit_breach_outbound planted account_ids "
-                f"{sorted(new_accounts)} should appear in the rendered "
-                f"Limit Breach table; got HTML head: "
-                f"{rendered_html[:500]!r}"
-            )
-        finally:
-            browser.close()
+        driver.trainer_take_violation_tour(entry.kind, entry.family)
+        rendered_html = driver.dashboard_table_inner_html()
+        hit = next(
+            (acc for acc in new_accounts if acc in rendered_html),
+            None,
+        )
+        assert hit is not None, (
+            f"{entry.kind} planted account_ids "
+            f"{sorted(new_accounts)} should appear in the rendered "
+            f"Limit Breach table; got HTML head: "
+            f"{rendered_html[:500]!r}"
+        )

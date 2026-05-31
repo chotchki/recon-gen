@@ -119,6 +119,31 @@ class App2Driver:
 
     @classmethod
     @contextlib.contextmanager
+    def attached_to(
+        cls, *, base_url: str, cfg: Config,
+        sheet_id_by_name: Mapping[str, str] | None = None,
+    ) -> Generator["App2Driver", None, None]:
+        """Driver pointed at an externally-managed server (caller owns
+        the uvicorn lifecycle; the driver only owns the WebKit page).
+
+        Use case: BV.3.3 Trainer e2e — the test owns the server via
+        ``tests.e2e._studio_deploy_helpers::studio_server`` so it can
+        seed the DB synchronously before the server starts. The driver
+        attaches to that ``base_url`` for the Playwright leg.
+
+        ``sheet_id_by_name`` is optional — the Trainer flow navigates
+        via link clicks (not ``open(sheet=...)``), so an empty mapping
+        is fine. Provide it only when the test calls ``open`` /
+        ``goto_sheet`` by name.
+        """
+        with webkit_page() as page:
+            yield cls(
+                base_url=base_url, page=page, cfg=cfg,
+                sheet_id_by_name=sheet_id_by_name or {},
+            )
+
+    @classmethod
+    @contextlib.contextmanager
     def serving(
         cls, *,
         cfg: Config,
@@ -785,6 +810,104 @@ class App2Driver:
         item.click()
         self._page.wait_for_load_state("networkidle")
         self._sync_nav_from_url()
+
+    # -- Trainer (BV.4 dual-prefix flow) ---------------------------------
+
+    def open_training(self) -> None:
+        """Navigate to ``/training/`` — the Trainer landing. Waits for
+        the Session Start button to mount; pre-Session-Start the page
+        renders only that single button + the 25 plant cards in their
+        collapsed-by-default `<details>` accordions."""
+        self._page.goto(f"{self._base}/training/")
+        self._page.wait_for_selector("#training-session-start-btn")
+
+    def trainer_start_session(self) -> None:
+        """Click Session Start + wait for the redirect-back to land
+        with the green success banner. This is the slow path on PG /
+        Oracle (~30s / ~10min for the /etl/run leg); the test budget
+        for any single kind-walk is ``Session Start + N × Apply``."""
+        with self._page.expect_navigation():
+            self._page.click("#training-session-start-btn")
+        banner = self._page.locator("[data-test-training-banner]")
+        if not banner.is_visible():
+            raise AssertionError(
+                "Session Start should have landed a success banner — "
+                "got none. Did the /etl/run leg fail?"
+            )
+
+    def trainer_enable_plant(
+        self, kind: str, family: str,
+        form_values: Mapping[str, str] | None = None,
+    ) -> None:
+        """Expand the kind's family accordion + tick the enable
+        checkbox + (optionally) override form fields. The form field
+        names are ``form_<kind>_<primitive>``.
+
+        ``family`` is the family pretty-label (``"L1 Cap"``); the
+        accordion's ``data-test-training-family="<family>"`` summary
+        is what we click. The page state (which accordions are open)
+        resets on every render — callers must re-expand after each
+        full-page navigation (Session Start / Apply / Tour).
+        """
+        self._page.locator(
+            f'[data-test-training-family="{family}"] > summary'
+        ).first.click()
+        checkbox = self._page.locator(
+            f"[data-test-training-enable-{kind}]"
+        )
+        checkbox.check()
+        for field_name, value in (form_values or {}).items():
+            self._page.locator(
+                f'[name="form_{kind}_{field_name}"]'
+            ).first.fill(value)
+
+    def trainer_apply(self) -> None:
+        """Click Apply + wait for the navigation back to /training/.
+        DL.9 means the wall-clock here depends on (add∪change) plant
+        count, not the full registry — a fingerprint-unchanged Apply
+        is a fast-path matview-refresh-only round-trip."""
+        with self._page.expect_navigation():
+            self._page.click("#training-apply-btn")
+        if "/training" not in self._page.url:
+            raise AssertionError(
+                f"Apply should have redirected to /training/, got "
+                f"{self._page.url!r}"
+            )
+
+    def trainer_take_violation_tour(
+        self, kind: str, family: str,
+    ) -> None:
+        """Re-expand the kind's family + click the Violation Tour
+        link (the ``?prefix=<base>_v`` one). Waits for the dashboard
+        sheet to settle (HTMX visual auto-loads count toward
+        networkidle)."""
+        self._page.locator(
+            f'[data-test-training-family="{family}"] > summary'
+        ).first.click()
+        tour_link = self._page.locator(
+            f'[data-test-tour-violation-{kind}]'
+        ).first
+        if tour_link.count() == 0:
+            raise AssertionError(
+                f"Violation Tour link missing on the {kind!r} card "
+                f"(data-test-tour-violation-{kind})"
+            )
+        tour_link.click()
+        self._page.wait_for_load_state("networkidle")
+
+    def dashboard_table_inner_html(self) -> str:
+        """Read the rendered ``.table-data`` block's inner HTML —
+        the cheap read used by BV.3.3's planted-row signature
+        assertions. Caller diffs the v overlay's matview to identify
+        the planted row's account_id then ``assert acc in inner_html``.
+
+        Waits for at least one row to render (the renderer auto-loads
+        via ``hx-trigger="load"`` on page open); table-only sheets
+        with 0 rendered rows yield an empty HTML string."""
+        self._page.wait_for_selector(
+            ".table-data tbody tr", timeout=15_000,
+        )
+        return str(self._page.locator(".table-data").inner_html())
 
     # -- artifacts -------------------------------------------------------
 
