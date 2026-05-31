@@ -158,6 +158,7 @@ def _invoke_phantom_rail_plant(
     anchor: datetime,
     count: int,
     rail_name: str,
+    instance: object = None,  # BU.2b — adapters that don't need the instance still accept it for uniform signature
 ) -> str:
     """Adapter from registry primitives → ``add_phantom_rail_gap_rows``.
 
@@ -165,6 +166,7 @@ def _invoke_phantom_rail_plant(
     signature so the BU.2b populate step can swap adapters per kind
     without touching the renderer.
     """
+    del instance  # unused — phantom_rail doesn't need the L2 declaration
     from recon_gen.common.l2.demo_etl_gaps import add_phantom_rail_gap_rows  # noqa: PLC0415
     from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
 
@@ -174,6 +176,56 @@ def _invoke_phantom_rail_plant(
         anchor=anchor,
         count=count,
         rail_name=rail_name,
+    )
+
+
+def _invoke_phantom_template_plant(
+    *,
+    prefix: str,
+    dialect: object,
+    anchor: datetime,
+    count: int,
+    instance: object = None,
+) -> str:
+    """Adapter for ``add_phantom_template_gap_rows`` — INSERTs ``count``
+    rows whose ``template_name`` doesn't resolve in the L2 declaration."""
+    del instance
+    from recon_gen.common.l2.demo_etl_gaps import add_phantom_template_gap_rows  # noqa: PLC0415
+    from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
+
+    return add_phantom_template_gap_rows(
+        prefix=prefix,
+        dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
+        anchor=anchor,
+        count=count,
+    )
+
+
+def _invoke_missing_metadata_plant(
+    *,
+    prefix: str,
+    dialect: object,
+    anchor: datetime,
+    instance: object = None,
+) -> str:
+    """Adapter for ``add_missing_metadata_gap_rows`` — plants one row
+    whose template resolves but whose metadata omits the template's
+    required transfer_key. Needs the L2 instance to pick a target
+    template that declares one."""
+    from recon_gen.common.l2.demo_etl_gaps import add_missing_metadata_gap_rows  # noqa: PLC0415
+    from recon_gen.common.l2.primitives import L2Instance  # noqa: PLC0415
+    from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
+
+    if not isinstance(instance, L2Instance):
+        raise ValueError(
+            "missing_metadata_key plant needs an L2Instance to "
+            "pick a template that declares a required transfer_key."
+        )
+    return add_missing_metadata_gap_rows(
+        instance,
+        prefix=prefix,
+        dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
+        anchor=anchor,
     )
 
 
@@ -220,6 +272,58 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         dashboard_check=DashboardCheck(
             url_path="/etl/triage",
             expect_text_contains="legacy_card_swipe",
+        ),
+    ),
+    PlantKindEntry(
+        kind="phantom_template",
+        category=PlantCategory.L2_TRIAGE,
+        family="L2 Triage gaps",
+        section_kind="unmatched_template",
+        plant_function=_invoke_phantom_template_plant,
+        primitives=(
+            PrimitiveIntField(
+                name="count",
+                label="Number of rows",
+                help_text=(
+                    "How many transactions to plant with the unrecognized "
+                    "template_name. Triage's volume badge reads this count."
+                ),
+                default=2,
+                min_value=1,
+                max_value=100,
+            ),
+        ),
+        tour_destination=TourDestination(
+            primary_url="/etl/triage",
+        ),
+        dashboard_check=DashboardCheck(
+            url_path="/etl/triage",
+            # Reads the demo emitter's hard-coded PHANTOM_TEMPLATE_NAME.
+            # Anti-drift gate would catch a rename divergence.
+            expect_text_contains="phantom_template",
+        ),
+    ),
+    PlantKindEntry(
+        kind="missing_metadata_key",
+        category=PlantCategory.L2_TRIAGE,
+        family="L2 Triage gaps",
+        section_kind="missing_metadata_key",
+        plant_function=_invoke_missing_metadata_plant,
+        # No tunable primitives — the plant picks a target template from
+        # the L2 deterministically (first template that declares a
+        # required transfer_key). The operator's only knob is "is the
+        # plant on or off"; future BU.4 polish may surface the chosen
+        # template name in the form for transparency.
+        primitives=(),
+        tour_destination=TourDestination(
+            primary_url="/etl/triage",
+        ),
+        dashboard_check=DashboardCheck(
+            url_path="/etl/triage",
+            # The triage card mentions "metadata key" in its
+            # diagnosis prose for this kind regardless of the chosen
+            # template — stable text contains check.
+            expect_text_contains="metadata key",
         ),
     ),
 )

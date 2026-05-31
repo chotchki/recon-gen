@@ -4276,11 +4276,14 @@ def make_studio_routes(
             kwargs = coerce_form_to_kwargs(entry, form_values)
             plant_cfg = cfg
 
+            plant_instance = instance
+
             def _do_plant() -> None:
                 sql = entry.plant_function(
                     prefix=plant_cfg.db_table_prefix,
                     dialect=plant_cfg.dialect,
                     anchor=now_anchor(),
+                    instance=plant_instance,
                     **kwargs,
                 )
                 conn = connect_demo_db(plant_cfg)
