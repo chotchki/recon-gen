@@ -118,3 +118,51 @@ upstream genuinely doesn't carry it. A missing required key means
 L1 Conservation can't bucket the affected rows, which silently
 distorts the L1 Drift dashboard for the operator's customer
 segments downstream of that template.
+
+## L2 Coverage gaps
+
+The triage gaps above (the four `GapKind` literals) fire when the
+runtime has data the L2 doesn't account for. The two **coverage**
+sections below are the inverse — the L2 declares a rail or template
+that the runtime never exercises. These surface on the `/etl/run`
+Coverage panel (after a refresh) rather than `/etl/triage`, but
+they share the same typed catalogue because they're the same
+operator surface family: "L2-to-runtime alignment is off, here's
+which side."
+
+### 5. Uncovered rail
+
+Each row is an L2-declared `Rail.name` with zero postings in
+`<prefix>_transactions`. The Coverage Rails panel renders the rail
+as ✗ (`declared but no rows`). Pulls from the same data slice as
+the L2FT Dead Rails hygiene check — they're two surfaces on the
+same underlying check.
+
+**Columns:** `rail_name`, `leg_shape`, `posting_count`.
+
+**What to do:** Either the declared rail is genuinely unused —
+retire it from the L2 yaml's `rails:` block — OR the ETL hook is
+misrouting postings against it (check `rail_name` casing + spelling
+against the L2 declaration). A long-uncovered rail is L2 noise:
+it shows up in dropdowns + handbook prose but never has data, so
+operators downstream lose trust in the L2 as a faithful map of the
+runtime.
+
+### 6. Uncovered template
+
+Each row is an L2-declared `TransferTemplate.name` with zero
+postings tagged with that `template_name`. Coverage Templates
+panel renders the template as ✗. Inverse of `unmatched_template` —
+that one means rows exist for an undeclared template; this means
+the template exists but no rows cite it.
+
+**Columns:** `template_name`, `rail`, `posting_count`.
+
+**What to do:** Either the template is no longer in use — retire it
+from the L2 yaml's `transfer_templates:` block — OR the ETL hook
+stopped tagging postings with it (check the template name + the
+template's `rail` field against what the ETL emits). Uncovered
+templates particularly hurt L1 Conservation: a template with no
+data means `template_metadata_coverage` can't bucket anything,
+which leaves rows landing under "(no template)" with no analyst
+recourse.

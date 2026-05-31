@@ -1,8 +1,9 @@
-"""L2 Triage Gaps parser — BU.2a (Lock 10).
+"""L2 Triage + L2 Coverage Gaps parser — BU.2a (Lock 10).
 
 Reads ``src/recon_gen/docs/L2_Triage_Gaps.md`` (the single source of
-truth for the four L2-to-runtime triage gap kinds) and returns a
-typed mapping of gap kind -> :class:`L2TriageGapSection`.
+truth for L2-to-runtime alignment gaps — both Triage and Coverage
+families) and returns a typed mapping of section kind ->
+:class:`L2TriageGapSection`.
 
 Mirrors :mod:`common.handbook.l2ft_exceptions` (the L2FT hygiene
 catalogue) and :mod:`common.handbook.invariants` (the L1 invariants
@@ -11,17 +12,15 @@ catalogue). Parser shape is identical to the L2FT flavor: ``### N.
 line — no SHOULD blockquote prefix (these are runtime checks against
 the L2, not L1 SHOULD-constraints).
 
-The single difference from L2FT is the kind slug derivation. The
-triage gap kinds are the four ``GapKind`` literals
-(``unmatched_rail`` / ``unmatched_template`` / ``missing_limit_schedule``
-/ ``missing_metadata_key``) — they don't map to the doc's natural
-title slugs one-to-one (e.g. doc title ``"Unmatched rail_name"``
-slugs to ``"unmatched_rail_name"`` but the ``GapKind`` literal is
-``"unmatched_rail"``). The doc orders sections to match the GapKind
-tuple order so the parser can zip them positionally; the
-:data:`KIND_TITLE_BY_GAP` table pins the title-to-kind mapping
-explicitly so a doc reordering would loud-fail rather than silently
-mis-attach.
+**Two families share this catalogue** per BU.0 round-4 Notes: L2
+Triage gaps (the four :class:`common.l2.triage.GapKind` literals —
+runtime has data the L2 doesn't account for) and L2 Coverage gaps
+(``uncovered_rail`` / ``uncovered_template`` — L2 declares something
+the runtime doesn't exercise). The family discriminator lives on
+:class:`common.l2.plant_registry.PlantKindEntry.family`, not on the
+section type. :data:`SECTION_TITLE_BY_KIND` pins the title-to-kind
+mapping for both families — a doc reordering or heading rename
+loud-fails at parser load rather than silently mis-attach.
 """
 
 from __future__ import annotations
@@ -32,32 +31,50 @@ from dataclasses import dataclass
 from importlib import resources
 
 
-# Pin: which Lock-10 GapKind maps to which doc-section title. The doc
+# Pin: which section kind maps to which doc-section title. The doc
 # is authored with operator-readable titles (``"Unmatched rail_name"``)
-# while the typed kind keys are the ``GapKind`` literals defined in
-# :mod:`common.l2.triage` (``"unmatched_rail"``). Keep these two
-# vocabularies aligned here — a doc edit that renames a heading OR a
-# new GapKind landing without a section will both surface as KeyError
-# at parser load + at the anti-drift test in
+# while the typed kind keys are the GapKind literals
+# (``"unmatched_rail"`` from :mod:`common.l2.triage`) plus the L2
+# Coverage extension keys (``"uncovered_rail"`` / ``"uncovered_template"``).
+# Keep these two vocabularies aligned here — a doc edit that renames a
+# heading OR a new GapKind landing without a section will both surface
+# as KeyError at parser load + at the anti-drift test in
 # ``tests/unit/test_l2_triage_gaps_handbook.py``.
-KIND_TITLE_BY_GAP: Mapping[str, str] = {
+SECTION_TITLE_BY_KIND: Mapping[str, str] = {
+    # -- L2 Triage (the four GapKind literals) ----
     "unmatched_rail": "Unmatched rail_name",
     "unmatched_template": "Unmatched template_name",
     "missing_limit_schedule": "Missing LimitSchedule",
     "missing_metadata_key": "Missing required metadata key",
+    # -- L2 Coverage (declared but unexercised) ----
+    "uncovered_rail": "Uncovered rail",
+    "uncovered_template": "Uncovered template",
 }
+
+
+# Backward-compat alias for the BU.2a-era name. Existing callers may
+# import KIND_TITLE_BY_GAP; new code SHOULD use SECTION_TITLE_BY_KIND
+# (the broader name reflecting both Triage and Coverage families).
+KIND_TITLE_BY_GAP: Mapping[str, str] = SECTION_TITLE_BY_KIND
 
 
 # Pin: per-kind editor CTA label rendered alongside the gap card.
 # Moved off ``common.html._studio_routes._GAP_KIND_EDITOR_LABELS``
 # into the typed catalogue so the editor copy + the section prose
-# stay in one place. Triage card render reads this table.
-EDITOR_LABEL_BY_GAP: Mapping[str, str] = {
+# stay in one place. Triage card render reads this table; Coverage
+# entries reuse the same editor surfaces (Rails / Templates).
+EDITOR_LABEL_BY_KIND: Mapping[str, str] = {
     "unmatched_rail": "Open Rails editor",
     "unmatched_template": "Open Templates editor",
     "missing_limit_schedule": "Open Limits editor",
     "missing_metadata_key": "Open template editor",
+    "uncovered_rail": "Open Rails editor",
+    "uncovered_template": "Open Templates editor",
 }
+
+
+# Backward-compat alias for the BU.2a-era name.
+EDITOR_LABEL_BY_GAP: Mapping[str, str] = EDITOR_LABEL_BY_KIND
 
 
 @dataclass(frozen=True)
@@ -71,9 +88,11 @@ class L2TriageGapSection:
     """
 
     kind: str
-    """One of the four :class:`common.l2.triage.GapKind` literals —
-    ``"unmatched_rail"`` / ``"unmatched_template"`` /
-    ``"missing_limit_schedule"`` / ``"missing_metadata_key"``."""
+    """Either one of the four :class:`common.l2.triage.GapKind`
+    literals (L2 Triage family) — ``"unmatched_rail"`` /
+    ``"unmatched_template"`` / ``"missing_limit_schedule"`` /
+    ``"missing_metadata_key"`` — or one of the two L2 Coverage
+    section kinds — ``"uncovered_rail"`` / ``"uncovered_template"``."""
 
     title: str
     """Human heading — ``"Unmatched rail_name"`` /
@@ -118,18 +137,18 @@ _COLUMN_TOKEN = re.compile(r"`([^`]+)`")
 
 
 def _title_to_kind(title: str) -> str:
-    """Reverse-lookup the ``GapKind`` for a doc heading title. Loud-fails
-    when the doc title isn't in :data:`KIND_TITLE_BY_GAP` — a doc edit
-    that introduces a heading without a backing kind (or vice versa) is
-    a bug the parser refuses to hide."""
-    for kind, kind_title in KIND_TITLE_BY_GAP.items():
+    """Reverse-lookup the section kind for a doc heading title.
+    Loud-fails when the doc title isn't in :data:`SECTION_TITLE_BY_KIND`
+    — a doc edit that introduces a heading without a backing kind (or
+    vice versa) is a bug the parser refuses to hide."""
+    for kind, kind_title in SECTION_TITLE_BY_KIND.items():
         if kind_title == title:
             return kind
     raise KeyError(
         f"L2_Triage_Gaps.md heading {title!r} doesn't map to any "
-        f"GapKind in KIND_TITLE_BY_GAP — either the doc renamed a "
-        f"heading or a new GapKind was added without updating "
-        f"common.handbook.l2_triage_gaps.KIND_TITLE_BY_GAP."
+        f"section kind in SECTION_TITLE_BY_KIND — either the doc renamed "
+        f"a heading or a new GapKind / coverage kind was added without "
+        f"updating common.handbook.l2_triage_gaps.SECTION_TITLE_BY_KIND."
     )
 
 
@@ -194,7 +213,7 @@ def parse_l2_triage_gaps(md_text: str) -> dict[str, L2TriageGapSection]:
             kind=kind,
             title=title,
             label=title,
-            editor_label=EDITOR_LABEL_BY_GAP[kind],
+            editor_label=EDITOR_LABEL_BY_KIND[kind],
             body=body,
             columns=columns,
             what_to_do=what_to_do,
