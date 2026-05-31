@@ -142,15 +142,30 @@ def render_training_v3_landing(
   <main class="px-8 py-6 flex flex-col gap-4">
     {banner_html}
     <form method="post" action="/training/apply" id="training-apply-form" class="flex flex-col gap-4">
-      <section class="bg-white border border-surface-border rounded-md p-4 flex items-center justify-between gap-3">
-        <span class="text-sm font-semibold">
-          {total_enabled}/{total_kinds} plants enabled
-        </span>
-        <span class="text-xs text-secondary-fg">
-          Bulk toggle within a family via its [all] / [none] chips.
-        </span>
+      <section class="bg-white border border-surface-border rounded-md p-4 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <span class="text-sm font-semibold" data-test-top-density>
+            {total_enabled}/{total_kinds} plants enabled
+          </span>
+          <button type="button" data-test-top-all
+                  class="text-xs px-2 py-1 border border-surface-border rounded-sm hover:bg-accent/10 cursor-pointer"
+                  onclick="window._bvToggleAll(true)">[Select all]</button>
+          <button type="button" data-test-top-none
+                  class="text-xs px-2 py-1 border border-surface-border rounded-sm hover:bg-accent/10 cursor-pointer"
+                  onclick="window._bvToggleAll(false)">[None]</button>
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="text-xs text-secondary-fg">Show:</label>
+          <select id="bv-show-filter"
+                  class="text-xs px-2 py-1 border border-surface-border rounded-sm bg-white cursor-pointer"
+                  onchange="window._bvApplyFilter(this.value)">
+            <option value="all">All</option>
+            <option value="enabled">Only enabled</option>
+            <option value="errors">Only with errors</option>
+          </select>
+        </div>
       </section>
-      <div class="flex flex-col gap-2">
+      <div id="bv-families" class="flex flex-col gap-2">
         {chr(10).join(families_html)}
       </div>
       <div class="bg-white border border-surface-border rounded-md p-4 sticky bottom-0 flex items-center gap-3 z-10">
@@ -163,6 +178,9 @@ def render_training_v3_landing(
       </div>
     </form>
   </main>
+  <script>
+{_BV_LANDING_JS}
+  </script>
 </body>
 </html>
 """
@@ -248,15 +266,25 @@ def _render_family_section(
         for entry in entries
     )
     open_attr = " open" if open_by_default else ""
+    # JS-safe family-id (drop spaces) for the bulk-toggle target.
+    family_id = family.replace(" ", "_")
     return (
         '<details class="bg-white border border-surface-border rounded-md overflow-hidden" '
         f'data-test-training-family="{escape(family)}"{open_attr}>'
-        '<summary class="cursor-pointer px-4 py-3 font-semibold hover:bg-surface-bg flex items-center gap-3">'
+        '<summary class="cursor-pointer px-4 py-3 font-semibold hover:bg-surface-bg flex items-center gap-3 flex-wrap">'
         f'<span>{escape(family)}</span>'
-        f'<span class="text-xs font-normal text-secondary-fg" data-test-family-badge>'
+        f'<span class="text-xs font-normal text-secondary-fg" data-test-family-badge data-family="{escape(family_id)}">'
         f'({enabled_in_family}/{total_in_family} enabled)</span>'
+        '<button type="button" '
+        f'data-test-family-all="{escape(family_id)}" '
+        'class="text-xs px-2 py-1 border border-surface-border rounded-sm hover:bg-accent/10 cursor-pointer font-normal" '
+        f'onclick="event.preventDefault(); event.stopPropagation(); window._bvToggleFamily(\'{escape(family_id)}\', true)">[all]</button>'
+        '<button type="button" '
+        f'data-test-family-none="{escape(family_id)}" '
+        'class="text-xs px-2 py-1 border border-surface-border rounded-sm hover:bg-accent/10 cursor-pointer font-normal" '
+        f'onclick="event.preventDefault(); event.stopPropagation(); window._bvToggleFamily(\'{escape(family_id)}\', false)">[none]</button>'
         '</summary>'
-        '<div class="px-4 pb-4 flex flex-col gap-3">'
+        f'<div class="px-4 pb-4 flex flex-col gap-3" data-family-body="{escape(family_id)}">'
         f'{cards_html}'
         '</div>'
         '</details>'
@@ -390,3 +418,69 @@ def _first_sentence(text: str) -> str:
 # error-card grouping (per-category visual band).
 _ = PlantCategory
 _ = Iterable
+
+
+# -- Landing-page JS (bulk-toggle chips + Show filter) ----------------------
+#
+# Small enough to inline. Adds three window-scoped helpers the buttons
+# call via inline onclick: _bvToggleAll, _bvToggleFamily, _bvApplyFilter.
+# Also recomputes the per-family + top-level density badges on any
+# checkbox change.
+
+_BV_LANDING_JS = """
+(function () {
+  const root = document;
+  function checkboxes(scope) {
+    return scope.querySelectorAll('input[type="checkbox"][name="enabled_kinds"]');
+  }
+  function updateDensity() {
+    // Top-level badge.
+    const all = checkboxes(root);
+    const totalEnabled = Array.from(all).filter(c => c.checked).length;
+    const topBadge = root.querySelector('[data-test-top-density]');
+    if (topBadge) topBadge.textContent = totalEnabled + '/' + all.length + ' plants enabled';
+    // Per-family badges.
+    root.querySelectorAll('[data-family-body]').forEach(body => {
+      const fid = body.getAttribute('data-family-body');
+      const inFamily = checkboxes(body);
+      const en = Array.from(inFamily).filter(c => c.checked).length;
+      const badge = root.querySelector(`[data-test-family-badge][data-family="${fid}"]`);
+      if (badge) badge.textContent = '(' + en + '/' + inFamily.length + ' enabled)';
+    });
+  }
+  window._bvToggleAll = function (enable) {
+    checkboxes(root).forEach(c => { c.checked = !!enable; });
+    updateDensity();
+  };
+  window._bvToggleFamily = function (familyId, enable) {
+    const body = root.querySelector(`[data-family-body="${familyId}"]`);
+    if (!body) return;
+    checkboxes(body).forEach(c => { c.checked = !!enable; });
+    updateDensity();
+  };
+  window._bvApplyFilter = function (mode) {
+    root.querySelectorAll('[data-test-training-family]').forEach(fam => {
+      const cards = fam.querySelectorAll('[data-test-training-kind]');
+      let anyShown = false;
+      cards.forEach(card => {
+        const cb = card.querySelector('input[type="checkbox"][name="enabled_kinds"]');
+        const enabled = cb && cb.checked;
+        // BV.4.5 will add per-card error state via a data-error attr.
+        const hasError = card.dataset.error === '1';
+        let show = true;
+        if (mode === 'enabled') show = !!enabled;
+        else if (mode === 'errors') show = !!hasError;
+        card.style.display = show ? '' : 'none';
+        if (show) anyShown = true;
+      });
+      fam.style.display = anyShown ? '' : 'none';
+    });
+  };
+  // Live density updates on any checkbox toggle.
+  root.addEventListener('change', e => {
+    if (e.target && e.target.matches && e.target.matches('input[type="checkbox"][name="enabled_kinds"]')) {
+      updateDensity();
+    }
+  });
+})();
+"""
