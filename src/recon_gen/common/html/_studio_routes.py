@@ -4241,11 +4241,116 @@ def make_studio_routes(
             ),
         )
 
+    # BU.1 vertical slice — Trainer surface (registry-driven, see
+    # common/l2/plant_registry.py + common/html/_studio_training_v2.py).
+    async def training_landing(_request: Request) -> HTMLResponse:
+        from recon_gen.common.html._studio_training_v2 import (  # noqa: PLC0415
+            render_training_landing,
+        )
+        instance = cache.get()
+        return HTMLResponse(render_training_landing(
+            top_nav_html=_top_nav_html("/training/"),
+            theme_head=studio_theme_head(instance),
+        ))
+
+    async def training_plant(request: Request) -> HTMLResponse | RedirectResponse:
+        import asyncio  # noqa: PLC0415
+
+        from recon_gen.common.html._studio_training_v2 import (  # noqa: PLC0415
+            coerce_form_to_kwargs,
+            now_anchor,
+            render_training_plant_page,
+        )
+        from recon_gen.common.l2.plant_registry import get_entry  # noqa: PLC0415
+        from recon_gen.common.db import (  # noqa: PLC0415
+            connect_demo_db, execute_script,
+        )
+
+        kind = request.path_params["kind"]
+        entry = get_entry(kind)
+        if entry is None:
+            return HTMLResponse(
+                f"<h1>404</h1><p>{escape(kind)} is not a plant kind.</p>",
+                status_code=404,
+            )
+        instance = cache.get()
+        theme = studio_theme_head(instance)
+        top = _top_nav_html("/training/")
+        plant_status: str | None = None
+        if request.method == "POST":
+            if cfg is None:
+                return RedirectResponse(url="/training/", status_code=303)
+            form = await request.form()
+            kwargs = coerce_form_to_kwargs(
+                entry,
+                {str(k): str(v) for k, v in form.items()},
+            )
+            plant_cfg = cfg
+
+            def _do_plant() -> None:
+                sql = entry.plant_function(
+                    prefix=plant_cfg.db_table_prefix,
+                    dialect=plant_cfg.dialect,
+                    anchor=now_anchor(),
+                    **kwargs,
+                )
+                conn = connect_demo_db(plant_cfg)
+                try:
+                    cur = conn.cursor()
+                    try:
+                        execute_script(cur, sql, dialect=plant_cfg.dialect)
+                        conn.commit()
+                    finally:
+                        cur.close()
+                finally:
+                    conn.close()
+
+            await asyncio.to_thread(_do_plant)
+            plant_status = (
+                f"Planted {kind} with "
+                + ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
+                + ". Tour the dashboard to see it surface."
+            )
+        return HTMLResponse(render_training_plant_page(
+            entry,
+            top_nav_html=top,
+            theme_head=theme,
+            plant_status=plant_status,
+        ))
+
+    async def training_tour(request: Request) -> HTMLResponse:
+        from recon_gen.common.html._studio_training_v2 import (  # noqa: PLC0415
+            render_training_tour_page,
+        )
+        from recon_gen.common.l2.plant_registry import get_entry  # noqa: PLC0415
+
+        kind = request.path_params["kind"]
+        entry = get_entry(kind)
+        if entry is None:
+            return HTMLResponse(
+                f"<h1>404</h1><p>{escape(kind)} is not a plant kind.</p>",
+                status_code=404,
+            )
+        instance = cache.get()
+        return HTMLResponse(render_training_tour_page(
+            entry,
+            top_nav_html=_top_nav_html("/training/"),
+            theme_head=studio_theme_head(instance),
+        ))
+
     routes: list[Route | Mount] = [
         Route("/", landing, methods=["GET"]),
         Route("/data", data, methods=["GET"]),
         Route("/data/timeline", data_timeline, methods=["GET"]),
         Route("/diagram", diagram, methods=["GET"]),
+        Route("/training/", training_landing, methods=["GET"]),
+        Route(
+            "/training/plant/{kind}", training_plant,
+            methods=["GET", "POST"],
+        ),
+        Route(
+            "/training/tour/{kind}", training_tour, methods=["GET"],
+        ),
         Route("/etl/", etl_landing, methods=["GET"]),
         Route("/etl/probe", etl_probe, methods=["GET"]),
         Route("/etl/run", etl_run, methods=["GET", "POST"]),

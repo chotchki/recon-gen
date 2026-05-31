@@ -140,15 +140,23 @@ def add_phantom_rail_gap_rows(
     dialect: Dialect,
     anchor: datetime,
     count: int = 3,
+    rail_name: str = PHANTOM_RAIL_NAME,
 ) -> str:
     """Plant ``count`` transactions whose ``rail_name`` doesn't
     resolve in the L2.
 
     Triage's ``_detect_unmatched_rails`` picks these up + renders an
     ``unmatched_rail`` accordion section with the volume badge
-    showing ``<count> rows``. The phantom name (``legacy_card_swipe``)
-    is chosen to read like a plausible legacy rail an integrator
-    might forget to declare — not a random sentinel.
+    showing ``<count> rows``. The default phantom name
+    (``legacy_card_swipe``) is chosen to read like a plausible
+    legacy rail an integrator might forget to declare — not a
+    random sentinel.
+
+    BU.1 — ``rail_name`` is now operator-overridable so the Trainer
+    plant page can pre-populate it from the registry and let the
+    operator type a custom name for the demo / cold-read scenario.
+    Defaults to the bundled-demo sentinel for backward compatibility
+    with the BTa.8 overlay caller.
 
     Parallels ``add_broken_rail_plants`` in ``auto_scenario.py``
     (single plant kind, parameterized count, deterministic output).
@@ -156,6 +164,7 @@ def add_phantom_rail_gap_rows(
     return "\n".join(
         _insert_phantom_rail_row(
             row_idx=i, prefix=prefix, dialect=dialect, anchor=anchor,
+            rail_name=rail_name,
         )
         for i in range(count)
     )
@@ -268,7 +277,12 @@ def add_missing_metadata_gap_rows(
 
 
 def _insert_phantom_rail_row(
-    *, row_idx: int, prefix: str, dialect: Dialect, anchor: datetime,
+    *,
+    row_idx: int,
+    prefix: str,
+    dialect: Dialect,
+    anchor: datetime,
+    rail_name: str = PHANTOM_RAIL_NAME,
 ) -> str:
     posting = (anchor - timedelta(hours=row_idx)).isoformat(timespec="seconds")
     ts_lit = _sql_timestamp_literal(posting, dialect)
@@ -282,7 +296,7 @@ def _insert_phantom_rail_row(
         ") VALUES ("
         f"'{tx_id}', '{_DEMO_ACCOUNT_ID}', 'DemoGap', 'external', "
         f"100, 'Credit', 'Posted', {ts_lit}, "
-        f"'{xfer_id}', '{PHANTOM_RAIL_NAME}', 'DemoOverlay', "
+        f"'{xfer_id}', '{_sql_escape(rail_name)}', 'DemoOverlay', "
         "'{}');"
     )
 
