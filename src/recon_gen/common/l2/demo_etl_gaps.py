@@ -273,6 +273,227 @@ def add_missing_metadata_gap_rows(
     return sql if sql is not None else ""
 
 
+# -- BU.3 L2FT Hygiene plants (Trainer needs-build) --------------------------
+#
+# Four plants flipping the L2FT L2 Hygiene Exceptions sheet's per-kind row
+# count above zero. Surface SQL via the same INSERT / DELETE shape the
+# Triage gaps use; the L2FT dataset SQL re-runs at every dashboard query
+# (no matview to refresh).
+
+
+def add_chain_orphan_gap_rows(
+    instance: L2Instance,
+    *,
+    prefix: str,
+    dialect: Dialect,
+    anchor: datetime,
+    count: int = 3,
+) -> str:
+    """Plant ``count`` parent firings for a Required (singleton-children,
+    non-fan_in) chain WITHOUT matching child firings.
+
+    Picks the alphabetically-first Required chain (singleton children,
+    fan_in=False on the only child). Inserts ``count`` rows whose
+    ``rail_name`` is the chain's parent identifier; no row references
+    these as a ``transfer_parent_id``, so the L2FT
+    ``build_exc_chain_orphans_dataset`` check fires
+    (``parent_firing_count > child_firing_count``).
+
+    Returns empty string when the L2 declares no Required chain —
+    the BU.3 picker's "satisfiability" guard.
+    """
+    target = _pick_required_chain_parent(instance)
+    if target is None:
+        return ""
+    return "\n".join(
+        _insert_chain_orphan_parent_row(
+            row_idx=i, prefix=prefix, dialect=dialect, anchor=anchor,
+            parent_name=target,
+        )
+        for i in range(count)
+    )
+
+
+def add_dead_bundles_activity_gap_rows(
+    instance: L2Instance,
+    *,
+    prefix: str,
+    dialect: Dialect,
+) -> str:
+    """Empty all transactions for one L2-declared bundle_target (DELETE).
+
+    Picks the alphabetically-first (aggregating_rail, bundle_target)
+    pair declared on an L2 rail's ``bundles_activity``; deletes every
+    row whose ``rail_name = bundle_target`` so the
+    ``build_exc_dead_bundles_activity_dataset`` check's NOT EXISTS
+    matches. Returns empty string when no rail declares
+    ``bundles_activity``.
+    """
+    target = _pick_dead_bundle_target(instance)
+    if target is None:
+        return ""
+    return (
+        f"DELETE FROM {prefix}_transactions "
+        f"WHERE rail_name = '{_sql_escape(target)}';"
+    )
+
+
+def add_dead_metadata_gap_rows(
+    instance: L2Instance,
+    *,
+    prefix: str,
+    dialect: Dialect,
+) -> str:
+    """Empty all transactions for one L2-declared (rail, metadata_key)
+    pair (DELETE).
+
+    The L2FT ``dead_metadata`` check fires per (rail, metadata_key)
+    declared on an L2 Rail when no posting on that rail carries a
+    non-null value for the key. Simplest plant: DELETE every row on the
+    chosen rail — the NOT EXISTS guard then matches for every key the
+    rail declared (rail-level), surfacing one or more rows on the L2FT
+    Hygiene Exceptions sheet's Dead Metadata Declarations branch.
+
+    Picks the alphabetically-first rail with non-empty
+    ``metadata_keys``. Returns empty string when no rail declares any.
+    """
+    target = _pick_rail_with_metadata_keys(instance)
+    if target is None:
+        return ""
+    return (
+        f"DELETE FROM {prefix}_transactions "
+        f"WHERE rail_name = '{_sql_escape(target)}';"
+    )
+
+
+def add_dead_limit_schedule_gap_rows(
+    instance: L2Instance,
+    *,
+    prefix: str,
+    dialect: Dialect,
+) -> str:
+    """Empty all Debit transactions for one L2-declared LimitSchedule
+    cell (DELETE).
+
+    The L2FT ``dead_limit_schedules`` check fires when no Debit posting
+    matches (parent_role, rail_name). Picks the alphabetically-first
+    (parent_role, rail_name) cell declared in
+    ``instance.limit_schedules`` + deletes every matching Debit row.
+    Returns empty string when no LimitSchedule is declared.
+    """
+    target = _pick_dead_limit_schedule_cell(instance)
+    if target is None:
+        return ""
+    parent_role, rail_name = target
+    return (
+        f"DELETE FROM {prefix}_transactions "
+        f"WHERE account_parent_role = '{_sql_escape(parent_role)}' "
+        f"AND rail_name = '{_sql_escape(rail_name)}' "
+        f"AND amount_direction = 'Debit';"
+    )
+
+
+# -- BU.3 pickers (deterministic, alphabetical-first by convention) ----------
+
+
+def _pick_required_chain_parent(instance: L2Instance) -> str | None:
+    """First chain that's singleton-children + non-fan_in (== Required
+    semantics per the L2 grammar Z.A: ``len(children) == 1`` encodes
+    "child SHOULD fire when parent does"). Returns the parent identifier
+    (a rail name OR a template name; the L2FT chain_orphans dataset
+    resolves both via ``COALESCE(template_name, rail_name)``).
+    """
+    candidates: list[str] = []
+    for chain in instance.chains:
+        if len(chain.children) != 1:
+            continue
+        if chain.children[0].fan_in:
+            continue
+        candidates.append(str(chain.parent))
+    if not candidates:
+        return None
+    return sorted(candidates)[0]
+
+
+def _pick_dead_bundle_target(instance: L2Instance) -> str | None:
+    """First (rail, bundle_target) pair where the rail declares
+    ``bundles_activity``. Returns the bundle_target identifier (the
+    rail_name to empty), not the aggregating rail itself. Sorted by
+    (rail_name, bundle_target) for determinism.
+    """
+    candidates: list[tuple[str, str]] = []
+    for r in instance.rails:
+        for ref in r.bundles_activity:
+            candidates.append((str(r.name), str(ref)))
+    if not candidates:
+        return None
+    candidates.sort()
+    return candidates[0][1]
+
+
+def _pick_rail_with_metadata_keys(instance: L2Instance) -> str | None:
+    """First rail (alphabetical) whose ``metadata_keys`` is non-empty.
+    Returns the rail name. None when no rail declares any keys.
+    """
+    candidates: list[str] = []
+    for r in instance.rails:
+        if r.metadata_keys:
+            candidates.append(str(r.name))
+    if not candidates:
+        return None
+    return sorted(candidates)[0]
+
+
+def _pick_dead_limit_schedule_cell(
+    instance: L2Instance,
+) -> tuple[str, str] | None:
+    """First (parent_role, rail_name) LimitSchedule cell (alphabetical).
+    Direction is ignored — the dead-schedule check filters on
+    ``amount_direction = 'Debit'`` regardless, matching the
+    out-of-the-box Outbound default.
+    """
+    candidates: list[tuple[str, str]] = [
+        (str(s.parent_role), str(s.rail))
+        for s in instance.limit_schedules
+    ]
+    if not candidates:
+        return None
+    candidates.sort()
+    return candidates[0]
+
+
+def _insert_chain_orphan_parent_row(
+    *,
+    row_idx: int,
+    prefix: str,
+    dialect: Dialect,
+    anchor: datetime,
+    parent_name: str,
+) -> str:
+    """One synthetic parent firing for the chain-orphan plant. The row
+    carries ``rail_name = parent_name`` so the L2FT chain_orphans CTE's
+    ``COALESCE(template_name, rail_name) = d.parent_name`` join matches.
+    ``transfer_parent_id`` is left null — no parent edge on this row.
+    No CHILD row is planted: that's the whole point — parent fires,
+    child doesn't, orphan_count > 0.
+    """
+    posting = (anchor - timedelta(hours=row_idx + 1)).isoformat(timespec="seconds")
+    ts_lit = _sql_timestamp_literal(posting, dialect)
+    tx_id = f"{DEMO_GAP_ID_PREFIX}chain_orphan_{row_idx:03d}"
+    xfer_id = f"{DEMO_GAP_ID_PREFIX}chain_orphan_xfer_{row_idx:03d}"
+    return (
+        f"INSERT INTO {prefix}_transactions ("
+        "id, account_id, account_role, account_scope, "
+        "amount_money, amount_direction, status, posting, "
+        "transfer_id, rail_name, origin, metadata"
+        ") VALUES ("
+        f"'{tx_id}', '{_DEMO_ACCOUNT_ID}', 'DemoGap', 'external', "
+        f"100, 'Credit', 'Posted', {ts_lit}, "
+        f"'{xfer_id}', '{_sql_escape(parent_name)}', 'DemoOverlay', "
+        "'{}');"
+    )
+
+
 # -- per-row builders (internal) ---------------------------------------------
 
 

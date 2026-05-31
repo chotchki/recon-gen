@@ -65,6 +65,7 @@ from recon_gen.common.l2.primitives import (
 from recon_gen.common.l2.seed import (
     ChainParentDisagreementPlant,
     DriftPlant,
+    ExpectedEodBalancePlant,
     FailedTransactionPlant,
     FanInChainExtraParentPlant,
     FanInChainMissingParentPlant,
@@ -90,6 +91,10 @@ from recon_gen.common.spine.chain_parent_disagreement import (
     ChainParentDisagreementGenerator,
 )
 from recon_gen.common.spine.drift import DriftGenerator
+from recon_gen.common.spine.expected_eod import (
+    ExpectedEodBalanceGenerator,
+    ExpectedEodBalanceInvariant,
+)
 from recon_gen.common.spine.failed_transaction import FailedTransactionGenerator
 from recon_gen.common.spine.fan_in_disagreement import FanInChainGenerator
 from recon_gen.common.spine.generator import ViolationGenerator
@@ -210,6 +215,12 @@ def scenario_to_generators(
         out.append(ib_gen)
         out.extend(_chain_completion_for_rail(
             ib_gen, instance, anchor_day,  # type: ignore[arg-type]: LimitBreachGenerator has rail-keyed transfer_id; structural narrowing not inferred
+        ))
+
+    # BU.3.1 — Expected-EOD-balance plants.
+    for eod in scenarios.expected_eod_balance_plants:
+        out.append(_adapt_expected_eod(
+            eod, instance, anchor_day, plant_window,
         ))
 
     # L2-shape plants — direct construct + L2 resolution.
@@ -446,6 +457,41 @@ def _adapt_inbound_cap_breach(
         cap=cap,
         overshoot=float(plant.amount) - cap,
         anchor_day=anchor_day,
+    )
+
+
+def _adapt_expected_eod(
+    plant: ExpectedEodBalancePlant, instance: L2Instance, anchor_day: date,
+    plant_window: DateInterval | None = None,
+) -> ViolationGenerator:
+    """BU.3.1 — direct-construct ExpectedEodBalanceGenerator via the
+    spine's smart constructor. The plant carries an Account role
+    (resolved by the adapter from L2); the generator picks the first
+    internal account with that role + emits a daily_balances row whose
+    ``money`` differs from ``expected_eod_balance``.
+
+    Per-plant ``anchor_day`` from ``days_ago`` (see ``_adapt_drift``
+    docstring for the offset math)."""
+    if plant_window is not None:
+        offset = max(plant.days_ago - 1, 0)
+        anchor_day = SingleDayPlant.at_offset_from_end(
+            plant_window, offset,
+        ).day
+    gen = ExpectedEodBalanceInvariant().scenario_for(
+        str(plant.role),
+        expected=float(plant.expected),
+        variance=float(plant.variance),
+        instance=instance,
+    )
+    # Override anchor_day from the plant's days_ago (the generator
+    # defaults to date(2030, 1, 1) when constructed via scenario_for).
+    return ExpectedEodBalanceGenerator(
+        account_id=gen.account_id,
+        account_role=gen.account_role,
+        account_parent_role=gen.account_parent_role,
+        anchor_day=anchor_day,
+        expected=gen.expected,
+        variance=gen.variance,
     )
 
 

@@ -1026,6 +1026,191 @@ def _invoke_supersession_audit_plant(
     return _emit_scenario(instance, scenario, prefix=prefix, dialect=dialect)
 
 
+# -- BU.3 needs-build adapters ---------------------------------------------
+# 1 L1 (expected_eod_balance_breach) + 4 L2FT Hygiene (chain_orphan /
+# dead_bundles_activity / dead_metadata / dead_limit_schedule). Pattern
+# matches the existing 20 adapters: uniform signature, ``_require_instance``
+# narrowing on the object-typed ``instance`` kwarg, function-local imports
+# via ``noqa: PLC0415`` to keep the module-load graph narrow.
+
+
+def _invoke_expected_eod_balance_breach_plant(
+    *,
+    prefix: str,
+    dialect: object,
+    anchor: datetime,
+    days_ago: int,
+    expected: str,
+    variance: str,
+    instance: object = None,
+) -> str:
+    """Adapter for ``ExpectedEodBalancePlant`` (BU.3.1). Picker resolves
+    the first internal Account role on the L2; the operator picks
+    ``days_ago`` + ``expected`` (the per-row expected_eod_balance) +
+    ``variance`` (the delta between stored money + expected). The
+    ``<prefix>_expected_eod_balance_breach`` matview surfaces a row when
+    variance != 0.
+    """
+    from decimal import Decimal  # noqa: PLC0415
+
+    from recon_gen.common.l2.primitives import Identifier  # noqa: PLC0415
+    from recon_gen.common.l2.seed import (  # noqa: PLC0415
+        ExpectedEodBalancePlant, ScenarioPlant,
+    )
+
+    instance = _require_instance(instance)
+    _, cust1, cust2 = _materialize_customers(instance)
+    role = _pick_first_internal_account_role(instance)
+    if role is None:
+        raise ValueError(
+            "expected_eod_balance_breach plant: no internal Account "
+            "declared on this L2 (the variance matview keys on "
+            "internal-scope rows)."
+        )
+    scenario = ScenarioPlant(
+        template_instances=(cust1, cust2),
+        expected_eod_balance_plants=(
+            ExpectedEodBalancePlant(
+                role=Identifier(role),
+                days_ago=days_ago,
+                expected=Decimal(expected),
+                variance=Decimal(variance),
+            ),
+        ),
+        today=anchor.date(),
+    )
+    return _emit_scenario(instance, scenario, prefix=prefix, dialect=dialect)
+
+
+def _pick_first_internal_account_role(instance: "L2Instance") -> str | None:
+    """First (alphabetical) Account role with ``scope='internal'`` on
+    the L2 — the deterministic pick for the BU.3.1 EOD plant. Mirrors
+    the ``find_internal_with_role`` helper in spine without raising on
+    miss; the adapter raises a Trainer-readable error itself."""
+    candidates: list[str] = []
+    for a in instance.accounts:
+        if str(a.scope) == "internal":
+            candidates.append(str(a.role))
+    if not candidates:
+        return None
+    return sorted(candidates)[0]
+
+
+def _invoke_chain_orphan_plant(
+    *,
+    prefix: str,
+    dialect: object,
+    anchor: datetime,
+    count: int,
+    instance: object = None,
+) -> str:
+    """Adapter for ``add_chain_orphan_gap_rows`` (BU.3.2). Plants
+    ``count`` parent firings against the first Required chain in the
+    L2 with no matching child firings, so the L2FT chain_orphans check
+    fires."""
+    from recon_gen.common.l2.demo_etl_gaps import (  # noqa: PLC0415
+        add_chain_orphan_gap_rows,
+    )
+    from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
+
+    inst = _require_instance(instance)
+    return add_chain_orphan_gap_rows(
+        inst,
+        prefix=prefix,
+        dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
+        anchor=anchor,
+        count=count,
+    )
+
+
+def _invoke_dead_bundles_activity_plant(
+    *,
+    prefix: str,
+    dialect: object,
+    anchor: datetime,
+    instance: object = None,
+) -> str:
+    """Adapter for ``add_dead_bundles_activity_gap_rows`` (BU.3.3).
+    DELETEs all transactions matching the first declared bundle_target;
+    the L2FT dead_bundles_activity check then fires NOT EXISTS for that
+    (aggregating_rail, bundle_target) pair.
+
+    No tunable primitives — the operator's only knob is on/off (the
+    picker is deterministic alphabetical-first). Same shape as the
+    existing ``uncovered_rail`` / ``uncovered_template`` Coverage
+    plants (BU.2b stage 3).
+    """
+    del anchor  # DELETE has no posting time
+    from recon_gen.common.l2.demo_etl_gaps import (  # noqa: PLC0415
+        add_dead_bundles_activity_gap_rows,
+    )
+    from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
+
+    inst = _require_instance(instance)
+    return add_dead_bundles_activity_gap_rows(
+        inst,
+        prefix=prefix,
+        dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
+    )
+
+
+def _invoke_dead_metadata_plant(
+    *,
+    prefix: str,
+    dialect: object,
+    anchor: datetime,
+    instance: object = None,
+) -> str:
+    """Adapter for ``add_dead_metadata_gap_rows`` (BU.3.4). DELETEs all
+    transactions on the first L2-declared rail with non-empty
+    ``metadata_keys`` so the rail-level NOT EXISTS guard in the L2FT
+    ``dead_metadata`` check matches for every key declared on the rail.
+
+    No tunable primitives — alphabetical-first picker; same shape as
+    the existing ``uncovered_rail`` plant.
+    """
+    del anchor
+    from recon_gen.common.l2.demo_etl_gaps import (  # noqa: PLC0415
+        add_dead_metadata_gap_rows,
+    )
+    from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
+
+    inst = _require_instance(instance)
+    return add_dead_metadata_gap_rows(
+        inst,
+        prefix=prefix,
+        dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
+    )
+
+
+def _invoke_dead_limit_schedule_plant(
+    *,
+    prefix: str,
+    dialect: object,
+    anchor: datetime,
+    instance: object = None,
+) -> str:
+    """Adapter for ``add_dead_limit_schedule_gap_rows`` (BU.3.5).
+    DELETEs all Debit transactions for the first (parent_role,
+    rail_name) LimitSchedule cell so the L2FT dead_limit_schedules
+    check's NOT EXISTS matches.
+
+    No tunable primitives — alphabetical-first picker.
+    """
+    del anchor
+    from recon_gen.common.l2.demo_etl_gaps import (  # noqa: PLC0415
+        add_dead_limit_schedule_gap_rows,
+    )
+    from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
+
+    inst = _require_instance(instance)
+    return add_dead_limit_schedule_gap_rows(
+        inst,
+        prefix=prefix,
+        dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
+    )
+
+
 # -- THE registry -----------------------------------------------------------
 
 
@@ -1683,6 +1868,165 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         dashboard_check=DashboardCheck(
             url_path="/etl/run",
             expect_text_contains="Coverage",
+        ),
+    ),
+    # ------ BU.3.1 — Expected EOD Balance (L1 Cap, no dedicated sheet) -----
+    # The matview ``<prefix>_expected_eod_balance_breach`` filters
+    # ``expected_eod_balance IS NOT NULL AND money <> expected_eod_balance``.
+    # The plant emits ONE row into ``_daily_balances`` (no transactions)
+    # with money = expected + variance; the variance row materializes.
+    # Tour destination: Today's Exceptions (no per-kind sheet per
+    # INVARIANT_KIND_TO_SHEET).
+    PlantKindEntry(
+        kind="expected_eod_balance_breach",
+        category=PlantCategory.L1_INVARIANT,
+        family="L1 Cap",
+        plant_function=_invoke_expected_eod_balance_breach_plant,
+        primitives=(
+            PrimitiveIntField(
+                name="days_ago",
+                label="Days ago",
+                help_text=(
+                    "Business-day offset for the EOD-variance row."
+                ),
+                default=2,
+                min_value=0,
+                max_value=90,
+            ),
+            PrimitiveStringField(
+                name="expected",
+                label="Expected EOD ($)",
+                help_text=(
+                    "The per-row expected_eod_balance value the daily "
+                    "snapshot SHOULD have hit. Demo magnitude only."
+                ),
+                default="100.00",
+            ),
+            PrimitiveStringField(
+                name="variance",
+                label="Variance ($)",
+                help_text=(
+                    "Stored - expected delta in dollars. Non-zero "
+                    "surfaces on Today's Exceptions. Zero would silently "
+                    "filter out (matview gates on money <> expected)."
+                ),
+                default="5.00",
+            ),
+        ),
+        tour_destination=TourDestination(
+            primary_url=(
+                "/dashboards/l1_dashboard/sheets/l1-sheet-todays-exceptions"
+            ),
+        ),
+        dashboard_check=DashboardCheck(
+            matview_name="expected_eod_balance_breach",
+            min_row_count=1,
+        ),
+    ),
+    # ------ BU.3.2-5 — L2FT Hygiene plants ---------------------------------
+    # All four land on the same L2FT L2 Hygiene Exceptions sheet (the
+    # unified row-per-violation table). L2FT checks are
+    # dataset-at-query-time (no matview), so dashboard_check uses
+    # url_path + expect_text_contains keyed on the check's stable
+    # display title — same pattern as L2 Triage entries.
+    PlantKindEntry(
+        kind="chain_orphan",
+        category=PlantCategory.L2FT_HYGIENE,
+        family="L2FT Hygiene",
+        section_kind="chain_orphans",
+        plant_function=_invoke_chain_orphan_plant,
+        primitives=(
+            PrimitiveIntField(
+                name="count",
+                label="Number of orphan parents",
+                help_text=(
+                    "How many parent firings to plant without matching "
+                    "child firings. The L2FT chain_orphans check's "
+                    "orphan_count column reads this directly."
+                ),
+                default=3,
+                min_value=1,
+                max_value=100,
+            ),
+        ),
+        tour_destination=TourDestination(
+            primary_url=(
+                "/dashboards/l2_flow_tracing/sheets/l2ft-sheet-l2-exceptions"
+            ),
+        ),
+        dashboard_check=DashboardCheck(
+            url_path=(
+                "/dashboards/l2_flow_tracing/sheets/l2ft-sheet-l2-exceptions"
+            ),
+            # The unified L2 Exceptions table's check_type column is the
+            # stable display string for chain_orphans.
+            expect_text_contains="Chain Orphans",
+        ),
+    ),
+    PlantKindEntry(
+        kind="dead_bundles_activity",
+        category=PlantCategory.L2FT_HYGIENE,
+        family="L2FT Hygiene",
+        section_kind="dead_bundles_activity",
+        plant_function=_invoke_dead_bundles_activity_plant,
+        # No tunable primitives — alphabetical-first picker chooses the
+        # bundle_target deterministically. Operator's only knob is
+        # on/off (same as the Coverage plants).
+        primitives=(),
+        tour_destination=TourDestination(
+            primary_url=(
+                "/dashboards/l2_flow_tracing/sheets/l2ft-sheet-l2-exceptions"
+            ),
+        ),
+        dashboard_check=DashboardCheck(
+            url_path=(
+                "/dashboards/l2_flow_tracing/sheets/l2ft-sheet-l2-exceptions"
+            ),
+            expect_text_contains="Dead Bundles Activity",
+        ),
+    ),
+    PlantKindEntry(
+        kind="dead_metadata",
+        category=PlantCategory.L2FT_HYGIENE,
+        family="L2FT Hygiene",
+        # Slug mismatch per BU.0 round-4 Notes: registry kind is
+        # ``dead_metadata`` (operator-vocabulary, parallels
+        # ``missing_metadata_key`` on the opposite direction) but the
+        # handbook parser's auto-derived section slug is
+        # ``dead_metadata_declarations`` (matches the Markdown title).
+        # The bijectivity anti-drift test gates this.
+        section_kind="dead_metadata_declarations",
+        plant_function=_invoke_dead_metadata_plant,
+        primitives=(),
+        tour_destination=TourDestination(
+            primary_url=(
+                "/dashboards/l2_flow_tracing/sheets/l2ft-sheet-l2-exceptions"
+            ),
+        ),
+        dashboard_check=DashboardCheck(
+            url_path=(
+                "/dashboards/l2_flow_tracing/sheets/l2ft-sheet-l2-exceptions"
+            ),
+            expect_text_contains="Dead Metadata",
+        ),
+    ),
+    PlantKindEntry(
+        kind="dead_limit_schedule",
+        category=PlantCategory.L2FT_HYGIENE,
+        family="L2FT Hygiene",
+        section_kind="dead_limit_schedules",
+        plant_function=_invoke_dead_limit_schedule_plant,
+        primitives=(),
+        tour_destination=TourDestination(
+            primary_url=(
+                "/dashboards/l2_flow_tracing/sheets/l2ft-sheet-l2-exceptions"
+            ),
+        ),
+        dashboard_check=DashboardCheck(
+            url_path=(
+                "/dashboards/l2_flow_tracing/sheets/l2ft-sheet-l2-exceptions"
+            ),
+            expect_text_contains="Dead Limit Schedules",
         ),
     ),
 )

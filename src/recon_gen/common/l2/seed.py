@@ -672,6 +672,36 @@ class InvFanoutPlant:
 
 
 @dataclass(frozen=True, slots=True)
+class ExpectedEodBalancePlant:
+    """BU.3.1 — A planted (account, business_day) cell whose stored
+    ``money`` differs from the per-row ``expected_eod_balance``.
+
+    Surfaces in L1's Expected-EOD-Balance variance matview
+    (``<prefix>_expected_eod_balance_breach``) — the matview filters
+    ``expected_eod_balance IS NOT NULL AND money <> expected_eod_balance``.
+    The plant emits ONE row into ``<prefix>_daily_balances`` with
+    ``money = expected + variance``, ``expected_eod_balance = expected``,
+    so the variance row materializes. NO transactions are emitted —
+    same balance-only shape as ``OverdraftPlant``.
+
+    The Trainer adapter (``_invoke_expected_eod_balance_breach_plant``)
+    picks the role from the L2 (first internal Account); the operator's
+    only knobs are ``days_ago`` + ``expected`` + ``variance``.
+
+    Per AU.0 / AU.2: a plant on a leaf internal account ALSO trips
+    ``drift`` (zero transactions ⇒ Σ legs = 0 ⇒ drift = stored - 0 =
+    expected + variance ≠ 0). This is encoded as the
+    ``(ExpectedEodBalanceGenerator, DriftInvariant)`` edge in the spine
+    registry and is intentional for the Trainer demo.
+    """
+
+    role: Identifier
+    days_ago: int
+    expected: Decimal
+    variance: Decimal
+
+
+@dataclass(frozen=True, slots=True)
 class ScenarioPlant:
     """The full set of planted scenarios + materialized template instances.
 
@@ -684,6 +714,7 @@ class ScenarioPlant:
     overdraft_plants: tuple[OverdraftPlant, ...] = ()
     limit_breach_plants: tuple[LimitBreachPlant, ...] = ()
     inbound_cap_breach_plants: tuple[InboundCapBreachPlant, ...] = ()
+    expected_eod_balance_plants: tuple[ExpectedEodBalancePlant, ...] = ()
     two_template_chain_plants: tuple[TwoTemplateChainPlant, ...] = ()
     chain_parent_disagreement_plants: tuple[ChainParentDisagreementPlant, ...] = ()
     xor_variant_missed_firing_plants: tuple[XorVariantMissedFiringPlant, ...] = ()
