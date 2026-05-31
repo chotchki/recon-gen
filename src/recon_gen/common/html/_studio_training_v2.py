@@ -371,13 +371,27 @@ def render_training_plant_page(
         f"{section.title} — {entry.kind_qualifier}"
         if entry.kind_qualifier else section.title
     )
-    primitives_html = "\n".join(
-        _render_primitive_field(
-            p,
-            form_value=(form_values or {}).get(p.name),
+    if entry.primitives:
+        primitives_html = "\n".join(
+            _render_primitive_field(
+                p,
+                form_value=(form_values or {}).get(p.name),
+            )
+            for p in entry.primitives
         )
-        for p in entry.primitives
-    )
+    else:
+        # BU.4 P2.1 — empty-primitive entries (the plant has no
+        # operator-tunable knobs; everything is picker-derived from
+        # the L2) used to render a form with no inputs + just a
+        # submit button — looked broken. Stamp an explicit
+        # "no parameters" hint so the operator knows it's intentional.
+        primitives_html = (
+            '<p class="text-xs text-secondary-fg m-0">'
+            "This plant has no operator-tunable parameters — the L2 "
+            "declaration determines what gets planted. Click <strong>Plant</strong> "
+            "to seed the canonical scenario."
+            "</p>"
+        )
     status_html = ""
     if plant_status:
         status_html = (
