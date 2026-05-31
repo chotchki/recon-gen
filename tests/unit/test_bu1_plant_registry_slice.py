@@ -169,6 +169,47 @@ def test_render_plant_page_renders_form_from_primitives() -> None:
     assert 'href="/training/tour/phantom_rail"' in html
 
 
+def test_render_plant_page_preserves_submitted_form_values() -> None:
+    """BU.1.10 — when ``form_values`` is supplied (POST re-render),
+    the inputs render the submitted value, not the primitive default.
+    Cold-read trust-killer: banner said one thing, form showed another."""
+    entry = get_entry("phantom_rail")
+    assert entry is not None
+    html = render_training_plant_page(
+        entry,
+        form_values={"count": "7", "rail_name": "bu1_cold_read_rail"},
+    )
+    assert 'value="7"' in html
+    assert 'value="bu1_cold_read_rail"' in html
+    # Default values must NOT leak through when an override was supplied.
+    assert 'value="3"' not in html
+    assert 'value="legacy_card_swipe"' not in html
+
+
+def test_render_plant_page_partial_form_values_use_default_for_missing() -> None:
+    """If only some fields were submitted (shouldn't happen with browser
+    forms but defensive coding wins), missing fields fall back to default.
+    Keeps the override semantics consistent with coerce_form_to_kwargs."""
+    entry = get_entry("phantom_rail")
+    assert entry is not None
+    html = render_training_plant_page(
+        entry,
+        form_values={"rail_name": "only_rail_provided"},
+    )
+    assert 'value="only_rail_provided"' in html
+    assert 'value="3"' in html  # count primitive falls back to default
+
+
+def test_render_plant_page_no_form_values_uses_defaults() -> None:
+    """Initial GET path — form_values=None means primitives use their
+    own defaults exactly as the BU.1 vertical-slice render did."""
+    entry = get_entry("phantom_rail")
+    assert entry is not None
+    html = render_training_plant_page(entry)
+    assert 'value="3"' in html
+    assert 'value="legacy_card_swipe"' in html
+
+
 def test_render_tour_page_embeds_iframe_at_destination() -> None:
     entry = get_entry("phantom_rail")
     assert entry is not None

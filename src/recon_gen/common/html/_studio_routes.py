@@ -4261,14 +4261,13 @@ def make_studio_routes(
         theme = studio_theme_head(instance)
         top = _top_nav_html("/training/")
         plant_status: str | None = None
+        form_values: dict[str, str] | None = None
         if request.method == "POST":
             if cfg is None:
                 return RedirectResponse(url="/training/", status_code=303)
             form = await request.form()
-            kwargs = coerce_form_to_kwargs(
-                entry,
-                {str(k): str(v) for k, v in form.items()},
-            )
+            form_values = {str(k): str(v) for k, v in form.items()}
+            kwargs = coerce_form_to_kwargs(entry, form_values)
             plant_cfg = cfg
 
             def _do_plant() -> None:
@@ -4300,6 +4299,7 @@ def make_studio_routes(
             top_nav_html=top,
             theme_head=theme,
             plant_status=plant_status,
+            form_values=form_values,
         ))
 
     async def training_reset(_request: Request) -> RedirectResponse:

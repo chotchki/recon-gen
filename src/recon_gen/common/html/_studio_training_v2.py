@@ -310,16 +310,24 @@ def render_training_plant_page(
     theme_head: str = "",
     asset_url: str = "/static/output.css",
     plant_status: str | None = None,
+    form_values: Mapping[str, str] | None = None,
 ) -> str:
     """The ``/training/plant/<kind>`` per-kind plant page.
 
     Data-driven from the entry. ``plant_status`` is a banner
     rendered when the operator just submitted the plant form +
-    we're showing the result of that submission.
+    we're showing the result of that submission. ``form_values``
+    (BU.1.10) preserves the operator's submitted values across the
+    POST re-render so the form mirrors the banner text instead of
+    snapping back to defaults.
     """
     section = resolve_section(entry)
     primitives_html = "\n".join(
-        _render_primitive_field(p) for p in entry.primitives
+        _render_primitive_field(
+            p,
+            form_value=(form_values or {}).get(p.name),
+        )
+        for p in entry.primitives
     )
     status_html = ""
     if plant_status:
@@ -382,34 +390,42 @@ def render_training_plant_page(
 """
 
 
-def _render_primitive_field(primitive: PrimitiveField) -> str:
+def _render_primitive_field(
+    primitive: PrimitiveField,
+    *,
+    form_value: str | None = None,
+) -> str:
     """Per-primitive-type renderer. Adding a new primitive shape
     here costs one branch + one HTML template — no per-kind hand
-    coding."""
+    coding. ``form_value`` (BU.1.10) overrides the primitive's
+    default when the operator just submitted a value — keeps the
+    form's reported state in sync with the banner."""
     if isinstance(primitive, PrimitiveIntField):
         attrs: list[str] = []
         if primitive.min_value is not None:
             attrs.append(f'min="{primitive.min_value}"')
         if primitive.max_value is not None:
             attrs.append(f'max="{primitive.max_value}"')
+        value = form_value if form_value is not None else str(primitive.default)
         return (
             '<label class="block">'
             f'<span class="block text-xs uppercase tracking-wide text-secondary-fg mb-1">'
             f'{escape(primitive.label)}</span>'
             f'<input type="number" name="{escape(primitive.name)}" '
-            f'value="{primitive.default}" {" ".join(attrs)} '
+            f'value="{escape(value)}" {" ".join(attrs)} '
             'class="px-2 py-1 border border-surface-border rounded-sm text-sm bg-white w-32">'
             f'<span class="block text-xs text-secondary-fg mt-1">'
             f'{escape(primitive.help_text)}</span>'
             '</label>'
         )
     # Type is PrimitiveStringField by narrowing — drop redundant isinstance.
+    value = form_value if form_value is not None else primitive.default
     return (
         '<label class="block">'
         f'<span class="block text-xs uppercase tracking-wide text-secondary-fg mb-1">'
         f'{escape(primitive.label)}</span>'
         f'<input type="text" name="{escape(primitive.name)}" '
-        f'value="{escape(primitive.default)}" '
+        f'value="{escape(value)}" '
         'class="px-2 py-1 border border-surface-border rounded-sm text-sm bg-white w-full max-w-md">'
         f'<span class="block text-xs text-secondary-fg mt-1">'
         f'{escape(primitive.help_text)}</span>'
