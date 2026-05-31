@@ -150,6 +150,12 @@ class PlantKindEntry:
     # typed-section's auto-derived slug (per BU.0 round-4 Notes,
     # e.g. `dead_metadata` vs `dead_metadata_declarations`).
     section_kind: str | None = None
+    # Per BU.0 Lock 8 — when multiple registry rows share a
+    # section_kind (e.g. limit_breach_outbound + limit_breach_inbound
+    # both point at InvariantSection["limit_breach"]), the renderer
+    # appends this qualifier to the title so the operator can tell
+    # the sub-kinds apart. Empty for kinds with a unique section_kind.
+    kind_qualifier: str | None = None
 
 
 # -- Plant-function adapters ------------------------------------------------
@@ -1433,6 +1439,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         # ``limit_breach`` matview with a ``direction`` column
         # distinguishing them; the typed handbook section is shared.
         section_kind="limit_breach",
+        kind_qualifier="Outbound direction",
         plant_function=_invoke_limit_breach_outbound_plant,
         primitives=(
             PrimitiveIntField(
@@ -1469,6 +1476,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         category=PlantCategory.L1_INVARIANT,
         family="L1 Cap",
         section_kind="limit_breach",
+        kind_qualifier="Inbound direction",
         plant_function=_invoke_limit_breach_inbound_plant,
         primitives=(
             PrimitiveIntField(
@@ -1615,6 +1623,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         category=PlantCategory.L1_INVARIANT,
         family="L1 Chain coherence",
         section_kind="xor_group_violation",
+        kind_qualifier="Missed-firing variant",
         plant_function=_invoke_xor_group_missed_plant,
         primitives=(
             PrimitiveIntField(
@@ -1641,6 +1650,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         category=PlantCategory.L1_INVARIANT,
         family="L1 Chain coherence",
         section_kind="xor_group_violation",
+        kind_qualifier="Overlap-firing variant",
         plant_function=_invoke_xor_group_overlap_plant,
         primitives=(
             PrimitiveIntField(
@@ -1667,6 +1677,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         category=PlantCategory.L1_INVARIANT,
         family="L1 Chain coherence",
         section_kind="fan_in_disagreement",
+        kind_qualifier="Missing-parent variant",
         plant_function=_invoke_fan_in_missing_parent_plant,
         primitives=(
             PrimitiveIntField(
@@ -1696,6 +1707,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         category=PlantCategory.L1_INVARIANT,
         family="L1 Chain coherence",
         section_kind="fan_in_disagreement",
+        kind_qualifier="Extra-parent variant",
         plant_function=_invoke_fan_in_extra_parent_plant,
         primitives=(
             PrimitiveIntField(
@@ -1726,6 +1738,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         category=PlantCategory.L1_INVARIANT,
         family="L1 Chain coherence",
         section_kind="multi_xor_violation",
+        kind_qualifier="Missed-firing variant",
         plant_function=_invoke_multi_xor_missed_plant,
         primitives=(
             PrimitiveIntField(
@@ -1755,6 +1768,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         category=PlantCategory.L1_INVARIANT,
         family="L1 Chain coherence",
         section_kind="multi_xor_violation",
+        kind_qualifier="Overlap-firing variant",
         plant_function=_invoke_multi_xor_overlap_plant,
         primitives=(
             PrimitiveIntField(

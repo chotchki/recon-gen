@@ -121,11 +121,39 @@ class InvariantSection:
 
 _HEADING_NUMBERED = re.compile(
     r"^###\s+(?P<n>\d+)\.\s+`\{\{\s*l2_instance_name\s*\}\}_(?P<kind>\w+)`"
-    r"\s+—\s+(?P<title>.+?)(?:\s+\([A-Z]\.[\w.]+\))?\s*$"
+    r"\s+—\s+(?P<title>.+?)\s*$"
 )
 """Matches ``### 1. `{{ l2_instance_name }}_drift` -- Sub-ledger drift``
-plus an optional ``(M.2b.8)`` trailing tag. Em-dash is ``—`` (the
-file is UTF-8 and uses curly em-dashes, not ``--``)."""
+through the line end. The trailing-noise strip (mkdocs attr-list
+anchors + phase markers) lives in :func:`_clean_title` so the
+patterns are documented + the test suite can exercise them in
+isolation. Em-dash is ``—`` (the file is UTF-8 and uses curly
+em-dashes, not ``--``)."""
+
+
+_TITLE_PHASE_MARKER = re.compile(r"\s*\([A-Z][a-zA-Z]*\.[\w.]+\)\s*$")
+"""``(M.2b.8)`` / ``(AB.2.3)`` / ``(AB.6.5)`` style trailing phase
+tag — sprint archaeology in operator copy; strip before render."""
+
+_TITLE_ATTR_LIST = re.compile(r"\s*\{:\s*#[^}]+\}\s*$")
+"""``{: #5-per-direction-flow-cap}`` mkdocs attr_list anchor — the
+extension is for in-page navigation, not for operator-facing copy."""
+
+
+def _clean_title(raw: str) -> str:
+    """Strip trailing render-only noise from a heading title.
+
+    Two passes because the doc can have both: ``... — Per-direction
+    flow cap {: #anchor}`` AND ``... — XOR violation (AB.3.3) {: #anchor}``.
+    Order doesn't matter for the current shapes; loop until stable
+    so future trailing tags compose."""
+    out = raw.strip()
+    while True:
+        before = out
+        out = _TITLE_PHASE_MARKER.sub("", out).rstrip()
+        out = _TITLE_ATTR_LIST.sub("", out).rstrip()
+        if out == before:
+            return out
 
 _HEADING_SUPERSESSION = re.compile(
     r"^##\s+Diagnostic surface\s+—\s+Supersession Audit\s*$"
@@ -269,7 +297,7 @@ def parse_l1_invariants(
         numbered = _HEADING_NUMBERED.match(line)
         if numbered:
             kind = numbered.group("kind")
-            title = numbered.group("title").strip()
+            title = _clean_title(numbered.group("title"))
         elif _HEADING_SUPERSESSION.match(line):
             kind = "supersession_audit"
             title = "Supersession Audit"

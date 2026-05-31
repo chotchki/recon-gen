@@ -126,26 +126,29 @@ def _first_paragraph(body: str) -> str:
 
 
 def _adapter_invariant(section: "InvariantSection") -> _SectionAdHoc:
-    """Map ``InvariantSection`` fields to the renderer protocol."""
-    should = getattr(section, "should", "") or ""
-    body = getattr(section, "body", "") or ""
+    """Map ``InvariantSection`` fields to the renderer protocol.
+
+    Fixed BU.4 stage 2 — the BU.1 wiring used the WRONG field names
+    (``getattr(section, "should")`` / ``getattr(section, "action")``)
+    so every L1 entry had blank short_statement + what_to_do. The
+    actual dataclass fields are ``short_statement`` and ``what_to_do``;
+    direct attribute access reads them correctly."""
     return _SectionAdHoc(
         title=section.title,
-        short_statement=should or _first_paragraph(body),
-        what_to_do=getattr(section, "action", "") or "",
+        short_statement=section.short_statement or _first_paragraph(section.body),
+        what_to_do=section.what_to_do,
     )
 
 
 def _adapter_l2ft(section: "L2FTExceptionSection") -> _SectionAdHoc:
-    """L2FT exceptions carry no ``should``/``short_statement`` field
-    — they're runtime checks, not SHOULD-constraints. Extract a
-    landing-card summary from the body's first paragraph so the
-    accordion isn't blank for the L2FT family."""
-    body = getattr(section, "body", "") or ""
+    """L2FT exceptions carry no ``short_statement`` field — they're
+    runtime checks, not SHOULD-constraints. Extract a landing-card
+    summary from the body's first paragraph so the accordion isn't
+    blank for the L2FT family."""
     return _SectionAdHoc(
         title=section.title,
-        short_statement=_first_paragraph(body),
-        what_to_do=getattr(section, "what_to_do", "") or "",
+        short_statement=_first_paragraph(section.body),
+        what_to_do=section.what_to_do,
     )
 
 
@@ -309,6 +312,10 @@ def _render_family_section(
         one_liner = short.split(". ", 1)[0]
         if one_liner and not one_liner.endswith("."):
             one_liner += "."
+        title_full = (
+            f"{section.title} — {entry.kind_qualifier}"
+            if entry.kind_qualifier else section.title
+        )
         items.append(
             '<li class="flex flex-col gap-1 py-2 border-b border-surface-border last:border-b-0">'
             '<div class="flex items-baseline gap-3">'
@@ -316,7 +323,7 @@ def _render_family_section(
             f'href="/training/plant/{escape(entry.kind)}" '
             f'data-test-training-kind="{escape(entry.kind)}">'
             f'{escape(entry.kind)}</a>'
-            f'<span class="text-sm font-semibold">{escape(section.title)}</span>'
+            f'<span class="text-sm font-semibold">{escape(title_full)}</span>'
             '</div>'
             f'<span class="text-xs text-secondary-fg max-w-3xl">'
             f'{escape(one_liner)}</span>'
@@ -357,6 +364,13 @@ def render_training_plant_page(
     snapping back to defaults.
     """
     section = resolve_section(entry)
+    # Lock 8 — append the registry entry's `kind_qualifier` to the
+    # title so the operator can distinguish sub-kinds that share a
+    # typed-section (e.g. limit_breach_outbound vs limit_breach_inbound).
+    title_full = (
+        f"{section.title} — {entry.kind_qualifier}"
+        if entry.kind_qualifier else section.title
+    )
     primitives_html = "\n".join(
         _render_primitive_field(
             p,
@@ -376,7 +390,7 @@ def render_training_plant_page(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Studio · Training · {escape(section.title)}</title>
+  <title>Studio · Training · {escape(title_full)}</title>
   {devlog_meta}{theme_head}
   <link rel="stylesheet" href="{escape(asset_url)}">
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
@@ -389,7 +403,7 @@ def render_training_plant_page(
     <span class="text-xs text-secondary-fg">{escape(_category_label(entry.category))} · {escape(entry.family)}</span>
   </header>
   <main class="max-w-3xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
-    <h1 class="text-2xl font-semibold m-0">{escape(section.title)}</h1>
+    <h1 class="text-2xl font-semibold m-0">{escape(title_full)}</h1>
     <p class="text-sm m-0">{escape(section.short_statement)}</p>
     {status_html}
     <section class="bg-white border border-surface-border rounded-md p-5">
