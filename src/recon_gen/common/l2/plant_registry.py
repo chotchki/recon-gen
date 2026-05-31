@@ -217,6 +217,7 @@ def _invoke_missing_metadata_plant(
     required transfer_key. Needs the L2 instance to pick a target
     template that declares one."""
     from recon_gen.common.l2.demo_etl_gaps import add_missing_metadata_gap_rows  # noqa: PLC0415
+    from recon_gen.common.l2.primitives import L2Instance  # noqa: PLC0415
     from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
 
     if not isinstance(instance, L2Instance):
@@ -229,6 +230,54 @@ def _invoke_missing_metadata_plant(
         prefix=prefix,
         dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
         anchor=anchor,
+    )
+
+
+def _invoke_uncovered_rail_plant(
+    *,
+    prefix: str,
+    dialect: object,
+    anchor: datetime,
+    instance: object = None,
+) -> str:
+    """Adapter for ``add_uncovered_rail_gap_rows`` — DELETEs all
+    transactions for one L2-declared rail (alphabetically-last,
+    deterministic). The Coverage Rails panel then renders that rail
+    as ✗ (declared but no rows)."""
+    del anchor  # unused — DELETE statement, no posting time
+    from recon_gen.common.l2.demo_etl_gaps import add_uncovered_rail_gap_rows  # noqa: PLC0415
+    from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
+
+    inst = _require_instance(instance)
+    return add_uncovered_rail_gap_rows(
+        inst,
+        prefix=prefix,
+        dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
+    )
+
+
+def _invoke_uncovered_template_plant(
+    *,
+    prefix: str,
+    dialect: object,
+    anchor: datetime,
+    instance: object = None,
+) -> str:
+    """Adapter for ``add_uncovered_template_gap_rows`` — DELETEs all
+    transactions for one L2-declared template (alphabetically-last,
+    deterministic). The Coverage Templates panel renders that
+    template as ✗."""
+    del anchor
+    from recon_gen.common.l2.demo_etl_gaps import (  # noqa: PLC0415
+        add_uncovered_template_gap_rows,
+    )
+    from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
+
+    inst = _require_instance(instance)
+    return add_uncovered_template_gap_rows(
+        inst,
+        prefix=prefix,
+        dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
     )
 
 
@@ -1597,6 +1646,43 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
             # The sheet's title is stable across renderings; the
             # planted row's specific values vary by L2 picker output.
             expect_text_contains="Supersession",
+        ),
+    ),
+    # -- L2 Coverage (declared but unexercised — BU.2b stage 3) -------------
+    PlantKindEntry(
+        kind="uncovered_rail",
+        category=PlantCategory.L2_COVERAGE,
+        family="L2 Coverage gaps",
+        section_kind="uncovered_rail",
+        plant_function=_invoke_uncovered_rail_plant,
+        # No tunable primitives — the emitter picks the alphabetically-
+        # last L2-declared rail deterministically (a stable, demo-clear
+        # choice). Operator's only knob is on/off.
+        primitives=(),
+        tour_destination=TourDestination(
+            primary_url="/etl/run",
+        ),
+        dashboard_check=DashboardCheck(
+            url_path="/etl/run",
+            # The Coverage Rails panel renders the un-covered rail
+            # with a "no rows" status badge — text varies but the
+            # word "Coverage" is stable on the panel header.
+            expect_text_contains="Coverage",
+        ),
+    ),
+    PlantKindEntry(
+        kind="uncovered_template",
+        category=PlantCategory.L2_COVERAGE,
+        family="L2 Coverage gaps",
+        section_kind="uncovered_template",
+        plant_function=_invoke_uncovered_template_plant,
+        primitives=(),
+        tour_destination=TourDestination(
+            primary_url="/etl/run",
+        ),
+        dashboard_check=DashboardCheck(
+            url_path="/etl/run",
+            expect_text_contains="Coverage",
         ),
     ),
 )
