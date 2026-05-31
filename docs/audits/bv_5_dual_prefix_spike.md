@@ -73,70 +73,95 @@ and then a plant one that we've checked off what plants to enable."**
 
 ### 1.2 Round-2 lock — TWO prefixes, multi-plant compose
 
-**Naming convention** (operator-locked): `prefix_b` for baseline,
-`prefix_v` for "with violations." Trainer mode operates on the
-suffix pair; regular `data apply` / `json apply` / `audit apply`
-still target a SINGLE base `prefix` (the operator's production
-deploy view).
+**Naming convention** (operator-locked, round-3 simplified): the
+production prefix IS the trainer baseline. Trainer adds ONE new
+prefix on top:
 
-**Final shape:**
-- **`<L2>_prefix_b_*`** — clean baseline, ONE copy. Built once at
-  trainer entry, never mutated during the session.
-- **`<L2>_prefix_v_*`** — composite of all operator-enabled plants
-  applied on top of a clone of baseline. Re-built whenever the
-  enabled set changes.
-- **`<L2>_*`** (unsuffixed) — the regular production deploy
-  prefix, untouched by trainer mode. This is what `recon-gen
-  data apply` / `etl_hook` write to outside trainer mode.
+- **`<L2>_*`** (unsuffixed) — production / baseline. Written by
+  `recon-gen data apply`, `etl_hook`, `/etl/run`. The Clean
+  dashboard reads from here. Probe / Triage / Coverage / ETL Run
+  / top-nav routes ALL hit this prefix in both production and
+  trainer modes — nothing is split. **Trainer never mutates this
+  prefix; only clones from it.**
+- **`<L2>_prefix_v_*`** — trainer-only overlay carrying the
+  composite of all operator-enabled plants applied on top of a
+  frozen snapshot-clone of the production prefix. Re-built when
+  the enabled set changes OR when the operator re-syncs against
+  upstream baseline drift.
 
-Disk cost: 2× baseline. Constant — independent of registry size.
+Disk cost: ~1× baseline of additional disk for trainer mode
+(the prefix_v copy). Constant — independent of registry size.
 
-### 1.2.1 DETERMINISM LOCK — copy-once, not etl-twice
+**Why this simplification beats the round-2 `prefix_b` + `prefix_v`
+shape:** The earlier draft introduced a dedicated `prefix_b`
+because "trainer mode needed its own deterministic baseline." But
+the production prefix IS deterministic at any given moment — it's
+whatever the operator's last ETL run produced. The trainer page
+cloning from it gives the same determinism guarantee without a
+separate schema. Probe / Triage / Coverage / ETL Run / top-nav
+stop being "production-mode-vs-trainer-mode aware" — they just
+hit `cfg.db_table_prefix` always.
 
-The Tour comparison is **only meaningful if `prefix_b` and
-`prefix_v` share identical underlying baseline data.** Customer
-ETL hooks read from upstream systems (production DBs, statement
-exports, vendor APIs) — calling the ETL hook twice produces TWO
-DIFFERENT baselines (different wall-clock, different row counts,
-different sampled rows). The Before/After comparison would be
-corrupted — operator wouldn't know if a delta they see is from
-the plant or from the underlying baseline drift.
+**There is no "trainer mode" as a runtime concept** (operator-locked).
+Studio is always Studio. The /training/ page is just a UI surface
+that exposes operations on `<L2>_prefix_v_*`: Session Start
+(create prefix_v schema + clone from base), Apply (mutate prefix_v
+to match enabled plant set), Cleanup (drop prefix_v). Dashboards
+take `?prefix=` URL param and resolve at request time; default to
+base when absent. The Clean dashboard link writes `?prefix=<L2>`;
+the Violation link writes `?prefix=<L2>_prefix_v`. No mode toggle,
+no mode-aware code paths.
 
-**Architecture:** call ETL hook ONCE per trainer session →
-`prefix_b`. Then `prefix_v` = data-copy of `prefix_b` + apply
-enabled plants + refresh matviews. Apply-cycle re-clones from
-`prefix_b` (which never mutates), guaranteeing the operator's
-"compare clean vs planted" is comparing literally the same
-baseline data with planted deltas applied on top.
+### 1.2.1 DETERMINISM LOCK — clone-from-base, never re-clone-without-asking
 
-This is the **only architecture that survives a non-deterministic
-ETL hook** — and customer ETL hooks are non-deterministic in
-practice.
+The Tour comparison is **only meaningful if the Clean dashboard
+and the Violation dashboard share identical underlying baseline
+data at the moment of comparison.** Customer ETL hooks read from
+upstream systems (production DBs, statement exports, vendor APIs)
+which mutate continuously — if `prefix_v` is built from a
+different ETL pass than the operator's current base prefix, the
+comparison is corrupted.
 
-### 1.2.2 ETL hook gains a `prefix` kwarg
+**Architecture:** `prefix_v` is always a frozen clone-snapshot of
+the base prefix taken at Session Start (or at "Re-clone from
+base"). Apply cycles (when the operator changes the enabled plant
+set) mutate `prefix_v` in place, NEVER re-clone from base, NEVER
+re-call etl_hook. The base prefix is the operator's responsibility
+to keep current via the existing /etl/run flow; the trainer page
+shows a staleness banner (DL.14) when the base mutates after the
+last clone.
 
-Today the etl_hook signature is `etl_hook(cfg)` — implicitly
-writes to `cfg.db_table_prefix`. Trainer mode needs:
+This is the **only architecture that keeps the prefix_v snapshot
+deterministic across an operator session** while still letting
+the operator re-sync when they want.
 
-```python
-def etl_hook(cfg, *, prefix: str) -> None:
-    # write into <prefix>_transactions, <prefix>_daily_balances
-```
+### 1.2.2 etl_hook signature unchanged
 
-- Regular `data apply` calls with `prefix=cfg.db_table_prefix` —
-  backward-compat shim if customers' existing hooks don't accept
-  the kwarg.
-- Trainer "Session start" populates `prefix_b` via etl_hook —
-  first time tables are made for the session. **Plus** an explicit
-  "Re-fetch baseline" button on the Trainer page so the operator
-  can re-pull from upstream mid-session (without re-entering the
-  full session). Re-fetch re-clones `prefix_b → prefix_v` + replays
-  enabled plants automatically.
-- All Apply cycles operate on `prefix_v` only (clone from
-  `prefix_b` + plants).
-- A "Cleanup" button on the Trainer page drops both `prefix_b_*`
-  and `prefix_v_*` tables for the session — reclaims the 2× disk
-  when the operator's done.
+`etl_hook(cfg)` keeps writing into `cfg.db_table_prefix` as
+today. The trainer page never calls etl_hook directly — it just
+clones from the base prefix. "Re-fetch baseline" on the trainer
+page triggers the existing /etl/run flow (which calls etl_hook
+into the base prefix) then re-clones to `prefix_v` + replays the
+enabled plant set. Two-step, separate concerns.
+
+**No new etl_hook kwarg.** Backward compat preserved for customer
+hooks.
+
+Operations on the /training/ page:
+- **Session Start** — creates `<L2>_prefix_v_*` schema; clones
+  data from `<L2>_*` (base); refreshes prefix_v matviews. Zero
+  plants enabled. Fast (clone-from-base only — no etl_hook,
+  no schema work on the base prefix).
+- **Apply** — diff against currently-applied plant set; mutate
+  `prefix_v` to match the operator's checkbox state (DL.9 diff-
+  only Apply).
+- **Re-clone from base** — operator-initiated reset of prefix_v;
+  re-clones from current base + replays enabled plants.
+- **Re-fetch baseline** — triggers the existing /etl/run flow
+  (writes to base prefix), then re-clones to prefix_v + replays
+  enabled plants. Two-step; covers "I want fresh upstream data."
+- **Cleanup** — drops `<L2>_prefix_v_*` tables, reclaims the
+  ~1× baseline disk hit. Base prefix untouched.
 
 ### 1.3 Landing UX consequence — cards collapse into checkboxes
 
@@ -163,7 +188,8 @@ kind at a time." Landing becomes:
   toggle is mode-confusing ("am I on Before or After?"); two
   distinct links per family / per kind are explicit.
   - `[ Clean dashboard → ]` — opens the dashboard reading from
-    `prefix_b`. The "this is what healthy looks like" view.
+    the base prefix (`?prefix=<L2>`). The "this is what healthy
+    looks like" view.
   - `[ Violation dashboard → ]` — opens the dashboard reading from
     `prefix_v`. The "this is what the operator's enabled plants
     cause" view.
@@ -207,16 +233,20 @@ density is **3-4 GB on sqlite** (the spec_example-sized data my
 probe ran against was much smaller — tens of MB). At that scale
 the clone + matview refresh costs are minutes, not seconds.
 
-When the operator checks/unchecks a plant + clicks Apply:
+When the operator checks/unchecks a plant + clicks Apply
+(naive clone-and-replay shape, superseded by DL.9 diff-only Apply):
 1. DROP `<L2>_prefix_v_*` tables (schema + data).
-2. Clone from `<L2>_prefix_b_*` — `CREATE TABLE prefix_v_X AS
-   SELECT * FROM prefix_b_X` for each base table, plus the
+2. Clone from the BASE prefix — `CREATE TABLE prefix_v_X AS
+   SELECT * FROM <L2>_X` for each base table, plus the
    matview-as-table shells. **The ETL hook is NOT re-invoked** —
-   it ran once at trainer entry into `prefix_b`; clone is pure
-   data-copy, deterministic by construction.
+   the base prefix's data is whatever the operator's last
+   /etl/run produced; clone is pure data-copy.
 3. Apply each enabled plant's SQL in registry order against
    `prefix_v_*`.
 4. Refresh `prefix_v_*` matviews.
+
+DL.9 diff-only Apply replaces this naive shape — Apply mutates
+prefix_v in place using the added/removed plant diff, no clone.
 
 Per-dialect estimate for ~5 enabled plants against a **3-4 GB
 sqlite baseline** (very rough — needs measuring on the real data):
@@ -234,13 +264,13 @@ sqlite baseline** (very rough — needs measuring on the real data):
 Apply (changing the enabled-plant set) pays the rebuild. So the
 flow becomes:
 
-1. Operator enters trainer mode → ~10 min baseline build (Oracle)
-   / ~30s (PG). Banner: "preparing your baseline data, this takes
-   ~10 min on Oracle…"
+1. Operator clicks Session Start → clone-from-base + matview
+   refresh on prefix_v only (no etl_hook in this step). On PG:
+   seconds. On sqlite/Oracle: minutes for the 3-4GB data copy.
 2. Operator picks plants from checkboxes → click Apply → ~3-5 min
-   wait with progress. Banner: "applying 5 plants, refreshing
-   matviews…"
-3. Operator iterates Tour (Before/After) freely — instant.
+   wait with progress on naive clone-and-replay; DL.9 diff-only
+   Apply drops this to seconds-to-tens-of-seconds.
+3. Operator follows Clean / Violation links freely — instant.
 
 For "I want to try a different plant set" — they re-check and
 re-Apply, paying the per-Apply cost. This is the expensive step;
@@ -333,36 +363,25 @@ difference between "compose-and-wait" vs "iterate-freely."
 **Today** `Config.db_table_prefix: str` is the single source.
 `cfg.deployment_name` is similar (used for QS resource naming).
 
-**Option A — runtime expansion.** cfg.yaml keeps `db_table_prefix`
-as ONE prefix (the "base prefix"). Trainer mode at session entry
-expands it: `f"{base}__baseline"`, `f"{base}__planted_{kind}"` for
-each kind in PLANT_REGISTRY. No cfg.yaml shape change; operator
-doesn't think about prefixes. The Trainer's internal state carries
-the active prefix list.
+**Lock:** cfg.yaml shape unchanged. The /training/ page derives
+`<L2>_prefix_v` from `cfg.db_table_prefix` at runtime; the
+operator never types prefixes anywhere.
 
-**Option B — declared list.** cfg.yaml ships a
-`trainer_mode: { base_prefix: "sasquatch_pr", populate_kinds:
-[...] }` block. Operator can subset which kinds get pre-populated
-(e.g. just the 5 they're teaching this week). More flexible but
-exposes a Trainer-only knob in the global cfg shape.
+**No mode at all.** Studio is always Studio. There is no
+`--trainer-mode` flag, no mode-aware code paths, no runtime
+"trainer mode detection." The /training/ page is just a UI
+surface that owns operations on `prefix_v`:
+- Session Start creates the `prefix_v` schema + clones data from
+  the base prefix.
+- Apply mutates `prefix_v` to match the operator's checkbox state.
+- Cleanup drops `prefix_v`.
 
-**Recommendation:** Option A for v1. Avoid cfg.yaml shape changes
-until we see operator demand for kind-subsetting.
-
-**Trainer-mode detection is intrinsic, not a flag.** No
-`--trainer-mode` CLI flag — Trainer mode "is on" once the operator
-clicks Session Start on the Trainer page. That action triggers
-schema creation (the base-table DDL) + config_kv populate + etl_hook
-invocation into `prefix_b`, then a clone of `prefix_b → prefix_v`.
-After that, Trainer-mode is implicit: the existence of
-`<base>_prefix_b_*` tables is the signal. A Cleanup button on the
-Trainer page drops both prefixes when the operator's done.
-
-This means **the Trainer surface is responsible for the entire
-schema lifecycle of its own prefixes** — not just data populate.
-The production schema (`<base>_*`) is created by `recon-gen
-schema apply --execute` as today; trainer schemas (`<base>_prefix_b`
-+ `<base>_prefix_v`) are created by Session Start.
+The base prefix (`<L2>_*`) is created by the existing `recon-gen
+schema apply --execute` flow as today; `<L2>_prefix_v_*` schema
+is created lazily by Session Start. Every other Studio surface
+(probe / triage / coverage / etl/run / top-nav / L2 editor)
+operates exactly as today — they hit `cfg.db_table_prefix`,
+unaware that `prefix_v` exists.
 
 ### 2.2 App2 (HTMX dashboards) — the cheap renderer
 
@@ -381,9 +400,9 @@ App2 reads `prefix` at request time from cfg or URL param. Survey:
    through to data fetchers. Defaults to `cfg.db_table_prefix`
    when the param is absent.
 3. Trainer's landing cards render the two Tour links per kind
-   with `?prefix=<base>_prefix_b` (Clean) and `?prefix=<base>_prefix_v`
-   (Violation). Operator follows the link → fully-formed dashboard
-   URL with prefix baked in → URL-as-truth (DL.10).
+   with `?prefix=<L2>` (Clean — base) and `?prefix=<L2>_prefix_v`
+   (Violation — overlay). Operator follows the link → fully-formed
+   dashboard URL with prefix baked in → URL-as-truth (DL.13).
 
 **Risk:** prefix is widely passed; one missed callsite means the
 toggle silently shows the wrong data. Mitigation: anti-drift test
@@ -495,12 +514,13 @@ deployments per L2) is the disqualifying number.
 
 Must-update sites:
 
-- [ ] `Config.db_table_prefix` — keep as single base; add
-      `trainer_mode_prefixes: tuple[str, ...] | None` runtime-set
-      field (NOT serialized to cfg.yaml).
-- [ ] `recon-gen studio` CLI — `--trainer-mode` flag that triggers
-      the N+1 populate at session entry.
-- [ ] New: trainer-mode populate orchestrator (parallel-capable).
+- [ ] `Config.db_table_prefix` — unchanged. The /training/ page
+      derives `<base>_prefix_v` at runtime.
+- [ ] `recon-gen studio` CLI — **no new flag.** /training/ page
+      surfaces Session Start / Apply / Cleanup buttons.
+- [ ] New: prefix_v lifecycle orchestrator on the /training/
+      page (Session Start = schema-create-prefix_v + clone-from-base
+      + matview refresh; Cleanup = drop).
 - [ ] New: `/training/setup` progress page (BTa.9 live-tail
       shape).
 - [ ] `/training/tour/<kind>` page — embed the dashboards under
@@ -544,21 +564,22 @@ Out of scope (defer):
 
 ## 5. Open questions — RESOLVED 2026-05-31
 
-1. **Trainer entry surface.** RESOLVED — Trainer page Session
-   Start button does the entire lifecycle (schema create + config_kv
-   populate + etl_hook for `prefix_b` + clone to `prefix_v`). A
-   Cleanup button drops both trainer prefixes when done. Promoted
-   to DL.10.
+1. **Trainer entry surface.** RESOLVED — /training/ page Session
+   Start button creates the prefix_v schema + clones data from the
+   base prefix + refreshes prefix_v matviews. NO etl_hook
+   invocation (operator runs that via the existing /etl/run flow
+   if they need to). A Cleanup button drops prefix_v when done.
+   Promoted to DL.10.
 2. **Per-kind subset / eager-vs-lazy.** RESOLVED — Session Start
-   sets up `prefix_b` AND a clean `prefix_v` (clone of baseline,
-   zero plants enabled). Operator then picks plants from
-   checkboxes; Select-all is their handy do-it-all. No CLI
-   subset; UI checkbox set IS the subset mechanism. Promoted to
-   DL.11.
-3. **Probe / Triage / Coverage state in trainer mode.** RESOLVED —
-   always baseline (`prefix_b`). Top nav routes also hit baseline.
-   Trainer baseline is always separate from the production prefix.
-   DL.4 already captured; restated for clarity.
+   produces a clean prefix_v (clone of base, zero plants enabled).
+   Operator then picks plants from checkboxes; Select-all is their
+   handy do-it-all. No CLI subset; UI checkbox set IS the subset
+   mechanism. Promoted to DL.11.
+3. **Probe / Triage / Coverage state during trainer use.**
+   RESOLVED — these always hit `cfg.db_table_prefix` (the base
+   prefix). Top-nav routes too. The /training/ page is the ONLY
+   surface that touches `prefix_v`. No mode-aware code paths
+   anywhere else. DL.4 simplified.
 4. **Failure mode when plant populate fails.** RESOLVED — show
    "error planting" on the kind card, still provide the
    Violation link (so operator can navigate + see empty-state).
@@ -574,40 +595,50 @@ Out of scope (defer):
    banner on the Trainer page when the L2 yaml has changed
    since Session Start. Promoted to DL.14.
 8. **CLI `--trainer-populate` split.** BACKLOGGED — no direct
-   value at the moment; trainer mode is Studio-only by design.
+   value at the moment; the /training/ page owns prefix_v
+   lifecycle by design.
 
 ---
 
 ## 6. Locked design decisions (pending operator confirmation)
 
-- **DL.1** — Trainer mode is App2-only. QS remains single-prefix
-  for v1.
-- **DL.2** — cfg.yaml shape unchanged. Trainer mode adds a runtime
-  pair `(prefix_b, prefix_v)` derived from `cfg.db_table_prefix`,
-  not serialized.
-- **DL.3** — **TWO prefixes** (not N+1): `<base>_prefix_b` (clean
-  baseline, etl-hook'd once per session) + `<base>_prefix_v`
-  (composite of all enabled plants, rebuilt per Apply). Disk =
-  2× baseline regardless of registry size.
-- **DL.3.a** — **Copy-once, not etl-twice.** ETL hook invoked
-  ONCE per session into `prefix_b`. `prefix_v` is always built by
-  data-copy from `prefix_b` + apply enabled plants. Survives
-  non-deterministic customer ETL hooks (the load-bearing
-  assumption).
-- **DL.3.b** — ETL hook signature gains `prefix: str` kwarg.
-  Regular `data apply` keeps current call shape; trainer mode
-  passes `prefix=<base>_prefix_b` at session entry.
-- **DL.4** — Probe / Triage / Coverage / ETL Run pages target the
-  **base prefix** (`cfg.db_table_prefix`) in production mode. In
-  trainer mode they target `prefix_b` (the deterministic baseline,
-  which is what the operator's L2 should be debugged against).
-  Planted prefix (`prefix_v`) is Tour-only.
-- **DL.5** — L2 Editor + cfg.yaml + CLI commands unchanged.
-  Trainer mode is a Studio orthogonal capability.
+- **DL.1** — The trainer surface is App2-only. QS remains
+  single-prefix for v1.
+- **DL.2** — cfg.yaml shape unchanged. `<base>_prefix_v` is
+  derived from `cfg.db_table_prefix` at runtime; never serialized
+  to cfg.yaml.
+- **DL.3** — **TWO prefixes per L2**: `<L2>_*` (base — the existing
+  production prefix; the Clean dashboard reads here) + `<L2>_prefix_v_*`
+  (overlay carrying the composite of all enabled plants applied
+  on top of a clone of base). Disk = ~2× baseline (1× new on top
+  of the existing base) regardless of registry size.
+- **DL.3.a** — **Clone-from-base, never re-clone-without-asking.**
+  prefix_v is a frozen clone-snapshot of the base prefix at the
+  moment of Session Start (or operator-initiated Re-clone).
+  Apply mutates prefix_v IN PLACE — never re-clones from base,
+  never re-calls etl_hook. The base prefix is the operator's
+  responsibility to keep current via the existing /etl/run flow;
+  the staleness banner (DL.14) flags base mutation since the
+  last clone.
+- **DL.3.b** — **etl_hook signature unchanged.** No new kwargs.
+  The /training/ page never calls etl_hook directly. "Re-fetch
+  baseline" on the /training/ page triggers the existing /etl/run
+  flow (which writes to base prefix as today) then re-clones to
+  prefix_v + replays the enabled plant set. Two-step, separate
+  concerns. Customer ETL hooks need zero changes.
+- **DL.4** — **No mode-awareness anywhere except the /training/ page.**
+  Probe / Triage / Coverage / ETL Run / top-nav / L2 Editor ALL
+  hit `cfg.db_table_prefix` (the base) unconditionally — same as
+  today. The /training/ page is the only surface that knows
+  prefix_v exists. Dashboards take `?prefix=` URL param so the
+  Tour links can drive the operator's view to either prefix
+  without server-side mode.
+- **DL.5** — L2 Editor + cfg.yaml + CLI commands unchanged. The
+  /training/ page is a Studio orthogonal capability.
 - **DL.6** — **Tour: two distinct links, not a toggle.** Per kind
   + per family, render `[ Clean dashboard → ]` (points at
-  `prefix_b`) AND `[ Violation dashboard → ]` (points at
-  `prefix_v`). When the operator hasn't enabled a kind, the
+  the base prefix `<L2>`) AND `[ Violation dashboard → ]` (points
+  at `<L2>_prefix_v`). When the operator hasn't enabled a kind, the
   Violation link still points at the violation-dashboard URL +
   the page renders an empty-state callout reinforcing "tick the
   checkbox + Apply to see it surface here." Self-reinforcing
@@ -637,18 +668,27 @@ Out of scope (defer):
   `trainer_undo_payload`). Apply becomes O(delta) not O(baseline
   copy). Per-Apply UX goes from "go-make-coffee" to "watch a
   progress bar for a few seconds."
-- **DL.10** — **No `--trainer-mode` CLI flag.** Trainer mode is
-  intrinsic — detected by the existence of `<base>_prefix_b_*`
-  tables. Session Start button on the Trainer page creates the
-  schema + populates baseline + clones to `prefix_v`. Cleanup
-  button on the Trainer page drops both trainer prefixes. A
-  "Re-fetch baseline" button on the Trainer page re-runs etl_hook
-  into `prefix_b` then re-clones to `prefix_v` (preserving
-  enabled-plant state).
+- **DL.10** — **No "trainer mode" as a runtime concept.** No CLI
+  flag, no mode-detection, no mode-aware code paths in Studio.
+  The /training/ page surfaces four buttons:
+  - **Session Start** — creates `<L2>_prefix_v_*` schema; clones
+    data from base; refreshes prefix_v matviews. No etl_hook
+    invocation.
+  - **Apply** — diff-only mutate prefix_v to match enabled-plant
+    checkbox state (DL.9).
+  - **Re-clone from base** — drops prefix_v's data, re-clones
+    from current base, replays enabled plants. For when the
+    operator suspects prefix_v drifted from base.
+  - **Cleanup** — drops `<L2>_prefix_v_*` schema entirely. Base
+    prefix untouched.
+  - **Re-fetch baseline** (optional) — wraps the existing /etl/run
+    flow with a follow-on Re-clone. For when the operator wants
+    fresh upstream data feeding the trainer comparison.
 - **DL.11** — **Initial state at Session Start: zero plants
-  enabled.** Both `prefix_b` and `prefix_v` ship a clean baseline.
-  Operator picks plants via checkboxes + Apply. Select-all chip is
-  the do-it-all shortcut.
+  enabled.** prefix_v is an exact clone of the base prefix —
+  Clean and Violation dashboards show identical data until the
+  operator enables their first plant + Applies. Select-all chip
+  is the do-it-all shortcut.
 - **DL.12** — **Per-kind failure tolerates partial set.** A plant
   that fails to apply (picker can't satisfy on this L2, plant SQL
   raises) gets an "error planting" badge on its card; Apply
@@ -710,7 +750,7 @@ Out of scope (defer):
 | BV.4.x phase | Work | Estimate |
 |---|---|---|
 | BV.4.0 | Operator confirmation on §6 design locks | 15 min |
-| BV.4.1 | Trainer page Session Start (schema + config_kv + etl_hook into `prefix_b` + clone to `prefix_v`); Cleanup button; Re-fetch baseline button | 1-2 d |
+| BV.4.1 | /training/ page Session Start (create `<L2>_prefix_v_*` schema; clone data from base; refresh prefix_v matviews); Cleanup button; Re-clone button; Re-fetch baseline button (chains to /etl/run) | 1-2 d |
 | BV.4.2 | `/dashboards/*` accepts `?prefix=`; threading through; default to `cfg.db_table_prefix` when absent | 1 d |
 | BV.4.3 | `/training/setup` streaming progress page (BTa.9 live-tail shape) | 0.5 d |
 | BV.4.4 | Diff-only Apply (DL.9) + Tour two-link wiring (DL.6) + landing checkbox UX (DL.8) | 1-1.5 d |
