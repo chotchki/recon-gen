@@ -218,16 +218,21 @@ kind at a time." Landing becomes:
     operator gets a prove-it-to-yourself reading even when no
     plants are enabled — confirms the dashboard doesn't lie.
 
-**Cards stay as the per-kind anchor** (operator-locked): each
-plant kind still gets its card on the landing — the card carries
-the title, description, "What to do about it" copy, and the two
-Tour links (Clean / Violation). What changes is that the card
-also has the checkbox + the form-tuning section goes away
-(defaults bake at populate time). The card is the instructional
-anchor and the navigation anchor; the checkbox is the compose
-control.
-- Comment: I think keeping the detail knobs is important, the checkboxes should serve to make it easy to mass enable/disable.
+**Cards stay as the per-kind anchor + carry the tunable form
+inline** (operator-locked): each plant kind still gets its card
+on the landing. The card carries:
+1. **Anchor content** — title, description, "What to do about it"
+   copy, and the two Tour links (Clean / Violation).
+2. **Compose control** — the enable/disable checkbox.
+3. **Tunable form fields inline** — count, days_ago, rail_name,
+   etc. The per-kind knobs the operator was clicking into a
+   separate plant page to tune now live RIGHT THERE on the card.
 
+The bulk-toggle checkboxes (per-card + per-family + top-level
+"Select all / None") are a **mass-enable shortcut layered on top
+of the per-kind controls** — they don't replace the per-kind
+tuning, they just make it easy to flip many kinds on or off
+without scrolling.
 
 **Active-plants filter** (top-level affordance): a "Show:
 [All / Only enabled / Only with errors]" filter at the page header
@@ -235,15 +240,16 @@ collapses families that don't have any operator-enabled plants —
 so when the session settles on a 5-plant set the operator isn't
 scrolling past 4 disabled families to get to the active ones.
 
-What we lose: the per-kind plant page's tunable-form section
-(count, days_ago, etc). For v1 every plant runs with its
-registered defaults; per-kind tuning becomes a stretch. The
-card+checkbox replaces "click into a per-kind page, fill the form,
-submit" — operator composes via the landing's checkbox set + Apply.
+What changes from BU's design: the per-kind plant **page** goes
+away (no more `/training/plant/<kind>` route). The form **fields**
+live on the landing card. The card+checkbox+form composes the
+"this is what I want in my v overlay" intent in one place;
+operator clicks Apply once and the diff lands.
 
-What we gain: cleaner mental model ("here's the demo state I want")
-+ no per-kind page navigation friction + the Tour Before/Violation
-links finally have a coherent backing model (zero per-toggle cost).
+What we gain: cleaner mental model ("here's the demo state I want
+across all plants") + no per-kind page navigation friction + the
+Tour Clean/Violation links finally have a coherent backing model
+(zero per-toggle cost) + per-kind tuning preserved.
 
 ### 1.4 Per-toggle (enable/disable) cost — and the real-data reality
 
@@ -293,10 +299,12 @@ flow becomes:
    Apply drops this to seconds-to-tens-of-seconds.
 3. Operator follows Clean / Violation links freely — instant.
 
-For "I want to try a different plant set" — they re-check and
-re-Apply, paying the per-Apply cost. This is the expensive step;
-the operator should expect to pick their session's plant set
-deliberately and Apply once, not iterate the checkboxes rapidly.
+For "I want to try a different plant set" OR "I want to bump
+`count` from 3 to 5 on this plant" — they update the cards (toggle
+checkbox, edit form fields) and click Apply. DL.9 diff-only Apply
+makes this approachable on PG (seconds); sqlite / Oracle each
+pay tens-of-seconds on naive shape but flow-survivable. Operator
+can iterate the form values relatively freely once DL.9 lands.
 
 **Pre-cost** (one-time at trainer entry, baseline only, 3-4GB
 sqlite-scale):
@@ -673,26 +681,37 @@ Out of scope (defer):
   defaults to `cfg.db_table_prefix` when absent. Single deployment
   supports multiple prefix views without re-deploying. This is
   the mechanism the Tour's two-link UX rides on.
-- **DL.8** — Landing UX: checkbox list per kind + per-family
-  `[Select all] [None]` bulk-toggle chips + top-level
-  `[Select all] [None]` + per-family/top selection-density
-  badges (`(7/9 enabled)`). Apply button at the bottom. Cards
-  stay as anchors (carry kind title + description + "What to do
-  about it" + the two Tour links); checkbox is the compose
-  control on the same card. Top-level "Show: [All / Only enabled
-  / Only with errors]" filter collapses inactive families when
-  the session settles on a small enabled set.
+- **DL.8** — Landing UX: per-kind card carrying (1) title + 
+  description + "What to do about it" + the two Tour links
+  (Clean / Violation); (2) enable/disable checkbox; (3) **per-kind
+  tunable form fields inline** (count, days_ago, rail_name, etc.
+  — same primitives BU.2b ships, just rendered on the card
+  instead of on a separate plant page). Per-family
+  `[Select all] [None]` bulk-toggle chips on each accordion
+  summary + top-level `[Select all] [None]` + per-family/top
+  selection-density badges (`(7/9 enabled)`). Apply button at the
+  bottom. Top-level "Show: [All / Only enabled / Only with
+  errors]" filter collapses inactive families when the session
+  settles on a small enabled set. Bulk-toggle checkboxes are a
+  mass-enable shortcut; they DO NOT replace per-kind tuning.
 - **DL.9** — **Diff-only Apply (not clone-and-replay).** Apply
-  computes the added/removed plant diff against the
-  currently-applied set (stored in `v_config_kv`) and emits
-  only the deltas. Added INSERT-style plants: run plant_function
-  SQL. Removed INSERT-style plants: `DELETE WHERE id LIKE
-  '__demo_<kind>%'` (the stable id-prefix namespace). Removed
-  DELETE-style plants (uncovered_*, dead_*): re-INSERT from the
-  saved-rowsets payload in `v_config_kv` (per-plant
-  `trainer_undo_payload`). Apply becomes O(delta) not O(baseline
-  copy). Per-Apply UX goes from "go-make-coffee" to "watch a
-  progress bar for a few seconds."
+  computes the diff against the currently-applied state (stored
+  in `<L2>_v_config_kv`) and emits only the deltas. The state is
+  a `dict[kind, form_values_fingerprint]` — NOT just a set of
+  enabled kinds — so changing `count=3→5` on an already-enabled
+  plant counts as a delta. Three diff cases per kind:
+  - **Added** (kind newly enabled OR fingerprint changed for an
+    enabled kind): run `plant_function(**form_values)` against
+    v overlay; if the kind was previously enabled with a different
+    fingerprint, first DELETE its prior rows.
+  - **Removed INSERT-style** (kind disabled): `DELETE WHERE id LIKE
+    '__demo_<kind>%'` against v overlay — leverages the stable
+    id-prefix namespace.
+  - **Removed DELETE-style** (uncovered_*, dead_*): re-INSERT from
+    the saved-rowsets payload in `v_config_kv` (per-plant
+    `trainer_undo_payload`).
+  Apply becomes O(delta) not O(baseline copy). Per-Apply UX goes
+  from "go-make-coffee" to "watch a progress bar for a few seconds."
 - **DL.10** — **No "trainer mode" as a runtime concept.** No CLI
   flag, no mode-detection, no mode-aware code paths in Studio.
   The /training/ page surfaces these buttons:
@@ -718,10 +737,14 @@ Out of scope (defer):
   clobber the other's in-flight state. The app doesn't add
   multi-tenant locking.
 - **DL.11** — **Initial state at Session Start: zero plants
-  enabled.** v overlay is an exact clone of the base prefix —
+  enabled; each card pre-populated with its registry default
+  form values.** v overlay is an exact clone of the base prefix —
   Clean and Violation dashboards show identical data until the
-  operator enables their first plant + Applies. Select-all chip
-  is the do-it-all shortcut.
+  operator enables their first plant + Applies. Each card's form
+  fields are pre-filled from the kind's `PrimitiveField.default`
+  values (per the BU.2b registry); the operator can override per
+  card before Applying. Select-all chip is the mass-enable
+  shortcut (does NOT touch per-card form values).
 - **DL.12** — **Per-kind failure tolerates partial set.** A plant
   that fails to apply (picker can't satisfy on this L2, plant SQL
   raises) gets an "error planting" badge on its card; Apply
@@ -813,11 +836,16 @@ Apply-cost numbers on PG.
 What gets cancelled:
 - BU.1.7 (progress indicator for reset) — reset becomes prefix-flip,
   no progress needed.
-- BU.1.11 (TRAINER_CLEAN still emits plants) — moot; baseline
-  prefix never has plants.
-- BU.4 banner auto-dismiss, "Re-plant" CTA, per-form-field defaults
-  rationale — moot; per-plant forms collapse (defaults already
-  baked in at populate time).
+- BU.1.11 (TRAINER_CLEAN still emits plants) — moot; base prefix
+  is the operator's responsibility, never trainer-mutated.
+- BU.4 banner auto-dismiss + "Re-plant" CTA — moot; the per-kind
+  plant **page** disappears (replaced by inline form on the
+  landing card). The form **fields themselves stay** — operator
+  comment 2026-05-31: "I think keeping the detail knobs is
+  important, the checkboxes should serve to make it easy to mass
+  enable/disable." So `count` / `days_ago` / `rail_name` form
+  primitives still ship; they just render inline on the card
+  instead of on a separate route.
 
 What carries forward:
 - BU.2a/b registry + typed sections + Lock 9 anti-drift — still
