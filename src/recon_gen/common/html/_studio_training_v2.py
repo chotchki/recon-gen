@@ -117,25 +117,36 @@ def _resolve_l2ft_section(entry: PlantKindEntry) -> _SectionAdHoc:
     return _adapter_l2ft(section)
 
 
+def _first_paragraph(body: str) -> str:
+    """Pull the first prose paragraph out of a markdown body + collapse
+    its internal newlines. Used as a fallback when a typed section
+    doesn't carry a dedicated `short_statement` field."""
+    first = body.split("\n\n", 1)[0]
+    return " ".join(line.strip() for line in first.splitlines() if line.strip())
+
+
 def _adapter_invariant(section: "InvariantSection") -> _SectionAdHoc:
     """Map ``InvariantSection`` fields to the renderer protocol."""
-    out = _SectionAdHoc(
+    should = getattr(section, "should", "") or ""
+    body = getattr(section, "body", "") or ""
+    return _SectionAdHoc(
         title=section.title,
-        short_statement=getattr(section, "should", "") or "",
+        short_statement=should or _first_paragraph(body),
         what_to_do=getattr(section, "action", "") or "",
     )
-    return out
 
 
 def _adapter_l2ft(section: "L2FTExceptionSection") -> _SectionAdHoc:
-    out = _SectionAdHoc(
+    """L2FT exceptions carry no ``should``/``short_statement`` field
+    — they're runtime checks, not SHOULD-constraints. Extract a
+    landing-card summary from the body's first paragraph so the
+    accordion isn't blank for the L2FT family."""
+    body = getattr(section, "body", "") or ""
+    return _SectionAdHoc(
         title=section.title,
-        short_statement=getattr(section, "should", "")
-        or getattr(section, "short_statement", "") or "",
-        what_to_do=getattr(section, "action", "")
-        or getattr(section, "what_to_do", "") or "",
+        short_statement=_first_paragraph(body),
+        what_to_do=getattr(section, "what_to_do", "") or "",
     )
-    return out
 
 
 def _resolve_l2_triage_section(entry: PlantKindEntry) -> _SectionAdHoc:
