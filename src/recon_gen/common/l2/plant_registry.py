@@ -1859,10 +1859,13 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         # choice). Operator's only knob is on/off.
         primitives=(),
         tour_destination=TourDestination(
-            primary_url="/etl/run",
+            # BU.4 P2.9 — Coverage gaps surface on /etl/triage alongside
+            # the unmatched-* gaps; /etl/run is the matview-refresh trigger
+            # (operator doesn't see Coverage data there).
+            primary_url="/etl/triage",
         ),
         dashboard_check=DashboardCheck(
-            url_path="/etl/run",
+            url_path="/etl/triage",
             # The Coverage Rails panel renders the un-covered rail
             # with a "no rows" status badge — text varies but the
             # word "Coverage" is stable on the panel header.
@@ -1877,10 +1880,10 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         plant_function=_invoke_uncovered_template_plant,
         primitives=(),
         tour_destination=TourDestination(
-            primary_url="/etl/run",
+            primary_url="/etl/triage",  # BU.4 P2.9 — see uncovered_rail above
         ),
         dashboard_check=DashboardCheck(
-            url_path="/etl/run",
+            url_path="/etl/triage",
             expect_text_contains="Coverage",
         ),
     ),

@@ -208,8 +208,16 @@ def render_training_landing(
     """
     groups = entries_by_family()
     family_sections: list[str] = []
-    for family_name, entries in groups.items():
-        family_sections.append(_render_family_section(family_name, entries))
+    # BU.4 P2.13 — default-collapsed accordion; leave the FIRST family
+    # open as an orientation hint (the operator sees one expanded
+    # family with cards + collapsed siblings, scans family sizes via
+    # the count badges).
+    for idx, (family_name, entries) in enumerate(groups.items()):
+        family_sections.append(
+            _render_family_section(
+                family_name, entries, open_by_default=(idx == 0),
+            ),
+        )
     families_html = "\n".join(family_sections)
     reset_banner = ""
     if reset_done:
@@ -293,17 +301,37 @@ def _category_label(category: PlantCategory) -> str:
     return _CATEGORY_LABELS.get(category, category.value)
 
 
+def _breadcrumb_label(entry: PlantKindEntry) -> str:
+    """Plant-page breadcrumb. Collapses the category+family pair into
+    one segment when the family already encodes the category prefix
+    (BU.4 P2.12 — `L1 invariant · L1 Conservation` is redundant since
+    the family already starts with `L1`)."""
+    cat = _category_label(entry.category)
+    fam = entry.family
+    cat_prefix = cat.split()[0] if cat else ""
+    if cat_prefix and fam.startswith(cat_prefix):
+        return fam
+    return f"{cat} · {fam}"
+
+
 def _render_family_section(
     family: str, entries: Iterable[PlantKindEntry],
+    *,
+    open_by_default: bool = False,
 ) -> str:
     """One <details> per family on the landing accordion.
 
     BU.4 polish — each row now carries the section's short statement
     as a hover tooltip + a one-line description, so the landing
     pre-explains what the operator will be planting instead of
-    showing them just the slug."""
+    showing them just the slug. P2.13 — default collapsed (caller
+    decides which family to leave open via ``open_by_default``); the
+    family summary now carries an entry-count badge so the operator
+    can scan family sizes without expanding."""
+    # Materialize once so we can iterate twice (count + render).
+    entries_list = list(entries)
     items: list[str] = []
-    for entry in entries:
+    for entry in entries_list:
         section = resolve_section(entry)
         short = section.short_statement or ""
         # Trim the short statement to one operator-readable sentence
@@ -329,11 +357,17 @@ def _render_family_section(
             f'{escape(one_liner)}</span>'
             '</li>'
         )
+    open_attr = " open" if open_by_default else ""
+    count = len(entries_list)
+    badge = (
+        f'<span class="ml-2 text-xs font-normal text-secondary-fg">'
+        f'({count} {"kind" if count == 1 else "kinds"})</span>'
+    )
     return (
         '<details class="bg-white border border-surface-border rounded-md overflow-hidden" '
-        f'data-test-training-family="{escape(family)}" open>'
+        f'data-test-training-family="{escape(family)}"{open_attr}>'
         '<summary class="cursor-pointer px-4 py-3 font-semibold hover:bg-surface-bg">'
-        f'{escape(family)}'
+        f'{escape(family)}{badge}'
         '</summary>'
         f'<ul class="list-none m-0 p-4 pt-0">{"".join(items)}</ul>'
         '</details>'
@@ -414,7 +448,7 @@ def render_training_plant_page(
   {top_nav_html}
   <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white">
     <a class="text-accent no-underline text-sm hover:underline" href="/training/">← back to Training</a>
-    <span class="text-xs text-secondary-fg">{escape(_category_label(entry.category))} · {escape(entry.family)}</span>
+    <span class="text-xs text-secondary-fg">{escape(_breadcrumb_label(entry))}</span>
   </header>
   <main class="max-w-3xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
     <h1 class="text-2xl font-semibold m-0">{escape(title_full)}</h1>
