@@ -4387,17 +4387,33 @@ def make_studio_routes(
     async def training_session_start(
         _request: Request,
     ) -> RedirectResponse:
-        """POST /training/session-start — creates the v overlay
-        from base. Vertical-slice shape: drops + recreates v schema,
-        clones base data, refreshes v matviews. BV.4.1 final wires
-        in the /etl/run leg before the clone."""
+        """POST /training/session-start — full lifecycle (DL.10).
+        Invokes /etl/run (TRAINER_CLEAN overlay) so base prefix is
+        fresh + then creates v overlay schema, clones base → v,
+        refreshes v matviews."""
         if cfg is None:
             return RedirectResponse(url="/training/", status_code=303)
         from recon_gen.common.l2.v_overlay import session_start  # noqa: PLC0415
 
-        await session_start(cfg, cache.get())
+        await session_start(cfg, cache.get(), refresh_base=True)
         return RedirectResponse(
             url="/training/?status=Session+started+%E2%80%94+v+overlay+ready.",
+            status_code=303,
+        )
+
+    async def training_reclone(_request: Request) -> RedirectResponse:
+        """POST /training/reclone — DL.10 Re-clone from base.
+        Skips the /etl/run leg; just drops + creates v schema +
+        clones current base + refreshes v matviews. For when the
+        operator knows base is current and wants to reset v overlay
+        without re-fetching upstream."""
+        if cfg is None:
+            return RedirectResponse(url="/training/", status_code=303)
+        from recon_gen.common.l2.v_overlay import session_start  # noqa: PLC0415
+
+        await session_start(cfg, cache.get(), refresh_base=False)
+        return RedirectResponse(
+            url="/training/?status=Re-cloned+from+base+%E2%80%94+v+overlay+reset.",
             status_code=303,
         )
 
@@ -4549,6 +4565,9 @@ def make_studio_routes(
         Route(
             "/training/session-start", training_session_start,
             methods=["POST"],
+        ),
+        Route(
+            "/training/reclone", training_reclone, methods=["POST"],
         ),
         Route(
             "/training/cleanup", training_cleanup, methods=["POST"],

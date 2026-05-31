@@ -113,19 +113,35 @@ def refresh_v_overlay_matviews_sql(
 
 async def session_start(
     cfg: "Config", instance: "L2Instance",
+    *,
+    refresh_base: bool = True,
 ) -> None:
     """Orchestrates Session Start (DL.10):
 
-    1. Drop v overlay schema (idempotent — silently no-ops if absent).
-    2. Create v overlay schema.
-    3. Clone base → v overlay (data tables only).
-    4. Refresh v overlay matviews.
+    1. Optionally invoke `run_deploy_pipeline` (the /etl/run flow)
+       against the base prefix — fresh upstream data + matview
+       refresh on `<base>_*`. Skipped when ``refresh_base=False``
+       (the Re-clone button uses this).
+    2. Drop v overlay schema (idempotent — silently no-ops if absent).
+    3. Create v overlay schema.
+    4. Clone base → v overlay (data tables only).
+    5. Refresh v overlay matviews.
 
-    Per DL.3.a — does NOT call etl_hook. The route handler is
-    responsible for chaining /etl/run BEFORE invoking session_start
-    when the operator clicks the Session Start button (so the base
-    prefix is current before the clone snapshot).
+    The /etl/run leg uses the `TRAINER_CLEAN` overlay (baseline only,
+    no plants) since the operator's plant choices live on the v
+    overlay — not the base.
     """
+    if refresh_base:
+        from recon_gen.common.l2.deploy_pipeline import (  # noqa: PLC0415
+            run_deploy_pipeline,
+        )
+        from recon_gen.common.l2.pipeline_overlays import (  # noqa: PLC0415
+            TRAINER_CLEAN,
+        )
+        await run_deploy_pipeline(
+            cfg, instance, dev_log=None, overlays=TRAINER_CLEAN,
+        )
+
     base_prefix = cfg.db_table_prefix
 
     def _run() -> None:
@@ -221,7 +237,7 @@ async def apply_plants(
         entry.kind: {k: str(v) for k, v in kwargs.items()}
         for entry, kwargs in plants_list
     }
-    applied_json = json.dumps(applied_snapshot)
+    applied_json = json.dumps(applied_snapshot, separators=(",", ":"))
 
     def _run() -> None:
         conn = connect_demo_db(cfg)

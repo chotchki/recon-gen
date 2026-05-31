@@ -169,18 +169,31 @@ def render_training_v3_landing(
 
 
 def _render_session_controls(v_overlay_exists: bool) -> str:
-    """Top-of-page Session Start / Cleanup buttons."""
-    start_label = "↻ Re-clone from base" if v_overlay_exists else "▶ Session Start"
-    start_title = (
-        "Drops the existing v overlay + clones fresh from the base "
-        "prefix + refreshes v matviews. Plant state resets."
-        if v_overlay_exists else
-        "Creates the <base>_v_* schema + clones data from the base "
-        "prefix + refreshes v matviews. (For the vertical slice this "
-        "skips the /etl/run leg; BV.4.1 final wires it in.)"
+    """Top-of-page Session Start / Re-clone / Cleanup buttons (DL.10).
+
+    Pre-overlay: Session Start only.
+    Post-overlay: Re-clone (skip ETL — fast reset) + Session Start
+      (full lifecycle — re-runs /etl/run) + Cleanup."""
+    session_start_title = (
+        "Full lifecycle: runs the /etl/run flow (so base prefix is "
+        "current) + drops + creates the v overlay schema + clones "
+        "base data + refreshes v matviews. On Oracle this takes ~10 "
+        "min for the /etl/run leg; PG ~30s; sqlite ~30s."
+    )
+    reclone_btn = (
+        '<form method="post" action="/training/reclone" class="inline-block">'
+        '<button type="submit" id="training-reclone-btn" '
+        'class="px-3 py-1.5 bg-accent text-accent-fg rounded-sm border border-accent text-xs font-semibold hover:opacity-85" '
+        'title="Skips /etl/run. Just drops + clones from current base '
+        '+ refreshes v matviews. For when the operator knows base is '
+        'current and wants to reset v overlay plant state.">'
+        "↻ Re-clone from base"
+        "</button>"
+        "</form>"
+        if v_overlay_exists else ""
     )
     cleanup_btn = (
-        '<form method="post" action="/training/cleanup" class="inline-block ml-2">'
+        '<form method="post" action="/training/cleanup" class="inline-block">'
         '<button type="submit" id="training-cleanup-btn" '
         'class="px-3 py-1.5 bg-warning text-white rounded-sm border border-warning text-xs font-semibold hover:opacity-85" '
         'title="Drops the &lt;base&gt;_v_* schema. Base prefix untouched.">'
@@ -189,15 +202,20 @@ def _render_session_controls(v_overlay_exists: bool) -> str:
         "</form>"
         if v_overlay_exists else ""
     )
+    session_start_label = (
+        "▶ Session Start (re-fetch)" if v_overlay_exists
+        else "▶ Session Start"
+    )
     return f"""
     <div class="mt-3 inline-flex items-center gap-2">
       <form method="post" action="/training/session-start" class="inline-block">
         <button type="submit" id="training-session-start-btn"
                 class="px-3 py-1.5 bg-accent text-accent-fg rounded-sm border border-accent text-xs font-semibold hover:opacity-85"
-                title="{escape(start_title)}">
-          {start_label}
+                title="{escape(session_start_title)}">
+          {session_start_label}
         </button>
       </form>
+      {reclone_btn}
       {cleanup_btn}
     </div>
     """
