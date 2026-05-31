@@ -73,18 +73,63 @@ and then a plant one that we've checked off what plants to enable."**
 
 ### 1.2 Round-2 lock — TWO prefixes, multi-plant compose
 
+**Naming convention** (operator-locked): `prefix_b` for baseline,
+`prefix_v` for "with violations." Trainer mode operates on the
+suffix pair; regular `data apply` / `json apply` / `audit apply`
+still target a SINGLE base `prefix` (the operator's production
+deploy view).
+
 **Final shape:**
-- **`<L2>__baseline_*`** — clean baseline, ONE copy. Built once at
-  trainer entry, never mutated.
-- **`<L2>__planted_*`** — composite of all operator-enabled plants
-  applied on top of baseline. Re-built whenever the enabled set
-  changes.
+- **`<L2>_prefix_b_*`** — clean baseline, ONE copy. Built once at
+  trainer entry, never mutated during the session.
+- **`<L2>_prefix_v_*`** — composite of all operator-enabled plants
+  applied on top of a clone of baseline. Re-built whenever the
+  enabled set changes.
+- **`<L2>_*`** (unsuffixed) — the regular production deploy
+  prefix, untouched by trainer mode. This is what `recon-gen
+  data apply` / `etl_hook` write to outside trainer mode.
 
 Disk cost: 2× baseline. Constant — independent of registry size.
 
-The Tour Before/After toggle still flips a `?state=before|after`
-URL param → resolves to one of the two prefixes. Same UX as the
-N+1 sketch; the difference is on the populate side.
+### 1.2.1 DETERMINISM LOCK — copy-once, not etl-twice
+
+The Tour comparison is **only meaningful if `prefix_b` and
+`prefix_v` share identical underlying baseline data.** Customer
+ETL hooks read from upstream systems (production DBs, statement
+exports, vendor APIs) — calling the ETL hook twice produces TWO
+DIFFERENT baselines (different wall-clock, different row counts,
+different sampled rows). The Before/After comparison would be
+corrupted — operator wouldn't know if a delta they see is from
+the plant or from the underlying baseline drift.
+
+**Architecture:** call ETL hook ONCE per trainer session →
+`prefix_b`. Then `prefix_v` = data-copy of `prefix_b` + apply
+enabled plants + refresh matviews. Apply-cycle re-clones from
+`prefix_b` (which never mutates), guaranteeing the operator's
+"compare clean vs planted" is comparing literally the same
+baseline data with planted deltas applied on top.
+
+This is the **only architecture that survives a non-deterministic
+ETL hook** — and customer ETL hooks are non-deterministic in
+practice.
+
+### 1.2.2 ETL hook gains a `prefix` kwarg
+
+Today the etl_hook signature is `etl_hook(cfg)` — implicitly
+writes to `cfg.db_table_prefix`. Trainer mode needs:
+
+```python
+def etl_hook(cfg, *, prefix: str) -> None:
+    # write into <prefix>_transactions, <prefix>_daily_balances
+```
+
+- Regular `data apply` calls with `prefix=cfg.db_table_prefix` —
+  backward-compat shim if customers' existing hooks don't accept
+  the kwarg.
+- Trainer entry calls ONCE with `prefix=<base>_prefix_b`. Never
+  calls it again during the session.
+- All Apply cycles after that operate on `prefix_v` (clone +
+  plants).
 
 ### 1.3 Landing UX consequence — cards collapse into checkboxes
 
@@ -107,9 +152,21 @@ kind at a time." Landing becomes:
 - An "Apply selection" button that re-builds the planted prefix
   (drops planted-* tables; copies from baseline-*; applies each
   enabled plant's SQL; refreshes matviews).
-- The Tour link goes to the dashboard with the toggle — `Before`
-  shows baseline (always clean); `After` shows the composite
-  effect of every enabled plant.
+- **Tour uses TWO LINKS, not a toggle.** Operator-locked: a single
+  toggle is mode-confusing ("am I on Before or After?"); two
+  distinct links per family / per kind are explicit.
+  - `[ Clean dashboard → ]` — opens the dashboard reading from
+    `prefix_b`. The "this is what healthy looks like" view.
+  - `[ Violation dashboard → ]` — opens the dashboard reading from
+    `prefix_v`. The "this is what the operator's enabled plants
+    cause" view.
+  - When a kind ISN'T in the operator's enabled set, the
+    Violation link STILL points to the violation-dashboard URL —
+    page renders an empty-state callout: "this violation isn't
+    present in your current enabled set; tick the
+    `<kind>` checkbox above and click Apply to surface it." The
+    operator gets a prove-it-to-yourself reading even when no
+    plants are enabled — confirms the dashboard doesn't lie.
 
 This **collapses per-kind plant pages entirely.** The operator
 doesn't navigate per-kind — they pick a set, see the combined
@@ -135,12 +192,15 @@ probe ran against was much smaller — tens of MB). At that scale
 the clone + matview refresh costs are minutes, not seconds.
 
 When the operator checks/unchecks a plant + clicks Apply:
-1. DROP planted-* tables (schema + data).
-2. Clone from baseline-* (`CREATE TABLE planted_X AS SELECT * FROM
-   baseline_X` for each base table, plus the matview-as-table
-   shells).
-3. Apply each enabled plant's SQL in registry order.
-4. Refresh planted-* matviews.
+1. DROP `<L2>_prefix_v_*` tables (schema + data).
+2. Clone from `<L2>_prefix_b_*` — `CREATE TABLE prefix_v_X AS
+   SELECT * FROM prefix_b_X` for each base table, plus the
+   matview-as-table shells. **The ETL hook is NOT re-invoked** —
+   it ran once at trainer entry into `prefix_b`; clone is pure
+   data-copy, deterministic by construction.
+3. Apply each enabled plant's SQL in registry order against
+   `prefix_v_*`.
+4. Refresh `prefix_v_*` matviews.
 
 Per-dialect estimate for ~5 enabled plants against a **3-4 GB
 sqlite baseline** (very rough — needs measuring on the real data):
@@ -460,18 +520,44 @@ Out of scope (defer):
 - **DL.1** — Trainer mode is App2-only. QS remains single-prefix
   for v1.
 - **DL.2** — cfg.yaml shape unchanged. Trainer mode adds a runtime
-  `trainer_mode_prefixes` field that's not serialized.
-- **DL.3** — Eager populate at trainer session entry. Streaming
-  progress page; failures per kind surface as ✗ but don't block
-  entry.
-- **DL.4** — Probe / Triage / Coverage / ETL Run pages stay
-  baseline-prefix-bound in trainer mode. Plant-prefixes are
-  tour-only.
+  pair `(prefix_b, prefix_v)` derived from `cfg.db_table_prefix`,
+  not serialized.
+- **DL.3** — **TWO prefixes** (not N+1): `<base>_prefix_b` (clean
+  baseline, etl-hook'd once per session) + `<base>_prefix_v`
+  (composite of all enabled plants, rebuilt per Apply). Disk =
+  2× baseline regardless of registry size.
+- **DL.3.a** — **Copy-once, not etl-twice.** ETL hook invoked
+  ONCE per session into `prefix_b`. `prefix_v` is always built by
+  data-copy from `prefix_b` + apply enabled plants. Survives
+  non-deterministic customer ETL hooks (the load-bearing
+  assumption).
+- **DL.3.b** — ETL hook signature gains `prefix: str` kwarg.
+  Regular `data apply` keeps current call shape; trainer mode
+  passes `prefix=<base>_prefix_b` at session entry.
+- **DL.4** — Probe / Triage / Coverage / ETL Run pages target the
+  **base prefix** (`cfg.db_table_prefix`) in production mode. In
+  trainer mode they target `prefix_b` (the deterministic baseline,
+  which is what the operator's L2 should be debugged against).
+  Planted prefix (`prefix_v`) is Tour-only.
 - **DL.5** — L2 Editor + cfg.yaml + CLI commands unchanged.
   Trainer mode is a Studio orthogonal capability.
-- **DL.6** — Tour Before/After toggle implementation: `?state=`
-  URL param on the tour-iframe URL → resolves to one of the
-  populated prefixes → dashboard renders against that prefix.
+- **DL.6** — **Tour: two distinct links, not a toggle.** Per kind
+  + per family, render `[ Clean dashboard → ]` (points at
+  `prefix_b`) AND `[ Violation dashboard → ]` (points at
+  `prefix_v`). When the operator hasn't enabled a kind, the
+  Violation link still points at the violation-dashboard URL +
+  the page renders an empty-state callout reinforcing "tick the
+  checkbox + Apply to see it surface here." Self-reinforcing
+  prove-it-to-yourself UX.
+- **DL.7** — **App2 `?prefix=` URL param is first-class.**
+  Every `/dashboards/<app>/...` route accepts `?prefix=<value>`;
+  defaults to `cfg.db_table_prefix` when absent. Single deployment
+  supports multiple prefix views without re-deploying. This is
+  the mechanism the Tour's two-link UX rides on.
+- **DL.8** — Landing UX: checkbox list per kind + per-family
+  `[Select all] [None]` bulk-toggle chips + top-level
+  `[Select all] [None]` + per-family/top selection-density
+  badges (`(7/9 enabled)`). Apply button at the bottom.
 
 ## 7. Estimated work
 
