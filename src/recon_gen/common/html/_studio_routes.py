@@ -4429,25 +4429,6 @@ def make_studio_routes(
             status_code=303,
         )
 
-    async def training_reclone(_request: Request) -> RedirectResponse:
-        """POST /training/reclone — DL.10 Re-clone from base.
-        Skips the /etl/run leg; just drops + creates v schema +
-        clones current base + refreshes v matviews. For when the
-        operator knows base is current and wants to reset v overlay
-        without re-fetching upstream."""
-        if cfg is None:
-            return RedirectResponse(url="/training/", status_code=303)
-        from recon_gen.common.l2.v_overlay import session_start  # noqa: PLC0415
-
-        await session_start(
-            cfg, cache.get(),
-            refresh_base=False, l2_yaml_path=cache.path,
-        )
-        return RedirectResponse(
-            url="/training/?status=Re-cloned+from+base+%E2%80%94+v+overlay+reset.",
-            status_code=303,
-        )
-
     async def training_cleanup(_request: Request) -> RedirectResponse:
         """POST /training/cleanup — drops the v overlay. Base prefix
         untouched."""
@@ -4596,9 +4577,6 @@ def make_studio_routes(
         Route(
             "/training/session-start", training_session_start,
             methods=["POST"],
-        ),
-        Route(
-            "/training/reclone", training_reclone, methods=["POST"],
         ),
         Route(
             "/training/cleanup", training_cleanup, methods=["POST"],

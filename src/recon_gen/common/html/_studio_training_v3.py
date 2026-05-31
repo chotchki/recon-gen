@@ -223,28 +223,23 @@ def render_training_v3_landing(
 
 
 def _render_session_controls(v_overlay_exists: bool) -> str:
-    """Top-of-page Session Start / Re-clone / Cleanup buttons (DL.10).
+    """Top-of-page Session Start / Cleanup buttons (DL.10).
 
     Pre-overlay: Session Start only.
-    Post-overlay: Re-clone (skip ETL — fast reset) + Session Start
-      (full lifecycle — re-runs /etl/run) + Cleanup."""
+    Post-overlay: Session Start (full lifecycle — re-runs /etl/run)
+      + Cleanup.
+
+    BV.4.8 followup — Re-clone dropped pre-DL.9: it's functionally
+    Apply-with-zero-checkboxes (Apply already does drop+clone+replay)
+    AND wipes the operator's checkbox curation, which surprises.
+    With DL.9 (incremental Apply) Re-clone returns as the "force a
+    full rebuild" escape hatch with a distinct job.
+    """
     session_start_title = (
         "Full lifecycle: runs the /etl/run flow (so base prefix is "
         "current) + drops + creates the v overlay schema + clones "
         "base data + refreshes v matviews. On Oracle this takes ~10 "
         "min for the /etl/run leg; PG ~30s; sqlite ~30s."
-    )
-    reclone_btn = (
-        '<form method="post" action="/training/reclone" class="inline-block">'
-        '<button type="submit" id="training-reclone-btn" '
-        'class="px-3 py-1.5 bg-accent text-accent-fg rounded-sm border border-accent text-xs font-semibold hover:opacity-85" '
-        'title="Skips /etl/run. Just drops + clones from current base '
-        '+ refreshes v matviews. For when the operator knows base is '
-        'current and wants to reset v overlay plant state.">'
-        "↻ Re-clone from base"
-        "</button>"
-        "</form>"
-        if v_overlay_exists else ""
     )
     cleanup_btn = (
         '<form method="post" action="/training/cleanup" class="inline-block">'
@@ -269,7 +264,6 @@ def _render_session_controls(v_overlay_exists: bool) -> str:
           {session_start_label}
         </button>
       </form>
-      {reclone_btn}
       {cleanup_btn}
     </div>
     """
