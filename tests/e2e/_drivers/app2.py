@@ -848,10 +848,12 @@ class App2Driver:
         is what we click. The page state (which accordions are open)
         resets on every render — callers must re-expand after each
         full-page navigation (Session Start / Apply / Tour).
-        """
-        self._page.locator(
-            f'[data-test-training-family="{family}"] > summary'
-        ).first.click()
+
+        Clicking a `<details summary>` that's already open TOGGLES
+        it closed; the L1 Conservation family opens by default, so
+        always check the `open` attribute first and only click when
+        we need to open it."""
+        self._trainer_ensure_family_open(family)
         checkbox = self._page.locator(
             f"[data-test-training-enable-{kind}]"
         )
@@ -860,6 +862,16 @@ class App2Driver:
             self._page.locator(
                 f'[name="form_{kind}_{field_name}"]'
             ).first.fill(value)
+
+    def _trainer_ensure_family_open(self, family: str) -> None:
+        """Open the family accordion if it isn't already. Clicking
+        the summary of an already-open `<details>` collapses it."""
+        details = self._page.locator(
+            f'[data-test-training-family="{family}"]'
+        ).first
+        is_open = bool(details.evaluate("el => el.hasAttribute('open')"))
+        if not is_open:
+            details.locator("> summary").first.click()
 
     def trainer_apply(self) -> None:
         """Click Apply + wait for the navigation back to /training/.
@@ -881,9 +893,7 @@ class App2Driver:
         link (the ``?prefix=<base>_v`` one). Waits for the dashboard
         sheet to settle (HTMX visual auto-loads count toward
         networkidle)."""
-        self._page.locator(
-            f'[data-test-training-family="{family}"] > summary'
-        ).first.click()
+        self._trainer_ensure_family_open(family)
         tour_link = self._page.locator(
             f'[data-test-tour-violation-{kind}]'
         ).first
@@ -896,18 +906,22 @@ class App2Driver:
         self._page.wait_for_load_state("networkidle")
 
     def dashboard_table_inner_html(self) -> str:
-        """Read the rendered ``.table-data`` block's inner HTML —
+        """Read the rendered ``.table-data`` block(s) inner HTML —
         the cheap read used by BV.3.3's planted-row signature
         assertions. Caller diffs the v overlay's matview to identify
         the planted row's account_id then ``assert acc in inner_html``.
 
+        Concatenates HTML of EVERY ``.table-data`` on the page —
+        some sheets carry multiple tables (drift has main + summary)
+        and the signature could legitimately surface in any of them.
         Waits for at least one row to render (the renderer auto-loads
         via ``hx-trigger="load"`` on page open); table-only sheets
-        with 0 rendered rows yield an empty HTML string."""
+        with 0 rendered rows yield an empty string."""
         self._page.wait_for_selector(
             ".table-data tbody tr", timeout=15_000,
         )
-        return str(self._page.locator(".table-data").inner_html())
+        chunks = self._page.locator(".table-data").all_inner_texts()
+        return "\n".join(str(c) for c in chunks)
 
     # -- artifacts -------------------------------------------------------
 
