@@ -393,18 +393,10 @@ def test_phantom_rail_plant_surfaces_on_etl_triage(
 # -- BU.1.6 — clean-baseline reset (Trainer-mode noise-free starting point)
 
 
-def test_landing_renders_reset_to_clean_baseline_button(
-    writable_l2_yaml: Path,
-) -> None:
-    """BU.1.6 — Trainer's premise is 'plant ONE, see ONLY it' which
-    collides with the BTa.8 bundled-demo overlay. Landing exposes a
-    'Reset to clean baseline' form that POSTs to /training/reset."""
-    app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
-        body = c.get("/training/").text
-    assert 'action="/training/reset"' in body
-    assert 'id="training-reset-btn"' in body
-    assert "Reset to clean baseline" in body
+# BU.1.6's "Reset to clean baseline" button is DELETED — BV.4.0's
+# /training/ landing exposes Session Start / Apply / Cleanup instead.
+# The v2 /training/reset route stays alive but is no longer linked
+# from the landing.
 
 
 def test_plant_page_also_carries_reset_button(
@@ -419,16 +411,10 @@ def test_plant_page_also_carries_reset_button(
     assert "Re-baseline" in body
 
 
-def test_landing_renders_reset_banner_when_query_param_set(
-    writable_l2_yaml: Path,
-) -> None:
-    """GET /training/?reset=1 → success banner. POST /training/reset
-    303s here w/ that query so the operator gets confirmation."""
-    app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
-        body = c.get("/training/?reset=1").text
-    assert "data-test-training-reset-banner" in body
-    assert "Clean baseline" in body
+# BU's `/training/?reset=1` banner test is DELETED — v3's landing
+# (BV.4.0) doesn't carry the v2 reset concept. /training/?status=…
+# is the v3-equivalent (an arbitrary banner message); covered
+# implicitly by the BV.4.1 route tests.
 
 
 def test_landing_omits_reset_banner_when_not_set(

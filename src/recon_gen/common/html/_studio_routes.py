@@ -4241,18 +4241,29 @@ def make_studio_routes(
         from recon_gen.common.html._studio_training_v3 import (  # noqa: PLC0415
             render_training_v3_landing,
         )
+        from recon_gen.common.l2.v_overlay import (  # noqa: PLC0415
+            read_applied_state,
+        )
         instance = cache.get()
         base_prefix = cfg.db_table_prefix if cfg is not None else cache.path.stem
         v_overlay_exists = await _v_overlay_exists(
             cfg, instance, base_prefix,
         )
         session_status = request.query_params.get("status") or None
+        # BV.4.0 P1.2 fix — read the persisted applied-plants state from
+        # `<v>_config_kv` so checkboxes + form fields render as the
+        # operator left them after the last Apply.
+        applied: dict[str, dict[str, str]] = {}
+        if v_overlay_exists and cfg is not None:
+            applied = await read_applied_state(cfg)
         return HTMLResponse(render_training_v3_landing(
             top_nav_html=_top_nav_html("/training/"),
             theme_head=studio_theme_head(instance),
             base_prefix=base_prefix,
             v_overlay_exists=v_overlay_exists,
             session_status=session_status,
+            enabled_kinds=tuple(applied.keys()),
+            form_values=applied,
         ))
 
     async def training_plant(request: Request) -> HTMLResponse | RedirectResponse:

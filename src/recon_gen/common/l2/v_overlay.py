@@ -1,4 +1,4 @@
-"""BV.4.1 — v-overlay lifecycle orchestration.
+"""BV.4.0/4.1 — v-overlay lifecycle orchestration.
 
 The /training/ page operates on a ``<base>_v_*`` schema that's a
 clone of the production ``<base>_*`` schema + the operator's enabled
@@ -207,10 +207,21 @@ async def apply_plants(
     Each entry in ``enabled_plants`` is the registry entry + the
     operator's form values (the kwargs the plant_function expects).
     """
+    import json  # noqa: PLC0415
+
     base_prefix = cfg.db_table_prefix
     v_prefix = v_overlay_prefix(base_prefix)
     anchor_dt = anchor or datetime(2026, 5, 30, 12, 0, 0)
     plants_list = list(enabled_plants)
+
+    # Snapshot the applied state we're about to persist BEFORE the run
+    # (kwargs values are stringified for JSON-safety; consumers parse
+    # back into typed primitives via the registry).
+    applied_snapshot: dict[str, dict[str, str]] = {
+        entry.kind: {k: str(v) for k, v in kwargs.items()}
+        for entry, kwargs in plants_list
+    }
+    applied_json = json.dumps(applied_snapshot)
 
     def _run() -> None:
         conn = connect_demo_db(cfg)
@@ -240,6 +251,14 @@ async def apply_plants(
                 )
                 execute_script(cur, refresh_sql, dialect=cfg.dialect)
 
+                # Persist applied state AFTER matview refresh — the
+                # config_kv write doesn't go through clone_base_to_v_sql's
+                # `DELETE` since we just did a fresh clone above and the
+                # base prefix's config_kv doesn't carry the applied-state
+                # row (it's v-overlay-only state per DL.9).
+                state_sql = applied_state_write_sql(base_prefix, applied_json)
+                execute_script(cur, state_sql, dialect=cfg.dialect)
+
                 conn.commit()
             finally:
                 cur.close()
@@ -252,3 +271,98 @@ async def apply_plants(
 # -- date arg is unused at the moment but kept for symmetry with
 # -- production deploy paths that thread `as_of`. Silences lint.
 _ = date
+
+
+# -- Applied-state persistence ----------------------------------------------
+#
+# The /training/ landing's checkbox state + per-card form values need to
+# survive the POST→re-render hop AND inform DL.9 diff-only Apply. We
+# park the state in a single row of `<v>_config_kv` keyed by a known
+# parent_id. Cheap; survives Studio restarts; lives inside the v overlay
+# so a Cleanup wipes it (correct — fresh Session Start should reset).
+
+
+_APPLIED_STATE_KEY = "trainer_applied_plants"
+
+
+def applied_state_read_sql(base_prefix: str) -> str:
+    """SELECT the JSON-encoded applied-plant set from `<v>_config_kv`."""
+    v = v_overlay_prefix(base_prefix)
+    return (
+        f"SELECT value FROM {v}_config_kv "
+        f"WHERE parent_id = '__bv__' AND key = '{_APPLIED_STATE_KEY}'"
+    )
+
+
+def applied_state_write_sql(base_prefix: str, json_payload: str) -> str:
+    """UPSERT the JSON-encoded applied-plant set into `<v>_config_kv`.
+
+    Two-statement shape (DELETE + INSERT) so it works on PG / Oracle /
+    sqlite without needing ON CONFLICT support."""
+    v = v_overlay_prefix(base_prefix)
+    escaped = json_payload.replace("'", "''")
+    return "\n".join([
+        (
+            f"DELETE FROM {v}_config_kv "
+            f"WHERE parent_id = '__bv__' AND key = '{_APPLIED_STATE_KEY}';"
+        ),
+        (
+            f"INSERT INTO {v}_config_kv "
+            "(node_id, parent_id, key, value) VALUES "
+            f"('__bv_applied__', '__bv__', '{_APPLIED_STATE_KEY}', '{escaped}');"
+        ),
+    ])
+
+
+async def read_applied_state(
+    cfg: "Config",
+) -> dict[str, dict[str, str]]:
+    """Read the persisted `{kind: form_values}` map from `<v>_config_kv`.
+
+    Returns empty dict when the v overlay doesn't exist OR the state
+    row is absent (no Apply has ever fired)."""
+    import json  # noqa: PLC0415
+
+    base_prefix = cfg.db_table_prefix
+
+    def _run() -> dict[str, dict[str, str]]:
+        try:
+            conn = connect_demo_db(cfg)
+        except Exception:  # noqa: BLE001
+            return {}
+        try:
+            cur = conn.cursor()
+            try:
+                try:
+                    cur.execute(applied_state_read_sql(base_prefix))
+                    row = cur.fetchone()
+                except Exception:  # noqa: BLE001
+                    return {}
+                if row is None or row[0] is None:
+                    return {}
+                try:
+                    raw: object = json.loads(str(row[0]))
+                except (ValueError, TypeError):
+                    return {}
+                if not isinstance(raw, dict):
+                    return {}
+                # Coerce to dict[str, dict[str, str]] defensively.
+                # Casting at the loop boundary keeps pyright strict happy.
+                from typing import cast  # noqa: PLC0415
+                raw_dict = cast(dict[object, object], raw)
+                out: dict[str, dict[str, str]] = {}
+                for k, v in raw_dict.items():
+                    if not isinstance(v, dict):
+                        continue
+                    v_dict = cast(dict[object, object], v)
+                    out[str(k)] = {
+                        str(fk): str(fv) for fk, fv in v_dict.items()
+                    }
+                return out
+            finally:
+                cur.close()
+        finally:
+            conn.close()
+
+    return await asyncio.to_thread(_run)
+
