@@ -169,8 +169,11 @@ The full L2 + ETL + Training round-trip. Glues everything under one e2e test. **
 - [ ] BV.0 - **REPLAN.** Re-read SPEC.md::Phase BV against post-BT + post-BU state. Inventory the parts BV.4 (the HUGE one) actually depends on. Decide e2e test infra: extend `tests/e2e/test_studio_dogfood_browser.py` or new file? AWS-deploy required or App2-only?
 - [ ] BV.1 - D3.1 L2 audit redux + per-primitive curriculum doc (the "what's persona for?" deliverable).
 - [ ] BV.2 - D3.2 ETL round-trip claim: test data generator hooked as ETL hook; BT.3's coverage report green per fuzz seed.
-- [ ] BV.3 - D3.3 Training round-trip claim: every plant kind surfaces correctly per fuzz seed.
-- [ ] BV.4 - **The HUGE one.** Take an L2 yaml → recreate in the editor → deploy via Training mode (all defaults) → assert dashboards match existing test deploys. Browser-layer e2e, parametrized over the fuzz pool.
+- [ ] BV.3 - D3.3 Training round-trip claim: every plant kind surfaces correctly. **Sub-tasks expand the round-trip into a layered audit on the 25-entry registry — pulled forward to surface broken plants (chain_orphan tour empty, etc) before the fuzz-pool scale-out in BV.4.**
+  - [ ] BV.3.1 - Parameterized unit-level round-trip over `PLANT_REGISTRY` × `dashboard_check`. Builds fresh sqlite per entry: schema → baseline seed → matview refresh → plant_function → matview refresh → assert dashboard_check. Reports PASS/FAIL per entry; entries that fail become RED tests for BV.3.2 to fix.
+  - [ ] BV.3.2 - Fix the entries surfaced by BV.3.1 as broken — wrong matview name, wrong dashboard_check shape, plant SQL that doesn't actually trip the check, picker outputs that don't reach the dashboard, etc. One commit per fix.
+  - [ ] BV.3.3 - Dogfooded browser e2e: parametrized over `PLANT_REGISTRY`, drives Studio through `App2Driver` — open plant page → fill form → submit → navigate tour → assert dashboard surface shows planted row. Catches render-layer regressions BV.3.1 can't see (form not POSTing the right kwargs, tour iframe not loading, etc). **MUST hit all three App2 dialect variants (sqlite / postgres / oracle)** — per operator's BV.4 framing, cross-dialect parity is the load-bearing claim. Lives under `tests/e2e/_drivers/app2.py` w/ `pytest.mark.parametrize` over the dialect axis × the registry axis.
+- [ ] BV.4 - **The HUGE one.** Take an L2 yaml → recreate in the editor → deploy via Training mode (all defaults) → assert dashboards match existing test deploys. Browser-layer e2e, parametrized over the fuzz pool. **Per-dialect coverage required (sqlite / postgres / oracle)** — App2 dialect parity is BV's load-bearing acceptance claim.
 - [ ] BV.5 - Agent-based design cold-read against the dogfood + the HUGE test. Output: `docs/audits/bv_cold_read.md`. Operator iteration + sign-off.
 
 ## Phase BW - Docs posture (deferred / follow-on)
@@ -499,3 +502,8 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - **App2 date picker shows resolved default** — added 2026-05-27 (deferred BL.2.C polish). When the analysis declares a `default_universal_date_range`, the bind layer narrows correctly, but the Flatpickr widget shows "All dates" placeholder — slightly misleading UX. Two paths: (a) pre-fill the visible input's `value` attribute with the default range string (Flatpickr reads it as defaultDate in range mode); (b) emit a `<small>` hint next to the picker showing the resolved range. Skip unless cold-read flags it.
 - **BX backlog — Probe name ✓/✗ status badges (deferred from BTa.5)** — added 2026-05-30.
 - **BTb backlog — P2/P3 cluster from BTa cold-read v3** — added 2026-05-31.
+- **Backlog — test_studio_data_route::test_put_emits_hx_push_url_with_state date flake** — added 2026-05-31.
+- ****REPLAN.** Re-read SPEC.md::Phase BV against post-BT + post-BU state. Inventory the parts BV.4 (the HUGE one) actually depends on. Decide e2e test infra: extend `tests/e2e/test_studio_dogfood_browser.py` or new file? AWS-deploy required or App2-only?** — deferred from BV.0 on 2026-05-31.
+- **D3.1 L2 audit redux + per-primitive curriculum doc (the "what's persona for?" deliverable).** — deferred from BV.1 on 2026-05-31.
+- **D3.2 ETL round-trip claim: test data generator hooked as ETL hook; BT.3's coverage report green per fuzz seed.** — deferred from BV.2 on 2026-05-31.
+- **D3.3 Training round-trip claim: every plant kind surfaces correctly per fuzz seed.** — deferred from BV.3 on 2026-05-31.
