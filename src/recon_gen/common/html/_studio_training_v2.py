@@ -30,7 +30,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from datetime import datetime
 from html import escape
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from recon_gen.common.l2.plant_registry import (
     PLANT_REGISTRY,
@@ -203,9 +203,9 @@ def render_training_landing(
             '<div class="bg-success/10 border border-success rounded-md '
             'px-3 py-2 mb-3 text-sm" data-test-training-reset-banner>'
             '<strong class="text-success">✓ Clean baseline.</strong> '
-            'Demo DB wiped + reseeded without the bundled-demo gap '
-            "overlay. Pick a kind below to plant exactly one scenario; "
-            "the dashboard tour will show ONLY your plant."
+            "Demo DB wiped and reseeded clean. Pick a kind below to "
+            "plant exactly one scenario; the dashboard tour will show "
+            "ONLY your plant."
             "</div>"
         )
 
@@ -242,41 +242,73 @@ def render_training_landing(
 
 def _render_reset_button() -> str:
     """The clean-baseline Reset form. Posts to /training/reset which
-    runs the wipe + regenerate pipeline WITHOUT the BTa.8 overlay
-    + 303s back to /training/?reset=1 for the success banner."""
+    runs the wipe + regenerate pipeline + 303s back to
+    /training/?reset=1 for the success banner.
+
+    BU.4 polish — copy uses operator vocabulary, no internal phase
+    references (was "BTa.8 demo-gap overlay")."""
     return (
         '<form method="post" action="/training/reset" class="mt-3 inline-flex items-center gap-3">'
         '<button type="submit" id="training-reset-btn" '
         'class="px-3 py-1.5 bg-warning text-white rounded-sm border border-warning text-sm font-semibold hover:opacity-85" '
-        'title="Wipes + reseeds the demo DB without the bundled-demo '
-        'gap overlay. Use this before planting so the tour shows '
-        'only your plant — not the ~6 plants the /etl/run demo path '
-        'lays down.">'
+        'title="Wipes the demo DB and reseeds it to a clean baseline. '
+        'Run this before planting a scenario so the dashboard tour '
+        'shows only your plant, not the demo-mode noise.">'
         "↻ Reset to clean baseline"
         "</button>"
         '<span class="text-xs text-secondary-fg max-w-md">'
-        "Wipes the demo DB + reseeds without the BTa.8 demo-gap "
-        "overlay. Plant after reset so the dashboard tour shows "
-        "ONLY your scenario."
+        "Wipes the demo DB and reseeds it clean. Plant after reset "
+        "so the dashboard tour shows ONLY your scenario."
         "</span>"
         "</form>"
     )
 
 
+_CATEGORY_LABELS: Final[Mapping[PlantCategory, str]] = {
+    PlantCategory.L1_INVARIANT: "L1 invariant",
+    PlantCategory.L2_TRIAGE: "L2 Triage",
+    PlantCategory.L2_COVERAGE: "L2 Coverage",
+    PlantCategory.L2FT_HYGIENE: "L2FT Hygiene",
+}
+
+
+def _category_label(category: PlantCategory) -> str:
+    """Human-readable label for the breadcrumb. Falls back to the
+    enum value when unmapped (defensive — every category MUST be in
+    the table; the fallback is a smell rather than a feature)."""
+    return _CATEGORY_LABELS.get(category, category.value)
+
+
 def _render_family_section(
     family: str, entries: Iterable[PlantKindEntry],
 ) -> str:
-    """One <details> per family on the landing accordion."""
+    """One <details> per family on the landing accordion.
+
+    BU.4 polish — each row now carries the section's short statement
+    as a hover tooltip + a one-line description, so the landing
+    pre-explains what the operator will be planting instead of
+    showing them just the slug."""
     items: list[str] = []
     for entry in entries:
         section = resolve_section(entry)
+        short = section.short_statement or ""
+        # Trim the short statement to one operator-readable sentence
+        # for the landing card; the full prose still renders on the
+        # plant page itself.
+        one_liner = short.split(". ", 1)[0]
+        if one_liner and not one_liner.endswith("."):
+            one_liner += "."
         items.append(
-            '<li class="flex items-baseline gap-3 py-1">'
+            '<li class="flex flex-col gap-1 py-2 border-b border-surface-border last:border-b-0">'
+            '<div class="flex items-baseline gap-3">'
             f'<a class="text-accent hover:underline font-mono text-sm" '
             f'href="/training/plant/{escape(entry.kind)}" '
             f'data-test-training-kind="{escape(entry.kind)}">'
             f'{escape(entry.kind)}</a>'
-            f'<span class="text-sm">{escape(section.title)}</span>'
+            f'<span class="text-sm font-semibold">{escape(section.title)}</span>'
+            '</div>'
+            f'<span class="text-xs text-secondary-fg max-w-3xl">'
+            f'{escape(one_liner)}</span>'
             '</li>'
         )
     return (
@@ -343,7 +375,7 @@ def render_training_plant_page(
   {top_nav_html}
   <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white">
     <a class="text-accent no-underline text-sm hover:underline" href="/training/">← back to Training</a>
-    <span class="text-xs text-secondary-fg font-mono">{escape(entry.category.value)} · {escape(entry.family)}</span>
+    <span class="text-xs text-secondary-fg">{escape(_category_label(entry.category))} · {escape(entry.family)}</span>
   </header>
   <main class="max-w-3xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
     <h1 class="text-2xl font-semibold m-0">{escape(section.title)}</h1>
