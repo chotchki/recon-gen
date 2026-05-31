@@ -1287,8 +1287,10 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         dashboard_check=DashboardCheck(
             url_path="/etl/triage",
             # Reads the demo emitter's hard-coded PHANTOM_TEMPLATE_NAME.
-            # Anti-drift gate would catch a rename divergence.
-            expect_text_contains="phantom_template",
+            # BV.3.2 fix — the L2 Triage card title comes from
+            # SECTION_TITLE_BY_KIND["unmatched_template"] via the typed
+            # source. Anti-drift gate ensures rename divergence trips.
+            expect_text_contains="Unmatched template_name",
         ),
     ),
     PlantKindEntry(
@@ -1308,10 +1310,10 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         ),
         dashboard_check=DashboardCheck(
             url_path="/etl/triage",
-            # The triage card mentions "metadata key" in its
-            # diagnosis prose for this kind regardless of the chosen
-            # template — stable text contains check.
-            expect_text_contains="metadata key",
+            # BV.3.2 fix — section title from the typed catalogue, not
+            # an ad-hoc substring of the underlying detect_gaps()
+            # diagnosis prose.
+            expect_text_contains="Missing required metadata key",
         ),
     ),
     # ------ L1 Conservation ------------------------------------------------
@@ -1859,13 +1861,14 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         # choice). Operator's only knob is on/off.
         primitives=(),
         tour_destination=TourDestination(
-            # BU.4 P2.9 — Coverage gaps surface on /etl/triage alongside
-            # the unmatched-* gaps; /etl/run is the matview-refresh trigger
-            # (operator doesn't see Coverage data there).
-            primary_url="/etl/triage",
+            # BV.3.2 fix — Coverage panel lives at /etl/run (under the
+            # Refresh-Data log section, not the Triage card list). My
+            # BU.4 P2.9 redirect was wrong; reverting + BV.3.1 test
+            # caught it.
+            primary_url="/etl/run",
         ),
         dashboard_check=DashboardCheck(
-            url_path="/etl/triage",
+            url_path="/etl/run",
             # The Coverage Rails panel renders the un-covered rail
             # with a "no rows" status badge — text varies but the
             # word "Coverage" is stable on the panel header.
@@ -1880,10 +1883,10 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         plant_function=_invoke_uncovered_template_plant,
         primitives=(),
         tour_destination=TourDestination(
-            primary_url="/etl/triage",  # BU.4 P2.9 — see uncovered_rail above
+            primary_url="/etl/run",  # BV.3.2 fix — see uncovered_rail above
         ),
         dashboard_check=DashboardCheck(
-            url_path="/etl/triage",
+            url_path="/etl/run",
             expect_text_contains="Coverage",
         ),
     ),
