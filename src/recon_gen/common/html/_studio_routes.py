@@ -4243,14 +4243,19 @@ def make_studio_routes(
 
     # BU.1 vertical slice — Trainer surface (registry-driven, see
     # common/l2/plant_registry.py + common/html/_studio_training_v2.py).
-    async def training_landing(_request: Request) -> HTMLResponse:
+    async def training_landing(request: Request) -> HTMLResponse:
         from recon_gen.common.html._studio_training_v2 import (  # noqa: PLC0415
             render_training_landing,
         )
         instance = cache.get()
+        # BU.1.6 — show a "reset complete" banner after the clean-
+        # baseline wipe completes (POST /training/reset 303s here
+        # with ?reset=1).
+        reset_done = request.query_params.get("reset") == "1"
         return HTMLResponse(render_training_landing(
             top_nav_html=_top_nav_html("/training/"),
             theme_head=studio_theme_head(instance),
+            reset_done=reset_done,
         ))
 
     async def training_plant(request: Request) -> HTMLResponse | RedirectResponse:
@@ -4318,6 +4323,38 @@ def make_studio_routes(
             plant_status=plant_status,
         ))
 
+    async def training_reset(_request: Request) -> RedirectResponse:
+        """BU.1.6 — Trainer clean-baseline reset.
+
+        Runs the same wipe+regenerate pipeline as /etl/run's Refresh
+        Data BUT SKIPS the BTa.8 bundled-demo gap overlay so the
+        Trainer's destination dashboards start NOISE-FREE. The
+        operator then plants exactly one scenario via /training/plant/
+        and sees ONLY that violation surface on the tour — the
+        whole pedagogical premise.
+
+        Compare with /etl/run's POST which appends the gap overlay
+        when `cfg.etl_hook is None` (intentional for the ETL-debug
+        demo flow); the Trainer needs the opposite.
+        """
+        if cfg is None:
+            return RedirectResponse(url="/training/", status_code=303)
+        # Same generator-enabled-when-no-hook semantics as
+        # /etl/run, so the bundled-demo path still gets baseline
+        # data (just without the gap overlay).
+        if cfg.etl_hook is None:
+            patched_cfg = cfg
+        else:
+            patched_cfg = dataclass_replace(
+                cfg, test_generator=dataclass_replace(
+                    cfg.test_generator, enabled=False,
+                ),
+            )
+        await run_deploy_pipeline(patched_cfg, cache.get(), dev_log=None)
+        return RedirectResponse(
+            url="/training/?reset=1", status_code=303,
+        )
+
     async def training_tour(request: Request) -> HTMLResponse:
         from recon_gen.common.html._studio_training_v2 import (  # noqa: PLC0415
             render_training_tour_page,
@@ -4344,6 +4381,9 @@ def make_studio_routes(
         Route("/data/timeline", data_timeline, methods=["GET"]),
         Route("/diagram", diagram, methods=["GET"]),
         Route("/training/", training_landing, methods=["GET"]),
+        Route(
+            "/training/reset", training_reset, methods=["POST"],
+        ),
         Route(
             "/training/plant/{kind}", training_plant,
             methods=["GET", "POST"],

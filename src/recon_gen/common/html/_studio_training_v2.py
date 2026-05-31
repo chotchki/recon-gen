@@ -187,15 +187,35 @@ def render_training_landing(
     devlog_script: str = "",
     theme_head: str = "",
     asset_url: str = "/static/output.css",
+    reset_done: bool = False,
 ) -> str:
     """The ``/training/`` landing page. Accordion grouped by family
     per BU.0 Lock 1. Iterates the registry; adding a kind just adds
-    a row."""
+    a row.
+
+    BU.1.6 — landing now ships a "Reset to clean baseline" form
+    (POST /training/reset). The Trainer's pedagogical premise is
+    "plant ONE thing, see ONLY it" — colliding with /etl/run's
+    BTa.8 bundled-demo overlay which auto-plants ~6 gaps. The
+    Reset button wipes + reseeds WITHOUT the overlay so the
+    dashboard starts noise-free before the operator plants.
+    """
     groups = entries_by_family()
     family_sections: list[str] = []
     for family_name, entries in groups.items():
         family_sections.append(_render_family_section(family_name, entries))
     families_html = "\n".join(family_sections)
+    reset_banner = ""
+    if reset_done:
+        reset_banner = (
+            '<div class="bg-success/10 border border-success rounded-md '
+            'px-3 py-2 mb-3 text-sm" data-test-training-reset-banner>'
+            '<strong class="text-success">✓ Clean baseline.</strong> '
+            'Demo DB wiped + reseeded without the bundled-demo gap '
+            "overlay. Pick a kind below to plant exactly one scenario; "
+            "the dashboard tour will show ONLY your plant."
+            "</div>"
+        )
 
     return f"""<!doctype html>
 <html lang="en">
@@ -217,13 +237,38 @@ def render_training_landing(
       below; each plant page lets you tune the scenario then jump to
       the dashboard sheet that should light up.
     </p>
+    {_render_reset_button()}
   </header>
   <main class="px-8 py-6 flex flex-col gap-3">
+    {reset_banner}
     {families_html}
   </main>
 </body>
 </html>
 """
+
+
+def _render_reset_button() -> str:
+    """The clean-baseline Reset form. Posts to /training/reset which
+    runs the wipe + regenerate pipeline WITHOUT the BTa.8 overlay
+    + 303s back to /training/?reset=1 for the success banner."""
+    return (
+        '<form method="post" action="/training/reset" class="mt-3 inline-flex items-center gap-3">'
+        '<button type="submit" id="training-reset-btn" '
+        'class="px-3 py-1.5 bg-warning text-white rounded-sm border border-warning text-sm font-semibold hover:opacity-85" '
+        'title="Wipes + reseeds the demo DB without the bundled-demo '
+        'gap overlay. Use this before planting so the tour shows '
+        'only your plant — not the ~6 plants the /etl/run demo path '
+        'lays down.">'
+        "↻ Reset to clean baseline"
+        "</button>"
+        '<span class="text-xs text-secondary-fg max-w-md">'
+        "Wipes the demo DB + reseeds without the BTa.8 demo-gap "
+        "overlay. Plant after reset so the dashboard tour shows "
+        "ONLY your scenario."
+        "</span>"
+        "</form>"
+    )
 
 
 def _render_family_section(
@@ -321,6 +366,15 @@ def render_training_plant_page(
     <section class="bg-white border border-surface-border rounded-md p-5">
       <h2 class="text-base font-semibold m-0 mb-2">What to do about it</h2>
       <p class="text-sm m-0">{escape(section.what_to_do)}</p>
+    </section>
+    <section class="bg-surface-bg border border-surface-border rounded-md p-4">
+      <h2 class="text-sm font-semibold m-0 mb-2">Re-baseline</h2>
+      <p class="text-xs text-secondary-fg max-w-md m-0 mb-2">
+        Going to plant a different scenario? Reset the demo DB to
+        a clean baseline first so the tour shows only your new
+        plant, not the previous one stacked on top.
+      </p>
+      {_render_reset_button()}
     </section>
   </main>
 </body>

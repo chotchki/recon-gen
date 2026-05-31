@@ -341,3 +341,65 @@ def test_phantom_rail_plant_surfaces_on_etl_triage(
     assert len(phantom) == 1
     assert phantom[0].kind == "unmatched_rail"
     assert phantom[0].evidence.row_count == 4
+
+
+# -- BU.1.6 — clean-baseline reset (Trainer-mode noise-free starting point)
+
+
+def test_landing_renders_reset_to_clean_baseline_button(
+    writable_l2_yaml: Path,
+) -> None:
+    """BU.1.6 — Trainer's premise is 'plant ONE, see ONLY it' which
+    collides with the BTa.8 bundled-demo overlay. Landing exposes a
+    'Reset to clean baseline' form that POSTs to /training/reset."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        body = c.get("/training/").text
+    assert 'action="/training/reset"' in body
+    assert 'id="training-reset-btn"' in body
+    assert "Reset to clean baseline" in body
+
+
+def test_plant_page_also_carries_reset_button(
+    writable_l2_yaml: Path,
+) -> None:
+    """The per-kind plant page also offers the reset so the operator
+    can re-baseline mid-flow without bouncing back to the landing."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        body = c.get("/training/plant/phantom_rail").text
+    assert 'action="/training/reset"' in body
+    assert "Re-baseline" in body
+
+
+def test_landing_renders_reset_banner_when_query_param_set(
+    writable_l2_yaml: Path,
+) -> None:
+    """GET /training/?reset=1 → success banner. POST /training/reset
+    303s here w/ that query so the operator gets confirmation."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        body = c.get("/training/?reset=1").text
+    assert "data-test-training-reset-banner" in body
+    assert "Clean baseline" in body
+
+
+def test_landing_omits_reset_banner_when_not_set(
+    writable_l2_yaml: Path,
+) -> None:
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        body = c.get("/training/").text
+    assert "data-test-training-reset-banner" not in body
+
+
+def test_training_reset_without_cfg_redirects_to_landing(
+    writable_l2_yaml: Path,
+) -> None:
+    """Unit-test surface (no cfg) — POST /training/reset bails to
+    /training/ rather than crash, mirroring the etl_run POST pattern."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        resp = c.post("/training/reset", follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/training/"
