@@ -83,16 +83,16 @@ prefix on top:
   / top-nav routes ALL hit this prefix in both production and
   trainer modes — nothing is split. **Trainer never mutates this
   prefix; only clones from it.**
-- **`<L2>_prefix_v_*`** — trainer-only overlay carrying the
+- **`<L2>_v_*`** — trainer-only overlay carrying the
   composite of all operator-enabled plants applied on top of a
   frozen snapshot-clone of the production prefix. Re-built when
   the enabled set changes OR when the operator re-syncs against
   upstream baseline drift.
 
 Disk cost: ~1× baseline of additional disk for trainer mode
-(the prefix_v copy). Constant — independent of registry size.
+(the v overlay copy). Constant — independent of registry size.
 
-**Why this simplification beats the round-2 `prefix_b` + `prefix_v`
+**Why this simplification beats the round-2 `prefix_b` + `v`
 shape:** The earlier draft introduced a dedicated `prefix_b`
 because "trainer mode needed its own deterministic baseline." But
 the production prefix IS deterministic at any given moment — it's
@@ -104,12 +104,12 @@ hit `cfg.db_table_prefix` always.
 
 **There is no "trainer mode" as a runtime concept** (operator-locked).
 Studio is always Studio. The /training/ page is just a UI surface
-that exposes operations on `<L2>_prefix_v_*`: Session Start
-(create prefix_v schema + clone from base), Apply (mutate prefix_v
-to match enabled plant set), Cleanup (drop prefix_v). Dashboards
+that exposes operations on `<L2>_v_*`: Session Start
+(create v overlay schema + clone from base), Apply (mutate v overlay
+to match enabled plant set), Cleanup (drop v overlay). Dashboards
 take `?prefix=` URL param and resolve at request time; default to
 base when absent. The Clean dashboard link writes `?prefix=<L2>`;
-the Violation link writes `?prefix=<L2>_prefix_v`. No mode toggle,
+the Violation link writes `?prefix=<L2>_v`. No mode toggle,
 no mode-aware code paths.
 
 ### 1.2.1 DETERMINISM LOCK — clone-from-base, never re-clone-without-asking
@@ -118,20 +118,20 @@ The Tour comparison is **only meaningful if the Clean dashboard
 and the Violation dashboard share identical underlying baseline
 data at the moment of comparison.** Customer ETL hooks read from
 upstream systems (production DBs, statement exports, vendor APIs)
-which mutate continuously — if `prefix_v` is built from a
+which mutate continuously — if `v` is built from a
 different ETL pass than the operator's current base prefix, the
 comparison is corrupted.
 
-**Architecture:** `prefix_v` is always a frozen clone-snapshot of
+**Architecture:** `v` is always a frozen clone-snapshot of
 the base prefix taken at Session Start (or at "Re-clone from
 base"). Apply cycles (when the operator changes the enabled plant
-set) mutate `prefix_v` in place, NEVER re-clone from base, NEVER
+set) mutate `v` in place, NEVER re-clone from base, NEVER
 re-call etl_hook. The base prefix is the operator's responsibility
 to keep current via the existing /etl/run flow; the trainer page
 shows a staleness banner (DL.14) when the base mutates after the
 last clone.
 
-This is the **only architecture that keeps the prefix_v snapshot
+This is the **only architecture that keeps the v overlay snapshot
 deterministic across an operator session** while still letting
 the operator re-sync when they want.
 
@@ -141,26 +141,26 @@ the operator re-sync when they want.
 today. The trainer page never calls etl_hook directly — it just
 clones from the base prefix. "Re-fetch baseline" on the trainer
 page triggers the existing /etl/run flow (which calls etl_hook
-into the base prefix) then re-clones to `prefix_v` + replays the
+into the base prefix) then re-clones to `v` + replays the
 enabled plant set. Two-step, separate concerns.
 
 **No new etl_hook kwarg.** Backward compat preserved for customer
 hooks.
 
 Operations on the /training/ page:
-- **Session Start** — creates `<L2>_prefix_v_*` schema; clones
-  data from `<L2>_*` (base); refreshes prefix_v matviews. Zero
+- **Session Start** — creates `<L2>_v_*` schema; clones
+  data from `<L2>_*` (base); refreshes v-overlay matviews. Zero
   plants enabled. Fast (clone-from-base only — no etl_hook,
   no schema work on the base prefix).
 - **Apply** — diff against currently-applied plant set; mutate
-  `prefix_v` to match the operator's checkbox state (DL.9 diff-
+  `v` to match the operator's checkbox state (DL.9 diff-
   only Apply).
-- **Re-clone from base** — operator-initiated reset of prefix_v;
+- **Re-clone from base** — operator-initiated reset of v overlay;
   re-clones from current base + replays enabled plants.
 - **Re-fetch baseline** — triggers the existing /etl/run flow
-  (writes to base prefix), then re-clones to prefix_v + replays
+  (writes to base prefix), then re-clones to v overlay + replays
   enabled plants. Two-step; covers "I want fresh upstream data."
-- **Cleanup** — drops `<L2>_prefix_v_*` tables, reclaims the
+- **Cleanup** — drops `<L2>_v_*` tables, reclaims the
   ~1× baseline disk hit. Base prefix untouched.
 
 ### 1.3 Landing UX consequence — cards collapse into checkboxes
@@ -191,7 +191,7 @@ kind at a time." Landing becomes:
     the base prefix (`?prefix=<L2>`). The "this is what healthy
     looks like" view.
   - `[ Violation dashboard → ]` — opens the dashboard reading from
-    `prefix_v`. The "this is what the operator's enabled plants
+    `v`. The "this is what the operator's enabled plants
     cause" view.
   - When a kind ISN'T in the operator's enabled set, the
     Violation link STILL points to the violation-dashboard URL —
@@ -235,18 +235,18 @@ the clone + matview refresh costs are minutes, not seconds.
 
 When the operator checks/unchecks a plant + clicks Apply
 (naive clone-and-replay shape, superseded by DL.9 diff-only Apply):
-1. DROP `<L2>_prefix_v_*` tables (schema + data).
-2. Clone from the BASE prefix — `CREATE TABLE prefix_v_X AS
+1. DROP `<L2>_v_*` tables (schema + data).
+2. Clone from the BASE prefix — `CREATE TABLE v_X AS
    SELECT * FROM <L2>_X` for each base table, plus the
    matview-as-table shells. **The ETL hook is NOT re-invoked** —
    the base prefix's data is whatever the operator's last
    /etl/run produced; clone is pure data-copy.
 3. Apply each enabled plant's SQL in registry order against
-   `prefix_v_*`.
-4. Refresh `prefix_v_*` matviews.
+   `v_*`.
+4. Refresh `v_*` matviews.
 
 DL.9 diff-only Apply replaces this naive shape — Apply mutates
-prefix_v in place using the added/removed plant diff, no clone.
+v overlay in place using the added/removed plant diff, no clone.
 
 Per-dialect estimate for ~5 enabled plants against a **3-4 GB
 sqlite baseline** (very rough — needs measuring on the real data):
@@ -265,7 +265,7 @@ Apply (changing the enabled-plant set) pays the rebuild. So the
 flow becomes:
 
 1. Operator clicks Session Start → clone-from-base + matview
-   refresh on prefix_v only (no etl_hook in this step). On PG:
+   refresh on v overlay only (no etl_hook in this step). On PG:
    seconds. On sqlite/Oracle: minutes for the 3-4GB data copy.
 2. Operator picks plants from checkboxes → click Apply → ~3-5 min
    wait with progress on naive clone-and-replay; DL.9 diff-only
@@ -308,24 +308,24 @@ Re-read with operator triage:
   due to our use of the metadata.plants fields. For deletes we
   may need to save the deleted rows in the _kv table."*
   Implementation shape:
-  - Track currently-applied plants in `<L2>_prefix_v_config_kv`
+  - Track currently-applied plants in `<L2>_v_config_kv`
     (the existing config_kv table, extended with a
     `trainer_applied_plants` row).
   - On Apply with new enabled-set: diff against the stored set
     → `added`, `removed`.
   - For each `added` plant: emit its plant_function SQL into
-    `prefix_v`. Plants use stable id-prefixes (`__demo_gap_*`,
+    `v`. Plants use stable id-prefixes (`__demo_gap_*`,
     `__demo_plant_*`) so they're cleanly recoverable. INSERT path.
   - For each `removed` INSERT-style plant: `DELETE FROM
-    <prefix_v>_transactions WHERE id LIKE '__demo_<kind>%'`.
+    <L2>_v_transactions WHERE id LIKE '__demo_<kind>%'`.
     Clean undo via id-prefix namespace.
   - For each `removed` DELETE-style plant (`uncovered_rail` /
     `uncovered_template` / `dead_*` — emitters that DELETE rows
     from baseline): **save the deleted-rowsets in
-    `<prefix_v>_config_kv` at plant-time** so undo can re-INSERT
+    `<L2>_v_config_kv` at plant-time** so undo can re-INSERT
     them. Per-plant `trainer_undo_payload` rows.
   - Refresh matviews (incremental once BV.6 lands; full now).
-  - Save the new applied-plants set back to `prefix_v_config_kv`.
+  - Save the new applied-plants set back to `v_config_kv`.
 
   **No clone-from-baseline cost.** Apply becomes O(delta) not
   O(full baseline). Combined with BV.6 incremental matview
@@ -364,24 +364,24 @@ difference between "compose-and-wait" vs "iterate-freely."
 `cfg.deployment_name` is similar (used for QS resource naming).
 
 **Lock:** cfg.yaml shape unchanged. The /training/ page derives
-`<L2>_prefix_v` from `cfg.db_table_prefix` at runtime; the
+<L2>_v from `cfg.db_table_prefix` at runtime; the
 operator never types prefixes anywhere.
 
 **No mode at all.** Studio is always Studio. There is no
 `--trainer-mode` flag, no mode-aware code paths, no runtime
 "trainer mode detection." The /training/ page is just a UI
-surface that owns operations on `prefix_v`:
-- Session Start creates the `prefix_v` schema + clones data from
+surface that owns operations on `v`:
+- Session Start creates the `v` schema + clones data from
   the base prefix.
-- Apply mutates `prefix_v` to match the operator's checkbox state.
-- Cleanup drops `prefix_v`.
+- Apply mutates `v` to match the operator's checkbox state.
+- Cleanup drops `v`.
 
 The base prefix (`<L2>_*`) is created by the existing `recon-gen
-schema apply --execute` flow as today; `<L2>_prefix_v_*` schema
+schema apply --execute` flow as today; `<L2>_v_*` schema
 is created lazily by Session Start. Every other Studio surface
 (probe / triage / coverage / etl/run / top-nav / L2 editor)
 operates exactly as today — they hit `cfg.db_table_prefix`,
-unaware that `prefix_v` exists.
+unaware that `v` exists.
 
 ### 2.2 App2 (HTMX dashboards) — the cheap renderer
 
@@ -400,7 +400,7 @@ App2 reads `prefix` at request time from cfg or URL param. Survey:
    through to data fetchers. Defaults to `cfg.db_table_prefix`
    when the param is absent.
 3. Trainer's landing cards render the two Tour links per kind
-   with `?prefix=<L2>` (Clean — base) and `?prefix=<L2>_prefix_v`
+   with `?prefix=<L2>` (Clean — base) and `?prefix=<L2>_v`
    (Violation — overlay). Operator follows the link → fully-formed
    dashboard URL with prefix baked in → URL-as-truth (DL.13).
 
@@ -515,11 +515,11 @@ deployments per L2) is the disqualifying number.
 Must-update sites:
 
 - [ ] `Config.db_table_prefix` — unchanged. The /training/ page
-      derives `<base>_prefix_v` at runtime.
+      derives `<base>_v` at runtime.
 - [ ] `recon-gen studio` CLI — **no new flag.** /training/ page
       surfaces Session Start / Apply / Cleanup buttons.
-- [ ] New: prefix_v lifecycle orchestrator on the /training/
-      page (Session Start = schema-create-prefix_v + clone-from-base
+- [ ] New: v-overlay lifecycle orchestrator on the /training/
+      page (Session Start = schema-create-v + clone-from-base
       + matview refresh; Cleanup = drop).
 - [ ] New: `/training/setup` progress page (BTa.9 live-tail
       shape).
@@ -565,20 +565,20 @@ Out of scope (defer):
 ## 5. Open questions — RESOLVED 2026-05-31
 
 1. **Trainer entry surface.** RESOLVED — /training/ page Session
-   Start button creates the prefix_v schema + clones data from the
-   base prefix + refreshes prefix_v matviews. NO etl_hook
+   Start button creates the v overlay schema + clones data from the
+   base prefix + refreshes v-overlay matviews. NO etl_hook
    invocation (operator runs that via the existing /etl/run flow
-   if they need to). A Cleanup button drops prefix_v when done.
+   if they need to). A Cleanup button drops v overlay when done.
    Promoted to DL.10.
 2. **Per-kind subset / eager-vs-lazy.** RESOLVED — Session Start
-   produces a clean prefix_v (clone of base, zero plants enabled).
+   produces a clean v overlay (clone of base, zero plants enabled).
    Operator then picks plants from checkboxes; Select-all is their
    handy do-it-all. No CLI subset; UI checkbox set IS the subset
    mechanism. Promoted to DL.11.
 3. **Probe / Triage / Coverage state during trainer use.**
    RESOLVED — these always hit `cfg.db_table_prefix` (the base
    prefix). Top-nav routes too. The /training/ page is the ONLY
-   surface that touches `prefix_v`. No mode-aware code paths
+   surface that touches `v`. No mode-aware code paths
    anywhere else. DL.4 simplified.
 4. **Failure mode when plant populate fails.** RESOLVED — show
    "error planting" on the kind card, still provide the
@@ -595,7 +595,7 @@ Out of scope (defer):
    banner on the Trainer page when the L2 yaml has changed
    since Session Start. Promoted to DL.14.
 8. **CLI `--trainer-populate` split.** BACKLOGGED — no direct
-   value at the moment; the /training/ page owns prefix_v
+   value at the moment; the /training/ page owns v overlay
    lifecycle by design.
 
 ---
@@ -604,18 +604,18 @@ Out of scope (defer):
 
 - **DL.1** — The trainer surface is App2-only. QS remains
   single-prefix for v1.
-- **DL.2** — cfg.yaml shape unchanged. `<base>_prefix_v` is
+- **DL.2** — cfg.yaml shape unchanged. `<base>_v` is
   derived from `cfg.db_table_prefix` at runtime; never serialized
   to cfg.yaml.
 - **DL.3** — **TWO prefixes per L2**: `<L2>_*` (base — the existing
-  production prefix; the Clean dashboard reads here) + `<L2>_prefix_v_*`
+  production prefix; the Clean dashboard reads here) + `<L2>_v_*`
   (overlay carrying the composite of all enabled plants applied
   on top of a clone of base). Disk = ~2× baseline (1× new on top
   of the existing base) regardless of registry size.
 - **DL.3.a** — **Clone-from-base, never re-clone-without-asking.**
-  prefix_v is a frozen clone-snapshot of the base prefix at the
+  v overlay is a frozen clone-snapshot of the base prefix at the
   moment of Session Start (or operator-initiated Re-clone).
-  Apply mutates prefix_v IN PLACE — never re-clones from base,
+  Apply mutates v overlay IN PLACE — never re-clones from base,
   never re-calls etl_hook. The base prefix is the operator's
   responsibility to keep current via the existing /etl/run flow;
   the staleness banner (DL.14) flags base mutation since the
@@ -624,13 +624,13 @@ Out of scope (defer):
   The /training/ page never calls etl_hook directly. "Re-fetch
   baseline" on the /training/ page triggers the existing /etl/run
   flow (which writes to base prefix as today) then re-clones to
-  prefix_v + replays the enabled plant set. Two-step, separate
+  v overlay + replays the enabled plant set. Two-step, separate
   concerns. Customer ETL hooks need zero changes.
 - **DL.4** — **No mode-awareness anywhere except the /training/ page.**
   Probe / Triage / Coverage / ETL Run / top-nav / L2 Editor ALL
   hit `cfg.db_table_prefix` (the base) unconditionally — same as
   today. The /training/ page is the only surface that knows
-  prefix_v exists. Dashboards take `?prefix=` URL param so the
+  v overlay exists. Dashboards take `?prefix=` URL param so the
   Tour links can drive the operator's view to either prefix
   without server-side mode.
 - **DL.5** — L2 Editor + cfg.yaml + CLI commands unchanged. The
@@ -638,7 +638,7 @@ Out of scope (defer):
 - **DL.6** — **Tour: two distinct links, not a toggle.** Per kind
   + per family, render `[ Clean dashboard → ]` (points at
   the base prefix `<L2>`) AND `[ Violation dashboard → ]` (points
-  at `<L2>_prefix_v`). When the operator hasn't enabled a kind, the
+  at <L2>_v). When the operator hasn't enabled a kind, the
   Violation link still points at the violation-dashboard URL +
   the page renders an empty-state callout reinforcing "tick the
   checkbox + Apply to see it surface here." Self-reinforcing
@@ -659,33 +659,33 @@ Out of scope (defer):
   the session settles on a small enabled set.
 - **DL.9** — **Diff-only Apply (not clone-and-replay).** Apply
   computes the added/removed plant diff against the
-  currently-applied set (stored in `prefix_v_config_kv`) and emits
+  currently-applied set (stored in `v_config_kv`) and emits
   only the deltas. Added INSERT-style plants: run plant_function
   SQL. Removed INSERT-style plants: `DELETE WHERE id LIKE
   '__demo_<kind>%'` (the stable id-prefix namespace). Removed
   DELETE-style plants (uncovered_*, dead_*): re-INSERT from the
-  saved-rowsets payload in `prefix_v_config_kv` (per-plant
+  saved-rowsets payload in `v_config_kv` (per-plant
   `trainer_undo_payload`). Apply becomes O(delta) not O(baseline
   copy). Per-Apply UX goes from "go-make-coffee" to "watch a
   progress bar for a few seconds."
 - **DL.10** — **No "trainer mode" as a runtime concept.** No CLI
   flag, no mode-detection, no mode-aware code paths in Studio.
   The /training/ page surfaces four buttons:
-  - **Session Start** — creates `<L2>_prefix_v_*` schema; clones
-    data from base; refreshes prefix_v matviews. No etl_hook
+  - **Session Start** — creates `<L2>_v_*` schema; clones
+    data from base; refreshes v-overlay matviews. No etl_hook
     invocation.
-  - **Apply** — diff-only mutate prefix_v to match enabled-plant
+  - **Apply** — diff-only mutate v overlay to match enabled-plant
     checkbox state (DL.9).
-  - **Re-clone from base** — drops prefix_v's data, re-clones
+  - **Re-clone from base** — drops v overlay's data, re-clones
     from current base, replays enabled plants. For when the
-    operator suspects prefix_v drifted from base.
-  - **Cleanup** — drops `<L2>_prefix_v_*` schema entirely. Base
+    operator suspects v overlay drifted from base.
+  - **Cleanup** — drops `<L2>_v_*` schema entirely. Base
     prefix untouched.
   - **Re-fetch baseline** (optional) — wraps the existing /etl/run
     flow with a follow-on Re-clone. For when the operator wants
     fresh upstream data feeding the trainer comparison.
 - **DL.11** — **Initial state at Session Start: zero plants
-  enabled.** prefix_v is an exact clone of the base prefix —
+  enabled.** v overlay is an exact clone of the base prefix —
   Clean and Violation dashboards show identical data until the
   operator enables their first plant + Applies. Select-all chip
   is the do-it-all shortcut.
@@ -750,7 +750,7 @@ Out of scope (defer):
 | BV.4.x phase | Work | Estimate |
 |---|---|---|
 | BV.4.0 | Operator confirmation on §6 design locks | 15 min |
-| BV.4.1 | /training/ page Session Start (create `<L2>_prefix_v_*` schema; clone data from base; refresh prefix_v matviews); Cleanup button; Re-clone button; Re-fetch baseline button (chains to /etl/run) | 1-2 d |
+| BV.4.1 | /training/ page Session Start (create `<L2>_v_*` schema; clone data from base; refresh v-overlay matviews); Cleanup button; Re-clone button; Re-fetch baseline button (chains to /etl/run) | 1-2 d |
 | BV.4.2 | `/dashboards/*` accepts `?prefix=`; threading through; default to `cfg.db_table_prefix` when absent | 1 d |
 | BV.4.3 | `/training/setup` streaming progress page (BTa.9 live-tail shape) | 0.5 d |
 | BV.4.4 | Diff-only Apply (DL.9) + Tour two-link wiring (DL.6) + landing checkbox UX (DL.8) | 1-1.5 d |
