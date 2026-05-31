@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
@@ -257,20 +258,65 @@ async def cleanup(
     await asyncio.to_thread(_run)
 
 
+@dataclass(frozen=True)
+class ApplyDiff:
+    """DL.9 — what changed between currently-applied plant state and
+    the newly-requested checkbox/form selection.
+
+    `unchanged` is in both with identical form-value fingerprints
+    (no re-run needed). `to_add` is in the new selection but not
+    currently applied (or with a changed fingerprint — treat as
+    remove+add so the new fingerprint becomes truth without trying
+    to surgically update one plant). `to_remove` is in current but
+    not in the new selection (or with a changed fingerprint).
+
+    Empty `to_remove` is the fast-path signal — skip the clone, just
+    run new plants against existing v data. Non-empty `to_remove`
+    triggers the slow-path reclone+replay since INSERT-style plants
+    can be surgically `DELETE`'d but DELETE-style plants
+    (uncovered_*, dead_*) can't be trivially undone; full reclone
+    is the safe default.
+    """
+    unchanged: frozenset[str]
+    to_add: frozenset[str]
+    to_remove: frozenset[str]
+
+
+def compute_apply_diff(
+    current: Mapping[str, Mapping[str, str]],
+    new: Mapping[str, Mapping[str, str]],
+) -> ApplyDiff:
+    """Pure diff between two `{kind: form_values}` maps. Tested
+    directly without spinning up a DB."""
+    current_keys = set(current.keys())
+    new_keys = set(new.keys())
+    same_fingerprint = frozenset(
+        k for k in current_keys & new_keys if current[k] == new[k]
+    )
+    return ApplyDiff(
+        unchanged=same_fingerprint,
+        to_add=frozenset(new_keys - same_fingerprint),
+        to_remove=frozenset(current_keys - same_fingerprint),
+    )
+
+
 async def apply_plants(
     cfg: "Config", instance: "L2Instance",
     enabled_plants: Iterable[tuple["PlantKindEntry", Mapping[str, object]]],
     *,
     anchor: datetime | None = None,
 ) -> None:
-    """Naive Apply (vertical-slice shape, NOT DL.9 diff-only):
-    re-clone base → v then replay enabled plants in registry order.
+    """BV.4.9 (DL.9) — diff-only Apply. Reads the currently-applied
+    state from `<v>_config_kv` and decides between two paths:
 
-    DL.9 diff-only Apply lands in BV.4.4 — at that point this
-    function gets replaced with a state-diff against
-    `<v>_config_kv`'s `trainer_applied_plants` row. For the BV.4.0
-    vertical slice we do the safe clone-and-replay shape so we can
-    prove the rest of the architecture first.
+    - **Fast path** (no kinds being removed / no fingerprint changes):
+      keep the existing v overlay data, just run the newly-enabled
+      plants. Skips the clone — Apply latency drops from
+      ~clone+matview-refresh+N-plants to ~N-plants+matview-refresh.
+    - **Slow path** (something has to come out — either an unchecked
+      kind or a kind whose form values changed): reclone base → v
+      and replay every enabled plant. Safe default because DELETE-
+      style plants (uncovered_*, dead_*) can't be trivially undone.
 
     Each entry in ``enabled_plants`` is the registry entry + the
     operator's form values (the kwargs the plant_function expects).
@@ -282,30 +328,58 @@ async def apply_plants(
     anchor_dt = anchor or datetime(2026, 5, 30, 12, 0, 0)
     plants_list = list(enabled_plants)
 
-    # applied_snapshot / applied_json moved INSIDE _run so we
-    # serialize the SUCCEEDED set, not the requested set. The
-    # `succeeded` dict (populated per-plant below) is what gets
-    # persisted.
+    # Stringify the new selection's form values once so the diff
+    # compares apples-to-apples with the persisted state (which is
+    # stringified at write time).
+    new_selection: dict[str, dict[str, str]] = {
+        entry.kind: {k: str(v) for k, v in kwargs.items()}
+        for entry, kwargs in plants_list
+    }
+    plants_by_kind: dict[str, tuple["PlantKindEntry", Mapping[str, object]]] = {
+        entry.kind: (entry, kwargs) for entry, kwargs in plants_list
+    }
 
-    # Track per-plant failures so the UI can render error badges
-    # (DL.12). The plant SQL emission is the most likely failure point
-    # (picker can't satisfy the L2 → ValueError from the adapter).
-    failures: dict[str, str] = {}
-    succeeded: dict[str, dict[str, str]] = {}
+    current_applied = await read_applied_state(cfg)
+    diff = compute_apply_diff(current_applied, new_selection)
+    needs_reclone = bool(diff.to_remove)
 
     def _run() -> None:
         conn = connect_demo_db(cfg)
         try:
             cur = conn.cursor()
             try:
-                # Re-clone base → v (naive shape — DL.9 lands incremental).
-                clone_sql = clone_base_to_v_sql(base_prefix)
-                execute_script(cur, clone_sql, dialect=cfg.dialect)
+                # Failure dict starts fresh — last-Apply is the truth.
+                # A previously-failed kind that the operator unchecked
+                # this round shouldn't carry a stale error badge.
+                failures: dict[str, str] = {}
+                succeeded: dict[str, dict[str, str]] = {}
 
-                # Emit each enabled plant's SQL against the v prefix —
-                # per-plant try/except so one failure doesn't drop the
-                # whole batch.
-                for entry, kwargs in plants_list:
+                if needs_reclone:
+                    # Slow path: drop+clone wipes the v overlay; every
+                    # enabled plant has to be re-run against fresh
+                    # data (including kinds whose fingerprint didn't
+                    # change — the cloned baseline no longer carries
+                    # their planted rows).
+                    clone_sql = clone_base_to_v_sql(base_prefix)
+                    execute_script(cur, clone_sql, dialect=cfg.dialect)
+                    kinds_to_run: list[
+                        tuple["PlantKindEntry", Mapping[str, object]]
+                    ] = plants_list
+                else:
+                    # Fast path: existing v overlay data stays; only
+                    # the newly-added kinds get their plant_function
+                    # invoked. Carry forward the already-succeeded
+                    # state for unchanged kinds so the persisted
+                    # ledger reflects the full enabled set.
+                    succeeded = {
+                        k: dict(current_applied[k]) for k in diff.unchanged
+                    }
+                    kinds_to_run = [
+                        plants_by_kind[k] for k in diff.to_add
+                        if k in plants_by_kind
+                    ]
+
+                for entry, kwargs in kinds_to_run:
                     try:
                         plant_sql = entry.plant_function(
                             prefix=v_prefix,
@@ -315,7 +389,9 @@ async def apply_plants(
                             **kwargs,
                         )
                         if plant_sql:
-                            execute_script(cur, plant_sql, dialect=cfg.dialect)
+                            execute_script(
+                                cur, plant_sql, dialect=cfg.dialect,
+                            )
                         succeeded[entry.kind] = {
                             k: str(v) for k, v in kwargs.items()
                         }
@@ -325,17 +401,14 @@ async def apply_plants(
                         )
 
                 # Refresh v matviews so the dashboards see the
-                # composite of (cloned baseline + succeeded plants).
+                # composite of (existing v data + succeeded plants).
+                # Always runs — even the fast path mutated v's base
+                # tables, so matviews must be re-derived.
                 refresh_sql = refresh_v_overlay_matviews_sql(
                     instance, base_prefix=base_prefix, dialect=cfg.dialect,
                 )
                 execute_script(cur, refresh_sql, dialect=cfg.dialect)
 
-                # Persist applied state — only includes kinds that
-                # actually emitted SQL successfully. Failed kinds
-                # surface in the parallel failed-state row so the UI
-                # can render error badges WITHOUT pretending the
-                # plant landed.
                 state_sql = applied_state_write_sql(
                     base_prefix,
                     json.dumps(succeeded, separators=(",", ":")),

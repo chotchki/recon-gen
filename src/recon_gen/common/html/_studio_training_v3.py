@@ -223,23 +223,38 @@ def render_training_v3_landing(
 
 
 def _render_session_controls(v_overlay_exists: bool) -> str:
-    """Top-of-page Session Start / Cleanup buttons (DL.10).
+    """Top-of-page Session Start / Force rebuild / Cleanup buttons (DL.10).
 
     Pre-overlay: Session Start only.
     Post-overlay: Session Start (full lifecycle — re-runs /etl/run)
-      + Cleanup.
+      + Force rebuild (drop v overlay + reclone from base, wipes
+      Apply state) + Cleanup.
 
-    BV.4.8 followup — Re-clone dropped pre-DL.9: it's functionally
-    Apply-with-zero-checkboxes (Apply already does drop+clone+replay)
-    AND wipes the operator's checkbox curation, which surprises.
-    With DL.9 (incremental Apply) Re-clone returns as the "force a
-    full rebuild" escape hatch with a distinct job.
+    BV.4.9 — Force rebuild is meaningful post-DL.9: Apply is now
+    incremental (fast-path for additive changes), so the operator
+    has no button to forcibly re-derive v from base. This is the
+    "throw away whatever's in v including planted state" escape
+    hatch — distinct from Apply's diff-driven behavior.
     """
     session_start_title = (
         "Full lifecycle: runs the /etl/run flow (so base prefix is "
         "current) + drops + creates the v overlay schema + clones "
         "base data + refreshes v matviews. On Oracle this takes ~10 "
         "min for the /etl/run leg; PG ~30s; sqlite ~30s."
+    )
+    rebuild_btn = (
+        '<form method="post" action="/training/reclone" class="inline-block">'
+        '<button type="submit" id="training-reclone-btn" '
+        'class="px-3 py-1.5 bg-white text-accent rounded-sm border border-accent text-xs font-semibold hover:bg-accent/10" '
+        'title="Drops + reclones the v overlay from current base + '
+        'wipes Apply state. Skips /etl/run (base stays as-is). For '
+        'when you want to throw out whatever is in v overlay and '
+        'start fresh from base — DL.9 Apply is incremental and '
+        'won\'t do that on its own.">'
+        "↻ Force rebuild from base"
+        "</button>"
+        "</form>"
+        if v_overlay_exists else ""
     )
     cleanup_btn = (
         '<form method="post" action="/training/cleanup" class="inline-block">'
@@ -264,6 +279,7 @@ def _render_session_controls(v_overlay_exists: bool) -> str:
           {session_start_label}
         </button>
       </form>
+      {rebuild_btn}
       {cleanup_btn}
     </div>
     """

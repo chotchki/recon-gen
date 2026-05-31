@@ -4429,6 +4429,28 @@ def make_studio_routes(
             status_code=303,
         )
 
+    async def training_reclone(_request: Request) -> RedirectResponse:
+        """POST /training/reclone — BV.4.9 Force rebuild from base.
+
+        Drops + recreates the v overlay from current base + wipes the
+        Apply state ledger. Distinct from Apply, which post-DL.9 is
+        incremental: Force rebuild is the "throw out v overlay
+        entirely" escape hatch the operator reaches for when they
+        want fresh ground regardless of the ledger's view of
+        already-applied plants. Skips /etl/run; base stays as-is."""
+        if cfg is None:
+            return RedirectResponse(url="/training/", status_code=303)
+        from recon_gen.common.l2.v_overlay import session_start  # noqa: PLC0415
+
+        await session_start(
+            cfg, cache.get(),
+            refresh_base=False, l2_yaml_path=cache.path,
+        )
+        return RedirectResponse(
+            url="/training/?status=v+overlay+rebuilt+from+base+%E2%80%94+Apply+state+wiped.",
+            status_code=303,
+        )
+
     async def training_cleanup(_request: Request) -> RedirectResponse:
         """POST /training/cleanup — drops the v overlay. Base prefix
         untouched."""
@@ -4577,6 +4599,9 @@ def make_studio_routes(
         Route(
             "/training/session-start", training_session_start,
             methods=["POST"],
+        ),
+        Route(
+            "/training/reclone", training_reclone, methods=["POST"],
         ),
         Route(
             "/training/cleanup", training_cleanup, methods=["POST"],

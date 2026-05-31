@@ -152,6 +152,18 @@ def test_post_session_start_303s_when_cfg_missing(
     assert resp.headers["location"] == "/training/"
 
 
+def test_post_reclone_303s_when_cfg_missing(
+    writable_l2_yaml: Path,
+) -> None:
+    """BV.4.9 — Force rebuild from base route. Returns post-DL.9
+    as the operator's "throw away v overlay" escape hatch."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:
+        resp = c.post("/training/reclone", follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/training/"
+
+
 def test_post_cleanup_303s_when_cfg_missing(
     writable_l2_yaml: Path,
 ) -> None:
