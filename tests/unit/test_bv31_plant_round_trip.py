@@ -80,8 +80,19 @@ def _default_kwargs(entry: PlantKindEntry) -> dict[str, Any]:
 
 
 def _build_seeded_sqlite(l2_path: Path) -> sqlite3.Connection:
-    """Per-entry fresh sqlite: schema + baseline + initial matview
-    refresh. Returns the connection ready for plant SQL."""
+    """Per-entry fresh sqlite: schema + config_kv populate + baseline
+    + initial matview refresh. Returns the connection ready for plant SQL.
+
+    BV.3.2 fix — the config_kv populate (`build_config_populate_sql`)
+    step was missing; without it, `<prefix>_v_config_limit_schedules`
+    and `<prefix>_v_config_*` views are empty, so the L1 matviews'
+    LEFT JOINs against them yield NULL caps + the `cap IS NOT NULL`
+    filter drops every row. Plants then have nothing to push above
+    the cap → matview stays 0. The CLI's data-apply path runs this
+    step; tests must too."""
+    from recon_gen.cli._helpers import build_config_populate_sql
+    from recon_gen.common.config import Config
+
     inst = load_instance(l2_path)
     conn = sqlite3.connect(":memory:")
     conn.execute("PRAGMA foreign_keys = ON;")
@@ -89,6 +100,20 @@ def _build_seeded_sqlite(l2_path: Path) -> sqlite3.Connection:
     cur = conn.cursor()
     schema_sql = emit_schema(inst, prefix=_PREFIX, dialect=Dialect.SQLITE)
     execute_script(cur, schema_sql, dialect=Dialect.SQLITE)
+    # Populate config_kv so the L1 matview LEFT JOINs against
+    # `<prefix>_v_config_limit_schedules` / `_pending_ages` etc. find
+    # rows. Stub Config — `build_config_populate_sql` only reads
+    # `db_table_prefix` + `dialect` off it.
+    cfg = Config(
+        aws_account_id="123456789012",
+        aws_region="us-east-1",
+        deployment_name="recon-bv31",
+        db_table_prefix=_PREFIX,
+        datasource_arn="arn:aws:quicksight:us-east-1:123456789012:datasource/test",
+        dialect=Dialect.SQLITE,
+    )
+    config_sql = build_config_populate_sql(cfg, inst, anchor=date(2026, 5, 30))
+    execute_script(cur, config_sql, dialect=Dialect.SQLITE)
     seed_sql = emit_baseline_seed(
         inst,
         prefix=_PREFIX,
