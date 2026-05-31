@@ -4420,34 +4420,50 @@ def make_studio_routes(
         DL.9 diff-only Apply."""
         if cfg is None:
             return RedirectResponse(url="/training/", status_code=303)
-        from recon_gen.common.l2.plant_registry import get_entry  # noqa: PLC0415
+        from recon_gen.common.l2.plant_registry import (  # noqa: PLC0415
+            PLANT_REGISTRY,
+            get_entry,
+        )
         from recon_gen.common.l2.v_overlay import apply_plants  # noqa: PLC0415
 
         form = await request.form()
         enabled = {str(v) for v in form.getlist("enabled_kinds")}
+        # BV.4.4 — form fields are named `form_<kind>_<primitive>` so
+        # the same primitive name (e.g. `count`) can appear on many
+        # cards without collision. Parse by longest-prefix-match
+        # against registry kinds.
+        registry_kinds = {entry.kind for entry in PLANT_REGISTRY}
         form_kwargs_by_kind: dict[str, dict[str, object]] = {}
         for key, value in form.items():
             key_str = str(key)
             if not key_str.startswith("form_"):
                 continue
-            field_name = key_str[len("form_"):]
-            # Vertical slice: assume single kind. Apply form values
-            # to every enabled kind that declares this field.
-            for kind in enabled:
-                entry = get_entry(kind)
-                if entry is None:
+            rest = key_str[len("form_"):]
+            # Match the longest prefix that's a registry kind.
+            matched_kind: str | None = None
+            for k in registry_kinds:
+                prefix = f"{k}_"
+                if rest.startswith(prefix) and (
+                    matched_kind is None or len(k) > len(matched_kind)
+                ):
+                    matched_kind = k
+            if matched_kind is None:
+                continue
+            field_name = rest[len(matched_kind) + 1:]
+            entry = get_entry(matched_kind)
+            if entry is None:
+                continue
+            for primitive in entry.primitives:
+                if primitive.name != field_name:
                     continue
-                for primitive in entry.primitives:
-                    if primitive.name != field_name:
-                        continue
-                    bucket = form_kwargs_by_kind.setdefault(kind, {})
-                    if isinstance(primitive.default, int):
-                        try:
-                            bucket[field_name] = int(str(value))
-                        except ValueError:
-                            bucket[field_name] = primitive.default
-                    else:
-                        bucket[field_name] = str(value)
+                bucket = form_kwargs_by_kind.setdefault(matched_kind, {})
+                if isinstance(primitive.default, int):
+                    try:
+                        bucket[field_name] = int(str(value))
+                    except ValueError:
+                        bucket[field_name] = primitive.default
+                else:
+                    bucket[field_name] = str(value)
 
         enabled_pairs: list[tuple[object, Mapping[str, object]]] = []
         for kind in sorted(enabled):
