@@ -446,3 +446,50 @@ def test_metadata_coverage_zero_rows_branch_reports_empty_per_key(
     assert nt.row_count == 0
     assert set(nt.per_key.keys()) == {"other_key"}
     assert nt.per_key["other_key"] == 0
+
+
+# -- BTa.8 regression — SQLite str timestamps must coerce to datetime ------
+
+
+def test_coerce_posting_accepts_str_for_sqlite() -> None:
+    """SQLite returns TIMESTAMP columns as str (no native TIMESTAMP);
+    `_coerce_posting` parses the ISO-8601 string into a `datetime`
+    so the dataclass invariant `posting: datetime` holds for every
+    driver. Cold-read v3 hit a 500 on /etl/probe when SQLite str
+    posting leaked into the renderer's `.isoformat()` call."""
+    from datetime import datetime
+    from recon_gen.common.l2.probe import _coerce_posting
+
+    coerced = _coerce_posting("2026-05-30 14:00:00")
+    assert isinstance(coerced, datetime)
+    assert coerced == datetime(2026, 5, 30, 14, 0, 0)
+
+
+def test_coerce_posting_accepts_iso_T_separator() -> None:
+    """PG often serializes timestamps with `T` separator; both space
+    and `T` parse cleanly via fromisoformat (Python 3.11+)."""
+    from datetime import datetime
+    from recon_gen.common.l2.probe import _coerce_posting
+
+    assert _coerce_posting("2026-05-30T14:00:00") == datetime(2026, 5, 30, 14, 0, 0)
+
+
+def test_coerce_posting_passes_through_datetime() -> None:
+    """PG / Oracle drivers return datetime natively — no coercion."""
+    from datetime import datetime
+    from recon_gen.common.l2.probe import _coerce_posting
+
+    dt = datetime(2026, 5, 30, 14, 0, 0)
+    assert _coerce_posting(dt) is dt
+
+
+def test_coerce_posting_raises_on_unsupported_type() -> None:
+    """Defensive — fail loud on int / None / bytes rather than
+    silently coerce."""
+    import pytest
+    from recon_gen.common.l2.probe import _coerce_posting
+
+    with pytest.raises(TypeError):
+        _coerce_posting(42)
+    with pytest.raises(TypeError):
+        _coerce_posting(None)

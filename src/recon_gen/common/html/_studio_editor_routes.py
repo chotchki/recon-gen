@@ -2211,12 +2211,22 @@ _RAIL_SUBTYPE_PICKER_INTRO: str = (
 
 def _render_rail_subtype_picker(
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed to thread the L2 theme override into the page <head>
+    *,
+    from_param: str | None = None,
+    prefill_name: str = "",
 ) -> str:
     """The Rail-only subtype picker landing page.
 
     Step 1 of the 2-step create flow. Two big buttons, each linking to
     ``/l2_shape/rail/new?subtype=<two_leg|single_leg>`` so the picked
     subtype shows up as a query param on step 2 (back button works).
+
+    BTb.1 — when arriving with ``?from=/etl/triage`` (Triage-CTA flow),
+    render the back-breadcrumb above the picker AND propagate ``?from=``
+    on each subtype link so the eventual step-2 create page keeps the
+    carryover. Without this propagation the breadcrumb is dropped on
+    step 1 (cold-read v3 finding: picker page shows generic "back to
+    Studio" but not "Back to Triage").
     """
     # AM.1 step 7 — rail-subtype-picker migrated. .rail-subtype-picker
     # + .rail-subtype-button drop in favor of a flex column with
@@ -2228,6 +2238,15 @@ def _render_rail_subtype_picker(
         "hover:border-accent hover:bg-link-tint "
         "focus:outline-2 focus:outline-accent focus:-outline-offset-1"
     )
+    # Build the subtype links — append `?from=` when in a back-breadcrumb
+    # flow so step 2 inherits the carryover.
+    from_qs = ""
+    if from_param is not None and _safe_back_target(from_param) is not None:
+        from urllib.parse import quote  # noqa: PLC0415
+        from_qs = f"&from={quote(from_param, safe='/')}"
+    if prefill_name:
+        from urllib.parse import quote  # noqa: PLC0415
+        from_qs += f"&prefill_name={quote(prefill_name, safe='')}"
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -2241,15 +2260,16 @@ def _render_rail_subtype_picker(
     <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
     <a class="text-accent no-underline text-sm hover:underline" href="/l2_shape/rail/">→ list all rails</a>
   </header>
+  {_back_breadcrumb_html(from_param)}
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
     {_render_intro_details(_RAIL_SUBTYPE_PICKER_INTRO)}
     <section class="bg-white border border-surface-border rounded-md p-5">
       <div class="flex flex-col gap-3">
-        <a class="{picker_btn_cls}" href="/l2_shape/rail/new?subtype=two_leg">
+        <a class="{picker_btn_cls}" href="/l2_shape/rail/new?subtype=two_leg{from_qs}">
           <strong class="block text-base text-accent mb-1">Two-leg rail →</strong>
           <small class="block text-sm text-secondary-fg">Debit + credit per firing (ACH, wire, internal, settlement)</small>
         </a>
-        <a class="{picker_btn_cls}" href="/l2_shape/rail/new?subtype=single_leg">
+        <a class="{picker_btn_cls}" href="/l2_shape/rail/new?subtype=single_leg{from_qs}">
           <strong class="block text-base text-accent mb-1">Single-leg rail →</strong>
           <small class="block text-sm text-secondary-fg">One leg per firing (fee, charge, sub-template leg)</small>
         </a>
@@ -3985,6 +4005,13 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
         if kind is None or kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse("not editable", status_code=404)
         from_param = request.query_params.get("from")
+        # BTb.2 — prefill the `name` field when Triage CTA carries
+        # `?prefill_name=<observed_value>`. Eliminates the retype-the-
+        # phantom-rail-name friction the cold-read v3 flagged.
+        prefill_name = request.query_params.get("prefill_name") or ""
+        form_overrides: Mapping[str, str | tuple[str, ...]] = (
+            {"name": prefill_name} if prefill_name else {}
+        )
         # X.4.f.11.5 — Rail is a discriminated union; the create flow
         # is 2-step. Step 1 (no ?subtype=) is the picker page; step 2
         # (?subtype=two_leg|single_leg) renders the create form
@@ -3998,7 +4025,13 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
             elif raw_subtype == "single_leg":
                 subtype = "single_leg"
             elif raw_subtype is None:
-                return HTMLResponse(_render_rail_subtype_picker(cache.get()))
+                return HTMLResponse(
+                    _render_rail_subtype_picker(
+                        cache.get(),
+                        from_param=from_param,
+                        prefill_name=prefill_name,
+                    ),
+                )
             else:
                 return HTMLResponse(
                     f"unknown rail subtype: {escape(raw_subtype)}",
@@ -4006,11 +4039,17 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
                 )
             return HTMLResponse(
                 _render_create_page(
-                    kind, cache.get(), subtype=subtype, from_param=from_param,
+                    kind, cache.get(), subtype=subtype,
+                    from_param=from_param,
+                    form_overrides=form_overrides or None,
                 ),
             )
         return HTMLResponse(
-            _render_create_page(kind, cache.get(), from_param=from_param),
+            _render_create_page(
+                kind, cache.get(),
+                from_param=from_param,
+                form_overrides=form_overrides or None,
+            ),
         )
 
     async def create(request: Request) -> Response:

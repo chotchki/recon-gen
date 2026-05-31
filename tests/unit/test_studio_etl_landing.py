@@ -249,3 +249,25 @@ def test_etl_landing_tutorial_banner_hidden_initially_for_js_reveal(
     # alongside the banner ID.
     banner_chunk = body.split('id="etl-tutorial-banner"', 1)[1][:300]
     assert "display:none" in banner_chunk
+
+
+# -- BTa.8 cold-read v3 — htmx loaded on every ETL sub-page ----------------
+
+
+@pytest.mark.parametrize("path", ["/etl/", "/etl/run", "/etl/triage", "/etl/probe"])
+def test_etl_sub_pages_load_htmx_for_side_panel_drawer(
+    writable_l2_yaml: Path, path: str,
+) -> None:
+    """The top-nav `[?]` button + side-panel drawer use `hx-get` to
+    swap the glossary fragment into `#side-panel-body`. Every page
+    that renders the top-nav MUST load htmx — otherwise the drawer
+    opens but stays on `Loading…`. Pre-BTa.8 the ETL sub-pages
+    rendered the [?] button but never loaded htmx, so clicking it
+    on /etl/triage left the drawer hung."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        body = c.get(path).text
+    assert "htmx.org@1.9.10" in body, (
+        f"{path} renders the [?] button but doesn't load htmx — "
+        f"the side-panel drawer will hang on Loading…"
+    )

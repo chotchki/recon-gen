@@ -274,7 +274,13 @@ def _select_columns(dialect: Dialect) -> tuple[str, ...]:
 
 
 def _row_from_tuple(row: tuple[Any, ...]) -> ProbeRow:  # typing-smell: ignore[explicit-any]: row tuples are driver-returned heterogeneous Any
-    """Coerce a raw cursor tuple to a ``ProbeRow``."""
+    """Coerce a raw cursor tuple to a ``ProbeRow``.
+
+    SQLite returns TIMESTAMP columns as ``str`` (no native TIMESTAMP
+    type per CLAUDE.md / Schema_v6); PG + Oracle return ``datetime``
+    objects natively. Normalize at this boundary so the dataclass's
+    ``posting: datetime`` invariant holds for every driver.
+    """
     return ProbeRow(
         transaction_id=str(row[0]),
         rail_name=None if row[1] is None else str(row[1]),
@@ -282,8 +288,28 @@ def _row_from_tuple(row: tuple[Any, ...]) -> ProbeRow:  # typing-smell: ignore[e
         account_role=None if row[3] is None else str(row[3]),
         amount_direction=str(row[4]),
         transfer_parent_id=None if row[5] is None else str(row[5]),
-        posting=cast(datetime, row[6]),
+        posting=_coerce_posting(row[6]),
         metadata=None if row[7] is None else str(row[7]),
+    )
+
+
+def _coerce_posting(value: object) -> datetime:
+    """Driver-uniform ``posting`` → ``datetime``.
+
+    SQLite stores TIMESTAMP as TEXT + returns ``str``; PG / Oracle
+    return ``datetime`` directly. Accept both, fall through to a
+    permissive ISO-8601 parse for the ``str`` case (handles both
+    ``T`` and space separators).
+    """
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        # SQLite emits "YYYY-MM-DD HH:MM:SS[.ffffff]"; ``fromisoformat``
+        # in Python 3.11+ accepts both space and ``T`` separators.
+        return datetime.fromisoformat(value)
+    raise TypeError(
+        f"posting column expected datetime or str, got "
+        f"{type(value).__name__}: {value!r}"
     )
 
 

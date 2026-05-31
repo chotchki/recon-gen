@@ -68,7 +68,7 @@ def test_etl_run_get_returns_200_with_run_button(
         resp = c.get("/etl/run")
         assert resp.status_code == 200
         body = resp.text
-    assert "<title>Studio · ETL · Run" in body
+    assert "<title>Studio · ETL · Refresh Data" in body
     assert 'id="etl-run-btn"' in body
     # Form posts back to /etl/run.
     assert '<form method="post" action="/etl/run">' in body
@@ -360,3 +360,269 @@ def test_metadata_coverage_denominator_matches_visible_list(
     assert str(templates[0].name) in html
     assert str(templates[1].name) in html
 
+
+
+# -- BTa.8 cold-read v3 — empty-state when no run this session -----------
+
+
+def test_coverage_renders_empty_state_when_no_run_this_session_even_with_rows(
+    writable_l2_yaml: Path,
+) -> None:
+    """Cold-read v3 finding: pre-existing rows in the demo DB
+    (from prior sessions / CLI `data apply` / planted overlays)
+    must NOT render as green ✓ in Coverage when no Refresh Data
+    has run this Studio session. Before this fix, operators saw
+    100% green Coverage despite having never clicked Refresh
+    Data — a trust killer. Now the empty-state copy renders
+    regardless of `total_rows`."""
+    import asyncio  # noqa: PLC0415
+    import os  # noqa: PLC0415
+    import sqlite3  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
+
+    from recon_gen.common.db import make_connection_pool  # noqa: PLC0415
+    from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
+        _render_etl_coverage_section,
+    )
+    from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
+
+    cache = L2InstanceCache.from_path(writable_l2_yaml)
+    prefix = writable_l2_yaml.stem
+    fd, db_path = tempfile.mkstemp(suffix=".sqlite")
+    os.close(fd)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        f"CREATE TABLE {prefix}_transactions ("
+        "id TEXT PRIMARY KEY, rail_name TEXT, template_name TEXT, "
+        "account_role TEXT, account_parent_role TEXT, "
+        "amount_direction TEXT NOT NULL, transfer_parent_id TEXT, "
+        "posting TIMESTAMP NOT NULL, metadata TEXT)"
+    )
+    conn.execute(
+        f"INSERT INTO {prefix}_transactions VALUES "
+        "('tx-1', 'some_rail', NULL, 'X', NULL, 'Credit', NULL, "
+        "'2030-01-05 09:00:00', NULL)"
+    )
+    conn.commit()
+    conn.close()
+    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=db_path)
+    pool = asyncio.run(make_connection_pool(cfg))
+    try:
+        body = asyncio.run(_render_etl_coverage_section(
+            db_pool=pool, dialect=Dialect.SQLITE,
+            prefix=prefix, instance=cache.get(),
+            last_summary=None,
+        ))
+    finally:
+        asyncio.run(pool.close())
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+    # Empty-state takes over — no per-card list, no ✓ marks.
+    assert 'id="etl-coverage-empty"' in body
+    assert "No Refresh Data run this session" in body
+    # Coverage cards themselves don't render.
+    assert 'data-test-card=' not in body
+
+
+# -- BTa.8 cold-read v3 — Refresh-Data context strip ----------------------
+
+
+def test_refresh_context_strip_renders_deployment_dialect_hook() -> None:
+    """BTa.8 cold-read v3 — the "What clicking Refresh Data will do"
+    strip surfaces deployment_name + dialect + etl_hook so the
+    operator knows what they're about to wipe + repopulate. Cold-read
+    finding: the button gave zero hint about its target."""
+    from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
+        _render_refresh_context_strip,
+    )
+    html = _render_refresh_context_strip(
+        deployment_name="prod-acme",
+        dialect_label="postgres",
+        etl_hook_command="./bin/load_acme.py",
+        demo_gaps_planted=False,
+    )
+    assert "data-test-refresh-context" in html
+    assert "prod-acme" in html
+    assert "postgres" in html
+    assert "./bin/load_acme.py" in html
+    assert "What clicking" in html
+
+
+def test_refresh_context_strip_flags_bundled_demo_when_no_hook() -> None:
+    """When etl_hook is None, the strip says (none configured —
+    bundled demo regeneration will run) + flags the demo-gap overlay
+    when planting is on. Operator's question 'why am I getting fake
+    bad data?' has an in-page answer."""
+    from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
+        _render_refresh_context_strip,
+    )
+    html = _render_refresh_context_strip(
+        deployment_name="qsgen-sqlite",
+        dialect_label="sqlite",
+        etl_hook_command=None,
+        demo_gaps_planted=True,
+    )
+    assert "bundled demo regeneration" in html
+    assert "demo gap overlay" in html
+
+
+def test_refresh_context_strip_empty_when_no_inputs() -> None:
+    """Unit-test surface (no cfg) gets an empty strip — no orphan
+    chrome rendered."""
+    from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
+        _render_refresh_context_strip,
+    )
+    assert _render_refresh_context_strip(
+        deployment_name=None, dialect_label=None,
+        etl_hook_command=None, demo_gaps_planted=False,
+    ) == ""
+
+
+def test_etl_run_page_drops_redundant_page_header(
+    writable_l2_yaml: Path,
+) -> None:
+    """BTa.8 cold-read v3 — the redundant
+    `<header><h1>Studio · ETL · Refresh Data</h1> qsgen-sqlite</header>`
+    strip is gone (the sub-nav already conveys the active page +
+    the new context strip carries the deployment chip)."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        body = c.get("/etl/run").text
+    # The `<h1>Studio · ETL · Refresh Data</h1>` row is gone.
+    assert "<h1>Studio · ETL · Refresh Data</h1>" not in body
+    # But the page title in <head> stays — that's the browser tab.
+    assert "<title>Studio · ETL · Refresh Data" in body
+
+
+# -- BTa.9 — live tail + cancel ------------------------------------------
+
+
+def test_render_live_tail_mount_carries_htmx_poll_attrs() -> None:
+    """BTa.9 — the mount-point sets up the htmx poll loop. Without
+    `load` + `every 1s` triggers + the `/etl/run/stream` initial
+    URL, the operator stares at "Waiting for events…" indefinitely."""
+    from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
+        _render_etl_live_tail_mount,
+    )
+    html = _render_etl_live_tail_mount()
+    assert 'hx-get="/etl/run/stream"' in html
+    assert 'hx-trigger="load, every 1s"' in html
+    assert 'id="etl-run-live-tail"' in html
+    # When the stream returns HX-Trigger: etl-run-finished, the
+    # inline script navigates to /etl/run?just_ran=1.
+    assert "etl-run-finished" in html
+    assert "/etl/run?just_ran=1" in html
+
+
+def test_render_live_tail_fragment_renders_all_accumulated_events() -> None:
+    """BTa.9 (cold-read iter) — the stream endpoint returns the FULL
+    accumulated event list each poll, not just the delta. Each
+    `outerHTML` swap re-renders the whole tail so history
+    accumulates visually instead of getting clobbered."""
+    from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
+        _render_etl_live_tail_fragment,
+    )
+    html = _render_etl_live_tail_fragment(
+        all_events=[
+            {"event": "deploy:step1:start", "ts_unix": 1000.0, "cmd": "ls"},
+            {"event": "deploy:step1:done", "ts_unix": 1000.1, "exit_code": 0},
+        ],
+        running=True,
+    )
+    assert 'data-test-live-tail-count="2"' in html
+    assert 'data-test-live-tail-state="running"' in html
+    # Next poll re-fetches the FULL list (no `?since=` param).
+    assert 'hx-get="/etl/run/stream"' in html
+    assert "?since=" not in html
+    # Event lines render with their inferred levels.
+    assert 'data-test-live-event-level="info"' in html
+    assert "deploy:step1:start" in html
+    assert "deploy:step1:done" in html
+
+
+def test_render_live_tail_fragment_finished_state_stops_polling() -> None:
+    """When the task is done, the fragment omits the polling htmx
+    attrs + marks state=finished. The server emits HX-Trigger:
+    etl-run-finished alongside the response so the page reloads."""
+    from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
+        _render_etl_live_tail_fragment,
+    )
+    html = _render_etl_live_tail_fragment(
+        all_events=[{"event": "deploy:halt", "reason": "x", "ts_unix": 1.0}],
+        running=False,
+    )
+    assert 'data-test-live-tail-state="finished"' in html
+    # No polling trigger when finished.
+    assert "every 1s" not in html
+    # The halt event renders as error level.
+    assert 'data-test-live-event-level="error"' in html
+
+
+def test_render_live_tail_fragment_empty_initial_state() -> None:
+    """No events yet (task just started) — show the 'Waiting for
+    events…' placeholder, not an empty div."""
+    from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
+        _render_etl_live_tail_fragment,
+    )
+    html = _render_etl_live_tail_fragment(
+        all_events=[], running=True,
+    )
+    assert "Waiting for events" in html
+
+
+def test_etl_run_page_renders_cancel_button_when_is_running(
+    writable_l2_yaml: Path,
+) -> None:
+    """When `is_running` is True the form swaps Refresh Data for a
+    Cancel button + a "Pipeline running" indicator."""
+    import asyncio  # noqa: PLC0415
+
+    from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
+        _render_etl_run_page,
+    )
+
+    cache = L2InstanceCache.from_path(writable_l2_yaml)
+    html = asyncio.run(_render_etl_run_page(
+        cache, dev_log=False,
+        last_summary=None, last_run_at=None,
+        db_pool=None, dialect=None,
+        prefix_override=None, cfg=make_test_config(),
+        demo_mode=False, top_nav_html="",
+        is_running=True,
+    ))
+    assert 'id="etl-run-cancel-btn"' in html
+    assert "✕ Cancel run" in html
+    assert "data-test-running-indicator" in html
+    # The static Refresh Data button is hidden while running.
+    assert 'id="etl-run-btn"' not in html
+    # The live-tail mount lands so events stream into it.
+    assert 'id="etl-run-live-tail-wrap"' in html
+
+
+def test_etl_run_stream_endpoint_returns_fragment(
+    writable_l2_yaml: Path,
+) -> None:
+    """`GET /etl/run/stream` returns the live-tail fragment. With no
+    events stored (no task launched), since=0 + state=finished."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        resp = c.get("/etl/run/stream")
+        assert resp.status_code == 200
+        body = resp.text
+        # No active task ⇒ state=finished ⇒ HX-Trigger header fires
+        # so any client polling sees the run as done.
+        assert resp.headers.get("HX-Trigger") == "etl-run-finished"
+    assert 'data-test-live-tail-state="finished"' in body
+
+
+def test_etl_run_cancel_endpoint_303s_to_run_page(
+    writable_l2_yaml: Path,
+) -> None:
+    """`POST /etl/run/cancel` is a no-op when no task is in flight,
+    but still 303s back to /etl/run so the operator-facing form's
+    submit is well-behaved."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        resp = c.post("/etl/run/cancel", follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/etl/run"

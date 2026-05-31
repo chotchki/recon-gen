@@ -490,23 +490,34 @@ def emit_top_nav(
     """
     if not entries:
         return ""
-    # `<hr>` between every entry per BS.0 Lock 2; render as a thin
-    # vertical separator via the `divide-x` Tailwind utility on the
-    # parent `<nav>` so we don't emit explicit <hr> markup for every
-    # gap. Same visual effect; one less DOM node per separator;
-    # accessible (no decorative <hr> noise).
+    # BTa.7 (cold-read v3) — dropped `divide-x` on the nav root + now
+    # control dividers per-entry: thin (between same-group entries),
+    # heavy (between different groups, plus group label chip). Cold-read
+    # v3 finding: the prior uniform `divide-x` made grouping invisible.
     nav_class = (
-        "flex items-center bg-surface border-b border-surface-border "
-        "divide-x divide-surface-border text-sm"
+        "flex items-center bg-surface border-b border-surface-border text-sm"
     )
     title_class = (
-        "px-4 py-3 font-semibold text-accent select-none"
+        "px-4 py-3 font-semibold text-accent select-none "
+        "border-r-2 border-surface-border"
     )
     link_base = (
         "px-4 py-3 text-primary-fg hover:bg-accent hover:text-accent-fg "
-        "transition-colors"
+        "transition-colors border-b-2 border-transparent"
     )
-    link_active = "font-bold text-accent"
+    # Active page — accent underline + bolder weight so the operator
+    # always sees where they are. Cold-read v3 finding: the prior
+    # `font-bold text-accent` alone was too subtle.
+    link_active = (
+        "font-semibold text-accent bg-accent/5 "
+        "border-b-2 border-accent"
+    )
+    # Same-group separator (thin), different-group (heavier double bar).
+    sep_thin = '<span class="self-stretch w-px bg-surface-border" aria-hidden="true"></span>'
+    sep_heavy = (
+        '<span class="self-stretch w-1 bg-accent/40 mx-1" '
+        'aria-hidden="true"></span>'
+    )
     # BS.3 follow-up (2026-05-30): brand title left of the nav entries.
     # divide-x emits a vertical separator between the title and the
     # first entry, which reads as "brand | nav" — the standard pattern.
@@ -514,11 +525,53 @@ def emit_top_nav(
         f'<nav class="{nav_class}" aria-label="App nav">',
         f'  <span class="{title_class}">Recon-Gen</span>',
     ]
+    # BTa.7 — visual grouping of top-nav entries by `entry.group`.
+    # Heavier separator between groups + a small uppercase group label
+    # so operators pre-attentively see the boundaries. Cold-read v3
+    # finding: v2's uniform divider made grouping invisible.
+    group_label_class = (
+        "px-3 py-3 text-[10px] uppercase tracking-wide text-accent "
+        "font-bold select-none bg-accent/10"
+    )
+    group_titles: Mapping[str, str] = {
+        "authoring": "Studio",
+        "viewing": "Dashboards",
+        "reading": "Reference",
+    }
+    # BTa.7 — active match is prefix-aware so sub-pages light up their
+    # parent nav entry. `/etl/run` should highlight `ETL Support`
+    # (href `/etl/`); `/dashboards/l1/sheets/x` should highlight the
+    # `/dashboards/l1` entry. Exact `/` (the Studio home) requires
+    # an exact match — otherwise it'd match every page.
+    def _is_active(entry_href: str) -> bool:
+        if active_href is None:
+            return False
+        if entry_href == active_href:
+            return True
+        if entry_href == "/":
+            return False  # root never wins by prefix
+        prefix = entry_href if entry_href.endswith("/") else entry_href + "/"
+        return active_href.startswith(prefix)
+
+    last_group: str | None = None
     for entry in entries:
+        same_group = entry.group == last_group
+        if not same_group:
+            # Heavy divider + group label between groups.
+            parts.append(f"  {sep_heavy}")
+            title = group_titles.get(entry.group, "")
+            if title:
+                parts.append(
+                    f'  <span class="{group_label_class}">{html.escape(title)}</span>'
+                )
+            last_group = entry.group
+        else:
+            # Thin divider between same-group entries.
+            parts.append(f"  {sep_thin}")
         esc_href = html.escape(entry.href)
         esc_label = html.escape(entry.label)
         cls = link_base
-        if active_href is not None and entry.href == active_href:
+        if _is_active(entry.href):
             cls = f"{link_base} {link_active}"
         parts.append(
             f'  <a href="{esc_href}" class="{cls}">{esc_label}</a>'

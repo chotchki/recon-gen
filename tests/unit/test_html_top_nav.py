@@ -64,19 +64,71 @@ def test_studio_disabled_excludes_studio_entries() -> None:
 
 
 def test_active_href_marks_link() -> None:
+    """BTa.7 — active page renders with a `border-b-2 border-accent`
+    underline + a tinted accent background so the operator's eye
+    lands on it pre-attentively. Pre-BTa.7 marker was the weaker
+    `font-bold text-accent` (cold-read v3 flagged as too subtle)."""
     entries = [
         TopNavEntry("L2 Editor", "/l2"),
         TopNavEntry("Docs", "/docs/"),
     ]
     nav = emit_top_nav(entries=entries, active_href="/docs/")
-    # Pull each anchor's full tag (href through close-angle) and check
-    # the active marker is on the docs anchor only.
     import re
     anchors = re.findall(r'<a [^>]*>', nav)
     docs_tag = next(a for a in anchors if '/docs/' in a)
     l2_tag = next(a for a in anchors if '/l2"' in a)
-    assert "font-bold text-accent" in docs_tag
-    assert "font-bold text-accent" not in l2_tag
+    # Active anchor carries the accent-underline marker.
+    assert "border-accent" in docs_tag
+    assert "border-accent" not in l2_tag
+    # Active anchor's bg differs from inactive (light accent tint).
+    assert "bg-accent/5" in docs_tag
+    assert "bg-accent/5" not in l2_tag
+
+
+def test_active_href_prefix_match_lights_parent_entry() -> None:
+    """BTa.7 cold-read v3 finding: an ETL sub-page (`/etl/run`) should
+    light up its parent nav entry (`ETL Support` at `/etl/`). Prefix
+    match is the rule — `/etl/run` startswith `/etl/` ⇒ active."""
+    entries = [
+        TopNavEntry("ETL Support", "/etl/", group="authoring"),
+        TopNavEntry("L2 Editor", "/", group="authoring"),
+        TopNavEntry("L1 Dashboard", "/dashboards/l1", group="viewing"),
+    ]
+    nav = emit_top_nav(entries=entries, active_href="/etl/run")
+    import re
+    anchors = re.findall(r'<a [^>]*>', nav)
+    etl_tag = next(a for a in anchors if 'href="/etl/"' in a)
+    assert "border-accent" in etl_tag
+    # Other entries stay inactive.
+    other_tags = [a for a in anchors if 'href="/etl/"' not in a]
+    for tag in other_tags:
+        assert "border-accent" not in tag
+
+
+def test_active_href_root_does_not_match_by_prefix() -> None:
+    """The root nav entry `/` matches only exact `/` — otherwise it
+    would shadow every sub-page (`/etl/run` startswith `/`)."""
+    entries = [
+        TopNavEntry("L2 Editor", "/", group="authoring"),
+        TopNavEntry("ETL Support", "/etl/", group="authoring"),
+    ]
+    nav = emit_top_nav(entries=entries, active_href="/etl/run")
+    import re
+    anchors = re.findall(r'<a [^>]*>', nav)
+    l2_tag = next(a for a in anchors if 'href="/"' in a)
+    assert "border-accent" not in l2_tag
+
+
+def test_active_href_prefix_match_requires_segment_boundary() -> None:
+    """Defensive — `/etl-stuff` shouldn't match `/etl`. The prefix
+    rule appends `/` before matching so segment boundaries are honored.
+    """
+    entries = [TopNavEntry("ETL", "/etl", group="authoring")]
+    nav = emit_top_nav(entries=entries, active_href="/etl-stuff")
+    import re
+    anchors = re.findall(r'<a [^>]*>', nav)
+    etl_tag = anchors[0]
+    assert "border-accent" not in etl_tag
 
 
 def test_no_active_href_marks_nothing() -> None:
@@ -84,7 +136,13 @@ def test_no_active_href_marks_nothing() -> None:
         entries=[TopNavEntry("L2 Editor", "/l2"), TopNavEntry("Docs", "/docs/")],
         active_href=None,
     )
-    assert "font-bold text-accent" not in nav
+    # No active marker means no accent-underline anchor + no tinted bg
+    # (group-label chips use bg-accent/10 which is a different shade).
+    import re
+    anchors = re.findall(r'<a [^>]*>', nav)
+    for a in anchors:
+        assert "bg-accent/5" not in a
+        assert "border-accent" not in a
 
 
 def test_html_escapes_labels_and_hrefs() -> None:
@@ -159,17 +217,21 @@ def test_build_entries_studio_only_no_dashboards_no_docs() -> None:
     assert labels == ["L2 Editor", "ETL Support", "Training"]
 
 
-def test_divider_via_divide_x_class() -> None:
-    """Per BS.0 Lock 2: visual separator between every entry. Shipped
-    as the `divide-x divide-surface-border` Tailwind utility on the
-    parent <nav> — equivalent to `<hr>` between every child <a>
-    without polluting the DOM."""
+def test_dividers_between_entries() -> None:
+    """BTa.7 — separators are now per-entry `<span>` spacers instead
+    of the global `divide-x` utility, because cold-read v3 needed
+    different weights between same-group and cross-group boundaries.
+    Same-group ⇒ thin `w-px bg-surface-border` divider; different
+    group ⇒ heavier `w-1 bg-accent/40` bar + a group-label chip."""
     nav = emit_top_nav(entries=[
-        TopNavEntry("A", "/a"),
-        TopNavEntry("B", "/b"),
+        TopNavEntry("A", "/a", group="authoring"),
+        TopNavEntry("B", "/b", group="authoring"),
+        TopNavEntry("C", "/c", group="viewing"),
     ])
-    assert "divide-x" in nav
-    assert "divide-surface-border" in nav
+    # Thin separator inside the same group (A → B).
+    assert 'w-px bg-surface-border' in nav
+    # Heavy separator + label between groups (B → C).
+    assert 'bg-accent/40' in nav
 
 
 def test_nav_renders_recon_gen_brand_title_first() -> None:

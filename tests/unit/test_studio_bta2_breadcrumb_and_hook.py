@@ -215,7 +215,10 @@ def test_render_gap_card_links_to_breadcrumb_carrying_target() -> None:
         link_target="/l2_shape/rail/new",
     )
     html = _render_gap_card(gap)
-    assert 'href="/l2_shape/rail/new?from=/etl/triage"' in html
+    # BTb.2 — `?from=` is now followed by `&prefill_name=` to short-
+    # circuit the retype-the-phantom-rail-name friction. Both must
+    # appear on the gap-card CTA href.
+    assert 'href="/l2_shape/rail/new?from=/etl/triage&amp;prefill_name=phantom"' in html
 
 
 # -- Back-breadcrumb same-origin guard -------------------------------------

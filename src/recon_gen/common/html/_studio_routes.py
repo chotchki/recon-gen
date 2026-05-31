@@ -620,6 +620,60 @@ def _render_home_page(
 # back to this list. Order: Probe (investigate) → Run (execute) →
 # Triage (find + fix) — matches the operator's natural flow per the
 # mockup's narrative.
+def _render_etl_sub_nav(active_href: str) -> str:
+    """BTa.7 — sub-nav strip on every ETL sub-page so the operator
+    can jump between Refresh Data / Triage / Probe without bouncing
+    back to /etl/.
+
+    Cold-read v2 finding: after Refresh Data fails the operator
+    needs Triage to debug, but there's no in-page nav to it. Each
+    sub-page now ships this strip just below the page header.
+
+    Cold-read v3 finding: the active sub-nav entry styled
+    identically to the primary action button on the same page
+    (both `bg-accent text-accent-fg` rectangles) — operators were
+    confused which was navigation vs action. Fix: render the active
+    entry as a flat "you-are-here" label (no button chrome, accent
+    underline), inactive entries as borderless text links. Keeps
+    the action button visually unique on the page.
+    """
+    items: list[tuple[str, str]] = [
+        ("↻ Refresh Data", "/etl/run"),
+        ("⚠ Triage", "/etl/triage"),
+        ("🔍 Probe", "/etl/probe"),
+        ("← Loop overview", "/etl/"),
+    ]
+    blocks: list[str] = []
+    for label, href in items:
+        active = href == active_href
+        if active:
+            # "You are here" — flat, no border, accent underline.
+            # NOT a button shape so the eye reads it as a marker,
+            # not as an action.
+            blocks.append(
+                '<span class="px-1 py-1.5 text-sm font-semibold text-accent '
+                'border-b-2 border-accent cursor-default" '
+                f'aria-current="page" '
+                f'data-test-etl-subnav-active="{escape(href)}">'
+                f'{escape(label)}</span>'
+            )
+        else:
+            blocks.append(
+                '<a class="px-1 py-1.5 text-sm text-secondary-fg no-underline '
+                'border-b-2 border-transparent hover:text-accent '
+                'hover:border-accent transition-colors" '
+                f'href="{escape(href)}" '
+                f'data-test-etl-subnav="{escape(href)}">{escape(label)}</a>'
+            )
+    return (
+        '<nav class="flex flex-wrap items-center gap-6 px-4 py-2 bg-white '
+        'border-b border-surface-border" aria-label="ETL Support sub-nav" '
+        'data-test-etl-subnav>'
+        + "".join(blocks)
+        + '</nav>'
+    )
+
+
 # BTa.3 — numbered loop (BTa.0 Lock 2). Tuple ordering IS the loop
 # order: Refresh Data → Triage gaps → Probe & fix. The render walks
 # in order + assigns 1./2./3. + a `→` arrow between cards.
@@ -840,6 +894,7 @@ def _render_etl_landing_page(
   <title>Studio · ETL Support — {prefix}</title>
   {devlog_meta}{studio_theme_head(instance)}
   <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
+  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   {devlog_script}</head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
@@ -953,14 +1008,12 @@ async def _render_etl_probe_page(
   <title>Studio · ETL · Probe — {prefix_label}</title>
   {devlog_meta}{studio_theme_head(instance)}
   <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
+  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   {devlog_script}</head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
   {demo_banner}
-  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
-    <h1>Studio · ETL · Probe</h1>
-    <span class="text-sm text-secondary-fg font-mono">{prefix_label}</span>
-  </header>
+  {_render_etl_sub_nav("/etl/probe")}
   {picker_html}
   {body_html}
 </body>
@@ -1504,6 +1557,7 @@ async def _render_etl_run_page(
     demo_mode: bool = False,
     top_nav_html: str = "",
     just_ran: bool = False,
+    is_running: bool = False,
 ) -> str:
     """BT.3 — ``/etl/run`` ETL execution + coverage report page.
 
@@ -1514,6 +1568,11 @@ async def _render_etl_run_page(
       4. Coverage cards (rails / templates / chains via coverage_for;
          metadata via metadata_coverage_per_template).
       5. Empty-state when no run has happened AND no rows exist.
+
+    BTa.9 — when ``is_running`` is True, a live-tail container
+    mounts above the static log + polls `/etl/run/stream?since=N`
+    for new events every second. A "Cancel" form replaces the
+    "Refresh Data" button while the task is in flight.
 
     The "run" state is closure-scope (single Studio user, single
     process); restart clears it.
@@ -1534,8 +1593,13 @@ async def _render_etl_run_page(
         last_summary=last_summary,
         last_run_at=last_run_at,
         etl_hook_command=cfg.etl_hook if cfg is not None else None,
+        deployment_name=cfg.deployment_name if cfg is not None else None,
+        dialect_label=cfg.dialect.value if cfg is not None else None,
+        demo_gaps_planted=cfg is not None and cfg.etl_hook is None,
+        is_running=is_running,
     )
     log_html = _render_etl_run_log(last_summary)
+    live_tail_html = _render_etl_live_tail_mount() if is_running else ""
     coverage_html = await _render_etl_coverage_section(
         db_pool=db_pool, dialect=dialect,
         prefix=prefix, instance=instance,
@@ -1569,19 +1633,18 @@ async def _render_etl_run_page(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Studio · ETL · Run — {prefix_label}</title>
+  <title>Studio · ETL · Refresh Data — {prefix_label}</title>
   {devlog_meta}{studio_theme_head(instance)}
   <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
+  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   {flash_styles}
   {devlog_script}</head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
   {demo_banner}
-  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
-    <h1>Studio · ETL · Run + coverage</h1>
-    <span class="text-sm text-secondary-fg font-mono">{prefix_label}</span>
-  </header>
+  {_render_etl_sub_nav("/etl/run")}
   {run_form_html}
+  {live_tail_html}
   {log_html}
   {coverage_html}
   {flash_script}
@@ -1595,6 +1658,10 @@ def _render_etl_run_form(
     last_summary: DeploySummary | None,
     last_run_at: datetime | None,
     etl_hook_command: str | None = None,
+    deployment_name: str | None = None,
+    dialect_label: str | None = None,
+    demo_gaps_planted: bool = False,
+    is_running: bool = False,
 ) -> str:
     """Refresh-Data button + last-run status sidebar.
 
@@ -1603,6 +1670,13 @@ def _render_etl_run_form(
     so first-time operators can tell whether THEIR hook ran or
     the bundled demo placeholder. ``etl_hook_command`` is
     ``cfg.etl_hook`` (None → bundled demo hook ran).
+
+    BTa.8 cold-read v3 — ``deployment_name`` + ``dialect_label`` +
+    ``demo_gaps_planted`` feed a "What clicking Refresh Data will
+    do" context strip above the button (cold-read finding: the
+    button didn't tell the operator which DB they were about to
+    wipe + repopulate). When all three are absent, the context
+    strip is skipped (unit-test surface).
     """
     if last_summary is None:
         status_html = (
@@ -1636,8 +1710,42 @@ def _render_etl_run_form(
                 f'<p class="text-xs text-secondary-fg m-0">'
                 f'hook: {hook_attr}</p>'
             )
-    return f"""
-  <section class="flex items-center gap-6 px-8 pt-6 pb-3 bg-white border-b border-surface-border">
+    context_html = _render_refresh_context_strip(
+        deployment_name=deployment_name,
+        dialect_label=dialect_label,
+        etl_hook_command=etl_hook_command,
+        demo_gaps_planted=demo_gaps_planted,
+    )
+    # BTa.9 — swap button per run state.
+    # BTb.4 — Cancel button now ships hover-tooltip + clarifying copy
+    # underneath. No modal (operator-locked: friction-heavy). Partial
+    # state is intentional — aids troubleshooting AND the next refresh
+    # wipes it automatically.
+    if is_running:
+        action_html = """
+    <div class="flex flex-col gap-2">
+      <form method="post" action="/etl/run/cancel">
+        <button type="submit" id="etl-run-cancel-btn"
+                class="px-4 py-2 bg-danger text-white rounded-sm border border-danger text-sm font-semibold hover:opacity-85"
+                title="Stops pipeline immediately. Partial DB state stays until the next Refresh Data wipes it (intentional — aids troubleshooting). Subprocess hooks may keep running until they exit.">
+          ✕ Cancel run
+        </button>
+      </form>
+      <p class="text-xs text-secondary-fg max-w-md m-0"
+         data-test-cancel-help>
+        Stops the pipeline immediately. Partial DB state stays until
+        the next Refresh Data wipes it — we don't auto-clean to help
+        with troubleshooting. Subprocess hooks may keep running until
+        they exit.
+      </p>
+    </div>
+    <div class="text-sm text-secondary-fg">
+      <span class="inline-block w-2 h-2 rounded-full bg-warning animate-pulse mr-2"></span>
+      <span data-test-running-indicator>Pipeline running — live events below.</span>
+    </div>
+"""
+    else:
+        action_html = f"""
     <form method="post" action="/etl/run">
       <button type="submit" id="etl-run-btn" class="px-4 py-2 bg-accent text-accent-fg rounded-sm border border-accent text-sm font-semibold hover:opacity-85">
         ↻ Refresh Data
@@ -1646,8 +1754,185 @@ def _render_etl_run_form(
     <div id="etl-last-run-status">
       {status_html}
     </div>
+"""
+    return f"""
+  {context_html}
+  <section class="flex items-center gap-6 px-8 pt-6 pb-3 bg-white border-b border-surface-border">
+    {action_html}
   </section>
 """
+
+
+def _render_refresh_context_strip(
+    *,
+    deployment_name: str | None,
+    dialect_label: str | None,
+    etl_hook_command: str | None,
+    demo_gaps_planted: bool,
+) -> str:
+    """BTa.8 cold-read v3 — "What clicking Refresh Data will do" strip.
+
+    Renders a 3-fact context panel above the button: which
+    deployment + dialect the wipe lands on, and which hook (or
+    bundled-demo path) will run. Cold-read finding: the previous
+    page header showed only the deployment_name in a small chip
+    next to a redundant title; now it lives above the action
+    button where the operator's eye is when they're about to click.
+
+    Returns empty string when nothing to show (unit-test surface
+    that builds the form without cfg context).
+    """
+    if not deployment_name and not dialect_label and not etl_hook_command:
+        return ""
+    facts: list[str] = []
+    if deployment_name:
+        facts.append(
+            '<div><dt class="text-xs uppercase tracking-wide text-secondary-fg">'
+            'Deployment</dt>'
+            f'<dd class="m-0 font-mono text-sm">{escape(deployment_name)}</dd></div>'
+        )
+    if dialect_label:
+        facts.append(
+            '<div><dt class="text-xs uppercase tracking-wide text-secondary-fg">'
+            'Dialect</dt>'
+            f'<dd class="m-0 font-mono text-sm">{escape(dialect_label)}</dd></div>'
+        )
+    if etl_hook_command:
+        facts.append(
+            '<div><dt class="text-xs uppercase tracking-wide text-secondary-fg">'
+            'ETL hook</dt>'
+            f'<dd class="m-0 font-mono text-sm break-all">'
+            f'<code>{escape(etl_hook_command)}</code></dd></div>'
+        )
+    else:
+        gap_note = (
+            ' <span class="text-warning text-xs">+ demo gap overlay '
+            '(phantom rail / template / missing metadata + uncovered '
+            'rail/template DELETEs)</span>'
+            if demo_gaps_planted else ""
+        )
+        facts.append(
+            '<div><dt class="text-xs uppercase tracking-wide text-secondary-fg">'
+            'ETL hook</dt>'
+            '<dd class="m-0 text-sm">'
+            '<em class="text-secondary-fg">(none configured — bundled demo '
+            f'regeneration will run){gap_note}</em></dd></div>'
+        )
+    return (
+        '<section class="px-8 pt-4 pb-2 bg-surface-bg border-b border-surface-border" '
+        'data-test-refresh-context>'
+        '<p class="text-xs uppercase tracking-wide text-secondary-fg m-0 mb-2">'
+        'What clicking <strong>↻ Refresh Data</strong> will do</p>'
+        '<dl class="grid grid-cols-1 sm:grid-cols-3 gap-4 m-0">'
+        + "".join(facts) +
+        '</dl>'
+        '</section>'
+    )
+
+
+def _render_etl_live_tail_mount() -> str:
+    """BTa.9 — mount point for the live-tail HTML fragment.
+
+    The empty wrapper div has htmx attrs that fire an immediate
+    `hx-get` of `/etl/run/stream?since=0` on `load`, then continue
+    polling every 1s while the run is in flight. When the stream
+    endpoint detects the task finished, it emits `HX-Trigger:
+    etl-run-finished` which the inline script catches + navigates
+    to `/etl/run?just_ran=1` so the final summary + flash render.
+    """
+    return """
+  <section class="px-8 pt-3 pb-3 bg-surface-bg border-b border-surface-border"
+           id="etl-run-live-tail-wrap">
+    <h2 class="text-base font-semibold m-0 mb-2">Live event tail</h2>
+    <div id="etl-run-live-tail"
+         class="bg-white border border-surface-border rounded-md p-3 max-h-72 overflow-y-auto font-mono text-xs"
+         hx-get="/etl/run/stream"
+         hx-trigger="load, every 1s"
+         hx-swap="outerHTML">
+      <p class="text-secondary-fg italic">Waiting for events…</p>
+    </div>
+  </section>
+  <script>
+  (function() {
+    document.body.addEventListener('etl-run-finished', function() {
+      // Brief delay so the last fragment swap completes visually.
+      setTimeout(() => { window.location.href = '/etl/run?just_ran=1'; }, 250);
+    });
+  })();
+  </script>
+"""
+
+
+def _render_etl_live_tail_fragment(
+    *,
+    all_events: list[Mapping[str, object]],
+    running: bool,
+) -> str:
+    """BTa.9 — the live-tail polling response.
+
+    Returns the SAME `<div id="etl-run-live-tail">` wrapper (so
+    htmx's `outerHTML` swap is self-replacing) with the FULL
+    accumulated event list re-rendered. Each poll's response
+    replaces the wrapper entirely; delta-only responses would
+    clobber the accumulating history. When the run is still in
+    flight we arm the next poll; when it's done we leave the
+    wrapper inert and the caller emits
+    ``HX-Trigger: etl-run-finished``.
+    """
+    event_html = "".join(
+        _format_live_event_line(event) for event in all_events
+    )
+    if not all_events:
+        event_html = (
+            '<p class="text-secondary-fg italic" data-test-live-tail-empty>'
+            'Waiting for events…</p>'
+        )
+    poll_attrs = ""
+    state_attr = "finished"
+    if running:
+        poll_attrs = (
+            ' hx-get="/etl/run/stream"'
+            ' hx-trigger="every 1s"'
+            ' hx-swap="outerHTML"'
+        )
+        state_attr = "running"
+    return (
+        '<div id="etl-run-live-tail"'
+        ' class="bg-white border border-surface-border rounded-md p-3 max-h-72 overflow-y-auto font-mono text-xs"'
+        f' data-test-live-tail-state="{state_attr}"'
+        f' data-test-live-tail-count="{len(all_events)}"'
+        f'{poll_attrs}>'
+        f'{event_html}'
+        '</div>'
+    )
+
+
+def _format_live_event_line(event: Mapping[str, object]) -> str:
+    """BTa.9 — one event → one log line (Δms is omitted in the live
+    tail because we don't know the prior event's timestamp from a
+    single fragment; the static log renders deltas at end-of-run)."""
+    event_name = str(event.get("event") or event.get("kind") or "")
+    if event_name.endswith(":halt") or event_name == "deploy:cancelled":
+        level = "error"
+        level_class = "text-danger"
+    elif event_name.endswith(":skip"):
+        level = "warn"
+        level_class = "text-warning"
+    else:
+        level = "info"
+        level_class = "text-secondary-fg"
+    suffix_bits: list[str] = []
+    for k, v in event.items():
+        if k in ("event", "kind", "ts_unix"):
+            continue
+        suffix_bits.append(f"{escape(str(k))}={escape(str(v))}")
+    suffix = " " + " ".join(suffix_bits) if suffix_bits else ""
+    return (
+        f'<div class="leading-relaxed" data-test-live-event-level="{level}">'
+        f'<span class="{level_class} mr-2 uppercase text-[10px]">[{level}]</span>'
+        f'{escape(event_name)}{suffix}'
+        '</div>'
+    )
 
 
 def _format_hook_attribution(etl_hook_command: str | None) -> str:
@@ -1749,24 +2034,29 @@ async def _render_etl_coverage_section(
             'to render coverage.</p></section>'
         )
 
+    # BTa.8 cold-read v3 — when no Refresh Data has run THIS session,
+    # don't render green ✓ marks against pre-existing data. Operators
+    # were trusting stale green as a clean signal even though the
+    # rows came from a prior session / CLI `data apply`. Show the
+    # empty-state regardless of `total_rows`: the only meaningful
+    # coverage signal is "did the operator just refresh".
+    if last_summary is None:
+        return """
+  <section class="px-8 py-10 text-center text-secondary-fg" id="etl-coverage-empty">
+    <p class="text-sm m-0 mb-2"><strong>No Refresh Data run this session.</strong></p>
+    <p class="text-sm m-0 max-w-2xl mx-auto">
+      Coverage only renders after a Refresh Data click in this Studio
+      session — pre-existing rows from prior sessions / CLI runs aren't
+      auto-trusted. Click <strong>↻ Refresh Data</strong> above to
+      populate.
+    </p>
+  </section>
+"""
+
     cov_map = await coverage_for(db_pool, prefix, instance, dialect=dialect)
     md_map = await metadata_coverage_per_template(
         db_pool, prefix, instance, dialect=dialect,
     )
-
-    # Empty-state when no rows exist anywhere AND no run summary stored.
-    total_rows = sum(e.count for e in cov_map.by_node_id.values())
-    if total_rows == 0 and last_summary is None:
-        return """
-  <section class="px-8 py-10 text-center text-secondary-fg" id="etl-coverage-empty">
-    <p class="text-sm m-0 mb-2"><strong>No ETL has been run yet on this L2.</strong></p>
-    <p class="text-sm m-0">
-      Click <strong>↻ Refresh Data</strong> above to invoke the configured
-      ETL hook against the demo DB. Coverage shows up here once the run
-      completes.
-    </p>
-  </section>
-"""
 
     rails_card = _render_coverage_card_for_kind(
         "Rails",
@@ -2053,6 +2343,23 @@ async def _render_etl_triage_page(
         else:
             body_html = _render_triage_body(gaps)
 
+    # BTb.3 — when on the bundled-demo path (no operator hook), echo
+    # the Run-page demo-overlay disclosure here so the operator
+    # doesn't panic at 4,400 "Missing LimitSchedule" rows + decide
+    # the L2 is broken. Real-hook deployments skip this banner.
+    demo_plant_banner = ""
+    if cfg is not None and cfg.etl_hook is None:
+        demo_plant_banner = """
+  <aside class="mx-8 mt-6 mb-2 bg-accent/5 border border-accent/30 rounded-md px-4 py-3 text-sm"
+         data-test-triage-demo-plant-banner role="status">
+    <strong class="text-accent">ⓘ Bundled-demo data.</strong>
+    Some gaps below are intentional demo plants (rows tagged
+    <code>__demo_gap_*</code>) so this page has content to demo.
+    With a real ETL hook configured (set <code>cfg.etl_hook</code>),
+    only your real gaps surface.
+  </aside>
+"""
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -2060,14 +2367,13 @@ async def _render_etl_triage_page(
   <title>Studio · ETL · Triage — {prefix_label}</title>
   {devlog_meta}{studio_theme_head(instance)}
   <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
+  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   {devlog_script}</head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
   {demo_banner}
-  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
-    <h1>Studio · ETL · Triage</h1>
-    <span class="text-sm text-secondary-fg font-mono">{prefix_label}</span>
-  </header>
+  {_render_etl_sub_nav("/etl/triage")}
+  {demo_plant_banner}
   {body_html}
 </body>
 </html>
@@ -2245,6 +2551,19 @@ def _render_gap_card(gap: Gap) -> str:
     cta_label = _GAP_KIND_EDITOR_LABELS.get(gap.kind, "Open editor")
     stripe_classes = _GAP_KIND_STRIPES.get(gap.kind, "border-l-4 border-l-warning")
     link_target = _append_from_query(gap.link_target, "/etl/triage")
+    # BTb.2 — prefill the editor's name field with the offending value
+    # so the operator doesn't retype the phantom rail / template name.
+    # Only attach for the kinds whose editor consumes a `name` field
+    # (unmatched_rail / unmatched_template / missing_limit_schedule).
+    # Missing_metadata_key links to an existing template's edit page
+    # which doesn't take a prefill.
+    if gap.observed_value and gap.kind in (
+        "unmatched_rail", "unmatched_template", "missing_limit_schedule",
+    ):
+        link_target = (
+            f"{link_target}&prefill_name="
+            f"{quote(gap.observed_value, safe='')}"
+        )
     # Card title: observed value (the operator-readable identifier
     # of what's broken) + volume badge.
     title_value = escape(gap.observed_value) if gap.observed_value else "—"
@@ -3622,39 +3941,156 @@ def make_studio_routes(
             ),
         )
 
-    # BT.3 — closure-scope "last run" state. Holds the most recent
-    # DeploySummary + its wall-clock timestamp so GET /etl/run can
-    # render the run-status banner after a POST 303s back to GET.
+    # BT.3 + BTa.9 — closure-scope "last run" state. Holds:
+    #   - "summary"     : finished DeploySummary | None
+    #   - "at"          : finished-at datetime | None
+    #   - "task"        : in-flight asyncio.Task | None (BTa.9)
+    #   - "events"      : live event list the streaming endpoint reads (BTa.9)
+    #   - "started_at"  : in-flight start datetime | None (BTa.9)
+    #   - "cancelled"   : True when the last run was cancelled (BTa.9)
     # Single-process / single-user Studio; restart wipes.
     _etl_run_state: dict[str, object] = {
         "summary": None, "at": None,
+        "task": None, "events": [],
+        "started_at": None, "cancelled": False,
     }
 
+    async def _run_pipeline_async(
+        patched_cfg: Config,
+    ) -> None:
+        """BTa.9 — pipeline body that runs in a detached task.
+
+        Builds a `_tee` writer that appends each event into
+        `_etl_run_state["events"]` so the stream endpoint can poll
+        them as they land. Handles CancelledError + post-pipeline
+        gap planting + final state transition.
+        """
+        import asyncio  # noqa: PLC0415
+        from recon_gen.common.l2.deploy_pipeline import DeploySummary  # noqa: PLC0415
+
+        # Reset the live-events buffer for this run.
+        live_events: list[Mapping[str, object]] = []
+        _etl_run_state["events"] = live_events
+        _etl_run_state["summary"] = None
+        _etl_run_state["at"] = None
+        _etl_run_state["cancelled"] = False
+
+        async def _tee(payload: Mapping[str, object]) -> None:
+            live_events.append(dict(payload))
+
+        try:
+            summary = await run_deploy_pipeline(
+                patched_cfg, cache.get(), dev_log=_tee,
+            )
+        except asyncio.CancelledError:
+            # BTa.9 — operator cancel. Don't roll back partial state
+            # (operator explicit: next wipe handles it + partial state
+            # aids troubleshooting). Just synthesize a halted summary.
+            from datetime import datetime as _dt  # noqa: PLC0415
+
+            await _tee({
+                "event": "deploy:cancelled",
+                "reason": "operator cancel",
+                "ts_unix": __import__("time").time(),
+            })
+            _etl_run_state["summary"] = DeploySummary(
+                halted=True,
+                halt_reason="cancelled by operator (partial state remains; next Refresh Data wipes it)",
+                events=tuple(live_events),
+            )
+            _etl_run_state["at"] = _dt.now()  # typing-smell: ignore[no-datetime-now]: BTa.9 cancel-stamp uses wall-clock for the operator's last-run banner
+            _etl_run_state["cancelled"] = True
+            _etl_run_state["task"] = None
+            raise
+
+        # BTa.8 — bundled-demo gap overlay (only when no operator hook
+        # AND the main pipeline succeeded). Locks the demo Triage
+        # surface to a populated state.
+        if patched_cfg.etl_hook is None and not summary.halted:
+            from recon_gen.common.l2.demo_etl_gaps import (  # noqa: PLC0415
+                emit_demo_etl_gap_sql,
+            )
+            from recon_gen.common.db import (  # noqa: PLC0415
+                connect_demo_db, execute_script,
+            )
+
+            demo_prefix = patched_cfg.db_table_prefix
+            demo_dialect = patched_cfg.dialect
+
+            def _plant_gaps() -> None:
+                gap_sql = emit_demo_etl_gap_sql(
+                    cache.get(),
+                    prefix=demo_prefix,
+                    dialect=demo_dialect,
+                )
+                conn = connect_demo_db(patched_cfg)
+                try:
+                    cur = conn.cursor()
+                    try:
+                        execute_script(cur, gap_sql, dialect=demo_dialect)
+                        conn.commit()
+                    finally:
+                        cur.close()
+                finally:
+                    conn.close()
+
+            await _tee({
+                "event": "demo:gap_overlay:start",
+                "ts_unix": __import__("time").time(),
+            })
+            await asyncio.to_thread(_plant_gaps)
+            await _tee({
+                "event": "demo:gap_overlay:done",
+                "ts_unix": __import__("time").time(),
+            })
+
+        _etl_run_state["summary"] = summary
+        _etl_run_state["at"] = datetime.now()  # typing-smell: ignore[no-datetime-now]: run-stamp for the operator-facing "last run at ..." banner — same wall-clock anchor as the trainer page; not a determinism path
+        _etl_run_state["task"] = None
+
     async def etl_run(request: Request) -> HTMLResponse | RedirectResponse:
-        """GET — render the run page; POST — invoke pipeline + 303 to GET.
+        """GET — render the run page; POST — launch background task + 303.
 
         POST disables ``test_generator`` per BT.0 lock 1 (pure-ETL
-        runs; generator overlay stays a Training-mode opt-in).
+        runs; generator overlay stays a Training-mode opt-in) — BUT
+        only when ``cfg.etl_hook`` is configured. With no hook the
+        pipeline would otherwise be wipe → no-op → empty DB; the
+        operator's "Refresh Data" click would dutifully wipe their
+        data with nothing to repopulate. Leaving the generator on
+        in the no-hook case gives the bundled-demo path actual
+        rows to surface in coverage + triage + probe.
+
+        BTa.9 — POST no longer blocks until the pipeline finishes;
+        instead it spawns a detached asyncio task and 303s back to
+        the GET so the operator can watch live events stream in via
+        ``/etl/run/stream``. Cancel via ``POST /etl/run/cancel``.
         """
+        import asyncio  # noqa: PLC0415
+
         if request.method == "POST":
             if cfg is None:
                 # Same gate as POST /deploy — pipeline needs cfg.
                 return RedirectResponse(url="/etl/", status_code=303)
-            patched_cfg = dataclass_replace(
-                cfg, test_generator=dataclass_replace(
-                    cfg.test_generator, enabled=False,
-                ),
-            )
-            summary = await run_deploy_pipeline(
-                patched_cfg, cache.get(), dev_log=None,
-            )
-            _etl_run_state["summary"] = summary
-            _etl_run_state["at"] = datetime.now()  # typing-smell: ignore[no-datetime-now]: run-stamp for the operator-facing "last run at ..." banner — same wall-clock anchor as the trainer page; not a determinism path
-            # BTa.6 — ?just_ran=1 triggers the post-refresh flash +
-            # tab-title pulse on the GET render so the operator
-            # multi-tasking in another tab gets a visual nudge that
-            # the run finished.
-            return RedirectResponse(url="/etl/run?just_ran=1", status_code=303)
+            # BTa.9 — double-click guard: if a run is in flight,
+            # ignore the second POST + bounce to GET so the operator
+            # sees the live tail.
+            existing = _etl_run_state.get("task")
+            if existing is not None and isinstance(existing, asyncio.Task) and not existing.done():
+                return RedirectResponse(url="/etl/run", status_code=303)
+            # Bundled-demo path: no hook ⇒ keep generator enabled
+            # so Refresh Data actually reloads the demo seed.
+            if cfg.etl_hook is None:
+                patched_cfg = cfg
+            else:
+                patched_cfg = dataclass_replace(
+                    cfg, test_generator=dataclass_replace(
+                        cfg.test_generator, enabled=False,
+                    ),
+                )
+            _etl_run_state["started_at"] = datetime.now()  # typing-smell: ignore[no-datetime-now]: BTa.9 wall-clock anchor for "running for Ns" + elapsed-time display
+            task = asyncio.create_task(_run_pipeline_async(patched_cfg))
+            _etl_run_state["task"] = task
+            return RedirectResponse(url="/etl/run", status_code=303)
 
         last_summary = cast(
             "DeploySummary | None", _etl_run_state.get("summary"),
@@ -3662,6 +4098,8 @@ def make_studio_routes(
         last_run_at = cast(
             "datetime | None", _etl_run_state.get("at"),
         )
+        task_obj = _etl_run_state.get("task")
+        is_running = isinstance(task_obj, asyncio.Task) and not task_obj.done()
         just_ran = request.query_params.get("just_ran") == "1"
         html = await _render_etl_run_page(
             cache, dev_log,
@@ -3671,8 +4109,52 @@ def make_studio_routes(
             cfg=cfg, demo_mode=demo_mode,
             top_nav_html=_top_nav_html("/etl/run"),
             just_ran=just_ran,
+            is_running=is_running,
         )
         return HTMLResponse(html)
+
+    async def etl_run_stream(_request: Request) -> HTMLResponse:
+        """BTa.9 — live-tail fragment endpoint.
+
+        Returns the FULL accumulated event log on every poll, not
+        just the delta since the last poll. The htmx swap is
+        ``outerHTML`` on the wrapper div, so each response replaces
+        the whole tail with the latest view; returning only deltas
+        would clobber the accumulated history.
+
+        When the task is still in flight the fragment carries the
+        next-poll htmx attrs; when finished the response also
+        emits ``HX-Trigger: etl-run-finished`` so the inline
+        client script navigates to ``/etl/run?just_ran=1`` for
+        the final summary + flash.
+        """
+        import asyncio  # noqa: PLC0415
+
+        live_events = cast(
+            "list[Mapping[str, object]]",
+            _etl_run_state.get("events") or [],
+        )
+        task_obj = _etl_run_state.get("task")
+        running = (
+            isinstance(task_obj, asyncio.Task) and not task_obj.done()
+        )
+        fragment = _render_etl_live_tail_fragment(
+            all_events=live_events,
+            running=running,
+        )
+        headers: dict[str, str] = {}
+        if not running:
+            headers["HX-Trigger"] = "etl-run-finished"
+        return HTMLResponse(fragment, headers=headers)
+
+    async def etl_run_cancel(_request: Request) -> RedirectResponse:
+        """BTa.9 — cancel the in-flight run, if any."""
+        import asyncio  # noqa: PLC0415
+
+        task_obj = _etl_run_state.get("task")
+        if isinstance(task_obj, asyncio.Task) and not task_obj.done():
+            task_obj.cancel()
+        return RedirectResponse(url="/etl/run", status_code=303)
 
     async def etl_triage(_request: Request) -> HTMLResponse:
         # BT.4 — exception triage. Renders gap cards diffing the L2's
@@ -3767,6 +4249,8 @@ def make_studio_routes(
         Route("/etl/", etl_landing, methods=["GET"]),
         Route("/etl/probe", etl_probe, methods=["GET"]),
         Route("/etl/run", etl_run, methods=["GET", "POST"]),
+        Route("/etl/run/stream", etl_run_stream, methods=["GET"]),
+        Route("/etl/run/cancel", etl_run_cancel, methods=["POST"]),
         Route("/etl/triage", etl_triage, methods=["GET"]),
         Mount(
             "/studio/static",
