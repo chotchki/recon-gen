@@ -185,6 +185,11 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         kind="phantom_rail",
         category=PlantCategory.L2_TRIAGE,
         family="L2 Triage gaps",
+        # BU.2a — bridge to the typed L2_Triage_Gaps.md section. The
+        # registry kind is operator-vocabulary ("phantom_rail" reads
+        # well in the Trainer URL); the underlying GapKind literal is
+        # the parser key.
+        section_kind="unmatched_rail",
         plant_function=_invoke_phantom_rail_plant,
         primitives=(
             PrimitiveIntField(

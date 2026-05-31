@@ -2246,19 +2246,25 @@ def _render_metadata_coverage_card(
 # -- BT.4 — /studio/etl/triage page ------------------------------------------
 
 
-_GAP_KIND_LABELS: Mapping[str, str] = {
-    "unmatched_rail": "Unmatched rail_name",
-    "unmatched_template": "Unmatched template_name",
-    "missing_limit_schedule": "Missing LimitSchedule",
-    "missing_metadata_key": "Missing required metadata key",
-}
+# BU.2a — labels + editor CTAs migrated to typed handbook source.
+# `common.handbook.l2_triage_gaps` parses `docs/L2_Triage_Gaps.md`
+# + ships `KIND_TITLE_BY_GAP` (labels) + `EDITOR_LABEL_BY_GAP` (CTAs).
+# Helpers below cache the parsed sections so render isn't paying
+# parse cost per gap card.
 
-_GAP_KIND_EDITOR_LABELS: Mapping[str, str] = {
-    "unmatched_rail": "Open Rails editor",
-    "unmatched_template": "Open Templates editor",
-    "missing_limit_schedule": "Open Limits editor",
-    "missing_metadata_key": "Open template editor",
-}
+
+def _gap_kind_label(kind: str) -> str:
+    from recon_gen.common.handbook.l2_triage_gaps import (  # noqa: PLC0415
+        KIND_TITLE_BY_GAP,
+    )
+    return KIND_TITLE_BY_GAP.get(kind, kind)
+
+
+def _gap_kind_editor_label(kind: str) -> str:
+    from recon_gen.common.handbook.l2_triage_gaps import (  # noqa: PLC0415
+        EDITOR_LABEL_BY_GAP,
+    )
+    return EDITOR_LABEL_BY_GAP.get(kind, "Open editor")
 
 # BTa.4 — per-kind visual stripe per BTa.0 Lock 3. Each kind ships
 # a distinct icon SHAPE + color — accessibility-friendly (not
@@ -2497,7 +2503,7 @@ def _render_triage_kind_section(
     distinct count). Body renders one card per gap, sorted by row
     count DESC (caller's responsibility).
     """
-    label = _GAP_KIND_LABELS.get(kind, kind)
+    label = _gap_kind_label(kind)
     icon = _GAP_KIND_ICONS.get(kind, "•")
     total_rows = sum(g.evidence.row_count for g in kind_gaps)
     distinct = len(kind_gaps)
@@ -2548,7 +2554,7 @@ def _render_gap_card(gap: Gap) -> str:
     section header (no more per-card kind banner — drop redundant
     chrome since the section already names the kind).
     """
-    cta_label = _GAP_KIND_EDITOR_LABELS.get(gap.kind, "Open editor")
+    cta_label = _gap_kind_editor_label(gap.kind)
     stripe_classes = _GAP_KIND_STRIPES.get(gap.kind, "border-l-4 border-l-warning")
     link_target = _append_from_query(gap.link_target, "/etl/triage")
     # BTb.2 — prefill the editor's name field with the offending value

@@ -81,7 +81,7 @@ def resolve_section(entry: PlantKindEntry) -> _SectionAdHoc:
     real lookup; BU.2b adds L1 + L2FT_HYGIENE branches.
     """
     if entry.category in (PlantCategory.L2_TRIAGE, PlantCategory.L2_COVERAGE):
-        return _l2_triage_shim_section(entry)
+        return _resolve_l2_triage_section(entry)
     if entry.category == PlantCategory.L1_INVARIANT:
         return _resolve_l1_section(entry)
     if entry.category == PlantCategory.L2FT_HYGIENE:
@@ -138,43 +138,35 @@ def _adapter_l2ft(section: "L2FTExceptionSection") -> _SectionAdHoc:
     return out
 
 
-# Lock 10 build (BU.2a) replaces this hard-coded shim with the
-# typed L2TriageGapSection catalogue. Until then, the slice ships
-# with ad-hoc copy so the page renders something sensible.
-_L2_TRIAGE_SHIM: Mapping[str, _SectionAdHoc] = {
-    "phantom_rail": _SectionAdHoc(
-        title="Phantom rail",
-        short_statement=(
-            "Transactions whose rail_name doesn't resolve to any "
-            "rail declared in your L2 yaml. Usually means a legacy "
-            "ETL feed produced rail names that nobody updated the "
-            "L2 to declare (or vice versa — somebody renamed a rail "
-            "in the L2 and the ETL still emits the old name)."
-        ),
-        what_to_do=(
-            "Either declare the rail in your L2 (if it's a real "
-            "rail your institution actually operates) OR fix your "
-            "ETL hook to translate the old name into the L2-declared "
-            "canonical name. Triage's CTA on the gap card deep-links "
-            "to the L2 editor's create-new form with the offending "
-            "rail name pre-filled."
-        ),
-    ),
-}
-
-
-def _l2_triage_shim_section(entry: PlantKindEntry) -> _SectionAdHoc:
+def _resolve_l2_triage_section(entry: PlantKindEntry) -> _SectionAdHoc:
+    """BU.2a — typed L2 triage catalogue. Reads the parsed
+    ``L2_Triage_Gaps.md`` sections; the registry entry's
+    ``section_kind`` (or ``kind`` when unset) is the GapKind literal.
+    Loud-fails when the registry references a section the doc doesn't
+    declare — anti-drift gate matching ``_resolve_l1_section`` shape."""
+    from recon_gen.common.handbook.l2_triage_gaps import (  # noqa: PLC0415
+        load_bundled_l2_triage_gaps,
+    )
     section_kind = entry.section_kind or entry.kind
-    section = _L2_TRIAGE_SHIM.get(section_kind)
+    section = load_bundled_l2_triage_gaps().get(section_kind)
     if section is None:
-        # Defensive — surfaces during the BU.2a wiring step if a
-        # new entry lands before the typed source is built.
-        return _SectionAdHoc(
-            title=section_kind.replace("_", " ").title(),
-            short_statement="(no typed-source section yet; BU.2a build pending)",
-            what_to_do="",
+        raise KeyError(
+            f"L2 triage GapKind {section_kind!r} not in handbook "
+            f"(common.handbook.l2_triage_gaps + docs/L2_Triage_Gaps.md)"
         )
-    return section
+    # The doc's leading paragraph is the operator-readable "what this
+    # surfaces" prose; collapse multi-line wrap to one paragraph for
+    # the Trainer's short_statement slot.
+    short_statement = " ".join(
+        line.strip()
+        for line in section.body.split("\n\n", 1)[0].splitlines()
+        if line.strip()
+    )
+    return _SectionAdHoc(
+        title=section.title,
+        short_statement=short_statement,
+        what_to_do=section.what_to_do,
+    )
 
 
 # -- Landing page ----------------------------------------------------------

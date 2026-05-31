@@ -147,7 +147,10 @@ def test_render_landing_renders_accordion_with_registry_entries() -> None:
     assert 'data-test-training-kind="phantom_rail"' in html
     # Each entry's title comes from the resolved section, not a
     # hard-coded display string.
-    assert "Phantom rail" in html
+    # BU.2a — section title comes from the typed L2_Triage_Gaps.md SoT;
+    # registry kind "phantom_rail" maps to GapKind "unmatched_rail" via
+    # section_kind override.
+    assert "Unmatched rail_name" in html
 
 
 def test_render_plant_page_renders_form_from_primitives() -> None:
@@ -156,7 +159,10 @@ def test_render_plant_page_renders_form_from_primitives() -> None:
     assert entry is not None
     html = render_training_plant_page(entry)
     # Section title at the top.
-    assert "Phantom rail" in html
+    # BU.2a — section title comes from the typed L2_Triage_Gaps.md SoT;
+    # registry kind "phantom_rail" maps to GapKind "unmatched_rail" via
+    # section_kind override.
+    assert "Unmatched rail_name" in html
     # Form action points back to the same URL.
     assert 'action="/training/plant/phantom_rail"' in html
     # Both primitives render with the right input type.
