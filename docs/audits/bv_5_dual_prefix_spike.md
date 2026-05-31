@@ -148,20 +148,36 @@ enabled plant set. Two-step, separate concerns.
 hooks.
 
 Operations on the /training/ page:
-- **Session Start** — creates `<L2>_v_*` schema; clones
-  data from `<L2>_*` (base); refreshes v-overlay matviews. Zero
-  plants enabled. Fast (clone-from-base only — no etl_hook,
-  no schema work on the base prefix).
+- **Session Start** — does **everything to make the trainer surface
+  ready** so the trainer person doesn't have to know about a
+  separate /etl/run step:
+  1. Invoke the existing /etl/run flow (`etl_hook` + base-prefix
+     matview refresh) so `<L2>_*` reflects fresh upstream data.
+  2. Create `<L2>_v_*` schema (idempotent — drops + recreates if
+     already present).
+  3. Clone data from `<L2>_*` (base) → `<L2>_v_*`.
+  4. Refresh v-overlay matviews.
+  Zero plants enabled at the end. Cost-wise: pays the full /etl/run
+  cost (the load-bearing wait on Oracle, ~10 min in the §0 probe).
+  Operator gets a single button that "does the right thing."
 - **Apply** — diff against currently-applied plant set; mutate
-  `v` to match the operator's checkbox state (DL.9 diff-
-  only Apply).
-- **Re-clone from base** — operator-initiated reset of v overlay;
-  re-clones from current base + replays enabled plants.
-- **Re-fetch baseline** — triggers the existing /etl/run flow
-  (writes to base prefix), then re-clones to v overlay + replays
-  enabled plants. Two-step; covers "I want fresh upstream data."
+  `v` to match the operator's checkbox state (DL.9 diff-only
+  Apply).
+- **Re-clone from base** — skip the /etl/run step; just clone
+  current `<L2>_*` → `<L2>_v_*` and replay enabled plants. For
+  when the operator knows base is current and wants a fast reset
+  of the v overlay without re-fetching upstream.
 - **Cleanup** — drops `<L2>_v_*` tables, reclaims the
   ~1× baseline disk hit. Base prefix untouched.
+
+**Multi-person safety via cfg.yaml segmentation, not in-app.** If
+two people share the same Studio instance — one doing ETL ops on
+`<L2>_*`, one doing trainer work that includes Session Start —
+their Session Start would re-trigger /etl/run + clobber the ETL
+person's in-flight state. **Resolution:** they each maintain their
+own cfg.yaml with different `db_table_prefix` values (e.g.
+`<L2_etl>_*` vs `<L2_trainer>_*`). The app doesn't add multi-tenant
+locking; operators segment cfg.yaml.
 
 ### 1.3 Landing UX consequence — cards collapse into checkboxes
 
@@ -209,6 +225,8 @@ also has the checkbox + the form-tuning section goes away
 (defaults bake at populate time). The card is the instructional
 anchor and the navigation anchor; the checkbox is the compose
 control.
+- Comment: I think keeping the detail knobs is important, the checkboxes should serve to make it easy to mass enable/disable.
+
 
 **Active-plants filter** (top-level affordance): a "Show:
 [All / Only enabled / Only with errors]" filter at the page header
@@ -264,9 +282,11 @@ sqlite baseline** (very rough — needs measuring on the real data):
 Apply (changing the enabled-plant set) pays the rebuild. So the
 flow becomes:
 
-1. Operator clicks Session Start → clone-from-base + matview
-   refresh on v overlay only (no etl_hook in this step). On PG:
-   seconds. On sqlite/Oracle: minutes for the 3-4GB data copy.
+1. Operator clicks Session Start → /etl/run flow into base +
+   clone-from-base + matview refresh on v overlay. This pays the
+   full /etl/run cost (PG: minutes; sqlite: minutes; Oracle:
+   ~10 min on the §0 probe — the load-bearing wait). One button;
+   no separate "remember to run /etl/run first" step.
 2. Operator picks plants from checkboxes → click Apply → ~3-5 min
    wait with progress on naive clone-and-replay; DL.9 diff-only
    Apply drops this to seconds-to-tens-of-seconds.
@@ -371,7 +391,7 @@ operator never types prefixes anywhere.
 `--trainer-mode` flag, no mode-aware code paths, no runtime
 "trainer mode detection." The /training/ page is just a UI
 surface that owns operations on `v`:
-- Session Start creates the `v` schema + clones data from
+- Session Start invokes /etl/run + creates the `v` schema + clones data from
   the base prefix.
 - Apply mutates `v` to match the operator's checkbox state.
 - Cleanup drops `v`.
@@ -519,8 +539,9 @@ Must-update sites:
 - [ ] `recon-gen studio` CLI — **no new flag.** /training/ page
       surfaces Session Start / Apply / Cleanup buttons.
 - [ ] New: v-overlay lifecycle orchestrator on the /training/
-      page (Session Start = schema-create-v + clone-from-base
-      + matview refresh; Cleanup = drop).
+      page (Session Start = /etl/run-into-base + schema-create-v
+      + clone-from-base + v matview refresh; Re-clone = clone-only;
+      Cleanup = drop).
 - [ ] New: `/training/setup` progress page (BTa.9 live-tail
       shape).
 - [ ] `/training/tour/<kind>` page — embed the dashboards under
@@ -565,11 +586,14 @@ Out of scope (defer):
 ## 5. Open questions — RESOLVED 2026-05-31
 
 1. **Trainer entry surface.** RESOLVED — /training/ page Session
-   Start button creates the v overlay schema + clones data from the
-   base prefix + refreshes v-overlay matviews. NO etl_hook
-   invocation (operator runs that via the existing /etl/run flow
-   if they need to). A Cleanup button drops v overlay when done.
-   Promoted to DL.10.
+   Start button does **everything to make the trainer surface
+   ready** so the trainer person doesn't have to know about a
+   separate /etl/run step: invokes /etl/run flow into base +
+   creates the v overlay schema + clones data from base + refreshes
+   v matviews. Multi-person safety via cfg.yaml segmentation
+   (separate `db_table_prefix` per person). A Re-clone button
+   skips the /etl/run leg for fast resets. A Cleanup button drops
+   v overlay when done. Promoted to DL.10.
 2. **Per-kind subset / eager-vs-lazy.** RESOLVED — Session Start
    produces a clean v overlay (clone of base, zero plants enabled).
    Operator then picks plants from checkboxes; Select-all is their
@@ -670,20 +694,28 @@ Out of scope (defer):
   progress bar for a few seconds."
 - **DL.10** — **No "trainer mode" as a runtime concept.** No CLI
   flag, no mode-detection, no mode-aware code paths in Studio.
-  The /training/ page surfaces four buttons:
-  - **Session Start** — creates `<L2>_v_*` schema; clones
-    data from base; refreshes v-overlay matviews. No etl_hook
-    invocation.
+  The /training/ page surfaces these buttons:
+  - **Session Start** — does **everything to make the trainer
+    surface ready** so the trainer person doesn't have to know
+    about a separate /etl/run step: (1) invoke /etl/run flow into
+    base, (2) create `<L2>_v_*` schema, (3) clone base → v,
+    (4) refresh v matviews. Pays the full /etl/run cost (the
+    ~10 min wait on Oracle). One button does it all.
   - **Apply** — diff-only mutate v overlay to match enabled-plant
     checkbox state (DL.9).
-  - **Re-clone from base** — drops v overlay's data, re-clones
-    from current base, replays enabled plants. For when the
-    operator suspects v overlay drifted from base.
+  - **Re-clone from base** — skip /etl/run; just clone current
+    base → v + replay enabled plants. Fast reset for when
+    operator knows base is current and wants to drop the v
+    overlay's plant state without re-fetching upstream.
   - **Cleanup** — drops `<L2>_v_*` schema entirely. Base
     prefix untouched.
-  - **Re-fetch baseline** (optional) — wraps the existing /etl/run
-    flow with a follow-on Re-clone. For when the operator wants
-    fresh upstream data feeding the trainer comparison.
+
+  **Multi-person safety via cfg.yaml segmentation, not in-app.**
+  Different ETL / trainer people maintain different cfg.yamls
+  with different `db_table_prefix` values (e.g. `<L2_etl>_*` vs
+  `<L2_trainer>_*`) so their Session Start's /etl/run leg doesn't
+  clobber the other's in-flight state. The app doesn't add
+  multi-tenant locking.
 - **DL.11** — **Initial state at Session Start: zero plants
   enabled.** v overlay is an exact clone of the base prefix —
   Clean and Violation dashboards show identical data until the
@@ -750,7 +782,7 @@ Out of scope (defer):
 | BV.4.x phase | Work | Estimate |
 |---|---|---|
 | BV.4.0 | Operator confirmation on §6 design locks | 15 min |
-| BV.4.1 | /training/ page Session Start (create `<L2>_v_*` schema; clone data from base; refresh v-overlay matviews); Cleanup button; Re-clone button; Re-fetch baseline button (chains to /etl/run) | 1-2 d |
+| BV.4.1 | /training/ page Session Start (invoke /etl/run into base; create `<L2>_v_*` schema; clone data from base; refresh v matviews); Re-clone button (skip /etl/run); Cleanup button | 1-2 d |
 | BV.4.2 | `/dashboards/*` accepts `?prefix=`; threading through; default to `cfg.db_table_prefix` when absent | 1 d |
 | BV.4.3 | `/training/setup` streaming progress page (BTa.9 live-tail shape) | 0.5 d |
 | BV.4.4 | Diff-only Apply (DL.9) + Tour two-link wiring (DL.6) + landing checkbox UX (DL.8) | 1-1.5 d |
