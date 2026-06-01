@@ -311,7 +311,9 @@ def test_planted_badge_absent_when_no_kinds_enabled() -> None:
 def test_session_start_running_banner_renders() -> None:
     """BV.4.10.d — when a Session Start task is in flight the
     landing renders a banner with collapsible live-tail wrapper
-    polling `/training/session-start/stream`."""
+    polling `/training/session-start/stream`, plus an animated
+    spinner (operator can't tell from a static emoji whether the
+    page is alive)."""
     html = render_training_v3_landing(
         base_prefix="recon-test",
         v_overlay_exists=False,
@@ -320,6 +322,26 @@ def test_session_start_running_banner_renders() -> None:
     assert "data-test-training-session-start-banner" in html
     assert "Session Start in progress" in html
     assert 'hx-get="/training/session-start/stream"' in html
+    assert "animate-spin" in html
+    # The pre-spinner ⏳ emoji should be gone.
+    assert "⏳" not in html
+
+
+def test_apply_running_banner_renders() -> None:
+    """BV.4.10.d — Apply gets the same banner+spinner+live-tail
+    treatment as Session Start. The hint reflects the pending plant
+    count so the operator sees what's being applied."""
+    html = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=True,
+        apply_running=True,
+        apply_pending_count=3,
+    )
+    assert "data-test-training-apply-banner" in html
+    assert "Apply in progress" in html
+    assert 'hx-get="/training/apply/stream"' in html
+    assert "animate-spin" in html
+    assert "3 plant(s)" in html
 
 
 def test_session_start_running_banner_absent_when_idle() -> None:

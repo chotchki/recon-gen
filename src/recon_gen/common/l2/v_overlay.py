@@ -339,6 +339,7 @@ async def apply_plants(
     enabled_plants: Iterable[tuple["PlantKindEntry", Mapping[str, object]]],
     *,
     anchor: datetime | None = None,
+    dev_log: object = None,
 ) -> None:
     """BV.4.9 (DL.9) — diff-only Apply. Reads the currently-applied
     state from `<v>_config_kv` and decides between two paths:
@@ -354,8 +355,19 @@ async def apply_plants(
 
     Each entry in ``enabled_plants`` is the registry entry + the
     operator's form values (the kwargs the plant_function expects).
+
+    BV.4.10.d — ``dev_log`` is a ``DevLogWriter | None`` callback that
+    accumulates per-step events for the live-tail UI (mirrors
+    session_start's plumbing).
     """
     import json  # noqa: PLC0415
+    import time as _time  # noqa: PLC0415
+
+    async def _emit(event: str, **fields: object) -> None:
+        if dev_log is None:
+            return
+        payload = {"event": event, "ts_unix": _time.time(), **fields}
+        await dev_log(payload)  # type: ignore[misc]  # dev_log is DevLogWriter | None; checked above
 
     base_prefix = cfg.db_table_prefix
     v_prefix = v_overlay_prefix(base_prefix)
@@ -376,6 +388,16 @@ async def apply_plants(
     current_applied = await read_applied_state(cfg)
     diff = compute_apply_diff(current_applied, new_selection)
     needs_reclone = bool(diff.to_remove)
+    await _emit(
+        "apply:begin",
+        path="slow" if needs_reclone else "fast",
+        to_add=sorted(diff.to_add),
+        to_remove=sorted(diff.to_remove),
+        unchanged=sorted(diff.unchanged),
+    )
+
+    # BV.4.10.d — per-step log drained after the threadpool work.
+    step_log: list[tuple[str, dict[str, object]]] = []
 
     def _run() -> None:
         conn = connect_demo_db(cfg)
@@ -396,6 +418,7 @@ async def apply_plants(
                     # their planted rows).
                     clone_sql = clone_base_to_v_sql(base_prefix)
                     execute_script(cur, clone_sql, dialect=cfg.dialect)
+                    step_log.append(("apply:clone_done", {}))
                     kinds_to_run: list[
                         tuple["PlantKindEntry", Mapping[str, object]]
                     ] = plants_list
@@ -429,10 +452,17 @@ async def apply_plants(
                         succeeded[entry.kind] = {
                             k: str(v) for k, v in kwargs.items()
                         }
+                        step_log.append((
+                            "apply:plant_done", {"kind": entry.kind},
+                        ))
                     except Exception as exc:  # noqa: BLE001 — surfaces per kind
                         failures[entry.kind] = (
                             f"{type(exc).__name__}: {exc}"
                         )
+                        step_log.append((
+                            "apply:plant_failed",
+                            {"kind": entry.kind, "error": f"{type(exc).__name__}: {str(exc)[:80]}"},
+                        ))
 
                 # Refresh v matviews so the dashboards see the
                 # composite of (existing v data + succeeded plants).
@@ -442,6 +472,7 @@ async def apply_plants(
                     instance, base_prefix=base_prefix, dialect=cfg.dialect,
                 )
                 execute_script(cur, refresh_sql, dialect=cfg.dialect)
+                step_log.append(("apply:refresh_matviews_done", {}))
 
                 state_sql = applied_state_write_sql(
                     base_prefix,
@@ -463,6 +494,9 @@ async def apply_plants(
             conn.close()
 
     await asyncio.to_thread(_run)
+    for event, fields in step_log:
+        await _emit(event, **fields)
+    await _emit("apply:done")
 
 
 # -- date arg is unused at the moment but kept for symmetry with

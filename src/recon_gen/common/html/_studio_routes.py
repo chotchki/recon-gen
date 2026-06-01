@@ -3960,9 +3960,15 @@ def make_studio_routes(
         "task": None, "events": [],
         "started_at": None, "cancelled": False,
     }
-    # BV.4.10.d — same shape for /training/session-start.
+    # BV.4.10.d — same shape for /training/session-start +
+    # /training/apply. Apply tracks pending_count so the post-run
+    # status message can match the operator's pre-click expectation.
     _training_start_state: dict[str, object] = {
         "task": None, "events": [], "started_at": None,
+    }
+    _training_apply_state: dict[str, object] = {
+        "task": None, "events": [], "started_at": None,
+        "pending_count": 0,
     }
 
     async def _run_pipeline_async(
@@ -4291,6 +4297,15 @@ def make_studio_routes(
         session_start_running = (
             isinstance(task_obj, _asyncio.Task) and not task_obj.done()
         )
+        apply_task_obj = _training_apply_state.get("task")
+        apply_running = (
+            isinstance(apply_task_obj, _asyncio.Task)
+            and not apply_task_obj.done()
+        )
+        apply_pending_count = (
+            int(cast(int, _training_apply_state.get("pending_count") or 0))
+            if apply_running else 0
+        )
         return HTMLResponse(render_training_v3_landing(
             top_nav_html=_top_nav_html("/training/"),
             theme_head=studio_theme_head(instance),
@@ -4303,7 +4318,35 @@ def make_studio_routes(
             l2_stale=l2_stale,
             session_start_time=session_start_time,
             session_start_running=session_start_running,
+            apply_running=apply_running,
+            apply_pending_count=apply_pending_count,
         ))
+
+    async def training_apply_stream(
+        _request: Request,
+    ) -> HTMLResponse:
+        """BV.4.10.d — apply live-tail fragment. Mirror of
+        ``training_session_start_stream`` for the Apply task."""
+        import asyncio as _asyncio  # noqa: PLC0415
+
+        events = cast(
+            "list[Mapping[str, object]]",
+            _training_apply_state.get("events") or [],
+        )
+        task_obj = _training_apply_state.get("task")
+        running = (
+            isinstance(task_obj, _asyncio.Task) and not task_obj.done()
+        )
+        from recon_gen.common.html._studio_training_v3 import (  # noqa: PLC0415
+            render_training_apply_live_tail,
+        )
+        fragment = render_training_apply_live_tail(
+            events=events, running=running,
+        )
+        headers: dict[str, str] = {}
+        if not running:
+            headers["HX-Trigger"] = "training-apply-finished"
+        return HTMLResponse(fragment, headers=headers)
 
     async def training_session_start_stream(
         _request: Request,
@@ -4536,9 +4579,12 @@ def make_studio_routes(
         )
 
     async def training_apply(request: Request) -> RedirectResponse:
-        """POST /training/apply — naive clone-and-replay shape:
-        re-clone base → v, then emit enabled plants. BV.4.4 lands
-        DL.9 diff-only Apply."""
+        """POST /training/apply — DL.9 diff-only Apply against the v
+        overlay. BV.4.10.d — spawns a detached task + redirects so
+        the operator sees the live-tail banner (mirrors Session
+        Start's BTa.9 pattern)."""
+        import asyncio  # noqa: PLC0415
+
         if cfg is None:
             return RedirectResponse(url="/training/", status_code=303)
         from recon_gen.common.l2.plant_registry import (  # noqa: PLC0415
@@ -4598,15 +4644,38 @@ def make_studio_routes(
                     kwargs[primitive.name] = primitive.default
             enabled_pairs.append((entry, kwargs))
 
-        await apply_plants(
-            cfg, cache.get(),
-            enabled_pairs,  # type: ignore[arg-type]: variance widening; apply_plants pulls .plant_function off first elt — relaxed typing fine at runtime
-        )
-        status_msg = f"Applied {len(enabled_pairs)} plant(s)."
-        return RedirectResponse(
-            url=f"/training/?status={status_msg.replace(' ', '+')}",
-            status_code=303,
-        )
+        # BV.4.10.d — detached task + live-tail. Same shape as
+        # /training/session-start. Apply on Oracle / large-PG with
+        # the slow-path reclone can take a non-trivial fraction of
+        # a minute; the operator deserves the same visibility as
+        # Session Start.
+        existing = _training_apply_state.get("task")
+        if isinstance(existing, asyncio.Task) and not existing.done():
+            return RedirectResponse(url="/training/", status_code=303)
+
+        live_events: list[Mapping[str, object]] = []
+        _training_apply_state["events"] = live_events
+        _training_apply_state["started_at"] = datetime.now()  # typing-smell: ignore[no-datetime-now]: BV.4.10.d wall-clock anchor
+        _training_apply_state["pending_count"] = len(enabled_pairs)
+
+        async def _tee(payload: Mapping[str, object]) -> None:
+            live_events.append(dict(payload))
+
+        _cfg = cfg
+
+        async def _run_apply() -> None:
+            try:
+                await apply_plants(
+                    _cfg, cache.get(),
+                    enabled_pairs,  # type: ignore[arg-type]: variance widening; apply_plants pulls .plant_function off first elt — relaxed typing fine at runtime
+                    dev_log=_tee,
+                )
+            finally:
+                _training_apply_state["task"] = None
+
+        task = asyncio.create_task(_run_apply())
+        _training_apply_state["task"] = task
+        return RedirectResponse(url="/training/", status_code=303)
 
     async def _v_overlay_exists(
         cfg_arg: Config | None, instance: L2Instance, base_prefix: str,
@@ -4670,6 +4739,10 @@ def make_studio_routes(
         Route(
             "/training/session-start/stream",
             training_session_start_stream, methods=["GET"],
+        ),
+        Route(
+            "/training/apply/stream",
+            training_apply_stream, methods=["GET"],
         ),
         Route(
             "/training/session-start", training_session_start,

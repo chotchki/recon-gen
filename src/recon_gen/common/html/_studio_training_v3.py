@@ -58,6 +58,8 @@ def render_training_v3_landing(
     l2_stale: bool = False,
     session_start_time: str = "",
     session_start_running: bool = False,
+    apply_running: bool = False,
+    apply_pending_count: int = 0,
 ) -> str:
     """The /training/ landing.
 
@@ -147,29 +149,38 @@ def render_training_v3_landing(
     # script catches + reloads /training/ so the post-run state
     # (success banner + applied-plants ledger reads) renders.
     if session_start_running:
-        banner_html += """
-    <div class="bg-accent/10 border border-accent rounded-md px-3 py-2 mb-3 text-sm"
-         data-test-training-session-start-banner>
-      <strong class="text-accent">⏳</strong> Session Start in progress —
-      this re-fetches the base prefix + rebuilds the v overlay
-      (~10s sqlite / ~30s Postgres / ~10 min Oracle for the /etl/run leg).
-      <details class="mt-2">
-        <summary class="cursor-pointer text-xs text-secondary-fg">Show event log</summary>
-        <div id="training-session-start-live-tail"
-             class="bg-white border border-surface-border rounded-md p-3 max-h-72 overflow-y-auto font-mono text-xs mt-1"
-             hx-get="/training/session-start/stream"
-             hx-trigger="load, every 1s"
-             hx-swap="outerHTML">
-          <p class="text-secondary-fg italic">Waiting for events…</p>
-        </div>
-      </details>
-    </div>
-    <script>
-      document.body.addEventListener('training-session-start-finished', function() {
-        setTimeout(() => { window.location.href = '/training/?status=Session+started+%E2%80%94+v+overlay+ready.'; }, 250);
-      });
-    </script>
-"""
+        banner_html += _render_progress_banner(
+            test_attr="data-test-training-session-start-banner",
+            tail_id="training-session-start-live-tail",
+            stream_url="/training/session-start/stream",
+            title="Session Start in progress",
+            hint=(
+                "re-fetches the base prefix + rebuilds the v overlay "
+                "(~10s sqlite / ~30s Postgres / ~10 min Oracle for "
+                "the /etl/run leg)"
+            ),
+            finished_event="training-session-start-finished",
+            redirect_url="/training/?status=Session+started+%E2%80%94+v+overlay+ready.",
+        )
+    if apply_running:
+        n_str = (
+            f"{apply_pending_count} plant(s)"
+            if apply_pending_count
+            else "your selection"
+        )
+        banner_html += _render_progress_banner(
+            test_attr="data-test-training-apply-banner",
+            tail_id="training-apply-live-tail",
+            stream_url="/training/apply/stream",
+            title="Apply in progress",
+            hint=(
+                f"applying {escape(n_str)} against the v overlay. "
+                "DL.9 fast path (no removals) skips the clone — "
+                "matview refresh is the dominant cost."
+            ),
+            finished_event="training-apply-finished",
+            redirect_url="/training/?status=Apply+done.",
+        )
 
     total_enabled = sum(
         1 for entry in PLANT_REGISTRY if entry.kind in enabled_set
@@ -261,21 +272,82 @@ def render_training_v3_landing(
 """
 
 
-def render_training_session_start_live_tail(
+# BV.4.10.d — small Tailwind animated spinner. Replaces the ⏳
+# emoji which was static — the operator can't tell from a glance
+# whether the page is alive. `animate-spin` (Tailwind core) rotates
+# the borders 1 turn/sec via CSS keyframes.
+_SPINNER_HTML = (
+    '<span class="inline-block h-3 w-3 align-middle '
+    'border-2 border-accent border-t-transparent rounded-full '
+    'animate-spin mr-2" aria-hidden="true"></span>'
+)
+
+
+def _render_progress_banner(
+    *, test_attr: str, tail_id: str, stream_url: str,
+    title: str, hint: str,
+    finished_event: str, redirect_url: str,
+) -> str:
+    """BV.4.10.d — common shape for the Session Start + Apply
+    in-progress banners. Spinner + title + hint + collapsible
+    live-tail + inline script that catches the finished HX-Trigger
+    and reloads /training/.
+
+    The live-tail `<details>` stays collapsed by default so the page
+    isn't dominated by a wall of event log lines (per operator:
+    "loader and a way to expand the log so you can see problems").
+    """
+    return f"""
+    <div class="bg-accent/10 border border-accent rounded-md px-3 py-2 mb-3 text-sm"
+         {test_attr}>
+      {_SPINNER_HTML}<strong class="text-accent">{escape(title)}</strong> —
+      {hint}
+      <details class="mt-2">
+        <summary class="cursor-pointer text-xs text-secondary-fg">Show event log</summary>
+        <div id="{tail_id}"
+             class="bg-white border border-surface-border rounded-md p-3 max-h-72 overflow-y-auto font-mono text-xs mt-1"
+             hx-get="{escape(stream_url)}"
+             hx-trigger="load, every 1s"
+             hx-swap="outerHTML">
+          <p class="text-secondary-fg italic">Waiting for events…</p>
+        </div>
+      </details>
+    </div>
+    <script>
+      document.body.addEventListener('{finished_event}', function() {{
+        setTimeout(() => {{ window.location.href = '{redirect_url}'; }}, 250);
+      }});
+    </script>
+"""
+
+
+def render_training_apply_live_tail(
     *,
     events: list[Mapping[str, object]],
     running: bool,
 ) -> str:
-    """BV.4.10.d — live-tail polling fragment.
+    """BV.4.10.d — apply live-tail. Shares fragment shape with
+    `render_training_session_start_live_tail` but polls
+    `/training/apply/stream` instead. Distinct id so the same page
+    can host both mounts if (hypothetically) two tasks ran
+    concurrently — they wouldn't in practice (the POST handlers
+    double-click guard against in-flight tasks)."""
+    return _render_live_tail_fragment(
+        events=events, running=running,
+        tail_id="training-apply-live-tail",
+        stream_url="/training/apply/stream",
+    )
 
-    htmx ``outerHTML`` swaps the wrapper itself, so each response is
-    a complete `<div id="training-session-start-live-tail">` with the
-    FULL accumulated event list. While the task is in flight the
-    fragment arms the next 1s poll; on completion the route handler
-    sends `HX-Trigger: training-session-start-finished` (consumed by
-    the inline script in the landing-page render to reload
-    `/training/`).
-    """
+
+def _render_live_tail_fragment(
+    *,
+    events: list[Mapping[str, object]],
+    running: bool,
+    tail_id: str,
+    stream_url: str,
+) -> str:
+    """Common fragment renderer for both session-start + apply
+    live tails."""
     if not events:
         body = (
             '<p class="text-secondary-fg italic" '
@@ -289,6 +361,7 @@ def render_training_session_start_live_tail(
                 "text-danger" if (
                     event_name.endswith(":halt")
                     or "cancelled" in event_name
+                    or event_name.endswith(":failed")
                 ) else "text-secondary-fg"
             )
             fields = " ".join(
@@ -308,19 +381,33 @@ def render_training_session_start_live_tail(
     state_attr = "finished"
     if running:
         poll_attrs = (
-            ' hx-get="/training/session-start/stream"'
+            f' hx-get="{escape(stream_url)}"'
             ' hx-trigger="every 1s"'
             ' hx-swap="outerHTML"'
         )
         state_attr = "running"
     return (
-        '<div id="training-session-start-live-tail"'
+        f'<div id="{tail_id}"'
         ' class="bg-white border border-surface-border rounded-md p-3 max-h-72 overflow-y-auto font-mono text-xs mt-1"'
         f' data-test-training-tail-state="{state_attr}"'
         f' data-test-training-tail-count="{len(events)}"'
         f'{poll_attrs}>'
         f'{body}'
         '</div>'
+    )
+
+
+def render_training_session_start_live_tail(
+    *,
+    events: list[Mapping[str, object]],
+    running: bool,
+) -> str:
+    """BV.4.10.d — session-start live-tail (shared shape with
+    `render_training_apply_live_tail`)."""
+    return _render_live_tail_fragment(
+        events=events, running=running,
+        tail_id="training-session-start-live-tail",
+        stream_url="/training/session-start/stream",
     )
 
 
