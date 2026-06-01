@@ -2275,14 +2275,14 @@ def seed_variant(
                 f"Create run/config.oracle.yaml (dialect: oracle) or "
                 f"set RECON_GEN_CONFIG to an oracle-dialect cfg path."
             )
-    elif spec.dialect == "sl":
-        # Y.2.gate.b.2.impl.sqlite — cfg path comes from
+    elif spec.dialect in ("sl", "du"):
+        # Y.2.gate.b.2.impl.sqlite + CA.3 — cfg path comes from
         # ``setup_variant`` (it generates the per-invocation cfg + DB
         # file under a tempdir and returns the cfg path in
         # ``env_overrides[RECON_GEN_CONFIG]``). No on-disk cfg in
-        # ``run/`` — the SQLite variant is by-design ephemeral
-        # per-invocation. If the override isn't there, setup_variant
-        # was bypassed; fail loud.
+        # ``run/`` — both SQLite and DuckDB variants are by-design
+        # ephemeral per-invocation. If the override isn't there,
+        # setup_variant was bypassed; fail loud.
         cfg_str = env_overrides.get(RECON_GEN_CONFIG.name)
         if not cfg_str:
             raise RuntimeError(
