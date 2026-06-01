@@ -151,10 +151,20 @@ class _DryRunCaptureOracle(_DryRunBase):
 _DryRunCaptureOracle.__module__ = "oracledb"
 
 
+class _DryRunCaptureDuckdb(_DryRunBase):
+    """DuckDB-dialect dry-run capture; ``_placeholder_style`` falls
+    through to ``qmark`` (``?``) — DuckDB accepts the SQLite-shape
+    positional binds the spine emits."""
+
+
+_DryRunCaptureDuckdb.__module__ = "_duckdb"
+
+
 _DRY_RUN_CLASSES: dict[Dialect, type[_DryRunBase]] = {
     Dialect.SQLITE: _DryRunCaptureSqlite,
     Dialect.POSTGRES: _DryRunCapturePostgres,
     Dialect.ORACLE: _DryRunCaptureOracle,
+    Dialect.DUCKDB: _DryRunCaptureDuckdb,
 }
 
 
