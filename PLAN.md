@@ -137,8 +137,9 @@ Same cold-read → triage → design → implement → re-cold-read pattern that
 
 
 - [ ] BX.backlog - BX backlog — Reorder sheets: L1/L2 Exceptions right after Getting Started
+  - [ ] BX.backlog.duckdb - swap-spike - BX backlog — BZ.7 SQLite→DuckDB swap spike
   - [ ] BX.backlog.session - start-silent-no-op - BX backlog — Studio /training/session-start silent no-op when base schema missing
-  - [ ] BX.backlog.sqlite-matview-perf - BX backlog — SQLite matview emulation slow on real-L2-sized data (spike)
+  - [ ] BX.backlog.sqlite - matview-perf - BX backlog — SQLite matview emulation slow on real-L2-sized data (spike)
 - [ ] BX.release - drift-detection - BX backlog — release.yml drift detection (smoke file list + extras spec)
 ## Phase BXa - Persona nuke + instance singleton structured form (standalone)
 
@@ -407,12 +408,29 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 
 **Done when:** ci.yml::test + e2e.yml::e2e-pg-browser run on the WSL2 runner with ≥2x speedup measured over 3-5 runs each, release.yml jobs verified unchanged on managed runners, operational docs in `docs/reference/self-host-ci.md`.
 
-- [ ] BY.0 - BY.0 — Spike: register WSL2 runner, migrate ci.yml::test, measure
+- [x] BY.0 - BY.0 — Spike: register WSL2 runner, migrate ci.yml::test, measure
 - [ ] BY.1 - BY.1 — Migrate ci.yml::test job to self-hosted
 - [ ] BY.2 - BY.2 — Migrate e2e.yml::e2e-pg-browser to self-hosted
 - [ ] BY.3 - BY.3 — Secret-isolation policy: release.yml stays on ubuntu-latest
 - [ ] BY.4 - BY.4 — Observability + cleanup automation on the WSL2 runner
 - [ ] BY.5 - BY.5 — Verify + document operational model
+## Phase BZ - Matview SQL reshape (correlated subquery → window function)
+
+**Why:** BX.backlog.sqlite-matview-perf spike (#174 → `docs/audits/sqlite_matview_perf_spike.md`) measured a 4.2-minute bundled SQLite matview refresh at ~1M base transaction rows on sasquatch_pr. 52% of that cost lives in one matview — `computed_subledger_balance` — built as a correlated `SUM(...) WHERE posting <= day` subquery that SQLite's planner can't rewrite (PG can, hence the dialect-divergence on real-customer L2s). Two more correlated-subquery offenders: `current_transactions` (4.2s @ 1M) and `daily_statement_summary` (2.6s @ 1M). Bonus alignment: faster matview refresh also helps CI test wallclock (every test that seeds + refreshes pays this cost).
+
+**Approach (audit's Candidate E):** rewrite the correlated subqueries to window-function shapes (`SUM(...) OVER (PARTITION BY account_id ORDER BY posting ROWS UNBOUNDED PRECEDING)` + per-day prefix-sum lookup). Same SQL ships to all 3 dialects (PG / Oracle / SQLite) — no dialect arms, no new dialect surface. Also speeds up PG + Oracle at scale.
+
+**Boundary:** matview body rewrites only — no schema migrations, no new dialects, no new DBs. DuckDB swap (audit Candidate C) held as the BZ.7 fallback if BZ.3 measurements miss the target.
+
+**Done when:** bundled matview refresh @ 1M base rows on SQLite lands &lt;60s (vs 253s baseline, a ≥4× improvement); PG + Oracle locked-seed gates green; mathematically-equivalent divergence (if any) re-locked with operator sign-off per BZ.5.
+
+- [x] BZ.0 - BZ.0 — Prototype: rewrite computed_subledger_balance to window-function shape
+- [x] BZ.1 - BZ.1 — Rewrite current_transactions (correlated subquery → window function)
+- [x] BZ.2 - BZ.2 — Inspect daily_statement_summary; rewrite if window-shape helps
+- [x] BZ.3 - BZ.3 — Re-measure bundled refresh @ 1M; gate on &lt;60s target
+- [x] BZ.4 - BZ.4 — Cross-dialect regression check (PG + Oracle locked seeds)
+- [x] BZ.5 - BZ.5 — Re-lock seeds (if BZ.4 found mathematically-equivalent divergence)
+- [x] BZ.6 - BZ.6 — Decision: BZ done OR file BZ.7 DuckDB spike
 ## Phase PLAN - Phase PLAN
 - [ ] PLAN.md - BS.5 — _v_config_chain_children + 7-path conversion
 

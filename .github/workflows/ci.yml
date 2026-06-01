@@ -2,9 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [main, by-0-spike-self-hosted-runner]
+    branches: [main]
   pull_request:
     branches: [main]
+  # workflow_dispatch lets operators manually fire CI on any branch
+  # (e.g. to validate a feature branch before merging). Added BY.1 so
+  # the canonical self-hosted runner change could be verified on a
+  # feature branch without re-expanding push: branches.
+  workflow_dispatch:
 
 # Auto-cancel superseded runs on the same branch. A rapid follow-up
 # push doesn't need the older commit's CI to finish — it's been
@@ -30,7 +35,15 @@ jobs:
     # parallel push-CI burns AWS rate-limit budget contending with it.
     # Downstream jobs `needs: test`, so skipping here skips everything.
     if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Release v')
-    runs-on: ubuntu-latest
+    # BY.1 — promoted from ubuntu-latest to self-hosted. The BY.0 spike
+    # measured 48 min on self-hosted vs 68 min on ubuntu-latest for the
+    # same suite (1.4× speedup). recon-gen-ci-local is the WSL2 Ubuntu
+    # runner on the 5800X3D / 64GB Windows box (per BY.4 ops doc).
+    # Playwright WebKit system deps + libatomic1 are pre-installed on
+    # the runner so `playwright install` can run without --with-deps
+    # (which would need sudo). If a future restore to ubuntu-latest is
+    # needed, set runs-on: ubuntu-latest and restore `--with-deps`.
+    runs-on: [self-hosted, recon-gen-ci-local]
 
     steps:
       - uses: actions/checkout@v6
@@ -58,10 +71,12 @@ jobs:
         # X.2.a.2 added a Playwright JS unit harness under tests/js/
         # that launches WebKit. Playwright ships its CLI but not the
         # browser binaries; CI must `playwright install` the browser
-        # explicitly. Otherwise pytest fails with
-        # "Executable doesn't exist at /home/runner/.cache/ms-playwright/webkit-…/pw_run.sh"
-        # — same install used by the e2e workflow's browser job.
-        run: .venv/bin/playwright install --with-deps webkit
+        # explicitly. BY.1 dropped `--with-deps`: self-hosted WSL2
+        # runner has the WebKit system libs pre-installed, so the
+        # bootstrap apt-get install (which needs sudo) is no longer
+        # needed per-job. On a fresh runner replacement, run the
+        # one-time bootstrap from BY.4's ops doc.
+        run: .venv/bin/playwright install webkit
 
       - name: Set up biome
         # biome is a standalone Rust binary (no Node / npm — setup-biome
@@ -93,52 +108,6 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 7
-
-  # BY.0 spike — parallel self-hosted variant of `test`. Same shape,
-  # only `runs-on` differs. Lets us measure wallclock side-by-side
-  # against the ubuntu-latest baseline. Nothing `needs:` this job;
-  # purely informational. Remove once BY.1 promotes the self-hosted
-  # variant + retires the managed `test` job (or vice versa).
-  test-selfhosted:
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Release v')
-    runs-on: [self-hosted, recon-gen-ci-local]
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-
-      - name: Install dependencies (V.2 — uv sync from uv.lock)
-        run: uv sync --frozen --extra dev --extra prod
-
-      - name: Install Playwright WebKit browser
-        # --with-deps requires apt-get sudo. On the self-hosted runner
-        # we pre-install system deps once (operator-side) so the
-        # per-job step can skip --with-deps. If this step fails on
-        # missing libs, run `sudo .venv/bin/playwright install-deps
-        # webkit` on the runner once and retry.
-        run: .venv/bin/playwright install webkit
-
-      - name: Set up biome
-        uses: biomejs/setup-biome@v2
-        with:
-          version: 2.4.14
-
-      - name: Run tests with coverage (pytest sessionstart runs pyright strict + biome)
-        env:
-          COVERAGE_FILE: .coverage.py3.13.selfhosted
-        run: .venv/bin/pytest --cov=recon_gen
-
-      # No coverage upload — spike is timing-only; combined coverage
-      # report still aggregates the managed `test` job's data.
 
   # P.7 — containerized integration job (Postgres leg).
   #
