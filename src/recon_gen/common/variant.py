@@ -170,26 +170,31 @@ def derive_default_fuzz_seed() -> int:
 
 def expand_full() -> list[VariantSpec]:
     """The 13-cell ``full`` default matrix (spike §"`full` matrix
-    definition", LOCKED 2026-05-08).
+    definition", LOCKED 2026-05-08; CA.7 swapped `sl` → `du`).
 
     Cells:
 
-    - 6 named-scenario × all-dialects × local: ``{sp, sq} × {pg, or, sl} × {lo}``
-    - 4 named-scenario × non-sqlite × aws:    ``{sp, sq} × {pg, or} × {aw}``
-    - 3 fuzz-seed × all-dialects × local:    ``{f<seed>} × {pg, or, sl} × {lo}``
+    - 6 named-scenario × all-dialects × local: ``{sp, sq} × {pg, or, du} × {lo}``
+    - 4 named-scenario × non-file-based × aws: ``{sp, sq} × {pg, or} × {aw}``
+    - 3 fuzz-seed × all-dialects × local:     ``{f<seed>} × {pg, or, du} × {lo}``
 
     The fuzz cells share **one** random seed across the 3 dialect cells
     so the same synthesized L2 topology gets exercised on PG / Oracle /
-    SQLite — cross-dialect coverage on identical input. ``--scenarios=fuzz:N``
-    (m.3 sub-flag composer territory) ramps this to N seeds × |dialect-axis|.
+    DuckDB — cross-dialect coverage on identical input.
+    ``--scenarios=fuzz:N`` (m.3 sub-flag composer territory) ramps this
+    to N seeds × |dialect-axis|.
 
     Excluded from default ``full`` per spike §"Invalid cells":
 
     - ``us_*_*``: requires operator yaml; opt-in via ``--scenarios=us:<path>``.
     - Fuzz on ``aw``: cost-control default; reachable via explicit
       ``--scenarios=fuzz:N --targets=aw``.
-    - ``<any>_sl_aw``: invalid cell (caught by `is_valid`); never
-      constructed here.
+    - ``<any>_du_aw`` / ``<any>_sl_aw``: invalid cells (caught by
+      `is_valid` — DuckDB + SQLite are both file-based); never constructed.
+
+    CA.7 — SQLite is still a valid manual opt-in via
+    ``--dialects=sl`` (the parser accepts it) but no longer appears
+    in the default 13-cell matrix. CA.8 removes the dialect entirely.
 
     Caller-side invariant: every returned spec satisfies ``is_valid()``.
     """
@@ -197,11 +202,11 @@ def expand_full() -> list[VariantSpec]:
 
     # Named scenarios × all dialects × local — 2 × 3 = 6 cells.
     for sc_named in ("sp", "sq"):
-        for di_local in ("pg", "or", "sl"):
+        for di_local in ("pg", "or", "du"):
             cells.append(VariantSpec(ScenarioCode(sc_named), di_local, "lo"))
 
-    # Named scenarios × non-sqlite dialects × aws — 2 × 2 = 4 cells.
-    # (sl × aw excluded by `is_valid`; not constructed.)
+    # Named scenarios × non-file-based dialects × aws — 2 × 2 = 4 cells.
+    # (du × aw + sl × aw excluded by `is_valid`; not constructed.)
     for sc_named in ("sp", "sq"):
         for di_aws in ("pg", "or"):
             cells.append(VariantSpec(ScenarioCode(sc_named), di_aws, "aw"))
@@ -210,7 +215,7 @@ def expand_full() -> list[VariantSpec]:
     # Same seed across dialects: cross-dialect coverage on identical L2.
     seed = derive_default_fuzz_seed()
     fuzz_code = ScenarioCode(f"f{seed}")
-    for di_local in ("pg", "or", "sl"):
+    for di_local in ("pg", "or", "du"):
         cells.append(VariantSpec(fuzz_code, di_local, "lo", fuzz_seed=seed))
 
     return cells
@@ -226,7 +231,7 @@ DEFAULT_SCENARIOS_NAMED: tuple[ScenarioCode, ...] = (
     ScenarioCode("sp"),
     ScenarioCode("sq"),
 )
-DEFAULT_DIALECTS: tuple[DialectCode, ...] = ("pg", "or", "sl")
+DEFAULT_DIALECTS: tuple[DialectCode, ...] = ("pg", "or", "du")
 DEFAULT_TARGETS: tuple[TargetCode, ...] = ("lo", "aw")
 
 

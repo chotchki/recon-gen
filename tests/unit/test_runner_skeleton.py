@@ -3727,7 +3727,7 @@ def test_full_matrix_includes_three_fuzz_cells_with_shared_seed() -> None:
     assert len(seeds) == 1
     # And they cover all 3 local dialects.
     dialects = {c.dialect for c in fuzz_cells}
-    assert dialects == {"pg", "or", "sl"}
+    assert dialects == {"pg", "or", "du"}  # CA.7 swapped sl→du
     assert all(c.target == "lo" for c in fuzz_cells)
 
 

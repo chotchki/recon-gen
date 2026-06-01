@@ -200,7 +200,7 @@ def test_expand_full_no_invalid_cells() -> None:
 
 
 def test_expand_full_named_local_cells() -> None:
-    """6 cells: ``{sp, sq} × {pg, or, sl} × {lo}``."""
+    """6 cells: ``{sp, sq} × {pg, or, du} × {lo}`` (CA.7 swapped sl→du)."""
     cells = expand_full()
     named_local = [
         c for c in cells
@@ -208,7 +208,7 @@ def test_expand_full_named_local_cells() -> None:
     ]
     assert len(named_local) == 6
     expected_names = {
-        f"{sc}_{di}_lo" for sc in ("sp", "sq") for di in ("pg", "or", "sl")
+        f"{sc}_{di}_lo" for sc in ("sp", "sq") for di in ("pg", "or", "du")
     }
     assert {c.name for c in named_local} == expected_names
 
@@ -236,7 +236,7 @@ def test_expand_full_fuzz_cells_share_seed() -> None:
     seeds = {c.fuzz_seed for c in fuzz_cells}
     assert len(seeds) == 1, f"expected all 3 fuzz cells to share one seed; got {seeds}"
     assert all(c.target == "lo" for c in fuzz_cells)
-    assert {c.dialect for c in fuzz_cells} == {"pg", "or", "sl"}
+    assert {c.dialect for c in fuzz_cells} == {"pg", "or", "du"}
 
 
 def test_expand_full_fuzz_excluded_from_aws() -> None:
@@ -302,17 +302,17 @@ def test_compose_targets_only_narrows() -> None:
     assert len(cells) == 6
     assert all(c.target == "lo" for c in cells)
     assert {c.scenario for c in cells} == {"sp", "sq"}
-    assert {c.dialect for c in cells} == {"pg", "or", "sl"}
+    assert {c.dialect for c in cells} == {"pg", "or", "du"}
 
 
 def test_compose_scenarios_only_named() -> None:
     """`--scenarios=sp` → {sp} × all dialects × all targets, filtered
-    for is_valid(). sp × {pg, or, sl} × {lo, aw} = 6 minus invalid
-    sp_sl_aw = 5 cells."""
+    for is_valid(). sp × {pg, or, du} × {lo, aw} = 6 minus invalid
+    sp_du_aw = 5 cells. (CA.7 swapped sl→du in DEFAULT_DIALECTS.)"""
     cells = compose_matrix(scenarios=[ScenarioSpec(ScenarioCode("sp"))])
     assert len(cells) == 5
     assert {c.name for c in cells} == {
-        "sp_pg_lo", "sp_or_lo", "sp_sl_lo", "sp_pg_aw", "sp_or_aw",
+        "sp_pg_lo", "sp_or_lo", "sp_du_lo", "sp_pg_aw", "sp_or_aw",
     }
 
 
@@ -362,7 +362,7 @@ def test_compose_default_constants() -> None:
     """Sanity check on the constants referenced when sub-flag axes are
     unspecified."""
     assert DEFAULT_SCENARIOS_NAMED == (ScenarioCode("sp"), ScenarioCode("sq"))
-    assert DEFAULT_DIALECTS == ("pg", "or", "sl")
+    assert DEFAULT_DIALECTS == ("pg", "or", "du")
     assert DEFAULT_TARGETS == ("lo", "aw")
 
 

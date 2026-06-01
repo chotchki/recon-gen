@@ -452,13 +452,14 @@ jobs:
   # ``tests/unit/test_layer1_query_sqlite.py`` + ``tests/audit/test_pdf_sqlite.py``;
   # this job is the App-2-against-SQLite cell those two couldn't cover.)
   #
-  # No ``--coverage`` (and not a ``coverage`` job dep) — same call as
-  # ``integration-oracle``: the SQLite dialect branches in
+  # CA.7 — `e2e-sqlite` was renamed `e2e-duckdb` and swapped to
+  # `--dialects=du`. The DuckDB dialect branches in
   # ``common/sql/dialect.py`` / ``common/l2/schema.py`` are already
-  # exercised by the ``test`` job's ``tests/schema/`` + the new SQLite
-  # unit suites, so the marginal coverage gain isn't worth wiring this
-  # job into the aggregator DAG.
-  e2e-sqlite:
+  # exercised by the ``test`` job's tests/schema + the unit suites, so
+  # the marginal coverage gain isn't worth wiring this job into the
+  # aggregator DAG. Once CA.8 lands and `sl` is gone, this job may
+  # absorb additional fan-out from the broader CB CI restructure.
+  e2e-duckdb:
     needs: test
     runs-on: ubuntu-latest
 
@@ -477,43 +478,42 @@ jobs:
 
       - name: Install dependencies (V.2 — uv sync from uv.lock)
         # `--extra prod` brings the App2 server stack (starlette /
-        # uvicorn / aiosqlite) — the `app2` layer serves the HTMX
-        # renderer in-process + reportlab/pypdf/pyhanko for audit. `--extra prod` covers it. Pre-BS.6 split was
-        # reportlab + pypdf so the `db` layer's audit-PDF render/verify
-        # lands its empty reviewer-signature widgets. `--extra e2e`
+        # uvicorn / aiosqlite + duckdb via [project.dependencies] core
+        # dep) and reportlab/pypdf/pyhanko for audit. `--extra e2e`
         # pulls pytest-xdist for the runner's `-n auto` unit prelude.
-        # No separate demo extra needed — SQLite uses stdlib `sqlite3` + aiosqlite,
-        # not psycopg.
+        # No separate demo extra needed — DuckDB ships a pure-Python
+        # wheel via the core deps, not psycopg.
         run: uv sync --frozen --extra dev --extra e2e --extra prod
 
       - name: Install Playwright WebKit browser
         # The `app2` chain layer runs `tests/e2e/test_html2_*` which
         # spawns Playwright (WebKit) against the in-process App2 server.
         # Same pattern the `test` job uses for `tests/js/`. v9.4.0
-        # regression: this step was missing in the e2e-sqlite job's
-        # original wiring, so every run failed with "Executable doesn't
-        # exist at /home/runner/.cache/ms-playwright/webkit-…/pw_run.sh".
+        # regression: this step was missing in the original e2e-sqlite
+        # wiring, so every run failed with "Executable doesn't exist at
+        # /home/runner/.cache/ms-playwright/webkit-…/pw_run.sh".
         run: .venv/bin/playwright install --with-deps webkit
 
       # The runner's `app2` chain layer fans `unit → db → app2` over
-      # the `--dialects=sl --targets=lo` cells (sp + sq scenarios, same
-      # default fan-out as `integration-pg`). `setup_variant` for `sl`
-      # is `_setup_local_sqlite()` — a tempdir DB + cfg, no Docker — so
-      # no `RECON_GEN_RUNNER_CI` / pre-provisioned URL is needed here
-      # (that path is only for the PG/Oracle GHA service containers).
-      # Pyright already passed in the `test` job (a hard `needs:`), so
-      # skip the sessionstart pyright gate to keep this job lean — the
-      # unit pytest still re-runs as the prelude (cheap fresh-env smoke).
-      - name: Run runner app2 layer against SQLite
+      # the `--dialects=du --targets=lo` cells (sp + sq scenarios,
+      # same default fan-out as `integration-pg`). `setup_variant` for
+      # `du` is `_setup_local_duckdb()` — a tempdir .duckdb + cfg, no
+      # Docker — so no `RECON_GEN_RUNNER_CI` / pre-provisioned URL is
+      # needed here (that path is only for the PG/Oracle GHA service
+      # containers). Pyright already passed in the `test` job (a hard
+      # `needs:`), so skip the sessionstart pyright gate to keep this
+      # job lean — the unit pytest still re-runs as the prelude (cheap
+      # fresh-env smoke).
+      - name: Run runner app2 layer against DuckDB
         env:
           RECON_GEN_SKIP_PYRIGHT: "1"
-        run: ./run_tests.sh up_to=app2 --dialects=sl --targets=lo
+        run: ./run_tests.sh up_to=app2 --dialects=du --targets=lo
 
       - name: Upload runner artifacts (triage parity)
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: e2e-sqlite-runs
+          name: e2e-duckdb-runs
           path: runs/
           if-no-files-found: warn
           retention-days: 7
