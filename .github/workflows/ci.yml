@@ -96,9 +96,16 @@ jobs:
         # named with a ``.py3.13`` suffix so the aggregator's
         # ``.coverage.*`` glob (kept for forward compatibility if a
         # second Python version is reintroduced) still matches.
+        # BY.1.1 — pytest-xdist (-n auto) on the self-hosted runner so
+        # the 5800X3D's 16 threads aren't wasted on a single-process
+        # run. conftest pins xdist's dist mode to `loadgroup` so
+        # `@pytest.mark.xdist_group` works for tests that need
+        # per-group serialization. The runner's layered ./run_tests.sh
+        # also uses -n auto; this brings the workflow-level pytest
+        # invocation into parity.
         env:
           COVERAGE_FILE: .coverage.py3.13
-        run: .venv/bin/pytest --cov=recon_gen
+        run: .venv/bin/pytest -n auto --cov=recon_gen
 
       - name: Upload coverage data
         uses: actions/upload-artifact@v7
