@@ -53,6 +53,7 @@ def render_training_v3_landing(
     v_overlay_exists: bool,
     session_status: str | None = None,
     enabled_kinds: tuple[str, ...] = (),
+    pending_kinds: tuple[str, ...] = (),
     form_values: Mapping[str, Mapping[str, str]] | None = None,
     failed_kinds: Mapping[str, str] | None = None,
     l2_stale: bool = False,
@@ -71,9 +72,15 @@ def render_training_v3_landing(
         Apply + Tour buttons.
       session_status: optional banner text to display.
       enabled_kinds: kinds whose checkboxes were last applied.
+      pending_kinds: BV.4.10.e — kinds the operator had checked when
+        they clicked Session Start, NOT yet applied. Rendered as
+        DOM-side check-on-load via inline JS so ``cb.defaultChecked``
+        still reflects only ``enabled_kinds`` and the diff preview
+        ("+N new — Apply to commit") works correctly.
       form_values: per-kind form-value snapshot.
     """
     enabled_set = set(enabled_kinds)
+    pending_set = set(pending_kinds) - enabled_set
     fv = form_values or {}
     failed = failed_kinds or {}
 
@@ -175,8 +182,9 @@ def render_training_v3_landing(
             title="Apply in progress",
             hint=(
                 f"applying {escape(n_str)} against the v overlay. "
-                "DL.9 fast path (no removals) skips the clone — "
-                "matview refresh is the dominant cost."
+                "Matview refresh is the dominant cost — "
+                "your existing planted state isn't re-cloned when "
+                "you're only adding new plants."
             ),
             finished_event="training-apply-finished",
             redirect_url="/training/?status=Apply+done.",
@@ -215,6 +223,32 @@ def render_training_v3_landing(
       overlay that all the Violation views read from; your production
       <code>{escape(base_prefix)}</code> prefix is untouched.
     </p>
+    <details class="mt-3 text-sm" data-test-training-workflow-help>
+      <summary class="cursor-pointer text-secondary-fg font-semibold">
+        How this page works
+      </summary>
+      <ol class="mt-2 ml-5 list-decimal text-secondary-fg max-w-3xl flex flex-col gap-1">
+        <li><strong>Session Start</strong> — populates a fresh
+          <code>{escape(base_prefix)}_v</code> overlay cloned from
+          your production data. Do this first when you arrive on this
+          page; your production prefix is untouched.</li>
+        <li><strong>Check the boxes</strong> next to violation kinds
+          you want to study (e.g., <em>drift</em>,
+          <em>overdraft</em>). Per-card primitives like "Days ago"
+          tune what gets planted.</li>
+        <li><strong>Apply selection</strong> — plants the chosen
+          kinds into the v overlay. Checked but not-yet-applied boxes
+          survive Session Start (your pending picks are restored).</li>
+        <li><strong>Clean dashboard / Violation dashboard</strong>
+          links on each card open the same dashboard side-by-side,
+          one reading from base (no planted rows) and one from
+          <code>{escape(base_prefix)}_v</code> (with the planted
+          violation visible).</li>
+        <li><strong>Cleanup</strong> when you're done — drops the v
+          overlay entirely. Reversible: click Session Start again to
+          re-clone.</li>
+      </ol>
+    </details>
     {_render_session_controls(v_overlay_exists, any_op_running=(session_start_running or apply_running))}
   </header>
   <main class="px-8 py-6 flex flex-col gap-4">
@@ -264,6 +298,14 @@ def render_training_v3_landing(
       </div>
     </form>
   </main>
+  <script>
+    // BV.4.10.e — pending_kinds carried across Session Start. The
+    // landing JS reads this at init time and sets `cb.checked = true`
+    // for matching kinds WITHOUT touching `defaultChecked`, so the
+    // diff preview ("+N new") shows the operator's selection survived
+    // but is still uncommitted to v_config_kv.
+    window._bvPendingKinds = {_pending_kinds_js_array(pending_set)};
+  </script>
   <script>
 {_BV_LANDING_JS}
   </script>
@@ -472,7 +514,9 @@ def _render_session_controls(
     )
     return f"""
     <div class="mt-3 inline-flex items-center gap-2">
-      <form method="post" action="/training/session-start" class="inline-block">
+      <form method="post" action="/training/session-start" id="training-session-start-form"
+            onsubmit="return window._bvCarryPendingToSessionStart(this)"
+            class="inline-block">
         <button type="submit" id="training-session-start-btn"{disabled_attr}
                 class="px-3 py-1.5 bg-accent text-accent-fg rounded-sm border border-accent text-xs font-semibold hover:opacity-85{disabled_cls}"
                 title="{escape(session_start_title)}">
@@ -691,6 +735,17 @@ _ = PlantCategory
 _ = Iterable
 
 
+def _pending_kinds_js_array(pending_set: set[str]) -> str:
+    """BV.4.10.e — render the pending-kinds set as a JS array literal
+    suitable for ``window._bvPendingKinds = ...``. Kind names are
+    ASCII identifiers (validated at registry-build time), so quoting
+    with JSON-style double quotes is sufficient — no XSS surface."""
+    if not pending_set:
+        return "[]"
+    quoted = ", ".join(f'"{kind}"' for kind in sorted(pending_set))
+    return f"[{quoted}]"
+
+
 # -- Landing-page JS (bulk-toggle chips + Show filter) ----------------------
 #
 # Small enough to inline. Adds three window-scoped helpers the buttons
@@ -701,6 +756,22 @@ _ = Iterable
 _BV_LANDING_JS = """
 (function () {
   const root = document;
+  // BV.4.10.e (P1.2) — re-apply the operator's pending checkbox state
+  // that was carried across the Session Start redirect. We set
+  // `cb.checked = true` AFTER the DOM parses, leaving
+  // `cb.defaultChecked` reflecting only the server-side applied state.
+  // So the diff preview correctly reads "+N new — Apply to commit"
+  // for the pending picks. Defer the density/diff recompute to the
+  // tail of the IIFE (see `updateDensity()` + `updateApplyDiff()`
+  // calls just before close) so the counters reflect the restored
+  // pending state, not the stale committed state.
+  const _bvPending = (window._bvPendingKinds || []);
+  if (_bvPending.length > 0) {
+    const _bvPendingSet = new Set(_bvPending);
+    root.querySelectorAll('input[type="checkbox"][name="enabled_kinds"]').forEach(cb => {
+      if (_bvPendingSet.has(cb.value)) cb.checked = true;
+    });
+  }
   function checkboxes(scope) {
     return scope.querySelectorAll('input[type="checkbox"][name="enabled_kinds"]');
   }
@@ -793,7 +864,42 @@ _BV_LANDING_JS = """
     }
   });
   // Initial sync — the page may render with prior pending changes
-  // if the operator's browser preserved form state across a reload.
+  // if the operator's browser preserved form state across a reload,
+  // OR if BV.4.10.e carried pending_kinds across a Session Start.
+  // Run density first so the top + per-family counters reflect the
+  // restored DOM state, then diff so the sticky-Apply bar matches.
+  updateDensity();
   updateApplyDiff();
 })();
+
+// BV.4.10.e (P1.2) — preserve the operator's pending checkbox state
+// across a Session Start. Without this, clicking Session Start while
+// you have boxes checked silently discards them because the
+// post→redirect→render cycle re-renders from server state (which
+// reflects `trainer_applied_plants` only, not in-flight DOM mutation).
+// We collect the current checked-box set from the apply form and
+// append them as hidden inputs on the session-start form just before
+// submission; the server stashes them in module state, the next
+// landing render restores them as the checkbox's HTML `checked`
+// attribute (so the operator's selection survives end-to-end).
+window._bvCarryPendingToSessionStart = function(sessionStartForm) {
+  var applyForm = document.getElementById("training-apply-form");
+  if (!applyForm) return true;
+  // Remove any prior carried inputs (defensive — if the operator
+  // double-clicked, we don't want duplicates).
+  sessionStartForm.querySelectorAll('input[data-bv-carried]').forEach(function(el) {
+    el.parentNode.removeChild(el);
+  });
+  applyForm.querySelectorAll('input[type="checkbox"][name="enabled_kinds"]').forEach(function(cb) {
+    if (cb.checked) {
+      var hidden = document.createElement("input");
+      hidden.type = "hidden";
+      hidden.name = "pending_kinds";
+      hidden.value = cb.value;
+      hidden.setAttribute("data-bv-carried", "1");
+      sessionStartForm.appendChild(hidden);
+    }
+  });
+  return true;
+};
 """

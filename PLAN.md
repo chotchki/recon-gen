@@ -179,7 +179,7 @@ The full L2 + ETL + Training round-trip. Glues everything under one e2e test. **
     - [x] BV.3.3.b - **Driver verbs.** Extend `tests/e2e/_drivers/app2.py::App2Driver` with Trainer verbs: `open_training`, `start_session`, `enable_plant(kind, form_values)`, `apply_selection`, `take_violation_tour(kind)`, `dashboard_surface_contains(visual_title, value)`. Refactor BV.3.3.a to drive through them — pins the verb shape before BV.3.3.c parametrizes over the registry.
     - [ ] BV.3.3.c - **Full-registry walk (sqlite). Status: 12/15 pass; 3 plant-doesn't-surface bugs + 1 false-positive concern.** Single-Session-Start cumulative walk over matview-bound, dashboard-bound kinds (15). Signature picker reads `PRAGMA table_info` + intersects with a priority column list so per-matview signature shape derives from the schema (no hardcoded per-kind map drifting from reality). Accordion-open detection (only click `<details>` summary when not already open). Multi-table-on-page read (drift sheet has 2). Remaining failures are real-bug signals: BV.3.3.c.bug1/2/3 (plant-doesn't-surface) + bug4 (chain-coherence sig matches only on date). Test stays red until those land; that's the intent (no xfail sweeping). Mark complete when bugs 1-3 fixed AND bug 4 strict-signature lands.
       - [x] BV.3.3.c.bug1 - BV.3.3.c.bug1 — ledger_drift plant doesn't surface row in v_ledger_drift matview
-      - [ ] BV.3.3.c.bug2 - BV.3.3.c.bug2 — stuck_unbundled plant lands but dashboard doesn't render cust-0002-snb
+      - [x] BV.3.3.c.bug2 - BV.3.3.c.bug2 — stuck_unbundled plant lands but dashboard doesn't render cust-0002-snb
       - [x] BV.3.3.c.bug3 - BV.3.3.c.bug3 — expected_eod_balance_breach plant lands but dashboard doesn't render acct-eod-ACHOrigSettlement
       - [ ] BV.3.3.c.bug4 - BV.3.3.c.bug4 — chain-coherence kinds match only on business_day (potentially false positive)
     - [ ] BV.3.3.d - **PG variant via Docker.** Reuse `tests/e2e/_studio_deploy_helpers::docker_available` skipif + ephemeral pg container per `[feedback_ephemeral_aws_infra]`. Schema apply + seed + matview-refresh paths must work against pg without driver changes. Parametrize the full registry walk over the dialect axis.
@@ -200,6 +200,7 @@ The full L2 + ETL + Training round-trip. Glues everything under one e2e test. **
     - [x] BV.4.10.a - BV.4.10.a — Currently-planted badge per card
     - [x] BV.4.10.b - BV.4.10.b — Apply diff preview (live client-side)
     - [x] BV.4.10.d - BV.4.10.d — Streaming progress page for Session Start
+    - [ ] BV.4.10.e - BV.4.10.e — Preserve pending checkbox state across Session Start
 - [ ] BV.5 - Agent-based design cold-read against the dogfood + the HUGE test. Output: `docs/audits/bv_cold_read.md`. Operator iteration + sign-off.
 
 - [ ] BV.6 - BV.6 — PG matview refresh modernization (CONCURRENTLY); Oracle/SQLite unchanged

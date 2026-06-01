@@ -3965,6 +3965,12 @@ def make_studio_routes(
     # status message can match the operator's pre-click expectation.
     _training_start_state: dict[str, object] = {
         "task": None, "events": [], "started_at": None,
+        # BV.4.10.e (P1.2) — pending checkbox state operator had at
+        # the moment they clicked Session Start. Preserved here so the
+        # post-redirect landing render can re-apply the selection
+        # (without it, the operator silently loses their in-flight
+        # picks). Cleared after the next Apply consumes them.
+        "pending_kinds": frozenset(),
     }
     _training_apply_state: dict[str, object] = {
         "task": None, "events": [], "started_at": None,
@@ -4306,6 +4312,17 @@ def make_studio_routes(
             int(cast(int, _training_apply_state.get("pending_count") or 0))
             if apply_running else 0
         )
+        # BV.4.10.e — pending_kinds carries the operator's pre-Session-
+        # Start checkbox state forward across the redirect. The render
+        # emits them as DOM-side check-on-load (not HTML `checked`
+        # attr) so cb.defaultChecked still reflects only applied
+        # state; the diff preview then correctly shows "+N new".
+        pending_kinds_obj = _training_start_state.get("pending_kinds")
+        pending_kinds: tuple[str, ...] = (
+            tuple(sorted(cast(frozenset[str], pending_kinds_obj)))
+            if isinstance(pending_kinds_obj, frozenset)
+            else ()
+        )
         return HTMLResponse(render_training_v3_landing(
             top_nav_html=_top_nav_html("/training/"),
             theme_head=studio_theme_head(instance),
@@ -4313,6 +4330,7 @@ def make_studio_routes(
             v_overlay_exists=v_overlay_exists,
             session_status=session_status,
             enabled_kinds=tuple(applied.keys()),
+            pending_kinds=pending_kinds,
             form_values=applied,
             failed_kinds=failed,
             l2_stale=l2_stale,
@@ -4499,7 +4517,7 @@ def make_studio_routes(
     # ---- BV.4.0 vertical slice — v-overlay POST handlers ----
 
     async def training_session_start(
-        _request: Request,
+        request: Request,
     ) -> RedirectResponse:
         """POST /training/session-start — full lifecycle (DL.10).
 
@@ -4507,7 +4525,15 @@ def make_studio_routes(
         /training/. The landing page detects the in-flight task and
         renders a banner + collapsible live-tail (BTa.9 pattern).
         Double-click guard: re-POSTing while a run is in flight is
-        a no-op redirect."""
+        a no-op redirect.
+
+        BV.4.10.e (P1.2) — operator's in-flight checkbox state arrives
+        as ``pending_kinds`` form fields (JS-populated from the apply
+        form before submit; see ``_bvCarryPendingToSessionStart`` in
+        ``_studio_training_v3._BV_LANDING_JS``). Captured into module
+        state so the next landing render restores the operator's
+        selection — without this, Session Start silently discards it
+        on the post→redirect→render cycle (cold-read v3 P1.2)."""
         import asyncio  # noqa: PLC0415
 
         if cfg is None:
@@ -4515,6 +4541,19 @@ def make_studio_routes(
         existing = _training_start_state.get("task")
         if isinstance(existing, asyncio.Task) and not existing.done():
             return RedirectResponse(url="/training/", status_code=303)
+        # BV.4.10.e — read pending_kinds before spawning the task.
+        # Starlette's request.form() reads the multipart/urlencoded
+        # body; we accept all values for the ``pending_kinds`` field
+        # (one hidden input per checked kind, all named identically).
+        pending: frozenset[str]
+        try:
+            form = await request.form()
+            pending = frozenset(
+                str(v) for v in form.getlist("pending_kinds")
+            )
+        except Exception:  # noqa: BLE001
+            pending = frozenset()
+        _training_start_state["pending_kinds"] = pending
 
         from recon_gen.common.l2.v_overlay import session_start  # noqa: PLC0415
 
@@ -4551,19 +4590,46 @@ def make_studio_routes(
         incremental: Force rebuild is the "throw out v overlay
         entirely" escape hatch the operator reaches for when they
         want fresh ground regardless of the ledger's view of
-        already-applied plants. Skips /etl/run; base stays as-is."""
+        already-applied plants. Skips /etl/run; base stays as-is.
+
+        BV.4.10.f (P3.1) — spawn as a detached task using the same
+        ``_training_start_state`` slot as Session Start, so the
+        landing render shows the streaming progress page instead of
+        a frozen browser. On SQLite the op is sub-second so the page
+        flashes through; on Postgres / Oracle it can be seconds-to-
+        tens-of-seconds and the streaming page becomes essential."""
+        import asyncio  # noqa: PLC0415
+
         if cfg is None:
             return RedirectResponse(url="/training/", status_code=303)
+        existing = _training_start_state.get("task")
+        if isinstance(existing, asyncio.Task) and not existing.done():
+            return RedirectResponse(url="/training/", status_code=303)
+
         from recon_gen.common.l2.v_overlay import session_start  # noqa: PLC0415
 
-        await session_start(
-            cfg, cache.get(),
-            refresh_base=False, l2_yaml_path=cache.path,
-        )
-        return RedirectResponse(
-            url="/training/?status=v+overlay+rebuilt+from+base+%E2%80%94+Apply+state+wiped.",
-            status_code=303,
-        )
+        live_events: list[Mapping[str, object]] = []
+        _training_start_state["events"] = live_events
+        _training_start_state["started_at"] = datetime.now()  # typing-smell: ignore[no-datetime-now]: BV.4.10.f wall-clock anchor mirrors Session Start
+
+        async def _tee(payload: Mapping[str, object]) -> None:
+            live_events.append(dict(payload))
+
+        _cfg = cfg
+
+        async def _run_reclone() -> None:
+            try:
+                await session_start(
+                    _cfg, cache.get(),
+                    refresh_base=False, l2_yaml_path=cache.path,
+                    dev_log=_tee,
+                )
+            finally:
+                _training_start_state["task"] = None
+
+        task = asyncio.create_task(_run_reclone())
+        _training_start_state["task"] = task
+        return RedirectResponse(url="/training/", status_code=303)
 
     async def training_cleanup(_request: Request) -> RedirectResponse:
         """POST /training/cleanup — drops the v overlay. Base prefix
@@ -4587,6 +4653,10 @@ def make_studio_routes(
 
         if cfg is None:
             return RedirectResponse(url="/training/", status_code=303)
+        # BV.4.10.e — Apply consumes whatever the operator selected,
+        # so any pending_kinds carried across a prior Session Start
+        # have been applied to the form. Clear the carry-state.
+        _training_start_state["pending_kinds"] = frozenset()
         from recon_gen.common.l2.plant_registry import (  # noqa: PLC0415
             PLANT_REGISTRY,
             get_entry,
