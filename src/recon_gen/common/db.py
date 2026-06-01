@@ -20,6 +20,7 @@ config — see PLAN.md P.9d). X.3 added the SQLite arm using the stdlib
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import time
 from collections.abc import AsyncGenerator, Sequence
@@ -902,6 +903,131 @@ class _AsyncSqlitePool:
         await self._pool.close()
 
 
+class _AsyncDuckdbCursor:
+    """CA.4 — async-shaped cursor result adapter for sync DuckDB.
+
+    DuckDB's Python driver is sync-only; ``_AsyncDuckdbConnection.execute``
+    runs the query + ``fetchall()`` synchronously under
+    ``asyncio.to_thread``, then stashes the rows + description here so
+    the ``AsyncCursor`` Protocol's later ``await fetchall()`` is a
+    no-op return.
+    """
+
+    def __init__(
+        self,
+        rows: list[Any],  # typing-smell: ignore[explicit-any]: DB-API rows are heterogeneous per the SQL contract
+        description: Sequence[Sequence[Any]] | None,  # typing-smell: ignore[explicit-any]: DB-API cursor.description tuples carry mixed types per column
+    ) -> None:
+        self._rows = rows
+        self._description = description
+
+    @property
+    def description(self) -> Sequence[Sequence[Any]] | None:  # typing-smell: ignore[explicit-any]: DB-API cursor.description shape
+        return self._description
+
+    async def fetchall(self) -> list[Any]:  # typing-smell: ignore[explicit-any]: rows are heterogeneous; per-call shape lives in the SQL contract
+        return self._rows
+
+
+class _AsyncDuckdbConnection:
+    """CA.4 — async adapter over a sync ``duckdb.DuckDBPyConnection``.
+
+    DuckDB has no native async driver. The adapter dispatches each
+    ``execute(query, params)`` call onto a worker thread via
+    ``asyncio.to_thread``, eagerly materializes rows + description,
+    and returns an ``_AsyncDuckdbCursor`` carrying both. Eager
+    materialization (sync ``fetchall()`` inside the thread) keeps the
+    later ``await cursor.fetchall()`` a no-op — matches the App2
+    executor's "one-shot execute + fetchall" usage.
+
+    Connection-thread-safety caveat (see ``_AsyncDuckdbPool``): DuckDB
+    connections are NOT thread-safe; the pool gives each acquire its
+    OWN connection, and that connection is bound to whichever thread
+    eventually runs the ``asyncio.to_thread`` calls. Don't share an
+    ``_AsyncDuckdbConnection`` across acquire scopes.
+    """
+
+    def __init__(self, conn: Any) -> None:  # typing-smell: ignore[explicit-any]: duckdb.DuckDBPyConnection has no PEP 561 stubs at strict
+        self._conn = conn
+
+    async def execute(
+        self,
+        query: str,
+        params: Any = None,  # typing-smell: ignore[explicit-any]: bind params dict — driver coerces per-driver; no shared Protocol covers the dict + list shapes DuckDB accepts
+        /,
+    ) -> AsyncCursor:
+        conn = self._conn
+
+        def _run() -> tuple[list[Any], Sequence[Sequence[Any]] | None]:  # typing-smell: ignore[explicit-any]: see class docstring
+            if params is None:
+                cur = conn.execute(query)
+            else:
+                cur = conn.execute(query, params)
+            rows = cur.fetchall()
+            desc = cur.description
+            return rows, desc
+
+        rows, desc = await asyncio.to_thread(_run)
+        return _AsyncDuckdbCursor(rows, desc)
+
+
+class _AsyncDuckdbPool:
+    """CA.4 — one-root-connection + cursor-per-acquire pool for the
+    App2 async DuckDB path.
+
+    DuckDB has no aiosqlite-equivalent async driver. Two empirical
+    constraints settled the pool shape (probed against duckdb 1.5.3):
+
+    1. **Only one process may open a given ``.duckdb`` file at a time
+       AND only one ``duckdb.connect(path)`` per process per file** —
+       a second ``connect()`` call against the same path from the same
+       process raises ``BinderException: Unique file handle conflict``.
+       This rules out the "fresh-connect-per-acquire" pattern that
+       ``_AsyncSqlitePool`` uses (aiosqlite has no such constraint).
+
+    2. **``connection.cursor()`` returns a fresh thread-safe
+       ``DuckDBPyConnection``** — a separate object that shares the
+       underlying database but can be used concurrently from another
+       thread without colliding with the root connection's locks.
+       (The reference API doc says ``cursor()`` "creates a duplicate
+       of the current connection"; the parallelism overview claims
+       it's just another handle, but a probe of 8 parallel threads
+       each running queries via ``root.cursor()`` succeeds cleanly.)
+
+    Pool shape: open ONE root ``duckdb.connect(path)`` at construction;
+    each ``acquire()`` calls ``root.cursor()`` to fork a fresh
+    sub-connection. Cursor close is cheap (no file I/O). Pool close
+    tears down the root. ``max_size`` semaphore bounds in-flight
+    cursors so a spike of parallel requests doesn't pile up handles.
+    """
+
+    def __init__(self, path: str, *, max_size: int = 10) -> None:
+        import duckdb  # noqa: PLC0415
+
+        self._path = path
+        self._sem = asyncio.Semaphore(max_size)
+        # Open the root eagerly so a bad path / corrupt file surfaces
+        # at construction (server startup) rather than first request.
+        self._root: Any = duckdb.connect(path)  # typing-smell: ignore[explicit-any]: duckdb.DuckDBPyConnection has no PEP 561 stubs at strict
+
+    def acquire(self) -> AbstractAsyncContextManager[AsyncConnection]:
+        return self._acquire()
+
+    @asynccontextmanager
+    async def _acquire(self) -> AsyncGenerator[AsyncConnection, None]:
+        async with self._sem:
+            cursor_conn = await asyncio.to_thread(self._root.cursor)
+            try:
+                yield _AsyncDuckdbConnection(cursor_conn)
+            finally:
+                await asyncio.to_thread(cursor_conn.close)
+
+    async def close(self) -> None:
+        if self._root is not None:
+            await asyncio.to_thread(self._root.close)
+            self._root = None
+
+
 async def make_connection_pool(
     cfg: Config, *, max_size: int = 10,
 ) -> AsyncConnectionPool:
@@ -965,6 +1091,21 @@ async def make_connection_pool(
             dsn=oracle_dsn(cfg.demo_database_url), min=1, max=max_size,
         )
         return _AsyncOraclePool(pool)
+    if cfg.dialect is Dialect.DUCKDB:
+        # CA.4 — core dep, no extras-install gate. Probe to surface a
+        # missing wheel at pool-construction time so Studio's startup
+        # fails loudly rather than at first request.
+        try:
+            import duckdb as _duckdb_probe  # noqa: PLC0415, F401
+        except ImportError as e:
+            raise ImportError(
+                "duckdb is required for the DuckDB pool. It's a core "
+                "dependency — run `uv sync` (or `pip install duckdb`)."
+            ) from e
+        del _duckdb_probe
+        return _AsyncDuckdbPool(
+            duckdb_path(cfg.demo_database_url), max_size=max_size,
+        )
     if cfg.dialect is Dialect.SQLITE:
         # Probe the import here so a missing aiosqlite surfaces at
         # pool-construction time (server startup) instead of inside

@@ -447,7 +447,7 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [x] CA.0 - CA.0 — Spike: DuckDB swap viability (JSON, row counts, perf)
 - [x] CA.1 - CA.1 — Add Dialect.DUCKDB enum + dialect dispatch plumbing
 - [x] CA.2 - CA.2 — Port dialect helpers (json_value, fetch_first_one_row, etc.) to DuckDB
-- [ ] CA.3 - CA.3 — Swap _setup_local_sqlite to _setup_local_duckdb in runner
+- [x] CA.3 - CA.3 — Swap _setup_local_sqlite to _setup_local_duckdb in runner
 - [ ] CA.4 - CA.4 — Update Studio's persist path to target .duckdb files
 - [ ] CA.5 - CA.5 — Delete BZ.0's SQLite-only scratch-table workaround
 - [ ] CA.6 - CA.6 — Re-lock seeds + semantic_lock fixtures for DuckDB
