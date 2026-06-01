@@ -495,23 +495,20 @@ def _emit_sqlite_current_matview_creates(p: str) -> str:
 def _render_computed_subledger_balance_section(
     prefix: str, dialect: Dialect,
 ) -> str:
-    """BZ.0 — emit the computed_subledger_balance matview block.
+    """Emit the computed_subledger_balance matview block.
 
-    Dialect-specific shape (semantics differ across matview engines):
-
-    * **SQLite** — matview is a plain ``CREATE TABLE AS SELECT`` (a
-      snapshot). We precompute the per-(account, posting) running sum
-      into an indexed scratch table, then the matview's correlated
-      ``LIMIT 1`` lookup runs in O(log K). Scratch is dropped at the
-      tail of the section — no lingering artifacts after refresh.
-
-    * **Postgres + Oracle** — matview is a ``MATERIALIZED VIEW`` that
-      stores the query DEFINITION (not just the snapshot). Dropping
-      the scratch table after the CREATE would cascade-drop the
-      matview (PG) or break refresh (Oracle). Both planners
-      ALREADY handle correlated SUM-WHERE-posting<=day subqueries
-      well (per the BX spike audit), so we keep the original
-      single-CREATE-MATERIALIZED-VIEW shape on these dialects.
+    CA.5 collapsed the dialect split: the BZ.0 SQLite-only
+    scratch-table + index workaround was removed. Per the CA.0
+    DuckDB spike, DuckDB's vectorized executor + cost-based
+    optimizer handle the original correlated ``SUM(...) WHERE
+    posting <= day`` subquery natively (in fact ~8% faster than the
+    scratch-table form at ~1M rows on DuckDB). PG + Oracle have
+    always handled the correlated pattern via their planners' hash-
+    grouped rewrite. SQLite — slated for removal in CA.8 — now
+    falls through to the same body; the perf regression is
+    negligible at SQLite's typical test scale (12-50k base tx) and
+    only surfaces at the ~1M scale (~133s vs the scratch form's
+    22.9s) the SQLite cells never exercise post-CA.
 
     The output column shape is identical across all dialects: 4 key
     columns (account_id, business_day_start, business_day_end,
@@ -519,8 +516,6 @@ def _render_computed_subledger_balance_section(
     semantic-lock test (BZ.4) verifies row-for-row equivalence.
     """
     from recon_gen.common.sql.dialect import (  # noqa: PLC0415
-        drop_table_if_exists,
-        fetch_first_one_row,
         matview_create_keyword,
         matview_options,
     )
@@ -542,76 +537,11 @@ def _render_computed_subledger_balance_section(
         f"    ON {p}_computed_subledger_balance (account_id, business_day_start);"
     )
 
-    if dialect is Dialect.SQLITE:
-        # Scratch-table + indexed-lookup shape: SQLite's planner can't
-        # rewrite the correlated subquery, so we materialize the running
-        # sum + index it ourselves. Drop scratch after — the matview
-        # is a snapshot so it doesn't depend on the table going forward.
-        drop_pre = drop_table_if_exists(f"{p}_csb_scratch", dialect)
-        drop_post = drop_table_if_exists(f"{p}_csb_scratch", dialect)
-        fetch = fetch_first_one_row(dialect)
-        return (
-            f"{header}"
-            f"-- BZ.0 (SQLite): scratch + index sidesteps the planner's missing\n"
-            f"-- correlated-SUM rewrite. Original O(D × A × K) cost on this dialect\n"
-            f"-- (~133s @ 1M rows); scratch-table form lands at O(N log N).\n"
-            f"-- The scratch is dropped at the tail of this block.\n"
-            f"-- ---------------------------------------------------------------------\n"
-            f"{drop_pre}\n"
-            f"CREATE TABLE {p}_csb_scratch AS\n"
-            f"WITH tx_day_sums AS (\n"
-            f"    SELECT\n"
-            f"        tx.account_id,\n"
-            f"        tx.posting,\n"
-            f"        SUM(tx.amount_money) AS day_delta\n"
-            f"    FROM {p}_current_transactions tx\n"
-            f"    WHERE tx.status = 'Posted'\n"
-            f"    GROUP BY tx.account_id, tx.posting\n"
-            f")\n"
-            f"SELECT\n"
-            f"    account_id,\n"
-            f"    posting,\n"
-            f"    SUM(day_delta) OVER (\n"
-            f"        PARTITION BY account_id\n"
-            f"        ORDER BY posting\n"
-            f"        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW\n"
-            f"    ) AS rs\n"
-            f"FROM tx_day_sums;\n"
-            f"CREATE INDEX idx_{p}_csb_scratch\n"
-            f"    ON {p}_csb_scratch (account_id, posting DESC);\n"
-            f"\n"
-            f"{mv_kw} {p}_computed_subledger_balance{mv_opt} AS\n"
-            f"SELECT\n"
-            f"    sb.account_id,\n"
-            f"    sb.business_day_start,\n"
-            f"    sb.business_day_end,\n"
-            f"    sb.account_parent_role,\n"
-            f"    COALESCE((\n"
-            f"        SELECT tr.rs\n"
-            f"        FROM {p}_csb_scratch tr\n"
-            f"        WHERE tr.account_id = sb.account_id\n"
-            f"          AND tr.posting <= sb.business_day_end\n"
-            f"        ORDER BY tr.posting DESC\n"
-            f"        {fetch}\n"
-            f"    ), 0) AS computed_balance\n"
-            f"FROM {p}_current_daily_balances sb\n"
-            f"WHERE sb.account_scope = 'internal'\n"
-            f"  AND sb.account_parent_role IS NOT NULL;\n"
-            f"{matview_index}\n"
-            f"-- Scratch cleanup — transient table is no longer needed.\n"
-            f"{drop_post}"
-        )
-
-    # Postgres + Oracle: stick with the original correlated-subquery
-    # shape. Both planners detect this pattern and rewrite it as a
-    # hash-grouped join (PG) or similar (Oracle); the original 7s @
-    # 250k on SQLite is sub-second on these engines natively, so no
-    # scratch-table workaround is needed.
     return (
         f"{header}"
-        f"-- BZ.0 (PG/Oracle): native MATERIALIZED VIEW + correlated SUM —\n"
-        f"-- both dialects' planners detect this pattern; SQLite has its own\n"
-        f"-- scratch-table form (see Dialect.SQLITE branch).\n"
+        f"-- Native MATERIALIZED VIEW + correlated SUM — PG/Oracle/DuckDB\n"
+        f"-- planners all rewrite this to a hash-grouped scan; SQLite (slated\n"
+        f"-- for removal in CA.8) accepts the same shape but pays a planner cost.\n"
         f"-- ---------------------------------------------------------------------\n"
         f"{mv_kw} {p}_computed_subledger_balance{mv_opt} AS\n"
         f"SELECT\n"
