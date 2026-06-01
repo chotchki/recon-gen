@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # workflow_dispatch lets operators manually fire CI on any branch
+  # (e.g. to validate a feature branch before merging). Added BY.1 so
+  # the canonical self-hosted runner change could be verified on a
+  # feature branch without re-expanding push: branches.
+  workflow_dispatch:
 
 # Auto-cancel superseded runs on the same branch. A rapid follow-up
 # push doesn't need the older commit's CI to finish — it's been
@@ -30,7 +35,15 @@ jobs:
     # parallel push-CI burns AWS rate-limit budget contending with it.
     # Downstream jobs `needs: test`, so skipping here skips everything.
     if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Release v')
-    runs-on: ubuntu-latest
+    # BY.1 — promoted from ubuntu-latest to self-hosted. The BY.0 spike
+    # measured 48 min on self-hosted vs 68 min on ubuntu-latest for the
+    # same suite (1.4× speedup). recon-gen-ci-local is the WSL2 Ubuntu
+    # runner on the 5800X3D / 64GB Windows box (per BY.4 ops doc).
+    # Playwright WebKit system deps + libatomic1 are pre-installed on
+    # the runner so `playwright install` can run without --with-deps
+    # (which would need sudo). If a future restore to ubuntu-latest is
+    # needed, set runs-on: ubuntu-latest and restore `--with-deps`.
+    runs-on: [self-hosted, recon-gen-ci-local]
 
     steps:
       - uses: actions/checkout@v6
@@ -58,10 +71,12 @@ jobs:
         # X.2.a.2 added a Playwright JS unit harness under tests/js/
         # that launches WebKit. Playwright ships its CLI but not the
         # browser binaries; CI must `playwright install` the browser
-        # explicitly. Otherwise pytest fails with
-        # "Executable doesn't exist at /home/runner/.cache/ms-playwright/webkit-…/pw_run.sh"
-        # — same install used by the e2e workflow's browser job.
-        run: .venv/bin/playwright install --with-deps webkit
+        # explicitly. BY.1 dropped `--with-deps`: self-hosted WSL2
+        # runner has the WebKit system libs pre-installed, so the
+        # bootstrap apt-get install (which needs sudo) is no longer
+        # needed per-job. On a fresh runner replacement, run the
+        # one-time bootstrap from BY.4's ops doc.
+        run: .venv/bin/playwright install webkit
 
       - name: Set up biome
         # biome is a standalone Rust binary (no Node / npm — setup-biome
@@ -81,9 +96,16 @@ jobs:
         # named with a ``.py3.13`` suffix so the aggregator's
         # ``.coverage.*`` glob (kept for forward compatibility if a
         # second Python version is reintroduced) still matches.
+        # BY.1.1 — pytest-xdist (-n auto) on the self-hosted runner so
+        # the 5800X3D's 16 threads aren't wasted on a single-process
+        # run. conftest pins xdist's dist mode to `loadgroup` so
+        # `@pytest.mark.xdist_group` works for tests that need
+        # per-group serialization. The runner's layered ./run_tests.sh
+        # also uses -n auto; this brings the workflow-level pytest
+        # invocation into parity.
         env:
           COVERAGE_FILE: .coverage.py3.13
-        run: .venv/bin/pytest --cov=recon_gen
+        run: .venv/bin/pytest -n auto --cov=recon_gen
 
       - name: Upload coverage data
         uses: actions/upload-artifact@v7
