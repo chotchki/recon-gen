@@ -183,6 +183,12 @@ def render_training_v3_landing(
   <title>Studio · Training · Dual-prefix v</title>
   {devlog_meta}{theme_head}
   <link rel="stylesheet" href="{escape(asset_url)}">
+  <!-- BV.4.10.d — htmx loaded for the Session-Start live tail's
+       hx-get polling. Pre-BV.4.10.d the page had zero hx-* attrs
+       (form posts went through native browser submit), so htmx
+       wasn't loaded — and the freshly-added hx-get poll silently
+       no-op'd. -->
+  <script src="/static/vendor/js/htmx.min.js" defer></script>
   {devlog_script}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
