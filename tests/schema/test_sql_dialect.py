@@ -524,8 +524,10 @@ class TestSqliteMatviews:
         # matview body SELECT — which lives in the schema template,
         # not in this helper. The dialect helper raises so callers get
         # routed through ``refresh_matviews_sql`` in common.l2.schema.
+        # CA.2 — message gained a dynamic dialect prefix ("sqlite refresh
+        # requires…" / "duckdb refresh requires…") for cross-dialect parity.
         import pytest as _pytest
-        with _pytest.raises(NotImplementedError, match="SQLite refresh"):
+        with _pytest.raises(NotImplementedError, match="sqlite refresh"):
             refresh_matview("p_drift", SQLITE)
 
     def test_analyze_table(self):
