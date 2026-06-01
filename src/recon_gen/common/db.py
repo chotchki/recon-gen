@@ -169,8 +169,23 @@ def connect_demo_db(cfg: Config) -> Any:  # typing-smell: ignore[explicit-any]: 
         # `STDDEV_SAMP` ships natively (the inv_pair_rolling_anomalies
         # matview's aggregate); no need for the SQLite-style aggregate
         # registration. FK enforcement is on by default in DuckDB.
+        #
+        # CA.8 — `RECON_GEN_DB_READ_ONLY=1` env override opens the file
+        # in read-only mode. DuckDB enforces single-writer-per-file
+        # across processes; pytest-xdist workers in the db / app2 tier
+        # all need shared read access without conflicting locks. Per
+        # the DuckDB docs (https://duckdb.org/docs/current/clients/
+        # python/dbapi#read_only-connections): "Read-only mode is
+        # required if multiple Python processes want to access the
+        # same database file at the same time." Runner sets the env
+        # for DuckDB cells at pytest-launch time; production CLI
+        # invocations (schema/data/seed apply) run without it and
+        # open read-write.
+        import os
         import duckdb
-        return duckdb.connect(duckdb_path(cfg.demo_database_url))
+        path = duckdb_path(cfg.demo_database_url)
+        read_only = os.environ.get("RECON_GEN_DB_READ_ONLY") == "1"
+        return duckdb.connect(path, read_only=read_only)
     if cfg.dialect is Dialect.SQLITE:
         # stdlib — no try/except for ImportError. SQLite uses Python's
         # builtin ``sqlite3`` module so the local-iteration loop has
@@ -1008,13 +1023,19 @@ class _AsyncDuckdbPool:
     """
 
     def __init__(self, path: str, *, max_size: int = 10) -> None:
+        import os  # noqa: PLC0415
         import duckdb  # noqa: PLC0415
 
         self._path = path
         self._sem = asyncio.Semaphore(max_size)
+        # CA.8 — honor RECON_GEN_DB_READ_ONLY=1 for the same multi-
+        # process safety reason `connect_demo_db` does. The runner sets
+        # this for the App2 pytest tier's DuckDB cells so xdist workers
+        # share read access against the seeded .duckdb file.
+        read_only = os.environ.get("RECON_GEN_DB_READ_ONLY") == "1"
         # Open the root eagerly so a bad path / corrupt file surfaces
         # at construction (server startup) rather than first request.
-        self._root: Any = duckdb.connect(path)  # typing-smell: ignore[explicit-any]: duckdb.DuckDBPyConnection has no PEP 561 stubs at strict
+        self._root: Any = duckdb.connect(path, read_only=read_only)  # typing-smell: ignore[explicit-any]: duckdb.DuckDBPyConnection has no PEP 561 stubs at strict
 
     def acquire(self) -> AbstractAsyncContextManager[AsyncConnection]:
         return self._acquire()

@@ -565,6 +565,24 @@ def _layer_command(
         RECON_GEN_RUN_DIR.name: str(run_dir),
         RECON_GEN_LAYER.name: layer,
     }
+    # CA.8 — DuckDB enforces single-writer-per-file across processes;
+    # pytest-xdist workers in the db / app2 / browser tier all need
+    # shared read access without locking each other out. Per the
+    # DuckDB docs (https://duckdb.org/docs/current/clients/python/
+    # dbapi#read_only-connections): "Read-only mode is required if
+    # multiple Python processes want to access the same database file
+    # at the same time." Setting this env tells the pytest workers'
+    # connect_demo_db / _AsyncDuckdbPool to open with read_only=True.
+    # Production CLI invocations (schema/data/seed apply) run before
+    # pytest dispatch under sequential variant-seed steps that don't
+    # see this env; they continue to open read-write. The audit verify
+    # test subprocess inherits the env, which is correct — audit only
+    # SELECTs from the seeded DB to render the PDF.
+    if layer in ("db", "app2", "browser"):
+        ve = variant_env or {}
+        url = ve.get(RECON_GEN_DEMO_DATABASE_URL.name, "")
+        if url.startswith("duckdb://"):
+            env_addl["RECON_GEN_DB_READ_ONLY"] = "1"
     if opts.trace_all:
         env_addl[RECON_GEN_TRACE_ALL.name] = "1"
     if opts.fuzz_seed_value is not None:
