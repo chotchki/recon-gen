@@ -57,7 +57,14 @@ from recon_gen.common.sql import Dialect
 
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-SASQUATCH_YAML = _REPO_ROOT / "run" / "sasquatch_pr.yaml"
+# BV.3.3 test infrastructure (and downstream callers) needs the
+# canonical sasquatch_pr L2 yaml. ``run/sasquatch_pr.yaml`` is an
+# operator-local convenience copy; the version checked into git lives
+# at ``tests/l2/sasquatch_pr.yaml`` (and is mirrored to
+# ``src/recon_gen/_l2_fixtures/sasquatch_pr.yaml`` for the bundled
+# distribution). Use the tests/l2 copy so CI runners that don't have
+# a populated ``run/`` directory still find the yaml.
+SASQUATCH_YAML = _REPO_ROOT / "tests" / "l2" / "sasquatch_pr.yaml"
 # Resolve recon-gen relative to this interpreter so the active venv
 # is honored (whether `.venv/bin/pytest` or a runner-managed tmpvenv).
 QUICKSIGHT_GEN_BIN = Path(sysconfig.get_path("scripts")) / "recon-gen"

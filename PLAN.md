@@ -182,6 +182,7 @@ The full L2 + ETL + Training round-trip. Glues everything under one e2e test. **
       - [x] BV.3.3.c.bug2 - BV.3.3.c.bug2 — stuck_unbundled plant lands but dashboard doesn't render cust-0002-snb
       - [x] BV.3.3.c.bug3 - BV.3.3.c.bug3 — expected_eod_balance_breach plant lands but dashboard doesn't render acct-eod-ACHOrigSettlement
       - [ ] BV.3.3.c.bug4 - BV.3.3.c.bug4 — chain-coherence kinds match only on business_day (potentially false positive)
+      - [ ] BV.3.3.c.bug4-followup - BV.3.3.c.bug4-followup — Chain-coherence dashboard rendering
     - [ ] BV.3.3.d - **PG variant via Docker.** Reuse `tests/e2e/_studio_deploy_helpers::docker_available` skipif + ephemeral pg container per `[feedback_ephemeral_aws_infra]`. Schema apply + seed + matview-refresh paths must work against pg without driver changes. Parametrize the full registry walk over the dialect axis.
     - [ ] BV.3.3.e - **Oracle variant via Docker.** Same shape as BV.3.3.d for Oracle. Oracle MV-LOG limitations (per BV.6 backlog) may surface here; doc what's portable vs Oracle-only.
     - [x] BV.3.3.f - BV.3.3.f — Gate session-scope AWS fixtures on AWS-dependent tests
@@ -200,7 +201,7 @@ The full L2 + ETL + Training round-trip. Glues everything under one e2e test. **
     - [x] BV.4.10.a - BV.4.10.a — Currently-planted badge per card
     - [x] BV.4.10.b - BV.4.10.b — Apply diff preview (live client-side)
     - [x] BV.4.10.d - BV.4.10.d — Streaming progress page for Session Start
-    - [ ] BV.4.10.e - BV.4.10.e — Preserve pending checkbox state across Session Start
+    - [x] BV.4.10.e - BV.4.10.e — Preserve pending checkbox state across Session Start
 - [ ] BV.5 - Agent-based design cold-read against the dogfood + the HUGE test. Output: `docs/audits/bv_cold_read.md`. Operator iteration + sign-off.
 
 - [ ] BV.6 - BV.6 — PG matview refresh modernization (CONCURRENTLY); Oracle/SQLite unchanged
