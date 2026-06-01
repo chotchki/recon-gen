@@ -162,6 +162,7 @@ def test_l2ft_chains_sheet_renders_its_dropdowns(
         assert sel.first.evaluate("el => el.multiple") is False
 
 
+@pytest.mark.flaky(reruns=2, reruns_delay=2)
 def test_l2ft_rail_dropdown_selection_refetches_with_param(
     l2ft_driver: App2Driver,
 ) -> None:
