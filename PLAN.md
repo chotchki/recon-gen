@@ -138,7 +138,7 @@ Same cold-read → triage → design → implement → re-cold-read pattern that
 
 - [ ] BX.backlog - BX backlog — Reorder sheets: L1/L2 Exceptions right after Getting Started
   - [ ] BX.backlog.coverage - merge-broken - BX backlog — Coverage combine job: merge doesn't render, markdown only available via artifact download
-  - [ ] BX.backlog.e2e-sqlite-l2ft-dropdown-flake - BX backlog — e2e-sqlite flake: test_l2ft_rail_dropdown_selection_refetches_with_param
+  - [ ] BX.backlog.e2e - sqlite-l2ft-dropdown-flake - BX backlog — e2e-sqlite flake: test_l2ft_rail_dropdown_selection_refetches_with_param
   - [ ] BX.backlog.session - start-silent-no-op - BX backlog — Studio /training/session-start silent no-op when base schema missing
   - [ ] BX.backlog.sqlite - matview-perf - BX backlog — SQLite matview emulation slow on real-L2-sized data (spike)
   - [ ] BX.backlog.sqlite - resourcewarning-regression - BX backlog — Re-triage sqlite3 ResourceWarning leaks (regression after BL.0 / earlier fix)
@@ -413,9 +413,9 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [x] BY.0 - BY.0 — Spike: register WSL2 runner, migrate ci.yml::test, measure
 - [x] BY.1 - BY.1 — Migrate ci.yml::test job to self-hosted
 - [ ] BY.2 - BY.2 — Migrate e2e.yml::e2e-pg-browser to self-hosted
-- [ ] BY.3 - BY.3 — Secret-isolation policy: release.yml stays on ubuntu-latest
-- [ ] BY.4 - BY.4 — Observability + cleanup automation on the WSL2 runner
-- [ ] BY.5 - BY.5 — Verify + document operational model
+- [x] BY.3 - BY.3 — Secret-isolation policy: release.yml stays on ubuntu-latest
+- [x] BY.4 - BY.4 — Observability + cleanup automation on the WSL2 runner
+- [x] BY.5 - BY.5 — Verify + document operational model
 ## Phase BZ - Matview SQL reshape (correlated subquery → window function)
 
 **Why:** BX.backlog.sqlite-matview-perf spike (#174 → `docs/audits/sqlite_matview_perf_spike.md`) measured a 4.2-minute bundled SQLite matview refresh at ~1M base transaction rows on sasquatch_pr. 52% of that cost lives in one matview — `computed_subledger_balance` — built as a correlated `SUM(...) WHERE posting <= day` subquery that SQLite's planner can't rewrite (PG can, hence the dialect-divergence on real-customer L2s). Two more correlated-subquery offenders: `current_transactions` (4.2s @ 1M) and `daily_statement_summary` (2.6s @ 1M). Bonus alignment: faster matview refresh also helps CI test wallclock (every test that seeds + refreshes pays this cost).
