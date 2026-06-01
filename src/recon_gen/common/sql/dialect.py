@@ -137,6 +137,15 @@ def serial_type(dialect: Dialect) -> str:
         return "BIGSERIAL"
     if dialect is Dialect.SQLITE:
         return "INTEGER"
+    if dialect is Dialect.DUCKDB:
+        # DuckDB has no auto-increment column-type alias (BIGSERIAL is
+        # rejected). The auto-increment is provided by a separately-
+        # emitted ``CREATE SEQUENCE`` + ``DEFAULT nextval('<seq>')`` on
+        # the column — `serial_type` returns just the bare ``BIGINT`` so
+        # schema-emit can splice the DEFAULT clause via a parallel path.
+        # See ``_entry_column_decl`` in ``common/l2/schema.py`` for the
+        # DuckDB sequence wiring (CA.3 lands the runner setup).
+        return "BIGINT"
     return "NUMBER GENERATED ALWAYS AS IDENTITY"
 
 
@@ -149,7 +158,7 @@ def boolean_type(dialect: Dialect) -> str:
     convention. The helper returns just the type name — callers that
     need the CHECK constraint compose it themselves.
     """
-    if dialect is Dialect.POSTGRES:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return "BOOLEAN"
     if dialect is Dialect.SQLITE:
         return "INTEGER"
@@ -159,11 +168,9 @@ def boolean_type(dialect: Dialect) -> str:
 def text_type(dialect: Dialect) -> str:
     """Unbounded character data.
 
-    Postgres ``TEXT`` / Oracle ``CLOB`` / SQLite ``TEXT``.
+    Postgres ``TEXT`` / DuckDB ``TEXT`` / Oracle ``CLOB`` / SQLite ``TEXT``.
     """
-    if dialect is Dialect.POSTGRES:
-        return "TEXT"
-    if dialect is Dialect.SQLITE:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB, Dialect.SQLITE):
         return "TEXT"
     return "CLOB"
 
@@ -198,7 +205,7 @@ def json_text_type(dialect: Dialect) -> str:
     matching the symmetric "string-shaped" treatment by emitting
     plain ``TEXT`` keeps the SQL readable.
     """
-    if dialect is Dialect.POSTGRES:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return "VARCHAR(4000)"
     if dialect is Dialect.SQLITE:
         return "TEXT"
@@ -236,7 +243,7 @@ def varchar_type(n: int, dialect: Dialect) -> str:
     ``TEXT`` (SQLite is typeless internally; the ``(n)`` would parse
     but enforce nothing, so emit plain ``TEXT`` for clarity).
     """
-    if dialect is Dialect.POSTGRES:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"VARCHAR({n})"
     if dialect is Dialect.SQLITE:
         return "TEXT"
@@ -258,9 +265,7 @@ def bigint_type(dialect: Dialect) -> str:
     ``cents_to_dollars_sql`` helper projects back to dollars when
     needed.
     """
-    if dialect is Dialect.POSTGRES:
-        return "BIGINT"
-    if dialect is Dialect.SQLITE:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB, Dialect.SQLITE):
         return "BIGINT"
     return "NUMBER(19)"
 
@@ -273,7 +278,7 @@ def decimal_type(precision: int, scale: int, dialect: Dialect) -> str:
     of INTEGER / REAL / TEXT per its dynamic typing rules; ``NUMERIC``
     is the affinity that prefers exact representation).
     """
-    if dialect is Dialect.POSTGRES:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"DECIMAL({precision},{scale})"
     if dialect is Dialect.SQLITE:
         return "NUMERIC"
@@ -291,7 +296,7 @@ def cast(expr: str, type_name: str, dialect: Dialect) -> str:
     type-name aliasing remaps Postgres-shape names to SQLite affinity
     names where they differ).
     """
-    if dialect is Dialect.POSTGRES:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"{expr}::{type_name}"
     if dialect is Dialect.SQLITE:
         return f"CAST({expr} AS {_sqlite_type_alias(type_name)})"
@@ -305,7 +310,7 @@ def typed_null(type_name: str, dialect: Dialect) -> str:
     ``CAST(NULL AS type)`` (same standard SQL CAST as Oracle; type
     aliasing maps to SQLite affinity names).
     """
-    if dialect is Dialect.POSTGRES:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"NULL::{type_name}"
     if dialect is Dialect.SQLITE:
         return f"CAST(NULL AS {_sqlite_type_alias(type_name)})"
@@ -320,7 +325,7 @@ def to_date(timestamp_expr: str, dialect: Dialect) -> str:
     returns the date portion as ``YYYY-MM-DD`` text, which is
     sortable + groupable the same way the typed counterparts are).
     """
-    if dialect is Dialect.POSTGRES:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"{timestamp_expr}::date"
     if dialect is Dialect.SQLITE:
         return f"DATE({timestamp_expr})"
@@ -460,8 +465,15 @@ def json_value(col: str, path_expr: str, dialect: Dialect) -> str:
     PG / Oracle: ``JSON_VALUE(col, path_expr)`` — the SQL/JSON-standard
     function (Postgres 12+, Oracle 12.2+). SQLite: ``json_extract(col,
     path_expr)`` — the JSON1 extension's equivalent (built into
-    stdlib ``sqlite3`` 3.38+). Both return scalar TEXT for the path's
-    leaf; missing paths return NULL.
+    stdlib ``sqlite3`` 3.38+). DuckDB: ``json_extract_string(col,
+    path_expr)`` — DuckDB also has ``JSON_VALUE`` and ``json_extract``
+    but their semantics diverge from the SQL/JSON-standard (they
+    return *quoted* JSON form rather than unwrapped scalar text);
+    ``json_extract_string`` unwraps the scalar, matching the
+    PG/Oracle/SQLite contract. Captured by CA.0 spike audit
+    (``docs/audits/ca_0_duckdb_spike.md`` — JSON portability).
+    All four return scalar TEXT for the path's leaf; missing paths
+    return NULL.
 
     ``path_expr`` is the SQL expression (already wrapped in quotes /
     constructed at the call site, e.g. ``"'$.customer_id'"`` or
@@ -470,6 +482,8 @@ def json_value(col: str, path_expr: str, dialect: Dialect) -> str:
     """
     if dialect is Dialect.SQLITE:
         return f"json_extract({col}, {path_expr})"
+    if dialect is Dialect.DUCKDB:
+        return f"json_extract_string({col}, {path_expr})"
     return f"JSON_VALUE({col}, {path_expr})"
 
 
@@ -487,6 +501,9 @@ def json_array_iterate(
 
     - **SQLite**: ``json_each(<expr>, '<path>')`` — table-valued
       function over JSON1; each row has ``key`` + ``value`` columns.
+    - **DuckDB**: ``json_each(<expr>, '<path>')`` — same shape as SQLite
+      (DuckDB ships ``json_each`` natively; columns include ``key``
+      and ``value`` plus type metadata the callers don't read).
     - **PG 17+**: ``JSON_TABLE(<expr>::json, '<path>[*]' COLUMNS
       (value JSON PATH '$'))`` — SQL/JSON-standard, no JSONB needed.
     - **Oracle 12c+**: same JSON_TABLE shape; ``VARCHAR2(4000) FORMAT
@@ -499,7 +516,7 @@ def json_array_iterate(
     (e.g. ``'$.rails'``). ``alias`` is the per-row alias the matview
     SQL uses to reference the iteration (e.g. ``rail``).
     """
-    if dialect is Dialect.SQLITE:
+    if dialect in (Dialect.SQLITE, Dialect.DUCKDB):
         return f"json_each({json_expr}, '{array_path}') {alias}"
     if dialect is Dialect.POSTGRES:
         # PG 17+ JSON_TABLE is SQL/JSON-standard; cast to `json`
@@ -524,6 +541,9 @@ def json_field_extract(value_expr: str, field_path: str, dialect: Dialect) -> st
     constraint).
 
     - **SQLite**: ``json_extract(<value_expr>, '<field_path>')``
+    - **DuckDB**: ``json_extract_string(<value_expr>, '<field_path>')``
+      — unwraps the scalar (DuckDB's ``JSON_VALUE`` returns quoted
+      JSON form; see ``json_value`` for the underlying gotcha).
     - **PG 12+ / Oracle 12c+**: ``JSON_VALUE(<value_expr>,
       '<field_path>')`` — SQL/JSON-standard scalar extract.
 
@@ -531,6 +551,8 @@ def json_field_extract(value_expr: str, field_path: str, dialect: Dialect) -> st
     """
     if dialect is Dialect.SQLITE:
         return f"json_extract({value_expr}, '{field_path}')"
+    if dialect is Dialect.DUCKDB:
+        return f"json_extract_string({value_expr}, '{field_path}')"
     return f"JSON_VALUE({value_expr}, '{field_path}')"
 
 
@@ -559,7 +581,7 @@ def lob_substr(expr: str, n: int, dialect: Dialect) -> str:
     """
     if dialect is Dialect.ORACLE:
         return f"DBMS_LOB.SUBSTR({expr}, {n}, 1)"
-    if dialect is Dialect.POSTGRES:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"SUBSTRING({expr} FROM 1 FOR {n})"
     return f"SUBSTR({expr}, 1, {n})"
 
@@ -569,12 +591,14 @@ def json_check(col: str, dialect: Dialect) -> str:
     uses ``CHECK (col IS NULL OR json_valid(col))``.
 
     The ``IS JSON`` SQL/JSON-standard constraint is supported in
-    Postgres 16+ and Oracle 12.2+ — bytes-identical there. SQLite
-    has no ``IS JSON`` predicate but ships ``json_valid(text)`` (returns
-    1 if the argument is well-formed JSON; 0 otherwise) via the
-    JSON1 extension (built into stdlib ``sqlite3`` since 3.38).
+    Postgres 16+ and Oracle 12.2+ — bytes-identical there. SQLite +
+    DuckDB have no ``IS JSON`` predicate but both ship
+    ``json_valid(text)`` (returns 1 / true if the argument is
+    well-formed JSON; 0 / false otherwise) — SQLite via the JSON1
+    extension (built into stdlib ``sqlite3`` since 3.38), DuckDB
+    natively.
     """
-    if dialect is Dialect.SQLITE:
+    if dialect in (Dialect.SQLITE, Dialect.DUCKDB):
         return f"CHECK ({col} IS NULL OR json_valid({col}))"
     return f"CHECK ({col} IS NULL OR {col} IS JSON)"
 
@@ -594,7 +618,7 @@ def epoch_seconds_between(later: str, earlier: str, dialect: Dialect) -> str:
     julianday values yields fractional days; multiplying by 86400
     gives seconds.
     """
-    if dialect is Dialect.POSTGRES:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"EXTRACT(EPOCH FROM ({later} - {earlier}))"
     if dialect is Dialect.SQLITE:
         return (
@@ -623,7 +647,7 @@ def interval_days(n: int, dialect: Dialect) -> str:
     instead, which adapts to SQLite's numeric-only RANGE frames via
     a Julian-day projection.
     """
-    if dialect is Dialect.POSTGRES:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"INTERVAL '{n} day'"
     if dialect is Dialect.SQLITE:
         return f"'{n} days'"
@@ -669,7 +693,7 @@ def date_minus_days(date_expr: str, n: int, dialect: Dialect) -> str:
     arithmetic interprets ``date - n`` as N days directly. SQLite
     uses ``date(expr, '-N days')``.
     """
-    if dialect is Dialect.POSTGRES:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"({date_expr} - {interval_days(n, dialect)})"
     if dialect is Dialect.SQLITE:
         return f"date({date_expr}, '-{n} days')"
@@ -696,7 +720,7 @@ def date_trunc_day(timestamp_expr: str, dialect: Dialect) -> str:
     in joins / comparisons; use ``to_date`` when the result is the
     final column the dashboard reads as a date.
     """
-    if dialect is Dialect.POSTGRES:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"DATE_TRUNC('day', {timestamp_expr})"
     if dialect is Dialect.SQLITE:
         return f"datetime({timestamp_expr}, 'start of day')"
@@ -717,11 +741,13 @@ def day_text(timestamp_expr: str, dialect: Dialect) -> str:
     ``YYYY-MM-DD`` prefix); ISO day strings also compare correctly with
     ``<`` / ``>=`` lexically.
 
-    Postgres + Oracle: ``TO_CHAR(expr, 'YYYY-MM-DD')``. SQLite:
-    ``strftime('%Y-%m-%d', expr)`` (the stored ``YYYY-MM-DD HH:MM:SS``
-    text → its date portion).
+    Postgres + Oracle: ``TO_CHAR(expr, 'YYYY-MM-DD')``. SQLite +
+    DuckDB: ``strftime('%Y-%m-%d', expr)`` (DuckDB has no ``TO_CHAR``
+    in the core build — strftime ships natively and accepts the same
+    Postgres-style ``%Y-%m-%d`` format spec; SQLite stores datetimes
+    as ``YYYY-MM-DD HH:MM:SS`` text → its date portion).
     """
-    if dialect is Dialect.SQLITE:
+    if dialect in (Dialect.SQLITE, Dialect.DUCKDB):
         return f"strftime('%Y-%m-%d', {timestamp_expr})"
     return f"TO_CHAR({timestamp_expr}, 'YYYY-MM-DD')"
 
@@ -747,7 +773,7 @@ def concat_agg(column_expr: str, separator: str, dialect: Dialect) -> str:
     the dialect.
     """
     sep_literal = f"'{separator}'"
-    if dialect is Dialect.POSTGRES:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"STRING_AGG({column_expr}, {sep_literal})"
     if dialect is Dialect.SQLITE:
         return f"GROUP_CONCAT({column_expr}, {sep_literal})"
@@ -776,7 +802,7 @@ def drop_table_if_exists(name: str, dialect: Dialect) -> str:
     concatenate directly without appending ``;`` to avoid a
     double-semicolon that Oracle's PL/SQL parser rejects.
     """
-    if dialect is Dialect.POSTGRES:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"DROP TABLE IF EXISTS {name} CASCADE;"
     if dialect is Dialect.SQLITE:
         return f"DROP TABLE IF EXISTS {name};"
@@ -819,7 +845,13 @@ def drop_matview_if_exists(name: str, dialect: Dialect) -> str:
     """
     if dialect is Dialect.POSTGRES:
         return f"DROP MATERIALIZED VIEW IF EXISTS {name};"
-    if dialect is Dialect.SQLITE:
+    if dialect in (Dialect.SQLITE, Dialect.DUCKDB):
+        # DuckDB has no CREATE MATERIALIZED VIEW (parser rejects the
+        # keyword); matviews land as plain tables via CREATE TABLE AS
+        # SELECT — drop them with DROP TABLE IF EXISTS, identical to
+        # the SQLite branch. CA.0 spike confirms (probe: "DROP
+        # MATERIALIZED VIEW IF EXISTS nope" → "Not implemented Error:
+        # Cannot drop this type yet").
         return f"DROP TABLE IF EXISTS {name};"
     return (
         _oracle_drop_if_exists(
@@ -840,9 +872,7 @@ def drop_index_if_exists(name: str, dialect: Dialect) -> str:
     ``DROP INDEX IF EXISTS …;``. Returned string is
     **fully terminated**.
     """
-    if dialect is Dialect.POSTGRES:
-        return f"DROP INDEX IF EXISTS {name};"
-    if dialect is Dialect.SQLITE:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB, Dialect.SQLITE):
         return f"DROP INDEX IF EXISTS {name};"
     return _oracle_drop_if_exists(
         f"DROP INDEX {name}", ignore_codes=(-1418,),
@@ -856,9 +886,7 @@ def drop_view_if_exists(name: str, dialect: Dialect) -> str:
     catching ORA-00942 / SQLite native ``DROP VIEW IF EXISTS …;``.
     Returned string is **fully terminated**.
     """
-    if dialect is Dialect.POSTGRES:
-        return f"DROP VIEW IF EXISTS {name};"
-    if dialect is Dialect.SQLITE:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB, Dialect.SQLITE):
         return f"DROP VIEW IF EXISTS {name};"
     return _oracle_drop_if_exists(
         f"DROP VIEW {name}", ignore_codes=(-942,),
@@ -909,7 +937,7 @@ def create_matview(name: str, body_sql: str, dialect: Dialect) -> str:
     """
     if dialect is Dialect.POSTGRES:
         return f"CREATE MATERIALIZED VIEW {name} AS {body_sql}"
-    if dialect is Dialect.SQLITE:
+    if dialect in (Dialect.SQLITE, Dialect.DUCKDB):
         return f"CREATE TABLE {name} AS {body_sql}"
     return (
         f"CREATE MATERIALIZED VIEW {name} "
@@ -931,9 +959,7 @@ def matview_options(dialect: Dialect) -> str:
     Returns the empty string on Postgres + SQLite so the substitution
     is a no-op.
     """
-    if dialect is Dialect.POSTGRES:
-        return ""
-    if dialect is Dialect.SQLITE:
+    if dialect in (Dialect.POSTGRES, Dialect.SQLITE, Dialect.DUCKDB):
         return ""
     return " BUILD IMMEDIATE REFRESH COMPLETE ON DEMAND"
 
@@ -947,7 +973,7 @@ def matview_create_keyword(dialect: Dialect) -> str:
     ``common.l2.schema`` so the per-matview template strings can stay
     one-line + dialect-clean instead of branching at every site.
     """
-    if dialect is Dialect.SQLITE:
+    if dialect in (Dialect.SQLITE, Dialect.DUCKDB):
         return "CREATE TABLE"
     return "CREATE MATERIALIZED VIEW"
 
@@ -968,13 +994,16 @@ def refresh_matview(name: str, dialect: Dialect) -> str:
     """
     if dialect is Dialect.POSTGRES:
         return f"REFRESH MATERIALIZED VIEW {name};"
-    if dialect is Dialect.SQLITE:
+    if dialect in (Dialect.SQLITE, Dialect.DUCKDB):
         # Sentinel — the per-matview SELECT body is needed to refresh,
         # which the helper here doesn't know. ``refresh_matviews_sql``
-        # in ``common.l2.schema`` substitutes the right body.
+        # in ``common.l2.schema`` substitutes the right body. DuckDB
+        # follows the SQLite path: matviews are CREATE TABLE AS SELECT
+        # tables, refresh is DELETE + INSERT (per-matview).
         raise NotImplementedError(
-            "SQLite refresh requires the matview body SELECT; call "
-            "refresh_matviews_sql in common.l2.schema instead.",
+            f"{dialect.value} refresh requires the matview body "
+            "SELECT; call refresh_matviews_sql in common.l2.schema "
+            "instead.",
         )
     return f"BEGIN DBMS_MVIEW.REFRESH('{name}', method => 'C'); END;"
 
@@ -987,9 +1016,7 @@ def analyze_table(name: str, dialect: Dialect) -> str:
     ``ANALYZE name;`` (same syntax as Postgres). Returned string is
     **fully terminated**.
     """
-    if dialect is Dialect.POSTGRES:
-        return f"ANALYZE {name};"
-    if dialect is Dialect.SQLITE:
+    if dialect in (Dialect.POSTGRES, Dialect.SQLITE, Dialect.DUCKDB):
         return f"ANALYZE {name};"
     return f"BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, '{name}'); END;"
 
@@ -1019,15 +1046,13 @@ def dual_from(dialect: Dialect) -> str:
     pseudo-table for "one row, no real source" is ``dual``. SQLite
     accepts the bare ``SELECT`` (like Postgres).
 
-    Returns ``""`` on Postgres + SQLite and ``" FROM dual"`` on
-    Oracle. Compose inline at the end of the SELECT list:
+    Returns ``""`` on Postgres / SQLite / DuckDB and ``" FROM dual"``
+    on Oracle. Compose inline at the end of the SELECT list:
     ``f"SELECT {expr} AS col{dual_from(dialect)}"``. Combine with
     ``WHERE 1=0`` (works on every dialect) for an empty-row sentinel
     branch — ``WHERE FALSE`` is Postgres-only and breaks Oracle.
     """
-    if dialect is Dialect.POSTGRES:
-        return ""
-    if dialect is Dialect.SQLITE:
+    if dialect in (Dialect.POSTGRES, Dialect.SQLITE, Dialect.DUCKDB):
         return ""
     return " FROM dual"
 
@@ -1044,8 +1069,6 @@ def with_recursive(dialect: Dialect) -> str:
     for portability across older Oracle releases. SQLite requires
     ``WITH RECURSIVE`` (same as Postgres).
     """
-    if dialect is Dialect.POSTGRES:
-        return "WITH RECURSIVE"
-    if dialect is Dialect.SQLITE:
+    if dialect in (Dialect.POSTGRES, Dialect.SQLITE, Dialect.DUCKDB):
         return "WITH RECURSIVE"
     return "WITH"
