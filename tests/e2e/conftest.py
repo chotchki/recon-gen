@@ -85,7 +85,7 @@ def _session_needs_aws(session: pytest.Session | None) -> bool:
         if any(name in _AWS_DEPENDENT_FIXTURE_NAMES for name in closure):
             needs_aws = True
             break
-    session._recon_aws_required = needs_aws  # type: ignore[attr-defined]
+    session._recon_aws_required = needs_aws  # type: ignore[attr-defined]: cache attribute attached to session at runtime per BV.3.3.f gate
     return needs_aws
 
 
@@ -340,7 +340,7 @@ def _refresh_matviews_once_per_session(  # pyright: ignore[reportUnusedFunction]
     test session so picker tests + agreement tests always see live data.
 
     The picker tests (``test_l1_additive_pickers.py``) read the live
-    ``<prefix>_current_daily_balances`` and ``<prefix>_todays_exceptions``
+    ``<prefix>_current_daily_balances`` and ``<prefix>_l1_exceptions``
     matviews to (a) build the Account dropdown's option universe and
     (b) source the anchor row the test pivots on. If a prior session
     left those matviews stale (e.g. an ``exceptions_only``-scope run

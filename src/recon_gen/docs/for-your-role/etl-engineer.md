@@ -29,7 +29,7 @@ posting leg) and `daily_balances` (one row per account-day). Every
 sheet — every L1 invariant, every L2 hygiene check, every
 Investigation question — projects off those two. Your ETL contract
 is a stable, narrow column shape ([Schema v6](../Schema_v6.md));
-your debug surface is the same Today's Exceptions / Daily
+your debug surface is the same L1 Exceptions / Daily
 Statement / Transactions chain the operators use.
 
 When a load goes silently wrong, the L1 dashboard surfaces it as
@@ -44,7 +44,7 @@ class of failure — and tells you which load step to audit:
 - Supersession
 
 **The first time you ship a load fix and watch the corresponding
-row disappear from Today's Exceptions on tomorrow's run — that's
+row disappear from L1 Exceptions on tomorrow's run — that's
 the proof your ETL is observable, not just running.**
 
 ## What we are *not* asking you to learn
@@ -97,7 +97,7 @@ the proof your ETL is observable, not just running.**
    per-(account, day) walk should show your loaded postings —
    opening + flow + closing should all reconcile.
 3. Watch
-   [Today's Exceptions](../walkthroughs/l1/todays-exceptions.md)
+   [L1 Exceptions](../walkthroughs/l1/exceptions.md)
    for new violations that look ETL-shaped (drift on a stable
    account, missing counterparty leg, force-posted-without-
    internal-catchup, supersession trail).

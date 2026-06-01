@@ -6,7 +6,7 @@ the `app2` leg a local server reading the same DB. Both tests stay
 data-agnostic per the no-hardcoded-data rule:
 
 - **Date-range narrow** is verified on a per-invariant sheet (Drift),
-  NOT Today's Exceptions. The Today's Exceptions UNION SQL pre-filters
+  NOT L1 Exceptions. The L1 Exceptions UNION SQL pre-filters
   to ``MAX(business_day_start)`` from current_daily_balances by design,
   so the dashboard's date picker is a structural no-op there. The
   per-invariant sheets have no SQL pre-filter, so the date filter
@@ -35,7 +35,7 @@ from recon_gen.apps.l1_dashboard.app import (
     _DRIFT_TIMELINES_NAME,
     _OVERDRAFT_NAME,
     _PENDING_AGING_NAME,
-    _TODAYS_EXCEPTIONS_NAME,
+    _L1_EXCEPTIONS_NAME,
 )
 from recon_gen.apps.l1_dashboard.datasets import (
     build_drift_dataset,
@@ -44,7 +44,7 @@ from recon_gen.apps.l1_dashboard.datasets import (
     build_ledger_drift_timeline_dataset,
     build_overdraft_dataset,
     build_stuck_pending_dataset,
-    build_todays_exceptions_dataset,
+    build_l1_exceptions_dataset,
 )
 from tests.e2e._kpi_parse import parse_currency_kpi, parse_int_kpi
 from recon_gen.common.config import Config
@@ -123,13 +123,13 @@ def test_date_range_filter_narrows_drift_sheet(l1_dashboard_driver: tuple["Dashb
 
 
 def test_check_type_dropdown_exposes_options(l1_dashboard_driver: tuple["DashboardDriver", str]) -> None:
-    """The Check Type dropdown on Today's Exceptions exposes the L1
+    """The Check Type dropdown on L1 Exceptions exposes the L1
     invariant view names (drift / ledger_drift / overdraft / …) as
     selectable values. The option universe comes from the data — we
     only assert the dropdown is populated, not which values appear.
     """
     driver, dashboard_arg = l1_dashboard_driver
-    driver.open(dashboard_arg, sheet=_TODAYS_EXCEPTIONS_NAME)
+    driver.open(dashboard_arg, sheet=_L1_EXCEPTIONS_NAME)
     options = driver.filter_options("Check Type")
     assert len(options) >= 1, (
         f"Check Type dropdown should expose ≥1 value, got {options}"
@@ -270,7 +270,7 @@ def test_bg3_drift_timelines_kpis_and_series_identity_plus_delta(
     driver.screenshot()
 
 
-# BG.6 — Pending Aging + Today's Exceptions KPI honest gates --------------
+# BG.6 — Pending Aging + L1 Exceptions KPI honest gates --------------
 
 
 def test_bg6_pending_aging_kpi_chart_table_triple_identity(
@@ -318,11 +318,11 @@ def test_bg6_pending_aging_kpi_chart_table_triple_identity(
     )
 
 
-def test_bg6_todays_exceptions_kpi_matches_dataset_count(
+def test_bg6_l1_exceptions_kpi_matches_dataset_count(
     l1_dashboard_driver: tuple["DashboardDriver", str], cfg: Config, l2: "L2Instance",
 ) -> None:
-    """BG.6 — Today's Exceptions Open Exceptions KPI must equal the
-    row count of the todays_exceptions dataset.
+    """BG.6 — L1 Exceptions Open Exceptions KPI must equal the
+    row count of the l1_exceptions dataset.
 
     The KPI binds ``ds["account_id"].count()``. Dataset row count =
     total violations across the 5 L1 invariant checks for the
@@ -332,10 +332,10 @@ def test_bg6_todays_exceptions_kpi_matches_dataset_count(
     THIS assertion is the gate.
     """
     driver, dashboard_arg = l1_dashboard_driver
-    driver.open(dashboard_arg, sheet=_TODAYS_EXCEPTIONS_NAME)
+    driver.open(dashboard_arg, sheet=_L1_EXCEPTIONS_NAME)
     driver.wait_loaded("Open Exceptions")
 
-    sql, params = _sql_and_params_for(build_todays_exceptions_dataset, cfg, l2)
+    sql, params = _sql_and_params_for(build_l1_exceptions_dataset, cfg, l2)
     # Phase BM — dataset SQL declares its own pL1Date* defaults; the
     # query_db substitution picks them up from `dataset_parameters` when
     # the URL binds omit them, matching the L1 picker's initial render.
@@ -343,7 +343,7 @@ def test_bg6_todays_exceptions_kpi_matches_dataset_count(
     rendered = parse_int_kpi(driver.kpi_value("Open Exceptions"))
     assert rendered == len(rows), (
         f"Open Exceptions KPI: rendered {rendered} ≠ "
-        f"len(query_db(todays_exceptions_sql, default_window)) = "
+        f"len(query_db(l1_exceptions_sql, default_window)) = "
         f"{len(rows)}. The KPI binds .count() over the dataset under "
         f"the default 7-day window; this assertion fails if the KPI "
         f"binding silently collapses to COUNT DISTINCT (pre-BL.1 QS "

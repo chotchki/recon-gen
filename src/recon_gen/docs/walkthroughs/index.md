@@ -18,7 +18,7 @@ The day-in-the-life flows for an operator working the L1 dashboard.
 - [Overdraft](l1/overdraft.md) · [Limit Breach](l1/limit-breach.md)
 - [Pending Aging](l1/pending-aging.md) · [Unbundled Aging](l1/unbundled-aging.md)
 - [Supersession Audit](l1/supersession-audit.md)
-- [Today's Exceptions](l1/todays-exceptions.md)
+- [L1 Exceptions](l1/exceptions.md)
 - [Daily Statement](l1/daily-statement.md) · [Transactions](l1/transactions.md)
 
 ## Investigation

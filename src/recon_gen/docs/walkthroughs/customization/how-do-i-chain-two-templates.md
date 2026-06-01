@@ -100,7 +100,7 @@ templates exist). The second one re-seeds the demo data —
 violation) AND a `ChainParentDisagreementPlant` (synthetic ETL bug
 with conflicting parent_transfer_ids).
 
-Open the L1 Today's Exceptions sheet. You should see:
+Open the L1 L1 Exceptions sheet. You should see:
 
 - One row with `check_type='chain_parent_disagreement'` and a
   `rail_name` column showing `InternalTransferCycle` (the template

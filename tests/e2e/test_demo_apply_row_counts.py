@@ -51,7 +51,7 @@ if not RECON_GEN_E2E.get_or_none():
 _SMOKE_SUFFIXES = (
     "transactions",
     "daily_balances",
-    "todays_exceptions",
+    "l1_exceptions",
     "inv_money_trail_edges",
 )
 

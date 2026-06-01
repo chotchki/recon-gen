@@ -62,7 +62,7 @@ L1 invariant matviews
                   ↓ (UI convenience)
 Dashboard-shape matviews
   ├── {{ l2_instance_name }}_daily_statement_summary
-  └── {{ l2_instance_name }}_todays_exceptions              — UNION over the 5 baselines
+  └── {{ l2_instance_name }}_l1_exceptions              — UNION over the 5 baselines
 ```
 
 13 matviews per L2 instance; full per-view contract in
@@ -85,7 +85,7 @@ L2 YAML was dropped). For a deployment with `db_table_prefix:
 | Current* | `{{ l2_instance_name }}_current_transactions`, `{{ l2_instance_name }}_current_daily_balances` |
 | Helper | `{{ l2_instance_name }}_computed_subledger_balance`, `{{ l2_instance_name }}_computed_ledger_balance` |
 | L1 invariant | `{{ l2_instance_name }}_drift`, `{{ l2_instance_name }}_overdraft`, … |
-| Dashboard | `{{ l2_instance_name }}_daily_statement_summary`, `{{ l2_instance_name }}_todays_exceptions` |
+| Dashboard | `{{ l2_instance_name }}_daily_statement_summary`, `{{ l2_instance_name }}_l1_exceptions` |
 | Index | `idx_{{ l2_instance_name }}_<...>` |
 
 Two L2 instances coexist in one database without conflict — `myorg_*`
@@ -511,7 +511,7 @@ Optional on day 1:
 3. Write minimum-viable rows to both base tables.
 4. `refresh_matviews_sql(instance)` after every batch.
 5. Deploy the L1 dashboard against the same `cfg` + `instance`. Open
-   it. Confirm Today's Exceptions roll-up shows what you expect.
+   it. Confirm L1 Exceptions roll-up shows what you expect.
 6. Iterate — populate optional columns as downstream checks demand
    them (L1 invariant matviews surface the gap).
 

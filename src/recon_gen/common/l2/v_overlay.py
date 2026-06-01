@@ -145,7 +145,7 @@ async def session_start(
         if dev_log is None:
             return
         payload = {"event": event, "ts_unix": _time.time(), **fields}
-        await dev_log(payload)  # type: ignore[misc]  # dev_log is DevLogWriter | None; checked above
+        await dev_log(payload)  # type: ignore[misc]: dev_log is DevLogWriter | None; None-guarded above
 
     await _emit("session_start:begin", refresh_base=refresh_base)
     if refresh_base:
@@ -157,7 +157,7 @@ async def session_start(
         )
         await _emit("session_start:etl_begin")
         await run_deploy_pipeline(
-            cfg, instance, dev_log=dev_log, overlays=TRAINER_CLEAN,  # type: ignore[arg-type]  # opaque DevLogWriter shape passed through
+            cfg, instance, dev_log=dev_log, overlays=TRAINER_CLEAN,  # type: ignore[arg-type]: opaque DevLogWriter shape passed through to deploy pipeline
         )
         await _emit("session_start:etl_done")
 
@@ -367,7 +367,7 @@ async def apply_plants(
         if dev_log is None:
             return
         payload = {"event": event, "ts_unix": _time.time(), **fields}
-        await dev_log(payload)  # type: ignore[misc]  # dev_log is DevLogWriter | None; checked above
+        await dev_log(payload)  # type: ignore[misc]: dev_log is DevLogWriter | None; None-guarded above
 
     base_prefix = cfg.db_table_prefix
     v_prefix = v_overlay_prefix(base_prefix)

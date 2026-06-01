@@ -82,7 +82,7 @@ multi-leg tie-breaker query.
 Several materialized views sit on top of these tables — the L1
 invariant matviews (`{{ l2_instance_name }}_drift`, `{{ l2_instance_name }}_overdraft`,
 `{{ l2_instance_name }}_limit_breach`, `{{ l2_instance_name }}_stuck_pending`,
-`{{ l2_instance_name }}_stuck_unbundled`, `{{ l2_instance_name }}_todays_exceptions`) plus
+`{{ l2_instance_name }}_stuck_unbundled`, `{{ l2_instance_name }}_l1_exceptions`) plus
 the Investigation cluster (`{{ l2_instance_name }}_inv_pair_rolling_anomalies`
 feeds Volume Anomalies; `{{ l2_instance_name }}_inv_money_trail_edges` feeds
 Money Trail and Account Network — recursive walk over

@@ -1145,7 +1145,7 @@ def test_exc_dataset_contract_columns_match_builder(
 def test_exceptions_sheet_unified_shape() -> None:
     """M.3.10l: L2 Exceptions sheet is a single KPI + bar chart +
     detail table backed by one unified-exceptions dataset (mirrors
-    L1's Today's Exceptions). The pre-M.3.10l 6-sections × (2 KPI +
+    L1's L1 Exceptions). The pre-M.3.10l 6-sections × (2 KPI +
     1 Table) layout (12 KPIs + 6 Tables ~= 144 rows of vertical
     scroll) collapses to one screen-sized view."""
     from collections import Counter

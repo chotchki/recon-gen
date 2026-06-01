@@ -391,7 +391,7 @@ _DASHBOARD_MATVIEWS = (
     "fan_in_disagreement",
     "multi_xor_violation",
     "daily_statement_summary",
-    "todays_exceptions",
+    "l1_exceptions",
     "inv_pair_rolling_anomalies",
     "inv_money_trail_edges",
 )

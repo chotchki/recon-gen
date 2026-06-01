@@ -20,7 +20,7 @@ that the underlying ledger doesn't reconcile for that account-day.
 
 ## When to use it
 
-Every analyst-facing investigation lands here. From Today's Exceptions
+Every analyst-facing investigation lands here. From L1 Exceptions
 right-click → "View Daily Statement"; from any per-invariant detail
 table same drill. The sheet is the per-account-day artifact the Data
 Integration Team can screenshot and send to the producer system's

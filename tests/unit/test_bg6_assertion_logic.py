@@ -1,5 +1,5 @@
 """BG.6 assertion-logic validation — proves the L2FT Exceptions +
-Pending Aging + Today's Exceptions honest-gate tests catch findings
+Pending Aging + L1 Exceptions honest-gate tests catch findings
 #11 (units mismatch) + #13 (chart-bar-vs-KPI population mismatch).
 
 Mirrors BG.2-BG.5's deterministic shape.
@@ -65,15 +65,15 @@ def planted_l2ft_l1_sqlite() -> Iterator["Config"]:
     )
     # 2 rows total; KPI should == 2; chart bar sum should == 2
 
-    # Today's exceptions
+    # L1 exceptions
     conn.execute(
-        "CREATE TABLE pfx_todays_exceptions ("
+        "CREATE TABLE pfx_l1_exceptions ("
         "  check_type TEXT, account_id TEXT, magnitude_amount REAL,"
         "  magnitude_count INTEGER"
         ")"
     )
     conn.executemany(
-        "INSERT INTO pfx_todays_exceptions VALUES (?,?,?,?)",
+        "INSERT INTO pfx_l1_exceptions VALUES (?,?,?,?)",
         [
             ("drift", "acc-1", 5000.0, None),
             ("drift", "acc-2", -2500.0, None),
@@ -93,7 +93,7 @@ def planted_l2ft_l1_sqlite() -> Iterator["Config"]:
 
 _L2_EXCEPTIONS_SQL = "SELECT * FROM pfx_unified_l2_exceptions"
 _STUCK_PENDING_SQL = "SELECT * FROM pfx_stuck_pending"
-_TODAYS_EXCEPTIONS_SQL = "SELECT * FROM pfx_todays_exceptions"
+_L1_EXCEPTIONS_SQL = "SELECT * FROM pfx_l1_exceptions"
 
 
 # ─── Finding #11 — L2 Exceptions KPI / table units mismatch ──────────
@@ -183,13 +183,13 @@ def test_bg6_pending_aging_triple_identity_trips_when_chart_population_diverges(
     assert rendered_chart_bar_sum != len(rows)
 
 
-# ─── Today's Exceptions KPI identity ─────────────────────────────────
+# ─── L1 Exceptions KPI identity ─────────────────────────────────
 
 
-def test_bg6_todays_exceptions_kpi_passes_when_matches_dataset_count(
+def test_bg6_l1_exceptions_kpi_passes_when_matches_dataset_count(
     planted_l2ft_l1_sqlite: "Config",
 ) -> None:
     cfg = planted_l2ft_l1_sqlite
-    rows = query_db_via_cfg(cfg, _TODAYS_EXCEPTIONS_SQL)
+    rows = query_db_via_cfg(cfg, _L1_EXCEPTIONS_SQL)
     rendered_kpi = 4
     assert rendered_kpi == len(rows)

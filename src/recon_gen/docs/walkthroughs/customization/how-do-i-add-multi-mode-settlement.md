@@ -168,7 +168,7 @@ zero firings ⇒ ``firing_count=0``, ``fired_rails=''``) AND ONE
 ``XorVariantOverlapPlant`` (a Transfer where two variants fired ⇒
 ``firing_count=2``, ``fired_rails='<a>,<b>'``).
 
-Open the L1 Today's Exceptions sheet. You should see:
+Open the L1 L1 Exceptions sheet. You should see:
 
 - One row with `check_type='xor_group_violation'` and `magnitude=0`
   (the missed-firing plant — the template fired but no group

@@ -199,7 +199,7 @@ Once your theme block is declared and the deploy reflects your
 brand:
 
 1. **Spot-check the three load-bearing surfaces.** Open the L1
-   Today's Exceptions sheet and check: KPI text colors
+   L1 Exceptions sheet and check: KPI text colors
    (`accent`), table cells with right-click drills (`link_tint`
    background), and the aging bar chart (gradient + data_colors
    series order). These are the three places where a wrong

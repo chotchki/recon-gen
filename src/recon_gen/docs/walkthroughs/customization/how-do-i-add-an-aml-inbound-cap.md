@@ -99,7 +99,7 @@ Open the L1 Limit Breach sheet. You should see:
   Flow column is `~$30,000` (the planted $20K × 1.5).
 - The existing Outbound rows (if any) still present, marked
   "Outbound" in the same column.
-- Today's Exceptions inherits the new row automatically — its
+- L1 Exceptions inherits the new row automatically — its
   UNION-over-matviews already reads from `<prefix>_limit_breach`
   unchanged.
 
@@ -108,7 +108,7 @@ Open the L1 Limit Breach sheet. You should see:
 - **Don't add a new matview just for inbound caps** — the existing
   `limit_breach` matview already handles both directions. Adding
   a second matview would double the dashboard's matview count
-  AND fork the Today's Exceptions UNION, which buys nothing.
+  AND fork the L1 Exceptions UNION, which buys nothing.
 - **Don't try to encode "AML routing" as an L2 enum on the
   schedule itself.** The direction column on the dashboard row
   IS the routing signal — your downstream pager / ticketing

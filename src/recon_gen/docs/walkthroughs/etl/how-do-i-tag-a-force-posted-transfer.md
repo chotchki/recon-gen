@@ -152,7 +152,7 @@ Once your Fed-statement projection is wired up:
    orphan-parent query (Invariant 3 in the validation walkthrough)
    on a window that covers your longest expected catch-up lag —
    typically 5 business days for ACH, 1 day for card.
-3. **Open L1 Today's Exceptions and inspect the relevant L1
+3. **Open L1 L1 Exceptions and inspect the relevant L1
    sheets**. If the L1 Drift KPI spikes after a Fed-statement load,
    you're either missing the catch-up postings (real exception) or
    your Fed rows are tagged `InternalInitiated` (tag bug — they

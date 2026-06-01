@@ -37,7 +37,7 @@ L1 invariant matviews (the SHOULD-constraint surfaces)
                   ↓
 Dashboard-shape matviews (UI convenience)
   ├── {{ l2_instance_name }}_daily_statement_summary
-  └── {{ l2_instance_name }}_todays_exceptions      (UNION over the 5 baseline L1s)
+  └── {{ l2_instance_name }}_l1_exceptions      (UNION over the 5 baseline L1s)
 ```
 
 13 matviews total. Refresh contract: every batch insert into the
@@ -425,7 +425,7 @@ intended alternative was never on the operator's menu). For
 'overlap': two children fired for one parent — either the XOR
 contract is wrong (the children aren't truly alternates and the
 L2 should split into separate chain rows) or the seed-emit / ETL
-double-fired on a single firing. The drill from Today's Exceptions
+double-fired on a single firing. The drill from L1 Exceptions
 on a row navigates to Transactions filtered to the parent's
 `transfer_id` — eyeball the child legs to see which alternatives
 landed.

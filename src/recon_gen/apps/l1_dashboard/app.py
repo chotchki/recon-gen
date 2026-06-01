@@ -24,7 +24,7 @@ Substep landmarks:
     M.2a.3 — Drift sheet — KPIs + leaf + ledger drift tables
     M.2a.4 — Overdraft sheet — KPI + violations table
     M.2a.5 — Limit Breach sheet — KPI + breach table
-    M.2a.6 — Today's Exceptions sheet — UNION across L1 views
+    M.2a.6 — L1 Exceptions sheet — UNION across L1 views
     M.2a.7 — Description-driven prose across every sheet (this commit)
     M.2a.8 — Hash-lock the seed at the M.2a structure
     M.2a.9 — Deploy + verify against Aurora
@@ -55,7 +55,7 @@ from recon_gen.apps.l1_dashboard.datasets import (
     DS_STUCK_UNBUNDLED,
     DS_SUPERSESSION_DAILY_BALANCES,
     DS_SUPERSESSION_TRANSACTIONS,
-    DS_TODAYS_EXCEPTIONS,
+    DS_L1_EXCEPTIONS,
     DS_TRANSACTIONS,
     L1_ALL_SENTINEL,
     P_L1_DATE_END as _P_L1_DATE_END,
@@ -166,7 +166,7 @@ SHEET_LIMIT_BREACH = SheetId("l1-sheet-limit-breach")
 SHEET_PENDING_AGING = SheetId("l1-sheet-pending-aging")
 SHEET_UNBUNDLED_AGING = SheetId("l1-sheet-unbundled-aging")
 SHEET_SUPERSESSION_AUDIT = SheetId("l1-sheet-supersession-audit")
-SHEET_TODAYS_EXCEPTIONS = SheetId("l1-sheet-todays-exceptions")
+SHEET_L1_EXCEPTIONS = SheetId("l1-sheet-exceptions")
 SHEET_DAILY_STATEMENT = SheetId("l1-sheet-daily-statement")
 SHEET_TRANSACTIONS = SheetId("l1-sheet-transactions")
 SHEET_APP_INFO = SheetId("l1-sheet-app-info")
@@ -249,7 +249,7 @@ def _wide_date_writes() -> list[tuple[DrillParam, DrillStaticDateTime]]:
     target row falls outside the destination's default 7-day window
     and the table renders empty.
 
-    Same-scope drills (e.g. Today's Exceptions → Drift, both already
+    Same-scope drills (e.g. L1 Exceptions → Drift, both already
     in the universal date filter) do NOT need these writes — the
     user's existing window is preserved across the drill.
     """
@@ -264,7 +264,7 @@ _GETTING_STARTED_TITLE = "L1 Reconciliation Dashboard"
 _GETTING_STARTED_DESCRIPTION = (
     "Where to start. The dashboard groups every L1 SHOULD-constraint "
     "into one tab per exception kind — drift, overdraft, limit breach, "
-    "expected EOD balance variance — plus a Today's Exceptions roll-up. "
+    "expected EOD balance variance — plus a L1 Exceptions roll-up. "
     "Each tab queries one L1 invariant view directly; rows ARE the "
     "constraint violations."
 )
@@ -371,9 +371,9 @@ _SUPERSESSION_AUDIT_DESCRIPTION = (
 )
 
 
-_TODAYS_EXCEPTIONS_NAME = "Today's Exceptions"
-_TODAYS_EXCEPTIONS_TITLE = "Today's Exceptions"
-_TODAYS_EXCEPTIONS_DESCRIPTION = (
+_L1_EXCEPTIONS_NAME = "L1 Exceptions"
+_L1_EXCEPTIONS_TITLE = "L1 Exceptions"
+_L1_EXCEPTIONS_DESCRIPTION = (
     # C6 (cold-read v11.26.1) — copy used to claim "5 L1 invariants" but
     # the matview UNIONs across 10 check kinds: 5 balance/numeric checks
     # (drift / ledger_drift / overdraft / limit_breach /
@@ -524,7 +524,7 @@ def _l1_datasets(
     # order as the visual identifiers below; map each to a tree Dataset.
     visual_ids = [
         DS_DRIFT, DS_LEDGER_DRIFT, DS_OVERDRAFT,
-        DS_LIMIT_BREACH, DS_TODAYS_EXCEPTIONS,
+        DS_LIMIT_BREACH, DS_L1_EXCEPTIONS,
         DS_DAILY_STATEMENT_SUMMARY, DS_DAILY_STATEMENT_TRANSACTIONS,
         DS_TRANSACTIONS,
         DS_DRIFT_TIMELINE, DS_LEDGER_DRIFT_TIMELINE,
@@ -1010,7 +1010,7 @@ def _populate_overdraft_sheet(
     )
 
 
-def _populate_todays_exceptions_sheet(
+def _populate_l1_exceptions_sheet(
     cfg: Config,
     sheet: Sheet,
     *,
@@ -1020,7 +1020,7 @@ def _populate_todays_exceptions_sheet(
     daily_statement_sheet: Sheet,
     theme: ThemePreset,
 ) -> None:
-    """Today's Exceptions sheet — KPI + check-type breakdown bar +
+    """L1 Exceptions sheet — KPI + check-type breakdown bar +
     sorted detail table.
 
     Backed by the live UNION ALL dataset across all 5 L1 invariant views
@@ -1035,7 +1035,7 @@ def _populate_todays_exceptions_sheet(
     institution's "what we are" prose at the bottom for context.
     """
     accent = theme.accent
-    ds = datasets[DS_TODAYS_EXCEPTIONS]
+    ds = datasets[DS_L1_EXCEPTIONS]
 
     # Row 1: total count KPI (full width — single headline number).
     sheet.layout.row(height=_KPI_ROW_SPAN).add_kpi(
@@ -1045,15 +1045,13 @@ def _populate_todays_exceptions_sheet(
             # C6 (cold-read v11.26.1) — was "5 invariant checks" but
             # the matview UNIONs 10; updated for accuracy. See the
             # sheet description for the full taxonomy.
-            "Total count of L1 SHOULD-constraint violations on today's "
-            "business day across all 10 invariant checks. "
-            # C15 (cold-read v11.26.1) — operators get confused when
-            # this count is far smaller than the App-Info row count of
-            # ``<prefix>_todays_exceptions``. Make the today's-scope
-            # explicit so the gap reads as expected, not as broken.
-            "Scoped to TODAY ONLY — the matview itself holds historical "
-            "violation rows; expect the App Info matview row-count to "
-            "be 16-30× this number across a typical 7-30-day window."
+            "Total count of L1 SHOULD-constraint violations in the "
+            "picker's date window across all 10 invariant checks. "
+            # BV.3.3.c.bug3 (2026-05-31) — the matview is no longer
+            # pre-filtered to latest_day; date narrowing happens at
+            # the dataset SQL via pL1DateStart / pL1DateEnd pushdown.
+            # KPI count == App Info matview row-count within the
+            # selected window. Wider window → larger count."
         ),
         values=[ds["account_id"].count()],
     )
@@ -1070,14 +1068,14 @@ def _populate_todays_exceptions_sheet(
         subtitle=(
             # C6 (cold-read v11.26.1) — same "5 → 10" copy fix as KPI
             # above. The bar chart's GROUP BY check_type covers every
-            # branch of the todays_exceptions UNION ALL, so a check
+            # branch of the l1_exceptions UNION ALL, so a check
             # type with rows in the detail table always renders a bar
             # (the cold-read flagged fan_in_disagreement showing in
             # the table but not on the chart — addressed by the
             # ``COALESCE(SUM(1), 0)`` count semantics fix in C2,
             # which also makes the GROUP BY emit zero-bar entries
             # for ANY check_type present in the day's matview slice).
-            "How today's open exceptions distribute across the 10 L1 "
+            "How open exceptions in the date window distribute across the 10 L1 "
             "invariants. Spikes in one check kind point at a recurring "
             "error class to investigate first. **Log-scale Y axis:** "
             "the dominant check kind would otherwise swamp the rarer "
@@ -1109,7 +1107,7 @@ def _populate_todays_exceptions_sheet(
         width=_FULL,
         title="Exception Detail",
         subtitle=(
-            "Every violation on today's business day. Sorted by "
+            "Every violation in the picker's date window. Sorted by "
             "dollar magnitude (largest first) so the biggest variances "
             "are the top rows. Transfer-keyed checks (chain / XOR / "
             "fan-in) carry a count instead of an amount and sort below. "
@@ -1878,7 +1876,7 @@ def _populate_daily_statement_sheet(
 # same params, so changing the date range on one sheet propagates to all.
 # Per-dataset FilterGroups (rather than a single ALL_DATASETS group) because
 # the L1 invariant views don't share a single date column name — daily-balance
-# views expose `business_day_start`, while limit_breach + todays_exceptions
+# views expose `business_day_start`, while limit_breach + l1_exceptions
 # expose `business_day` (DATE_TRUNC of posting). Per-dataset binding sidesteps
 # the column-name mismatch without a schema migration.
 
@@ -1901,7 +1899,7 @@ def _wire_date_range_filter(
     pending_aging_sheet: Sheet,
     unbundled_aging_sheet: Sheet,
     supersession_audit_sheet: Sheet,
-    todays_exceptions_sheet: Sheet,
+    l1_exceptions_sheet: Sheet,
     transactions_sheet: Sheet,
     universal_range_view: DateView,
 ) -> None:
@@ -1932,7 +1930,7 @@ def _wire_date_range_filter(
         DS_DRIFT, DS_LEDGER_DRIFT,
         DS_DRIFT_TIMELINE, DS_LEDGER_DRIFT_TIMELINE,
         DS_OVERDRAFT,
-        DS_LIMIT_BREACH, DS_TODAYS_EXCEPTIONS,
+        DS_LIMIT_BREACH, DS_L1_EXCEPTIONS,
         DS_TRANSACTIONS,
     )
     start_bridges = [
@@ -1960,7 +1958,7 @@ def _wire_date_range_filter(
     # intentionally absent — see date_scoped_datasets note above.
     for sheet in (
         drift_sheet, drift_timelines_sheet, overdraft_sheet,
-        limit_breach_sheet, todays_exceptions_sheet,
+        limit_breach_sheet, l1_exceptions_sheet,
         transactions_sheet,
     ):
         sheet.add_parameter_datetime_picker(
@@ -2070,7 +2068,7 @@ def _wire_per_sheet_dropdowns(
     pending_aging_sheet: Sheet,
     unbundled_aging_sheet: Sheet,
     supersession_audit_sheet: Sheet,
-    todays_exceptions_sheet: Sheet,
+    l1_exceptions_sheet: Sheet,
     transactions_sheet: Sheet,
 ) -> None:
     """Y.2.g + AA.A.3 — per-sheet filter dropdowns, all pushed into
@@ -2101,7 +2099,7 @@ def _wire_per_sheet_dropdowns(
     ds_sp = datasets[DS_STUCK_PENDING]
     ds_su = datasets[DS_STUCK_UNBUNDLED]
     ds_sa_tx = datasets[DS_SUPERSESSION_TRANSACTIONS]
-    ds_te = datasets[DS_TODAYS_EXCEPTIONS]
+    ds_te = datasets[DS_L1_EXCEPTIONS]
     ds_tx = datasets[DS_TRANSACTIONS]
     ds_accounts = datasets[DS_L1_ACCOUNTS]
     ds_tx_ids = datasets[DS_L1_TX_IDS]
@@ -2217,22 +2215,22 @@ def _wire_per_sheet_dropdowns(
         title="Supersedes Reason", all_values=l1_supersede_reason_values(),
     )
 
-    # --- Today's Exceptions sheet — Check Type (enum) + Account
+    # --- L1 Exceptions sheet — Check Type (enum) + Account
     #     (data-value) + Transfer Type (enum, nullable).
     _populate_pushdown_enum_dropdown(
-        sheet=todays_exceptions_sheet, analysis=analysis,
+        sheet=l1_exceptions_sheet, analysis=analysis,
         bridges=[(ds_te, P_L1_TODAYS_EXC_CHECK_TYPE)],
         param_name=ParameterName(P_L1_TODAYS_EXC_CHECK_TYPE),
         title="Check Type", all_values=l1_check_type_values(),
     )
     _populate_pushdown_value_dropdown(
-        sheet=todays_exceptions_sheet, analysis=analysis,
+        sheet=l1_exceptions_sheet, analysis=analysis,
         bridges=[(ds_te, P_L1_TODAYS_EXC_ACCOUNT)],
         param_name=ParameterName(P_L1_TODAYS_EXC_ACCOUNT), title="Account",
         options_dataset=ds_accounts, options_column="account_display",
     )
     _populate_pushdown_enum_dropdown(
-        sheet=todays_exceptions_sheet, analysis=analysis,
+        sheet=l1_exceptions_sheet, analysis=analysis,
         bridges=[(ds_te, P_L1_TODAYS_EXC_TYPE)],
         param_name=ParameterName(P_L1_TODAYS_EXC_TYPE), title="Transfer Type",
         all_values=type_values,
@@ -2593,7 +2591,7 @@ def _wire_drill_filter_groups(
 # AA.C.3 — Exception-literacy panel wiring. Pulls per-invariant prose
 # (SHOULD-constraint + body + remediation) from L1_Invariants.md via
 # the AA.C.2 parser and lands a SheetTextBox at the bottom of each
-# invariant sheet. Today's Exceptions gets a generic intro panel
+# invariant sheet. L1 Exceptions gets a generic intro panel
 # instead of per-kind prose (it aggregates every kind, and a stack of
 # seven panels would crowd the sheet).
 _PANEL_LAYOUT_HEIGHT = 6
@@ -2612,18 +2610,18 @@ _PER_SHEET_PANELS: dict[str, tuple[str, ...]] = {
     "supersession_audit": ("supersession_audit",),
 }
 
-# AA.C.3.e — Today's Exceptions intro panel. Hand-authored vs
+# AA.C.3.e — L1 Exceptions intro panel. Hand-authored vs
 # parser-driven because the sheet doesn't map to a single
 # invariant kind; instead it aggregates rows from every L1
 # SHOULD-constraint matview. The bullet list points operators at
 # the per-kind sheets where they'll find the formal SHOULD +
-# remediation, keeping THIS sheet focused on "today's surfaces"
+# remediation, keeping THIS sheet focused on the rollup view
 # rather than re-printing every kind's prose.
-_TODAYS_EXCEPTIONS_PANEL = """\
+_L1_EXCEPTIONS_PANEL = """\
 **About this sheet**
 
-Today's Exceptions aggregates every L1 SHOULD-constraint violation
-that landed on the most recent business day. One row per violation,
+L1 Exceptions aggregates every L1 SHOULD-constraint violation
+across the date picker's window. One row per violation,
 across all kinds -- drift, overdraft, limit breach, expected EOD
 balance breach, pending aging, unbundled aging.
 
@@ -2654,14 +2652,14 @@ def _wire_invariant_panels(
     pending_aging_sheet: Sheet,
     unbundled_aging_sheet: Sheet,
     supersession_audit_sheet: Sheet,
-    todays_exceptions_sheet: Sheet,
+    l1_exceptions_sheet: Sheet,
 ) -> None:
     """AA.C.3 -- land per-invariant prose panels at the bottom of the
     L1 dashboard sheets.
 
     Six invariant sheets get one or more :class:`TextBox` panels
     composed from the L1_Invariants.md sections (AA.C.2 parser +
-    :func:`panel_markdown`). Today's Exceptions gets a single
+    :func:`panel_markdown`). L1 Exceptions gets a single
     hand-authored intro panel that points at the per-kind sheets
     (AA.C.3.e -- avoiding a seven-panel stack here)."""
     sections = load_bundled_invariants()
@@ -2686,13 +2684,13 @@ def _wire_invariant_panels(
                 ),
                 width=_FULL,
             )
-    # Today's Exceptions hand-authored intro panel.
-    todays_exceptions_sheet.layout.row(
+    # L1 Exceptions hand-authored intro panel.
+    l1_exceptions_sheet.layout.row(
         height=_PANEL_LAYOUT_HEIGHT,
     ).add_text_box(
         TextBox(
-            text_box_id="l1-todays-exceptions-panel",
-            content=rt.text_box(rt.markdown(_TODAYS_EXCEPTIONS_PANEL)),
+            text_box_id="l1-exceptions-panel",
+            content=rt.text_box(rt.markdown(_L1_EXCEPTIONS_PANEL)),
         ),
         width=_FULL,
     )
@@ -2708,7 +2706,7 @@ def build_l1_dashboard_app(
     M.2a.3: registers Analysis + Dashboard + Getting Started + Drift
     sheets, plus the 2 L1 invariant datasets (drift + ledger_drift).
     Substeps M.2a.4-M.2a.6 add the remaining per-invariant sheets
-    (Overdraft, Limit Breach, Today's Exceptions). Each sheet IS one
+    (Overdraft, Limit Breach, L1 Exceptions). Each sheet IS one
     L1 SHOULD-constraint visualized via the M.1a.7 invariant views.
 
     Dashboard ID convention: ``<deployment_name>-l1-dashboard`` (Z.C) —
@@ -2789,11 +2787,11 @@ def build_l1_dashboard_app(
         title=_SUPERSESSION_AUDIT_TITLE,
         description=_SUPERSESSION_AUDIT_DESCRIPTION,
     ))
-    todays_exceptions_sheet = analysis.add_sheet(Sheet(
-        sheet_id=SHEET_TODAYS_EXCEPTIONS,
-        name=_TODAYS_EXCEPTIONS_NAME,
-        title=_TODAYS_EXCEPTIONS_TITLE,
-        description=_TODAYS_EXCEPTIONS_DESCRIPTION,
+    l1_exceptions_sheet = analysis.add_sheet(Sheet(
+        sheet_id=SHEET_L1_EXCEPTIONS,
+        name=_L1_EXCEPTIONS_NAME,
+        title=_L1_EXCEPTIONS_TITLE,
+        description=_L1_EXCEPTIONS_DESCRIPTION,
     ))
     daily_statement_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_DAILY_STATEMENT,
@@ -2850,8 +2848,8 @@ def build_l1_dashboard_app(
         cfg, analysis, supersession_audit_sheet,
         datasets=datasets, theme=theme,
     )
-    _populate_todays_exceptions_sheet(
-        cfg, todays_exceptions_sheet,
+    _populate_l1_exceptions_sheet(
+        cfg, l1_exceptions_sheet,
         datasets=datasets, l2_instance=l2_instance,
         drift_sheet=drift_sheet,
         daily_statement_sheet=daily_statement_sheet, theme=theme,
@@ -2887,7 +2885,7 @@ def build_l1_dashboard_app(
         pending_aging_sheet=pending_aging_sheet,
         unbundled_aging_sheet=unbundled_aging_sheet,
         supersession_audit_sheet=supersession_audit_sheet,
-        todays_exceptions_sheet=todays_exceptions_sheet,
+        l1_exceptions_sheet=l1_exceptions_sheet,
         transactions_sheet=transactions_sheet,
         universal_range_view=DateView(
             frame=cfg.test_generator.as_of_frame(window_days=7),
@@ -2909,7 +2907,7 @@ def build_l1_dashboard_app(
         pending_aging_sheet=pending_aging_sheet,
         unbundled_aging_sheet=unbundled_aging_sheet,
         supersession_audit_sheet=supersession_audit_sheet,
-        todays_exceptions_sheet=todays_exceptions_sheet,
+        l1_exceptions_sheet=l1_exceptions_sheet,
         transactions_sheet=transactions_sheet,
     )
 
@@ -2940,7 +2938,7 @@ def build_l1_dashboard_app(
 
     # AA.C.3 — exception-literacy panels (sheet-bottom rich-text from
     # L1_Invariants.md). Per-kind on the 6 invariant sheets, generic
-    # intro on Today's Exceptions.
+    # intro on L1 Exceptions.
     _wire_invariant_panels(
         drift_sheet=drift_sheet,
         overdraft_sheet=overdraft_sheet,
@@ -2948,7 +2946,7 @@ def build_l1_dashboard_app(
         pending_aging_sheet=pending_aging_sheet,
         unbundled_aging_sheet=unbundled_aging_sheet,
         supersession_audit_sheet=supersession_audit_sheet,
-        todays_exceptions_sheet=todays_exceptions_sheet,
+        l1_exceptions_sheet=l1_exceptions_sheet,
     )
 
     app.create_dashboard(

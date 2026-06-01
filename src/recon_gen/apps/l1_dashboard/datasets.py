@@ -12,7 +12,7 @@ Substep landmarks:
     M.2a.3 — drift + ledger_drift datasets
     M.2a.4 — overdraft dataset
     M.2a.5 — limit_breach dataset
-    M.2a.6 — today's exceptions UNION dataset (this commit)
+    M.2a.6 — L1 exceptions UNION dataset (this commit)
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ def l1_matview_specs(cfg: Config) -> list[tuple[str, str | None]]:
       - daily_balances / current_daily_balances / daily_statement_summary
         → ``business_day_start``
       - drift / ledger_drift / overdraft → ``business_day_end``
-      - limit_breach / todays_exceptions → ``business_day``
+      - limit_breach / l1_exceptions → ``business_day``
 
     Z.C — was ``l1_matview_specs(l2_instance)`` reading
     ``l2_instance.instance``; now reads ``cfg.db_table_prefix``.
@@ -73,7 +73,7 @@ def l1_matview_specs(cfg: Config) -> list[tuple[str, str | None]]:
         (f"{p}_ledger_drift", "business_day_end"),
         (f"{p}_overdraft", "business_day_end"),
         (f"{p}_limit_breach", "business_day"),
-        (f"{p}_todays_exceptions", "business_day"),
+        (f"{p}_l1_exceptions", "business_day"),
         (f"{p}_stuck_pending", "posting"),
         (f"{p}_stuck_unbundled", "posting"),
         (f"{p}_daily_statement_summary", "business_day_start"),
@@ -128,7 +128,7 @@ _L1_ALL_SENTINEL_SQL = f"'{L1_ALL_SENTINEL}'"
 _L1_DS_ACCOUNT_SENTINEL = "__l1_no_account_selected__"
 _L1_DS_ACCOUNT_SENTINEL_SQL = f"'{_L1_DS_ACCOUNT_SENTINEL}'"
 
-# Fixed ``check_type`` discriminator values the ``<prefix>_todays_exceptions``
+# Fixed ``check_type`` discriminator values the ``<prefix>_l1_exceptions``
 # matview's UNION ALL projects (common/l2/schema.py). Schema-level, not
 # L2-dependent.
 _L1_CHECK_TYPE_VALUES: tuple[str, ...] = (
@@ -192,7 +192,7 @@ def l1_supersede_reason_values() -> list[str]:
 
 
 def l1_check_type_values() -> list[str]:
-    """The ``check_type`` discriminator values the Today's Exceptions
+    """The ``check_type`` discriminator values the L1 Exceptions
     matview projects. Static dropdown source — see ``_L1_CHECK_TYPE_VALUES``.
     """
     return list(_L1_CHECK_TYPE_VALUES)
@@ -292,7 +292,7 @@ DS_DRIFT = "l1-drift-ds"
 DS_LEDGER_DRIFT = "l1-ledger-drift-ds"
 DS_OVERDRAFT = "l1-overdraft-ds"
 DS_LIMIT_BREACH = "l1-limit-breach-ds"
-DS_TODAYS_EXCEPTIONS = "l1-todays-exceptions-ds"
+DS_L1_EXCEPTIONS = "l1-exceptions-ds"
 DS_DAILY_STATEMENT_SUMMARY = "l1-daily-statement-summary-ds"
 DS_DAILY_STATEMENT_TRANSACTIONS = "l1-daily-statement-transactions-ds"
 DS_TRANSACTIONS = "l1-transactions-ds"
@@ -319,9 +319,9 @@ DS_L1_DS_ROLES = "l1-ds-roles-ds"
 # BO.1 (2026-05-29) — Daily-Statement-specific account picker source.
 # Pre-BO.1 the Daily Statement account dropdown re-used ``DS_L1_ACCOUNTS``
 # which BL.3 widened to UNION (current_daily_balances ∪
-# current_transactions ∪ todays_exceptions) so Pending-only accounts +
+# current_transactions ∪ l1_exceptions) so Pending-only accounts +
 # spine-planted accounts that have NO ``daily_balances`` row would
-# still be pickable on the Pending Aging / Today's Exceptions sheets.
+# still be pickable on the Pending Aging / L1 Exceptions sheets.
 # That widening was right for those sheets — but wrong for Daily
 # Statement, which reconciles per-(account, day) against the
 # daily-balances matview. Picking a balance-less account on Daily
@@ -333,7 +333,7 @@ DS_L1_DS_ROLES = "l1-ds-roles-ds"
 # so every option in the Daily Statement dropdown is guaranteed to
 # have a balance row. DS_L1_ACCOUNTS stays unchanged — the 7 other
 # L1 sheets (Drift / Drift Timelines / Overdraft / Limit Breach /
-# Today's Exceptions / Pending Aging / Transactions) keep the wider
+# L1 Exceptions / Pending Aging / Transactions) keep the wider
 # universe BL.3 wired for them.
 DS_L1_DS_ACCOUNTS = "l1-ds-accounts-ds"
 
@@ -449,7 +449,7 @@ LIMIT_BREACH_CONTRACT = DatasetContract(columns=[
 ])
 
 
-# Today's Exceptions UNION across the 5 L1 invariant views. The
+# L1 Exceptions UNION across the 5 L1 invariant views. The
 # `check_type` discriminator carries the originating constraint name;
 # `magnitude` is the per-branch "how bad is it" number normalized to
 # absolute value so the bar chart + sort-by-magnitude reads consistently:
@@ -459,7 +459,7 @@ LIMIT_BREACH_CONTRACT = DatasetContract(columns=[
 # `account_parent_role` and `rail_name` are NULL for branches that
 # don't carry them (ledger_drift has no parent; only limit_breach has
 # rail_name).
-TODAYS_EXCEPTIONS_CONTRACT = DatasetContract(columns=[
+L1_EXCEPTIONS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("check_type", "STRING"),
     ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
     ColumnSpec("account_name", "STRING"),
@@ -944,19 +944,19 @@ def build_limit_breach_dataset(
     )
 
 
-# Y.2.g — Today's Exceptions pushdown params.
+# Y.2.g — L1 Exceptions pushdown params.
 P_L1_TODAYS_EXC_CHECK_TYPE = "pL1TodaysExcCheckType"
 P_L1_TODAYS_EXC_ACCOUNT = "pL1TodaysExcAccount"
 P_L1_TODAYS_EXC_TYPE = "pL1TodaysExcType"
 
 
-def build_todays_exceptions_dataset(
+def build_l1_exceptions_dataset(
     cfg: Config, l2_instance: L2Instance,
 ) -> DataSet:
-    """Wrap the `<prefix>_todays_exceptions` matview from M.1a.9.
+    """Wrap the `<prefix>_l1_exceptions` matview from M.1a.9.
 
     M.1a.9 promoted the UNION ALL from inline CustomSql to a per-instance
-    MATERIALIZED VIEW so each visual on the Today's Exceptions sheet
+    MATERIALIZED VIEW so each visual on the L1 Exceptions sheet
     reads a precomputed table instead of re-running the 5-branch UNION.
     Refresh contract: integrators MUST call `refresh_matviews_sql()`
     after every batch insert into the base tables.
@@ -992,7 +992,7 @@ def build_todays_exceptions_dataset(
         f" account_parent_role, business_day, rail_name,"
         f" {magnitude_amount} AS magnitude_amount,"
         f" magnitude_count\n"
-        f"FROM {prefix}_todays_exceptions\n"
+        f"FROM {prefix}_l1_exceptions\n"
         f"WHERE {_data_value_clause('check_type', P_L1_TODAYS_EXC_CHECK_TYPE)}\n"
         f"  AND {_account_display_clause(P_L1_TODAYS_EXC_ACCOUNT)}\n"
         f"  AND ({_data_value_clause('rail_name', P_L1_TODAYS_EXC_TYPE)}"
@@ -1004,10 +1004,10 @@ def build_todays_exceptions_dataset(
         f")"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l1-todays-exceptions-dataset"),
-        "L1 Today's Exceptions", "l1-todays-exceptions",
-        sql, TODAYS_EXCEPTIONS_CONTRACT,
-        visual_identifier=DS_TODAYS_EXCEPTIONS,
+        cfg, cfg.prefixed("l1-exceptions-dataset"),
+        "L1 L1 Exceptions", "l1-exceptions",
+        sql, L1_EXCEPTIONS_CONTRACT,
+        visual_identifier=DS_L1_EXCEPTIONS,
         dataset_parameters=[
             # AA.A.3 — all three dropdowns flipped from MULTI to SINGLE per
             # the drill-to-one default (audit row pL1TodaysExcCheckType +
@@ -1623,7 +1623,7 @@ def build_l1_accounts_dataset(
         f"   SELECT account_id, account_role, account_name"
         f"   FROM {prefix}_current_transactions"
         f"   UNION ALL"
-        # BL.3 — `<prefix>_todays_exceptions` is a UNION ALL of 9
+        # BL.3 — `<prefix>_l1_exceptions` is a UNION ALL of 9
         # invariant matviews; some branches (chain_parent_disagreement,
         # xor_group_violation) emit NULL account_id (the violation is
         # keyed on transfer_id, not account). A NULL row in the
@@ -1633,10 +1633,10 @@ def build_l1_accounts_dataset(
         # keeps the surface to account-keyed branches
         # (multi_xor_violation, the per-(account, day) invariants)
         # which is the original BL.3 motivation — those rows are
-        # accounts that appear ONLY in todays_exceptions (no balance,
+        # accounts that appear ONLY in l1_exceptions (no balance,
         # no transaction).
         f"   SELECT account_id, account_role, account_name"
-        f"   FROM {prefix}_todays_exceptions"
+        f"   FROM {prefix}_l1_exceptions"
         f"   WHERE account_id IS NOT NULL"
         f" ) accounts_universe"
     )
@@ -1763,7 +1763,7 @@ def build_all_l1_dashboard_datasets(
         build_ledger_drift_dataset(cfg, l2_instance),
         build_overdraft_dataset(cfg, l2_instance),
         build_limit_breach_dataset(cfg, l2_instance),
-        build_todays_exceptions_dataset(cfg, l2_instance),
+        build_l1_exceptions_dataset(cfg, l2_instance),
         build_daily_statement_summary_dataset(cfg, l2_instance),
         build_daily_statement_transactions_dataset(cfg, l2_instance),
         build_transactions_dataset(cfg, l2_instance),

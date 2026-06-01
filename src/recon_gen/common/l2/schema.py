@@ -324,7 +324,7 @@ def refresh_matviews_sql(
         # AB.3.3 — XOR group violations: per (Transfer, template, XOR
         # group) firing-cardinality check. Reads current_transactions
         # + the L2 declaration (inlined); independent of other L1
-        # matviews. Refresh before todays_exceptions so its UNION ALL
+        # matviews. Refresh before l1_exceptions so its UNION ALL
         # branch reads fresh rows.
         f"{p}_xor_group_violation",
         # AB.4.3 — Per-child Transfer parent set (long form). Derived
@@ -338,14 +338,14 @@ def refresh_matviews_sql(
         f"{p}_fan_in_disagreement",
         # AB.6.5 — Multi-XOR violation L1 invariant. Reads from
         # current_transactions + L2 declaration inlined; independent
-        # of other L1 matviews. Refresh before todays_exceptions so
+        # of other L1 matviews. Refresh before l1_exceptions so
         # its UNION ALL branch reads fresh rows.
         f"{p}_multi_xor_violation",
         # Dashboard-shape matviews: read from current_* +
         # L1 invariants. MUST refresh AFTER all L1 invariants are
-        # fresh so todays_exceptions's UNION reads up-to-date data.
+        # fresh so l1_exceptions's UNION reads up-to-date data.
         f"{p}_daily_statement_summary",
-        f"{p}_todays_exceptions",
+        f"{p}_l1_exceptions",
         # Investigation matviews (N.3.b): read directly from base
         # ``{p}_transactions``, so they're independent of every L1
         # matview. Order between the two doesn't matter — they don't
@@ -426,7 +426,7 @@ def _emit_sqlite_matview_refresh(instance: L2Instance, *, prefix: str) -> str:
         f"{p}_fan_in_disagreement",
         f"{p}_multi_xor_violation",
         f"{p}_daily_statement_summary",
-        f"{p}_todays_exceptions",
+        f"{p}_l1_exceptions",
         f"{p}_inv_pair_rolling_anomalies",
         f"{p}_inv_money_trail_edges",
     ]
@@ -607,7 +607,7 @@ def _emit_l1_invariant_views(
         # collapse.
         null_text=cast("NULL", varchar_type(100, dialect), dialect),
         # BC.12 surfaced (after ORA-32368 unblocked stmt #91): the
-        # transfer-keyed UNION ALL branches in todays_exceptions used
+        # transfer-keyed UNION ALL branches in l1_exceptions used
         # ``CAST(NULL AS BIGINT) AS magnitude_amount`` — Oracle has no
         # BIGINT, so the cast fails ORA-00902 "invalid datatype".
         # Route through ``typed_null`` so the alias maps to NUMBER(19)
@@ -1637,12 +1637,12 @@ CREATE INDEX idx_{p}_curr_db_scope_day
 # (no view here depends on another in this block, but ordering is
 # conservative).
 # L1 invariant matview names in drop order: dashboard-shape matviews
-# (todays_exceptions, daily_statement_summary) drop FIRST because they
+# (l1_exceptions, daily_statement_summary) drop FIRST because they
 # read from the L1 invariant matviews (which read from current_* +
 # computed_*). The two helper matviews (computed_ledger_balance,
 # computed_subledger_balance) drop last.
 _L1_INVARIANT_DROP_NAMES: tuple[str, ...] = (
-    "todays_exceptions",
+    "l1_exceptions",
     "daily_statement_summary",
     "multi_xor_violation",
     "fan_in_disagreement",
@@ -1667,7 +1667,7 @@ _L1_INVARIANT_DROPS_HEADER = """\
 -- depend on the base tables). Re-emitted at the top of the script so
 -- re-runs converge. M.1a.9 made these MATERIALIZED VIEWs.
 --
--- Drop order: dashboard-shape matviews (todays_exceptions,
+-- Drop order: dashboard-shape matviews (l1_exceptions,
 -- daily_statement_summary) drop FIRST because they read from the L1
 -- invariant matviews (which read from current_* + computed_*).
 --
@@ -2396,7 +2396,7 @@ WHERE tx.transfer_parent_id IS NOT NULL
   AND tx.status <> 'Failed'{chain_parent_disagreement_fan_in_filter}
 GROUP BY tx.transfer_id, tx.template_name
 HAVING COUNT(DISTINCT tx.transfer_parent_id) > 1;
--- Dashboard hot-path indexes — per-transfer drill (Today's Exceptions
+-- Dashboard hot-path indexes — per-transfer drill (L1 Exceptions
 -- → Transactions), per-template dropdown (analyst filter), per-day filter.
 CREATE INDEX idx_{p}_cpd_transfer ON {p}_chain_parent_disagreement (transfer_id);
 CREATE INDEX idx_{p}_cpd_template ON {p}_chain_parent_disagreement (child_template_name);
@@ -2428,7 +2428,7 @@ CREATE INDEX idx_{p}_cpd_day ON {p}_chain_parent_disagreement (business_day);
 -- ---------------------------------------------------------------------
 {matview_create_kw} {p}_xor_group_violation{matview_options} AS
 {xor_group_violation_body};
--- Dashboard hot-path indexes — per-transfer drill (Today's Exceptions
+-- Dashboard hot-path indexes — per-transfer drill (L1 Exceptions
 -- → Transactions), per-template dropdown filter, per-day filter.
 CREATE INDEX idx_{p}_xgv_transfer ON {p}_xor_group_violation (transfer_id);
 CREATE INDEX idx_{p}_xgv_template ON {p}_xor_group_violation (template_name);
@@ -2492,7 +2492,7 @@ CREATE INDEX idx_{p}_tp_parent ON {p}_transfer_parents (parent_transfer_id);
 -- ---------------------------------------------------------------------
 {matview_create_kw} {p}_fan_in_disagreement{matview_options} AS
 {fan_in_disagreement_body};
--- Dashboard hot-path indexes — per-transfer drill (Today's Exceptions
+-- Dashboard hot-path indexes — per-transfer drill (L1 Exceptions
 -- → Transactions), per-template dropdown filter, per-kind triage filter.
 CREATE INDEX idx_{p}_fid_transfer ON {p}_fan_in_disagreement (child_transfer_id);
 CREATE INDEX idx_{p}_fid_template ON {p}_fan_in_disagreement (child_template_name);
@@ -2518,7 +2518,7 @@ CREATE INDEX idx_{p}_fid_kind ON {p}_fan_in_disagreement (disagreement_kind);
 -- ---------------------------------------------------------------------
 {matview_create_kw} {p}_multi_xor_violation{matview_options} AS
 {multi_xor_violation_body};
--- Dashboard hot-path indexes — per-parent drill (Today's Exceptions
+-- Dashboard hot-path indexes — per-parent drill (L1 Exceptions
 -- → Transactions on the parent firing), per-chain-parent filter,
 -- per-kind triage filter.
 CREATE INDEX idx_{p}_mxv_parent ON {p}_multi_xor_violation (parent_transfer_id);
@@ -2599,59 +2599,60 @@ CREATE INDEX idx_{p}_dss_account_day
     ON {p}_daily_statement_summary (account_id, business_day_start);
 
 -- ---------------------------------------------------------------------
--- Dashboard-shape matview: Today's Exceptions UNION.
+-- Dashboard-shape matview: L1 Exceptions UNION.
 -- M.1a.9 — moved from `apps/l1_dashboard/datasets.py` CustomSql into
--- a per-instance MATERIALIZED VIEW so each visual on Today's
--- Exceptions queries a precomputed table instead of re-running the
--- 5-branch UNION ALL (each branch with its own MAX subquery).
--- One row per L1 invariant violation on the most recent business day.
+-- a per-instance MATERIALIZED VIEW so each visual on the L1
+-- Exceptions sheet queries a precomputed table instead of re-running
+-- the 10-branch UNION ALL.
+-- One row per L1 invariant violation across all observed business days;
+-- the dataset's pL1DateStart / pL1DateEnd pushdown narrows to the
+-- picker's window at query time.
 -- AO.4 — split magnitude into ``magnitude_amount`` (BIGINT cents, money
 -- branches) + ``magnitude_count`` (INT, transfer-keyed cardinality
 -- branches). Exactly one populated per row; the other NULL. Eliminates
 -- the dual-unit "is this $ or count?" UX confusion the operator flagged.
+-- BV.3.3.c.bug3 (2026-05-31) — dropped the `WHERE business_day_start =
+-- MAX(business_day_start)` pre-filter from each per-day branch. The
+-- dataset SQL already pushes pL1DateStart / pL1DateEnd over business_day;
+-- the matview-level latest-day filter made the picker meaningless + hid
+-- historical violations the operator wanted to triage. Sheet renamed
+-- accordingly. Plants at any days_ago now surface naturally within the
+-- picker's window.
 -- ---------------------------------------------------------------------
-{matview_create_kw} {p}_todays_exceptions{matview_options} AS
-WITH latest_day AS (
-    SELECT MAX(business_day_start) AS day
-    FROM {p}_current_daily_balances
-)
+{matview_create_kw} {p}_l1_exceptions{matview_options} AS
 -- Per-day branches (drift / ledger_drift / overdraft / limit_breach /
--- expected_eod_balance_breach) — each is a per-(account, day) cell, so
--- "today's exception" filters to MAX(business_day) from current_daily_balances.
+-- expected_eod_balance_breach) — each is a per-(account, day) cell.
+-- No matview-level day filter. The sheet's date picker pushes
+-- pL1DateStart / pL1DateEnd over business_day at query time.
 SELECT 'drift' AS check_type, account_id, account_name,
        account_role, account_parent_role,
        business_day_start AS business_day,
        {null_text} AS rail_name,
        ABS(drift) AS magnitude_amount,
        CAST(NULL AS INTEGER) AS magnitude_count
-FROM {p}_drift, latest_day
-WHERE business_day_start = latest_day.day
+FROM {p}_drift
 UNION ALL
 SELECT 'ledger_drift', account_id, account_name, account_role,
        NULL, business_day_start, NULL, ABS(drift),
        CAST(NULL AS INTEGER)
-FROM {p}_ledger_drift, latest_day
-WHERE business_day_start = latest_day.day
+FROM {p}_ledger_drift
 UNION ALL
 SELECT 'overdraft', account_id, account_name, account_role,
        account_parent_role, business_day_start, NULL,
        ABS(stored_balance),
        CAST(NULL AS INTEGER)
-FROM {p}_overdraft, latest_day
-WHERE business_day_start = latest_day.day
+FROM {p}_overdraft
 UNION ALL
 SELECT 'limit_breach', account_id, account_name, account_role,
        account_parent_role, business_day, rail_name,
        (outbound_total - cap),
        CAST(NULL AS INTEGER)
-FROM {p}_limit_breach, latest_day
-WHERE business_day = latest_day.day
+FROM {p}_limit_breach
 UNION ALL
 SELECT 'expected_eod_balance_breach', account_id, account_name,
        account_role, NULL, business_day_start, NULL, ABS(variance),
        CAST(NULL AS INTEGER)
-FROM {p}_expected_eod_balance_breach, latest_day
-WHERE business_day_start = latest_day.day
+FROM {p}_expected_eod_balance_breach
 -- Currently-open branches (M.4.4.12) — stuck_pending and stuck_unbundled
 -- are matviews of legs whose age has exceeded a per-rail cap measured
 -- against CURRENT_TIMESTAMP. By construction every row is "currently
@@ -2732,12 +2733,12 @@ SELECT 'multi_xor_violation',
        {null_bigint} AS magnitude_amount,
        child_count AS magnitude_count
 FROM {p}_multi_xor_violation;
--- Today's Exceptions sheet has 3 dropdowns (check_type, account,
+-- L1 Exceptions sheet has 3 dropdowns (check_type, account,
 -- rail_name); each WHERE filter benefits from its own index.
-CREATE INDEX idx_{p}_te_check_type
-    ON {p}_todays_exceptions (check_type);
-CREATE INDEX idx_{p}_te_account ON {p}_todays_exceptions (account_id);
-CREATE INDEX idx_{p}_te_rail ON {p}_todays_exceptions (rail_name);
+CREATE INDEX idx_{p}_l1e_check_type
+    ON {p}_l1_exceptions (check_type);
+CREATE INDEX idx_{p}_l1e_account ON {p}_l1_exceptions (account_id);
+CREATE INDEX idx_{p}_l1e_rail ON {p}_l1_exceptions (rail_name);
 """
 
 

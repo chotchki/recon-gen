@@ -3,7 +3,7 @@ search-by-name-AND-id) — parametrized over ``[qs, app2]`` via
 ``l1_dashboard_driver``.
 
 Pairs naturally with ``test_l1_filters.py`` (which covers the universal
-date filter + the Today's Exceptions Check Type dropdown). This file
+date filter + the L1 Exceptions Check Type dropdown). This file
 exists separately so the Daily Statement / Account-display contracts
 can be triaged independently — the Daily Statement Account dropdown
 silently broke between AA.E.2 and AA.E.3 because the AA.E.2 sweep
@@ -32,7 +32,7 @@ from recon_gen.apps.l1_dashboard.app import (
     _DRIFT_NAME,
     _LIMIT_BREACH_NAME,
     _OVERDRAFT_NAME,
-    _TODAYS_EXCEPTIONS_NAME,
+    _L1_EXCEPTIONS_NAME,
     _TRANSACTIONS_NAME,
 )
 from recon_gen.apps.l1_dashboard.datasets import (
@@ -158,7 +158,7 @@ def test_bo_1_daily_statement_picks_reconcile_per_role(
     parseable currency values).
 
     Pre-BO.1 the picker source (``DS_L1_ACCOUNTS``) UNIONed three
-    matviews including ``current_transactions`` + ``todays_exceptions``,
+    matviews including ``current_transactions`` + ``l1_exceptions``,
     so the dropdown advertised owner-rollup IDs that had NO
     daily_balances row. Pre-BM the filter was a no-op so the FK gap
     was invisible; BM made the picker strict, so cardholder-rollup
@@ -276,7 +276,7 @@ def test_bo_1_daily_statement_picks_reconcile_per_role(
     _DRIFT_NAME,
     _OVERDRAFT_NAME,
     _LIMIT_BREACH_NAME,
-    _TODAYS_EXCEPTIONS_NAME,
+    _L1_EXCEPTIONS_NAME,
     _DAILY_STATEMENT_NAME,
     _TRANSACTIONS_NAME,
 ])

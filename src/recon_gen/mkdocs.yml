@@ -102,7 +102,7 @@ nav:
       - Pending Aging: walkthroughs/l1/pending-aging.md
       - Unbundled Aging: walkthroughs/l1/unbundled-aging.md
       - Supersession Audit: walkthroughs/l1/supersession-audit.md
-      - Today's Exceptions: walkthroughs/l1/todays-exceptions.md
+      - L1 Exceptions: walkthroughs/l1/exceptions.md
       - Daily Statement: walkthroughs/l1/daily-statement.md
       - Transactions: walkthroughs/l1/transactions.md
     - Investigation:

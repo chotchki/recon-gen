@@ -43,8 +43,8 @@ from recon_gen.apps.l1_dashboard.app import (
     _PENDING_AGING_TITLE,
     _SUPERSESSION_AUDIT_NAME,
     _SUPERSESSION_AUDIT_TITLE,
-    _TODAYS_EXCEPTIONS_NAME,
-    _TODAYS_EXCEPTIONS_TITLE,
+    _L1_EXCEPTIONS_NAME,
+    _L1_EXCEPTIONS_TITLE,
     _TRANSACTIONS_NAME,
     _TRANSACTIONS_TITLE,
     _UNBUNDLED_AGING_NAME,
@@ -169,7 +169,7 @@ def test_twelve_sheets_after_m445() -> None:
         _GETTING_STARTED_NAME, _DRIFT_NAME, _DRIFT_TIMELINES_NAME,
         _OVERDRAFT_NAME, _LIMIT_BREACH_NAME,
         _PENDING_AGING_NAME, _UNBUNDLED_AGING_NAME, _SUPERSESSION_AUDIT_NAME,
-        _TODAYS_EXCEPTIONS_NAME, _DAILY_STATEMENT_NAME, _TRANSACTIONS_NAME,
+        _L1_EXCEPTIONS_NAME, _DAILY_STATEMENT_NAME, _TRANSACTIONS_NAME,
         APP_INFO_SHEET_NAME,  # M.4.4.5 — App Info canary, always last
     ]
 
@@ -556,21 +556,21 @@ def test_limit_breach_dataset_registered_and_targets_l1_view() -> None:
     assert f"FROM {_CFG.db_table_prefix}_limit_breach" in sql.SqlQuery
 
 
-# -- Today's Exceptions sheet (M.2a.6) ---------------------------------------
+# -- L1 Exceptions sheet (M.2a.6) ---------------------------------------
 
 
-def test_todays_exceptions_sheet_present_after_m2a6() -> None:
-    """M.2a.6 lands the Today's Exceptions sheet — referenced by name."""
+def test_l1_exceptions_sheet_present_after_m2a6() -> None:
+    """M.2a.6 lands the L1 Exceptions sheet — referenced by name."""
     app = build_l1_dashboard_app(_CFG)
-    te = _sheet_by_name(app, _TODAYS_EXCEPTIONS_NAME)
-    assert te.title == _TODAYS_EXCEPTIONS_TITLE
+    te = _sheet_by_name(app, _L1_EXCEPTIONS_NAME)
+    assert te.title == _L1_EXCEPTIONS_TITLE
 
 
-def test_todays_exceptions_sheet_has_kpi_bar_table() -> None:
-    """Today's Exceptions structure: 1 KPI (count) + 1 BarChart by
+def test_l1_exceptions_sheet_has_kpi_bar_table() -> None:
+    """L1 Exceptions structure: 1 KPI (count) + 1 BarChart by
     check_type + 1 detail table sorted by magnitude DESC."""
     app = build_l1_dashboard_app(_CFG)
-    te = _sheet_by_name(app, _TODAYS_EXCEPTIONS_NAME)
+    te = _sheet_by_name(app, _L1_EXCEPTIONS_NAME)
     titles = [_visual_title(v) for v in te.visuals]
     assert titles == [
         "Open Exceptions",
@@ -579,31 +579,31 @@ def test_todays_exceptions_sheet_has_kpi_bar_table() -> None:
     ]
 
 
-def test_todays_exceptions_dataset_reads_matview() -> None:
-    """M.1a.9: the Today's Exceptions dataset SQL is a thin wrapper
-    around `<prefix>_todays_exceptions` matview — the UNION ALL logic
+def test_l1_exceptions_dataset_reads_matview() -> None:
+    """M.1a.9: the L1 Exceptions dataset SQL is a thin wrapper
+    around `<prefix>_l1_exceptions` matview — the UNION ALL logic
     moved into the L1 schema in M.1a.9 so QS reads a precomputed
     table instead of re-running the 5-branch UNION per visual.
     """
     from recon_gen.common.l2 import default_l2_instance
     from recon_gen.apps.l1_dashboard.datasets import (
-        DS_TODAYS_EXCEPTIONS,
-        build_todays_exceptions_dataset,
+        DS_L1_EXCEPTIONS,
+        build_l1_exceptions_dataset,
     )
 
     app = build_l1_dashboard_app(_CFG)
     registered_ids = {ds.identifier for ds in app.datasets}
-    assert DS_TODAYS_EXCEPTIONS in registered_ids
+    assert DS_L1_EXCEPTIONS in registered_ids
 
     instance = default_l2_instance()
-    te_ds = build_todays_exceptions_dataset(_CFG, instance)
+    te_ds = build_l1_exceptions_dataset(_CFG, instance)
     sql_obj = next(iter(te_ds.PhysicalTableMap.values())).CustomSql
     assert sql_obj is not None
     sql = sql_obj.SqlQuery
     # SQL wraps the prefixed matview. AO.1.impl — SELECT * expanded to
     # wrap the ``magnitude`` column cents → dollars.
     assert sql.startswith("SELECT check_type")
-    assert f"FROM {_CFG.db_table_prefix}_todays_exceptions" in sql
+    assert f"FROM {_CFG.db_table_prefix}_l1_exceptions" in sql
 
 
 # -- Transactions sheet (M.2b.5) ---------------------------------------------
@@ -941,12 +941,12 @@ def test_limit_breach_sheet_lists_l2_caps() -> None:
     assert "$" in config_xml
 
 
-def test_todays_exceptions_footer_carries_l2_description() -> None:
-    """M.2a.7: Today's Exceptions ends with a TextBox carrying the L2
+def test_l1_exceptions_footer_carries_l2_description() -> None:
+    """M.2a.7: L1 Exceptions ends with a TextBox carrying the L2
     instance's top-level description — same prose as the Getting Started
     welcome, anchored at the bottom of the unified-view landing page."""
     app = build_l1_dashboard_app(_CFG)
-    te = _sheet_by_name(app, _TODAYS_EXCEPTIONS_NAME)
+    te = _sheet_by_name(app, _L1_EXCEPTIONS_NAME)
     footer_xml = _text_box_by_id(te, "l1-te-l2-footer").content
     assert "Institution Context" in footer_xml
     # Same fixture string the Getting Started welcome uses (M.3.2:
@@ -993,13 +993,13 @@ def test_aa_c_3_invariant_sheets_carry_per_kind_panels() -> None:
         )
 
 
-def test_aa_c_3_e_todays_exceptions_intro_panel_lists_every_kind() -> None:
-    """AA.C.3.e: Today's Exceptions gets a generic intro panel pointing
+def test_aa_c_3_e_l1_exceptions_intro_panel_lists_every_kind() -> None:
+    """AA.C.3.e: L1 Exceptions gets a generic intro panel pointing
     at the per-kind sheets — not seven stacked per-kind panels. The
     intro names every invariant kind so analysts know where to drill."""
     app = build_l1_dashboard_app(_CFG)
-    te = _sheet_by_name(app, _TODAYS_EXCEPTIONS_NAME)
-    intro = _text_box_by_id(te, "l1-todays-exceptions-panel")
+    te = _sheet_by_name(app, _L1_EXCEPTIONS_NAME)
+    intro = _text_box_by_id(te, "l1-exceptions-panel")
     # Every L1 invariant the dashboard surfaces gets a mention so
     # analysts know which kinds the aggregated table covers.
     for label in (
@@ -1026,7 +1026,7 @@ def test_per_sheet_filter_dropdowns() -> None:
     - Drift Timelines: Account Role
     - Overdraft: Account + Account Role
     - Limit Breach: Account + Transfer Type
-    - Today's Exceptions: Check Type + Account + Transfer Type
+    - L1 Exceptions: Check Type + Account + Transfer Type
     - Transactions: Account + Transfer + Status + Origin + Transfer Type
 
     Plus the date-range pickers from M.2b.1 (Date From / Date To).
@@ -1048,7 +1048,7 @@ def test_per_sheet_filter_dropdowns() -> None:
     assert {"Account", "Account Role"}.issubset(_filter_titles(_OVERDRAFT_NAME))
     assert {"Account", "Transfer Type"}.issubset(_filter_titles(_LIMIT_BREACH_NAME))
     assert {"Check Type", "Account", "Transfer Type"}.issubset(
-        _filter_titles(_TODAYS_EXCEPTIONS_NAME),
+        _filter_titles(_L1_EXCEPTIONS_NAME),
     )
     assert {"Account", "Transfer", "Status", "Origin", "Transfer Type"}.issubset(
         _filter_titles(_TRANSACTIONS_NAME),
@@ -1142,7 +1142,7 @@ def test_account_id_link_tints_on_every_table_with_account_id() -> None:
             )
             tinted_tables += 1
     # 5 tables (drift leaf + drift parent + overdraft + limit breach +
-    # today's exceptions) carry account_id and so should be tinted.
+    # L1 exceptions) carry account_id and so should be tinted.
     assert tinted_tables >= 5, (
         f"expected at least 5 tables with account_id+tint, saw "
         f"{tinted_tables}"
@@ -1212,7 +1212,7 @@ def test_date_range_params_bridge_to_dataset_pushdown_params() -> None:
 
 def test_date_range_pickers_on_every_data_sheet() -> None:
     """Every data-bearing sheet (Drift, Drift Timelines, Overdraft,
-    Limit Breach, Today's Exceptions) carries paired date pickers
+    Limit Breach, L1 Exceptions) carries paired date pickers
     (Date From / Date To) bound to the shared params — controls sync
     via shared parameter binding so changing one moves all five."""
     app = build_l1_dashboard_app(_CFG)
@@ -1223,7 +1223,7 @@ def test_date_range_pickers_on_every_data_sheet() -> None:
     # Each of the 5 data-bearing universal-date sheets has 2 pickers.
     for sheet_name in (
         "Drift", "Drift Timelines", "Overdraft",
-        "Limit Breach", "Today's Exceptions",
+        "Limit Breach", "L1 Exceptions",
     ):
         sheet = _sheet_by_name(app, sheet_name)
         picker_titles = [
@@ -1241,7 +1241,7 @@ def test_date_range_pushdown_clause_per_dataset_targets_correct_column() -> None
     """Phase BM — each date-scoped dataset's SQL embeds the
     universal-range pushdown clause against its own date column
     (``business_day_start`` for drift / ledger_drift / overdraft,
-    ``business_day`` for limit_breach / todays_exceptions,
+    ``business_day`` for limit_breach / l1_exceptions,
     ``business_day_end`` for the drift-timeline aggregates, ``posting``
     for transactions). Verified by inspecting the registered SQL
     rather than walking analysis-level FilterGroups (which dissolved
@@ -1255,7 +1255,7 @@ def test_date_range_pushdown_clause_per_dataset_targets_correct_column() -> None
         DS_LEDGER_DRIFT_TIMELINE,
         DS_LIMIT_BREACH,
         DS_OVERDRAFT,
-        DS_TODAYS_EXCEPTIONS,
+        DS_L1_EXCEPTIONS,
         DS_TRANSACTIONS,
         P_L1_DATE_END,
         P_L1_DATE_START,
@@ -1273,7 +1273,7 @@ def test_date_range_pushdown_clause_per_dataset_targets_correct_column() -> None
         DS_DRIFT_TIMELINE: "business_day_end",
         DS_LEDGER_DRIFT_TIMELINE: "business_day_end",
         DS_LIMIT_BREACH: "business_day",
-        DS_TODAYS_EXCEPTIONS: "business_day",
+        DS_L1_EXCEPTIONS: "business_day",
         DS_TRANSACTIONS: "posting",
     }
     for ds_id, date_col in expected.items():
@@ -1685,7 +1685,7 @@ def test_drill_filter_groups_present() -> None:
     )
 
 
-def test_todays_exceptions_table_carries_two_drills() -> None:
+def test_l1_exceptions_table_carries_two_drills() -> None:
     """M.2b.7: Exception Detail table has 2 drill actions —
     DATA_POINT_CLICK → Drift (back-toward source per CLAUDE drill
     direction); DATA_POINT_MENU → Daily Statement (forward into the
@@ -1694,7 +1694,7 @@ def test_todays_exceptions_table_carries_two_drills() -> None:
     from recon_gen.common.tree import Drill
 
     app = build_l1_dashboard_app(_CFG)
-    te = _sheet_by_name(app, _TODAYS_EXCEPTIONS_NAME)
+    te = _sheet_by_name(app, _L1_EXCEPTIONS_NAME)
     detail = next(v for v in te.visuals if _visual_title(v) == "Exception Detail")
     drills = [a for a in _visual_actions(detail) if isinstance(a, Drill)]
     assert len(drills) == 2
@@ -1859,7 +1859,7 @@ class TestCli:
             "recon-cli-l1-l1-ledger-drift-dataset.json",
             "recon-cli-l1-l1-overdraft-dataset.json",
             "recon-cli-l1-l1-limit-breach-dataset.json",
-            "recon-cli-l1-l1-todays-exceptions-dataset.json",
+            "recon-cli-l1-l1-exceptions-dataset.json",
             "recon-cli-l1-l1-daily-statement-summary-dataset.json",
             "recon-cli-l1-l1-daily-statement-transactions-dataset.json",
             "recon-cli-l1-l1-transactions-dataset.json",
@@ -1931,7 +1931,7 @@ def test_y2g_datasets_declare_pushdown_params() -> None:
         build_ledger_drift_timeline_dataset,
         build_overdraft_dataset,
         build_limit_breach_dataset,
-        build_todays_exceptions_dataset,
+        build_l1_exceptions_dataset,
         build_stuck_pending_dataset,
         build_stuck_unbundled_dataset,
         build_supersession_transactions_dataset,
@@ -1949,7 +1949,7 @@ def test_y2g_datasets_declare_pushdown_params() -> None:
         build_overdraft_dataset: {"pL1OverdraftAccount", "pL1OverdraftRole"},
         build_limit_breach_dataset:
             {"pL1LimitBreachAccount", "pL1LimitBreachType"},
-        build_todays_exceptions_dataset: {
+        build_l1_exceptions_dataset: {
             "pL1TodaysExcCheckType", "pL1TodaysExcAccount", "pL1TodaysExcType",
         },
         build_stuck_pending_dataset:
@@ -2109,11 +2109,11 @@ def test_bo_1_daily_statement_account_picker_sources_balance_only() -> None:
     dropdown sources options from ``DS_L1_DS_ACCOUNTS``
     (``<prefix>_current_daily_balances`` only), NOT from
     ``DS_L1_ACCOUNTS`` (the BL.3-widened UNION across
-    current_daily_balances ∪ current_transactions ∪ todays_exceptions).
+    current_daily_balances ∪ current_transactions ∪ l1_exceptions).
 
     Daily Statement reconciles per-(account, day) against the
     daily-balances matview. The BL.3 wider universe was added for
-    the Pending Aging / Today's Exceptions sheets where spine-planted
+    the Pending Aging / L1 Exceptions sheets where spine-planted
     accounts that have NO daily-balances row are still legitimately
     pickable. But the wider source on Daily Statement guaranteed
     every cardholder/owner-rollup pick returned five blank KPI cards
@@ -2159,8 +2159,8 @@ def test_bo_1_daily_statement_account_picker_sources_balance_only() -> None:
         f"DS_L1_DS_ACCOUNTS must NOT pull from current_transactions "
         f"(those accounts may lack daily_balances rows). SQL is:\n{sql}"
     )
-    assert "todays_exceptions" not in sql, (
-        f"DS_L1_DS_ACCOUNTS must NOT pull from todays_exceptions "
+    assert "l1_exceptions" not in sql, (
+        f"DS_L1_DS_ACCOUNTS must NOT pull from l1_exceptions "
         f"(BL.3-era widening that the Daily Statement reconciliation "
         f"can't support). SQL is:\n{sql}"
     )

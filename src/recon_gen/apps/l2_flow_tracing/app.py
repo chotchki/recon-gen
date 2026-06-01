@@ -357,7 +357,7 @@ def _l2ft_datasets(
     # M.3.10f added DS_TT_INSTANCES + DS_TT_LEGS for the Transfer
     # Templates sheet. M.3.10l replaced the 6 separate L2 exception
     # datasets with one DS_UNIFIED_L2_EXCEPTIONS (mirrors L1's
-    # todays-exceptions pattern).
+    # exceptions pattern).
     visual_ids = [
         DS_POSTINGS,
         DS_META_VALUES,
@@ -1138,7 +1138,7 @@ def _populate_l2_exceptions_sheet(
     """L2 Exceptions sheet — unified violation view (M.3.10l rewrite
     of M.3.7).
 
-    Mirrors L1's Today's Exceptions pattern: one KPI (total count),
+    Mirrors L1's L1 Exceptions pattern: one KPI (total count),
     one bar chart (by check_type), one detail table (sorted by
     count DESC). All six L2 hygiene checks (Chain Orphans,
     Unmatched Rail Name, Dead Rails, Dead Bundles Activity,

@@ -216,7 +216,7 @@ def panel_markdown(sections: dict[str, L2FTExceptionSection]) -> str:
     Exceptions sheet), so unlike L1 — where each invariant kind has
     its own sheet + panel — L2FT gets one panel that lists all six
     kinds with their remediation guidance inline. Shape mirrors L1's
-    Today's Exceptions intro panel (AA.C.3.e).
+    L1 Exceptions intro panel (AA.C.3.e).
 
     Returns a markdown string suitable for ``rich_text.markdown(...)``.
     """

@@ -1591,9 +1591,9 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         ),
     ),
     # ------ L1 Chain coherence --------------------------------------------
-    # All five chain-coherence kinds surface on Today's Exceptions
+    # All five chain-coherence kinds surface on L1 Exceptions
     # (no dedicated sheets per the INVARIANT_KIND_TO_SHEET map); shared
-    # tour destination is the Today's Exceptions sheet. Sections are
+    # tour destination is the L1 Exceptions sheet. Sections are
     # shared too — xor_group_missed + xor_group_overlap both reference
     # ``xor_group_violation``; fan_in_missing + fan_in_extra share
     # ``fan_in_disagreement``; multi_xor_missed + multi_xor_overlap share
@@ -1618,7 +1618,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         ),
         tour_destination=TourDestination(
             primary_url=(
-                "/dashboards/l1_dashboard/sheets/l1-sheet-todays-exceptions"
+                "/dashboards/l1_dashboard/sheets/l1-sheet-exceptions"
             ),
         ),
         dashboard_check=DashboardCheck(
@@ -1645,7 +1645,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         ),
         tour_destination=TourDestination(
             primary_url=(
-                "/dashboards/l1_dashboard/sheets/l1-sheet-todays-exceptions"
+                "/dashboards/l1_dashboard/sheets/l1-sheet-exceptions"
             ),
         ),
         dashboard_check=DashboardCheck(
@@ -1672,7 +1672,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         ),
         tour_destination=TourDestination(
             primary_url=(
-                "/dashboards/l1_dashboard/sheets/l1-sheet-todays-exceptions"
+                "/dashboards/l1_dashboard/sheets/l1-sheet-exceptions"
             ),
         ),
         dashboard_check=DashboardCheck(
@@ -1702,7 +1702,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         ),
         tour_destination=TourDestination(
             primary_url=(
-                "/dashboards/l1_dashboard/sheets/l1-sheet-todays-exceptions"
+                "/dashboards/l1_dashboard/sheets/l1-sheet-exceptions"
             ),
         ),
         dashboard_check=DashboardCheck(
@@ -1733,7 +1733,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         ),
         tour_destination=TourDestination(
             primary_url=(
-                "/dashboards/l1_dashboard/sheets/l1-sheet-todays-exceptions"
+                "/dashboards/l1_dashboard/sheets/l1-sheet-exceptions"
             ),
         ),
         dashboard_check=DashboardCheck(
@@ -1763,7 +1763,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         ),
         tour_destination=TourDestination(
             primary_url=(
-                "/dashboards/l1_dashboard/sheets/l1-sheet-todays-exceptions"
+                "/dashboards/l1_dashboard/sheets/l1-sheet-exceptions"
             ),
         ),
         dashboard_check=DashboardCheck(
@@ -1793,7 +1793,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         ),
         tour_destination=TourDestination(
             primary_url=(
-                "/dashboards/l1_dashboard/sheets/l1-sheet-todays-exceptions"
+                "/dashboards/l1_dashboard/sheets/l1-sheet-exceptions"
             ),
         ),
         dashboard_check=DashboardCheck(
@@ -1901,7 +1901,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
     # ``expected_eod_balance IS NOT NULL AND money <> expected_eod_balance``.
     # The plant emits ONE row into ``_daily_balances`` (no transactions)
     # with money = expected + variance; the variance row materializes.
-    # Tour destination: Today's Exceptions (no per-kind sheet per
+    # Tour destination: L1 Exceptions (no per-kind sheet per
     # INVARIANT_KIND_TO_SHEET).
     PlantKindEntry(
         kind="expected_eod_balance_breach",
@@ -1933,7 +1933,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
                 label="Variance ($)",
                 help_text=(
                     "Stored - expected delta in dollars. Non-zero "
-                    "surfaces on Today's Exceptions. Zero would silently "
+                    "surfaces on L1 Exceptions. Zero would silently "
                     "filter out (matview gates on money <> expected)."
                 ),
                 default="5.00",
@@ -1941,7 +1941,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         ),
         tour_destination=TourDestination(
             primary_url=(
-                "/dashboards/l1_dashboard/sheets/l1-sheet-todays-exceptions"
+                "/dashboards/l1_dashboard/sheets/l1-sheet-exceptions"
             ),
         ),
         dashboard_check=DashboardCheck(

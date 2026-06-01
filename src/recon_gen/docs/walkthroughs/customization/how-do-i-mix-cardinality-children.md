@@ -121,14 +121,14 @@ recon-gen schema apply -c run/config.yaml --execute
 recon-gen data apply -c run/config.yaml --execute
 ```
 
-Open the L1 Today's Exceptions sheet. Filter `check_type`:
+Open the L1 L1 Exceptions sheet. Filter `check_type`:
 
 - `multi_xor_violation` rows → planted XOR violations on the
   3 payout vehicles.
 - `fan_in_disagreement` rows → planted fan-in violations on
   the weekly batch.
 
-Both surface on the same sheet (Today's Exceptions); both drill
+Both surface on the same sheet (L1 Exceptions); both drill
 to Transactions filtered to the violating parent firing's
 transfer_id. The two contracts enforce independently — a cycle
 with the wrong payout-vehicle count BUT a healthy batch

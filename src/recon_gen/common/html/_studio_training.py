@@ -51,32 +51,32 @@ _L1_DASHBOARD_SLUG: Final[str] = "l1_dashboard"
 # kind→human-name mapping, but resolves to the URL-facing sheet_id the
 # tree assigns (see ``apps/l1_dashboard/app.py`` SHEET_* constants).
 # ``drift`` + ``ledger_drift`` both deep-link to the same Drift sheet;
-# ``expected_eod_balance_breach`` deep-links to Today's Exceptions
+# ``expected_eod_balance_breach`` deep-links to L1 Exceptions
 # (the rollup sheet that surfaces it under M.2b).
 _L1_KIND_TO_SHEET_ID: Final[dict[str, str]] = {
     "drift": "l1-sheet-drift",
     "ledger_drift": "l1-sheet-drift",
     "overdraft": "l1-sheet-overdraft",
-    "expected_eod_balance_breach": "l1-sheet-todays-exceptions",
+    "expected_eod_balance_breach": "l1-sheet-exceptions",
     "limit_breach": "l1-sheet-limit-breach",
     "stuck_pending": "l1-sheet-pending-aging",
     "stuck_unbundled": "l1-sheet-unbundled-aging",
     # AB.2.3 — chain_parent_disagreement surfaces only on Today's
     # Exceptions (no dedicated sheet); deep-link there.
-    "chain_parent_disagreement": "l1-sheet-todays-exceptions",
+    "chain_parent_disagreement": "l1-sheet-exceptions",
     # AB.3.3 — xor_group_violation also surfaces only on Today's
     # Exceptions (same pattern: UNION-only L1 invariant, analyst
     # drill goes to the Transactions sheet via the conflicting
     # Transfer's id).
-    "xor_group_violation": "l1-sheet-todays-exceptions",
+    "xor_group_violation": "l1-sheet-exceptions",
     # AB.4.7 — fan_in_disagreement also UNION-only. Same drill path
     # as the chain_parent_disagreement / xor_group_violation kinds.
-    "fan_in_disagreement": "l1-sheet-todays-exceptions",
+    "fan_in_disagreement": "l1-sheet-exceptions",
     # AB.6.5 — multi_xor_violation also UNION-only. Same drill path
     # as the other AB.2/3/4 UNION-only kinds: analyst's drill on a
     # surfaced row navigates to the Transactions sheet keyed by the
     # parent firing's transfer_id.
-    "multi_xor_violation": "l1-sheet-todays-exceptions",
+    "multi_xor_violation": "l1-sheet-exceptions",
     "supersession_audit": "l1-sheet-supersession-audit",
 }
 

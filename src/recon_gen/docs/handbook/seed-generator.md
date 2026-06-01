@@ -370,7 +370,7 @@ and TransferTemplate plants already produce 3 firings per template
 
 For visual hierarchy: pick one Rail (deterministic — sorted by name,
 the first rail with `max_pending_age` set) and plant **15** stuck-pending
-entries on it across the window. Today's Exceptions KPI then has a
+entries on it across the window. L1 Exceptions KPI then has a
 magnitude that matters; the L2 Exceptions sheet's bar chart shows the
 broken Rail spike immediately as one tall bar against the baseline.
 

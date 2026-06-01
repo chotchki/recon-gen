@@ -362,7 +362,7 @@ def default_scenario_for(
     # AB.3.5 — XorVariantMissedFiringPlant. Plants one Transfer tagged
     # with an XOR-grouped template where the target group has zero
     # firings. days_ago=0 places business_day=today so the row surfaces
-    # on Today's Exceptions immediately.
+    # on L1 Exceptions immediately.
     xor_variant_missed_firing_plants: tuple[XorVariantMissedFiringPlant, ...] = ()
     if xor_missed_pick is not None:
         xor_template_name, xor_group_idx, xor_witness = xor_missed_pick
@@ -978,7 +978,7 @@ def add_broken_rail_plants(
 
     Picks one Rail with ``max_pending_age`` set + plants
     ``broken_count`` stuck_pending entries on it across the window.
-    Today's Exceptions KPI then has a magnitude that matters; the
+    L1 Exceptions KPI then has a magnitude that matters; the
     L2 Exceptions sheet's bar chart shows the broken Rail spike
     immediately.
 

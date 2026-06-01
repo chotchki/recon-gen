@@ -173,7 +173,7 @@ Mirror `tests/l2/{{ l2_instance_name }}.yaml` for shape. The L2 declares:
 
 Rich descriptions matter — the M.2a.7 prose seam pulls them straight
 into the dashboard's Getting Started, Drift, Limit Breach, and
-Today's Exceptions text boxes. Switching the L2 instance switches
+L1 Exceptions text boxes. Switching the L2 instance switches
 the prose without touching dashboard code.
 
 ### 2. Apply the prefixed schema

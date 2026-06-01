@@ -1099,7 +1099,7 @@ chains:
       one `parent_transfer_id` (first-firing-wins per gap doc §3).
       The L1 `chain_parent_disagreement` matview catches any leg
       that claims a different parent — surfaces as an ETL bug on
-      Today's Exceptions.
+      L1 Exceptions.
 
   # ----- AB.4 (2026-05-19): fan-in chain (N parents → 1 child)
 
@@ -1140,7 +1140,7 @@ limit_schedules:
     cap: 12000.00
     description: |
       $12,000 daily ACH outbound cap per customer DDA. Mirrors the
-      legacy AR policy. Breaches surface on the Today's Exceptions
+      legacy AR policy. Breaches surface on the L1 Exceptions
       sheet's Limit Breach check.
 
   - parent_role: DDAControl

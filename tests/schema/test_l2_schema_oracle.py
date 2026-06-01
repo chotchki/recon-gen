@@ -253,7 +253,7 @@ def test_refresh_matviews_sql_oracle_uses_dbms_mview() -> None:
     # stuck_unbundled / chain_parent_disagreement [AB.2.3] /
     # xor_group_violation [AB.3.3] / fan_in_disagreement [AB.4.7] /
     # multi_xor_violation [AB.6.5]) + 1 derived (transfer_parents [AB.4.3])
-    # + 2 dashboard-shape (daily_statement / todays_exceptions) + 2
+    # + 2 dashboard-shape (daily_statement / l1_exceptions) + 2
     # Investigation matviews.
     assert sql.count("BEGIN DBMS_MVIEW.REFRESH(") == 20
     assert sql.count("BEGIN DBMS_STATS.GATHER_TABLE_STATS(") == 20

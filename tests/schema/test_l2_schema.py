@@ -739,8 +739,8 @@ def test_chain_parent_disagreement_view_ab2_shape() -> None:
     assert "idx_ab2_cpd_day" in sql
 
 
-def test_todays_exceptions_includes_chain_parent_disagreement_branch() -> None:
-    """AB.2.9: Today's Exceptions matview UNION ALLs a row category for
+def test_l1_exceptions_includes_chain_parent_disagreement_branch() -> None:
+    """AB.2.9: L1 Exceptions matview UNION ALLs a row category for
     chain_parent_disagreement violations, with check_type='chain_parent_disagreement'
     and magnitude = distinct_parent_count."""
     sql = emit_schema(
@@ -755,7 +755,7 @@ def test_todays_exceptions_includes_chain_parent_disagreement_branch() -> None:
         prefix="te2",
     )
     body_match = re.search(
-        r"CREATE MATERIALIZED VIEW te2_todays_exceptions AS(.*?);",
+        r"CREATE MATERIALIZED VIEW te2_l1_exceptions AS(.*?);",
         sql,
         re.DOTALL,
     )
@@ -1078,8 +1078,8 @@ def test_xor_group_violation_view_populated_when_groups_declared() -> None:
     assert "HAVING COUNT(tx.transfer_id) <> 1" in body
 
 
-def test_todays_exceptions_includes_xor_group_violation_branch() -> None:
-    """AB.3.3 wiring: Today's Exceptions matview UNION ALLs a row
+def test_l1_exceptions_includes_xor_group_violation_branch() -> None:
+    """AB.3.3 wiring: L1 Exceptions matview UNION ALLs a row
     category for xor_group_violation violations, with
     check_type='xor_group_violation' and magnitude=firing_count."""
     sql = emit_schema(
@@ -1094,7 +1094,7 @@ def test_todays_exceptions_includes_xor_group_violation_branch() -> None:
         prefix="xt",
     )
     body_match = re.search(
-        r"CREATE MATERIALIZED VIEW xt_todays_exceptions AS(.*?);",
+        r"CREATE MATERIALIZED VIEW xt_l1_exceptions AS(.*?);",
         sql,
         re.DOTALL,
     )
@@ -1265,8 +1265,8 @@ def test_fan_in_disagreement_body_is_static_across_l2_chain_shape(
                 )
 
 
-def test_todays_exceptions_includes_fan_in_disagreement_branch() -> None:
-    """AB.4.7 wiring: Today's Exceptions matview UNION ALLs a row
+def test_l1_exceptions_includes_fan_in_disagreement_branch() -> None:
+    """AB.4.7 wiring: L1 Exceptions matview UNION ALLs a row
     category for fan_in_disagreement violations, with
     check_type='fan_in_disagreement' and magnitude=parent_count."""
     sql = emit_schema(
@@ -1281,7 +1281,7 @@ def test_todays_exceptions_includes_fan_in_disagreement_branch() -> None:
         prefix="fit",
     )
     body_match = re.search(
-        r"CREATE MATERIALIZED VIEW fit_todays_exceptions AS(.*?);",
+        r"CREATE MATERIALIZED VIEW fit_l1_exceptions AS(.*?);",
         sql,
         re.DOTALL,
     )
@@ -1359,8 +1359,8 @@ def test_multi_xor_violation_body_is_static_across_l2_chain_shape(
             )
 
 
-def test_todays_exceptions_includes_multi_xor_violation_branch() -> None:
-    """AB.6.5 wiring: Today's Exceptions matview UNION ALLs a row
+def test_l1_exceptions_includes_multi_xor_violation_branch() -> None:
+    """AB.6.5 wiring: L1 Exceptions matview UNION ALLs a row
     category for multi_xor_violation violations, with
     check_type='multi_xor_violation' and magnitude=child_count."""
     sql = emit_schema(
@@ -1375,7 +1375,7 @@ def test_todays_exceptions_includes_multi_xor_violation_branch() -> None:
         prefix="mxt",
     )
     body_match = re.search(
-        r"CREATE MATERIALIZED VIEW mxt_todays_exceptions AS(.*?);",
+        r"CREATE MATERIALIZED VIEW mxt_l1_exceptions AS(.*?);",
         sql,
         re.DOTALL,
     )
@@ -1429,7 +1429,7 @@ def test_refresh_matviews_sql_emits_one_per_view() -> None:
     chain_parent_disagreement [AB.2.3] + xor_group_violation
     [AB.3.3] + fan_in_disagreement [AB.4.7]) + 1 derived
     (transfer_parents [AB.4.3]) + 2 dashboard-shape
-    (daily_statement_summary + todays_exceptions) + 2 Investigation
+    (daily_statement_summary + l1_exceptions) + 2 Investigation
     matviews (inv_pair_rolling_anomalies + inv_money_trail_edges,
     added in N.3.b) + AB.6.5's multi_xor_violation = 20 matviews ×
     2 statements each = 40 total."""
@@ -1467,8 +1467,8 @@ def test_refresh_matviews_sql_dependency_order() -> None:
     ):
         assert _idx("current_transactions") < _idx(inv)
     # Dashboard-shape matviews (M.1a.9) refresh AFTER L1 invariants
-    # because todays_exceptions UNIONs them.
-    assert _idx("limit_breach") < _idx("todays_exceptions")
+    # because l1_exceptions UNIONs them.
+    assert _idx("limit_breach") < _idx("l1_exceptions")
     assert _idx("current_daily_balances") < _idx("daily_statement_summary")
 
 
@@ -1681,7 +1681,7 @@ def test_l1_invariant_drops_preserve_drop_order() -> None:
     from recon_gen.common.l2.schema import _emit_l1_invariant_drops
 
     out = _emit_l1_invariant_drops("ord", Dialect.POSTGRES)
-    todays = out.index("ord_todays_exceptions")
+    todays = out.index("ord_l1_exceptions")
     drift = out.index("ord_drift")
     computed = out.index("ord_computed_subledger_balance")
     assert todays < drift < computed

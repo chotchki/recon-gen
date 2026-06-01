@@ -1,4 +1,4 @@
-# Today's Exceptions
+# L1 Exceptions
 
 *Per-sheet walkthrough — L1 Reconciliation Dashboard.*
 
@@ -18,7 +18,7 @@ limit_breach) so a sort-by-magnitude reads consistently across
 check kinds.
 
 ??? example "Screenshot"
-    ![Today's Exceptions](../screenshots/l1/l1-sheet-todays-exceptions.png)
+    ![L1 Exceptions](../screenshots/l1/l1-sheet-exceptions.png)
 
 ## When to use it
 

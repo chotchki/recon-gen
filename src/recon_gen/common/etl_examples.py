@@ -73,7 +73,7 @@ _PATTERN_SINGLE_LEG_POSTED = """\
 --   crediting the suspense account. One row per leg, ``status='Posted'``,
 --   no counter-leg in this table.
 -- Consumed by: every L1 sheet (Drift, Overdraft, Limit Breach,
---   Today's Exceptions); L2FT Rails sheet's Transactions table.
+--   L1 Exceptions); L2FT Rails sheet's Transactions table.
 
 INSERT INTO <prefix>_transactions (
     id, account_id, account_name, account_role, account_scope,

@@ -50,7 +50,7 @@ When a chain row's ``children`` entry resolves to a TransferTemplate
    established (typically an ETL bug — stale parent reference,
    cross-cycle contamination, race condition), the L1
    ``<prefix>_chain_parent_disagreement`` matview surfaces the
-   conflict on Today's Exceptions under
+   conflict on L1 Exceptions under
    ``check_type='chain_parent_disagreement'``.
 
 The validator auto-derives the implicit ``parent_transfer_id`` posted
@@ -113,7 +113,7 @@ chains:
 ```
 
 The L1 ``<prefix>_fan_in_disagreement`` matview surfaces violations
-on Today's Exceptions under ``check_type='fan_in_disagreement'``;
+on L1 Exceptions under ``check_type='fan_in_disagreement'``;
 the ``magnitude`` column carries the actual parent_count and the
 ``rail_name`` slot carries the child template name. The
 ``<prefix>_chain_parent_disagreement`` matview (AB.2.3) automatically

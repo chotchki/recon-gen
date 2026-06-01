@@ -35,14 +35,14 @@ from importlib import resources
 # kinds can map to the same sheet -- ``drift`` and ``ledger_drift``
 # both surface on the Drift sheet, and AA.C.3 will compose both
 # bodies into one panel there. ``expected_eod_balance_breach`` rolls
-# up into Today's Exceptions alongside the other invariant kinds,
+# up into L1 Exceptions alongside the other invariant kinds,
 # but its own dedicated sheet would land here if M.2b ever splits it
 # out.
 INVARIANT_KIND_TO_SHEET: dict[str, str] = {
     "drift": "Drift",
     "ledger_drift": "Drift",
     "overdraft": "Overdraft",
-    "expected_eod_balance_breach": "Today's Exceptions",
+    "expected_eod_balance_breach": "L1 Exceptions",
     "limit_breach": "Limit Breach",
     "stuck_pending": "Pending Aging",
     "stuck_unbundled": "Unbundled Aging",
@@ -50,25 +50,25 @@ INVARIANT_KIND_TO_SHEET: dict[str, str] = {
     # Exceptions (no dedicated sheet, because the violation is keyed
     # on transfer_id not (account, day) and the analyst's drill goes
     # straight to the Transactions sheet via the conflicting parent ids).
-    "chain_parent_disagreement": "Today's Exceptions",
+    "chain_parent_disagreement": "L1 Exceptions",
     # AB.3.3 — xor_group_violation also surfaces only on Today's
     # Exceptions (same pattern: keyed on transfer_id + template_name,
     # analyst's drill goes to the Transactions sheet to see which
     # variant did or didn't fire). Mirrors chain_parent_disagreement's
     # cross-tool wiring; no dedicated dashboard sheet.
-    "xor_group_violation": "Today's Exceptions",
-    # AB.4.7 — fan_in_disagreement also surfaces on Today's Exceptions
+    "xor_group_violation": "L1 Exceptions",
+    # AB.4.7 — fan_in_disagreement also surfaces on L1 Exceptions
     # (same UNION-only pattern as AB.2.3 + AB.3.3). Keyed on
     # child_transfer_id + child_template_name + disagreement_kind;
     # analyst's drill goes to Transactions to see which contributing
     # parent legs landed (or didn't).
-    "fan_in_disagreement": "Today's Exceptions",
-    # AB.6.5 — multi_xor_violation surfaces on Today's Exceptions
+    "fan_in_disagreement": "L1 Exceptions",
+    # AB.6.5 — multi_xor_violation surfaces on L1 Exceptions
     # too (same UNION-only pattern). Keyed on parent_transfer_id +
     # parent_rail_or_template_name + disagreement_kind ('missed' /
     # 'overlap'); analyst's drill goes to Transactions to see which
     # XOR alternatives did or didn't fire under the parent firing.
-    "multi_xor_violation": "Today's Exceptions",
+    "multi_xor_violation": "L1 Exceptions",
     "supersession_audit": "Supersession Audit",
 }
 
@@ -369,7 +369,7 @@ def panel_markdown(section: InvariantSection) -> str:
     4. A bold ``Action.`` line carrying :attr:`what_to_do`.
 
     AA.C.3 wires one of these per L1 invariant sheet via
-    ``apps/l1_dashboard/app.py``. The Today's Exceptions sheet
+    ``apps/l1_dashboard/app.py``. The L1 Exceptions sheet
     composes its own intro panel (AA.C.3.e) rather than stacking
     seven of these.
     """

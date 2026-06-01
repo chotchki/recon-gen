@@ -167,7 +167,7 @@ wrong cardinality). The second command re-seeds the demo data —
 - **Extra-parent** (6 parents): ``parent_count=6 > expected=5``
   → emits a row with ``disagreement_kind='extra'``.
 
-Open the L1 Today's Exceptions sheet. You should see:
+Open the L1 L1 Exceptions sheet. You should see:
 
 - One row with ``check_type='fan_in_disagreement'`` and ``magnitude=4``
   (the missing plant).

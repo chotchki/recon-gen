@@ -115,7 +115,7 @@ def test_l2_exceptions_sheet_visuals_invariant_M3_10l(
 ) -> None:
     """M.3.10l: L2 Exceptions sheet collapses to 1 KPI + 1 BarChart +
     1 Table backed by the unified-exceptions dataset (mirrors L1's
-    Today's Exceptions). Pre-M.3.10l shape was 12 KPIs + 6 Tables
+    L1 Exceptions). Pre-M.3.10l shape was 12 KPIs + 6 Tables
     across 6 vertical sections."""
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
     exc = next(s for s in app.analysis.sheets if s.name == _L2_EXCEPTIONS_NAME)

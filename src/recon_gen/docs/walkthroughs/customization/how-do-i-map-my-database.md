@@ -197,7 +197,7 @@ Once you've decided this product fits your data:
    day's load against `{{ l2_instance_name }}_transactions` +
    `{{ l2_instance_name }}_daily_balances`.
 3. **Validate with the dashboards.** Once a slice is loaded,
-   open the L1 Reconciliation Dashboard's Today's Exceptions
+   open the L1 Reconciliation Dashboard's L1 Exceptions
    sheet. KPI at 0 with no detail rows means the feed landed
    cleanly. KPIs spiking unexpectedly is the signal to walk
    [What do I do when the demo passes but my prod data fails?](../etl/what-do-i-do-when-demo-passes-but-prod-fails.md)

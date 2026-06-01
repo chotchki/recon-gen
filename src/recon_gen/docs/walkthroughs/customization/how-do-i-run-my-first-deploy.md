@@ -101,7 +101,7 @@ Deploying QuickSight resources from out
 
 ==> Datasource: ...
 ==> Theme: recon-prod-theme
-==> Dataset: recon-prod-l1-todays-exceptions-dataset
+==> Dataset: recon-prod-l1-exceptions-dataset
 ... (~27 datasets total across all four apps)
 ==> Analysis: recon-prod-l1-dashboard-analysis
 ... (one per app)

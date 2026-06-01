@@ -175,7 +175,7 @@ Once your projection is wired up:
    — it walks you through the net-zero, drift-recompute, and
    parent-chain integrity checks you should run before declaring
    the load complete.
-3. **Open the L1 Reconciliation Dashboard's Today's Exceptions
+3. **Open the L1 Reconciliation Dashboard's L1 Exceptions
    sheet** — if the KPI reads 0 with no detail rows, your feed
    landed and the contract holds. If KPIs spike unexpectedly, see
    [What do I do when the demo passes but my prod data fails?](what-do-i-do-when-demo-passes-but-prod-fails.md)

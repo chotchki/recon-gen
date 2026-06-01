@@ -226,7 +226,7 @@ class TestSqliteSchemaActuallyRuns:
             "sqlt_stuck_pending",
             "sqlt_stuck_unbundled",
             "sqlt_daily_statement_summary",
-            "sqlt_todays_exceptions",
+            "sqlt_l1_exceptions",
             "sqlt_inv_pair_rolling_anomalies",
             "sqlt_inv_money_trail_edges",
         }

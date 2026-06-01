@@ -154,7 +154,7 @@ class TestSqliteFullLocalLoop:
         # The matview-as-tables should now have rows populated by the
         # refresh-time SELECT bodies. Spot-check the L1 invariants
         # (drift / overdraft / limit_breach / etc.) and the dashboard-
-        # shape rollups (todays_exceptions / daily_statement_summary).
+        # shape rollups (l1_exceptions / daily_statement_summary).
         conn = connect_demo_db(cfg)
         try:
             # Base tables present + non-empty.
@@ -182,7 +182,7 @@ class TestSqliteFullLocalLoop:
                 "spec_example_computed_subledger_balance",
                 "spec_example_computed_ledger_balance",
                 "spec_example_daily_statement_summary",
-                "spec_example_todays_exceptions",
+                "spec_example_l1_exceptions",
                 "spec_example_inv_pair_rolling_anomalies",
                 "spec_example_inv_money_trail_edges",
             ):

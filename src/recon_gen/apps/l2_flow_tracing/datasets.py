@@ -454,7 +454,7 @@ EXC_DEAD_LIMIT_SCHEDULES_CONTRACT = DatasetContract(columns=[
 # Unified L2 Exceptions (M.3.10l) — UNION ALL across all 6 L2 hygiene
 # checks with a shared shape so a single KPI + bar chart + detail
 # table can present the whole L2-hygiene picture in one place.
-# Mirrors the L1 dashboard's `_todays_exceptions` pattern (one row =
+# Mirrors the L1 dashboard's `_l1_exceptions` pattern (one row =
 # one violation; check_type is the discriminator).
 #
 # - check_type: which L2 hygiene check produced the row.
@@ -565,7 +565,7 @@ def build_all_l2_flow_tracing_datasets(
     M.3.10f adds the Transfer Templates sheet with tt-instances (per
     shared Transfer) + tt-legs (per leg, backing the multi-leg flow
     Sankey); M.3.10l replaces the 6 separate L2 exception datasets
-    with one unified UNION-ALL dataset (mirrors L1's todays-exceptions
+    with one unified UNION-ALL dataset (mirrors L1's exceptions
     pattern — single KPI + bar chart + detail table).
     """
     return [
@@ -1492,7 +1492,7 @@ def build_unified_l2_exceptions_dataset(
     """UNION ALL across the 6 L2 hygiene checks into one row-per-
     violation dataset (M.3.10l).
 
-    Mirrors L1's `todays_exceptions` pattern: one row = one violation;
+    Mirrors L1's `l1_exceptions` pattern: one row = one violation;
     `check_type` is the discriminator; `count` is the per-violation row
     count used for sort + bar stacking. Each branch inlines its own
     CTEs as a subquery so the outer SELECT can do consistent typing

@@ -22,7 +22,7 @@ did *that* entry come from?"), it's another round-trip.
 
 The L1 Reconciliation Dashboard is the same underlying data, laid
 out so you can answer those follow-up questions yourself. Every
-KPI on the **Today's Exceptions** sheet is a single class of
+KPI on the **L1 Exceptions** sheet is a single class of
 violation. Every row in the detail tables is the specific break.
 Every clickable cell drills to the underlying transactions.
 
@@ -58,7 +58,7 @@ When the symptom is a real one and you need to know *why*, the
   activity in the runtime data. The **L2 Exceptions** sheet
   surfaces declarations that are dead, mismatched, or orphaned —
   and these failures often manifest one layer down as the L1
-  exceptions you saw on Today's Exceptions.
+  exceptions you saw on L1 Exceptions.
 
 When an L1 trace ends with "but why is this happening *every*
 day?", flip to L2 Flow Tracing. A spike in *Dead Rails* or *Chain
@@ -73,7 +73,7 @@ hiccup, but a structural problem that needs an integrator handoff.
    and the L2-instance contract that drives every prose block on
    each sheet.
 2. Walk through the
-   [Today's Exceptions walkthrough](../walkthroughs/l1/todays-exceptions.md).
+   [L1 Exceptions walkthrough](../walkthroughs/l1/exceptions.md).
    It's the morning landing page — start there every day.
 3. Walk through
    [Drift](../walkthroughs/l1/drift.md) and
@@ -87,15 +87,15 @@ hiccup, but a structural problem that needs an integrator handoff.
    trace ends at a Daily Statement page or a raw posting ledger.
 5. Bookmark the
    [L1 Invariants reference](../L1_Invariants.md). Every check on
-   Today's Exceptions ties back to one of these SHOULD-constraints;
+   L1 Exceptions ties back to one of these SHOULD-constraints;
    when you see an unfamiliar `check_type`, look it up here.
 
 ## The drill chain you'll use every day
 
-*Today's Exceptions → per-invariant narrowing → Daily Statement →
+*L1 Exceptions → per-invariant narrowing → Daily Statement →
 Transactions.*
 
-- **Left-click an `account_id`** on any Today's Exceptions row →
+- **Left-click an `account_id`** on any L1 Exceptions row →
   narrows the per-invariant sheets (Drift / Overdraft / Limit
   Breach) to that account.
 - **Right-click → "View Daily Statement"** → opens the

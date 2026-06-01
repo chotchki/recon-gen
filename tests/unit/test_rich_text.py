@@ -338,7 +338,7 @@ class TestMarkdownEmphasisAndBullets:
 
     def test_bullet_continuation_line_joins_into_item(self) -> None:
         # A soft-wrapped bullet (item text spans two source lines) is one
-        # <li>, not a dropped line — matches _TODAYS_EXCEPTIONS_PANEL's
+        # <li>, not a dropped line — matches _L1_EXCEPTIONS_PANEL's
         # wrapped bullets.
         out = rt.markdown("- first part\n  wrapped tail\n- second")
         assert out == (

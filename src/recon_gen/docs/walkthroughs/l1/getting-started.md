@@ -33,4 +33,4 @@ No KPIs, no tables, no drills. The sheet is purely descriptive.
 ## Drills
 
 None. This is the orientation page; the analyst's first click is
-typically a tab over to **Today's Exceptions**.
+typically a tab over to **L1 Exceptions**.

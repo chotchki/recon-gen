@@ -40,7 +40,7 @@ hands.**
 
 ## What we are *not* asking you to learn
 
-- **Not the daily operational view.** Today's Exceptions, Drift,
+- **Not the daily operational view.** L1 Exceptions, Drift,
   Limit Breach — those are operator surfaces. You don't need to
   know what a "stuck pending" row is to answer the executive
   questions. (If something genuinely needs your attention, the

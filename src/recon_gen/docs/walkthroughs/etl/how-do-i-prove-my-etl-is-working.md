@@ -37,9 +37,9 @@ Three reference points:
   `{{ l2_instance_name }}_stuck_pending`, `{{ l2_instance_name }}_stuck_unbundled`,
   `{{ l2_instance_name }}_expected_eod_balance_breach`) are the dashboard-side
   consequence of the invariants below. If your pre-flight passes,
-  the L1 dashboard's Today's Exceptions KPI reads zero on the demo
+  the L1 dashboard's L1 Exceptions KPI reads zero on the demo
   data.
-- **L1 Reconciliation Dashboard → Today's Exceptions sheet** —
+- **L1 Reconciliation Dashboard → L1 Exceptions sheet** —
   the unified roll-up. UNION ALL across all 5 L1 invariant views
   scoped to the most recent business day. If pre-flight is green,
   this sheet's KPI is `0`.
@@ -92,7 +92,7 @@ post.
 
 **Dashboard consequence**: rows surface in the L1 Drift sheet (the
 mismatch shows up at the account level once the daily balance
-recompute runs) and the Today's Exceptions roll-up KPI fires.
+recompute runs) and the L1 Exceptions roll-up KPI fires.
 
 ### Invariant 2 — `{{ l2_instance_name }}_daily_balances.money` matches the recomputed cumulative sum
 
@@ -182,7 +182,7 @@ checklist:
 
 - [ ] **L1 Reconciliation Dashboard → Getting Started** sheet
   renders with a date range for today's cut.
-- [ ] **L1 Today's Exceptions** KPI = 0; no rows in the detail
+- [ ] **L1 L1 Exceptions** KPI = 0; no rows in the detail
   table for accounts your real ETL touched today (planted demo
   scenarios may still surface — those are the demo's job).
 - [ ] **L1 Drift** KPI = 0 for any account whose `money` you
