@@ -282,7 +282,7 @@ FilterSpec = (
 # Third-party browser libs — served from ``/static/vendor/...`` (the
 # existing ``assets/`` static mount), NOT a CDN. The dist files are
 # committed under ``common/html/assets/vendor/{js,css}/`` and shipped via
-# ``package-data`` so ``pip install recon-gen[serve] && recon-gen
+# ``package-data`` so ``pip install recon-gen[prod] && recon-gen
 # dashboards`` works with zero internet (X.2.p). Provenance + the
 # refresh recipe live in ``assets/vendor/vendor.lock`` +
 # ``scripts/vendor_js_deps.py``; ``tests/unit/test_vendor_assets.py``

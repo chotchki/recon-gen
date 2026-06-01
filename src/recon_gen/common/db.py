@@ -102,8 +102,8 @@ def connect_demo_db(cfg: Config) -> Any:  # typing-smell: ignore[explicit-any]: 
     """Open a DB-API 2.0 connection to ``cfg.demo_database_url``.
 
     Branches on ``cfg.dialect``:
-      - Postgres: psycopg (v3, from the ``[demo]`` extra).
-      - Oracle: oracledb thin client (from the ``[demo-oracle]`` extra).
+      - Postgres: psycopg (v3, from the ``[prod]`` extra).
+      - Oracle: oracledb thin client (from the ``[prod]`` extra).
       - SQLite: stdlib ``sqlite3`` (no extra required).
 
     Raises:
@@ -124,7 +124,7 @@ def connect_demo_db(cfg: Config) -> Any:  # typing-smell: ignore[explicit-any]: 
         except ImportError as e:
             raise ImportError(
                 "psycopg is required for Postgres connections. "
-                "Install it with: pip install 'recon-gen[demo]'"
+                "Install it with: pip install 'recon-gen[prod]'"
             ) from e
         return psycopg.connect(cfg.demo_database_url)
     if cfg.dialect is Dialect.ORACLE:
@@ -133,7 +133,7 @@ def connect_demo_db(cfg: Config) -> Any:  # typing-smell: ignore[explicit-any]: 
         except ImportError as e:
             raise ImportError(
                 "oracledb is required for Oracle connections. "
-                "Install it with: pip install 'recon-gen[demo-oracle]'"
+                "Install it with: pip install 'recon-gen[prod]'"
             ) from e
         return oracledb.connect(oracle_dsn(cfg.demo_database_url))
     if cfg.dialect is Dialect.SQLITE:
@@ -906,7 +906,7 @@ async def make_connection_pool(
         except ImportError as e:
             raise ImportError(
                 "psycopg_pool is required for the async Postgres pool. "
-                "Install it with: pip install 'recon-gen[demo]' "
+                "Install it with: pip install 'recon-gen[prod]' "
                 "(the [pool] extra is bundled into psycopg[binary,pool])."
             ) from e
         # ``open=False`` so we await ``open()`` here — surfaces bad DSNs
@@ -923,7 +923,7 @@ async def make_connection_pool(
         except ImportError as e:
             raise ImportError(
                 "oracledb is required for Oracle connections. "
-                "Install it with: pip install 'recon-gen[demo-oracle]'"
+                "Install it with: pip install 'recon-gen[prod]'"
             ) from e
         # oracledb's async pool factory is sync (it returns the pool
         # object; connection acquisition is the async part).
@@ -940,7 +940,7 @@ async def make_connection_pool(
         except ImportError as e:
             raise ImportError(
                 "aiosqlite is required for the async SQLite pool. "
-                "Install it with: pip install 'recon-gen[serve]'"
+                "Install it with: pip install 'recon-gen[prod]'"
             ) from e
         del _aiosqlite_probe
         return _AsyncSqlitePool(

@@ -5,7 +5,7 @@ The four bundled apps render two ways. The default is **QuickSight** — `recon-
 ## Running it
 
 ```bash
-pip install 'recon-gen[serve]'
+pip install 'recon-gen[prod]'
 recon-gen dashboards -c config.yaml                # one process, all 4 apps
 # → http://127.0.0.1:8000/dashboards
 ```

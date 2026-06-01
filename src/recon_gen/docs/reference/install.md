@@ -38,7 +38,7 @@ them up. No AWS credentials or DB drivers needed.
 ### "I want to deploy to AWS"
 
 ```bash
-pip install "recon-gen[deploy]"
+pip install "recon-gen[prod]"
 recon-gen json apply -c config.yaml -o out/ --execute
 ```
 
@@ -49,8 +49,8 @@ SSO session, instance profile).
 ### "I want to seed the demo database"
 
 ```bash
-pip install "recon-gen[deploy,demo]"           # PostgreSQL 17+
-pip install "recon-gen[deploy,demo,demo-oracle]"  # add Oracle 19c+
+pip install "recon-gen[prod]"           # PostgreSQL 17+
+pip install "recon-gen[prod]"  # add Oracle 19c+
 ```
 
 Then:
@@ -65,7 +65,7 @@ recon-gen json   apply -c config.yaml -o out/ --execute
 ### "I want to render the audit PDF"
 
 ```bash
-pip install "recon-gen[deploy,demo,audit]"
+pip install "recon-gen[prod]"
 recon-gen audit apply -c config.yaml --execute -o report.pdf
 ```
 
@@ -112,16 +112,16 @@ pass, you just won't catch a JS-lint regression before pushing.
 
 ## Quoting note
 
-The square brackets in `recon-gen[demo,audit]` are shell
+The square brackets in `recon-gen[prod]` are shell
 metacharacters — quote them or your shell will interpret them as glob
 patterns:
 
 ```bash
-pip install "recon-gen[demo,audit]"     # works in bash + zsh
-pip install 'recon-gen[demo,audit]'     # also works
+pip install "recon-gen[prod]"     # works in bash + zsh
+pip install 'recon-gen[prod]'     # also works
 pip install recon-gen\[demo,audit\]     # also works
 ```
 
-Without quoting you'll get `zsh: no matches found: recon-gen[demo,audit]`
+Without quoting you'll get `zsh: no matches found: recon-gen[prod]`
 or pip will install only the bare package, silently dropping the
 extras.
