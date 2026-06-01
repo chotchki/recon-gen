@@ -180,9 +180,10 @@ The full L2 + ETL + Training round-trip. Glues everything under one e2e test. **
     - [ ] BV.3.3.c - **Full-registry walk (sqlite). Status: 12/15 pass; 3 plant-doesn't-surface bugs + 1 false-positive concern.** Single-Session-Start cumulative walk over matview-bound, dashboard-bound kinds (15). Signature picker reads `PRAGMA table_info` + intersects with a priority column list so per-matview signature shape derives from the schema (no hardcoded per-kind map drifting from reality). Accordion-open detection (only click `<details>` summary when not already open). Multi-table-on-page read (drift sheet has 2). Remaining failures are real-bug signals: BV.3.3.c.bug1/2/3 (plant-doesn't-surface) + bug4 (chain-coherence sig matches only on date). Test stays red until those land; that's the intent (no xfail sweeping). Mark complete when bugs 1-3 fixed AND bug 4 strict-signature lands.
       - [x] BV.3.3.c.bug1 - BV.3.3.c.bug1 — ledger_drift plant doesn't surface row in v_ledger_drift matview
       - [x] BV.3.3.c.bug2 - BV.3.3.c.bug2 — stuck_unbundled plant lands but dashboard doesn't render cust-0002-snb
+      - [ ] BV.3.3.c.bug2-cumulative-followup - BV.3.3.c.bug2-cumulative-followup — stuck_unbundled fails in cumulative walk
       - [x] BV.3.3.c.bug3 - BV.3.3.c.bug3 — expected_eod_balance_breach plant lands but dashboard doesn't render acct-eod-ACHOrigSettlement
       - [ ] BV.3.3.c.bug4 - BV.3.3.c.bug4 — chain-coherence kinds match only on business_day (potentially false positive)
-      - [ ] BV.3.3.c.bug4-followup - BV.3.3.c.bug4-followup — Chain-coherence dashboard rendering
+      - [ ] BV.3.3.c.bug4 - followup - BV.3.3.c.bug4-followup — Chain-coherence dashboard rendering
     - [ ] BV.3.3.d - **PG variant via Docker.** Reuse `tests/e2e/_studio_deploy_helpers::docker_available` skipif + ephemeral pg container per `[feedback_ephemeral_aws_infra]`. Schema apply + seed + matview-refresh paths must work against pg without driver changes. Parametrize the full registry walk over the dialect axis.
     - [ ] BV.3.3.e - **Oracle variant via Docker.** Same shape as BV.3.3.d for Oracle. Oracle MV-LOG limitations (per BV.6 backlog) may surface here; doc what's portable vs Oracle-only.
     - [x] BV.3.3.f - BV.3.3.f — Gate session-scope AWS fixtures on AWS-dependent tests
