@@ -316,7 +316,17 @@ jobs:
     # pg-browser. Sequencing pg-api before pg-browser dodges that;
     # cleanup-pg already waits on both via ``needs:``.
     needs: [auth-smoke, e2e-pg-api]
-    runs-on: ubuntu-latest
+    # BY.2 — promoted from ubuntu-latest to self-hosted. e2e-pg-browser
+    # was the second-slowest CI/E2E job at ~50 min on the 2-vCPU
+    # ubuntu-latest runner; the 5800X3D / 64GB self-hosted box gives
+    # comfortable headroom for Playwright WebKit + the matview-heavy
+    # deploy chain. AWS OIDC + the QS_GEN_PG_URL / RECON_E2E_USER_ARN
+    # secrets work identically on self-hosted (workflow-level secrets
+    # context), and BY.3's secret-isolation policy is scoped to
+    # *publish* jobs (PyPI, GitHub Release) — test-credential jobs
+    # like this one move cleanly. release.yml's release-e2e stays on
+    # ubuntu-latest per BY.3.
+    runs-on: [self-hosted, recon-gen-ci-local]
     concurrency:
       group: e2e-pg
       cancel-in-progress: false
@@ -342,14 +352,15 @@ jobs:
       - name: Install Playwright WebKit browser
         # Only WebKit — that's what ``common/browser/helpers.py``
         # uses (``webkit_page`` context manager). Skipping Chromium
-        # + Firefox saves ~200MB of download. ``--with-deps`` runs
-        # ``apt-get install`` for the WebKit system libs (libsoup3,
-        # libwebkitgtk-6.0, etc.) — without it, Ubuntu 24.04
-        # runners launch Playwright but fail every page open with
-        # ``Host system is missing dependencies to run browsers``,
-        # cascading every browser e2e test to FAIL (seen in the
-        # 2026-05-04 nightly).
-        run: .venv/bin/playwright install --with-deps webkit
+        # + Firefox saves ~200MB of download. BY.2 dropped
+        # ``--with-deps``: the self-hosted WSL2 runner has the
+        # WebKit system libs (libsoup3, libwebkitgtk-6.0, etc.)
+        # pre-installed via the BY.4 operational bootstrap, so the
+        # per-job apt-get install (which would need sudo, and the
+        # runner's NOPASSWD allowlist doesn't permit arbitrary apt)
+        # is no longer needed. On a fresh runner replacement, run
+        # the one-time bootstrap from BY.4's ops doc.
+        run: .venv/bin/playwright install webkit
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -392,11 +403,15 @@ jobs:
         run: .venv/bin/recon-gen json apply -c /tmp/ci-pg-browser.yaml -o /tmp/ci-pg-browser-out --execute
 
       - name: Run browser e2e (renders + sheet visuals + filters + drilldown)
-        # ``-n 2`` because the standard 2-vCPU GHA runner can't sustain
-        # ``-n 4`` for browser tests without flake (verified empirically
-        # — Playwright timeouts climb under contention). Bumped page
-        # timeout to 60s so the slower browser-tier waits don't trip
-        # on cold-start visual loads.
+        # BY.2 — bumped from `-n 2` to `-n 4`. On the prior ubuntu-latest
+        # 2-vCPU runner `-n 4` caused Playwright timeout flake under
+        # contention; the 5800X3D / 64GB self-hosted box has 8C/16T and
+        # plenty of memory, so `-n 4` runs comfortably without thrashing.
+        # Held at 4 rather than `-n auto` (16) because browser tests are
+        # IO+CPU-mixed and over-parallelism risks intermittent visual
+        # render races; revisit with `-n 8` if `-n 4` proves stable for
+        # multiple consecutive runs. Page timeout kept at 60s so cold-
+        # start visual loads have headroom.
         env:
           RECON_GEN_E2E: "1"
           RECON_GEN_CONFIG: /tmp/ci-pg-browser.yaml
@@ -428,7 +443,7 @@ jobs:
           .venv/bin/pytest tests/e2e/ \
             -m browser \
             --ignore=tests/e2e/test_audit_dashboard_agreement.py \
-            -v -n 2 \
+            -v -n 4 \
             --cov=recon_gen
 
       # X.2.j — the 4-way cross-tool agreement test runs in its OWN
