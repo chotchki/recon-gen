@@ -492,6 +492,147 @@ def _emit_sqlite_current_matview_creates(p: str) -> str:
     )
 
 
+def _render_computed_subledger_balance_section(
+    prefix: str, dialect: Dialect,
+) -> str:
+    """BZ.0 — emit the computed_subledger_balance matview block.
+
+    Dialect-specific shape (semantics differ across matview engines):
+
+    * **SQLite** — matview is a plain ``CREATE TABLE AS SELECT`` (a
+      snapshot). We precompute the per-(account, posting) running sum
+      into an indexed scratch table, then the matview's correlated
+      ``LIMIT 1`` lookup runs in O(log K). Scratch is dropped at the
+      tail of the section — no lingering artifacts after refresh.
+
+    * **Postgres + Oracle** — matview is a ``MATERIALIZED VIEW`` that
+      stores the query DEFINITION (not just the snapshot). Dropping
+      the scratch table after the CREATE would cascade-drop the
+      matview (PG) or break refresh (Oracle). Both planners
+      ALREADY handle correlated SUM-WHERE-posting<=day subqueries
+      well (per the BX spike audit), so we keep the original
+      single-CREATE-MATERIALIZED-VIEW shape on these dialects.
+
+    The output column shape is identical across all dialects: 4 key
+    columns (account_id, business_day_start, business_day_end,
+    account_parent_role) + computed_balance. The cross-dialect
+    semantic-lock test (BZ.4) verifies row-for-row equivalence.
+    """
+    from recon_gen.common.sql.dialect import (  # noqa: PLC0415
+        drop_table_if_exists,
+        fetch_first_one_row,
+        matview_create_keyword,
+        matview_options,
+    )
+    p = prefix
+    mv_kw = matview_create_keyword(dialect)
+    mv_opt = matview_options(dialect)
+
+    header = (
+        "-- ---------------------------------------------------------------------\n"
+        "-- Helper view: ComputedBalance theorem for leaf accounts.\n"
+        "-- Per SPEC: ComputedBalance(account, businessDay) := Σ CurrentTransaction\n"
+        "-- (Account = inAccount, Status = Posted, Posting ≤ inBusinessDay.EndTime).\n"
+        "-- A \"leaf\" account is one with account_parent_role IS NOT NULL\n"
+        "-- (i.e., it's a child of a parent role).\n"
+    )
+    matview_index = (
+        f"-- JOIN key with current_daily_balances + drift's WHERE filter.\n"
+        f"CREATE INDEX idx_{p}_csb_account_day\n"
+        f"    ON {p}_computed_subledger_balance (account_id, business_day_start);"
+    )
+
+    if dialect is Dialect.SQLITE:
+        # Scratch-table + indexed-lookup shape: SQLite's planner can't
+        # rewrite the correlated subquery, so we materialize the running
+        # sum + index it ourselves. Drop scratch after — the matview
+        # is a snapshot so it doesn't depend on the table going forward.
+        drop_pre = drop_table_if_exists(f"{p}_csb_scratch", dialect)
+        drop_post = drop_table_if_exists(f"{p}_csb_scratch", dialect)
+        fetch = fetch_first_one_row(dialect)
+        return (
+            f"{header}"
+            f"-- BZ.0 (SQLite): scratch + index sidesteps the planner's missing\n"
+            f"-- correlated-SUM rewrite. Original O(D × A × K) cost on this dialect\n"
+            f"-- (~133s @ 1M rows); scratch-table form lands at O(N log N).\n"
+            f"-- The scratch is dropped at the tail of this block.\n"
+            f"-- ---------------------------------------------------------------------\n"
+            f"{drop_pre}\n"
+            f"CREATE TABLE {p}_csb_scratch AS\n"
+            f"WITH tx_day_sums AS (\n"
+            f"    SELECT\n"
+            f"        tx.account_id,\n"
+            f"        tx.posting,\n"
+            f"        SUM(tx.amount_money) AS day_delta\n"
+            f"    FROM {p}_current_transactions tx\n"
+            f"    WHERE tx.status = 'Posted'\n"
+            f"    GROUP BY tx.account_id, tx.posting\n"
+            f")\n"
+            f"SELECT\n"
+            f"    account_id,\n"
+            f"    posting,\n"
+            f"    SUM(day_delta) OVER (\n"
+            f"        PARTITION BY account_id\n"
+            f"        ORDER BY posting\n"
+            f"        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW\n"
+            f"    ) AS rs\n"
+            f"FROM tx_day_sums;\n"
+            f"CREATE INDEX idx_{p}_csb_scratch\n"
+            f"    ON {p}_csb_scratch (account_id, posting DESC);\n"
+            f"\n"
+            f"{mv_kw} {p}_computed_subledger_balance{mv_opt} AS\n"
+            f"SELECT\n"
+            f"    sb.account_id,\n"
+            f"    sb.business_day_start,\n"
+            f"    sb.business_day_end,\n"
+            f"    sb.account_parent_role,\n"
+            f"    COALESCE((\n"
+            f"        SELECT tr.rs\n"
+            f"        FROM {p}_csb_scratch tr\n"
+            f"        WHERE tr.account_id = sb.account_id\n"
+            f"          AND tr.posting <= sb.business_day_end\n"
+            f"        ORDER BY tr.posting DESC\n"
+            f"        {fetch}\n"
+            f"    ), 0) AS computed_balance\n"
+            f"FROM {p}_current_daily_balances sb\n"
+            f"WHERE sb.account_scope = 'internal'\n"
+            f"  AND sb.account_parent_role IS NOT NULL;\n"
+            f"{matview_index}\n"
+            f"-- Scratch cleanup — transient table is no longer needed.\n"
+            f"{drop_post}"
+        )
+
+    # Postgres + Oracle: stick with the original correlated-subquery
+    # shape. Both planners detect this pattern and rewrite it as a
+    # hash-grouped join (PG) or similar (Oracle); the original 7s @
+    # 250k on SQLite is sub-second on these engines natively, so no
+    # scratch-table workaround is needed.
+    return (
+        f"{header}"
+        f"-- BZ.0 (PG/Oracle): native MATERIALIZED VIEW + correlated SUM —\n"
+        f"-- both dialects' planners detect this pattern; SQLite has its own\n"
+        f"-- scratch-table form (see Dialect.SQLITE branch).\n"
+        f"-- ---------------------------------------------------------------------\n"
+        f"{mv_kw} {p}_computed_subledger_balance{mv_opt} AS\n"
+        f"SELECT\n"
+        f"    sb.account_id,\n"
+        f"    sb.business_day_start,\n"
+        f"    sb.business_day_end,\n"
+        f"    sb.account_parent_role,\n"
+        f"    COALESCE((\n"
+        f"        SELECT SUM(tx.amount_money)\n"
+        f"        FROM {p}_current_transactions tx\n"
+        f"        WHERE tx.account_id = sb.account_id\n"
+        f"          AND tx.status = 'Posted'\n"
+        f"          AND tx.posting <= sb.business_day_end\n"
+        f"    ), 0) AS computed_balance\n"
+        f"FROM {p}_current_daily_balances sb\n"
+        f"WHERE sb.account_scope = 'internal'\n"
+        f"  AND sb.account_parent_role IS NOT NULL;\n"
+        f"{matview_index}"
+    )
+
+
 def _emit_l1_invariant_views(
     instance: L2Instance, *, prefix: str, dialect: Dialect = Dialect.POSTGRES,
 ) -> str:
@@ -564,22 +705,10 @@ def _emit_l1_invariant_views(
     multi_xor_violation_body = _render_multi_xor_violation_body(
         instance, p=p, dialect=dialect,
     )
-    from recon_gen.common.sql.dialect import (  # noqa: PLC0415 — local import to avoid top-level cycle
-        drop_table_if_exists,
-        fetch_first_one_row,
-    )
-    csb_scratch_drop_pre = drop_table_if_exists(
-        f"{p}_csb_scratch", dialect,
-    )
-    csb_scratch_drop_post = drop_table_if_exists(
-        f"{p}_csb_scratch", dialect,
-    )
-    fetch_first_one = fetch_first_one_row(dialect)
+    csb_section = _render_computed_subledger_balance_section(p, dialect)
     return _L1_INVARIANT_VIEWS_TEMPLATE.format(
         p=p,
-        csb_scratch_drop_pre=csb_scratch_drop_pre,
-        csb_scratch_drop_post=csb_scratch_drop_post,
-        fetch_first_one_row=fetch_first_one,
+        computed_subledger_balance_section=csb_section,
         limit_join_outbound=limit_join_outbound,
         limit_join_inbound=limit_join_inbound,
         limit_cap_value=limit_cap_value,
@@ -2016,84 +2145,7 @@ _L1_INVARIANT_VIEWS_TEMPLATE = """\
 -- (DROPs moved to the top of the script so they run before the base
 -- DROPs that would otherwise hit "dependent objects still exist".)
 
--- ---------------------------------------------------------------------
--- Helper view: ComputedBalance theorem for leaf accounts.
--- Per SPEC: ComputedBalance(account, businessDay) := Σ CurrentTransaction
--- (Account = inAccount, Status = Posted, Posting ≤ inBusinessDay.EndTime).
--- A "leaf" account is one with account_parent_role IS NOT NULL
--- (i.e., it's a child of a parent role).
---
--- BZ.0 reshape: original body used a correlated subquery shape that
--- SQLite's planner can't rewrite, costing ~133s @ 1M rows on real-L2-
--- sized data. New shape: precompute the per-(account, posting) running
--- sum into an INDEXED scratch table, then look up the latest rs per
--- sb row in O(log K) via the index.
---
--- Total cost: O(N log N) for the scratch build + O(D × A × log K) for
--- the per-sb lookups vs. O(D × A × K) for the original. Same SQL
--- ships to all 3 dialects.
---
--- The scratch table is dropped at the tail of this block — by-design
--- transient, no lingering artifacts after refresh.
---
--- NOTE: an earlier draft used a UNION-ALL-plus-window-function shape
--- that produced byte-identical output in standalone queries but ALL
--- ZEROS in the matview. SQLite's optimizer pushed the outer
--- `WHERE is_sb=1` filter past the window function into the events
--- CTE, eliminating tx rows from the partition. The scratch-table
--- form below avoids the pushdown trap by computing the running sum
--- in a separate statement.
---
--- Tie handling: GROUP BY (account_id, posting) in tx_day_sums collapses
--- multiple tx at the exact same instant into one row, so the running
--- sum below has at most one row per (account, posting). This makes the
--- `ORDER BY posting DESC {fetch_first_one_row}` lookup deterministic.
--- ---------------------------------------------------------------------
-{csb_scratch_drop_pre}
-CREATE TABLE {p}_csb_scratch AS
-WITH tx_day_sums AS (
-    SELECT
-        tx.account_id,
-        tx.posting,
-        SUM(tx.amount_money) AS day_delta
-    FROM {p}_current_transactions tx
-    WHERE tx.status = 'Posted'
-    GROUP BY tx.account_id, tx.posting
-)
-SELECT
-    account_id,
-    posting,
-    SUM(day_delta) OVER (
-        PARTITION BY account_id
-        ORDER BY posting
-        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-    ) AS rs
-FROM tx_day_sums;
-CREATE INDEX idx_{p}_csb_scratch
-    ON {p}_csb_scratch (account_id, posting DESC);
-
-{matview_create_kw} {p}_computed_subledger_balance{matview_options} AS
-SELECT
-    sb.account_id,
-    sb.business_day_start,
-    sb.business_day_end,
-    sb.account_parent_role,
-    COALESCE((
-        SELECT tr.rs
-        FROM {p}_csb_scratch tr
-        WHERE tr.account_id = sb.account_id
-          AND tr.posting <= sb.business_day_end
-        ORDER BY tr.posting DESC
-        {fetch_first_one_row}
-    ), 0) AS computed_balance
-FROM {p}_current_daily_balances sb
-WHERE sb.account_scope = 'internal'
-  AND sb.account_parent_role IS NOT NULL;
--- JOIN key with current_daily_balances + drift's WHERE filter.
-CREATE INDEX idx_{p}_csb_account_day
-    ON {p}_computed_subledger_balance (account_id, business_day_start);
--- Scratch cleanup — transient table is no longer needed.
-{csb_scratch_drop_post}
+{computed_subledger_balance_section}
 
 -- ---------------------------------------------------------------------
 -- Helper view: ComputedBalance theorem for parent (ledger) accounts.
