@@ -1913,9 +1913,16 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
                 name="days_ago",
                 label="Days ago",
                 help_text=(
-                    "Business-day offset for the EOD-variance row."
+                    "Business-day offset for the EOD-variance row. "
+                    "Default 1 (yesterday) lands on the latest day in "
+                    "current_daily_balances — Today's Exceptions (the "
+                    "tour destination) filters `business_day_start = "
+                    "MAX(business_day_start)`, so historical days don't "
+                    "show. Other L1 plants have dedicated sheets that "
+                    "render all days; EOD doesn't, so the default must "
+                    "match the latest-day filter (BV.3.3.c.bug3)."
                 ),
-                default=2,
+                default=1,
                 min_value=0,
                 max_value=90,
             ),
