@@ -958,17 +958,32 @@ def test_stuck_unbundled_view_indexes_emit() -> None:
 
 def test_computed_subledger_balance_uses_current_transactions_view() -> None:
     """The helper view reads from Current* (technical-error supersession
-    transparent) rather than the raw transactions base table."""
+    transparent) rather than the raw transactions base table.
+
+    BZ.0 — the matview body itself reads from an indexed scratch table
+    `<p>_csb_scratch`; the scratch is what reads from current_transactions.
+    The invariant — "tx data comes from current_transactions, never the
+    base table" — is preserved, just one level of indirection deeper.
+    """
     sql = emit_schema(_instance("h"), prefix="h")
-    body_match = re.search(
-        r"CREATE MATERIALIZED VIEW h_computed_subledger_balance AS(.*?);",
+    # The full CSB section: scratch DROP-CREATE block + matview body.
+    section_match = re.search(
+        r"(DROP TABLE IF EXISTS h_csb_scratch.*?"
+        r"CREATE INDEX idx_h_csb_account_day.*?h_computed_subledger_balance.*?;)",
         sql,
         re.DOTALL,
     )
-    assert body_match is not None
-    body = body_match.group(1)
-    assert "FROM h_current_transactions" in body
-    assert "tx.status = 'Posted'" in body
+    assert section_match is not None, (
+        "Couldn't locate the BZ.0 computed_subledger_balance emit section"
+    )
+    section = section_match.group(1)
+    # Scratch table reads from current_transactions, not raw transactions.
+    assert "FROM h_current_transactions" in section
+    assert "tx.status = 'Posted'" in section
+    # Sanity: no direct base-table read in this section.
+    assert "FROM h_transactions" not in section, (
+        "computed_subledger_balance must not read from raw <p>_transactions"
+    )
 
 
 def test_computed_ledger_balance_unions_children_plus_direct_postings() -> None:

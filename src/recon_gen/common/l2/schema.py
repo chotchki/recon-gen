@@ -564,8 +564,22 @@ def _emit_l1_invariant_views(
     multi_xor_violation_body = _render_multi_xor_violation_body(
         instance, p=p, dialect=dialect,
     )
+    from recon_gen.common.sql.dialect import (  # noqa: PLC0415 — local import to avoid top-level cycle
+        drop_table_if_exists,
+        fetch_first_one_row,
+    )
+    csb_scratch_drop_pre = drop_table_if_exists(
+        f"{p}_csb_scratch", dialect,
+    )
+    csb_scratch_drop_post = drop_table_if_exists(
+        f"{p}_csb_scratch", dialect,
+    )
+    fetch_first_one = fetch_first_one_row(dialect)
     return _L1_INVARIANT_VIEWS_TEMPLATE.format(
         p=p,
+        csb_scratch_drop_pre=csb_scratch_drop_pre,
+        csb_scratch_drop_post=csb_scratch_drop_post,
+        fetch_first_one_row=fetch_first_one,
         limit_join_outbound=limit_join_outbound,
         limit_join_inbound=limit_join_inbound,
         limit_cap_value=limit_cap_value,
@@ -2010,30 +2024,34 @@ _L1_INVARIANT_VIEWS_TEMPLATE = """\
 -- (i.e., it's a child of a parent role).
 --
 -- BZ.0 reshape: original body used a correlated subquery shape that
--- SQLite's planner can't rewrite, costing ~133s @ 1M rows. New shape:
---   1. Compute per-tx running sum in `tx_running` (one O(N log N) pass
---      over `<p>_current_transactions WHERE status='Posted'`).
---   2. For each sb row, look up the latest `tx_running.rs` whose
---      posting <= sb.business_day_end (per (account, posting) index).
--- Mathematically equivalent to the correlated-subquery form, but the
--- inner lookup is O(log K) per sb row (index seek + LIMIT 1), so the
--- total cost is O(N log N + D × A × log K) vs. O(D × A × K).
--- Same SQL ships to all 3 dialects.
+-- SQLite's planner can't rewrite, costing ~133s @ 1M rows on real-L2-
+-- sized data. New shape: precompute the per-(account, posting) running
+-- sum into an INDEXED scratch table, then look up the latest rs per
+-- sb row in O(log K) via the index.
+--
+-- Total cost: O(N log N) for the scratch build + O(D × A × log K) for
+-- the per-sb lookups vs. O(D × A × K) for the original. Same SQL
+-- ships to all 3 dialects.
+--
+-- The scratch table is dropped at the tail of this block — by-design
+-- transient, no lingering artifacts after refresh.
 --
 -- NOTE: an earlier draft used a UNION-ALL-plus-window-function shape
 -- that produced byte-identical output in standalone queries but ALL
 -- ZEROS in the matview. SQLite's optimizer pushed the outer
 -- `WHERE is_sb=1` filter past the window function into the events
--- CTE, eliminating tx rows from the partition. The tx_running form
--- below avoids the pushdown trap by computing the running sum on a
--- single source.
+-- CTE, eliminating tx rows from the partition. The scratch-table
+-- form below avoids the pushdown trap by computing the running sum
+-- in a separate statement.
+--
+-- Tie handling: GROUP BY (account_id, posting) in tx_day_sums collapses
+-- multiple tx at the exact same instant into one row, so the running
+-- sum below has at most one row per (account, posting). This makes the
+-- `ORDER BY posting DESC {fetch_first_one_row}` lookup deterministic.
 -- ---------------------------------------------------------------------
-{matview_create_kw} {p}_computed_subledger_balance{matview_options} AS
+{csb_scratch_drop_pre}
+CREATE TABLE {p}_csb_scratch AS
 WITH tx_day_sums AS (
-    -- Collapse ties on (account_id, posting): if multiple tx posted at
-    -- the exact same instant, sum their amounts first so the running
-    -- sum below has at most one row per (account, posting) — no
-    -- nondeterminism in the LIMIT-1 lookup downstream.
     SELECT
         tx.account_id,
         tx.posting,
@@ -2041,18 +2059,20 @@ WITH tx_day_sums AS (
     FROM {p}_current_transactions tx
     WHERE tx.status = 'Posted'
     GROUP BY tx.account_id, tx.posting
-),
-tx_running AS (
-    SELECT
-        account_id,
-        posting,
-        SUM(day_delta) OVER (
-            PARTITION BY account_id
-            ORDER BY posting
-            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-        ) AS rs
-    FROM tx_day_sums
 )
+SELECT
+    account_id,
+    posting,
+    SUM(day_delta) OVER (
+        PARTITION BY account_id
+        ORDER BY posting
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS rs
+FROM tx_day_sums;
+CREATE INDEX idx_{p}_csb_scratch
+    ON {p}_csb_scratch (account_id, posting DESC);
+
+{matview_create_kw} {p}_computed_subledger_balance{matview_options} AS
 SELECT
     sb.account_id,
     sb.business_day_start,
@@ -2060,11 +2080,11 @@ SELECT
     sb.account_parent_role,
     COALESCE((
         SELECT tr.rs
-        FROM tx_running tr
+        FROM {p}_csb_scratch tr
         WHERE tr.account_id = sb.account_id
           AND tr.posting <= sb.business_day_end
         ORDER BY tr.posting DESC
-        LIMIT 1
+        {fetch_first_one_row}
     ), 0) AS computed_balance
 FROM {p}_current_daily_balances sb
 WHERE sb.account_scope = 'internal'
@@ -2072,6 +2092,8 @@ WHERE sb.account_scope = 'internal'
 -- JOIN key with current_daily_balances + drift's WHERE filter.
 CREATE INDEX idx_{p}_csb_account_day
     ON {p}_computed_subledger_balance (account_id, business_day_start);
+-- Scratch cleanup — transient table is no longer needed.
+{csb_scratch_drop_post}
 
 -- ---------------------------------------------------------------------
 -- Helper view: ComputedBalance theorem for parent (ledger) accounts.

@@ -983,6 +983,20 @@ def analyze_table(name: str, dialect: Dialect) -> str:
 # -- Constant SELECT (no real source table) ---------------------------------
 
 
+def fetch_first_one_row(dialect: Dialect) -> str:
+    """Return the row-limiting clause that picks the first row of an
+    ORDER BY — ``LIMIT 1`` for Postgres + SQLite, ``FETCH FIRST 1
+    ROW ONLY`` for Oracle. Oracle 19c rejects ``LIMIT``; Postgres + SQLite
+    accept both forms but ``LIMIT`` is the established convention here.
+
+    Compose at the tail of a SELECT after ``ORDER BY``:
+        f"SELECT ... ORDER BY x DESC {fetch_first_one_row(dialect)}"
+    """
+    if dialect is Dialect.ORACLE:
+        return "FETCH FIRST 1 ROW ONLY"
+    return "LIMIT 1"
+
+
 def dual_from(dialect: Dialect) -> str:
     """Suffix that makes a constant SELECT valid on both dialects.
 
