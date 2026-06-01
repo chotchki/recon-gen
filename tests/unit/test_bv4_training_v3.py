@@ -327,6 +327,71 @@ def test_session_start_running_banner_renders() -> None:
     assert "⏳" not in html
 
 
+def test_op_in_flight_disables_all_action_buttons() -> None:
+    """BV.4.10.d.3 — while ANY op runs (Session Start or Apply),
+    every action button gets `disabled` + visual-affordance classes
+    so the operator can't double-click. The server already no-ops
+    re-POSTs, but "I clicked, nothing happened" is bad UX."""
+    # Session Start running → all buttons (incl. Apply) disabled.
+    html = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=True,
+        session_start_running=True,
+    )
+    # Find each control button + check it carries disabled + the
+    # opacity-50 cursor-not-allowed affordance.
+    for button_id in (
+        "training-session-start-btn", "training-reclone-btn",
+        "training-cleanup-btn", "training-apply-btn",
+    ):
+        marker = f'id="{button_id}"'
+        idx = html.find(marker)
+        assert idx > 0, f"button {button_id} missing"
+        # Disabled attr + visual affordance must both be on the
+        # button tag (next ~300 chars from the id marker).
+        button_chunk = html[idx:idx + 600]
+        assert "disabled" in button_chunk, (
+            f"{button_id} should carry disabled while op runs"
+        )
+        assert "cursor-not-allowed" in button_chunk, (
+            f"{button_id} should carry cursor-not-allowed affordance"
+        )
+
+    # Apply running → same disabled state.
+    html_apply = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=True,
+        apply_running=True,
+        apply_pending_count=2,
+    )
+    for button_id in (
+        "training-session-start-btn", "training-reclone-btn",
+        "training-cleanup-btn", "training-apply-btn",
+    ):
+        idx = html_apply.find(f'id="{button_id}"')
+        button_chunk = html_apply[idx:idx + 600]
+        assert "disabled" in button_chunk, (
+            f"{button_id} should be disabled during Apply"
+        )
+
+    # Idle: nothing running → no disabled attr on session-start /
+    # reclone / cleanup (Apply still has its own pre-op-disabled
+    # logic for the no-v-overlay case but here we have one).
+    html_idle = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=True,
+    )
+    for button_id in (
+        "training-session-start-btn", "training-reclone-btn",
+        "training-cleanup-btn",
+    ):
+        idx = html_idle.find(f'id="{button_id}"')
+        button_chunk = html_idle[idx:idx + 600]
+        assert "disabled" not in button_chunk, (
+            f"{button_id} shouldn't be disabled when nothing's running"
+        )
+
+
 def test_apply_running_banner_renders() -> None:
     """BV.4.10.d — Apply gets the same banner+spinner+live-tail
     treatment as Session Start. The hint reflects the pending plant

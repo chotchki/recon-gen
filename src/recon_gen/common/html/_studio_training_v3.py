@@ -215,7 +215,7 @@ def render_training_v3_landing(
       overlay that all the Violation views read from; your production
       <code>{escape(base_prefix)}</code> prefix is untouched.
     </p>
-    {_render_session_controls(v_overlay_exists)}
+    {_render_session_controls(v_overlay_exists, any_op_running=(session_start_running or apply_running))}
   </header>
   <main class="px-8 py-6 flex flex-col gap-4">
     {banner_html}
@@ -254,8 +254,8 @@ def render_training_v3_landing(
       </div>
       <div class="bg-white border border-surface-border rounded-md p-4 sticky bottom-0 flex items-center gap-3 z-10">
         <button type="submit" id="training-apply-btn"
-                class="px-4 py-2 bg-accent text-accent-fg rounded-sm border border-accent text-sm font-semibold hover:opacity-85"
-                {("" if v_overlay_exists else "disabled")}>
+                class="px-4 py-2 bg-accent text-accent-fg rounded-sm border border-accent text-sm font-semibold hover:opacity-85{(' opacity-50 cursor-not-allowed' if (not v_overlay_exists or session_start_running or apply_running) else '')}"
+                {("disabled" if (not v_overlay_exists or session_start_running or apply_running) else "")}>
           ⚡ Apply selection
         </button>
         <span id="bv-apply-diff" data-test-bv-apply-diff
@@ -411,7 +411,10 @@ def render_training_session_start_live_tail(
     )
 
 
-def _render_session_controls(v_overlay_exists: bool) -> str:
+def _render_session_controls(
+    v_overlay_exists: bool, *,
+    any_op_running: bool = False,
+) -> str:
     """Top-of-page Session Start / Force rebuild / Cleanup buttons (DL.10).
 
     Pre-overlay: Session Start only.
@@ -419,11 +422,13 @@ def _render_session_controls(v_overlay_exists: bool) -> str:
       + Force rebuild (drop v overlay + reclone from base, wipes
       Apply state) + Cleanup.
 
-    BV.4.9 — Force rebuild is meaningful post-DL.9: Apply is now
-    incremental (fast-path for additive changes), so the operator
-    has no button to forcibly re-derive v from base. This is the
-    "throw away whatever's in v including planted state" escape
-    hatch — distinct from Apply's diff-driven behavior.
+    BV.4.10.d.3 — when an op is in flight (`any_op_running=True`)
+    every button gets `disabled` + visual-affordance classes so the
+    operator can't double-click and confuse the queue. The server
+    already no-ops re-POSTs while a task runs, but the operator's
+    experience without the disabled state is "I clicked, nothing
+    happened, let me click again" — the UI should prevent the
+    second click, not just absorb it silently.
     """
     session_start_title = (
         "Full lifecycle: runs the /etl/run flow (so base prefix is "
@@ -431,10 +436,16 @@ def _render_session_controls(v_overlay_exists: bool) -> str:
         "base data + refreshes v matviews. On Oracle this takes ~10 "
         "min for the /etl/run leg; PG ~30s; sqlite ~30s."
     )
+    disabled_attr = " disabled" if any_op_running else ""
+    # Tailwind `disabled:` variant doesn't always cover hover overrides,
+    # so explicitly add opacity + cursor-not-allowed when disabled.
+    disabled_cls = (
+        " opacity-50 cursor-not-allowed" if any_op_running else ""
+    )
     rebuild_btn = (
         '<form method="post" action="/training/reclone" class="inline-block">'
-        '<button type="submit" id="training-reclone-btn" '
-        'class="px-3 py-1.5 bg-white text-accent rounded-sm border border-accent text-xs font-semibold hover:bg-accent/10" '
+        f'<button type="submit" id="training-reclone-btn"{disabled_attr} '
+        f'class="px-3 py-1.5 bg-white text-accent rounded-sm border border-accent text-xs font-semibold hover:bg-accent/10{disabled_cls}" '
         'title="Drops + reclones the v overlay from current base + '
         'wipes Apply state. Skips /etl/run (base stays as-is). For '
         'when you want to throw out whatever is in v overlay and '
@@ -447,8 +458,8 @@ def _render_session_controls(v_overlay_exists: bool) -> str:
     )
     cleanup_btn = (
         '<form method="post" action="/training/cleanup" class="inline-block">'
-        '<button type="submit" id="training-cleanup-btn" '
-        'class="px-3 py-1.5 bg-warning text-white rounded-sm border border-warning text-xs font-semibold hover:opacity-85" '
+        f'<button type="submit" id="training-cleanup-btn"{disabled_attr} '
+        f'class="px-3 py-1.5 bg-warning text-white rounded-sm border border-warning text-xs font-semibold hover:opacity-85{disabled_cls}" '
         'title="Drops the &lt;base&gt;_v_* schema. Base prefix untouched.">'
         "🗑 Cleanup"
         "</button>"
@@ -462,8 +473,8 @@ def _render_session_controls(v_overlay_exists: bool) -> str:
     return f"""
     <div class="mt-3 inline-flex items-center gap-2">
       <form method="post" action="/training/session-start" class="inline-block">
-        <button type="submit" id="training-session-start-btn"
-                class="px-3 py-1.5 bg-accent text-accent-fg rounded-sm border border-accent text-xs font-semibold hover:opacity-85"
+        <button type="submit" id="training-session-start-btn"{disabled_attr}
+                class="px-3 py-1.5 bg-accent text-accent-fg rounded-sm border border-accent text-xs font-semibold hover:opacity-85{disabled_cls}"
                 title="{escape(session_start_title)}">
           {session_start_label}
         </button>
