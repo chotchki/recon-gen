@@ -321,7 +321,7 @@ def partition_matrix(
 # `--variants=<code>` shape: <scenario>_<dialect>_<target>. The fuzz_seed
 # integer (when scenario is f<n>) is extracted from the scenario suffix.
 _VARIANT_CODE_RE = re.compile(
-    r"^(?P<scenario>sp|sq|us|f\d+)_(?P<dialect>pg|or|sl)_(?P<target>lo|aw)$"
+    r"^(?P<scenario>sp|sq|us|f\d+)_(?P<dialect>pg|or|sl|du)_(?P<target>lo|aw)$"
 )
 
 
