@@ -2008,19 +2008,63 @@ _L1_INVARIANT_VIEWS_TEMPLATE = """\
 -- (Account = inAccount, Status = Posted, Posting ≤ inBusinessDay.EndTime).
 -- A "leaf" account is one with account_parent_role IS NOT NULL
 -- (i.e., it's a child of a parent role).
+--
+-- BZ.0 reshape: original body used a correlated subquery shape that
+-- SQLite's planner can't rewrite, costing ~133s @ 1M rows. New shape:
+--   1. Compute per-tx running sum in `tx_running` (one O(N log N) pass
+--      over `<p>_current_transactions WHERE status='Posted'`).
+--   2. For each sb row, look up the latest `tx_running.rs` whose
+--      posting <= sb.business_day_end (per (account, posting) index).
+-- Mathematically equivalent to the correlated-subquery form, but the
+-- inner lookup is O(log K) per sb row (index seek + LIMIT 1), so the
+-- total cost is O(N log N + D × A × log K) vs. O(D × A × K).
+-- Same SQL ships to all 3 dialects.
+--
+-- NOTE: an earlier draft used a UNION-ALL-plus-window-function shape
+-- that produced byte-identical output in standalone queries but ALL
+-- ZEROS in the matview. SQLite's optimizer pushed the outer
+-- `WHERE is_sb=1` filter past the window function into the events
+-- CTE, eliminating tx rows from the partition. The tx_running form
+-- below avoids the pushdown trap by computing the running sum on a
+-- single source.
 -- ---------------------------------------------------------------------
 {matview_create_kw} {p}_computed_subledger_balance{matview_options} AS
+WITH tx_day_sums AS (
+    -- Collapse ties on (account_id, posting): if multiple tx posted at
+    -- the exact same instant, sum their amounts first so the running
+    -- sum below has at most one row per (account, posting) — no
+    -- nondeterminism in the LIMIT-1 lookup downstream.
+    SELECT
+        tx.account_id,
+        tx.posting,
+        SUM(tx.amount_money) AS day_delta
+    FROM {p}_current_transactions tx
+    WHERE tx.status = 'Posted'
+    GROUP BY tx.account_id, tx.posting
+),
+tx_running AS (
+    SELECT
+        account_id,
+        posting,
+        SUM(day_delta) OVER (
+            PARTITION BY account_id
+            ORDER BY posting
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS rs
+    FROM tx_day_sums
+)
 SELECT
     sb.account_id,
     sb.business_day_start,
     sb.business_day_end,
     sb.account_parent_role,
     COALESCE((
-        SELECT SUM(tx.amount_money)
-        FROM {p}_current_transactions tx
-        WHERE tx.account_id = sb.account_id
-          AND tx.status = 'Posted'
-          AND tx.posting <= sb.business_day_end
+        SELECT tr.rs
+        FROM tx_running tr
+        WHERE tr.account_id = sb.account_id
+          AND tr.posting <= sb.business_day_end
+        ORDER BY tr.posting DESC
+        LIMIT 1
     ), 0) AS computed_balance
 FROM {p}_current_daily_balances sb
 WHERE sb.account_scope = 'internal'
