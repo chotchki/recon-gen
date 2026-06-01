@@ -209,9 +209,12 @@ jobs:
           COVERAGE_FILE: .coverage.release-smoke
         run: |
           # Q.3.a.9 reorg moved these into tests/{unit,json}/ for v8.0.0.
+          # tests/unit/test_persona.py removed in BXa persona-nuke
+          # (v11.30.0). Smoke now covers the three surviving slices:
+          # models (data shape), theme_presets (palette), and the JSON
+          # dataset_contract gate (per-column-pair derivation).
           /tmp/qs-smoke/bin/pytest \
             tests/unit/test_models.py \
-            tests/unit/test_persona.py \
             tests/unit/test_theme_presets.py \
             tests/json/test_dataset_contract.py \
             --cov=recon_gen
