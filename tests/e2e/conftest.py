@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -46,6 +46,47 @@ if TYPE_CHECKING:
     from recon_gen.common.l2 import L2Instance
     from recon_gen.common.tree import App
     from tests.e2e._drivers import DashboardDriver, QsEmbedDriver
+
+
+#: Fixture names that imply an AWS dependency. If NONE of the
+#: collected tests in a session pulls one of these into its fixture
+#: closure, the session doesn't need AWS — the session-scope autouse
+#: fixtures (`_refresh_matviews_once_per_session`, `_qs_pre_warm_dashboards`)
+#: + `cfg`'s `_pin_cfg_to_kv_as_of` step skip out before burning ~30s
+#: each on TCP connect timeouts to an unreachable Aurora / expired
+#: AWS creds. Surfaced by BV.3.3.c.bug1 triage: the sqlite-only
+#: `test_bv33c_full_registry_walk_sqlite` wasted ~90s/run on these
+#: leaks before its actual test logic fired.
+_AWS_DEPENDENT_FIXTURE_NAMES: frozenset[str] = frozenset({
+    "qs_client", "qs_driver", "qs_user_arn", "account_id",
+    "l1_dashboard_id", "inv_dashboard_id", "exec_dashboard_id",
+    "l2ft_dashboard_id",
+})
+
+
+def _session_needs_aws(session: pytest.Session | None) -> bool:
+    """Returns True if any collected test in the session pulls an
+    AWS-dependent fixture into its closure. Cached per-session on a
+    `_recon_aws_required` attribute. Defaults to True when session is
+    None (direct-fixture-request path, no collection info yet) — the
+    safe choice is to fire AWS work; the gate's purpose is avoiding
+    waste, not gating correctness."""
+    if session is None:
+        return True
+    cached = getattr(session, "_recon_aws_required", None)
+    if cached is not None:
+        return bool(cached)
+    needs_aws = False
+    for item in getattr(session, "items", ()):
+        fixtureinfo = getattr(item, "_fixtureinfo", None)
+        if fixtureinfo is None:
+            continue
+        closure = getattr(fixtureinfo, "names_closure", ()) or ()
+        if any(name in _AWS_DEPENDENT_FIXTURE_NAMES for name in closure):
+            needs_aws = True
+            break
+    session._recon_aws_required = needs_aws  # type: ignore[attr-defined]
+    return needs_aws
 
 
 def pytest_collection_modifyitems(
@@ -91,7 +132,7 @@ IDENTITY_REGION = RECON_E2E_IDENTITY_REGION.get_or_none() or "us-east-1"
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="session")
-def cfg() -> Config:
+def cfg(request: pytest.FixtureRequest) -> Config:
     """Load project config — checks the legacy single-file location, then
     the per-dialect copies (Phase P), then env vars.
 
@@ -135,6 +176,13 @@ def cfg() -> Config:
                 break
         if loaded is None:
             loaded = load_config(None)
+    # BV.3.3.f — `_pin_cfg_to_kv_as_of` connects to the cfg-pinned demo
+    # DB (which in production is Aurora). When this session contains no
+    # AWS-dependent tests, skip the pin to avoid a ~30s TCP-connect
+    # timeout. Falls through unpinned — sqlite/local-PG tests bring
+    # their own DB via tmp_path or docker.
+    if not _session_needs_aws(request.session):
+        return loaded
     return _pin_cfg_to_kv_as_of(loaded)
 
 
@@ -286,7 +334,7 @@ def l2(cfg: Config) -> "L2Instance":
 
 @pytest.fixture(scope="session", autouse=True)
 def _refresh_matviews_once_per_session(  # pyright: ignore[reportUnusedFunction]: pytest autouse fixture — invoked by pytest via name, not directly accessed
-    cfg: Config, l2: "L2Instance",
+    request: pytest.FixtureRequest, cfg: Config, l2: "L2Instance",
 ) -> None:
     """AA.A.qs-triage.5.followon — refresh deployed-DB matviews once per
     test session so picker tests + agreement tests always see live data.
@@ -311,6 +359,12 @@ def _refresh_matviews_once_per_session(  # pyright: ignore[reportUnusedFunction]
     report their own DB-state-derived failures.
     """
     if not RECON_GEN_E2E.get_or_none():
+        return
+    # BV.3.3.f — skip when no AWS-dependent test runs this session.
+    # The cfg's demo DB (Aurora in production) is irrelevant for
+    # sqlite/local-PG tests that bring their own DB; the connect-
+    # timeout otherwise burns ~30s per session.
+    if not _session_needs_aws(request.session):
         return
     # Under the runner, seed_variant already ran `data refresh`, so this is
     # redundant — and scope="session" means once PER XDIST WORKER, so N
@@ -501,10 +555,7 @@ def l2ft_analysis_id(deployment_name: str) -> str:
 
 @pytest.fixture(scope="session", autouse=True)
 def _qs_pre_warm_dashboards(  # pyright: ignore[reportUnusedFunction]: pytest autouse fixture — invoked by pytest via name, not directly accessed
-    cfg: "Config",
-    qs_client: "QuickSightClient",
-    account_id: str,
-    deployment_name: str,
+    request: pytest.FixtureRequest,
 ) -> None:
     """BL.3 follow-on (Task #466 mitigation): pre-warm each deployed
     dashboard via ``describe_dashboard_definition`` ONCE at session
@@ -535,6 +586,18 @@ def _qs_pre_warm_dashboards(  # pyright: ignore[reportUnusedFunction]: pytest au
     import os
     if os.environ.get(RECON_GEN_E2E.name) != "1":
         return
+    # BV.3.3.f — skip when no AWS-dependent test runs this session.
+    # Lazy-request the AWS fixtures from inside the body so this
+    # autouse fixture's own parameter list doesn't contaminate the
+    # closure check (declaring qs_client/account_id as params would
+    # make every e2e test pull them transitively and the gate would
+    # always evaluate True).
+    if not _session_needs_aws(request.session):
+        return
+    cfg = cast("Config", request.getfixturevalue("cfg"))
+    qs_client = cast("QuickSightClient", request.getfixturevalue("qs_client"))
+    account_id = cast(str, request.getfixturevalue("account_id"))
+    deployment_name = cast(str, request.getfixturevalue("deployment_name"))
     if not cfg.aws_account_id or not account_id:
         return
     dashboard_ids = (
