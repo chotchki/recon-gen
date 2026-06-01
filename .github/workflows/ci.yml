@@ -24,6 +24,12 @@ permissions:
 
 jobs:
   test:
+    # v12.0.0 followup — skip the push-CI when this is a Release commit.
+    # The Release workflow (release.yml) fires on the tag push and runs
+    # its own gauntlet (tests + smoke + verify + release-e2e); the
+    # parallel push-CI burns AWS rate-limit budget contending with it.
+    # Downstream jobs `needs: test`, so skipping here skips everything.
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Release v')
     runs-on: ubuntu-latest
 
     steps:

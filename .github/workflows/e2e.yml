@@ -64,6 +64,12 @@ jobs:
   # OIDC config all line up before any downstream job touches QS / DB
   # / Playwright. ~30s.
   auth-smoke:
+    # v12.0.0 followup — skip the push-E2E when this is a Release
+    # commit. The Release workflow (release.yml) fires on the tag push
+    # and runs its own release-e2e gauntlet; the parallel push-E2E
+    # burns AWS rate-limit budget contending with it. Downstream jobs
+    # `needs: auth-smoke`, so skipping here skips everything.
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Release v')
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS credentials via OIDC
