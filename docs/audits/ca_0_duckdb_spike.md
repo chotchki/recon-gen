@@ -119,12 +119,16 @@ DuckDB file size at ~1M: **613.7 MB** (cf. SQLite's 1,506 MB — **59% smaller**
 
 The BZ.0 SQLite arm introduced a scratch-table workaround for `computed_subledger_balance` because SQLite's planner couldn't rewrite the correlated `SUM(...) WHERE posting <= day` subquery. The BX audit predicted DuckDB's vectorized executor + cost-based optimizer would handle this natively.
 
-Reverting the dialect-split (using the PG/Oracle body) on DuckDB:
+Reverting the dialect-split (using the PG/Oracle body) on DuckDB at the same ~1M scale as the headline benchmark:
 
-- At 50k spec_example: **189 ms (correlated) vs 182 ms (scratch)** — within noise (~3.8% delta).
-- At ~93k spec_example (bonus 1M target — defaulted to spec_example, not sasquatch_pr; spec_example tops out at the L2's natural row count): **1,013 ms** vs the regular spec_example refresh at the same scale's similar timing.
+| body shape | 50k spec_example | ~1M sasquatch_pr |
+|---|---:|---:|
+| BZ.0 scratch (current SQLite arm) | 182 ms | **4,600 ms** |
+| Original PG/Oracle correlated body | 189 ms | **4,248 ms** |
 
-DuckDB handles the original correlated `SUM(...) WHERE posting <= day` subquery natively via its vectorized executor + cost-based optimizer, exactly as the BX audit predicted. **CA.5 (delete BZ.0's SQLite-only scratch table) is safe** — DuckDB doesn't benefit from the workaround and slightly under-performs the BZ.0 shape (the extra scratch table + index becomes overhead, not a win, when the planner can do the rewrite itself).
+At small scale the two shapes are within noise (3.8% delta). At ~1M the **original correlated-subquery body is actually 8% FASTER** on DuckDB — the scratch table + index becomes overhead the vectorized planner doesn't need.
+
+DuckDB handles the original correlated `SUM(...) WHERE posting <= day` subquery natively via its vectorized executor + cost-based optimizer, exactly as the BX audit predicted. **CA.5 (delete BZ.0's SQLite-only scratch table) is safe and recommended** — DuckDB doesn't benefit from the workaround and pays a small price for the extra DDL/IO. Once the SQLite dialect is gone, the `_render_computed_subledger_balance_section` helper collapses back to the single PG/Oracle body for all three dialects, and the dialect-split is a code deletion not a maintenance burden.
 
 ## Recommendation
 
