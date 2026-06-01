@@ -94,6 +94,52 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
+  # BY.0 spike — parallel self-hosted variant of `test`. Same shape,
+  # only `runs-on` differs. Lets us measure wallclock side-by-side
+  # against the ubuntu-latest baseline. Nothing `needs:` this job;
+  # purely informational. Remove once BY.1 promotes the self-hosted
+  # variant + retires the managed `test` job (or vice versa).
+  test-selfhosted:
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Release v')
+    runs-on: [self-hosted, recon-gen-ci-local]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (V.2 — uv sync from uv.lock)
+        run: uv sync --frozen --extra dev --extra prod
+
+      - name: Install Playwright WebKit browser
+        # --with-deps requires apt-get sudo. On the self-hosted runner
+        # we pre-install system deps once (operator-side) so the
+        # per-job step can skip --with-deps. If this step fails on
+        # missing libs, run `sudo .venv/bin/playwright install-deps
+        # webkit` on the runner once and retry.
+        run: .venv/bin/playwright install webkit
+
+      - name: Set up biome
+        uses: biomejs/setup-biome@v2
+        with:
+          version: 2.4.14
+
+      - name: Run tests with coverage (pytest sessionstart runs pyright strict + biome)
+        env:
+          COVERAGE_FILE: .coverage.py3.13.selfhosted
+        run: .venv/bin/pytest --cov=recon_gen
+
+      # No coverage upload — spike is timing-only; combined coverage
+      # report still aggregates the managed `test` job's data.
+
   # P.7 — containerized integration job (Postgres leg).
   #
   # Y.2.gate.k.3 (2026-05-09): split off from the merged PG+Oracle

@@ -137,6 +137,7 @@ Same cold-read → triage → design → implement → re-cold-read pattern that
 
 
 - [ ] BX.backlog - BX backlog — Reorder sheets: L1/L2 Exceptions right after Getting Started
+- [ ] BX.release - drift-detection - BX backlog — release.yml drift detection (smoke file list + extras spec)
 ## Phase BXa - Persona nuke + instance singleton structured form (standalone)
 
 Discovery output of `docs/audits/bx_persona_audit.md` v2: `DemoPersona` is doubly dead (Sasquatch vocab hardcodes stakeholders + merchants, then those hardcoded values aren't substituted in any docs page either). Full NUKE — promote `institution_name` + `institution_acronym` to top-level `L2Instance` fields alongside the existing top-level `description`; remove `DemoPersona` + `/l2_shape/persona/` route + `_sasquatch_pr_vocabulary` intercept + the entire stakeholder/merchant/gl_accounts/flavor surface. Collapses BX P1.1 (Instance singleton structured form) into BXa.2. **Independent of BTa + BX; can fire anytime.**
@@ -180,7 +181,7 @@ The full L2 + ETL + Training round-trip. Glues everything under one e2e test. **
     - [ ] BV.3.3.c - **Full-registry walk (sqlite). Status: 12/15 pass; 3 plant-doesn't-surface bugs + 1 false-positive concern.** Single-Session-Start cumulative walk over matview-bound, dashboard-bound kinds (15). Signature picker reads `PRAGMA table_info` + intersects with a priority column list so per-matview signature shape derives from the schema (no hardcoded per-kind map drifting from reality). Accordion-open detection (only click `<details>` summary when not already open). Multi-table-on-page read (drift sheet has 2). Remaining failures are real-bug signals: BV.3.3.c.bug1/2/3 (plant-doesn't-surface) + bug4 (chain-coherence sig matches only on date). Test stays red until those land; that's the intent (no xfail sweeping). Mark complete when bugs 1-3 fixed AND bug 4 strict-signature lands.
       - [x] BV.3.3.c.bug1 - BV.3.3.c.bug1 — ledger_drift plant doesn't surface row in v_ledger_drift matview
       - [x] BV.3.3.c.bug2 - BV.3.3.c.bug2 — stuck_unbundled plant lands but dashboard doesn't render cust-0002-snb
-      - [ ] BV.3.3.c.bug2-cumulative-followup - BV.3.3.c.bug2-cumulative-followup — stuck_unbundled fails in cumulative walk
+      - [ ] BV.3.3.c.bug2 - cumulative-followup - BV.3.3.c.bug2-cumulative-followup — stuck_unbundled fails in cumulative walk
       - [x] BV.3.3.c.bug3 - BV.3.3.c.bug3 — expected_eod_balance_breach plant lands but dashboard doesn't render acct-eod-ACHOrigSettlement
       - [ ] BV.3.3.c.bug4 - BV.3.3.c.bug4 — chain-coherence kinds match only on business_day (potentially false positive)
       - [ ] BV.3.3.c.bug4 - followup - BV.3.3.c.bug4-followup — Chain-coherence dashboard rendering
@@ -396,6 +397,20 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 **Done when:** sq_pg_aw + sq_or_aw + sp_or_aw browser layers green on `./run_tests.sh up_to=browser` (no xfail-to-mute per `feedback_no_xfail_to_sweep_under_rug`); sweep to PLAN_ARCHIVE.
 
 - [ ] BN.0 - Triage spike: snapshot per-failure repro shape against sq_pg_aw, sq_or_aw, sp_or_aw. Output: `docs/audits/bn_0_sq_aw_flake_snapshot.md` with per-test root-cause hypothesis + reproduction recipe. Prereq for BN.1+ fixes.
+## Phase BY - Self-hosted CI runner (Windows 11 + WSL2)
+
+**Why:** GitHub-hosted runner wallclock has degraded to ~1h+ per CI run as Studio buildout adds test load; release autopilot loops are wasting minutes on the runner itself rather than on the actual test surface. Available hardware: Windows 11 box, AMD 5800X3D (8c/16t, 96MB L3), 64GB RAM, on-network behind NAT. Runner lives inside WSL2 Ubuntu — native x86_64 amd64 docker (matches the `ubuntu-latest` shape our workflows target), POSIX paths, native bash; 64GB RAM supports 2-3 concurrent jobs.
+
+**Boundary (BY.3 is the contract):** all secret-bearing jobs stay on `ubuntu-latest` — `publish-testpypi`, `publish-pypi`, `release-e2e` (AWS OIDC), GitHub Release publish. Self-hosted picks up the slow non-secret-bearing CI/E2E load.
+
+**Done when:** ci.yml::test + e2e.yml::e2e-pg-browser run on the WSL2 runner with ≥2x speedup measured over 3-5 runs each, release.yml jobs verified unchanged on managed runners, operational docs in `docs/reference/self-host-ci.md`.
+
+- [ ] BY.0 - BY.0 — Spike: register WSL2 runner, migrate ci.yml::test, measure
+- [ ] BY.1 - BY.1 — Migrate ci.yml::test job to self-hosted
+- [ ] BY.2 - BY.2 — Migrate e2e.yml::e2e-pg-browser to self-hosted
+- [ ] BY.3 - BY.3 — Secret-isolation policy: release.yml stays on ubuntu-latest
+- [ ] BY.4 - BY.4 — Observability + cleanup automation on the WSL2 runner
+- [ ] BY.5 - BY.5 — Verify + document operational model
 ## Phase PLAN - Phase PLAN
 - [ ] PLAN.md - BS.5 — _v_config_chain_children + 7-path conversion
 
