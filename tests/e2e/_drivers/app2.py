@@ -821,19 +821,49 @@ class App2Driver:
         self._page.goto(f"{self._base}/training/")
         self._page.wait_for_selector("#training-session-start-btn")
 
-    def trainer_start_session(self) -> None:
-        """Click Session Start + wait for the redirect-back to land
-        with the green success banner. This is the slow path on PG /
-        Oracle (~30s / ~10min for the /etl/run leg); the test budget
-        for any single kind-walk is ``Session Start + N × Apply``."""
-        with self._page.expect_navigation():
-            self._page.click("#training-session-start-btn")
-        banner = self._page.locator("[data-test-training-banner]")
-        if not banner.is_visible():
-            raise AssertionError(
-                "Session Start should have landed a success banner — "
-                "got none. Did the /etl/run leg fail?"
-            )
+    def trainer_start_session(self, timeout_ms: int = 600_000) -> None:
+        """Click Session Start; wait for the detached task to finish.
+
+        BV.4.10.d — Session Start is now an async detached task. POST
+        303s back to /training/ with `session_start_running=True`,
+        rendering an in-progress banner with an htmx live-tail. When
+        the task finishes the live-tail's HX-Trigger fires a JS
+        reload to `/training/?status=Session+started...` (the green
+        success banner).
+
+        Wait shape:
+        1. Click Session Start.
+        2. Wait for the in-progress banner to render (proves the
+           POST → 303 → GET landed).
+        3. Wait for the live-tail's data-test-training-tail-state to
+           flip to `"finished"` — that's the moment the task done +
+           HX-Trigger about to fire.
+        4. Wait for the success banner to render (JS-reloaded page).
+
+        ``timeout_ms`` default is 10 minutes — Oracle Session Start
+        can take ~10 min for the /etl/run leg.
+        """
+        self._page.click("#training-session-start-btn")
+        # Step 2: in-progress banner appears.
+        self._page.wait_for_selector(
+            "[data-test-training-session-start-banner], "
+            "[data-test-training-banner]",
+            timeout=15_000,
+        )
+        if self._page.locator("[data-test-training-banner]").count() > 0:
+            # Fast PG/sqlite case: page may have already reloaded
+            # before our selector caught the in-progress banner.
+            return
+        # Step 3: poll the live-tail state until finished.
+        self._trainer_wait_until_finished(
+            mount_id="training-session-start-live-tail",
+            timeout_ms=timeout_ms,
+        )
+        # Step 4: success banner via JS-reload.
+        self._page.wait_for_selector(
+            "[data-test-training-banner]",
+            timeout=15_000,
+        )
 
     def trainer_enable_plant(
         self, kind: str, family: str,
@@ -873,18 +903,56 @@ class App2Driver:
         if not is_open:
             details.locator("> summary").first.click()
 
-    def trainer_apply(self) -> None:
-        """Click Apply + wait for the navigation back to /training/.
-        DL.9 means the wall-clock here depends on (add∪change) plant
-        count, not the full registry — a fingerprint-unchanged Apply
-        is a fast-path matview-refresh-only round-trip."""
-        with self._page.expect_navigation():
-            self._page.click("#training-apply-btn")
-        if "/training" not in self._page.url:
-            raise AssertionError(
-                f"Apply should have redirected to /training/, got "
-                f"{self._page.url!r}"
-            )
+    def trainer_apply(self, timeout_ms: int = 120_000) -> None:
+        """Click Apply; wait for the detached task to finish.
+
+        BV.4.10.d.2 — Apply mirrors Session Start: POST 303s back
+        to /training/ with an apply-in-progress banner + live-tail.
+        On completion the HX-Trigger fires JS reload to
+        `/training/?status=Apply+done.`
+
+        Wait shape mirrors `trainer_start_session` (in-progress
+        banner → live-tail finished state → JS-reloaded success
+        banner). Default timeout 2 min — sqlite Apply finishes in
+        seconds, PG slow-path reclone takes ~30s, oracle ~few min.
+        """
+        self._page.click("#training-apply-btn")
+        # In-progress banner appears (or page already reloaded for
+        # very-fast no-op applies).
+        self._page.wait_for_selector(
+            "[data-test-training-apply-banner], "
+            "[data-test-training-banner]",
+            timeout=15_000,
+        )
+        if self._page.locator("[data-test-training-banner]").count() > 0:
+            return
+        self._trainer_wait_until_finished(
+            mount_id="training-apply-live-tail",
+            timeout_ms=timeout_ms,
+        )
+        self._page.wait_for_selector(
+            "[data-test-training-banner]",
+            timeout=15_000,
+        )
+
+    def _trainer_wait_until_finished(
+        self, *, mount_id: str, timeout_ms: int,
+    ) -> None:
+        """Poll the live-tail mount's ``data-test-training-tail-state``
+        until it flips to ``"finished"``. The mount is HTMX-polled
+        every 1s by the page itself; we don't drive it — we just
+        observe. When the state lands at "finished" the page's
+        inline HX-Trigger script will reload `/training/` so the
+        caller waits for the success-banner selector after this."""
+        self._page.wait_for_function(
+            (
+                f"() => {{"
+                f" const el = document.getElementById('{mount_id}');"
+                f" return el && el.dataset.testTrainingTailState === 'finished';"
+                f"}}"
+            ),
+            timeout=timeout_ms,
+        )
 
     def trainer_take_violation_tour(
         self, kind: str, family: str,

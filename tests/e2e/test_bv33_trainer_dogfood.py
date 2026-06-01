@@ -24,6 +24,7 @@ Gated behind ``RECON_GEN_E2E=1`` per conftest (the `browser` marker).
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from datetime import date
 from pathlib import Path
@@ -105,6 +106,22 @@ def _seed_demo_db(cfg_obj: object) -> None:
 
 def _pick_kind(kind: str) -> PlantKindEntry:
     return next(e for e in PLANT_REGISTRY if e.kind == kind)
+
+
+# BV.3.3.c.bug4 — chain-coherence kinds were "passing" the surface
+# assertion just because the test anchor date "2026-05-30 00:00:00"
+# appeared in the rendered HTML for many unrelated rows. A date-only
+# match doesn't prove the planted row surfaced — it just proves the
+# table renders some row on that day. Tighten by requiring the
+# match to be a non-date-shaped value (transfer_id / account_id /
+# rail_name / etc.) so the assertion catches the actual planted row.
+_DATE_LIKE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
+
+def _is_date_like(value: str) -> bool:
+    """Date-shape detector: anything starting with `YYYY-MM-DD` is
+    treated as a date for false-positive-rejection purposes."""
+    return bool(_DATE_LIKE.match(value))
 
 
 def _browser_walkable_kinds() -> list[PlantKindEntry]:
@@ -426,24 +443,45 @@ def test_bv33c_full_registry_walk_sqlite(tmp_path: Path) -> None:
                 failures.append(f"{entry.kind}: Tour failed ({exc!s})")
                 continue
 
-            # Surface assertion: any element of any new signature tuple
-            # appearing in the rendered HTML. Loose but works because
-            # signatures are designed plant-unique on at least one
-            # element (account_id for L1 invariants, parent_transfer_id
-            # for chain coherence).
+            # BV.3.3.c.bug4 — surface assertion rejects date-only
+            # matches. The anchor date (e.g. "2026-05-30") appears in
+            # the rendered HTML for MANY unrelated rows on a busy
+            # dashboard; matching on it doesn't prove the planted
+            # row is the one rendered. Require an id-like value
+            # (transfer_id / account_id / rail_name / etc.) to match.
             hit = next(
                 (
                     val for sig in new_sigs for val in sig
-                    if val and val in rendered
+                    if val and val in rendered and not _is_date_like(val)
                 ),
                 None,
             )
             if hit is None:
-                failures.append(
-                    f"{entry.kind}: planted signatures "
-                    f"{sorted(new_sigs)} absent from rendered "
-                    f"dashboard table"
+                # Distinguish "matview row exists but no non-date
+                # match" from "no match at all" so the failure
+                # message points the next fix at the right shape.
+                date_only_hit = next(
+                    (
+                        val for sig in new_sigs for val in sig
+                        if val and val in rendered and _is_date_like(val)
+                    ),
+                    None,
                 )
+                if date_only_hit is not None:
+                    failures.append(
+                        f"{entry.kind}: only date-shaped match "
+                        f"({date_only_hit!r}) found; signature's "
+                        f"id-like columns absent from rendered HTML — "
+                        f"likely a real-bug: matview row exists but "
+                        f"dashboard isn't rendering it. Signatures: "
+                        f"{sorted(new_sigs)}"
+                    )
+                else:
+                    failures.append(
+                        f"{entry.kind}: planted signatures "
+                        f"{sorted(new_sigs)} absent from rendered "
+                        f"dashboard table"
+                    )
                 continue
 
             successes.append(f"{entry.kind} ✓ (sig={hit})")
