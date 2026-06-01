@@ -1422,8 +1422,18 @@ def _emit_base_schema(
         # composite ``(id, entry)`` PG/Oracle PK collapses to a
         # ``UNIQUE`` constraint on SQLite (see ``tx_pk_decl`` /
         # ``db_pk_decl`` below).
-        "tx_entry_decl": _entry_column_decl(dialect),
-        "db_entry_decl": _entry_column_decl(dialect),
+        "tx_entry_decl": _entry_column_decl(
+            dialect, sequence_name=f"{p}_transactions_entry_seq",
+        ),
+        "db_entry_decl": _entry_column_decl(
+            dialect, sequence_name=f"{p}_daily_balances_entry_seq",
+        ),
+        # CA.3 — DuckDB-only CREATE / DROP SEQUENCE pair feeding the
+        # entry-column DEFAULT (PG/Oracle/SQLite emit empty string).
+        # The drop lands in the schema's idempotent-cleanup block;
+        # the create lands after drops + before the base-table CREATE.
+        "drop_sequences": _drop_sequences_sql(p, dialect),
+        "create_sequences": _create_sequences_sql(p, dialect),
         # Per-table PK / UNIQUE declaration. PG/Oracle declare a
         # composite ``PRIMARY KEY (id, entry)`` /
         # ``PRIMARY KEY (account_id, business_day_start, entry)``.
@@ -1475,7 +1485,7 @@ def _emit_base_schema(
     return _SCHEMA_TEMPLATE.format(**fmt)
 
 
-def _entry_column_decl(dialect: Dialect) -> str:
+def _entry_column_decl(dialect: Dialect, *, sequence_name: str | None = None) -> str:
     """Per-dialect declaration for the ``entry`` column.
 
     PG: ``BIGSERIAL NOT NULL``. Oracle:
@@ -1485,26 +1495,83 @@ def _entry_column_decl(dialect: Dialect) -> str:
     composite-PK shape PG/Oracle use can't apply. The composite
     ``(id, entry)`` uniqueness invariant gets enforced via a
     ``UNIQUE`` constraint instead (see ``_pk_decl``).
+
+    DuckDB: ``BIGINT DEFAULT nextval('<seq>') NOT NULL`` — DuckDB has
+    no ``BIGSERIAL`` / ``IDENTITY`` column-type alias; auto-increment
+    requires a separately-emitted ``CREATE SEQUENCE`` per table. The
+    ``sequence_name`` kwarg names that sequence; the call site must
+    have first arranged for ``CREATE SEQUENCE <name>`` to land via
+    ``_create_sequences_sql``. Composite PK / pk_decl shape matches
+    PG/Oracle on DuckDB (no UNIQUE-fallback like SQLite).
     """
     if dialect is Dialect.SQLITE:
         return "INTEGER PRIMARY KEY AUTOINCREMENT"
+    if dialect is Dialect.DUCKDB:
+        if sequence_name is None:
+            raise ValueError(
+                "_entry_column_decl(DUCKDB) requires sequence_name — "
+                "DuckDB has no BIGSERIAL-alias and needs a per-table "
+                "sequence for auto-increment."
+            )
+        return f"BIGINT      DEFAULT nextval('{sequence_name}') NOT NULL"
     return f"{serial_type(dialect)}      NOT NULL"
 
 
 def _pk_decl(cols: tuple[str, ...], dialect: Dialect) -> str:
     """Per-dialect PK / UNIQUE declaration for the base tables.
 
-    PG/Oracle: ``PRIMARY KEY (cols)`` — composite key including
+    PG/Oracle/DuckDB: ``PRIMARY KEY (cols)`` — composite key including
     ``entry`` per the L1 supersession contract. SQLite: ``UNIQUE
     (cols)`` — the ``entry`` column already carries the table's
     PRIMARY KEY (single-column AUTOINCREMENT, see
     ``_entry_column_decl``), so the composite uniqueness shifts to a
-    UNIQUE constraint while preserving the same invariant.
+    UNIQUE constraint while preserving the same invariant. DuckDB
+    keeps the PG/Oracle composite-PK shape (its ``entry`` column is
+    BIGINT + sequence-default, not a single-col PK).
     """
     cols_sql = ", ".join(cols)
     if dialect is Dialect.SQLITE:
         return f"UNIQUE ({cols_sql})"
     return f"PRIMARY KEY ({cols_sql})"
+
+
+def _create_sequences_sql(prefix: str, dialect: Dialect) -> str:
+    """Per-prefix ``CREATE SEQUENCE`` statements feeding the ``entry``
+    column DEFAULT for dialects with no inline auto-increment.
+
+    Only DuckDB emits non-empty output today. Two sequences per
+    instance — one each for ``<prefix>_transactions.entry`` and
+    ``<prefix>_daily_balances.entry`` — matching the two base tables
+    the schema template defines. PG/Oracle's BIGSERIAL/IDENTITY +
+    SQLite's AUTOINCREMENT inline the increment in the column type,
+    so they return empty strings (the template substitution is a
+    no-op).
+    """
+    if dialect is not Dialect.DUCKDB:
+        return ""
+    tx_seq = f"{prefix}_transactions_entry_seq"
+    db_seq = f"{prefix}_daily_balances_entry_seq"
+    return (
+        f"CREATE SEQUENCE {tx_seq};\n"
+        f"CREATE SEQUENCE {db_seq};"
+    )
+
+
+def _drop_sequences_sql(prefix: str, dialect: Dialect) -> str:
+    """Per-prefix ``DROP SEQUENCE IF EXISTS`` statements — symmetric
+    counterpart to ``_create_sequences_sql``. Idempotent re-emission
+    needs the drops at the head of the schema script alongside the
+    other ``DROP IF EXISTS`` statements so a re-apply doesn't trip
+    ``Catalog Error: sequence already exists``.
+    """
+    if dialect is not Dialect.DUCKDB:
+        return ""
+    tx_seq = f"{prefix}_transactions_entry_seq"
+    db_seq = f"{prefix}_daily_balances_entry_seq"
+    return (
+        f"DROP SEQUENCE IF EXISTS {tx_seq};\n"
+        f"DROP SEQUENCE IF EXISTS {db_seq};"
+    )
 
 
 _SCHEMA_TEMPLATE = """\
@@ -1526,6 +1593,12 @@ _SCHEMA_TEMPLATE = """\
 {drop_idx_db_business_day}
 {drop_metadata_indexes}{drop_table_db}
 {drop_table_tx}
+{drop_sequences}
+
+-- CA.3 — Per-table sequences feeding the ``entry`` column DEFAULT.
+-- Empty on PG (BIGSERIAL) / Oracle (IDENTITY) / SQLite
+-- (AUTOINCREMENT) — only DuckDB needs externally-emitted sequences.
+{create_sequences}
 
 -- ---------------------------------------------------------------------
 -- L1 Transaction (denormalized with Transfer + Account fields per

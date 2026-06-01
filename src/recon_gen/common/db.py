@@ -41,6 +41,7 @@ __all__ = [
     "make_connection_pool",
     "oracle_dsn",
     "split_oracle_script",
+    "duckdb_path",
     "sqlite_path",
 ]
 
@@ -66,6 +67,31 @@ def oracle_dsn(url: str) -> str:
             or "FREEPDB1"
         )
         return f"{user}/{pw}@{host}:{port}/{service}"
+    return url
+
+
+def duckdb_path(url: str) -> str:
+    """Translate a ``duckdb:///path/to/db.duckdb`` URL to a path string.
+
+    Accepts the SQLAlchemy-style ``duckdb:///`` triple-slash form (the
+    fourth slash starts the absolute path component) and the
+    ``duckdb://:memory:`` in-memory form. Also accepts a bare path
+    string for ergonomics — if the value isn't a recognized URL
+    scheme, it's returned unchanged so the caller can pass the raw
+    DuckDB file path directly. Mirrors the ``sqlite_path`` contract.
+
+    Examples:
+      - ``duckdb:///tmp/demo.duckdb`` → ``/tmp/demo.duckdb``
+      - ``duckdb:///./relative.duckdb`` → ``./relative.duckdb``
+      - ``duckdb://:memory:`` → ``:memory:``
+      - ``/tmp/demo.duckdb`` → ``/tmp/demo.duckdb``
+    """
+    if url == "duckdb://:memory:" or url.endswith(":memory:"):
+        return ":memory:"
+    if url.startswith("duckdb:///"):
+        return url[len("duckdb:///"):]
+    if url.startswith("duckdb://"):
+        return url[len("duckdb://"):]
     return url
 
 
@@ -136,6 +162,14 @@ def connect_demo_db(cfg: Config) -> Any:  # typing-smell: ignore[explicit-any]: 
                 "Install it with: pip install 'recon-gen[prod]'"
             ) from e
         return oracledb.connect(oracle_dsn(cfg.demo_database_url))
+    if cfg.dialect is Dialect.DUCKDB:
+        # CA.3 — DuckDB is a core dialect (in `[project.dependencies]`,
+        # not extras). Pure-Python wheel, no extra install friction.
+        # `STDDEV_SAMP` ships natively (the inv_pair_rolling_anomalies
+        # matview's aggregate); no need for the SQLite-style aggregate
+        # registration. FK enforcement is on by default in DuckDB.
+        import duckdb
+        return duckdb.connect(duckdb_path(cfg.demo_database_url))
     if cfg.dialect is Dialect.SQLITE:
         # stdlib — no try/except for ImportError. SQLite uses Python's
         # builtin ``sqlite3`` module so the local-iteration loop has
@@ -154,8 +188,8 @@ def connect_demo_db(cfg: Config) -> Any:  # typing-smell: ignore[explicit-any]: 
         return conn
     raise ValueError(
         f"Unknown dialect {cfg.dialect!r}. "
-        "Set 'dialect: postgres', 'dialect: oracle', or 'dialect: sqlite' "
-        "in your config."
+        "Set 'dialect: postgres', 'dialect: oracle', 'dialect: duckdb', "
+        "or 'dialect: sqlite' in your config."
     )
 
 
@@ -948,6 +982,6 @@ async def make_connection_pool(
         )
     raise ValueError(
         f"Unknown dialect {cfg.dialect!r}. "
-        "Set 'dialect: postgres', 'dialect: oracle', or 'dialect: sqlite' "
-        "in your config."
+        "Set 'dialect: postgres', 'dialect: oracle', 'dialect: duckdb', "
+        "or 'dialect: sqlite' in your config."
     )

@@ -494,6 +494,10 @@ def kv_as_of_as_timestamp_sql(prefix: str, dialect: Dialect) -> str:
 
     - **PG**: ``CAST(... AS TIMESTAMP)`` — PG accepts the ISO-format
       text and yields a proper TIMESTAMP.
+    - **DuckDB**: ``CAST(... AS TIMESTAMP)`` — same shape as PG.
+      DuckDB is strict about implicit casts (``VARCHAR - TIMESTAMP``
+      raises BinderException unless the VARCHAR is explicitly cast),
+      so the cast is load-bearing here even though it looks redundant.
     - **Oracle**: ``TO_TIMESTAMP(DBMS_LOB.SUBSTR(value, 100, 1),
       'YYYY-MM-DD HH24:MI:SS')`` — Oracle won't CAST CLOB to TIMESTAMP
       (ORA-00932); DBMS_LOB.SUBSTR converts to VARCHAR2 first, then
@@ -505,7 +509,7 @@ def kv_as_of_as_timestamp_sql(prefix: str, dialect: Dialect) -> str:
       unchanged).
     """
     sub = kv_as_of_subquery(prefix)
-    if dialect is Dialect.POSTGRES:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"CAST({sub} AS TIMESTAMP)"
     if dialect is Dialect.ORACLE:
         return (

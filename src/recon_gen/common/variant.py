@@ -42,7 +42,7 @@ from typing import Literal, NewType
 # Closed sets — Literal lets pyright reject unknown values at the
 # constructor call site. Scenario is open (`f<n>` for any n) so it
 # stays NewType + runtime regex validation.
-DialectCode = Literal["pg", "or", "sl"]
+DialectCode = Literal["pg", "or", "sl", "du"]
 TargetCode = Literal["lo", "aw"]
 ScenarioCode = NewType("ScenarioCode", str)
 # #729 — wrap the cell-discriminator string so accidental swaps with
@@ -56,7 +56,7 @@ _SCENARIO_RE = re.compile(r"^(sp|sq|us|f\d+)$")
 
 # Frozensets for quick membership checks at validation time.
 NAMED_SCENARIOS: frozenset[str] = frozenset({"sp", "sq", "us"})
-DIALECTS: frozenset[DialectCode] = frozenset({"pg", "or", "sl"})
+DIALECTS: frozenset[DialectCode] = frozenset({"pg", "or", "sl", "du"})
 TARGETS: frozenset[TargetCode] = frozenset({"lo", "aw"})
 
 
@@ -138,11 +138,13 @@ class VariantSpec:
 
         - ``sl × aw``: SQLite is file-based; QuickSight can't reach it
           via a remote DataSource.
+        - ``du × aw``: DuckDB is also file-based (in-process columnar);
+          same QuickSight reachability constraint as SQLite. CA.3.
 
         Spec-level malformations (e.g., scenario doesn't match
         fuzz_seed) raise in ``__post_init__`` — those never construct.
         """
-        if self.dialect == "sl" and self.target == "aw":
+        if self.dialect in ("sl", "du") and self.target == "aw":
             return False
         return True
 

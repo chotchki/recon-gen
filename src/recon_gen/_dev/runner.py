@@ -1492,6 +1492,7 @@ _LEGACY_VARIANT_HINTS: Final[dict[str, str]] = {
     "local-pg": "--dialects=pg --targets=lo",
     "local-oracle": "--dialects=or --targets=lo",
     "local-sqlite": "--dialects=sl --targets=lo",
+    "local-duckdb": "--dialects=du --targets=lo",
     "default": "(no flags = full matrix; or --dialects=pg,or --targets=aw for the AWS subset)",
 }
 
@@ -1584,6 +1585,89 @@ def _setup_local_sqlite() -> tuple[dict[str, str], object | None]:
         RECON_GEN_CONFIG.name: str(cfg_path),
     }
     return env, _SqliteHandle(db_path=db_path, cfg_path=cfg_path)
+
+
+class _DuckdbHandle:
+    """CA.3 — teardown handle for the local-duckdb variant. Parallel
+    shape to ``_SqliteHandle``: ``.stop()`` unlinks the per-invocation
+    .duckdb file + temp cfg via the same duck-typed contract
+    ``teardown_variant`` already invokes on testcontainer handles.
+    """
+
+    def __init__(self, db_path: Path, cfg_path: Path) -> None:
+        self.db_path = db_path
+        self.cfg_path = cfg_path
+
+    def stop(self) -> None:
+        """Best-effort cleanup. Sidecar contract preserved — never raises."""
+        for path in (self.db_path, self.cfg_path):
+            try:
+                path.unlink()
+            except (FileNotFoundError, OSError):
+                pass
+
+
+def _setup_local_duckdb() -> tuple[dict[str, str], object | None]:
+    """Create the per-invocation DuckDB DB file + minimal cfg, return
+    the env overrides + handle the variant lifecycle expects.
+
+    Parallel to ``_setup_local_sqlite`` — same temp-dir isolation,
+    same cfg slots, swap the dialect / URL scheme / file extension:
+
+    - ``dialect: duckdb`` so emit_schema / emit_full_seed /
+      refresh_matviews_sql pick the DuckDB arms of the dialect
+      helpers (CA.2 landed these);
+    - ``demo_database_url: duckdb:///<path>`` so connect_demo_db
+      opens the file via ``duckdb.connect(duckdb_path(...))`` (CA.3
+      landed the db.py arm);
+    - ``aws_account_id`` + ``aws_region`` placeholders satisfying
+      ``Config`` validators (the local-duckdb variant never touches
+      AWS — fields required by the loader but unused).
+
+    The DB file is created empty — ``schema apply`` populates it
+    including the per-table CREATE SEQUENCE statements that feed the
+    ``entry`` column DEFAULT (DuckDB has no BIGSERIAL/IDENTITY-style
+    inline auto-increment; see ``common/l2/schema.py``).
+
+    Parallelism caveat (DuckDB docs):
+    https://duckdb.org/docs/current/clients/python/overview#using-connections-in-parallel-python-programs
+
+    - **Per-invocation isolation** — each runner cell + each
+      ``./run_tests.sh`` invocation allocates a *fresh* tempdir +
+      ``.duckdb`` file, so multi-cell parallel runs don't share a DB.
+    - **Per-thread connection** — DuckDB's connection object is NOT
+      thread-safe; ``cursor()`` returns a handle to the *same*
+      connection (no extra parallelism). ``connect_demo_db`` opens
+      a fresh connection per call, so layer subprocesses / pytest
+      workers / App2 async tasks each get their own — safe by
+      construction as long as nobody caches a shared handle.
+    - **pytest-xdist intra-invocation** — workers within ONE runner
+      cell share the cell's ``.duckdb`` file. Parallel readers are
+      fine; concurrent writers (parallel ``schema apply`` + seed
+      INSERTs) will serialize at the file lock — tests that mutate
+      the DB must either use xdist-worker-scoped fixtures (one DB
+      per worker) or serialize via ``@pytest.mark.xdist_group``.
+      CA.7 + CA.4 audit these patterns when integration tests +
+      Studio land.
+    """
+    import tempfile
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="qs-gen-duckdb-"))  # typing-smell: ignore[qs-gen-prefix]: tempfile dir name only — not an AWS resource ID, just disambiguates per-invocation runner-managed temp dirs from other tools' tempfiles for operator-visible cleanup
+    db_path = tmp_dir / "demo.duckdb"
+    cfg_path = tmp_dir / "config.duckdb.yaml"
+    cfg_path.write_text(
+        f"aws_account_id: \"111122223333\"\n"
+        f"aws_region: \"us-east-1\"\n"
+        f"dialect: duckdb\n"
+        f"demo_database_url: \"duckdb:///{db_path}\"\n"
+        f"deployment_name: \"qsgen-duckdb\"\n"
+        f"db_table_prefix: \"qsgen_duckdb\"\n"
+    )
+    env: dict[str, str] = {
+        RECON_GEN_DEMO_DATABASE_URL.name: f"duckdb:///{db_path}",
+        RECON_GEN_CONFIG.name: str(cfg_path),
+    }
+    return env, _DuckdbHandle(db_path=db_path, cfg_path=cfg_path)
 
 
 @dataclass(frozen=True)
@@ -1798,6 +1882,12 @@ def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
         # unlinks both files via the ``_SqliteHandle.stop()`` duck-
         # typed contract ``teardown_variant`` already calls.
         return _setup_local_sqlite()
+    if spec.dialect == "du":
+        # CA.3 — parallel to the SQLite arm above, just swap the
+        # storage backend. Same no-Docker / no-network shape;
+        # ``_DuckdbHandle.stop()`` is the same duck-typed cleanup.
+        # CA.8 will collapse the sl + du arms once SQLite goes away.
+        return _setup_local_duckdb()
     raise ValueError(
         f"setup_variant: unhandled (dialect={spec.dialect!r}, target={spec.target!r})"
     )
@@ -1869,12 +1959,16 @@ def _dump_top_queries_for_variant(
         return
 
     dialect_str = perf.dialect_name(cfg.dialect)
-    if cfg.dialect is Dialect.SQLITE:
+    if cfg.dialect in (Dialect.SQLITE, Dialect.DUCKDB):
+        # CA.3 — DuckDB also has no pg_stat_statements / v$sqlstats
+        # equivalent; the in-process columnar engine doesn't expose
+        # cumulative query stats. Skip with the same diagnostic shape.
+        engine_label = "sqlite" if cfg.dialect is Dialect.SQLITE else "duckdb"
         out_path.write_text(perf.format_skipped(
             title=title, dialect=dialect_str,
-            reason="SQLite has no pg_stat_statements / v$sqlstats equivalent",
+            reason=f"{engine_label} has no pg_stat_statements / v$sqlstats equivalent",
         ))
-        print(f"{terminal_prefix}runner: db-perf [{spec.name}] skipped (sqlite)")
+        print(f"{terminal_prefix}runner: db-perf [{spec.name}] skipped ({engine_label})")
         return
 
     # Filter on the DB-table prefix so we drop the operator's

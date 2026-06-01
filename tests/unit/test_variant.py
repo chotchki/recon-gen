@@ -161,7 +161,8 @@ def test_named_scenarios_set() -> None:
 
 
 def test_dialects_set() -> None:
-    assert DIALECTS == frozenset({"pg", "or", "sl"})
+    # CA.3 — du joins the set additively; sl stays through CA.7.
+    assert DIALECTS == frozenset({"pg", "or", "sl", "du"})
 
 
 def test_targets_set() -> None:
