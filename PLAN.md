@@ -137,9 +137,10 @@ Same cold-read → triage → design → implement → re-cold-read pattern that
 
 
 - [ ] BX.backlog - BX backlog — Reorder sheets: L1/L2 Exceptions right after Getting Started
-  - [ ] BX.backlog.duckdb - swap-spike - BX backlog — BZ.7 SQLite→DuckDB swap spike
+  - [ ] BX.backlog.coverage - merge-broken - BX backlog — Coverage combine job: merge doesn't render, markdown only available via artifact download
   - [ ] BX.backlog.session - start-silent-no-op - BX backlog — Studio /training/session-start silent no-op when base schema missing
   - [ ] BX.backlog.sqlite - matview-perf - BX backlog — SQLite matview emulation slow on real-L2-sized data (spike)
+  - [ ] BX.backlog.sqlite - resourcewarning-regression - BX backlog — Re-triage sqlite3 ResourceWarning leaks (regression after BL.0 / earlier fix)
 - [ ] BX.release - drift-detection - BX backlog — release.yml drift detection (smoke file list + extras spec)
 ## Phase BXa - Persona nuke + instance singleton structured form (standalone)
 
@@ -431,6 +432,26 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [x] BZ.4 - BZ.4 — Cross-dialect regression check (PG + Oracle locked seeds)
 - [x] BZ.5 - BZ.5 — Re-lock seeds (if BZ.4 found mathematically-equivalent divergence)
 - [x] BZ.6 - BZ.6 — Decision: BZ done OR file BZ.7 DuckDB spike
+## Phase CA - Nuke SQLite, replace with DuckDB
+
+**Why:** BX/BZ surgical SQLite work (BZ.0 scratch+index, the running BX backlog of SQLite-only footguns — #173 silent no-op, #185 ResourceWarning regression) plus the audit's measured 2.08× ceiling on SQLite-native fixes (121.5s @ 1M, target was &lt;60s) makes the case that SQLite-the-engine is the bottleneck, not the SQL. DuckDB is in-process (same offline-iteration story), has a vectorized executor + cost-based optimizer (handles correlated subqueries natively), native MATERIALIZED VIEW, columnar storage, and SQL/JSON (json_extract / json_extract_string) that ports cleanly to our `json_value` helper.
+
+**Approach:** REPLACE SQLite with DuckDB. Still 3 dialects (DuckDB, PG, Oracle), no 4th-dialect maintenance surface. Studio writes `.duckdb` files (operator-confirmed 2026-06-01: "perfectly fine if it's writing duckdb files not sqlite"). The BZ.0 scratch-table workaround goes away as part of the swap (CA.5).
+
+**Spike-first:** CA.0 is a 1-day scoped spike to validate three things before committing: JSON portability, matview row-count parity, and bundled refresh &lt;30s @ 1M. If all green, proceed to CA.1+. If any fails, halt + reassess.
+
+**Done when:** `Dialect.SQLITE` is deleted from the codebase; bundled refresh @ 1M lands in the &lt;30s envelope (vs SQLite's 121.5s); cross-dialect equivalence holds 3-way (DuckDB, PG, Oracle); Studio's offline-iteration loop works against .duckdb files; major-version release notes published.
+
+- [ ] CA.0 - CA.0 — Spike: DuckDB swap viability (JSON, row counts, perf)
+- [ ] CA.1 - CA.1 — Add Dialect.DUCKDB enum + dialect dispatch plumbing
+- [ ] CA.2 - CA.2 — Port dialect helpers (json_value, fetch_first_one_row, etc.) to DuckDB
+- [ ] CA.3 - CA.3 — Swap _setup_local_sqlite to _setup_local_duckdb in runner
+- [ ] CA.4 - CA.4 — Update Studio's persist path to target .duckdb files
+- [ ] CA.5 - CA.5 — Delete BZ.0's SQLite-only scratch-table workaround
+- [ ] CA.6 - CA.6 — Re-lock seeds + semantic_lock fixtures for DuckDB
+- [ ] CA.7 - CA.7 — Update integration tests + CI integration jobs
+- [ ] CA.8 - CA.8 — Nuke Dialect.SQLITE and all SQLite-specific arms
+- [ ] CA.9 - CA.9 — Docs + release notes + memory updates
 ## Phase PLAN - Phase PLAN
 - [ ] PLAN.md - BS.5 — _v_config_chain_children + 7-path conversion
 
