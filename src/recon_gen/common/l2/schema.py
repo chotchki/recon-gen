@@ -353,12 +353,14 @@ def refresh_matviews_sql(
         f"{p}_inv_pair_rolling_anomalies",
         f"{p}_inv_money_trail_edges",
     ]
-    if dialect is Dialect.SQLITE:
-        # X.3.c — SQLite has no matviews. Refresh = DROP + re-emit
-        # the matview-as-table CREATE. We re-run the schema
-        # template, but only the matview block (drops + creates),
-        # since the base tables stay untouched by a refresh.
-        return _emit_sqlite_matview_refresh(instance, prefix=p)
+    if dialect in (Dialect.SQLITE, Dialect.DUCKDB):
+        # X.3.c — neither SQLite nor DuckDB has native matviews; both
+        # land them as plain tables via CREATE TABLE AS SELECT (CA.2
+        # collapsed the matview-create helpers around this). Refresh
+        # is DROP + re-emit. We re-run the schema template, but only
+        # the matview block (drops + creates), since the base tables
+        # stay untouched by a refresh.
+        return _emit_table_based_matview_refresh(instance, prefix=p, dialect=dialect)
     # REFRESH first, then ANALYZE — ANALYZE updates planner stats so
     # subsequent SELECTs use the indexes we ship on each matview
     # (without ANALYZE the planner doesn't know the post-REFRESH row
@@ -368,14 +370,18 @@ def refresh_matviews_sql(
     return f"{refreshes}\n{analyzes}"
 
 
-def _emit_sqlite_matview_refresh(instance: L2Instance, *, prefix: str) -> str:
-    """X.3.c — SQLite refresh: tear down + re-emit every matview-as-table.
+def _emit_table_based_matview_refresh(
+    instance: L2Instance, *, prefix: str, dialect: Dialect,
+) -> str:
+    """X.3.c — table-based matview refresh: tear down + re-emit every
+    matview-as-table.
 
-    The matview bodies live in the schema templates. Rather than
-    duplicate them here, this helper re-runs the L1 invariant + Inv
-    matview emission against the same instance / dialect so the
-    refresh SQL is byte-equivalent to "drop then re-create" for every
-    matview.
+    Used by both SQLite and DuckDB (CA.6): neither dialect has native
+    matviews, so refresh = DROP + re-emit the CREATE TABLE AS SELECT.
+    The matview bodies live in the schema templates; this helper
+    re-runs the L1 invariant + Inv matview emission against the same
+    instance / dialect so the refresh SQL is byte-equivalent to "drop
+    then re-create" for every matview.
 
     The base tables (transactions / daily_balances) and base indexes
     are NOT in scope — a refresh leaves rows in place; only the
@@ -391,23 +397,18 @@ def _emit_sqlite_matview_refresh(instance: L2Instance, *, prefix: str) -> str:
 
     Z.C — ``prefix`` is the cfg.db_table_prefix.
     """
+    assert dialect in (Dialect.SQLITE, Dialect.DUCKDB), (
+        f"_emit_table_based_matview_refresh expects SQLite or DuckDB, "
+        f"got {dialect!r} — PG / Oracle use REFRESH MATERIALIZED VIEW."
+    )
     p = prefix
-    drops_l1 = _emit_l1_invariant_drops(p, Dialect.SQLITE)
-    drops_inv = _emit_inv_matview_drops(p, Dialect.SQLITE)
-    drops_curr_tx = drop_matview_if_exists(
-        f"{p}_current_transactions", Dialect.SQLITE,
-    )
-    drops_curr_db = drop_matview_if_exists(
-        f"{p}_current_daily_balances", Dialect.SQLITE,
-    )
-    # Re-emit Current* matviews + all L1/Inv matviews. We extract
-    # just the CREATE blocks from the schema templates by re-rendering
-    # the inv + L1 invariant view sections (which depend on
-    # current_*) plus the Current* matview CREATEs from the base
-    # template.
-    current_creates = _emit_sqlite_current_matview_creates(p)
-    invariants = _emit_l1_invariant_views(instance, prefix=p, dialect=Dialect.SQLITE)
-    inv_views = _emit_inv_views(instance, prefix=p, dialect=Dialect.SQLITE)
+    drops_l1 = _emit_l1_invariant_drops(p, dialect)
+    drops_inv = _emit_inv_matview_drops(p, dialect)
+    drops_curr_tx = drop_matview_if_exists(f"{p}_current_transactions", dialect)
+    drops_curr_db = drop_matview_if_exists(f"{p}_current_daily_balances", dialect)
+    current_creates = _emit_table_based_current_matview_creates(p, dialect)
+    invariants = _emit_l1_invariant_views(instance, prefix=p, dialect=dialect)
+    inv_views = _emit_inv_views(instance, prefix=p, dialect=dialect)
     names = [
         f"{p}_current_transactions",
         f"{p}_current_daily_balances",
@@ -430,10 +431,10 @@ def _emit_sqlite_matview_refresh(instance: L2Instance, *, prefix: str) -> str:
         f"{p}_inv_pair_rolling_anomalies",
         f"{p}_inv_money_trail_edges",
     ]
-    analyzes = "\n".join(analyze_table(n, Dialect.SQLITE) for n in names)
+    analyzes = "\n".join(analyze_table(n, dialect) for n in names)
     return (
         f"-- ===========================================================\n"
-        f"-- SQLite matview refresh for L2 instance: {p}\n"
+        f"-- Table-based matview refresh for L2 instance: {p} ({dialect.value})\n"
         f"-- Drops + re-emits every matview-as-table; base tables stay.\n"
         f"-- ===========================================================\n"
         + drops_l1 + "\n"
@@ -447,18 +448,18 @@ def _emit_sqlite_matview_refresh(instance: L2Instance, *, prefix: str) -> str:
     )
 
 
-def _emit_sqlite_current_matview_creates(p: str) -> str:
+def _emit_table_based_current_matview_creates(p: str, dialect: Dialect) -> str:
     """Re-emit the Current* matview CREATE statements + their indexes
-    for SQLite refresh.
+    for the table-based refresh path (SQLite + DuckDB).
 
     These live inside ``_SCHEMA_TEMPLATE`` for the regular schema
     emit; the refresh path can't invoke the full template (the base-
     table CREATE would conflict with existing data). This helper
     isolates just the Current* matview CREATEs + their indexes so
-    the SQLite refresh path can rebuild them after a DROP.
+    the table-based refresh path can rebuild them after a DROP.
     """
-    matview_kw = matview_create_keyword(Dialect.SQLITE)
-    matview_opts = matview_options(Dialect.SQLITE)
+    matview_kw = matview_create_keyword(dialect)
+    matview_opts = matview_options(dialect)
     return (
         f"{matview_kw} {p}_current_transactions{matview_opts} AS\n"
         f"SELECT * FROM {p}_transactions tx\n"

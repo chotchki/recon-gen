@@ -39,9 +39,10 @@ from pathlib import Path
 
 import pytest
 
-from recon_gen.cli.data import _build_fresh_semantic_lock_sqlite
+from recon_gen.cli.data import _build_fresh_semantic_lock
 from recon_gen.common.as_of_frame import LOCKED_ANCHOR
 from recon_gen.common.l2.loader import load_instance
+from recon_gen.common.sql import Dialect
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -49,17 +50,25 @@ _SEMANTIC_LOCKS_DIR = _REPO_ROOT / "tests" / "data" / "_semantic_locks"
 _L2_DIR = _REPO_ROOT / "tests" / "l2"
 _CANONICAL_ANCHOR: date = LOCKED_ANCHOR
 
+# CA.6 — supported in-process lock dialects. SQLite stays until CA.8;
+# DuckDB is the default post-CA.6 (faster apply, no STDDEV_SAMP shim).
+_LOCK_DIALECTS: dict[str, Dialect] = {
+    "sqlite": Dialect.SQLITE,
+    "duckdb": Dialect.DUCKDB,
+}
 
-def _discover_locks() -> list[tuple[Path, str]]:
-    """Find every `_semantic_locks/<instance>.sqlite.json` file.
-    Returns `[(path, instance_name), ...]`."""
+
+def _discover_locks() -> list[tuple[Path, str, Dialect]]:
+    """Find every `_semantic_locks/<instance>.<dialect>.json` file.
+    Returns `[(path, instance_name, dialect), ...]`."""
     if not _SEMANTIC_LOCKS_DIR.exists():
         return []
-    out: list[tuple[Path, str]] = []
-    for p in sorted(_SEMANTIC_LOCKS_DIR.glob("*.sqlite.json")):
-        # Strip `.sqlite.json` suffix to get the instance name.
-        instance_name = p.name[: -len(".sqlite.json")]
-        out.append((p, instance_name))
+    out: list[tuple[Path, str, Dialect]] = []
+    for d_str, dialect in _LOCK_DIALECTS.items():
+        for p in sorted(_SEMANTIC_LOCKS_DIR.glob(f"*.{d_str}.json")):
+            suffix = f".{d_str}.json"
+            instance_name = p.name[: -len(suffix)]
+            out.append((p, instance_name, dialect))
     return out
 
 
@@ -71,15 +80,16 @@ _LOCKS = _discover_locks()
     reason="no semantic locks discovered — run `recon-gen data semantic-lock --l2 <yaml>` first",
 )
 @pytest.mark.parametrize(
-    "locked_path, instance_name",
+    "locked_path, instance_name, dialect",
     _LOCKS,
-    ids=[p.name for p, _ in _LOCKS],
+    ids=[p.name for p, _, _ in _LOCKS],
 )
 def test_semantic_lock_matches_fresh_emit(
-    locked_path: Path, instance_name: str,
+    locked_path: Path, instance_name: str, dialect: Dialect,
 ) -> None:
-    """Re-build the semantic lock from a fresh in-memory SQLite +
-    assert it matches the on-disk JSON byte-for-byte.
+    """Re-build the semantic lock from a fresh in-memory DB matching
+    the file's dialect suffix + assert it matches the on-disk JSON
+    byte-for-byte.
 
     On drift, fail with a unified diff of the first ~50 changed
     lines so the reviewer sees the actual violation-set shift, not
@@ -89,6 +99,10 @@ def test_semantic_lock_matches_fresh_emit(
     Per AZ.0: JSON-string equality is the gate contract. Re-emit
     is byte-stable by construction (lock_to_json's sort order is
     deterministic; the on-disk write uses the same serializer).
+
+    CA.6 — covers both SQLite + DuckDB lock files. The violation
+    sets are byte-identical (BZ.4 + CA.0 audit); only the
+    `scenario_fingerprint.dialect` field changes per file.
     """
     yaml_path = _L2_DIR / f"{instance_name}.yaml"
     assert yaml_path.exists(), (
@@ -97,8 +111,9 @@ def test_semantic_lock_matches_fresh_emit(
         f"Either rename the lock file or restore the YAML."
     )
     instance = load_instance(yaml_path)
-    fresh = _build_fresh_semantic_lock_sqlite(
+    fresh = _build_fresh_semantic_lock(
         instance, _CANONICAL_ANCHOR, prefix=instance_name,
+        dialect=dialect,
     )
     on_disk = locked_path.read_text()
     if fresh == on_disk:
@@ -133,12 +148,12 @@ def test_semantic_lock_matches_fresh_emit(
 
 @pytest.mark.skipif(not _LOCKS, reason="no semantic locks discovered")
 @pytest.mark.parametrize(
-    "locked_path, instance_name",
+    "locked_path, instance_name, dialect",
     _LOCKS,
-    ids=[p.name for p, _ in _LOCKS],
+    ids=[p.name for p, _, _ in _LOCKS],
 )
 def test_semantic_lock_fingerprint_matches_filename(
-    locked_path: Path, instance_name: str,
+    locked_path: Path, instance_name: str, dialect: Dialect,
 ) -> None:
     """Cheap pre-check before the expensive emit: the lock file's
     `scenario_fingerprint` must match the (instance, dialect)
@@ -151,9 +166,9 @@ def test_semantic_lock_fingerprint_matches_filename(
         f"doesn't match the filename's instance {instance_name!r}. "
         f"Re-lock or rename to fix."
     )
-    assert fp.get("dialect") == "sqlite", (
+    assert fp.get("dialect") == dialect.value, (
         f"Lock {locked_path.name}'s fingerprint.dialect={fp.get('dialect')!r} "
-        f"doesn't match the filename's `.sqlite.json` suffix."
+        f"doesn't match the filename's `.{dialect.value}.json` suffix."
     )
     assert fp.get("canonical_anchor") == _CANONICAL_ANCHOR.isoformat(), (
         f"Lock {locked_path.name}'s anchor={fp.get('canonical_anchor')!r} "

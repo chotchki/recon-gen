@@ -265,6 +265,12 @@ def execute_script(
     if dialect is Dialect.POSTGRES:
         cur.execute(sql)
         return
+    if dialect is Dialect.DUCKDB:
+        # CA.6 — DuckDB's Python driver accepts multi-statement strings
+        # as a single execute() call (probed against 1.5.3); same one-shot
+        # shape as the PG branch.
+        cur.execute(sql)
+        return
     if dialect is Dialect.SQLITE:
         # Bind-variable + executemany fast path for INSERT-heavy
         # scripts (Studio deploy emits ~72k single-row INSERTs against
