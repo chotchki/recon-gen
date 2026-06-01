@@ -451,7 +451,7 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [x] CA.4 - CA.4 — Update Studio's persist path to target .duckdb files
 - [x] CA.5 - CA.5 — Delete BZ.0's SQLite-only scratch-table workaround
 - [x] CA.6 - CA.6 — Re-lock seeds + semantic_lock fixtures for DuckDB
-- [ ] CA.7 - CA.7 — Update integration tests + CI integration jobs
+- [x] CA.7 - CA.7 — Update integration tests + CI integration jobs
 - [ ] CA.8 - CA.8 — Nuke Dialect.SQLITE and all SQLite-specific arms
 - [ ] CA.9 - CA.9 — Docs + release notes + memory updates
 ## Phase PLAN - Phase PLAN
