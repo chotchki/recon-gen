@@ -308,6 +308,54 @@ def test_planted_badge_absent_when_no_kinds_enabled() -> None:
     assert 'data-test-planted-badge-' not in html
 
 
+def test_session_start_running_banner_renders() -> None:
+    """BV.4.10.d — when a Session Start task is in flight the
+    landing renders a banner with collapsible live-tail wrapper
+    polling `/training/session-start/stream`."""
+    html = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=False,
+        session_start_running=True,
+    )
+    assert "data-test-training-session-start-banner" in html
+    assert "Session Start in progress" in html
+    assert 'hx-get="/training/session-start/stream"' in html
+
+
+def test_session_start_running_banner_absent_when_idle() -> None:
+    """Default state: no in-flight Session Start, no banner."""
+    html = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=False,
+    )
+    assert "data-test-training-session-start-banner" not in html
+
+
+def test_session_start_live_tail_fragment_running_arms_next_poll() -> None:
+    """Stream endpoint's fragment carries `hx-trigger="every 1s"`
+    while the task runs, then drops it on completion (the route
+    handler also sends the HX-Trigger reload signal at that point)."""
+    from recon_gen.common.html._studio_training_v3 import (
+        render_training_session_start_live_tail,
+    )
+    running_html = render_training_session_start_live_tail(
+        events=[{"event": "session_start:etl_begin"}], running=True,
+    )
+    assert 'hx-trigger="every 1s"' in running_html
+    assert 'data-test-training-tail-state="running"' in running_html
+
+    finished_html = render_training_session_start_live_tail(
+        events=[
+            {"event": "session_start:etl_begin"},
+            {"event": "session_start:done"},
+        ],
+        running=False,
+    )
+    assert 'hx-trigger="every 1s"' not in finished_html
+    assert 'data-test-training-tail-state="finished"' in finished_html
+    assert 'data-test-training-tail-count="2"' in finished_html
+
+
 def test_apply_diff_preview_element_rendered() -> None:
     """BV.4.10.b — the sticky Apply bar carries a diff-preview span
     the client-side JS updates on every checkbox toggle. The element

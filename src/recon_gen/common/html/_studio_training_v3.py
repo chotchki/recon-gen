@@ -57,6 +57,7 @@ def render_training_v3_landing(
     failed_kinds: Mapping[str, str] | None = None,
     l2_stale: bool = False,
     session_start_time: str = "",
+    session_start_running: bool = False,
 ) -> str:
     """The /training/ landing.
 
@@ -139,6 +140,36 @@ def render_training_v3_landing(
             "Hover the card's error badge for the underlying message."
             "</div>"
         )
+    # BV.4.10.d — Session-Start-in-flight banner with collapsible
+    # live tail. The wrapper polls `/training/session-start/stream`
+    # every 1s; on completion the response carries
+    # `HX-Trigger: training-session-start-finished` which the inline
+    # script catches + reloads /training/ so the post-run state
+    # (success banner + applied-plants ledger reads) renders.
+    if session_start_running:
+        banner_html += """
+    <div class="bg-accent/10 border border-accent rounded-md px-3 py-2 mb-3 text-sm"
+         data-test-training-session-start-banner>
+      <strong class="text-accent">⏳</strong> Session Start in progress —
+      this re-fetches the base prefix + rebuilds the v overlay
+      (~10s sqlite / ~30s Postgres / ~10 min Oracle for the /etl/run leg).
+      <details class="mt-2">
+        <summary class="cursor-pointer text-xs text-secondary-fg">Show event log</summary>
+        <div id="training-session-start-live-tail"
+             class="bg-white border border-surface-border rounded-md p-3 max-h-72 overflow-y-auto font-mono text-xs mt-1"
+             hx-get="/training/session-start/stream"
+             hx-trigger="load, every 1s"
+             hx-swap="outerHTML">
+          <p class="text-secondary-fg italic">Waiting for events…</p>
+        </div>
+      </details>
+    </div>
+    <script>
+      document.body.addEventListener('training-session-start-finished', function() {
+        setTimeout(() => { window.location.href = '/training/?status=Session+started+%E2%80%94+v+overlay+ready.'; }, 250);
+      });
+    </script>
+"""
 
     total_enabled = sum(
         1 for entry in PLANT_REGISTRY if entry.kind in enabled_set
@@ -222,6 +253,69 @@ def render_training_v3_landing(
 </body>
 </html>
 """
+
+
+def render_training_session_start_live_tail(
+    *,
+    events: list[Mapping[str, object]],
+    running: bool,
+) -> str:
+    """BV.4.10.d — live-tail polling fragment.
+
+    htmx ``outerHTML`` swaps the wrapper itself, so each response is
+    a complete `<div id="training-session-start-live-tail">` with the
+    FULL accumulated event list. While the task is in flight the
+    fragment arms the next 1s poll; on completion the route handler
+    sends `HX-Trigger: training-session-start-finished` (consumed by
+    the inline script in the landing-page render to reload
+    `/training/`).
+    """
+    if not events:
+        body = (
+            '<p class="text-secondary-fg italic" '
+            'data-test-training-tail-empty>Waiting for events…</p>'
+        )
+    else:
+        lines: list[str] = []
+        for event in events:
+            event_name = str(event.get("event") or event.get("kind") or "")
+            level_class = (
+                "text-danger" if (
+                    event_name.endswith(":halt")
+                    or "cancelled" in event_name
+                ) else "text-secondary-fg"
+            )
+            fields = " ".join(
+                f"{escape(str(k))}={escape(str(v))}"
+                for k, v in event.items()
+                if k not in ("event", "kind", "ts_unix")
+            )
+            lines.append(
+                f'<div class="leading-relaxed">'
+                f'<span class="{level_class} mr-2 text-[10px] uppercase">[evt]</span>'
+                f'<span>{escape(event_name)}</span>'
+                f'{(" " + fields) if fields else ""}'
+                f'</div>'
+            )
+        body = "".join(lines)
+    poll_attrs = ""
+    state_attr = "finished"
+    if running:
+        poll_attrs = (
+            ' hx-get="/training/session-start/stream"'
+            ' hx-trigger="every 1s"'
+            ' hx-swap="outerHTML"'
+        )
+        state_attr = "running"
+    return (
+        '<div id="training-session-start-live-tail"'
+        ' class="bg-white border border-surface-border rounded-md p-3 max-h-72 overflow-y-auto font-mono text-xs mt-1"'
+        f' data-test-training-tail-state="{state_attr}"'
+        f' data-test-training-tail-count="{len(events)}"'
+        f'{poll_attrs}>'
+        f'{body}'
+        '</div>'
+    )
 
 
 def _render_session_controls(v_overlay_exists: bool) -> str:

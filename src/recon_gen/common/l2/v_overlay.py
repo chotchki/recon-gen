@@ -117,6 +117,7 @@ async def session_start(
     *,
     refresh_base: bool = True,
     l2_yaml_path: object = None,
+    dev_log: object = None,
 ) -> None:
     """Orchestrates Session Start (DL.10):
 
@@ -132,7 +133,21 @@ async def session_start(
     The /etl/run leg uses the `TRAINER_CLEAN` overlay (baseline only,
     no plants) since the operator's plant choices live on the v
     overlay — not the base.
+
+    BV.4.10.d — `dev_log` is a ``DevLogWriter | None`` callback that
+    accumulates per-step events for the live-tail UI. None silences
+    progress events (CLI / test callers); supplying it makes the
+    Studio's `/training/session-start/stream` endpoint useful.
     """
+    import time as _time  # noqa: PLC0415
+
+    async def _emit(event: str, **fields: object) -> None:
+        if dev_log is None:
+            return
+        payload = {"event": event, "ts_unix": _time.time(), **fields}
+        await dev_log(payload)  # type: ignore[misc]  # dev_log is DevLogWriter | None; checked above
+
+    await _emit("session_start:begin", refresh_base=refresh_base)
     if refresh_base:
         from recon_gen.common.l2.deploy_pipeline import (  # noqa: PLC0415
             run_deploy_pipeline,
@@ -140,9 +155,11 @@ async def session_start(
         from recon_gen.common.l2.pipeline_overlays import (  # noqa: PLC0415
             TRAINER_CLEAN,
         )
+        await _emit("session_start:etl_begin")
         await run_deploy_pipeline(
-            cfg, instance, dev_log=None, overlays=TRAINER_CLEAN,
+            cfg, instance, dev_log=dev_log, overlays=TRAINER_CLEAN,  # type: ignore[arg-type]  # opaque DevLogWriter shape passed through
         )
+        await _emit("session_start:etl_done")
 
     base_prefix = cfg.db_table_prefix
     # DL.14 — capture L2 yaml mtime + clone time so the landing render
@@ -157,6 +174,13 @@ async def session_start(
         except OSError:
             pass
 
+    # BV.4.10.d — record per-step completion against this list so the
+    # async caller can `await _emit(...)` each step. Closure shape
+    # (rather than emit inline inside _run, which is sync) keeps the
+    # sync DB work on the threadpool while dev_log writes stay on
+    # the event loop.
+    step_log: list[tuple[str, dict[str, object]]] = []
+
     def _run() -> None:
         conn = connect_demo_db(cfg)
         try:
@@ -169,21 +193,28 @@ async def session_start(
                         dialect=cfg.dialect,
                     )
                     execute_script(cur, drop_sql, dialect=cfg.dialect)
-                except Exception:  # noqa: BLE001 — schema may not exist; that's fine
-                    pass
+                    step_log.append(("session_start:drop_v_done", {}))
+                except Exception as exc:  # noqa: BLE001 — schema may not exist; that's fine
+                    step_log.append((
+                        "session_start:drop_v_skipped",
+                        {"reason": str(exc)[:80]},
+                    ))
 
                 create_sql = create_v_overlay_sql(
                     instance, base_prefix=base_prefix, dialect=cfg.dialect,
                 )
                 execute_script(cur, create_sql, dialect=cfg.dialect)
+                step_log.append(("session_start:create_v_done", {}))
 
                 clone_sql = clone_base_to_v_sql(base_prefix)
                 execute_script(cur, clone_sql, dialect=cfg.dialect)
+                step_log.append(("session_start:clone_done", {}))
 
                 refresh_sql = refresh_v_overlay_matviews_sql(
                     instance, base_prefix=base_prefix, dialect=cfg.dialect,
                 )
                 execute_script(cur, refresh_sql, dialect=cfg.dialect)
+                step_log.append(("session_start:refresh_matviews_done", {}))
 
                 # DL.14 — record session-start metadata so the
                 # /training/ landing render can flag staleness when
@@ -232,6 +263,9 @@ async def session_start(
             conn.close()
 
     await asyncio.to_thread(_run)
+    for event, fields in step_log:
+        await _emit(event, **fields)
+    await _emit("session_start:done")
 
 
 async def cleanup(

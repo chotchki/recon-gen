@@ -3960,6 +3960,10 @@ def make_studio_routes(
         "task": None, "events": [],
         "started_at": None, "cancelled": False,
     }
+    # BV.4.10.d — same shape for /training/session-start.
+    _training_start_state: dict[str, object] = {
+        "task": None, "events": [], "started_at": None,
+    }
 
     async def _run_pipeline_async(
         patched_cfg: Config,
@@ -4278,6 +4282,15 @@ def make_studio_routes(
             )
         else:
             session_start_time = ""
+        # BV.4.10.d — detect in-flight Session Start so the landing
+        # renders a banner + collapsible live-tail instead of looking
+        # idle while the operator waits.
+        import asyncio as _asyncio  # noqa: PLC0415
+
+        task_obj = _training_start_state.get("task")
+        session_start_running = (
+            isinstance(task_obj, _asyncio.Task) and not task_obj.done()
+        )
         return HTMLResponse(render_training_v3_landing(
             top_nav_html=_top_nav_html("/training/"),
             theme_head=studio_theme_head(instance),
@@ -4289,7 +4302,40 @@ def make_studio_routes(
             failed_kinds=failed,
             l2_stale=l2_stale,
             session_start_time=session_start_time,
+            session_start_running=session_start_running,
         ))
+
+    async def training_session_start_stream(
+        _request: Request,
+    ) -> HTMLResponse:
+        """BV.4.10.d — live-tail fragment endpoint.
+
+        Returns the FULL accumulated event log on every poll (htmx's
+        `outerHTML` swap replaces the wrapper entirely; delta-only
+        would clobber the history). On run completion, sends
+        ``HX-Trigger: training-session-start-finished`` so the inline
+        client script reloads /training/ to pick up the post-run
+        state (success banner + applied/failed ledger reads)."""
+        import asyncio as _asyncio  # noqa: PLC0415
+
+        events = cast(
+            "list[Mapping[str, object]]",
+            _training_start_state.get("events") or [],
+        )
+        task_obj = _training_start_state.get("task")
+        running = (
+            isinstance(task_obj, _asyncio.Task) and not task_obj.done()
+        )
+        from recon_gen.common.html._studio_training_v3 import (  # noqa: PLC0415
+            render_training_session_start_live_tail,
+        )
+        fragment = render_training_session_start_live_tail(
+            events=events, running=running,
+        )
+        headers: dict[str, str] = {}
+        if not running:
+            headers["HX-Trigger"] = "training-session-start-finished"
+        return HTMLResponse(fragment, headers=headers)
 
     async def training_plant(request: Request) -> HTMLResponse | RedirectResponse:
         import asyncio  # noqa: PLC0415
@@ -4413,21 +4459,46 @@ def make_studio_routes(
         _request: Request,
     ) -> RedirectResponse:
         """POST /training/session-start — full lifecycle (DL.10).
-        Invokes /etl/run (TRAINER_CLEAN overlay) so base prefix is
-        fresh + then creates v overlay schema, clones base → v,
-        refreshes v matviews."""
+
+        BV.4.10.d — spawns a detached asyncio task + 303s back to
+        /training/. The landing page detects the in-flight task and
+        renders a banner + collapsible live-tail (BTa.9 pattern).
+        Double-click guard: re-POSTing while a run is in flight is
+        a no-op redirect."""
+        import asyncio  # noqa: PLC0415
+
         if cfg is None:
             return RedirectResponse(url="/training/", status_code=303)
+        existing = _training_start_state.get("task")
+        if isinstance(existing, asyncio.Task) and not existing.done():
+            return RedirectResponse(url="/training/", status_code=303)
+
         from recon_gen.common.l2.v_overlay import session_start  # noqa: PLC0415
 
-        await session_start(
-            cfg, cache.get(),
-            refresh_base=True, l2_yaml_path=cache.path,
-        )
-        return RedirectResponse(
-            url="/training/?status=Session+started+%E2%80%94+v+overlay+ready.",
-            status_code=303,
-        )
+        live_events: list[Mapping[str, object]] = []
+        _training_start_state["events"] = live_events
+        _training_start_state["started_at"] = datetime.now()  # typing-smell: ignore[no-datetime-now]: BV.4.10.d wall-clock anchor for "running for Ns" banner
+
+        async def _tee(payload: Mapping[str, object]) -> None:
+            live_events.append(dict(payload))
+
+        # Capture cfg into a local so the inner closure has a non-None
+        # type by construction (the early-return above gates on None).
+        _cfg = cfg
+
+        async def _run_session_start() -> None:
+            try:
+                await session_start(
+                    _cfg, cache.get(),
+                    refresh_base=True, l2_yaml_path=cache.path,
+                    dev_log=_tee,
+                )
+            finally:
+                _training_start_state["task"] = None
+
+        task = asyncio.create_task(_run_session_start())
+        _training_start_state["task"] = task
+        return RedirectResponse(url="/training/", status_code=303)
 
     async def training_reclone(_request: Request) -> RedirectResponse:
         """POST /training/reclone — BV.4.9 Force rebuild from base.
@@ -4596,6 +4667,10 @@ def make_studio_routes(
         Route("/data/timeline", data_timeline, methods=["GET"]),
         Route("/diagram", diagram, methods=["GET"]),
         Route("/training/", training_landing, methods=["GET"]),
+        Route(
+            "/training/session-start/stream",
+            training_session_start_stream, methods=["GET"],
+        ),
         Route(
             "/training/session-start", training_session_start,
             methods=["POST"],

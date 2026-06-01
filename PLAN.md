@@ -197,7 +197,7 @@ The full L2 + ETL + Training round-trip. Glues everything under one e2e test. **
   - [ ] BV.4.10 - **Trainer visibility cluster.** Operator-spotted (2026-05-31): too much hidden state. The /training/ page tells you 25 things you COULD do but nothing about (1) what's currently planted, (2) what would change if you click Apply, (3) whether long ops are still running.
     - [x] BV.4.10.a - BV.4.10.a — Currently-planted badge per card
     - [x] BV.4.10.b - BV.4.10.b — Apply diff preview (live client-side)
-    - [ ] BV.4.10.d - BV.4.10.d — Streaming progress page for Session Start
+    - [x] BV.4.10.d - BV.4.10.d — Streaming progress page for Session Start
 - [ ] BV.5 - Agent-based design cold-read against the dogfood + the HUGE test. Output: `docs/audits/bv_cold_read.md`. Operator iteration + sign-off.
 
 - [ ] BV.6 - BV.6 — PG matview refresh modernization (CONCURRENTLY); Oracle/SQLite unchanged
