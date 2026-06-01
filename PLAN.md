@@ -137,6 +137,8 @@ Same cold-read → triage → design → implement → re-cold-read pattern that
 
 
 - [ ] BX.backlog - BX backlog — Reorder sheets: L1/L2 Exceptions right after Getting Started
+  - [ ] BX.backlog.session - start-silent-no-op - BX backlog — Studio /training/session-start silent no-op when base schema missing
+  - [ ] BX.backlog.sqlite-matview-perf - BX backlog — SQLite matview emulation slow on real-L2-sized data (spike)
 - [ ] BX.release - drift-detection - BX backlog — release.yml drift detection (smoke file list + extras spec)
 ## Phase BXa - Persona nuke + instance singleton structured form (standalone)
 
