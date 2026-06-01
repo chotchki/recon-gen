@@ -958,10 +958,16 @@ def test_stuck_unbundled_view_indexes_emit() -> None:
 
 def test_computed_subledger_balance_uses_current_transactions_view() -> None:
     """The helper view reads from Current* (technical-error supersession
-    transparent) rather than the raw transactions base table."""
+    transparent) rather than the raw transactions base table.
+
+    BZ.0 — the rewrite is dialect-split (SQLite uses an indexed scratch
+    table; PG/Oracle keep the original correlated subquery). On the
+    default (PG) emit path, the matview body itself reads from
+    current_transactions; this test asserts the PG shape.
+    """
     sql = emit_schema(_instance("h"), prefix="h")
     body_match = re.search(
-        r"CREATE MATERIALIZED VIEW h_computed_subledger_balance AS(.*?);",
+        r"CREATE MATERIALIZED VIEW h_computed_subledger_balance.*?AS(.*?);",
         sql,
         re.DOTALL,
     )
@@ -969,6 +975,10 @@ def test_computed_subledger_balance_uses_current_transactions_view() -> None:
     body = body_match.group(1)
     assert "FROM h_current_transactions" in body
     assert "tx.status = 'Posted'" in body
+    # Sanity: no direct base-table read in this section.
+    assert "FROM h_transactions tx" not in body, (
+        "computed_subledger_balance must not read from raw <p>_transactions"
+    )
 
 
 def test_computed_ledger_balance_unions_children_plus_direct_postings() -> None:
