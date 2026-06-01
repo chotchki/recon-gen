@@ -142,6 +142,7 @@ Same cold-read → triage → design → implement → re-cold-read pattern that
   - [ ] BX.backlog.session - start-silent-no-op - BX backlog — Studio /training/session-start silent no-op when base schema missing
   - [ ] BX.backlog.sqlite - matview-perf - BX backlog — SQLite matview emulation slow on real-L2-sized data (spike)
   - [ ] BX.backlog.sqlite - resourcewarning-regression - BX backlog — Re-triage sqlite3 ResourceWarning leaks (regression after BL.0 / earlier fix)
+  - [ ] BX.backlog.studio - plant-oracle-broken - BX backlog — Studio plant flow broken on Oracle (caught manually 2026-06-01)
 - [ ] BX.release - drift-detection - BX backlog — release.yml drift detection (smoke file list + extras spec)
 ## Phase BXa - Persona nuke + instance singleton structured form (standalone)
 
@@ -443,7 +444,7 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 
 **Done when:** `Dialect.SQLITE` is deleted from the codebase; bundled refresh @ 1M lands in the &lt;30s envelope (vs SQLite's 121.5s); cross-dialect equivalence holds 3-way (DuckDB, PG, Oracle); Studio's offline-iteration loop works against .duckdb files; major-version release notes published.
 
-- [ ] CA.0 - CA.0 — Spike: DuckDB swap viability (JSON, row counts, perf)
+- [x] CA.0 - CA.0 — Spike: DuckDB swap viability (JSON, row counts, perf)
 - [ ] CA.1 - CA.1 — Add Dialect.DUCKDB enum + dialect dispatch plumbing
 - [ ] CA.2 - CA.2 — Port dialect helpers (json_value, fetch_first_one_row, etc.) to DuckDB
 - [ ] CA.3 - CA.3 — Swap _setup_local_sqlite to _setup_local_duckdb in runner

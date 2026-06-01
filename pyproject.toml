@@ -31,6 +31,12 @@ dependencies = [
     "click>=8.1",
     "pyyaml>=6.0",
     "graphviz>=0.20",
+    # CA.1 — DuckDB is a core dialect (replaces SQLite as the in-process
+    # backend for unit/Studio/integration paths). Not extras: every
+    # `recon-gen` invocation imports `Dialect.DUCKDB` and the runner
+    # spins one up for the local test path. Pure-Python wheel; install
+    # cost minor. SQLite path stays alive through CA.8.
+    "duckdb>=1.1",
 ]
 
 [project.urls]

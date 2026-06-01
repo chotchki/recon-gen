@@ -62,11 +62,25 @@ class Dialect(str, Enum):
     Standard Edition (the long-term-support version Phase P targets).
     SQLite covers SQLite 3.38+ (the version floor for the JSON1
     functions we depend on; ships with Python's stdlib ``sqlite3``).
+    DuckDB is in-process (in-Python wheel), columnar, with native
+    MATERIALIZED VIEW + a vectorized executor that handles
+    correlated-subquery rewrites natively (per the CA.0 spike).
+
+    **Phase CA in progress.** ``DUCKDB`` is being added as part of the
+    CA.0 → CA.8 swap that replaces ``SQLITE``. During the migration both
+    enum values coexist; CA.8 deletes ``SQLITE``. Each dialect-dispatch
+    helper gets its DuckDB branch in CA.2; until then, ``DUCKDB`` may
+    silently fall through to the Oracle fallback shape in helpers that
+    haven't been ported — exercising it without that port will
+    misbehave. The CA.0 audit at
+    ``docs/audits/ca_0_duckdb_spike.md`` is the source of truth for
+    each helper's DuckDB binding.
     """
 
     POSTGRES = "postgres"
     ORACLE = "oracle"
     SQLITE = "sqlite"
+    DUCKDB = "duckdb"
 
 
 # -- Identifiers -------------------------------------------------------------
