@@ -211,17 +211,22 @@ def test_generators_for_reverse_lookup() -> None:
     # edge, manifest for OverdraftGenerator, ExpectedEodBalanceGenerator,
     # …). The reverse-lookup is the running tally.
     #
-    # LedgerDriftInvariant stays single-source (DriftGenerator only) —
-    # composition-induced edges to ledger_drift (AU.2 finding) are
-    # scenario-level, not class-level, so they don't promote here.
+    # LedgerDriftInvariant has two registered generators:
+    # DriftGenerator (legacy coupled child+parent emission — the
+    # ledger_drift edge is the side-effect of the parent emission) +
+    # LedgerDriftGenerator (BV.3.3.c.bug1 — plant ledger_drift in
+    # isolation under a synthetic parent_role; no drift edge).
     from recon_gen.common.spine import (
         ExpectedEodBalanceGenerator,
         OverdraftGenerator,
     )
+    from recon_gen.common.spine.drift import LedgerDriftGenerator
     assert generators_for(DriftInvariant) == {
         DriftGenerator, OverdraftGenerator, ExpectedEodBalanceGenerator,
     }
-    assert generators_for(LedgerDriftInvariant) == {DriftGenerator}
+    assert generators_for(LedgerDriftInvariant) == {
+        DriftGenerator, LedgerDriftGenerator,
+    }
 
 
 def test_iter_edges_yields_every_pair() -> None:

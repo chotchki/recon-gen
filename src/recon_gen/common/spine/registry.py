@@ -68,6 +68,7 @@ from recon_gen.common.spine.chain_parent_disagreement import (
 from recon_gen.common.spine.drift import (
     DriftGenerator,
     DriftInvariant,
+    LedgerDriftGenerator,
     LedgerDriftInvariant,
 )
 from recon_gen.common.spine.expected_eod import (
@@ -138,6 +139,11 @@ INVARIANT_GENERATOR_EDGES: Final[
     dict[type[ViolationGenerator], tuple[type[Invariant], ...]]
 ] = {
     DriftGenerator: (DriftInvariant, LedgerDriftInvariant),
+    # BV.3.3.c.bug1 — LedgerDriftGenerator plants a synthetic
+    # parent+child pair under a unique parent_role; child is clean
+    # (Σ legs = stored), so only ledger_drift fires on the parent.
+    # Single-edge by construction.
+    LedgerDriftGenerator: (LedgerDriftInvariant,),
     OverdraftGenerator: (OverdraftInvariant, DriftInvariant),
     # AU.3.a — same empirical-edge shape as OverdraftGenerator: a leaf
     # plant trips drift (zero transactions ⇒ Σ legs ≠ planted stored),
@@ -267,6 +273,7 @@ generator in `INVARIANT_GENERATOR_EDGES`."""
 
 ALL_L1_GENERATORS: Final[tuple[type[ViolationGenerator], ...]] = (
     DriftGenerator,
+    LedgerDriftGenerator,
     OverdraftGenerator,
     ExpectedEodBalanceGenerator,
     StuckPendingGenerator,

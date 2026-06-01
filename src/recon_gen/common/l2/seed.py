@@ -193,6 +193,30 @@ class DriftPlant:
 
 
 @dataclass(frozen=True, slots=True)
+class LedgerDriftPlant:
+    """A planted (parent_account, business_day) cell where the parent
+    (control) account's stored balance disagrees with Σ children by
+    ``delta_money``.
+
+    Distinct from :class:`DriftPlant` (sub-ledger drift on a LEAF):
+    this fires the parent-level conservation invariant. Real-world
+    example: an operator manually adjusts the DDAControl GL stored
+    balance without posting matching leg adjustments to the customer
+    DDAs — the control account diverges from Σ customers even though
+    every customer's individual sub-ledger still balances.
+
+    The Trainer adapter (:func:`_invoke_ledger_drift_plant`) plants a
+    synthetic parent+child pair under a UNIQUE synthetic ``parent_role``
+    so the matview's ``computed_ledger_balance`` for our parent only
+    sums OUR child (no bleed from baseline accounts with matching
+    parent_role). Operator only picks ``days_ago`` + ``delta_money``.
+    """
+
+    days_ago: int
+    delta_money: Decimal
+
+
+@dataclass(frozen=True, slots=True)
 class OverdraftPlant:
     """A planted (account, business_day) cell where stored balance is
     negative.
@@ -711,6 +735,7 @@ class ScenarioPlant:
 
     template_instances: tuple[TemplateInstance, ...]
     drift_plants: tuple[DriftPlant, ...] = ()
+    ledger_drift_plants: tuple[LedgerDriftPlant, ...] = ()
     overdraft_plants: tuple[OverdraftPlant, ...] = ()
     limit_breach_plants: tuple[LimitBreachPlant, ...] = ()
     inbound_cap_breach_plants: tuple[InboundCapBreachPlant, ...] = ()

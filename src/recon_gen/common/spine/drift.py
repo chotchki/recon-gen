@@ -292,6 +292,114 @@ class DriftGenerator:
             )
 
 
+@dataclass
+class LedgerDriftGenerator:
+    """Plant a parent+child pair where the parent's stored money
+    diverges from Σ child stored by ``delta``. Child is CLEAN (stored
+    matches its single leg), so only ``ledger_drift`` fires — not
+    ``drift``.
+
+    Distinct from DriftGenerator (which fires BOTH drift on the child +
+    ledger_drift on the parent as a coupled pair): this generator
+    targets ledger_drift in isolation, modeling the real-world case
+    where a control account is adjusted directly without touching the
+    sub-ledger leaves.
+
+    Uses a UNIQUE synthetic ``parent_role`` so the matview's
+    ``computed_ledger_balance`` for our synthetic parent only sums OUR
+    synthetic child (no bleed from baseline accounts that happen to
+    share a real parent_role).
+    """
+
+    parent_account_id: str
+    parent_role: str
+    child_account_id: str
+    child_role: str
+    anchor_day: date
+    delta: float
+    rng: random.Random = field(default_factory=scenario_rng)
+    leg_amount: float = 100.0
+    prefix: str = "spec_example"
+
+    @property
+    def intended(self) -> RuleViolation:
+        return RuleViolation.of(
+            "ledger_drift",
+            account_id=self.parent_account_id,
+            business_day=self.anchor_day,
+            drift=round(self.delta, 2),
+        )
+
+    @property
+    def claimed_accounts(self) -> frozenset[str]:
+        return frozenset({self.parent_account_id, self.child_account_id})
+
+    def emit(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        scenario_id: str | None = None,
+    ) -> None:
+        from recon_gen.common.spine.scenario_context import scenario_metadata
+        metadata = (
+            scenario_metadata(scenario_id, generator="LedgerDriftGenerator")
+            if scenario_id is not None else None
+        )
+        start, end = day_bounds(self.anchor_day)
+        # Child: stored money == leg_amount, with one matching credit
+        # leg → child's computed_subledger = leg_amount → no drift on
+        # child. Child's account_parent_role points at our SYNTHETIC
+        # parent_role so the matview's EXISTS gate fires only for our
+        # synthetic parent (no baseline pollution).
+        insert_balance(
+            conn,
+            prefix=self.prefix,
+            account_id=self.child_account_id,
+            account_name=f"Ledger Drift Child ({self.child_role})",
+            account_role=self.child_role,
+            account_scope="internal",
+            account_parent_role=self.parent_role,
+            business_day_start=start,
+            business_day_end=end,
+            money=self.leg_amount,
+            metadata=metadata,
+        )
+        insert_tx(
+            conn,
+            prefix=self.prefix,
+            id=f"tx-ledger-drift-{self.parent_role}-1",
+            account_id=self.child_account_id,
+            account_name=f"Ledger Drift Child ({self.child_role})",
+            account_role=self.child_role,
+            account_scope="internal",
+            account_parent_role=self.parent_role,
+            amount_money=self.leg_amount,
+            amount_direction="Credit",
+            status="Posted",
+            posting=ts(self.anchor_day),
+            transfer_id=f"xfer-ledger-drift-{self.parent_role}-1",
+            rail_name="_spine_plant",
+            origin="etl",
+            metadata=metadata,
+        )
+        # Parent: stored money = leg_amount + delta. Σ children for our
+        # synthetic parent_role = leg_amount (just our child). drift =
+        # (leg_amount + delta) - leg_amount = delta exactly.
+        insert_balance(
+            conn,
+            prefix=self.prefix,
+            account_id=self.parent_account_id,
+            account_name=f"Ledger Drift Parent ({self.parent_role})",
+            account_role=self.parent_role,
+            account_scope="internal",
+            account_parent_role=None,
+            business_day_start=start,
+            business_day_end=end,
+            money=self.leg_amount + self.delta,
+            metadata=metadata,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Drift-specific finder — kept here because it returns None rather than
 # raising. The shared `find_internal_with_role` raises on "not found";

@@ -441,15 +441,34 @@ def _invoke_ledger_drift_plant(
     delta_money: str,
     instance: object = None,
 ) -> str:
-    """Adapter for the ``ledger_drift`` registry kind. Same DriftPlant
-    shape as the ``drift`` adapter — ``ledger_drift`` is the
-    DDA-Control-account flavor of the same invariant (Σ leaves should
-    match the control account), and the same plant exercises it via
-    the cust1 (DDA leaf) account."""
-    return _invoke_drift_plant(
-        prefix=prefix, dialect=dialect, anchor=anchor,
-        days_ago=days_ago, delta_money=delta_money, instance=instance,
+    """Adapter for the ``ledger_drift`` registry kind. BV.3.3.c.bug1 —
+    authors a real LedgerDriftPlant (was: delegated to drift adapter,
+    which planted on a LEAF and only fired ledger_drift as a
+    side-effect that didn't reliably surface in the matview).
+
+    The new shape plants a synthetic parent+child pair under a unique
+    parent_role. Operator picks ``days_ago`` + ``delta_money``; the
+    spine generator handles the rest.
+    """
+    from decimal import Decimal  # noqa: PLC0415
+
+    from recon_gen.common.l2.seed import (  # noqa: PLC0415
+        LedgerDriftPlant, ScenarioPlant,
     )
+
+    instance = _require_instance(instance)
+    _, cust1, cust2 = _materialize_customers(instance)
+    scenario = ScenarioPlant(
+        template_instances=(cust1, cust2),
+        ledger_drift_plants=(
+            LedgerDriftPlant(
+                days_ago=days_ago,
+                delta_money=Decimal(delta_money),
+            ),
+        ),
+        today=anchor.date(),
+    )
+    return _emit_scenario(instance, scenario, prefix=prefix, dialect=dialect)
 
 
 def _invoke_overdraft_plant(

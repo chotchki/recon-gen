@@ -72,6 +72,7 @@ from recon_gen.common.l2.seed import (
     FanInChainPlant,
     InboundCapBreachPlant,
     InvFanoutPlant,
+    LedgerDriftPlant,
     LimitBreachPlant,
     MultiXorMissedPlant,
     MultiXorOverlapPlant,
@@ -90,7 +91,7 @@ from recon_gen.common.spine.chain_completion import ChainCompletionGenerator
 from recon_gen.common.spine.chain_parent_disagreement import (
     ChainParentDisagreementGenerator,
 )
-from recon_gen.common.spine.drift import DriftGenerator
+from recon_gen.common.spine.drift import DriftGenerator, LedgerDriftGenerator
 from recon_gen.common.spine.expected_eod import (
     ExpectedEodBalanceGenerator,
     ExpectedEodBalanceInvariant,
@@ -189,6 +190,8 @@ def scenario_to_generators(
         out.append(_adapt_drift(
             dp, instance, scenarios, anchor_day, plant_window,
         ))
+    for ldp in scenarios.ledger_drift_plants:
+        out.append(_adapt_ledger_drift(ldp, anchor_day, plant_window))
     for op in scenarios.overdraft_plants:
         out.append(_adapt_overdraft(
             op, instance, scenarios, anchor_day, plant_window,
@@ -349,6 +352,43 @@ def _adapt_drift(
         parent_account_role=parent_account_role,
         anchor_day=anchor_day,
         magnitude=float(abs(plant.delta_money)),
+        rng=scenario_rng(),
+    )
+
+
+def _adapt_ledger_drift(
+    plant: LedgerDriftPlant, anchor_day: date,
+    plant_window: DateInterval | None = None,
+) -> ViolationGenerator:
+    """BV.3.3.c.bug1 — author a real LedgerDriftPlant adapter.
+
+    Builds a LedgerDriftGenerator under a unique synthetic parent_role
+    derived from the plant's days_ago, so multiple ledger_drift plants
+    on different days don't collide on the matview's per-(parent_role,
+    business_day) sum.
+
+    Per-plant ``anchor_day`` from ``days_ago`` (see ``_adapt_drift``
+    docstring for the offset math).
+    """
+    if plant_window is not None:
+        offset = max(plant.days_ago - 1, 0)
+        anchor_day = SingleDayPlant.at_offset_from_end(
+            plant_window, offset,
+        ).day
+    # Unique-per-plant synthetic role so each plant's parent.role is
+    # distinct → the matview's computed_ledger_balance only sums OUR
+    # synthetic child. Days_ago in the suffix lets the trainer plant
+    # multiple ledger_drift cells on different days without collision.
+    suffix = f"d{plant.days_ago}"
+    parent_role = f"LedgerDriftTestControl_{suffix}"
+    child_role = f"LedgerDriftTestSub_{suffix}"
+    return LedgerDriftGenerator(
+        parent_account_id=f"acct-ledger-drift-parent-{suffix}",
+        parent_role=parent_role,
+        child_account_id=f"acct-ledger-drift-child-{suffix}",
+        child_role=child_role,
+        anchor_day=anchor_day,
+        delta=float(plant.delta_money),
         rng=scenario_rng(),
     )
 
