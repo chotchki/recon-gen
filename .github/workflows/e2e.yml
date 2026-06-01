@@ -886,11 +886,11 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        # ``deploy`` for boto3 (json clean), ``demo-oracle`` for
-        # ``oracledb`` (schema clean drops Oracle tables). Skip
-        # ``audit`` / ``e2e`` — cleanup doesn't need the seed pipeline
-        # or pytest.
-        run: uv sync --frozen --extra prod-oracle
+        # Post-BS.6 extras: `prod` bundles boto3 + oracledb + every
+        # runtime dep cleanup needs (schema clean drops Oracle tables;
+        # json clean reaches AWS). Pre-BS.6 this was `prod-oracle` —
+        # rename leftover, stale since the BS.6 collapse.
+        run: uv sync --frozen --extra prod
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
