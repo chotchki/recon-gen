@@ -984,10 +984,26 @@ class App2Driver:
         and the signature could legitimately surface in any of them.
         Waits for at least one row to render (the renderer auto-loads
         via ``hx-trigger="load"`` on page open); table-only sheets
-        with 0 rendered rows yield an empty string."""
+        with 0 rendered rows yield an empty string.
+
+        BV.3.3.c.bug2 — re-navigate to the current URL with
+        ``page_size=10000`` so the planted row surfaces regardless of
+        its position in the underlying matview (default 50-row page +
+        unsorted matview rows + plant inserted last → planted row
+        falls beyond page 1). The test asserts presence anywhere in
+        the table-data text; the operator-facing page-size default is
+        independent (50 rows fits the dashboard layout)."""
         self._page.wait_for_selector(
             ".table-data tbody tr", timeout=15_000,
         )
+        cur_url = self._page.url
+        sep = "&" if "?" in cur_url else "?"
+        if "page_size=" not in cur_url:
+            self._page.goto(f"{cur_url}{sep}page_size=10000")
+            self._page.wait_for_load_state("networkidle")
+            self._page.wait_for_selector(
+                ".table-data tbody tr", timeout=15_000,
+            )
         chunks = self._page.locator(".table-data").all_inner_texts()
         return "\n".join(str(c) for c in chunks)
 
