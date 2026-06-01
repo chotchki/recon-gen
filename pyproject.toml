@@ -93,6 +93,18 @@ prod = [
     "reportlab>=4.0",
     "pypdf>=4.0",
     "pyhanko>=0.30",
+    # Docs site build (was [docs] pre-BS.6, then briefly only in [dev]).
+    # `recon-gen docs apply --portable` is a production CLI verb — users
+    # following `pip install recon-gen[prod]` should get a working docs
+    # build. mkdocs-macros for Jinja2 templating; mkdocs-click for
+    # auto-generated CLI reference; graphviz Python wrapper for L2
+    # topology + dataflow diagram construction.
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.26",
+    "mkdocs-click>=0.8",
+    "mkdocs-macros-plugin>=1.3",
+    "graphviz>=0.20",
 ]
 dev = [
     "pytest>=7.0",
@@ -180,17 +192,9 @@ dev = [
     # sufficient for the test surface — matches the existing
     # starlette mirror pattern.
     "markdown>=3.6",
-    # Docs site build (BS.6 — was [docs]). mkdocs-macros for Jinja2
-    # templating; mkdocs-click for auto-generated CLI reference;
-    # graphviz Python wrapper for L2 topology + dataflow diagram
-    # construction (Phase T moved rendering to browser via
-    # @hpcc-js/wasm-graphviz, so no system `dot` binary needed).
-    "mkdocs>=1.6",
-    "mkdocs-material>=9.5",
-    "mkdocstrings[python]>=0.26",
-    "mkdocs-click>=0.8",
-    "mkdocs-macros-plugin>=1.3",
-    "graphviz>=0.20",
+    # NOTE: mkdocs + mkdocs-* + graphviz moved to [prod] post-BS.6.
+    # `docs apply` is a production CLI verb so users following
+    # `pip install recon-gen[prod]` get a working docs build.
 ]
 e2e = [
     "pytest>=7.0",

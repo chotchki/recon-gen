@@ -642,13 +642,15 @@ jobs:
       - name: Install wheel into a fresh venv (NOT editable)
         # ``uv venv`` plus ``uv pip install`` against the built wheel
         # mirrors what an end-user does after ``pip install
-        # recon-gen[docs]`` — no symlinks back to the repo
-        # ``src/`` tree, so any path code that walks parents to find
-        # repo-root files breaks here.
+        # recon-gen[prod]`` — no symlinks back to the repo ``src/``
+        # tree, so any path code that walks parents to find repo-root
+        # files breaks here. BS.6 collapsed [docs] into [prod] (since
+        # `docs apply` is a production CLI verb); installing [prod]
+        # now pulls mkdocs + the docs site deps.
         run: |
           uv venv /tmp/portable-test-venv
           uv pip install --python /tmp/portable-test-venv/bin/python \
-              "$(ls /tmp/wheelhouse/recon_gen-*.whl)[docs]"
+              "$(ls /tmp/wheelhouse/recon_gen-*.whl)[prod]"
 
       - name: Build portable docs from installed wheel
         run: |
