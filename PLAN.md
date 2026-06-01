@@ -138,6 +138,7 @@ Same cold-read → triage → design → implement → re-cold-read pattern that
 
 - [ ] BX.backlog - BX backlog — Reorder sheets: L1/L2 Exceptions right after Getting Started
   - [ ] BX.backlog.coverage - merge-broken - BX backlog — Coverage combine job: merge doesn't render, markdown only available via artifact download
+  - [ ] BX.backlog.e2e-sqlite-l2ft-dropdown-flake - BX backlog — e2e-sqlite flake: test_l2ft_rail_dropdown_selection_refetches_with_param
   - [ ] BX.backlog.session - start-silent-no-op - BX backlog — Studio /training/session-start silent no-op when base schema missing
   - [ ] BX.backlog.sqlite - matview-perf - BX backlog — SQLite matview emulation slow on real-L2-sized data (spike)
   - [ ] BX.backlog.sqlite - resourcewarning-regression - BX backlog — Re-triage sqlite3 ResourceWarning leaks (regression after BL.0 / earlier fix)
@@ -410,7 +411,7 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 **Done when:** ci.yml::test + e2e.yml::e2e-pg-browser run on the WSL2 runner with ≥2x speedup measured over 3-5 runs each, release.yml jobs verified unchanged on managed runners, operational docs in `docs/reference/self-host-ci.md`.
 
 - [x] BY.0 - BY.0 — Spike: register WSL2 runner, migrate ci.yml::test, measure
-- [ ] BY.1 - BY.1 — Migrate ci.yml::test job to self-hosted
+- [x] BY.1 - BY.1 — Migrate ci.yml::test job to self-hosted
 - [ ] BY.2 - BY.2 — Migrate e2e.yml::e2e-pg-browser to self-hosted
 - [ ] BY.3 - BY.3 — Secret-isolation policy: release.yml stays on ubuntu-latest
 - [ ] BY.4 - BY.4 — Observability + cleanup automation on the WSL2 runner

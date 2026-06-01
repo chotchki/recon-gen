@@ -1,3 +1,32 @@
+# Release workflow — tag-push triggered.
+#
+# **BY.3 secret-isolation policy: every job in this file must run on
+# `runs-on: ubuntu-latest`.** Self-hosted runners are forbidden here
+# even though they're used by ci.yml::test (BY.1) + e2e.yml::e2e-pg-browser
+# (BY.2). Rationale:
+#
+# - PyPI publish tokens (publish-testpypi / publish-pypi): a compromised
+#   self-hosted runner could push malicious wheels to every recon-gen
+#   user. PyPI is the project identity to downstream integrators.
+# - AWS OIDC role assumption (release-e2e / e2e-against-testpypi): write
+#   access to the project's QuickSight account. The release-e2e job is
+#   the canonical pre-cut gate that exercises full deploys end-to-end.
+# - `GITHUB_TOKEN` write scope (github-release): can manipulate release
+#   artifacts, tags, and the `badges` branch.
+#
+# GitHub-managed `ubuntu-latest` runners are ephemeral, network-isolated,
+# and rotated per job. The Windows-host WSL2 self-hosted runner (BY.0+)
+# is single-tenant on the operator's home network and shares filesystem
+# state across jobs — a fine profile for CI test runs against test-tier
+# credentials, but unacceptable for the publish + deploy surface.
+#
+# Enforced structurally by `tests/unit/test_release_yml_secret_isolation.py`
+# — that test grep-checks this file for any `self-hosted` reference AND
+# parses every job's `runs-on:` to assert `ubuntu-latest`. Any drift
+# fails the unit suite. If a future job genuinely needs a non-`ubuntu-latest`
+# runner, edit the lint's ALLOWED_EXCEPTIONS allowlist with a one-line
+# WHY explaining the security profile.
+
 name: Release
 
 on:
