@@ -1,24 +1,11 @@
 # pyright: reportArgumentType=false
 # BF.4/F: `_ALL_INVARIANTS` is `tuple[str, ...]` but extract takes
 # `L1Invariant` Literal. Runtime correctness enforced by dict lookups.
-"""CB.5 stage 2 — App2 tier consumer: rendered rows per L1 invariant.
+"""CB.5 stage 2 — App2 tier: rendered rows per L1 invariant.
 
-Reads DB state seeded by the db-tier producer
-(`tests/e2e/db/test_audit_direct.py`) and writes App2-rendered rows
-as artifacts the cross-tier validator consumes.
-
-CB.7 followup (2026-06-02): migrated from producer-marked + re-seeding
-to consumer-marked + read-only. The `isolation_consumer` marker drives
-PG's `SET default_transaction_read_only = on` via the
-`enforce_readonly` helper applied in the file's local `conn` fixture
-(since this file overrides the canonical `db_conn` for the
-dialect-parametrize axis). Any DROP/CREATE/INSERT from this file
-raises `ReadOnlySqlTransaction` at the offending line.
-
-The producer ran in the db tier (`unit → db → app2 → qs_browser`
-chain). The ScenarioPlant needed for `expected_audit_counts` is
-reconstructed deterministically via `default_scenario_for` — pure
-function, no DB writes.
+Seeds its own isolated prefix + writes App2-rendered rows as
+artifacts the cross-tier validator reads. Tiers communicate via
+JSON artifacts on disk (the pre-CB.7 contract restored 2026-06-02).
 
 Module-scoped App2Driver — one driver context handles all 6 invariant
 parametrize cells (the L1 dashboard's sheets each render different
@@ -34,7 +21,6 @@ import pytest
 
 from recon_gen.common.db import connect_demo_db
 from recon_gen.common.l2 import load_instance
-from recon_gen.common.l2.auto_scenario import default_scenario_for
 
 from tests.audit._dashboard_extract import (
     count_l1_invariant_rows,
@@ -42,7 +28,6 @@ from tests.audit._dashboard_extract import (
     l1_invariant_rows_seen,
 )
 from tests.audit._scenario_expectations import expected_audit_counts
-from tests._marks import IsolationScope, isolation_consumer  # noqa: E402
 from tests.e2e._agreement import write_rendered_rows
 from tests.e2e._agreement_helpers import (
     ALL_L1_INVARIANTS,
@@ -53,7 +38,6 @@ from tests.e2e._agreement_helpers import (
     today_anchor,
 )
 from tests.e2e._drivers import App2Driver
-from tests.e2e._isolation import enforce_readonly
 
 if TYPE_CHECKING:
     from recon_gen.common.config import Config
@@ -64,7 +48,6 @@ if TYPE_CHECKING:
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
-    isolation_consumer(IsolationScope.AGREEMENT_AUDIT),
 ]
 
 
@@ -85,15 +68,10 @@ def dialect_isolated_cfg(
     dialect_cfg: "tuple[Config, Path, Dialect]",
     tmp_path_factory: pytest.TempPathFactory,
 ) -> "tuple[Config, Path, Dialect]":
-    """Per-(module, worker, dialect) isolated cfg — scope-pinned to
-    `AGREEMENT_AUDIT`.
+    """Per-(module, worker, dialect) isolated cfg.
 
-    CB.7 followup — mirrors the producer's `dialect_isolated_cfg` in
-    `tests/e2e/db/test_audit_direct.py`. Both fixtures call
-    `_resolve_isolation_suffix` which picks up the module's
-    `@isolation_consumer(IsolationScope.AGREEMENT_AUDIT)` marker and
-    returns the scope value as suffix → producer + consumer read/write
-    the same `<base>_x_aa` prefix.
+    CB.7-followup unwind (2026-06-02): per-test hash suffix, no cross-tier
+    scope sharing. Tiers communicate via JSON artifacts on disk.
     """
     from tests.e2e._isolation import _isolate_cfg, _resolve_isolation_suffix
 
@@ -106,33 +84,41 @@ def dialect_isolated_cfg(
 
 
 @pytest.fixture(scope="module")
-def scenario(
+def seeded_db(
     dialect_isolated_cfg: "tuple[Config, Path, Dialect]",
 ) -> "ScenarioPlant":
-    """Reconstruct the producer's ScenarioPlant deterministically.
+    """Seed dialect-specific DB with the spec_example scenario."""
+    from tests.e2e._seed_helpers import apply_db_seed
 
-    `default_scenario_for` is pure (no DB writes); same inputs the
-    producer fed `apply_db_seed`. Used by `expected_audit_counts` to
-    compute the planted-row count this consumer asserts against.
-    """
-    _ = dialect_isolated_cfg  # ordering only; scenario construction is pure
+    cfg, _cfg_path, dialect = dialect_isolated_cfg
     instance = load_instance(l2_yaml_for_test())
-    report = default_scenario_for(instance, today=_TODAY, mode="l1_invariants")
-    return report.scenario
+    conn = connect_demo_db(cfg)
+    try:
+        scenario = apply_db_seed(
+            conn, instance,
+            prefix=cfg.db_table_prefix,
+            mode="l1_invariants",
+            today=_TODAY,
+            plant_window=_PERIOD,
+            dialect=dialect,
+            include_baseline=False,
+        )
+    finally:
+        conn.close()
+    return scenario
 
 
 @pytest.fixture(scope="module")
 def conn(
     dialect_isolated_cfg: "tuple[Config, Path, Dialect]",
+    seeded_db: "ScenarioPlant",
 ) -> "Iterator[Any]":
-    """Per-dialect read-only DB connection against the scope-pinned
-    isolated cfg. CB.7 followup: applies `enforce_readonly` so the
-    consumer marker is enforced by PG itself — any attempted write
-    raises at the offending line."""
-    cfg, _cfg_path, dialect = dialect_isolated_cfg
+    """Per-dialect DB connection against the isolated cfg.
+    Depends on seeded_db to enforce ordering."""
+    _ = seeded_db
+    cfg, _cfg_path, _dialect = dialect_isolated_cfg
     c = connect_demo_db(cfg)
     try:
-        enforce_readonly(c, dialect)
         yield c
     finally:
         c.close()
@@ -211,7 +197,7 @@ def app2_results(
 
 @pytest.mark.parametrize("invariant", ALL_L1_INVARIANTS)
 def test_l1_invariant_app2_extract(
-    scenario: "ScenarioPlant",
+    seeded_db: "ScenarioPlant",
     app2_results: "Mapping[str, Mapping[str, object]]",
     invariant: str,
 ) -> None:
@@ -223,7 +209,7 @@ def test_l1_invariant_app2_extract(
     set) before serializing the keys — a partial set would silently
     mismatch the agreement validator's row-identity check.
     """
-    expected_obj = expected_audit_counts(scenario, _PERIOD)
+    expected_obj = expected_audit_counts(seeded_db, _PERIOD)
     expected: int = getattr(expected_obj, f"{invariant}_count")
     entry = app2_results[invariant]
     app2_count = int(entry["count"])  # type: ignore[call-overload]: dict value is `object`; int by fixture construction

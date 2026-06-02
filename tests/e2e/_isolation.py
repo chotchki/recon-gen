@@ -37,27 +37,23 @@ if TYPE_CHECKING:
 def _resolve_isolation_suffix(
     request: pytest.FixtureRequest, cfg: "Config",
 ) -> tuple[str, bool]:
-    """Resolve the prefix suffix the fixture should use, honoring any
-    `@isolation_scope(...)` module-level marker.
+    """Resolve the prefix suffix the fixture should use.
 
-    Returns ``(suffix, is_scope_pinned)``. When the test's module
-    declares `@isolation_producer` or `@isolation_consumer`, the suffix
-    is the scope value (``x_<scope>``) so producer + consumer agree on
-    the shared prefix across tiers. Otherwise falls back to a per-(test
-    nodeid, worker, dialect, l2) hash for plain per-test isolation.
+    CB.7-followup unwind (2026-06-02): always returns the per-test
+    hash. The earlier "scope-pinned suffix shared across tiers"
+    branch was the source of the implicit cross-tier dependency
+    that kept biting in different guises (UndefinedTable on
+    consumer reads, wrong-shape seed counts, deadlock cascades
+    when writers shared a prefix).
 
-    Shared by:
-    - the canonical `isolated_cfg` fixture (default cfg flow)
-    - per-file `dialect_isolated_cfg` fixtures that override the
-      canonical fixture for dialect-parametrized writer/reader tests
-      (audit chain).
+    Tiers now communicate ONLY via JSON artifacts on disk (the
+    pre-CB.7 contract). Each pytest invocation is self-contained;
+    the marker remains a semantic label, not a coordination
+    mechanism.
+
+    Return shape kept as ``(suffix, is_scope_pinned)`` for callers'
+    teardown logic — second element is always ``False`` now.
     """
-    request_any: Any = request  # typing-smell: ignore[explicit-any]: pytest FixtureRequest dynamic attr
-    scope_marker = next(
-        request_any.node.iter_markers("isolation_scope"), None,
-    )
-    if scope_marker is not None and scope_marker.args:
-        return f"x_{scope_marker.args[0]}", True
     return _isolated_cfg_key(request, cfg), False
 
 
@@ -124,16 +120,11 @@ def isolated_cfg(
     cfg: "Config",
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator["Config"]:
-    """Module-scoped per-(file, xdist worker) isolated cfg, OR fixed-key
-    isolated cfg when the module declares `@isolation_scope(...)`.
+    """Module-scoped per-(file, xdist worker) isolated cfg.
 
-    See `tests/_marks.py::IsolationScope` for the cross-tier sharing
-    semantics. Default behavior is per-(module, worker) hash — each
-    file × xdist worker gets its own prefix; concurrent writes don't
-    race. With `@isolation_scope(...)` at module scope, the fixture
-    uses the scope value as a stable suffix; all three tiers (db /
-    app2 / qs_browser) declaring the same scope read each other's
-    state via the shared DB prefix.
+    CB.7-followup unwind (2026-06-02): always per-(file, worker)
+    hash. Cross-tier sharing dropped — tiers communicate via JSON
+    artifacts on disk, not shared DB prefixes.
 
     Teardown (best-effort): drop the worker's prefixed schema so
     repeated runs don't accumulate `_<suffix>` debris. Failures
@@ -141,22 +132,11 @@ def isolated_cfg(
     """
     from recon_gen.common.sql import Dialect
 
-    suffix, is_scope_pinned = _resolve_isolation_suffix(request, cfg)
+    suffix, _is_scope_pinned = _resolve_isolation_suffix(request, cfg)
     isolated = _isolate_cfg(cfg, suffix=suffix, tmp_path_factory=tmp_path_factory)
     yield isolated
 
     if isolated.dialect is Dialect.DUCKDB:
-        return
-    # CB.7 followup — when the suffix came from a cross-tier scope
-    # marker (`x_<scope>`), the prefix lives across pytest invocations
-    # (db tier seeds → app2/qs_browser tiers read). Tearing down here
-    # at the producer's module-fixture end would drop the schema
-    # before the consumer tier opens its pytest. Per-worker hash
-    # suffixes don't share across processes, so their schema can be
-    # cleaned up locally — only the scope-pinned variant is unsafe to
-    # drop. (The runner's container is torn down at variant-end either
-    # way; nothing leaks past that boundary.)
-    if is_scope_pinned:
         return
     try:
         from recon_gen.common.db import connect_demo_db, execute_script
@@ -242,10 +222,13 @@ def db_conn(
     Centralizes `connect_demo_db(isolated_cfg) → yield → close` so
     individual test files don't reimplement it.
 
-    CB.7 followup: when the test's module declares
-    ``@isolation_consumer(...)``, the connection is switched to
-    read-only mode via :func:`enforce_readonly`. Writes raise at the
-    exact line that issued them.
+    Marker-driven read-only safety net: when the test's module
+    declares ``@isolation_consumer(...)``, the connection is switched
+    to read-only mode via :func:`enforce_readonly`. Any DROP / CREATE
+    / INSERT raises ``ReadOnlySqlTransaction`` at the offending line
+    — the marker contract is enforced by Postgres itself, not by
+    trust. The marker becomes opt-in for files that genuinely don't
+    write (e.g., qs_browser tests that only hit QS).
     """
     from recon_gen.common.db import connect_demo_db
     conn = connect_demo_db(isolated_cfg)

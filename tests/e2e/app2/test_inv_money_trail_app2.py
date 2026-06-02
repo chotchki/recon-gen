@@ -1,24 +1,23 @@
-"""CB.5 stage 2 — App2 tier consumer: L2 money_trail rendered rows.
+"""CB.5 stage 2 — App2 tier: L2 money_trail rendered rows.
 
-Reads the DB state seeded by the db-tier producer
-(`tests/e2e/db/test_inv_direct.py`) and writes App2-rendered rows as
-artifacts the cross-tier validator consumes.
-
-CB.7 followup (2026-06-02): migrated from producer-marked + re-seeding
-to consumer-marked + read-only. See `tests/e2e/_isolation.py::enforce_readonly`.
+Seeds its own isolated prefix + writes App2-rendered rows as
+artifacts the cross-tier validator reads. Tiers communicate via
+JSON artifacts on disk (the pre-CB.7 contract restored 2026-06-02).
 """
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any, Iterator
 
 import pytest
 
+from recon_gen.common.db import connect_demo_db, execute_script
 from recon_gen.common.env_keys import RECON_GEN_E2E
 
 if not RECON_GEN_E2E.get_or_none():
     pytest.skip(
-        "App2 L2 money_trail consumer needs RECON_GEN_E2E=1",
+        "App2 L2 money_trail tier needs RECON_GEN_E2E=1",
         allow_module_level=True,
     )
 
@@ -26,35 +25,91 @@ if not RECON_GEN_E2E.get_or_none():
 from recon_gen.common.l2 import (  # noqa: E402
     L2Instance,
     load_instance,
+    refresh_matviews_sql,
 )
+from recon_gen.common.spine import MoneyTrailInvariant  # noqa: E402
 from tests.audit._inv_dashboard_extract import (  # noqa: E402
     count_money_trail_rows,
     money_trail_row_keys,
     rows_seen_money_trail,
 )
-from tests._marks import IsolationScope, isolation_consumer  # noqa: E402
 from tests.e2e._agreement import write_rendered_rows  # noqa: E402
 from tests.e2e._agreement_helpers import (  # noqa: E402
     l2_yaml_for_test,
+    today_anchor,
 )
 from tests.e2e._drivers import App2Driver  # noqa: E402
 
 if TYPE_CHECKING:
     from recon_gen.common.config import Config
+    from recon_gen.common.spine.money_trail import MoneyTrailGenerator
     from recon_gen.common.tree import App
 
 
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
-    isolation_consumer(IsolationScope.AGREEMENT_INV),
 ]
 
 
+_TODAY = today_anchor()
 _INSTANCE: L2Instance = load_instance(l2_yaml_for_test())
 
 _MONEY_TRAIL_CHAIN_LENGTH = 3
+_MONEY_TRAIL_AMOUNT = 100.0
 _PLANTED_CHAIN_ROOT = "xfer-money-trail-0"
+
+
+def _plant_anchor_day() -> date:
+    return _TODAY - timedelta(days=2)
+
+
+def _build_money_trail_generator(
+    cfg: "Config", anchor_day: date,
+) -> "MoneyTrailGenerator":
+    gen = MoneyTrailInvariant().scenario_for(
+        "CustomerSubledger",
+        chain_length=_MONEY_TRAIL_CHAIN_LENGTH,
+        amount=_MONEY_TRAIL_AMOUNT,
+        anchor_day=anchor_day,
+        instance=_INSTANCE,
+    )
+    gen.prefix = cfg.db_table_prefix
+    return gen
+
+
+@pytest.fixture(scope="module")
+def seeded_l2_db(isolated_cfg: "Config") -> None:
+    """Apply schema + broad seed + money_trail plants + matview refresh
+    against the per-(module, worker) isolated cfg."""
+    from tests.e2e._seed_helpers import apply_db_seed
+
+    conn = connect_demo_db(isolated_cfg)
+    try:
+        apply_db_seed(
+            conn, _INSTANCE,
+            prefix=isolated_cfg.db_table_prefix,
+            mode="l1_plus_broad",
+            today=_TODAY,
+            dialect=isolated_cfg.dialect,
+            include_baseline=False,
+        )
+        anchor = _plant_anchor_day()
+        mt_gen = _build_money_trail_generator(isolated_cfg, anchor)
+        mt_gen.emit(conn)
+        conn.commit()
+        refresh_sql = refresh_matviews_sql(
+            _INSTANCE,
+            prefix=isolated_cfg.db_table_prefix,
+            dialect=isolated_cfg.dialect,
+        )
+        with conn.cursor() as cur:
+            execute_script(
+                cur, refresh_sql, dialect=isolated_cfg.dialect,
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 @pytest.fixture(scope="module")
@@ -77,9 +132,11 @@ def _serialize_keys(keys: "set[tuple[Any, ...]]") -> list[list[Any]]:
 
 
 def test_money_trail_app2_extract(
+    seeded_l2_db: None,
     isolated_cfg: "Config",
     isolated_inv_app: "App",
 ) -> None:
+    _ = seeded_l2_db
     """Read App2's rendered rows for L2 money_trail at the planted
     root; write the artifact.
 
