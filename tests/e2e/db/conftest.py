@@ -216,7 +216,16 @@ def isolated_cfg(
     """
     from recon_gen.common.sql import Dialect
 
-    suffix = _isolated_cfg_key(request, cfg)
+    # CB.7 refactor (2026-06-02) — check for `@isolation_scope(...)` marker.
+    # Files in a cross-tier agreement chain (db → app2 → qs_browser)
+    # declare the same scope; their isolated_cfgs share a prefix so the
+    # tiers read each other's writes via the DB. Absent marker → default
+    # per-(module, worker) hash (cross-tier sharing N/A).
+    scope_marker = next(request.node.iter_markers("isolation_scope"), None)
+    if scope_marker and scope_marker.args:
+        suffix = f"x_{scope_marker.args[0]}"
+    else:
+        suffix = _isolated_cfg_key(request, cfg)
     isolated = _isolate_cfg(cfg, suffix=suffix, tmp_path_factory=tmp_path_factory)
     yield isolated
 

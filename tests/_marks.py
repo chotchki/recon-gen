@@ -130,6 +130,64 @@ def needs(*ns: Need) -> pytest.MarkDecorator:
     return pytest.mark.needs(*[n.value for n in ns])
 
 
+class IsolationScope(StrEnum):
+    """Cross-tier isolation key (CB.7 refactor 2026-06-02).
+
+    Each scope identifies ONE cross-tier agreement chain. Adding a new
+    chain = adding a new enum variant. The enum is the source of truth
+    for the chain catalogue.
+
+    The chain has exactly ONE producer file (the writer fixture lives
+    there) and one-or-more consumer files (read from the producer's
+    DB state). Producer + consumers declare the SAME scope at module
+    level via `@isolation_producer(...)` / `@isolation_consumer(...)`
+    respectively. Both decorators emit the same `isolation_scope`
+    marker so `isolated_cfg` uses the same prefix suffix — readers and
+    writers in the chain see consistent state.
+
+    Trade-off: within a tier, scope-marked tests share the same prefix
+    across workers → concurrent writes would race. Pair with
+    `pytest.mark.xdist_group(...)` on the same group name to pin to
+    one worker (status quo). Future work: parallelize-and-detect by
+    refusing concurrent producer fires.
+
+    Adding a new chain:
+    1. Add a new variant here (e.g. `AGREEMENT_L2FT = "l2ft"`).
+    2. The producer file declares `@isolation_producer(IsolationScope.X)`
+       at module-level pytestmark.
+    3. Each consumer file declares `@isolation_consumer(IsolationScope.X)`.
+    4. Pair with `xdist_group` on the same scope value for within-tier
+       worker pinning.
+    """
+
+    AGREEMENT_INV = "ai"
+    AGREEMENT_AUDIT = "aa"
+
+
+def isolation_producer(scope: IsolationScope) -> pytest.MarkDecorator:
+    """`@isolation_producer(IsolationScope.X)` — declare this module
+    as the WRITER for scope X. Its writer fixtures (requesting
+    `isolated_cfg`) seed the chain's shared prefix.
+
+    There must be exactly one producer file per scope. Static check
+    enforced by `tests/unit/test_typing_smells.py::test_isolation_scopes`
+    (CB.7-followup) once the migration completes.
+    """
+    return pytest.mark.isolation_scope(scope.value, "producer")
+
+
+def isolation_consumer(scope: IsolationScope) -> pytest.MarkDecorator:
+    """`@isolation_consumer(IsolationScope.X)` — declare this module
+    as a READER for scope X. Its tests read the prefix the producer
+    seeded.
+
+    Tests in a consumer file should not write — they trust the
+    producer's seeded state and assert against it. Multiple consumer
+    files per scope are expected (one per tier: app2, qs_browser).
+    """
+    return pytest.mark.isolation_scope(scope.value, "consumer")
+
+
 def writes() -> pytest.MarkDecorator:
     """`@writes()` — DEPRECATED 2026-06-02. Use the provider-marked
     isolation pattern instead: writer FIXTURES request
