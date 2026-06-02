@@ -64,43 +64,18 @@ def pytest_configure(config: Any) -> None:
     if RECON_GEN_FUZZ_SEED.get_or_none() is None:
         os.environ[RECON_GEN_FUZZ_SEED.name] = str(secrets.randbits(32))
 
-    # Y.7-followup — when pytest-xdist is active and `-n` workers were
-    # requested (xdist then defaults `dist` to "load"), bump to "loadgroup"
-    # so `@pytest.mark.xdist_group` markers pin grouped tests to a single
-    # worker. Needed because xdist re-runs module/session-scoped fixtures
-    # ONCE PER WORKER: a module-scoped fixture that mutates a shared
-    # external resource (e.g. test_audit_dashboard_agreement.py's
-    # seeded_audit re-applying the Oracle schema) races across workers —
-    # Oracle's DDL auto-commits, so the second worker's CREATE TABLE hits
-    # ORA-00955 while the first worker's run is still in flight. Done here,
-    # NOT via pyproject `addopts = "--dist ..."`, because a no-xdist env
-    # (the CI `test` job, the wheel-smoke job) chokes on an unrecognized
-    # `--dist`. An explicit `--dist <mode>` on the command line still wins
-    # (only the implicit "load" default — set by `-n` alone — gets bumped).
-    # BM.5 (2026-05-28) — pre-BM the check was
-    # ``getattr(config.option, "dist", "no") == "load"`` but on at least
-    # pytest-xdist 3.8 `pytest -n 4` doesn't set `config.option.dist`
-    # to `"load"` by the time our `pytest_configure` runs — the bare
-    # `-n` shortcut's implicit dist defaulting happens later in xdist's
-    # own configure path. Result: our bump never fired under bare `-n
-    # N`, so every variant cell's `-n 4` invocation effectively ran in
-    # `dist=load` mode + ignored every `@pytest.mark.xdist_group` marker.
-    # The sp_pg_aw browser layer's `test_invariant_three_way_agreement`
-    # is the symptom: with default `load` the two parametrizations
-    # distribute to different workers, each races to `apply_db_seed`
-    # on the same iagree prefix, and one worker's DROP CASCADE wipes
-    # the matview the other just CREATEd. With `loadgroup` actually
-    # active, both parametrizations land on the same worker and share
-    # the module-scoped seed.
-    #
-    # Bump on EITHER `"load"` (explicit) OR `"no"` (default-when-
-    # xdist-plugin-loaded), so the `-n N` shortcut also gets bumped.
-    # An explicit user-supplied `--dist=<something-else>` would set
-    # `config.option.dist` to that other value and skip the bump (the
-    # NOT in {"load", "no"} branch).
-    dist = getattr(config.option, "dist", "no")
-    if config.pluginmanager.hasplugin("xdist") and dist in ("load", "no"):
-        config.option.dist = "loadgroup"
+    # CB.7-followup (2026-06-02) — the historic loadgroup auto-bump
+    # was deleted. Its rationale (pin a shared-prefix writer fixture's
+    # tests to one worker so module-scope seeds didn't race) was the
+    # exact thing CB.7-followup unwound when it dropped cross-tier
+    # shared prefixes. Each test now self-isolates via a per-(file,
+    # worker) hash suffix, so scattered module-scope fixtures reseed
+    # their own private prefix — no contention, no DDL collisions.
+    # Keeping the bump caused the qs_browser cascade: with full e2e
+    # collection + `-m browser` + loadgroup, worker session-start dies
+    # in ~5s on every worker (xdist 3.8 loadgroup interacts badly with
+    # marker-deselected items that carry xdist_group). See runner.py's
+    # unit-layer `_layer_command` comment for the full repro.
 
     # #741 — redirect runner.RUNS_DIR so in-process runner.main calls
     # land in session tmp instead of the operator's real runs/. Lazy

@@ -581,12 +581,13 @@ def _layer_command(
         # for serial debug). Same pattern as api/browser layers.
         cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
-        # CB.7 — `--dist=loadgroup` must hit the CLI (not just be
-        # bumped in pytest_configure) because xdist worker subprocesses
-        # re-parse the original argv, and the runtime bump only
-        # affects the controller. Without this, `@pytest.mark.xdist_group`
-        # markers are silently ignored on the worker side.
-        cmd += ["--dist=loadgroup"]
+        # CB.7-followup (2026-06-02) — `--dist=loadgroup` was the cause
+        # of the qs_browser cascade (workers crash at session-start,
+        # cascade to max-worker-restart). Post-CB.7-unwind every test
+        # self-isolates via per-(file, worker) hash, so xdist_group
+        # pinning is no longer load-bearing. Scattered module-scope
+        # seed fixtures reseed their own prefix per worker — no DB
+        # contention, just N× wall on producer modules (acceptable).
         return (cmd, env_addl)
     if layer == "db":
         # 3a — DB-touching pytest (behind RECON_GEN_E2E=1). CB.6: discover
@@ -605,7 +606,7 @@ def _layer_command(
         # j.6 — see unit layer comment.
         cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
-        cmd += ["--dist=loadgroup"]  # CB.7 — see unit-layer note
+        # CB.7-followup (2026-06-02) — loadgroup dropped; see unit-layer note.
         return (cmd, {**env_addl, RECON_GEN_E2E.name: "1"})
     if layer == "app2":
         # b.3.impl.layer — App2 e2e (HTMX dialect, Playwright WebKit
@@ -624,7 +625,7 @@ def _layer_command(
         # j.6 — see unit layer comment.
         cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
-        cmd += ["--dist=loadgroup"]  # CB.7 — see unit-layer note
+        # CB.7-followup (2026-06-02) — loadgroup dropped; see unit-layer note.
         return (cmd, {**env_addl, RECON_GEN_E2E.name: "1"})
     if layer == "deploy":
         # Y.2.gate.c.5.deploy — `recon-gen json apply --execute` against
@@ -699,7 +700,7 @@ def _layer_command(
             cmd += ["-k", opts.only]
         cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "4"]
-        cmd += ["--dist=loadgroup"]  # CB.7 — see unit-layer note
+        # CB.7-followup (2026-06-02) — loadgroup dropped; see unit-layer note.
         return (cmd, {**env_addl, RECON_GEN_E2E.name: "1"})
     if layer == "qs_browser":
         # Y.2.gate.c.5.browser — Playwright WebKit e2e against deployed QS
@@ -791,7 +792,7 @@ def _layer_command(
             # recovery time per affected test, well within the chain's
             # tolerance.
             "--reruns", "2", "--reruns-delay", "60",
-            "--dist=loadgroup",  # CB.7 — see unit-layer note
+            # CB.7-followup (2026-06-02) — loadgroup dropped; see unit-layer note.
         ]
         agree_cmd = [
             str(_VENV_BIN / "pytest"), agree_file, "-q",
