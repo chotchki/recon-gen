@@ -1,49 +1,67 @@
+# CI — collapsed onto a single self-hosted runner (CB.11.c, 2026-06-02).
+#
+# The pre-CB.11.c shape had six top-level jobs plus a sibling `e2e.yml`
+# workflow with another four. With the self-hosted recon-gen-ci-local
+# box online and `./run_tests.sh up_to=qs_browser` driving every layer
+# (unit → db → app2 → deploy → qs_api → qs_browser) under one roof —
+# Docker per-cell, AWS QuickSight deploys, Playwright WebKit, teardown —
+# the matrix can collapse onto one self-hosted job.
+#
+# What stays out:
+# - `e2e.yml` is deleted (the layered runner does its work). The nightly
+#   AWS-sweep belongs in `nightly-cost-sweep.yml`, not here.
+# - `release.yml` no longer re-runs tests; it gates on this workflow's
+#   `workflow_run` success (see `release.yml.new`).
+# - `docs-portable-install` stays on ubuntu-latest — it's a wheel-extras
+#   gate, not a runner-layer concern.
+# - `coverage-badge` stays on ubuntu-latest — pure post-processing.
+
 name: CI
 
+# Trigger model — only fire on:
+#   - push: main          (post-merge gate)
+#   - pull_request: main  (pre-merge gate)
+#   - workflow_dispatch   (operator manual override)
+# Feature-branch pushes intentionally do NOT fire CI; the self-hosted
+# runner is a finite resource and PR-on-main is the contract.
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-  # workflow_dispatch lets operators manually fire CI on any branch
-  # (e.g. to validate a feature branch before merging). Added BY.1 so
-  # the canonical self-hosted runner change could be verified on a
-  # feature branch without re-expanding push: branches.
   workflow_dispatch:
 
-# Auto-cancel superseded runs on the same branch. A rapid follow-up
-# push doesn't need the older commit's CI to finish — it's been
-# obsoleted. Cuts wasted minutes + clears the queue for the newest
-# truth. (Added 2026-05-27 after a manual `gh run cancel` round on
-# the c4dcdfec→83b5d5d2 push pair surfaced the gap.)
-#
-# E2E intentionally keeps cancel-in-progress: false because mid-flight
-# runs hold deployed AWS dashboards + cleanup expects an orderly
-# teardown — those need to finish.
+# Auto-cancel superseded runs on the same branch. A rapid follow-up push
+# obsoletes the older commit's CI.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
+  id-token: write   # AWS OIDC for the qs_api / qs_browser layers
   contents: read
+  actions: read     # `gh run list` if any cleanup helper needs it
 
 jobs:
-  test:
-    # v12.0.0 followup — skip the push-CI when this is a Release commit.
-    # The Release workflow (release.yml) fires on the tag push and runs
-    # its own gauntlet (tests + smoke + verify + release-e2e); the
-    # parallel push-CI burns AWS rate-limit budget contending with it.
-    # Downstream jobs `needs: test`, so skipping here skips everything.
+  test-everything:
+    name: Layered runner (unit → qs_browser)
+    # v12.0.0 followup, preserved: skip the push-CI when this is a
+    # Release commit. The Release workflow (release.yml) fires on the
+    # tag push and runs its own pipeline; the parallel push-CI burns
+    # AWS rate-limit budget contending with it. Downstream jobs
+    # `needs: test-everything`, so skipping here skips everything.
     if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Release v')
-    # BY.1 — promoted from ubuntu-latest to self-hosted. The BY.0 spike
-    # measured 48 min on self-hosted vs 68 min on ubuntu-latest for the
-    # same suite (1.4× speedup). recon-gen-ci-local is the WSL2 Ubuntu
-    # runner on the 5800X3D / 64GB Windows box (per BY.4 ops doc).
-    # Playwright WebKit system deps + libatomic1 are pre-installed on
-    # the runner so `playwright install` can run without --with-deps
-    # (which would need sudo). If a future restore to ubuntu-latest is
-    # needed, set runs-on: ubuntu-latest and restore `--with-deps`.
+
+    # The WSL2 Ubuntu runner on the 5800X3D / 64GB Windows box.
+    # Playwright WebKit system deps, libatomic1, Docker, AWS CLI, and
+    # uv are pre-installed (see BY.4 ops doc). recon-gen-ci-local is
+    # the unique label tying jobs to this physical host.
     runs-on: [self-hosted, recon-gen-ci-local]
+
+    # Hard cap so a hung Playwright session doesn't pin the runner.
+    # 90 min is comfortable headroom over the observed ~50 min wall on
+    # a full qs_browser sweep (BY.2 baseline).
+    timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v6
@@ -58,260 +76,157 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install dependencies (V.2 — uv sync from uv.lock)
-        # `[audit]` brings in reportlab + pypdf + pyhanko; the audit
-        # CLI verb (and tests/audit/) require them — pyhanko in
-        # particular is needed even for unsigned PDFs because the
-        # empty reviewer signature widgets land via pyhanko on every
-        # render, regardless of whether `signing:` is configured.
-        # `--frozen` fails the build if the lock is out of date.
+      - name: Install dependencies (uv sync from uv.lock)
+        # `--extra dev --extra prod` matches the broadest extras any
+        # layer exercises (unit needs dev/pyright + playwright; db/app2
+        # need prod for the seed + App2 server). Playwright + boto3-stubs
+        # + pytest-xdist all live in [dev].
         run: uv sync --frozen --extra dev --extra prod
 
       - name: Install Playwright WebKit browser
-        # X.2.a.2 added a Playwright JS unit harness under tests/js/
-        # that launches WebKit. Playwright ships its CLI but not the
-        # browser binaries; CI must `playwright install` the browser
-        # explicitly. BY.1 dropped `--with-deps`: self-hosted WSL2
-        # runner has the WebKit system libs pre-installed, so the
-        # bootstrap apt-get install (which needs sudo) is no longer
-        # needed per-job. On a fresh runner replacement, run the
-        # one-time bootstrap from BY.4's ops doc.
+        # WebKit system libs are pre-installed on the runner, so
+        # --with-deps is omitted (it requires sudo). The browser binary
+        # itself still needs per-version install.
         run: .venv/bin/playwright install webkit
 
       - name: Set up biome
-        # biome is a standalone Rust binary (no Node / npm — setup-biome
-        # downloads the prebuilt binary). The pytest sessionstart hook
-        # (conftest.py) runs `biome check` as a gate when `biome` is on
-        # PATH, alongside pyright — so this step is what makes the JS
-        # lint gate fire in CI. Version pinned to match the schema in
-        # biome.jsonc; bump both together.
+        # biome is a standalone Rust binary; the pytest sessionstart
+        # hook runs `biome check` as a gate when `biome` is on PATH.
+        # Version pinned to match biome.jsonc schema.
         uses: biomejs/setup-biome@v2
         with:
           version: 2.4.14
 
-      - name: Run tests with coverage (pytest sessionstart runs pyright strict + biome)
-        # W.8b — drop ``--cov-report=xml --cov-report=term`` from this
-        # job: the coverage aggregator job below downloads the data
-        # file and produces the combined report. ``COVERAGE_FILE`` is
-        # named with a ``.py3.13`` suffix so the aggregator's
-        # ``.coverage.*`` glob (kept for forward compatibility if a
-        # second Python version is reintroduced) still matches.
-        # BY.1.1 — pytest-xdist (-n auto) on the self-hosted runner so
-        # the 5800X3D's 16 threads aren't wasted on a single-process
-        # run. conftest pins xdist's dist mode to `loadgroup` so
-        # `@pytest.mark.xdist_group` works for tests that need
-        # per-group serialization. The runner's layered ./run_tests.sh
-        # also uses -n auto; this brings the workflow-level pytest
-        # invocation into parity.
-        env:
-          COVERAGE_FILE: .coverage.py3.13
-        run: .venv/bin/pytest -n auto --cov=recon_gen
-
-      - name: Upload coverage data
-        uses: actions/upload-artifact@v7
+      - name: Configure AWS credentials via OIDC
+        # qs_api + qs_browser layers reach AWS for QuickSight deploys.
+        # OIDC trust policy on `qs-gen-ci` role is documented in
+        # `.github/E2E_SETUP.md` (carried over from e2e.yml).
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          name: coverage-data-py3.13
-          path: .coverage.py3.13
-          if-no-files-found: error
-          include-hidden-files: true
-          retention-days: 7
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
 
-  # P.7 — containerized integration job (Postgres leg).
-  #
-  # Y.2.gate.k.3 (2026-05-09): split off from the merged PG+Oracle
-  # ``integration`` job. PR-quick mode — PG-only runs on every PR for
-  # ~2-min feedback. The Oracle leg (``integration-oracle`` below) only
-  # fires on push:main + workflow_dispatch — it costs ~3 min more
-  # (Oracle Free service container ~60-90s first-boot init + per-step
-  # apply/seed time), and dialect-divergence regressions are rare
-  # enough that catching them at merge time is acceptable.
-  #
-  # Runs ``recon-gen schema/data/json apply`` against a live
-  # Postgres service container, then verifies per-prefix matview row
-  # counts via ``tests/e2e/test_demo_apply_row_counts.py`` (Y.2.gate.f.2
-  # — was ``tests/integration/verify_demo_apply.py`` CLI before the
-  # sweep).
-  #
-  # Service-container syntax (vs. ``docker run`` inside steps) lets GHA
-  # health-check the DB before steps start, so the apply doesn't race
-  # against the postgres init.
-  integration-pg:
-    needs: test
-    runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_PASSWORD: ci_pg_password
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-
-      - name: Install dependencies (V.2 — uv sync from uv.lock)
-        # `--extra prod` provides reportlab + pypdf + pyhanko
-        # (already in [dev]) so `audit apply --execute` can land its
-        # empty reviewer-signature widgets without ImportError.
-        # `--extra e2e` adds pytest-xdist which the runner's unit layer
-        # invokes via ``-n auto`` (k.1.proof — without it the runner
-        # fails with ``pytest: error: unrecognized arguments: -n``).
-        run: uv sync --frozen --extra dev --extra e2e --extra prod
-
-      - name: Generate per-job config.yaml
-        # Cfg lives in /tmp so the runner picks it up via RECON_GEN_CONFIG.
-        # Container URL points at the GHA service container's exposed port.
+      - name: Materialize per-dialect runner cfgs
+        # The runner discovers cfg via `run/config.<dialect>.yaml`.
+        # For the AWS-touching layers it needs `auth:` (aws_profile or
+        # quicksight_user_arn) + the QS account / region. We can't
+        # depend on the runner box having these checked in (the whole
+        # `run/` dir is gitignored), so the job materializes them from
+        # secrets per-run.
+        #
+        # The AWS_ROLE_ARN step above already exported temporary creds
+        # to the default profile, so the cfg's `auth:` block uses
+        # `quicksight_user_arn` directly (no profile lookup needed).
+        #
+        # `demo_database_url` points at the Docker container the runner
+        # will spin up under `setup_variant` — testcontainers binds to
+        # 127.0.0.1:5433 (PG) / a dynamic port (Oracle); the runner
+        # rewrites `demo_database_url` in the per-variant cfg, so the
+        # value here is only the fallback / discovery anchor.
         run: |
-          cat > /tmp/ci-pg.yaml <<'EOF'
-          aws_account_id: "000000000000"
+          mkdir -p run
+          cat > run/config.postgres.yaml <<'EOF'
+          aws_account_id: "470656905821"
           aws_region: "us-east-1"
-          datasource_arn: "arn:aws:quicksight:us-east-1:000000000000:datasource/ci"
-          deployment_name: "qs-ci-pg"
-          db_table_prefix: "qs_ci_pg"
+          deployment_name: "qs-ci-${{ github.run_id }}-pg"
+          db_table_prefix: "qs_ci_${{ github.run_id }}_pg"
           dialect: "postgres"
-          demo_database_url: "postgresql://postgres:ci_pg_password@localhost:5432/postgres"
+          demo_database_url: "postgresql://postgres:postgres@127.0.0.1:5433/postgres"
+          principal_arns:
+            - "${{ secrets.RECON_E2E_USER_ARN }}"
+          auth:
+            quicksight_user_arn: "${{ secrets.RECON_E2E_USER_ARN }}"
+          EOF
+          cat > run/config.oracle.yaml <<'EOF'
+          aws_account_id: "470656905821"
+          aws_region: "us-east-1"
+          deployment_name: "qs-ci-${{ github.run_id }}-or"
+          db_table_prefix: "qs_ci_${{ github.run_id }}_or"
+          dialect: "oracle"
+          demo_database_url: "oracle://recon:recon@127.0.0.1:1521/FREEPDB1"
+          principal_arns:
+            - "${{ secrets.RECON_E2E_USER_ARN }}"
+          auth:
+            quicksight_user_arn: "${{ secrets.RECON_E2E_USER_ARN }}"
           EOF
 
-      # Y.2.gate.k.1+k.6 — Phase 1 wedge (k.1.proof). Replaces the prior
-      # manual `schema apply` + `data apply` + `data refresh` + `json apply`
-      # + `pytest test_dataset_sql_smoke.py` chain with a single runner
-      # invocation. RECON_GEN_RUNNER_CI=1 tells setup_variant to skip
-      # Docker spin-up (the postgres service container above is the DB);
-      # RECON_GEN_DEMO_DATABASE_URL points at it.
-      #
-      # The runner does:
-      #   1. setup_variant — no-op (CI mode + URL pre-set)
-      #   2. seed_variant — schema apply + data apply + data refresh
-      #   3. dispatch_layer("db") — pytest tests/e2e/test_dataset_sql_smoke.py
-      #
-      # Per-cell artifacts land at runs/<run-id>/sp_pg_lo/db/{cmd,stdout,stderr}.log
-      # for triage parity with local invocations.
-      - name: Run runner db layer (CI-mode, no Docker spin-up)
-        # Multi-variant fan-out (sp + sq for pg/lo) works fine here:
-        # each variant gets its own synthesized L2 yaml with
-        # `instance: <spec.name>` (e.g. `sp_pg_lo`, `sq_pg_lo`), so
-        # their schemas live under disjoint prefixes and don't collide
-        # on the shared GHA postgres service container.
+      - name: Run the full layered chain (unit → qs_browser)
+        # ./run_tests.sh is the canonical layered runner. up_to=qs_browser
+        # invokes layers 1..6: unit (prelude, once) → db → app2 → deploy →
+        # qs_api → qs_browser, fanned out across the matrix. --coverage
+        # writes `.coverage.<variant>.<layer>` files into runs/<id>/.
+        # No --dialects / --targets / --scenarios = full default matrix
+        # (the runner's compose_matrix decides what fans out).
         #
-        # The runner's db layer dispatches:
-        #   - test_dataset_sql_smoke.py — substitutes QS placeholders +
-        #     runs every dataset's CustomSQL against the live DB.
-        #   - test_demo_apply_row_counts.py (k.1.absorb, Phase 2) —
-        #     asserts ≥1 row in every named matview. Reads
-        #     RECON_GEN_TEST_L2_INSTANCE from the runner's per-variant env
-        #     (the synthesized yaml), so prefix discovery picks up the
-        #     `<spec.name>_*` tables the runner just seeded.
+        # RECON_GEN_E2E=1 lets the e2e-tier pytest collections run.
+        # RECON_E2E_USER_ARN is consumed by the qs_browser layer for
+        # embed URL minting (also derivable from cfg.auth, kept explicit
+        # for parity with the legacy e2e.yml shape).
         env:
-          RECON_GEN_RUNNER_CI: "1"
-          RECON_GEN_DEMO_DATABASE_URL: "postgresql://postgres:ci_pg_password@localhost:5432/postgres"
-          RECON_GEN_CONFIG: /tmp/ci-pg.yaml
-          RECON_GEN_TEST_L2_INSTANCE: tests/l2/spec_example.yaml
-        # Y.2.gate.k.1.coverage (Phase 3) — `--coverage` makes every
-        # pytest layer (unit prelude + per-variant db) write a
-        # `.coverage.<variant>.<layer>` data file under runs/<id>/.
-        # Collected + uploaded below; the `coverage` aggregator job's
-        # `coverage-data-*` glob + `coverage combine` (W.8b) picks them
-        # up with no logic change. (Oracle leg doesn't emit coverage —
-        # `integration-oracle`'s db-layer dialect branches are already
-        # covered by tests/schema/test_sql_dialect.py in the `test` job,
-        # and wiring the conditional Oracle job into the `coverage`
-        # DAG isn't worth the marginal gain.)
-        run: ./run_tests.sh up_to=db --dialects=pg --targets=lo --coverage
-
-      # Note: audit PDF render+verify is now runner-internal — handled
-      # by tests/e2e/test_audit_pdf_render_verify.py in the runner's
-      # db layer dispatch (k.1.absorb-audit, Phase 2.5). The variant's
-      # synthesized prefix flows through RECON_GEN_TEST_L2_INSTANCE so
-      # audit finds the `<spec.name>_*` tables the seed populated.
+          RECON_GEN_E2E: "1"
+          RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
+          # QS_GEN_RUNNER_YES bypasses the destructive-op prompt; the
+          # runner needs it in non-interactive CI.
+          QS_GEN_RUNNER_YES: "1"
+        run: ./run_tests.sh up_to=qs_browser --coverage
 
       - name: Collect runner coverage data
-        # The runner wrote `.coverage.<variant>.<layer>` files into the
-        # per-variant run dirs (runs/<id>/_prelude/, runs/<id>/sp_pg_lo/,
-        # runs/<id>/sq_pg_lo/). Flatten them to the repo root so the
-        # upload step's `.coverage.*` glob catches them; `coverage
-        # combine` in the aggregator scans the data-file dir. Best-effort
-        # — never fail the job over coverage collection.
+        # Each layer wrote `.coverage.<variant>.<layer>` files under
+        # `runs/<id>/<variant>/` (and `runs/<id>/_prelude/` for the unit
+        # prelude). Flatten to repo root so the upload step's
+        # `.coverage.*` glob catches them; the badge job's
+        # `coverage combine` will merge them. Best-effort — never fail
+        # the job over coverage collection.
         if: always()
         run: |
           find runs -name '.coverage.*' 2>/dev/null | while read -r f; do cp "$f" .; done || true
-          echo "coverage data files: $(ls .coverage.* 2>/dev/null || echo '<none>')"
+          echo "coverage data files: $(ls -la .coverage.* 2>/dev/null || echo '<none>')"
 
-      - name: Upload runner coverage data
+      - name: Upload runner artifacts (triage parity)
+        # The `runs/<run-id>/` tree is the same artifact shape an
+        # operator sees locally — per-variant per-layer cmd.json /
+        # stdout.log / stderr.log / timings.json + screenshots from any
+        # failing browser tests. The local `_dev/runner.py::collect_run_outputs`
+        # already lays it out canonically.
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-data-pg-runner
+          name: runner-runs-${{ github.run_id }}
+          path: runs/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload combined coverage data
+        # Aggregator (coverage-badge job below) downloads this artifact.
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-data-runner
           path: .coverage.*
           if-no-files-found: warn
           include-hidden-files: true
           retention-days: 7
 
-      - name: Upload runner artifacts (triage parity)
+      - name: Sweep deployed QS resources (always)
+        # Belt-and-suspenders: even though the runner's per-cell teardown
+        # is supposed to be idempotent, a runner-killed-mid-job case
+        # (timeout, OOM, manual cancel) leaves QS dashboards behind. The
+        # `json clean` here scopes by `Deployment` tag — uses the same
+        # deployment_name we wrote into the cfgs above, so it only
+        # sweeps THIS run's resources.
         if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: integration-pg-runs
-          path: runs/
-          if-no-files-found: warn
-          retention-days: 7
+        run: |
+          mkdir -p /tmp/empty-out
+          .venv/bin/recon-gen json clean -c run/config.postgres.yaml -o /tmp/empty-out --execute || true
+          .venv/bin/recon-gen json clean -c run/config.oracle.yaml -o /tmp/empty-out --execute || true
 
-  # P.7 — containerized integration job (Oracle leg).
-  #
-  # Y.2.gate.k.3 (2026-05-09): gated to push:main + workflow_dispatch
-  # only. Oracle Free service container costs ~60-90s first-boot init,
-  # plus per-step apply time — too slow to gate every PR on. Catches
-  # dialect-divergence regressions at merge time (PG-only PRs already
-  # passed integration-pg).
-  #
-  # ``gvenzl/oracle-free`` is the de-facto Oracle Free Edition image
-  # for CI (Oracle's own ``container-registry.oracle.com`` requires
-  # login). ``:latest`` is the full Oracle Free 23ai (~2GB image,
-  # ~60-90s first-boot init). ``FREEPDB1`` is the default service
-  # name; admin user is ``system`` with the password we set here.
-  integration-oracle:
-    needs: test
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+  # Build a wheel from the current commit, install it in a fresh venv
+  # (NOT an editable / src-tree install), and run `docs apply --portable`
+  # end-to-end. Catches regressions where docs sourcing assumes a repo
+  # checkout. Unchanged from pre-CB.11.c — pure wheel-extras gate.
+  docs-portable-install:
+    needs: test-everything
     runs-on: ubuntu-latest
-
-    services:
-      oracle:
-        image: gvenzl/oracle-free:latest
-        env:
-          ORACLE_PASSWORD: ci_ora_password
-          # Create a dedicated app user with quota on the USERS
-          # tablespace, so seed inserts don't pile into SYSTEM (which
-          # autoextends in tiny increments and hits ORA-01653 around
-          # ~60k transaction rows). Default behavior of
-          # gvenzl/oracle-free: APP_USER + APP_USER_PASSWORD create
-          # the user with UNLIMITED quota on USERS at container init.
-          APP_USER: recon
-          APP_USER_PASSWORD: ci_recon_password
-        ports:
-          - 1521:1521
-        options: >-
-          --health-cmd "healthcheck.sh"
-          --health-interval 30s
-          --health-timeout 30s
-          --health-retries 30
-          --health-start-period 90s
-
     steps:
       - uses: actions/checkout@v6
 
@@ -325,223 +240,67 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install dependencies (V.2 — uv sync from uv.lock)
-        # `--extra e2e` brings in pytest-xdist which the runner's unit
-        # layer invokes via `-n auto`.
-        run: uv sync --frozen --extra dev --extra e2e --extra prod
-
-      - name: Generate per-job config.yaml
+      - name: Build wheel
         run: |
-          cat > /tmp/ci-oracle.yaml <<'EOF'
-          aws_account_id: "000000000000"
-          aws_region: "us-east-1"
-          datasource_arn: "arn:aws:quicksight:us-east-1:000000000000:datasource/ci"
-          deployment_name: "qs-ci-oracle"
-          db_table_prefix: "qs_ci_oracle"
-          dialect: "oracle"
-          demo_database_url: "recon/ci_recon_password@localhost:1521/FREEPDB1:POOLED"
-          EOF
+          uv pip install --system build
+          python -m build --wheel --outdir /tmp/wheelhouse
 
-      # Two variant cells (sp_or_lo + sq_or_lo) seed in parallel against
-      # the SAME Oracle container (runner uses asyncio.gather per
-      # m.5.a). gvenzl/oracle-free's default config gives each client
-      # connection its own dedicated server process with its own PGA;
-      # two concurrent 60k-row INSERT-ALL sessions exhaust the process
-      # global area regardless of PGA_AGGREGATE_LIMIT (prior 1G bump
-      # didn't help — container memory caps below what two dedicated
-      # servers need).
-      #
-      # Fix: DRCP (Database Resident Connection Pooling). One
-      # ALTER-style call starts a server-side pool of dedicated server
-      # processes shared across all client sessions; clients append
-      # `:POOLED` to the service name in the DSN (see cfg line above
-      # + env var below). PGA pressure collapses because both variants
-      # multiplex onto the same small set of pooled server processes
-      # instead of forking a dedicated server per connection.
-      - name: Start Oracle DRCP (Database Resident Connection Pool)
-        # CRITICAL: connect as SYS-as-SYSDBA, to FREE (the CDB root).
-        # DBMS_CONNECTION_POOL is a SYS-owned CDB-level package; the
-        # `system` user has DBA but NOT SYSDBA, so even connected to
-        # the CDB it can't see the package (PLS-00201). gvenzl/oracle-free
-        # uses ORACLE_PASSWORD for sys as well, so we just swap the user
-        # + add the SYSDBA mode flag.
+      - name: Install wheel into a fresh venv (NOT editable)
         run: |
-          .venv/bin/python <<'PY'
-          import oracledb
-          conn = oracledb.connect(
-              user="sys",
-              password="ci_ora_password",
-              dsn="localhost:1521/FREE",
-              mode=oracledb.AUTH_MODE_SYSDBA,
-          )
-          cur = conn.cursor()
-          # Idempotent: START_POOL errors with ORA-56501 if already
-          # started, which is fine in CI (single-job lifetime anyway).
-          try:
-              cur.callproc("DBMS_CONNECTION_POOL.START_POOL")
-              print("DRCP pool started.")
-          except oracledb.DatabaseError as exc:
-              (err,) = exc.args
-              if "ORA-56501" in str(err):
-                  print("DRCP pool already running (ignoring).")
-              else:
-                  raise
-          # Verify ACTIVE state. dba_cpool_info is the config-side
-          # view (it has STATUS but NOT runtime counters); the busy /
-          # open server counts live in v$cpool_stats, which is empty
-          # until a pooled client connects — no point querying it here.
-          cur.execute(
-              "SELECT status FROM dba_cpool_info "
-              "WHERE connection_pool = 'SYS_DEFAULT_CONNECTION_POOL'"
-          )
-          (status,) = cur.fetchone()
-          print(f"DRCP pool: status={status}")
-          conn.close()
-          PY
+          uv venv /tmp/portable-test-venv
+          uv pip install --python /tmp/portable-test-venv/bin/python \
+              "$(ls /tmp/wheelhouse/recon_gen-*.whl)[prod]"
 
-      # Y.2.gate.k.1.thin-wrapper (Phase 4): runner drives the entire
-      # apply + smoke + audit chain. `--dialects=or --targets=lo`
-      # narrows the matrix to Oracle local-container cells. CI mode
-      # tells setup_variant to skip Docker spin-up (the GHA Oracle
-      # service container above is the DB).
-      #
-      # The runner's db layer dispatches:
-      #   - test_dataset_sql_smoke.py (the Oracle leg matters most —
-      #     dialect divergences like JSON path concat, ORA-00923
-      #     SELECT-without-FROM, ORA-00911 underscore identifier,
-      #     ORA-25154 USING qualifier surface here, not against PG).
-      #   - test_demo_apply_row_counts.py — ≥1 row per named matview.
-      #   - test_audit_pdf_render_verify.py — render + verify cycle.
-      - name: Run runner db layer (CI-mode, no Docker spin-up)
-        env:
-          RECON_GEN_RUNNER_CI: "1"
-          # Must match cfg's demo_database_url (line ~292) — in CI mode
-          # the runner uses this env var as the connection URL and
-          # ignores the cfg yaml's URL. Both must point at `recon`, not
-          # `system`, so seed inserts land in USERS not SYSTEM tablespace.
-          # `:POOLED` suffix routes the client through the DRCP pool
-          # (started by the prior step). Without it, each connection
-          # forks a dedicated server with its own PGA, exhausting the
-          # container under parallel variant seeds.
-          RECON_GEN_DEMO_DATABASE_URL: "recon/ci_recon_password@localhost:1521/FREEPDB1:POOLED"
-          RECON_GEN_CONFIG: /tmp/ci-oracle.yaml
-          RECON_GEN_TEST_L2_INSTANCE: tests/l2/spec_example.yaml
-        run: ./run_tests.sh up_to=db --dialects=or --targets=lo
+      - name: Build portable docs from installed wheel
+        run: |
+          /tmp/portable-test-venv/bin/recon-gen docs apply \
+              --portable -o /tmp/portable-site
+          test -f /tmp/portable-site/index.html
+          test -f /tmp/portable-site/handbook/l1.html
 
-      - name: Upload runner artifacts (triage parity)
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: integration-oracle-runs
-          path: runs/
-          if-no-files-found: warn
-          retention-days: 7
+      - name: Portable docs carry the L2 theme + site.css is persona-neutral (X.2.s.2)
+        run: |
+          set -e
+          L2=/tmp/portable-site/stylesheets/_l2_theme.css
+          SITE=/tmp/portable-site/stylesheets/site.css
+          test -f "$L2" || { echo "::error::_l2_theme.css not generated — theming code didn't run"; exit 1; }
+          grep -q -- '--qs-accent:' "$L2" || { echo "::error::_l2_theme.css doesn't set --qs-accent"; exit 1; }
+          grep -qi '#2E5090' "$L2"        || { echo "::error::_l2_theme.css missing the bundled L2 accent"; exit 1; }
+          grep -q 'stylesheets/_l2_theme.css' /tmp/portable-site/index.html || { echo "::error::index.html doesn't link _l2_theme.css"; exit 1; }
+          grep -q 'var(--qs-accent)' "$SITE" || { echo "::error::site.css doesn't route through --qs-accent"; exit 1; }
+          if grep -qi -- '--snb-\|2B4A2E' "$SITE"; then
+            echo "::error::site.css still hard-codes the SNB palette (X.2.s.2 regression)"; exit 1
+          fi
 
-  # X.3.g — the SQLite column of the X.2 matrix. SQLite is the
-  # cheapest cell in the whole grid: no DB service container, no
-  # Docker, no AWS — the runner's ``_setup_local_sqlite()`` creates a
-  # per-invocation tempfile DB + synthesized cfg, seeds it (schema +
-  # data + refresh), then runs the ``db`` layer (every dataset's
-  # CustomSQL against the live SQLite + per-matview row counts + the
-  # audit PDF render/verify cycle) and the ``app2`` layer (the
-  # self-hosted HTMX renderer served against that SQLite, via
-  # ``test_html2_*``). That's the integrator-local persona's iteration
-  # loop — install, point at a SQLite file, see it apply, see App 2
-  # render — turned into a CI gate. (Layer-1 matview-check + audit-PDF
-  # SQLite *unit* coverage already runs in the ``test`` job above —
-  # ``tests/unit/test_layer1_query_sqlite.py`` + ``tests/audit/test_pdf_sqlite.py``;
-  # this job is the App-2-against-SQLite cell those two couldn't cover.)
-  #
-  # CA.7 — `e2e-sqlite` was renamed `e2e-duckdb` and swapped to
-  # `--dialects=du`. The DuckDB dialect branches in
-  # ``common/sql/dialect.py`` / ``common/l2/schema.py`` are already
-  # exercised by the ``test`` job's tests/schema + the unit suites, so
-  # the marginal coverage gain isn't worth wiring this job into the
-  # aggregator DAG. Once CA.8 lands and `sl` is gone, this job may
-  # absorb additional fan-out from the broader CB CI restructure.
-  e2e-duckdb:
-    needs: test
+      - name: docs serve starts from installed wheel (X.2.s.1)
+        run: |
+          set +e
+          cd /tmp  # ensure cwd has no docs/_macros — the failure cwd
+          timeout 30 /tmp/portable-test-venv/bin/recon-gen docs serve \
+              -p 8765 > /tmp/serve.log 2>&1
+          set -e
+          echo "--- docs serve output ---"; cat /tmp/serve.log
+          if grep -qi "_macros.*does not exist\|does not exist.*_macros" /tmp/serve.log; then
+            echo "::error::docs serve hit the X.2.s.1 macros-path regression"
+            exit 1
+          fi
+          grep -qi "Serving on" /tmp/serve.log || {
+            echo "::error::docs serve never reached 'Serving on'"
+            exit 1
+          }
+
+  # Combine coverage data, render markdown + HTML reports, generate the
+  # SVG badge, push to the `badges` branch. Merges the W.8b coverage job
+  # and the prior coverage-badge job — there's only one source of
+  # coverage data now (the runner), so the two-step indirection is gone.
+  coverage-badge:
+    name: Combine coverage + push badge
+    needs: test-everything
+    # Only push the badge on main pushes — PRs and dispatches still
+    # render the report (Step Summary + artifacts) but skip the push.
     runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-
-      - name: Install dependencies (V.2 — uv sync from uv.lock)
-        # `--extra prod` brings the App2 server stack (starlette /
-        # uvicorn / aiosqlite + duckdb via [project.dependencies] core
-        # dep) and reportlab/pypdf/pyhanko for audit. `--extra e2e`
-        # pulls pytest-xdist for the runner's `-n auto` unit prelude.
-        # No separate demo extra needed — DuckDB ships a pure-Python
-        # wheel via the core deps, not psycopg.
-        run: uv sync --frozen --extra dev --extra e2e --extra prod
-
-      - name: Install Playwright WebKit browser
-        # The `app2` chain layer runs `tests/e2e/test_html2_*` which
-        # spawns Playwright (WebKit) against the in-process App2 server.
-        # Same pattern the `test` job uses for `tests/js/`. v9.4.0
-        # regression: this step was missing in the original e2e-sqlite
-        # wiring, so every run failed with "Executable doesn't exist at
-        # /home/runner/.cache/ms-playwright/webkit-…/pw_run.sh".
-        run: .venv/bin/playwright install --with-deps webkit
-
-      # The runner's `app2` chain layer fans `unit → db → app2` over
-      # the `--dialects=du --targets=lo` cells (sp + sq scenarios,
-      # same default fan-out as `integration-pg`). `setup_variant` for
-      # `du` is `_setup_local_duckdb()` — a tempdir .duckdb + cfg, no
-      # Docker — so no `RECON_GEN_RUNNER_CI` / pre-provisioned URL is
-      # needed here (that path is only for the PG/Oracle GHA service
-      # containers). Pyright already passed in the `test` job (a hard
-      # `needs:`), so skip the sessionstart pyright gate to keep this
-      # job lean — the unit pytest still re-runs as the prelude (cheap
-      # fresh-env smoke).
-      - name: Run runner app2 layer against DuckDB
-        env:
-          RECON_GEN_SKIP_PYRIGHT: "1"
-        run: ./run_tests.sh up_to=app2 --dialects=du --targets=lo
-
-      - name: Upload runner artifacts (triage parity)
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: e2e-duckdb-runs
-          path: runs/
-          if-no-files-found: warn
-          retention-days: 7
-
-  # W.8b — combine the matrix entries' coverage data, render a
-  # markdown summary into the GitHub Actions Step Summary (so the
-  # number is one click from the run page, not buried in logs), and
-  # publish the combined XML + HTML as artifacts. Pattern follows
-  # Hynek Schlawack's "Ditch Codecov" article — server-side coverage
-  # service replaced by a workflow job and a downloadable HTML
-  # report.
-  #
-  # Threshold: not gated. The user noted ~80% is the comfortable
-  # band — gating on a number tends to invite useless test churn,
-  # so the workflow surfaces the percentage and leaves the call to
-  # the operator. Add ``--fail-under=N`` to the report step below if
-  # you want the gate later.
-  coverage:
-    name: Combine + report coverage
-    # `integration-pg` (always-on) uploads `coverage-data-pg-runner` —
-    # the runner's per-variant db-layer coverage (Y.2.gate.k.1.coverage).
-    # Waiting on it keeps the combined report inclusive of the
-    # runner-driven workflow path. `integration-oracle` is conditional
-    # (push:main / dispatch only) and intentionally NOT a dep — see the
-    # comment on its `--coverage`-less runner step.
-    needs: [test, integration-pg]
-    runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
 
@@ -556,42 +315,22 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies (just coverage tooling)
-        # ``coverage`` is a transitive dep of pytest-cov which is in
-        # ``[dev]``. ``--no-install-project`` would skip the heavy
-        # extras, but uv sync needs the project for the venv shape;
-        # ``[dev]`` alone is light enough.
         run: uv sync --frozen --extra dev
 
-      - name: Download all coverage data artifacts
+      - name: Download runner coverage data
         uses: actions/download-artifact@v6
         with:
-          pattern: coverage-data-*
-          merge-multiple: true
+          name: coverage-data-runner
 
       - name: Combine coverage data files
-        # Each matrix entry uploaded ``.coverage.<host>.<pid>.<rand>``
-        # files (``parallel = true`` in pyproject). ``coverage
-        # combine`` merges them into a single ``.coverage`` data
-        # file the report / xml / html steps consume.
         run: .venv/bin/coverage combine
 
       - name: Render markdown report (Step Summary + artifact)
-        # ``--format=markdown`` emits a GitHub-Flavored-Markdown
-        # table (coverage.py 7.x feature). Same content goes to
-        # both:
-        #   1. ``$GITHUB_STEP_SUMMARY`` — surfaces above the per-job
-        #      logs on the run page.
-        #   2. ``coverage-report.md`` — uploaded as an artifact and
-        #      republished by the ``coverage-badge`` job to the
-        #      ``badges`` branch so the README's coverage badge can
-        #      wrap-link to a human-readable report (``raw.git`` URL
-        #      stays static across runs since the file lives on the
-        #      ``badges`` branch).
         run: |
           {
             echo "# Coverage report"
             echo ""
-            echo "_Generated by W.8b coverage workflow on commit ${GITHUB_SHA:0:7}._"
+            echo "_Generated by CB.11.c collapsed CI on commit ${GITHUB_SHA:0:7}._"
             echo ""
             .venv/bin/coverage report --format=markdown
           } > coverage-report.md
@@ -614,161 +353,25 @@ jobs:
           retention-days: 14
 
       - name: Upload combined XML report
-        # Consumed by the ``coverage-badge`` job below — keeps the
-        # badge in sync with the unified report instead of re-running
-        # the suite a third time just for the badge.
         uses: actions/upload-artifact@v7
         with:
           name: coverage-xml-${{ github.run_id }}
           path: coverage.xml
           retention-days: 14
 
-      - name: Upload markdown report
-        # Consumed by ``coverage-badge`` so it can republish to the
-        # ``badges`` branch; the README's coverage badge then
-        # wrap-links to it.
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-md-${{ github.run_id }}
-          path: coverage-report.md
-          retention-days: 14
-
-  # Build a wheel from the current commit, install it in a fresh venv
-  # (NOT an editable / src-tree install), and run ``docs apply
-  # --portable`` end-to-end. Catches the class of regression where
-  # docs sourcing assumes a repo checkout — pre-restructure the
-  # bundled mkdocs.yml + main.py + L2 fixtures lived outside ``src/``
-  # and were only present in a dev tree, so installed users hit a
-  # ``mkdocs.yml not found`` failure when running ``docs apply``.
-  docs-portable-install:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-
-      - name: Build wheel
-        run: |
-          uv pip install --system build
-          python -m build --wheel --outdir /tmp/wheelhouse
-
-      - name: Install wheel into a fresh venv (NOT editable)
-        # ``uv venv`` plus ``uv pip install`` against the built wheel
-        # mirrors what an end-user does after ``pip install
-        # recon-gen[prod]`` — no symlinks back to the repo ``src/``
-        # tree, so any path code that walks parents to find repo-root
-        # files breaks here. BS.6 collapsed [docs] into [prod] (since
-        # `docs apply` is a production CLI verb); installing [prod]
-        # now pulls mkdocs + the docs site deps.
-        run: |
-          uv venv /tmp/portable-test-venv
-          uv pip install --python /tmp/portable-test-venv/bin/python \
-              "$(ls /tmp/wheelhouse/recon_gen-*.whl)[prod]"
-
-      - name: Build portable docs from installed wheel
-        run: |
-          /tmp/portable-test-venv/bin/recon-gen docs apply \
-              --portable -o /tmp/portable-site
-          test -f /tmp/portable-site/index.html
-          test -f /tmp/portable-site/handbook/l1.html
-
-      - name: Portable docs carry the L2 theme + site.css is persona-neutral (X.2.s.2)
-        # main.py::_apply_l2_theme_css writes stylesheets/_l2_theme.css from
-        # the bundled spec_example L2's theme: block (accent #2E5090), and
-        # site.css must route all colors through the --qs-* tokens it
-        # overrides — no hard-coded SNB palette (`--snb-*` / the old
-        # `#2B4A2E` valley-deep hex). The unit test exercises the
-        # distinctive-accent path; this is the non-editable-wheel guard.
-        run: |
-          set -e
-          L2=/tmp/portable-site/stylesheets/_l2_theme.css
-          SITE=/tmp/portable-site/stylesheets/site.css
-          test -f "$L2" || { echo "::error::_l2_theme.css not generated — theming code didn't run"; exit 1; }
-          grep -q -- '--qs-accent:' "$L2" || { echo "::error::_l2_theme.css doesn't set --qs-accent"; exit 1; }
-          grep -qi '#2E5090' "$L2"        || { echo "::error::_l2_theme.css missing the bundled L2 accent"; exit 1; }
-          grep -q 'stylesheets/_l2_theme.css' /tmp/portable-site/index.html || { echo "::error::index.html doesn't link _l2_theme.css"; exit 1; }
-          grep -q 'var(--qs-accent)' "$SITE" || { echo "::error::site.css doesn't route through --qs-accent"; exit 1; }
-          if grep -qi -- '--snb-\|2B4A2E' "$SITE"; then
-            echo "::error::site.css still hard-codes the SNB palette (X.2.s.2 regression)"; exit 1
-          fi
-
-      - name: docs serve starts from installed wheel (X.2.s.1)
-        # `docs serve` must run mkdocs with cwd = the bundled
-        # mkdocs.yml's dir so mkdocs-macros's `include_dir: docs/_macros`
-        # resolves — from a non-editable install the default cwd has no
-        # `docs/_macros` and mkdocs dies on the initial build before it
-        # can serve. mkdocs serve has no build-and-exit mode, so run it
-        # under a short timeout, then assert it (a) didn't hit the
-        # macros-path error and (b) reached "Serving on".
-        run: |
-          set +e
-          cd /tmp  # ensure cwd has no docs/_macros — the failure cwd
-          timeout 30 /tmp/portable-test-venv/bin/recon-gen docs serve \
-              -p 8765 > /tmp/serve.log 2>&1
-          set -e
-          echo "--- docs serve output ---"; cat /tmp/serve.log
-          if grep -qi "_macros.*does not exist\|does not exist.*_macros" /tmp/serve.log; then
-            echo "::error::docs serve hit the X.2.s.1 macros-path regression"
-            exit 1
-          fi
-          grep -qi "Serving on" /tmp/serve.log || {
-            echo "::error::docs serve never reached 'Serving on'"
-            exit 1
-          }
-
-  coverage-badge:
-    needs: coverage
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-
       - name: Install genbadge in an isolated venv
-        # W.8b's ``uv pip install --system`` fails on the runner
-        # because the system Python is PEP 668 externally-managed
-        # (``error: The interpreter at /usr is externally managed``).
-        # Spin up a lightweight venv just for genbadge — same pattern
-        # the docs-portable-install job uses.
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           uv venv /tmp/badge-venv
           uv pip install --python /tmp/badge-venv/bin/python \
               'genbadge[coverage]'
 
-      - name: Download combined coverage XML
-        uses: actions/download-artifact@v6
-        with:
-          name: coverage-xml-${{ github.run_id }}
-
-      - name: Download combined coverage markdown
-        uses: actions/download-artifact@v6
-        with:
-          name: coverage-md-${{ github.run_id }}
-
       - name: Generate badge SVG
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: /tmp/badge-venv/bin/genbadge coverage -i coverage.xml -o coverage-badge.svg
 
       - name: Push badge + report to badges branch
-        # Stash both files in /tmp before the orphan-branch reset
-        # blows them away. README's coverage badge wrap-links to
-        # ``coverage-report.md`` on this branch — raw.git URL stays
-        # static across runs, so the link doesn't rot.
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           cp coverage-badge.svg /tmp/coverage-badge.svg
           cp coverage-report.md /tmp/coverage-report.md
