@@ -6,7 +6,7 @@ Invoked via the ``./run_tests.sh`` bash shim at repo root; the shim
 
 Verbs:
     up_to <layer>     Run the chain up to and including <layer>.
-                      Layers: unit | db | app2 | deploy | api | browser
+                      Layers: unit | db | app2 | deploy | qs_api | qs_browser
                       (pyright folds into unit via the conftest sessionstart
                       gate). ``unit`` is variant-independent — it runs ONCE
                       as a prelude before the matrix fans out (Y.2.gate.n),
@@ -88,9 +88,17 @@ LAYERS: Final[tuple[str, ...]] = (
     "db",
     "app2",
     "deploy",
-    "api",
-    "browser",
+    "qs_api",
+    "qs_browser",
 )
+# CB.11.a.3 (2026-06-02) — renamed `api` → `qs_api`, `browser` →
+# `qs_browser` to match the `Tier.QS_API` / `Tier.QS_BROWSER` marks
+# defined in `tests/_marks.py`. The pytest mark selectors below still
+# use `-m api` / `-m browser` against the old-style `@pytest.mark.api`
+# / `@pytest.mark.browser` decorators — CB.6 will migrate selection to
+# `--tier=qs_api` / `--tier=qs_browser` once the test-file migration
+# (tests/e2e/qs_api/ + tests/e2e/qs_browser/ subdirs) finishes covering
+# the full set.
 # Y.2.gate.b.3.impl.layer (2026-05-07) — `app2` inserted as layer 3.7
 # (between db + deploy) per audit §7.10. App2 is the local-Docker
 # fast-feedback gate: same dataset SQL as QS, no AWS contact, runs
@@ -172,8 +180,8 @@ _LAYER_DEPS: Final[dict[str, frozenset[str]]] = {
     # readiness is already covered by the `docker` dep; per-dialect
     # container-boot lands in CB.11.b.
     "deploy": frozenset({"aws", "docker"}),
-    "api": frozenset({"aws", "docker"}),
-    "browser": frozenset({"aws", "docker", "qs_arn"}),
+    "qs_api": frozenset({"aws", "docker"}),
+    "qs_browser": frozenset({"aws", "docker", "qs_arn"}),
 }
 
 
@@ -501,7 +509,7 @@ def _layer_command(
     # see this env; they continue to open read-write. The audit verify
     # test subprocess inherits the env, which is correct — audit only
     # SELECTs from the seeded DB to render the PDF.
-    if layer in ("db", "app2", "browser"):
+    if layer in ("db", "app2", "qs_browser"):
         ve = variant_env or {}
         url = ve.get(RECON_GEN_DEMO_DATABASE_URL.name, "")
         if url.startswith("duckdb://"):
@@ -516,7 +524,7 @@ def _layer_command(
     # JS surface (a few seconds). Post-BE.7.D the pyright scope is the
     # whole `src/recon_gen` + `tests/` (~470 files, ~15-30s) and the
     # matrix dispatches 5 layers × N cells = repeats those static gates
-    # dozens of times across a single `up_to=browser` sweep.
+    # dozens of times across a single `up_to=qs_browser` sweep.
     #
     # The unit prelude (`_run_unit_prelude`, runs ONCE) is the
     # authoritative static-gate run. Per-cell layers (db / app2 / deploy /
@@ -544,7 +552,7 @@ def _layer_command(
     # `--cov-report=` (empty) suppresses the per-layer terminal report — the
     # CI `coverage` aggregator (W.8b) globs every `.coverage.*` artifact and
     # `coverage combine`s them, so a per-layer report is just stdout.log clutter.
-    _is_pytest_layer = layer in ("unit", "db", "app2", "api", "browser")
+    _is_pytest_layer = layer in ("unit", "db", "app2", "qs_api", "qs_browser")
     _cov_args: list[str] = (
         ["--cov=recon_gen", "--cov-report="]
         if opts.coverage and _is_pytest_layer
@@ -695,7 +703,7 @@ def _layer_command(
         # CLI doesn't have a tracked-changes refusal of its own, so no
         # pass-through is needed.
         return (cmd, env_addl)
-    if layer == "api":
+    if layer == "qs_api":
         # Y.2.gate.c.5.api — boto3-only e2e tests verifying deployed QS
         # resources via `describe_*` calls. Pytest mark `api` (set by
         # pytestmark in every e2e file) selects the right files; no
@@ -720,7 +728,7 @@ def _layer_command(
         cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "4"]
         return (cmd, {**env_addl, RECON_GEN_E2E.name: "1"})
-    if layer == "browser":
+    if layer == "qs_browser":
         # Y.2.gate.c.5.browser — Playwright WebKit e2e against deployed QS
         # embed URLs. Pytest mark `browser`. Default `-n 4` per existing
         # `./run_e2e.sh` pattern (browser tier is heavy enough that 8+
@@ -1253,7 +1261,7 @@ def chain_through(target: str) -> list[str]:
     """Y.2.gate.c.5 — return the slice of LAYERS from start through ``target``.
 
     Chain semantics (b.9 LOCKED): cross-layer is sequential. ``up_to=db`` means
-    pyright → unit → db; ``up_to=browser`` means the full chain.
+    pyright → unit → db; ``up_to=qs_browser`` means the full chain.
     """
     idx = LAYERS.index(target)
     return list(LAYERS[: idx + 1])
@@ -1373,7 +1381,7 @@ def is_layer_cached_green(layer: str, *, variant: str = "default") -> bool:
 # through (RECON_GEN_DEMO_DATABASE_URL etc.). Unit doesn't need it.
 # `app2` (b.3.impl.layer) reads the variant DB via the App2 fetcher
 # (`make_tree_db_fetcher`), so it lives here.
-DB_TOUCHING_LAYERS: Final = ("db", "app2", "deploy", "api", "browser")
+DB_TOUCHING_LAYERS: Final = ("db", "app2", "deploy", "qs_api", "qs_browser")
 
 # m.4.f — layers that need an AWS-reachable datasource. Lo-target
 # cells seed a localhost container that QuickSight in AWS can't reach;
@@ -1381,7 +1389,7 @@ DB_TOUCHING_LAYERS: Final = ("db", "app2", "deploy", "api", "browser")
 # is a guaranteed dead pointer (deploy succeeds, but every dashboard
 # render times out because QS can't query localhost). Cap lo cells at
 # `app2` (the local-Docker terminal, locked by audit §7.10).
-AWS_TOUCHING_LAYERS: Final = ("deploy", "api", "browser")
+AWS_TOUCHING_LAYERS: Final = ("deploy", "qs_api", "qs_browser")
 
 # Y.2.gate.j.5 — Oracle container reuse. **Per-cell** name (not single
 # shared) so two Oracle cells (e.g., sp_or_lo + sq_or_lo) running in
@@ -3343,7 +3351,7 @@ def cmd_dump_last_errors(args: argparse.Namespace) -> int:
     - **Per failing test**: the ``FAILED ...`` summary line + the
       matched ``____ <test_id> ____`` traceback block from
       ``stdout.log`` (truncated at the next ``____`` / ``=====``).
-    - **Capture-artifact pointer**: ``$RECON_GEN_RUN_DIR/browser/<sanitized
+    - **Capture-artifact pointer**: ``$RECON_GEN_RUN_DIR/qs_browser/<sanitized
       test_id>/`` paths, with a loud warning if AA.H.6's 6 files
       (screenshot.png / dom.html / console.txt / network.txt /
       qs_errors.txt / trace.zip) are missing — AA.H.10 wired the hook
@@ -3529,13 +3537,13 @@ def _dump_pytest_failures(stdout: str) -> None:
 
 
 def _dump_capture_status(cell_dir: Path, layer_dir: Path, stdout: str) -> None:
-    """For a failing browser layer, check whether AA.H.6 capture
+    """For a failing qs_browser layer, check whether AA.H.6 capture
     artifacts landed for each failed test. Print a warning if any
     failed test has no matching capture dir — that's an AA.H.10
     regression worth investigating."""
-    if layer_dir.name != "browser":
+    if layer_dir.name != "qs_browser":
         return
-    browser_capture_root = cell_dir / "browser"
+    browser_capture_root = cell_dir / "qs_browser"
     failed = list(_FAILED_LINE_RE.finditer(stdout))
     if not failed:
         return
@@ -3718,7 +3726,7 @@ Auth (Y.2.gate.h+i):
       docs/audits/_iam/recon-gen-local-policy.json
 
 Layer chain (Y.2.gate.b/c/n):
-  unit -> db -> app2 -> deploy -> api -> browser
+  unit -> db -> app2 -> deploy -> qs_api -> qs_browser
   ./run_tests.sh up_to=<layer>  runs the chain through that layer.
   `unit` is variant-independent, so it runs ONCE per invocation as a
   prelude (artifacts → runs/<id>/_prelude/unit/) — not once per matrix
