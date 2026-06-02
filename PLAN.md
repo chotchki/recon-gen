@@ -348,6 +348,7 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [ ] CB.3 - CB.3 — Mark the app2 tier + replace _layer_command's app2 arm
 - [x] CB.4 - CB.4 — Mark the db tier + replace its arm
 - [ ] CB.5 - CB.5 — Mark the qs_api + qs_browser tiers + replace those arms
+  - [ ] CB.5.addendum - CB.5 addendum — @inputs(*nodeids) typed marker + agreement helper
 - [ ] CB.6 - CB.6 — Delete hardcoded file-lists; lint at full strength
 - [ ] CB.7 - CB.7 — @writes() fixture branching + per-test audit (agent-friendly)
 - [ ] CB.8 - CB.8 — Drop Dialect.SQLITE + all SQLite-specific arms

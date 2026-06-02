@@ -126,3 +126,41 @@ _CB_MARK_NAMES = ("tier", "dialects", "l2", "needs", "writes")  # typing-smell: 
 # deferred. The behavior is also indirectly covered by every
 # `--tier=` runner invocation in CI, where deselection silently
 # trims unmarked tests from each cell.
+
+
+# -- CB.5 addendum: @inputs(*nodeids) ---------------------------------------
+
+from tests._marks import inputs
+
+
+class TestInputsDecorator:
+    """CB.5 addendum — the `@inputs(...)` typed marker.
+
+    Carries a list of pytest nodeids the test depends on. Validation
+    happens at COLLECTION TIME in `tests/conftest.py`'s
+    `pytest_collection_modifyitems` hook — this class just pins the
+    decorator-output shape.
+
+    Live validation behavior (nodeid-not-found → collection error)
+    is exercised indirectly by every CB.5+ agreement validator that
+    carries the marker — a stale nodeid would surface as an
+    `errors.append(...)` entry from the conftest hook and crash the
+    runner via `pytest.exit(..., returncode=2)`.
+    """
+
+    def test_inputs_carries_nodeid_strings_verbatim(self) -> None:
+        nodeid = "tests/e2e/db/test_x.py::test_y"
+        @inputs(nodeid)
+        def sample() -> None: ...
+        marks = sample.pytestmark  # type: ignore[attr-defined]: pytest mark decorators stash on `pytestmark`
+        assert marks[0].name == "inputs"
+        assert marks[0].args == (nodeid,)
+
+    def test_inputs_accepts_zero_or_more_nodeids(self) -> None:
+        @inputs(
+            "tests/e2e/db/test_a.py::t",
+            "tests/e2e/app2/test_b.py::t",
+        )
+        def sample() -> None: ...
+        marks = sample.pytestmark  # type: ignore[attr-defined]: pytest mark decorators stash on `pytestmark`
+        assert len(marks[0].args) == 2

@@ -137,3 +137,48 @@ def writes() -> pytest.MarkDecorator:
     seeded DB. CB.7 builds the fixture branching; CB.0 just defines
     the flag."""
     return pytest.mark.writes
+
+
+def inputs(*nodeids: str) -> pytest.MarkDecorator:
+    """`@inputs(*nodeids)` — declare cross-test artifact dependencies.
+
+    CB.5 addendum (operator-flagged 2026-06-02): promotes test-graph
+    coupling from runtime to collection-time. A validator test that
+    reads artifacts written by earlier tests names them via
+    pytest nodeid strings — the conftest validates at collection time
+    that every referenced nodeid actually exists, so renaming /
+    moving / deleting an input test SCREAMS instead of silently
+    detaching the validator.
+
+    Example shape (agreement-test decomposition):
+
+        @tier(Tier.QS_BROWSER)
+        @needs(Need.AWS_QS, Need.PLAYWRIGHT)
+        @inputs(
+            "tests/e2e/db/test_inv_matview_direct.py::test_drift",
+            "tests/e2e/app2/test_inv_renders_app2.py::test_drift_sheet",
+            "tests/e2e/qs_browser/test_inv_renders_qs.py::test_drift_sheet",
+        )
+        def test_inv_agreement_validator_drift(): ...
+
+    Parametrize handling: a bare `<file>::<func>` nodeid matches ANY
+    parametrize instance of that function (the conftest checks
+    `nodeid.startswith(<ref>)` for parametrized matches). To pin a
+    specific parametrize instance, spell the full nodeid
+    (`<file>::<func>[<param-id>]`).
+
+    Runner ordering: the validator can't fire standalone — when the
+    runner runs `--tier=qs_browser` without first running tier=db +
+    tier=app2, the artifact reads fail with "missing artifact" by
+    design. The validator's place in the chain is at the high
+    watermark (qs_browser tier), which the runner's
+    `unit → db → app2 → deploy → api → browser` chain naturally
+    satisfies via `./run_tests.sh up_to=browser`.
+
+    Type intent: `nodeids` are pytest nodeids
+    (`<rel_path>::<func>` or `<rel_path>::<Class>::<method>` or those
+    with `[<param-id>]` appended). Pyright won't typecheck the string
+    contents — the collection-time hook in `tests/conftest.py` IS
+    the contract.
+    """
+    return pytest.mark.inputs(*nodeids)

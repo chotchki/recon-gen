@@ -341,6 +341,7 @@ _CB_MARK_DOCS = {
     "l2": "L2 forms this test exercises (zero or more of spec_example | sasquatch_pr | fuzz).",
     "needs": "Runtime deps (docker | playwright | aws_qs | oracledb_client).",
     "writes": "Test mutates DB state — opt in to per-worker isolation.",
+    "inputs": "Cross-test artifact dependencies (pytest nodeids of tests whose artifacts this test reads). Collection-time-validated.",
 }
 
 
@@ -379,6 +380,58 @@ def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:  # typ
     # / writes / l2 warnings) lands in CB.1 once the mark sweep is
     # underway.
     errors: list[str] = []
+
+    # CB.5 addendum — `@inputs(*nodeids)` collection-time validation.
+    # Build the collected-nodeid set once, then for every item that
+    # carries an `inputs` marker, verify every referenced nodeid
+    # actually exists in the collection. Parametrize-aware: a bare
+    # `<file>::<func>` matches any parametrize instance of that
+    # function (via prefix check); a full
+    # `<file>::<func>[<param-id>]` requires an exact match. This
+    # catches the renamed/moved/deleted-input-test case at collection
+    # time, before the validator silently reads a stale or missing
+    # artifact at runtime.
+    collected_nodeids = {item.nodeid for item in items}
+    # Build a parametrize-base index too — maps
+    # `<file>::<func>` → True for any item whose nodeid starts with
+    # that prefix followed by `[` (parametrize instance) OR equals it
+    # exactly (non-parametrized). Lets `@inputs("...test_x")` resolve
+    # against `...test_x[case1]` automatically.
+    parametrize_bases: set[str] = set()
+    for nodeid in collected_nodeids:
+        # Split off any `[<param>]` tail.
+        bracket = nodeid.find("[")
+        base = nodeid[:bracket] if bracket != -1 else nodeid
+        parametrize_bases.add(base)
+    for item in items:
+        inputs_marker = next(item.iter_markers("inputs"), None)
+        if inputs_marker is None:
+            continue
+        missing: list[str] = []
+        for ref in inputs_marker.args:
+            # Exact match? Direct nodeid (parametrize-aware authors who
+            # pinned a specific param instance).
+            if ref in collected_nodeids:
+                continue
+            # Prefix match against parametrize bases? Bare nodeid
+            # without `[...]` — matches any instance OR a
+            # non-parametrized test by exact base.
+            if ref in parametrize_bases:
+                continue
+            missing.append(ref)
+        if missing:
+            errors.append(
+                f"{item.nodeid}: declares @inputs(...) referencing "
+                f"nodeids that don't exist in this collection:\n    - "
+                + "\n    - ".join(missing)
+                + "\n  This usually means an input test was renamed, "
+                "moved, or deleted. Update the @inputs(...) on the "
+                "validator (or restore the input). If the input lives "
+                "in a tier that's not currently being collected (e.g. "
+                "running `--tier=qs_browser` standalone), chain via "
+                "`./run_tests.sh up_to=<higher-watermark-layer>` "
+                "instead."
+            )
     for item in items:
         markers = {m.name for m in item.iter_markers()}
         tier_marker = next(item.iter_markers("tier"), None)
