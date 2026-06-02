@@ -592,6 +592,10 @@ class TestMakeConnectionPool:
 
 # -- _apply_seed_via_duckdb_pyarrow regressions (CA.11) ---------------------
 
+from tests._marks import tier, Tier  # noqa: E402,PLC0415: CB.0 spike — typed mark imports at use-site for clarity during the rollout phase; CB.2 will sweep these into a per-file top-of-module bundle
+
+
+@tier(Tier.UNIT)
 class TestApplySeedViaDuckdbPyarrow:
     """Regression cases against the CA.11 fast path.
 

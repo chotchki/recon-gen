@@ -119,6 +119,12 @@ def pytest_configure(config: Any) -> None:
     session_runs_tmp = Path(tempfile.mkdtemp(prefix="qs-gen-test-runs-"))  # typing-smell: ignore[qs-gen-prefix]: tempdir disambiguator, not an AWS resource ID
     runner.RUNS_DIR = session_runs_tmp  # type: ignore[misc]: patching module-level Final at session start; the Final mark documents intent for prod, tests legitimately rebind
 
+    # CB.0 — register marker names so `PytestUnknownMarkWarning` doesn't
+    # fire on the new typed marks. `_CB_MARK_DOCS` is defined at module
+    # scope alongside `pytest_collection_modifyitems` further down.
+    for _mark_name, _mark_doc in _CB_MARK_DOCS.items():
+        config.addinivalue_line("markers", f"{_mark_name}: {_mark_doc}")
+
 
 # ---------------------------------------------------------------------------
 # SQLite connection-leak detector (opt-in via RECON_GEN_SQLITE_LEAK_GATE=1)
@@ -280,3 +286,190 @@ def pytest_runtest_makereport(item: Any, call: Any) -> Generator[None, Any, None
             fh.write(json.dumps(record) + "\n")
     except OSError:
         pass
+
+
+# ---------------------------------------------------------------------------
+# CB.0 — Typed-mark filtering (`--tier`, `--dialect`, `--l2`, `--fuzz-count`)
+# ---------------------------------------------------------------------------
+#
+# The runner discovers tests via `pytest --tier=X --dialect=Y --l2=Z`
+# instead of hand-listed file paths. Marks are declared via the typed
+# wrappers in `tests/_marks.py` (pyright-checked at write time); these
+# hooks plumb them into pytest's selection + composition-validation
+# at collection time. See `docs/audits/cb_test_layers_update.md` for
+# the full design rationale.
+
+
+def pytest_addoption(parser: Any) -> None:  # typing-smell: ignore[explicit-any]: pytest.Parser from late import
+    """Register CB.0's runner-facing options.
+
+    All four default to None (= no filter); when set, the matching
+    `pytest_collection_modifyitems` step deselects every test whose
+    mark doesn't intersect with the supplied value. The runner sets
+    these per cell; bare `pytest tests/unit/` with no CB options
+    preserves the pre-CB behavior (all tests run unfiltered)."""
+    group = parser.getgroup("recon-gen layered tests (CB.0)")
+    group.addoption(
+        "--tier", default=None,
+        help="Run tests marked @tier(Tier.X) where X matches. "
+             "Choices: unit | db | app2 | qs_api | qs_browser.",
+    )
+    group.addoption(
+        "--dialect", default=None,
+        help="Run tests marked @dialects(...) containing this dialect. "
+             "Choices: pg | or | du.",
+    )
+    group.addoption(
+        "--l2", dest="cb_l2", default=None,
+        help="Run tests marked @l2(...) containing this L2 form. "
+             "Choices: spec_example | sasquatch_pr | fuzz.",
+    )
+    group.addoption(
+        "--fuzz-count", type=int, default=1,
+        help="Number of fuzz seeds to expand `@l2(L2.FUZZ)` tests over. "
+             "Local default 1; nightly bumps to 100+. CB.0 spike: "
+             "stored on config but not yet wired into seed expansion.",
+    )
+
+
+# CB.0 — known marker names; registered via `pytest_configure` to silence
+# the `PytestUnknownMarkWarning` that fires for custom marks. Listing them
+# here keeps the marker authority in one place.
+_CB_MARK_DOCS = {
+    "tier": "Test tier (one of unit | db | app2 | qs_api | qs_browser). Required on every test.",
+    "dialects": "DB dialects this test exercises (zero or more of pg | or | du).",
+    "l2": "L2 forms this test exercises (zero or more of spec_example | sasquatch_pr | fuzz).",
+    "needs": "Runtime deps (docker | playwright | aws_qs | oracledb_client).",
+    "writes": "Test mutates DB state — opt in to per-worker isolation.",
+}
+
+
+def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:  # typing-smell: ignore[explicit-any]: pytest.Config + Item from late import
+    """CB.0 — filter the collected test set by the runner's
+    `--tier / --dialect / --l2` options + run composition-rule
+    validation.
+
+    Validation rules (per `docs/audits/cb_test_layers_update.md`):
+
+    - No `@tier` mark on a test → ERROR (source of truth; can't
+      dispatch).
+    - `tier(unit)` + `dialects(...)` → ERROR.
+    - `tier(qs_*)` without `aws_qs` in `needs` → ERROR.
+    - `tier(qs_browser)` without `playwright` in `needs` → ERROR.
+
+    Errors are surfaced as collected pytest errors — pytest's
+    standard machinery puts them in the report.
+
+    Filtering: each `--tier=X / --dialect=Y / --l2=Z` selector
+    excludes items whose corresponding mark doesn't match. Selectors
+    are independent (`AND`). Items missing a relevant mark when the
+    selector is set are deselected (e.g., `--dialect=pg` on a unit
+    test with no `@dialects` mark drops it — unit-tier tests run
+    under `--tier=unit` only). CB.0 spike behavior: when NO CB
+    selector is passed, no filtering happens — backwards compatible
+    with the existing 3,436-test default-run.
+    """
+    cb_tier = config.getoption("--tier")
+    cb_dialect = config.getoption("--dialect")
+    cb_l2 = config.getoption("cb_l2")
+
+    # Composition-rule validation (always on, even when no selectors).
+    # CB.0 spike scope: only the hardest invariants — unmarked-tier
+    # ERROR + unit/dialects mismatch ERROR. The fuller rule set (needs
+    # / writes / l2 warnings) lands in CB.1 once the mark sweep is
+    # underway.
+    errors: list[str] = []
+    for item in items:
+        markers = {m.name for m in item.iter_markers()}
+        tier_marker = next(item.iter_markers("tier"), None)
+        if tier_marker is None:
+            # CB.0 spike: WARN-only on missing tier so the 3,436 existing
+            # unmarked tests don't error out before CB.2's sweep. CB.6
+            # flips this to ERROR once every test carries a tier.
+            continue
+        tier_value = (
+            tier_marker.args[0] if tier_marker.args else None
+        )
+        if tier_value == "unit" and "dialects" in markers:
+            errors.append(
+                f"{item.nodeid}: `tier(Tier.UNIT)` + `dialects(...)` "
+                f"is invalid (unit tier doesn't open a DB; tests that "
+                f"emit + assert SQL strings don't carry a dialects "
+                f"mark — they're cross-dialect by construction)."
+            )
+        if tier_value in ("qs_api", "qs_browser"):
+            needs_marker = next(item.iter_markers("needs"), None)
+            needs_values: set[str] = (
+                set(needs_marker.args) if needs_marker is not None else set()
+            )
+            if "aws_qs" not in needs_values:
+                errors.append(
+                    f"{item.nodeid}: `tier({tier_value!r})` requires "
+                    f"`needs(Need.AWS_QS)` so the runner can skip "
+                    f"when AWS is paused."
+                )
+            if tier_value == "qs_browser" and "playwright" not in needs_values:
+                errors.append(
+                    f"{item.nodeid}: `tier(Tier.QS_BROWSER)` requires "
+                    f"`needs(Need.PLAYWRIGHT)` (QS embed renders in a "
+                    f"browser)."
+                )
+
+    if errors:
+        # Surface as a single collected error rather than per-item;
+        # gives the operator a clean diff of all violations.
+        import pytest  # noqa: PLC0415 — lazy
+        pytest.exit(
+            "CB.0 mark composition violations:\n  - "
+            + "\n  - ".join(errors),
+            returncode=2,
+        )
+
+    # Selector-based filtering.
+    if cb_tier is None and cb_dialect is None and cb_l2 is None:
+        return  # backwards compat — no CB selectors = unfiltered
+
+    kept: list[Any] = []  # typing-smell: ignore[explicit-any]: same posture as enclosing fn — pytest Item from late import
+    deselected: list[Any] = []
+    for item in items:
+        # `--tier=X` keeps only tests with exactly that tier value.
+        if cb_tier is not None:
+            tier_marker = next(item.iter_markers("tier"), None)
+            if (
+                tier_marker is None
+                or not tier_marker.args
+                or tier_marker.args[0] != cb_tier
+            ):
+                deselected.append(item)
+                continue
+        # `--dialect=Y` keeps tests whose @dialects mark contains Y.
+        # An empty / missing @dialects mark fails the selector (unit
+        # tests with no DB → naturally filtered out under --dialect).
+        if cb_dialect is not None:
+            dialects_marker = next(item.iter_markers("dialects"), None)
+            if (
+                dialects_marker is None
+                or cb_dialect not in dialects_marker.args
+            ):
+                deselected.append(item)
+                continue
+        # `--l2=Z` keeps tests whose @l2 mark contains Z. Same shape
+        # as `--dialect`. L2.FUZZ expansion (via --fuzz-count) is
+        # CB.1 territory; the spike preserves the bare-name match.
+        if cb_l2 is not None:
+            l2_marker = next(item.iter_markers("l2"), None)
+            if (
+                l2_marker is None
+                or cb_l2 not in l2_marker.args
+            ):
+                deselected.append(item)
+                continue
+        kept.append(item)
+
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+    items[:] = kept
+
+
+# CB.0 marker registration is folded into the existing pytest_configure
+# above — see the `_CB_MARK_DOCS` loop at the end of that hook body.
