@@ -12,7 +12,7 @@ each worker seeds its own prefix in parallel; no DROP CASCADE race.
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any
 
 import pytest
 

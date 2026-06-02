@@ -114,7 +114,15 @@ def _isolated_cfg_key(
     """
     import hashlib
     worker_id = os.environ.get("PYTEST_XDIST_WORKER", "gw0")
-    nodeid = getattr(request.node, "nodeid", request.module.__name__)
+    # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]:
+    # pytest's FixtureRequest exposes `node` / `module` as typed-Any
+    # late-import shapes; pyright can't follow them through the
+    # FixtureRequest protocol. The cast through `Any` below resolves.
+    request_any: Any = request
+    nodeid: str = str(
+        getattr(request_any.node, "nodeid", None)
+        or request_any.module.__name__,
+    )
     l2 = cfg.default_l2_instance or "no-l2"
     dialect = cfg.dialect.value
     key = f"{nodeid}|{l2}|{dialect}|{worker_id}"

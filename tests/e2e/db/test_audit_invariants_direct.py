@@ -201,7 +201,7 @@ def test_l1_invariant_direct_extract(
     empty rows list + `direct_count: null`. The validator handles the
     null shape by skipping the renderer⋈matview leg for supersession.
     """
-    cfg, _cfg_path, dialect = dialect_cfg
+    cfg, _cfg_path, dialect = dialect_isolated_cfg
     expected_obj = expected_audit_counts(seeded_db, _PERIOD)
     expected: int = getattr(expected_obj, f"{invariant}_count")
     is_flat = invariant in FLAT_SHAPE_INVARIANTS
