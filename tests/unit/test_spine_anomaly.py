@@ -280,6 +280,7 @@ def test_violation_identity_matches_detect_projection() -> None:
     assert gen.intended == expected
 
 
+@pytest.mark.skip(reason="set_trace_callback was SQLite-only; DuckDB has no equivalent. CB.8 backlog #set_trace.")
 def test_detect_does_not_cross_a_sql_pushdown_surface() -> None:
     """AR.5 lesson codified for AT.1: anomaly's detect SQL has no
     `<<$param>>` substitution — no divergence risk between

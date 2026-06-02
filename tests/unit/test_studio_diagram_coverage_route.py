@@ -62,7 +62,6 @@ def seeded_studio_pool() -> Iterator[AsyncConnectionPool]:
     conn = duckdb.connect(path)
     conn.execute(
         "CREATE TABLE spec_example_transactions ("
-        "id INTEGER PRIMARY KEY, "
         "account_role TEXT, "
         "rail_name TEXT, "
         "template_name TEXT)"

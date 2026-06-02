@@ -78,7 +78,6 @@ def seeded_pool() -> Iterator[AsyncConnectionPool]:
     conn = duckdb.connect(path)
     conn.execute(
         "CREATE TABLE coverage_test_transactions ("
-        "id INTEGER PRIMARY KEY, "
         "account_role TEXT, "
         "rail_name TEXT, "
         "template_name TEXT)"

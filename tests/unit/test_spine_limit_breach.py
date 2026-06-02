@@ -316,6 +316,7 @@ def test_iter_edges_includes_limit_breach_edge() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="set_trace_callback was SQLite-only; DuckDB has no equivalent. CB.8 backlog #set_trace.")
 def test_detect_does_not_cross_a_sql_pushdown_surface() -> None:
     inv = LimitBreachInvariant()
     conn = _fresh_db()
