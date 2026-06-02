@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import time
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Protocol
 from urllib.parse import parse_qs, urlparse
@@ -282,9 +282,14 @@ def execute_script(
         return
     if dialect is Dialect.DUCKDB:
         # CA.6 — DuckDB's Python driver accepts multi-statement strings
-        # as a single execute() call (probed against 1.5.3); same one-shot
-        # shape as the PG branch.
-        cur.execute(sql)
+        # as a single execute() call. CA.10 — but the seed apply emits
+        # ~127k individual INSERT statements; one-shot execute() parses
+        # + executes them serially (~179s on a sasquatch-scale seed).
+        # DuckDB's executemany is essentially a Python loop (~5% faster
+        # than individual execute); multi-row VALUES literal SQL is 54×
+        # faster than either at 50k rows. Route consecutive INSERT runs
+        # through the multi-row-VALUES coalescer.
+        _execute_with_coalesced_inserts(cur, sql, _flush_duckdb_multivalues)
         return
     if dialect is Dialect.SQLITE:
         # Bind-variable + executemany fast path for INSERT-heavy
@@ -445,13 +450,31 @@ def _parse_simple_values(body: str) -> tuple[object, ...] | None:
 
 
 def _execute_sqlite_with_binds(cur: Any, sql: str) -> None:  # typing-smell: ignore[explicit-any]: sqlite3.Cursor — DB-API 2.0 cursor with no shared Protocol across drivers
-    """SQLite execute-script fast path: coalesce consecutive same-shape
-    ``INSERT INTO foo (cols) VALUES (...)`` statements into ``executemany``
-    calls. Non-INSERT or non-conforming statements fall through to
-    per-statement ``cur.execute`` so the contract matches ``executescript``.
+    """SQLite execute-script fast path. Thin wrapper over the dialect-
+    agnostic coalescer; SQLite's executemany IS a real bulk path (50×
+    speedup per the docstring on `_flush_sqlite_executemany`)."""
+    _execute_with_coalesced_inserts(cur, sql, _flush_sqlite_executemany)
 
-    The transaction stays open across the whole call — caller still
-    decides when to commit.
+
+def _execute_with_coalesced_inserts(
+    cur: Any,  # typing-smell: ignore[explicit-any]: sync DB-API 2.0 cursor — see execute_script
+    sql: str,
+    flush_fn: "Callable[[Any, str, str, list[tuple[object, ...]]], None]",  # typing-smell: ignore[explicit-any]: per-dialect bulk-insert strategy callback — receives the same Any-typed cursor as `cur` above, see that param's WHY
+) -> None:
+    """Walk a multi-statement script, coalescing consecutive same-shape
+    ``INSERT INTO foo (cols) VALUES (...)`` runs into one bulk call per
+    run via ``flush_fn(cur, table, cols, rows)``. Non-INSERT or
+    non-conforming statements pass through to ``cur.execute(stmt)``
+    so the contract matches ``executescript``.
+
+    The bulk-insert strategy varies per dialect (CA.10): SQLite uses
+    ``executemany`` (real C++ bulk path), DuckDB uses multi-row
+    ``VALUES (…),(…),…`` literal SQL (DuckDB's executemany is a
+    Python loop, ~55× slower than the literal form per probe). Oracle
+    has its own coalescer at ``batch_oracle_inserts`` because its
+    INSERT ALL syntax doesn't fit this scanner shape.
+
+    Transaction stays open across the call — caller commits.
     """
     statements = _split_sqlite_statements(sql)
 
@@ -468,13 +491,7 @@ def _execute_sqlite_with_binds(cur: Any, sql: str) -> None:  # typing-smell: ign
             pending_table = None
             pending_cols = None
             return
-        ncols = len(pending_rows[0])
-        placeholders = ",".join("?" * ncols)
-        stmt = (
-            f"INSERT INTO {pending_table} ({pending_cols}) "
-            f"VALUES ({placeholders})"
-        )
-        cur.executemany(stmt, pending_rows)
+        flush_fn(cur, pending_table, pending_cols, pending_rows)
         pending_rows = []
         pending_table = None
         pending_cols = None
@@ -498,6 +515,74 @@ def _execute_sqlite_with_binds(cur: Any, sql: str) -> None:  # typing-smell: ign
         _flush()
         cur.execute(stmt)
     _flush()
+
+
+def _flush_sqlite_executemany(
+    cur: Any,  # typing-smell: ignore[explicit-any]: sqlite3.Cursor — DB-API 2.0 with no shared Protocol
+    table: str, cols: str, rows: list[tuple[object, ...]],
+) -> None:
+    """SQLite bulk path: ``cur.executemany``. The connection's
+    ``executescript`` couldn't be used directly because the cursor (not
+    the connection) is the runner's hand-off point, and ``executemany``
+    is the cursor-level bulk API SQLite ships. Measured ~50× speedup
+    vs per-row execute on the ~72k-row sasquatch_pr seed (~33s → ~0.6s).
+    """
+    ncols = len(rows[0])
+    placeholders = ",".join("?" * ncols)
+    stmt = f"INSERT INTO {table} ({cols}) VALUES ({placeholders})"
+    cur.executemany(stmt, rows)
+
+
+def _flush_duckdb_multivalues(
+    cur: Any,  # typing-smell: ignore[explicit-any]: duckdb.DuckDBPyConnection — DB-API 2.0 with no shared Protocol
+    table: str, cols: str, rows: list[tuple[object, ...]],
+) -> None:
+    """DuckDB bulk path: multi-row ``VALUES (…),(…),…`` literal SQL,
+    batched in ~1000-row chunks to bound the SQL string size.
+
+    CA.10 — measured 54× faster than DuckDB's executemany at 50k rows
+    (22.76s → 0.44s); 2196 → 112772 rows/sec. DuckDB's executemany is
+    essentially a Python loop (~5% faster than individual ``execute()``);
+    the multi-row literal lets the engine parse once + plan once for
+    the whole batch. Sasquatch_pr's 127,554-tx seed apply: ~179s
+    (unbatched DuckDB) → ~86s (this path) end-to-end.
+
+    Memory bound: one batch's SQL string holds ~1000 rows × ~150
+    chars/row ≈ 150KB peak. Caller is the seed-apply CLI which already
+    holds the full SQL script in memory, so this is well within budget.
+    """
+    BATCH = 1000
+    for chunk_start in range(0, len(rows), BATCH):
+        chunk = rows[chunk_start:chunk_start + BATCH]
+        values = ",".join(
+            "(" + ",".join(_render_sql_literal(v) for v in row) + ")"
+            for row in chunk
+        )
+        cur.execute(f"INSERT INTO {table} ({cols}) VALUES {values}")
+
+
+def _render_sql_literal(v: object) -> str:
+    """Render a Python primitive (from `_parse_simple_values`) back as
+    DuckDB SQL literal text. The parser bails on any string containing
+    `''` escapes so we don't need quote-escape logic here — only the
+    four primitive shapes the parser emits round-trip.
+
+    NULL → ``NULL``; bool → ``TRUE`` / ``FALSE``; int/float → ``str(v)``;
+    str → single-quoted (no escape needed per the parser's contract).
+    Unrecognized shapes raise — would be a parser/flush invariant violation.
+    """
+    if v is None:
+        return "NULL"
+    if isinstance(v, bool):
+        return "TRUE" if v else "FALSE"
+    if isinstance(v, (int, float)):
+        return str(v)
+    if isinstance(v, str):
+        return f"'{v}'"
+    raise TypeError(
+        f"_render_sql_literal: unrecognized primitive {type(v).__name__}: "
+        f"{v!r}. `_parse_simple_values` should have bailed on this shape."
+    )
 
 
 def _split_sqlite_statements(sql: str) -> list[str]:
