@@ -44,6 +44,7 @@ File lives under ``tests/e2e/app2/`` so the dir-conftest auto-applies
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from datetime import date
 from pathlib import Path
@@ -86,6 +87,18 @@ from tests.e2e._studio_deploy_helpers import (
 pytestmark = [pytest.mark.browser]
 
 
+# CB.7 followup — the seed + dashboard must agree on the as-of anchor
+# or the L1 date-range filter clips out the plants. Pre-fix the seed
+# pinned anchor=2026-05-30 but the cfg defaulted to `AsOfFrame.live()`
+# (= today). On a wall-clock day ≥7 days past the anchor, the default
+# 7-day window `[as_of-7d, as_of]` excluded plants near the anchor —
+# e.g. `overdraft` plants at `anchor - 6 days = 2026-05-24` and the
+# wall-clock window `[today-7d, today]` doesn't reach back that far.
+# Pin both ends to the same constant so the trainer flow is wall-clock-
+# independent.
+_TRAINER_ANCHOR = date(2026, 5, 30)
+
+
 @pytest.fixture
 def isolated_studio_cfg(
     request: pytest.FixtureRequest,
@@ -124,6 +137,14 @@ def isolated_studio_cfg(
     else:
         db_path = sqlite_path
 
+    # Pin as-of to the seed anchor so the L1 dashboard's default
+    # 7-day window `[as_of-7d, as_of]` covers the plants. Without this
+    # pin the dashboard reads the wall-clock day and the trainer
+    # silently drops plants that land more than 7 days back from now.
+    base_cfg.test_generator = dataclasses.replace(
+        base_cfg.test_generator, end_date=_TRAINER_ANCHOR,
+    )
+
     suffix = _isolated_cfg_key(request, base_cfg)
     isolated = _isolate_cfg(
         base_cfg, suffix=suffix, tmp_path_factory=tmp_path_factory,
@@ -155,7 +176,7 @@ def _seed_demo_db(cfg: Config) -> None:
             # and the breach filter excludes the planted row.
             execute_script(
                 cur,
-                build_config_populate_sql(cfg, instance, anchor=date(2026, 5, 30)),
+                build_config_populate_sql(cfg, instance, anchor=_TRAINER_ANCHOR),
                 dialect=cfg.dialect,
             )
             execute_script(
@@ -163,7 +184,7 @@ def _seed_demo_db(cfg: Config) -> None:
                 emit_full_seed(
                     instance, scenarios,
                     prefix=base_prefix, dialect=cfg.dialect,
-                    anchor=date(2026, 5, 30),
+                    anchor=_TRAINER_ANCHOR,
                 ),
                 dialect=cfg.dialect,
             )
