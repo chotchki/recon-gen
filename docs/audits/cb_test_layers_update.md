@@ -15,15 +15,18 @@ Keep the up_to model, its great!
 
 ## Help
 - We have access to nice beefy box to run stuff on!
+- There are Oracle 19c docker images! (See https://hub.docker.com/r/doctorkirk/oracle-19c or even Oracle's official images)
 
 ## Open Questions: 
 - How much to keep in AWS?
+  - Should we keep an Oracle DB?
 - When should it be run?
 - How can we better define what a test needs? Annotations? (Will this require a Python upgrade?)
   - Right now I think we have huge hand maintained arrays instead of annotations on each test fixture declaring dialects 
 - Idea: Could the docker dbs be exposed to AWS from the self hosted runner? 
   - It would nuke a major cost leg of AWS and we control the scaling way more.
   - Have a public ipv4 and can port forward
+  - AWS published their outbound ip range here: 52.23.63.224/27 (I could lock down the port forwarding)
   - Couldn't do it before because of github's runner limitations
 
 ## Layer / Cell Model (it is great!)

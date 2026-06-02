@@ -39,7 +39,7 @@ Two ways we close the loop:
 
 ## Runs where you run
 
-Three database backends — **PostgreSQL 17+**, **Oracle 19c+**, and **SQLite 3.38+** — covering on-prem, cloud-managed, and zero-install integrator-laptop iteration.
+Database backends — **PostgreSQL 17+** and **Oracle 19c+** for the on-prem / cloud-managed production targets, plus **DuckDB** as the zero-install integrator-laptop iteration backend (pure-Python wheel, no server, in-process vectorized executor, ~55× faster bundled refresh than the legacy SQLite path at ~1M rows). SQLite 3.38+ still works as a manual opt-in for back-compat triage; Phase CB will remove it.
 
 Three runtime environments — pick what your auditors and analysts already trust:
 
