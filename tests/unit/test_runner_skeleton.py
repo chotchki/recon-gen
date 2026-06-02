@@ -2335,13 +2335,15 @@ def test_setup_variant_ci_mode_aw_unchanged(
 # Y.2.gate.m.4.f — per-cell layer cap (A) tests.
 
 
-def test_cell_chain_lo_caps_at_app2() -> None:
-    """m.4.f — lo cells drop deploy/api/browser. The local container
-    isn't reachable from QuickSight so dispatching those layers would
-    deploy a dead-pointer dashboard."""
+def test_cell_chain_lo_pg_runs_full_chain() -> None:
+    """CB.11.b followup — lo cells with pg/or dialect can reach QS
+    via the hotchkiss.io forward (runner writes a sibling QS-side
+    cfg), so they run the full chain. Pre-CB.11.b they dropped
+    deploy/qs_api/qs_browser because QS couldn't reach the localhost
+    container; that constraint dissolved with the hotchkiss.io path."""
     chain = ["unit", "db", "app2", "deploy", "qs_api", "qs_browser"]
     capped = runner.cell_chain(_spec_pg_lo(), chain)
-    assert capped == ["unit", "db", "app2"]
+    assert capped == chain
 
 
 def test_cell_chain_aw_passes_through() -> None:
