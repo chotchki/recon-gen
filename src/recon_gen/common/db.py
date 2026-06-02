@@ -71,6 +71,28 @@ def oracle_dsn(url: str) -> str:
     return url
 
 
+def make_demo_database_url(dialect: Dialect, path: str | Path) -> str:
+    """Build the canonical ``demo_database_url`` for a dialect + path.
+
+    Inverse of ``duckdb_path`` / ``sqlite_path``. Used by test fixtures
+    and config-building helpers so the URL-scheme literal lives in one
+    place instead of being copy-pasted as ``f"duckdb:///{path}"`` at
+    every callsite.
+
+    PG / Oracle URLs aren't constructible from a bare path — they need
+    user / password / host — so this raises for those dialects. Callers
+    that need a PG / Oracle URL build it from full config (cfg.yaml or
+    env), not from a path.
+    """
+    if dialect is Dialect.DUCKDB:
+        return f"duckdb:///{path}"
+    raise ValueError(
+        f"make_demo_database_url is path-based and only meaningful for "
+        f"file-backed dialects (DuckDB). Got {dialect!r}; build the URL "
+        f"from full config for that dialect."
+    )
+
+
 def duckdb_path(url: str) -> str:
     """Translate a ``duckdb:///path/to/db.duckdb`` URL to a path string.
 

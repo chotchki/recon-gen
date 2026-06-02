@@ -808,6 +808,13 @@ def _capture_failure_db_counts(
                         (f"{prefix}_%",),
                     )
                     names = [row[0] for row in cur.fetchall()]
+                elif dialect is Dialect.DUCKDB:
+                    cur.execute(
+                        "SELECT table_name FROM information_schema.tables "
+                        "WHERE table_name LIKE ? ORDER BY table_name",
+                        (f"{prefix}_%",),
+                    )
+                    names = [row[0] for row in cur.fetchall()]
                 elif dialect is Dialect.ORACLE:
                     # Oracle uppercases identifiers; prefix is case-insensitive
                     # in our cfg so query both layers.

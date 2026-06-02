@@ -253,10 +253,12 @@ class TestCaptureFailureDbCounts:
             dialect: Dialect
             demo_database_url: str
 
+        from recon_gen.common.db import make_demo_database_url
+
         return _Cfg(
             db_table_prefix=prefix,
             dialect=Dialect.DUCKDB,
-            demo_database_url=f"sqlite:///{db_path}",
+            demo_database_url=make_demo_database_url(Dialect.DUCKDB, db_path),
         )
 
     def test_writes_per_table_counts_for_prefixed_tables(

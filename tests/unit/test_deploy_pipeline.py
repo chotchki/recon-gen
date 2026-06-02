@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from recon_gen.common.config import Config
-from recon_gen.common.db import connect_demo_db, execute_script
+from recon_gen.common.db import connect_demo_db, execute_script, make_demo_database_url
 from recon_gen.common.config import (
     TestGeneratorConfig,
 )
@@ -81,7 +81,7 @@ def _duckdb_cfg(tmp_path: Path) -> Config:
         datasource_arn=(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
         ),
-        demo_database_url=f"duckdb:///{db_path}",
+        demo_database_url=make_demo_database_url(Dialect.DUCKDB, db_path),
         dialect=Dialect.DUCKDB,
     )
 
