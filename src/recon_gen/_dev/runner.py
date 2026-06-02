@@ -1406,19 +1406,28 @@ def _oracle_container_name_for(spec: VariantSpec) -> str:
 def cell_chain(spec: VariantSpec, requested_chain: list[str]) -> list[str]:
     """m.4.f — filter the requested chain to layers this cell can run.
 
-    - ``target=aw`` cells run every layer the operator asked for;
-      passes ``requested_chain`` through unchanged.
-    - ``target=lo`` cells drop ``deploy`` / ``api`` / ``browser`` —
-      QuickSight can't reach the localhost container that backs the
-      cell's seeded data, so those layers would deploy a dead-pointer
-      dashboard. The natural lo terminal is ``app2`` (b.3.impl.layer
-      LOCKED that as the local-Docker fast-feedback layer).
+    Post-CB.11.b: ``lo`` cells can now drive the QS-touching layers
+    too. The runner generates a sibling QS-side cfg per cell whose
+    ``demo_database_url`` points at ``hotchkiss.io:<forwarded-port>``;
+    QuickSight in us-east-1 reaches the operator's dev-machine Docker
+    via the hotchkiss.io DDNS forward, so the lo container backs both
+    the local layers (db/app2 against 127.0.0.1) AND the deployed QS
+    data source (against hotchkiss.io). The cell_chain no longer drops
+    layers for lo cells; ``up_to=<layer>`` is the only cap.
 
-    The operator's ``up_to=<layer>`` is the *upper* cap; this function
-    further trims based on what the cell can physically support. Both
-    caps compose: ``up_to=db`` for any cell already excludes app2+.
+    DuckDB cells stay local-only — there's no remote-reachable DuckDB
+    shape, and QS can't read a file:// URL from us-east-1. Same for
+    SQLite if it's still in the matrix.
+
+    ``aw`` cells (the legacy Aurora-pointed shape, deleted in CB.12)
+    pass through unchanged for operators with their own external DB
+    pinned in cfg.
     """
     if spec.target == "aw":
+        return requested_chain
+    # lo cells with a QS-reachable dialect (pg/or) get the full chain;
+    # du/sl lo cells still need to drop AWS-touching layers.
+    if spec.dialect in ("pg", "or"):
         return requested_chain
     return [layer for layer in requested_chain if layer not in AWS_TOUCHING_LAYERS]
 
