@@ -48,6 +48,7 @@ from tests.audit._dashboard_extract import (
     l1_invariant_rows_seen,
 )
 from tests.audit._scenario_expectations import expected_audit_counts
+from tests._marks import IsolationScope, isolation_producer  # noqa: E402
 from tests.e2e._agreement import write_rendered_rows
 from tests.e2e._agreement_helpers import (
     ALL_L1_INVARIANTS,
@@ -68,7 +69,7 @@ if TYPE_CHECKING:
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
-    pytest.mark.xdist_group("audit_dashboard_agreement_seed"),
+    isolation_producer(IsolationScope.AGREEMENT_AUDIT),
 ]
 
 

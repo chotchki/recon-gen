@@ -59,10 +59,13 @@ if TYPE_CHECKING:
     from recon_gen.common.sql import Dialect
 
 
-# CB.7 (refactored 2026-06-02) — xdist_group dropped: `seeded_audit`
-# uses provider-marked isolation via `dialect_isolated_cfg`, so concurrent
-# workers don't race on schema apply or audit PDF render.
-pytestmark = [pytest.mark.e2e]
+# CB.7 (refactored 2026-06-02) — `@isolation_producer` for the
+# audit-agreement chain. See sibling `test_audit_invariants_direct.py`.
+from tests._marks import IsolationScope, isolation_producer  # noqa: E402
+pytestmark = [
+    pytest.mark.e2e,
+    isolation_producer(IsolationScope.AGREEMENT_AUDIT),
+]
 
 
 _TODAY = today_anchor()

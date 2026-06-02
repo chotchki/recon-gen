@@ -58,12 +58,16 @@ if TYPE_CHECKING:
     from recon_gen.common.spine.anomaly import AnomalyGenerator
 
 
-# CB.7 (2026-06-02) — removed `pytest.mark.xdist_group(...)` previously
-# pinned this module to a single worker. The new `isolated_cfg` fixture
-# (tests/e2e/db/conftest.py) gives every xdist worker its own
-# per-worker prefix, so parametrize cells distributing across workers
-# no longer race on DROP CASCADE — each worker seeds its own prefix.
-pytestmark = [pytest.mark.e2e]
+# CB.7 (refactored 2026-06-02) — `@isolation_producer` declares this
+# file as the WRITER for the inv-dashboard-agreement chain. App2 +
+# qs_browser sibling files declare `@isolation_consumer(AGREEMENT_INV)`
+# at their module level; all three tiers share the same `isolated_cfg`
+# prefix and the chain reads the same seeded state across tiers.
+from tests._marks import IsolationScope, isolation_producer  # noqa: E402
+pytestmark = [
+    pytest.mark.e2e,
+    isolation_producer(IsolationScope.AGREEMENT_INV),
+]
 
 
 _TODAY = today_anchor()

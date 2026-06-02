@@ -34,6 +34,19 @@ from typing import Any
 
 from tests._marks import Need, Tier, needs, tier
 
+# CB.7 (refactored 2026-06-02) — re-export the isolation primitives so
+# qs_browser-tier tests (especially the cross-tier consumers of
+# `IsolationScope.AGREEMENT_INV` / `AGREEMENT_AUDIT`) get the same
+# `isolated_cfg` + `db_conn` fixtures as the db tier.
+from tests.e2e._isolation import (  # noqa: F401 — re-export so pytest discovers the fixtures
+    _isolate_cfg,
+    _isolated_cfg_key,
+    db_conn,
+    isolated_cfg,
+)
+
+__all__ = ["_isolate_cfg", "_isolated_cfg_key", "db_conn", "isolated_cfg"]
+
 
 _QS_BROWSER_TIER_MARK = tier(Tier.QS_BROWSER)
 _QS_BROWSER_NEEDS_MARK = needs(Need.AWS_QS, Need.PLAYWRIGHT)

@@ -39,6 +39,7 @@ from tests.audit._inv_dashboard_extract import (  # noqa: E402
     count_anomaly_rows,
     rows_seen_anomaly,
 )
+from tests._marks import IsolationScope, isolation_producer  # noqa: E402
 from tests.e2e._agreement import write_rendered_rows  # noqa: E402
 from tests.e2e._agreement_helpers import (  # noqa: E402
     l2_yaml_for_test,
@@ -55,7 +56,7 @@ if TYPE_CHECKING:
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
-    pytest.mark.xdist_group("inv_dashboard_agreement"),
+    isolation_producer(IsolationScope.AGREEMENT_INV),
 ]
 
 
@@ -90,46 +91,35 @@ def _build_anomaly_generator(
     return gen
 
 
-@pytest.fixture(scope="module")
-def isolated_inv_cfg(cfg: "Config") -> "Iterator[Config]":
-    from dataclasses import replace
-
-    iso = replace(
-        cfg,
-        db_table_prefix=f"{cfg.db_table_prefix}_{_ISOLATION_SUFFIX}",
-        deployment_name=f"{cfg.deployment_name}-{_ISOLATION_SUFFIX}",
-    )
-    yield iso
-
 
 @pytest.fixture(scope="module")
-def seeded_l2_db(isolated_inv_cfg: "Config") -> None:
+def seeded_l2_db(isolated_cfg: "Config") -> None:
     """Re-seed against the isolated cfg. Shared idempotently with the
     db-tier producer via xdist_group worker pinning."""
     from tests.e2e._seed_helpers import apply_db_seed
 
-    conn = connect_demo_db(isolated_inv_cfg)
+    conn = connect_demo_db(isolated_cfg)
     try:
         apply_db_seed(
             conn, _INSTANCE,
-            prefix=isolated_inv_cfg.db_table_prefix,
+            prefix=isolated_cfg.db_table_prefix,
             mode="l1_plus_broad",
             today=_TODAY,
-            dialect=isolated_inv_cfg.dialect,
+            dialect=isolated_cfg.dialect,
             include_baseline=False,
         )
         anchor = _plant_anchor_day()
-        anomaly_gen = _build_anomaly_generator(isolated_inv_cfg, anchor)
+        anomaly_gen = _build_anomaly_generator(isolated_cfg, anchor)
         anomaly_gen.emit(conn)
         conn.commit()
         refresh_sql = refresh_matviews_sql(
             _INSTANCE,
-            prefix=isolated_inv_cfg.db_table_prefix,
-            dialect=isolated_inv_cfg.dialect,
+            prefix=isolated_cfg.db_table_prefix,
+            dialect=isolated_cfg.dialect,
         )
         with conn.cursor() as cur:
             execute_script(
-                cur, refresh_sql, dialect=isolated_inv_cfg.dialect,
+                cur, refresh_sql, dialect=isolated_cfg.dialect,
             )
         conn.commit()
     finally:
@@ -138,7 +128,7 @@ def seeded_l2_db(isolated_inv_cfg: "Config") -> None:
 
 @pytest.fixture(scope="module")
 def isolated_inv_app(
-    isolated_inv_cfg: "Config",
+    isolated_cfg: "Config",
 ) -> "Iterator[App]":
     """Investigation App tree built against the ISOLATED cfg.
 
@@ -153,7 +143,7 @@ def isolated_inv_app(
 
     with isolated_dataset_registries():
         app = build_investigation_app(
-            isolated_inv_cfg, l2_instance=_INSTANCE,
+            isolated_cfg, l2_instance=_INSTANCE,
         )
         app.emit_analysis()
         yield app
@@ -178,7 +168,7 @@ def _normalise_row(row: list[Any]) -> list[Any]:
 
 def test_anomaly_app2_extract(
     seeded_l2_db: None,
-    isolated_inv_cfg: "Config",
+    isolated_cfg: "Config",
     isolated_inv_app: "App",
 ) -> None:
     """Read App2's rendered rows for L2 anomaly; write the artifact.
@@ -191,11 +181,11 @@ def test_anomaly_app2_extract(
 
     assert isolated_inv_app.analysis is not None
     visual_fetcher, options_fetcher = make_live_db_fetchers_for_app(
-        tree_app=isolated_inv_app, cfg=isolated_inv_cfg,
+        tree_app=isolated_inv_app, cfg=isolated_cfg,
     )
 
     with App2Driver.serving(
-        cfg=isolated_inv_cfg,
+        cfg=isolated_cfg,
         tree_app=isolated_inv_app,
         sheet=isolated_inv_app.analysis.sheets[0],
         data_fetcher=visual_fetcher, options_fetcher=options_fetcher,

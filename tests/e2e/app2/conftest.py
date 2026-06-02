@@ -23,6 +23,20 @@ from typing import Any
 
 from tests._marks import Tier, tier
 
+# CB.7 (refactored 2026-06-02) — re-export the isolation primitives so
+# app2-tier tests (especially the cross-tier consumers of
+# `IsolationScope.AGREEMENT_INV` / `AGREEMENT_AUDIT`) get the same
+# `isolated_cfg` + `db_conn` fixtures as the db tier. The DB tier writes;
+# app2 reads via the shared scope-keyed prefix.
+from tests.e2e._isolation import (  # noqa: F401 — re-export so pytest discovers the fixtures
+    _isolate_cfg,
+    _isolated_cfg_key,
+    db_conn,
+    isolated_cfg,
+)
+
+__all__ = ["_isolate_cfg", "_isolated_cfg_key", "db_conn", "isolated_cfg"]
+
 
 _APP2_TIER_MARK = tier(Tier.APP2)
 _OWN_DIR = pathlib.Path(__file__).resolve().parent

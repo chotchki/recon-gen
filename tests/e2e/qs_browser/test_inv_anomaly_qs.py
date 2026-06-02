@@ -29,6 +29,7 @@ from tests.audit._inv_dashboard_extract import (  # noqa: E402
     count_anomaly_rows,
     rows_seen_anomaly,
 )
+from tests._marks import IsolationScope, isolation_producer  # noqa: E402
 from tests.e2e._agreement import write_rendered_rows  # noqa: E402
 
 if TYPE_CHECKING:
@@ -39,7 +40,7 @@ if TYPE_CHECKING:
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
-    pytest.mark.xdist_group("inv_dashboard_agreement"),
+    isolation_producer(IsolationScope.AGREEMENT_INV),
 ]
 
 
@@ -47,24 +48,13 @@ _DEFAULT_SIGMA = 2.0
 _ISOLATION_SUFFIX = "iagree"
 
 
-@pytest.fixture(scope="module")
-def isolated_inv_cfg(cfg: "Config") -> "Iterator[Config]":
-    from dataclasses import replace
-
-    iso = replace(
-        cfg,
-        db_table_prefix=f"{cfg.db_table_prefix}_{_ISOLATION_SUFFIX}",
-        deployment_name=f"{cfg.deployment_name}-{_ISOLATION_SUFFIX}",
-    )
-    yield iso
-
 
 @pytest.fixture(scope="module")
-def inv_dashboard_id(isolated_inv_cfg: "Config") -> str:
+def inv_dashboard_id(isolated_cfg: "Config") -> str:
     """Isolated cfg's investigation-dashboard ID. When the dashboard
     isn't deployed, qs_inv_driver yields None and the producer writes
     the no-leg sentinel."""
-    return f"{isolated_inv_cfg.deployment_name}-investigation-dashboard"
+    return f"{isolated_cfg.deployment_name}-investigation-dashboard"
 
 
 @pytest.fixture

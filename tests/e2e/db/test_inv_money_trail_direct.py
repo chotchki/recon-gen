@@ -51,9 +51,16 @@ if TYPE_CHECKING:
     from recon_gen.common.spine.money_trail import MoneyTrailGenerator
 
 
-# CB.7 — xdist_group dropped: `isolated_cfg` gives each worker its own prefix,
-# so concurrent module fixtures don't race.
-pytestmark = [pytest.mark.e2e]
+# CB.7 (refactored 2026-06-02) — `@isolation_producer` for the
+# inv-agreement chain. See sibling `test_inv_anomaly_direct.py` for the
+# pattern rationale. Both modules produce into the same scope's prefix;
+# both run on the same worker via xdist_group so concurrent writes
+# don't race.
+from tests._marks import IsolationScope, isolation_producer  # noqa: E402
+pytestmark = [
+    pytest.mark.e2e,
+    isolation_producer(IsolationScope.AGREEMENT_INV),
+]
 
 
 _TODAY = today_anchor()

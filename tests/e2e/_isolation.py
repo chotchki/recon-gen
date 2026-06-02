@@ -114,8 +114,12 @@ def isolated_cfg(
     """
     from recon_gen.common.sql import Dialect
 
-    scope_marker = next(request.node.iter_markers("isolation_scope"), None)
-    if scope_marker and scope_marker.args:
+    # See `_isolated_cfg_key` for the pyright-cast rationale.
+    request_any: Any = request  # typing-smell: ignore[explicit-any]: pytest FixtureRequest protocol attrs are dynamic
+    scope_marker = next(
+        request_any.node.iter_markers("isolation_scope"), None,
+    )
+    if scope_marker is not None and scope_marker.args:
         suffix = f"x_{scope_marker.args[0]}"
     else:
         suffix = _isolated_cfg_key(request, cfg)

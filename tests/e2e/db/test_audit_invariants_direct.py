@@ -58,12 +58,15 @@ if TYPE_CHECKING:
     from recon_gen.common.sql import Dialect
 
 
-# CB.7 (refactored 2026-06-02) — `xdist_group` dropped: each worker's
-# `seeded_db` fixture writes to its own per-(module, worker, dialect)
-# prefix via `_isolate_cfg`, so concurrent workers don't race on
-# DROP+CREATE. The marker was a band-aid for the racing root cause that
-# isolation now fixes properly.
-pytestmark = [pytest.mark.e2e]
+# CB.7 (refactored 2026-06-02) — `@isolation_producer` for the
+# audit-agreement chain. App2 + qs_browser sibling files declare
+# `@isolation_consumer(AGREEMENT_AUDIT)`; all three tiers share the
+# same prefix and read each other's seeded state.
+from tests._marks import IsolationScope, isolation_producer  # noqa: E402
+pytestmark = [
+    pytest.mark.e2e,
+    isolation_producer(IsolationScope.AGREEMENT_AUDIT),
+]
 
 
 _TODAY = today_anchor()

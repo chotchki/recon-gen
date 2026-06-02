@@ -344,6 +344,7 @@ _CB_MARK_DOCS = {
     "writes": "Test mutates DB state — opt in to per-worker isolation.",
     "inputs": "Cross-test artifact dependencies (pytest nodeids of tests whose artifacts this test reads). Collection-time-validated.",
     "serial": "Test must run with `-n 1` (no parallel workers). Carry a reason argument explaining why — usually surfaces a `@writes()`-without-isolation debt entry.",
+    "isolation_scope": "Cross-tier isolation key (CB.7 refactor). Args: (scope_value, role) where role is 'producer' or 'consumer'. The `isolated_cfg` fixture uses scope_value as the prefix suffix.",
 }
 
 

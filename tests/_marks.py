@@ -146,10 +146,14 @@ class IsolationScope(StrEnum):
     writers in the chain see consistent state.
 
     Trade-off: within a tier, scope-marked tests share the same prefix
-    across workers → concurrent writes would race. Pair with
-    `pytest.mark.xdist_group(...)` on the same group name to pin to
-    one worker (status quo). Future work: parallelize-and-detect by
-    refusing concurrent producer fires.
+    across workers → concurrent writers would race on DROP+CREATE.
+    Operator-locked posture (2026-06-02): DON'T auto-pair with
+    `xdist_group`. The scope provides shared prefix; worker pinning
+    is a separate decision a test author opts into ONLY when they have
+    a specific reason (none currently identified post-CB.7 in this
+    codebase). If concurrent producers within tier turn out to race,
+    the right fix is to make the producer fixture idempotent
+    (apply_db_seed already does DROP+CREATE), not to serialize.
 
     Adding a new chain:
     1. Add a new variant here (e.g. `AGREEMENT_L2FT = "l2ft"`).
