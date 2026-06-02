@@ -41,6 +41,9 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
     isolation_producer(IsolationScope.AGREEMENT_INV),
+    # Sibling producers in this scope race on DROP+CREATE; pin to one
+    # worker so the module-scope writer fixtures serialize.
+    pytest.mark.xdist_group(IsolationScope.AGREEMENT_INV.value),
 ]
 
 

@@ -145,15 +145,24 @@ class IsolationScope(StrEnum):
     marker so `isolated_cfg` uses the same prefix suffix — readers and
     writers in the chain see consistent state.
 
-    Trade-off: within a tier, scope-marked tests share the same prefix
-    across workers → concurrent writers would race on DROP+CREATE.
-    Operator-locked posture (2026-06-02): DON'T auto-pair with
-    `xdist_group`. The scope provides shared prefix; worker pinning
-    is a separate decision a test author opts into ONLY when they have
-    a specific reason (none currently identified post-CB.7 in this
-    codebase). If concurrent producers within tier turn out to race,
-    the right fix is to make the producer fixture idempotent
-    (apply_db_seed already does DROP+CREATE), not to serialize.
+    Trade-off: when MULTIPLE producer files share a scope (e.g.
+    `test_inv_anomaly_direct.py` + `test_inv_money_trail_direct.py`
+    both producing into `AGREEMENT_INV`), concurrent workers running
+    those files race on DROP+CREATE against the shared prefix. For
+    these cases, pair the producer's `pytestmark` with
+    `pytest.mark.xdist_group(scope.value)` so all producers in the
+    scope land on the same worker and serialize.
+
+    When there's exactly ONE producer file per scope, xdist_group is
+    NOT needed — the file's own tests share the module-scope writer
+    fixture via pytest's normal caching, and other workers running
+    consumer tiers in their own pytest invocations don't race because
+    the producer tier already ran first.
+
+    The codebase invariant captured in the AST check (CB.7-followup):
+    `xdist_group(IsolationScope.X.value)` MUST be paired with
+    `isolation_producer(IsolationScope.X)` if and only if more than
+    one producer file shares the scope. Otherwise it's noise.
 
     Adding a new chain:
     1. Add a new variant here (e.g. `AGREEMENT_L2FT = "l2ft"`).
