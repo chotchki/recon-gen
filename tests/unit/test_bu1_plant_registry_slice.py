@@ -9,6 +9,8 @@ abstraction is testable from day one.
 
 from __future__ import annotations
 
+import duckdb
+
 import shutil
 from collections.abc import Iterator
 from datetime import datetime
@@ -340,7 +342,7 @@ def test_phantom_rail_plant_surfaces_on_etl_triage(
     # the plant surfaced as an unmatched_rail gap.
     fd, db_path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
-    conn = sqlite3.connect(db_path)
+    conn = duckdb.connect(db_path)
     conn.execute(
         f"CREATE TABLE {prefix}_transactions ("
         "entry INTEGER PRIMARY KEY AUTOINCREMENT, "
@@ -358,24 +360,24 @@ def test_phantom_rail_plant_surfaces_on_etl_triage(
     # Invoke the registry's plant function exactly as the route would.
     sql = entry.plant_function(
         prefix=prefix,
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
         anchor=datetime(2026, 5, 30, 14, 0, 0),
         count=4,
         rail_name=PHANTOM_RAIL_NAME,
     )
     cur = conn.cursor()
-    execute_script(cur, sql, dialect=Dialect.SQLITE)
+    execute_script(cur, sql, dialect=Dialect.DUCKDB)
     conn.commit()
     conn.close()
 
     cfg = make_test_config(
-        dialect=Dialect.SQLITE, demo_database_url=db_path,
+        dialect=Dialect.DUCKDB, demo_database_url=db_path,
     )
     pool: AsyncConnectionPool = asyncio.run(make_connection_pool(cfg))
     try:
         contracts = derive_column_contracts(inst)
         gaps = asyncio.run(detect_gaps(
-            pool, prefix, inst, contracts, dialect=Dialect.SQLITE,
+            pool, prefix, inst, contracts, dialect=Dialect.DUCKDB,
         ))
     finally:
         asyncio.run(pool.close())

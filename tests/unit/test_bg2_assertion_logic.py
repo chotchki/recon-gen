@@ -28,7 +28,7 @@ isn't tautologically failing.
 from __future__ import annotations
 
 import os
-import sqlite3
+import duckdb
 import tempfile
 from collections.abc import Iterator
 from decimal import Decimal
@@ -56,7 +56,7 @@ def planted_sqlite() -> Iterator["Config"]:
     query."""
     fd, path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
-    conn = sqlite3.connect(path)
+    conn = duckdb.connect(path)
     # Minimal projection — matches DAILY_STATEMENT_SUMMARY_CONTRACT
     # columns the SQL projects. Values stored as integer cents
     # (matches what the production matview holds; the production SQL
@@ -96,7 +96,7 @@ def planted_sqlite() -> Iterator["Config"]:
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=path)
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
     cfg.db_table_prefix = "pfx"
     try:
         yield cfg
@@ -238,7 +238,7 @@ def test_bg2_narrative_formula_against_independent_truth_catches_matview_net_flo
     """
     cfg = planted_sqlite
     assert cfg.demo_database_url is not None
-    conn = sqlite3.connect(cfg.demo_database_url)
+    conn = duckdb.connect(cfg.demo_database_url)
     # Plant a base-transactions table mirroring the matview's input
     # shape. In v6 amount_money is signed: Credit positive, Debit
     # negative.

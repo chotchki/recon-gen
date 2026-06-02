@@ -30,7 +30,7 @@ accounts). AS.3 is the scalar foundation.
 from __future__ import annotations
 
 import random
-import sqlite3
+import duckdb
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Literal
@@ -165,7 +165,7 @@ class AccountSimulation:
 
     def emit(
         self,
-        conn: sqlite3.Connection,
+        conn: duckdb.DuckDBPyConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:
@@ -178,7 +178,7 @@ class AccountSimulation:
             self._emit_day(conn, em, scenario_id=scenario_id)
 
     def violation_trajectory(
-        self, invariant: Invariant, conn: sqlite3.Connection,
+        self, invariant: Invariant, conn: duckdb.DuckDBPyConnection,
     ) -> list[set[Violation]]:
         """Run the fold day by day, refresh + detect after each day,
         return the per-day violation set. The carried-state shape
@@ -210,9 +210,9 @@ class AccountSimulation:
             execute_script(
                 cur,
                 refresh_matviews_sql(
-                    instance, prefix=self.prefix, dialect=Dialect.SQLITE,
+                    instance, prefix=self.prefix, dialect=Dialect.DUCKDB,
                 ),
-                dialect=Dialect.SQLITE,
+                dialect=Dialect.DUCKDB,
             )
             conn.commit()
             snapshots.append(invariant.detect(conn))
@@ -222,7 +222,7 @@ class AccountSimulation:
 
     def _emit_day(
         self,
-        conn: sqlite3.Connection,
+        conn: duckdb.DuckDBPyConnection,
         em: DayEmission,
         *,
         scenario_id: str | None = None,

@@ -288,15 +288,13 @@ def connect_and_apply(
     Cursor lifecycle: psycopg2 + oracledb both support
     ``with conn.cursor() as cur`` (PEP 249's cursor context manager
     protocol — close-on-exit semantics). sqlite3.Cursor doesn't
-    implement ``__enter__`` / ``__exit__`` (only sqlite3.Connection
+    implement ``__enter__`` / ``__exit__`` (only duckdb.DuckDBPyConnection
     does), so the SQLite arm acquires the cursor, runs the script,
     and explicitly closes in a finally block. Same observable
     behavior; different syntax driven by the underlying driver's
     PEP 249 conformance level.
     """
     from recon_gen.common.db import connect_demo_db, execute_script
-    from recon_gen.common.sql import Dialect
-
     if not cfg.demo_database_url:
         raise click.ClickException(
             "demo_database_url is required. "
@@ -310,18 +308,8 @@ def connect_and_apply(
         raise click.ClickException(str(e)) from e
     try:
         click.echo(f"  Applying {label}...")
-        if cfg.dialect is Dialect.SQLITE:
-            # sqlite3.Cursor lacks __enter__ / __exit__ — manage
-            # close() explicitly. Same observable behavior as the
-            # `with conn.cursor() as cur` block on PG / Oracle.
-            cur = conn.cursor()
-            try:
-                execute_script(cur, sql, dialect=cfg.dialect)
-            finally:
-                cur.close()
-        else:
-            with conn.cursor() as cur:
-                execute_script(cur, sql, dialect=cfg.dialect)
+        with conn.cursor() as cur:
+            execute_script(cur, sql, dialect=cfg.dialect)
         conn.commit()
         click.echo(f"  {label.capitalize()} applied.")
     except Exception:

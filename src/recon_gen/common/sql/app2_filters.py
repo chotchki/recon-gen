@@ -75,16 +75,6 @@ def universal_date_range_clause(
             f"AND {date_column} < TO_DATE(SUBSTR({p_end}, 1, 10), "
             f"'YYYY-MM-DD') + 1"
         )
-    if dialect is Dialect.SQLITE:
-        # SQLite has no DATE type — stored timestamps are ISO TEXT.
-        # ``datetime(...)`` normalizes the input + supports modifiers;
-        # ``'+1 day'`` lands the upper bound on the next midnight, so
-        # any same-day ``YYYY-MM-DD HH:MM:SS`` stored on end_param's day
-        # sorts BEFORE it lex-wise.
-        return (
-            f"{date_column} >= datetime({p_start}) "
-            f"AND {date_column} < datetime({p_end}, '+1 day')"
-        )
     # Postgres — CAST(<ISO-T string> AS TIMESTAMP) parses natively.
     return (
         f"{date_column} >= CAST({p_start} AS TIMESTAMP) "

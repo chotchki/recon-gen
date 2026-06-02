@@ -36,7 +36,7 @@ or hits a different shape, AW's design needs another iteration.
 from __future__ import annotations
 
 import json
-import sqlite3
+import duckdb
 
 
 _L2_YAML_AS_JSON = json.dumps({
@@ -69,8 +69,8 @@ CREATE TABLE spike_config (
 """
 
 
-def _fresh_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
+def _fresh_db() -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(":memory:")
     conn.execute(_CONFIG_DDL)
     conn.execute(
         "INSERT INTO spike_config (l2_yaml) VALUES (?)",

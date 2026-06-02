@@ -40,12 +40,12 @@ documented in `test_spine_au2_composition.py`. AU.5's gate is the
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from pathlib import Path
 
 import pytest
 
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.config_table import replace_config
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
@@ -154,20 +154,18 @@ def test_every_promoted_invariant_has_a_generator(
 # ---------------------------------------------------------------------------
 
 
-def _fresh_db_with_full_l2() -> sqlite3.Connection:
+def _fresh_db_with_full_l2() -> duckdb.DuckDBPyConnection:
     """Schema + config row seeded with the L2 fields the spine
     generators read. The per-invariant test files seed narrower L2
     blobs (just the rails / limit_schedules they exercise); the
     AU.5 cross-cutting test seeds the full set so every generator's
     scenario_for can resolve."""
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+    conn = duckdb.connect(":memory:")
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
-        cur, emit_schema(instance, prefix=_PREFIX, dialect=Dialect.SQLITE),
-        dialect=Dialect.SQLITE,
+        cur, emit_schema(instance, prefix=_PREFIX, dialect=Dialect.DUCKDB),
+        dialect=Dialect.DUCKDB,
     )
     conn.commit()
     # BS.5 (2026-05-29): the hand-crafted JSON shape (rails +
@@ -191,12 +189,12 @@ def _fresh_db_with_full_l2() -> sqlite3.Connection:
     return conn
 
 
-def _refresh(conn: sqlite3.Connection) -> None:
+def _refresh(conn: duckdb.DuckDBPyConnection) -> None:
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
-        cur, refresh_matviews_sql(instance, prefix=_PREFIX, dialect=Dialect.SQLITE),
-        dialect=Dialect.SQLITE,
+        cur, refresh_matviews_sql(instance, prefix=_PREFIX, dialect=Dialect.DUCKDB),
+        dialect=Dialect.DUCKDB,
     )
     conn.commit()
 

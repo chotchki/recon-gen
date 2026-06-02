@@ -845,7 +845,7 @@ def test_daily_statement_balance_date_narrow_renders_a_portable_day_string() -> 
         Dialect.ORACLE: f"TO_CHAR(CAST({param} AS DATE), 'YYYY-MM-DD')",
         # SQLite has no real DATE type — strftime parses ISO strings
         # directly — so the cast is skipped.
-        Dialect.SQLITE: f"strftime('%Y-%m-%d', {param})",
+        Dialect.DUCKDB: f"strftime('%Y-%m-%d', {param})",
     }
     for dialect, expected_fn in expected_per_dialect.items():
         cfg = replace(_CFG, dialect=dialect)

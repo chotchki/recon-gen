@@ -186,71 +186,12 @@ def connect_demo_db(cfg: Config) -> Any:  # typing-smell: ignore[explicit-any]: 
         path = duckdb_path(cfg.demo_database_url)
         read_only = bool(RECON_GEN_DB_READ_ONLY.get_or_none())
         return duckdb.connect(path, read_only=read_only)
-    if cfg.dialect is Dialect.SQLITE:
-        # stdlib — no try/except for ImportError. SQLite uses Python's
-        # builtin ``sqlite3`` module so the local-iteration loop has
-        # zero install friction beyond ``pip install recon-gen``.
-        import sqlite3
-        conn = sqlite3.connect(sqlite_path(cfg.demo_database_url))
-        # Foreign keys are off by default; turn them on so any FK
-        # declarations in future schema versions enforce. The schema
-        # we emit today has no FKs, so this is forward-looking.
-        conn.execute("PRAGMA foreign_keys = ON;")
-        # Register the SQL/2008 STDDEV_SAMP aggregate that SQLite
-        # doesn't ship natively but the inv_pair_rolling_anomalies
-        # matview needs. Implementation is single-pass + numerically
-        # stable (Welford's online algorithm).
-        _register_sqlite_aggregates(conn)
-        return conn
     raise ValueError(
         f"Unknown dialect {cfg.dialect!r}. "
         "Set 'dialect: postgres', 'dialect: oracle', 'dialect: duckdb', "
         "or 'dialect: sqlite' in your config."
     )
 
-
-class _StddevSampAggregate:
-    """Welford's online algorithm for sample standard deviation —
-    registered as the SQLite aggregate ``STDDEV_SAMP`` since SQLite
-    doesn't ship the SQL/2008 standard aggregate natively.
-
-    Numerically stable single-pass: tracks running mean + sum of
-    squared deviations (``m2`` in Welford notation, lowercased here
-    so pyright's ``reportConstantRedefinition`` doesn't trip on
-    the per-step reassignment).
-    Returns NULL when n < 2 (matching the SQL standard semantic where
-    sample stddev of a single value is undefined, not 0).
-    """
-
-    def __init__(self) -> None:
-        self.n = 0
-        self.mean = 0.0
-        self.m2 = 0.0
-
-    def step(self, value: Any) -> None:  # typing-smell: ignore[explicit-any]: SQLite aggregate step receives whatever the SQL column resolves to (NULL/INT/REAL/TEXT)
-        if value is None:
-            return
-        x = float(value)
-        self.n += 1
-        delta = x - self.mean
-        self.mean += delta / self.n
-        delta2 = x - self.mean
-        self.m2 += delta * delta2
-
-    def finalize(self) -> float | None:
-        if self.n < 2:
-            return None
-        return (self.m2 / (self.n - 1)) ** 0.5  # SQRT(m2 / (n-1))
-
-
-def _register_sqlite_aggregates(conn: Any) -> None:  # typing-smell: ignore[explicit-any]: aiosqlite/sqlite3 connection has no Protocol covering create_aggregate
-    """Register the SQL aggregates SQLite doesn't ship that the schema
-    SQL needs.
-
-    Today: ``STDDEV_SAMP``. Future additions land here so the SQLite
-    connection looks SQL-standard from the schema's point of view.
-    """
-    conn.create_aggregate("STDDEV_SAMP", 1, _StddevSampAggregate)
 
 
 def execute_script(
@@ -299,15 +240,6 @@ def execute_script(
             _apply_seed_via_duckdb_pyarrow(cur, sql)
         else:
             _execute_with_coalesced_inserts(cur, sql, _flush_duckdb_multivalues)
-        return
-    if dialect is Dialect.SQLITE:
-        # Bind-variable + executemany fast path for INSERT-heavy
-        # scripts (Studio deploy emits ~72k single-row INSERTs against
-        # 2 tables for sasquatch_pr; bare executescript = ~33s, this
-        # path = ~0.6s — 50x speedup). Falls back to per-statement
-        # cur.execute for any non-INSERT or non-conforming statement,
-        # so the contract is unchanged for callers.
-        _execute_sqlite_with_binds(cur, sql)
         return
     # CA.13 — Oracle fast path: if oracledb 3.4+ is installed AND pyarrow
     # is available, use Connection.direct_path_load() (server-side bypass
@@ -540,29 +472,6 @@ def _parse_simple_values(body: str) -> tuple[object, ...] | None:
     return tuple(out)
 
 
-def _typed_lit_to_sqlite_bind(v: object) -> object:
-    """SQLite's `executemany` binds Python values via the DB-API 2.0
-    adapter chain; it doesn't know what to do with a `_TypedSqlLiteral`
-    sentinel. Since SQLite stores datetimes as TEXT and accepts ISO
-    strings for DATE / TIMESTAMP columns, collapse the sentinel to its
-    inner text. Pass-through for every other shape.
-
-    For SQLite specifically, the seed's `date_literal` helper emits a
-    bare `'YYYY-MM-DD'` string (not `DATE 'YYYY-MM-DD'`), so this
-    helper is defensive — it only fires if the SQL emit grows a typed
-    literal on the SQLite path.
-    """
-    if isinstance(v, _TypedSqlLiteral):
-        return v.text
-    return v
-
-
-def _execute_sqlite_with_binds(cur: Any, sql: str) -> None:  # typing-smell: ignore[explicit-any]: sqlite3.Cursor — DB-API 2.0 cursor with no shared Protocol across drivers
-    """SQLite execute-script fast path. Thin wrapper over the dialect-
-    agnostic coalescer; SQLite's executemany IS a real bulk path (50×
-    speedup per the docstring on `_flush_sqlite_executemany`)."""
-    _execute_with_coalesced_inserts(cur, sql, _flush_sqlite_executemany)
-
 
 def _execute_with_coalesced_inserts(
     cur: Any,  # typing-smell: ignore[explicit-any]: sync DB-API 2.0 cursor — see execute_script
@@ -624,27 +533,6 @@ def _execute_with_coalesced_inserts(
         cur.execute(stmt)
     _flush()
 
-
-def _flush_sqlite_executemany(
-    cur: Any,  # typing-smell: ignore[explicit-any]: sqlite3.Cursor — DB-API 2.0 with no shared Protocol
-    table: str, cols: str, rows: list[tuple[object, ...]],
-) -> None:
-    """SQLite bulk path: ``cur.executemany``. The connection's
-    ``executescript`` couldn't be used directly because the cursor (not
-    the connection) is the runner's hand-off point, and ``executemany``
-    is the cursor-level bulk API SQLite ships. Measured ~50× speedup
-    vs per-row execute on the ~72k-row sasquatch_pr seed (~33s → ~0.6s).
-
-    Any `_TypedSqlLiteral` sentinels (CA.10-followup, used by DuckDB to
-    round-trip ``TIMESTAMP '...'`` / ``DATE '...'``) collapse to their
-    inner text — SQLite stores datetimes as TEXT and accepts ISO
-    strings for DATE / TIMESTAMP columns.
-    """
-    ncols = len(rows[0])
-    placeholders = ",".join("?" * ncols)
-    stmt = f"INSERT INTO {table} ({cols}) VALUES ({placeholders})"
-    bind_rows = [tuple(_typed_lit_to_sqlite_bind(v) for v in row) for row in rows]
-    cur.executemany(stmt, bind_rows)
 
 
 def _flush_duckdb_multivalues(
@@ -1517,52 +1405,6 @@ class _AsyncOraclePool:
         await self._pool.close()
 
 
-class _AsyncSqlitePool:
-    """``aiosqlitepool``-backed pool for the App2 async SQLite path.
-
-    Upstream aiosqlite#258 (https://github.com/omnilib/aiosqlite/issues/258,
-    still open on 0.22.1) — `async with aiosqlite.connect(...) as db` leaks
-    thread locks on close. The old per-acquire connect+close pattern here
-    accumulated memory until OOM (caught locally during a 13-variant
-    browser e2e sweep in v11.22.4-followon: each test spun a fresh
-    App2Driver pool, each request opened+closed an aiosqlite connection).
-
-    ``aiosqlitepool.SQLiteConnectionPool`` is a third-party pool that reuses
-    long-lived aiosqlite connections (the upstream-issue workaround pattern,
-    productized). Same shape as ``psycopg_pool.AsyncConnectionPool`` on the
-    PG path — consistent ``.connection()`` async-cm + ``.close()``.
-
-    The factory opens the underlying aiosqlite connection lazily on first
-    acquire + applies our PRAGMA setup. NOTE: STDDEV_SAMP is NOT registered
-    on this async pool (aiosqlite doesn't expose create_aggregate); the
-    inv_pair_rolling_anomalies matview holds pre-computed rows from the
-    sync `connect_demo_db` path which does register the aggregate, so the
-    async App2 read-only workload never needs it.
-    """
-
-    def __init__(self, path: str, *, max_size: int = 10) -> None:
-        from aiosqlitepool import SQLiteConnectionPool  # type: ignore[import-untyped]: aiosqlitepool lacks PEP 561 stubs  # noqa: PLC0415
-
-        async def _factory() -> Any:  # typing-smell: ignore[explicit-any]: aiosqlite.Connection conforms to aiosqlitepool's Connection Protocol at runtime; static stubs disagree
-            import aiosqlite  # noqa: PLC0415
-
-            conn = await aiosqlite.connect(path)
-            await conn.execute("PRAGMA foreign_keys = ON;")
-            return conn
-
-        self._pool = SQLiteConnectionPool(_factory, pool_size=max_size)
-
-    def acquire(self) -> AbstractAsyncContextManager[AsyncConnection]:
-        return self._acquire()
-
-    @asynccontextmanager
-    async def _acquire(self) -> AsyncGenerator[AsyncConnection, None]:
-        async with self._pool.connection() as conn:
-            yield conn  # type: ignore[misc]: aiosqlite Connection conforms to AsyncConnection protocol
-
-    async def close(self) -> None:
-        await self._pool.close()
-
 
 class _AsyncDuckdbCursor:
     """CA.4 — async-shaped cursor result adapter for sync DuckDB.
@@ -1772,21 +1614,6 @@ async def make_connection_pool(
         del _duckdb_probe
         return _AsyncDuckdbPool(
             duckdb_path(cfg.demo_database_url), max_size=max_size,
-        )
-    if cfg.dialect is Dialect.SQLITE:
-        # Probe the import here so a missing aiosqlite surfaces at
-        # pool-construction time (server startup) instead of inside
-        # the first request handler.
-        try:
-            import aiosqlite as _aiosqlite_probe  # noqa: PLC0415, F401
-        except ImportError as e:
-            raise ImportError(
-                "aiosqlite is required for the async SQLite pool. "
-                "Install it with: pip install 'recon-gen[prod]'"
-            ) from e
-        del _aiosqlite_probe
-        return _AsyncSqlitePool(
-            sqlite_path(cfg.demo_database_url), max_size=max_size,
         )
     raise ValueError(
         f"Unknown dialect {cfg.dialect!r}. "

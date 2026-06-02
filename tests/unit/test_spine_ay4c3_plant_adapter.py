@@ -323,12 +323,12 @@ def test_default_scenario_full_corpus_composes_via_dry_run() -> None:
     gens = scenario_to_generators(
         scenario_bundle.scenario, inst,
     )
-    cap = dry_run_capture(Dialect.SQLITE)
+    cap = dry_run_capture(Dialect.DUCKDB)
     ctx = ScenarioContext(scenario_id="ay4c4-smoke", prefix=DEFAULT_PREFIX)
     captured = ctx.compose(cap, *gens, dry_run=True)  # pyright: ignore[reportArgumentType]: ``cap`` is _DryRunBase (duck-typed Connection for dry-run); ViolationGenerator narrows to ClaimedAccountsGenerator Protocol at runtime — same seam as tests/e2e/_seed_helpers.py
     assert captured is not None
     assert len(captured) > 0
-    sql = render_captured_sql(captured, dialect=Dialect.SQLITE)
+    sql = render_captured_sql(captured, dialect=Dialect.DUCKDB)
     assert "?" not in sql
     assert "INSERT INTO" in sql
     assert "ay4c4-smoke" in sql
@@ -359,12 +359,12 @@ def test_focused_single_plant_round_trips_through_compose_render() -> None:
         today=date(2030, 1, 1),
     )
     gens = scenario_to_generators(scenarios, inst)
-    cap = dry_run_capture(Dialect.SQLITE)
+    cap = dry_run_capture(Dialect.DUCKDB)
     ctx = ScenarioContext(scenario_id="ay4c3-smoke", prefix=DEFAULT_PREFIX)
     captured = ctx.compose(cap, *gens, dry_run=True)  # pyright: ignore[reportArgumentType]: ``cap`` is _DryRunBase (duck-typed Connection for dry-run); ViolationGenerator narrows to ClaimedAccountsGenerator Protocol at runtime — same seam as tests/e2e/_seed_helpers.py
     assert captured is not None
     assert len(captured) > 0
-    sql = render_captured_sql(captured, dialect=Dialect.SQLITE)
+    sql = render_captured_sql(captured, dialect=Dialect.DUCKDB)
     assert "?" not in sql
     assert "INSERT INTO" in sql
     assert "ay4c3-smoke" in sql

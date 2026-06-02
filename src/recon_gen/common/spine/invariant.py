@@ -35,7 +35,7 @@ Promoted from `tests/unit/test_as0_drift_full_spine.py` by AS.1.
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from typing import ClassVar, Protocol, runtime_checkable
 
 from recon_gen.common.spine.violation import Violation
@@ -61,4 +61,4 @@ class Invariant(Protocol):
 
     name: ClassVar[str]
 
-    def detect(self, conn: sqlite3.Connection) -> set[Violation]: ...
+    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]: ...

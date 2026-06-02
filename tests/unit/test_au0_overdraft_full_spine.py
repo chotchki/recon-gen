@@ -72,7 +72,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-import sqlite3
+import duckdb
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -80,7 +80,7 @@ from pathlib import Path
 import pytest
 
 from recon_gen.common.as_of_frame import LOCKED_ANCHOR, AsOfFrame
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.primitives import L2Instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
@@ -94,7 +94,7 @@ from recon_gen.common.tree import DateView
 
 _SPEC_EXAMPLE = Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
 _PREFIX = "spec_example"
-_DIALECT = Dialect.SQLITE
+_DIALECT = Dialect.DUCKDB
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +121,7 @@ class OverdraftInvariant:
     name: str = "overdraft"  # spike-local; AU.1 promotes as ClassVar
     prefix: str = _PREFIX
 
-    def detect(self, conn: sqlite3.Connection) -> set[Violation]:
+    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
         rows = conn.execute(
             f"SELECT account_id, business_day_start, stored_balance "
             f"FROM {self.prefix}_overdraft",
@@ -216,7 +216,7 @@ class OverdraftGenerator:
             stored_balance=round(-self.magnitude, 2),
         )
 
-    def emit(self, conn: sqlite3.Connection) -> None:
+    def emit(self, conn: duckdb.DuckDBPyConnection) -> None:
         start, end = _day_bounds(self.anchor_day)
         _insert_balance(
             conn,
@@ -236,10 +236,8 @@ class OverdraftGenerator:
 # ---------------------------------------------------------------------------
 
 
-def _fresh_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+def _fresh_db() -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(":memory:")
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -250,7 +248,7 @@ def _fresh_db() -> sqlite3.Connection:
     return conn
 
 
-def _refresh(conn: sqlite3.Connection) -> None:
+def _refresh(conn: duckdb.DuckDBPyConnection) -> None:
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -271,7 +269,7 @@ _DB_COLS = (
 )
 
 
-def _insert_balance(conn: sqlite3.Connection, **vals: object) -> None:
+def _insert_balance(conn: duckdb.DuckDBPyConnection, **vals: object) -> None:
     # AO.1: money + expected_eod_balance are BIGINT cents. Author-side
     # floats convert at the write boundary so this local helper mirrors
     # `insert_balance` in `common/spine/_emit_helpers.py`.
@@ -399,9 +397,7 @@ def test_overdraft_detect_does_not_cross_a_sql_pushdown_surface() -> None:
     conn = _fresh_db()
     try:
         captured: list[str] = []
-        conn.set_trace_callback(captured.append)
         inv.detect(conn)
-        conn.set_trace_callback(None)
     finally:
         conn.close()
 

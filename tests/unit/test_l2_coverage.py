@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sqlite3
+import duckdb
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -74,7 +74,7 @@ def seeded_pool() -> Iterator[AsyncConnectionPool]:
     fd, path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
 
-    conn = sqlite3.connect(path)
+    conn = duckdb.connect(path)
     conn.execute(
         "CREATE TABLE coverage_test_transactions ("
         "id INTEGER PRIMARY KEY, "
@@ -100,7 +100,7 @@ def seeded_pool() -> Iterator[AsyncConnectionPool]:
     conn.commit()
     conn.close()
 
-    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=path)
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
     pool = asyncio.run(make_connection_pool(cfg))
     try:
         yield pool
@@ -113,7 +113,7 @@ def _run_coverage(
     pool: AsyncConnectionPool, instance: L2Instance,
 ) -> "tuple[dict[str, CoverageEntry], dict[str, CoverageEntry]]":
     cov = asyncio.run(
-        coverage_for(pool, "coverage_test", instance, dialect=Dialect.SQLITE),
+        coverage_for(pool, "coverage_test", instance, dialect=Dialect.DUCKDB),
     )
     return dict(cov.by_node_id), dict(cov.by_chain_edge_id)
 

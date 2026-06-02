@@ -95,8 +95,6 @@ def range_clause(
     # SQLite stores TEXT and compares lexically (ISO format is correct).
     start_iso = interval.start.isoformat(sep=" ")
     end_iso = interval.end_exclusive.isoformat(sep=" ")
-    if dialect is Dialect.SQLITE:
-        return f"{column} >= '{start_iso}' AND {column} < '{end_iso}'"
     return (
         f"{column} >= TIMESTAMP '{start_iso}' AND "
         f"{column} < TIMESTAMP '{end_iso}'"

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sqlite3
+import duckdb
 import tempfile
 from collections.abc import Iterator
 from datetime import date, datetime
@@ -69,7 +69,7 @@ def seeded_pool() -> Iterator[AsyncConnectionPool]:
     fd, path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
 
-    conn = sqlite3.connect(path)
+    conn = duckdb.connect(path)
     conn.execute(
         f"CREATE TABLE {_PREFIX}_transactions ("
         "id TEXT PRIMARY KEY, "
@@ -107,7 +107,7 @@ def seeded_pool() -> Iterator[AsyncConnectionPool]:
     conn.commit()
     conn.close()
 
-    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=path)
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
     pool = asyncio.run(make_connection_pool(cfg))
     try:
         yield pool
@@ -126,7 +126,7 @@ def _fetch(
         pool, _PREFIX,
         kind=kind, name=name,
         date_from=date_from, date_to=date_to,
-        dialect=Dialect.SQLITE, limit=limit,
+        dialect=Dialect.DUCKDB, limit=limit,
     ))
 
 
@@ -409,7 +409,7 @@ def test_metadata_coverage_emits_one_entry_per_l2_template(
     zero rows in the table."""
     inst = _make_l2_instance_with_templates()
     cov = asyncio.run(metadata_coverage_per_template(
-        seeded_pool, _PREFIX, inst, dialect=Dialect.SQLITE,
+        seeded_pool, _PREFIX, inst, dialect=Dialect.DUCKDB,
     ))
     assert set(cov.keys()) == {"merchant_cycle", "nonexistent_template"}
 
@@ -421,7 +421,7 @@ def test_metadata_coverage_counts_required_keys_landing_per_template(
     keys; the helper records per_key[k]=1 for each required key."""
     inst = _make_l2_instance_with_templates()
     cov = asyncio.run(metadata_coverage_per_template(
-        seeded_pool, _PREFIX, inst, dialect=Dialect.SQLITE,
+        seeded_pool, _PREFIX, inst, dialect=Dialect.DUCKDB,
     ))
     mc = cov["merchant_cycle"]
     assert mc.row_count == 1
@@ -440,7 +440,7 @@ def test_metadata_coverage_zero_rows_branch_reports_empty_per_key(
     for each required key (so the BT.3 card paints '0/N keys ✗ no rows')."""
     inst = _make_l2_instance_with_templates()
     cov = asyncio.run(metadata_coverage_per_template(
-        seeded_pool, _PREFIX, inst, dialect=Dialect.SQLITE,
+        seeded_pool, _PREFIX, inst, dialect=Dialect.DUCKDB,
     ))
     nt = cov["nonexistent_template"]
     assert nt.row_count == 0

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sqlite3
+import duckdb
 import tempfile
 from collections.abc import Callable, Iterator
 from decimal import Decimal
@@ -56,7 +56,7 @@ def _seed_db(rows: Sequence[SeedRow]) -> str:
     """
     fd, path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
-    conn = sqlite3.connect(path)
+    conn = duckdb.connect(path)
     conn.execute(
         f"CREATE TABLE {_PREFIX}_transactions ("
         "id TEXT PRIMARY KEY, "
@@ -104,7 +104,7 @@ def pool_factory() -> Iterator[PoolFactory]:
     paths: list[str] = []
 
     def _build(path: str) -> AsyncConnectionPool:
-        cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=path)
+        cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
         pool = asyncio.run(make_connection_pool(cfg))
         pools.append(pool)
         paths.append(path)
@@ -124,7 +124,7 @@ def _detect(
 ) -> tuple[Gap, ...]:
     contracts = derive_column_contracts(instance)
     return asyncio.run(detect_gaps(
-        pool, _PREFIX, instance, contracts, dialect=Dialect.SQLITE,
+        pool, _PREFIX, instance, contracts, dialect=Dialect.DUCKDB,
     ))
 
 

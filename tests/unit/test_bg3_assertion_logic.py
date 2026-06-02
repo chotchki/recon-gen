@@ -28,7 +28,7 @@ failing.
 from __future__ import annotations
 
 import os
-import sqlite3
+import duckdb
 import tempfile
 from collections.abc import Iterator
 from decimal import Decimal
@@ -54,7 +54,7 @@ def planted_drift_sqlite() -> Iterator["Config"]:
     re-query to trip individual assertions."""
     fd, path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
-    conn = sqlite3.connect(path)
+    conn = duckdb.connect(path)
 
     # `<prefix>_drift` matview — one row per leaf-account-day with
     # drift. The .count() KPI reads len(rows here).
@@ -124,7 +124,7 @@ def planted_drift_sqlite() -> Iterator["Config"]:
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=path)
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
     cfg.db_table_prefix = "pfx"
     try:
         yield cfg
@@ -295,10 +295,10 @@ def test_bg3_kv_pin_anchors_test_to_deploy_day_across_midnight(
     # 1) Stamp an isolated sqlite with kv.as_of = 5/28 (the "deploy day").
     db_path = tmp_path / "bg3_kv_pin.sqlite"
     prefix = "bg3kv"
-    conn = sqlite3.connect(str(db_path))
+    conn = duckdb.connect(str(db_path))
     try:
-        conn.executescript(
-            emit_config_table_ddl(prefix, dialect=Dialect.SQLITE),
+        conn.execute(
+            emit_config_table_ddl(prefix, dialect=Dialect.DUCKDB),
         )
         replace_config(
             conn, prefix=prefix,
@@ -319,7 +319,7 @@ def test_bg3_kv_pin_anchors_test_to_deploy_day_across_midnight(
 
     # 3) Build a cfg pointed at the stamped sqlite.
     cfg = make_test_config(
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
         db_table_prefix=prefix,
         demo_database_url=f"sqlite:///{db_path}",
     )

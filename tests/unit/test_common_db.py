@@ -190,7 +190,7 @@ class TestConnectDemoDb:
         # X.3.a — SQLite uses stdlib sqlite3 with no extra. ``:memory:``
         # is the canonical in-memory DB string; SQLAlchemy-style URL
         # form parses to the same path via ``sqlite_path``.
-        cfg = _cfg(dialect=Dialect.SQLITE, url="sqlite://:memory:")
+        cfg = _cfg(dialect=Dialect.DUCKDB, url="sqlite://:memory:")
         conn = connect_demo_db(cfg)
         try:
             cur = conn.cursor()
@@ -202,9 +202,9 @@ class TestConnectDemoDb:
     def test_sqlite_branch_opens_file(self, tmp_path: Path) -> None:
         # SQLAlchemy-style ``sqlite:///path`` translates to the file
         # path correctly. Round-trip a CREATE/INSERT/SELECT to confirm
-        # the connection is a real DB-API 2.0 sqlite3.Connection.
+        # the connection is a real DB-API 2.0 duckdb.DuckDBPyConnection.
         db_file = tmp_path / "demo.sqlite"
-        cfg = _cfg(dialect=Dialect.SQLITE, url=f"sqlite:///{db_file}")
+        cfg = _cfg(dialect=Dialect.DUCKDB, url=f"sqlite:///{db_file}")
         conn = connect_demo_db(cfg)
         try:
             cur = conn.cursor()
@@ -255,7 +255,7 @@ class TestExecuteScriptSqlite:
     def test_executes_multi_statement_script(self) -> None:
         import sqlite3
 
-        conn = sqlite3.connect(":memory:")
+        conn = duckdb.connect(":memory:")
         try:
             cur = conn.cursor()
             sql = (
@@ -264,7 +264,7 @@ class TestExecuteScriptSqlite:
                 "INSERT INTO t VALUES (2);\n"
                 "INSERT INTO t VALUES (3);"
             )
-            execute_script(cur, sql, dialect=Dialect.SQLITE)
+            execute_script(cur, sql, dialect=Dialect.DUCKDB)
             cur.execute("SELECT COUNT(*) FROM t")
             assert cur.fetchone()[0] == 3
         finally:
@@ -276,7 +276,7 @@ class TestExecuteScriptSqlite:
         plain executescript."""
         import sqlite3
 
-        conn = sqlite3.connect(":memory:")
+        conn = duckdb.connect(":memory:")
         try:
             cur = conn.cursor()
             sql = (
@@ -286,7 +286,7 @@ class TestExecuteScriptSqlite:
                 "INSERT INTO t (id, n, x, j) VALUES ('b', NULL, -2.0, NULL);\n"
                 "INSERT INTO t (id, n, x, j) VALUES ('c', 999, 0.0, 'plain');"
             )
-            execute_script(cur, sql, dialect=Dialect.SQLITE)
+            execute_script(cur, sql, dialect=Dialect.DUCKDB)
             cur.execute("SELECT id, n, x, j FROM t ORDER BY id")
             rows = cur.fetchall()
             assert rows == [
@@ -302,7 +302,7 @@ class TestExecuteScriptSqlite:
         within each table is preserved."""
         import sqlite3
 
-        conn = sqlite3.connect(":memory:")
+        conn = duckdb.connect(":memory:")
         try:
             cur = conn.cursor()
             sql = (
@@ -313,7 +313,7 @@ class TestExecuteScriptSqlite:
                 "INSERT INTO b (v) VALUES (10);\n"
                 "INSERT INTO a (v) VALUES (3);\n"  # transitions back
             )
-            execute_script(cur, sql, dialect=Dialect.SQLITE)
+            execute_script(cur, sql, dialect=Dialect.DUCKDB)
             cur.execute("SELECT v FROM a ORDER BY v")
             assert [r[0] for r in cur.fetchall()] == [1, 2, 3]
             cur.execute("SELECT v FROM b ORDER BY v")
@@ -326,7 +326,7 @@ class TestExecuteScriptSqlite:
         — buffer flushes before each non-conforming statement runs."""
         import sqlite3
 
-        conn = sqlite3.connect(":memory:")
+        conn = duckdb.connect(":memory:")
         try:
             cur = conn.cursor()
             sql = (
@@ -336,7 +336,7 @@ class TestExecuteScriptSqlite:
                 "DELETE FROM t WHERE v = 1;\n"
                 "INSERT INTO t (v) VALUES (3);"
             )
-            execute_script(cur, sql, dialect=Dialect.SQLITE)
+            execute_script(cur, sql, dialect=Dialect.DUCKDB)
             cur.execute("SELECT v FROM t ORDER BY v")
             assert [r[0] for r in cur.fetchall()] == [2, 3]
         finally:
@@ -347,7 +347,7 @@ class TestExecuteScriptSqlite:
         must not surface as bogus statements."""
         import sqlite3
 
-        conn = sqlite3.connect(":memory:")
+        conn = duckdb.connect(":memory:")
         try:
             cur = conn.cursor()
             sql = (
@@ -360,7 +360,7 @@ class TestExecuteScriptSqlite:
                 "INSERT INTO t (v) VALUES (1);\n"
                 "INSERT INTO t (v) VALUES (2);"
             )
-            execute_script(cur, sql, dialect=Dialect.SQLITE)
+            execute_script(cur, sql, dialect=Dialect.DUCKDB)
             cur.execute("SELECT COUNT(*) FROM t")
             assert cur.fetchone()[0] == 2
         finally:
@@ -372,7 +372,7 @@ class TestExecuteScriptSqlite:
         all the inserted rows."""
         import sqlite3
 
-        conn = sqlite3.connect(":memory:")
+        conn = duckdb.connect(":memory:")
         try:
             cur = conn.cursor()
             cur.execute("CREATE TABLE t (v INTEGER)")
@@ -382,7 +382,7 @@ class TestExecuteScriptSqlite:
                 "INSERT INTO t (v) VALUES (2);\n"
                 "INSERT INTO t (v) VALUES (3);"
             )
-            execute_script(cur, sql, dialect=Dialect.SQLITE)
+            execute_script(cur, sql, dialect=Dialect.DUCKDB)
             # Pre-rollback rows visible to this connection (autocommit-ish view).
             cur.execute("SELECT COUNT(*) FROM t")
             assert cur.fetchone()[0] == 3
@@ -513,7 +513,7 @@ class TestMakeConnectionPool:
 
         cfg = make_test_config(
             aws_region="us-east-2",
-            dialect=Dialect.SQLITE,
+            dialect=Dialect.DUCKDB,
             demo_database_url=":memory:",
         )
 
@@ -546,7 +546,7 @@ class TestMakeConnectionPool:
 
         cfg = make_test_config(
             aws_region="us-east-2",
-            dialect=Dialect.SQLITE,
+            dialect=Dialect.DUCKDB,
             demo_database_url=None,
         )
         with pytest.raises(ValueError, match="demo_database_url is unset"):
@@ -575,7 +575,7 @@ class TestMakeConnectionPool:
 
         cfg = make_test_config(
             aws_region="us-east-2",
-            dialect=Dialect.SQLITE,
+            dialect=Dialect.DUCKDB,
             demo_database_url=":memory:",
         )
         pool = asyncio.run(make_connection_pool(cfg))

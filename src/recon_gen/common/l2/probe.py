@@ -250,8 +250,6 @@ def _placeholder(dialect: Dialect) -> Callable[[int], str]:
     """
     if dialect is Dialect.ORACLE:
         return lambda i: f":{i + 1}"
-    if dialect is Dialect.SQLITE:
-        return lambda _i: "?"
     return lambda _i: "%s"
 
 

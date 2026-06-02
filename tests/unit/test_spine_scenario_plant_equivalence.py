@@ -55,12 +55,12 @@ adds 7 more new generators that will extend this gate to 20):
 from __future__ import annotations
 
 import json
-import sqlite3
+import duckdb
 from datetime import date, datetime
 from pathlib import Path
 
 
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.auto_scenario import (
     default_scenario_for,
     filter_scenario_plants,
@@ -89,17 +89,15 @@ _SPEC_EXAMPLE = (
     Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
 )
 _PREFIX = "spec_example"
-_DIALECT = Dialect.SQLITE
+_DIALECT = Dialect.DUCKDB
 _ANCHOR = date(2030, 1, 1)
 _AS_OF = datetime(2030, 1, 1, 12, 0, 0)
 
 
-def _fresh_db() -> sqlite3.Connection:
+def _fresh_db() -> duckdb.DuckDBPyConnection:
     """Schema + AW config row populated (the spine + L2 helpers
     both read from the <prefix>_config table post-AW)."""
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+    conn = duckdb.connect(":memory:")
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -127,7 +125,7 @@ def _fresh_db() -> sqlite3.Connection:
 
 
 def _apply_old_path(
-    conn: sqlite3.Connection,
+    conn: duckdb.DuckDBPyConnection,
     scenario: object,
 ) -> None:
     """Execute the OLD `emit_seed` SQL against the connection +
@@ -146,7 +144,7 @@ def _apply_old_path(
     conn.commit()
 
 
-def _detect_count(conn: sqlite3.Connection, inv: Invariant) -> int:
+def _detect_count(conn: duckdb.DuckDBPyConnection, inv: Invariant) -> int:
     """Count of detected violations for the given invariant."""
     return len(inv.detect(conn))
 

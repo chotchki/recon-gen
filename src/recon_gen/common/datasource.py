@@ -142,14 +142,6 @@ def build_datasource(cfg: Config) -> DataSource:
     if not cfg.demo_database_url:
         raise ValueError("demo_database_url is required to build a datasource")
 
-    if cfg.dialect is Dialect.SQLITE:
-        raise ValueError(
-            "SQLite is not a deployable QuickSight datasource type — "
-            "the SQLite dialect targets the local-iteration loop "
-            "(see docs/integrator/local-loop.md). For QuickSight deploys, "
-            "use 'dialect: postgres' or 'dialect: oracle' against an "
-            "RDS-managed instance."
-        )
 
     if cfg.dialect is Dialect.ORACLE:
         info = _parse_oracle_url(cfg.demo_database_url)

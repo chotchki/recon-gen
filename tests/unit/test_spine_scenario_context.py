@@ -34,13 +34,13 @@ generators rather than the spike's mock classes):
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
 
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema
 from recon_gen.common.spine import (
@@ -62,19 +62,17 @@ _SPEC_EXAMPLE = (
 _PREFIX = "spec_example"
 
 
-def _fresh_db() -> sqlite3.Connection:
+def _fresh_db() -> duckdb.DuckDBPyConnection:
     """In-process SQLite with the L2 schema applied (matches the AS/AT/AU
     pattern). The post-AV.1 schema gives daily_balances its metadata
     column — without that, the ScenarioContext per-row tagging would
     fall back to the spike's sidecar approach."""
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+    conn = duckdb.connect(":memory:")
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
-        cur, emit_schema(instance, prefix=_PREFIX, dialect=Dialect.SQLITE),
-        dialect=Dialect.SQLITE,
+        cur, emit_schema(instance, prefix=_PREFIX, dialect=Dialect.DUCKDB),
+        dialect=Dialect.DUCKDB,
     )
     conn.commit()
     return conn

@@ -8,6 +8,8 @@ Oracle 19c-compatible equivalent.
 
 from __future__ import annotations
 
+import duckdb
+
 from typing import Any, Callable
 
 import pytest
@@ -45,7 +47,7 @@ from recon_gen.common.sql import (
 
 PG = Dialect.POSTGRES
 ORA = Dialect.ORACLE
-SQLITE = Dialect.SQLITE
+SQLITE = Dialect.DUCKDB
 
 
 # -- Postgres branches -------------------------------------------------------
@@ -342,12 +344,12 @@ class TestDialectEnum:
     def test_string_values(self):
         assert Dialect.POSTGRES.value == "postgres"
         assert Dialect.ORACLE.value == "oracle"
-        assert Dialect.SQLITE.value == "sqlite"
+        assert Dialect.DUCKDB.value == "sqlite"
 
     def test_round_trip_from_string(self):
         assert Dialect("postgres") is Dialect.POSTGRES
         assert Dialect("oracle") is Dialect.ORACLE
-        assert Dialect("sqlite") is Dialect.SQLITE
+        assert Dialect("sqlite") is Dialect.DUCKDB
 
 
 # -- Identifiers (Y.3.f.1) ---------------------------------------------------

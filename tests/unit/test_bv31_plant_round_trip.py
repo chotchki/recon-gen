@@ -29,7 +29,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
-import sqlite3
+import duckdb
 import tempfile
 from collections.abc import Iterator
 from datetime import date, datetime
@@ -39,7 +39,7 @@ from typing import Any
 import pytest
 
 from recon_gen.common.db import (
-    AsyncConnectionPool, _register_sqlite_aggregates, execute_script,
+    AsyncConnectionPool, execute_script,
     make_connection_pool,
 )
 from recon_gen.common.l2 import load_instance
@@ -79,7 +79,7 @@ def _default_kwargs(entry: PlantKindEntry) -> dict[str, Any]:
     return out
 
 
-def _build_seeded_sqlite(l2_path: Path) -> sqlite3.Connection:
+def _build_seeded_sqlite(l2_path: Path) -> duckdb.DuckDBPyConnection:
     """Per-entry fresh sqlite: schema + config_kv populate + baseline
     + initial matview refresh. Returns the connection ready for plant SQL.
 
@@ -94,12 +94,10 @@ def _build_seeded_sqlite(l2_path: Path) -> sqlite3.Connection:
     from recon_gen.common.config import Config
 
     inst = load_instance(l2_path)
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+    conn = duckdb.connect(":memory:")
     cur = conn.cursor()
-    schema_sql = emit_schema(inst, prefix=_PREFIX, dialect=Dialect.SQLITE)
-    execute_script(cur, schema_sql, dialect=Dialect.SQLITE)
+    schema_sql = emit_schema(inst, prefix=_PREFIX, dialect=Dialect.DUCKDB)
+    execute_script(cur, schema_sql, dialect=Dialect.DUCKDB)
     # Populate config_kv so the L1 matview LEFT JOINs against
     # `<prefix>_v_config_limit_schedules` / `_pending_ages` etc. find
     # rows. Stub Config — `build_config_populate_sql` only reads
@@ -110,21 +108,21 @@ def _build_seeded_sqlite(l2_path: Path) -> sqlite3.Connection:
         deployment_name="recon-bv31",
         db_table_prefix=_PREFIX,
         datasource_arn="arn:aws:quicksight:us-east-1:123456789012:datasource/test",
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     config_sql = build_config_populate_sql(cfg, inst, anchor=date(2026, 5, 30))
-    execute_script(cur, config_sql, dialect=Dialect.SQLITE)
+    execute_script(cur, config_sql, dialect=Dialect.DUCKDB)
     seed_sql = emit_baseline_seed(
         inst,
         prefix=_PREFIX,
         anchor=date(2026, 5, 30),
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
         skip_rails=frozenset(),
         base_seed=42,
     )
-    execute_script(cur, seed_sql, dialect=Dialect.SQLITE)
-    refresh_sql = refresh_matviews_sql(inst, prefix=_PREFIX, dialect=Dialect.SQLITE)
-    execute_script(cur, refresh_sql, dialect=Dialect.SQLITE)
+    execute_script(cur, seed_sql, dialect=Dialect.DUCKDB)
+    refresh_sql = refresh_matviews_sql(inst, prefix=_PREFIX, dialect=Dialect.DUCKDB)
+    execute_script(cur, refresh_sql, dialect=Dialect.DUCKDB)
     conn.commit()
     cur.close()
     return conn
@@ -133,7 +131,7 @@ def _build_seeded_sqlite(l2_path: Path) -> sqlite3.Connection:
 # -- Signal probes (return an int "thing count" the assert can diff) -------
 
 
-def _signal_matview(conn: sqlite3.Connection, matview_name: str) -> int:
+def _signal_matview(conn: duckdb.DuckDBPyConnection, matview_name: str) -> int:
     """Row count of the matview the dashboard reads from."""
     full_name = f"{_PREFIX}_{matview_name}"
     cur = conn.cursor()
@@ -146,7 +144,7 @@ def _signal_matview(conn: sqlite3.Connection, matview_name: str) -> int:
 
 
 def _signal_etl_triage(
-    conn: sqlite3.Connection, l2_path: Path, expected_gap_kind: str | None,
+    conn: duckdb.DuckDBPyConnection, l2_path: Path, expected_gap_kind: str | None,
 ) -> int:
     """Count of gaps the L2 triage detector returns. When
     ``expected_gap_kind`` is set (drawn from the registry entry's
@@ -158,7 +156,7 @@ def _signal_etl_triage(
 
     fd, db_path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
-    dst = sqlite3.connect(db_path)
+    dst = duckdb.connect(db_path)
     with dst:
         conn.backup(dst)
     dst.close()
@@ -170,7 +168,7 @@ def _signal_etl_triage(
             deployment_name="recon-bv31",
             db_table_prefix=_PREFIX,
             datasource_arn="arn:aws:quicksight:us-east-1:123456789012:datasource/test",
-            dialect=Dialect.SQLITE,
+            dialect=Dialect.DUCKDB,
             demo_database_url=db_path,
         )
 
@@ -179,7 +177,7 @@ def _signal_etl_triage(
             try:
                 contracts = derive_column_contracts(inst)
                 gaps = await detect_gaps(
-                    pool, _PREFIX, inst, contracts, dialect=Dialect.SQLITE,
+                    pool, _PREFIX, inst, contracts, dialect=Dialect.DUCKDB,
                 )
             finally:
                 await pool.close()
@@ -194,7 +192,7 @@ def _signal_etl_triage(
 
 
 def _signal_etl_run_coverage(
-    conn: sqlite3.Connection, l2_path: Path,
+    conn: duckdb.DuckDBPyConnection, l2_path: Path,
 ) -> int:
     """Count of L2-declared primitives with present=False in
     ``coverage_for`` — same data the /etl/run Coverage panel renders."""
@@ -203,7 +201,7 @@ def _signal_etl_run_coverage(
 
     fd, db_path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
-    dst = sqlite3.connect(db_path)
+    dst = duckdb.connect(db_path)
     with dst:
         conn.backup(dst)
     dst.close()
@@ -215,7 +213,7 @@ def _signal_etl_run_coverage(
             deployment_name="recon-bv31",
             db_table_prefix=_PREFIX,
             datasource_arn="arn:aws:quicksight:us-east-1:123456789012:datasource/test",
-            dialect=Dialect.SQLITE,
+            dialect=Dialect.DUCKDB,
             demo_database_url=db_path,
         )
 
@@ -223,7 +221,7 @@ def _signal_etl_run_coverage(
             pool: AsyncConnectionPool = await make_connection_pool(cfg)
             try:
                 cov_map = await coverage_for(
-                    pool, _PREFIX, inst, dialect=Dialect.SQLITE,
+                    pool, _PREFIX, inst, dialect=Dialect.DUCKDB,
                 )
             finally:
                 await pool.close()
@@ -239,7 +237,7 @@ def _signal_etl_run_coverage(
 
 
 def _signal_for(
-    conn: sqlite3.Connection, l2_path: Path, entry: PlantKindEntry,
+    conn: duckdb.DuckDBPyConnection, l2_path: Path, entry: PlantKindEntry,
 ) -> int:
     """Dispatch to the right probe for the entry's dashboard_check shape.
 
@@ -296,17 +294,17 @@ def test_plant_surfaces_on_dashboard(
         kwargs = _default_kwargs(entry)
         plant_sql = entry.plant_function(
             prefix=_PREFIX,
-            dialect=Dialect.SQLITE,
+            dialect=Dialect.DUCKDB,
             anchor=_ANCHOR,
             instance=inst,
             **kwargs,
         )
         cur = conn.cursor()
-        execute_script(cur, plant_sql, dialect=Dialect.SQLITE)
+        execute_script(cur, plant_sql, dialect=Dialect.DUCKDB)
         refresh_sql = refresh_matviews_sql(
-            inst, prefix=_PREFIX, dialect=Dialect.SQLITE,
+            inst, prefix=_PREFIX, dialect=Dialect.DUCKDB,
         )
-        execute_script(cur, refresh_sql, dialect=Dialect.SQLITE)
+        execute_script(cur, refresh_sql, dialect=Dialect.DUCKDB)
         conn.commit()
         cur.close()
 

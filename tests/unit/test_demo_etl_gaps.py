@@ -8,6 +8,8 @@ rows make Triage's `detect_gaps` surface the expected gap kinds.
 
 from __future__ import annotations
 
+import duckdb
+
 import shutil
 from collections.abc import Iterator
 from datetime import datetime
@@ -46,7 +48,7 @@ def test_emits_three_phantom_rail_rows(writable_l2_yaml: Path) -> None:
     enough for the volume badge to render a meaningful count."""
     inst = load_instance(writable_l2_yaml)
     sql = emit_demo_etl_gap_sql(
-        inst, prefix="testpfx", dialect=Dialect.SQLITE,
+        inst, prefix="testpfx", dialect=Dialect.DUCKDB,
         anchor=datetime(2026, 5, 30, 14, 0, 0),
     )
     assert sql.count(f"'{PHANTOM_RAIL_NAME}'") == 3
@@ -55,7 +57,7 @@ def test_emits_three_phantom_rail_rows(writable_l2_yaml: Path) -> None:
 def test_emits_two_phantom_template_rows(writable_l2_yaml: Path) -> None:
     inst = load_instance(writable_l2_yaml)
     sql = emit_demo_etl_gap_sql(
-        inst, prefix="testpfx", dialect=Dialect.SQLITE,
+        inst, prefix="testpfx", dialect=Dialect.DUCKDB,
         anchor=datetime(2026, 5, 30, 14, 0, 0),
     )
     assert sql.count(f"'{PHANTOM_TEMPLATE_NAME}'") == 2
@@ -69,7 +71,7 @@ def test_emits_missing_metadata_row_for_first_template_with_transfer_key(
     surface Triage's `_detect_missing_metadata_keys` reads from."""
     inst = load_instance(writable_l2_yaml)
     sql = emit_demo_etl_gap_sql(
-        inst, prefix="testpfx", dialect=Dialect.SQLITE,
+        inst, prefix="testpfx", dialect=Dialect.DUCKDB,
         anchor=datetime(2026, 5, 30, 14, 0, 0),
     )
     # Plant row has metadata='{}' and a real template name.
@@ -84,7 +86,7 @@ def test_every_demo_row_has_demo_gap_prefix_on_id(
     them in one expression."""
     inst = load_instance(writable_l2_yaml)
     sql = emit_demo_etl_gap_sql(
-        inst, prefix="testpfx", dialect=Dialect.SQLITE,
+        inst, prefix="testpfx", dialect=Dialect.DUCKDB,
         anchor=datetime(2026, 5, 30, 14, 0, 0),
     )
     # Every INSERT statement should reference a demo-prefixed id +
@@ -103,15 +105,15 @@ def test_emits_deterministic_for_fixed_anchor(
     inst = load_instance(writable_l2_yaml)
     anchor = datetime(2026, 5, 30, 14, 0, 0)
     a = emit_demo_etl_gap_sql(
-        inst, prefix="testpfx", dialect=Dialect.SQLITE, anchor=anchor,
+        inst, prefix="testpfx", dialect=Dialect.DUCKDB, anchor=anchor,
     )
     b = emit_demo_etl_gap_sql(
-        inst, prefix="testpfx", dialect=Dialect.SQLITE, anchor=anchor,
+        inst, prefix="testpfx", dialect=Dialect.DUCKDB, anchor=anchor,
     )
     assert a == b
 
 
-@pytest.mark.parametrize("dialect", [Dialect.SQLITE, Dialect.POSTGRES, Dialect.ORACLE])
+@pytest.mark.parametrize("dialect", [Dialect.DUCKDB, Dialect.POSTGRES, Dialect.ORACLE])
 def test_emits_valid_sql_per_dialect(
     writable_l2_yaml: Path, dialect: Dialect,
 ) -> None:
@@ -167,7 +169,7 @@ def test_emit_skips_missing_metadata_when_no_template_has_transfer_key(
     from recon_gen.common.l2 import L2Instance
 
     sql = emit_demo_etl_gap_sql(
-        cast(L2Instance, fake), prefix="testpfx", dialect=Dialect.SQLITE,
+        cast(L2Instance, fake), prefix="testpfx", dialect=Dialect.DUCKDB,
         anchor=datetime(2026, 5, 30, 14, 0, 0),
     )
     # Phantom rail/template plants still land.
@@ -187,14 +189,14 @@ def test_per_kind_plant_functions_are_independently_callable(
     inst = load_instance(writable_l2_yaml)
     anchor = datetime(2026, 5, 30, 14, 0, 0)
     rail_sql = add_phantom_rail_gap_rows(
-        prefix="testpfx", dialect=Dialect.SQLITE,
+        prefix="testpfx", dialect=Dialect.DUCKDB,
         anchor=anchor, count=3,
     )
     assert rail_sql.count(f"'{PHANTOM_RAIL_NAME}'") == 3
     assert PHANTOM_TEMPLATE_NAME not in rail_sql
 
     tmpl_sql = add_phantom_template_gap_rows(
-        prefix="testpfx", dialect=Dialect.SQLITE,
+        prefix="testpfx", dialect=Dialect.DUCKDB,
         anchor=anchor, count=2,
     )
     assert tmpl_sql.count(f"'{PHANTOM_TEMPLATE_NAME}'") == 2
@@ -203,7 +205,7 @@ def test_per_kind_plant_functions_are_independently_callable(
     assert PHANTOM_RAIL_NAME not in tmpl_sql
 
     md_sql = add_missing_metadata_gap_rows(
-        inst, prefix="testpfx", dialect=Dialect.SQLITE, anchor=anchor,
+        inst, prefix="testpfx", dialect=Dialect.DUCKDB, anchor=anchor,
     )
     assert "__demo_gap_missing_md_" in md_sql
 
@@ -216,7 +218,7 @@ def test_uncovered_rail_emits_delete_for_alphabetically_last_rail(
     last rail (stable + demo-clear)."""
     inst = load_instance(writable_l2_yaml)
     sql = add_uncovered_rail_gap_rows(
-        inst, prefix="testpfx", dialect=Dialect.SQLITE,
+        inst, prefix="testpfx", dialect=Dialect.DUCKDB,
     )
     assert "DELETE FROM testpfx_transactions" in sql
     assert "WHERE rail_name =" in sql
@@ -230,7 +232,7 @@ def test_uncovered_template_emits_delete_for_alphabetically_last_template(
 ) -> None:
     inst = load_instance(writable_l2_yaml)
     sql = add_uncovered_template_gap_rows(
-        inst, prefix="testpfx", dialect=Dialect.SQLITE,
+        inst, prefix="testpfx", dialect=Dialect.DUCKDB,
     )
     assert "DELETE FROM testpfx_transactions" in sql
     assert "WHERE template_name =" in sql
@@ -252,7 +254,7 @@ def test_uncovered_rail_returns_empty_when_no_rails() -> None:
 
     sql = add_uncovered_rail_gap_rows(
         cast(L2Instance, _FakeInst()),
-        prefix="p", dialect=Dialect.SQLITE,
+        prefix="p", dialect=Dialect.DUCKDB,
     )
     assert sql == ""
 
@@ -275,7 +277,7 @@ def test_uncovered_rail_sql_escapes_single_quotes() -> None:
 
     fake = _FakeInst(rails=(_R(name="rail_with_'quote"),))
     sql = add_uncovered_rail_gap_rows(
-        cast(L2Instance, fake), prefix="p", dialect=Dialect.SQLITE,
+        cast(L2Instance, fake), prefix="p", dialect=Dialect.DUCKDB,
     )
     # Single quote doubled per SQL string-literal rule.
     assert "rail_with_''quote" in sql
@@ -289,7 +291,7 @@ def test_emit_composer_includes_both_insert_and_delete_plants(
     demo failure set."""
     inst = load_instance(writable_l2_yaml)
     sql = emit_demo_etl_gap_sql(
-        inst, prefix="testpfx", dialect=Dialect.SQLITE,
+        inst, prefix="testpfx", dialect=Dialect.DUCKDB,
         anchor=datetime(2026, 5, 30, 14, 0, 0),
     )
     assert "INSERT INTO testpfx_transactions" in sql
@@ -301,10 +303,10 @@ def test_per_kind_plant_count_parameterized() -> None:
     knob can scale plant volume per kind independently."""
     anchor = datetime(2026, 5, 30, 14, 0, 0)
     sql_low = add_phantom_rail_gap_rows(
-        prefix="p", dialect=Dialect.SQLITE, anchor=anchor, count=1,
+        prefix="p", dialect=Dialect.DUCKDB, anchor=anchor, count=1,
     )
     sql_high = add_phantom_rail_gap_rows(
-        prefix="p", dialect=Dialect.SQLITE, anchor=anchor, count=10,
+        prefix="p", dialect=Dialect.DUCKDB, anchor=anchor, count=10,
     )
     assert sql_low.count("INSERT INTO p_transactions") == 1
     assert sql_high.count("INSERT INTO p_transactions") == 10
@@ -333,7 +335,7 @@ def test_gaps_actually_surface_in_triage_detect_gaps(
     prefix = writable_l2_yaml.stem
     fd, db_path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
-    conn = sqlite3.connect(db_path)
+    conn = duckdb.connect(db_path)
     conn.execute(
         f"CREATE TABLE {prefix}_transactions ("
         "entry INTEGER PRIMARY KEY AUTOINCREMENT, "
@@ -347,20 +349,20 @@ def test_gaps_actually_surface_in_triage_detect_gaps(
         "template_name TEXT, origin TEXT NOT NULL, metadata TEXT)"
     )
     gap_sql = emit_demo_etl_gap_sql(
-        inst, prefix=prefix, dialect=Dialect.SQLITE,
+        inst, prefix=prefix, dialect=Dialect.DUCKDB,
         anchor=datetime(2026, 5, 30, 14, 0, 0),
     )
     cur = conn.cursor()
-    execute_script(cur, gap_sql, dialect=Dialect.SQLITE)
+    execute_script(cur, gap_sql, dialect=Dialect.DUCKDB)
     conn.commit()
     conn.close()
 
-    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=db_path)
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=db_path)
     pool: AsyncConnectionPool = asyncio.run(make_connection_pool(cfg))
     try:
         contracts = derive_column_contracts(inst)
         gaps = asyncio.run(detect_gaps(
-            pool, prefix, inst, contracts, dialect=Dialect.SQLITE,
+            pool, prefix, inst, contracts, dialect=Dialect.DUCKDB,
         ))
     finally:
         asyncio.run(pool.close())

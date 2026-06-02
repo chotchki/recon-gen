@@ -1908,16 +1908,15 @@ def _dump_top_queries_for_variant(
         return
 
     dialect_str = perf.dialect_name(cfg.dialect)
-    if cfg.dialect in (Dialect.SQLITE, Dialect.DUCKDB):
-        # CA.3 — DuckDB also has no pg_stat_statements / v$sqlstats
+    if cfg.dialect is Dialect.DUCKDB:
+        # CA.3 — DuckDB has no pg_stat_statements / v$sqlstats
         # equivalent; the in-process columnar engine doesn't expose
         # cumulative query stats. Skip with the same diagnostic shape.
-        engine_label = "sqlite" if cfg.dialect is Dialect.SQLITE else "duckdb"
         out_path.write_text(perf.format_skipped(
             title=title, dialect=dialect_str,
-            reason=f"{engine_label} has no pg_stat_statements / v$sqlstats equivalent",
+            reason="duckdb has no pg_stat_statements / v$sqlstats equivalent",
         ))
-        print(f"{terminal_prefix}runner: db-perf [{spec.name}] skipped ({engine_label})")
+        print(f"{terminal_prefix}runner: db-perf [{spec.name}] skipped (duckdb)")
         return
 
     # Filter on the DB-table prefix so we drop the operator's

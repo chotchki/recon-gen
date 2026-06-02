@@ -182,7 +182,7 @@ def _invoke_phantom_rail_plant(
 
     return add_phantom_rail_gap_rows(
         prefix=prefix,
-        dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
+        dialect=dialect if isinstance(dialect, Dialect) else Dialect.DUCKDB,
         anchor=anchor,
         count=count,
         rail_name=rail_name,
@@ -205,7 +205,7 @@ def _invoke_phantom_template_plant(
 
     return add_phantom_template_gap_rows(
         prefix=prefix,
-        dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
+        dialect=dialect if isinstance(dialect, Dialect) else Dialect.DUCKDB,
         anchor=anchor,
         count=count,
     )
@@ -234,7 +234,7 @@ def _invoke_missing_metadata_plant(
     return add_missing_metadata_gap_rows(
         instance,
         prefix=prefix,
-        dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
+        dialect=dialect if isinstance(dialect, Dialect) else Dialect.DUCKDB,
         anchor=anchor,
     )
 
@@ -258,7 +258,7 @@ def _invoke_uncovered_rail_plant(
     return add_uncovered_rail_gap_rows(
         inst,
         prefix=prefix,
-        dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
+        dialect=dialect if isinstance(dialect, Dialect) else Dialect.DUCKDB,
     )
 
 
@@ -283,7 +283,7 @@ def _invoke_uncovered_template_plant(
     return add_uncovered_template_gap_rows(
         inst,
         prefix=prefix,
-        dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
+        dialect=dialect if isinstance(dialect, Dialect) else Dialect.DUCKDB,
     )
 
 
@@ -374,7 +374,7 @@ def _emit_scenario(
         instance,
         scenario,
         prefix=prefix,
-        dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
+        dialect=dialect if isinstance(dialect, Dialect) else Dialect.DUCKDB,
     )
 
 
@@ -1149,7 +1149,7 @@ def _invoke_chain_orphan_plant(
     return add_chain_orphan_gap_rows(
         inst,
         prefix=prefix,
-        dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
+        dialect=dialect if isinstance(dialect, Dialect) else Dialect.DUCKDB,
         anchor=anchor,
         count=count,
     )
@@ -1182,7 +1182,7 @@ def _invoke_dead_bundles_activity_plant(
     return add_dead_bundles_activity_gap_rows(
         inst,
         prefix=prefix,
-        dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
+        dialect=dialect if isinstance(dialect, Dialect) else Dialect.DUCKDB,
     )
 
 
@@ -1211,7 +1211,7 @@ def _invoke_dead_metadata_plant(
     return add_dead_metadata_gap_rows(
         inst,
         prefix=prefix,
-        dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
+        dialect=dialect if isinstance(dialect, Dialect) else Dialect.DUCKDB,
     )
 
 
@@ -1239,7 +1239,7 @@ def _invoke_dead_limit_schedule_plant(
     return add_dead_limit_schedule_gap_rows(
         inst,
         prefix=prefix,
-        dialect=dialect if isinstance(dialect, Dialect) else Dialect.SQLITE,
+        dialect=dialect if isinstance(dialect, Dialect) else Dialect.DUCKDB,
     )
 
 

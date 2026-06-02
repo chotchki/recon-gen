@@ -61,7 +61,7 @@ def _render_one(
 ) -> str:
     """Substitute placeholders in `sql` with literal renderings of
     `params`. Picks the substitution strategy from `dialect`."""
-    if dialect in (Dialect.SQLITE, Dialect.DUCKDB):
+    if dialect in (Dialect.DUCKDB):
         # DuckDB shares the qmark placeholder style with SQLite (the
         # spine's `_placeholder_style` falls through to "qmark" for
         # both); rendered captured SQL is identical.

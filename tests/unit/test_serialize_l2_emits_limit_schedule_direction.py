@@ -36,13 +36,13 @@ Two-tier coverage (mirrors BC.8 test structure):
 from __future__ import annotations
 
 import json
-import sqlite3
+import duckdb
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import yaml
 
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.config_table import replace_config
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
@@ -51,7 +51,7 @@ from recon_gen.common.sql import Dialect
 
 _SPEC_EXAMPLE = Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
 _PREFIX = "spec_example"
-_DIALECT = Dialect.SQLITE
+_DIALECT = Dialect.DUCKDB
 _TEST_AS_OF = datetime(2030, 1, 1, 12, 0, 0)
 
 
@@ -98,10 +98,8 @@ def test_serialize_l2_drives_limit_breach_outbound_end_to_end() -> None:
     # is a dollar Decimal. Breach = cap * 100 cents * 1.5.
     breach_cents = int(float(outbound_ls.cap) * 100 * 1.5)
 
-    conn = sqlite3.connect(":memory:")
+    conn = duckdb.connect(":memory:")
     try:
-        conn.execute("PRAGMA foreign_keys = ON;")
-        _register_sqlite_aggregates(conn)
         cur = conn.cursor()
         execute_script(
             cur, emit_schema(instance, prefix=_PREFIX, dialect=_DIALECT),

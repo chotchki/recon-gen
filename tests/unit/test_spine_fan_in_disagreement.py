@@ -21,13 +21,13 @@ expected is None.)
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from datetime import date
 from pathlib import Path
 
 import pytest
 
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.spine import (
@@ -44,13 +44,11 @@ _SPEC_EXAMPLE = (
     Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
 )
 _PREFIX = "spec_example"
-_DIALECT = Dialect.SQLITE
+_DIALECT = Dialect.DUCKDB
 
 
-def _fresh_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+def _fresh_db() -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(":memory:")
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -80,7 +78,7 @@ def _fresh_db() -> sqlite3.Connection:
     return conn
 
 
-def _refresh(conn: sqlite3.Connection) -> None:
+def _refresh(conn: duckdb.DuckDBPyConnection) -> None:
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(

@@ -30,6 +30,4 @@ def cents_to_dollars_sql(col: str, *, dialect: Dialect) -> str:
     it as needed, e.g., ``"t.amount_money"``). Returns the parenthesized
     expression ready to drop into a SELECT list or WHERE clause.
     """
-    if dialect == Dialect.SQLITE:
-        return f"(CAST({col} AS REAL) / 100.0)"
     return f"({col} / 100.0)"

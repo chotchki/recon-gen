@@ -14,6 +14,8 @@ The metadata-coverage helper has its own tests in
 
 from __future__ import annotations
 
+import duckdb
+
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
@@ -172,7 +174,7 @@ def test_etl_run_coverage_carries_failures_only_toggle(
     prefix = writable_l2_yaml.stem
     fd, db_path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
-    conn = sqlite3.connect(db_path)
+    conn = duckdb.connect(db_path)
     conn.execute(
         f"CREATE TABLE {prefix}_transactions ("
         "id TEXT PRIMARY KEY, rail_name TEXT, template_name TEXT, "
@@ -182,7 +184,7 @@ def test_etl_run_coverage_carries_failures_only_toggle(
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=db_path)
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=db_path)
     pool = asyncio.run(make_connection_pool(cfg))
     try:
         # Seed a DeploySummary so the renderer skips the
@@ -190,7 +192,7 @@ def test_etl_run_coverage_carries_failures_only_toggle(
         # the populated coverage chrome (cards + toggle).
         summary = DeploySummary(halted=False)
         body = asyncio.run(_render_etl_coverage_section(
-            db_pool=pool, dialect=Dialect.SQLITE,
+            db_pool=pool, dialect=Dialect.DUCKDB,
             prefix=prefix, instance=cache.get(),
             last_summary=summary,
         ))
@@ -390,7 +392,7 @@ def test_coverage_renders_empty_state_when_no_run_this_session_even_with_rows(
     prefix = writable_l2_yaml.stem
     fd, db_path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
-    conn = sqlite3.connect(db_path)
+    conn = duckdb.connect(db_path)
     conn.execute(
         f"CREATE TABLE {prefix}_transactions ("
         "id TEXT PRIMARY KEY, rail_name TEXT, template_name TEXT, "
@@ -405,11 +407,11 @@ def test_coverage_renders_empty_state_when_no_run_this_session_even_with_rows(
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=db_path)
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=db_path)
     pool = asyncio.run(make_connection_pool(cfg))
     try:
         body = asyncio.run(_render_etl_coverage_section(
-            db_pool=pool, dialect=Dialect.SQLITE,
+            db_pool=pool, dialect=Dialect.DUCKDB,
             prefix=prefix, instance=cache.get(),
             last_summary=None,
         ))

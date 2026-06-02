@@ -96,12 +96,12 @@ class TestSqlite:
         """SQLite has no native DATE type — ``datetime(...)``
         normalizes ISO TEXT inputs + supports the ``'+1 day'``
         modifier for the day-inclusive upper bound."""
-        sql = _clause(Dialect.SQLITE)
+        sql = _clause(Dialect.DUCKDB)
         assert "datetime(" in sql
         assert "'+1 day'" in sql
 
     def test_includes_both_param_placeholders(self) -> None:
-        sql = _clause(Dialect.SQLITE)
+        sql = _clause(Dialect.DUCKDB)
         assert f"<<${_START}>>" in sql
         assert f"<<${_END}>>" in sql
 

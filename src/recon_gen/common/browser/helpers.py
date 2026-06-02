@@ -820,14 +820,6 @@ def _capture_failure_db_counts(
                         (f"{prefix}_%",),
                     )
                     names = [row[0] for row in cur.fetchall()]
-                elif dialect is Dialect.SQLITE:
-                    cur.execute(
-                        "SELECT name FROM sqlite_master "
-                        "WHERE type IN ('table', 'view') AND name LIKE ? "
-                        "ORDER BY name",
-                        (f"{prefix}_%",),
-                    )
-                    names = [row[0] for row in cur.fetchall()]
                 else:
                     path.write_text(
                         f"# capture skipped: unsupported dialect {dialect!r}\n",

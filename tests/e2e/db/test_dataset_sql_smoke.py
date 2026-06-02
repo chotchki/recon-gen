@@ -23,6 +23,8 @@ before deploy; CI gating on this prevents a re-occurrence.
 
 from __future__ import annotations
 
+import duckdb
+
 import re
 from pathlib import Path
 from typing import Any, Iterator
@@ -151,7 +153,7 @@ def _smoke_one(conn: Any, ds: DataSet) -> tuple[bool, str]:
     smoke_sql = _wrap_smoke(sub_sql)
     cur = conn.cursor()
     # try/finally + manual close instead of ``with conn.cursor() as cur``
-    # — sqlite3.Cursor doesn't implement the context-manager protocol.
+    # — duckdb.DuckDBPyConnection doesn't implement the context-manager protocol.
     try:
         try:
             cur.execute(smoke_sql)

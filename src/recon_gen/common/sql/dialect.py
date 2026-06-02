@@ -79,7 +79,6 @@ class Dialect(str, Enum):
 
     POSTGRES = "postgres"
     ORACLE = "oracle"
-    SQLITE = "sqlite"
     DUCKDB = "duckdb"
 
 
@@ -135,8 +134,6 @@ def serial_type(dialect: Dialect) -> str:
     """
     if dialect is Dialect.POSTGRES:
         return "BIGSERIAL"
-    if dialect is Dialect.SQLITE:
-        return "INTEGER"
     if dialect is Dialect.DUCKDB:
         # DuckDB has no auto-increment column-type alias (BIGSERIAL is
         # rejected). The auto-increment is provided by a separately-
@@ -160,8 +157,6 @@ def boolean_type(dialect: Dialect) -> str:
     """
     if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return "BOOLEAN"
-    if dialect is Dialect.SQLITE:
-        return "INTEGER"
     return "NUMBER(1)"
 
 
@@ -170,7 +165,7 @@ def text_type(dialect: Dialect) -> str:
 
     Postgres ``TEXT`` / DuckDB ``TEXT`` / Oracle ``CLOB`` / SQLite ``TEXT``.
     """
-    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB, Dialect.SQLITE):
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return "TEXT"
     return "CLOB"
 
@@ -207,8 +202,6 @@ def json_text_type(dialect: Dialect) -> str:
     """
     if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return "VARCHAR(4000)"
-    if dialect is Dialect.SQLITE:
-        return "TEXT"
     return "VARCHAR2(4000)"
 
 
@@ -245,8 +238,6 @@ def varchar_type(n: int, dialect: Dialect) -> str:
     """
     if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"VARCHAR({n})"
-    if dialect is Dialect.SQLITE:
-        return "TEXT"
     return f"VARCHAR2({n})"
 
 
@@ -265,7 +256,7 @@ def bigint_type(dialect: Dialect) -> str:
     ``cents_to_dollars_sql`` helper projects back to dollars when
     needed.
     """
-    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB, Dialect.SQLITE):
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return "BIGINT"
     return "NUMBER(19)"
 
@@ -280,8 +271,6 @@ def decimal_type(precision: int, scale: int, dialect: Dialect) -> str:
     """
     if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"DECIMAL({precision},{scale})"
-    if dialect is Dialect.SQLITE:
-        return "NUMERIC"
     return f"NUMBER({precision},{scale})"
 
 
@@ -298,8 +287,6 @@ def cast(expr: str, type_name: str, dialect: Dialect) -> str:
     """
     if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"{expr}::{type_name}"
-    if dialect is Dialect.SQLITE:
-        return f"CAST({expr} AS {_sqlite_type_alias(type_name)})"
     return f"CAST({expr} AS {_oracle_type_alias(type_name)})"
 
 
@@ -312,8 +299,6 @@ def typed_null(type_name: str, dialect: Dialect) -> str:
     """
     if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"NULL::{type_name}"
-    if dialect is Dialect.SQLITE:
-        return f"CAST(NULL AS {_sqlite_type_alias(type_name)})"
     return f"CAST(NULL AS {_oracle_type_alias(type_name)})"
 
 
@@ -327,8 +312,6 @@ def to_date(timestamp_expr: str, dialect: Dialect) -> str:
     """
     if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"{timestamp_expr}::date"
-    if dialect is Dialect.SQLITE:
-        return f"DATE({timestamp_expr})"
     return f"TRUNC({timestamp_expr})"
 
 
@@ -355,8 +338,6 @@ def date_literal(iso_value: str, dialect: Dialect) -> str:
     formatting at every audit / matview / dataset SQL site that needs
     a date literal in a WHERE / CASE WHEN comparison.
     """
-    if dialect is Dialect.SQLITE:
-        return f"'{iso_value}'"
     return f"DATE '{iso_value}'"
 
 
@@ -407,38 +388,6 @@ def _oracle_type_alias(type_name: str) -> str:
 # stored in TEXT-affinity columns + queried via ``date()`` / ``datetime()``
 # / ``strftime()``), and text-y types to TEXT. Anything we forgot
 # passes through unchanged.
-_SQLITE_TYPE_ALIASES = {
-    "numeric": "NUMERIC",
-    "bigint": "INTEGER",
-    "int": "INTEGER",
-    "integer": "INTEGER",
-    "smallint": "INTEGER",
-    "date": "TEXT",
-    "timestamp": "TEXT",
-    "text": "TEXT",
-    "boolean": "INTEGER",
-    "clob": "TEXT",
-}
-
-
-def _sqlite_type_alias(type_name: str) -> str:
-    """Return the SQLite equivalent of a Postgres-shape type name.
-
-    Direct hits in ``_SQLITE_TYPE_ALIASES`` win; otherwise the helper
-    rewrites ``varchar(N)`` → ``TEXT`` (SQLite ignores VARCHAR length).
-    Unhandled types pass through unchanged.
-    """
-    name_lower = type_name.lower()
-    if name_lower in _SQLITE_TYPE_ALIASES:
-        return _SQLITE_TYPE_ALIASES[name_lower]
-    # varchar(N) → TEXT — SQLite is typeless internally; the (N) is
-    # advisory at best.
-    import re
-    m = re.match(r"^varchar\((\d+)\)$", name_lower)
-    if m:
-        return "TEXT"
-    return type_name
-
 
 # -- JSON --------------------------------------------------------------------
 
@@ -454,8 +403,6 @@ def greatest(*args: str, dialect: Dialect) -> str:
     expressions like ``GREATEST(x - y, 0)``).
     """
     joined = ", ".join(args)
-    if dialect is Dialect.SQLITE:
-        return f"MAX({joined})"
     return f"GREATEST({joined})"
 
 
@@ -480,8 +427,6 @@ def json_value(col: str, path_expr: str, dialect: Dialect) -> str:
     ``"'$.' || pKey"``) — same shape on every dialect, so the helper
     only swaps the function name.
     """
-    if dialect is Dialect.SQLITE:
-        return f"json_extract({col}, {path_expr})"
     if dialect is Dialect.DUCKDB:
         return f"json_extract_string({col}, {path_expr})"
     return f"JSON_VALUE({col}, {path_expr})"
@@ -516,7 +461,7 @@ def json_array_iterate(
     (e.g. ``'$.rails'``). ``alias`` is the per-row alias the matview
     SQL uses to reference the iteration (e.g. ``rail``).
     """
-    if dialect in (Dialect.SQLITE, Dialect.DUCKDB):
+    if dialect in (Dialect.DUCKDB):
         return f"json_each({json_expr}, '{array_path}') {alias}"
     if dialect is Dialect.POSTGRES:
         # PG 17+ JSON_TABLE is SQL/JSON-standard; cast to `json`
@@ -549,8 +494,6 @@ def json_field_extract(value_expr: str, field_path: str, dialect: Dialect) -> st
 
     ``field_path`` is the SQL/JSON path (e.g. ``'$.name'``).
     """
-    if dialect is Dialect.SQLITE:
-        return f"json_extract({value_expr}, '{field_path}')"
     if dialect is Dialect.DUCKDB:
         return f"json_extract_string({value_expr}, '{field_path}')"
     return f"JSON_VALUE({value_expr}, '{field_path}')"
@@ -598,7 +541,7 @@ def json_check(col: str, dialect: Dialect) -> str:
     extension (built into stdlib ``sqlite3`` since 3.38), DuckDB
     natively.
     """
-    if dialect in (Dialect.SQLITE, Dialect.DUCKDB):
+    if dialect in (Dialect.DUCKDB):
         return f"CHECK ({col} IS NULL OR json_valid({col}))"
     return f"CHECK ({col} IS NULL OR {col} IS JSON)"
 
@@ -620,10 +563,6 @@ def epoch_seconds_between(later: str, earlier: str, dialect: Dialect) -> str:
     """
     if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"EXTRACT(EPOCH FROM ({later} - {earlier}))"
-    if dialect is Dialect.SQLITE:
-        return (
-            f"((julianday({later}) - julianday({earlier})) * 86400)"
-        )
     diff = f"({later} - {earlier})"
     return (
         f"(EXTRACT(DAY FROM {diff}) * 86400 "
@@ -649,8 +588,6 @@ def interval_days(n: int, dialect: Dialect) -> str:
     """
     if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"INTERVAL '{n} day'"
-    if dialect is Dialect.SQLITE:
-        return f"'{n} days'"
     return f"INTERVAL '{n}' DAY"
 
 
@@ -667,8 +604,6 @@ def range_interval_days(n: int, dialect: Dialect) -> str:
     ``ORDER BY julianday(posted_day)``, gives the same per-day
     semantics PG / Oracle deliver via INTERVAL.
     """
-    if dialect is Dialect.SQLITE:
-        return str(n)
     return interval_days(n, dialect)
 
 
@@ -681,8 +616,6 @@ def order_by_day_expr(day_col: str, dialect: Dialect) -> str:
     RANGE frame's numeric arithmetic lands on the same scale as
     ``range_interval_days(N, SQLITE) = str(N)``.
     """
-    if dialect is Dialect.SQLITE:
-        return f"julianday({day_col})"
     return day_col
 
 
@@ -695,8 +628,6 @@ def date_minus_days(date_expr: str, n: int, dialect: Dialect) -> str:
     """
     if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"({date_expr} - {interval_days(n, dialect)})"
-    if dialect is Dialect.SQLITE:
-        return f"date({date_expr}, '-{n} days')"
     return f"({date_expr} - {n})"
 
 
@@ -722,8 +653,6 @@ def date_trunc_day(timestamp_expr: str, dialect: Dialect) -> str:
     """
     if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"DATE_TRUNC('day', {timestamp_expr})"
-    if dialect is Dialect.SQLITE:
-        return f"datetime({timestamp_expr}, 'start of day')"
     return f"CAST(TRUNC({timestamp_expr}) AS TIMESTAMP)"
 
 
@@ -747,7 +676,7 @@ def day_text(timestamp_expr: str, dialect: Dialect) -> str:
     Postgres-style ``%Y-%m-%d`` format spec; SQLite stores datetimes
     as ``YYYY-MM-DD HH:MM:SS`` text → its date portion).
     """
-    if dialect in (Dialect.SQLITE, Dialect.DUCKDB):
+    if dialect in (Dialect.DUCKDB):
         return f"strftime('%Y-%m-%d', {timestamp_expr})"
     return f"TO_CHAR({timestamp_expr}, 'YYYY-MM-DD')"
 
@@ -775,8 +704,6 @@ def concat_agg(column_expr: str, separator: str, dialect: Dialect) -> str:
     sep_literal = f"'{separator}'"
     if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"STRING_AGG({column_expr}, {sep_literal})"
-    if dialect is Dialect.SQLITE:
-        return f"GROUP_CONCAT({column_expr}, {sep_literal})"
     return (
         f"LISTAGG({column_expr}, {sep_literal}) "
         f"WITHIN GROUP (ORDER BY {column_expr})"
@@ -804,8 +731,6 @@ def drop_table_if_exists(name: str, dialect: Dialect) -> str:
     """
     if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"DROP TABLE IF EXISTS {name} CASCADE;"
-    if dialect is Dialect.SQLITE:
-        return f"DROP TABLE IF EXISTS {name};"
     return _oracle_drop_if_exists(
         f"DROP TABLE {name} CASCADE CONSTRAINTS", ignore_codes=(-942,),
     )
@@ -845,7 +770,7 @@ def drop_matview_if_exists(name: str, dialect: Dialect) -> str:
     """
     if dialect is Dialect.POSTGRES:
         return f"DROP MATERIALIZED VIEW IF EXISTS {name};"
-    if dialect in (Dialect.SQLITE, Dialect.DUCKDB):
+    if dialect in (Dialect.DUCKDB):
         # DuckDB has no CREATE MATERIALIZED VIEW (parser rejects the
         # keyword); matviews land as plain tables via CREATE TABLE AS
         # SELECT — drop them with DROP TABLE IF EXISTS, identical to
@@ -872,7 +797,7 @@ def drop_index_if_exists(name: str, dialect: Dialect) -> str:
     ``DROP INDEX IF EXISTS …;``. Returned string is
     **fully terminated**.
     """
-    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB, Dialect.SQLITE):
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"DROP INDEX IF EXISTS {name};"
     return _oracle_drop_if_exists(
         f"DROP INDEX {name}", ignore_codes=(-1418,),
@@ -886,7 +811,7 @@ def drop_view_if_exists(name: str, dialect: Dialect) -> str:
     catching ORA-00942 / SQLite native ``DROP VIEW IF EXISTS …;``.
     Returned string is **fully terminated**.
     """
-    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB, Dialect.SQLITE):
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"DROP VIEW IF EXISTS {name};"
     return _oracle_drop_if_exists(
         f"DROP VIEW {name}", ignore_codes=(-942,),
@@ -937,7 +862,7 @@ def create_matview(name: str, body_sql: str, dialect: Dialect) -> str:
     """
     if dialect is Dialect.POSTGRES:
         return f"CREATE MATERIALIZED VIEW {name} AS {body_sql}"
-    if dialect in (Dialect.SQLITE, Dialect.DUCKDB):
+    if dialect in (Dialect.DUCKDB):
         return f"CREATE TABLE {name} AS {body_sql}"
     return (
         f"CREATE MATERIALIZED VIEW {name} "
@@ -959,7 +884,7 @@ def matview_options(dialect: Dialect) -> str:
     Returns the empty string on Postgres + SQLite so the substitution
     is a no-op.
     """
-    if dialect in (Dialect.POSTGRES, Dialect.SQLITE, Dialect.DUCKDB):
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return ""
     return " BUILD IMMEDIATE REFRESH COMPLETE ON DEMAND"
 
@@ -973,7 +898,7 @@ def matview_create_keyword(dialect: Dialect) -> str:
     ``common.l2.schema`` so the per-matview template strings can stay
     one-line + dialect-clean instead of branching at every site.
     """
-    if dialect in (Dialect.SQLITE, Dialect.DUCKDB):
+    if dialect in (Dialect.DUCKDB):
         return "CREATE TABLE"
     return "CREATE MATERIALIZED VIEW"
 
@@ -994,7 +919,7 @@ def refresh_matview(name: str, dialect: Dialect) -> str:
     """
     if dialect is Dialect.POSTGRES:
         return f"REFRESH MATERIALIZED VIEW {name};"
-    if dialect in (Dialect.SQLITE, Dialect.DUCKDB):
+    if dialect in (Dialect.DUCKDB):
         # Sentinel — the per-matview SELECT body is needed to refresh,
         # which the helper here doesn't know. ``refresh_matviews_sql``
         # in ``common.l2.schema`` substitutes the right body. DuckDB
@@ -1016,7 +941,7 @@ def analyze_table(name: str, dialect: Dialect) -> str:
     ``ANALYZE name;`` (same syntax as Postgres). Returned string is
     **fully terminated**.
     """
-    if dialect in (Dialect.POSTGRES, Dialect.SQLITE, Dialect.DUCKDB):
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"ANALYZE {name};"
     return f"BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, '{name}'); END;"
 
@@ -1052,7 +977,7 @@ def dual_from(dialect: Dialect) -> str:
     ``WHERE 1=0`` (works on every dialect) for an empty-row sentinel
     branch — ``WHERE FALSE`` is Postgres-only and breaks Oracle.
     """
-    if dialect in (Dialect.POSTGRES, Dialect.SQLITE, Dialect.DUCKDB):
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return ""
     return " FROM dual"
 
@@ -1069,6 +994,6 @@ def with_recursive(dialect: Dialect) -> str:
     for portability across older Oracle releases. SQLite requires
     ``WITH RECURSIVE`` (same as Postgres).
     """
-    if dialect in (Dialect.POSTGRES, Dialect.SQLITE, Dialect.DUCKDB):
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return "WITH RECURSIVE"
     return "WITH"

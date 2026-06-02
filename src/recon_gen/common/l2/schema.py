@@ -353,7 +353,7 @@ def refresh_matviews_sql(
         f"{p}_inv_pair_rolling_anomalies",
         f"{p}_inv_money_trail_edges",
     ]
-    if dialect in (Dialect.SQLITE, Dialect.DUCKDB):
+    if dialect in (Dialect.DUCKDB):
         # X.3.c — neither SQLite nor DuckDB has native matviews; both
         # land them as plain tables via CREATE TABLE AS SELECT (CA.2
         # collapsed the matview-create helpers around this). Refresh
@@ -397,7 +397,7 @@ def _emit_table_based_matview_refresh(
 
     Z.C — ``prefix`` is the cfg.db_table_prefix.
     """
-    assert dialect in (Dialect.SQLITE, Dialect.DUCKDB), (
+    assert dialect in (Dialect.DUCKDB), (
         f"_emit_table_based_matview_refresh expects SQLite or DuckDB, "
         f"got {dialect!r} — PG / Oracle use REFRESH MATERIALIZED VIEW."
     )
@@ -1435,8 +1435,6 @@ def _entry_column_decl(dialect: Dialect, *, sequence_name: str | None = None) ->
     ``_create_sequences_sql``. Composite PK / pk_decl shape matches
     PG/Oracle on DuckDB (no UNIQUE-fallback like SQLite).
     """
-    if dialect is Dialect.SQLITE:
-        return "INTEGER PRIMARY KEY AUTOINCREMENT"
     if dialect is Dialect.DUCKDB:
         if sequence_name is None:
             raise ValueError(
@@ -1461,8 +1459,6 @@ def _pk_decl(cols: tuple[str, ...], dialect: Dialect) -> str:
     BIGINT + sequence-default, not a single-col PK).
     """
     cols_sql = ", ".join(cols)
-    if dialect is Dialect.SQLITE:
-        return f"UNIQUE ({cols_sql})"
     return f"PRIMARY KEY ({cols_sql})"
 
 

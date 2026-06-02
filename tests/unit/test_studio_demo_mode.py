@@ -57,7 +57,7 @@ def _sqlite_cfg(tmp_path: Path, **overrides: object) -> Config:
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
         ),
         demo_database_url=f"sqlite:///{db_path}",
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     if overrides:
         base = replace(base, **overrides)  # type: ignore[arg-type]: replace's overload erases the per-field types

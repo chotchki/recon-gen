@@ -16,7 +16,7 @@ infrastructure.
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -339,7 +339,7 @@ def test_execute_visual_sql_expands_multivalued_in_list_against_db(
         sqlite_factory,
         "SELECT id FROM t WHERE name IN (<<$pName>>) ORDER BY id",
         {"param_pName": ["alpha", "gamma"]},
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
         dataset_parameters=params,
     )
     assert [r[0] for r in rows] == [1, 3]
@@ -355,7 +355,7 @@ def test_execute_visual_sql_multivalued_single_value_against_db(
         sqlite_factory,
         "SELECT id FROM t WHERE name IN (<<$pName>>)",
         {"param_pName": ["beta"]},
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
         dataset_parameters=params,
     )
     assert [r[0] for r in rows] == [2]
@@ -371,7 +371,7 @@ def test_execute_visual_sql_multivalued_emptied_falls_to_default_against_db(
         sqlite_factory,
         "SELECT id FROM t WHERE name IN (<<$pName>>)",
         {"param_pName": [""]},
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
         dataset_parameters=params,
     )
     assert [r[0] for r in rows] == [1]
@@ -435,7 +435,7 @@ def test_rewrite_oracle_keeps_colon_named() -> None:
 
 def test_rewrite_sqlite_keeps_colon_named() -> None:
     sql = "SELECT * FROM t WHERE x = :date_from"
-    out = rewrite_placeholders_for_dialect(sql, Dialect.SQLITE)
+    out = rewrite_placeholders_for_dialect(sql, Dialect.DUCKDB)
     assert out == sql
 
 
@@ -529,7 +529,7 @@ def sqlite_factory() -> Iterator[Callable[[], Any]]:
     """In-memory SQLite seeded with a tiny test table. Yields the
     factory the executor expects (returns a fresh connection per
     call); the fixture closes the underlying conn at teardown."""
-    conn = sqlite3.connect(":memory:")
+    conn = duckdb.connect(":memory:")
     conn.execute(
         "CREATE TABLE t (id INTEGER, name TEXT, amount REAL)"
     )
@@ -562,7 +562,7 @@ def test_execute_visual_sql_returns_rows_and_columns(sqlite_factory: Callable[[]
         sqlite_factory,
         "SELECT id, name, amount FROM t ORDER BY id",
         {},
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     assert rows == [(1, "alpha", 10.0), (2, "beta", 20.0), (3, "gamma", 30.0)]
     assert cols == ["id", "name", "amount"]
@@ -575,7 +575,7 @@ def test_execute_visual_sql_substitutes_named_filter(sqlite_factory: Callable[[]
         sqlite_factory,
         "SELECT id, name FROM t WHERE amount >= :min_amount ORDER BY id",
         {"min_amount": ["20"]},
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     assert [r[1] for r in rows] == ["beta", "gamma"]
 
@@ -589,7 +589,7 @@ def test_execute_visual_sql_handles_multiple_filters(sqlite_factory: Callable[[]
             "ORDER BY id"
         ),
         {"min_amount": ["15"], "max_amount": ["25"]},
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     assert [r[1] for r in rows] == ["beta"]
 
@@ -609,7 +609,7 @@ def test_execute_visual_sql_unreferenced_url_params_dont_break_execution(
             "param_view": ["summary"],      # unreferenced
             "date_from": ["2030-01-01"],    # unreferenced
         },
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     assert {r[0] for r in rows} == {2, 3}
 
@@ -619,7 +619,7 @@ def test_execute_visual_sql_empty_result_set(sqlite_factory: Callable[[], Any]) 
         sqlite_factory,
         "SELECT id, name FROM t WHERE amount > :min_amount",
         {"min_amount": ["9999"]},
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     assert rows == []
     assert cols == ["id", "name"]
@@ -687,7 +687,7 @@ def aiosqlite_pool() -> Iterator[AsyncConnectionPool]:
 
     fd, path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
-    conn = sqlite3.connect(path)
+    conn = duckdb.connect(path)
     conn.execute("CREATE TABLE t (id INTEGER, name TEXT, amount REAL)")
     conn.executemany(
         "INSERT INTO t VALUES (?, ?, ?)",
@@ -696,7 +696,7 @@ def aiosqlite_pool() -> Iterator[AsyncConnectionPool]:
     conn.commit()
     conn.close()
 
-    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=path)
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
     pool = asyncio.run(make_connection_pool(cfg))
     try:
         yield pool
@@ -714,7 +714,7 @@ def test_execute_visual_sql_async_returns_rows_and_columns(
         aiosqlite_pool,
         "SELECT id, name, amount FROM t ORDER BY id",
         {},
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     ))
     assert rows == [(1, "alpha", 10.0), (2, "beta", 20.0), (3, "gamma", 30.0)]
     assert cols == ["id", "name", "amount"]
@@ -729,7 +729,7 @@ def test_execute_visual_sql_async_substitutes_named_filter(
         aiosqlite_pool,
         "SELECT id, name FROM t WHERE amount >= :min_amount ORDER BY id",
         {"min_amount": ["20"]},
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     ))
     assert [r[1] for r in rows] == ["beta", "gamma"]
 
@@ -751,7 +751,7 @@ def test_execute_visual_sql_async_unreferenced_url_params_dont_break(
             "param_view": ["summary"],
             "date_from": ["2030-01-01"],
         },
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     ))
     assert {r[0] for r in rows} == {2, 3}
 
@@ -765,7 +765,7 @@ def test_execute_visual_sql_async_empty_result_set(
         aiosqlite_pool,
         "SELECT id, name FROM t WHERE amount > :min_amount",
         {"min_amount": ["9999"]},
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     ))
     assert rows == []
     assert cols == ["id", "name"]
@@ -795,7 +795,7 @@ def test_async_qs_placeholder_translates_and_filters_at_db(
         aiosqlite_pool,
         "SELECT id, name, amount FROM t WHERE amount >= <<$pMinAmount>>",
         {"param_pMinAmount": ["20"]},
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     ))
     # Threshold 20 → only beta (20.0) and gamma (30.0) match.
     assert {r[0] for r in rows} == {2, 3}
@@ -816,6 +816,6 @@ def test_async_qs_quoted_placeholder_string_round_trip(
         aiosqlite_pool,
         "SELECT id FROM t WHERE name = '<<$pName>>'",
         {"param_pName": ["beta"]},
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     ))
     assert rows == [(2,)]

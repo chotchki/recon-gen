@@ -66,7 +66,7 @@ loss because there was no data.
 from __future__ import annotations
 
 import json
-import sqlite3
+import duckdb
 from collections.abc import Iterable
 from datetime import datetime
 from typing import Any  # typing-smell: ignore[explicit-any]: kv values are JSON-shaped — int/str/bool/None/dict/list — the union is wider than ergonomic; pinned at the walker boundary
@@ -350,7 +350,7 @@ def _sql_quote_long(s: str, dialect: Dialect) -> str:
 
 
 def replace_config(
-    conn: sqlite3.Connection,
+    conn: duckdb.DuckDBPyConnection,
     *,
     prefix: str,
     cfg_json: str,
@@ -364,7 +364,7 @@ def replace_config(
     cfg + L2 to JSON strings (typically via ``dataclasses.asdict`` +
     ``json.dumps``, or by reading the source YAML and re-serializing).
 
-    Cursor flavor: the type annotation is ``sqlite3.Connection`` for
+    Cursor flavor: the type annotation is ``duckdb.DuckDBPyConnection`` for
     SQLite-test convenience, but the function is duck-typed against the
     PEP 249 conn / cursor interface — psycopg2 + oracledb both work.
     """
@@ -386,7 +386,7 @@ def replace_config(
 
 
 def set_as_of(
-    conn: sqlite3.Connection,
+    conn: duckdb.DuckDBPyConnection,
     *,
     prefix: str,
     as_of: datetime | None = None,
@@ -415,7 +415,7 @@ def set_as_of(
     conn.commit()
 
 
-def get_as_of(conn: sqlite3.Connection, *, prefix: str) -> datetime:
+def get_as_of(conn: duckdb.DuckDBPyConnection, *, prefix: str) -> datetime:
     """Read the current ``as_of`` value back as a Python datetime.
 
     Reads from the single ``as_of`` kv row at ``parent_id IS NULL``.

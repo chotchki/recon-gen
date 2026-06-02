@@ -12,6 +12,8 @@ see tests/unit/test_common_db.py) rather than relying on
 """
 from __future__ import annotations
 
+import duckdb
+
 import asyncio
 from collections.abc import Mapping
 from dataclasses import replace
@@ -80,7 +82,7 @@ def _sqlite_cfg(tmp_path: Path) -> Config:
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
         ),
         demo_database_url=f"sqlite:///{db_path}",
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
 
 
@@ -324,7 +326,7 @@ def test_wipe_demo_data_sql_sqlite_format(
 ) -> None:
     p = "spec_example"
     sql = wipe_demo_data_sql(
-        spec_example_instance, prefix=p, dialect=Dialect.SQLITE,
+        spec_example_instance, prefix=p, dialect=Dialect.DUCKDB,
     )
     assert f"DELETE FROM {p}_daily_balances;" in sql
     assert f"DELETE FROM {p}_transactions;" in sql
@@ -939,7 +941,7 @@ def test_step_3_generator_only_template_writes_strictly_fewer_than_full(
 
 
 def _insert_test_transaction(
-    cur: object,  # sqlite3.Cursor
+    cur: object,  # duckdb.DuckDBPyConnection
     p: str,
     *,
     tid: str,

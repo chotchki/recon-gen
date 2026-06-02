@@ -36,20 +36,20 @@ verdict + rollout shape go to audit §5. FINDINGS inline.
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from enum import Enum, auto
 from pathlib import Path
 
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.sql import Dialect
 
 _SPEC_EXAMPLE = Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
 _PREFIX = "spec_example"
-_DIALECT = Dialect.SQLITE
+_DIALECT = Dialect.DUCKDB
 _LOCKED_ANCHOR = date(2030, 1, 1)
 
 
@@ -148,10 +148,8 @@ def _legacy_dataset_default_day(available_days: list[date]) -> date:
 # ---------------------------------------------------------------------------
 
 
-def _fresh_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+def _fresh_db() -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(":memory:")
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -162,7 +160,7 @@ def _fresh_db() -> sqlite3.Connection:
     return conn
 
 
-def _refresh(conn: sqlite3.Connection) -> None:
+def _refresh(conn: duckdb.DuckDBPyConnection) -> None:
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -179,7 +177,7 @@ _DB_COLS = (
 )
 
 
-def _emit_balance(conn: sqlite3.Connection, *, day: date, money: float) -> None:
+def _emit_balance(conn: duckdb.DuckDBPyConnection, *, day: date, money: float) -> None:
     start = datetime(day.year, day.month, day.day, 0, 0, 0)
     row = {
         "account_id": "acct-view", "account_name": "View Acct",
@@ -197,13 +195,13 @@ def _emit_balance(conn: sqlite3.Connection, *, day: date, money: float) -> None:
     )
 
 
-def _emit_days(conn: sqlite3.Connection, days: list[date]) -> None:
+def _emit_days(conn: duckdb.DuckDBPyConnection, days: list[date]) -> None:
     for i, day in enumerate(days):
         _emit_balance(conn, day=day, money=100.0 * (i + 1))
     conn.commit()
 
 
-def _available_days(conn: sqlite3.Connection) -> list[date]:
+def _available_days(conn: duckdb.DuckDBPyConnection) -> list[date]:
     rows = conn.execute(
         f"SELECT business_day_start FROM {_PREFIX}_current_daily_balances "
         f"WHERE account_id = 'acct-view'",
@@ -211,7 +209,7 @@ def _available_days(conn: sqlite3.Connection) -> list[date]:
     return [datetime.strptime(str(r[0])[:10], "%Y-%m-%d").date() for r in rows]
 
 
-def _kpi_rowcount_for_day(conn: sqlite3.Connection, picked: date) -> int:
+def _kpi_rowcount_for_day(conn: duckdb.DuckDBPyConnection, picked: date) -> int:
     """The Daily Statement KPI summary, narrowed to one balance date — the
     query that returned 0 rows under C1. Mirrors the `<<$pL1DsBalanceDate>>`
     single-date pushdown."""
@@ -223,7 +221,7 @@ def _kpi_rowcount_for_day(conn: sqlite3.Connection, picked: date) -> int:
     return int(count)
 
 
-def _locked_db() -> sqlite3.Connection:
+def _locked_db() -> duckdb.DuckDBPyConnection:
     # Data ends at the locked anchor (the fold's terminal day) — exactly the
     # situation where now()-anchored RollingDate defaults look at empty space.
     conn = _fresh_db()

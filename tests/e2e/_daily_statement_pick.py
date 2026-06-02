@@ -58,7 +58,7 @@ def find_two_days_for_same_account(
     account in the matching role has ≥2 distinct days of data — typically
     a thin local seed.
     """
-    if cfg.dialect not in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.SQLITE):
+    if cfg.dialect not in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.DUCKDB):
         raise RuntimeError(
             f"find_two_days_for_same_account: unsupported dialect "
             f"{cfg.dialect!r}"
@@ -167,7 +167,7 @@ def find_account_day_with_data(cfg: Config) -> tuple[str, str, str]:
     doesn't dispatch browser e2e against SQLite — QS can't reach a
     sqlite tempfile).
     """
-    if cfg.dialect not in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.SQLITE):
+    if cfg.dialect not in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.DUCKDB):
         raise RuntimeError(
             f"find_account_day_with_data: unsupported dialect "
             f"{cfg.dialect!r}"
@@ -273,7 +273,7 @@ def find_one_account_day_per_role(
     Raises ``RuntimeError`` if no role has rows — the seed state is
     broken upstream and the test would be useless either way.
     """
-    if cfg.dialect not in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.SQLITE):
+    if cfg.dialect not in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.DUCKDB):
         raise RuntimeError(
             f"find_one_account_day_per_role: unsupported dialect "
             f"{cfg.dialect!r}"

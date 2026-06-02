@@ -3,7 +3,7 @@ methods that run against either the in-memory sqlite generator pipeline
 OR a live deployed DB (PG / Oracle / SQLite).
 
 Background — pre-BM.5 every `.detect()` body called
-``conn.execute(sql).fetchall()``. sqlite3.Connection ships ``.execute``
+``conn.execute(sql).fetchall()``. duckdb.DuckDBPyConnection ships ``.execute``
 as a convenience shim that creates + returns a cursor in one shot;
 oracledb.Connection + psycopg.Connection don't (DB-API 2.0 only
 mandates the cursor-then-execute pattern). The

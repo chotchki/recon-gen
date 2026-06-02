@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sqlite3
+import duckdb
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -58,7 +58,7 @@ def seeded_studio_pool() -> Iterator[AsyncConnectionPool]:
     fd, path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
 
-    conn = sqlite3.connect(path)
+    conn = duckdb.connect(path)
     conn.execute(
         "CREATE TABLE spec_example_transactions ("
         "id INTEGER PRIMARY KEY, "
@@ -78,7 +78,7 @@ def seeded_studio_pool() -> Iterator[AsyncConnectionPool]:
     conn.commit()
     conn.close()
 
-    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=path)
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
     pool = asyncio.run(make_connection_pool(cfg))
     try:
         yield pool
@@ -116,7 +116,7 @@ def _build_studio_app_with_pool(pool: AsyncConnectionPool):
     return make_app(
         dashboards={"smoke": served},
         studio_routes=make_studio_routes(
-            cache, db_pool=pool, dialect=Dialect.SQLITE,
+            cache, db_pool=pool, dialect=Dialect.DUCKDB,
         ),
     )
 
@@ -192,7 +192,7 @@ def test_make_studio_routes_pool_without_dialect_raises() -> None:
     """
     cache = L2InstanceCache.from_path(_FIXTURES / "spec_example.yaml")
     # Build a real pool just to have a non-None value to hand in.
-    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=":memory:")
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=":memory:")
     pool = asyncio.run(make_connection_pool(cfg))
     try:
         with pytest.raises(ValueError, match="dialect"):

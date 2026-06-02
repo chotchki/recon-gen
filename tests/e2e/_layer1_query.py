@@ -40,7 +40,7 @@ def _placeholder(dialect: Dialect, position: int) -> str:
     """
     if dialect is Dialect.ORACLE:
         return f":{position}"
-    if dialect is Dialect.SQLITE:
+    if dialect is Dialect.DUCKDB:
         return "?"
     return "%s"
 

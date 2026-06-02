@@ -40,7 +40,7 @@ polish — because that's the exact failure mode it exists to catch.
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from typing import Any
 from pathlib import Path
 
@@ -105,7 +105,7 @@ def _resolve_cfg() -> Config:
 _CFG = _resolve_cfg()
 
 
-def _conn() -> sqlite3.Connection:  # type: ignore[return]: live PG/Oracle/SQLite — concrete return varies per dialect, no shared protocol
+def _conn() -> duckdb.DuckDBPyConnection:  # type: ignore[return]: live PG/Oracle/SQLite — concrete return varies per dialect, no shared protocol
     """Per-test live DB connection (psycopg / oracledb / sqlite3
     depending on `_CFG.dialect`). Caller closes."""
     return connect_demo_db(_CFG)

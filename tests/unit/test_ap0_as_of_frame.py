@@ -38,19 +38,19 @@ discipline as AP.2 / AP.3. FINDINGS fold back into audit §5.
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.sql import Dialect
 
 _SPEC_EXAMPLE = Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
 _PREFIX = "spec_example"
-_DIALECT = Dialect.SQLITE
+_DIALECT = Dialect.DUCKDB
 
 # The locked scenario anchor the codebase already uses for byte-identical seed
 # SQL (post-BD.6: `common/as_of_frame.py::LOCKED_ANCHOR`; the AQ.3 funnel's
@@ -124,10 +124,8 @@ class AsOfFrame:
 # ---------------------------------------------------------------------------
 
 
-def _fresh_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+def _fresh_db() -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(":memory:")
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -138,7 +136,7 @@ def _fresh_db() -> sqlite3.Connection:
     return conn
 
 
-def _refresh(conn: sqlite3.Connection) -> None:
+def _refresh(conn: duckdb.DuckDBPyConnection) -> None:
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -163,7 +161,7 @@ def _ts_bounds(day: date) -> tuple[str, str]:
     )
 
 
-def _emit_balance(conn: sqlite3.Connection, *, day: date, money: float) -> None:
+def _emit_balance(conn: duckdb.DuckDBPyConnection, *, day: date, money: float) -> None:
     start, end = _ts_bounds(day)
     row = {
         "account_id": "acct-frame", "account_name": "Frame Acct",
@@ -179,7 +177,7 @@ def _emit_balance(conn: sqlite3.Connection, *, day: date, money: float) -> None:
     )
 
 
-def _latest_balance_day(conn: sqlite3.Connection) -> date:
+def _latest_balance_day(conn: duckdb.DuckDBPyConnection) -> date:
     (raw,) = conn.execute(
         f"SELECT MAX(business_day_start) FROM {_PREFIX}_current_daily_balances "
         f"WHERE account_id = 'acct-frame'",
@@ -187,7 +185,7 @@ def _latest_balance_day(conn: sqlite3.Connection) -> date:
     return datetime.strptime(str(raw)[:10], "%Y-%m-%d").date()
 
 
-def _emit_fold_to(frame: AsOfFrame, *, days: int) -> sqlite3.Connection:
+def _emit_fold_to(frame: AsOfFrame, *, days: int) -> duckdb.DuckDBPyConnection:
     """Emit `days` daily balances ending exactly at `frame.data_end_day()` —
     the fold's terminal day IS `as_of` (the generator reads the frame, not
     now()). Each day's stored balance is a clean running total."""

@@ -36,7 +36,7 @@ no drift trip.
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
@@ -68,7 +68,7 @@ class FanInDisagreementInvariant:
     name: ClassVar[str] = "fan_in_disagreement"
     prefix: str = "spec_example"
 
-    def detect(self, conn: sqlite3.Connection) -> set[Violation]:
+    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
         rows = fetch_all(
             conn,
             f"SELECT child_transfer_id, disagreement_kind "
@@ -272,7 +272,7 @@ class FanInChainGenerator:
 
     def emit(
         self,
-        conn: sqlite3.Connection,
+        conn: duckdb.DuckDBPyConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:

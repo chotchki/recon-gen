@@ -39,7 +39,7 @@ What does NOT live here:
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -178,7 +178,7 @@ identical to pre-AV.5)."""
 
 
 def insert_tx(
-    conn: sqlite3.Connection,
+    conn: duckdb.DuckDBPyConnection,
     *,
     prefix: str = DEFAULT_PREFIX,
     **vals: object,
@@ -193,7 +193,7 @@ def insert_tx(
     AT.5.b: dialect-aware placeholder style + ``cursor.execute`` path
     so the spine generators emit into deployed PG / Oracle DBs (not
     just the in-process SQLite harness). The annotation still reads
-    ``sqlite3.Connection`` because that's the dominant call shape; in
+    ``duckdb.DuckDBPyConnection`` because that's the dominant call shape; in
     practice the function accepts any dbapi 2.0 connection (psycopg /
     oracledb / sqlite3) and dispatches via ``_placeholder_style``.
     """
@@ -219,7 +219,7 @@ def insert_tx(
 
 
 def insert_balance(
-    conn: sqlite3.Connection,
+    conn: duckdb.DuckDBPyConnection,
     *,
     prefix: str = DEFAULT_PREFIX,
     **vals: object,

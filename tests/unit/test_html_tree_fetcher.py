@@ -14,6 +14,8 @@ shape stays familiar.
 
 from __future__ import annotations
 
+import duckdb
+
 import asyncio
 from collections.abc import Iterator, Mapping
 from typing import Any
@@ -42,7 +44,7 @@ from tests._test_helpers import make_test_config
 
 
 _TEST_CFG = make_test_config()
-_TEST_CFG_SQLITE = make_test_config(dialect=Dialect.SQLITE)
+_TEST_CFG_SQLITE = make_test_config(dialect=Dialect.DUCKDB)
 
 
 # The producer's ``DataFetcher`` is typed ``Callable[..., Awaitable[Any]]``,
@@ -150,7 +152,7 @@ def aiosqlite_pool() -> Iterator[AsyncConnectionPool]:
 
     # Seed synchronously via stdlib sqlite3 — much simpler than
     # async setup and the fixture is sync.
-    conn = sqlite3.connect(path)
+    conn = duckdb.connect(path)
     conn.execute("CREATE TABLE t (status TEXT, amount INTEGER)")
     conn.executemany(
         "INSERT INTO t VALUES (?, ?)",
@@ -160,7 +162,7 @@ def aiosqlite_pool() -> Iterator[AsyncConnectionPool]:
     conn.close()
 
     cfg = make_test_config(
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
         demo_database_url=path,
     )
     pool = asyncio.run(make_connection_pool(cfg))
@@ -323,7 +325,7 @@ def test_make_tree_db_fetcher_retargets_to_alt_prefix(
     import sqlite3
 
     db_path = tmp_path / "alt_prefix.sqlite"
-    conn = sqlite3.connect(str(db_path))
+    conn = duckdb.connect(str(db_path))
     # ``cfg.db_table_prefix == "test"`` (see make_test_config). Two
     # tables: "test_t" (the cfg-bound base) holds the clean rows;
     # "test_v_t" (the v overlay) holds the planted-violation rows.
@@ -341,7 +343,7 @@ def test_make_tree_db_fetcher_retargets_to_alt_prefix(
     conn.close()
 
     cfg = make_test_config(
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
         demo_database_url=str(db_path),
     )
     pool = asyncio.run(make_connection_pool(cfg))
@@ -507,7 +509,7 @@ def aiosqlite_sankey_pool() -> Iterator[AsyncConnectionPool]:
     fd, path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
 
-    conn = sqlite3.connect(path)
+    conn = duckdb.connect(path)
     conn.execute(
         "CREATE TABLE edges (source TEXT, target TEXT, amount INTEGER)",
     )
@@ -527,7 +529,7 @@ def aiosqlite_sankey_pool() -> Iterator[AsyncConnectionPool]:
     conn.close()
 
     cfg = make_test_config(
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
         demo_database_url=path,
     )
     pool = asyncio.run(make_connection_pool(cfg))

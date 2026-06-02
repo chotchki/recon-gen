@@ -12,6 +12,7 @@ unchanged.
 
 from __future__ import annotations
 
+import duckdb
 import json
 import os
 import secrets
@@ -131,7 +132,7 @@ def pytest_configure(config: Any) -> None:
 # ---------------------------------------------------------------------------
 #
 # Surfaced 2026-05-27 — aiosqlite#258 (still open) leaks thread locks on
-# per-request connect+close, and `with sqlite3.connect(...)` (Python's
+# per-request connect+close, and `with duckdb.connect(...)` (Python's
 # sqlite3 context manager handles transactions, NOT close) is a common
 # foot-gun. Both shapes accumulate live Connection objects until OOM —
 # explains the local browser-tier OOM during the 13-variant sweep.
@@ -173,7 +174,7 @@ def _count_live_sqlite_connections() -> int:
         _gc.collect()
     live = 0
     for o in _gc.get_objects():
-        if isinstance(o, _sqlite3.Connection):
+        if isinstance(o, _duckdb.DuckDBPyConnection):
             try:
                 o.execute("SELECT 1")
                 live += 1
@@ -209,7 +210,7 @@ def pytest_runtest_teardown(item: Any) -> Generator[None, None, None]:  # typing
     """Fail if the test left more sqlite conns than it found (gate opt-in).
 
     Surfaced 2026-05-27 — aiosqlite#258 leaks thread locks on per-request
-    connect+close, and `with sqlite3.connect(...)` (Python's sqlite3
+    connect+close, and `with duckdb.connect(...)` (Python's sqlite3
     context manager handles transactions, NOT close) is a common
     foot-gun. Both accumulate live Connection objects until OOM.
 
@@ -229,7 +230,7 @@ def pytest_runtest_teardown(item: Any) -> Generator[None, None, None]:  # typing
         raise AssertionError(
             f"sqlite-leak-gate: test {item.nodeid!r} leaked {leaked} "
             f"Connection instance(s) (before={before} → after={after}). "
-            f"Likely culprits: `with sqlite3.connect(...) as c:` "
+            f"Likely culprits: `with duckdb.connect(...) as c:` "
             f"(commits transaction, DOES NOT close) or "
             f"`async with aiosqlite.connect(...)` (aiosqlite#258 leaks "
             f"thread locks). Use the `aiosqlitepool`-backed pool from "

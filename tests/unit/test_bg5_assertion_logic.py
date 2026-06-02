@@ -17,7 +17,7 @@ aggregate — so if a future refactor accidentally drifts the binding
 from __future__ import annotations
 
 import os
-import sqlite3
+import duckdb
 import tempfile
 from collections.abc import Iterator
 from decimal import Decimal
@@ -40,7 +40,7 @@ def planted_exec_sqlite() -> Iterator["Config"]:
     per-rail combinatorial stays visible."""
     fd, path = tempfile.mkstemp(suffix=".sqlite")
     os.close(fd)
-    conn = sqlite3.connect(path)
+    conn = duckdb.connect(path)
     # Mirrors EXEC_TRANSACTION_SUMMARY_CONTRACT — 5 columns.
     conn.execute(
         "CREATE TABLE pfx_exec_txn_summary ("
@@ -70,7 +70,7 @@ def planted_exec_sqlite() -> Iterator["Config"]:
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=path)
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
     cfg.db_table_prefix = "pfx"
     try:
         yield cfg

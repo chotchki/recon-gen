@@ -51,20 +51,20 @@ FINDINGS are recorded inline + folded back into the audit §5.
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.sql import Dialect
 
 _SPEC_EXAMPLE = Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
 _PREFIX = "spec_example"
-_DIALECT = Dialect.SQLITE
+_DIALECT = Dialect.DUCKDB
 
 
 # ---------------------------------------------------------------------------
@@ -73,10 +73,9 @@ _DIALECT = Dialect.SQLITE
 # ---------------------------------------------------------------------------
 
 
-def _fresh_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)  # STDDEV_SAMP for the windowed matview
+def _fresh_db() -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(":memory:")
+    (conn)  # STDDEV_SAMP for the windowed matview
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -87,7 +86,7 @@ def _fresh_db() -> sqlite3.Connection:
     return conn
 
 
-def _refresh(conn: sqlite3.Connection) -> None:
+def _refresh(conn: duckdb.DuckDBPyConnection) -> None:
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -109,7 +108,7 @@ _DB_COLS = (
 )
 
 
-def _insert_tx(conn: sqlite3.Connection, **vals: object) -> None:
+def _insert_tx(conn: duckdb.DuckDBPyConnection, **vals: object) -> None:
     placeholders = ", ".join("?" for _ in _TX_COLS)
     conn.execute(
         f"INSERT INTO {_PREFIX}_transactions ({', '.join(_TX_COLS)}) "
@@ -118,7 +117,7 @@ def _insert_tx(conn: sqlite3.Connection, **vals: object) -> None:
     )
 
 
-def _insert_balance(conn: sqlite3.Connection, **vals: object) -> None:
+def _insert_balance(conn: duckdb.DuckDBPyConnection, **vals: object) -> None:
     placeholders = ", ".join("?" for _ in _DB_COLS)
     conn.execute(
         f"INSERT INTO {_PREFIX}_daily_balances ({', '.join(_DB_COLS)}) "
@@ -157,7 +156,7 @@ class DriftByDayInvariant:
     def __init__(self, account_id: str) -> None:
         self.account_id = account_id
 
-    def detect(self, conn: sqlite3.Connection) -> dict[date, float]:
+    def detect(self, conn: duckdb.DuckDBPyConnection) -> dict[date, float]:
         """day → drift, for this account, over every day the matview flags.
         Clean ⇒ {} (the matview only emits rows where stored <> computed)."""
         rows = conn.execute(
@@ -284,7 +283,7 @@ class AccountSimulation:
             out.append(DayEmission(plan.day, tuple(legs), balance + blip_total))
         return out
 
-    def _emit_day(self, conn: sqlite3.Connection, em: DayEmission) -> None:
+    def _emit_day(self, conn: duckdb.DuckDBPyConnection, em: DayEmission) -> None:
         for tag, amount in em.legs:
             direction = "Credit" if amount >= 0 else "Debit"
             _insert_tx(
@@ -304,12 +303,12 @@ class AccountSimulation:
             business_day_end=end, money=em.stored,
         )
 
-    def run(self, conn: sqlite3.Connection) -> None:
+    def run(self, conn: duckdb.DuckDBPyConnection) -> None:
         for em in self._fold():
             self._emit_day(conn, em)
 
     def violation_trajectory(
-        self, conn: sqlite3.Connection,
+        self, conn: duckdb.DuckDBPyConnection,
     ) -> list[dict[date, float]]:
         """Carry the VIOLATION SET as state through the fold: emit day i,
         refresh, detect, snapshot. The returned list is the active-violation

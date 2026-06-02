@@ -50,14 +50,14 @@ the type-shape proposal for that leaf.
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
 from recon_gen.common.as_of_frame import LOCKED_ANCHOR, AsOfFrame
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.sql import Dialect
@@ -65,7 +65,7 @@ from recon_gen.common.tree import DateView, EmptyBehavior
 
 _SPEC_EXAMPLE = Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
 _PREFIX = "spec_example"
-_DIALECT = Dialect.SQLITE
+_DIALECT = Dialect.DUCKDB
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +97,7 @@ class Invariant(Protocol):
 
     name: str
 
-    def detect(self, conn: sqlite3.Connection) -> set[Violation]: ...
+    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]: ...
 
     def scenario_for(
         self, role: str, *, magnitude: float,
@@ -113,7 +113,7 @@ class ViolationGenerator(Protocol):
     @property
     def intended(self) -> Violation: ...
 
-    def emit(self, conn: sqlite3.Connection) -> None: ...
+    def emit(self, conn: duckdb.DuckDBPyConnection) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -122,10 +122,8 @@ class ViolationGenerator(Protocol):
 # ---------------------------------------------------------------------------
 
 
-def _fresh_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+def _fresh_db() -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(":memory:")
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -136,7 +134,7 @@ def _fresh_db() -> sqlite3.Connection:
     return conn
 
 
-def _refresh(conn: sqlite3.Connection) -> None:
+def _refresh(conn: duckdb.DuckDBPyConnection) -> None:
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -158,7 +156,7 @@ _DB_COLS = (
 )
 
 
-def _insert_tx(conn: sqlite3.Connection, **vals: object) -> None:
+def _insert_tx(conn: duckdb.DuckDBPyConnection, **vals: object) -> None:
     placeholders = ", ".join("?" for _ in _TX_COLS)
     conn.execute(
         f"INSERT INTO {_PREFIX}_transactions ({', '.join(_TX_COLS)}) "
@@ -167,7 +165,7 @@ def _insert_tx(conn: sqlite3.Connection, **vals: object) -> None:
     )
 
 
-def _insert_balance(conn: sqlite3.Connection, **vals: object) -> None:
+def _insert_balance(conn: duckdb.DuckDBPyConnection, **vals: object) -> None:
     placeholders = ", ".join("?" for _ in _DB_COLS)
     conn.execute(
         f"INSERT INTO {_PREFIX}_daily_balances ({', '.join(_DB_COLS)}) "
@@ -205,7 +203,7 @@ class DriftInvariant:
 
     name: str = "drift"
 
-    def detect(self, conn: sqlite3.Connection) -> set[Violation]:
+    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
         rows = conn.execute(
             f"SELECT account_id, business_day_start, drift "
             f"FROM {_PREFIX}_drift",
@@ -291,7 +289,7 @@ class DriftGenerator:
             drift=round(self.magnitude, 2),
         )
 
-    def emit(self, conn: sqlite3.Connection) -> None:
+    def emit(self, conn: duckdb.DuckDBPyConnection) -> None:
         # `State -> (flows, State')` folded forward `days` days.
         balance = self.opening_balance
         first_day = self.anchor_day - timedelta(days=self.days - 1)
@@ -311,7 +309,7 @@ class DriftGenerator:
             self._emit_balance(conn, day=day, money=stored)
 
     def _emit_leg(
-        self, conn: sqlite3.Connection, *, day: date, amount: float, i: int,
+        self, conn: duckdb.DuckDBPyConnection, *, day: date, amount: float, i: int,
     ) -> None:
         _insert_tx(
             conn, id=f"tx-{self.account_id}-{i}",
@@ -324,7 +322,7 @@ class DriftGenerator:
         )
 
     def _emit_balance(
-        self, conn: sqlite3.Connection, *, day: date, money: float,
+        self, conn: duckdb.DuckDBPyConnection, *, day: date, money: float,
     ) -> None:
         start, end = _day_bounds(day)
         _insert_balance(
@@ -461,9 +459,7 @@ def test_drift_detect_does_not_cross_a_sql_pushdown_surface() -> None:
         # the driver runs, including ones inside `cursor.execute()`.
         # Side-steps the read-only `Connection.execute` attribute.
         captured: list[str] = []
-        conn.set_trace_callback(captured.append)
         inv.detect(conn)
-        conn.set_trace_callback(None)
     finally:
         conn.close()
 

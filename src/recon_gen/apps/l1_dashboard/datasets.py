@@ -1095,11 +1095,7 @@ def build_daily_statement_summary_dataset(
     # cast is dialect-skipped to keep the no-op out of SQLite's path.
     day = day_text("business_day_start", cfg.dialect)
     _param_ref = f"<<${P_L1_DS_BALANCE_DATE_DSP}>>"
-    bdate_param = (
-        _param_ref
-        if cfg.dialect is Dialect.SQLITE
-        else f"CAST({_param_ref} AS DATE)"
-    )
+    bdate_param = f"CAST({_param_ref} AS DATE)"
     bdate = day_text(bdate_param, cfg.dialect)
     acct = "(account_name || ' (' || account_id || ')')"
     # AO.2 / AR.2 — balance-date narrow is a strict day equality. The
@@ -1176,11 +1172,7 @@ def _daily_statement_transactions_sql(prefix: str, dialect: Dialect) -> str:
     # directly so its branch skips the cast).
     day_txt = day_text("tx.posting", dialect)
     _param_ref = f"<<${P_L1_DS_BALANCE_DATE_DSP}>>"
-    bdate_param = (
-        _param_ref
-        if dialect is Dialect.SQLITE
-        else f"CAST({_param_ref} AS DATE)"
-    )
+    bdate_param = f"CAST({_param_ref} AS DATE)"
     bdate = day_text(bdate_param, dialect)
     # AO.2 / AR.2 — same balance-date narrow as the summary; strict day
     # equality (pre-AR.2 latest-on-empty fallback removed per the

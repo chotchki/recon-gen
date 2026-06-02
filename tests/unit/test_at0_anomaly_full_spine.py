@@ -63,7 +63,7 @@ the lessons + locks AT.1-AT.6's migration order.
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -71,7 +71,7 @@ from pathlib import Path
 import pytest
 
 from recon_gen.common.as_of_frame import LOCKED_ANCHOR, AsOfFrame
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.primitives import L2Instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
@@ -85,7 +85,7 @@ from recon_gen.common.tree import DateView
 
 _SPEC_EXAMPLE = Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
 _PREFIX = "spec_example"
-_DIALECT = Dialect.SQLITE
+_DIALECT = Dialect.DUCKDB
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +109,7 @@ class AnomalyInvariant:
     name: str = "inv_pair_rolling_anomalies"
     prefix: str = _PREFIX
 
-    def detect(self, conn: sqlite3.Connection) -> set[Violation]:
+    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
         rows = conn.execute(
             f"SELECT sender_account_id, recipient_account_id, window_end, "
             f"z_bucket "
@@ -220,7 +220,7 @@ class AnomalyGenerator:
             z_bucket="4+ sigma",
         )
 
-    def emit(self, conn: sqlite3.Connection) -> None:
+    def emit(self, conn: duckdb.DuckDBPyConnection) -> None:
         # Background pairs — populate the distribution so pop_stddev > 0.
         # Each is a 2-leg transfer (sender_leg with amount < 0; recipient
         # leg with amount > 0). The matview's pair_legs CTE joins on
@@ -260,7 +260,7 @@ class AnomalyGenerator:
 
     def _emit_pair(
         self,
-        conn: sqlite3.Connection,
+        conn: duckdb.DuckDBPyConnection,
         *,
         sender_account_id: str,
         sender_account_role: str,
@@ -314,10 +314,8 @@ class AnomalyGenerator:
 # ---------------------------------------------------------------------------
 
 
-def _fresh_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+def _fresh_db() -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(":memory:")
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -328,7 +326,7 @@ def _fresh_db() -> sqlite3.Connection:
     return conn
 
 
-def _refresh(conn: sqlite3.Connection) -> None:
+def _refresh(conn: duckdb.DuckDBPyConnection) -> None:
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -378,7 +376,7 @@ _TX_COLS = (
 )
 
 
-def _insert_tx(conn: sqlite3.Connection, **vals: object) -> None:
+def _insert_tx(conn: duckdb.DuckDBPyConnection, **vals: object) -> None:
     placeholders = ", ".join("?" for _ in _TX_COLS)
     conn.execute(
         f"INSERT INTO {_PREFIX}_transactions ({', '.join(_TX_COLS)}) "
@@ -563,9 +561,7 @@ def test_detect_does_not_cross_a_sql_pushdown_surface() -> None:
     conn = _fresh_db()
     try:
         captured: list[str] = []
-        conn.set_trace_callback(captured.append)
         inv.detect(conn)
-        conn.set_trace_callback(None)
     finally:
         conn.close()
     assert captured

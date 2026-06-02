@@ -92,7 +92,7 @@ What this spike does NOT prove (AW.1+ work):
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from datetime import datetime, timedelta
 
 
@@ -130,9 +130,9 @@ WHERE status = 'Pending';
 _CAP_SECONDS = 3600
 
 
-def _fresh_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
-    conn.executescript(_SCHEMA_SQL)
+def _fresh_db() -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(":memory:")
+    conn.execute(_SCHEMA_SQL)
     # Seed runtime with an arbitrary initial value; tests overwrite.
     conn.execute(
         "INSERT INTO spike_runtime (as_of) VALUES (?)",
@@ -142,7 +142,7 @@ def _fresh_db() -> sqlite3.Connection:
     return conn
 
 
-def _set_as_of(conn: sqlite3.Connection, as_of: datetime) -> None:
+def _set_as_of(conn: duckdb.DuckDBPyConnection, as_of: datetime) -> None:
     """Production-equivalent of `UPDATE <prefix>_runtime SET as_of=...`."""
     conn.execute(
         "DELETE FROM spike_runtime",
@@ -154,11 +154,11 @@ def _set_as_of(conn: sqlite3.Connection, as_of: datetime) -> None:
     conn.commit()
 
 
-def _refresh_matview(conn: sqlite3.Connection) -> None:
+def _refresh_matview(conn: duckdb.DuckDBPyConnection) -> None:
     """SQLite refresh — DROP + re-CREATE the matview body. PG would do
     `REFRESH MATERIALIZED VIEW`; in both cases the SELECT re-evaluates
     against the current runtime row."""
-    conn.executescript(
+    conn.execute(
         """
         DROP TABLE spike_stuck_pending;
         CREATE TABLE spike_stuck_pending AS
@@ -178,7 +178,7 @@ def _refresh_matview(conn: sqlite3.Connection) -> None:
 
 
 def _plant_pending_tx(
-    conn: sqlite3.Connection,
+    conn: duckdb.DuckDBPyConnection,
     *,
     tx_id: str,
     posting: datetime,

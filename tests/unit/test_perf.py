@@ -96,7 +96,7 @@ def test_format_skipped_shape() -> None:
 def test_dialect_name_per_dialect() -> None:
     assert dialect_name(Dialect.POSTGRES) == "postgres"
     assert dialect_name(Dialect.ORACLE) == "oracle"
-    assert dialect_name(Dialect.SQLITE) == "sqlite"
+    assert dialect_name(Dialect.DUCKDB) == "sqlite"
 
 
 # -- fetch_top_queries -----------------------------------------------------
@@ -178,7 +178,7 @@ def test_fetch_top_queries_sqlite_raises_not_implemented() -> None:
     conn = _FakeConn(cur)
     with pytest.raises(NotImplementedError, match="sqlite"):
         fetch_top_queries(
-            conn, Dialect.SQLITE, like_pattern="x", top=1,
+            conn, Dialect.DUCKDB, like_pattern="x", top=1,
         )
 
 

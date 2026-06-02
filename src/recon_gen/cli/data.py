@@ -195,7 +195,6 @@ def _build_fresh_semantic_lock(
         dialect = _Dialect.DUCKDB
 
     from recon_gen.common.db import (
-        _register_sqlite_aggregates,
         execute_script,
     )
     from recon_gen.common.l2.config_table import replace_config
@@ -219,12 +218,7 @@ def _build_fresh_semantic_lock(
     # Widen to Any so the body type-checks under both branches.
     from typing import Any as _Any  # noqa: PLC0415
     conn: _Any
-    if dialect is Dialect.SQLITE:
-        import sqlite3
-        conn = sqlite3.connect(":memory:")
-        conn.execute("PRAGMA foreign_keys = ON;")
-        _register_sqlite_aggregates(conn)
-    elif dialect is Dialect.DUCKDB:
+    if dialect is Dialect.DUCKDB:
         import duckdb
         conn = duckdb.connect(":memory:")
     else:
@@ -240,8 +234,6 @@ def _build_fresh_semantic_lock(
             emit_schema(instance, prefix=prefix, dialect=dialect),
             dialect=dialect,
         )
-        if dialect is Dialect.SQLITE:
-            conn.commit()
         # Seed config row (matview reads as_of + BS.5 chain children
         # from here). Pre-BS.5 this passed l2_json="{}" because no matview
         # body read chain data through the kv projection — they baked
@@ -278,14 +270,8 @@ def _build_fresh_semantic_lock(
             instance, prefix=prefix,
             window_days=90, anchor=anchor, dialect=dialect,
         )
-        # Both dialects accept multi-statement scripts; SQLite uses
-        # conn.executescript() (cursor doesn't have it), DuckDB uses
-        # conn.execute() — both succeed on the full baseline blob.
-        if dialect is Dialect.SQLITE:
-            conn.executescript(baseline_sql)
-            conn.commit()
-        else:
-            conn.execute(baseline_sql)
+        # DuckDB accepts multi-statement scripts via conn.execute().
+        conn.execute(baseline_sql)
         # Compose the production seed via the spine pipeline.
         from recon_gen.cli._helpers import build_default_scenario  # pyright: ignore[reportUnknownVariableType]  # WHY: helper has pending untyped-def waiver
         scenario = build_default_scenario(instance, anchor=anchor)  # pyright: ignore[reportUnknownVariableType]: same helper-untyped waiver propagates to the call
@@ -311,8 +297,6 @@ def _build_fresh_semantic_lock(
         # Live emit (not dry_run) — the matview detector needs real rows.
         for gen in generators:
             gen.emit(conn, scenario_id=ctx.scenario_id)  # type: ignore[call-arg]: ViolationGenerator Protocol structural narrowing to ClaimedAccountsGenerator's scenario_id kwarg not inferred
-        if dialect is Dialect.SQLITE:
-            conn.commit()
         # Refresh matviews so detect() reads up-to-date violations.
         cur2 = conn.cursor()
         execute_script(
@@ -320,8 +304,6 @@ def _build_fresh_semantic_lock(
             refresh_matviews_sql(instance, prefix=prefix, dialect=dialect),
             dialect=dialect,
         )
-        if dialect is Dialect.SQLITE:
-            conn.commit()
         # Each Invariant defaults `prefix="spec_example"`; pass the
         # right prefix when the instance differs.
         invariants = [
@@ -386,7 +368,7 @@ def data_semantic_lock(
 
     from recon_gen.common.sql import Dialect as _Dialect  # noqa: PLC0415
     # CA.6 — default lock dialect moved from SQLite to DuckDB. The
-    # SQLite arm stays alive until CA.8 deletes Dialect.SQLITE; both
+    # SQLite arm stays alive until CA.8 deletes Dialect.DUCKDB; both
     # files are kept on disk so the CI gate can be flipped without
     # losing the recoverable point. Violation set is dialect-invariant
     # (BZ.4 + CA.0 audit), only `scenario_fingerprint.dialect` differs.
