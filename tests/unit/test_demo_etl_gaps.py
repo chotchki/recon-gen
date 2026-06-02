@@ -341,7 +341,7 @@ def test_gaps_actually_surface_in_triage_detect_gaps(
     conn = duckdb.connect(db_path)
     conn.execute(
         f"CREATE TABLE {prefix}_transactions ("
-        "entry INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "entry BIGINT, "
         "id TEXT NOT NULL, account_id TEXT NOT NULL, "
         "account_role TEXT, account_parent_role TEXT, "
         "account_scope TEXT NOT NULL, "

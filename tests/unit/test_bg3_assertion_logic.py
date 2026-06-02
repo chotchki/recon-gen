@@ -293,8 +293,8 @@ def test_bg3_kv_pin_anchors_test_to_deploy_day_across_midnight(
     )
     from tests.e2e.conftest import _pin_cfg_to_kv_as_of
 
-    # 1) Stamp an isolated sqlite with kv.as_of = 5/28 (the "deploy day").
-    db_path = tmp_path / "bg3_kv_pin.sqlite"
+    # 1) Stamp an isolated DuckDB with kv.as_of = 5/28 (the "deploy day").
+    db_path = tmp_path / "bg3_kv_pin.duckdb"
     prefix = "bg3kv"
     conn = duckdb.connect(str(db_path))
     try:
@@ -318,11 +318,12 @@ def test_bg3_kv_pin_anchors_test_to_deploy_day_across_midnight(
 
     monkeypatch.setattr(af_mod, "date", _Date_2026_05_29)
 
-    # 3) Build a cfg pointed at the stamped sqlite.
+    # 3) Build a cfg pointed at the stamped DuckDB.
+    from recon_gen.common.db import make_demo_database_url
     cfg = make_test_config(
         dialect=Dialect.DUCKDB,
         db_table_prefix=prefix,
-        demo_database_url=f"sqlite:///{db_path}",
+        demo_database_url=make_demo_database_url(Dialect.DUCKDB, db_path),
     )
 
     unpinned = cfg.test_generator.as_of_frame(window_days=7).as_of

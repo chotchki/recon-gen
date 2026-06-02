@@ -413,8 +413,11 @@ def set_as_of(
     """
     name = config_table_name(prefix)
     if as_of is None:
+        # CB.8 — DuckDB doesn't recognize SQLite's ``'now'`` magic
+        # string in strftime; use the standard CURRENT_TIMESTAMP +
+        # cast-and-format path. PG/Oracle accept this shape too.
         conn.execute(
-            f"UPDATE {name} SET value = strftime('%Y-%m-%d %H:%M:%S', 'now') "
+            f"UPDATE {name} SET value = strftime(CURRENT_TIMESTAMP, '%Y-%m-%d %H:%M:%S') "
             f"WHERE parent_id IS NULL AND key = 'as_of'",
         )
     else:

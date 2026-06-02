@@ -47,7 +47,7 @@ from recon_gen.common.sql import (
 
 PG = Dialect.POSTGRES
 ORA = Dialect.ORACLE
-SQLITE = Dialect.DUCKDB
+DUCKDB = Dialect.DUCKDB
 
 
 # -- Postgres branches -------------------------------------------------------
@@ -344,12 +344,12 @@ class TestDialectEnum:
     def test_string_values(self):
         assert Dialect.POSTGRES.value == "postgres"
         assert Dialect.ORACLE.value == "oracle"
-        assert Dialect.DUCKDB.value == "sqlite"
+        assert Dialect.DUCKDB.value == "duckdb"
 
     def test_round_trip_from_string(self):
         assert Dialect("postgres") is Dialect.POSTGRES
         assert Dialect("oracle") is Dialect.ORACLE
-        assert Dialect("sqlite") is Dialect.DUCKDB
+        assert Dialect("duckdb") is Dialect.DUCKDB
 
 
 # -- Identifiers (Y.3.f.1) ---------------------------------------------------
@@ -364,9 +364,9 @@ class TestColumnName:
         assert column_name("ACCOUNT_ID", PG) == "account_id"
         assert column_name("Account_Id", PG) == "account_id"
 
-    def test_sqlite_lowercases(self):
-        assert column_name("account_id", SQLITE) == "account_id"
-        assert column_name("ACCOUNT_ID", SQLITE) == "account_id"
+    def test_duckdb_lowercases(self):
+        assert column_name("account_id", DUCKDB) == "account_id"
+        assert column_name("ACCOUNT_ID", DUCKDB) == "account_id"
 
     def test_oracle_uppercases(self):
         assert column_name("account_id", ORA) == "ACCOUNT_ID"
@@ -374,179 +374,171 @@ class TestColumnName:
         assert column_name("Account_Id", ORA) == "ACCOUNT_ID"
 
     def test_idempotent(self):
-        for d in (PG, ORA, SQLITE):
+        for d in (PG, ORA, DUCKDB):
             once = column_name("account_id", d)
             twice = column_name(once, d)
             assert once == twice
 
 
-# -- SQLite branches ---------------------------------------------------------
+# -- DuckDB branches ---------------------------------------------------------
 
 
-class TestSqliteTypeNames:
-    """X.3.a — SQLite type names. SQLite is typeless internally so the
-    affinity names are advisory; we prefer ``TEXT`` / ``INTEGER`` /
-    ``NUMERIC`` over Postgres-shape names so the emitted DDL reads as
-    SQLite-native rather than Postgres-with-a-different-engine."""
+class TestDuckdbTypeNames:
+    """CB.8 — DuckDB has a real type system (unlike SQLite's affinities).
+    Most helpers emit the PG-shaped types since DuckDB borrows PG's
+    typing model directly."""
 
     def test_serial_type(self):
-        # No INTEGER PRIMARY KEY AUTOINCREMENT — composite (id, entry)
-        # PK can't use the auto-increment shortcut. Schema emit pairs
-        # the bare INTEGER type with a BEFORE INSERT trigger that
-        # computes entry per id.
-        assert serial_type(SQLITE) == "INTEGER"
+        # CA.2 — DuckDB uses BIGINT for the (id, entry) composite-PK
+        # pattern; the schema-emit layer pairs it with a per-prefix
+        # SEQUENCE + DEFAULT nextval (no autoincrement shortcut works
+        # cleanly for composite PKs on any of the supported dialects).
+        assert serial_type(DUCKDB) == "BIGINT"
 
     def test_boolean_type(self):
-        assert boolean_type(SQLITE) == "INTEGER"
+        assert boolean_type(DUCKDB) == "BOOLEAN"
 
     def test_text_type(self):
-        assert text_type(SQLITE) == "TEXT"
+        assert text_type(DUCKDB) == "TEXT"
 
     def test_timestamp_type(self):
-        # TIMESTAMP across all 3 dialects (P.9a kept the unification).
-        assert timestamp_type(SQLITE) == "TIMESTAMP"
+        assert timestamp_type(DUCKDB) == "TIMESTAMP"
 
     def test_varchar_type(self):
-        # VARCHAR(N) collapses to TEXT — SQLite's VARCHAR length is
-        # advisory so dropping the (N) keeps the DDL honest.
-        assert varchar_type(100, SQLITE) == "TEXT"
+        assert varchar_type(100, DUCKDB) == "VARCHAR(100)"
 
     def test_decimal_type(self):
-        assert decimal_type(20, 2, SQLITE) == "NUMERIC"
+        assert decimal_type(20, 2, DUCKDB) == "DECIMAL(20,2)"
 
 
-class TestSqliteCasts:
+class TestDuckdbCasts:
     def test_cast_numeric(self):
-        assert cast("col", "numeric", SQLITE) == "CAST(col AS NUMERIC)"
+        # DuckDB uses PG-style ``expr::type`` cast syntax.
+        assert cast("col", "numeric", DUCKDB) == "col::numeric"
 
     def test_cast_bigint(self):
-        # bigint → INTEGER (SQLite has only one integer type internally).
-        assert cast("(a + b)", "bigint", SQLITE) == "CAST((a + b) AS INTEGER)"
+        assert cast("(a + b)", "bigint", DUCKDB) == "(a + b)::bigint"
 
     def test_typed_null_numeric(self):
-        assert typed_null("numeric", SQLITE) == "CAST(NULL AS NUMERIC)"
+        assert typed_null("numeric", DUCKDB) == "NULL::numeric"
 
     def test_typed_null_bigint(self):
-        assert typed_null("bigint", SQLITE) == "CAST(NULL AS INTEGER)"
+        assert typed_null("bigint", DUCKDB) == "NULL::bigint"
 
     def test_to_date(self):
-        assert to_date("posting", SQLITE) == "DATE(posting)"
+        assert to_date("posting", DUCKDB) == "posting::date"
 
 
-class TestSqliteJsonCheck:
+class TestDuckdbJsonCheck:
     def test_uses_json_valid(self):
-        # SQLite's JSON1 extension ships ``json_valid()``; the SQL/JSON
-        # standard ``IS JSON`` predicate isn't available.
-        assert json_check("metadata", SQLITE) == (
+        # DuckDB has ``json_valid(text)`` natively + accepts the
+        # ``CHECK (col IS NULL OR json_valid(col))`` shape unchanged.
+        assert json_check("metadata", DUCKDB) == (
             "CHECK (metadata IS NULL OR json_valid(metadata))"
         )
 
 
-class TestSqliteDateTime:
+class TestDuckdbDateTime:
     def test_epoch_seconds_between(self):
-        # julianday(later) - julianday(earlier) returns fractional
-        # days; * 86400 gives seconds.
-        result = epoch_seconds_between("CURRENT_TIMESTAMP", "ct.posting", SQLITE)
-        assert "julianday(CURRENT_TIMESTAMP)" in result
-        assert "julianday(ct.posting)" in result
-        assert "* 86400" in result
+        # DuckDB has native EXTRACT(EPOCH FROM (later - earlier)) so the
+        # SQLite julianday()-math workaround drops out.
+        result = epoch_seconds_between(
+            "CURRENT_TIMESTAMP", "ct.posting", DUCKDB,
+        )
+        assert result == (
+            "EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - ct.posting))"
+        )
 
     def test_interval_days(self):
-        # SQLite has no INTERVAL; emit as a string for use inside
-        # date(expr, '<interval>') modifier.
-        assert interval_days(1, SQLITE) == "'1 days'"
-        assert interval_days(7, SQLITE) == "'7 days'"
+        # DuckDB has the standard INTERVAL syntax (vs. SQLite's
+        # string-form '+1 days' that piggybacked on the date()
+        # modifier function).
+        assert interval_days(1, DUCKDB) == "INTERVAL '1 day'"
+        assert interval_days(7, DUCKDB) == "INTERVAL '7 day'"
 
     def test_date_minus_days(self):
-        assert date_minus_days("pw.posted_day", 1, SQLITE) == (
-            "date(pw.posted_day, '-1 days')"
+        assert date_minus_days("pw.posted_day", 1, DUCKDB) == (
+            "(pw.posted_day - INTERVAL '1 day')"
         )
 
     def test_date_trunc_day(self):
-        # datetime(expr, 'start of day') returns YYYY-MM-DD HH:MM:SS at
-        # midnight — matches the timestamp-shape semantics PG/Oracle
-        # deliver via DATE_TRUNC / CAST(TRUNC AS TIMESTAMP).
-        assert date_trunc_day("tx.posting", SQLITE) == (
-            "datetime(tx.posting, 'start of day')"
+        assert date_trunc_day("tx.posting", DUCKDB) == (
+            "DATE_TRUNC('day', tx.posting)"
         )
 
     def test_day_text(self):
-        # AO.10 — SQLite strftime day key from the stored ISO text.
-        assert day_text("business_day_start", SQLITE) == (
+        # DuckDB's strftime is overloaded on (TIMESTAMP, format); the
+        # SQLite-style (format, value) form happens to be supported
+        # too. ``day_text`` keeps the legacy ordering for cross-dialect
+        # source-text portability.
+        assert day_text("business_day_start", DUCKDB) == (
             "strftime('%Y-%m-%d', business_day_start)"
         )
 
-    def test_date_literal_plain_text(self):
-        # SQLite has no native DATE type and rejects ``DATE 'literal'``
-        # as a column reference. ``CAST('YYYY-MM-DD' AS DATE)`` coerces
-        # to INTEGER 2030 (NUMERIC affinity extracts the leading digits)
-        # — silently wrong for comparisons against TEXT-stored ISO
-        # dates. The plain quoted-string form sorts lexically and ISO
-        # ordering matches date ordering, so comparisons are correct.
-        assert date_literal("2030-01-01", SQLITE) == "'2030-01-01'"
-        assert date_literal("2030-01-08", SQLITE) == "'2030-01-08'"
+    def test_date_literal_typed(self):
+        # DuckDB has a real DATE type — emit the SQL-standard
+        # ``DATE 'YYYY-MM-DD'`` literal (same as PG / Oracle).
+        assert date_literal("2030-01-01", DUCKDB) == "DATE '2030-01-01'"
+        assert date_literal("2030-01-08", DUCKDB) == "DATE '2030-01-08'"
 
 
-class TestSqliteDdlIdempotency:
-    """X.3.a — SQLite DDL idempotency uses native ``IF EXISTS``."""
-
+class TestDuckdbDdlIdempotency:
     def test_drop_table(self):
-        # No CASCADE keyword — SQLite enforces FKs via PRAGMA, not
-        # CASCADE.
-        assert drop_table_if_exists("foo", SQLITE) == "DROP TABLE IF EXISTS foo;"
+        # DuckDB supports DROP TABLE IF EXISTS … CASCADE (PG-compatible).
+        assert drop_table_if_exists("foo", DUCKDB) == (
+            "DROP TABLE IF EXISTS foo CASCADE;"
+        )
 
     def test_drop_matview(self):
-        # Matviews land as plain tables in SQLite — drop them as tables.
-        assert drop_matview_if_exists("p_drift", SQLITE) == (
+        # Matviews land as plain tables (same shape as the SQLite
+        # workaround kept by CA.2); drop them as tables. No CASCADE
+        # — the matview-as-table has no FKs that depend on it.
+        assert drop_matview_if_exists("p_drift", DUCKDB) == (
             "DROP TABLE IF EXISTS p_drift;"
         )
 
     def test_drop_index(self):
-        assert drop_index_if_exists("idx_foo", SQLITE) == (
+        assert drop_index_if_exists("idx_foo", DUCKDB) == (
             "DROP INDEX IF EXISTS idx_foo;"
         )
 
     def test_drop_view(self):
-        assert drop_view_if_exists("v_foo", SQLITE) == "DROP VIEW IF EXISTS v_foo;"
+        assert drop_view_if_exists("v_foo", DUCKDB) == (
+            "DROP VIEW IF EXISTS v_foo;"
+        )
 
 
-class TestSqliteMatviews:
+class TestDuckdbMatviews:
     def test_matview_options_empty(self):
-        # CREATE TABLE … AS — no per-keyword suffix.
+        # CREATE TABLE … AS — same matview-as-table shape SQLite had.
         from recon_gen.common.sql import matview_create_keyword
-        assert matview_options(SQLITE) == ""
-        assert matview_create_keyword(SQLITE) == "CREATE TABLE"
+        assert matview_options(DUCKDB) == ""
+        assert matview_create_keyword(DUCKDB) == "CREATE TABLE"
 
     def test_create_matview_emits_create_table(self):
-        sql = create_matview("p_drift", "SELECT 1", SQLITE)
+        sql = create_matview("p_drift", "SELECT 1", DUCKDB)
         assert sql == "CREATE TABLE p_drift AS SELECT 1"
 
     def test_refresh_matview_raises(self):
-        # SQLite's matview refresh is a DELETE + INSERT pair using the
-        # matview body SELECT — which lives in the schema template,
-        # not in this helper. The dialect helper raises so callers get
-        # routed through ``refresh_matviews_sql`` in common.l2.schema.
-        # CA.2 — message gained a dynamic dialect prefix ("sqlite refresh
-        # requires…" / "duckdb refresh requires…") for cross-dialect parity.
+        # CA.2 — message carries the dynamic dialect prefix
+        # ("duckdb refresh requires…").
         import pytest as _pytest
-        with _pytest.raises(NotImplementedError, match="sqlite refresh"):
-            refresh_matview("p_drift", SQLITE)
+        with _pytest.raises(NotImplementedError, match="duckdb refresh"):
+            refresh_matview("p_drift", DUCKDB)
 
     def test_analyze_table(self):
-        assert analyze_table("p_drift", SQLITE) == "ANALYZE p_drift;"
+        assert analyze_table("p_drift", DUCKDB) == "ANALYZE p_drift;"
 
 
-class TestSqliteRecursiveCte:
+class TestDuckdbRecursiveCte:
     def test_with_recursive(self):
-        # SQLite requires the RECURSIVE keyword (same as PG).
-        assert with_recursive(SQLITE) == "WITH RECURSIVE"
+        assert with_recursive(DUCKDB) == "WITH RECURSIVE"
 
 
-class TestSqliteDualFrom:
+class TestDuckdbDualFrom:
     def test_no_from_dual_clause(self):
-        # SQLite accepts the bare ``SELECT 'x'`` form (like Postgres).
         from recon_gen.common.sql import dual_from
-        assert dual_from(SQLITE) == ""
+        assert dual_from(DUCKDB) == ""
 
 
 # -- Default-arg behavior ---------------------------------------------------

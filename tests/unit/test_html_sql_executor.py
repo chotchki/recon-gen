@@ -433,10 +433,13 @@ def test_rewrite_oracle_keeps_colon_named() -> None:
     assert out == sql
 
 
-def test_rewrite_sqlite_keeps_colon_named() -> None:
+def test_rewrite_duckdb_uses_dollar_named() -> None:
+    """DuckDB's Python driver rejects ``:name`` named placeholders with
+    "Parser Error: syntax error at or near ':'"; rewrite to ``$name``
+    so the same bind-dict shape works."""
     sql = "SELECT * FROM t WHERE x = :date_from"
     out = rewrite_placeholders_for_dialect(sql, Dialect.DUCKDB)
-    assert out == sql
+    assert out == "SELECT * FROM t WHERE x = $date_from"
 
 
 def test_rewrite_postgres_preserves_double_colon_cast() -> None:

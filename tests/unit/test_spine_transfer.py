@@ -271,7 +271,9 @@ def test_transfer_posting_hour_defaults_to_noon() -> None:
         ).fetchall()
     finally:
         conn.close()
-    assert postings == [("2030-01-15 12:00:00",)]
+    # DuckDB reads TIMESTAMP columns back as Python datetime (unlike
+    # SQLite which returned ISO TEXT). Both shapes carry the same value.
+    assert postings == [(datetime(2030, 1, 15, 12, 0, 0),)]
 
 
 # ---------------------------------------------------------------------------

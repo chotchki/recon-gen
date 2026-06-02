@@ -70,13 +70,16 @@ def _seed_db(rows: Sequence[SeedRow]) -> str:
         "posting TIMESTAMP NOT NULL, "
         "metadata TEXT)"
     )
-    conn.executemany(
-        f"INSERT INTO {_PREFIX}_transactions "
-        "(id, rail_name, template_name, account_role, account_parent_role, "
-        " amount_direction, transfer_parent_id, posting, metadata) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        rows,
-    )
+    if rows:
+        # DuckDB rejects executemany with an empty list ("requires a
+        # non-empty list of parameter sets"); SQLite quietly no-op'd.
+        conn.executemany(
+            f"INSERT INTO {_PREFIX}_transactions "
+            "(id, rail_name, template_name, account_role, account_parent_role, "
+            " amount_direction, transfer_parent_id, posting, metadata) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
     conn.commit()
     conn.close()
     return path

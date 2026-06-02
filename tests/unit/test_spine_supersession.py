@@ -161,7 +161,7 @@ def test_tagged_emit_tags_both_rows() -> None:
         conn.commit()
         tagged = conn.execute(
             f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
-            f"WHERE json_extract(metadata, '$.scenario_id') = ?",
+            f"WHERE json_extract_string(metadata, '$.scenario_id') = ?",
             ("test-ay2b-supersession",),
         ).fetchone()[0]
     finally:

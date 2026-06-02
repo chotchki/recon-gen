@@ -126,8 +126,10 @@ def test_ddl_postgres_uses_text_value_type() -> None:
     ddl = emit_config_table_ddl(_PREFIX, Dialect.POSTGRES)
     assert "VARCHAR(4000)" not in ddl  # unbounded per text_type
     assert "TEXT" in ddl
-    # BIGINT for the node_id PK + parent_id self-ref.
-    assert "BIGINT" in ddl
+    # CB.8 widened node_id + parent_id to VARCHAR so the v_overlay's
+    # string sentinels (``__bv_applied__`` / ``__bv__``) coexist with
+    # walker-emitted integer ids.
+    assert "VARCHAR(64)" in ddl
 
 
 def test_drop_ddl_idempotent_on_missing_table() -> None:

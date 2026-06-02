@@ -51,7 +51,7 @@ def test_empty_lock_renders_top_level_shape() -> None:
     assert set(parsed.keys()) == {"_comment", "scenario_fingerprint", "violations"}
     assert parsed["scenario_fingerprint"] == {
         "instance": DEFAULT_PREFIX,
-        "dialect": "sqlite",
+        "dialect": "duckdb",
         "canonical_anchor": "2030-01-01",
         "schema_version": 1,
     }

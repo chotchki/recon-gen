@@ -249,7 +249,7 @@ def test_tagged_emit_tags_every_leg() -> None:
         conn.commit()
         tagged = conn.execute(
             f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
-            f"WHERE json_extract(metadata, '$.scenario_id') = ?",
+            f"WHERE json_extract_string(metadata, '$.scenario_id') = ?",
             ("test-ay2b-rail-firing",),
         ).fetchone()[0]
     finally:

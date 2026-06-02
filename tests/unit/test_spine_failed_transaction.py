@@ -142,7 +142,7 @@ def test_tagged_emit_writes_scenario_id() -> None:
         gen.emit(conn, scenario_id="test-ay2b-failed")
         conn.commit()
         sid = conn.execute(
-            f"SELECT json_extract(metadata, '$.scenario_id') "
+            f"SELECT json_extract_string(metadata, '$.scenario_id') "
             f"FROM {_PREFIX}_transactions",
         ).fetchone()[0]
     finally:
