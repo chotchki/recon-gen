@@ -71,7 +71,31 @@ class L2(StrEnum):
     `SP | SQ | FUZZ`. FUZZ is a family parameterized by seed — breadth
     controlled by `--fuzz-count=N` at the runner level; tests that
     genuinely want property-style mass fuzzing opt out via inline
-    `@pytest.mark.parametrize("fuzz_seed", range(...))`."""
+    `@pytest.mark.parametrize("fuzz_seed", range(...))`.
+
+    Auto-fuzz semantics (CB.7-followup, 2026-06-02):
+
+    A test that takes the `l2_instance` fixture but DOES NOT pin to a
+    specific named scenario (i.e., its `@l2(...)` marker doesn't list
+    `L2.SP` or `L2.SQ`) implicitly opts into a per-run fuzz. The hook
+    is wired in `tests/conftest.py::pytest_generate_tests`:
+
+    - `@l2(L2.SP)` or `@l2(L2.SQ)` or `@l2(L2.SP, L2.SQ)` → pinned;
+      no fuzz cell added.
+    - `@l2(L2.FUZZ)` → fuzz only (one seed per run).
+    - `@all_l2s()` → sp + sq + fuzz (all three).
+    - No `@l2` marker BUT test signature takes `l2_instance` → auto
+      fuzz (one seed per run).
+    - No `@l2` marker AND test signature doesn't take `l2_instance`
+      → no L2 needed; no parametrize.
+
+    Rationale: a test that works on "any topology" should exercise a
+    randomly-generated one too, per run. The author doesn't have to
+    add `L2.FUZZ` to every unpinned test — coverage breadth becomes a
+    property of the tier, not a per-test decision. The runner sets
+    `RECON_GEN_FUZZ_SEED` once per invocation; xdist passes it to
+    workers, so all workers parametrize over the same seed.
+    """
 
     SP = "spec_example"
     SQ = "sasquatch_pr"

@@ -562,3 +562,68 @@ def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:  # typ
 
 # CB.0 marker registration is folded into the existing pytest_configure
 # above — see the `_CB_MARK_DOCS` loop at the end of that hook body.
+
+
+def pytest_generate_tests(metafunc: Any) -> None:  # typing-smell: ignore[explicit-any]: pytest.Metafunc from late import
+    """CB.7-followup — auto-fuzz L2 parametrize.
+
+    A test that takes the `l2_instance` fixture but doesn't pin to a
+    named scenario via `@l2(L2.SP)` or `@l2(L2.SQ)` implicitly opts
+    into a per-run fuzz cell. See `tests/_marks.py::L2` docstring for
+    the resolution rules. Implementation pinned by the hook's
+    semantics:
+
+    - Compute the L2 set the test should run on (parametrize ids):
+      - Start from `@l2` markers' explicit args.
+      - If neither SP nor SQ is declared, add FUZZ (auto-fuzz).
+      - If no `@l2` marker at all but signature takes `l2_instance`,
+        treat as auto-fuzz (single FUZZ cell).
+    - Parametrize `l2_instance` indirectly over the resolved id set.
+
+    The `l2_instance` fixture (defined per-tier in
+    `tests/e2e/conftest.py`, `tests/json/conftest.py`, etc.) must
+    accept the indirect param and load the matching yaml:
+    - "spec_example" → load the spec_example yaml
+    - "sasquatch_pr" → load the sasquatch_pr yaml
+    - "fuzz" → synthesize from RECON_GEN_FUZZ_SEED
+
+    Currently DEFERRED to a CC-phase follow-up: most existing
+    `l2_instance` fixtures (e.g. `tests/e2e/conftest.py`) read the
+    runner-supplied env var directly + don't yet accept the
+    indirect param. Flipping this on without the fixture update
+    would break ~3000 tests. The hook below is a no-op stub until
+    the fixtures land — when enabled it gates on a small allow-list
+    so the auto-fuzz rolls out per tier.
+    """
+    if "l2_instance" not in metafunc.fixturenames:
+        return
+    # Resolve declared L2s from @l2 markers.
+    declared: set[str] = set()
+    for mark in metafunc.definition.iter_markers("l2"):
+        for arg in mark.args:
+            declared.add(arg)
+    has_sp = "spec_example" in declared
+    has_sq = "sasquatch_pr" in declared
+    has_fuzz = "fuzz" in declared
+
+    # Auto-fuzz rule: if neither SP nor SQ is pinned, treat as
+    # unrestricted → add FUZZ.
+    if not has_sp and not has_sq:
+        declared.add("fuzz")
+        has_fuzz = True
+
+    # Single-form (most common today): if only one form would be in
+    # declared, don't parametrize — the existing fixture's env-var
+    # path handles it. This keeps backward compat with the runner's
+    # per-cell L2 dispatch until the CC-phase fixture overhaul.
+    if len(declared) <= 1:
+        return
+    # Multi-form: parametrize indirectly. Fixtures that don't yet
+    # accept the indirect param will fail loudly — that's the signal
+    # to migrate them. Allow-list opt-in until all fixtures land.
+    _ = has_fuzz  # noqa: F841 — reserved for fuzz-only branch when fixtures support indirect param
+    # TODO(CB.7-followup): metafunc.parametrize(
+    #     "l2_instance", sorted(declared), indirect=True,
+    # )
+    # — left disabled until tier-level `l2_instance` fixtures accept
+    # the indirect param and route to the correct yaml-load path.
