@@ -632,7 +632,7 @@ def _layer_command(
         # the cfg + L2 the runner discovered. Two cfg-path sources, in order:
         # (1) `variant_env[RECON_GEN_CONFIG]` — `_run_one_variant` only injects
         #     this for non-default variants (local-pg / local-oracle /
-        #     local-sqlite, where the per-variant cfg matches the variant's
+        #     local-duckdb, where the per-variant cfg matches the variant's
         #     dialect-flavored DB). For the default variant `_run_one_variant`
         #     doesn't inject it because the variant's cfg-discovery is
         #     subprocess-side via `tests/e2e/conftest.py` etc.
@@ -1417,8 +1417,7 @@ def cell_chain(spec: VariantSpec, requested_chain: list[str]) -> list[str]:
     layers for lo cells; ``up_to=<layer>`` is the only cap.
 
     DuckDB cells stay local-only — there's no remote-reachable DuckDB
-    shape, and QS can't read a file:// URL from us-east-1. Same for
-    SQLite if it's still in the matrix.
+    shape, and QS can't read a file:// URL from us-east-1.
 
     ``aw`` cells (the legacy Aurora-pointed shape, deleted in CB.12)
     pass through unchanged for operators with their own external DB
@@ -1427,7 +1426,7 @@ def cell_chain(spec: VariantSpec, requested_chain: list[str]) -> list[str]:
     if spec.target == "aw":
         return requested_chain
     # lo cells with a QS-reachable dialect (pg/or) get the full chain;
-    # du/sl lo cells still need to drop AWS-touching layers.
+    # du lo cells still need to drop AWS-touching layers.
     if spec.dialect in ("pg", "or"):
         return requested_chain
     return [layer for layer in requested_chain if layer not in AWS_TOUCHING_LAYERS]
@@ -1438,7 +1437,6 @@ def cell_chain(spec: VariantSpec, requested_chain: list[str]) -> list[str]:
 _LEGACY_VARIANT_HINTS: Final[dict[str, str]] = {
     "local-pg": "--dialects=pg --targets=lo",
     "local-oracle": "--dialects=or --targets=lo",
-    "local-sqlite": "--dialects=sl --targets=lo",
     "local-duckdb": "--dialects=du --targets=lo",
     "default": "(no flags = full matrix; or --dialects=pg,or --targets=aw for the AWS subset)",
 }
@@ -1462,83 +1460,13 @@ def _check_legacy_variant_names(arg: str) -> None:
         )
 
 
-class _SqliteHandle:
-    """Y.2.gate.b.2.impl.sqlite — teardown handle for the local-sqlite
-    variant. Mirrors the duck-typed ``.stop()`` shape that
-    ``teardown_variant`` calls on testcontainer handles, but unlinks
-    the per-invocation SQLite DB file + temp cfg instead of stopping
-    a Docker container.
-    """
-
-    def __init__(self, db_path: Path, cfg_path: Path) -> None:
-        self.db_path = db_path
-        self.cfg_path = cfg_path
-
-    def stop(self) -> None:
-        """Best-effort cleanup of the per-invocation files. Sidecar
-        contract preserved — never raises."""
-        for path in (self.db_path, self.cfg_path):
-            try:
-                path.unlink()
-            except (FileNotFoundError, OSError):
-                # Already gone or unwritable — drop it.
-                pass
-
-
-def _setup_local_sqlite() -> tuple[dict[str, str], object | None]:
-    """Create the per-invocation SQLite DB file + minimal cfg, return
-    the env overrides + handle the variant lifecycle expects.
-
-    Allocates a fresh temp directory (``tempfile.mkdtemp(prefix=
-    "qs-gen-sqlite-")``) so the DB and cfg files are isolated from
-    other concurrent invocations. The DB file is created empty —
-    ``schema apply`` populates it via ``connect_demo_db`` (which
-    handles the SQLite branch + ``STDDEV_SAMP`` aggregate
-    registration). The cfg carries:
-
-    - ``dialect: sqlite`` so emit_schema / emit_full_seed /
-      refresh_matviews_sql pick the SQLite arms of the dialect helpers;
-    - ``demo_database_url: sqlite:///<path>`` so connect_demo_db
-      points at the right file;
-    - ``aws_account_id`` + ``aws_region`` placeholders that satisfy
-      ``Config`` validators (the local-sqlite variant never touches
-      AWS — these fields are required by the loader but unused).
-
-    Both ``RECON_GEN_DEMO_DATABASE_URL`` and ``RECON_GEN_CONFIG`` end up in
-    the env overrides so DB-touching layer subprocesses (``db``,
-    ``app2``) load the right cfg + connect to the right file.
-    """
-    import tempfile
-
-    tmp_dir = Path(tempfile.mkdtemp(prefix="qs-gen-sqlite-"))  # typing-smell: ignore[qs-gen-prefix]: tempfile dir name only — not an AWS resource ID, just disambiguates per-invocation runner-managed temp dirs from other tools' tempfiles for operator-visible cleanup
-    db_path = tmp_dir / "demo.sqlite"
-    cfg_path = tmp_dir / "config.sqlite.yaml"
-    # Z.C — synth cfg uses ``deployment_name`` + ``db_table_prefix``
-    # (Z.C.2 collapse). The runner injects per-cell overrides via
-    # RECON_GEN_DEPLOYMENT_NAME / RECON_GEN_DB_TABLE_PREFIX env vars in
-    # ``_run_one_variant`` so multi-cell parallel runs don't collide
-    # — the values written here are the per-invocation defaults that
-    # apply when a cell doesn't override.
-    cfg_path.write_text(
-        f"aws_account_id: \"111122223333\"\n"
-        f"aws_region: \"us-east-1\"\n"
-        f"dialect: sqlite\n"
-        f"demo_database_url: \"sqlite:///{db_path}\"\n"
-        f"deployment_name: \"qsgen-sqlite\"\n"
-        f"db_table_prefix: \"qsgen_sqlite\"\n"
-    )
-    env: dict[str, str] = {
-        RECON_GEN_DEMO_DATABASE_URL.name: f"sqlite:///{db_path}",
-        RECON_GEN_CONFIG.name: str(cfg_path),
-    }
-    return env, _SqliteHandle(db_path=db_path, cfg_path=cfg_path)
-
-
 class _DuckdbHandle:
-    """CA.3 — teardown handle for the local-duckdb variant. Parallel
-    shape to ``_SqliteHandle``: ``.stop()`` unlinks the per-invocation
-    .duckdb file + temp cfg via the same duck-typed contract
-    ``teardown_variant`` already invokes on testcontainer handles.
+    """CA.3 — teardown handle for the local-duckdb variant.
+    ``.stop()`` unlinks the per-invocation .duckdb file + temp cfg via
+    the duck-typed contract ``teardown_variant`` invokes on
+    testcontainer handles. CB.7-followup (2026-06-02): the
+    `_SqliteHandle` sibling that originally paired with this was
+    deleted in the CB.7-followup cleanup after CB.8 dropped Dialect.SQLITE.
     """
 
     def __init__(self, db_path: Path, cfg_path: Path) -> None:
@@ -1558,8 +1486,7 @@ def _setup_local_duckdb() -> tuple[dict[str, str], object | None]:
     """Create the per-invocation DuckDB DB file + minimal cfg, return
     the env overrides + handle the variant lifecycle expects.
 
-    Parallel to ``_setup_local_sqlite`` — same temp-dir isolation,
-    same cfg slots, swap the dialect / URL scheme / file extension:
+    Allocates a tempdir; the cfg slots:
 
     - ``dialect: duckdb`` so emit_schema / emit_full_seed /
       refresh_matviews_sql pick the DuckDB arms of the dialect
@@ -1812,7 +1739,7 @@ def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
         # and break in confusing ways downstream.
         url = RECON_GEN_DEMO_DATABASE_URL.require()
         return {RECON_GEN_DEMO_DATABASE_URL.name: url}, None
-    # target == "lo" — local container or sqlite tempfile.
+    # target == "lo" — local container or DuckDB tempfile.
     if spec.dialect == "pg":
         # Lazy-import: testcontainers requires Docker, which not every
         # operator has. Importing only on demand keeps non-Docker
@@ -1861,18 +1788,12 @@ def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
             _oracle_container_name_for(spec), ORACLE_REUSE_PASSWORD,
         )
         return {RECON_GEN_DEMO_DATABASE_URL.name: url}, handle
-    if spec.dialect == "sl":
-        # Y.2.gate.b.2.impl.sqlite — no Docker, no network. Create
-        # a tempdir with a SQLite DB file + minimal cfg pointing at
-        # it; both env overrides flow to layer subprocesses. Teardown
-        # unlinks both files via the ``_SqliteHandle.stop()`` duck-
-        # typed contract ``teardown_variant`` already calls.
-        return _setup_local_sqlite()
     if spec.dialect == "du":
-        # CA.3 — parallel to the SQLite arm above, just swap the
-        # storage backend. Same no-Docker / no-network shape;
-        # ``_DuckdbHandle.stop()`` is the same duck-typed cleanup.
-        # CA.8 will collapse the sl + du arms once SQLite goes away.
+        # CA.3 — no Docker, no network. Allocate a tempdir with a
+        # .duckdb file + minimal cfg; both env overrides flow to
+        # layer subprocesses. Teardown unlinks both files via the
+        # ``_DuckdbHandle.stop()`` duck-typed contract
+        # ``teardown_variant`` already calls.
         return _setup_local_duckdb()
     raise ValueError(
         f"setup_variant: unhandled (dialect={spec.dialect!r}, target={spec.target!r})"
@@ -1913,7 +1834,7 @@ def _dump_top_queries_for_variant(
 
     Never raises — connection / query / format failures all degrade to a
     ``format_skipped`` marker so a flaky stats view can't break the
-    chain. SQLite has no equivalent stats view (skipped cleanly).
+    chain. DuckDB has no equivalent stats view (skipped cleanly).
     """
     # Lazy imports keep startup fast and avoid pulling psycopg/oracledb
     # into pyright-strict scope unless this helper actually fires.
@@ -2077,7 +1998,7 @@ def _resolve_seed_config(candidates: tuple[str, ...]) -> Path | None:
 
 def _resolve_seed_config_for_dialect(dialect: DialectCode) -> Path | None:
     """Per-dialect cfg dispatcher — returns the dialect-flavored cfg
-    for ``pg`` / ``or``, ``None`` for ``sl`` (the per-invocation
+    for ``pg`` / ``or``, ``None`` for ``du`` (the per-invocation
     cfg is generated by ``setup_variant`` and threaded via
     ``env_overrides[RECON_GEN_CONFIG]``, not discovered on disk).
 
@@ -2172,13 +2093,13 @@ def _write_qs_cfg_for_variant(
         # Oracle datasource branch already hardcodes DisableSsl=True
         # (common/datasource.py); no flag needed.
     else:
-        # du / sl dialects — no QS data source can point at a file DB.
+        # du dialect — no QS data source can point at a file DB.
         # The runner should never call this path; raise loudly so a
         # misroute surfaces during testing.
         raise RuntimeError(
             f"_write_qs_cfg_for_variant: dialect {spec.dialect!r} has no "
             f"QS-reachable shape (file-based DB). Should not be called "
-            f"for du/sl cells."
+            f"for du cells."
         )
 
     cfg_dir = run_dir / "cfg"
@@ -2358,12 +2279,11 @@ def seed_variant(
                 f"Create run/config.oracle.yaml (dialect: oracle) or "
                 f"set RECON_GEN_CONFIG to an oracle-dialect cfg path."
             )
-    elif spec.dialect in ("sl", "du"):
-        # Y.2.gate.b.2.impl.sqlite + CA.3 — cfg path comes from
-        # ``setup_variant`` (it generates the per-invocation cfg + DB
-        # file under a tempdir and returns the cfg path in
-        # ``env_overrides[RECON_GEN_CONFIG]``). No on-disk cfg in
-        # ``run/`` — both SQLite and DuckDB variants are by-design
+    elif spec.dialect == "du":
+        # CA.3 — cfg path comes from ``setup_variant`` (it generates
+        # the per-invocation cfg + DB file under a tempdir and returns
+        # the cfg path in ``env_overrides[RECON_GEN_CONFIG]``). No
+        # on-disk cfg in ``run/`` — DuckDB variants are by-design
         # ephemeral per-invocation. If the override isn't there,
         # setup_variant was bypassed; fail loud.
         cfg_str = env_overrides.get(RECON_GEN_CONFIG.name)
@@ -2737,7 +2657,7 @@ def _run_one_variant(
 
     # CB.11.b — when the chain reaches any QS-touching layer (deploy /
     # qs_api / qs_browser) AND the dialect has a QS-reachable shape
-    # (pg / or; not du / sl), generate a sibling QS-side cfg and thread
+    # (pg / or; not du), generate a sibling QS-side cfg and thread
     # it via RECON_GEN_QS_CONFIG. The deploy/qs layers prefer this cfg
     # over RECON_GEN_CONFIG so the QS data source's endpoint is
     # hotchkiss.io (not 127.0.0.1, which QS can't reach).
@@ -3158,12 +3078,12 @@ def cmd_up_to(args: argparse.Namespace) -> int:
             return EXIT_NEEDS_OPERATOR
         # m.4.b — surface invalid-cell skips so operators see the filter
         # happen rather than silently dropped cells. The only invalid
-        # combination today is sl × aw (sqlite is file-based; QuickSight
-        # has no remote DataSource for it).
+        # combination today is du × aw (DuckDB is file-based / in-process;
+        # QuickSight has no remote DataSource for it).
         for skipped in skipped_specs:
             reason = (
-                "sl × aw: sqlite is file-based; QuickSight can't reach it remotely"
-                if skipped.dialect == "sl" and skipped.target == "aw"
+                "du × aw: DuckDB is file-based / in-process; QuickSight can't reach it remotely"
+                if skipped.dialect == "du" and skipped.target == "aw"
                 else f"unhandled invalid combination ({skipped.dialect} × {skipped.target})"
             )
             print(f"runner: skip [{skipped.name}] ({reason})")
@@ -3246,7 +3166,7 @@ def cmd_up_to(args: argparse.Namespace) -> int:
         # create a container with the same fixed Ryuk name and the
         # second one crashes with HTTP 409 from Docker. Lazy-imported
         # so the runner stays Docker-free for AWS-only invocations.
-        if any(s.target == "lo" and s.dialect != "sl" for s in specs):
+        if any(s.target == "lo" and s.dialect != "du" for s in specs):
             try:
                 from testcontainers.core.container import Reaper  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
                 Reaper.get_instance()
@@ -3918,9 +3838,9 @@ Layer chain (Y.2.gate.b/c/n):
   aborts before any cell dispatches.
 
 Variant matrix (Y.2.gate.m):
-  No flags = full 13-cell matrix (sp/sq named scenarios × pg/or/sl × lo/aw,
-  plus 3 fuzz cells × pg/or/sl × lo). Narrow via sub-flags or pin via --variants.
-  Invalid cells (sl × aw — sqlite isn't reachable from QS) auto-skip with a log.
+  No flags = full 13-cell matrix (sp/sq named scenarios × pg/or/du × lo/aw,
+  plus 3 fuzz cells × pg/or/du × lo). Narrow via sub-flags or pin via --variants.
+  Invalid cells (du × aw — DuckDB isn't reachable from QS) auto-skip with a log.
 
   Examples (all assume `up_to=db` or higher):
     --scenarios=sp,sq                       sp + sq named-scenario subset
@@ -3928,9 +3848,9 @@ Variant matrix (Y.2.gate.m):
     --scenarios=fuzz:5                      5 random fuzz seeds (× dialect axis)
     --scenarios=us:run/customer.yaml        operator-supplied L2 yaml
     --dialects=pg                           postgres only
-    --dialects=pg,or                        cross-dialect (no sqlite)
-    --targets=lo                            local containers / sqlite tempfile
-    --targets=aw                            operator's external Aurora / Oracle
+    --dialects=pg,or                        cross-dialect subset
+    --targets=lo                            local containers / DuckDB tempfile
+    --targets=aw                            operator's external PG / Oracle
     --variants=sp_pg_lo                     triage: pin a single cell
     --variants=f12345_pg_lo                 reproduce a fuzz failure by seed
 """
@@ -3973,13 +3893,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dialects",
         metavar="<csv>",
         default=None,
-        help="dialects axis CSV (pg / or / sl); default = pg,or,sl.",
+        help="dialects axis CSV (pg / or / du); default = pg,or,du.",
     )
     p_up_to.add_argument(
         "--targets",
         metavar="<csv>",
         default=None,
-        help="targets axis CSV (lo / aw); default = lo,aw. sl × aw auto-skips.",
+        help="targets axis CSV (lo / aw); default = lo,aw. du × aw auto-skips.",
     )
     # m.2.a — --variants is the triage escape: each entry is a single
     # ``<sc>_<di>_<ta>`` cell code (e.g., sp_pg_lo, f42_or_lo). Mutex with

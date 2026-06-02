@@ -51,26 +51,26 @@ def test_name_fuzz_scenario() -> None:
 
 def test_name_user_supplied_scenario() -> None:
     spec = VariantSpec(
-        ScenarioCode("us"), "sl", "lo", user_yaml=Path("/tmp/foo.yaml"),
+        ScenarioCode("us"), "du", "lo", user_yaml=Path("/tmp/foo.yaml"),
     )
-    assert spec.name == "us_sl_lo"
+    assert spec.name == "us_du_lo"
 
 
-# --- is_valid: invalid cell rejection (sl × aw) ----------------------------
+# --- is_valid: invalid cell rejection (du × aw) ----------------------------
 
 
 @pytest.mark.parametrize("dialect", ["pg", "or"])
-def test_is_valid_aw_with_non_sqlite(dialect: str) -> None:
+def test_is_valid_aw_with_non_file_based(dialect: str) -> None:
     """AWS target works for postgres + oracle (the dialects QuickSight
     has remote DataSources for)."""
     spec = VariantSpec(ScenarioCode("sp"), dialect, "aw")  # pyright: ignore[reportArgumentType]: parametrize feeds str, narrowed to DialectCode at runtime
     assert spec.is_valid()
 
 
-def test_is_valid_rejects_sqlite_aws() -> None:
-    """SQLite × AWS is the canonical invalid cell. SQLite is file-based;
-    QuickSight has no remote DataSource for it."""
-    spec = VariantSpec(ScenarioCode("sp"), "sl", "aw")
+def test_is_valid_rejects_duckdb_aws() -> None:
+    """DuckDB × AWS is the canonical invalid cell. DuckDB is file-based /
+    in-process; QuickSight has no remote DataSource for it."""
+    spec = VariantSpec(ScenarioCode("sp"), "du", "aw")
     assert not spec.is_valid()
 
 
@@ -79,13 +79,13 @@ def test_is_valid_rejects_sqlite_aws() -> None:
     [
         ("pg", "lo"),
         ("or", "lo"),
-        ("sl", "lo"),  # sqlite-local IS valid (file-based engine, no AWS needed)
+        ("du", "lo"),  # duckdb-local IS valid (file-based engine, no AWS needed)
         ("pg", "aw"),
         ("or", "aw"),
     ],
 )
 def test_is_valid_other_cells(dialect: str, target: str) -> None:
-    """Every cell except sl × aw is valid."""
+    """Every cell except du × aw is valid."""
     spec = VariantSpec(ScenarioCode("sp"), dialect, target)  # pyright: ignore[reportArgumentType]: parametrize feeds str, narrowed to DialectCode/TargetCode at runtime
     assert spec.is_valid()
 
@@ -161,8 +161,8 @@ def test_named_scenarios_set() -> None:
 
 
 def test_dialects_set() -> None:
-    # CA.3 — du joins the set additively; sl stays through CA.7.
-    assert DIALECTS == frozenset({"pg", "or", "sl", "du"})
+    # CA.3 added du; CB.7-followup dropped sl entirely.
+    assert DIALECTS == frozenset({"pg", "or", "du"})
 
 
 def test_targets_set() -> None:
@@ -317,10 +317,10 @@ def test_compose_scenarios_only_named() -> None:
 
 
 def test_compose_invalid_cells_filtered() -> None:
-    """`is_valid()` filter applies in cross-product mode — sl × aw cells
+    """`is_valid()` filter applies in cross-product mode — du × aw cells
     auto-skip even when targets=aw includes them."""
-    cells = compose_matrix(dialects=["sl"], targets=["aw"])
-    # {sp, sq} × {sl} × {aw} would be 2 cells, but both invalid → 0
+    cells = compose_matrix(dialects=["du"], targets=["aw"])
+    # {sp, sq} × {du} × {aw} would be 2 cells, but both invalid → 0
     assert cells == []
 
 
@@ -346,13 +346,13 @@ def test_compose_with_user_supplied_scenario() -> None:
 
 def test_compose_explicit_full_intent_via_sub_flags() -> None:
     """Operator who DOES want full local matrix can spell it explicitly:
-    --scenarios=sp,sq --dialects=pg,or,sl --targets=lo = 6 cells."""
+    --scenarios=sp,sq --dialects=pg,or,du --targets=lo = 6 cells."""
     cells = compose_matrix(
         scenarios=[
             ScenarioSpec(ScenarioCode("sp")),
             ScenarioSpec(ScenarioCode("sq")),
         ],
-        dialects=["pg", "or", "sl"],
+        dialects=["pg", "or", "du"],
         targets=["lo"],
     )
     assert len(cells) == 6
@@ -528,7 +528,7 @@ def test_parse_variant_code_bad(bad: str) -> None:
 
 def test_parse_variant_code_invalid_cell_constructs() -> None:
     """Bug guard: parse_variant_code constructs the spec, but invalid
-    cells (sl × aw) construct fine — caller checks is_valid() if it
+    cells (du × aw) construct fine — caller checks is_valid() if it
     cares. The triage path may want to inspect why a cell is invalid."""
-    spec = parse_variant_code("sp_sl_aw")
+    spec = parse_variant_code("sp_du_aw")
     assert not spec.is_valid()

@@ -66,8 +66,8 @@ def _spec_or_lo() -> VariantSpec:
     return VariantSpec(ScenarioCode("sp"), "or", "lo")
 
 
-def _spec_sl_lo() -> VariantSpec:
-    return VariantSpec(ScenarioCode("sp"), "sl", "lo")
+def _spec_du_lo() -> VariantSpec:
+    return VariantSpec(ScenarioCode("sp"), "du", "lo")
 
 
 def _spec_pg_aw() -> VariantSpec:
@@ -2195,16 +2195,16 @@ def test_compose_specs_dialects_only_narrows() -> None:
     assert skipped == []
 
 
-def test_compose_specs_sl_aw_invalid_cell_surfaces_in_skipped() -> None:
-    """m.4.b — `--dialects=sl --targets=aw` produces 0 valid cells
-    (sl × aw is rejected by `is_valid()`) but the skipped list carries
+def test_compose_specs_du_aw_invalid_cell_surfaces_in_skipped() -> None:
+    """m.4.b — `--dialects=du --targets=aw` produces 0 valid cells
+    (du × aw is rejected by `is_valid()`) but the skipped list carries
     the cells the operator narrowed to so the runner can log them."""
-    opts = runner.RunOptions(dialects="sl", targets="aw")
+    opts = runner.RunOptions(dialects="du", targets="aw")
     specs, skipped = runner._compose_specs_from_options(opts)
     assert specs == []
     # 2 named scenarios × 1 dialect × 1 target = 2 invalid cells.
     assert len(skipped) == 2
-    assert all(s.dialect == "sl" and s.target == "aw" for s in skipped)
+    assert all(s.dialect == "du" and s.target == "aw" for s in skipped)
 
 
 def test_compose_specs_variants_triage_returns_pinned_cells() -> None:
@@ -2358,7 +2358,7 @@ def test_cell_chain_lo_with_db_only_chain_unaffected() -> None:
     include any AWS-touching layers, the cap is a no-op."""
     chain = ["unit", "db"]
     assert runner.cell_chain(_spec_pg_lo(), chain) == ["unit", "db"]
-    assert runner.cell_chain(_spec_sl_lo(), chain) == ["unit", "db"]
+    assert runner.cell_chain(_spec_du_lo(), chain) == ["unit", "db"]
 
 
 def test_teardown_variant_no_op_for_none() -> None:
