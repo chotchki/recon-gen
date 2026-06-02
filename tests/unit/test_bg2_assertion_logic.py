@@ -122,8 +122,8 @@ _SUMMARY_SQL_FOR_TEST = (
     " (drift / 100.0) AS drift\n"
     "FROM pfx_daily_statement_summary\n"
     "WHERE (account_name || ' (' || account_id || ')') = <<$pL1DsAccount>>\n"
-    "  AND strftime('%Y-%m-%d', business_day_start) = "
-    "strftime('%Y-%m-%d', <<$pL1DsBalanceDate>>)"
+    "  AND strftime(business_day_start::TIMESTAMP, '%Y-%m-%d') = "
+    "strftime(<<$pL1DsBalanceDate>>::TIMESTAMP, '%Y-%m-%d')"
 )
 
 

@@ -115,13 +115,20 @@ def emit_config_table_ddl(prefix: str, dialect: Dialect) -> str:
     (CLOB-incompatible on Oracle without function-based indexes).
     """
     name = config_table_name(prefix)
-    bigint = bigint_type(dialect)
+    vc64 = varchar_type(64, dialect)
     vc255 = varchar_type(255, dialect)
     text_t = text_type(dialect)
+    # CB.8: node_id + parent_id widened from BIGINT to VARCHAR so the
+    # v_overlay state sentinels (``__bv_applied__`` / ``__bv_failed__`` /
+    # ``__bv__``) fit alongside walker-emitted integer ids. SQLite's TEXT
+    # affinity used to mask the type mismatch silently; DuckDB's strict
+    # typing rejects string-into-BIGINT, so the schema goes wide enough
+    # to cover both use cases. No code does ORDER BY / arithmetic on
+    # these columns — only equality joins on (parent_id, key).
     return (
         f"CREATE TABLE {name} (\n"
-        f"    node_id   {bigint}   NOT NULL PRIMARY KEY,\n"
-        f"    parent_id {bigint},\n"
+        f"    node_id   {vc64}   NOT NULL PRIMARY KEY,\n"
+        f"    parent_id {vc64},\n"
         f"    key       {vc255},\n"
         f"    value     {text_t}\n"
         f");\n"
@@ -294,14 +301,18 @@ def emit_config_populate_sql(
         f"DELETE FROM {name};",
     ]
     for node_id, parent_id, key, value in rows:
-        parent_sql = "NULL" if parent_id is None else str(parent_id)
+        # CB.8: node_id + parent_id are VARCHAR; quote the integer
+        # walker-output values as text so they coexist with the
+        # v_overlay's string sentinels (``__bv_applied__`` / ``__bv__``).
+        node_sql = _sql_quote(str(node_id))
+        parent_sql = "NULL" if parent_id is None else _sql_quote(str(parent_id))
         key_sql = "NULL" if key is None else _sql_quote(key)
         value_sql = (
             "NULL" if value is None else _sql_quote_long(value, dialect)
         )
         lines.append(
             f"INSERT INTO {name} (node_id, parent_id, key, value) "
-            f"VALUES ({node_id}, {parent_sql}, {key_sql}, {value_sql});"
+            f"VALUES ({node_sql}, {parent_sql}, {key_sql}, {value_sql});"
         )
     return "\n".join(lines) + "\n"
 

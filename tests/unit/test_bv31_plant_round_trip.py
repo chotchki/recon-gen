@@ -156,6 +156,7 @@ def _signal_etl_triage(
 
     fd, db_path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
+    os.unlink(db_path)
     dst = duckdb.connect(db_path)
     with dst:
         conn.backup(dst)
@@ -201,6 +202,7 @@ def _signal_etl_run_coverage(
 
     fd, db_path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
+    os.unlink(db_path)
     dst = duckdb.connect(db_path)
     with dst:
         conn.backup(dst)

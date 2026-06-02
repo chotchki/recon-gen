@@ -45,7 +45,7 @@ class TestBetweenClause:
             ),
             (
                 Dialect.DUCKDB,
-                "business_day_start BETWEEN '2026-05-17' AND '2026-05-23'",
+                "business_day_start BETWEEN DATE '2026-05-17' AND DATE '2026-05-23'",
             ),
         ],
     )
@@ -92,8 +92,8 @@ class TestRangeClauseDateInterval:
             ),
             (
                 Dialect.DUCKDB,
-                "business_day_start >= '2026-05-17' AND "
-                "business_day_start < '2026-05-24'",
+                "business_day_start >= DATE '2026-05-17' AND "
+                "business_day_start < DATE '2026-05-24'",
             ),
         ],
     )
@@ -128,7 +128,7 @@ class TestRangeClauseDateTimeInterval:
         [
             (Dialect.POSTGRES, "posted_at >= TIMESTAMP '2026-05-24 09:00:00' AND posted_at < TIMESTAMP '2026-05-24 17:00:00'"),
             (Dialect.ORACLE, "posted_at >= TIMESTAMP '2026-05-24 09:00:00' AND posted_at < TIMESTAMP '2026-05-24 17:00:00'"),
-            (Dialect.DUCKDB, "posted_at >= '2026-05-24 09:00:00' AND posted_at < '2026-05-24 17:00:00'"),
+            (Dialect.DUCKDB, "posted_at >= TIMESTAMP '2026-05-24 09:00:00' AND posted_at < TIMESTAMP '2026-05-24 17:00:00'"),
         ],
     )
     def test_dialect_timestamp_literal_shape(

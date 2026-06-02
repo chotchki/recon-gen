@@ -131,7 +131,10 @@ def _seeded_pool_with_unmatched_rail(yaml_path: Path) -> tuple[AsyncConnectionPo
     cache = L2InstanceCache.from_path(yaml_path)
     prefix = yaml_path.stem  # path.stem matches make_studio_routes' default
     fd, db_path = tempfile.mkstemp(suffix=".duckdb")
+
     os.close(fd)
+
+    os.unlink(db_path)
     conn = duckdb.connect(db_path)
     conn.execute(
         f"CREATE TABLE {prefix}_transactions ("
@@ -197,7 +200,10 @@ def test_etl_triage_empty_state_when_no_gaps(
     cache = L2InstanceCache.from_path(writable_l2_yaml)
     prefix = writable_l2_yaml.stem
     fd, db_path = tempfile.mkstemp(suffix=".duckdb")
+
     os.close(fd)
+
+    os.unlink(db_path)
     conn = duckdb.connect(db_path)
     conn.execute(
         f"CREATE TABLE {prefix}_transactions ("
