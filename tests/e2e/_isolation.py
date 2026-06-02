@@ -119,7 +119,10 @@ def isolated_cfg(
     scope_marker = next(
         request_any.node.iter_markers("isolation_scope"), None,
     )
-    if scope_marker is not None and scope_marker.args:
+    is_scope_pinned = (
+        scope_marker is not None and bool(scope_marker.args)
+    )
+    if is_scope_pinned:
         suffix = f"x_{scope_marker.args[0]}"
     else:
         suffix = _isolated_cfg_key(request, cfg)
@@ -127,6 +130,17 @@ def isolated_cfg(
     yield isolated
 
     if isolated.dialect is Dialect.DUCKDB:
+        return
+    # CB.7 followup — when the suffix came from a cross-tier scope
+    # marker (`x_<scope>`), the prefix lives across pytest invocations
+    # (db tier seeds → app2/qs_browser tiers read). Tearing down here
+    # at the producer's module-fixture end would drop the schema
+    # before the consumer tier opens its pytest. Per-worker hash
+    # suffixes don't share across processes, so their schema can be
+    # cleaned up locally — only the scope-pinned variant is unsafe to
+    # drop. (The runner's container is torn down at variant-end either
+    # way; nothing leaks past that boundary.)
+    if is_scope_pinned:
         return
     try:
         from recon_gen.common.db import connect_demo_db, execute_script
