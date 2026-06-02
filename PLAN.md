@@ -356,8 +356,28 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [x] CB.10 - CB.10 — Spike: hotchkiss.io DDNS + QS data source against Docker PG
 - [ ] CB.11 - CB.11 — Wire bridge into runner / CI
   - [x] CB.11.a - CB.11.a — Spike: hotchkiss.io forward → dev-machine Docker DBs
+  - [x] CB.11.b - CB.11.b — Runner-side per-cell Docker boot + QS data source rotation
+  - [ ] CB.11.c - CB.11.c — Collapse ci.yml + delete e2e.yml (CI side of the bridge)
 - [x] CB.12 - CB.12 — Drop AWS RDS Aurora resources
 - [ ] CB.13 - CB.13 — Docs + release notes + v13.0.0 release
+- [ ] CB.7.followup - CB.7 followup — Triage qs_browser session-start cascade (workers die at session-start under the layer's pytest invocation; 4 "FAILED" entries are xdist queue residue, not real failures)
+
+## Phase CC - Collapse cells; move scenario/dialect matrix to test markers
+
+**Why:** Post-CB the cell concept (`scenario × dialect × target`) duplicates work that test markers + parametrize would do. `target=aw` died in CB.12; `dialect` is already a typed mark (`@dialects(...)`); `scenario` is expressible via `@l2(...)` + the auto-fuzz hook designed in CB.7-followup; `isolation_scope` provides per-test prefix isolation. Cells provide nothing markers can't. Pushing the matrix to test-level lets the test author own coverage, drops ~1k+ runner lines, and reduces container management from 13-cell fan-out to 2 long-lived containers per `./run_tests.sh` invocation.
+
+**Approach:** Five steps. (1) Unify `l2_instance` fixtures to a single parametrize-aware loader (CC.0). (2) Enable the `pytest_generate_tests` auto-fuzz hook drafted in CB.7 (CC.1). (3) Move dialect axis to markers; drop cell-level `--dialects` fan-out (CC.2). (4) Reduce runner to single-pytest-per-layer with marker-driven xdist (CC.3). (5) Absorb BN.0 browser-flake task scope (CC.4).
+
+**Done when:** `runs/<run-id>/<variant>/` shape replaced by `runs/<run-id>/<layer>/`; runner code drops ~1k lines; auto-fuzz hook live; `--variants` knob retires; v14.0.0 release notes ship "test-author owns the matrix" story.
+
+**Sequencing locked (2026-06-02):** CB.11.c → qs_browser triage → CB.13 ships v13.0.0 FIRST. CC starts on v14. Cells go away on v14, not v13 — keeps v13 scope focused on what's already in flight.
+
+- [ ] CC.0 - CC.0 — Spike: unify `l2_instance` fixtures to a single parametrize-aware loader
+- [ ] CC.1 - CC.1 — Enable the auto-fuzz `pytest_generate_tests` hook + sweep test signatures
+- [ ] CC.2 - CC.2 — Move dialect axis to test markers; drop cell-level `--dialects` fan-out
+- [ ] CC.3 - CC.3 — Reduce runner to 1 pytest-per-layer; delete `VariantSpec`/`cell_chain`/per-cell setup
+- [ ] CC.4 - CC.4 — Absorb BN.0 (sasquatch + AWS browser-layer flakes) into marker-based scoping
+
 ## Phase PLAN - Phase PLAN
 - [ ] PLAN.md - BS.5 — _v_config_chain_children + 7-path conversion
 
