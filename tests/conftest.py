@@ -494,6 +494,21 @@ def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:  # typ
                     f"`needs(Need.PLAYWRIGHT)` (QS embed renders in a "
                     f"browser)."
                 )
+        # CB.7 — `@writes()` without `l2_instance` in the test signature
+        # → ERROR. A test that mutates DB state but doesn't bind the
+        # L2-scoped fixture chain can't get proper per-worker isolation;
+        # it'd race on the shared seeded DB. The `l2_instance` fixture
+        # is the entry point to the L2-scoped resource graph (cfg,
+        # demo_db_conn, seeded matviews); a writing test must bind it.
+        if "writes" in markers:
+            fixture_names = set(getattr(item, "fixturenames", ()))
+            if "l2_instance" not in fixture_names:
+                errors.append(
+                    f"{item.nodeid}: `@writes()` requires the "
+                    f"`l2_instance` fixture in the test signature so "
+                    f"per-worker isolation can attach. See "
+                    f"docs/audits/cb_7_writes_audit.md."
+                )
 
     if errors:
         # Surface as a single collected error rather than per-item;
