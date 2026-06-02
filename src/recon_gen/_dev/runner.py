@@ -2858,23 +2858,22 @@ def _run_one_variant(
                 layer_results.append(cached_result)
                 continue
 
-            # CB.11.b — per-layer variant_env routing: deploy/qs_api/
-            # qs_browser layers see RECON_GEN_CONFIG pointing at the
-            # QS-side cfg (hotchkiss.io endpoint); db/app2 keep the
-            # local cfg. Build a layer-specific copy here rather than
-            # mutating variant_env so later layers see the original.
+            # CB.11.b — per-layer variant_env routing.
+            # - deploy reads the QS-side cfg (hotchkiss.io URL) so the
+            #   created data source points at the dev-machine forward
+            #   QS can reach. Drop the local-URL env so cfg precedence
+            #   wins.
+            # - qs_api is boto3-only and doesn't open the demo DB; cfg
+            #   choice doesn't matter, leave variant_env untouched.
+            # - qs_browser keeps the LOCAL cfg + local-URL env: consumer
+            #   tests read seeded state via `connect_demo_db(cfg)` and
+            #   would otherwise resolve hotchkiss.io → operator's
+            #   external IP, which the operator's own host can't route
+            #   to (firewall whitelist is QS egress only).
             layer_env = dict(variant_env)
             qs_cfg = layer_env.get(RECON_GEN_QS_CONFIG.name)
-            if (
-                qs_cfg is not None
-                and layer in ("deploy", "qs_api", "qs_browser")
-            ):
+            if qs_cfg is not None and layer == "deploy":
                 layer_env[RECON_GEN_CONFIG.name] = qs_cfg
-                # The local container URL (variant_env carries it for
-                # db/app2) would override the QS-side cfg's hotckiss.io
-                # endpoint via cfg-loader env precedence — drop it so
-                # QS's data source gets the hotchkiss.io URL and QS in
-                # us-east-1 can route to the dev-machine Docker.
                 layer_env.pop(RECON_GEN_DEMO_DATABASE_URL.name, None)
             result = dispatch_layer(
                 layer, run_dir, options,
