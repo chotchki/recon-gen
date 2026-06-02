@@ -349,6 +349,7 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [x] CB.4 - CB.4 — Mark the db tier + replace its arm
 - [ ] CB.5 - CB.5 — Mark the qs_api + qs_browser tiers + replace those arms
   - [ ] CB.5.addendum - CB.5 addendum — @inputs(*nodeids) typed marker + agreement helper
+  - [ ] CB.5.stage2 - CB.5 stage 2 — Decompose 3 monolithic agreement tests via @inputs (3 files → 14 producer + validator files; ~18 cells → ~66)
 - [ ] CB.6 - CB.6 — Delete hardcoded file-lists; lint at full strength
 - [ ] CB.7 - CB.7 — @writes() fixture branching + per-test audit (agent-friendly)
 - [ ] CB.8 - CB.8 — Drop Dialect.SQLITE + all SQLite-specific arms

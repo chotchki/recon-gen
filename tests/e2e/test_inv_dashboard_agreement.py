@@ -675,6 +675,16 @@ def _money_trail_root_edge_keys(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(
+    reason="CB.5 stage 2: superseded by per-renderer producers + "
+    "high-watermark validators. See "
+    "tests/e2e/qs_browser/test_inv_anomaly_agreement.py and "
+    "tests/e2e/qs_browser/test_inv_money_trail_agreement.py "
+    "(per-invariant validators with @inputs(...) chaining db/ + "
+    "app2/ + qs_browser/ producers). One commit transition: this "
+    "skip stays for one commit so the operator can confirm the new "
+    "shape passes; CB.5 follow-up deletes the file entirely."
+)
 @pytest.mark.parametrize("invariant", _ALL_L2_INVARIANTS)
 def test_invariant_three_way_agreement(
     seeded_l2_db: None,

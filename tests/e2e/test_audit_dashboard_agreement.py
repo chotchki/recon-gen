@@ -592,6 +592,15 @@ _ALL_INVARIANTS: tuple[str, ...] = (
 )
 
 
+@pytest.mark.skip(
+    reason="CB.5 stage 2: superseded by per-renderer producers + "
+    "high-watermark validators. See "
+    "tests/e2e/qs_browser/test_audit_invariants_agreement.py "
+    "(per-invariant validators with @inputs(...) chaining db/ + "
+    "app2/ + qs_browser/ producers). One commit transition: this "
+    "skip stays for one commit so the operator can confirm the new "
+    "shape passes; CB.5 follow-up deletes the file entirely."
+)
 @pytest.mark.parametrize("invariant", _ALL_INVARIANTS)
 def test_invariant_four_way_agreement(
     seeded_audit: "tuple[Path, ScenarioPlant]",
