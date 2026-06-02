@@ -2870,6 +2870,12 @@ def _run_one_variant(
                 and layer in ("deploy", "qs_api", "qs_browser")
             ):
                 layer_env[RECON_GEN_CONFIG.name] = qs_cfg
+                # The local container URL (variant_env carries it for
+                # db/app2) would override the QS-side cfg's hotckiss.io
+                # endpoint via cfg-loader env precedence — drop it so
+                # QS's data source gets the hotchkiss.io URL and QS in
+                # us-east-1 can route to the dev-machine Docker.
+                layer_env.pop(RECON_GEN_DEMO_DATABASE_URL.name, None)
             result = dispatch_layer(
                 layer, run_dir, options,
                 variant_env=layer_env, terminal_prefix=terminal_prefix,
