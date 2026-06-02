@@ -497,31 +497,11 @@ def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:  # typ
                     f"`needs(Need.PLAYWRIGHT)` (QS embed renders in a "
                     f"browser)."
                 )
-        # CB.7 — `@writes()` without `db_cfg` in the test signature
-        # → ERROR. A test that mutates DB state must inject the
-        # canonical isolation primitive — `db_cfg` provides per-worker
-        # isolation (file clone for DuckDB; per-worker prefix for
-        # PG/Oracle). Hand-rolled `isolated_<x>_cfg` patterns are the
-        # smell this rule prevents; `db_cfg` is the single injection
-        # point. See `tests/e2e/db/conftest.py::db_cfg` and
-        # `docs/audits/cb_7_writes_audit.md`.
-        #
-        # Unit-tier `@writes()` tests (rare — typically a test that
-        # mutates an in-process structure with no DB) are exempt
-        # since the `db_cfg` fixture is e2e-tier only.
-        if "writes" in markers and tier_value != "unit":
-            fixture_names: set[str] = set(
-                getattr(item, "fixturenames", ()) or (),
-            )
-            if "db_cfg" not in fixture_names:
-                errors.append(
-                    f"{item.nodeid}: `@writes()` requires the "
-                    f"`db_cfg` fixture in the test signature so the "
-                    f"canonical per-worker isolation kicks in. "
-                    f"Replace `cfg` with `db_cfg` in the test (and any "
-                    f"fixtures it depends on). See "
-                    f"docs/audits/cb_7_writes_audit.md."
-                )
+        # CB.7 (refactored 2026-06-02) — the previous "@writes() requires
+        # db_cfg" rule was a workaround for the wrong abstraction.
+        # Provider-marked isolation (writer fixtures request
+        # `isolated_cfg` directly) made the rule vacuous. See
+        # `tests/e2e/db/conftest.py::isolated_cfg`.
 
     if errors:
         # Surface as a single collected error rather than per-item;

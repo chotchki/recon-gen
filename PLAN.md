@@ -350,7 +350,7 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [x] CB.5 - CB.5 — Mark the qs_api + qs_browser tiers + replace those arms
   - [x] CB.5.addendum - CB.5 addendum — @inputs(*nodeids) typed marker + agreement helper
 - [x] CB.6 - CB.6 — Delete hardcoded file-lists; lint at full strength
-- [x] CB.7 - CB.7 — @writes() fixture branching + per-test audit (agent-friendly)
+- [x] CB.7 - CB.7 refactor — provider-marked isolation (isolated_cfg)
 - [x] CB.8 - CB.8 — Drop Dialect.SQLITE + all SQLite-specific arms
 - [x] CB.9 - CB.9 — Drop aiosqlite/aiosqlitepool from [prod] extras
 - [x] CB.10 - CB.10 — Spike: hotchkiss.io DDNS + QS data source against Docker PG

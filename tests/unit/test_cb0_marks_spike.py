@@ -180,11 +180,12 @@ class TestSerialDecorator:
     mutating shared state at module/session scope.
     """
 
-    def test_serial_carries_reason_string(self) -> None:
-        @serial(reason="seeded_audit fixture DROPs+CREATEs schema; "
-                       "DDL races on -n 4. CB.7 follow-up.")
+    def test_serial_is_no_op_stub_post_refactor(self) -> None:
+        """CB.7 refactor (2026-06-02) — `@serial(reason)` deprecated in
+        favor of provider-marked isolation (`isolated_cfg`). The stub
+        now just emits a no-op `pytest.mark.serial` so old call sites
+        don't break; the reason string is discarded."""
+        @serial(reason="anything")
         def sample() -> None: ...
         marks = sample.pytestmark  # type: ignore[attr-defined]: pytest mark decorators stash on `pytestmark`
         assert marks[0].name == "serial"
-        assert len(marks[0].args) == 1
-        assert "seeded_audit" in marks[0].args[0]

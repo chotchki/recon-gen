@@ -59,10 +59,10 @@ if TYPE_CHECKING:
     from recon_gen.common.sql import Dialect
 
 
-pytestmark = [
-    pytest.mark.e2e,
-    pytest.mark.xdist_group("audit_dashboard_agreement_seed"),
-]
+# CB.7 (refactored 2026-06-02) — xdist_group dropped: `seeded_audit`
+# uses provider-marked isolation via `dialect_isolated_cfg`, so concurrent
+# workers don't race on schema apply or audit PDF render.
+pytestmark = [pytest.mark.e2e]
 
 
 _TODAY = today_anchor()
@@ -77,15 +77,40 @@ def dialect_cfg(
 
 
 @pytest.fixture(scope="module")
-def seeded_audit(
+def dialect_isolated_cfg(
+    request: pytest.FixtureRequest,
     dialect_cfg: "tuple[Config, Path, Dialect]",
+    tmp_path_factory: pytest.TempPathFactory,
+) -> "tuple[Config, Path, Dialect]":
+    """Per-(module, worker, dialect) isolated cfg. See parallel
+    fixture in `test_audit_invariants_direct.py` for the rationale."""
+    from tests.e2e.db.conftest import _isolate_cfg, _isolated_cfg_key
+
+    cfg, cfg_path, dialect = dialect_cfg
+    suffix = f"{_isolated_cfg_key(request)}_{dialect.value[:2]}"
+    isolated = _isolate_cfg(
+        cfg, suffix=suffix, tmp_path_factory=tmp_path_factory,
+    )
+    return isolated, cfg_path, dialect
+
+
+@pytest.fixture(scope="module")
+def seeded_audit(
+    dialect_isolated_cfg: "tuple[Config, Path, Dialect]",
     tmp_path_factory: pytest.TempPathFactory,
 ) -> "tuple[Path, ScenarioPlant]":
     """Seed DB + render audit PDF. Module-scoped — both setup steps
-    are expensive and shared across the 6 invariant cells."""
+    are expensive and shared across the 6 invariant cells.
+
+    CB.7 (refactored) — requests `dialect_isolated_cfg`, the
+    provider-marked isolation primitive. The audit CLI invocation
+    receives the isolated prefix via the
+    `RECON_GEN_DB_TABLE_PREFIX` env override so it queries the
+    same per-worker prefix the seed wrote to.
+    """
     from tests.e2e._seed_helpers import apply_db_seed
 
-    cfg, cfg_path, dialect = dialect_cfg
+    cfg, cfg_path, dialect = dialect_isolated_cfg
     instance = load_instance(l2_yaml_for_test())
     conn = connect_demo_db(cfg)
     try:
@@ -114,6 +139,13 @@ def seeded_audit(
             "-o", str(out),
             "--execute",
         ],
+        env={
+            # Thread the isolated prefix + deployment name through to the
+            # CLI subprocess so it queries the same per-worker tables the
+            # seed wrote to.
+            "RECON_GEN_DB_TABLE_PREFIX": cfg.db_table_prefix,
+            "RECON_GEN_DEPLOYMENT_NAME": cfg.deployment_name,
+        },
     )
     assert result.exit_code == 0, result.output
     return (out, scenario)

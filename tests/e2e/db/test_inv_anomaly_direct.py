@@ -47,7 +47,6 @@ from tests.audit._matview_extract import (  # noqa: E402
     anomaly_matview_row_keys,
     count_anomaly_matview_rows,
 )
-from tests._marks import writes  # noqa: E402
 from tests.e2e._agreement import write_rendered_rows  # noqa: E402
 from tests.e2e._agreement_helpers import (  # noqa: E402
     l2_yaml_for_test,
@@ -60,7 +59,7 @@ if TYPE_CHECKING:
 
 
 # CB.7 (2026-06-02) — removed `pytest.mark.xdist_group(...)` previously
-# pinned this module to a single worker. The new `db_cfg` fixture
+# pinned this module to a single worker. The new `isolated_cfg` fixture
 # (tests/e2e/db/conftest.py) gives every xdist worker its own
 # per-worker prefix, so parametrize cells distributing across workers
 # no longer race on DROP CASCADE — each worker seeds its own prefix.
@@ -102,51 +101,40 @@ def _build_anomaly_generator(
 
 
 @pytest.fixture(scope="module")
-def seeded_l2_db(db_cfg: "Config") -> None:
+def seeded_l2_db(isolated_cfg: "Config") -> None:
     """Apply schema + broad seed + spine plants + matview refresh
-    against the per-worker isolated `db_cfg`. CB.7: replaced the
+    against the per-worker isolated `isolated_cfg`. CB.7: replaced the
     hand-rolled `isolated_inv_cfg` + `_iagree` suffix with the
-    canonical `db_cfg` injection (per-worker prefix from
+    canonical `isolated_cfg` injection (per-worker prefix from
     `tests/e2e/db/conftest.py`)."""
     from tests.e2e._seed_helpers import apply_db_seed
 
-    conn = connect_demo_db(db_cfg)
+    conn = connect_demo_db(isolated_cfg)
     try:
         apply_db_seed(
             conn, _INSTANCE,
-            prefix=db_cfg.db_table_prefix,
+            prefix=isolated_cfg.db_table_prefix,
             mode="l1_plus_broad",
             today=_TODAY,
-            dialect=db_cfg.dialect,
+            dialect=isolated_cfg.dialect,
             include_baseline=False,
         )
         # AT.5.b — L2 plants via the spine generator.
         anchor = _plant_anchor_day()
-        anomaly_gen = _build_anomaly_generator(db_cfg, anchor)
+        anomaly_gen = _build_anomaly_generator(isolated_cfg, anchor)
         anomaly_gen.emit(conn)
         conn.commit()
         # Refresh again so matviews see the L2 plants.
         refresh_sql = refresh_matviews_sql(
             _INSTANCE,
-            prefix=db_cfg.db_table_prefix,
-            dialect=db_cfg.dialect,
+            prefix=isolated_cfg.db_table_prefix,
+            dialect=isolated_cfg.dialect,
         )
         with conn.cursor() as cur:
             execute_script(
-                cur, refresh_sql, dialect=db_cfg.dialect,
+                cur, refresh_sql, dialect=isolated_cfg.dialect,
             )
         conn.commit()
-    finally:
-        conn.close()
-
-
-@pytest.fixture
-def db_conn(db_cfg: "Config") -> "Iterator[Any]":
-    """Function-scoped raw DB connection against the per-worker
-    `db_cfg`."""
-    conn = connect_demo_db(db_cfg)
-    try:
-        yield conn
     finally:
         conn.close()
 
@@ -194,11 +182,10 @@ def _normalise_row(row: list[Any]) -> list[Any]:
     return out
 
 
-@writes()
 def test_anomaly_direct_extract(
     seeded_l2_db: None,
     db_conn: Any,
-    db_cfg: "Config",
+    isolated_cfg: "Config",
 ) -> None:
     """Direct σ-filtered matview SELECT + spine `detect()` for the
     anomaly invariant. Writes both as artifacts for the validator.
@@ -209,9 +196,9 @@ def test_anomaly_direct_extract(
     matview SELECT to mirror the dashboard's WHERE-clause pushdown.
     """
     _ = seeded_l2_db
-    prefix = db_cfg.db_table_prefix
+    prefix = isolated_cfg.db_table_prefix
     anchor = _plant_anchor_day()
-    gen = _build_anomaly_generator(db_cfg, anchor)
+    gen = _build_anomaly_generator(isolated_cfg, anchor)
     # The expected anomaly singleton — see
     # `expected_l2_audit_counts` for the same shape. Local construction
     # avoids requiring a MoneyTrailGenerator from the anomaly producer.

@@ -58,13 +58,12 @@ if TYPE_CHECKING:
     from recon_gen.common.sql import Dialect
 
 
-pytestmark = [
-    pytest.mark.e2e,
-    # Y.7-followup — pin module's parametrize cells to one xdist
-    # worker so the module-scope seed runs exactly once. See
-    # tests/conftest.py::pytest_configure xdist_group rationale.
-    pytest.mark.xdist_group("audit_dashboard_agreement_seed"),
-]
+# CB.7 (refactored 2026-06-02) — `xdist_group` dropped: each worker's
+# `seeded_db` fixture writes to its own per-(module, worker, dialect)
+# prefix via `_isolate_cfg`, so concurrent workers don't race on
+# DROP+CREATE. The marker was a band-aid for the racing root cause that
+# isolation now fixes properly.
+pytestmark = [pytest.mark.e2e]
 
 
 _TODAY = today_anchor()
@@ -81,21 +80,47 @@ def dialect_cfg(
 
 
 @pytest.fixture(scope="module")
-def seeded_db(
+def dialect_isolated_cfg(
+    request: pytest.FixtureRequest,
     dialect_cfg: "tuple[Config, Path, Dialect]",
+    tmp_path_factory: pytest.TempPathFactory,
+) -> "tuple[Config, Path, Dialect]":
+    """Per-(module, worker, dialect) isolated cfg.
+
+    CB.7 (refactored 2026-06-02) — this is the provider-marked
+    isolation primitive for dialect-parametrized writer fixtures.
+    The plain `isolated_cfg` fixture in `tests/e2e/db/conftest.py`
+    serves the single-cfg case; this variant is its parallel for
+    `dialect_cfg`-driven tests.
+
+    Each (test module, xdist worker, dialect parametrize callspec)
+    gets its OWN isolated cfg → concurrent workers and dialect cells
+    don't race on schema apply.
+    """
+    from tests.e2e.db.conftest import _isolate_cfg, _isolated_cfg_key
+
+    cfg, cfg_path, dialect = dialect_cfg
+    suffix = f"{_isolated_cfg_key(request)}_{dialect.value[:2]}"
+    isolated_cfg = _isolate_cfg(
+        cfg, suffix=suffix, tmp_path_factory=tmp_path_factory,
+    )
+    return isolated_cfg, cfg_path, dialect
+
+
+@pytest.fixture(scope="module")
+def seeded_db(
+    dialect_isolated_cfg: "tuple[Config, Path, Dialect]",
 ) -> "ScenarioPlant":
     """Seed dialect-specific DB with the spec_example scenario.
 
-    Module-scoped — one seed per (file, dialect); shared across the
-    6 invariant parametrize cells. The seed is destructive
-    (DROP+CREATE) so it's idempotent across runs; CB.5's downstream
-    tier producers (app2/, qs_browser/) reconnect to the same DB and
-    trust it's seeded (the runner's `unit → db → app2 → qs_browser`
-    chain guarantees DB tier ran first).
+    Module-scoped — one seed per (file, dialect, xdist worker).
+    Requests `dialect_isolated_cfg` (provider-marked isolation): the
+    seed lands in a per-worker prefix, eliminating concurrent-DROP+CREATE
+    races without needing `xdist_group` pinning.
     """
     from tests.e2e._seed_helpers import apply_db_seed
 
-    cfg, _cfg_path, dialect = dialect_cfg
+    cfg, _cfg_path, dialect = dialect_isolated_cfg
     instance = load_instance(l2_yaml_for_test())
     conn = connect_demo_db(cfg)
     try:
@@ -114,9 +139,13 @@ def seeded_db(
 
 
 @pytest.fixture
-def conn(dialect_cfg: "tuple[Config, Path, Dialect]") -> "Iterator[Any]":
-    """Function-scoped raw DB connection (per-driver type union)."""
-    cfg, _, _ = dialect_cfg
+def conn(dialect_isolated_cfg: "tuple[Config, Path, Dialect]") -> "Iterator[Any]":
+    """Per-dialect raw DB connection. Thin wrapper over `connect_demo_db`
+    because the test parametrizes over dialect and pytest doesn't let a
+    file's local fixture override the canonical `db_conn` fixture (which
+    takes the single `isolated_cfg`, not `dialect_isolated_cfg`)."""
+    from recon_gen.common.db import connect_demo_db
+    cfg, _, _ = dialect_isolated_cfg
     c = connect_demo_db(cfg)
     try:
         yield c
@@ -153,7 +182,7 @@ def _normalise_for_json(row: list[Any]) -> list[Any]:
 def test_l1_invariant_direct_extract(
     seeded_db: "ScenarioPlant",
     conn: Any,
-    dialect_cfg: "tuple[Config, Path, Dialect]",
+    dialect_isolated_cfg: "tuple[Config, Path, Dialect]",
     invariant: str,
 ) -> None:
     """Direct matview SELECT for one L1 invariant; writes the artifact

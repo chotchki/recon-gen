@@ -131,47 +131,33 @@ def needs(*ns: Need) -> pytest.MarkDecorator:
 
 
 def writes() -> pytest.MarkDecorator:
-    """`@writes()` — flag declaring this test mutates DB state. The
-    conftest's DB fixture branches on it: writes + DuckDB → per-worker
-    isolated DB; unmarked → read_only against the cell's shared
-    seeded DB. CB.7 builds the fixture branching; CB.0 just defines
-    the flag."""
+    """`@writes()` — DEPRECATED 2026-06-02. Use the provider-marked
+    isolation pattern instead: writer FIXTURES request
+    `isolated_cfg` (see `tests/e2e/db/conftest.py`); test functions
+    don't carry a writes mark.
+
+    The original design put the marker on test functions, which
+    misnamed the writer — the test is the consumer; the FIXTURE that
+    calls apply_db_seed / DROP / CREATE is the actual writer. The
+    refactored pattern moves the declaration to the writer fixture
+    via its `isolated_cfg` dependency.
+
+    Kept here as a no-op stub so old call sites don't immediately
+    break; sweep on next pass."""
     return pytest.mark.writes
 
 
 def serial(reason: str) -> pytest.MarkDecorator:
-    """`@serial(reason)` — declare this test must run with `-n 1`.
+    """`@serial(reason)` — DEPRECATED 2026-06-02. Same root cause
+    as `@writes()` (see above): the marker named the wrong layer.
+    The reason tests need serial execution is almost always
+    "shared-state mutation across workers" — fixed at the writer
+    fixture via `isolated_cfg`, not at the test via forced -n 1.
 
-    CB.6 (operator-flagged 2026-06-02): typed wrapper around the
-    runner's per-worker forced-serial path. The `reason` argument is
-    mandatory + visible — it's the contract for WHY this test can't
-    parallelize. The operator's observation when proposing the typed
-    form: **"this smells like a `@writes()` is hidden in there"** —
-    most serial-needing tests are actually mutating shared state at
-    module/session scope (the canonical case: the audit-agreement
-    test's `seeded_audit` fixture re-applies the dialect schema with
-    DROP MATERIALIZED VIEW + CREATE; on `-n 4` two workers race the
-    schema apply and Oracle's auto-commit DDL produces ORA-00955).
-
-    The right LONG-TERM fix is `@writes()` + per-worker isolation
-    (CB.7). `@serial(...)` is the temporary band-aid that surfaces
-    the latent debt — every `serial` mark IS a `@writes`-without-
-    isolation debt entry.
-
-    Example:
-
-        @serial(reason="seeded_audit module-scope fixture DROPs + "
-                       "CREATEs the dialect schema; concurrent workers "
-                       "race the schema apply. CB.7 follow-up: migrate "
-                       "to per-worker isolation via @writes().")
-        def test_audit_invariant_agreement(): ...
-
-    Runner consumption (CB.6): the browser-tier dispatch splits into
-    `-m "not serial" -n 4` (main) + `-m "serial" -n 1` (sequential).
-    Replaces the current hardcoded `--ignore=test_audit_dashboard_agreement.py`
-    + the second pytest invocation against that one file.
-    """
-    return pytest.mark.serial(reason)
+    Kept here as a no-op stub so old call sites don't immediately
+    break; sweep on next pass."""
+    del reason
+    return pytest.mark.serial
 
 
 def inputs(*nodeids: str) -> pytest.MarkDecorator:
