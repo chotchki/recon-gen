@@ -119,13 +119,12 @@ def isolated_cfg(
     scope_marker = next(
         request_any.node.iter_markers("isolation_scope"), None,
     )
-    is_scope_pinned = (
-        scope_marker is not None and bool(scope_marker.args)
-    )
-    if is_scope_pinned:
+    if scope_marker is not None and scope_marker.args:
         suffix = f"x_{scope_marker.args[0]}"
+        is_scope_pinned = True
     else:
         suffix = _isolated_cfg_key(request, cfg)
+        is_scope_pinned = False
     isolated = _isolate_cfg(cfg, suffix=suffix, tmp_path_factory=tmp_path_factory)
     yield isolated
 
