@@ -328,9 +328,6 @@ def test_probe_dependencies_browser_aggregates_failures(monkeypatch: Any) -> Non
         "aws": lambda: runner.ProbeFailure(kind="aws_creds_expired", message="..."),
         "docker": lambda: runner.ProbeFailure(kind="docker_daemon_down", message="..."),
         "qs_arn": runner._probe_qs_e2e_user_arn,
-        # gate.l.3 — passes through when no cfg discoverable (which is
-        # the state monkeypatched above via `_resolve_seed_config → None`).
-        "aws_rds_running": runner._probe_aws_rds_running,
     }
     monkeypatch.setattr(runner, "_PROBE_FUNCTIONS", fake_probes)
     failures = runner.probe_dependencies("browser")
@@ -3744,89 +3741,17 @@ def test_full_matrix_fuzz_seed_is_random_across_calls() -> None:
     assert seed_a != seed_b
 
 
-# Y.2.gate.l.2 — RDS lifecycle command tests.
-# Strategy: mock _load_runner_cfg_for_lifecycle + aws_rds.{start,stop,get_status}
-# at the runner-module level. Tests don't touch real boto3 / Docker.
+# CB.11.a.2 (2026-06-01) — Y.2.gate.l.2 RDS-lifecycle tests deleted
+# along with `aws_rds` module + AWS lifecycle commands. Post-CB.12 the
+# DB substrate is Docker only; `cmd_up` / `cmd_down` / `cmd_status` are
+# local-container-only. The local-container test cases below survive.
 
 
-def _fake_cfg(
-    *, pg: str | None = "test-pg-cluster",
-    oracle: str | None = "test-oracle-instance",
-) -> Any:
-    """Minimal cfg object exposing the fields the lifecycle commands
-    read. Real Config(...) would also need datasource_arn / etc., but
-    duck-typing is fine for these unit tests."""
-    from types import SimpleNamespace
-    return SimpleNamespace(
-        aws_pg_cluster_id=pg,
-        aws_oracle_instance_id=oracle,
-        aws_region="us-east-1",
-    )
-
-
-def test_cmd_up_local_is_noop() -> None:
-    """Local containers spin on-demand; `up local` is just a status
-    line so the operator can call it for symmetry with `down local`."""
+def test_cmd_up_is_noop() -> None:
+    """Post-CB.11.a.2: `up` is a no-op (local containers spin on-demand;
+    no AWS RDS to start). Reported for symmetry with `down`."""
     code = runner.main(["up", "local"])
     assert code == runner.EXIT_SUCCESS
-
-
-def test_cmd_up_aws_loud_fails_when_no_cfg() -> None:
-    """No cfg discoverable → operator-actionable EXIT_NEEDS_OPERATOR."""
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=None):
-        code = runner.main(["up", "aws"])
-    assert code == runner.EXIT_NEEDS_OPERATOR
-
-
-def test_cmd_up_aws_loud_fails_when_no_rds_fields() -> None:
-    """Cfg loads but neither RDS field set → operator-actionable
-    EXIT_NEEDS_OPERATOR with provisioning-runbook pointer."""
-    cfg = _fake_cfg(pg=None, oracle=None)
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg):
-        code = runner.main(["up", "aws"])
-    assert code == runner.EXIT_NEEDS_OPERATOR
-
-
-def test_cmd_up_aws_idempotent_when_already_available() -> None:
-    """`start()` returns 'available' immediately → no poll, no failure."""
-    cfg = _fake_cfg(pg="my-pg", oracle=None)
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
-         patch("recon_gen.common.aws_rds.start", return_value="available"), \
-         patch("recon_gen.common.aws_rds.get_status", return_value="available"):
-        code = runner.main(["up", "aws"])
-    assert code == runner.EXIT_SUCCESS
-
-
-def test_cmd_up_aws_polls_until_available() -> None:
-    """`start()` returns 'starting'; poll loop hits 'available' next tick."""
-    cfg = _fake_cfg(pg="my-pg", oracle=None)
-    statuses = iter(["starting", "available"])
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
-         patch("recon_gen.common.aws_rds.start", return_value="starting"), \
-         patch("recon_gen.common.aws_rds.get_status",
-               side_effect=lambda _r: next(statuses)), \
-         patch.object(runner.time, "sleep"):  # don't actually sleep in tests
-        code = runner.main(["up", "aws"])
-    assert code == runner.EXIT_SUCCESS
-
-
-def test_cmd_down_aws_calls_stop() -> None:
-    """`down aws --yes` invokes `aws_rds.stop` for both resources."""
-    cfg = _fake_cfg()
-    stop_calls: list[Any] = []
-
-    def fake_stop(resource: Any) -> str:
-        stop_calls.append(resource)
-        return "stopping"
-
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
-         patch("recon_gen.common.aws_rds.stop", side_effect=fake_stop):
-        code = runner.main(["down", "aws", "--yes"])
-    assert code == runner.EXIT_SUCCESS
-    # One call for pg, one for oracle.
-    assert len(stop_calls) == 2
-    kinds = sorted(c.kind for c in stop_calls)
-    assert kinds == ["cluster", "instance"]
 
 
 def test_cmd_down_local_no_containers_succeeds(monkeypatch: Any) -> None:
@@ -3867,11 +3792,9 @@ def test_cmd_down_local_stops_named_containers(monkeypatch: Any) -> None:
     assert "quicksight-test-oracle-sp_or_lo" in stop_calls[0]
 
 
-def test_cmd_status_runs_local_and_aws_sections(monkeypatch: Any) -> None:
-    """`status` prints both the local docker section and the AWS RDS
-    section. AWS section needs a cfg + at least one identifier."""
-    cfg = _fake_cfg(pg="my-pg", oracle=None)
-
+def test_cmd_status_runs_local_section(monkeypatch: Any) -> None:
+    """`status` prints the local docker container section. Post-CB.11.a.2
+    there's no AWS RDS section."""
     def fake_run(cmd: list[str], **kwargs: Any) -> Any:
         from types import SimpleNamespace
         if cmd[:2] == ["docker", "ps"]:
@@ -3879,105 +3802,14 @@ def test_cmd_status_runs_local_and_aws_sections(monkeypatch: Any) -> None:
         raise RuntimeError(f"unexpected cmd: {cmd}")
 
     monkeypatch.setattr(runner.subprocess, "run", fake_run)
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
-         patch("recon_gen.common.aws_rds.get_status", return_value="available"):
-        code = runner.main(["status"])
+    code = runner.main(["status"])
     assert code == runner.EXIT_SUCCESS
 
 
-def test_cmd_status_with_cost_includes_estimates(
-    monkeypatch: Any, capsys: pytest.CaptureFixture[str],
-) -> None:
-    """`status --cost` adds rough hourly cost lines."""
-    cfg = _fake_cfg(pg="my-pg", oracle="my-oracle")
-
-    def fake_run(cmd: list[str], **kwargs: Any) -> Any:
-        from types import SimpleNamespace
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(runner.subprocess, "run", fake_run)
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
-         patch("recon_gen.common.aws_rds.get_status", return_value="available"):
-        runner.main(["status", "--cost"])
-    captured = capsys.readouterr()
-    assert "rough total" in captured.out
-    assert "/hr" in captured.out
-
-
-# Y.2.gate.l.3 — `aws_rds_running` probe tests. Same mocking pattern
-# as the lifecycle commands above.
-
-
-def test_probe_aws_rds_running_passes_when_no_cfg() -> None:
-    """No cfg discoverable → probe passes (the `aws` probe handles
-    the cfg-missing path; layered probes don't double-fail)."""
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=None):
-        assert runner._probe_aws_rds_running() is None
-
-
-def test_probe_aws_rds_running_passes_when_cfg_fields_unset() -> None:
-    """Cfg loads but neither RDS field set → operator opted out of
-    cfg-driven lifecycle. Probe passes through."""
-    cfg = _fake_cfg(pg=None, oracle=None)
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg):
-        assert runner._probe_aws_rds_running() is None
-
-
-def test_probe_aws_rds_running_passes_when_cluster_available() -> None:
-    """Cfg field set + cluster status='available' → probe passes."""
-    cfg = _fake_cfg(pg="my-pg", oracle=None)
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
-         patch("recon_gen.common.aws_rds.get_status", return_value="available"):
-        assert runner._probe_aws_rds_running() is None
-
-
-def test_probe_aws_rds_running_fails_when_cluster_stopped() -> None:
-    """Cluster status='stopped' → probe returns ProbeFailure with the
-    actionable 'run up aws first' message."""
-    cfg = _fake_cfg(pg="my-pg", oracle=None)
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
-         patch("recon_gen.common.aws_rds.get_status", return_value="stopped"):
-        result = runner._probe_aws_rds_running()
-    assert result is not None
-    assert result.kind == "aws_rds_not_running"
-    assert "stopped" in result.message
-    assert "up aws" in result.message
-
-
-def test_probe_aws_rds_running_fails_when_boto3_raises() -> None:
-    """boto3 raises (AccessDenied / NotFound) → probe surfaces the
-    error in the failure message instead of crashing."""
-    cfg = _fake_cfg(pg="my-pg", oracle=None)
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
-         patch("recon_gen.common.aws_rds.get_status",
-               side_effect=RuntimeError("AccessDenied: rds:DescribeDBClusters")):
-        result = runner._probe_aws_rds_running()
-    assert result is not None
-    assert result.kind == "aws_rds_not_running"
-    assert "AccessDenied" in result.message
-
-
-def test_probe_aws_rds_running_aggregates_pg_and_oracle_failures() -> None:
-    """Both cfg fields set + both not-available → both surface in one
-    failure (operator sees everything broken in one pass, not one at a time)."""
-    cfg = _fake_cfg(pg="my-pg", oracle="my-oracle")
-    statuses = iter(["stopped", "stopping"])
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
-         patch("recon_gen.common.aws_rds.get_status",
-               side_effect=lambda _r: next(statuses)):
-        result = runner._probe_aws_rds_running()
-    assert result is not None
-    assert "my-pg" in result.message
-    assert "my-oracle" in result.message
-    assert "stopped" in result.message
-    assert "stopping" in result.message
-
-
-def test_probe_aws_rds_running_no_longer_gates_dispatch() -> None:
-    """CB.11.a.1 — the `aws_rds_running` probe is no longer in any
-    layer's deps. The probe FUNCTION + registry entry stay (deleted in
-    CB.11.a.2 when the surrounding aws_rds lifecycle module goes), but
-    no layer requires it — Docker substrate replaces RDS post-CB.12."""
-    assert "aws_rds_running" in runner._PROBE_FUNCTIONS  # function still wired
+def test_aws_rds_running_no_longer_referenced() -> None:
+    """CB.11.a.2 — the `aws_rds_running` probe (and the surrounding
+    aws_rds module + RDS lifecycle commands) are deleted entirely.
+    No code path should reference it post-CB.12."""
+    assert "aws_rds_running" not in runner._PROBE_FUNCTIONS
     for layer in runner._LAYER_DEPS:
         assert "aws_rds_running" not in runner._LAYER_DEPS[layer]
