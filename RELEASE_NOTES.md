@@ -105,6 +105,41 @@ new hard dep. CA.12 (PG via `adbc_ingest`) and CA.13 (Oracle via
 to extend the same pyarrow pipe to the other production dialects
 once their integration testing lands.
 
+**CA.13 — Oracle direct_path_load fast path.** Oracle was the dialect
+with the most leverage from the pyarrow work: the current INSERT-ALL
+batched coalescer takes ~10 minutes on a 131k-row sasquatch_pr seed
+(measured 621s against Docker Oracle 23 + oracledb 3.4.2 thin mode);
+the only viable production-scale seed apply was "schedule overnight."
+CA.13 routes Oracle seed apply through `Connection.direct_path_load`,
+added in oracledb 3.4.0 (Oct 2025) — a server-side bypass of the SQL
+parser that writes blocks directly above the High Water Mark. The
+implementation mirrors CA.11's structure: single `re.finditer` scan
+of the seed SQL, group consecutive same-shape rows by `(table, cols)`,
+build a typed pyarrow Table per group (column types discovered via
+`all_tab_columns`, cached by `(conn, schema, table, col-tuple)` —
+the col-tuple is part of the key because the same Oracle table can
+be the target of multiple INSERT shapes in one apply), then flush via
+`conn.direct_path_load(schema_name, table_name, column_names, data)`.
+Non-INSERT residual (DDL, SET commands) flows through the existing
+`_execute_oracle_stmt_with_lock_retry` between batches, preserving
+script ordering. **Measured 621.33s → 6.44s on the 131k-row
+sasquatch_pr Oracle seed — 96.53× speedup**; business-key hashes
+identical to the existing path. (Identity column ENTRY values differ
+by design — Oracle's INSERT-ALL with IDENTITY reuses values across
+batches, a known footgun documented in [[project_oracle_19c_compat]];
+`direct_path_load` handles identity natively.)
+
+`oracledb` floor bumped from `>=2.0` to `>=3.4.0` in `[prod]` to pull
+the `direct_path_load` method into every production install. The
+dispatch in `execute_script` auto-detects via `hasattr(conn,
+'direct_path_load')` + pyarrow availability; installs with older
+oracledb (or without pyarrow) transparently fall back to the existing
+INSERT-ALL coalescer. CA.12 (PG) stays in backlog with the rationale
+documented — PG was never the Python-bound bottleneck Oracle and
+DuckDB were (psycopg's `cur.execute(big_script)` already batches PG
+INSERTs efficiently; measured win was only 1.95×, not worth the
+complexity at current scale).
+
 ## v11.24.2 — Emit-time guard for NumericalMeasureField over non-numeric columns
 
 Backstop for the v11.24.1 fix. The tree's ``Measure.emit()`` now

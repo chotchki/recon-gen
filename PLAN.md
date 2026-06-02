@@ -458,8 +458,8 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [ ] CA.8 - CA.8 — Nuke Dialect.SQLITE and all SQLite-specific arms
 - [x] CA.9 - CA.9 — Docs + release notes + memory updates
 - [x] CA.10 - CA followup — DuckDB bulk-insert via executemany (apply layer perf)
-- [ ] CA.11 - CA.11 — Structural seed apply: pyarrow bypass for DuckDB (opt-in extra)
-- [ ] CA.12 - CA.12 — PG pyarrow adapter via adbc-driver-postgresql
+- [x] CA.11 - CA.11 — Structural seed apply: pyarrow bypass for DuckDB (opt-in extra)
+- [>] CA.12 - CA.12 — PG pyarrow adapter via adbc-driver-postgresql
 - [ ] CA.13 - CA.13 — Oracle pyarrow adapter via direct_path_load
 ## Phase CB - Test-layer marks + Docker-to-AWS bridge + SQLite removal
 
@@ -624,3 +624,4 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - **D3.1 L2 audit redux + per-primitive curriculum doc (the "what's persona for?" deliverable).** — deferred from BV.1 on 2026-05-31.
 - **D3.2 ETL round-trip claim: test data generator hooked as ETL hook; BT.3's coverage report green per fuzz seed.** — deferred from BV.2 on 2026-05-31.
 - **D3.3 Training round-trip claim: every plant kind surfaces correctly per fuzz seed.** — deferred from BV.3 on 2026-05-31.
+- **CA.12 — PG pyarrow adapter via adbc-driver-postgresql** — deferred from CA.12 on 2026-06-02. **Why deferred**: Docker-PG probe @ 131k rows showed `psycopg.cursor.copy()` (the right tool here, not adbc) is only 1.95× faster than the existing `cur.execute(big_seed_text)` path (20.89s → 10.69s). PG was never a Python-bound bottleneck the way DuckDB was — psycopg streams big multi-statement INSERTs efficiently and PG's batch planner handles them well. **Revisit if** we step in a PG-perf problem at full prod scale (the COPY-vs-INSERT curve might widen above ~5× as N grows + indexes deepen), or if a user-facing flow (CB.10 QS-against-Docker-PG iteration, a CI seed-apply slowdown) makes the 2× materially valuable. Implementation if revisited: psycopg3 `cursor.copy()`, NOT adbc-driver-postgresql — psycopg is already a core dep and handles type coercion automatically.

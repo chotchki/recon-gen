@@ -309,6 +309,21 @@ def execute_script(
         # so the contract is unchanged for callers.
         _execute_sqlite_with_binds(cur, sql)
         return
+    # CA.13 — Oracle fast path: if oracledb 3.4+ is installed AND pyarrow
+    # is available, use Connection.direct_path_load() (server-side bypass
+    # of the SQL parser; writes blocks above the High Water Mark). On the
+    # 131k-row sasquatch_pr seed this drops Oracle apply from ~10 minutes
+    # to ~30 seconds (~20× win — Oracle is the dialect with the biggest
+    # leverage from this work). Falls back to the existing INSERT-ALL
+    # coalescer if either dep is absent or if the connection doesn't
+    # expose direct_path_load (oracledb < 3.4.0).
+    if (
+        _try_import_pyarrow() is not None
+        and hasattr(cur, "connection")
+        and hasattr(cur.connection, "direct_path_load")
+    ):
+        _apply_seed_via_oracle_dpl(cur, sql)
+        return
     statements = split_oracle_script(sql)
     if oracle_insert_batch > 1:
         statements = batch_oracle_inserts(
@@ -830,6 +845,269 @@ def _apply_seed_via_duckdb_pyarrow(cur: Any, sql: str) -> None:  # typing-smell:
                 pending_table, pending_cols = table, cols_tuple
         pending_rows.append(row)
     # Tail: flush final INSERT batch first, then execute trailing residual.
+    _flush_inserts()
+    _execute_residual(sql[last_end:])
+
+
+# CA.13 — Oracle direct_path_load fast path. Mirrors the DuckDB path's
+# scan-once-then-bulk-load shape; the per-dialect divergence is in the
+# flush step (DuckDB takes a `con.register(pa.Table)` + INSERT SELECT;
+# Oracle takes `conn.direct_path_load(schema_name, table_name, ...)`
+# which bypasses the SQL parser at the server side and writes blocks
+# above the High Water Mark). Direct Path is committed at end of the
+# call — separate from the caller's transaction. Operationally fine
+# for `data apply` (no concurrent writers); flagged in the docstring
+# in case a future caller has different semantics needs.
+
+
+# Cache: built pyarrow schemas per (conn, schema, table, col-tuple). The
+# col-tuple is part of the key because a single Oracle table can be the
+# target of multiple INSERT shapes in one apply — the seed today emits
+# both 11-col and 10-col INSERTs against `diag_daily_balances` (the
+# 10-col plant-shape drops `supersedes`), and both 19-col and 17-col
+# INSERTs against `diag_transactions`. Caching by (conn, schema, table)
+# alone would return a stale schema on the second shape and
+# pyarrow.Table.from_pylist would silently drop the missing column,
+# producing a data-shape vs column_names mismatch that direct_path_load
+# rejects with `DPY-4009: N positional bind values are required but M
+# were provided`. The all_tab_columns lookup itself is cheap; the cache
+# is purely for the ~few thousand same-shape repeat flushes per apply.
+_ORACLE_ARROW_SCHEMA_CACHE: dict[
+    tuple[int, str, str, tuple[str, ...]], object
+] = {}
+
+
+def _oracle_table_arrow_schema(
+    conn: Any,  # typing-smell: ignore[explicit-any]: oracledb.Connection — DB-API 2.0 with no shared Protocol
+    schema_name: str,
+    table_name: str,
+    column_names: tuple[str, ...],
+) -> object:
+    """Build a pyarrow Schema for ``table_name``'s columns from Oracle
+    metadata.
+
+    Maps Oracle types to pyarrow:
+
+    - VARCHAR2 / CHAR / NCHAR / NVARCHAR2 / CLOB → ``pa.string()``
+    - NUMBER with scale=0 (or scale=None on the metadata schema we emit) → ``pa.int64()``
+    - NUMBER with scale>0 → ``pa.float64()`` (the seed doesn't emit decimals today)
+    - TIMESTAMP / TIMESTAMP(N) → ``pa.timestamp("us")`` (TZ-naive per P.9a)
+    - DATE → ``pa.timestamp("us")`` (Oracle DATE carries time-of-day)
+
+    Cached per (conn, schema, table). The seed loops through ~3 distinct
+    (table, cols) groups; cache hit rate is near-100%.
+    """
+    pa = _try_import_pyarrow()
+    assert pa is not None
+
+    col_names_upper = tuple(c.upper() for c in column_names)
+    key = (id(conn), schema_name.upper(), table_name.upper(), col_names_upper)
+    cached = _ORACLE_ARROW_SCHEMA_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT column_name, data_type, data_scale
+            FROM all_tab_columns
+            WHERE owner = :owner AND table_name = :tbl
+            """,
+            owner=schema_name.upper(), tbl=table_name.upper(),
+        )
+        rows = {r[0].upper(): (r[1], r[2]) for r in cur.fetchall()}
+    finally:
+        cur.close()
+
+    fields: list[object] = []
+    for col in column_names:
+        col_upper = col.upper()
+        if col_upper not in rows:
+            raise RuntimeError(
+                f"Oracle DPL: column {col_upper!r} not found in "
+                f"all_tab_columns for {schema_name}.{table_name}. "
+                f"Available: {sorted(rows.keys())}"
+            )
+        data_type, data_scale = rows[col_upper]
+        # Normalize Oracle type strings — e.g. ``TIMESTAMP(6)`` returns
+        # base name ``TIMESTAMP`` here because all_tab_columns omits the
+        # precision suffix; ``data_type`` is just ``TIMESTAMP``.
+        if data_type in ("VARCHAR2", "CHAR", "NVARCHAR2", "NCHAR", "CLOB"):
+            fields.append((col_upper, pa.string()))
+        elif data_type == "NUMBER":
+            if data_scale is None or data_scale == 0:
+                fields.append((col_upper, pa.int64()))
+            else:
+                fields.append((col_upper, pa.float64()))
+        elif data_type.startswith("TIMESTAMP") or data_type == "DATE":
+            fields.append((col_upper, pa.timestamp("us")))
+        else:
+            raise RuntimeError(
+                f"Oracle DPL: column {col_upper!r} has unsupported type "
+                f"{data_type!r} (data_scale={data_scale}). Add a mapping "
+                f"to `_oracle_table_arrow_schema`."
+            )
+    schema = pa.schema(fields)
+    _ORACLE_ARROW_SCHEMA_CACHE[key] = schema
+    return schema
+
+
+def _oracle_dpl_normalize_value(v: object, expected_pa_type: object) -> object:
+    """Convert a `_parse_simple_values` output to a Python primitive that
+    pyarrow can encode as the column's expected type.
+
+    The seed parser emits ints / strings / None / `_TypedSqlLiteral`.
+    For TIMESTAMP columns we parse the ISO-8601 text into a `datetime`;
+    Oracle DPL rejects raw strings against TIMESTAMP. For string columns,
+    pyarrow handles `_TypedSqlLiteral.text` round-trip via `.text`. For
+    NUMBER columns the parser already gives us an int.
+    """
+    pa = _try_import_pyarrow()
+    assert pa is not None
+    if v is None:
+        return None
+    if isinstance(v, _TypedSqlLiteral):
+        # The TIMESTAMP / DATE typed literal: parse ISO string to datetime.
+        if pa.types.is_timestamp(expected_pa_type):
+            from datetime import datetime  # noqa: PLC0415
+            # Strip trailing fractional-second / TZ tail Oracle's DATE
+            # columns can't take; our seed emits TZ-naive `YYYY-MM-DD HH:MM:SS`
+            # after `_sql_timestamp_literal`'s normalization (P.9a).
+            return datetime.fromisoformat(v.text)
+        # Fall through: render text as-is (rare).
+        return v.text
+    # Plain primitive (str / int / float).
+    return v
+
+
+def _apply_seed_via_oracle_dpl(cur: Any, sql: str) -> None:  # typing-smell: ignore[explicit-any]: oracledb.Cursor — DB-API 2.0 cursor
+    """Apply a seed SQL script to Oracle via Connection.direct_path_load.
+
+    CA.13 — scans the script for INSERTs in a single `finditer` pass
+    (same approach as `_apply_seed_via_duckdb_pyarrow`), parses each
+    VALUES body with `_parse_simple_values`, groups consecutive
+    same-shape rows, and flushes each group via
+    `conn.direct_path_load(schema_name=..., table_name=...,
+    column_names=[...], data=pa_table)`. Non-INSERT residual chunks
+    (DDL, SET commands, comments) are executed IN ORDER between
+    INSERT batches, mirroring the CA.11 ordering contract.
+
+    Oracle Direct Path Load characteristics worth knowing:
+
+    - **Server-side parser bypass**: writes blocks directly above the
+      High Water Mark, skipping the SQL parser entirely. The performance
+      win comes from this, not from network round-trip reduction.
+    - **CHECK constraints enforced**: NOT NULL + CHECK constraints
+      still validate per row (we proved this against
+      `account_scope IN ('internal', 'external')` during the CA.13
+      probe). Foreign keys + triggers behave per Oracle's documented
+      Direct Path semantics — see docs/audits/ if a constraint shape
+      surfaces a CA.13 issue.
+    - **Auto-commit at call end**: each call commits its own batch.
+      `connect_and_apply`'s explicit `conn.commit()` at the end of the
+      apply is a no-op against an already-committed transaction (or
+      raises in some oracledb versions); `_apply_seed_via_oracle_dpl`
+      itself does not call commit/rollback.
+    - **Identity columns auto-fill**: pass column_names WITHOUT the
+      identity column (e.g. ENTRY) and Oracle assigns it from the
+      sequence. Our scan extracts the explicit column list from
+      `INSERT INTO foo (col1, col2, ...) VALUES (...)`, which never
+      includes ENTRY (the seed emit doesn't either), so this is
+      handled automatically.
+    """
+    pa = _try_import_pyarrow()
+    assert pa is not None
+
+    conn = cur.connection
+    # Discover the current schema (Oracle's "owner") once per call —
+    # all our seed tables live in the connecting user's schema.
+    discover = conn.cursor()
+    try:
+        discover.execute("SELECT user FROM dual")
+        schema_name = str(discover.fetchone()[0]).upper()
+    finally:
+        discover.close()
+
+    pending_table: str | None = None
+    pending_cols: tuple[str, ...] | None = None
+    pending_rows: list[tuple[object, ...]] = []
+    last_end = 0
+
+    def _flush_inserts() -> None:
+        nonlocal pending_rows, pending_table, pending_cols
+        if not pending_rows or pending_table is None or pending_cols is None:
+            pending_rows = []
+            pending_table = None
+            pending_cols = None
+            return
+        table_upper = pending_table.upper()
+        col_names_upper = tuple(c.upper() for c in pending_cols)
+        arrow_schema: Any = _oracle_table_arrow_schema(  # typing-smell: ignore[explicit-any]: pyarrow Schema lacks stubs; iteration over it is dynamic
+            conn, schema_name, table_upper, col_names_upper,
+        )
+        expected_types: dict[str, Any] = {  # typing-smell: ignore[explicit-any]: pyarrow Field.type is dynamic, same posture as the lazy import
+            field.name: field.type for field in arrow_schema
+        }
+        rows_as_dicts = [
+            {
+                col_names_upper[i]: _oracle_dpl_normalize_value(
+                    v, expected_types[col_names_upper[i]],
+                )
+                for i, v in enumerate(row)
+            }
+            for row in pending_rows
+        ]
+        arrow_table = pa.Table.from_pylist(rows_as_dicts, schema=arrow_schema)
+        conn.direct_path_load(
+            schema_name=schema_name,
+            table_name=table_upper,
+            column_names=list(col_names_upper),
+            data=arrow_table,
+        )
+        pending_rows = []
+        pending_table = None
+        pending_cols = None
+
+    def _execute_residual(text: str) -> None:
+        """Execute non-INSERT residual via the existing Oracle script
+        splitter (`split_oracle_script`) so comment-aware splitting +
+        trailing-`;` stripping behave correctly."""
+        if not text.strip():
+            return
+        for stmt in split_oracle_script(text):
+            stripped = stmt.strip()
+            if not stripped or all(
+                ln.strip().startswith("--") or not ln.strip()
+                for ln in stripped.splitlines()
+            ):
+                continue
+            _execute_oracle_stmt_with_lock_retry(cur, stmt)
+
+    for match in _SEED_INSERT_SCAN_RE.finditer(sql):
+        residual_before = sql[last_end:match.start()]
+        last_end = match.end()
+        table = match.group(1)
+        cols_str = match.group(2).strip()
+        body = match.group(3)
+        row = _parse_simple_values(body)
+        cols_tuple = tuple(s.strip() for s in cols_str.split(","))
+        key = (table, cols_tuple)
+        if row is None:
+            _flush_inserts()
+            _execute_residual(residual_before)
+            _execute_oracle_stmt_with_lock_retry(cur, match.group(0))
+            continue
+        if (pending_table, pending_cols) != key:
+            _flush_inserts()
+            _execute_residual(residual_before)
+            pending_table, pending_cols = table, cols_tuple
+        else:
+            if residual_before.strip():
+                _flush_inserts()
+                _execute_residual(residual_before)
+                pending_table, pending_cols = table, cols_tuple
+        pending_rows.append(row)
     _flush_inserts()
     _execute_residual(sql[last_end:])
 
