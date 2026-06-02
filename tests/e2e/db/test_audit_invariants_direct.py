@@ -100,7 +100,10 @@ def dialect_isolated_cfg(
     from tests.e2e.db.conftest import _isolate_cfg, _isolated_cfg_key
 
     cfg, cfg_path, dialect = dialect_cfg
-    suffix = f"{_isolated_cfg_key(request)}_{dialect.value[:2]}"
+    # The hash already includes cfg.dialect.value (per `_isolated_cfg_key`
+    # inputs lock), so no need to splice the dialect into the suffix
+    # ourselves — the hash differs per dialect parametrize cell.
+    suffix = _isolated_cfg_key(request, cfg)
     isolated_cfg = _isolate_cfg(
         cfg, suffix=suffix, tmp_path_factory=tmp_path_factory,
     )

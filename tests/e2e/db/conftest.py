@@ -86,26 +86,39 @@ def pytest_collection_modifyitems(
 # ---------------------------------------------------------------------------
 
 
-def _isolated_cfg_key(request: pytest.FixtureRequest) -> str:
-    """Build a stable isolation suffix from module name + xdist worker id.
+def _isolated_cfg_key(
+    request: pytest.FixtureRequest, cfg: "Config",
+) -> str:
+    """Build a stable, short isolation suffix.
 
-    The suffix combines:
-    - module name (e.g. `test_audit_invariants_direct`) — so different
-      test files don't collide on the same prefix.
-    - xdist worker id (e.g. `gw0`) — so concurrent workers running the
-      same module on different parametrize cells don't race.
+    Hash inputs (operator-locked 2026-06-02):
+    - `request.node.nodeid` — full pytest path: file::function[param].
+      For module-scope fixtures pytest gives the Module's nodeid (the
+      file path); for finer-grained fixtures it gives the test item's
+      nodeid. Granularity matches the requesting fixture's scope.
+    - `cfg.default_l2_instance` — distinguishes per-L2 runs against
+      the same DB (e.g. spec_example vs sasquatch_pr).
+    - `cfg.dialect.value` — distinguishes PG vs Oracle vs DuckDB.
+    - `PYTEST_XDIST_WORKER` — distinguishes concurrent workers on the
+      same DB.
 
-    The result is a snake-case identifier safe for DB prefixes.
+    SHA-256 truncated to 6 hex chars. Deterministic — same inputs
+    always produce the same suffix. Short — fits Oracle's 30-char
+    identifier cap with plenty of room for the base prefix.
+
+    Operator-suggested counter fallback (2026-06-02): if the hash
+    space ever feels too opaque for triage, swap this for a
+    `_ISOLATION_COUNTER: dict[<key-tuple>, int] = {}` registry that
+    emits `a01`/`a02`/... — equally deterministic but easier to
+    eyeball. The current hash form chosen because it needs no state.
     """
-    worker_id = os.environ.get("PYTEST_XDIST_WORKER", "gw0").replace("gw", "w")
-    # request.module.__name__ is e.g. "tests.e2e.db.test_audit_invariants_direct"
-    mod_short = request.module.__name__.rsplit(".", 1)[-1]
-    # Drop the "test_" prefix; cap at 18 chars so the combined suffix
-    # stays well under cfg.db_table_prefix's 30-char Oracle limit.
-    if mod_short.startswith("test_"):
-        mod_short = mod_short[5:]
-    mod_short = mod_short[:18]
-    return f"{mod_short}_{worker_id}"
+    import hashlib
+    worker_id = os.environ.get("PYTEST_XDIST_WORKER", "gw0")
+    nodeid = getattr(request.node, "nodeid", request.module.__name__)
+    l2 = cfg.default_l2_instance or "no-l2"
+    dialect = cfg.dialect.value
+    key = f"{nodeid}|{l2}|{dialect}|{worker_id}"
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:6]
 
 
 def _isolate_cfg(
@@ -196,7 +209,7 @@ def isolated_cfg(
     """
     from recon_gen.common.sql import Dialect
 
-    suffix = _isolated_cfg_key(request)
+    suffix = _isolated_cfg_key(request, cfg)
     isolated = _isolate_cfg(cfg, suffix=suffix, tmp_path_factory=tmp_path_factory)
     yield isolated
 
