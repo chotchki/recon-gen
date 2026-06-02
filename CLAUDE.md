@@ -14,6 +14,17 @@ DB backends: PostgreSQL 17+ / Oracle 19c+ for prod; **DuckDB** as the local-iter
 - **Entry point**: `python -m recon_gen` or `recon-gen`; **CLI**: Click; **Output**: JSON in `out/`
 - **Dialects**: PostgreSQL 17+ / Oracle 19c+ / DuckDB (default local) / SQLite 3.38+ (legacy, manual opt-in until CB removes it); SQL emitters branch on `Dialect` enum (`common/sql/dialect.py`); DuckDB uses `json_extract_string` (not `JSON_VALUE` — DuckDB's `JSON_VALUE` returns quoted JSON form, see [[project_duckdb_local_default_post_ca]]) and matviews are `CREATE TABLE … AS SELECT` (refresh = re-CREATE, same shape as the SQLite path).
 
+## Config file locations
+
+Two kinds of `config.yaml` exist in this repo. Don't conflate them.
+
+- **Operator-authored cfg** (`run/config.yaml` / `run/config.postgres.yaml` / `run/config.oracle.yaml`) — checked into nothing (the whole `run/` dir is gitignored). Holds AWS account / region, demo DB URL, deployment_name, signing material, auth profile. The CLI discovers it via this candidate order: env `RECON_GEN_CONFIG` override → `config.yaml` (repo root) → `run/config.yaml` → `run/config.postgres.yaml` → `run/config.oracle.yaml`. See `src/recon_gen/common/config.py::load_config` for the loader and `tests/e2e/conftest.py::cfg` for the test-side discovery candidate list. Memory: [[project_local_config_location]].
+- **Runner-managed cfgs** (under `runs/<run-id>/<variant>/cfg/`) — written by `src/recon_gen/_dev/runner.py::_run_one_variant` per cell. Post-CB.11.b there are two siblings per cell:
+  - `local.yaml` — `demo_database_url` points at `127.0.0.1:<container-port>` (or `duckdb://` for du dialect); used by `db` + `app2` layers via env `RECON_GEN_CONFIG`.
+  - `qs.yaml` — `demo_database_url` points at `hotchkiss.io:<forwarded-port>` (with `qs_disable_pg_ssl: true` for PG); used by `deploy` + `qs_api` + `qs_browser` layers via env `RECON_GEN_QS_CONFIG`. QS data source created from this cfg reaches the dev-machine Docker via the hotchkiss.io forward documented in [[project_cb10_qs_to_docker_pg_constraints]].
+
+The two-cfg pattern exists because QS (us-east-1) and local pytest workers (this machine) need different hostnames pointing at the same Docker container. NAT loopback fails fast in our home network, so we don't unify them.
+
 ## Commands
 
 Five artifact groups (**schema** | **data** | **json** | **docs** | **audit**), each with `apply`/`clean`/`test` (audit adds `verify`), plus HTTP servers **studio** + **dashboards**. Destructive defaults to emit (`out/` / stdout); only writes DB/AWS/disk with `--execute`.

@@ -59,6 +59,7 @@ from recon_gen.common.env_keys import (
     RECON_GEN_DB_TABLE_PREFIX,
     RECON_GEN_DEMO_DATABASE_URL,
     RECON_GEN_DEPLOYMENT_NAME,
+    RECON_GEN_QS_CONFIG,
     RECON_GEN_E2E,
     RECON_GEN_FUZZ_SEED,
     RECON_GEN_LAYER,
@@ -633,7 +634,11 @@ def _layer_command(
         # genuinely can't deploy and fall through to the dispatch-skip path
         # with an actionable error.
         ve = variant_env or {}
-        cfg_str = ve.get(RECON_GEN_CONFIG.name)
+        # CB.11.b — prefer the QS-side cfg (hotchkiss.io endpoint +
+        # qs_disable_pg_ssl) over the local cfg for the deploy layer.
+        # The QS data source created here must be reachable from QS
+        # in us-east-1; the local cfg's 127.0.0.1 is not.
+        cfg_str = ve.get(RECON_GEN_QS_CONFIG.name) or ve.get(RECON_GEN_CONFIG.name)
         if cfg_str is None:
             fallback_cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
             cfg_str = str(fallback_cfg_path) if fallback_cfg_path is not None else None
@@ -1366,6 +1371,20 @@ ORACLE_REUSE_CONTAINER_PREFIX: Final = "quicksight-test-oracle-"
 # the adopt path can't predict the URL on subsequent runs.
 ORACLE_REUSE_PASSWORD: Final = "qs-gen-test-pwd-2026"  # typing-smell: ignore[qs-gen-prefix]: local Docker fixture password — not an AWS resource ID, not multi-tenant; the prefix is incidental string content, not a Config-prefixed resource name
 
+# CB.11.b — fixed host port for the local PG container. Matches the
+# operator's hotchkiss.io:5433 forward target, so QS data sources
+# pointing at hotchkiss.io:5433 land here. Single PG cell at a time —
+# parallel PG cells collide on this port until CB.11.c adds port-pool
+# support (or sequentializes qs-touching layers per-dialect).
+_LOCAL_PG_HOST_PORT: Final = 5433
+_LOCAL_ORACLE_HOST_PORT: Final = 1522
+
+# CB.11.b — DDNS host the operator's port-forwards terminate on. QS in
+# us-east-1 reaches this Docker container via
+# `hotchkiss.io:<_LOCAL_*_HOST_PORT>` → home firewall → dev machine LAN.
+# Memory: [[project_cb10_qs_to_docker_pg_constraints]].
+_QS_FORWARD_HOST: Final = "hotchkiss.io"
+
 
 def _oracle_container_name_for(spec: VariantSpec) -> str:
     """j.5 — per-cell Oracle container name. The cell suffix prevents
@@ -1762,8 +1781,16 @@ def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
         # (``test_date_filter_does_not_error_when_applied`` networkidle
         # timeout downstream). 300 leaves headroom for the matrix
         # without pushing PG anywhere near its real limits.
-        container = PostgresContainer("postgres:17-alpine").with_command(
-            "postgres -c max_connections=300",
+        #
+        # CB.11.b — bind container's 5432 to host's fixed 5433 so the
+        # hotchkiss.io:5433 forward terminates here when QS reaches in.
+        # Trade-off: parallel PG cells collide on the host port. Single
+        # PG cell at a time is the current contract; parallel-PG support
+        # via per-cell port pool is CB.11.c work.
+        container = (
+            PostgresContainer("postgres:17-alpine")
+            .with_command("postgres -c max_connections=300")
+            .with_bind_ports(5432, _LOCAL_PG_HOST_PORT)
         )
         container.start()
         raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]: testcontainers method has no type annotations
@@ -2043,6 +2070,104 @@ def _resolve_runner_cfg_path(spec: VariantSpec) -> Path | None:
     if dialect_cfg is not None:
         return dialect_cfg
     return _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
+
+
+def _write_qs_cfg_for_variant(
+    spec: VariantSpec,
+    *,
+    base_cfg_path: Path,
+    local_url: str,
+    run_dir: Path,
+) -> Path:
+    """CB.11.b — derive the per-cell QS-side cfg yaml.
+
+    Clones the operator's base cfg (``run/config.<dialect>.yaml``),
+    swaps ``demo_database_url`` from ``local_url`` (the
+    127.0.0.1:<container-port> form from setup_variant) to
+    ``hotchkiss.io:<forwarded-port>``, and sets ``qs_disable_pg_ssl: true``
+    for PG cells. Writes to ``<run_dir>/cfg/qs.yaml`` and returns the
+    path so the caller can set ``RECON_GEN_QS_CONFIG`` for the
+    ``deploy``/``qs_api``/``qs_browser`` layers.
+
+    Why a sibling file instead of mutating the env's DB URL: a per-cell
+    cfg yaml round-trips through ``load_config`` so every cfg field
+    (``deployment_name``, ``db_table_prefix``, ``principal_arns``,
+    ``auth.aws_profile``, ``qs_disable_pg_ssl``) lands together — env
+    overrides handle one field at a time, which would force the
+    composition rule into multiple env vars. The two-cfg approach also
+    keeps the local-layer cfg pure (``127.0.0.1`` works without QS
+    knowing the LAN), independent of the QS-side cfg's hotchkiss.io
+    forward target.
+    """
+    import yaml  # noqa: PLC0415 — lazy: yaml is already a tx dep but only this branch needs it
+
+    with base_cfg_path.open() as f:
+        raw = yaml.safe_load(f) or {}
+    if not isinstance(raw, dict):
+        raise RuntimeError(
+            f"_write_qs_cfg_for_variant: base cfg {base_cfg_path} did not "
+            f"parse as a mapping (got {type(raw).__name__})"
+        )
+    # Swap demo_database_url to the hotchkiss.io form.
+    if spec.dialect == "pg":
+        new_url = _swap_url_host(local_url, _QS_FORWARD_HOST, _LOCAL_PG_HOST_PORT)
+        raw["demo_database_url"] = new_url
+        # PG branch needs SSL disable for vanilla postgres:17-alpine (which
+        # doesn't serve TLS) — see CB.11.a spike outcome.
+        raw["qs_disable_pg_ssl"] = True
+    elif spec.dialect == "or":
+        new_url = _swap_url_host(local_url, _QS_FORWARD_HOST, _LOCAL_ORACLE_HOST_PORT)
+        raw["demo_database_url"] = new_url
+        # Oracle datasource branch already hardcodes DisableSsl=True
+        # (common/datasource.py); no flag needed.
+    else:
+        # du / sl dialects — no QS data source can point at a file DB.
+        # The runner should never call this path; raise loudly so a
+        # misroute surfaces during testing.
+        raise RuntimeError(
+            f"_write_qs_cfg_for_variant: dialect {spec.dialect!r} has no "
+            f"QS-reachable shape (file-based DB). Should not be called "
+            f"for du/sl cells."
+        )
+
+    cfg_dir = run_dir / "cfg"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    qs_cfg_path = cfg_dir / "qs.yaml"
+    with qs_cfg_path.open("w") as f:
+        f.write(
+            f"# Runner-generated per-cell QS-side cfg (CB.11.b).\n"
+            f"# Sibling local-layer cfg: {base_cfg_path}\n"
+            f"# Spec: {spec.name}; generated by _write_qs_cfg_for_variant.\n"
+            f"# DO NOT commit — `runs/` is gitignored.\n",
+        )
+        yaml.safe_dump(raw, f, sort_keys=False)
+    return qs_cfg_path
+
+
+def _swap_url_host(url: str, new_host: str, new_port: int) -> str:
+    """Replace the host:port part of a postgresql:// or oracle:// URL.
+
+    Used by ``_write_qs_cfg_for_variant`` to map the local container
+    URL onto the hotchkiss.io-forwarded endpoint. Preserves user, pw,
+    and path/db components. Raises if the URL doesn't parse — we want
+    a misshapen URL to fail loudly, not silently land a wrong endpoint
+    in the QS data source.
+    """
+    from urllib.parse import urlparse, urlunparse  # noqa: PLC0415
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.hostname:
+        raise RuntimeError(
+            f"_swap_url_host: malformed URL {url!r} (missing scheme or host)"
+        )
+    # Rebuild netloc with auth + new host:port.
+    auth = ""
+    if parsed.username:
+        if parsed.password:
+            auth = f"{parsed.username}:{parsed.password}@"
+        else:
+            auth = f"{parsed.username}@"
+    new_netloc = f"{auth}{new_host}:{new_port}"
+    return urlunparse(parsed._replace(netloc=new_netloc))
 
 
 def _derive_qs_user_arn(cfg: "Config") -> str:
@@ -2559,6 +2684,38 @@ def _run_one_variant(
     if dialect_cfg is not None and RECON_GEN_CONFIG.name not in variant_env:
         variant_env[RECON_GEN_CONFIG.name] = str(dialect_cfg)
 
+    # CB.11.b — when the chain reaches any QS-touching layer (deploy /
+    # qs_api / qs_browser) AND the dialect has a QS-reachable shape
+    # (pg / or; not du / sl), generate a sibling QS-side cfg and thread
+    # it via RECON_GEN_QS_CONFIG. The deploy/qs layers prefer this cfg
+    # over RECON_GEN_CONFIG so the QS data source's endpoint is
+    # hotchkiss.io (not 127.0.0.1, which QS can't reach).
+    if (
+        spec.target == "lo"
+        and spec.dialect in ("pg", "or")
+        and any(layer in ("deploy", "qs_api", "qs_browser") for layer in chain)
+        and dialect_cfg is not None
+        and RECON_GEN_DEMO_DATABASE_URL.name in variant_env
+    ):
+        try:
+            qs_cfg_path = _write_qs_cfg_for_variant(
+                spec,
+                base_cfg_path=dialect_cfg,
+                local_url=variant_env[RECON_GEN_DEMO_DATABASE_URL.name],
+                run_dir=run_dir,
+            )
+            variant_env[RECON_GEN_QS_CONFIG.name] = str(qs_cfg_path)
+            print(
+                f"{terminal_prefix}runner: variant={spec.name} "
+                f"QS-side cfg written → {qs_cfg_path}"
+            )
+        except Exception as exc:  # noqa: BLE001 — surface as triage signal; deploy layer will fail loudly
+            print(
+                f"{terminal_prefix}runner: variant={spec.name} "
+                f"QS-side cfg gen failed: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+
     # Z.C.4 — per-cell ``deployment_name`` + ``db_table_prefix`` overrides
     # so multi-cell parallel runs (sp_pg_lo / sq_pg_lo / fuzz cells) don't
     # collide on AWS resource IDs (``deployment_name`` weaves into every
@@ -2682,9 +2839,21 @@ def _run_one_variant(
                 layer_results.append(cached_result)
                 continue
 
+            # CB.11.b — per-layer variant_env routing: deploy/qs_api/
+            # qs_browser layers see RECON_GEN_CONFIG pointing at the
+            # QS-side cfg (hotchkiss.io endpoint); db/app2 keep the
+            # local cfg. Build a layer-specific copy here rather than
+            # mutating variant_env so later layers see the original.
+            layer_env = dict(variant_env)
+            qs_cfg = layer_env.get(RECON_GEN_QS_CONFIG.name)
+            if (
+                qs_cfg is not None
+                and layer in ("deploy", "qs_api", "qs_browser")
+            ):
+                layer_env[RECON_GEN_CONFIG.name] = qs_cfg
             result = dispatch_layer(
                 layer, run_dir, options,
-                variant_env=variant_env, terminal_prefix=terminal_prefix,
+                variant_env=layer_env, terminal_prefix=terminal_prefix,
             )
             # #986 followon, 2026-05-19 — extend the prelude's exit-5 + --only
             # tolerance to every per-cell layer. Same shape: when the operator

@@ -371,6 +371,27 @@ RECON_GEN_DEMO_DATABASE_URL: Final = EnvVar(
     # URL parsing here.
 )
 
+# CB.11.b — QS-side cfg path. Sibling to ``RECON_GEN_CONFIG``: points at
+# a cfg yaml whose ``demo_database_url`` is the hotchkiss.io-forwarded
+# endpoint (with ``qs_disable_pg_ssl: true`` for PG) so the QS data
+# source can validate-connect from us-east-1. The local-layer cfg
+# (``RECON_GEN_CONFIG``) keeps ``127.0.0.1:<port>`` for in-process
+# schema/seed/refresh. The runner writes both per-cell. Layer dispatch
+# routes ``deploy``/``qs_api``/``qs_browser`` to this cfg; ``db``/``app2``
+# stay on ``RECON_GEN_CONFIG``. See ``project_cb10_qs_to_docker_pg_constraints``
+# memory + ``docs/audits/cb_11_a_dev_machine_forward_spike.md`` (CB.11.a
+# spike outcome) for the underlying QS→home-firewall→dev-machine shape.
+RECON_GEN_QS_CONFIG: Final = EnvVar(
+    name="RECON_GEN_QS_CONFIG",
+    description=(
+        "QS-side cfg yaml path. Used by deploy/qs_api/qs_browser layers; "
+        "its demo_database_url points at hotchkiss.io:<port> + carries "
+        "qs_disable_pg_ssl=true for PG. Runner writes per-cell."
+    ),
+    coercer=str,
+    optional=True,
+)
+
 # Y.2.gate.c.11 — operator opt-in to capture Playwright traces on
 # every test (default is failure-only). Plumbed by RunOptions; the
 # webkit_page helper checks it in the finally block.
