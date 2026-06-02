@@ -242,7 +242,7 @@ def test_tagged_emit_writes_scenario_id_in_metadata() -> None:
         conn.commit()
         tagged = conn.execute(
             f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
-            f"WHERE json_extract(metadata, '$.scenario_id') = ?",
+            f"WHERE json_extract_string(metadata, '$.scenario_id') = ?",
             ("test-ax1",),
         ).fetchone()[0]
         total = conn.execute(

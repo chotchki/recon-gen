@@ -356,7 +356,7 @@ def test_tagged_emit_writes_scenario_id_on_every_row() -> None:
         tagged = conn.execute(
             f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
             f"WHERE account_id = ? "
-            f"AND json_extract(metadata, '$.scenario_id') = ?",
+            f"AND json_extract_string(metadata, '$.scenario_id') = ?",
             (gen.account_id, "test-ax3-extra"),
         ).fetchone()[0]
         total = conn.execute(

@@ -223,7 +223,7 @@ def test_disjoint_claims_compose_and_tag_both_tables() -> None:
         # Every transaction row carries the scenario tag.
         tx_count = conn.execute(
             f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
-            f"WHERE json_extract(metadata, '$.scenario_id') = ?",
+            f"WHERE json_extract_string(metadata, '$.scenario_id') = ?",
             ("test-happy",),
         ).fetchone()[0]
         tx_total = conn.execute(
@@ -236,7 +236,7 @@ def test_disjoint_claims_compose_and_tag_both_tables() -> None:
         # And every daily_balances row.
         db_count = conn.execute(
             f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances "
-            f"WHERE json_extract(metadata, '$.scenario_id') = ?",
+            f"WHERE json_extract_string(metadata, '$.scenario_id') = ?",
             ("test-happy",),
         ).fetchone()[0]
         db_total = conn.execute(

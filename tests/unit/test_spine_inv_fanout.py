@@ -177,8 +177,8 @@ def test_emit_metadata_carries_sender_recipient_pair() -> None:
         gen.emit(conn)
         conn.commit()
         rows = conn.execute(
-            f"SELECT json_extract(metadata, '$.sender_id'), "
-            f"json_extract(metadata, '$.recipient_id') "
+            f"SELECT json_extract_string(metadata, '$.sender_id'), "
+            f"json_extract_string(metadata, '$.recipient_id') "
             f"FROM {_PREFIX}_transactions",
         ).fetchall()
     finally:
@@ -253,9 +253,9 @@ def test_tagged_emit_merges_scenario_id_with_pair_keys() -> None:
         gen.emit(conn, scenario_id="test-ay2b-inv-fanout")
         conn.commit()
         rows = conn.execute(
-            f"SELECT json_extract(metadata, '$.scenario_id'), "
-            f"json_extract(metadata, '$.sender_id'), "
-            f"json_extract(metadata, '$.recipient_id') "
+            f"SELECT json_extract_string(metadata, '$.scenario_id'), "
+            f"json_extract_string(metadata, '$.sender_id'), "
+            f"json_extract_string(metadata, '$.recipient_id') "
             f"FROM {_PREFIX}_transactions",
         ).fetchall()
     finally:

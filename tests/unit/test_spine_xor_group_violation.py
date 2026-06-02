@@ -319,7 +319,7 @@ def test_overlap_tagged_emit_writes_scenario_id() -> None:
         tagged = conn.execute(
             f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
             f"WHERE transfer_id = ? "
-            f"AND json_extract(metadata, '$.scenario_id') = ?",
+            f"AND json_extract_string(metadata, '$.scenario_id') = ?",
             (gen.transfer_id, "test-ax2-overlap"),
         ).fetchone()[0]
     finally:

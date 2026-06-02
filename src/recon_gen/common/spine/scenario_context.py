@@ -438,11 +438,21 @@ class ScenarioContext:
                 f"{self.prefix}_transactions",
                 f"{self.prefix}_daily_balances",
             ):
+                # DuckDB returns -1 from cur.rowcount on DELETE; count
+                # match-rows via SELECT first so the cross-dialect contract
+                # ("number deleted") holds. PG / Oracle would also accept
+                # this path, so no per-dialect branch.
+                cur.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE {sid_extract} = {placeholder}",
+                    (self.scenario_id,),
+                )
+                row = cur.fetchone()
+                match_count = int(row[0]) if row else 0
                 cur.execute(
                     f"DELETE FROM {table} WHERE {sid_extract} = {placeholder}",
                     (self.scenario_id,),
                 )
-                total += cur.rowcount
+                total += match_count
         finally:
             cur.close()
         conn.commit()
