@@ -55,6 +55,7 @@ from recon_gen.common.env_keys import (
     RECON_E2E_PAGE_TIMEOUT,
     RECON_E2E_USER_ARN,
     RECON_GEN_CONFIG,
+    RECON_GEN_DB_READ_ONLY,
     RECON_GEN_DB_TABLE_PREFIX,
     RECON_GEN_DEMO_DATABASE_URL,
     RECON_GEN_DEPLOYMENT_NAME,
@@ -582,7 +583,7 @@ def _layer_command(
         ve = variant_env or {}
         url = ve.get(RECON_GEN_DEMO_DATABASE_URL.name, "")
         if url.startswith("duckdb://"):
-            env_addl["RECON_GEN_DB_READ_ONLY"] = "1"
+            env_addl[RECON_GEN_DB_READ_ONLY.name] = "1"
     if opts.trace_all:
         env_addl[RECON_GEN_TRACE_ALL.name] = "1"
     if opts.fuzz_seed_value is not None:

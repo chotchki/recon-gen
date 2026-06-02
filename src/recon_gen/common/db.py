@@ -181,10 +181,10 @@ def connect_demo_db(cfg: Config) -> Any:  # typing-smell: ignore[explicit-any]: 
         # for DuckDB cells at pytest-launch time; production CLI
         # invocations (schema/data/seed apply) run without it and
         # open read-write.
-        import os
         import duckdb
+        from recon_gen.common.env_keys import RECON_GEN_DB_READ_ONLY
         path = duckdb_path(cfg.demo_database_url)
-        read_only = os.environ.get("RECON_GEN_DB_READ_ONLY") == "1"
+        read_only = bool(RECON_GEN_DB_READ_ONLY.get_or_none())
         return duckdb.connect(path, read_only=read_only)
     if cfg.dialect is Dialect.SQLITE:
         # stdlib — no try/except for ImportError. SQLite uses Python's
@@ -1023,8 +1023,8 @@ class _AsyncDuckdbPool:
     """
 
     def __init__(self, path: str, *, max_size: int = 10) -> None:
-        import os  # noqa: PLC0415
         import duckdb  # noqa: PLC0415
+        from recon_gen.common.env_keys import RECON_GEN_DB_READ_ONLY  # noqa: PLC0415
 
         self._path = path
         self._sem = asyncio.Semaphore(max_size)
@@ -1032,7 +1032,7 @@ class _AsyncDuckdbPool:
         # process safety reason `connect_demo_db` does. The runner sets
         # this for the App2 pytest tier's DuckDB cells so xdist workers
         # share read access against the seeded .duckdb file.
-        read_only = os.environ.get("RECON_GEN_DB_READ_ONLY") == "1"
+        read_only = bool(RECON_GEN_DB_READ_ONLY.get_or_none())
         # Open the root eagerly so a bad path / corrupt file surfaces
         # at construction (server startup) rather than first request.
         self._root: Any = duckdb.connect(path, read_only=read_only)  # typing-smell: ignore[explicit-any]: duckdb.DuckDBPyConnection has no PEP 561 stubs at strict

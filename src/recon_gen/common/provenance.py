@@ -200,7 +200,12 @@ def hash_table_rows(
         )
     ]
     h = hashlib.sha256()
-    for row in cur:
+    # CA.8 — DuckDB's DuckDBPyConnection cursor doesn't implement the
+    # DB-API 2.0 iterator protocol (no __iter__); use fetchall().
+    # Matview-bounded row counts here keep memory reasonable; for the
+    # base-table hash this could OOM at very large scale — switch to
+    # fetchmany batches if it becomes an issue.
+    for row in cur.fetchall():
         h.update(b"\x1f".join(
             canonical_value(row[i]) for i in sorted_indices
         ))
@@ -242,7 +247,7 @@ def hash_matview_rows(
     ]
     canonical_rows = [
         tuple(canonical_value(row[i]) for i in sorted_indices)
-        for row in cur
+        for row in cur.fetchall()  # CA.8 — DuckDB cursor not iterable
     ]
     canonical_rows.sort()
     h = hashlib.sha256()

@@ -155,6 +155,12 @@ def _liveness_sql(dialect: Dialect) -> str:
             "FROM sqlite_master "
             "WHERE type='table'"
         )
+    if dialect is Dialect.DUCKDB:
+        return (
+            "SELECT COUNT(*) AS table_count "
+            "FROM information_schema.tables "
+            "WHERE table_schema = 'main'"
+        )
     return "SELECT COUNT(*) AS table_count FROM USER_TABLES"
 
 
@@ -373,7 +379,7 @@ def populate_app_info_sheet(
     # Oracle render bare (those ARE prod dialects).
     dialect_line = (
         f"dialect: {dialect} (dev build)"
-        if cfg.dialect is Dialect.SQLITE
+        if cfg.dialect in (Dialect.SQLITE, Dialect.DUCKDB)
         else f"dialect: {dialect}"
     )
     sheet.layout.row(height=_TEXT_HEIGHT).add_text_box(

@@ -138,7 +138,10 @@ Same cold-read → triage → design → implement → re-cold-read pattern that
 
 - [ ] BX.backlog - BX backlog — Reorder sheets: L1/L2 Exceptions right after Getting Started
   - [ ] BX.backlog.coverage - merge-broken - BX backlog — Coverage combine job: merge doesn't render, markdown only available via artifact download
+  - [ ] BX.backlog.duckdb - pytest-xdist-file-lock - CB scope — DuckDB pytest-xdist intra-cell file-lock contention
+  - [ ] BX.backlog.duckdb-memory-per-worker-fixtures - CB scope — Migrate db-tier fixtures to :memory: DuckDB per xdist worker
   - [ ] BX.backlog.e2e - sqlite-l2ft-dropdown-flake - BX backlog — e2e-sqlite flake: test_l2ft_rail_dropdown_selection_refetches_with_param
+  - [ ] BX.backlog.runner - browser-probe-target-aware - BX backlog — Runner browser-layer probe over-gates on aws_rds_running for local targets
   - [ ] BX.backlog.session - start-silent-no-op - BX backlog — Studio /training/session-start silent no-op when base schema missing
   - [ ] BX.backlog.sqlite - matview-perf - BX backlog — SQLite matview emulation slow on real-L2-sized data (spike)
   - [ ] BX.backlog.sqlite - resourcewarning-regression - BX backlog — Re-triage sqlite3 ResourceWarning leaks (regression after BL.0 / earlier fix)

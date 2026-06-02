@@ -385,6 +385,26 @@ RECON_GEN_TRACE_ALL: Final = EnvVar(
     optional=True,
 )
 
+# CA.8 — DuckDB read_only-mode toggle for pytest workers. The runner
+# sets this on the db / app2 / browser layer's env_addl when the
+# cell's URL is duckdb:// so connect_demo_db + _AsyncDuckdbPool open
+# read_only=True (per the DuckDB single-writer-per-file constraint;
+# https://duckdb.org/docs/current/clients/python/dbapi#read_only-connections).
+# Production CLI invocations (schema/data apply) run before pytest
+# dispatch under sequential variant-seed steps that don't see this
+# env and continue to open read-write.
+RECON_GEN_DB_READ_ONLY: Final = EnvVar(
+    name="RECON_GEN_DB_READ_ONLY",
+    description=(
+        "Bool — set to '1' to force connect_demo_db / _AsyncDuckdbPool "
+        "to open the .duckdb file read_only=True (multi-process safe). "
+        "Runner injects this for pytest db/app2/browser layers against "
+        "DuckDB cells."
+    ),
+    coercer=_bool_coercer,
+    optional=True,
+)
+
 # Y.2.gate.c.6.xdist-safety — operator pin for the random-per-run
 # fuzz seed. Set this to repro a fuzz failure. Otherwise the runner
 # rolls a fresh value each invocation.
