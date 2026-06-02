@@ -342,8 +342,8 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 
 **Done when:** All tests carry typed marks; `_layer_command` reads `--tier=X --dialect=Y` (no hardcoded file lists); `MIGRATED_TIERS == all_tiers`; `@writes()` audit complete + fixture branches DuckDB isolation per-test; `Dialect.SQLITE` deleted; aiosqlite/aiosqlitepool dropped from [prod]; QS test deploys point at the runner-hosted Docker DBs; AWS RDS Aurora instances stopped and removed from cfg; v13.0.0 release notes published.
 
-- [ ] CB.0 - CB.0 — Spike: typed-marks + pytest_addoption pattern
-- [ ] CB.1 - CB.1 — tests/_marks.py module + conftest plumbing
+- [x] CB.0 - CB.0 — Spike: typed-marks + pytest_addoption pattern
+- [x] CB.1 - CB.1 — tests/_marks.py module + conftest plumbing
 - [ ] CB.2 - CB.2 — Mark the unit tier (largest population, parallel-agent friendly)
 - [ ] CB.3 - CB.3 — Mark the app2 tier + replace _layer_command's app2 arm
 - [ ] CB.4 - CB.4 — Mark the db tier + replace its arm
