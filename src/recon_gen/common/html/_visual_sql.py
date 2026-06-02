@@ -249,8 +249,12 @@ def wrap_for_visual(base_sql: str, visual: Any, *, contract: Any = None) -> str:
             f"SELECT {select_clause} FROM (\n{base_sql}\n) sub "
             f"GROUP BY {group_clause}"
         )
-        if kind == "LineChart":
-            wrapped += f" ORDER BY {group_clause}"
+        # CB.8 — always ORDER BY for deterministic category order. Without
+        # this, DuckDB's GROUP BY iteration ordering differs from PG /
+        # SQLite, breaking renderer-side tests that assert on specific
+        # category order. LineChart already had this; BarChart needs it
+        # too so the bar order is stable across engines.
+        wrapped += f" ORDER BY {group_clause}"
         return wrapped
 
     if kind == "Sankey":
