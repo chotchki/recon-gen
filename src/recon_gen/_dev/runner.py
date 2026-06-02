@@ -1722,20 +1722,51 @@ def _start_fresh_oracle_container(
     password. Returns the URL + a persistent handle (`.stop()` no-op
     so the container outlives this invocation and the next run can
     adopt it).
-    """
-    from testcontainers.oracle import OracleDbContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
 
-    # gvenzl/oracle-free:23-faststart — pre-initialized DB starts in
-    # seconds vs. the multi-minute cold-start on :slim. Image is
-    # heavier (~3 GB) but the time savings dominate test-loop
-    # economics. Service name defaults to FREEPDB1 (the oracle-free
-    # image's pluggable DB).
-    container = OracleDbContainer(
-        "gvenzl/oracle-free:23-faststart",
-        oracle_password=password,
-    ).with_name(name)
+    CB.7-followup (2026-06-02) — image switched from
+    `gvenzl/oracle-free:23-faststart` (Oracle 23ai) to
+    `doctorkirk/oracle-19c` for production parity with AWS RDS Oracle
+    SE2 19c. The CB.10 spike validated this image with
+    `-e ORACLE_SID=FREEPDB1`, which keeps the service-name string the
+    rest of the codebase already expects (`db.py`, `datasource.py`,
+    docs, and the persistent-reuse path's URL formation above all
+    hard-coded `FREEPDB1`; preserving it = no cascading edits).
+
+    The 19c image takes longer to boot (~90-120s vs 23-faststart's
+    ~20-30s) but it's the same SQL/JSON path engine production runs.
+    `testcontainers.oracle.OracleDbContainer` is hardcoded for gvenzl
+    images (different env vars + ready-detection log line); use the
+    generic `DockerContainer` + `wait_for_logs` instead.
+    """
+    from testcontainers.core.container import DockerContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415 — lazy: only oracle path needs it
+    from testcontainers.core.waiting_utils import wait_for_logs  # type: ignore[import-untyped]: same  # noqa: PLC0415
+
+    # doctorkirk/oracle-19c env vars (CB.10 spike-validated):
+    #   ORACLE_SID=FREEPDB1   — overrides the default CDB SID so the
+    #                           service-name + URL shape match the
+    #                           rest of the codebase.
+    #   ORACLE_PWD=<password> — image-specific (NOT ORACLE_PASSWORD).
+    #   ORACLE_CHARACTERSET=UTF8 — matches RDS character set.
+    container = (
+        DockerContainer("doctorkirk/oracle-19c")
+        .with_name(name)
+        .with_exposed_ports(1521)
+        .with_env("ORACLE_SID", "FREEPDB1")
+        .with_env("ORACLE_PWD", password)
+        .with_env("ORACLE_CHARACTERSET", "UTF8")
+    )
     container.start()  # type: ignore[no-untyped-call]: testcontainers .start() lacks return-type hint
-    url: str = container.get_connection_url()
+
+    # doctorkirk/oracle-19c emits "DATABASE IS READY TO USE!" on the
+    # listener once both SID open + listener registration complete.
+    # 240s timeout covers a cold-start on a slow disk.
+    wait_for_logs(container, "DATABASE IS READY TO USE!", timeout=240)  # type: ignore[no-untyped-call]: testcontainers helper lacks return-type hint
+
+    host_port = int(container.get_exposed_port(1521))  # type: ignore[no-untyped-call]: same
+    url = (
+        f"oracle+oracledb://system:{password}@localhost:{host_port}"
+        f"/?service_name=FREEPDB1"
+    )
     return url, _PersistentContainerHandle(name=name)
 
 
@@ -1751,20 +1782,20 @@ def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
       (Aurora cluster, etc.); cfg-discovery for AWS auth happens
       separately in ``_run_one_variant``.
     - ``(pg, lo)``: postgres:17-alpine testcontainer; URL override.
-    - ``(or, lo)``: gvenzl/oracle-free:23-faststart testcontainer;
-      URL override.
-    - ``(sl, lo)``: per-invocation SQLite tempdir + cfg; both
+    - ``(or, lo)``: doctorkirk/oracle-19c testcontainer (production
+      parity w/ AWS RDS Oracle SE2 19c); URL override.
+    - ``(du, lo)``: per-invocation DuckDB tempfile + cfg; both
       ``RECON_GEN_DEMO_DATABASE_URL`` and ``RECON_GEN_CONFIG`` overrides
-      (no on-disk cfg under ``run/`` for sqlite — it's ephemeral).
-    - ``(sl, aw)``: rejected upstream by ``VariantSpec.is_valid()``
-      (sqlite is file-based; QS can't reach it remotely). Defensive
-      raise here for completeness.
+      (no on-disk cfg under ``run/`` for DuckDB — it's ephemeral).
 
     PG container takes ~10-15s to start. Oracle container
-    (``gvenzl/oracle-free:23-faststart``) takes ~20-30s — still
-    fast for a fresh Oracle DB. SQLite is instant (file-create
-    only). Lifetime is the chain (one DB / container reused across
-    all layers in a single ``up_to`` invocation), not per-layer.
+    (``doctorkirk/oracle-19c``) takes ~90-120s for a fresh DB —
+    longer than the 23-faststart predecessor but matches AWS RDS
+    Oracle SE2 19c production. DuckDB is instant (file-create only).
+    Lifetime is the chain (one DB / container reused across all
+    layers in a single ``up_to`` invocation), not per-layer; the
+    persistent-container path (`_check_or_start_persistent_oracle_container`)
+    amortizes the cold-start across runs.
     """
     if spec.target == "aw":
         return {}, None
@@ -1773,8 +1804,8 @@ def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
     # containers. Operator (or workflow) sets RECON_GEN_RUNNER_CI=1 +
     # RECON_GEN_DEMO_DATABASE_URL=<service-container-url>; setup_variant
     # is then a no-op and the variant URL passes through unchanged.
-    # SQLite has no container to skip — but we still honor CI mode
-    # for symmetry (the workflow can pre-create the SQLite file).
+    # DuckDB has no container to skip — but we still honor CI mode
+    # for symmetry (the workflow can pre-create the DuckDB file).
     if RECON_GEN_RUNNER_CI.get_or_none():
         # Loud-fail if the operator set CI mode but forgot the URL —
         # we'd otherwise silently fall back to cfg.demo_database_url
