@@ -1666,7 +1666,7 @@ def _start_fresh_oracle_container(
     generic `DockerContainer` + `wait_for_logs` instead.
     """
     from testcontainers.core.container import DockerContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415 — lazy: only oracle path needs it
-    from testcontainers.core.waiting_utils import wait_for_logs  # type: ignore[import-untyped]: same  # noqa: PLC0415
+    from testcontainers.core.waiting_utils import wait_for_logs  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
 
     # doctorkirk/oracle-19c env vars (CB.10 spike-validated):
     #   ORACLE_SID=FREEPDB1   — overrides the default CDB SID so the
@@ -1689,7 +1689,7 @@ def _start_fresh_oracle_container(
     # 240s timeout covers a cold-start on a slow disk.
     wait_for_logs(container, "DATABASE IS READY TO USE!", timeout=240)  # type: ignore[no-untyped-call]: testcontainers helper lacks return-type hint
 
-    host_port = int(container.get_exposed_port(1521))  # type: ignore[no-untyped-call]: same
+    host_port = int(container.get_exposed_port(1521))  # type: ignore[no-untyped-call]: testcontainers helper lacks return-type hint
     url = (
         f"oracle+oracledb://system:{password}@localhost:{host_port}"
         f"/?service_name=FREEPDB1"
