@@ -41,7 +41,7 @@ from tests.audit._dashboard_extract import (
     l1_invariant_row_keys,
     l1_invariant_rows_seen,
 )
-from tests._marks import IsolationScope, isolation_producer  # noqa: E402
+from tests._marks import IsolationScope, isolation_consumer  # noqa: E402
 from tests.e2e._agreement import write_rendered_rows
 from tests.e2e._agreement_helpers import (
     ALL_L1_INVARIANTS,
@@ -62,10 +62,7 @@ if TYPE_CHECKING:
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
-    isolation_producer(IsolationScope.AGREEMENT_AUDIT),
-    # Sibling producers in this scope race on DROP+CREATE; pin to one
-    # worker so the module-scope writer fixtures serialize.
-    pytest.mark.xdist_group(IsolationScope.AGREEMENT_AUDIT.value),
+    isolation_consumer(IsolationScope.AGREEMENT_AUDIT),
 ]
 
 

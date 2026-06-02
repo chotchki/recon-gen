@@ -29,7 +29,7 @@ from tests.audit._inv_dashboard_extract import (  # noqa: E402
     count_anomaly_rows,
     rows_seen_anomaly,
 )
-from tests._marks import IsolationScope, isolation_producer  # noqa: E402
+from tests._marks import IsolationScope, isolation_consumer  # noqa: E402
 from tests.e2e._agreement import write_rendered_rows  # noqa: E402
 
 if TYPE_CHECKING:
@@ -40,10 +40,7 @@ if TYPE_CHECKING:
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
-    isolation_producer(IsolationScope.AGREEMENT_INV),
-    # Sibling producers in this scope race on DROP+CREATE; pin to one
-    # worker so the module-scope writer fixtures serialize.
-    pytest.mark.xdist_group(IsolationScope.AGREEMENT_INV.value),
+    isolation_consumer(IsolationScope.AGREEMENT_INV),
 ]
 
 
