@@ -54,8 +54,9 @@ def _seed_db(rows: Sequence[SeedRow]) -> str:
     account_parent_role, amount_direction, transfer_parent_id,
     posting, metadata).
     """
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
+    os.unlink(path)
     conn = duckdb.connect(path)
     conn.execute(
         f"CREATE TABLE {_PREFIX}_transactions ("

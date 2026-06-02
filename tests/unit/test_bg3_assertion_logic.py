@@ -52,8 +52,9 @@ def planted_drift_sqlite() -> Iterator["Config"]:
     ``drift_timeline`` / ``overdraft`` matviews. Values chosen so the
     healthy-path assertions pass cleanly; per-bug tests modify or
     re-query to trip individual assertions."""
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
+    os.unlink(path)
     conn = duckdb.connect(path)
 
     # `<prefix>_drift` matview — one row per leaf-account-day with

@@ -54,8 +54,9 @@ def planted_sqlite() -> Iterator["Config"]:
     ``drift = closing_stored − (opening + net_flow)`` holds on the
     healthy row and fails on the buggy one — tests pick which row to
     query."""
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
+    os.unlink(path)
     conn = duckdb.connect(path)
     # Minimal projection — matches DAILY_STATEMENT_SUMMARY_CONTRACT
     # columns the SQL projects. Values stored as integer cents

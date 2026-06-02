@@ -154,7 +154,7 @@ def _signal_etl_triage(
     from recon_gen.common.l2.contract import derive_column_contracts
     from recon_gen.common.l2.triage import detect_gaps
 
-    fd, db_path = tempfile.mkstemp(suffix=".sqlite")
+    fd, db_path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
     dst = duckdb.connect(db_path)
     with dst:
@@ -199,7 +199,7 @@ def _signal_etl_run_coverage(
     from recon_gen.common.config import Config
     from recon_gen.common.l2.coverage import coverage_for
 
-    fd, db_path = tempfile.mkstemp(suffix=".sqlite")
+    fd, db_path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
     dst = duckdb.connect(db_path)
     with dst:

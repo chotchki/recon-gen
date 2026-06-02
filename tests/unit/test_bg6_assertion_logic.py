@@ -25,8 +25,9 @@ if TYPE_CHECKING:
 
 @pytest.fixture
 def planted_l2ft_l1_sqlite() -> Iterator["Config"]:
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
+    os.unlink(path)
     conn = duckdb.connect(path)
     # L2FT exceptions — one row per violation, with a per-violation
     # count column.

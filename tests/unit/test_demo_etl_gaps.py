@@ -333,7 +333,7 @@ def test_gaps_actually_surface_in_triage_detect_gaps(
 
     inst = load_instance(writable_l2_yaml)
     prefix = writable_l2_yaml.stem
-    fd, db_path = tempfile.mkstemp(suffix=".sqlite")
+    fd, db_path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
     conn = duckdb.connect(db_path)
     conn.execute(

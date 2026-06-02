@@ -147,7 +147,7 @@ def aiosqlite_pool() -> Iterator[AsyncConnectionPool]:
     import tempfile
     import os
 
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
 
     # Seed synchronously via stdlib sqlite3 — much simpler than
@@ -506,9 +506,10 @@ def aiosqlite_sankey_pool() -> Iterator[AsyncConnectionPool]:
     import tempfile
     import os
 
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
 
+    os.unlink(path)
     conn = duckdb.connect(path)
     conn.execute(
         "CREATE TABLE edges (source TEXT, target TEXT, amount INTEGER)",

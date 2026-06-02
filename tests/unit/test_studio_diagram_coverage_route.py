@@ -55,9 +55,10 @@ def seeded_studio_pool() -> Iterator[AsyncConnectionPool]:
     (``spec_example_transactions``) so the route's auto-derived prefix
     matches.
     """
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
 
+    os.unlink(path)
     conn = duckdb.connect(path)
     conn.execute(
         "CREATE TABLE spec_example_transactions ("

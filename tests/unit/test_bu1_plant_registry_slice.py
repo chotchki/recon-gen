@@ -340,7 +340,7 @@ def test_phantom_rail_plant_surfaces_on_etl_triage(
     # Build a seeded sqlite with the spec_example schema + plant the
     # registry entry's SQL against it. Then run detect_gaps + assert
     # the plant surfaced as an unmatched_rail gap.
-    fd, db_path = tempfile.mkstemp(suffix=".sqlite")
+    fd, db_path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
     conn = duckdb.connect(db_path)
     conn.execute(

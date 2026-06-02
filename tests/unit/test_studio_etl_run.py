@@ -172,7 +172,7 @@ def test_etl_run_coverage_carries_failures_only_toggle(
 
     cache = L2InstanceCache.from_path(writable_l2_yaml)
     prefix = writable_l2_yaml.stem
-    fd, db_path = tempfile.mkstemp(suffix=".sqlite")
+    fd, db_path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
     conn = duckdb.connect(db_path)
     conn.execute(
@@ -390,7 +390,7 @@ def test_coverage_renders_empty_state_when_no_run_this_session_even_with_rows(
 
     cache = L2InstanceCache.from_path(writable_l2_yaml)
     prefix = writable_l2_yaml.stem
-    fd, db_path = tempfile.mkstemp(suffix=".sqlite")
+    fd, db_path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
     conn = duckdb.connect(db_path)
     conn.execute(

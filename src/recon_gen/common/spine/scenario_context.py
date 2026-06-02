@@ -280,13 +280,14 @@ def _check_cross_scenario(
     accounts_tuple = tuple(accounts)
     if not accounts_tuple:
         return
-    placeholders = ", ".join("%s"
-                              if dialect is Dialect.POSTGRES else f":{i + 1}"
-                              for i in range(len(accounts_tuple)))
-    sid_placeholder = (
-        "%s" if dialect is Dialect.POSTGRES
-        else f":{len(accounts_tuple) + 1}"
-    )
+    def _ph(idx: int) -> str:
+        if dialect is Dialect.POSTGRES:
+            return "%s"
+        if dialect is Dialect.DUCKDB:
+            return "?"
+        return f":{idx + 1}"
+    placeholders = ", ".join(_ph(i) for i in range(len(accounts_tuple)))
+    sid_placeholder = _ph(len(accounts_tuple))
     sid_extract = json_value("metadata", "'$.scenario_id'", dialect)
     cur = conn.cursor()
     try:
@@ -424,10 +425,12 @@ class ScenarioContext:
         sid_extract = json_value(
             "metadata", "'$.scenario_id'", self.dialect,
         )
-        placeholder = (
-            "%s" if self.dialect is Dialect.POSTGRES
-            else ":1"
-        )
+        if self.dialect is Dialect.POSTGRES:
+            placeholder = "%s"
+        elif self.dialect is Dialect.DUCKDB:
+            placeholder = "?"
+        else:
+            placeholder = ":1"
         total = 0
         cur = conn.cursor()
         try:

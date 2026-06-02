@@ -685,8 +685,9 @@ def aiosqlite_pool() -> Iterator[AsyncConnectionPool]:
     import sqlite3
     import tempfile
 
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
+    os.unlink(path)
     conn = duckdb.connect(path)
     conn.execute("CREATE TABLE t (id INTEGER, name TEXT, amount REAL)")
     conn.executemany(

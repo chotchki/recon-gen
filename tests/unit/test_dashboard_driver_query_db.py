@@ -52,8 +52,9 @@ def sqlite_cfg() -> Iterator["Config"]:
     """Spin up a tiny SQLite-backed cfg with one table. ``query_db_via_cfg``
     opens / closes the connection per call, so the test fixture only needs
     to plant the data + return the cfg."""
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
+    os.unlink(path)
     conn = duckdb.connect(path)
     conn.execute(
         "CREATE TABLE accounts ("

@@ -28,8 +28,9 @@ if TYPE_CHECKING:
 
 @pytest.fixture
 def planted_inv_sqlite() -> Iterator["Config"]:
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
+    os.unlink(path)
     conn = duckdb.connect(path)
 
     # Volume Anomalies matview — rows with varying z_score across

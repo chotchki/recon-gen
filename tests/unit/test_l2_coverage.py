@@ -71,9 +71,10 @@ def seeded_pool() -> Iterator[AsyncConnectionPool]:
     Every other L2-declared primitive is fed nothing too, so the
     map should record those as ``present=False, count=0``.
     """
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
 
+    os.unlink(path)
     conn = duckdb.connect(path)
     conn.execute(
         "CREATE TABLE coverage_test_transactions ("

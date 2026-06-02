@@ -38,8 +38,9 @@ def planted_exec_sqlite() -> Iterator["Config"]:
     """Spin up a SQLite with synthetic transaction summary rows. Values
     chosen so the KPI aggregates have non-trivial sums + the per-day +
     per-rail combinatorial stays visible."""
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
+    os.unlink(path)
     conn = duckdb.connect(path)
     # Mirrors EXEC_TRANSACTION_SUMMARY_CONTRACT — 5 columns.
     conn.execute(

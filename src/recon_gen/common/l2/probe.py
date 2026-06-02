@@ -243,13 +243,14 @@ def _where_for_kind(
 def _placeholder(dialect: Dialect) -> Callable[[int], str]:
     """Driver-specific positional placeholder.
 
-    psycopg / aiosqlite use ``%s`` / ``?``; Oracle binds positional via
-    ``:1`` / ``:2`` / etc. The factory returns ``"?"`` / ``"%s"`` for
-    indexed PG/SQLite (ignores the index since they're positional) and
-    ``f":{i+1}"`` for Oracle.
+    psycopg uses ``%s``; DuckDB uses ``?``; Oracle binds positional via
+    ``:1`` / ``:2`` / etc. The factory returns ``"?"`` for DuckDB,
+    ``"%s"`` for Postgres, and ``f":{i+1}"`` for Oracle.
     """
     if dialect is Dialect.ORACLE:
         return lambda i: f":{i + 1}"
+    if dialect is Dialect.DUCKDB:
+        return lambda _i: "?"
     return lambda _i: "%s"
 
 

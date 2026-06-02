@@ -75,11 +75,6 @@ prod = [
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.18",
     "httpx>=0.27",
-    # Async DB drivers. aiosqlite wraps stdlib sqlite3 for the async
-    # path; aiosqlitepool mitigates aiosqlite#258 thread-lock leak on
-    # per-request connect+close. (was [serve])
-    "aiosqlite>=0.19",
-    "aiosqlitepool>=1.0.0",
     # PG driver — psycopg3 with [pool] for AsyncConnectionPool used
     # by the App2 server to bound DB concurrency. (was [demo])
     "psycopg[binary,pool]>=3.1",
@@ -159,11 +154,6 @@ dev = [
     # spec).
     "testcontainers[postgres,oracle]>=3.7",
     "psycopg[binary,pool]>=3.1",
-    "aiosqlite>=0.19",
-    # aiosqlitepool — connection pool wrapper for aiosqlite.
-    # Mitigates aiosqlite#258 thread-lock leak on per-request connect+close
-    # patterns. See common/db.py::_AsyncSqlitePool for the integration.
-    "aiosqlitepool>=1.0.0",
     # P.9d — oracledb thin client so the e2e harness can connect to
     # an Oracle dialect config without a separate `[demo-oracle]` install.
     "oracledb>=2.0",
@@ -223,21 +213,15 @@ e2e = [
     "playwright>=1.40",
     # X.2.u.3 — the browser e2e suite is now parametrized over
     # [qs, app2]: App2Driver serves the bundled HTMX renderer in-process
-    # (common/html/server.py imports starlette), and `serving(...)` with a
-    # live-DB fetcher uses the aiosqlite async driver for SQLite cfgs. So
-    # the App2 server stack is a hard dep of `pytest tests/e2e/ -m browser`
-    # — keep this list in sync with [serve]. (Caught by the nightly
+    # (common/html/server.py imports starlette). So the App2 server stack
+    # is a hard dep of `pytest tests/e2e/ -m browser`
+    # — keep this list in sync with [prod]. (Caught by the nightly
     # e2e-pg-browser cron: `uv sync --extra e2e` without these →
     # ModuleNotFoundError: No module named 'starlette' at collection.)
     "starlette>=1.1.0",
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.18",
     "httpx>=0.27",
-    "aiosqlite>=0.19",
-    # aiosqlitepool — connection pool wrapper for aiosqlite.
-    # Mitigates aiosqlite#258 thread-lock leak on per-request connect+close
-    # patterns. See common/db.py::_AsyncSqlitePool for the integration.
-    "aiosqlitepool>=1.0.0",
     # BF.9 — same mirror as [dev]; the e2e suite spins App2Driver
     # which hits the studio editor's markdown-preview route in some
     # cells. Keep in sync with [serve] + [dev].
