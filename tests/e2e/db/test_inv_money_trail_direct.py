@@ -3,11 +3,10 @@
 Decomposed from `tests/e2e/test_inv_dashboard_agreement.py`'s
 `test_invariant_three_way_agreement[money_trail]` cell.
 
-Same isolated-cfg + seeded-l2-db setup as the anomaly producer
-(`test_inv_anomaly_direct.py`); per-module setup re-runs the seed
-which is idempotent. Both modules share the `inv_dashboard_agreement`
-xdist group so they pin to the same worker — the DB-side schema is
-shared across them, no race on DROP CASCADE.
+CB.7 (2026-06-02): swapped hand-rolled `isolated_inv_cfg` for the
+canonical `db_cfg` fixture (tests/e2e/db/conftest.py). The
+per-worker isolation makes the xdist_group pinning unnecessary —
+each worker seeds its own prefix in parallel; no DROP CASCADE race.
 """
 
 from __future__ import annotations
@@ -41,6 +40,7 @@ from tests.audit._matview_extract import (  # noqa: E402
     distinct_money_trail_roots,
     money_trail_matview_row_keys,
 )
+from tests._marks import writes  # noqa: E402
 from tests.e2e._agreement import write_rendered_rows  # noqa: E402
 from tests.e2e._agreement_helpers import (  # noqa: E402
     l2_yaml_for_test,
@@ -52,10 +52,9 @@ if TYPE_CHECKING:
     from recon_gen.common.spine.money_trail import MoneyTrailGenerator
 
 
-pytestmark = [
-    pytest.mark.e2e,
-    pytest.mark.xdist_group("inv_dashboard_agreement"),
-]
+# CB.7 — xdist_group dropped: `db_cfg` gives each worker its own prefix,
+# so concurrent module fixtures don't race.
+pytestmark = [pytest.mark.e2e]
 
 
 _TODAY = today_anchor()
@@ -68,8 +67,6 @@ _MONEY_TRAIL_AMOUNT = 100.0
 # Deterministic root — the MoneyTrailGenerator's transfer-id scheme
 # is `xfer-money-trail-{index}`; root is `xfer-money-trail-0`.
 _PLANTED_CHAIN_ROOT = "xfer-money-trail-0"
-
-_ISOLATION_SUFFIX = "iagree"
 
 
 def _plant_anchor_day() -> date:
@@ -91,63 +88,33 @@ def _build_money_trail_generator(
 
 
 @pytest.fixture(scope="module")
-def isolated_inv_cfg(cfg: "Config") -> "Iterator[Config]":
-    from dataclasses import replace
-
-    iso = replace(
-        cfg,
-        db_table_prefix=f"{cfg.db_table_prefix}_{_ISOLATION_SUFFIX}",
-        deployment_name=f"{cfg.deployment_name}-{_ISOLATION_SUFFIX}",
-    )
-    yield iso
-    try:
-        teardown_conn = connect_demo_db(iso)
-    except Exception as exc:  # noqa: BLE001
-        print(f"teardown connect failed: {exc!r}")
-        return
-    try:
-        from recon_gen.common.l2.schema import emit_schema_drop_sql
-        clean_sql = emit_schema_drop_sql(
-            _INSTANCE, prefix=iso.db_table_prefix, dialect=iso.dialect,
-        )
-        with teardown_conn.cursor() as cur:
-            execute_script(cur, clean_sql, dialect=iso.dialect)
-        teardown_conn.commit()
-    except Exception as exc:  # noqa: BLE001
-        print(f"teardown clean failed: {exc!r}")
-    finally:
-        teardown_conn.close()
-
-
-@pytest.fixture(scope="module")
-def seeded_l2_db(isolated_inv_cfg: "Config") -> None:
+def seeded_l2_db(db_cfg: "Config") -> None:
     """Apply schema + broad seed + money_trail spine plants + matview
-    refresh. Module-scoped — sibling anomaly producer shares the seed
-    via the xdist_group worker pinning."""
+    refresh. CB.7 — uses canonical `db_cfg` per-worker isolation."""
     from tests.e2e._seed_helpers import apply_db_seed
 
-    conn = connect_demo_db(isolated_inv_cfg)
+    conn = connect_demo_db(db_cfg)
     try:
         apply_db_seed(
             conn, _INSTANCE,
-            prefix=isolated_inv_cfg.db_table_prefix,
+            prefix=db_cfg.db_table_prefix,
             mode="l1_plus_broad",
             today=_TODAY,
-            dialect=isolated_inv_cfg.dialect,
+            dialect=db_cfg.dialect,
             include_baseline=False,
         )
         anchor = _plant_anchor_day()
-        mt_gen = _build_money_trail_generator(isolated_inv_cfg, anchor)
+        mt_gen = _build_money_trail_generator(db_cfg, anchor)
         mt_gen.emit(conn)
         conn.commit()
         refresh_sql = refresh_matviews_sql(
             _INSTANCE,
-            prefix=isolated_inv_cfg.db_table_prefix,
-            dialect=isolated_inv_cfg.dialect,
+            prefix=db_cfg.db_table_prefix,
+            dialect=db_cfg.dialect,
         )
         with conn.cursor() as cur:
             execute_script(
-                cur, refresh_sql, dialect=isolated_inv_cfg.dialect,
+                cur, refresh_sql, dialect=db_cfg.dialect,
             )
         conn.commit()
     finally:
@@ -155,8 +122,8 @@ def seeded_l2_db(isolated_inv_cfg: "Config") -> None:
 
 
 @pytest.fixture
-def db_conn(isolated_inv_cfg: "Config") -> "Iterator[Any]":
-    conn = connect_demo_db(isolated_inv_cfg)
+def db_conn(db_cfg: "Config") -> "Iterator[Any]":
+    conn = connect_demo_db(db_cfg)
     try:
         yield conn
     finally:
@@ -183,10 +150,11 @@ def _serialize_keys(keys: "set[tuple[Any, ...]]") -> list[list[Any]]:
     return sorted([list(t) for t in keys])
 
 
+@writes()
 def test_money_trail_direct_extract(
     seeded_l2_db: None,
     db_conn: Any,
-    isolated_inv_cfg: "Config",
+    db_cfg: "Config",
 ) -> None:
     """Direct root-filtered matview SELECT + spine `detect()` for
     money_trail. Writes both as artifacts for the validator.
@@ -197,7 +165,7 @@ def test_money_trail_direct_extract(
     time per the analyst's root pick.
     """
     _ = seeded_l2_db
-    prefix = isolated_inv_cfg.db_table_prefix
+    prefix = db_cfg.db_table_prefix
 
     roots = distinct_money_trail_roots(db_conn, prefix)
     assert _PLANTED_CHAIN_ROOT in roots, (

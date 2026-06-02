@@ -47,6 +47,7 @@ from tests.audit._matview_extract import (  # noqa: E402
     anomaly_matview_row_keys,
     count_anomaly_matview_rows,
 )
+from tests._marks import writes  # noqa: E402
 from tests.e2e._agreement import write_rendered_rows  # noqa: E402
 from tests.e2e._agreement_helpers import (  # noqa: E402
     l2_yaml_for_test,
@@ -58,10 +59,12 @@ if TYPE_CHECKING:
     from recon_gen.common.spine.anomaly import AnomalyGenerator
 
 
-pytestmark = [
-    pytest.mark.e2e,
-    pytest.mark.xdist_group("inv_dashboard_agreement"),
-]
+# CB.7 (2026-06-02) — removed `pytest.mark.xdist_group(...)` previously
+# pinned this module to a single worker. The new `db_cfg` fixture
+# (tests/e2e/db/conftest.py) gives every xdist worker its own
+# per-worker prefix, so parametrize cells distributing across workers
+# no longer race on DROP CASCADE — each worker seeds its own prefix.
+pytestmark = [pytest.mark.e2e]
 
 
 _TODAY = today_anchor()
@@ -78,11 +81,6 @@ _DEFAULT_SIGMA = 2.0
 _ANOMALY_BASELINE_PAIRS = 100
 _ANOMALY_BASELINE_AMOUNT = 100.0
 _ANOMALY_SPIKE_MAGNITUDE = 100_000.0
-
-# CB.5 stage 2: shared isolation suffix across the L2 producer +
-# validator chain. Same shape pre-CB.5 fixtures used.
-_ISOLATION_SUFFIX = "iagree"
-
 
 def _plant_anchor_day() -> date:
     return _TODAY - timedelta(days=2)
@@ -104,74 +102,38 @@ def _build_anomaly_generator(
 
 
 @pytest.fixture(scope="module")
-def isolated_inv_cfg(cfg: "Config") -> "Iterator[Config]":
-    """Per-module cfg with isolated `<prefix>_iagree` namespace —
-    mirrors the pre-CB.5 fixture so the destructive seed doesn't
-    touch the runner's shared seed."""
-    from dataclasses import replace
-
-    iso = replace(
-        cfg,
-        db_table_prefix=f"{cfg.db_table_prefix}_{_ISOLATION_SUFFIX}",
-        deployment_name=f"{cfg.deployment_name}-{_ISOLATION_SUFFIX}",
-    )
-    yield iso
-    # Teardown — DROP CASCADE the isolated schema. Best-effort:
-    # connect failures don't break the chain (a sibling tier's
-    # producer might still need to read from it).
-    try:
-        teardown_conn = connect_demo_db(iso)
-    except Exception as exc:  # noqa: BLE001
-        print(
-            f"isolated_inv_cfg teardown: connect failed: {exc!r}; "
-            f"tables {iso.db_table_prefix}_* may persist."
-        )
-        return
-    try:
-        from recon_gen.common.l2.schema import emit_schema_drop_sql
-        clean_sql = emit_schema_drop_sql(
-            _INSTANCE, prefix=iso.db_table_prefix, dialect=iso.dialect,
-        )
-        with teardown_conn.cursor() as cur:
-            execute_script(cur, clean_sql, dialect=iso.dialect)
-        teardown_conn.commit()
-    except Exception as exc:  # noqa: BLE001
-        print(f"isolated_inv_cfg teardown clean failed: {exc!r}")
-    finally:
-        teardown_conn.close()
-
-
-@pytest.fixture(scope="module")
-def seeded_l2_db(isolated_inv_cfg: "Config") -> None:
+def seeded_l2_db(db_cfg: "Config") -> None:
     """Apply schema + broad seed + spine plants + matview refresh
-    against the isolated cfg. Module-scoped — both anomaly + money_trail
-    producer modules share this via xdist_group ordering."""
+    against the per-worker isolated `db_cfg`. CB.7: replaced the
+    hand-rolled `isolated_inv_cfg` + `_iagree` suffix with the
+    canonical `db_cfg` injection (per-worker prefix from
+    `tests/e2e/db/conftest.py`)."""
     from tests.e2e._seed_helpers import apply_db_seed
 
-    conn = connect_demo_db(isolated_inv_cfg)
+    conn = connect_demo_db(db_cfg)
     try:
         apply_db_seed(
             conn, _INSTANCE,
-            prefix=isolated_inv_cfg.db_table_prefix,
+            prefix=db_cfg.db_table_prefix,
             mode="l1_plus_broad",
             today=_TODAY,
-            dialect=isolated_inv_cfg.dialect,
+            dialect=db_cfg.dialect,
             include_baseline=False,
         )
         # AT.5.b — L2 plants via the spine generator.
         anchor = _plant_anchor_day()
-        anomaly_gen = _build_anomaly_generator(isolated_inv_cfg, anchor)
+        anomaly_gen = _build_anomaly_generator(db_cfg, anchor)
         anomaly_gen.emit(conn)
         conn.commit()
         # Refresh again so matviews see the L2 plants.
         refresh_sql = refresh_matviews_sql(
             _INSTANCE,
-            prefix=isolated_inv_cfg.db_table_prefix,
-            dialect=isolated_inv_cfg.dialect,
+            prefix=db_cfg.db_table_prefix,
+            dialect=db_cfg.dialect,
         )
         with conn.cursor() as cur:
             execute_script(
-                cur, refresh_sql, dialect=isolated_inv_cfg.dialect,
+                cur, refresh_sql, dialect=db_cfg.dialect,
             )
         conn.commit()
     finally:
@@ -179,9 +141,10 @@ def seeded_l2_db(isolated_inv_cfg: "Config") -> None:
 
 
 @pytest.fixture
-def db_conn(isolated_inv_cfg: "Config") -> "Iterator[Any]":
-    """Function-scoped raw DB connection (per-driver type union)."""
-    conn = connect_demo_db(isolated_inv_cfg)
+def db_conn(db_cfg: "Config") -> "Iterator[Any]":
+    """Function-scoped raw DB connection against the per-worker
+    `db_cfg`."""
+    conn = connect_demo_db(db_cfg)
     try:
         yield conn
     finally:
@@ -231,10 +194,11 @@ def _normalise_row(row: list[Any]) -> list[Any]:
     return out
 
 
+@writes()
 def test_anomaly_direct_extract(
     seeded_l2_db: None,
     db_conn: Any,
-    isolated_inv_cfg: "Config",
+    db_cfg: "Config",
 ) -> None:
     """Direct σ-filtered matview SELECT + spine `detect()` for the
     anomaly invariant. Writes both as artifacts for the validator.
@@ -245,9 +209,9 @@ def test_anomaly_direct_extract(
     matview SELECT to mirror the dashboard's WHERE-clause pushdown.
     """
     _ = seeded_l2_db
-    prefix = isolated_inv_cfg.db_table_prefix
+    prefix = db_cfg.db_table_prefix
     anchor = _plant_anchor_day()
-    gen = _build_anomaly_generator(isolated_inv_cfg, anchor)
+    gen = _build_anomaly_generator(db_cfg, anchor)
     # The expected anomaly singleton — see
     # `expected_l2_audit_counts` for the same shape. Local construction
     # avoids requiring a MoneyTrailGenerator from the anomaly producer.
