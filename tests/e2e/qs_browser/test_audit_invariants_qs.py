@@ -88,10 +88,19 @@ def qs_dashboard_id(
 
 
 @pytest.fixture(scope="module")
-def qs_client(
+def dialect_qs_client(
     dialect_cfg: "tuple[Config, Path, Dialect]",
 ) -> "QuickSightClient":
-    """Boto3 QuickSight client for this dialect's dashboard region."""
+    """Boto3 QuickSight client for this dialect's dashboard region.
+
+    CB.7-followup (2026-06-02): renamed from `qs_client` to avoid
+    shadowing the session-scoped `qs_client` in
+    `tests/e2e/conftest.py`. The session-autouse
+    `_qs_pre_warm_dashboards` does `request.getfixturevalue("qs_client")`
+    and with the shadow it found this module-scoped one + raised
+    `ScopeMismatch` at every test setup. The cascade was masking
+    that — now exposed by the loadgroup unwind.
+    """
     import boto3
     cfg, _, _ = dialect_cfg
     return boto3.client(  # pyright: ignore[reportUnknownMemberType]: boto3.client dynamic service overload
@@ -104,7 +113,7 @@ def qs_driver(
     request: pytest.FixtureRequest,
     dialect_cfg: "tuple[Config, Path, Dialect]",
     qs_dashboard_id: str,
-    qs_client: "QuickSightClient",
+    dialect_qs_client: "QuickSightClient",
 ) -> "Iterator[QsEmbedDriver | None]":
     """Function-scoped QS driver. Yields `None` when QS is
     unavailable (dashboard not deployed, `RECON_E2E_USER_ARN` unset);
@@ -112,11 +121,11 @@ def qs_driver(
     """
     cfg, _, _ = dialect_cfg
     try:
-        qs_client.describe_dashboard(
+        dialect_qs_client.describe_dashboard(
             AwsAccountId=cfg.aws_account_id,
             DashboardId=qs_dashboard_id,
         )
-    except qs_client.exceptions.ResourceNotFoundException:
+    except dialect_qs_client.exceptions.ResourceNotFoundException:
         yield None
         return
     from tests.e2e._drivers._lifecycle import qs_driver_or_none
