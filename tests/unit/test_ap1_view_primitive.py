@@ -46,6 +46,7 @@ from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 _SPEC_EXAMPLE = Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
 _PREFIX = "spec_example"
@@ -213,11 +214,12 @@ def _kpi_rowcount_for_day(conn: duckdb.DuckDBPyConnection, picked: date) -> int:
     """The Daily Statement KPI summary, narrowed to one balance date — the
     query that returned 0 rows under C1. Mirrors the `<<$pL1DsBalanceDate>>`
     single-date pushdown."""
-    (count,) = conn.execute(
+    count = fetch_scalar(
+        conn,
         f"SELECT COUNT(*) FROM {_PREFIX}_current_daily_balances "
         f"WHERE account_id = 'acct-view' AND date(business_day_start) = date(?)",
         (picked.isoformat(),),
-    ).fetchone()
+    )
     return int(count)
 
 

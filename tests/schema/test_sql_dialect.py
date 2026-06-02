@@ -8,7 +8,6 @@ Oracle 19c-compatible equivalent.
 
 from __future__ import annotations
 
-import duckdb
 
 from typing import Any, Callable
 

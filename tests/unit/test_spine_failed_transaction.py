@@ -24,6 +24,7 @@ from recon_gen.common.spine import (
     FailedTransactionGenerator,
 )
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 
 _SPEC_EXAMPLE = (
@@ -127,9 +128,7 @@ def test_untagged_emit_writes_null_metadata() -> None:
     try:
         gen.emit(conn)
         conn.commit()
-        metadata = conn.execute(
-            f"SELECT metadata FROM {_PREFIX}_transactions",
-        ).fetchone()[0]
+        metadata = fetch_scalar(conn, f"SELECT metadata FROM {_PREFIX}_transactions",)
     finally:
         conn.close()
     assert metadata is None
@@ -141,10 +140,8 @@ def test_tagged_emit_writes_scenario_id() -> None:
     try:
         gen.emit(conn, scenario_id="test-ay2b-failed")
         conn.commit()
-        sid = conn.execute(
-            f"SELECT json_extract_string(metadata, '$.scenario_id') "
-            f"FROM {_PREFIX}_transactions",
-        ).fetchone()[0]
+        sid = fetch_scalar(conn, f"SELECT json_extract_string(metadata, '$.scenario_id') "
+            f"FROM {_PREFIX}_transactions",)
     finally:
         conn.close()
     assert sid == "test-ay2b-failed"

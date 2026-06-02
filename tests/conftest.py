@@ -12,7 +12,6 @@ unchanged.
 
 from __future__ import annotations
 
-import duckdb
 import json
 import os
 import secrets
@@ -153,6 +152,7 @@ def _count_live_sqlite_connections() -> int:
     connections are reaped before the count. aiosqlite import is
     soft — environments without it count only stdlib sqlite3 conns.
     """
+    import duckdb as _duckdb  # noqa: PLC0415
     import gc as _gc  # noqa: PLC0415
     import sqlite3 as _sqlite3  # noqa: PLC0415
 
@@ -510,7 +510,9 @@ def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:  # typ
         # mutates an in-process structure with no DB) are exempt
         # since the `db_cfg` fixture is e2e-tier only.
         if "writes" in markers and tier_value != "unit":
-            fixture_names = set(getattr(item, "fixturenames", ()))
+            fixture_names: set[str] = set(
+                getattr(item, "fixturenames", ()) or (),
+            )
             if "db_cfg" not in fixture_names:
                 errors.append(
                     f"{item.nodeid}: `@writes()` requires the "

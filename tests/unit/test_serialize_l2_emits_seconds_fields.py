@@ -46,6 +46,7 @@ from recon_gen.common.l2.primitives import (
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.l2.serializer import serialize_l2
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 _SPEC_EXAMPLE = Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
 _PREFIX = "spec_example"
@@ -226,9 +227,7 @@ def test_serialize_l2_drives_stuck_pending_matview_end_to_end() -> None:
         )
         conn.commit()
 
-        count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_stuck_pending"
-        ).fetchone()[0]
+        count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_stuck_pending")
     finally:
         conn.close()
 
@@ -292,9 +291,7 @@ def test_serialize_l2_drives_stuck_unbundled_matview_end_to_end() -> None:
         )
         conn.commit()
 
-        count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_stuck_unbundled"
-        ).fetchone()[0]
+        count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_stuck_unbundled")
     finally:
         conn.close()
 

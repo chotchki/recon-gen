@@ -31,6 +31,7 @@ from recon_gen.common.spine import (
     TransferTemplateGenerator,
 )
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 
 _SPEC_EXAMPLE = (
@@ -188,11 +189,9 @@ def test_tagged_emit_tags_every_leg() -> None:
     try:
         gen.emit(conn, scenario_id="test-ay2b-transfer-template")
         conn.commit()
-        tagged = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+        tagged = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
             f"WHERE json_extract_string(metadata, '$.scenario_id') = ?",
-            ("test-ay2b-transfer-template",),
-        ).fetchone()[0]
+            ("test-ay2b-transfer-template",),)
     finally:
         conn.close()
     assert tagged == 2

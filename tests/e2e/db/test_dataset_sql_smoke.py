@@ -23,7 +23,6 @@ before deploy; CI gating on this prevents a re-occurrence.
 
 from __future__ import annotations
 
-import duckdb
 
 import re
 from pathlib import Path

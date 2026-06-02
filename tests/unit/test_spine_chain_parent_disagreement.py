@@ -33,6 +33,7 @@ from recon_gen.common.spine import (
     LedgerDriftInvariant,
 )
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 
 _SPEC_EXAMPLE = (
@@ -194,12 +195,8 @@ def test_emit_does_not_trip_drift_single_edge_property() -> None:
         gen.emit(conn)
         conn.commit()
         _refresh(conn)
-        drift_count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_drift",
-        ).fetchone()[0]
-        ledger_drift_count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_ledger_drift",
-        ).fetchone()[0]
+        drift_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_drift",)
+        ledger_drift_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_ledger_drift",)
         assert DriftInvariant().detect(conn) == set()
         assert LedgerDriftInvariant().detect(conn) == set()
     finally:
@@ -240,14 +237,10 @@ def test_tagged_emit_writes_scenario_id_in_metadata() -> None:
     try:
         gen.emit(conn, scenario_id="test-ax1")
         conn.commit()
-        tagged = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+        tagged = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
             f"WHERE json_extract_string(metadata, '$.scenario_id') = ?",
-            ("test-ax1",),
-        ).fetchone()[0]
-        total = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions",
-        ).fetchone()[0]
+            ("test-ax1",),)
+        total = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions",)
     finally:
         conn.close()
     assert tagged == total > 0, (

@@ -38,6 +38,7 @@ from recon_gen.common.spine import (
     LedgerDriftInvariant,
 )
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 
 _SPEC_EXAMPLE = (
@@ -276,12 +277,10 @@ def test_missing_emit_writes_one_less_parent_than_expected() -> None:
         gen.emit(conn)
         conn.commit()
         # Count distinct parent_transfer_ids on the child Transfer.
-        n_parents = conn.execute(
-            f"SELECT COUNT(DISTINCT transfer_parent_id) "
+        n_parents = fetch_scalar(conn, f"SELECT COUNT(DISTINCT transfer_parent_id) "
             f"FROM {_PREFIX}_transactions "
             f"WHERE transfer_id = ? AND transfer_parent_id IS NOT NULL",
-            (gen.child_transfer_id,),
-        ).fetchone()[0]
+            (gen.child_transfer_id,),)
     finally:
         conn.close()
     assert n_parents == gen.parent_count
@@ -295,12 +294,10 @@ def test_extra_emit_writes_one_more_parent_than_expected() -> None:
     try:
         gen.emit(conn)
         conn.commit()
-        n_parents = conn.execute(
-            f"SELECT COUNT(DISTINCT transfer_parent_id) "
+        n_parents = fetch_scalar(conn, f"SELECT COUNT(DISTINCT transfer_parent_id) "
             f"FROM {_PREFIX}_transactions "
             f"WHERE transfer_id = ? AND transfer_parent_id IS NOT NULL",
-            (gen.child_transfer_id,),
-        ).fetchone()[0]
+            (gen.child_transfer_id,),)
     finally:
         conn.close()
     assert gen.expected_parent_count is not None
@@ -353,17 +350,13 @@ def test_tagged_emit_writes_scenario_id_on_every_row() -> None:
         gen.emit(conn, scenario_id="test-ax3-extra")
         conn.commit()
         # Every parent + child leg should carry the tag.
-        tagged = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+        tagged = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
             f"WHERE account_id = ? "
             f"AND json_extract_string(metadata, '$.scenario_id') = ?",
-            (gen.account_id, "test-ax3-extra"),
-        ).fetchone()[0]
-        total = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+            (gen.account_id, "test-ax3-extra"),)
+        total = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
             f"WHERE account_id = ?",
-            (gen.account_id,),
-        ).fetchone()[0]
+            (gen.account_id,),)
     finally:
         conn.close()
     assert tagged == total > 0

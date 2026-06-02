@@ -82,6 +82,7 @@ from recon_gen.common.spine import (
 )
 from recon_gen.common.sql import Dialect
 from recon_gen.common.tree import DateView
+from tests._test_helpers import fetch_scalar
 
 _SPEC_EXAMPLE = Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
 _PREFIX = "spec_example"
@@ -593,9 +594,7 @@ def test_anomaly_plant_is_multi_row_by_construction() -> None:
     try:
         gen.emit(conn)
         conn.commit()
-        tx_count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions",
-        ).fetchone()[0]
+        tx_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions",)
     finally:
         conn.close()
     # 8 baseline pairs * 2 legs/pair + 1 spike pair * 2 legs = 18 rows
@@ -626,9 +625,7 @@ def test_anomaly_emission_does_not_trip_drift_without_balance_rows() -> None:
         conn.commit()
         _refresh(conn)
         # Check that drift matview is empty for these accounts.
-        drift_rows = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_drift",
-        ).fetchone()[0]
+        drift_rows = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_drift",)
     finally:
         conn.close()
     assert drift_rows == 0, (

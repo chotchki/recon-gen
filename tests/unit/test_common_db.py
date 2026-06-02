@@ -12,7 +12,7 @@ the import-error branches in ``connect_demo_db`` are covered here with
 
 from __future__ import annotations
 
-from pathlib import Path
+
 from typing import Any
 
 import pytest
@@ -22,7 +22,6 @@ from tests._test_helpers import make_test_config
 from recon_gen.common.db import (
     AsyncConnectionPool as AsyncConnectionPool,  # re-exported for protocol smoke
     connect_demo_db,
-    execute_script,
     make_connection_pool,
     oracle_dsn,
     split_oracle_script,

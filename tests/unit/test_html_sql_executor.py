@@ -685,7 +685,6 @@ def aiosqlite_pool() -> Iterator[AsyncConnectionPool]:
     """
     import asyncio
     import os
-    import sqlite3
     import tempfile
 
     fd, path = tempfile.mkstemp(suffix=".duckdb")

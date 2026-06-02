@@ -143,7 +143,6 @@ def aiosqlite_pool() -> Iterator[AsyncConnectionPool]:
     production semantics. Cleanup tears down the file at fixture
     exit.
     """
-    import sqlite3
     import tempfile
     import os
 
@@ -322,7 +321,6 @@ def test_make_tree_db_fetcher_retargets_to_alt_prefix(
     leading ``<base>_`` token at request time. Without this, Clean
     and Violation Tour links render identical data — the operator's
     teaching comparison teaches nothing."""
-    import sqlite3
 
     db_path = tmp_path / "alt_prefix.sqlite"
     conn = duckdb.connect(str(db_path))
@@ -502,7 +500,6 @@ def aiosqlite_sankey_pool() -> Iterator[AsyncConnectionPool]:
     has work to do — the wrap should sum them; otherwise the per-pair
     aggregation step is a silent no-op.
     """
-    import sqlite3
     import tempfile
     import os
 

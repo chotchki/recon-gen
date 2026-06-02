@@ -47,6 +47,7 @@ from recon_gen.common.spine import (
     ViolationGenerator,
 )
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 _SPEC_EXAMPLE = (
     Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
@@ -250,9 +251,7 @@ def test_generator_emit_writes_baseline_plus_spike_transactions() -> None:
     try:
         gen.emit(conn)
         conn.commit()
-        tx_count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions",
-        ).fetchone()[0]
+        tx_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions",)
     finally:
         conn.close()
     # 8 baseline pairs * 2 legs + 1 spike pair * 2 legs = 18

@@ -12,7 +12,6 @@ see tests/unit/test_common_db.py) rather than relying on
 """
 from __future__ import annotations
 
-import duckdb
 
 import asyncio
 from collections.abc import Mapping

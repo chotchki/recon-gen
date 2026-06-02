@@ -321,7 +321,6 @@ def test_phantom_rail_plant_surfaces_on_etl_triage(
     should contain the planted rail name."""
     import asyncio
     import os
-    import sqlite3
     import tempfile
 
     from recon_gen.common.db import (

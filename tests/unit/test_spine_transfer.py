@@ -46,6 +46,7 @@ from recon_gen.common.spine import (
 )
 from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 _SPEC_EXAMPLE = (
     Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
@@ -173,12 +174,8 @@ def test_ledger_simulation_with_transfers_only_no_accounts() -> None:
     try:
         sim.emit(conn)
         conn.commit()
-        tx_count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions",
-        ).fetchone()[0]
-        balance_count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances",
-        ).fetchone()[0]
+        tx_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions",)
+        balance_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances",)
     finally:
         conn.close()
     assert tx_count == 2  # one row per leg
@@ -299,12 +296,8 @@ def test_mixed_accounts_and_transfers_both_emit() -> None:
     try:
         sim.emit(conn)
         conn.commit()
-        tx_count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions",
-        ).fetchone()[0]
-        balance_count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances",
-        ).fetchone()[0]
+        tx_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions",)
+        balance_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances",)
     finally:
         conn.close()
     # Account fold: 1 leg tx + 1 balance row. Transfer: 2 legs. Total: 3 tx + 1 balance.
@@ -386,9 +379,7 @@ def test_multi_leg_unbalanced_transfer_is_representable() -> None:
     try:
         sim.emit(conn)
         conn.commit()
-        n = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions",
-        ).fetchone()[0]
+        n = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions",)
     finally:
         conn.close()
     assert n == 3
@@ -428,9 +419,7 @@ def test_amount_sign_routes_direction(
     try:
         sim.emit(conn)
         conn.commit()
-        d = conn.execute(
-            f"SELECT amount_direction FROM {_PREFIX}_transactions",
-        ).fetchone()[0]
+        d = fetch_scalar(conn, f"SELECT amount_direction FROM {_PREFIX}_transactions",)
     finally:
         conn.close()
     assert d == expected_direction

@@ -303,7 +303,6 @@ def _build_l2_sqlite(reference_path: Path) -> tuple[object, str]:
     its source rows from the planted scenario.
     """
     import json as _json
-    import sqlite3
     from datetime import datetime as _datetime
 
     import yaml as _yaml

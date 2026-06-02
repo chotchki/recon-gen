@@ -2102,7 +2102,7 @@ def _write_qs_cfg_for_variant(
     import yaml  # noqa: PLC0415 — lazy: yaml is already a tx dep but only this branch needs it
 
     with base_cfg_path.open() as f:
-        raw = yaml.safe_load(f) or {}
+        raw: Any = yaml.safe_load(f) or {}
     if not isinstance(raw, dict):
         raise RuntimeError(
             f"_write_qs_cfg_for_variant: base cfg {base_cfg_path} did not "

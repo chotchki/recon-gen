@@ -50,6 +50,7 @@ from recon_gen.common.spine import (
 )
 from recon_gen.common.spine._emit_helpers import insert_tx, ts
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 _SPEC_EXAMPLE = (
     Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
@@ -371,9 +372,7 @@ def test_generator_emit_writes_no_balance_rows() -> None:
     try:
         gen.emit(conn)
         conn.commit()
-        balance_count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances",
-        ).fetchone()[0]
+        balance_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances",)
     finally:
         conn.close()
     assert balance_count == 0

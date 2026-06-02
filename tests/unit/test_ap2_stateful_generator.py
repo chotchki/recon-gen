@@ -75,7 +75,6 @@ _DIALECT = Dialect.DUCKDB
 
 def _fresh_db() -> duckdb.DuckDBPyConnection:
     conn = duckdb.connect(":memory:")
-    (conn)  # STDDEV_SAMP for the windowed matview
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(

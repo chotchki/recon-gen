@@ -73,7 +73,6 @@ from typing import Any  # typing-smell: ignore[explicit-any]: kv values are JSON
 
 from recon_gen.common.sql.dialect import (
     Dialect,
-    bigint_type,
     text_type,
     varchar_type,
 )

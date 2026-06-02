@@ -160,7 +160,6 @@ def test_etl_run_coverage_carries_failures_only_toggle(
     the empty-state / no-pool fallback and skip the toggle markup)."""
     import asyncio  # noqa: PLC0415
     import os  # noqa: PLC0415
-    import sqlite3  # noqa: PLC0415
     import tempfile  # noqa: PLC0415
 
     from recon_gen.common.db import make_connection_pool  # noqa: PLC0415
@@ -382,7 +381,6 @@ def test_coverage_renders_empty_state_when_no_run_this_session_even_with_rows(
     regardless of `total_rows`."""
     import asyncio  # noqa: PLC0415
     import os  # noqa: PLC0415
-    import sqlite3  # noqa: PLC0415
     import tempfile  # noqa: PLC0415
 
     from recon_gen.common.db import make_connection_pool  # noqa: PLC0415

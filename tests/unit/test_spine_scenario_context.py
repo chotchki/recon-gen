@@ -54,6 +54,7 @@ from recon_gen.common.spine import (
     StuckPendingInvariant,
 )
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 
 _SPEC_EXAMPLE = (
@@ -185,14 +186,10 @@ def test_cross_class_colocation_on_same_account_allowed() -> None:
     try:
         ctx.compose(conn, drift_gen, overdraft_gen)
         # No exception → both emits landed. Verify both rows exist.
-        n_drift = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
-            f"WHERE account_id = 'acct-shared' AND id LIKE 'tx-drift-%'",
-        ).fetchone()[0]
-        n_overdraft = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances "
-            f"WHERE account_id = 'acct-shared'",
-        ).fetchone()[0]
+        n_drift = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+            f"WHERE account_id = 'acct-shared' AND id LIKE 'tx-drift-%'",)
+        n_overdraft = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances "
+            f"WHERE account_id = 'acct-shared'",)
         assert n_drift >= 1, "drift generator's rows should land"
         assert n_overdraft >= 1, "overdraft generator's rows should land"
     finally:
@@ -221,27 +218,19 @@ def test_disjoint_claims_compose_and_tag_both_tables() -> None:
     try:
         ctx.compose(conn, drift_gen, money_trail_gen)
         # Every transaction row carries the scenario tag.
-        tx_count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+        tx_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
             f"WHERE json_extract_string(metadata, '$.scenario_id') = ?",
-            ("test-happy",),
-        ).fetchone()[0]
-        tx_total = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions"
-        ).fetchone()[0]
+            ("test-happy",),)
+        tx_total = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions")
         assert tx_count == tx_total > 0, (
             f"transactions: {tx_count} tagged of {tx_total} total — "
             "every emitted tx row must carry the scenario_id"
         )
         # And every daily_balances row.
-        db_count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances "
+        db_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances "
             f"WHERE json_extract_string(metadata, '$.scenario_id') = ?",
-            ("test-happy",),
-        ).fetchone()[0]
-        db_total = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances"
-        ).fetchone()[0]
+            ("test-happy",),)
+        db_total = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances")
         assert db_count == db_total > 0, (
             f"daily_balances: {db_count} tagged of {db_total} total — "
             "AV.1's metadata column should be carrying tags on this table too"
@@ -352,9 +341,7 @@ def test_cleanup_by_scenario_id_is_surgical() -> None:
     try:
         ctx_a.compose(conn, gen_a)
         ctx_b.compose(conn, gen_b)
-        assert conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances",
-        ).fetchone()[0] == 2
+        assert fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances",) == 2
         deleted = ctx_a.cleanup(conn)
         assert deleted == 1, (
             f"Expected 1 row deleted (one daily_balances row); got {deleted}"

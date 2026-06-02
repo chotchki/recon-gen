@@ -47,6 +47,7 @@ from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 _SPEC_EXAMPLE = Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
 _PREFIX = "spec_example"
@@ -178,10 +179,11 @@ def _emit_balance(conn: duckdb.DuckDBPyConnection, *, day: date, money: float) -
 
 
 def _latest_balance_day(conn: duckdb.DuckDBPyConnection) -> date:
-    (raw,) = conn.execute(
+    raw = fetch_scalar(
+        conn,
         f"SELECT MAX(business_day_start) FROM {_PREFIX}_current_daily_balances "
         f"WHERE account_id = 'acct-frame'",
-    ).fetchone()
+    )
     return datetime.strptime(str(raw)[:10], "%Y-%m-%d").date()
 
 

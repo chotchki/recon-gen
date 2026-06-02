@@ -321,7 +321,6 @@ def test_gaps_actually_surface_in_triage_detect_gaps(
     Triage page that consumes the planted rows."""
     import asyncio
     import os
-    import sqlite3
     import tempfile
 
     from recon_gen.common.db import (

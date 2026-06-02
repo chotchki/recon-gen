@@ -26,6 +26,7 @@ from recon_gen.common.spine import (
     SupersessionGenerator,
 )
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 
 _SPEC_EXAMPLE = (
@@ -133,15 +134,11 @@ def test_emit_supersession_pair_satisfies_audit_pdf_filter() -> None:
     try:
         gen.emit(conn)
         conn.commit()
-        n_in_partition = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions WHERE id = ?",
-            (gen.transaction_id,),
-        ).fetchone()[0]
-        n_with_supersedes = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+        n_in_partition = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions WHERE id = ?",
+            (gen.transaction_id,),)
+        n_with_supersedes = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
             f"WHERE id = ? AND supersedes IS NOT NULL",
-            (gen.transaction_id,),
-        ).fetchone()[0]
+            (gen.transaction_id,),)
     finally:
         conn.close()
     assert n_in_partition == 2  # > 1, the partition gate
@@ -159,11 +156,9 @@ def test_tagged_emit_tags_both_rows() -> None:
     try:
         gen.emit(conn, scenario_id="test-ay2b-supersession")
         conn.commit()
-        tagged = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+        tagged = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
             f"WHERE json_extract_string(metadata, '$.scenario_id') = ?",
-            ("test-ay2b-supersession",),
-        ).fetchone()[0]
+            ("test-ay2b-supersession",),)
     finally:
         conn.close()
     assert tagged == 2

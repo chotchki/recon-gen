@@ -34,6 +34,7 @@ from recon_gen.common.spine import (
     MultiXorViolationInvariant,
 )
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 
 _SPEC_EXAMPLE = (
@@ -212,16 +213,12 @@ def test_missed_emit_writes_only_parent() -> None:
     try:
         gen.emit(conn)
         conn.commit()
-        n_parent = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+        n_parent = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
             f"WHERE transfer_id = ?",
-            (gen.parent_transfer_id,),
-        ).fetchone()[0]
-        n_children = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+            (gen.parent_transfer_id,),)
+        n_children = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
             f"WHERE transfer_parent_id = ?",
-            (gen.parent_transfer_id,),
-        ).fetchone()[0]
+            (gen.parent_transfer_id,),)
     finally:
         conn.close()
     assert n_parent == 1
@@ -234,16 +231,12 @@ def test_overlap_emit_writes_parent_plus_two_children() -> None:
     try:
         gen.emit(conn)
         conn.commit()
-        n_parent = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+        n_parent = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
             f"WHERE transfer_id = ?",
-            (gen.parent_transfer_id,),
-        ).fetchone()[0]
-        n_children = conn.execute(
-            f"SELECT COUNT(DISTINCT transfer_id) FROM {_PREFIX}_transactions "
+            (gen.parent_transfer_id,),)
+        n_children = fetch_scalar(conn, f"SELECT COUNT(DISTINCT transfer_id) FROM {_PREFIX}_transactions "
             f"WHERE transfer_parent_id = ?",
-            (gen.parent_transfer_id,),
-        ).fetchone()[0]
+            (gen.parent_transfer_id,),)
     finally:
         conn.close()
     assert n_parent == 1
@@ -308,17 +301,13 @@ def test_overlap_tagged_emit_writes_scenario_id_on_every_row() -> None:
     try:
         gen.emit(conn, scenario_id="test-ax4-overlap")
         conn.commit()
-        tagged = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+        tagged = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
             f"WHERE account_id = ? "
             f"AND json_extract_string(metadata, '$.scenario_id') = ?",
-            (gen.account_id, "test-ax4-overlap"),
-        ).fetchone()[0]
-        total = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+            (gen.account_id, "test-ax4-overlap"),)
+        total = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
             f"WHERE account_id = ?",
-            (gen.account_id,),
-        ).fetchone()[0]
+            (gen.account_id,),)
     finally:
         conn.close()
     assert tagged == total > 0

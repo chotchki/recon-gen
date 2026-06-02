@@ -27,10 +27,8 @@ emitter, the dashboard_check, or both.
 from __future__ import annotations
 
 import asyncio
-import os
 import shutil
 import duckdb
-import tempfile
 from collections.abc import Iterator
 from datetime import date, datetime
 from pathlib import Path

@@ -34,6 +34,7 @@ from recon_gen.common.spine import (
     XorGroupViolationInvariant,
 )
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 
 _SPEC_EXAMPLE = (
@@ -316,12 +317,10 @@ def test_overlap_tagged_emit_writes_scenario_id() -> None:
     try:
         gen.emit(conn, scenario_id="test-ax2-overlap")
         conn.commit()
-        tagged = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+        tagged = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
             f"WHERE transfer_id = ? "
             f"AND json_extract_string(metadata, '$.scenario_id') = ?",
-            (gen.transfer_id, "test-ax2-overlap"),
-        ).fetchone()[0]
+            (gen.transfer_id, "test-ax2-overlap"),)
     finally:
         conn.close()
     assert tagged == 2  # both legs tagged

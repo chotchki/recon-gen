@@ -47,6 +47,7 @@ from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema
 from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 _PREFIX = "spec_example"
 _SPEC_EXAMPLE = (
@@ -254,26 +255,20 @@ def test_replace_config_replaces_existing_rows() -> None:
             l2_json=json.dumps({"rails": [{"name": "A"}]}),
             as_of=datetime(2030, 1, 1),
         )
-        first_count = conn.execute(
-            "SELECT COUNT(*) FROM spec_example_config_kv",
-        ).fetchone()[0]
+        first_count = fetch_scalar(conn, "SELECT COUNT(*) FROM spec_example_config_kv",)
         replace_config(
             conn, prefix=_PREFIX,
             cfg_json="{}",
             l2_json=json.dumps({"rails": [{"name": "B"}, {"name": "C"}]}),
             as_of=datetime(2030, 6, 1),
         )
-        second_count = conn.execute(
-            "SELECT COUNT(*) FROM spec_example_config_kv",
-        ).fetchone()[0]
+        second_count = fetch_scalar(conn, "SELECT COUNT(*) FROM spec_example_config_kv",)
         # The second walk has 2 rails → more rows than the first.
         assert second_count > first_count
         # The first walk's 'A' rail is GONE — single-row invariant on
         # the populate side (TRUNCATE-then-INSERT).
-        a_rows = conn.execute(
-            "SELECT COUNT(*) FROM spec_example_config_kv "
-            "WHERE key = 'name' AND value = 'A'",
-        ).fetchone()[0]
+        a_rows = fetch_scalar(conn, "SELECT COUNT(*) FROM spec_example_config_kv "
+            "WHERE key = 'name' AND value = 'A'",)
         assert a_rows == 0
     finally:
         conn.close()
@@ -319,6 +314,7 @@ def test_set_as_of_none_uses_current_timestamp() -> None:
         ).fetchone()
     finally:
         conn.close()
+    assert row is not None
     assert row[0] != "2020-01-01 00:00:00"
 
 

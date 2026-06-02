@@ -39,6 +39,7 @@ from recon_gen.common.spine import (
     dry_run_capture,
 )
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 
 _SPEC_EXAMPLE = (
@@ -187,9 +188,7 @@ def test_compose_live_mode_unchanged_returns_none() -> None:
     conn = _fresh_live_db()
     try:
         result = ctx.compose(conn, gen)
-        rows = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions",
-        ).fetchone()[0]
+        rows = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions",)
     finally:
         conn.close()
     assert result is None

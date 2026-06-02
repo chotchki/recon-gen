@@ -51,6 +51,7 @@ def test_duckdb_round_trip_integer_storage() -> None:
         projection = cents_to_dollars_sql("amount_money", dialect=Dialect.DUCKDB)
         cur = conn.execute(f"SELECT {projection} FROM t")
         row = cur.fetchone()
+        assert row is not None
         assert row[0] == 75.0
         assert isinstance(row[0], float)
     finally:

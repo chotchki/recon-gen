@@ -28,6 +28,7 @@ from recon_gen.common.spine import (
     TwoTemplateChainGenerator,
 )
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 
 _SPEC_EXAMPLE = (
@@ -235,11 +236,9 @@ def test_tagged_emit_tags_every_row() -> None:
     try:
         gen.emit(conn, scenario_id="test-ay2b-two-template-chain")
         conn.commit()
-        tagged = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+        tagged = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
             f"WHERE json_extract_string(metadata, '$.scenario_id') = ?",
-            ("test-ay2b-two-template-chain",),
-        ).fetchone()[0]
+            ("test-ay2b-two-template-chain",),)
     finally:
         conn.close()
     assert tagged == expected_row_count

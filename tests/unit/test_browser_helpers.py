@@ -264,7 +264,6 @@ class TestCaptureFailureDbCounts:
     def test_writes_per_table_counts_for_prefixed_tables(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        import sqlite3
 
         from recon_gen.common.browser.helpers import _capture_failure_db_counts
 
@@ -311,7 +310,6 @@ class TestCaptureFailureDbCounts:
     def test_empty_file_when_no_prefixed_tables(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        import sqlite3
 
         from recon_gen.common.browser.helpers import _capture_failure_db_counts
 
