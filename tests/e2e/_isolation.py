@@ -152,16 +152,84 @@ def isolated_cfg(
         )
 
 
+def enforce_readonly(conn: Any, dialect: Any) -> None:  # typing-smell: ignore[explicit-any]: DBAPI conn protocol + Dialect enum, late import
+    """Switch ``conn`` to read-only mode. Subsequent writes raise at
+    the DB driver layer with the offending SQL in the traceback.
+
+    CB.7 followup (2026-06-02): the read-side of the isolation contract
+    is enforced by the DB engine itself, not by AST checks or trust.
+    A test (or its fixture) that declares ``@isolation_consumer`` claims
+    to only READ — if it tries to ``INSERT`` / ``UPDATE`` / ``CREATE``
+    / ``DROP`` the engine raises (PG: ``ReadOnlySqlTransaction``;
+    Oracle: ``ORA-01456``; DuckDB: ``Cannot execute statement … in
+    read-only mode``) at the exact line, surfacing the marker drift
+    loudly.
+
+    Per-dialect mechanism:
+    - PG: ``SET default_transaction_read_only = on`` at session scope.
+      Every transaction thereafter is read-only; commits + reads still
+      work, writes fail.
+    - Oracle: ``SET TRANSACTION READ ONLY``. Must be re-issued after
+      each commit; for fixture-scope conns the test typically commits
+      0 times so one-shot is sufficient. Tests that commit + then write
+      will silently re-enable writes — fix at the test if surfaced.
+    - DuckDB: there's no in-flight switch (it's a connection-open arg).
+      Falls through with a warning; DuckDB consumer enforcement is a
+      followup that requires re-opening through `make_connection_pool`.
+
+    Available as a free function so tests with custom conn fixtures
+    (e.g., dialect-parametrized files where the file's own ``conn``
+    fixture overrides ``db_conn``) can opt in via one call.
+    """
+    from recon_gen.common.sql import Dialect
+    cur = conn.cursor()
+    try:
+        if dialect is Dialect.POSTGRES:
+            cur.execute("SET default_transaction_read_only = on")
+            conn.commit()
+        elif dialect is Dialect.ORACLE:
+            cur.execute("SET TRANSACTION READ ONLY")
+        elif dialect is Dialect.DUCKDB:
+            # No in-flight switch; the test should open with read_only=True
+            # at connection time. Emit a marker so the AST check (CB.7
+            # followup) can flag DuckDB consumer files for the deeper
+            # migration.
+            print(
+                "enforce_readonly[duckdb]: skipped — DuckDB needs "
+                "read_only=True at open. File a CB.7-followup."
+            )
+    finally:
+        cur.close()
+
+
 @pytest.fixture
-def db_conn(isolated_cfg: "Config") -> Iterator[Any]:
+def db_conn(
+    request: pytest.FixtureRequest,
+    isolated_cfg: "Config",
+) -> Iterator[Any]:
     """Function-scoped DB connection opened against `isolated_cfg`.
 
     Centralizes `connect_demo_db(isolated_cfg) → yield → close` so
     individual test files don't reimplement it.
+
+    CB.7 followup: when the test's module declares
+    ``@isolation_consumer(...)``, the connection is switched to
+    read-only mode via :func:`enforce_readonly`. Writes raise at the
+    exact line that issued them.
     """
     from recon_gen.common.db import connect_demo_db
     conn = connect_demo_db(isolated_cfg)
     try:
+        request_any: Any = request  # typing-smell: ignore[explicit-any]: pytest FixtureRequest dynamic attr
+        scope_marker = next(
+            request_any.node.iter_markers("isolation_scope"), None,
+        )
+        if (
+            scope_marker is not None
+            and len(scope_marker.args) >= 2
+            and scope_marker.args[1] == "consumer"
+        ):
+            enforce_readonly(conn, isolated_cfg.dialect)
         yield conn
     finally:
         conn.close()

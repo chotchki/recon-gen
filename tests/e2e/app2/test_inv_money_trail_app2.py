@@ -1,23 +1,24 @@
-"""CB.5 stage 2 — App2 tier producer: L2 money_trail rendered rows.
+"""CB.5 stage 2 — App2 tier consumer: L2 money_trail rendered rows.
 
-Decomposed from `test_inv_dashboard_agreement.py`'s
-`test_invariant_three_way_agreement[money_trail]` cell. One App2
-driver walk; the planted chain root pegs the dashboard's dropdown.
+Reads the DB state seeded by the db-tier producer
+(`tests/e2e/db/test_inv_direct.py`) and writes App2-rendered rows as
+artifacts the cross-tier validator consumes.
+
+CB.7 followup (2026-06-02): migrated from producer-marked + re-seeding
+to consumer-marked + read-only. See `tests/e2e/_isolation.py::enforce_readonly`.
 """
 
 from __future__ import annotations
 
-from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any, Iterator
 
 import pytest
 
-from recon_gen.common.db import connect_demo_db, execute_script
 from recon_gen.common.env_keys import RECON_GEN_E2E
 
 if not RECON_GEN_E2E.get_or_none():
     pytest.skip(
-        "App2 L2 money_trail producer needs RECON_GEN_E2E=1",
+        "App2 L2 money_trail consumer needs RECON_GEN_E2E=1",
         allow_module_level=True,
     )
 
@@ -25,97 +26,35 @@ if not RECON_GEN_E2E.get_or_none():
 from recon_gen.common.l2 import (  # noqa: E402
     L2Instance,
     load_instance,
-    refresh_matviews_sql,
 )
-from recon_gen.common.spine import MoneyTrailInvariant  # noqa: E402
 from tests.audit._inv_dashboard_extract import (  # noqa: E402
     count_money_trail_rows,
     money_trail_row_keys,
     rows_seen_money_trail,
 )
-from tests._marks import IsolationScope, isolation_producer  # noqa: E402
+from tests._marks import IsolationScope, isolation_consumer  # noqa: E402
 from tests.e2e._agreement import write_rendered_rows  # noqa: E402
 from tests.e2e._agreement_helpers import (  # noqa: E402
     l2_yaml_for_test,
-    today_anchor,
 )
 from tests.e2e._drivers import App2Driver  # noqa: E402
 
 if TYPE_CHECKING:
     from recon_gen.common.config import Config
-    from recon_gen.common.spine.money_trail import MoneyTrailGenerator
     from recon_gen.common.tree import App
 
 
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
-    isolation_producer(IsolationScope.AGREEMENT_INV),
-    # Sibling producers in this scope race on DROP+CREATE; pin to one
-    # worker so the module-scope writer fixtures serialize.
-    pytest.mark.xdist_group(IsolationScope.AGREEMENT_INV.value),
+    isolation_consumer(IsolationScope.AGREEMENT_INV),
 ]
 
 
-_TODAY = today_anchor()
 _INSTANCE: L2Instance = load_instance(l2_yaml_for_test())
 
 _MONEY_TRAIL_CHAIN_LENGTH = 3
-_MONEY_TRAIL_AMOUNT = 100.0
 _PLANTED_CHAIN_ROOT = "xfer-money-trail-0"
-
-_ISOLATION_SUFFIX = "iagree"
-
-
-def _plant_anchor_day() -> date:
-    return _TODAY - timedelta(days=2)
-
-
-def _build_money_trail_generator(
-    cfg: "Config", anchor_day: date,
-) -> "MoneyTrailGenerator":
-    gen = MoneyTrailInvariant().scenario_for(
-        "CustomerSubledger",
-        chain_length=_MONEY_TRAIL_CHAIN_LENGTH,
-        amount=_MONEY_TRAIL_AMOUNT,
-        anchor_day=anchor_day,
-        instance=_INSTANCE,
-    )
-    gen.prefix = cfg.db_table_prefix
-    return gen
-
-
-
-@pytest.fixture(scope="module")
-def seeded_l2_db(isolated_cfg: "Config") -> None:
-    from tests.e2e._seed_helpers import apply_db_seed
-
-    conn = connect_demo_db(isolated_cfg)
-    try:
-        apply_db_seed(
-            conn, _INSTANCE,
-            prefix=isolated_cfg.db_table_prefix,
-            mode="l1_plus_broad",
-            today=_TODAY,
-            dialect=isolated_cfg.dialect,
-            include_baseline=False,
-        )
-        anchor = _plant_anchor_day()
-        mt_gen = _build_money_trail_generator(isolated_cfg, anchor)
-        mt_gen.emit(conn)
-        conn.commit()
-        refresh_sql = refresh_matviews_sql(
-            _INSTANCE,
-            prefix=isolated_cfg.db_table_prefix,
-            dialect=isolated_cfg.dialect,
-        )
-        with conn.cursor() as cur:
-            execute_script(
-                cur, refresh_sql, dialect=isolated_cfg.dialect,
-            )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 @pytest.fixture(scope="module")
@@ -138,7 +77,6 @@ def _serialize_keys(keys: "set[tuple[Any, ...]]") -> list[list[Any]]:
 
 
 def test_money_trail_app2_extract(
-    seeded_l2_db: None,
     isolated_cfg: "Config",
     isolated_inv_app: "App",
 ) -> None:
@@ -148,7 +86,6 @@ def test_money_trail_app2_extract(
     Producer-side: `app2_count == chain_length` (every edge of the
     planted chain visible) and `app2_seen == app2_count`.
     """
-    _ = seeded_l2_db
     from tests.e2e._harness_html2 import make_live_db_fetchers_for_app
 
     assert isolated_inv_app.analysis is not None

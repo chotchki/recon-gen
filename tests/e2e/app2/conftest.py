@@ -32,10 +32,14 @@ from tests.e2e._isolation import (  # noqa: F401 — re-export so pytest discove
     _isolate_cfg,
     _isolated_cfg_key,
     db_conn,
+    enforce_readonly,
     isolated_cfg,
 )
 
-__all__ = ["_isolate_cfg", "_isolated_cfg_key", "db_conn", "isolated_cfg"]
+__all__ = [
+    "_isolate_cfg", "_isolated_cfg_key", "db_conn", "enforce_readonly",
+    "isolated_cfg",
+]
 
 
 _APP2_TIER_MARK = tier(Tier.APP2)

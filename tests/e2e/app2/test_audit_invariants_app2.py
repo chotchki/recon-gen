@@ -1,46 +1,40 @@
 # pyright: reportArgumentType=false
 # BF.4/F: `_ALL_INVARIANTS` is `tuple[str, ...]` but extract takes
 # `L1Invariant` Literal. Runtime correctness enforced by dict lookups.
-"""CB.5 stage 2 — App2 tier producer: rendered rows per L1 invariant.
+"""CB.5 stage 2 — App2 tier consumer: rendered rows per L1 invariant.
 
-One producer test per L1 invariant. Each producer:
+Reads DB state seeded by the db-tier producer
+(`tests/e2e/db/test_audit_direct.py`) and writes App2-rendered rows
+as artifacts the cross-tier validator consumes.
 
-1. Loads per-dialect cfg (the DB was seeded by the db tier's
-   `test_audit_invariants_direct.py::seeded_db` before this tier
-   fires — the runner's `unit → db → app2 → qs_browser` chain
-   guarantees ordering).
-2. Builds the L1 dashboard tree against the per-dialect cfg.
-3. Spins App2Driver, walks the sheet for this invariant.
-4. Writes the rendered row keys + count as a JSON artifact
-   (`app2/<inv>_rows.json`).
+CB.7 followup (2026-06-02): migrated from producer-marked + re-seeding
+to consumer-marked + read-only. The `isolation_consumer` marker drives
+PG's `SET default_transaction_read_only = on` via the
+`enforce_readonly` helper applied in the file's local `conn` fixture
+(since this file overrides the canonical `db_conn` for the
+dialect-parametrize axis). Any DROP/CREATE/INSERT from this file
+raises `ReadOnlySqlTransaction` at the offending line.
 
-The high-watermark validator (in `tests/e2e/qs_browser/`) reads this
-alongside the db tier's direct-matview / PDF + qs_browser's QS
-artifacts and asserts agreement.
+The producer ran in the db tier (`unit → db → app2 → qs_browser`
+chain). The ScenarioPlant needed for `expected_audit_counts` is
+reconstructed deterministically via `default_scenario_for` — pure
+function, no DB writes.
 
 Module-scoped App2Driver — one driver context handles all 6 invariant
 parametrize cells (the L1 dashboard's sheets each render different
 invariants, but the driver opens once and `goto_sheet` swaps).
-
-Re-seed semantics: this module DOES re-seed the DB on entry, mirroring
-the db-tier's seeded_db fixture. Two reasons: (a) the runner's tier
-chain is `unit → db → app2`, so by the time this tier fires the DB
-is already seeded, but the module-scope fixture in db/ closes its
-conn at module teardown — the schema persists, the connection
-doesn't, and re-seeding here is harmless (DROP+CREATE is idempotent);
-(b) running app2 standalone via `pytest tests/e2e/app2/` (no runner)
-needs its own seed for the App2 walk to find any rows.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Mapping
+from typing import TYPE_CHECKING, Any, Iterator, Mapping
 
 import pytest
 
 from recon_gen.common.db import connect_demo_db
 from recon_gen.common.l2 import load_instance
+from recon_gen.common.l2.auto_scenario import default_scenario_for
 
 from tests.audit._dashboard_extract import (
     count_l1_invariant_rows,
@@ -48,7 +42,7 @@ from tests.audit._dashboard_extract import (
     l1_invariant_rows_seen,
 )
 from tests.audit._scenario_expectations import expected_audit_counts
-from tests._marks import IsolationScope, isolation_producer  # noqa: E402
+from tests._marks import IsolationScope, isolation_consumer  # noqa: E402
 from tests.e2e._agreement import write_rendered_rows
 from tests.e2e._agreement_helpers import (
     ALL_L1_INVARIANTS,
@@ -59,6 +53,7 @@ from tests.e2e._agreement_helpers import (
     today_anchor,
 )
 from tests.e2e._drivers import App2Driver
+from tests.e2e._isolation import enforce_readonly
 
 if TYPE_CHECKING:
     from recon_gen.common.config import Config
@@ -69,10 +64,7 @@ if TYPE_CHECKING:
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
-    isolation_producer(IsolationScope.AGREEMENT_AUDIT),
-    # Sibling producers in this scope race on DROP+CREATE; pin to one
-    # worker so the module-scope writer fixtures serialize.
-    pytest.mark.xdist_group(IsolationScope.AGREEMENT_AUDIT.value),
+    isolation_consumer(IsolationScope.AGREEMENT_AUDIT),
 ]
 
 
@@ -88,29 +80,35 @@ def dialect_cfg(
 
 
 @pytest.fixture(scope="module")
-def seeded_db(
+def scenario(
     dialect_cfg: "tuple[Config, Path, Dialect]",
 ) -> "ScenarioPlant":
-    """Re-seed the DB. See module docstring for the why (cross-tier
-    boundary; harmless idempotency on the schema apply path).
-    """
-    from tests.e2e._seed_helpers import apply_db_seed
+    """Reconstruct the producer's ScenarioPlant deterministically.
 
-    cfg, _cfg_path, dialect = dialect_cfg
+    `default_scenario_for` is pure (no DB writes); same inputs the
+    producer fed `apply_db_seed`. Used by `expected_audit_counts` to
+    compute the planted-row count this consumer asserts against.
+    """
+    _ = dialect_cfg  # ordering only; scenario construction is pure
     instance = load_instance(l2_yaml_for_test())
-    conn = connect_demo_db(cfg)
+    report = default_scenario_for(instance, today=_TODAY, mode="l1_invariants")
+    return report.scenario
+
+
+@pytest.fixture(scope="module")
+def conn(
+    dialect_cfg: "tuple[Config, Path, Dialect]",
+) -> "Iterator[Any]":
+    """Per-dialect read-only DB connection. CB.7 followup: applies
+    `enforce_readonly` so the consumer marker is enforced by PG
+    itself — any attempted write raises at the offending line."""
+    cfg, _cfg_path, dialect = dialect_cfg
+    c = connect_demo_db(cfg)
     try:
-        return apply_db_seed(
-            conn, instance,
-            prefix=cfg.db_table_prefix,
-            mode="l1_invariants",
-            today=_TODAY,
-            plant_window=_PERIOD,
-            dialect=dialect,
-            include_baseline=False,
-        )
+        enforce_readonly(c, dialect)
+        yield c
     finally:
-        conn.close()
+        c.close()
 
 
 def _serialize_keys(keys: "set[tuple[object, ...]]") -> list[list[object]]:
@@ -134,7 +132,7 @@ def _normalise_row(row: list[object]) -> list[object]:
 @pytest.fixture(scope="module")
 def app2_results(
     dialect_cfg: "tuple[Config, Path, Dialect]",
-    seeded_db: "ScenarioPlant",
+    conn: Any,
 ) -> "Mapping[str, Mapping[str, object]]":
     """One App2 walk; collect all 6 invariants' (count, seen, keys).
 
@@ -154,7 +152,7 @@ def app2_results(
     from tests.e2e._harness_html2 import make_live_db_fetchers_for_app
 
     cfg, _cfg_path, _dialect = dialect_cfg
-    _ = seeded_db  # ordering dep — see fixture docstring
+    _ = conn  # ordering dep — the read-only conn forces producer-ran ordering
 
     instance = load_instance(l2_yaml_for_test())
     build_all_l1_dashboard_datasets(cfg, instance)
@@ -186,7 +184,7 @@ def app2_results(
 
 @pytest.mark.parametrize("invariant", ALL_L1_INVARIANTS)
 def test_l1_invariant_app2_extract(
-    seeded_db: "ScenarioPlant",
+    scenario: "ScenarioPlant",
     app2_results: "Mapping[str, Mapping[str, object]]",
     invariant: str,
 ) -> None:
@@ -198,7 +196,7 @@ def test_l1_invariant_app2_extract(
     set) before serializing the keys — a partial set would silently
     mismatch the agreement validator's row-identity check.
     """
-    expected_obj = expected_audit_counts(seeded_db, _PERIOD)
+    expected_obj = expected_audit_counts(scenario, _PERIOD)
     expected: int = getattr(expected_obj, f"{invariant}_count")
     entry = app2_results[invariant]
     app2_count = int(entry["count"])  # type: ignore[call-overload]: dict value is `object`; int by fixture construction
