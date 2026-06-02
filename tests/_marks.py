@@ -139,6 +139,41 @@ def writes() -> pytest.MarkDecorator:
     return pytest.mark.writes
 
 
+def serial(reason: str) -> pytest.MarkDecorator:
+    """`@serial(reason)` — declare this test must run with `-n 1`.
+
+    CB.6 (operator-flagged 2026-06-02): typed wrapper around the
+    runner's per-worker forced-serial path. The `reason` argument is
+    mandatory + visible — it's the contract for WHY this test can't
+    parallelize. The operator's observation when proposing the typed
+    form: **"this smells like a `@writes()` is hidden in there"** —
+    most serial-needing tests are actually mutating shared state at
+    module/session scope (the canonical case: the audit-agreement
+    test's `seeded_audit` fixture re-applies the dialect schema with
+    DROP MATERIALIZED VIEW + CREATE; on `-n 4` two workers race the
+    schema apply and Oracle's auto-commit DDL produces ORA-00955).
+
+    The right LONG-TERM fix is `@writes()` + per-worker isolation
+    (CB.7). `@serial(...)` is the temporary band-aid that surfaces
+    the latent debt — every `serial` mark IS a `@writes`-without-
+    isolation debt entry.
+
+    Example:
+
+        @serial(reason="seeded_audit module-scope fixture DROPs + "
+                       "CREATEs the dialect schema; concurrent workers "
+                       "race the schema apply. CB.7 follow-up: migrate "
+                       "to per-worker isolation via @writes().")
+        def test_audit_invariant_agreement(): ...
+
+    Runner consumption (CB.6): the browser-tier dispatch splits into
+    `-m "not serial" -n 4` (main) + `-m "serial" -n 1` (sequential).
+    Replaces the current hardcoded `--ignore=test_audit_dashboard_agreement.py`
+    + the second pytest invocation against that one file.
+    """
+    return pytest.mark.serial(reason)
+
+
 def inputs(*nodeids: str) -> pytest.MarkDecorator:
     """`@inputs(*nodeids)` — declare cross-test artifact dependencies.
 

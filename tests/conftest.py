@@ -342,6 +342,7 @@ _CB_MARK_DOCS = {
     "needs": "Runtime deps (docker | playwright | aws_qs | oracledb_client).",
     "writes": "Test mutates DB state — opt in to per-worker isolation.",
     "inputs": "Cross-test artifact dependencies (pytest nodeids of tests whose artifacts this test reads). Collection-time-validated.",
+    "serial": "Test must run with `-n 1` (no parallel workers). Carry a reason argument explaining why — usually surfaces a `@writes()`-without-isolation debt entry.",
 }
 
 

@@ -164,3 +164,27 @@ class TestInputsDecorator:
         def sample() -> None: ...
         marks = sample.pytestmark  # type: ignore[attr-defined]: pytest mark decorators stash on `pytestmark`
         assert len(marks[0].args) == 2
+
+
+# -- CB.6 prep: @serial(reason) ---------------------------------------------
+
+from tests._marks import serial
+
+
+class TestSerialDecorator:
+    """CB.6 (operator-flagged 2026-06-02) — typed `@serial(reason)` marker.
+
+    Carries a mandatory reason argument. Captures the "WHY can't this
+    parallelize" so the latent `@writes()`-without-isolation debt is
+    visible in source — most serial-needing tests turn out to be
+    mutating shared state at module/session scope.
+    """
+
+    def test_serial_carries_reason_string(self) -> None:
+        @serial(reason="seeded_audit fixture DROPs+CREATEs schema; "
+                       "DDL races on -n 4. CB.7 follow-up.")
+        def sample() -> None: ...
+        marks = sample.pytestmark  # type: ignore[attr-defined]: pytest mark decorators stash on `pytestmark`
+        assert marks[0].name == "serial"
+        assert len(marks[0].args) == 1
+        assert "seeded_audit" in marks[0].args[0]
