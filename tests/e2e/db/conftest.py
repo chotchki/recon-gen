@@ -114,11 +114,10 @@ def _isolated_cfg_key(
     """
     import hashlib
     worker_id = os.environ.get("PYTEST_XDIST_WORKER", "gw0")
-    # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]:
-    # pytest's FixtureRequest exposes `node` / `module` as typed-Any
-    # late-import shapes; pyright can't follow them through the
-    # FixtureRequest protocol. The cast through `Any` below resolves.
-    request_any: Any = request
+    # FixtureRequest.node + .module surface as typed-Any late-import
+    # shapes pyright can't follow; cast through Any so the str(...) result
+    # narrows cleanly.
+    request_any: Any = request  # typing-smell: ignore[explicit-any]: pytest FixtureRequest protocol attrs are dynamic
     nodeid: str = str(
         getattr(request_any.node, "nodeid", None)
         or request_any.module.__name__,
