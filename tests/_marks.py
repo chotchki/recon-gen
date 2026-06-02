@@ -137,7 +137,7 @@ class IsolationScope(StrEnum):
     chain = adding a new enum variant. The enum is the source of truth
     for the chain catalogue.
 
-    The chain has exactly ONE producer file (the writer fixture lives
+    The chain has EXACTLY ONE producer file (the writer fixture lives
     there) and one-or-more consumer files (read from the producer's
     DB state). Producer + consumers declare the SAME scope at module
     level via `@isolation_producer(...)` / `@isolation_consumer(...)`
@@ -145,32 +145,41 @@ class IsolationScope(StrEnum):
     marker so `isolated_cfg` uses the same prefix suffix — readers and
     writers in the chain see consistent state.
 
-    Trade-off: when MULTIPLE producer files share a scope (e.g.
-    `test_inv_anomaly_direct.py` + `test_inv_money_trail_direct.py`
-    both producing into `AGREEMENT_INV`), concurrent workers running
-    those files race on DROP+CREATE against the shared prefix. For
-    these cases, pair the producer's `pytestmark` with
-    `pytest.mark.xdist_group(scope.value)` so all producers in the
-    scope land on the same worker and serialize.
+    The single-producer rule is load-bearing. If two files both write
+    into the same scope's prefix, they either:
+    - run concurrently → DROP+CREATE deadlock; or
+    - run sequentially → the second's seed wipes the first's plants and
+      cross-tier consumers see broken state.
 
-    When there's exactly ONE producer file per scope, xdist_group is
-    NOT needed — the file's own tests share the module-scope writer
-    fixture via pytest's normal caching, and other workers running
-    consumer tiers in their own pytest invocations don't race because
-    the producer tier already ran first.
+    The right fix when you think you have "two producers for one chain"
+    is to merge them — one file, one writer fixture seeding all the
+    plant sets the chain needs, multiple test functions asserting their
+    pieces of the shared state. The CB.7 inv-direct merge is the model
+    (see `tests/e2e/db/test_inv_direct.py`).
 
-    The codebase invariant captured in the AST check (CB.7-followup):
-    `xdist_group(IsolationScope.X.value)` MUST be paired with
-    `isolation_producer(IsolationScope.X)` if and only if more than
-    one producer file shares the scope. Otherwise it's noise.
+    Producer files ALSO pair their `pytestmark` with
+    `pytest.mark.xdist_group(scope.value)` even when there is only one
+    producer file. Reason: pytest module-scoped fixtures cache per
+    xdist WORKER, not globally — without xdist_group pinning, `-n auto`
+    scatters the file's individual tests across workers and each worker
+    reseeds the shared scope prefix → PG schema-create race. With the
+    pin, all tests in the producer file land on one worker, the writer
+    fixture seeds once, and the tests share its state.
+
+    Consumer files don't need xdist_group: they READ via the same
+    scope prefix the producer wrote, and concurrent reads don't race.
+
+    Codebase invariant captured in the AST check (CB.7-followup):
+    each `IsolationScope` variant has exactly one `@isolation_producer`
+    declaration across `tests/e2e/**`. Multi-producer = lint error.
 
     Adding a new chain:
     1. Add a new variant here (e.g. `AGREEMENT_L2FT = "l2ft"`).
-    2. The producer file declares `@isolation_producer(IsolationScope.X)`
+    2. The single producer file declares
+       `@isolation_producer(IsolationScope.X)` + `xdist_group(X.value)`
        at module-level pytestmark.
-    3. Each consumer file declares `@isolation_consumer(IsolationScope.X)`.
-    4. Pair with `xdist_group` on the same scope value for within-tier
-       worker pinning.
+    3. Each consumer file declares `@isolation_consumer(IsolationScope.X)`
+       — no xdist_group needed.
     """
 
     AGREEMENT_INV = "ai"

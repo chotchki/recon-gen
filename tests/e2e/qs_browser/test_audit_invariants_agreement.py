@@ -33,8 +33,8 @@ from tests.e2e._agreement import read_rendered_rows
 
 
 # Common nodeid prefixes — keep the @inputs() strings readable.
-_DIRECT = "tests/e2e/db/test_audit_invariants_direct.py::test_l1_invariant_direct_extract"
-_PDF = "tests/e2e/db/test_audit_invariants_pdf.py::test_l1_invariant_pdf_count"
+_DIRECT = "tests/e2e/db/test_audit_direct.py::test_l1_invariant_direct_extract"
+_PDF = "tests/e2e/db/test_audit_direct.py::test_l1_invariant_pdf_count"
 _APP2 = "tests/e2e/app2/test_audit_invariants_app2.py::test_l1_invariant_app2_extract"
 _QS = "tests/e2e/qs_browser/test_audit_invariants_qs.py::test_l1_invariant_qs_extract"
 

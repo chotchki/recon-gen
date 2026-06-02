@@ -1,28 +1,40 @@
 # pyright: reportArgumentType=false
-# BF.4/F: `_ALL_INVARIANTS` is `tuple[str, ...]` but the matview-extract
-# helpers take the narrower `L1Invariant` Literal. Runtime correctness
-# is enforced by the matview-extract helpers' own dict lookups.
-"""CB.5 stage 2 — DB-tier producer: direct matview SELECT for L1 audit.
+# BF.4/F: `_ALL_INVARIANTS` is `tuple[str, ...]` but matview-extract /
+# pdf-extract helpers take narrower L1Invariant / Invariant Literals.
+# Runtime correctness is enforced by the helpers' own dict lookups.
+"""CB.7 (refactored 2026-06-02) — DB-tier producer: direct matview
+SELECT + PDF row count per L1 invariant.
 
-One producer test per L1 invariant. Each producer:
+Merged from CB.5-era split into `test_audit_invariants_direct.py` +
+`test_audit_invariants_pdf.py`; that decomposition put two writer
+files into one `AGREEMENT_AUDIT` scope, which is the broken shape
+documented in `tests/_marks.py::IsolationScope`. One producer file per
+scope is the canonical pattern.
 
-1. Loads the per-dialect cfg + seeds the DB (`apply_db_seed` plants
-   the scenario into the matviews).
-2. Runs a direct `SELECT` against the L1 invariant matview — the
-   *ground truth* every renderer should match.
-3. Writes the result rows + count as a JSON artifact via
-   `tests/e2e/_agreement.py::write_rendered_rows("db", "<inv>_rows", ...)`.
-4. Asserts the producer-side lower bound (matview holds ≥ planted).
+Per-dialect (postgres / oracle) parametrized. Per cell:
 
-The high-watermark validator in `tests/e2e/qs_browser/` reads this
-artifact via `read_rendered_rows("db", "<inv>_rows")` and compares
-against the App2 / QS producer artifacts. Producer-side failure
-(seed didn't reach the matview) fails THIS test directly — the
-validator just gets a clean "missing artifact" with the actionable
-"check the db tier's stderr" message.
+1. Loads the per-dialect cfg + seeds the DB
+   (`apply_db_seed(mode="l1_invariants")` plants the scenario into the
+   matviews).
+2. Renders the audit PDF (`recon-gen audit apply --execute`) ONCE
+   against the seeded DB (`audit_pdf` fixture; depends on `seeded_db`).
+3. Two parametrized test functions assert producer-side lower bounds
+   for each L1 invariant + write the artifacts the cross-renderer
+   validator reads:
+   - `test_l1_invariant_direct_extract` — direct matview SELECT, writes
+     `<inv>_direct_rows.json` + `<inv>_direct_meta.json`
+   - `test_l1_invariant_pdf_count` — PDF row count, writes
+     `<inv>_pdf_counts.json`
 
-Decomposed from the pre-CB.5 monolithic `test_audit_dashboard_agreement.py`'s
-4-way agreement test, per the CB.5 stage 2 design.
+The high-watermark validator in `tests/e2e/qs_browser/` reads these
+alongside the App2 / QS artifacts and applies the agreement chain:
+
+    scenario_plants ⊆ direct == QS == App2  (== PDF, drift only)
+
+PDF count == direct only for `drift` (the PDF section is a flat
+one-row-per-matview-row table there); the other invariants aggregate
+into roll-up tables and the PDF count legitimately differs from the
+matview count, so `pdf >= expected` is the meaningful PDF check.
 """
 
 from __future__ import annotations
@@ -31,7 +43,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator
 
 import pytest
+from click.testing import CliRunner
 
+from recon_gen.cli import main
 from recon_gen.common.db import connect_demo_db
 from recon_gen.common.l2 import load_instance
 
@@ -40,6 +54,7 @@ from tests.audit._matview_extract import (
     count_l1_invariant_matview_rows,
     l1_invariant_matview_row_keys,
 )
+from tests.audit._pdf_extract import count_invariant_table_rows
 from tests.audit._scenario_expectations import expected_audit_counts
 from tests.e2e._agreement import write_rendered_rows
 from tests.e2e._agreement_helpers import (
@@ -58,16 +73,17 @@ if TYPE_CHECKING:
     from recon_gen.common.sql import Dialect
 
 
-# CB.7 (refactored 2026-06-02) — `@isolation_producer` for the
-# audit-agreement chain. App2 + qs_browser sibling files declare
-# `@isolation_consumer(AGREEMENT_AUDIT)`; all three tiers share the
-# same prefix and read each other's seeded state.
 from tests._marks import IsolationScope, isolation_producer  # noqa: E402
+
 pytestmark = [
     pytest.mark.e2e,
     isolation_producer(IsolationScope.AGREEMENT_AUDIT),
-    # Sibling producers in this scope race on DROP+CREATE; pin to one
-    # worker so the module-scope writer fixtures serialize.
+    # Pin all tests in this writer file to ONE xdist worker so the
+    # module-scope `seeded_db` + `audit_pdf` fixtures cache once per
+    # (worker, dialect cell) and all tests share the same DB state.
+    # Without this, `-n auto` scatters the 12+ parametrized cells
+    # across workers; each worker reseeds the same scope-keyed prefix
+    # → PG schema-create race.
     pytest.mark.xdist_group(IsolationScope.AGREEMENT_AUDIT.value),
 ]
 
@@ -93,11 +109,10 @@ def dialect_isolated_cfg(
 ) -> "tuple[Config, Path, Dialect]":
     """Per-(module, worker, dialect) isolated cfg.
 
-    CB.7 (refactored 2026-06-02) — this is the provider-marked
-    isolation primitive for dialect-parametrized writer fixtures.
-    The plain `isolated_cfg` fixture in `tests/e2e/db/conftest.py`
-    serves the single-cfg case; this variant is its parallel for
-    `dialect_cfg`-driven tests.
+    Provider-marked isolation primitive for dialect-parametrized writer
+    fixtures. The plain `isolated_cfg` fixture in
+    `tests/e2e/db/conftest.py` serves the single-cfg case; this variant
+    is its parallel for `dialect_cfg`-driven tests.
 
     Each (test module, xdist worker, dialect parametrize callspec)
     gets its OWN isolated cfg → concurrent workers and dialect cells
@@ -147,13 +162,49 @@ def seeded_db(
     return scenario
 
 
+@pytest.fixture(scope="module")
+def audit_pdf(
+    dialect_isolated_cfg: "tuple[Config, Path, Dialect]",
+    seeded_db: "ScenarioPlant",
+    tmp_path_factory: pytest.TempPathFactory,
+) -> "tuple[Path, ScenarioPlant]":
+    """Render the audit PDF against the seeded DB. Module-scoped —
+    one render per (file, dialect, xdist worker).
+
+    Depends on `seeded_db` so the PDF includes the scenario plants;
+    the isolated prefix + deployment name thread through to the CLI
+    subprocess via env so it queries the same per-worker tables.
+    """
+    cfg, cfg_path, _dialect = dialect_isolated_cfg
+
+    out = tmp_path_factory.mktemp("audit-pdf") / "report.pdf"
+    cli_runner = CliRunner()
+    result = cli_runner.invoke(
+        main,
+        [
+            "audit", "apply",
+            "-c", str(cfg_path),
+            "--l2", str(l2_yaml_for_test()),
+            "--period",
+            f"{_PERIOD.start.isoformat()}..{_PERIOD.end.isoformat()}",
+            "-o", str(out),
+            "--execute",
+        ],
+        env={
+            "RECON_GEN_DB_TABLE_PREFIX": cfg.db_table_prefix,
+            "RECON_GEN_DEPLOYMENT_NAME": cfg.deployment_name,
+        },
+    )
+    assert result.exit_code == 0, result.output
+    return (out, seeded_db)
+
+
 @pytest.fixture
 def conn(dialect_isolated_cfg: "tuple[Config, Path, Dialect]") -> "Iterator[Any]":
     """Per-dialect raw DB connection. Thin wrapper over `connect_demo_db`
     because the test parametrizes over dialect and pytest doesn't let a
     file's local fixture override the canonical `db_conn` fixture (which
     takes the single `isolated_cfg`, not `dialect_isolated_cfg`)."""
-    from recon_gen.common.db import connect_demo_db
     cfg, _, _ = dialect_isolated_cfg
     c = connect_demo_db(cfg)
     try:
@@ -185,6 +236,12 @@ def _normalise_for_json(row: list[Any]) -> list[Any]:
         else:
             out.append(cell)
     return out
+
+
+# ---------------------------------------------------------------------
+# Direct matview SELECT — assertion shape from pre-CB.7
+#                          test_audit_invariants_direct.py
+# ---------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("invariant", ALL_L1_INVARIANTS)
@@ -227,8 +284,6 @@ def test_l1_invariant_direct_extract(
                 conn, prefix, invariant, _PERIOD, dialect,
             )
 
-    # Producer-side lower bound — fail HERE rather than detaching
-    # the agreement comparison.
     if direct_count is not None:
         assert direct_count >= expected, (
             f"Producer-side regression ({invariant}): scenario "
@@ -238,19 +293,11 @@ def test_l1_invariant_direct_extract(
             f"drifted from the plant."
         )
 
-    # Write the artifact for the validator. Shape per the CB.5
-    # convention: a list of dicts; one dict per row containing the
-    # natural-key tuple under `natural_key`. The `count` is the
-    # row count (None when the matview has no anchor); a separate
-    # `<invariant>_meta.json` entry is implicit in the rows shape.
     payload: list[dict[str, Any]] = []
     for key_tuple in _serialize_keys(direct_keys):
         payload.append({"natural_key": key_tuple})
     write_rendered_rows("db", f"{invariant}_direct_rows", payload)
 
-    # Also write a sidecar count + scenario expectation so the
-    # validator can do count comparisons for the divergent-shape
-    # invariants (which have no row-identity check).
     write_rendered_rows("db", f"{invariant}_direct_meta", [
         {
             "direct_count": direct_count,
@@ -258,4 +305,38 @@ def test_l1_invariant_direct_extract(
             "is_flat": is_flat,
             "anchored": invariant in MATVIEW_ANCHORED,
         },
+    ])
+
+
+# ---------------------------------------------------------------------
+# PDF count — assertion shape from pre-CB.7 test_audit_invariants_pdf.py
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("invariant", ALL_L1_INVARIANTS)
+def test_l1_invariant_pdf_count(
+    audit_pdf: "tuple[Path, ScenarioPlant]",
+    invariant: str,
+) -> None:
+    """PDF row count for one L1 invariant; writes the artifact the
+    validator reads.
+
+    Producer-side assertion: `pdf_count >= expected`. Catches "plant
+    didn't reach the PDF" locally rather than detaching the agreement
+    comparison.
+    """
+    pdf_path, scenario = audit_pdf
+    expected_obj = expected_audit_counts(scenario, _PERIOD)
+    expected: int = getattr(expected_obj, f"{invariant}_count")
+    pdf_count = count_invariant_table_rows(pdf_path, invariant)
+
+    assert pdf_count >= expected, (
+        f"Producer-side regression ({invariant}): scenario planted "
+        f"{expected} rows but the PDF shows only {pdf_count}. Plant "
+        f"didn't reach the matview, or the audit query / PDF render "
+        f"dropped the row."
+    )
+
+    write_rendered_rows("db", f"{invariant}_pdf_counts", [
+        {"pdf_count": pdf_count, "expected_count": expected},
     ])

@@ -31,7 +31,7 @@ from tests._marks import inputs  # noqa: E402
 from tests.e2e._agreement import read_rendered_rows  # noqa: E402
 
 
-_DIRECT = "tests/e2e/db/test_inv_anomaly_direct.py::test_anomaly_direct_extract"
+_DIRECT = "tests/e2e/db/test_inv_direct.py::test_anomaly_direct_extract"
 _APP2 = "tests/e2e/app2/test_inv_anomaly_app2.py::test_anomaly_app2_extract"
 _QS = "tests/e2e/qs_browser/test_inv_anomaly_qs.py::test_anomaly_qs_extract"
 

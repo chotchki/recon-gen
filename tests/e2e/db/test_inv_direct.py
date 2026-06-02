@@ -1,20 +1,26 @@
-"""CB.5 stage 2 — DB-tier producer: direct matview SELECT for L2 anomaly.
+"""CB.7 (refactored 2026-06-02) — DB-tier producer: direct matview SELECT
+for the Investigation cross-tier agreement chain.
 
-Decomposed from `tests/e2e/test_inv_dashboard_agreement.py`'s
-`test_invariant_three_way_agreement[anomaly]` cell. The producer:
+CB.5-era decomposition split this into two files (one per invariant);
+that misnamed the chain — both invariants share the same baseline seed
++ same isolated prefix, so the two files raced on DROP+CREATE under the
+shared `AGREEMENT_INV` scope (concurrent workers deadlocked; sequential
+workers wiped each other's state). Merged 2026-06-02 into ONE producer
+that:
 
-1. Loads cfg + seeds the isolated `<prefix>_iagree` DB with the
-   `l1_plus_broad` baseline + spine-generator anomaly plants.
-2. Refreshes matviews so the plants land in `_inv_pair_rolling_anomalies`.
-3. Runs the spine `AnomalyInvariant.detect(conn)` AND the direct
-   σ-filtered matview SELECT — both at the same threshold.
-4. Asserts spine == direct (the AT.5.a contract), writes both as
-   artifacts so the cross-renderer validator (in qs_browser/) can
-   compare against App2 + QS.
+1. Loads cfg + seeds the isolated prefix with the `l1_plus_broad`
+   baseline.
+2. Emits BOTH plant generators (anomaly + money_trail) on top.
+3. Refreshes matviews so the plants land in
+   `_inv_pair_rolling_anomalies` and `_inv_money_trail_edges`.
+4. Two test functions assert spine == direct for each invariant
+   independently against the shared seeded state, writing
+   `anomaly_direct_*` and `money_trail_direct_*` artifacts the
+   cross-renderer validators in `tests/e2e/qs_browser/` consume.
 
-The L2 isolation suffix (`iagree`) keeps the destructive DROP CASCADE
-out of the runner's shared seed namespace — mirrors the pre-CB.5
-fixture's design.
+One producer per scope = no within-scope race, no `xdist_group` pin
+needed — the AST check (CB.7-followup) enforces "exactly one producer
+file per IsolationScope variant" once the migration completes.
 """
 
 from __future__ import annotations
@@ -41,11 +47,15 @@ if not RECON_GEN_E2E.get_or_none():
 # noqa: E402 — post-skip imports keep collection cheap on the unit job
 from recon_gen.common.spine import (  # noqa: E402
     AnomalyInvariant,
+    MoneyTrailInvariant,
     Violation,
 )
 from tests.audit._matview_extract import (  # noqa: E402
     anomaly_matview_row_keys,
     count_anomaly_matview_rows,
+    count_money_trail_matview_rows,
+    distinct_money_trail_roots,
+    money_trail_matview_row_keys,
 )
 from tests.e2e._agreement import write_rendered_rows  # noqa: E402
 from tests.e2e._agreement_helpers import (  # noqa: E402
@@ -56,19 +66,19 @@ from tests.e2e._agreement_helpers import (  # noqa: E402
 if TYPE_CHECKING:
     from recon_gen.common.config import Config
     from recon_gen.common.spine.anomaly import AnomalyGenerator
+    from recon_gen.common.spine.money_trail import MoneyTrailGenerator
 
 
-# CB.7 (refactored 2026-06-02) — `@isolation_producer` declares this
-# file as the WRITER for the inv-dashboard-agreement chain. App2 +
-# qs_browser sibling files declare `@isolation_consumer(AGREEMENT_INV)`
-# at their module level; all three tiers share the same `isolated_cfg`
-# prefix and the chain reads the same seeded state across tiers.
 from tests._marks import IsolationScope, isolation_producer  # noqa: E402
+
 pytestmark = [
     pytest.mark.e2e,
     isolation_producer(IsolationScope.AGREEMENT_INV),
-    # Sibling producers in this scope race on DROP+CREATE; pin to one
-    # worker so the module-scope writer fixtures serialize.
+    # Pin all tests in this writer file to ONE xdist worker so the
+    # module-scope `seeded_l2_db` fixture seeds once and all tests
+    # share the same DB state. Without this, `-n auto` distributes
+    # individual tests across workers; each worker reseeds the same
+    # scope-keyed prefix → PG schema-create race.
     pytest.mark.xdist_group(IsolationScope.AGREEMENT_INV.value),
 ]
 
@@ -87,6 +97,15 @@ _DEFAULT_SIGMA = 2.0
 _ANOMALY_BASELINE_PAIRS = 100
 _ANOMALY_BASELINE_AMOUNT = 100.0
 _ANOMALY_SPIKE_MAGNITUDE = 100_000.0
+
+# 3-deep chain — exercises depths 0/1/2 of the recursive walk.
+_MONEY_TRAIL_CHAIN_LENGTH = 3
+_MONEY_TRAIL_AMOUNT = 100.0
+
+# Deterministic root — the MoneyTrailGenerator's transfer-id scheme
+# is `xfer-money-trail-{index}`; root is `xfer-money-trail-0`.
+_PLANTED_CHAIN_ROOT = "xfer-money-trail-0"
+
 
 def _plant_anchor_day() -> date:
     return _TODAY - timedelta(days=2)
@@ -107,13 +126,29 @@ def _build_anomaly_generator(
     return gen
 
 
+def _build_money_trail_generator(
+    cfg: "Config", anchor_day: date,
+) -> "MoneyTrailGenerator":
+    gen = MoneyTrailInvariant().scenario_for(
+        "CustomerSubledger",
+        chain_length=_MONEY_TRAIL_CHAIN_LENGTH,
+        amount=_MONEY_TRAIL_AMOUNT,
+        anchor_day=anchor_day,
+        instance=_INSTANCE,
+    )
+    gen.prefix = cfg.db_table_prefix
+    return gen
+
+
 @pytest.fixture(scope="module")
 def seeded_l2_db(isolated_cfg: "Config") -> None:
-    """Apply schema + broad seed + spine plants + matview refresh
-    against the per-worker isolated `isolated_cfg`. CB.7: replaced the
-    hand-rolled `isolated_inv_cfg` + `_iagree` suffix with the
-    canonical `isolated_cfg` injection (per-worker prefix from
-    `tests/e2e/db/conftest.py`)."""
+    """Apply schema + broad seed + BOTH spine plant sets + matview
+    refresh against `isolated_cfg`.
+
+    Both anomaly + money_trail share this seed — they target different
+    matviews and don't interact, so seeding once + asserting twice is
+    both safer and ~2x faster than the old two-file design.
+    """
     from tests.e2e._seed_helpers import apply_db_seed
 
     conn = connect_demo_db(isolated_cfg)
@@ -126,12 +161,12 @@ def seeded_l2_db(isolated_cfg: "Config") -> None:
             dialect=isolated_cfg.dialect,
             include_baseline=False,
         )
-        # AT.5.b — L2 plants via the spine generator.
         anchor = _plant_anchor_day()
         anomaly_gen = _build_anomaly_generator(isolated_cfg, anchor)
         anomaly_gen.emit(conn)
+        mt_gen = _build_money_trail_generator(isolated_cfg, anchor)
+        mt_gen.emit(conn)
         conn.commit()
-        # Refresh again so matviews see the L2 plants.
         refresh_sql = refresh_matviews_sql(
             _INSTANCE,
             prefix=isolated_cfg.db_table_prefix,
@@ -144,6 +179,11 @@ def seeded_l2_db(isolated_cfg: "Config") -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------
+# Anomaly invariant — assertion shape from pre-CB.7 test_inv_anomaly_direct.py
+# ---------------------------------------------------------------------
 
 
 def _anomaly_spine_keys(
@@ -170,12 +210,6 @@ def _anomaly_spine_keys(
     return out
 
 
-def _serialize_keys(
-    keys: "set[tuple[Any, ...]]",
-) -> list[list[Any]]:
-    return sorted([_normalise_row(list(t)) for t in keys])
-
-
 def _normalise_row(row: list[Any]) -> list[Any]:
     from datetime import date as _date, datetime as _datetime
     out: list[Any] = []
@@ -187,6 +221,12 @@ def _normalise_row(row: list[Any]) -> list[Any]:
         else:
             out.append(cell)
     return out
+
+
+def _serialize_anomaly_keys(
+    keys: "set[tuple[Any, ...]]",
+) -> list[list[Any]]:
+    return sorted([_normalise_row(list(t)) for t in keys])
 
 
 def test_anomaly_direct_extract(
@@ -206,9 +246,6 @@ def test_anomaly_direct_extract(
     prefix = isolated_cfg.db_table_prefix
     anchor = _plant_anchor_day()
     gen = _build_anomaly_generator(isolated_cfg, anchor)
-    # The expected anomaly singleton — see
-    # `expected_l2_audit_counts` for the same shape. Local construction
-    # avoids requiring a MoneyTrailGenerator from the anomaly producer.
     expected_anomaly_keys: tuple[tuple[str, str, date], ...] = (
         (
             gen.sender_account_id,
@@ -225,9 +262,6 @@ def test_anomaly_direct_extract(
         db_conn, prefix, sigma_threshold=_DEFAULT_SIGMA,
     )
 
-    # Spine ⋈ direct matview (AT.5.a). Detector returns every bucket;
-    # intersection with σ-filtered direct keys mirrors dashboard
-    # pushdown.
     inv = AnomalyInvariant(prefix=prefix)
     spine_keys = _anomaly_spine_keys(inv.detect(db_conn))  # type: ignore[arg-type]: live dbapi conn — Invariant.detect annotated as sqlite3 but accepts any 2.0 conn
     spine_keys_at_sigma = spine_keys & direct_keys  # type: ignore[operator]: matview_keys items are tuple[str|date,...] union; subset of spine_keys' tuple[str,str,date]
@@ -251,7 +285,7 @@ def test_anomaly_direct_extract(
     )
 
     payload: list[dict[str, Any]] = []
-    for key_tuple in _serialize_keys(direct_keys):
+    for key_tuple in _serialize_anomaly_keys(direct_keys):
         payload.append({"natural_key": key_tuple})
     write_rendered_rows("db", "anomaly_direct_rows", payload)
     write_rendered_rows("db", "anomaly_direct_meta", [
@@ -259,5 +293,101 @@ def test_anomaly_direct_extract(
             "direct_count": direct_count,
             "expected_count": expected_count,
             "sigma_threshold": _DEFAULT_SIGMA,
+        },
+    ])
+
+
+# ---------------------------------------------------------------------
+# Money-trail invariant — assertion shape from pre-CB.7 test_inv_money_trail_direct.py
+# ---------------------------------------------------------------------
+
+
+def _money_trail_spine_keys(
+    violations: set[Violation],
+) -> set[tuple[str, int]]:
+    """Project to (transfer_id, depth) — matches matview key +
+    dashboard group_by."""
+    out: set[tuple[str, int]] = set()
+    for v in violations:
+        items = dict(v.identity)
+        tid = items.get("transfer_id")
+        depth = items.get("depth")
+        if tid is None or depth is None:
+            continue
+        out.add((str(tid), int(depth)))  # type: ignore[arg-type]: depth narrowed by early-continue
+    return out
+
+
+def _serialize_mt_keys(keys: "set[tuple[Any, ...]]") -> list[list[Any]]:
+    return sorted([list(t) for t in keys])
+
+
+def test_money_trail_direct_extract(
+    seeded_l2_db: None,
+    db_conn: Any,
+    isolated_cfg: "Config",
+) -> None:
+    """Direct root-filtered matview SELECT + spine `detect()` for
+    money_trail. Writes both as artifacts for the validator.
+
+    Producer-side assertion (AT.5.a contract): spine == direct
+    when filtered to the planted root. The detector returns every
+    edge across every chain; the dashboard shows one chain at a
+    time per the analyst's root pick.
+    """
+    _ = seeded_l2_db
+    prefix = isolated_cfg.db_table_prefix
+
+    roots = distinct_money_trail_roots(db_conn, prefix)
+    assert _PLANTED_CHAIN_ROOT in roots, (
+        f"Planted chain root {_PLANTED_CHAIN_ROOT!r} missing from "
+        f"{prefix}_inv_money_trail_edges; roots found: "
+        f"{sorted(roots)[:10]}"
+    )
+
+    direct_count = count_money_trail_matview_rows(
+        db_conn, prefix, root_transfer_id=_PLANTED_CHAIN_ROOT,
+    )
+    direct_keys = money_trail_matview_row_keys(
+        db_conn, prefix, root_transfer_id=_PLANTED_CHAIN_ROOT,
+    )
+
+    inv = MoneyTrailInvariant(prefix=prefix)
+    spine_keys = _money_trail_spine_keys(inv.detect(db_conn))  # type: ignore[arg-type]: Invariant.detect annotated as sqlite3 but accepts any DBAPI 2.0 connection
+    root_edge_keys = direct_keys
+    spine_keys_at_root = spine_keys & root_edge_keys  # type: ignore[operator]: tuple[str,int] & tuple[str,int]
+
+    assert spine_keys_at_root == direct_keys, (
+        f"Spine.detect disagrees with the matview (money_trail):\n"
+        f"  spine-only: {sorted(spine_keys_at_root - direct_keys)[:5]}\n"  # type: ignore[type-var]: set difference produces sortable tuples by construction
+        f"  direct-only: {sorted(direct_keys - spine_keys_at_root)[:5]}\n"  # type: ignore[type-var]: same as above
+        f"  counts: spine={len(spine_keys_at_root)} "
+        f"direct={len(direct_keys)}"
+    )
+
+    expected_keys = {
+        (f"xfer-money-trail-{i}", i)
+        for i in range(_MONEY_TRAIL_CHAIN_LENGTH)
+    }
+    expected_count = len(expected_keys)
+    assert expected_keys <= direct_keys, (  # type: ignore[operator]: tuple[str,int] ⊆ tuple[str|int,...]; pyright doesn't follow subset through the union
+        f"Planted money_trail edges missing:\n"
+        f"  planted but absent: "
+        f"{sorted(expected_keys - direct_keys)[:5]}"  # type: ignore[type-var,operator]: set difference + sort produce sortable tuples
+    )
+    assert direct_count >= expected_count, (
+        f"Producer regression: planted {expected_count} edges, "
+        f"matview holds {direct_count}"
+    )
+
+    payload: list[dict[str, Any]] = []
+    for key_tuple in _serialize_mt_keys(direct_keys):
+        payload.append({"natural_key": key_tuple})
+    write_rendered_rows("db", "money_trail_direct_rows", payload)
+    write_rendered_rows("db", "money_trail_direct_meta", [
+        {
+            "direct_count": direct_count,
+            "expected_count": expected_count,
+            "root_transfer_id": _PLANTED_CHAIN_ROOT,
         },
     ])

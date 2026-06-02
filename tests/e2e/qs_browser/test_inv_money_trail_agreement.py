@@ -26,7 +26,7 @@ from tests._marks import inputs  # noqa: E402
 from tests.e2e._agreement import read_rendered_rows  # noqa: E402
 
 
-_DIRECT = "tests/e2e/db/test_inv_money_trail_direct.py::test_money_trail_direct_extract"
+_DIRECT = "tests/e2e/db/test_inv_direct.py::test_money_trail_direct_extract"
 _APP2 = "tests/e2e/app2/test_inv_money_trail_app2.py::test_money_trail_app2_extract"
 _QS = "tests/e2e/qs_browser/test_inv_money_trail_qs.py::test_money_trail_qs_extract"
 
