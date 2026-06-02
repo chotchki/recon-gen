@@ -345,9 +345,9 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [x] CB.0 - CB.0 — Spike: typed-marks + pytest_addoption pattern
 - [x] CB.1 - CB.1 — tests/_marks.py module + conftest plumbing
 - [x] CB.2 - CB.2 — Mark the unit tier (largest population, parallel-agent friendly)
-- [ ] CB.3 - CB.3 — Mark the app2 tier + replace _layer_command's app2 arm
+- [x] CB.3 - CB.3 — Mark the app2 tier + replace _layer_command's app2 arm
 - [x] CB.4 - CB.4 — Mark the db tier + replace its arm
-- [ ] CB.5 - CB.5 — Mark the qs_api + qs_browser tiers + replace those arms
+- [x] CB.5 - CB.5 — Mark the qs_api + qs_browser tiers + replace those arms
   - [x] CB.5.addendum - CB.5 addendum — @inputs(*nodeids) typed marker + agreement helper
 - [ ] CB.6 - CB.6 — Delete hardcoded file-lists; lint at full strength
 - [ ] CB.7 - CB.7 — @writes() fixture branching + per-test audit (agent-friendly)

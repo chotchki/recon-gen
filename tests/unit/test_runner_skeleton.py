@@ -474,46 +474,27 @@ def test_layer_command_unit_runs_pytest() -> None:
 
 
 def test_layer_command_db_sets_e2e_gate() -> None:
-    """Layer 3 (DB SQL smoke) needs RECON_GEN_E2E=1 to bypass the e2e gate."""
+    """Layer 3 (DB SQL smoke) needs RECON_GEN_E2E=1 to bypass the e2e gate.
+
+    CB.6 — dispatch swapped from a hardcoded file list to the tier-dir
+    ``tests/e2e/db/`` (whose conftest auto-applies ``@tier(Tier.DB)``).
+    """
     cmd_env = runner._layer_command("db", Path("/tmp/run"))
     assert cmd_env is not None
     cmd, env_addl = cmd_env
-    assert "test_dataset_sql_smoke.py" in cmd[1]
+    assert "tests/e2e/db/" in cmd
     assert env_addl["RECON_GEN_E2E"] == "1"
 
 
-def test_layer_command_app2_dispatches_html2_tests() -> None:
-    """b.3.impl.layer — Layer 3.7 (App2 against local Docker) dispatches
-    the test_html2_*.py files (stub + live-DB fetcher), plus
-    test_dashboard_driver.py (X.2.u.6.followon — its App2Driver.smoke()
-    protocol-parity tests need only Playwright + the bundled smoke app).
-
-    Z.B.14 — the dispatch carries ``-m "not browser"`` so the 3
-    ``@pytest.mark.browser`` tests in test_dashboard_driver.py
-    (``test_qs_l1_*``) are deselected at collection time. Earlier
-    reasoning that they "skip cleanly here" stopped holding once
-    Y.2.gate.h.1 made the runner auto-derive ``RECON_E2E_USER_ARN``; the
-    QS-bound tests then actually try to run pre-deploy and probe a stale
-    cross-cell dashboard. Browser layer picks them up via its own
-    ``-m browser`` selector — no parallel addition needed there.
+def test_layer_command_app2_dispatches_tier_dir() -> None:
+    """CB.6 — the app2 layer dispatches the ``tests/e2e/app2/`` tier-dir
+    (auto-applies ``@tier(Tier.APP2)``). Replaces the prior hardcoded
+    ``test_html2_*.py`` + ``test_dashboard_driver.py`` list.
     """
     cmd_env = runner._layer_command("app2", Path("/tmp/run"))
     assert cmd_env is not None
     cmd, env_addl = cmd_env
-    cmd_str = " ".join(cmd)
-    assert "test_html2_executives.py" in cmd_str
-    assert "test_html2_executives_live.py" in cmd_str
-    assert "test_html2_money_trail.py" in cmd_str
-    assert "test_html2_l2ft.py" in cmd_str  # Y.2.app2.cde.l2ft-wiring.c
-    assert "test_dashboard_driver.py" in cmd_str  # X.2.u.6.followon
-    # Z.B.14 — the deselect of QS-marked tests must show up as
-    # consecutive ``-m`` and ``not browser`` argv elements (no shell
-    # quoting in this codepath — argv is delivered directly to
-    # subprocess, so the args are list-literal).
-    assert "-m" in cmd
-    assert "not browser" in cmd
-    m_idx = cmd.index("-m")
-    assert cmd[m_idx + 1] == "not browser"
+    assert "tests/e2e/app2/" in cmd
     # Behind RECON_GEN_E2E=1 like every other tests/e2e/ file.
     assert env_addl["RECON_GEN_E2E"] == "1"
     assert env_addl["RECON_GEN_LAYER"] == "app2"
@@ -560,17 +541,17 @@ def test_layer_command_deploy_returns_cmd_with_variant_env(tmp_path: Path) -> No
     assert cmd[out_idx].endswith("/deploy/out")
 
 
-def test_layer_command_api_dispatches_pytest_marked_api() -> None:
-    """Y.2.gate.c.5.api — pytest -m api selects the boto3-only e2e files
-    (every test_*_deployed_resources.py + test_*_dashboard_structure.py +
-    test_*_filters.py carries `pytest.mark.api`). RECON_GEN_E2E=1 like every
-    other tests/e2e/ file."""
+def test_layer_command_qs_api_dispatches_tier_dir() -> None:
+    """CB.6 — the qs_api layer dispatches the ``tests/e2e/qs_api/``
+    tier-dir (auto-applies ``@tier(Tier.QS_API)`` + ``@needs(AWS_QS)``).
+    Replaces the prior ``-m api`` selector against the full ``tests/e2e/``
+    sweep. RECON_GEN_E2E=1 like every other tests/e2e/ file.
+    """
     cmd_env = runner._layer_command("qs_api", Path("/tmp/run"))
     assert cmd_env is not None
     cmd, env = cmd_env
     assert cmd[0].endswith("/pytest")
-    assert "-m" in cmd and "api" in cmd
-    assert "tests/e2e/" in cmd
+    assert "tests/e2e/qs_api/" in cmd
     assert env.get(RECON_GEN_E2E.name) == "1"
 
 
