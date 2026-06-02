@@ -178,15 +178,15 @@ def test_layer_deps_match_audit_table() -> None:
     unit is dependency-free (in-process; pyright runs via conftest sessionstart);
     db needs docker (containers per b.2); app2 needs docker (b.3.impl.layer —
     NO aws because App2 is local-only by audit §7.10);
-    deploy/api need aws + docker + aws_rds_running (gate.l.3); browser adds
-    qs_arn for embed signing. Edits to either side without the other should
-    fail loudly."""
+    deploy/api need aws + docker (CB.11.a.1 dropped aws_rds_running — Docker
+    substrate replaces RDS post-CB.12); browser adds qs_arn for embed signing.
+    Edits to either side without the other should fail loudly."""
     assert runner._LAYER_DEPS["unit"] == frozenset()
     assert runner._LAYER_DEPS["db"] == frozenset({"docker"})
     assert runner._LAYER_DEPS["app2"] == frozenset({"docker"})
-    assert runner._LAYER_DEPS["deploy"] == frozenset({"aws", "docker", "aws_rds_running"})
-    assert runner._LAYER_DEPS["api"] == frozenset({"aws", "docker", "aws_rds_running"})
-    assert runner._LAYER_DEPS["browser"] == frozenset({"aws", "docker", "qs_arn", "aws_rds_running"})
+    assert runner._LAYER_DEPS["deploy"] == frozenset({"aws", "docker"})
+    assert runner._LAYER_DEPS["api"] == frozenset({"aws", "docker"})
+    assert runner._LAYER_DEPS["browser"] == frozenset({"aws", "docker", "qs_arn"})
     assert "pyright" not in runner._LAYER_DEPS
 
 
@@ -3973,15 +3973,11 @@ def test_probe_aws_rds_running_aggregates_pg_and_oracle_failures() -> None:
     assert "stopping" in result.message
 
 
-def test_probe_aws_rds_running_registered_in_probe_functions() -> None:
-    """The new probe is wired into the runner's PROBE_FUNCTIONS map +
-    the deploy/api/browser layer deps. Locks the integration so a
-    rename / forgotten registration breaks loudly."""
-    assert "aws_rds_running" in runner._PROBE_FUNCTIONS
-    assert "aws_rds_running" in runner._LAYER_DEPS["deploy"]
-    assert "aws_rds_running" in runner._LAYER_DEPS["api"]
-    assert "aws_rds_running" in runner._LAYER_DEPS["browser"]
-    # And NOT in the local-only layers — those don't touch AWS.
-    assert "aws_rds_running" not in runner._LAYER_DEPS["unit"]
-    assert "aws_rds_running" not in runner._LAYER_DEPS["db"]
-    assert "aws_rds_running" not in runner._LAYER_DEPS["app2"]
+def test_probe_aws_rds_running_no_longer_gates_dispatch() -> None:
+    """CB.11.a.1 — the `aws_rds_running` probe is no longer in any
+    layer's deps. The probe FUNCTION + registry entry stay (deleted in
+    CB.11.a.2 when the surrounding aws_rds lifecycle module goes), but
+    no layer requires it — Docker substrate replaces RDS post-CB.12."""
+    assert "aws_rds_running" in runner._PROBE_FUNCTIONS  # function still wired
+    for layer in runner._LAYER_DEPS:
+        assert "aws_rds_running" not in runner._LAYER_DEPS[layer]

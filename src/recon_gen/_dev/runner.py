@@ -169,9 +169,17 @@ _LAYER_DEPS: Final[dict[str, frozenset[str]]] = {
     # only by design (audit §7.10 LOCKED — App2 = local-feedback gate;
     # QS = AWS-deploy parity cell at 6/7).
     "app2": frozenset({"docker"}),
-    "deploy": frozenset({"aws", "docker", "aws_rds_running"}),
-    "api": frozenset({"aws", "docker", "aws_rds_running"}),
-    "browser": frozenset({"aws", "docker", "qs_arn", "aws_rds_running"}),
+    # CB.11.a.1 (2026-06-01) — dropped `aws_rds_running` from
+    # deploy/api/browser. Post-CB.12 the DB substrate is Docker (PG +
+    # Oracle on the self-hosted runner / dev box), not RDS Aurora —
+    # there's no remote cluster lifecycle to gate dispatch on. Docker
+    # readiness is already covered by the `docker` dep; per-dialect
+    # container-boot lands in CB.11.b. The `_probe_aws_rds_running`
+    # function + `aws_rds` module + `cmd_up_aws` / `cmd_down_aws` RDS
+    # arms are no-ops now; CB.11.a.2 deletes them.
+    "deploy": frozenset({"aws", "docker"}),
+    "api": frozenset({"aws", "docker"}),
+    "browser": frozenset({"aws", "docker", "qs_arn"}),
 }
 
 
