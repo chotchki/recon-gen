@@ -314,6 +314,14 @@ class Config:
     # at the dispatch site with the env-var fallback name.
     aws_pg_cluster_id: str | None = None
     aws_oracle_instance_id: str | None = None
+    # CB.11.a — set to True when the QS data source's PG endpoint is a
+    # plain Docker container (or any non-TLS Postgres). Default False
+    # because RDS Postgres forces TLS; flipping False against RDS would
+    # silently downgrade. CB.11.a spike (2026-06-02) added this when
+    # the QS-to-Docker-PG forward worked but failed SSL handshake
+    # ("server does not support SSL"). Wired through
+    # `common/datasource.py::build_data_source` PG branch.
+    qs_disable_pg_ssl: bool = False
     # X.4.g.1 — Optional shell command run as step 1 of the deploy
     # pipeline, BEFORE step 2 wipes the demo DB. Non-zero exit halts
     # the pipeline (the demo DB is never touched). When unset, step 1
@@ -470,6 +478,8 @@ _CONFIG_ALLOWED_KEYS: frozenset[str] = frozenset({
     "default_l2_instance", "aws_pg_cluster_id", "aws_oracle_instance_id",
     # X.4.g.1+3 — deploy pipeline knobs (etl_datasource removed in BS.4).
     "etl_hook", "test_generator",
+    # CB.11.a — flip DisableSsl on the QS PG data source for Docker PG endpoints.
+    "qs_disable_pg_ssl",
 })
 
 # Z.C — `instance` removed: the L2 yaml no longer has an `instance:` field
@@ -940,6 +950,7 @@ def load_config(path: str | Path | None = None) -> Config:
         app2_db_pool_size=pool_size,
         aws_pg_cluster_id=_opt_str(values, "aws_pg_cluster_id"),
         aws_oracle_instance_id=_opt_str(values, "aws_oracle_instance_id"),
+        qs_disable_pg_ssl=bool(values.get("qs_disable_pg_ssl", False)),
         etl_hook=_opt_str(values, "etl_hook"),
         test_generator=test_generator,
     )

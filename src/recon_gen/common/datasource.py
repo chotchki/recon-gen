@@ -164,7 +164,10 @@ def build_datasource(cfg: Config) -> DataSource:
                 Host=info.host, Port=info.port, Database=info.database,
             ),
         )
-        ssl = SslProperties(DisableSsl=False)
+        # CB.11.a — cfg.qs_disable_pg_ssl flips this to True when the
+        # QS endpoint is a Docker Postgres without TLS configured.
+        # Default False preserves the RDS-forces-SSL contract.
+        ssl = SslProperties(DisableSsl=cfg.qs_disable_pg_ssl)
 
     ds_id = cfg.prefixed("demo-datasource")
 
