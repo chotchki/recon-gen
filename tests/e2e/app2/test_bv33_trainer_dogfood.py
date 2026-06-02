@@ -69,6 +69,7 @@ from recon_gen.common.l2.plant_registry import PLANT_REGISTRY, PlantKindEntry
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.l2.seed import emit_full_seed
 from recon_gen.common.sql import Dialect
+from tests.e2e._isolation import _isolate_cfg, _isolated_cfg_key
 from tests.e2e._studio_deploy_helpers import (
     SASQUATCH_YAML,
     make_studio_cfg,
@@ -85,37 +86,49 @@ from tests.e2e._studio_deploy_helpers import (
 pytestmark = [pytest.mark.browser]
 
 
-def _studio_cfg_for_cell(tmp_path: Path) -> tuple[Config, Path]:
-    """Return ``(cfg, db_path)`` for the runner cell currently active.
+@pytest.fixture
+def isolated_studio_cfg(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Config, Path]:
+    """Per-test isolated Studio cfg honoring the runner cell's dialect.
 
-    Wraps :func:`tests.e2e._studio_deploy_helpers.make_studio_cfg`
-    (sqlite-pinned by default) and overlays the runner's per-cell
-    ``RECON_GEN_DEMO_DATABASE_URL`` + ``RECON_GEN_DIALECT`` env-var
-    overrides when set. This keeps the test dialect-agnostic without
-    refactoring ``make_studio_cfg`` itself (the helper is shared with
-    ``test_studio_deploy_browser.py``; its signature change is a
-    follow-up).
+    Builds a Studio-flavored cfg via :func:`make_studio_cfg`, overlays
+    the runner cell's ``RECON_GEN_DEMO_DATABASE_URL`` + ``RECON_GEN_DIALECT``
+    env vars (set by ``runner.py``'s PG/Oracle variant arms), then runs
+    ``_isolate_cfg`` to suffix the ``db_table_prefix`` + ``deployment_name``
+    with a per-(test nodeid, worker) hash.
 
-    The returned ``db_path`` is a ``Path`` of the SQLite tempfile when
-    the cell is local SQLite, or a synthetic informational path when
-    the cell points at a containerized PG / Oracle URL (the helpers
-    below never read it — they use ``connect_demo_db(cfg)`` instead).
+    CB.7-followup migration (2026-06-02): pre-CB.7 the test built cfg
+    inline via ``_studio_cfg_for_cell`` and seeded ``sasquatch_pr``
+    against the runner's PG container without isolation — every
+    parametrized kind raced every other on the shared prefix, producing
+    the v11.* "test_trainer_dogfood_per_kind[*]" mass-fail signature.
+    The fixture-side isolation closes that race: each test function
+    (= each kind) lands on its own ``sasquatch_pr_<hash>`` prefix in
+    the container.
+
+    Returns ``(cfg, db_path)`` where ``db_path`` is informational
+    (DuckDB tempfile for local cells, URL-cast for PG / Oracle).
     """
-    cfg, sqlite_path = make_studio_cfg(tmp_path)
+    base_cfg, sqlite_path = make_studio_cfg(tmp_path)
 
-    # Runner cell injects RECON_GEN_DIALECT + RECON_GEN_DEMO_DATABASE_URL
-    # for non-SQLite variants (sp_pg_aw / sp_or_aw). Absent → SQLite
-    # local file (the make_studio_cfg default).
     dialect_override = RECON_GEN_DIALECT.get_or_none()
     url_override = RECON_GEN_DEMO_DATABASE_URL.get_or_none()
     if dialect_override is not None:
-        cfg.dialect = Dialect(dialect_override)
+        base_cfg.dialect = Dialect(dialect_override)
     if url_override is not None:
-        cfg.demo_database_url = url_override
-        # db_path is informational only for non-SQLite cells; the
-        # helpers below all consume ``cfg`` directly.
-        return cfg, Path(url_override)
-    return cfg, sqlite_path
+        base_cfg.demo_database_url = url_override
+        db_path = Path(url_override)
+    else:
+        db_path = sqlite_path
+
+    suffix = _isolated_cfg_key(request, base_cfg)
+    isolated = _isolate_cfg(
+        base_cfg, suffix=suffix, tmp_path_factory=tmp_path_factory,
+    )
+    return isolated, db_path
 
 
 def _seed_demo_db(cfg: Config) -> None:
@@ -433,7 +446,7 @@ def _v_matview_account_ids(
 
 
 def test_bv33a_limit_breach_outbound_trainer_dogfood(
-    tmp_path: Path,
+    isolated_studio_cfg: tuple[Config, Path],
 ) -> None:
     """BV.3.3.a vertical slice — drive the Trainer end-to-end for
     ``limit_breach_outbound`` and assert the planted row surfaces in
@@ -446,7 +459,7 @@ def test_bv33a_limit_breach_outbound_trainer_dogfood(
     breakage shape (one specific plant, one specific matview)."""
     from tests.e2e._drivers.app2 import App2Driver  # noqa: PLC0415
 
-    cfg, _db_path = _studio_cfg_for_cell(tmp_path)
+    cfg, _db_path = isolated_studio_cfg
     _seed_demo_db(cfg)
 
     entry = _pick_kind("limit_breach_outbound")
@@ -519,19 +532,20 @@ def _walkable_params() -> list[Any]:  # noqa: ANN401  — ParameterSet has no pu
 
 @pytest.mark.parametrize("entry", _walkable_params())
 def test_trainer_dogfood_per_kind(
-    entry: PlantKindEntry, tmp_path: Path,
+    entry: PlantKindEntry,
+    isolated_studio_cfg: tuple[Config, Path],
 ) -> None:
     """Per-kind trainer dogfood — each plant runs against a fresh
     studio + fresh DB; failure on one kind doesn't taint the rest.
 
-    The runner cell determines dialect (``sp_pg_aw`` → PG;
-    ``sp_or_aw`` → Oracle; ``sp_sl_aw`` → SQLite). Cross-dialect
+    The runner cell determines dialect (``sp_pg_lo`` → PG;
+    ``sp_or_lo`` → Oracle; ``sp_du_lo`` → DuckDB). Cross-dialect
     coverage emerges from re-running this test file per cell — no
     explicit ``@pytest.mark.parametrize("dialect", ...)`` here.
     """
     from tests.e2e._drivers.app2 import App2Driver  # noqa: PLC0415
 
-    cfg, _db_path = _studio_cfg_for_cell(tmp_path)
+    cfg, _db_path = isolated_studio_cfg
     _seed_demo_db(cfg)
 
     matview = entry.dashboard_check.matview_name
