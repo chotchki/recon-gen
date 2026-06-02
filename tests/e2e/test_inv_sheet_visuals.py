@@ -27,6 +27,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tests._marks import Need, Tier, needs, tier
+
 from .tree_validator import TreeValidator
 
 if TYPE_CHECKING:
@@ -34,7 +36,12 @@ if TYPE_CHECKING:
     from tests.e2e._drivers import DashboardDriver
 
 
-pytestmark = [pytest.mark.e2e, pytest.mark.browser]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.browser,
+    tier(Tier.QS_BROWSER),
+    needs(Need.AWS_QS, Need.PLAYWRIGHT),
+]
 
 
 def test_inv_dashboard_structure_matches_tree(inv_dashboard_driver: tuple["DashboardDriver", str], inv_app: "App") -> None:

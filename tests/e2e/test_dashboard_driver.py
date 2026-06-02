@@ -34,10 +34,17 @@ from recon_gen.common.sheets.app_info import (
     APP_INFO_MATVIEW_STATUS_TITLE,
     APP_INFO_SHEET_NAME,
 )
+from tests._marks import Need, Tier, needs, tier
 from tests.e2e._drivers import App2Driver, DashboardDriver, QsEmbedDriver
 
 # `qs_driver` lives in conftest.py — shared with the other QS browser
 # e2e tests (X.2.q.3).
+
+
+pytestmark = [
+    tier(Tier.QS_BROWSER),
+    needs(Need.AWS_QS, Need.PLAYWRIGHT),
+]
 
 
 @pytest.fixture

@@ -43,6 +43,7 @@ from testcontainers.postgres import PostgresContainer  # type: ignore[import-unt
 
 from recon_gen.cli._html_serve import REAL_APPS
 
+from tests._marks import Need, Tier, needs, tier
 from tests.e2e._studio_deploy_helpers import (
     QUICKSIGHT_GEN_BIN,
     SASQUATCH_YAML,
@@ -56,6 +57,8 @@ from tests.e2e._studio_deploy_helpers import (
 
 
 pytestmark = [
+    tier(Tier.QS_BROWSER),
+    needs(Need.AWS_QS, Need.PLAYWRIGHT),
     pytest.mark.skipif(
         not docker_available(),
         reason="docker not available — skipping postgres-in-docker e2e",

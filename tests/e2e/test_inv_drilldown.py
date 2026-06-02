@@ -35,12 +35,19 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tests._marks import Need, Tier, needs, tier
+
 
 
 if TYPE_CHECKING:
     from tests.e2e._drivers import DashboardDriver
 
-pytestmark = [pytest.mark.e2e, pytest.mark.browser]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.browser,
+    tier(Tier.QS_BROWSER),
+    needs(Need.AWS_QS, Need.PLAYWRIGHT),
+]
 
 
 @pytest.mark.skip(

@@ -29,6 +29,8 @@ from decimal import Decimal
 
 import pytest
 
+from tests._marks import Need, Tier, needs, tier
+
 from recon_gen.apps.investigation.datasets import (
     build_recipient_fanout_dataset,
     build_volume_anomalies_dataset,
@@ -43,7 +45,12 @@ if TYPE_CHECKING:
     from recon_gen.common.models import DatasetParameter
     from tests.e2e._drivers import DashboardDriver
 
-pytestmark = [pytest.mark.e2e, pytest.mark.browser]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.browser,
+    tier(Tier.QS_BROWSER),
+    needs(Need.AWS_QS, Need.PLAYWRIGHT),
+]
 
 
 def _sql_and_params_for(

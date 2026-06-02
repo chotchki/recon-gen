@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tests._marks import Need, Tier, needs, tier
+
 from .tree_validator import TreeValidator
 
 
@@ -32,7 +34,12 @@ if TYPE_CHECKING:
     from recon_gen.common.tree import App
     from tests.e2e._drivers import DashboardDriver
 
-pytestmark = [pytest.mark.e2e, pytest.mark.browser]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.browser,
+    tier(Tier.QS_BROWSER),
+    needs(Need.AWS_QS, Need.PLAYWRIGHT),
+]
 
 L1_VISUAL_TIMEOUT_MS = 90_000
 

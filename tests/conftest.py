@@ -461,11 +461,14 @@ def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:  # typ
         markers = {m.name for m in item.iter_markers()}
         tier_marker = next(item.iter_markers("tier"), None)
         if tier_marker is None:
-            # CB.6 partial: the auto-apply loop above marks every test
-            # outside tests/e2e/ as UNIT. The residual unmarked items are
-            # root-e2e parametrized [qs, app2] tests that need a
-            # tier-disjunction design pass — left as WARN-only until the
-            # disjunction marker (`@tier_any(...)`) lands.
+            errors.append(
+                f"{item.nodeid}: missing `@tier(...)` mark. Apply one of "
+                f"`@tier(Tier.UNIT | DB | APP2 | QS_API | QS_BROWSER)` "
+                f"at the module/test level. Tests in tier-dirs "
+                f"(tests/e2e/{{db,app2,qs_api,qs_browser}}/) get the "
+                f"tier auto-applied by the dir's conftest — moving the "
+                f"file there is the cleanest fix."
+            )
             continue
         tier_value = (
             tier_marker.args[0] if tier_marker.args else None

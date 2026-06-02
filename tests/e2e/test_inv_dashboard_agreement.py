@@ -100,11 +100,14 @@ from tests.audit._scenario_expectations import (  # noqa: E402
     expected_l2_audit_counts,
 )
 from tests.e2e._drivers import App2Driver  # noqa: E402
+from tests._marks import Need, Tier, needs, tier  # noqa: E402
 
 
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
+    tier(Tier.QS_BROWSER),
+    needs(Need.AWS_QS, Need.PLAYWRIGHT),
     # The module-scope ``seeded_l2_db`` + ``isolated_inv_cfg`` fixtures
     # build a shared ``<prefix>_iagree`` schema. Under pytest-xdist's
     # default ``load`` distribution each parametrized variant of the

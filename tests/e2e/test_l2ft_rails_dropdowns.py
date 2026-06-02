@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tests._marks import Need, Tier, needs, tier
+
 from recon_gen.apps.l2_flow_tracing.app import _RAILS_NAME, _RAILS_TRANSACTIONS_TITLE
 
 from ._l2ft_dropdown_walk import walk_dropdown
@@ -23,7 +25,12 @@ from ._l2ft_dropdown_walk import walk_dropdown
 if TYPE_CHECKING:
     from tests.e2e._drivers import DashboardDriver
 
-pytestmark = [pytest.mark.e2e, pytest.mark.browser]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.browser,
+    tier(Tier.QS_BROWSER),
+    needs(Need.AWS_QS, Need.PLAYWRIGHT),
+]
 
 
 @pytest.mark.parametrize("dropdown_title", ["Rail", "Status", "Bundle"])

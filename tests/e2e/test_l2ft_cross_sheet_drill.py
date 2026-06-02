@@ -33,6 +33,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tests._marks import Need, Tier, needs, tier
+
 from recon_gen.apps.l2_flow_tracing.app import (
     _L2_EXCEPTIONS_NAME,
     _RAILS_TRANSACTIONS_TITLE,
@@ -42,7 +44,12 @@ from recon_gen.apps.l2_flow_tracing.app import (
 if TYPE_CHECKING:
     from tests.e2e._drivers import DashboardDriver
 
-pytestmark = [pytest.mark.e2e, pytest.mark.browser]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.browser,
+    tier(Tier.QS_BROWSER),
+    needs(Need.AWS_QS, Need.PLAYWRIGHT),
+]
 
 
 # Mapping from L2 Exceptions ``check_type`` value → which drill menu
