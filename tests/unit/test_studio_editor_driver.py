@@ -6,7 +6,6 @@
 
 Drives the Studio editor over a Starlette ``TestClient`` (no browser,
 no real server) to recreate every fixture in the test-input corpus
-import duckdb
 from an empty L2 in dependency order, then asserts the saved YAML
 loads back structurally equal to the reference. This IS the dogfood
 acceptance gate.
@@ -35,6 +34,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import duckdb
 import pytest
 
 from recon_gen.common.env_keys import RECON_GEN_AI_FUZZ_SAMPLE_N

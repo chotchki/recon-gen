@@ -610,7 +610,16 @@ async def step_3_5_derive_balances(
                 f"  AND status <> 'failed' "
                 f"GROUP BY account_id, {date_expr}",
             )
-            rows_written = cur.rowcount or 0
+            if cfg.dialect is Dialect.DUCKDB:
+                # DuckDB returns -1 for cur.rowcount on INSERT-FROM-SELECT;
+                # re-query the row set we just wrote to get the actual count.
+                cur.execute(
+                    f"SELECT COUNT(*) FROM {p}_daily_balances "
+                    f"WHERE account_role IN ({roles_clause})",
+                )
+                rows_written = int(cur.fetchone()[0])
+            else:
+                rows_written = cur.rowcount or 0
             conn.commit()
         finally:
             cur.close()

@@ -703,7 +703,11 @@ def concat_agg(column_expr: str, separator: str, dialect: Dialect) -> str:
     """
     sep_literal = f"'{separator}'"
     if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
-        return f"STRING_AGG({column_expr}, {sep_literal})"
+        # ORDER BY makes the concatenation deterministic — without it the
+        # output depends on the engine's group-iteration order, which
+        # differs between PG and DuckDB and breaks reference/dogfood row
+        # equality.
+        return f"STRING_AGG({column_expr}, {sep_literal} ORDER BY {column_expr})"
     return (
         f"LISTAGG({column_expr}, {sep_literal}) "
         f"WITHIN GROUP (ORDER BY {column_expr})"

@@ -35,6 +35,13 @@ or hits a different shape, AW's design needs another iteration.
 
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.skip(
+    reason="CB.8: obsolete SQLite-syntax spike (json_each); design locked, "
+    "kept as archive only."
+)
+
 import json
 import duckdb
 

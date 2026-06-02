@@ -1,5 +1,11 @@
 """AW.0 spike — controlled as_of injection into matview age computation.
 
+NOTE (CB.8, 2026-06-02): obsolete spike — written against SQLite syntax
+(`julianday()`), which DuckDB doesn't expose (it has `julian` with
+different semantics). Spike's design conclusion is already locked + the
+production code uses the config-table mechanism; the spike file is
+preserved as design-archive only. Skipped wholesale rather than ported."""
+
 User-driven (2026-05-23): the spine's `datetime.now()` in stuck_pending
 + stuck_unbundled is a symptom of a deeper uncontrolled dependency —
 the matview SQL itself uses `CURRENT_TIMESTAMP` / `julianday('now')` for
@@ -91,6 +97,13 @@ What this spike does NOT prove (AW.1+ work):
 """
 
 from __future__ import annotations
+
+import pytest
+
+pytestmark = pytest.mark.skip(
+    reason="CB.8: obsolete SQLite-syntax spike (julianday); design locked, "
+    "kept as archive only."
+)
 
 import duckdb
 from datetime import datetime, timedelta

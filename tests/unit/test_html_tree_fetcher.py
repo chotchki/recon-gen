@@ -149,9 +149,9 @@ def aiosqlite_pool() -> Iterator[AsyncConnectionPool]:
 
     fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
+    os.unlink(path)
 
-    # Seed synchronously via stdlib sqlite3 — much simpler than
-    # async setup and the fixture is sync.
+    # Seed synchronously via DuckDB.
     conn = duckdb.connect(path)
     conn.execute("CREATE TABLE t (status TEXT, amount INTEGER)")
     conn.executemany(
