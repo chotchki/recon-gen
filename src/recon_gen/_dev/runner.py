@@ -582,29 +582,15 @@ def _layer_command(
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
         return (cmd, env_addl)
     if layer == "db":
-        # 3a — DB-touching pytest (behind RECON_GEN_E2E=1). Three test files:
-        #   - test_dataset_sql_smoke.py: parametrized over 37 datasets;
-        #     substitutes QS `<<$param>>` placeholders with declared
-        #     defaults, wraps in `WHERE 1=0`, runs against live DB.
-        #   - test_demo_apply_row_counts.py: asserts ≥1 row in every
-        #     named matview the seed populates (k.1.absorb — Phase 2 of
-        #     Y.2.gate.k.1+k.6 spike).
-        #   - test_audit_pdf_render_verify.py: invokes
-        #     `recon-gen audit apply --execute` + `audit verify`
-        #     against the variant's seeded DB (k.1.absorb-audit —
-        #     Phase 2.5). Reads RECON_GEN_TEST_L2_INSTANCE so the audit
-        #     CLI picks the variant's synthesized yaml and finds the
-        #     `<spec.name>_*` prefixed tables the seed populated.
-        # All three flow through the same RECON_GEN_TEST_L2_INSTANCE-aware
-        # test resolution, so the variant's synthesized prefix is the
-        # one source of truth for which tables to query / render from.
-        # Real DB connection comes from cfg; until cfg loading lands the test
-        # itself fails fast if cfg is missing. That's the expected shape.
+        # 3a — DB-touching pytest (behind RECON_GEN_E2E=1). CB.6: discover
+        # via the per-tier directory ``tests/e2e/db/`` — the conftest there
+        # auto-applies ``@tier(Tier.DB)``, so adding a new DB-tier test is
+        # ``touch tests/e2e/db/test_foo.py`` instead of editing this
+        # hardcoded list. The composition-rule conftest at
+        # ``tests/conftest.py`` validates tier marks at collection time.
         cmd = [
             str(_VENV_BIN / "pytest"),
-            "tests/e2e/test_dataset_sql_smoke.py",
-            "tests/e2e/test_demo_apply_row_counts.py",
-            "tests/e2e/test_audit_pdf_render_verify.py",
+            "tests/e2e/db/",
             "-q",
         ]
         if opts.only:
@@ -615,46 +601,14 @@ def _layer_command(
         return (cmd, {**env_addl, RECON_GEN_E2E.name: "1"})
     if layer == "app2":
         # b.3.impl.layer — App2 e2e (HTMX dialect, Playwright WebKit
-        # against the App2 Starlette server). Stub-fetcher renderer tests:
-        # `test_html2_executives.py`, `test_html2_money_trail.py`, and
-        # `test_html2_l2ft.py` (Y.2.app2.cde.l2ft-wiring.c — proves the
-        # auto-derived MULTI_SELECT pushdown dropdowns render + the
-        # repeated-key `?param_<name>=A&param_<name>=B` refetch wire).
-        # `test_html2_executives_live.py` uses `make_tree_db_fetcher(
-        # tree_app, cfg)` against the variant DB — `connect_demo_db(cfg)`
-        # reads `RECON_GEN_DEMO_DATABASE_URL` env override (config.py:364),
-        # so the variant URL flows through naturally. Behind `RECON_GEN_E2E=1`
-        # like every other tests/e2e/ file. NO AWS contact (audit §7.10 LOCKED).
-        #
-        # X.2.u.6.followon — `test_dashboard_driver.py` joins the list: its 8
-        # `App2Driver.smoke()` protocol-parity tests (`test_showcase_*` /
-        # `test_app2_*`) need only Playwright + the bundled smoke app (no DB,
-        # no AWS), so this is their home.
-        #
-        # Z.B.14 (2026-05-15) — `-m "not browser"` deselects the 3
-        # `@pytest.mark.browser` tests in `test_dashboard_driver.py`
-        # (`test_qs_l1_*`). Earlier reasoning that they "skip cleanly here
-        # (no `RECON_E2E_USER_ARN`)" is no longer true: Y.2.gate.h.1 made the
-        # runner auto-derive `RECON_E2E_USER_ARN` from `cfg.auth.aws_profile`,
-        # so the QS-bound tests now actually try to run pre-deploy and probe
-        # whatever dashboard happens to be left in QS from a prior run
-        # (cross-cell coupling). The Z.B.12 verification matrix surfaced
-        # this on `sq_or_aw`: 3 timeouts on `[role="tab"]` against a stale
-        # spec_example dashboard. The browser layer already picks these up
-        # via `-m browser` against `tests/e2e/`, so no parallel addition
-        # needed there. The other html2 files in this list carry no marks
-        # (verified) so `-m "not browser"` keeps them in.
+        # against the App2 Starlette server). CB.6: discover via the
+        # per-tier directory ``tests/e2e/app2/`` — the conftest there
+        # auto-applies ``@tier(Tier.APP2)``, replacing the prior hardcoded
+        # ``test_html2_*.py`` + ``test_dashboard_driver.py`` list. NO AWS
+        # contact (audit §7.10 LOCKED).
         cmd = [
             str(_VENV_BIN / "pytest"),
-            "tests/e2e/test_html2_executives.py",
-            "tests/e2e/test_html2_executives_live.py",
-            "tests/e2e/test_html2_money_trail.py",
-            "tests/e2e/test_html2_l2ft.py",
-            # X.2.h.5 — Table sort + pagination round-trip (smoke app,
-            # Playwright-only, no DB / no AWS).
-            "tests/e2e/test_html2_table_pagination.py",
-            "tests/e2e/test_dashboard_driver.py",
-            "-m", "not browser",
+            "tests/e2e/app2/",
             "-q",
         ]
         if opts.only:
@@ -705,9 +659,12 @@ def _layer_command(
         return (cmd, env_addl)
     if layer == "qs_api":
         # Y.2.gate.c.5.api — boto3-only e2e tests verifying deployed QS
-        # resources via `describe_*` calls. Pytest mark `api` (set by
-        # pytestmark in every e2e file) selects the right files; no
-        # hardcoded test-file list to drift. Behind `RECON_GEN_E2E=1`.
+        # resources via `describe_*` calls. CB.6: discover via the
+        # per-tier directory ``tests/e2e/qs_api/`` (which auto-applies
+        # ``@tier(Tier.QS_API)``) PLUS root-e2e files carrying the
+        # legacy ``pytest.mark.api`` mark (parametrized [qs, app2]
+        # tests that live at the root and partition by mark).
+        # Behind `RECON_GEN_E2E=1`.
         #
         # Default `-n 4` (capped) — pre-cap (2026-05-17), this layer
         # ran ``-n auto`` (= cpu_count, ~10-12 workers on a beefy Mac)
@@ -721,7 +678,9 @@ def _layer_command(
         # can still override via ``--parallel=N`` for serial debug or
         # explicit bump.
         cmd = [
-            str(_VENV_BIN / "pytest"), "tests/e2e/", "-m", "api", "-q",
+            str(_VENV_BIN / "pytest"),
+            "tests/e2e/qs_api/",
+            "-q",
         ]
         if opts.only:
             cmd += ["-k", opts.only]

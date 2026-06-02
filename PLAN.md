@@ -351,8 +351,8 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
   - [x] CB.5.addendum - CB.5 addendum — @inputs(*nodeids) typed marker + agreement helper
 - [ ] CB.6 - CB.6 — Delete hardcoded file-lists; lint at full strength
 - [ ] CB.7 - CB.7 — @writes() fixture branching + per-test audit (agent-friendly)
-- [ ] CB.8 - CB.8 — Drop Dialect.SQLITE + all SQLite-specific arms
-- [ ] CB.9 - CB.9 — Drop aiosqlite/aiosqlitepool from [prod] extras
+- [x] CB.8 - CB.8 — Drop Dialect.SQLITE + all SQLite-specific arms
+- [x] CB.9 - CB.9 — Drop aiosqlite/aiosqlitepool from [prod] extras
 - [x] CB.10 - CB.10 — Spike: hotchkiss.io DDNS + QS data source against Docker PG
 - [ ] CB.11 - CB.11 — Wire bridge into runner / CI
 - [ ] CB.12 - CB.12 — Drop AWS RDS Aurora resources
