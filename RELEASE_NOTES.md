@@ -82,6 +82,29 @@ base tx): SQLite db 4.41s + app2 18.47s, DuckDB db 7.15s + app2 15.44s
 — essentially equivalent at small scale; the engine perf gap manifests
 at large scale per the CA.0 spike measurements.
 
+**CA.11 — pyarrow-based seed apply fast path (opt-in via `[prod]`).**
+The seed-text → multi-row-VALUES coalescer (CA.10) cut sasquatch_pr
+apply from ~179s to ~21s on M1 — but the rest of the wall was
+Python-bound: 8.7s in the comment-aware statement splitter and ~10s
+re-rendering parsed VALUES tuples back into multi-row VALUES literal
+SQL for DuckDB to re-parse. CA.11 takes a structural shortcut: a
+single `re.finditer` scan over the seed text extracts INSERTs
+directly (skipping the 8.7s splitter), `_parse_simple_values` walks
+each VALUES body once, and consecutive same-shape rows flush via
+`pa.Table.from_pylist + con.register + INSERT SELECT` — DuckDB's
+zero-copy Arrow ingest path. **Measured 21.8s → 2.3s on M1 sasquatch_pr
+(8.5× speedup), byte-identical DB state vs the CA.10 path** (row
+counts + content hashes match on both base tables; matview violation
+set unchanged).
+
+pyarrow is added to `[prod]` extras (`pyarrow>=14`) — same opt-in
+posture as `oracledb` for Oracle. Operators on the minimal `[dev]`
+install transparently fall back to CA.10's multi-row VALUES path; no
+new hard dep. CA.12 (PG via `adbc_ingest`) and CA.13 (Oracle via
+`Connection.direct_path_load`, added in oracledb 3.4.0) are filed
+to extend the same pyarrow pipe to the other production dialects
+once their integration testing lands.
+
 ## v11.24.2 — Emit-time guard for NumericalMeasureField over non-numeric columns
 
 Backstop for the v11.24.1 fix. The tree's ``Measure.emit()`` now

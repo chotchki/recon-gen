@@ -285,11 +285,20 @@ def execute_script(
         # as a single execute() call. CA.10 — but the seed apply emits
         # ~127k individual INSERT statements; one-shot execute() parses
         # + executes them serially (~179s on a sasquatch-scale seed).
-        # DuckDB's executemany is essentially a Python loop (~5% faster
-        # than individual execute); multi-row VALUES literal SQL is 54×
-        # faster than either at 50k rows. Route consecutive INSERT runs
-        # through the multi-row-VALUES coalescer.
-        _execute_with_coalesced_inserts(cur, sql, _flush_duckdb_multivalues)
+        # CA.10 routed consecutive INSERT runs through a multi-row VALUES
+        # coalescer (~86s on sasquatch-scale; ~21s on M1 post-typed-literal-fix).
+        # CA.11 — if pyarrow is installed, take the structural fast path:
+        # finditer-scan the seed text for INSERTs in one pass (skipping the
+        # 8.7s comment-aware `_split_sqlite_statements`), parse VALUES bodies
+        # with the same `_parse_simple_values` walker, and bulk-load via
+        # `con.register(pa.Table) + INSERT SELECT`. Measured 21.8s → ~3.8s
+        # on the 131k-row sasquatch_pr seed. Falls back to the CA.10 path
+        # when pyarrow isn't available (operator on minimal `[dev]` install,
+        # not `[prod]`).
+        if _try_import_pyarrow() is not None:
+            _apply_seed_via_duckdb_pyarrow(cur, sql)
+        else:
+            _execute_with_coalesced_inserts(cur, sql, _flush_duckdb_multivalues)
         return
     if dialect is Dialect.SQLITE:
         # Bind-variable + executemany fast path for INSERT-heavy
@@ -402,16 +411,60 @@ _INSERT_FULL_RE = __import__("re").compile(
 )
 
 
+class _TypedSqlLiteral:
+    """Sentinel for ``<KEYWORD> '<text>'`` typed-literal forms — e.g.
+    ``TIMESTAMP '2026-03-03 00:00:01'`` or ``DATE '2026-03-03'``. The
+    parser emits these instead of plain strings so the flush stage
+    can re-render them in dialect-appropriate form (DuckDB / PG /
+    Oracle keep the typed prefix; SQLite collapses to bare text via
+    `_typed_lit_to_sqlite_bind`).
+
+    Without this, the seed's ~131k INSERTs against the `transactions`
+    table — every one carrying a ``TIMESTAMP '...'`` column — bail out
+    of the simple-values parser and fall through to per-row
+    ``cur.execute``, defeating the multi-row VALUES coalescer entirely
+    (CA.10 followup; diagnosed at 99.8% bail rate against sasquatch_pr).
+    """
+
+    __slots__ = ("kind", "text")
+
+    def __init__(self, kind: str, text: str) -> None:
+        self.kind = kind
+        self.text = text
+
+    def __repr__(self) -> str:
+        return f"_TypedSqlLiteral(kind={self.kind!r}, text={self.text!r})"
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, _TypedSqlLiteral)
+            and self.kind == other.kind
+            and self.text == other.text
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.kind, self.text))
+
+
+# Typed-literal keywords the parser recognizes. SQL has more (INTERVAL
+# with WITH TIME ZONE, etc.) but these are the only ones the L2 seed
+# emits today. Add to this set if the emit grows another shape.
+_TYPED_LITERAL_KEYWORDS = frozenset({"TIMESTAMP", "DATE"})
+
+
 def _parse_simple_values(body: str) -> tuple[object, ...] | None:
     """Walk a VALUES tuple body and emit Python primitives, or None if
     the body uses any form this parser can't safely handle.
 
     Recognized literals: ``'string'`` (no escape sequences),
-    ``NULL``, integers, floats. JSON metadata strings happen to embed
-    double-quotes which never collide with the single-quote delimiter.
-    Anything else (function call, ``''`` escape, hex literal, etc.)
-    returns None — the caller passes the raw INSERT through to
-    ``cur.execute`` instead.
+    ``NULL``, integers, floats, and ``<KEYWORD> '<text>'`` typed
+    literals (``TIMESTAMP '...'`` / ``DATE '...'``) which round-trip
+    via the `_TypedSqlLiteral` sentinel so the flush stage can
+    re-render dialect-appropriately. JSON metadata strings happen to
+    embed double-quotes which never collide with the single-quote
+    delimiter. Anything else (function call, ``''`` escape, hex
+    literal, etc.) returns None — the caller passes the raw INSERT
+    through to ``cur.execute`` instead.
     """
     out: list[object] = []
     i, n = 0, len(body)
@@ -444,9 +497,49 @@ def _parse_simple_values(body: str) -> tuple[object, ...] | None:
             except ValueError:
                 return None
             i = j
+        elif c.isalpha():
+            # Possible `<KEYWORD> '<text>'` typed literal (TIMESTAMP /
+            # DATE). Read the keyword, require whitespace, then a
+            # quoted string. Anything else bails.
+            j = i + 1
+            while j < n and body[j].isalpha():
+                j += 1
+            kw = body[i:j].upper()
+            if kw not in _TYPED_LITERAL_KEYWORDS:
+                return None
+            # Skip whitespace.
+            while j < n and body[j].isspace():
+                j += 1
+            if j >= n or body[j] != "'":
+                return None
+            k = body.find("'", j + 1)
+            if k == -1:
+                return None
+            # Same `''`-escape bail rule as plain strings.
+            if k + 1 < n and body[k + 1] == "'":
+                return None
+            out.append(_TypedSqlLiteral(kw, body[j + 1:k]))
+            i = k + 1
         else:
             return None
     return tuple(out)
+
+
+def _typed_lit_to_sqlite_bind(v: object) -> object:
+    """SQLite's `executemany` binds Python values via the DB-API 2.0
+    adapter chain; it doesn't know what to do with a `_TypedSqlLiteral`
+    sentinel. Since SQLite stores datetimes as TEXT and accepts ISO
+    strings for DATE / TIMESTAMP columns, collapse the sentinel to its
+    inner text. Pass-through for every other shape.
+
+    For SQLite specifically, the seed's `date_literal` helper emits a
+    bare `'YYYY-MM-DD'` string (not `DATE 'YYYY-MM-DD'`), so this
+    helper is defensive — it only fires if the SQL emit grows a typed
+    literal on the SQLite path.
+    """
+    if isinstance(v, _TypedSqlLiteral):
+        return v.text
+    return v
 
 
 def _execute_sqlite_with_binds(cur: Any, sql: str) -> None:  # typing-smell: ignore[explicit-any]: sqlite3.Cursor — DB-API 2.0 cursor with no shared Protocol across drivers
@@ -526,11 +619,17 @@ def _flush_sqlite_executemany(
     the connection) is the runner's hand-off point, and ``executemany``
     is the cursor-level bulk API SQLite ships. Measured ~50× speedup
     vs per-row execute on the ~72k-row sasquatch_pr seed (~33s → ~0.6s).
+
+    Any `_TypedSqlLiteral` sentinels (CA.10-followup, used by DuckDB to
+    round-trip ``TIMESTAMP '...'`` / ``DATE '...'``) collapse to their
+    inner text — SQLite stores datetimes as TEXT and accepts ISO
+    strings for DATE / TIMESTAMP columns.
     """
     ncols = len(rows[0])
     placeholders = ",".join("?" * ncols)
     stmt = f"INSERT INTO {table} ({cols}) VALUES ({placeholders})"
-    cur.executemany(stmt, rows)
+    bind_rows = [tuple(_typed_lit_to_sqlite_bind(v) for v in row) for row in rows]
+    cur.executemany(stmt, bind_rows)
 
 
 def _flush_duckdb_multivalues(
@@ -561,15 +660,161 @@ def _flush_duckdb_multivalues(
         cur.execute(f"INSERT INTO {table} ({cols}) VALUES {values}")
 
 
+# CA.11 — pyarrow-based DuckDB fast path. The CA.10 multi-row VALUES path
+# still parses + re-renders every value; the bigger latent cost is the
+# 8.7s comment-aware `_split_sqlite_statements` walk over 100MB of seed
+# text. CA.11 replaces both with a single `finditer` scan + a pyarrow
+# `con.register + INSERT SELECT` bulk-load, ~5-6× faster end-to-end.
+
+# Note the regex differs from `_INSERT_FULL_RE` only by NOT being anchored
+# (`^…$`), so it can find matches anywhere in the multi-statement script.
+# The body `[^;]+` capture is safe because the seed never embeds `;` inside
+# a string literal (JSON metadata uses `,` + `:` only).
+_SEED_INSERT_SCAN_RE = __import__("re").compile(
+    r"INSERT\s+INTO\s+(\S+)\s*\(([^)]+)\)\s*VALUES\s*\(([^;]+)\)\s*;",
+    __import__("re").IGNORECASE | __import__("re").DOTALL,
+)
+
+
+def _try_import_pyarrow() -> Any:  # typing-smell: ignore[explicit-any]: lazy-loaded extension; no stubs in [dev], same posture as oracledb's lazy import
+    """Return the pyarrow module if installed, else None.
+
+    CA.11 — pyarrow lives in `[prod]` extras alongside oracledb. Minimal
+    dev installs without `[prod]` won't have it; the seed-apply path
+    transparently falls back to the CA.10 multi-row VALUES coalescer
+    instead of crashing.
+    """
+    try:
+        import pyarrow as pa  # noqa: PLC0415 — lazy import is the point
+        return pa
+    except ImportError:
+        return None
+
+
+def _apply_seed_via_duckdb_pyarrow(cur: Any, sql: str) -> None:  # typing-smell: ignore[explicit-any]: duckdb.DuckDBPyConnection cursor — DB-API 2.0 with no shared Protocol
+    """Apply a seed SQL script to DuckDB via pyarrow bulk-load.
+
+    CA.11 — scans the script for INSERT statements via a single
+    `finditer` (skips the 8.7s `_split_sqlite_statements` walker),
+    parses each VALUES body with the same `_parse_simple_values`
+    used by CA.10, groups consecutive same-shape inserts, and flushes
+    via `pa.Table.from_pylist + con.register + INSERT SELECT`. The
+    DuckDB Arrow ingest path is zero-copy through the C API; no SQL
+    parse cost on the DB side per row.
+
+    Statements that aren't `INSERT INTO foo (cols) VALUES (...)`
+    shape — the seed header comments + any future DDL — fall through
+    to a per-statement `cur.execute` on the residual text (everything
+    NOT covered by an INSERT match). On the current seed shape
+    (131k INSERTs, 0 non-INSERT statements that need execution),
+    the residual block is just comment-only text that DuckDB silently
+    accepts as a no-op script.
+    """
+    pa = _try_import_pyarrow()
+    assert pa is not None  # caller guarantees via `_try_import_pyarrow() is not None`
+
+    # Group state.
+    pending_table: str | None = None
+    pending_cols: tuple[str, ...] | None = None
+    pending_rows: list[tuple[object, ...]] = []
+    # Staging table name needs a unique suffix per flush so re-registering
+    # doesn't trip "view already exists" on quick-fire flushes.
+    staging_counter = 0
+    # Track the residual non-INSERT text (everything between matches) so
+    # any DDL / SET / pragma slips through to `cur.execute` rather than
+    # silently disappearing.
+    residual_parts: list[str] = []
+    last_end = 0
+
+    def _flush() -> None:
+        nonlocal pending_rows, pending_table, pending_cols, staging_counter
+        if not pending_rows or pending_table is None or pending_cols is None:
+            pending_rows = []
+            pending_table = None
+            pending_cols = None
+            return
+        # Collapse `_TypedSqlLiteral` sentinels to their raw text; DuckDB
+        # will cast VARCHAR → TIMESTAMP / DATE on the INSERT SELECT via
+        # implicit conversion. Pyarrow stores them as strings.
+        col_names = pending_cols
+        rows_as_dicts = [
+            {
+                col_names[i]: (
+                    v.text if isinstance(v, _TypedSqlLiteral) else v
+                )
+                for i, v in enumerate(row)
+            }
+            for row in pending_rows
+        ]
+        arrow_table = pa.Table.from_pylist(rows_as_dicts)
+        staging_counter += 1
+        staging_name = f"_recon_gen_ca11_staging_{staging_counter}"
+        cur.register(staging_name, arrow_table)
+        try:
+            col_list = ", ".join(col_names)
+            cur.execute(
+                f"INSERT INTO {pending_table} ({col_list}) "
+                f"SELECT * FROM {staging_name}"
+            )
+        finally:
+            cur.unregister(staging_name)
+        pending_rows = []
+        pending_table = None
+        pending_cols = None
+
+    # Single pass over the script: emit residual text on misses, parse +
+    # buffer on INSERT matches.
+    for match in _SEED_INSERT_SCAN_RE.finditer(sql):
+        residual_parts.append(sql[last_end:match.start()])
+        last_end = match.end()
+        table = match.group(1)
+        cols_str = match.group(2).strip()
+        body = match.group(3)
+        row = _parse_simple_values(body)
+        if row is None:
+            # Non-conforming VALUES body (a function call, hex literal,
+            # quoted-escape we don't decode, etc.). Flush + fall through
+            # to per-row `cur.execute` on the original SQL chunk.
+            _flush()
+            cur.execute(match.group(0))
+            continue
+        cols_tuple = tuple(s.strip() for s in cols_str.split(","))
+        key = (table, cols_tuple)
+        if (pending_table, pending_cols) != key:
+            _flush()
+            pending_table, pending_cols = table, cols_tuple
+        pending_rows.append(row)
+    _flush()
+    # Trailing residual (post-last-INSERT). Plus any earlier residual
+    # chunks. Strip + drop empty / comment-only blocks the same way
+    # `_split_sqlite_statements` does.
+    residual_parts.append(sql[last_end:])
+    residual = "".join(residual_parts).strip()
+    if residual:
+        # Strip comment-only lines so DuckDB's parser doesn't choke on a
+        # trailing bare ';'.
+        code_lines = [
+            ln for ln in residual.splitlines()
+            if ln.strip() and not ln.strip().startswith("--")
+        ]
+        if code_lines:
+            # Multi-statement; DuckDB accepts ;-separated scripts in one
+            # `execute()`. Whatever non-INSERT statements snuck through
+            # (schema DDL, SET commands, pragmas) run here in order.
+            cur.execute("\n".join(code_lines))
+
+
 def _render_sql_literal(v: object) -> str:
     """Render a Python primitive (from `_parse_simple_values`) back as
     DuckDB SQL literal text. The parser bails on any string containing
     `''` escapes so we don't need quote-escape logic here — only the
-    four primitive shapes the parser emits round-trip.
+    primitive shapes the parser emits round-trip.
 
     NULL → ``NULL``; bool → ``TRUE`` / ``FALSE``; int/float → ``str(v)``;
-    str → single-quoted (no escape needed per the parser's contract).
-    Unrecognized shapes raise — would be a parser/flush invariant violation.
+    str → single-quoted (no escape needed per the parser's contract);
+    `_TypedSqlLiteral(kind, text)` → ``<kind> '<text>'`` (e.g.
+    ``TIMESTAMP '2026-03-03 00:00:01'``). Unrecognized shapes raise —
+    would be a parser/flush invariant violation.
     """
     if v is None:
         return "NULL"
@@ -577,6 +822,8 @@ def _render_sql_literal(v: object) -> str:
         return "TRUE" if v else "FALSE"
     if isinstance(v, (int, float)):
         return str(v)
+    if isinstance(v, _TypedSqlLiteral):
+        return f"{v.kind} '{v.text}'"
     if isinstance(v, str):
         return f"'{v}'"
     raise TypeError(

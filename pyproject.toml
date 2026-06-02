@@ -87,6 +87,12 @@ prod = [
     # install needed; thick mode kicks in if client libs present).
     # Pure PyPI wheel; install cost minor. (was [demo-oracle])
     "oracledb>=2.0",
+    # CA.11 — pyarrow for DuckDB bulk-load via pa.Table + con.register +
+    # INSERT SELECT. Optional like oracledb: the apply path falls back to
+    # the CA.10 multi-row VALUES text path when pyarrow isn't installed.
+    # CA.12/CA.13 follow-ups will extend the same pyarrow pipe to PG
+    # (adbc_ingest) and Oracle (direct_path_load) once those adapters land.
+    "pyarrow>=14",
     # Markdown for the Studio editor's textarea Preview tab (BF.9 —
     # description fields opt-in via FieldSpec.preview_markdown).
     # Lazy-imported in `_studio_editor_routes.py`; inert when

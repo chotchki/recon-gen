@@ -139,7 +139,7 @@ Same cold-read → triage → design → implement → re-cold-read pattern that
 - [ ] BX.backlog - BX backlog — Reorder sheets: L1/L2 Exceptions right after Getting Started
   - [ ] BX.backlog.coverage - merge-broken - BX backlog — Coverage combine job: merge doesn't render, markdown only available via artifact download
   - [ ] BX.backlog.duckdb - pytest-xdist-file-lock - CB scope — DuckDB pytest-xdist intra-cell file-lock contention
-  - [ ] BX.backlog.duckdb-memory-per-worker-fixtures - CB scope — Migrate db-tier fixtures to :memory: DuckDB per xdist worker
+  - [ ] BX.backlog.duckdb - memory-per-worker-fixtures - CB scope — Migrate db-tier fixtures to :memory: DuckDB per xdist worker
   - [ ] BX.backlog.e2e - sqlite-l2ft-dropdown-flake - BX backlog — e2e-sqlite flake: test_l2ft_rail_dropdown_selection_refetches_with_param
   - [ ] BX.backlog.runner - browser-probe-target-aware - BX backlog — Runner browser-layer probe over-gates on aws_rds_running for local targets
   - [ ] BX.backlog.session - start-silent-no-op - BX backlog — Studio /training/session-start silent no-op when base schema missing
@@ -456,7 +456,33 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [x] CA.6 - CA.6 — Re-lock seeds + semantic_lock fixtures for DuckDB
 - [x] CA.7 - CA.7 — Update integration tests + CI integration jobs
 - [ ] CA.8 - CA.8 — Nuke Dialect.SQLITE and all SQLite-specific arms
-- [ ] CA.9 - CA.9 — Docs + release notes + memory updates
+- [x] CA.9 - CA.9 — Docs + release notes + memory updates
+- [x] CA.10 - CA followup — DuckDB bulk-insert via executemany (apply layer perf)
+- [ ] CA.11 - CA.11 — Structural seed apply: pyarrow bypass for DuckDB (opt-in extra)
+- [ ] CA.12 - CA.12 — PG pyarrow adapter via adbc-driver-postgresql
+- [ ] CA.13 - CA.13 — Oracle pyarrow adapter via direct_path_load
+## Phase CB - Test-layer marks + Docker-to-AWS bridge + SQLite removal
+
+**Why:** Phase CA shipped DuckDB as the local default but left three threads dangling: (1) the hand-maintained test-file lists in `_layer_command` (drift between code-author and runner-author), (2) the multi-process DuckDB file-lock that the read_only mode papered over without solving the underlying isolation question (#199 / #200), and (3) `Dialect.SQLITE` + aiosqlite still in the tree because removing them requires the test fixtures to migrate first. The CB audit at `docs/audits/cb_test_layers_update.md` settled the destination: typed pytest marks (`@tier`, `@dialects`, `@needs`, `@writes`) become the single source of truth for what each test does + needs; the runner becomes a `--tier=X --dialect=Y` dispatcher; the writes-mark fixture branches isolation honestly. Plus the AWS minimization: PG + Oracle move to Docker on the self-hosted runner, QS data sources point at the runner over a port-forwarded bridge (hotchkiss.io DNS + 52.23.63.224/27 IP allowlist), AWS RDS Aurora goes away entirely.
+
+**Approach:** Five thrusts. (1) Marks infrastructure (CB.0-6) — typed enums + decorators + progressive lint ratchet, one tier at a time. (2) Writes-mark fixture branching (CB.7) — closes #199 / #200 via test-declared isolation signal. (3) SQLite removal (CB.8-9) — gated on CB.7's isolation. (4) Docker-to-AWS bridge (CB.10-12) — parallelizable with thrust 1-3. (5) Wrap (CB.13) — major v13.0.0 release since SQLite removal is breaking for any external pinning. Per the audit + the strict-isolation principle ([[feedback_strict_engines_surface_isolation_bugs]]): tests declare what they do; fixtures match; lint enforces.
+
+**Done when:** All tests carry typed marks; `_layer_command` reads `--tier=X --dialect=Y` (no hardcoded file lists); `MIGRATED_TIERS == all_tiers`; `@writes()` audit complete + fixture branches DuckDB isolation per-test; `Dialect.SQLITE` deleted; aiosqlite/aiosqlitepool dropped from [prod]; QS test deploys point at the runner-hosted Docker DBs; AWS RDS Aurora instances stopped and removed from cfg; v13.0.0 release notes published.
+
+- [ ] CB.0 - CB.0 — Spike: typed-marks + pytest_addoption pattern
+- [ ] CB.1 - CB.1 — tests/_marks.py module + conftest plumbing
+- [ ] CB.2 - CB.2 — Mark the unit tier (largest population, parallel-agent friendly)
+- [ ] CB.3 - CB.3 — Mark the app2 tier + replace _layer_command's app2 arm
+- [ ] CB.4 - CB.4 — Mark the db tier + replace its arm
+- [ ] CB.5 - CB.5 — Mark the qs_api + qs_browser tiers + replace those arms
+- [ ] CB.6 - CB.6 — Delete hardcoded file-lists; lint at full strength
+- [ ] CB.7 - CB.7 — @writes() fixture branching + per-test audit (agent-friendly)
+- [ ] CB.8 - CB.8 — Drop Dialect.SQLITE + all SQLite-specific arms
+- [ ] CB.9 - CB.9 — Drop aiosqlite/aiosqlitepool from [prod] extras
+- [ ] CB.10 - CB.10 — Spike: hotchkiss.io DDNS + QS data source against Docker PG
+- [ ] CB.11 - CB.11 — Wire bridge into runner / CI
+- [ ] CB.12 - CB.12 — Drop AWS RDS Aurora resources
+- [ ] CB.13 - CB.13 — Docs + release notes + v13.0.0 release
 ## Phase PLAN - Phase PLAN
 - [ ] PLAN.md - BS.5 — _v_config_chain_children + 7-path conversion
 
