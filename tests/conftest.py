@@ -434,13 +434,38 @@ def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:  # typ
                 "`./run_tests.sh up_to=<higher-watermark-layer>` "
                 "instead."
             )
+    # CB.6 — auto-apply `@tier(Tier.UNIT)` to any test that doesn't carry
+    # an explicit tier AND isn't under a tier-dir (tests/e2e/{db,app2,
+    # qs_api,qs_browser}/) whose own conftest auto-applies the matching
+    # tier. The four tier-dirs each have a conftest that adds their tier
+    # mark before this hook runs (pytest collection-modifyitems hooks
+    # chain in conftest discovery order, deepest-first), so by the time
+    # we get here every collected item under a tier-dir already has its
+    # mark — the auto-mark below only catches the residual: tests under
+    # tests/{unit,json,cli,docs,schema,l2,data}/ that didn't get an
+    # explicit @tier.
+    from tests._marks import Tier as _Tier, tier as _tier  # noqa: PLC0415
+    _UNIT_MARK = _tier(_Tier.UNIT)
+    for item in items:
+        if any(m.name == "tier" for m in item.iter_markers()):
+            continue
+        nodeid_path = str(item.path)
+        if "/tests/e2e/" in nodeid_path:
+            # E2E items without a tier landed here because the test sits
+            # at tests/e2e/ root (not in a tier-dir). Don't auto-mark —
+            # the test author needs to either move the file into a
+            # tier-dir or declare an explicit `@tier(...)`.
+            continue
+        item.add_marker(_UNIT_MARK)
     for item in items:
         markers = {m.name for m in item.iter_markers()}
         tier_marker = next(item.iter_markers("tier"), None)
         if tier_marker is None:
-            # CB.0 spike: WARN-only on missing tier so the 3,436 existing
-            # unmarked tests don't error out before CB.2's sweep. CB.6
-            # flips this to ERROR once every test carries a tier.
+            # CB.6 partial: the auto-apply loop above marks every test
+            # outside tests/e2e/ as UNIT. The residual unmarked items are
+            # root-e2e parametrized [qs, app2] tests that need a
+            # tier-disjunction design pass — left as WARN-only until the
+            # disjunction marker (`@tier_any(...)`) lands.
             continue
         tier_value = (
             tier_marker.args[0] if tier_marker.args else None
