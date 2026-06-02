@@ -588,3 +588,123 @@ class TestMakeConnectionPool:
             # is enough to catch a missing method regression.
         finally:
             asyncio.run(pool.close())
+
+
+# -- _apply_seed_via_duckdb_pyarrow regressions (CA.11) ---------------------
+
+class TestApplySeedViaDuckdbPyarrow:
+    """Regression cases against the CA.11 fast path.
+
+    Two correctness bugs surfaced post-initial-CA.11 land — both worth
+    a permanent regression:
+
+    1. **Ordering bug**: residual DDL that appeared BEFORE an INSERT in
+       the script was queued for end-of-function execution; the INSERT
+       then flushed against a missing table. Fix: process residual
+       between each INSERT match boundary, before the next batch.
+
+    2. **Quote-aware scanner**: the naive `[^;]+` body capture
+       truncated when the seed text embedded ``;`` inside a string
+       literal (operator-authored config descriptions). Fix: body
+       alternation matches single-quoted strings OR non-`;` chars.
+
+    Tests intentionally hit the function directly via the in-process
+    `duckdb.connect(":memory:")` to keep the regression cheap
+    (~milliseconds) and dialect-isolated.
+    """
+
+    def test_ddl_before_insert_runs_in_order(self) -> None:
+        import duckdb
+
+        from recon_gen.common.db import _apply_seed_via_duckdb_pyarrow
+
+        con = duckdb.connect(":memory:")
+        try:
+            _apply_seed_via_duckdb_pyarrow(
+                con,
+                "CREATE TABLE foo (id INTEGER, name VARCHAR);\n"
+                "INSERT INTO foo (id, name) VALUES (1, 'a');\n"
+                "INSERT INTO foo (id, name) VALUES (2, 'b');\n",
+            )
+            assert con.execute(
+                "SELECT id, name FROM foo ORDER BY id"
+            ).fetchall() == [(1, "a"), (2, "b")]
+        finally:
+            con.close()
+
+    def test_ddl_between_two_insert_groups_runs_in_order(self) -> None:
+        """CREATE TABLE bar between an INSERT-into-foo and INSERT-into-bar
+        must run BEFORE the bar INSERT lands (group boundary triggers
+        both flush + residual execution)."""
+        import duckdb
+
+        from recon_gen.common.db import _apply_seed_via_duckdb_pyarrow
+
+        con = duckdb.connect(":memory:")
+        try:
+            _apply_seed_via_duckdb_pyarrow(
+                con,
+                "CREATE TABLE foo (id INTEGER);\n"
+                "INSERT INTO foo (id) VALUES (1);\n"
+                "CREATE TABLE bar (id INTEGER);\n"
+                "INSERT INTO bar (id) VALUES (10);\n"
+                "INSERT INTO foo (id) VALUES (2);\n",
+            )
+            assert con.execute("SELECT id FROM foo ORDER BY id").fetchall() == [(1,), (2,)]
+            assert con.execute("SELECT id FROM bar").fetchall() == [(10,)]
+        finally:
+            con.close()
+
+    def test_semicolon_inside_string_literal(self) -> None:
+        """Quote-aware body scanner: a `;` inside a VALUES string literal
+        must NOT be treated as a statement terminator. Repros the second
+        config-populate failure shape (operator-authored description text
+        containing punctuation)."""
+        import duckdb
+
+        from recon_gen.common.db import _apply_seed_via_duckdb_pyarrow
+
+        con = duckdb.connect(":memory:")
+        try:
+            _apply_seed_via_duckdb_pyarrow(
+                con,
+                "CREATE TABLE foo (id INTEGER, descr VARCHAR);\n"
+                "INSERT INTO foo (id, descr) VALUES (1, "
+                "'Inbound ACH credit; force-posts via the rail');\n"
+                "INSERT INTO foo (id, descr) VALUES (2, 'plain text');\n",
+            )
+            rows = con.execute(
+                "SELECT id, descr FROM foo ORDER BY id"
+            ).fetchall()
+            assert rows == [
+                (1, "Inbound ACH credit; force-posts via the rail"),
+                (2, "plain text"),
+            ]
+        finally:
+            con.close()
+
+    def test_comment_only_residual_does_not_choke_duckdb(self) -> None:
+        """The seed's `-- SHA256: ...` header lands as residual between
+        the script start and the first INSERT. Comment-only residual
+        must be stripped (DuckDB chokes on a bare `;` left over from
+        the comment-line strip)."""
+        import duckdb
+
+        from recon_gen.common.db import _apply_seed_via_duckdb_pyarrow
+
+        con = duckdb.connect(":memory:")
+        try:
+            _apply_seed_via_duckdb_pyarrow(
+                con,
+                "-- SHA256: fake-hash-header\n"
+                "-- another comment line\n"
+                "CREATE TABLE foo (id INTEGER);\n"
+                "-- mid-script comment\n"
+                "INSERT INTO foo (id) VALUES (1);\n"
+                "-- trailing comment\n",
+            )
+            assert con.execute(
+                "SELECT id FROM foo"
+            ).fetchall() == [(1,)]
+        finally:
+            con.close()

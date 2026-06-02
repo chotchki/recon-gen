@@ -39,14 +39,15 @@ test belong to and what does it need." The runner discovers tests via
 `pytest --collect-only -m "<expr>"` instead of hand-listed file
 paths. The runner shrinks, drift between code + runner stops.
 
-### Four marks, all strongly typed
+### Five marks, all strongly typed
 
 ```python
-from tests._marks import tier, dialects, needs, writes, all_dialects
-from tests._marks import Tier, Dialect, Need
+from tests._marks import tier, dialects, l2, needs, writes, all_dialects, all_l2s
+from tests._marks import Tier, Dialect, L2, Need
 
 @tier(Tier.APP2)
 @dialects(Dialect.PG, Dialect.DU)        # OR @all_dialects()
+@l2(L2.SP, L2.SQ)                        # OR @all_l2s()
 @needs(Need.DOCKER, Need.PLAYWRIGHT)
 @writes()                                # this test mutates DB state — opt-in
 def test_studio_plant_apply(...): ...
@@ -64,6 +65,24 @@ def test_studio_plant_apply(...): ...
   sqlite is gone. `@all_dialects()` is the convenience for tests that
   apply to every dialect — equivalent to `@dialects(*Dialect)` but
   saves the per-dialect listing churn when a dialect joins or leaves.
+- **`@l2(*L2)`** — zero or more of `L2.SP | SQ | FUZZ`. Empty means
+  "this test doesn't load an L2 yaml" (pure helper / SQL-emit / JSON
+  byte-shape tests that operate on either inline yaml fragments or
+  no L2 at all). The runner fans the test out over the matched L2
+  forms, producing the `sp_du_lo` / `sq_pg_lo` / `f12345_du_lo`
+  variants. `@all_l2s()` is the convenience that fans over SP + SQ +
+  FUZZ together. The `l2_instance: L2Instance` fixture parameter
+  receives the loaded yaml — tests don't call `load_instance` directly.
+  Replaces the runner's hardcoded `expand_full()` L2 list.
+  - **`L2.FUZZ`** is a *family*, not a fixed yaml — it fans out N seeds
+    (today: `f12345_…`, `f67890_…`). Breadth is runner-controlled via
+    a `--fuzz-count=N` CLI flag (default 1 locally, higher in nightly);
+    `pytest_addoption` exposes it. Tests that genuinely want
+    property-style mass fuzzing (the 1–2 contract-matrix tests at the
+    bottom of `tests/data/`) opt out of the runner's count and apply
+    their own `@pytest.mark.parametrize("fuzz_seed", range(...))`
+    inline. This keeps the common case under runner control without
+    bloating the typed mark surface with per-test breadth.
 - **`@needs(*Need)`** — zero or more of `Need.DOCKER | PLAYWRIGHT |
   AWS_QS | ORACLEDB_CLIENT`. The runner's `probe_dependencies`
   already knows most of these. Pre-dispatch, the runner checks each
@@ -98,6 +117,11 @@ class Dialect(StrEnum):
     OR = "or"
     DU = "du"
 
+class L2(StrEnum):
+    SP = "spec_example"
+    SQ = "sasquatch_pr"
+    FUZZ = "fuzz"   # parameterized by --fuzz-count=N at runner level
+
 class Need(StrEnum):
     DOCKER = "docker"
     PLAYWRIGHT = "playwright"
@@ -117,6 +141,16 @@ def all_dialects() -> pytest.MarkDecorator:
     subset (Oracle-only-quirk tests, etc.)."""
     return dialects(*Dialect)
 
+def l2(*xs: L2) -> pytest.MarkDecorator:
+    return pytest.mark.l2(*[x.value for x in xs])
+
+def all_l2s() -> pytest.MarkDecorator:
+    """Sugar for `l2(*L2)` — fans out over spec_example + sasquatch_pr
+    + fuzz together. Use for tests that should run on every shape;
+    reserve explicit listing when a test pins to one form (sasquatch-
+    specific scenario coverage, fuzz-only contract probe, etc.)."""
+    return l2(*L2)
+
 def needs(*ns: Need) -> pytest.MarkDecorator:
     return pytest.mark.needs(*[n.value for n in ns])
 
@@ -124,20 +158,25 @@ def writes() -> pytest.MarkDecorator:
     return pytest.mark.writes
 ```
 
-Pyright catches `tier("appp2")` (wrong type) and `dialects("Pg")`
-(case typo) at write time. Pytest's runtime marks stay strings
-(can't change that); the author-facing surface is fully typed. Same
+Pyright catches `tier("appp2")` (wrong type), `dialects("Pg")` (case
+typo), and `l2(L2.SAS)` (wrong member name — typo bait when there are
+several short L2 forms) at write time. Pytest's runtime marks stay
+strings (can't change that); the author-facing surface is fully typed. Same
 trick as the existing `NewType("VariantName", str)` pattern — typed
 at the call site, identity at runtime.
 
-### Runner uses `--tier=X --dialect=Y` custom options, not `-m`
+### Runner uses `--tier=X --dialect=Y --l2=Z` custom options, not `-m`
 
 Pytest's `-m` filter doesn't natively understand "mark with
 argument" — `-m "tier(app2)"` doesn't work; it sees the mark
 `tier` regardless of args. Two options:
 
-- (a) Custom `--tier=app2 --dialect=du` command-line options via
-  `pytest_addoption` + selection in `pytest_collection_modifyitems`.
+- (a) Custom `--tier=app2 --dialect=du --l2=sp` command-line options
+  via `pytest_addoption` + selection in
+  `pytest_collection_modifyitems`. The same hook also reads
+  `--fuzz-count=N` to expand `L2.FUZZ` tests into N parameterized
+  copies (one per fuzz seed drawn from the deterministic per-commit
+  pool, per [[feedback_fuzzer_as_property_testing]]).
 - (b) Distinct mark names per value (`@pytest.mark.tier_app2()`) so
   `-m` works directly — but loses strong typing.
 
@@ -148,27 +187,33 @@ Pick (a). The runner becomes:
 | Rule | Why |
 |---|---|
 | `tier(unit)` + `dialects(...)` ⇒ ERROR | Unit tier doesn't open a DB. Tests that emit + assert SQL strings don't carry a dialects mark — they're cross-dialect by construction. |
+| `tier(unit)` + `l2(...)` ⇒ WARNING | Unit-tier tests usually operate on inline yaml fragments or no L2 at all; if a unit test actually loads an L2 instance, it's worth a comment justifying why it's not in the DB tier. |
 | `tier(qs_*)` without `aws_qs` in `needs` ⇒ ERROR | QS-touching tests must declare the AWS dep so the runner knows to skip when AWS is paused. |
 | `tier(qs_browser)` without `playwright` in `needs` ⇒ ERROR | Symmetry; QS embed renders in a browser. |
 | `dialects()` empty + tier ≠ unit ⇒ WARNING | Tier above unit usually means a DB is touched; empty dialects is probably an oversight. (PDF + dialect-agnostic e2e tests can suppress with a comment.) |
+| `l2()` empty + tier ≠ unit ⇒ WARNING | Same shape as the dialects rule: a DB/app2/qs-tier test almost certainly loads SOME L2 yaml — the empty mark is probably an oversight. |
+| `writes()` without an `l2_instance` fixture in the test signature ⇒ ERROR | A test that mutates DB state but doesn't bind the L2-scoped fixture chain can't get proper per-worker isolation — it'd race on the shared seeded DB. |
 | No `tier` mark ⇒ ERROR | Source of truth; can't dispatch without it. |
 
 ```python
 def _layer_command(layer: Tier, cell: VariantSpec, ...) -> list[str]:
     return [
         ".venv/bin/pytest",
-        "tests/",  # walks the whole tree; --tier + --dialect filter
+        "tests/",  # walks the whole tree; --tier + --dialect + --l2 filter
         f"--tier={layer.value}",
         f"--dialect={cell.dialect}",
+        f"--l2={cell.l2}",
+        f"--fuzz-count={cell.fuzz_count}",  # 1 local, N nightly
         "-q",
         # rest of the args (xdist, cov, env)
     ]
 ```
 
-Two-cell DuckDB+PG app2 dispatch is the same call with different
-`--dialect`. Adding a new test goes into the right tier
-automatically just by carrying its marks. The runner doesn't get
-touched.
+Three-axis dispatch (`--tier=app2 --dialect=du --l2=sq`) is the
+same call shape; the cells fan out as the cartesian product of the
+matrix. Adding a new test goes into the right tier × dialect × L2
+slice automatically just by carrying its marks. The runner doesn't
+get touched.
 
 ### Conftest wiring
 

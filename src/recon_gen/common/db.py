@@ -666,12 +666,20 @@ def _flush_duckdb_multivalues(
 # text. CA.11 replaces both with a single `finditer` scan + a pyarrow
 # `con.register + INSERT SELECT` bulk-load, ~5-6× faster end-to-end.
 
-# Note the regex differs from `_INSERT_FULL_RE` only by NOT being anchored
-# (`^…$`), so it can find matches anywhere in the multi-statement script.
-# The body `[^;]+` capture is safe because the seed never embeds `;` inside
-# a string literal (JSON metadata uses `,` + `:` only).
+# Quote-aware INSERT scanner. The body alternation matches either a
+# single-quoted string (with doubled-quote escape allowance for safety
+# even though the seed parser bails on `''`) OR any non-quote non-`;`
+# char. Required because the config-populate text the schema-apply path
+# emits embeds operator-authored descriptions containing `;`, `(`, etc.
+# inside string literals; the naive `[^;]+` body capture truncated at
+# the first quoted-`;`.
+# Measured on the 131k-row sasquatch_pr seed: 3.2s scan vs 1.0s with
+# the naive `[^;]+` form; still well below `_split_sqlite_statements`
+# at 8.7s. The 2.2s of extra Python regex work buys correctness.
 _SEED_INSERT_SCAN_RE = __import__("re").compile(
-    r"INSERT\s+INTO\s+(\S+)\s*\(([^)]+)\)\s*VALUES\s*\(([^;]+)\)\s*;",
+    r"INSERT\s+INTO\s+(\S+)\s*\(([^)]+)\)\s*VALUES\s*\("
+    r"((?:'(?:[^']|'')*'|[^;'])+)"
+    r"\)\s*;",
     __import__("re").IGNORECASE | __import__("re").DOTALL,
 )
 
@@ -702,13 +710,17 @@ def _apply_seed_via_duckdb_pyarrow(cur: Any, sql: str) -> None:  # typing-smell:
     DuckDB Arrow ingest path is zero-copy through the C API; no SQL
     parse cost on the DB side per row.
 
-    Statements that aren't `INSERT INTO foo (cols) VALUES (...)`
-    shape — the seed header comments + any future DDL — fall through
-    to a per-statement `cur.execute` on the residual text (everything
-    NOT covered by an INSERT match). On the current seed shape
-    (131k INSERTs, 0 non-INSERT statements that need execution),
-    the residual block is just comment-only text that DuckDB silently
-    accepts as a no-op script.
+    Order-preserving: residual non-INSERT chunks (DDL, SET commands,
+    pragmas, comments) are executed *between* INSERT batches in the
+    same order they appear in the script. A pre-fix version queued
+    residual until the end of the function, which broke any input
+    where `CREATE TABLE foo` appeared before `INSERT INTO foo` —
+    the INSERT flushed against a missing table. Now: at every
+    boundary where the next INSERT's `(table, cols)` differs from
+    the pending group (and at every non-conforming statement),
+    flush pending INSERTs first, then execute the residual chunk
+    that preceded this match, then start a fresh group. End-of-
+    script residual flushes after the final INSERT group.
     """
     pa = _try_import_pyarrow()
     assert pa is not None  # caller guarantees via `_try_import_pyarrow() is not None`
@@ -720,13 +732,9 @@ def _apply_seed_via_duckdb_pyarrow(cur: Any, sql: str) -> None:  # typing-smell:
     # Staging table name needs a unique suffix per flush so re-registering
     # doesn't trip "view already exists" on quick-fire flushes.
     staging_counter = 0
-    # Track the residual non-INSERT text (everything between matches) so
-    # any DDL / SET / pragma slips through to `cur.execute` rather than
-    # silently disappearing.
-    residual_parts: list[str] = []
     last_end = 0
 
-    def _flush() -> None:
+    def _flush_inserts() -> None:
         nonlocal pending_rows, pending_table, pending_cols, staging_counter
         if not pending_rows or pending_table is None or pending_cols is None:
             pending_rows = []
@@ -762,46 +770,68 @@ def _apply_seed_via_duckdb_pyarrow(cur: Any, sql: str) -> None:  # typing-smell:
         pending_table = None
         pending_cols = None
 
-    # Single pass over the script: emit residual text on misses, parse +
-    # buffer on INSERT matches.
+    def _execute_residual(text: str) -> None:
+        """Run any non-INSERT text between matches.
+
+        Comment-only lines (the seed's `-- SHA256: ...` header) are
+        stripped so DuckDB's parser doesn't choke on bare `;`s; real
+        DDL / SET / pragma statements run via a single multi-statement
+        `cur.execute`, preserving their declared order.
+        """
+        if not text.strip():
+            return
+        code_lines = [
+            ln for ln in text.splitlines()
+            if ln.strip() and not ln.strip().startswith("--")
+        ]
+        if code_lines:
+            cur.execute("\n".join(code_lines))
+
+    # Single pass over the script. At each match boundary: if the new
+    # match's group key differs from the pending group, flush pending
+    # INSERTs FIRST, then execute the residual text that lay between
+    # the previous group's end and this match's start (the residual
+    # might contain DDL the next INSERT depends on — flush has to
+    # precede the residual for the residual to see all already-INSERTed
+    # rows, AND the residual has to precede the next INSERT in case
+    # the next INSERT depends on DDL inside the residual).
     for match in _SEED_INSERT_SCAN_RE.finditer(sql):
-        residual_parts.append(sql[last_end:match.start()])
+        residual_before = sql[last_end:match.start()]
         last_end = match.end()
         table = match.group(1)
         cols_str = match.group(2).strip()
         body = match.group(3)
         row = _parse_simple_values(body)
-        if row is None:
-            # Non-conforming VALUES body (a function call, hex literal,
-            # quoted-escape we don't decode, etc.). Flush + fall through
-            # to per-row `cur.execute` on the original SQL chunk.
-            _flush()
-            cur.execute(match.group(0))
-            continue
         cols_tuple = tuple(s.strip() for s in cols_str.split(","))
         key = (table, cols_tuple)
+        if row is None:
+            # Non-conforming VALUES body. Flush pending, run residual,
+            # then fall through to per-statement `cur.execute` on the
+            # raw INSERT text.
+            _flush_inserts()
+            _execute_residual(residual_before)
+            cur.execute(match.group(0))
+            continue
         if (pending_table, pending_cols) != key:
-            _flush()
+            # Group boundary. Flush pending INSERT batch FIRST so any
+            # tables the residual queries see the rows that were already
+            # buffered. Then run residual DDL/etc. so the new group's
+            # target table exists if the residual just created it.
+            _flush_inserts()
+            _execute_residual(residual_before)
             pending_table, pending_cols = table, cols_tuple
+        else:
+            # Continuing the same group — residual must still run before
+            # the next INSERT lands (rare, but matters if a SET / pragma
+            # sneaks in between same-shape INSERTs).
+            if residual_before.strip():
+                _flush_inserts()
+                _execute_residual(residual_before)
+                pending_table, pending_cols = table, cols_tuple
         pending_rows.append(row)
-    _flush()
-    # Trailing residual (post-last-INSERT). Plus any earlier residual
-    # chunks. Strip + drop empty / comment-only blocks the same way
-    # `_split_sqlite_statements` does.
-    residual_parts.append(sql[last_end:])
-    residual = "".join(residual_parts).strip()
-    if residual:
-        # Strip comment-only lines so DuckDB's parser doesn't choke on a
-        # trailing bare ';'.
-        code_lines = [
-            ln for ln in residual.splitlines()
-            if ln.strip() and not ln.strip().startswith("--")
-        ]
-        if code_lines:
-            # Multi-statement; DuckDB accepts ;-separated scripts in one
-            # `execute()`. Whatever non-INSERT statements snuck through
-            # (schema DDL, SET commands, pragmas) run here in order.
-            cur.execute("\n".join(code_lines))
+    # Tail: flush final INSERT batch first, then execute trailing residual.
+    _flush_inserts()
+    _execute_residual(sql[last_end:])
 
 
 def _render_sql_literal(v: object) -> str:
