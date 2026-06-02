@@ -1,8 +1,20 @@
 # CB.7 — `@writes()` fixture branching + per-test audit
 
-**Status:** Skeleton (this doc) + initial fixture-branching landed; per-test
-audit pending. Tracks the multi-session work to flip DuckDB tests onto
-declared-isolation semantics.
+**Status:** Fixture landed (2026-06-02). DB-tier audit + migration in progress.
+
+**Scope correction (2026-06-02, operator-flagged):** the original draft was
+DuckDB-myopic — it treated `@writes()` as a DuckDB-only concern. The
+canonical design: `@writes()` is a **dialect-agnostic** declaration at the
+test level; the `db_cfg` fixture provides per-dialect isolation:
+
+- **DuckDB**: per-worker `.duckdb` file (cloned from canonical OR fresh,
+  depending on whether the test needs the runner's broad seed)
+- **PG**: per-worker `db_table_prefix` suffix (e.g., `qsgen_postgres_w0`)
+- **Oracle**: same as PG — per-worker prefix
+
+The hand-rolled isolation patterns (`isolated_inv_cfg`, etc.) scattered
+across `tests/e2e/db/test_*.py` are exactly the smell `db_cfg` replaces.
+Tests inject the canonical primitive; they don't roll their own.
 
 ## Why
 
