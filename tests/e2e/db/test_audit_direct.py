@@ -114,17 +114,16 @@ def dialect_isolated_cfg(
     `tests/e2e/db/conftest.py` serves the single-cfg case; this variant
     is its parallel for `dialect_cfg`-driven tests.
 
-    Each (test module, xdist worker, dialect parametrize callspec)
-    gets its OWN isolated cfg → concurrent workers and dialect cells
-    don't race on schema apply.
+    CB.7 followup — uses `_resolve_isolation_suffix` so the scope-pinned
+    suffix from `@isolation_producer(IsolationScope.AGREEMENT_AUDIT)`
+    wins over the per-test hash. The app2 + qs_browser tier consumers
+    mirror this fixture against the same scope, so all tiers read/write
+    the same `<base>_x_aa` prefix.
     """
-    from tests.e2e.db.conftest import _isolate_cfg, _isolated_cfg_key
+    from tests.e2e._isolation import _isolate_cfg, _resolve_isolation_suffix
 
     cfg, cfg_path, dialect = dialect_cfg
-    # The hash already includes cfg.dialect.value (per `_isolated_cfg_key`
-    # inputs lock), so no need to splice the dialect into the suffix
-    # ourselves — the hash differs per dialect parametrize cell.
-    suffix = _isolated_cfg_key(request, cfg)
+    suffix, _is_scope_pinned = _resolve_isolation_suffix(request, cfg)
     isolated_cfg = _isolate_cfg(
         cfg, suffix=suffix, tmp_path_factory=tmp_path_factory,
     )

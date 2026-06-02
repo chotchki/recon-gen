@@ -80,8 +80,34 @@ def dialect_cfg(
 
 
 @pytest.fixture(scope="module")
-def scenario(
+def dialect_isolated_cfg(
+    request: pytest.FixtureRequest,
     dialect_cfg: "tuple[Config, Path, Dialect]",
+    tmp_path_factory: pytest.TempPathFactory,
+) -> "tuple[Config, Path, Dialect]":
+    """Per-(module, worker, dialect) isolated cfg — scope-pinned to
+    `AGREEMENT_AUDIT`.
+
+    CB.7 followup — mirrors the producer's `dialect_isolated_cfg` in
+    `tests/e2e/db/test_audit_direct.py`. Both fixtures call
+    `_resolve_isolation_suffix` which picks up the module's
+    `@isolation_consumer(IsolationScope.AGREEMENT_AUDIT)` marker and
+    returns the scope value as suffix → producer + consumer read/write
+    the same `<base>_x_aa` prefix.
+    """
+    from tests.e2e._isolation import _isolate_cfg, _resolve_isolation_suffix
+
+    cfg, cfg_path, dialect = dialect_cfg
+    suffix, _is_scope_pinned = _resolve_isolation_suffix(request, cfg)
+    isolated_cfg = _isolate_cfg(
+        cfg, suffix=suffix, tmp_path_factory=tmp_path_factory,
+    )
+    return isolated_cfg, cfg_path, dialect
+
+
+@pytest.fixture(scope="module")
+def scenario(
+    dialect_isolated_cfg: "tuple[Config, Path, Dialect]",
 ) -> "ScenarioPlant":
     """Reconstruct the producer's ScenarioPlant deterministically.
 
@@ -89,7 +115,7 @@ def scenario(
     producer fed `apply_db_seed`. Used by `expected_audit_counts` to
     compute the planted-row count this consumer asserts against.
     """
-    _ = dialect_cfg  # ordering only; scenario construction is pure
+    _ = dialect_isolated_cfg  # ordering only; scenario construction is pure
     instance = load_instance(l2_yaml_for_test())
     report = default_scenario_for(instance, today=_TODAY, mode="l1_invariants")
     return report.scenario
@@ -97,12 +123,13 @@ def scenario(
 
 @pytest.fixture(scope="module")
 def conn(
-    dialect_cfg: "tuple[Config, Path, Dialect]",
+    dialect_isolated_cfg: "tuple[Config, Path, Dialect]",
 ) -> "Iterator[Any]":
-    """Per-dialect read-only DB connection. CB.7 followup: applies
-    `enforce_readonly` so the consumer marker is enforced by PG
-    itself — any attempted write raises at the offending line."""
-    cfg, _cfg_path, dialect = dialect_cfg
+    """Per-dialect read-only DB connection against the scope-pinned
+    isolated cfg. CB.7 followup: applies `enforce_readonly` so the
+    consumer marker is enforced by PG itself — any attempted write
+    raises at the offending line."""
+    cfg, _cfg_path, dialect = dialect_isolated_cfg
     c = connect_demo_db(cfg)
     try:
         enforce_readonly(c, dialect)
@@ -131,7 +158,7 @@ def _normalise_row(row: list[object]) -> list[object]:
 
 @pytest.fixture(scope="module")
 def app2_results(
-    dialect_cfg: "tuple[Config, Path, Dialect]",
+    dialect_isolated_cfg: "tuple[Config, Path, Dialect]",
     conn: Any,
 ) -> "Mapping[str, Mapping[str, object]]":
     """One App2 walk; collect all 6 invariants' (count, seen, keys).
@@ -151,7 +178,7 @@ def app2_results(
     )
     from tests.e2e._harness_html2 import make_live_db_fetchers_for_app
 
-    cfg, _cfg_path, _dialect = dialect_cfg
+    cfg, _cfg_path, _dialect = dialect_isolated_cfg
     _ = conn  # ordering dep — the read-only conn forces producer-ran ordering
 
     instance = load_instance(l2_yaml_for_test())

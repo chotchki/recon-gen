@@ -34,6 +34,33 @@ if TYPE_CHECKING:
     from recon_gen.common.config import Config
 
 
+def _resolve_isolation_suffix(
+    request: pytest.FixtureRequest, cfg: "Config",
+) -> tuple[str, bool]:
+    """Resolve the prefix suffix the fixture should use, honoring any
+    `@isolation_scope(...)` module-level marker.
+
+    Returns ``(suffix, is_scope_pinned)``. When the test's module
+    declares `@isolation_producer` or `@isolation_consumer`, the suffix
+    is the scope value (``x_<scope>``) so producer + consumer agree on
+    the shared prefix across tiers. Otherwise falls back to a per-(test
+    nodeid, worker, dialect, l2) hash for plain per-test isolation.
+
+    Shared by:
+    - the canonical `isolated_cfg` fixture (default cfg flow)
+    - per-file `dialect_isolated_cfg` fixtures that override the
+      canonical fixture for dialect-parametrized writer/reader tests
+      (audit chain).
+    """
+    request_any: Any = request  # typing-smell: ignore[explicit-any]: pytest FixtureRequest dynamic attr
+    scope_marker = next(
+        request_any.node.iter_markers("isolation_scope"), None,
+    )
+    if scope_marker is not None and scope_marker.args:
+        return f"x_{scope_marker.args[0]}", True
+    return _isolated_cfg_key(request, cfg), False
+
+
 def _isolated_cfg_key(
     request: pytest.FixtureRequest, cfg: "Config",
 ) -> str:
@@ -114,17 +141,7 @@ def isolated_cfg(
     """
     from recon_gen.common.sql import Dialect
 
-    # See `_isolated_cfg_key` for the pyright-cast rationale.
-    request_any: Any = request  # typing-smell: ignore[explicit-any]: pytest FixtureRequest protocol attrs are dynamic
-    scope_marker = next(
-        request_any.node.iter_markers("isolation_scope"), None,
-    )
-    if scope_marker is not None and scope_marker.args:
-        suffix = f"x_{scope_marker.args[0]}"
-        is_scope_pinned = True
-    else:
-        suffix = _isolated_cfg_key(request, cfg)
-        is_scope_pinned = False
+    suffix, is_scope_pinned = _resolve_isolation_suffix(request, cfg)
     isolated = _isolate_cfg(cfg, suffix=suffix, tmp_path_factory=tmp_path_factory)
     yield isolated
 
