@@ -9,6 +9,8 @@ abstraction is testable from day one.
 
 from __future__ import annotations
 
+import duckdb
+
 import shutil
 from collections.abc import Iterator
 from datetime import datetime
@@ -319,7 +321,6 @@ def test_phantom_rail_plant_surfaces_on_etl_triage(
     should contain the planted rail name."""
     import asyncio
     import os
-    import sqlite3
     import tempfile
 
     from recon_gen.common.db import (
@@ -338,12 +339,15 @@ def test_phantom_rail_plant_surfaces_on_etl_triage(
     # Build a seeded sqlite with the spec_example schema + plant the
     # registry entry's SQL against it. Then run detect_gaps + assert
     # the plant surfaced as an unmatched_rail gap.
-    fd, db_path = tempfile.mkstemp(suffix=".sqlite")
+    fd, db_path = tempfile.mkstemp(suffix=".duckdb")
+
     os.close(fd)
-    conn = sqlite3.connect(db_path)
+
+    os.unlink(db_path)
+    conn = duckdb.connect(db_path)
     conn.execute(
         f"CREATE TABLE {prefix}_transactions ("
-        "entry INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "entry BIGINT, "
         "id TEXT NOT NULL, account_id TEXT NOT NULL, "
         "account_role TEXT, account_parent_role TEXT, "
         "account_scope TEXT NOT NULL, "
@@ -358,24 +362,24 @@ def test_phantom_rail_plant_surfaces_on_etl_triage(
     # Invoke the registry's plant function exactly as the route would.
     sql = entry.plant_function(
         prefix=prefix,
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
         anchor=datetime(2026, 5, 30, 14, 0, 0),
         count=4,
         rail_name=PHANTOM_RAIL_NAME,
     )
     cur = conn.cursor()
-    execute_script(cur, sql, dialect=Dialect.SQLITE)
+    execute_script(cur, sql, dialect=Dialect.DUCKDB)
     conn.commit()
     conn.close()
 
     cfg = make_test_config(
-        dialect=Dialect.SQLITE, demo_database_url=db_path,
+        dialect=Dialect.DUCKDB, demo_database_url=db_path,
     )
     pool: AsyncConnectionPool = asyncio.run(make_connection_pool(cfg))
     try:
         contracts = derive_column_contracts(inst)
         gaps = asyncio.run(detect_gaps(
-            pool, prefix, inst, contracts, dialect=Dialect.SQLITE,
+            pool, prefix, inst, contracts, dialect=Dialect.DUCKDB,
         ))
     finally:
         asyncio.run(pool.close())

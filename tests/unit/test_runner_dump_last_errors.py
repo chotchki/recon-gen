@@ -151,7 +151,7 @@ def test_dump_failing_layer_surfaces_header_env_and_traceback(
     run_dir = runs_dir / _RUN_ID_NEW
     run_dir.mkdir()
     _write_layer(
-        run_dir, "sp_pg_aw", "browser",
+        run_dir, "sp_pg_aw", "qs_browser",
         exit_code=1, duration=12.5,
         stdout=_PYTEST_STDOUT_WITH_FAILURE,
         env={
@@ -161,7 +161,7 @@ def test_dump_failing_layer_surfaces_header_env_and_traceback(
         },
     )
     out = _dump(runs_dir)
-    assert "[sp_pg_aw/browser] exit=1 duration=12.5s" in out
+    assert "[sp_pg_aw/qs_browser] exit=1 duration=12.5s" in out
     assert "RECON_GEN_DEPLOYMENT_NAME=recon-sp_pg_aw" in out
     assert "RECON_GEN_FUZZ_SEED=42" in out
     assert "1 FAILED test(s)" in out
@@ -195,11 +195,11 @@ def test_dump_browser_failure_with_capture_dir_no_warning(
     runs_dir: Path,
 ) -> None:
     """A failed browser test WITH an artifact dir under
-    ``<cell>/browser/<sanitized_test_id>/`` → no warning."""
+    ``<cell>/qs_browser/<sanitized_test_id>/`` → no warning."""
     run_dir = runs_dir / _RUN_ID_NEW
     run_dir.mkdir()
     _write_layer(
-        run_dir, "sp_pg_aw", "browser",
+        run_dir, "sp_pg_aw", "qs_browser",
         exit_code=1,
         stdout=_PYTEST_STDOUT_WITH_FAILURE,
     )
@@ -209,7 +209,7 @@ def test_dump_browser_failure_with_capture_dir_no_warning(
     slug = (
         nodeid.replace("/", "_").replace("::", "__").replace(".py", "")
     )
-    cap = run_dir / "sp_pg_aw" / "browser" / slug
+    cap = run_dir / "sp_pg_aw" / "qs_browser" / slug
     cap.mkdir(parents=True)
     (cap / "screenshot.png").write_bytes(b"fake-png")
     out = _dump(runs_dir)
@@ -222,7 +222,7 @@ def test_dump_browser_failure_without_capture_warns(runs_dir: Path) -> None:
     run_dir = runs_dir / _RUN_ID_NEW
     run_dir.mkdir()
     _write_layer(
-        run_dir, "sp_pg_aw", "browser",
+        run_dir, "sp_pg_aw", "qs_browser",
         exit_code=1,
         stdout=_PYTEST_STDOUT_WITH_FAILURE,
     )
@@ -240,7 +240,7 @@ def test_dump_browser_failure_with_empty_capture_dir_warns(
     run_dir = runs_dir / _RUN_ID_NEW
     run_dir.mkdir()
     _write_layer(
-        run_dir, "sp_pg_aw", "browser",
+        run_dir, "sp_pg_aw", "qs_browser",
         exit_code=1,
         stdout=_PYTEST_STDOUT_WITH_FAILURE,
     )
@@ -248,7 +248,7 @@ def test_dump_browser_failure_with_empty_capture_dir_warns(
     slug = (
         nodeid.replace("/", "_").replace("::", "__").replace(".py", "")
     )
-    cap = run_dir / "sp_pg_aw" / "browser" / slug
+    cap = run_dir / "sp_pg_aw" / "qs_browser" / slug
     cap.mkdir(parents=True)
     # Empty dir — no expected files.
     out = _dump(runs_dir)
@@ -303,13 +303,13 @@ def test_dump_variant_arg_narrows_cells(runs_dir: Path) -> None:
     """``--variant NAME`` shows only the matching cell, hides others."""
     run_dir = runs_dir / _RUN_ID_NEW
     run_dir.mkdir()
-    _write_layer(run_dir, "sp_pg_aw", "browser", exit_code=1, stdout="FAILED tests/aw.py::test_aw\n")
-    _write_layer(run_dir, "sp_or_lo", "browser", exit_code=1, stdout="FAILED tests/or.py::test_or\n")
+    _write_layer(run_dir, "sp_pg_aw", "qs_browser", exit_code=1, stdout="FAILED tests/aw.py::test_aw\n")
+    _write_layer(run_dir, "sp_or_lo", "qs_browser", exit_code=1, stdout="FAILED tests/or.py::test_or\n")
     out_aw = _dump(runs_dir, variant="sp_pg_aw")
-    assert "sp_pg_aw/browser" in out_aw
+    assert "sp_pg_aw/qs_browser" in out_aw
     assert "sp_or_lo" not in out_aw
     out_or = _dump(runs_dir, variant="sp_or_lo")
-    assert "sp_or_lo/browser" in out_or
+    assert "sp_or_lo/qs_browser" in out_or
     assert "sp_pg_aw" not in out_or
 
 

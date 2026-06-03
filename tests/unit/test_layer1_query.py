@@ -11,7 +11,7 @@ harness against real Aurora / Oracle.
 from __future__ import annotations
 
 import re
-import sqlite3
+import duckdb
 from collections.abc import Iterator
 from typing import Any
 
@@ -28,7 +28,7 @@ class _FakeCursor:
     placeholders (``%s``, ``:1``) into sqlite's ``?`` so the rest of
     the helper logic exercises end-to-end."""
 
-    def __init__(self, real: sqlite3.Cursor) -> None:
+    def __init__(self, real: duckdb.DuckDBPyConnection) -> None:
         self._real = real
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> None:
@@ -53,7 +53,7 @@ class _FakeCursor:
 
 
 class _FakeConn:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: duckdb.DuckDBPyConnection) -> None:
         self._conn = conn
 
     def cursor(self) -> _FakeCursor:
@@ -62,7 +62,7 @@ class _FakeConn:
 
 @pytest.fixture
 def db() -> Iterator[_FakeConn]:
-    conn = sqlite3.connect(":memory:")
+    conn = duckdb.connect(":memory:")
     try:
         conn.execute(
             "CREATE TABLE drift (account_id TEXT, business_day DATE, magnitude REAL)"

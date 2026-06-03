@@ -36,7 +36,7 @@ AT.6 reuses this mechanism for L2's anomaly + money_trail scenarios
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -71,7 +71,7 @@ class TrainingScenario:
     prefix: str = "spec_example"
     instance_path: Path | None = None
 
-    def self_validate(self, conn: sqlite3.Connection) -> None:
+    def self_validate(self, conn: duckdb.DuckDBPyConnection) -> None:
         """Apply the scenario; assert every intended Violation fires.
 
         Raises `AssertionError` with the missing-Violation diff if the
@@ -122,9 +122,9 @@ def validate_all(
             conn.close()
 
 
-# A `Callable[[], sqlite3.Connection]` alias kept module-local for the
+# A `Callable[[], duckdb.DuckDBPyConnection]` alias kept module-local for the
 # `validate_all` signature; pyright resolves it without a TypeAlias
 # import dance.
 from typing import Callable
 
-ConnFactory = Callable[[], sqlite3.Connection]
+ConnFactory = Callable[[], duckdb.DuckDBPyConnection]

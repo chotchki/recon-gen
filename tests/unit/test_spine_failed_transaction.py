@@ -9,12 +9,12 @@ returns an `AuditFixture` per the AY.2.a evidence-currency layering.
 from __future__ import annotations
 
 import json
-import sqlite3
+import duckdb
 from datetime import date, datetime
 from pathlib import Path
 
 
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.config_table import replace_config
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema
@@ -24,6 +24,7 @@ from recon_gen.common.spine import (
     FailedTransactionGenerator,
 )
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 
 _SPEC_EXAMPLE = (
@@ -32,15 +33,13 @@ _SPEC_EXAMPLE = (
 _PREFIX = "spec_example"
 
 
-def _fresh_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+def _fresh_db() -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(":memory:")
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
-        cur, emit_schema(instance, prefix=_PREFIX, dialect=Dialect.SQLITE),
-        dialect=Dialect.SQLITE,
+        cur, emit_schema(instance, prefix=_PREFIX, dialect=Dialect.DUCKDB),
+        dialect=Dialect.DUCKDB,
     )
     conn.commit()
     replace_config(
@@ -129,9 +128,7 @@ def test_untagged_emit_writes_null_metadata() -> None:
     try:
         gen.emit(conn)
         conn.commit()
-        metadata = conn.execute(
-            f"SELECT metadata FROM {_PREFIX}_transactions",
-        ).fetchone()[0]
+        metadata = fetch_scalar(conn, f"SELECT metadata FROM {_PREFIX}_transactions",)
     finally:
         conn.close()
     assert metadata is None
@@ -143,10 +140,8 @@ def test_tagged_emit_writes_scenario_id() -> None:
     try:
         gen.emit(conn, scenario_id="test-ay2b-failed")
         conn.commit()
-        sid = conn.execute(
-            f"SELECT json_extract(metadata, '$.scenario_id') "
-            f"FROM {_PREFIX}_transactions",
-        ).fetchone()[0]
+        sid = fetch_scalar(conn, f"SELECT json_extract_string(metadata, '$.scenario_id') "
+            f"FROM {_PREFIX}_transactions",)
     finally:
         conn.close()
     assert sid == "test-ay2b-failed"

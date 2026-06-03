@@ -563,21 +563,13 @@ async def step_3_5_derive_balances(
     # Sum amount_money per (account_id, business_day_end). Use a CAST
     # of posting to DATE to derive the business-day grouping key; the
     # resulting (start, end) span the operator's local-day window.
-    # SQLite needs DATE() function; PG / Oracle use CAST(posting AS DATE).
-    if cfg.dialect == Dialect.SQLITE:
-        date_expr = "DATE(posting)"
-        bday_start = (
-            "DATETIME(DATE(posting) || ' 00:00:00')"
-        )
-        bday_end = "DATETIME(DATE(posting, '+1 day') || ' 00:00:00')"
+    date_expr = "CAST(posting AS DATE)"
+    bday_start = "CAST(CAST(posting AS DATE) AS TIMESTAMP)"
+    # +1 day for the half-open business-day window.
+    if cfg.dialect == Dialect.ORACLE:
+        bday_end = "CAST(CAST(posting AS DATE) AS TIMESTAMP) + INTERVAL '1' DAY"
     else:
-        date_expr = "CAST(posting AS DATE)"
-        bday_start = "CAST(CAST(posting AS DATE) AS TIMESTAMP)"
-        # +1 day for the half-open business-day window.
-        if cfg.dialect == Dialect.ORACLE:
-            bday_end = "CAST(CAST(posting AS DATE) AS TIMESTAMP) + INTERVAL '1' DAY"
-        else:
-            bday_end = "CAST(CAST(posting AS DATE) AS TIMESTAMP) + INTERVAL '1 day'"
+        bday_end = "CAST(CAST(posting AS DATE) AS TIMESTAMP) + INTERVAL '1 day'"
 
     conn = connect_demo_db(cfg)
     rows_written = 0
@@ -618,7 +610,16 @@ async def step_3_5_derive_balances(
                 f"  AND status <> 'failed' "
                 f"GROUP BY account_id, {date_expr}",
             )
-            rows_written = cur.rowcount or 0
+            if cfg.dialect is Dialect.DUCKDB:
+                # DuckDB returns -1 for cur.rowcount on INSERT-FROM-SELECT;
+                # re-query the row set we just wrote to get the actual count.
+                cur.execute(
+                    f"SELECT COUNT(*) FROM {p}_daily_balances "
+                    f"WHERE account_role IN ({roles_clause})",
+                )
+                rows_written = int(cur.fetchone()[0])
+            else:
+                rows_written = cur.rowcount or 0
             conn.commit()
         finally:
             cur.close()

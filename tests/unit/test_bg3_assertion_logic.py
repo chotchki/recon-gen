@@ -28,7 +28,7 @@ failing.
 from __future__ import annotations
 
 import os
-import sqlite3
+import duckdb
 import tempfile
 from collections.abc import Iterator
 from decimal import Decimal
@@ -52,9 +52,10 @@ def planted_drift_sqlite() -> Iterator["Config"]:
     ``drift_timeline`` / ``overdraft`` matviews. Values chosen so the
     healthy-path assertions pass cleanly; per-bug tests modify or
     re-query to trip individual assertions."""
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
-    conn = sqlite3.connect(path)
+    os.unlink(path)
+    conn = duckdb.connect(path)
 
     # `<prefix>_drift` matview — one row per leaf-account-day with
     # drift. The .count() KPI reads len(rows here).
@@ -124,7 +125,7 @@ def planted_drift_sqlite() -> Iterator["Config"]:
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=path)
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
     cfg.db_table_prefix = "pfx"
     try:
         yield cfg
@@ -292,13 +293,13 @@ def test_bg3_kv_pin_anchors_test_to_deploy_day_across_midnight(
     )
     from tests.e2e.conftest import _pin_cfg_to_kv_as_of
 
-    # 1) Stamp an isolated sqlite with kv.as_of = 5/28 (the "deploy day").
-    db_path = tmp_path / "bg3_kv_pin.sqlite"
+    # 1) Stamp an isolated DuckDB with kv.as_of = 5/28 (the "deploy day").
+    db_path = tmp_path / "bg3_kv_pin.duckdb"
     prefix = "bg3kv"
-    conn = sqlite3.connect(str(db_path))
+    conn = duckdb.connect(str(db_path))
     try:
-        conn.executescript(
-            emit_config_table_ddl(prefix, dialect=Dialect.SQLITE),
+        conn.execute(
+            emit_config_table_ddl(prefix, dialect=Dialect.DUCKDB),
         )
         replace_config(
             conn, prefix=prefix,
@@ -317,11 +318,12 @@ def test_bg3_kv_pin_anchors_test_to_deploy_day_across_midnight(
 
     monkeypatch.setattr(af_mod, "date", _Date_2026_05_29)
 
-    # 3) Build a cfg pointed at the stamped sqlite.
+    # 3) Build a cfg pointed at the stamped DuckDB.
+    from recon_gen.common.db import make_demo_database_url
     cfg = make_test_config(
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
         db_table_prefix=prefix,
-        demo_database_url=f"sqlite:///{db_path}",
+        demo_database_url=make_demo_database_url(Dialect.DUCKDB, db_path),
     )
 
     unpinned = cfg.test_generator.as_of_frame(window_days=7).as_of

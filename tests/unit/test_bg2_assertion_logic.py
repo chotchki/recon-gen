@@ -28,7 +28,7 @@ isn't tautologically failing.
 from __future__ import annotations
 
 import os
-import sqlite3
+import duckdb
 import tempfile
 from collections.abc import Iterator
 from decimal import Decimal
@@ -54,9 +54,10 @@ def planted_sqlite() -> Iterator["Config"]:
     ``drift = closing_stored − (opening + net_flow)`` holds on the
     healthy row and fails on the buggy one — tests pick which row to
     query."""
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
-    conn = sqlite3.connect(path)
+    os.unlink(path)
+    conn = duckdb.connect(path)
     # Minimal projection — matches DAILY_STATEMENT_SUMMARY_CONTRACT
     # columns the SQL projects. Values stored as integer cents
     # (matches what the production matview holds; the production SQL
@@ -96,7 +97,7 @@ def planted_sqlite() -> Iterator["Config"]:
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=path)
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
     cfg.db_table_prefix = "pfx"
     try:
         yield cfg
@@ -121,8 +122,8 @@ _SUMMARY_SQL_FOR_TEST = (
     " (drift / 100.0) AS drift\n"
     "FROM pfx_daily_statement_summary\n"
     "WHERE (account_name || ' (' || account_id || ')') = <<$pL1DsAccount>>\n"
-    "  AND strftime('%Y-%m-%d', business_day_start) = "
-    "strftime('%Y-%m-%d', <<$pL1DsBalanceDate>>)"
+    "  AND strftime(business_day_start::TIMESTAMP, '%Y-%m-%d') = "
+    "strftime(<<$pL1DsBalanceDate>>::TIMESTAMP, '%Y-%m-%d')"
 )
 
 
@@ -238,7 +239,7 @@ def test_bg2_narrative_formula_against_independent_truth_catches_matview_net_flo
     """
     cfg = planted_sqlite
     assert cfg.demo_database_url is not None
-    conn = sqlite3.connect(cfg.demo_database_url)
+    conn = duckdb.connect(cfg.demo_database_url)
     # Plant a base-transactions table mirroring the matview's input
     # shape. In v6 amount_money is signed: Credit positive, Debit
     # negative.

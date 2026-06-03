@@ -66,9 +66,16 @@ from recon_gen.common.l2.primitives import (
     SingleLegRail,
     TwoLegRail,
 )
+from tests._marks import Need, Tier, needs, tier
 from tests.e2e._drivers.studio_browser_editor import (
     StudioBrowserEditorDriver,
 )
+
+
+pytestmark = [
+    tier(Tier.QS_BROWSER),
+    needs(Need.AWS_QS, Need.PLAYWRIGHT),
+]
 
 
 def _empty_l2() -> L2Instance:

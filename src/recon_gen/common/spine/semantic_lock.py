@@ -36,7 +36,7 @@ violations the data produces, not the SQL that built it.
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Protocol
@@ -54,15 +54,15 @@ class _Emitter(Protocol):
     its Protocol) and `LedgerSimulation` (the AS.4 composition layer)
     plus any future `AccountSimulation`-using emitter."""
 
-    def emit(self, conn: sqlite3.Connection) -> None: ...
+    def emit(self, conn: duckdb.DuckDBPyConnection) -> None: ...
 
 
 def apply_scenario(
-    conn: sqlite3.Connection,
+    conn: duckdb.DuckDBPyConnection,
     *emitters: _Emitter,
     prefix: str = "spec_example",
     instance_path: Path | None = None,
-    dialect: Dialect = Dialect.SQLITE,
+    dialect: Dialect = Dialect.DUCKDB
 ) -> None:
     """Emit every passed object's rows into `conn`, commit, then
     refresh the matviews for the `prefix`'s L2 instance.
@@ -71,7 +71,7 @@ def apply_scenario(
     — same default the existing in-process spike harness pattern uses.
     Pass an explicit path for AT's Investigation-surface scenarios.
 
-    `dialect` defaults to `Dialect.SQLITE` for the in-process test
+    `dialect` defaults to `Dialect.DUCKDB` for the in-process test
     harness shape (the dominant call site). AY.3 lifted the hardcode
     so production callers + per-dialect semantic_lock generation
     (AZ.1 will produce `_semantic_locks/<instance>.<dialect>.json`
@@ -100,7 +100,7 @@ def apply_scenario(
 
 
 def semantic_lock(
-    conn: sqlite3.Connection,
+    conn: duckdb.DuckDBPyConnection,
     invariants: Iterable[Invariant],
 ) -> dict[str, frozenset[Violation]]:
     """Run `detect(conn)` for every invariant; return the lock dict.

@@ -41,7 +41,7 @@ is the truth-source, the generator is honest.
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal
@@ -147,7 +147,7 @@ class LedgerSimulation:
 
     def emit(
         self,
-        conn: sqlite3.Connection,
+        conn: duckdb.DuckDBPyConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:
@@ -166,7 +166,7 @@ class LedgerSimulation:
 
     def _emit_transfer(
         self,
-        conn: sqlite3.Connection,
+        conn: duckdb.DuckDBPyConnection,
         transfer: Transfer,
         *,
         scenario_id: str | None = None,
@@ -211,7 +211,7 @@ class LedgerSimulation:
     def violation_trajectory(
         self,
         invariant: Invariant,
-        conn: sqlite3.Connection,
+        conn: duckdb.DuckDBPyConnection,
     ) -> list[set[Violation]]:
         """Per-day violation snapshots, like AccountSimulation's but
         emitting all accounts' rows for day i BEFORE refresh+detect.
@@ -264,9 +264,9 @@ class LedgerSimulation:
             execute_script(
                 cur,
                 refresh_matviews_sql(
-                    instance, prefix=prefix, dialect=Dialect.SQLITE,
+                    instance, prefix=prefix, dialect=Dialect.DUCKDB,
                 ),
-                dialect=Dialect.SQLITE,
+                dialect=Dialect.DUCKDB,
             )
             conn.commit()
             snapshots.append(invariant.detect(conn))

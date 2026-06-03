@@ -20,9 +20,11 @@ config — see PLAN.md P.9d). X.3 added the SQLite arm using the stdlib
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import time
-from collections.abc import AsyncGenerator, Sequence
+from pathlib import Path
+from collections.abc import AsyncGenerator, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Protocol
 from urllib.parse import parse_qs, urlparse
@@ -41,6 +43,7 @@ __all__ = [
     "make_connection_pool",
     "oracle_dsn",
     "split_oracle_script",
+    "duckdb_path",
     "sqlite_path",
 ]
 
@@ -66,6 +69,53 @@ def oracle_dsn(url: str) -> str:
             or "FREEPDB1"
         )
         return f"{user}/{pw}@{host}:{port}/{service}"
+    return url
+
+
+def make_demo_database_url(dialect: Dialect, path: str | Path) -> str:
+    """Build the canonical ``demo_database_url`` for a dialect + path.
+
+    Inverse of ``duckdb_path`` / ``sqlite_path``. Used by test fixtures
+    and config-building helpers so the URL-scheme literal lives in one
+    place instead of being copy-pasted as ``f"duckdb:///{path}"`` at
+    every callsite.
+
+    PG / Oracle URLs aren't constructible from a bare path — they need
+    user / password / host — so this raises for those dialects. Callers
+    that need a PG / Oracle URL build it from full config (cfg.yaml or
+    env), not from a path.
+    """
+    if dialect is Dialect.DUCKDB:
+        return f"duckdb:///{path}"
+    raise ValueError(
+        f"make_demo_database_url is path-based and only meaningful for "
+        f"file-backed dialects (DuckDB). Got {dialect!r}; build the URL "
+        f"from full config for that dialect."
+    )
+
+
+def duckdb_path(url: str) -> str:
+    """Translate a ``duckdb:///path/to/db.duckdb`` URL to a path string.
+
+    Accepts the SQLAlchemy-style ``duckdb:///`` triple-slash form (the
+    fourth slash starts the absolute path component) and the
+    ``duckdb://:memory:`` in-memory form. Also accepts a bare path
+    string for ergonomics — if the value isn't a recognized URL
+    scheme, it's returned unchanged so the caller can pass the raw
+    DuckDB file path directly. Mirrors the ``sqlite_path`` contract.
+
+    Examples:
+      - ``duckdb:///tmp/demo.duckdb`` → ``/tmp/demo.duckdb``
+      - ``duckdb:///./relative.duckdb`` → ``./relative.duckdb``
+      - ``duckdb://:memory:`` → ``:memory:``
+      - ``/tmp/demo.duckdb`` → ``/tmp/demo.duckdb``
+    """
+    if url == "duckdb://:memory:" or url.endswith(":memory:"):
+        return ":memory:"
+    if url.startswith("duckdb:///"):
+        return url[len("duckdb:///"):]
+    if url.startswith("duckdb://"):
+        return url[len("duckdb://"):]
     return url
 
 
@@ -135,72 +185,51 @@ def connect_demo_db(cfg: Config) -> Any:  # typing-smell: ignore[explicit-any]: 
                 "oracledb is required for Oracle connections. "
                 "Install it with: pip install 'recon-gen[prod]'"
             ) from e
-        return oracledb.connect(oracle_dsn(cfg.demo_database_url))
-    if cfg.dialect is Dialect.SQLITE:
-        # stdlib — no try/except for ImportError. SQLite uses Python's
-        # builtin ``sqlite3`` module so the local-iteration loop has
-        # zero install friction beyond ``pip install recon-gen``.
-        import sqlite3
-        conn = sqlite3.connect(sqlite_path(cfg.demo_database_url))
-        # Foreign keys are off by default; turn them on so any FK
-        # declarations in future schema versions enforce. The schema
-        # we emit today has no FKs, so this is forward-looking.
-        conn.execute("PRAGMA foreign_keys = ON;")
-        # Register the SQL/2008 STDDEV_SAMP aggregate that SQLite
-        # doesn't ship natively but the inv_pair_rolling_anomalies
-        # matview needs. Implementation is single-pass + numerically
-        # stable (Welford's online algorithm).
-        _register_sqlite_aggregates(conn)
+        conn = oracledb.connect(oracle_dsn(cfg.demo_database_url))
+        # CB.14 — pin session NLS to ISO so string-shaped date literals
+        # (e.g. spine generators emitting "2026-01-15") parse without
+        # ORA-01843. Oracle's default NLS_DATE_FORMAT (DD-MON-YY) made
+        # the spine inserts in tests/e2e/db/test_inv_direct.py fail at
+        # cur.execute(sql, params); pinning here makes every connection
+        # speak the same date dialect regardless of the image's locale.
+        nls_cur: Any = conn.cursor()  # typing-smell: ignore[explicit-any]: oracledb.Cursor partial-unknown without stubs; matches the Any-typed `cur` parameter shape used elsewhere in this module
+        try:
+            nls_cur.execute("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD'")
+            nls_cur.execute(
+                "ALTER SESSION SET NLS_TIMESTAMP_FORMAT = 'YYYY-MM-DD HH24:MI:SS.FF'"
+            )
+        finally:
+            nls_cur.close()
         return conn
+    if cfg.dialect is Dialect.DUCKDB:
+        # CA.3 — DuckDB is a core dialect (in `[project.dependencies]`,
+        # not extras). Pure-Python wheel, no extra install friction.
+        # `STDDEV_SAMP` ships natively (the inv_pair_rolling_anomalies
+        # matview's aggregate); no need for the SQLite-style aggregate
+        # registration. FK enforcement is on by default in DuckDB.
+        #
+        # CA.8 — `RECON_GEN_DB_READ_ONLY=1` env override opens the file
+        # in read-only mode. DuckDB enforces single-writer-per-file
+        # across processes; pytest-xdist workers in the db / app2 tier
+        # all need shared read access without conflicting locks. Per
+        # the DuckDB docs (https://duckdb.org/docs/current/clients/
+        # python/dbapi#read_only-connections): "Read-only mode is
+        # required if multiple Python processes want to access the
+        # same database file at the same time." Runner sets the env
+        # for DuckDB cells at pytest-launch time; production CLI
+        # invocations (schema/data/seed apply) run without it and
+        # open read-write.
+        import duckdb
+        from recon_gen.common.env_keys import RECON_GEN_DB_READ_ONLY
+        path = duckdb_path(cfg.demo_database_url)
+        read_only = bool(RECON_GEN_DB_READ_ONLY.get_or_none())
+        return duckdb.connect(path, read_only=read_only)
     raise ValueError(
         f"Unknown dialect {cfg.dialect!r}. "
-        "Set 'dialect: postgres', 'dialect: oracle', or 'dialect: sqlite' "
-        "in your config."
+        "Set 'dialect: postgres', 'dialect: oracle', 'dialect: duckdb', "
+        "or 'dialect: sqlite' in your config."
     )
 
-
-class _StddevSampAggregate:
-    """Welford's online algorithm for sample standard deviation —
-    registered as the SQLite aggregate ``STDDEV_SAMP`` since SQLite
-    doesn't ship the SQL/2008 standard aggregate natively.
-
-    Numerically stable single-pass: tracks running mean + sum of
-    squared deviations (``m2`` in Welford notation, lowercased here
-    so pyright's ``reportConstantRedefinition`` doesn't trip on
-    the per-step reassignment).
-    Returns NULL when n < 2 (matching the SQL standard semantic where
-    sample stddev of a single value is undefined, not 0).
-    """
-
-    def __init__(self) -> None:
-        self.n = 0
-        self.mean = 0.0
-        self.m2 = 0.0
-
-    def step(self, value: Any) -> None:  # typing-smell: ignore[explicit-any]: SQLite aggregate step receives whatever the SQL column resolves to (NULL/INT/REAL/TEXT)
-        if value is None:
-            return
-        x = float(value)
-        self.n += 1
-        delta = x - self.mean
-        self.mean += delta / self.n
-        delta2 = x - self.mean
-        self.m2 += delta * delta2
-
-    def finalize(self) -> float | None:
-        if self.n < 2:
-            return None
-        return (self.m2 / (self.n - 1)) ** 0.5  # SQRT(m2 / (n-1))
-
-
-def _register_sqlite_aggregates(conn: Any) -> None:  # typing-smell: ignore[explicit-any]: aiosqlite/sqlite3 connection has no Protocol covering create_aggregate
-    """Register the SQL aggregates SQLite doesn't ship that the schema
-    SQL needs.
-
-    Today: ``STDDEV_SAMP``. Future additions land here so the SQLite
-    connection looks SQL-standard from the schema's point of view.
-    """
-    conn.create_aggregate("STDDEV_SAMP", 1, _StddevSampAggregate)
 
 
 def execute_script(
@@ -230,14 +259,40 @@ def execute_script(
     if dialect is Dialect.POSTGRES:
         cur.execute(sql)
         return
-    if dialect is Dialect.SQLITE:
-        # Bind-variable + executemany fast path for INSERT-heavy
-        # scripts (Studio deploy emits ~72k single-row INSERTs against
-        # 2 tables for sasquatch_pr; bare executescript = ~33s, this
-        # path = ~0.6s — 50x speedup). Falls back to per-statement
-        # cur.execute for any non-INSERT or non-conforming statement,
-        # so the contract is unchanged for callers.
-        _execute_sqlite_with_binds(cur, sql)
+    if dialect is Dialect.DUCKDB:
+        # CA.6 — DuckDB's Python driver accepts multi-statement strings
+        # as a single execute() call. CA.10 — but the seed apply emits
+        # ~127k individual INSERT statements; one-shot execute() parses
+        # + executes them serially (~179s on a sasquatch-scale seed).
+        # CA.10 routed consecutive INSERT runs through a multi-row VALUES
+        # coalescer (~86s on sasquatch-scale; ~21s on M1 post-typed-literal-fix).
+        # CA.11 — if pyarrow is installed, take the structural fast path:
+        # finditer-scan the seed text for INSERTs in one pass (skipping the
+        # 8.7s comment-aware `_split_sqlite_statements`), parse VALUES bodies
+        # with the same `_parse_simple_values` walker, and bulk-load via
+        # `con.register(pa.Table) + INSERT SELECT`. Measured 21.8s → ~3.8s
+        # on the 131k-row sasquatch_pr seed. Falls back to the CA.10 path
+        # when pyarrow isn't available (operator on minimal `[dev]` install,
+        # not `[prod]`).
+        if _try_import_pyarrow() is not None:
+            _apply_seed_via_duckdb_pyarrow(cur, sql)
+        else:
+            _execute_with_coalesced_inserts(cur, sql, _flush_duckdb_multivalues)
+        return
+    # CA.13 — Oracle fast path: if oracledb 3.4+ is installed AND pyarrow
+    # is available, use Connection.direct_path_load() (server-side bypass
+    # of the SQL parser; writes blocks above the High Water Mark). On the
+    # 131k-row sasquatch_pr seed this drops Oracle apply from ~10 minutes
+    # to ~30 seconds (~20× win — Oracle is the dialect with the biggest
+    # leverage from this work). Falls back to the existing INSERT-ALL
+    # coalescer if either dep is absent or if the connection doesn't
+    # expose direct_path_load (oracledb < 3.4.0).
+    if (
+        _try_import_pyarrow() is not None
+        and hasattr(cur, "connection")
+        and hasattr(cur.connection, "direct_path_load")
+    ):
+        _apply_seed_via_oracle_dpl(cur, sql)
         return
     statements = split_oracle_script(sql)
     if oracle_insert_batch > 1:
@@ -341,16 +396,60 @@ _INSERT_FULL_RE = __import__("re").compile(
 )
 
 
+class _TypedSqlLiteral:
+    """Sentinel for ``<KEYWORD> '<text>'`` typed-literal forms — e.g.
+    ``TIMESTAMP '2026-03-03 00:00:01'`` or ``DATE '2026-03-03'``. The
+    parser emits these instead of plain strings so the flush stage
+    can re-render them in dialect-appropriate form (DuckDB / PG /
+    Oracle keep the typed prefix; SQLite collapses to bare text via
+    `_typed_lit_to_sqlite_bind`).
+
+    Without this, the seed's ~131k INSERTs against the `transactions`
+    table — every one carrying a ``TIMESTAMP '...'`` column — bail out
+    of the simple-values parser and fall through to per-row
+    ``cur.execute``, defeating the multi-row VALUES coalescer entirely
+    (CA.10 followup; diagnosed at 99.8% bail rate against sasquatch_pr).
+    """
+
+    __slots__ = ("kind", "text")
+
+    def __init__(self, kind: str, text: str) -> None:
+        self.kind = kind
+        self.text = text
+
+    def __repr__(self) -> str:
+        return f"_TypedSqlLiteral(kind={self.kind!r}, text={self.text!r})"
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, _TypedSqlLiteral)
+            and self.kind == other.kind
+            and self.text == other.text
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.kind, self.text))
+
+
+# Typed-literal keywords the parser recognizes. SQL has more (INTERVAL
+# with WITH TIME ZONE, etc.) but these are the only ones the L2 seed
+# emits today. Add to this set if the emit grows another shape.
+_TYPED_LITERAL_KEYWORDS = frozenset({"TIMESTAMP", "DATE"})
+
+
 def _parse_simple_values(body: str) -> tuple[object, ...] | None:
     """Walk a VALUES tuple body and emit Python primitives, or None if
     the body uses any form this parser can't safely handle.
 
     Recognized literals: ``'string'`` (no escape sequences),
-    ``NULL``, integers, floats. JSON metadata strings happen to embed
-    double-quotes which never collide with the single-quote delimiter.
-    Anything else (function call, ``''`` escape, hex literal, etc.)
-    returns None — the caller passes the raw INSERT through to
-    ``cur.execute`` instead.
+    ``NULL``, integers, floats, and ``<KEYWORD> '<text>'`` typed
+    literals (``TIMESTAMP '...'`` / ``DATE '...'``) which round-trip
+    via the `_TypedSqlLiteral` sentinel so the flush stage can
+    re-render dialect-appropriately. JSON metadata strings happen to
+    embed double-quotes which never collide with the single-quote
+    delimiter. Anything else (function call, ``''`` escape, hex
+    literal, etc.) returns None — the caller passes the raw INSERT
+    through to ``cur.execute`` instead.
     """
     out: list[object] = []
     i, n = 0, len(body)
@@ -383,19 +482,54 @@ def _parse_simple_values(body: str) -> tuple[object, ...] | None:
             except ValueError:
                 return None
             i = j
+        elif c.isalpha():
+            # Possible `<KEYWORD> '<text>'` typed literal (TIMESTAMP /
+            # DATE). Read the keyword, require whitespace, then a
+            # quoted string. Anything else bails.
+            j = i + 1
+            while j < n and body[j].isalpha():
+                j += 1
+            kw = body[i:j].upper()
+            if kw not in _TYPED_LITERAL_KEYWORDS:
+                return None
+            # Skip whitespace.
+            while j < n and body[j].isspace():
+                j += 1
+            if j >= n or body[j] != "'":
+                return None
+            k = body.find("'", j + 1)
+            if k == -1:
+                return None
+            # Same `''`-escape bail rule as plain strings.
+            if k + 1 < n and body[k + 1] == "'":
+                return None
+            out.append(_TypedSqlLiteral(kw, body[j + 1:k]))
+            i = k + 1
         else:
             return None
     return tuple(out)
 
 
-def _execute_sqlite_with_binds(cur: Any, sql: str) -> None:  # typing-smell: ignore[explicit-any]: sqlite3.Cursor — DB-API 2.0 cursor with no shared Protocol across drivers
-    """SQLite execute-script fast path: coalesce consecutive same-shape
-    ``INSERT INTO foo (cols) VALUES (...)`` statements into ``executemany``
-    calls. Non-INSERT or non-conforming statements fall through to
-    per-statement ``cur.execute`` so the contract matches ``executescript``.
 
-    The transaction stays open across the whole call — caller still
-    decides when to commit.
+def _execute_with_coalesced_inserts(
+    cur: Any,  # typing-smell: ignore[explicit-any]: sync DB-API 2.0 cursor — see execute_script
+    sql: str,
+    flush_fn: "Callable[[Any, str, str, list[tuple[object, ...]]], None]",  # typing-smell: ignore[explicit-any]: per-dialect bulk-insert strategy callback — receives the same Any-typed cursor as `cur` above, see that param's WHY
+) -> None:
+    """Walk a multi-statement script, coalescing consecutive same-shape
+    ``INSERT INTO foo (cols) VALUES (...)`` runs into one bulk call per
+    run via ``flush_fn(cur, table, cols, rows)``. Non-INSERT or
+    non-conforming statements pass through to ``cur.execute(stmt)``
+    so the contract matches ``executescript``.
+
+    The bulk-insert strategy varies per dialect (CA.10): SQLite uses
+    ``executemany`` (real C++ bulk path), DuckDB uses multi-row
+    ``VALUES (…),(…),…`` literal SQL (DuckDB's executemany is a
+    Python loop, ~55× slower than the literal form per probe). Oracle
+    has its own coalescer at ``batch_oracle_inserts`` because its
+    INSERT ALL syntax doesn't fit this scanner shape.
+
+    Transaction stays open across the call — caller commits.
     """
     statements = _split_sqlite_statements(sql)
 
@@ -412,13 +546,7 @@ def _execute_sqlite_with_binds(cur: Any, sql: str) -> None:  # typing-smell: ign
             pending_table = None
             pending_cols = None
             return
-        ncols = len(pending_rows[0])
-        placeholders = ",".join("?" * ncols)
-        stmt = (
-            f"INSERT INTO {pending_table} ({pending_cols}) "
-            f"VALUES ({placeholders})"
-        )
-        cur.executemany(stmt, pending_rows)
+        flush_fn(cur, pending_table, pending_cols, pending_rows)
         pending_rows = []
         pending_table = None
         pending_cols = None
@@ -442,6 +570,513 @@ def _execute_sqlite_with_binds(cur: Any, sql: str) -> None:  # typing-smell: ign
         _flush()
         cur.execute(stmt)
     _flush()
+
+
+
+def _flush_duckdb_multivalues(
+    cur: Any,  # typing-smell: ignore[explicit-any]: duckdb.DuckDBPyConnection — DB-API 2.0 with no shared Protocol
+    table: str, cols: str, rows: list[tuple[object, ...]],
+) -> None:
+    """DuckDB bulk path: multi-row ``VALUES (…),(…),…`` literal SQL,
+    batched in ~1000-row chunks to bound the SQL string size.
+
+    CA.10 — measured 54× faster than DuckDB's executemany at 50k rows
+    (22.76s → 0.44s); 2196 → 112772 rows/sec. DuckDB's executemany is
+    essentially a Python loop (~5% faster than individual ``execute()``);
+    the multi-row literal lets the engine parse once + plan once for
+    the whole batch. Sasquatch_pr's 127,554-tx seed apply: ~179s
+    (unbatched DuckDB) → ~86s (this path) end-to-end.
+
+    Memory bound: one batch's SQL string holds ~1000 rows × ~150
+    chars/row ≈ 150KB peak. Caller is the seed-apply CLI which already
+    holds the full SQL script in memory, so this is well within budget.
+    """
+    BATCH = 1000
+    for chunk_start in range(0, len(rows), BATCH):
+        chunk = rows[chunk_start:chunk_start + BATCH]
+        values = ",".join(
+            "(" + ",".join(_render_sql_literal(v) for v in row) + ")"
+            for row in chunk
+        )
+        cur.execute(f"INSERT INTO {table} ({cols}) VALUES {values}")
+
+
+# CA.11 — pyarrow-based DuckDB fast path. The CA.10 multi-row VALUES path
+# still parses + re-renders every value; the bigger latent cost is the
+# 8.7s comment-aware `_split_sqlite_statements` walk over 100MB of seed
+# text. CA.11 replaces both with a single `finditer` scan + a pyarrow
+# `con.register + INSERT SELECT` bulk-load, ~5-6× faster end-to-end.
+
+# Quote-aware INSERT scanner. The body alternation matches either a
+# single-quoted string (with doubled-quote escape allowance for safety
+# even though the seed parser bails on `''`) OR any non-quote non-`;`
+# char. Required because the config-populate text the schema-apply path
+# emits embeds operator-authored descriptions containing `;`, `(`, etc.
+# inside string literals; the naive `[^;]+` body capture truncated at
+# the first quoted-`;`.
+# Measured on the 131k-row sasquatch_pr seed: 3.2s scan vs 1.0s with
+# the naive `[^;]+` form; still well below `_split_sqlite_statements`
+# at 8.7s. The 2.2s of extra Python regex work buys correctness.
+_SEED_INSERT_SCAN_RE = __import__("re").compile(
+    r"INSERT\s+INTO\s+(\S+)\s*\(([^)]+)\)\s*VALUES\s*\("
+    r"((?:'(?:[^']|'')*'|[^;'])+)"
+    r"\)\s*;",
+    __import__("re").IGNORECASE | __import__("re").DOTALL,
+)
+
+
+def _try_import_pyarrow() -> Any:  # typing-smell: ignore[explicit-any]: lazy-loaded extension; no stubs in [dev], same posture as oracledb's lazy import
+    """Return the pyarrow module if installed, else None.
+
+    CA.11 — pyarrow lives in `[prod]` extras alongside oracledb. Minimal
+    dev installs without `[prod]` won't have it; the seed-apply path
+    transparently falls back to the CA.10 multi-row VALUES coalescer
+    instead of crashing.
+    """
+    try:
+        import pyarrow as pa  # noqa: PLC0415 — lazy import is the point
+        return pa
+    except ImportError:
+        return None
+
+
+def _apply_seed_via_duckdb_pyarrow(cur: Any, sql: str) -> None:  # typing-smell: ignore[explicit-any]: duckdb.DuckDBPyConnection cursor — DB-API 2.0 with no shared Protocol
+    """Apply a seed SQL script to DuckDB via pyarrow bulk-load.
+
+    CA.11 — scans the script for INSERT statements via a single
+    `finditer` (skips the 8.7s `_split_sqlite_statements` walker),
+    parses each VALUES body with the same `_parse_simple_values`
+    used by CA.10, groups consecutive same-shape inserts, and flushes
+    via `pa.Table.from_pylist + con.register + INSERT SELECT`. The
+    DuckDB Arrow ingest path is zero-copy through the C API; no SQL
+    parse cost on the DB side per row.
+
+    Order-preserving: residual non-INSERT chunks (DDL, SET commands,
+    pragmas, comments) are executed *between* INSERT batches in the
+    same order they appear in the script. A pre-fix version queued
+    residual until the end of the function, which broke any input
+    where `CREATE TABLE foo` appeared before `INSERT INTO foo` —
+    the INSERT flushed against a missing table. Now: at every
+    boundary where the next INSERT's `(table, cols)` differs from
+    the pending group (and at every non-conforming statement),
+    flush pending INSERTs first, then execute the residual chunk
+    that preceded this match, then start a fresh group. End-of-
+    script residual flushes after the final INSERT group.
+    """
+    pa = _try_import_pyarrow()
+    assert pa is not None  # caller guarantees via `_try_import_pyarrow() is not None`
+
+    # Group state.
+    pending_table: str | None = None
+    pending_cols: tuple[str, ...] | None = None
+    pending_rows: list[tuple[object, ...]] = []
+    # Staging table name needs a unique suffix per flush so re-registering
+    # doesn't trip "view already exists" on quick-fire flushes.
+    staging_counter = 0
+    last_end = 0
+
+    def _flush_inserts() -> None:
+        nonlocal pending_rows, pending_table, pending_cols, staging_counter
+        if not pending_rows or pending_table is None or pending_cols is None:
+            pending_rows = []
+            pending_table = None
+            pending_cols = None
+            return
+        # Collapse `_TypedSqlLiteral` sentinels to their raw text; DuckDB
+        # will cast VARCHAR → TIMESTAMP / DATE on the INSERT SELECT via
+        # implicit conversion. Pyarrow stores them as strings.
+        col_names = pending_cols
+        rows_as_dicts = [
+            {
+                col_names[i]: (
+                    v.text if isinstance(v, _TypedSqlLiteral) else v
+                )
+                for i, v in enumerate(row)
+            }
+            for row in pending_rows
+        ]
+        arrow_table = pa.Table.from_pylist(rows_as_dicts)
+        staging_counter += 1
+        staging_name = f"_recon_gen_ca11_staging_{staging_counter}"
+        cur.register(staging_name, arrow_table)
+        try:
+            col_list = ", ".join(col_names)
+            cur.execute(
+                f"INSERT INTO {pending_table} ({col_list}) "
+                f"SELECT * FROM {staging_name}"
+            )
+        finally:
+            cur.unregister(staging_name)
+        pending_rows = []
+        pending_table = None
+        pending_cols = None
+
+    def _execute_residual(text: str) -> None:
+        """Run any non-INSERT text between matches.
+
+        Comment-only lines (the seed's `-- SHA256: ...` header) are
+        stripped so DuckDB's parser doesn't choke on bare `;`s; real
+        DDL / SET / pragma statements run via a single multi-statement
+        `cur.execute`, preserving their declared order.
+        """
+        if not text.strip():
+            return
+        code_lines = [
+            ln for ln in text.splitlines()
+            if ln.strip() and not ln.strip().startswith("--")
+        ]
+        if code_lines:
+            cur.execute("\n".join(code_lines))
+
+    # Single pass over the script. At each match boundary: if the new
+    # match's group key differs from the pending group, flush pending
+    # INSERTs FIRST, then execute the residual text that lay between
+    # the previous group's end and this match's start (the residual
+    # might contain DDL the next INSERT depends on — flush has to
+    # precede the residual for the residual to see all already-INSERTed
+    # rows, AND the residual has to precede the next INSERT in case
+    # the next INSERT depends on DDL inside the residual).
+    for match in _SEED_INSERT_SCAN_RE.finditer(sql):
+        residual_before = sql[last_end:match.start()]
+        last_end = match.end()
+        table = match.group(1)
+        cols_str = match.group(2).strip()
+        body = match.group(3)
+        row = _parse_simple_values(body)
+        cols_tuple = tuple(s.strip() for s in cols_str.split(","))
+        key = (table, cols_tuple)
+        if row is None:
+            # Non-conforming VALUES body. Flush pending, run residual,
+            # then fall through to per-statement `cur.execute` on the
+            # raw INSERT text.
+            _flush_inserts()
+            _execute_residual(residual_before)
+            cur.execute(match.group(0))
+            continue
+        if (pending_table, pending_cols) != key:
+            # Group boundary. Flush pending INSERT batch FIRST so any
+            # tables the residual queries see the rows that were already
+            # buffered. Then run residual DDL/etc. so the new group's
+            # target table exists if the residual just created it.
+            _flush_inserts()
+            _execute_residual(residual_before)
+            pending_table, pending_cols = table, cols_tuple
+        else:
+            # Continuing the same group — residual must still run before
+            # the next INSERT lands (rare, but matters if a SET / pragma
+            # sneaks in between same-shape INSERTs).
+            if residual_before.strip():
+                _flush_inserts()
+                _execute_residual(residual_before)
+                pending_table, pending_cols = table, cols_tuple
+        pending_rows.append(row)
+    # Tail: flush final INSERT batch first, then execute trailing residual.
+    _flush_inserts()
+    _execute_residual(sql[last_end:])
+
+
+# CA.13 — Oracle direct_path_load fast path. Mirrors the DuckDB path's
+# scan-once-then-bulk-load shape; the per-dialect divergence is in the
+# flush step (DuckDB takes a `con.register(pa.Table)` + INSERT SELECT;
+# Oracle takes `conn.direct_path_load(schema_name, table_name, ...)`
+# which bypasses the SQL parser at the server side and writes blocks
+# above the High Water Mark). Direct Path is committed at end of the
+# call — separate from the caller's transaction. Operationally fine
+# for `data apply` (no concurrent writers); flagged in the docstring
+# in case a future caller has different semantics needs.
+
+
+# Cache: built pyarrow schemas per (conn, schema, table, col-tuple). The
+# col-tuple is part of the key because a single Oracle table can be the
+# target of multiple INSERT shapes in one apply — the seed today emits
+# both 11-col and 10-col INSERTs against `diag_daily_balances` (the
+# 10-col plant-shape drops `supersedes`), and both 19-col and 17-col
+# INSERTs against `diag_transactions`. Caching by (conn, schema, table)
+# alone would return a stale schema on the second shape and
+# pyarrow.Table.from_pylist would silently drop the missing column,
+# producing a data-shape vs column_names mismatch that direct_path_load
+# rejects with `DPY-4009: N positional bind values are required but M
+# were provided`. The all_tab_columns lookup itself is cheap; the cache
+# is purely for the ~few thousand same-shape repeat flushes per apply.
+_ORACLE_ARROW_SCHEMA_CACHE: dict[
+    tuple[int, str, str, tuple[str, ...]], object
+] = {}
+
+
+def _oracle_table_arrow_schema(
+    conn: Any,  # typing-smell: ignore[explicit-any]: oracledb.Connection — DB-API 2.0 with no shared Protocol
+    schema_name: str,
+    table_name: str,
+    column_names: tuple[str, ...],
+) -> object:
+    """Build a pyarrow Schema for ``table_name``'s columns from Oracle
+    metadata.
+
+    Maps Oracle types to pyarrow:
+
+    - VARCHAR2 / CHAR / NCHAR / NVARCHAR2 / CLOB → ``pa.string()``
+    - NUMBER with scale=0 (or scale=None on the metadata schema we emit) → ``pa.int64()``
+    - NUMBER with scale>0 → ``pa.float64()`` (the seed doesn't emit decimals today)
+    - TIMESTAMP / TIMESTAMP(N) → ``pa.timestamp("us")`` (TZ-naive per P.9a)
+    - DATE → ``pa.timestamp("us")`` (Oracle DATE carries time-of-day)
+
+    Cached per (conn, schema, table). The seed loops through ~3 distinct
+    (table, cols) groups; cache hit rate is near-100%.
+    """
+    pa = _try_import_pyarrow()
+    assert pa is not None
+
+    col_names_upper = tuple(c.upper() for c in column_names)
+    key = (id(conn), schema_name.upper(), table_name.upper(), col_names_upper)
+    cached = _ORACLE_ARROW_SCHEMA_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT column_name, data_type, data_scale
+            FROM all_tab_columns
+            WHERE owner = :owner AND table_name = :tbl
+            """,
+            owner=schema_name.upper(), tbl=table_name.upper(),
+        )
+        rows = {r[0].upper(): (r[1], r[2]) for r in cur.fetchall()}
+    finally:
+        cur.close()
+
+    fields: list[object] = []
+    for col in column_names:
+        col_upper = col.upper()
+        if col_upper not in rows:
+            raise RuntimeError(
+                f"Oracle DPL: column {col_upper!r} not found in "
+                f"all_tab_columns for {schema_name}.{table_name}. "
+                f"Available: {sorted(rows.keys())}"
+            )
+        data_type, data_scale = rows[col_upper]
+        # Normalize Oracle type strings — e.g. ``TIMESTAMP(6)`` returns
+        # base name ``TIMESTAMP`` here because all_tab_columns omits the
+        # precision suffix; ``data_type`` is just ``TIMESTAMP``.
+        if data_type in ("VARCHAR2", "CHAR", "NVARCHAR2", "NCHAR", "CLOB"):
+            fields.append((col_upper, pa.string()))
+        elif data_type == "NUMBER":
+            if data_scale is None or data_scale == 0:
+                fields.append((col_upper, pa.int64()))
+            else:
+                fields.append((col_upper, pa.float64()))
+        elif data_type.startswith("TIMESTAMP") or data_type == "DATE":
+            fields.append((col_upper, pa.timestamp("us")))
+        else:
+            raise RuntimeError(
+                f"Oracle DPL: column {col_upper!r} has unsupported type "
+                f"{data_type!r} (data_scale={data_scale}). Add a mapping "
+                f"to `_oracle_table_arrow_schema`."
+            )
+    schema = pa.schema(fields)
+    _ORACLE_ARROW_SCHEMA_CACHE[key] = schema
+    return schema
+
+
+def _oracle_dpl_normalize_value(v: object, expected_pa_type: object) -> object:
+    """Convert a `_parse_simple_values` output to a Python primitive that
+    pyarrow can encode as the column's expected type.
+
+    The seed parser emits ints / strings / None / `_TypedSqlLiteral`.
+    For TIMESTAMP columns we parse the ISO-8601 text into a `datetime`;
+    Oracle DPL rejects raw strings against TIMESTAMP. For string columns,
+    pyarrow handles `_TypedSqlLiteral.text` round-trip via `.text`. For
+    NUMBER columns the parser already gives us an int.
+    """
+    pa = _try_import_pyarrow()
+    assert pa is not None
+    if v is None:
+        return None
+    if isinstance(v, _TypedSqlLiteral):
+        # The TIMESTAMP / DATE typed literal: parse ISO string to datetime.
+        if pa.types.is_timestamp(expected_pa_type):
+            from datetime import datetime  # noqa: PLC0415
+            # Strip trailing fractional-second / TZ tail Oracle's DATE
+            # columns can't take; our seed emits TZ-naive `YYYY-MM-DD HH:MM:SS`
+            # after `_sql_timestamp_literal`'s normalization (P.9a).
+            return datetime.fromisoformat(v.text)
+        # Fall through: render text as-is (rare).
+        return v.text
+    # Plain primitive (str / int / float).
+    return v
+
+
+def _apply_seed_via_oracle_dpl(cur: Any, sql: str) -> None:  # typing-smell: ignore[explicit-any]: oracledb.Cursor — DB-API 2.0 cursor
+    """Apply a seed SQL script to Oracle via Connection.direct_path_load.
+
+    CA.13 — scans the script for INSERTs in a single `finditer` pass
+    (same approach as `_apply_seed_via_duckdb_pyarrow`), parses each
+    VALUES body with `_parse_simple_values`, groups consecutive
+    same-shape rows, and flushes each group via
+    `conn.direct_path_load(schema_name=..., table_name=...,
+    column_names=[...], data=pa_table)`. Non-INSERT residual chunks
+    (DDL, SET commands, comments) are executed IN ORDER between
+    INSERT batches, mirroring the CA.11 ordering contract.
+
+    Oracle Direct Path Load characteristics worth knowing:
+
+    - **Server-side parser bypass**: writes blocks directly above the
+      High Water Mark, skipping the SQL parser entirely. The performance
+      win comes from this, not from network round-trip reduction.
+    - **CHECK constraints enforced**: NOT NULL + CHECK constraints
+      still validate per row (we proved this against
+      `account_scope IN ('internal', 'external')` during the CA.13
+      probe). Foreign keys + triggers behave per Oracle's documented
+      Direct Path semantics — see docs/audits/ if a constraint shape
+      surfaces a CA.13 issue.
+    - **Auto-commit at call end**: each call commits its own batch.
+      `connect_and_apply`'s explicit `conn.commit()` at the end of the
+      apply is a no-op against an already-committed transaction (or
+      raises in some oracledb versions); `_apply_seed_via_oracle_dpl`
+      itself does not call commit/rollback.
+    - **Identity columns auto-fill**: pass column_names WITHOUT the
+      identity column (e.g. ENTRY) and Oracle assigns it from the
+      sequence. Our scan extracts the explicit column list from
+      `INSERT INTO foo (col1, col2, ...) VALUES (...)`, which never
+      includes ENTRY (the seed emit doesn't either), so this is
+      handled automatically.
+    """
+    pa = _try_import_pyarrow()
+    assert pa is not None
+
+    conn = cur.connection
+    # Discover the current schema (Oracle's "owner") once per call —
+    # all our seed tables live in the connecting user's schema.
+    discover = conn.cursor()
+    try:
+        discover.execute("SELECT user FROM dual")
+        schema_name = str(discover.fetchone()[0]).upper()
+    finally:
+        discover.close()
+
+    pending_table: str | None = None
+    pending_cols: tuple[str, ...] | None = None
+    pending_rows: list[tuple[object, ...]] = []
+    last_end = 0
+
+    def _flush_inserts() -> None:
+        nonlocal pending_rows, pending_table, pending_cols
+        if not pending_rows or pending_table is None or pending_cols is None:
+            pending_rows = []
+            pending_table = None
+            pending_cols = None
+            return
+        table_upper = pending_table.upper()
+        col_names_upper = tuple(c.upper() for c in pending_cols)
+        arrow_schema: Any = _oracle_table_arrow_schema(  # typing-smell: ignore[explicit-any]: pyarrow Schema lacks stubs; iteration over it is dynamic
+            conn, schema_name, table_upper, col_names_upper,
+        )
+        expected_types: dict[str, Any] = {  # typing-smell: ignore[explicit-any]: pyarrow Field.type is dynamic, same posture as the lazy import
+            field.name: field.type for field in arrow_schema
+        }
+        rows_as_dicts = [
+            {
+                col_names_upper[i]: _oracle_dpl_normalize_value(
+                    v, expected_types[col_names_upper[i]],
+                )
+                for i, v in enumerate(row)
+            }
+            for row in pending_rows
+        ]
+        arrow_table = pa.Table.from_pylist(rows_as_dicts, schema=arrow_schema)
+        # CB.14 — direct_path_load raises ORA-26085 when the connection
+        # has an active transaction. oracledb 3.x opens an implicit
+        # transaction on the first statement of any kind (including the
+        # SELECT user discovery above), and the non-INSERT residual
+        # chunks can also leave a write txn open. Commit before each
+        # flush so direct_path_load can start its own.
+        conn.commit()
+        conn.direct_path_load(
+            schema_name=schema_name,
+            table_name=table_upper,
+            column_names=list(col_names_upper),
+            data=arrow_table,
+        )
+        pending_rows = []
+        pending_table = None
+        pending_cols = None
+
+    def _execute_residual(text: str) -> None:
+        """Execute non-INSERT residual via the existing Oracle script
+        splitter (`split_oracle_script`) so comment-aware splitting +
+        trailing-`;` stripping behave correctly."""
+        if not text.strip():
+            return
+        for stmt in split_oracle_script(text):
+            stripped = stmt.strip()
+            if not stripped or all(
+                ln.strip().startswith("--") or not ln.strip()
+                for ln in stripped.splitlines()
+            ):
+                continue
+            _execute_oracle_stmt_with_lock_retry(cur, stmt)
+
+    for match in _SEED_INSERT_SCAN_RE.finditer(sql):
+        residual_before = sql[last_end:match.start()]
+        last_end = match.end()
+        table = match.group(1)
+        cols_str = match.group(2).strip()
+        body = match.group(3)
+        row = _parse_simple_values(body)
+        cols_tuple = tuple(s.strip() for s in cols_str.split(","))
+        key = (table, cols_tuple)
+        if row is None:
+            _flush_inserts()
+            _execute_residual(residual_before)
+            # CB.14 — `_SEED_INSERT_SCAN_RE` captures through the trailing
+            # `;` (the regex anchor); oracledb's thin-mode `cur.execute()`
+            # rejects trailing semicolons with ORA-00933. Latent under
+            # 23ai (apparently lenient) — exposed by 19c. Strip before
+            # executing the verbatim fallback.
+            stmt = match.group(0).rstrip().rstrip(";")
+            _execute_oracle_stmt_with_lock_retry(cur, stmt)
+            continue
+        if (pending_table, pending_cols) != key:
+            _flush_inserts()
+            _execute_residual(residual_before)
+            pending_table, pending_cols = table, cols_tuple
+        else:
+            if residual_before.strip():
+                _flush_inserts()
+                _execute_residual(residual_before)
+                pending_table, pending_cols = table, cols_tuple
+        pending_rows.append(row)
+    _flush_inserts()
+    _execute_residual(sql[last_end:])
+
+
+def _render_sql_literal(v: object) -> str:
+    """Render a Python primitive (from `_parse_simple_values`) back as
+    DuckDB SQL literal text. The parser bails on any string containing
+    `''` escapes so we don't need quote-escape logic here — only the
+    primitive shapes the parser emits round-trip.
+
+    NULL → ``NULL``; bool → ``TRUE`` / ``FALSE``; int/float → ``str(v)``;
+    str → single-quoted (no escape needed per the parser's contract);
+    `_TypedSqlLiteral(kind, text)` → ``<kind> '<text>'`` (e.g.
+    ``TIMESTAMP '2026-03-03 00:00:01'``). Unrecognized shapes raise —
+    would be a parser/flush invariant violation.
+    """
+    if v is None:
+        return "NULL"
+    if isinstance(v, bool):
+        return "TRUE" if v else "FALSE"
+    if isinstance(v, (int, float)):
+        return str(v)
+    if isinstance(v, _TypedSqlLiteral):
+        return f"{v.kind} '{v.text}'"
+    if isinstance(v, str):
+        return f"'{v}'"
+    raise TypeError(
+        f"_render_sql_literal: unrecognized primitive {type(v).__name__}: "
+        f"{v!r}. `_parse_simple_values` should have bailed on this shape."
+    )
 
 
 def _split_sqlite_statements(sql: str) -> list[str]:
@@ -821,51 +1456,136 @@ class _AsyncOraclePool:
         await self._pool.close()
 
 
-class _AsyncSqlitePool:
-    """``aiosqlitepool``-backed pool for the App2 async SQLite path.
 
-    Upstream aiosqlite#258 (https://github.com/omnilib/aiosqlite/issues/258,
-    still open on 0.22.1) — `async with aiosqlite.connect(...) as db` leaks
-    thread locks on close. The old per-acquire connect+close pattern here
-    accumulated memory until OOM (caught locally during a 13-variant
-    browser e2e sweep in v11.22.4-followon: each test spun a fresh
-    App2Driver pool, each request opened+closed an aiosqlite connection).
+class _AsyncDuckdbCursor:
+    """CA.4 — async-shaped cursor result adapter for sync DuckDB.
 
-    ``aiosqlitepool.SQLiteConnectionPool`` is a third-party pool that reuses
-    long-lived aiosqlite connections (the upstream-issue workaround pattern,
-    productized). Same shape as ``psycopg_pool.AsyncConnectionPool`` on the
-    PG path — consistent ``.connection()`` async-cm + ``.close()``.
+    DuckDB's Python driver is sync-only; ``_AsyncDuckdbConnection.execute``
+    runs the query + ``fetchall()`` synchronously under
+    ``asyncio.to_thread``, then stashes the rows + description here so
+    the ``AsyncCursor`` Protocol's later ``await fetchall()`` is a
+    no-op return.
+    """
 
-    The factory opens the underlying aiosqlite connection lazily on first
-    acquire + applies our PRAGMA setup. NOTE: STDDEV_SAMP is NOT registered
-    on this async pool (aiosqlite doesn't expose create_aggregate); the
-    inv_pair_rolling_anomalies matview holds pre-computed rows from the
-    sync `connect_demo_db` path which does register the aggregate, so the
-    async App2 read-only workload never needs it.
+    def __init__(
+        self,
+        rows: list[Any],  # typing-smell: ignore[explicit-any]: DB-API rows are heterogeneous per the SQL contract
+        description: Sequence[Sequence[Any]] | None,  # typing-smell: ignore[explicit-any]: DB-API cursor.description tuples carry mixed types per column
+    ) -> None:
+        self._rows = rows
+        self._description = description
+
+    @property
+    def description(self) -> Sequence[Sequence[Any]] | None:  # typing-smell: ignore[explicit-any]: DB-API cursor.description shape
+        return self._description
+
+    async def fetchall(self) -> list[Any]:  # typing-smell: ignore[explicit-any]: rows are heterogeneous; per-call shape lives in the SQL contract
+        return self._rows
+
+
+class _AsyncDuckdbConnection:
+    """CA.4 — async adapter over a sync ``duckdb.DuckDBPyConnection``.
+
+    DuckDB has no native async driver. The adapter dispatches each
+    ``execute(query, params)`` call onto a worker thread via
+    ``asyncio.to_thread``, eagerly materializes rows + description,
+    and returns an ``_AsyncDuckdbCursor`` carrying both. Eager
+    materialization (sync ``fetchall()`` inside the thread) keeps the
+    later ``await cursor.fetchall()`` a no-op — matches the App2
+    executor's "one-shot execute + fetchall" usage.
+
+    Connection-thread-safety caveat (see ``_AsyncDuckdbPool``): DuckDB
+    connections are NOT thread-safe; the pool gives each acquire its
+    OWN connection, and that connection is bound to whichever thread
+    eventually runs the ``asyncio.to_thread`` calls. Don't share an
+    ``_AsyncDuckdbConnection`` across acquire scopes.
+    """
+
+    def __init__(self, conn: Any) -> None:  # typing-smell: ignore[explicit-any]: duckdb.DuckDBPyConnection has no PEP 561 stubs at strict
+        self._conn = conn
+
+    async def execute(
+        self,
+        query: str,
+        params: Any = None,  # typing-smell: ignore[explicit-any]: bind params dict — driver coerces per-driver; no shared Protocol covers the dict + list shapes DuckDB accepts
+        /,
+    ) -> AsyncCursor:
+        conn = self._conn
+
+        def _run() -> tuple[list[Any], Sequence[Sequence[Any]] | None]:  # typing-smell: ignore[explicit-any]: see class docstring
+            if params is None:
+                cur = conn.execute(query)
+            else:
+                cur = conn.execute(query, params)
+            rows = cur.fetchall()
+            desc = cur.description
+            return rows, desc
+
+        rows, desc = await asyncio.to_thread(_run)
+        return _AsyncDuckdbCursor(rows, desc)
+
+
+class _AsyncDuckdbPool:
+    """CA.4 — one-root-connection + cursor-per-acquire pool for the
+    App2 async DuckDB path.
+
+    DuckDB has no aiosqlite-equivalent async driver. Two empirical
+    constraints settled the pool shape (probed against duckdb 1.5.3):
+
+    1. **Only one process may open a given ``.duckdb`` file at a time
+       AND only one ``duckdb.connect(path)`` per process per file** —
+       a second ``connect()`` call against the same path from the same
+       process raises ``BinderException: Unique file handle conflict``.
+       This rules out the "fresh-connect-per-acquire" pattern that
+       ``_AsyncSqlitePool`` uses (aiosqlite has no such constraint).
+
+    2. **``connection.cursor()`` returns a fresh thread-safe
+       ``DuckDBPyConnection``** — a separate object that shares the
+       underlying database but can be used concurrently from another
+       thread without colliding with the root connection's locks.
+       (The reference API doc says ``cursor()`` "creates a duplicate
+       of the current connection"; the parallelism overview claims
+       it's just another handle, but a probe of 8 parallel threads
+       each running queries via ``root.cursor()`` succeeds cleanly.)
+
+    Pool shape: open ONE root ``duckdb.connect(path)`` at construction;
+    each ``acquire()`` calls ``root.cursor()`` to fork a fresh
+    sub-connection. Cursor close is cheap (no file I/O). Pool close
+    tears down the root. ``max_size`` semaphore bounds in-flight
+    cursors so a spike of parallel requests doesn't pile up handles.
     """
 
     def __init__(self, path: str, *, max_size: int = 10) -> None:
-        from aiosqlitepool import SQLiteConnectionPool  # type: ignore[import-untyped]: aiosqlitepool lacks PEP 561 stubs  # noqa: PLC0415
+        import duckdb  # noqa: PLC0415
+        from recon_gen.common.env_keys import RECON_GEN_DB_READ_ONLY  # noqa: PLC0415
 
-        async def _factory() -> Any:  # typing-smell: ignore[explicit-any]: aiosqlite.Connection conforms to aiosqlitepool's Connection Protocol at runtime; static stubs disagree
-            import aiosqlite  # noqa: PLC0415
-
-            conn = await aiosqlite.connect(path)
-            await conn.execute("PRAGMA foreign_keys = ON;")
-            return conn
-
-        self._pool = SQLiteConnectionPool(_factory, pool_size=max_size)
+        self._path = path
+        self._sem = asyncio.Semaphore(max_size)
+        # CA.8 — honor RECON_GEN_DB_READ_ONLY=1 for the same multi-
+        # process safety reason `connect_demo_db` does. The runner sets
+        # this for the App2 pytest tier's DuckDB cells so xdist workers
+        # share read access against the seeded .duckdb file.
+        read_only = bool(RECON_GEN_DB_READ_ONLY.get_or_none())
+        # Open the root eagerly so a bad path / corrupt file surfaces
+        # at construction (server startup) rather than first request.
+        self._root: Any = duckdb.connect(path, read_only=read_only)  # typing-smell: ignore[explicit-any]: duckdb.DuckDBPyConnection has no PEP 561 stubs at strict
 
     def acquire(self) -> AbstractAsyncContextManager[AsyncConnection]:
         return self._acquire()
 
     @asynccontextmanager
     async def _acquire(self) -> AsyncGenerator[AsyncConnection, None]:
-        async with self._pool.connection() as conn:
-            yield conn  # type: ignore[misc]: aiosqlite Connection conforms to AsyncConnection protocol
+        async with self._sem:
+            cursor_conn = await asyncio.to_thread(self._root.cursor)
+            try:
+                yield _AsyncDuckdbConnection(cursor_conn)
+            finally:
+                await asyncio.to_thread(cursor_conn.close)
 
     async def close(self) -> None:
-        await self._pool.close()
+        if self._root is not None:
+            await asyncio.to_thread(self._root.close)
+            self._root = None
 
 
 async def make_connection_pool(
@@ -931,23 +1651,23 @@ async def make_connection_pool(
             dsn=oracle_dsn(cfg.demo_database_url), min=1, max=max_size,
         )
         return _AsyncOraclePool(pool)
-    if cfg.dialect is Dialect.SQLITE:
-        # Probe the import here so a missing aiosqlite surfaces at
-        # pool-construction time (server startup) instead of inside
-        # the first request handler.
+    if cfg.dialect is Dialect.DUCKDB:
+        # CA.4 — core dep, no extras-install gate. Probe to surface a
+        # missing wheel at pool-construction time so Studio's startup
+        # fails loudly rather than at first request.
         try:
-            import aiosqlite as _aiosqlite_probe  # noqa: PLC0415, F401
+            import duckdb as _duckdb_probe  # noqa: PLC0415, F401
         except ImportError as e:
             raise ImportError(
-                "aiosqlite is required for the async SQLite pool. "
-                "Install it with: pip install 'recon-gen[prod]'"
+                "duckdb is required for the DuckDB pool. It's a core "
+                "dependency — run `uv sync` (or `pip install duckdb`)."
             ) from e
-        del _aiosqlite_probe
-        return _AsyncSqlitePool(
-            sqlite_path(cfg.demo_database_url), max_size=max_size,
+        del _duckdb_probe
+        return _AsyncDuckdbPool(
+            duckdb_path(cfg.demo_database_url), max_size=max_size,
         )
     raise ValueError(
         f"Unknown dialect {cfg.dialect!r}. "
-        "Set 'dialect: postgres', 'dialect: oracle', or 'dialect: sqlite' "
-        "in your config."
+        "Set 'dialect: postgres', 'dialect: oracle', 'dialect: duckdb', "
+        "or 'dialect: sqlite' in your config."
     )

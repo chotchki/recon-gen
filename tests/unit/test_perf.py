@@ -96,7 +96,7 @@ def test_format_skipped_shape() -> None:
 def test_dialect_name_per_dialect() -> None:
     assert dialect_name(Dialect.POSTGRES) == "postgres"
     assert dialect_name(Dialect.ORACLE) == "oracle"
-    assert dialect_name(Dialect.SQLITE) == "sqlite"
+    assert dialect_name(Dialect.DUCKDB) == "duckdb"
 
 
 # -- fetch_top_queries -----------------------------------------------------
@@ -167,18 +167,19 @@ def test_fetch_top_queries_oracle_uses_v_sqlstats_and_bind_params() -> None:
     assert cur.executed[0][1] == ("%spec_example%", 10)
 
 
-def test_fetch_top_queries_sqlite_raises_not_implemented() -> None:
-    """SQLite has no stats view — the fetch function explicitly raises
-    so the caller falls into its skipped-marker path. (The conftest
-    fixture short-circuits before calling fetch for SQLite, but the
-    function itself must not silently return empty.)"""
+def test_fetch_top_queries_duckdb_raises_not_implemented() -> None:
+    """DuckDB has no pg_stat_statements equivalent — the fetch function
+    explicitly raises so the caller falls into its skipped-marker
+    path. (The conftest fixture short-circuits before calling fetch
+    for DuckDB, but the function itself must not silently return
+    empty.)"""
     import pytest
 
     cur = _FakeCursor([])
     conn = _FakeConn(cur)
-    with pytest.raises(NotImplementedError, match="sqlite"):
+    with pytest.raises(NotImplementedError, match="duckdb"):
         fetch_top_queries(
-            conn, Dialect.SQLITE, like_pattern="x", top=1,
+            conn, Dialect.DUCKDB, like_pattern="x", top=1,
         )
 
 

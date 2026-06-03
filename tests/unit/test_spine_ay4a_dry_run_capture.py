@@ -25,12 +25,12 @@ What's pinned:
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from pathlib import Path
 
 import pytest
 
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema
 from recon_gen.common.spine import (
@@ -39,6 +39,7 @@ from recon_gen.common.spine import (
     dry_run_capture,
 )
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 
 _SPEC_EXAMPLE = (
@@ -53,7 +54,7 @@ _PREFIX = "spec_example"
 
 
 def test_dry_run_capture_sqlite_uses_question_mark_placeholders() -> None:
-    cap = dry_run_capture(Dialect.SQLITE)
+    cap = dry_run_capture(Dialect.DUCKDB)
     gen = DriftInvariant().scenario_for(
         "CustomerSubledger", magnitude=5.0,
     )
@@ -108,7 +109,7 @@ def test_dry_run_capture_normalizes_params_to_tuple() -> None:
     """Whether insert_tx passes a list, tuple, or empty params, the
     captured slot is always a tuple — downstream renderer can rely
     on `len(params)`."""
-    cap = dry_run_capture(Dialect.SQLITE)
+    cap = dry_run_capture(Dialect.DUCKDB)
     gen = DriftInvariant().scenario_for(
         "CustomerSubledger", magnitude=5.0,
     )
@@ -122,7 +123,7 @@ def test_dry_run_capture_normalizes_params_to_tuple() -> None:
 def test_dry_run_capture_supports_dbapi_cursor_lifecycle() -> None:
     """The fake conn must satisfy the cursor/commit/close shape
     insert_tx / insert_balance use."""
-    cap = dry_run_capture(Dialect.SQLITE)
+    cap = dry_run_capture(Dialect.DUCKDB)
     cur = cap.cursor()
     cur.execute("SELECT 1", ())
     cur.close()  # no-op; should not raise
@@ -134,8 +135,8 @@ def test_dry_run_capture_supports_dbapi_cursor_lifecycle() -> None:
 def test_dry_run_capture_is_fresh_per_call() -> None:
     """Two `dry_run_capture()` calls don't share state — the AY.4
     builder needs to know each call gets a clean capture buffer."""
-    a = dry_run_capture(Dialect.SQLITE)
-    b = dry_run_capture(Dialect.SQLITE)
+    a = dry_run_capture(Dialect.DUCKDB)
+    b = dry_run_capture(Dialect.DUCKDB)
     a.cursor().execute("FAKE", ())
     assert a.captured == [("FAKE", ())]
     assert b.captured == []
@@ -146,15 +147,13 @@ def test_dry_run_capture_is_fresh_per_call() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _fresh_live_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+def _fresh_live_db() -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(":memory:")
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
-        cur, emit_schema(instance, prefix=_PREFIX, dialect=Dialect.SQLITE),
-        dialect=Dialect.SQLITE,
+        cur, emit_schema(instance, prefix=_PREFIX, dialect=Dialect.DUCKDB),
+        dialect=Dialect.DUCKDB,
     )
     conn.commit()
     return conn
@@ -164,7 +163,7 @@ def test_compose_dry_run_returns_captured_list() -> None:
     """Hitting `dry_run=True` returns the (sql, params) list; live
     mode returns None."""
     ctx = ScenarioContext(scenario_id="test-ay4a-dry", prefix=_PREFIX)
-    cap = dry_run_capture(Dialect.SQLITE)
+    cap = dry_run_capture(Dialect.DUCKDB)
     gen = DriftInvariant().scenario_for(
         "CustomerSubledger", magnitude=5.0,
     )
@@ -189,9 +188,7 @@ def test_compose_live_mode_unchanged_returns_none() -> None:
     conn = _fresh_live_db()
     try:
         result = ctx.compose(conn, gen)
-        rows = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions",
-        ).fetchone()[0]
+        rows = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions",)
     finally:
         conn.close()
     assert result is None
@@ -217,7 +214,7 @@ def test_compose_dry_run_skips_pairwise_disjoint_check() -> None:
     # the check; this composes cleanly.
     gen_a = DriftInvariant().scenario_for("CustomerSubledger", magnitude=5.0)
     gen_b = DriftInvariant().scenario_for("CustomerSubledger", magnitude=10.0)
-    cap = dry_run_capture(Dialect.SQLITE)
+    cap = dry_run_capture(Dialect.DUCKDB)
     captured = ctx.compose(cap, gen_a, gen_b, dry_run=True)
     assert captured is not None
     assert len(captured) > 0
@@ -229,7 +226,7 @@ def test_compose_dry_run_skips_cross_scenario_check() -> None:
     for the check."""
     ctx = ScenarioContext(scenario_id="test-ay4a-cross", prefix=_PREFIX)
     gen = DriftInvariant().scenario_for("CustomerSubledger", magnitude=5.0)
-    cap = dry_run_capture(Dialect.SQLITE)
+    cap = dry_run_capture(Dialect.DUCKDB)
     # Pre-AY.4.a, this would crash on _check_cross_scenario's
     # `cur.execute(sql, params)` against the fake conn (no fetchone).
     # Post-AY.4.a, the check is bypassed.

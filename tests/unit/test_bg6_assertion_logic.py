@@ -8,7 +8,7 @@ Mirrors BG.2-BG.5's deterministic shape.
 from __future__ import annotations
 
 import os
-import sqlite3
+import duckdb
 import tempfile
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
@@ -25,9 +25,10 @@ if TYPE_CHECKING:
 
 @pytest.fixture
 def planted_l2ft_l1_sqlite() -> Iterator["Config"]:
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
-    conn = sqlite3.connect(path)
+    os.unlink(path)
+    conn = duckdb.connect(path)
     # L2FT exceptions — one row per violation, with a per-violation
     # count column.
     conn.execute(
@@ -83,7 +84,7 @@ def planted_l2ft_l1_sqlite() -> Iterator["Config"]:
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=path)
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
     cfg.db_table_prefix = "pfx"
     try:
         yield cfg

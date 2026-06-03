@@ -51,26 +51,26 @@ def test_name_fuzz_scenario() -> None:
 
 def test_name_user_supplied_scenario() -> None:
     spec = VariantSpec(
-        ScenarioCode("us"), "sl", "lo", user_yaml=Path("/tmp/foo.yaml"),
+        ScenarioCode("us"), "du", "lo", user_yaml=Path("/tmp/foo.yaml"),
     )
-    assert spec.name == "us_sl_lo"
+    assert spec.name == "us_du_lo"
 
 
-# --- is_valid: invalid cell rejection (sl × aw) ----------------------------
+# --- is_valid: invalid cell rejection (du × aw) ----------------------------
 
 
 @pytest.mark.parametrize("dialect", ["pg", "or"])
-def test_is_valid_aw_with_non_sqlite(dialect: str) -> None:
+def test_is_valid_aw_with_non_file_based(dialect: str) -> None:
     """AWS target works for postgres + oracle (the dialects QuickSight
     has remote DataSources for)."""
     spec = VariantSpec(ScenarioCode("sp"), dialect, "aw")  # pyright: ignore[reportArgumentType]: parametrize feeds str, narrowed to DialectCode at runtime
     assert spec.is_valid()
 
 
-def test_is_valid_rejects_sqlite_aws() -> None:
-    """SQLite × AWS is the canonical invalid cell. SQLite is file-based;
-    QuickSight has no remote DataSource for it."""
-    spec = VariantSpec(ScenarioCode("sp"), "sl", "aw")
+def test_is_valid_rejects_duckdb_aws() -> None:
+    """DuckDB × AWS is the canonical invalid cell. DuckDB is file-based /
+    in-process; QuickSight has no remote DataSource for it."""
+    spec = VariantSpec(ScenarioCode("sp"), "du", "aw")
     assert not spec.is_valid()
 
 
@@ -79,13 +79,13 @@ def test_is_valid_rejects_sqlite_aws() -> None:
     [
         ("pg", "lo"),
         ("or", "lo"),
-        ("sl", "lo"),  # sqlite-local IS valid (file-based engine, no AWS needed)
+        ("du", "lo"),  # duckdb-local IS valid (file-based engine, no AWS needed)
         ("pg", "aw"),
         ("or", "aw"),
     ],
 )
 def test_is_valid_other_cells(dialect: str, target: str) -> None:
-    """Every cell except sl × aw is valid."""
+    """Every cell except du × aw is valid."""
     spec = VariantSpec(ScenarioCode("sp"), dialect, target)  # pyright: ignore[reportArgumentType]: parametrize feeds str, narrowed to DialectCode/TargetCode at runtime
     assert spec.is_valid()
 
@@ -161,7 +161,8 @@ def test_named_scenarios_set() -> None:
 
 
 def test_dialects_set() -> None:
-    assert DIALECTS == frozenset({"pg", "or", "sl"})
+    # CA.3 added du; CB.7-followup dropped sl entirely.
+    assert DIALECTS == frozenset({"pg", "or", "du"})
 
 
 def test_targets_set() -> None:
@@ -199,7 +200,7 @@ def test_expand_full_no_invalid_cells() -> None:
 
 
 def test_expand_full_named_local_cells() -> None:
-    """6 cells: ``{sp, sq} × {pg, or, sl} × {lo}``."""
+    """6 cells: ``{sp, sq} × {pg, or, du} × {lo}`` (CA.7 swapped sl→du)."""
     cells = expand_full()
     named_local = [
         c for c in cells
@@ -207,7 +208,7 @@ def test_expand_full_named_local_cells() -> None:
     ]
     assert len(named_local) == 6
     expected_names = {
-        f"{sc}_{di}_lo" for sc in ("sp", "sq") for di in ("pg", "or", "sl")
+        f"{sc}_{di}_lo" for sc in ("sp", "sq") for di in ("pg", "or", "du")
     }
     assert {c.name for c in named_local} == expected_names
 
@@ -235,7 +236,7 @@ def test_expand_full_fuzz_cells_share_seed() -> None:
     seeds = {c.fuzz_seed for c in fuzz_cells}
     assert len(seeds) == 1, f"expected all 3 fuzz cells to share one seed; got {seeds}"
     assert all(c.target == "lo" for c in fuzz_cells)
-    assert {c.dialect for c in fuzz_cells} == {"pg", "or", "sl"}
+    assert {c.dialect for c in fuzz_cells} == {"pg", "or", "du"}
 
 
 def test_expand_full_fuzz_excluded_from_aws() -> None:
@@ -301,25 +302,25 @@ def test_compose_targets_only_narrows() -> None:
     assert len(cells) == 6
     assert all(c.target == "lo" for c in cells)
     assert {c.scenario for c in cells} == {"sp", "sq"}
-    assert {c.dialect for c in cells} == {"pg", "or", "sl"}
+    assert {c.dialect for c in cells} == {"pg", "or", "du"}
 
 
 def test_compose_scenarios_only_named() -> None:
     """`--scenarios=sp` → {sp} × all dialects × all targets, filtered
-    for is_valid(). sp × {pg, or, sl} × {lo, aw} = 6 minus invalid
-    sp_sl_aw = 5 cells."""
+    for is_valid(). sp × {pg, or, du} × {lo, aw} = 6 minus invalid
+    sp_du_aw = 5 cells. (CA.7 swapped sl→du in DEFAULT_DIALECTS.)"""
     cells = compose_matrix(scenarios=[ScenarioSpec(ScenarioCode("sp"))])
     assert len(cells) == 5
     assert {c.name for c in cells} == {
-        "sp_pg_lo", "sp_or_lo", "sp_sl_lo", "sp_pg_aw", "sp_or_aw",
+        "sp_pg_lo", "sp_or_lo", "sp_du_lo", "sp_pg_aw", "sp_or_aw",
     }
 
 
 def test_compose_invalid_cells_filtered() -> None:
-    """`is_valid()` filter applies in cross-product mode — sl × aw cells
+    """`is_valid()` filter applies in cross-product mode — du × aw cells
     auto-skip even when targets=aw includes them."""
-    cells = compose_matrix(dialects=["sl"], targets=["aw"])
-    # {sp, sq} × {sl} × {aw} would be 2 cells, but both invalid → 0
+    cells = compose_matrix(dialects=["du"], targets=["aw"])
+    # {sp, sq} × {du} × {aw} would be 2 cells, but both invalid → 0
     assert cells == []
 
 
@@ -345,13 +346,13 @@ def test_compose_with_user_supplied_scenario() -> None:
 
 def test_compose_explicit_full_intent_via_sub_flags() -> None:
     """Operator who DOES want full local matrix can spell it explicitly:
-    --scenarios=sp,sq --dialects=pg,or,sl --targets=lo = 6 cells."""
+    --scenarios=sp,sq --dialects=pg,or,du --targets=lo = 6 cells."""
     cells = compose_matrix(
         scenarios=[
             ScenarioSpec(ScenarioCode("sp")),
             ScenarioSpec(ScenarioCode("sq")),
         ],
-        dialects=["pg", "or", "sl"],
+        dialects=["pg", "or", "du"],
         targets=["lo"],
     )
     assert len(cells) == 6
@@ -361,7 +362,7 @@ def test_compose_default_constants() -> None:
     """Sanity check on the constants referenced when sub-flag axes are
     unspecified."""
     assert DEFAULT_SCENARIOS_NAMED == (ScenarioCode("sp"), ScenarioCode("sq"))
-    assert DEFAULT_DIALECTS == ("pg", "or", "sl")
+    assert DEFAULT_DIALECTS == ("pg", "or", "du")
     assert DEFAULT_TARGETS == ("lo", "aw")
 
 
@@ -527,7 +528,7 @@ def test_parse_variant_code_bad(bad: str) -> None:
 
 def test_parse_variant_code_invalid_cell_constructs() -> None:
     """Bug guard: parse_variant_code constructs the spec, but invalid
-    cells (sl × aw) construct fine — caller checks is_valid() if it
+    cells (du × aw) construct fine — caller checks is_valid() if it
     cares. The triage path may want to inspect why a cell is invalid."""
-    spec = parse_variant_code("sp_sl_aw")
+    spec = parse_variant_code("sp_du_aw")
     assert not spec.is_valid()

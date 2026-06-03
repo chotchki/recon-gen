@@ -24,7 +24,7 @@ onto).
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import ClassVar
@@ -58,7 +58,7 @@ class MoneyTrailInvariant:
     name: ClassVar[str] = "inv_money_trail_edges"
     prefix: str = "spec_example"
 
-    def detect(self, conn: sqlite3.Connection) -> set[Violation]:
+    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
         rows = fetch_all(
             conn,
             f"SELECT root_transfer_id, transfer_id, depth "
@@ -235,7 +235,7 @@ class MoneyTrailGenerator:
 
     def emit(
         self,
-        conn: sqlite3.Connection,
+        conn: duckdb.DuckDBPyConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:

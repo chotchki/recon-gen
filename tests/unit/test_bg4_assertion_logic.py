@@ -10,7 +10,7 @@ the right assertion.
 from __future__ import annotations
 
 import os
-import sqlite3
+import duckdb
 import tempfile
 from collections.abc import Iterator
 from decimal import Decimal
@@ -28,9 +28,10 @@ if TYPE_CHECKING:
 
 @pytest.fixture
 def planted_inv_sqlite() -> Iterator["Config"]:
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
-    conn = sqlite3.connect(path)
+    os.unlink(path)
+    conn = duckdb.connect(path)
 
     # Volume Anomalies matview — rows with varying z_score across
     # buckets so the σ-cut consistency assertion has signal.
@@ -95,7 +96,7 @@ def planted_inv_sqlite() -> Iterator["Config"]:
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=path)
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
     cfg.db_table_prefix = "pfx"
     try:
         yield cfg

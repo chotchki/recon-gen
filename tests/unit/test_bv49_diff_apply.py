@@ -9,7 +9,7 @@ the slow path rebuilds correctly.
 from __future__ import annotations
 
 import asyncio
-import sqlite3
+import duckdb
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -116,7 +116,7 @@ def fresh_v_overlay(tmp_path: Path) -> Iterator[tuple[Config, Path]]:
     (designed for an already-bootstrapped base prefix)."""
     db_path = tmp_path / "bv49.sqlite"
     cfg = make_test_config(
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
         demo_database_url=str(db_path),
         db_table_prefix="bv49",
     )
@@ -248,7 +248,7 @@ def _count_phantom_rows(cfg: Config) -> int:
     """Count v-overlay transactions whose id marker indicates a
     phantom_rail plant. Used to verify whether the plant was
     re-applied or skipped."""
-    conn: sqlite3.Connection = connect_demo_db(cfg)
+    conn: duckdb.DuckDBPyConnection = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
         try:

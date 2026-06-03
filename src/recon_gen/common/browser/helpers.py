@@ -808,6 +808,13 @@ def _capture_failure_db_counts(
                         (f"{prefix}_%",),
                     )
                     names = [row[0] for row in cur.fetchall()]
+                elif dialect is Dialect.DUCKDB:
+                    cur.execute(
+                        "SELECT table_name FROM information_schema.tables "
+                        "WHERE table_name LIKE ? ORDER BY table_name",
+                        (f"{prefix}_%",),
+                    )
+                    names = [row[0] for row in cur.fetchall()]
                 elif dialect is Dialect.ORACLE:
                     # Oracle uppercases identifiers; prefix is case-insensitive
                     # in our cfg so query both layers.
@@ -817,14 +824,6 @@ def _capture_failure_db_counts(
                         "'MATERIALIZED VIEW') "
                         "AND UPPER(object_name) LIKE UPPER(:1) "
                         "ORDER BY object_name",
-                        (f"{prefix}_%",),
-                    )
-                    names = [row[0] for row in cur.fetchall()]
-                elif dialect is Dialect.SQLITE:
-                    cur.execute(
-                        "SELECT name FROM sqlite_master "
-                        "WHERE type IN ('table', 'view') AND name LIKE ? "
-                        "ORDER BY name",
                         (f"{prefix}_%",),
                     )
                     names = [row[0] for row in cur.fetchall()]
@@ -1676,6 +1675,99 @@ def read_chart_categories(page: Page, visual_title: str) -> list[str]:
 
 
 
+def read_table_rows_via_scroll(
+    page: Page, visual_title: str,
+) -> list[dict[str, str]]:
+    """De-virtualized table read — scroll through the table and accumulate
+    every row that mounts. Returns a list of dicts keyed by column-header
+    text, in row-index order across the full dataset.
+
+    QS virtualizes ~10-37 rows in the DOM at a time. ``read_table_rows_dom``
+    captures only what's currently mounted; for tables with N > window,
+    callers need this scroll-collect shape to get every row. Used by
+    `l1_invariant_rows_seen` post-BO.1 fix: row-identity checks against
+    a 119-row overdraft table were comparing a 37-row DOM window to the
+    page-size-bumped count of 119 and failing the assertion.
+
+    Walks the same scroll-accumulate dance as
+    `find_row_in_table_via_scroll` but returns the ACCUMULATED row map
+    instead of early-exiting on the first predicate match. Dedupes by
+    the absolute row index in `sn-table-cell-{row}-{col}` (QS uses an
+    absolute index across the whole dataset, not the window-relative
+    index, so newly-mounted rows have row indices we haven't seen yet).
+
+    Returns ``[]`` if the visual isn't found or has no body cells.
+    Bounded by 500 scroll steps + the table's natural scroll-bottom.
+    """
+    return page.evaluate(
+        """async (title) => {
+            const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
+            let target = null;
+            for (const v of visuals) {
+                const t = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
+                if (t && t.innerText.trim() === title) { target = v; break; }
+            }
+            if (!target) return [];
+            const readHeaders = () => {
+                const headers = [];
+                target.querySelectorAll('[data-automation-id^="sn-table-column-"]').forEach(c => {
+                    if (!/sn-table-column-\\d+$/.test(c.getAttribute('data-automation-id'))) return;
+                    const titleEl = c.querySelector('.table-title .title')
+                        || c.querySelector('.title');
+                    headers.push(titleEl ? titleEl.innerText.trim() : c.innerText.trim());
+                });
+                return headers;
+            };
+            const headers = readHeaders();
+            // rowsByIdx: { absoluteRowIdx: { colIdx: text } } — accumulated
+            // across scroll steps. Each step's mounted cells get merged in.
+            const rowsByIdx = {};
+            const accumulateMounted = () => {
+                target.querySelectorAll('[data-automation-id^="sn-table-cell-"]').forEach(c => {
+                    const m = c.getAttribute('data-automation-id').match(/sn-table-cell-(\\d+)-(\\d+)/);
+                    if (!m) return;
+                    const r = parseInt(m[1], 10), col = parseInt(m[2], 10);
+                    (rowsByIdx[r] = rowsByIdx[r] || {})[col] = c.innerText.trim();
+                });
+            };
+            accumulateMounted();
+            const container = target.querySelector('.grid-container');
+            if (container) {
+                let stable = 0;
+                let prevMax = -1;
+                const getMaxRow = () => Math.max(-1, ...Object.keys(rowsByIdx).map(Number));
+                for (let step = 0; step < 500; step++) {
+                    container.scrollTop = container.scrollTop + 400;
+                    await new Promise(r => setTimeout(r, 120));
+                    accumulateMounted();
+                    const now = getMaxRow();
+                    if (container.scrollTop + container.clientHeight >= container.scrollHeight - 1) {
+                        await new Promise(r => setTimeout(r, 400));
+                        accumulateMounted();
+                        break;
+                    }
+                    if (now === prevMax) { stable++; if (stable > 3) break; }
+                    else { stable = 0; prevMax = now; }
+                }
+            }
+            // Materialize as ordered list keyed by header text.
+            const rows = [];
+            Object.keys(rowsByIdx).map(Number).sort((a, b) => a - b).forEach(r => {
+                const cols = rowsByIdx[r];
+                const ordered = Object.keys(cols).map(Number).sort((a, b) => a - b)
+                    .map(col => cols[col]);
+                const row = {};
+                for (let i = 0; i < headers.length && i < ordered.length; i++) {
+                    row[headers[i]] = ordered[i];
+                }
+                rows.push(row);
+            });
+            return rows;
+        }""",
+        visual_title,
+    ) or []
+
+
 def read_table_rows_dom(
     page: Page, visual_title: str,
 ) -> list[dict[str, str]]:
@@ -1737,7 +1829,7 @@ def read_table_rows_dom(
     ) or []
 
 
-def read_kpi_value(page: Page, visual_title: str) -> str:
+def read_kpi_value(page: Page, visual_title: str, *, timeout_ms: int = 8_000) -> str:
     """Return the displayed big-number text of a KPI visual.
 
     QS renders the value inside ``.visual-x-center`` (the actual text node).
@@ -1745,26 +1837,54 @@ def read_kpi_value(page: Page, visual_title: str) -> str:
     innerText sometimes includes the comparison label — prefer the center
     node and fall back to the automation-id if unavailable.
 
-    Raises ``AssertionError`` if the visual isn't found or has no value.
+    **Stability poll**: returns only when 2 consecutive reads (200ms
+    apart) match. Handles both:
+
+    - *First-paint race* (BO.1 `test_bg3_drift_sheet_kpis_match_matview_counts`
+      fix): caller's `wait_loaded(...)` may settle one visual while
+      sibling KPIs on the same sheet are still rendering; poll past
+      the None window until the value appears stable.
+    - *Post-param-change stale-read* (BO.1
+      `test_bg2_daily_statement_kpis_match_summary_matview` fix): after
+      a date pick, QS's WS settle may return before the KPI cell
+      repaints — DOM transiently still shows the previous day's value.
+      Stability poll waits for the new value to land.
+
+    Raises ``AssertionError`` if the value never reaches a stable state
+    within the timeout.
     """
-    value = page.evaluate(
-        """(title) => {
-            const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
-            for (const v of visuals) {
-                const t = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
-                if (!t || t.innerText.trim() !== title) continue;
-                const center = v.querySelector('.visual-x-center');
-                if (center && center.innerText.trim()) return center.innerText.trim();
-                const kpi = v.querySelector('[data-automation-id="kpi-display-value"]');
-                if (kpi && kpi.innerText.trim()) return kpi.innerText.trim();
-                return null;
-            }
+    js = """(title) => {
+        const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
+        for (const v of visuals) {
+            const t = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
+            if (!t || t.innerText.trim() !== title) continue;
+            const center = v.querySelector('.visual-x-center');
+            if (center && center.innerText.trim()) return center.innerText.trim();
+            const kpi = v.querySelector('[data-automation-id="kpi-display-value"]');
+            if (kpi && kpi.innerText.trim()) return kpi.innerText.trim();
             return null;
-        }""",
-        visual_title,
+        }
+        return null;
+    }"""
+    deadline = time.monotonic() + timeout_ms / 1000.0
+    last: str | None = None
+    while time.monotonic() < deadline:
+        value = page.evaluate(js, visual_title)
+        if value is not None and value == last:
+            # Two consecutive identical non-None reads — value has stabilized.
+            return value
+        last = value
+        time.sleep(0.2)  # typing-smell: ignore[no-sleep]: 200ms inter-poll backoff inside a bounded retry loop with overall timeout
+    # Timed out without stabilizing. Surface the most recent value to
+    # aid triage (last seen, plus an explanation of which gate fired).
+    if last is None:
+        raise AssertionError(
+            f"No KPI value found for {visual_title!r} after {timeout_ms}ms"
+        )
+    raise AssertionError(
+        f"KPI value for {visual_title!r} never stabilized (last seen: "
+        f"{last!r}) within {timeout_ms}ms"
     )
-    assert value is not None, f"No KPI value found for {visual_title!r}"
-    return value
 
 
 
@@ -2123,8 +2243,16 @@ def set_dropdown_value(
             _OPTION_SELECTOR,
             timeout=timeout_ms, state="visible",
         )
+    # BO.1 fix — `has_text=value` is substring (case-insensitive)
+    # matching. When the search filled the autocomplete with a value
+    # whose prefix is shared with other options (e.g., on the L1 Drift
+    # sheet's Account picker, several options share the
+    # ``"Drift Child (..."`` prefix), `.first` could click a sibling
+    # alphabetically before the intended option. Use exact-match
+    # regex so the locator only resolves to the option whose full text
+    # equals ``value``.
     page.locator(
-        _OPTION_SELECTOR, has_text=value,
+        _OPTION_SELECTOR, has_text=re.compile(f"^{re.escape(value)}$"),
     ).first.click(timeout=timeout_ms)
     page.keyboard.press("Escape")
 

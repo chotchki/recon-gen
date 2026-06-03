@@ -517,6 +517,48 @@ class QsEmbedDriver:
         # against the rendered header order.
         return rekey_by_columns(rows, columns) if columns else rows
 
+    def table_rows_full(
+        self,
+        visual_title: str,
+        *,
+        columns: Sequence[str] | None = None,
+    ) -> list[dict[str, str]]:
+        """De-virtualized table read — page-size bump + WS settle +
+        scroll-collect every row.
+
+        BO.1 fix: previously the overdraft invariant's 119-row table
+        returned only 37 rows because `read_table_rows_via_scroll`
+        scrolled within whatever page was shown (~37 rows). Mirrors the
+        `table_row_count` orchestration: bump page-size to 10000 if
+        paginated, settle the post-bump re-fetch, THEN scroll-collect.
+        """
+        from recon_gen.common.browser.helpers import (  # noqa: PLC0415
+            bump_table_page_size_to_10000,
+            read_table_rows_via_scroll,
+            visual_is_empty,
+        )
+
+        # `wait_for_cells=False` — the bump+settle below handles the
+        # actual "is the data ready" wait. Pre-fix used the default
+        # (`wait_for_cells=True`, 15s cap) which timed out on overdraft
+        # when the second call into the sheet re-applied the date
+        # filter and triggered a fresh fetch.
+        scroll_visual_into_view(
+            self._page, visual_title, self._visual_timeout,
+            wait_for_cells=False,
+        )
+        if visual_is_empty(self._page, visual_title):
+            return []
+        # Page-size-bump path: same shape as table_row_count. WS-settle
+        # after the bump triggers a re-fetch; failing to settle would
+        # leave the scroll-collect reading stale rows.
+        if bump_table_page_size_to_10000(
+            self._page, visual_title, self._visual_timeout,
+        ):
+            self._settle_after_param_change()
+        rows = read_table_rows_via_scroll(self._page, visual_title)
+        return rekey_by_columns(rows, columns) if columns else rows
+
     def find_row(
         self, visual_title: str, predicate: Mapping[str, str],
     ) -> dict[str, str] | None:
@@ -573,8 +615,20 @@ class QsEmbedDriver:
         # circuits the empty case at 0 without paying any pagination/
         # bump cost. Test callers like `_assert_anchor_present_and_populated`
         # rely on this returning 0 to decide whether to `pytest.skip`.
+        #
+        # BO.1 fix — stability poll on the empty-state branch. After a
+        # picker pick that restored a previously-narrowed value, the
+        # DOM can carry the toggle's empty-state overlay momentarily
+        # before QS finishes painting the restored row. `pick_filter`'s
+        # `_settle_after_param_change` waits for WS frames to quiet but
+        # the DOM update lags by a few hundred ms. Without this poll,
+        # `test_l1_dropdown_pickers_inverse_excludes_anchor[qs-Drift]`
+        # read 0 from the stale empty-state.
         if visual_is_empty(self._page, visual_title):
-            return 0
+            # Re-check after a brief wait; if still empty, accept 0.
+            self._page.wait_for_timeout(800)  # typing-smell: ignore[no-sleep]: 800ms post-pick DOM-update window; bounded one-shot, not a poll loop
+            if visual_is_empty(self._page, visual_title):
+                return 0
         # AA.A.l2ft-rails-inverse.2 — three table shapes QS uses, three
         # paths to the true row count:
         #

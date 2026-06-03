@@ -6,13 +6,24 @@ Independent validation tool for midsize financial institutions: layers double-en
 - **Self-hosted HTMX** (`recon-gen dashboards` / `recon-gen studio`) — same four apps via Starlette + Studio implementation tools (diagram, L2 editor, data-shaping panel). Offline iteration loop.
 - **Regulator-ready PDF** (`recon-gen audit apply`) — cryptographically fingerprinted, optionally pyHanko-signed. End-of-pipeline 4-way agreement test gates QS / self-hosted / PDF / direct-DB on every L1 invariant violation set.
 
-Three DB backends: PostgreSQL 17+, Oracle 19c+, SQLite 3.38+. Recon Generator validates data; it does not move it (customer ETL feeds `<prefix>_transactions` + `<prefix>_daily_balances`; Studio carries an `etl_hook`). Everything generated from code, deployed idempotently (delete-then-create).
+DB backends: PostgreSQL 17+ / Oracle 19c+ for prod; **DuckDB** as the local-iteration / Studio default (Phase CA swapped it in over SQLite; SQLite 3.38+ still works as a manual opt-in until Phase CB removes it). Recon Generator validates data; it does not move it (customer ETL feeds `<prefix>_transactions` + `<prefix>_daily_balances`; Studio carries an `etl_hook`). Everything generated from code, deployed idempotently (delete-then-create).
 
 ## Quick Reference
 
 - **Python 3.13** + **uv** (lock at `uv.lock`, venv at `.venv/`; `uv sync --all-extras` after pull; invoke via `.venv/bin/...`)
 - **Entry point**: `python -m recon_gen` or `recon-gen`; **CLI**: Click; **Output**: JSON in `out/`
-- **Dialects**: PostgreSQL 17+ / Oracle 19c+ / SQLite 3.38+; SQL emitters branch on `Dialect` enum (`common/sql/dialect.py`); SQLite uses JSON1 in place of SQL/JSON `JSON_VALUE` (`json_value` helper) and matviews are `CREATE TABLE … AS SELECT` (refresh = re-CREATE).
+- **Dialects**: PostgreSQL 17+ / Oracle 19c+ / DuckDB (default local) / SQLite 3.38+ (legacy, manual opt-in until CB removes it); SQL emitters branch on `Dialect` enum (`common/sql/dialect.py`); DuckDB uses `json_extract_string` (not `JSON_VALUE` — DuckDB's `JSON_VALUE` returns quoted JSON form, see [[project_duckdb_local_default_post_ca]]) and matviews are `CREATE TABLE … AS SELECT` (refresh = re-CREATE, same shape as the SQLite path).
+
+## Config file locations
+
+Two kinds of `config.yaml` exist in this repo. Don't conflate them.
+
+- **Operator-authored cfg** (`run/config.yaml` / `run/config.postgres.yaml` / `run/config.oracle.yaml`) — checked into nothing (the whole `run/` dir is gitignored). Holds AWS account / region, demo DB URL, deployment_name, signing material, auth profile. The CLI discovers it via this candidate order: env `RECON_GEN_CONFIG` override → `config.yaml` (repo root) → `run/config.yaml` → `run/config.postgres.yaml` → `run/config.oracle.yaml`. See `src/recon_gen/common/config.py::load_config` for the loader and `tests/e2e/conftest.py::cfg` for the test-side discovery candidate list. Memory: [[project_local_config_location]].
+- **Runner-managed cfgs** (under `runs/<run-id>/<variant>/cfg/`) — written by `src/recon_gen/_dev/runner.py::_run_one_variant` per cell. Post-CB.11.b there are two siblings per cell:
+  - `local.yaml` — `demo_database_url` points at `127.0.0.1:<container-port>` (or `duckdb://` for du dialect); used by `db` + `app2` layers via env `RECON_GEN_CONFIG`.
+  - `qs.yaml` — `demo_database_url` points at `hotchkiss.io:<forwarded-port>` (with `qs_disable_pg_ssl: true` for PG); used by `deploy` + `qs_api` + `qs_browser` layers via env `RECON_GEN_QS_CONFIG`. QS data source created from this cfg reaches the dev-machine Docker via the hotchkiss.io forward documented in [[project_cb10_qs_to_docker_pg_constraints]].
+
+The two-cfg pattern exists because QS (us-east-1) and local pytest workers (this machine) need different hostnames pointing at the same Docker container. NAT loopback fails fast in our home network, so we don't unify them.
 
 ## Commands
 

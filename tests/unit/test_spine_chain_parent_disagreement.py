@@ -16,13 +16,13 @@ The invariant differs from L1 in two important ways:
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from datetime import date
 from pathlib import Path
 
 import pytest
 
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.spine import (
@@ -33,19 +33,18 @@ from recon_gen.common.spine import (
     LedgerDriftInvariant,
 )
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 
 _SPEC_EXAMPLE = (
     Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
 )
 _PREFIX = "spec_example"
-_DIALECT = Dialect.SQLITE
+_DIALECT = Dialect.DUCKDB
 
 
-def _fresh_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+def _fresh_db() -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(":memory:")
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -56,7 +55,7 @@ def _fresh_db() -> sqlite3.Connection:
     return conn
 
 
-def _refresh(conn: sqlite3.Connection) -> None:
+def _refresh(conn: duckdb.DuckDBPyConnection) -> None:
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -196,12 +195,8 @@ def test_emit_does_not_trip_drift_single_edge_property() -> None:
         gen.emit(conn)
         conn.commit()
         _refresh(conn)
-        drift_count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_drift",
-        ).fetchone()[0]
-        ledger_drift_count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_ledger_drift",
-        ).fetchone()[0]
+        drift_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_drift",)
+        ledger_drift_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_ledger_drift",)
         assert DriftInvariant().detect(conn) == set()
         assert LedgerDriftInvariant().detect(conn) == set()
     finally:
@@ -242,14 +237,10 @@ def test_tagged_emit_writes_scenario_id_in_metadata() -> None:
     try:
         gen.emit(conn, scenario_id="test-ax1")
         conn.commit()
-        tagged = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
-            f"WHERE json_extract(metadata, '$.scenario_id') = ?",
-            ("test-ax1",),
-        ).fetchone()[0]
-        total = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions",
-        ).fetchone()[0]
+        tagged = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+            f"WHERE json_extract_string(metadata, '$.scenario_id') = ?",
+            ("test-ax1",),)
+        total = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions",)
     finally:
         conn.close()
     assert tagged == total > 0, (

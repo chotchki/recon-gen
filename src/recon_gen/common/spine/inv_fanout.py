@@ -39,7 +39,7 @@ synthetic default + the leaf-internal fields the
 from __future__ import annotations
 
 import json
-import sqlite3
+import duckdb
 from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
@@ -167,7 +167,7 @@ class InvFanoutGenerator:
 
     def emit(
         self,
-        conn: sqlite3.Connection,
+        conn: duckdb.DuckDBPyConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:

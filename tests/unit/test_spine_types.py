@@ -10,7 +10,7 @@ abstract layer composes cleanly and `runtime_checkable` does its job.
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
@@ -88,7 +88,7 @@ class _TrivialInvariant:
 
     name: ClassVar[str] = "trivial"
 
-    def detect(self, conn: sqlite3.Connection) -> set[Violation]:
+    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
         return set()  # never fires; just satisfies the Protocol
 
 
@@ -112,7 +112,7 @@ def test_invariant_detect_returns_violations() -> None:
     # The shape contract — detect returns a set[Violation], no other
     # types. Sanity-check that the trivial impl conforms.
     inv = _TrivialInvariant()
-    conn = sqlite3.connect(":memory:")
+    conn = duckdb.connect(":memory:")
     try:
         result = inv.detect(conn)
         assert isinstance(result, set)
@@ -134,7 +134,7 @@ class _TrivialGenerator:
     def intended(self) -> Violation:
         return Violation.of("trivial", marker="trivial")
 
-    def emit(self, conn: sqlite3.Connection) -> None:
+    def emit(self, conn: duckdb.DuckDBPyConnection) -> None:
         # No rows; never actually causes a violation.
         return None
 
@@ -173,7 +173,7 @@ def test_invariant_and_generator_compose() -> None:
     # the trivial impls don't write anything — but the types align.)
     inv = _TrivialInvariant()
     gen = _TrivialGenerator()
-    conn = sqlite3.connect(":memory:")
+    conn = duckdb.connect(":memory:")
     try:
         detected = inv.detect(conn)
         # No actual breach (trivial impls), so intended isn't IN detected.

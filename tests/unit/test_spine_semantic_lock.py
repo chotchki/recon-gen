@@ -19,11 +19,11 @@ What's pinned here:
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from datetime import date, timedelta
 from pathlib import Path
 
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema
 from recon_gen.common.spine import (
@@ -45,15 +45,13 @@ _SPEC_EXAMPLE = (
 _PREFIX = "spec_example"
 
 
-def _fresh_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+def _fresh_db() -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(":memory:")
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
-        cur, emit_schema(instance, prefix=_PREFIX, dialect=Dialect.SQLITE),
-        dialect=Dialect.SQLITE,
+        cur, emit_schema(instance, prefix=_PREFIX, dialect=Dialect.DUCKDB),
+        dialect=Dialect.DUCKDB,
     )
     conn.commit()
     return conn
@@ -311,14 +309,14 @@ def test_apply_scenario_default_dialect_is_sqlite() -> None:
     """The default kwarg matches every existing caller's implicit
     expectation (preserves pre-AY.3 behavior byte-stable). The
     in-process test harness is the dominant call site; threading
-    Dialect.SQLITE through doesn't change the rendered SQL."""
+    Dialect.DUCKDB through doesn't change the rendered SQL."""
     import inspect
     sig = inspect.signature(apply_scenario)
-    assert sig.parameters["dialect"].default is Dialect.SQLITE
+    assert sig.parameters["dialect"].default is Dialect.DUCKDB
 
 
 def test_apply_scenario_accepts_dialect_kwarg_and_preserves_violations() -> None:
-    """Pass `dialect=Dialect.SQLITE` explicitly + assert the lock
+    """Pass `dialect=Dialect.DUCKDB` explicitly + assert the lock
     matches the no-kwarg call. AY.3 is a no-op for SQLite (the
     default); the test pins that the new kwarg path stays consistent
     so AZ.1's per-dialect lock generation can lean on it.
@@ -352,9 +350,9 @@ def test_apply_scenario_accepts_dialect_kwarg_and_preserves_violations() -> None
             conn.close()
 
     implicit_lock = _run(explicit_dialect=None)
-    explicit_lock = _run(explicit_dialect=Dialect.SQLITE)
+    explicit_lock = _run(explicit_dialect=Dialect.DUCKDB)
     assert implicit_lock == explicit_lock, (
-        "passing dialect=Dialect.SQLITE explicitly should be byte-"
+        "passing dialect=Dialect.DUCKDB explicitly should be byte-"
         "identical to relying on the kwarg default — AY.3's lift "
         "must not introduce semantic drift on the dominant call shape"
     )

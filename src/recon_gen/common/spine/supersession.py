@@ -27,7 +27,7 @@ column handles the `entry` discriminator.
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from dataclasses import dataclass
 from datetime import date
 
@@ -90,7 +90,7 @@ class SupersessionGenerator:
 
     def emit(
         self,
-        conn: sqlite3.Connection,
+        conn: duckdb.DuckDBPyConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:

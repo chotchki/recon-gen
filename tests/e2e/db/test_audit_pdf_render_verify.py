@@ -43,7 +43,8 @@ from recon_gen.common.env_keys import (
 )
 
 
-_VENV_BIN = Path(__file__).resolve().parents[2] / ".venv" / "bin"
+# parents[3] = repo root (post-CB.4 file move from tests/e2e/ to tests/e2e/db/).
+_VENV_BIN = Path(__file__).resolve().parents[3] / ".venv" / "bin"
 _QS_GEN = _VENV_BIN / "recon-gen"
 
 

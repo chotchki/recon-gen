@@ -27,7 +27,7 @@ because drift needs choice. Anomaly (AT.2) WILL use it.
 from __future__ import annotations
 
 import random
-import sqlite3
+import duckdb
 from dataclasses import dataclass, field
 from datetime import date
 from typing import ClassVar
@@ -64,7 +64,7 @@ class DriftInvariant:
     #: invariant variant needs one.
     prefix: str = "spec_example"
 
-    def detect(self, conn: sqlite3.Connection) -> set[Violation]:
+    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
         rows = fetch_all(
             conn,
             f"SELECT account_id, business_day_start, drift "
@@ -147,7 +147,7 @@ class LedgerDriftInvariant:
     name: ClassVar[str] = "ledger_drift"
     prefix: str = "spec_example"
 
-    def detect(self, conn: sqlite3.Connection) -> set[Violation]:
+    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
         rows = fetch_all(
             conn,
             f"SELECT account_id, business_day_start, drift "
@@ -229,7 +229,7 @@ class DriftGenerator:
 
     def emit(
         self,
-        conn: sqlite3.Connection,
+        conn: duckdb.DuckDBPyConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:
@@ -336,7 +336,7 @@ class LedgerDriftGenerator:
 
     def emit(
         self,
-        conn: sqlite3.Connection,
+        conn: duckdb.DuckDBPyConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:

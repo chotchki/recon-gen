@@ -268,12 +268,17 @@ def rewrite_placeholders_for_dialect(sql: str, dialect: Dialect) -> str:
     """Convert ``:name`` placeholders to dialect-native form.
 
     SQLite + Oracle accept ``:name`` natively (DB-API 2.0 named
-    paramstyle); Postgres uses ``%(name)s``. The rewrite is purely
+    paramstyle); Postgres uses ``%(name)s``; DuckDB uses ``$name``
+    (dollar prefix — DuckDB's Python driver rejects ``:name`` with
+    "Parser Error: syntax error at or near ':'", but accepts the same
+    bind-dict shape under ``$name``). The rewrite is purely
     string-level — caller still passes the same dict of bind values
     regardless of dialect. ``::`` (PG cast) is preserved.
     """
     if dialect is Dialect.POSTGRES:
         return _NAMED_PLACEHOLDER_RE.sub(r"%(\1)s", sql)
+    if dialect is Dialect.DUCKDB:
+        return _NAMED_PLACEHOLDER_RE.sub(r"$\1", sql)
     # Oracle + SQLite already accept ``:name``.
     return sql
 

@@ -11,6 +11,8 @@ site, fail loud.
 
 from __future__ import annotations
 
+import duckdb
+
 import re
 from pathlib import Path
 
@@ -251,26 +253,27 @@ class TestCaptureFailureDbCounts:
             dialect: Dialect
             demo_database_url: str
 
+        from recon_gen.common.db import make_demo_database_url
+
         return _Cfg(
             db_table_prefix=prefix,
-            dialect=Dialect.SQLITE,
-            demo_database_url=f"sqlite:///{db_path}",
+            dialect=Dialect.DUCKDB,
+            demo_database_url=make_demo_database_url(Dialect.DUCKDB, db_path),
         )
 
     def test_writes_per_table_counts_for_prefixed_tables(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        import sqlite3
 
         from recon_gen.common.browser.helpers import _capture_failure_db_counts
 
         db_path = tmp_path / "smoke.db"
-        # `with sqlite3.connect(...) as c` only commits on exit — it
+        # `with duckdb.connect(...) as c` only commits on exit — it
         # does NOT close the connection (Python stdlib foot-gun).
         # Explicit try/finally so the conn actually closes (otherwise
         # the leak gate fires + each test's leftover Connection
         # accumulates memory across the suite).
-        conn = sqlite3.connect(db_path)
+        conn = duckdb.connect(db_path)
         try:
             cur = conn.cursor()
             cur.execute("CREATE TABLE smoke_transactions (id INTEGER)")
@@ -307,14 +310,13 @@ class TestCaptureFailureDbCounts:
     def test_empty_file_when_no_prefixed_tables(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        import sqlite3
 
         from recon_gen.common.browser.helpers import _capture_failure_db_counts
 
         db_path = tmp_path / "empty.db"
-        # See sibling test: `with sqlite3.connect(...) as c` commits but
+        # See sibling test: `with duckdb.connect(...) as c` commits but
         # doesn't close. Explicit try/finally for the actual close.
-        conn = sqlite3.connect(db_path)
+        conn = duckdb.connect(db_path)
         try:
             conn.execute("CREATE TABLE unrelated_table (id INTEGER)")
             conn.commit()

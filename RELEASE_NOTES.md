@@ -1,5 +1,145 @@
 # Release Notes
 
+## Unreleased — Phase CA: DuckDB swap
+
+DuckDB joins as the new default local-iteration backend alongside the
+existing PG / Oracle production targets. The CA.0 spike measured a
+**54.9× bundled-refresh speedup vs the SQLite baseline at ~1M base-tx
+rows (4.6s vs 252.9s)** and a **59% smaller on-disk footprint**, with
+**byte-identical matview output** across all 20 L1/Investigation
+matviews. Engine-level audit: `docs/audits/ca_0_duckdb_spike.md`.
+
+What landed:
+
+- **`Dialect.DUCKDB`** alongside PG/Oracle/SQLite in `common/sql/dialect.py`;
+  every helper has a DuckDB arm. `duckdb>=1.1` is now a core dependency
+  (not extras — every `recon-gen` invocation imports the enum).
+- **Runner local cell** swapped `sl` → `du` in `expand_full()` and
+  `DEFAULT_DIALECTS`. CI's `e2e-sqlite` job became `e2e-duckdb`.
+  `--dialects=sl` still parses (manual SQLite triage) but no longer
+  appears in the default 13-cell matrix.
+- **Studio + App2** runs end-to-end against DuckDB. `cfg.yaml` carries
+  `dialect: duckdb` + `demo_database_url: duckdb:///<path>`; schema
+  apply / data apply / studio boot are operator commands unchanged. All
+  four dashboards (L1 / L2FT / Investigation / Executives) + the
+  `/etl/` surface + the `/l2_shape/` editor surfaces render.
+- **Async pool** (`_AsyncDuckdbPool`) uses the one-root-`connect` +
+  per-acquire-`cursor()` pattern. DuckDB rejects a second `connect()`
+  to the same file from the same process (Unique file handle conflict);
+  `cursor()` forks a thread-safe sub-connection (verified with 8
+  parallel threads).
+- **Multi-process pytest safety** via `RECON_GEN_DB_READ_ONLY=1`. The
+  runner injects this for db / app2 / browser layers when the cell URL
+  is `duckdb://`; pytest-xdist workers all open read-only against the
+  pre-seeded `.duckdb` file (per DuckDB's [read_only docs](https://duckdb.org/docs/current/clients/python/dbapi#read_only-connections):
+  "Read-only mode is required if multiple Python processes want to
+  access the same database file at the same time"). Production CLI
+  invocations (schema/data apply) run before pytest dispatches under
+  sequential variant-seed steps that don't see the env and continue
+  to open read-write.
+- **Schema sequences** for DuckDB's `entry` column (DuckDB has no
+  `BIGSERIAL`-alias; auto-increment via `CREATE SEQUENCE` +
+  `DEFAULT nextval('<seq>')`).
+- **Paramstyle rewrite**: `:name` → `$name` for DuckDB in
+  `_sql_executor` (DuckDB's Python driver rejects `:name`).
+- **BZ.0 SQLite scratch-table workaround DELETED**. DuckDB's vectorized
+  executor handles the correlated `SUM(...) WHERE posting <= day`
+  subquery natively (8% FASTER than the scratch form at ~1M rows on
+  DuckDB per the CA.0 spike). 88 lines deleted, 18 added.
+- **Semantic-lock files** for DuckDB: `tests/data/_semantic_locks/<instance>.duckdb.json`
+  alongside the existing `.sqlite.json` entries. Violation sets are
+  byte-identical (BZ.4 + CA.0 audit); only `scenario_fingerprint.dialect`
+  differs.
+
+Operator workflow against this HEAD:
+
+```bash
+cat > cfg.yaml <<EOF
+aws_account_id: "111122223333"
+aws_region: "us-east-1"
+dialect: duckdb
+demo_database_url: "duckdb:///./demo.duckdb"
+deployment_name: "my-demo"
+db_table_prefix: "my_demo"
+studio_enabled: true
+EOF
+recon-gen schema apply --execute -c cfg.yaml --l2 tests/l2/spec_example.yaml
+recon-gen data   apply --execute -c cfg.yaml --l2 tests/l2/spec_example.yaml
+recon-gen studio -c cfg.yaml --l2 tests/l2/spec_example.yaml
+# http://localhost:8765
+```
+
+**SQLite still works** as a manual opt-in (`--dialects=sl` for the
+runner, `dialect: sqlite` in cfg). Phase CB (next) restructures the
+test-layer architecture per `docs/audits/cb_test_layers_update.md` —
+includes per-xdist-worker DuckDB isolation (`:memory:` per worker),
+broader test-fixture migration off SQLite, the `Dialect.SQLITE` removal,
+and the aiosqlite/aiosqlitepool extras cleanup.
+
+3246 unit tests + 8 semantic-lock tests + the sp_du_lo app2 cell all
+pass. Local SQLite vs DuckDB wall-clock at the spec_example scale (~12k
+base tx): SQLite db 4.41s + app2 18.47s, DuckDB db 7.15s + app2 15.44s
+— essentially equivalent at small scale; the engine perf gap manifests
+at large scale per the CA.0 spike measurements.
+
+**CA.11 — pyarrow-based seed apply fast path (opt-in via `[prod]`).**
+The seed-text → multi-row-VALUES coalescer (CA.10) cut sasquatch_pr
+apply from ~179s to ~21s on M1 — but the rest of the wall was
+Python-bound: 8.7s in the comment-aware statement splitter and ~10s
+re-rendering parsed VALUES tuples back into multi-row VALUES literal
+SQL for DuckDB to re-parse. CA.11 takes a structural shortcut: a
+single `re.finditer` scan over the seed text extracts INSERTs
+directly (skipping the 8.7s splitter), `_parse_simple_values` walks
+each VALUES body once, and consecutive same-shape rows flush via
+`pa.Table.from_pylist + con.register + INSERT SELECT` — DuckDB's
+zero-copy Arrow ingest path. **Measured 21.8s → 2.3s on M1 sasquatch_pr
+(8.5× speedup), byte-identical DB state vs the CA.10 path** (row
+counts + content hashes match on both base tables; matview violation
+set unchanged).
+
+pyarrow is added to `[prod]` extras (`pyarrow>=14`) — same opt-in
+posture as `oracledb` for Oracle. Operators on the minimal `[dev]`
+install transparently fall back to CA.10's multi-row VALUES path; no
+new hard dep. CA.12 (PG via `adbc_ingest`) and CA.13 (Oracle via
+`Connection.direct_path_load`, added in oracledb 3.4.0) are filed
+to extend the same pyarrow pipe to the other production dialects
+once their integration testing lands.
+
+**CA.13 — Oracle direct_path_load fast path.** Oracle was the dialect
+with the most leverage from the pyarrow work: the current INSERT-ALL
+batched coalescer takes ~10 minutes on a 131k-row sasquatch_pr seed
+(measured 621s against Docker Oracle 23 + oracledb 3.4.2 thin mode);
+the only viable production-scale seed apply was "schedule overnight."
+CA.13 routes Oracle seed apply through `Connection.direct_path_load`,
+added in oracledb 3.4.0 (Oct 2025) — a server-side bypass of the SQL
+parser that writes blocks directly above the High Water Mark. The
+implementation mirrors CA.11's structure: single `re.finditer` scan
+of the seed SQL, group consecutive same-shape rows by `(table, cols)`,
+build a typed pyarrow Table per group (column types discovered via
+`all_tab_columns`, cached by `(conn, schema, table, col-tuple)` —
+the col-tuple is part of the key because the same Oracle table can
+be the target of multiple INSERT shapes in one apply), then flush via
+`conn.direct_path_load(schema_name, table_name, column_names, data)`.
+Non-INSERT residual (DDL, SET commands) flows through the existing
+`_execute_oracle_stmt_with_lock_retry` between batches, preserving
+script ordering. **Measured 621.33s → 6.44s on the 131k-row
+sasquatch_pr Oracle seed — 96.53× speedup**; business-key hashes
+identical to the existing path. (Identity column ENTRY values differ
+by design — Oracle's INSERT-ALL with IDENTITY reuses values across
+batches, a known footgun documented in [[project_oracle_19c_compat]];
+`direct_path_load` handles identity natively.)
+
+`oracledb` floor bumped from `>=2.0` to `>=3.4.0` in `[prod]` to pull
+the `direct_path_load` method into every production install. The
+dispatch in `execute_script` auto-detects via `hasattr(conn,
+'direct_path_load')` + pyarrow availability; installs with older
+oracledb (or without pyarrow) transparently fall back to the existing
+INSERT-ALL coalescer. CA.12 (PG) stays in backlog with the rationale
+documented — PG was never the Python-bound bottleneck Oracle and
+DuckDB were (psycopg's `cur.execute(big_script)` already batches PG
+INSERTs efficiently; measured win was only 1.95×, not worth the
+complexity at current scale).
+
 ## v11.24.2 — Emit-time guard for NumericalMeasureField over non-numeric columns
 
 Backstop for the v11.24.1 fix. The tree's ``Measure.emit()`` now

@@ -117,7 +117,7 @@ def test_etl_triage_landing_card_for_triage_drops_coming_in_hint(
 
 import asyncio
 import os
-import sqlite3
+import duckdb
 import tempfile
 
 from recon_gen.common.db import AsyncConnectionPool, make_connection_pool
@@ -130,9 +130,12 @@ def _seeded_pool_with_unmatched_rail(yaml_path: Path) -> tuple[AsyncConnectionPo
     rail_name doesn't resolve in spec_example.yaml."""
     cache = L2InstanceCache.from_path(yaml_path)
     prefix = yaml_path.stem  # path.stem matches make_studio_routes' default
-    fd, db_path = tempfile.mkstemp(suffix=".sqlite")
+    fd, db_path = tempfile.mkstemp(suffix=".duckdb")
+
     os.close(fd)
-    conn = sqlite3.connect(db_path)
+
+    os.unlink(db_path)
+    conn = duckdb.connect(db_path)
     conn.execute(
         f"CREATE TABLE {prefix}_transactions ("
         "id TEXT PRIMARY KEY, "
@@ -153,7 +156,7 @@ def _seeded_pool_with_unmatched_rail(yaml_path: Path) -> tuple[AsyncConnectionPo
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=db_path)
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=db_path)
     pool = asyncio.run(make_connection_pool(cfg))
     _ = cache  # cache loaded but the render reads via cache parameter
     return pool, db_path
@@ -169,7 +172,7 @@ def test_etl_triage_with_pool_renders_gap_cards(
         cache = L2InstanceCache.from_path(writable_l2_yaml)
         body = asyncio.run(_render_etl_triage_page(
             cache, dev_log=False,
-            db_pool=pool, dialect=Dialect.SQLITE,
+            db_pool=pool, dialect=Dialect.DUCKDB,
             prefix_override=None, cfg=None,
             demo_mode=False, top_nav_html="",
         ))
@@ -196,9 +199,12 @@ def test_etl_triage_empty_state_when_no_gaps(
     affirmation lands instead of cards."""
     cache = L2InstanceCache.from_path(writable_l2_yaml)
     prefix = writable_l2_yaml.stem
-    fd, db_path = tempfile.mkstemp(suffix=".sqlite")
+    fd, db_path = tempfile.mkstemp(suffix=".duckdb")
+
     os.close(fd)
-    conn = sqlite3.connect(db_path)
+
+    os.unlink(db_path)
+    conn = duckdb.connect(db_path)
     conn.execute(
         f"CREATE TABLE {prefix}_transactions ("
         "id TEXT PRIMARY KEY, rail_name TEXT, template_name TEXT, "
@@ -208,12 +214,12 @@ def test_etl_triage_empty_state_when_no_gaps(
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=db_path)
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=db_path)
     pool = asyncio.run(make_connection_pool(cfg))
     try:
         body = asyncio.run(_render_etl_triage_page(
             cache, dev_log=False,
-            db_pool=pool, dialect=Dialect.SQLITE,
+            db_pool=pool, dialect=Dialect.DUCKDB,
             prefix_override=None, cfg=None,
             demo_mode=False, top_nav_html="",
         ))

@@ -55,7 +55,7 @@ def create_v_overlay_sql(
     schema may already exist (Studio's Session Start does)."""
     from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
 
-    d = dialect if isinstance(dialect, Dialect) else Dialect.SQLITE
+    d = dialect if isinstance(dialect, Dialect) else Dialect.DUCKDB
     return emit_schema(
         instance, prefix=v_overlay_prefix(base_prefix), dialect=d,
     )
@@ -68,7 +68,7 @@ def drop_v_overlay_sql(
     """Drop every per-prefix object the v overlay created."""
     from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
 
-    d = dialect if isinstance(dialect, Dialect) else Dialect.SQLITE
+    d = dialect if isinstance(dialect, Dialect) else Dialect.DUCKDB
     return emit_schema_drop_sql(
         instance, prefix=v_overlay_prefix(base_prefix), dialect=d,
     )
@@ -106,7 +106,7 @@ def refresh_v_overlay_matviews_sql(
     """`refresh_matviews_sql` against the v overlay prefix."""
     from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
 
-    d = dialect if isinstance(dialect, Dialect) else Dialect.SQLITE
+    d = dialect if isinstance(dialect, Dialect) else Dialect.DUCKDB
     return refresh_matviews_sql(
         instance, prefix=v_overlay_prefix(base_prefix), dialect=d,
     )

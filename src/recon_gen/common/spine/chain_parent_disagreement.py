@@ -34,7 +34,7 @@ plant.
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from dataclasses import dataclass, field
 from datetime import date
 from typing import ClassVar
@@ -63,7 +63,7 @@ class ChainParentDisagreementInvariant:
     name: ClassVar[str] = "chain_parent_disagreement"
     prefix: str = "spec_example"
 
-    def detect(self, conn: sqlite3.Connection) -> set[Violation]:
+    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
         rows = fetch_all(
             conn,
             f"SELECT transfer_id, child_template_name "
@@ -208,7 +208,7 @@ class ChainParentDisagreementGenerator:
 
     def emit(
         self,
-        conn: sqlite3.Connection,
+        conn: duckdb.DuckDBPyConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:

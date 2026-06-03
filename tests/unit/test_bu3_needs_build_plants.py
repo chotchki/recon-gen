@@ -49,7 +49,7 @@ def _invoke(kind: str, *, instance: object, **kwargs: object) -> str:
     assert entry is not None, f"registry missing {kind!r}"
     sql = entry.plant_function(
         prefix=_PREFIX,
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
         anchor=_ANCHOR,
         instance=instance,
         **kwargs,

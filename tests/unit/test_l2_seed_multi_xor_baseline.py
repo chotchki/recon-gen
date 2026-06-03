@@ -123,7 +123,7 @@ def _emit_sql(inst: L2Instance) -> str:
         prefix="t",
         window_days=10,
         anchor=date(2030, 1, 1),
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
 
 

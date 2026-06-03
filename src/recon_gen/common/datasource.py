@@ -142,14 +142,6 @@ def build_datasource(cfg: Config) -> DataSource:
     if not cfg.demo_database_url:
         raise ValueError("demo_database_url is required to build a datasource")
 
-    if cfg.dialect is Dialect.SQLITE:
-        raise ValueError(
-            "SQLite is not a deployable QuickSight datasource type — "
-            "the SQLite dialect targets the local-iteration loop "
-            "(see docs/integrator/local-loop.md). For QuickSight deploys, "
-            "use 'dialect: postgres' or 'dialect: oracle' against an "
-            "RDS-managed instance."
-        )
 
     if cfg.dialect is Dialect.ORACLE:
         info = _parse_oracle_url(cfg.demo_database_url)
@@ -172,7 +164,10 @@ def build_datasource(cfg: Config) -> DataSource:
                 Host=info.host, Port=info.port, Database=info.database,
             ),
         )
-        ssl = SslProperties(DisableSsl=False)
+        # CB.11.a — cfg.qs_disable_pg_ssl flips this to True when the
+        # QS endpoint is a Docker Postgres without TLS configured.
+        # Default False preserves the RDS-forces-SSL contract.
+        ssl = SslProperties(DisableSsl=cfg.qs_disable_pg_ssl)
 
     ds_id = cfg.prefixed("demo-datasource")
 

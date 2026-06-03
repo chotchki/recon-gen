@@ -27,7 +27,7 @@ multi-valued IN-list expansion, default substitution) is owned by
 from __future__ import annotations
 
 import os
-import sqlite3
+import duckdb
 import tempfile
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
@@ -52,9 +52,10 @@ def sqlite_cfg() -> Iterator["Config"]:
     """Spin up a tiny SQLite-backed cfg with one table. ``query_db_via_cfg``
     opens / closes the connection per call, so the test fixture only needs
     to plant the data + return the cfg."""
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
-    conn = sqlite3.connect(path)
+    os.unlink(path)
+    conn = duckdb.connect(path)
     conn.execute(
         "CREATE TABLE accounts ("
         "  account_id TEXT,"
@@ -72,7 +73,7 @@ def sqlite_cfg() -> Iterator["Config"]:
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=path)
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
     try:
         yield cfg
     finally:

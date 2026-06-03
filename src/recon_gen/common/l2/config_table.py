@@ -66,14 +66,13 @@ loss because there was no data.
 from __future__ import annotations
 
 import json
-import sqlite3
+import duckdb
 from collections.abc import Iterable
 from datetime import datetime
 from typing import Any  # typing-smell: ignore[explicit-any]: kv values are JSON-shaped — int/str/bool/None/dict/list — the union is wider than ergonomic; pinned at the walker boundary
 
 from recon_gen.common.sql.dialect import (
     Dialect,
-    bigint_type,
     text_type,
     varchar_type,
 )
@@ -115,13 +114,20 @@ def emit_config_table_ddl(prefix: str, dialect: Dialect) -> str:
     (CLOB-incompatible on Oracle without function-based indexes).
     """
     name = config_table_name(prefix)
-    bigint = bigint_type(dialect)
+    vc64 = varchar_type(64, dialect)
     vc255 = varchar_type(255, dialect)
     text_t = text_type(dialect)
+    # CB.8: node_id + parent_id widened from BIGINT to VARCHAR so the
+    # v_overlay state sentinels (``__bv_applied__`` / ``__bv_failed__`` /
+    # ``__bv__``) fit alongside walker-emitted integer ids. SQLite's TEXT
+    # affinity used to mask the type mismatch silently; DuckDB's strict
+    # typing rejects string-into-BIGINT, so the schema goes wide enough
+    # to cover both use cases. No code does ORDER BY / arithmetic on
+    # these columns — only equality joins on (parent_id, key).
     return (
         f"CREATE TABLE {name} (\n"
-        f"    node_id   {bigint}   NOT NULL PRIMARY KEY,\n"
-        f"    parent_id {bigint},\n"
+        f"    node_id   {vc64}   NOT NULL PRIMARY KEY,\n"
+        f"    parent_id {vc64},\n"
         f"    key       {vc255},\n"
         f"    value     {text_t}\n"
         f");\n"
@@ -294,14 +300,18 @@ def emit_config_populate_sql(
         f"DELETE FROM {name};",
     ]
     for node_id, parent_id, key, value in rows:
-        parent_sql = "NULL" if parent_id is None else str(parent_id)
+        # CB.8: node_id + parent_id are VARCHAR; quote the integer
+        # walker-output values as text so they coexist with the
+        # v_overlay's string sentinels (``__bv_applied__`` / ``__bv__``).
+        node_sql = _sql_quote(str(node_id))
+        parent_sql = "NULL" if parent_id is None else _sql_quote(str(parent_id))
         key_sql = "NULL" if key is None else _sql_quote(key)
         value_sql = (
             "NULL" if value is None else _sql_quote_long(value, dialect)
         )
         lines.append(
             f"INSERT INTO {name} (node_id, parent_id, key, value) "
-            f"VALUES ({node_id}, {parent_sql}, {key_sql}, {value_sql});"
+            f"VALUES ({node_sql}, {parent_sql}, {key_sql}, {value_sql});"
         )
     return "\n".join(lines) + "\n"
 
@@ -350,7 +360,7 @@ def _sql_quote_long(s: str, dialect: Dialect) -> str:
 
 
 def replace_config(
-    conn: sqlite3.Connection,
+    conn: duckdb.DuckDBPyConnection,
     *,
     prefix: str,
     cfg_json: str,
@@ -364,7 +374,7 @@ def replace_config(
     cfg + L2 to JSON strings (typically via ``dataclasses.asdict`` +
     ``json.dumps``, or by reading the source YAML and re-serializing).
 
-    Cursor flavor: the type annotation is ``sqlite3.Connection`` for
+    Cursor flavor: the type annotation is ``duckdb.DuckDBPyConnection`` for
     SQLite-test convenience, but the function is duck-typed against the
     PEP 249 conn / cursor interface — psycopg2 + oracledb both work.
     """
@@ -386,7 +396,7 @@ def replace_config(
 
 
 def set_as_of(
-    conn: sqlite3.Connection,
+    conn: duckdb.DuckDBPyConnection,
     *,
     prefix: str,
     as_of: datetime | None = None,
@@ -402,8 +412,11 @@ def set_as_of(
     """
     name = config_table_name(prefix)
     if as_of is None:
+        # CB.8 — DuckDB doesn't recognize SQLite's ``'now'`` magic
+        # string in strftime; use the standard CURRENT_TIMESTAMP +
+        # cast-and-format path. PG/Oracle accept this shape too.
         conn.execute(
-            f"UPDATE {name} SET value = strftime('%Y-%m-%d %H:%M:%S', 'now') "
+            f"UPDATE {name} SET value = strftime(CURRENT_TIMESTAMP, '%Y-%m-%d %H:%M:%S') "
             f"WHERE parent_id IS NULL AND key = 'as_of'",
         )
     else:
@@ -415,7 +428,7 @@ def set_as_of(
     conn.commit()
 
 
-def get_as_of(conn: sqlite3.Connection, *, prefix: str) -> datetime:
+def get_as_of(conn: duckdb.DuckDBPyConnection, *, prefix: str) -> datetime:
     """Read the current ``as_of`` value back as a Python datetime.
 
     Reads from the single ``as_of`` kv row at ``parent_id IS NULL``.
@@ -494,6 +507,10 @@ def kv_as_of_as_timestamp_sql(prefix: str, dialect: Dialect) -> str:
 
     - **PG**: ``CAST(... AS TIMESTAMP)`` — PG accepts the ISO-format
       text and yields a proper TIMESTAMP.
+    - **DuckDB**: ``CAST(... AS TIMESTAMP)`` — same shape as PG.
+      DuckDB is strict about implicit casts (``VARCHAR - TIMESTAMP``
+      raises BinderException unless the VARCHAR is explicitly cast),
+      so the cast is load-bearing here even though it looks redundant.
     - **Oracle**: ``TO_TIMESTAMP(DBMS_LOB.SUBSTR(value, 100, 1),
       'YYYY-MM-DD HH24:MI:SS')`` — Oracle won't CAST CLOB to TIMESTAMP
       (ORA-00932); DBMS_LOB.SUBSTR converts to VARCHAR2 first, then
@@ -505,7 +522,7 @@ def kv_as_of_as_timestamp_sql(prefix: str, dialect: Dialect) -> str:
       unchanged).
     """
     sub = kv_as_of_subquery(prefix)
-    if dialect is Dialect.POSTGRES:
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
         return f"CAST({sub} AS TIMESTAMP)"
     if dialect is Dialect.ORACLE:
         return (

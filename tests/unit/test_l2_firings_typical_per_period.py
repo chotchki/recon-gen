@@ -347,7 +347,7 @@ def test_declared_range_bounds_emitted_count() -> None:
     )
     sql = emit_baseline_seed(
         inst, prefix="t", window_days=20, anchor=date(2030, 1, 1),
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     n = _count_rail_firings(sql, "countrail")
     # window_days=20 → ~14 business days. total = 5 × 14 = 70 target;

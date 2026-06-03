@@ -250,7 +250,7 @@ def test_template_parent_multi_xor_plant_emits_with_template_name() -> None:
 
     sql = emit_full_seed(
         inst, report.scenario, prefix="t",
-        anchor=date(2030, 1, 1), dialect=Dialect.SQLITE,
+        anchor=date(2030, 1, 1), dialect=Dialect.DUCKDB,
     )
     # The mxor plant parent rows use transfer_id prefix `tr-mxor-*`.
     # Post-AG.3 they carry template_name='ParentTmpl' (synthesized from
@@ -306,7 +306,7 @@ def test_template_parent_multi_xor_plant_child_rail_name_is_real_rail() -> None:
     report = default_scenario_for(inst)
     sql = emit_full_seed(
         inst, report.scenario, prefix="t",
-        anchor=date(2030, 1, 1), dialect=Dialect.SQLITE,
+        anchor=date(2030, 1, 1), dialect=Dialect.DUCKDB,
     )
     # Overlap-plant CHILD rows have tx ids tx-mxor-overlap-NNNN-a / -b
     # (the parent row is ...-p). A correct child row references only the

@@ -6,7 +6,7 @@ Invoked via the ``./run_tests.sh`` bash shim at repo root; the shim
 
 Verbs:
     up_to <layer>     Run the chain up to and including <layer>.
-                      Layers: unit | db | app2 | deploy | api | browser
+                      Layers: unit | db | app2 | deploy | qs_api | qs_browser
                       (pyright folds into unit via the conftest sessionstart
                       gate). ``unit`` is variant-independent — it runs ONCE
                       as a prelude before the matrix fans out (Y.2.gate.n),
@@ -55,12 +55,15 @@ from recon_gen.common.env_keys import (
     RECON_E2E_PAGE_TIMEOUT,
     RECON_E2E_USER_ARN,
     RECON_GEN_CONFIG,
+    RECON_GEN_DB_READ_ONLY,
     RECON_GEN_DB_TABLE_PREFIX,
     RECON_GEN_DEMO_DATABASE_URL,
     RECON_GEN_DEPLOYMENT_NAME,
+    RECON_GEN_QS_CONFIG,
     RECON_GEN_E2E,
     RECON_GEN_FUZZ_SEED,
     RECON_GEN_LAYER,
+    RECON_GEN_ORACLE_IMAGE,
     RECON_GEN_RUN_DIR,
     RECON_GEN_RUNNER_CI,
     RECON_GEN_RUNNER_YES,
@@ -87,9 +90,17 @@ LAYERS: Final[tuple[str, ...]] = (
     "db",
     "app2",
     "deploy",
-    "api",
-    "browser",
+    "qs_api",
+    "qs_browser",
 )
+# CB.11.a.3 (2026-06-02) — renamed `api` → `qs_api`, `browser` →
+# `qs_browser` to match the `Tier.QS_API` / `Tier.QS_BROWSER` marks
+# defined in `tests/_marks.py`. The pytest mark selectors below still
+# use `-m api` / `-m browser` against the old-style `@pytest.mark.api`
+# / `@pytest.mark.browser` decorators — CB.6 will migrate selection to
+# `--tier=qs_api` / `--tier=qs_browser` once the test-file migration
+# (tests/e2e/qs_api/ + tests/e2e/qs_browser/ subdirs) finishes covering
+# the full set.
 # Y.2.gate.b.3.impl.layer (2026-05-07) — `app2` inserted as layer 3.7
 # (between db + deploy) per audit §7.10. App2 is the local-Docker
 # fast-feedback gate: same dataset SQL as QS, no AWS contact, runs
@@ -150,12 +161,8 @@ _RUN_ID_PATTERN: Final = re.compile(r"^\d{8}T\d{6}Z-\w+(?:-dirty)?$")
 #   "aws"             — AWS creds present + not expired (sts:GetCallerIdentity).
 #   "docker"          — Docker daemon reachable (`docker ps`).
 #   "qs_arn"          — RECON_E2E_USER_ARN set (browser e2e signs embed URLs as this user).
-#   "aws_rds_running" — Y.2.gate.l.3 — cfg-declared RDS cluster + instance
-#                       are 'available'. Refuses dispatch BEFORE container
-#                       spin-up so a stopped cluster doesn't burn ~5min of
-#                       deploy chatter to surface "connection refused".
-#                       Skipped (passes through) when cfg fields are unset
-#                       — operator hasn't opted in to cfg-driven lifecycle.
+# CB.11.a.2 (2026-06-01) — `aws_rds_running` probe deleted. RDS Aurora is
+# gone post-CB.12; Docker-on-self-hosted-runner is the only DB substrate.
 #
 # DB connectivity is probed via cfg-loaded URLs and lands when Y.2.gate.h.2
 # (cfg-driven DB strings) wires up. For now, layers that need DB rely on the
@@ -168,9 +175,15 @@ _LAYER_DEPS: Final[dict[str, frozenset[str]]] = {
     # only by design (audit §7.10 LOCKED — App2 = local-feedback gate;
     # QS = AWS-deploy parity cell at 6/7).
     "app2": frozenset({"docker"}),
-    "deploy": frozenset({"aws", "docker", "aws_rds_running"}),
-    "api": frozenset({"aws", "docker", "aws_rds_running"}),
-    "browser": frozenset({"aws", "docker", "qs_arn", "aws_rds_running"}),
+    # CB.11.a.1+.2 (2026-06-01) — dropped `aws_rds_running` from
+    # deploy/api/browser. Post-CB.12 the DB substrate is Docker (PG +
+    # Oracle on the self-hosted runner / dev box), not RDS Aurora —
+    # there's no remote cluster lifecycle to gate dispatch on. Docker
+    # readiness is already covered by the `docker` dep; per-dialect
+    # container-boot lands in CB.11.b.
+    "deploy": frozenset({"aws", "docker"}),
+    "qs_api": frozenset({"aws", "docker"}),
+    "qs_browser": frozenset({"aws", "docker", "qs_arn"}),
 }
 
 
@@ -339,89 +352,10 @@ def _probe_qs_e2e_user_arn() -> ProbeFailure | None:
     )
 
 
-def _probe_aws_rds_running() -> ProbeFailure | None:
-    """Y.2.gate.l.3 — verify cfg-declared RDS resources are 'available'
-    before dispatching deploy/api/browser layers.
-
-    Without this probe a stopped Aurora cluster surfaces as a
-    psycopg ``connection refused`` deep inside the deploy step's
-    first SQL call — operator wastes ~5 min on container spin-up +
-    boto3 chatter before seeing the actionable error. With it, the
-    chain refuses at dispatch time with "run `./run_tests.sh up aws`
-    first".
-
-    Skipped (passes through) when both ``cfg.aws_pg_cluster_id`` and
-    ``cfg.aws_oracle_instance_id`` are unset — that's the operator
-    opting out of cfg-driven lifecycle (e.g., they manage clusters
-    via console / Terraform / etc., or they're using legacy
-    pre-gate.l shape). Same opt-in shape as ``cmd_up_aws`` /
-    ``cmd_status``.
-
-    Loads cfg via the lifecycle-helper which also injects
-    ``AWS_PROFILE`` from ``cfg.auth.aws_profile`` so the boto3 RDS
-    calls hit the long-lived IAM keys (matches gate.h.1 pattern).
-    """
-    cfg = _load_runner_cfg_for_lifecycle()
-    if cfg is None:
-        # No cfg discoverable — fall through; the `aws` probe will
-        # surface the auth-or-cfg failure on its own. Layered probes
-        # don't double-fail.
-        return None
-    if cfg.aws_pg_cluster_id is None and cfg.aws_oracle_instance_id is None:
-        return None
-
-    from recon_gen.common.aws_rds import RdsResource, get_status  # noqa: PLC0415 — lazy
-    failures: list[str] = []
-
-    if cfg.aws_pg_cluster_id is not None:
-        resource = RdsResource(
-            kind="cluster",
-            identifier=cfg.aws_pg_cluster_id,
-            aws_region=cfg.aws_region,
-        )
-        try:
-            status = get_status(resource)
-            if status != "available":
-                failures.append(
-                    f"PG cluster {cfg.aws_pg_cluster_id!r}: {status} "
-                    f"(not 'available')"
-                )
-        except Exception as exc:  # noqa: BLE001 — surface AWS errors to operator
-            failures.append(
-                f"PG cluster {cfg.aws_pg_cluster_id!r}: ERROR — {exc}"
-            )
-
-    if cfg.aws_oracle_instance_id is not None:
-        resource = RdsResource(
-            kind="instance",
-            identifier=cfg.aws_oracle_instance_id,
-            aws_region=cfg.aws_region,
-        )
-        try:
-            status = get_status(resource)
-            if status != "available":
-                failures.append(
-                    f"Oracle instance {cfg.aws_oracle_instance_id!r}: "
-                    f"{status} (not 'available')"
-                )
-        except Exception as exc:  # noqa: BLE001
-            failures.append(
-                f"Oracle instance {cfg.aws_oracle_instance_id!r}: "
-                f"ERROR — {exc}"
-            )
-
-    if not failures:
-        return None
-
-    return ProbeFailure(
-        kind="aws_rds_not_running",
-        message=(
-            "Cfg-declared RDS resources are not all 'available':\n  "
-            + "\n  ".join(failures)
-            + "\nRun './run_tests.sh up aws' first (or bring the "
-            "resources up via console) before re-invoking."
-        ),
-    )
+# CB.11.a.2 (2026-06-01) — `_probe_aws_rds_running` deleted along with
+# the `aws_rds` module + RDS lifecycle commands. RDS Aurora is gone
+# (CB.12 final); Docker on the self-hosted runner is the only DB
+# substrate. Per-dialect Docker readiness probe lands in CB.11.b.
 
 
 _ProbeFunc = Callable[[], "ProbeFailure | None"]
@@ -429,7 +363,6 @@ _PROBE_FUNCTIONS: Final[dict[str, _ProbeFunc]] = {
     "aws": _probe_aws,
     "docker": _probe_docker,
     "qs_arn": _probe_qs_e2e_user_arn,
-    "aws_rds_running": _probe_aws_rds_running,
 }
 
 
@@ -565,6 +498,24 @@ def _layer_command(
         RECON_GEN_RUN_DIR.name: str(run_dir),
         RECON_GEN_LAYER.name: layer,
     }
+    # CA.8 — DuckDB enforces single-writer-per-file across processes;
+    # pytest-xdist workers in the db / app2 / browser tier all need
+    # shared read access without locking each other out. Per the
+    # DuckDB docs (https://duckdb.org/docs/current/clients/python/
+    # dbapi#read_only-connections): "Read-only mode is required if
+    # multiple Python processes want to access the same database file
+    # at the same time." Setting this env tells the pytest workers'
+    # connect_demo_db / _AsyncDuckdbPool to open with read_only=True.
+    # Production CLI invocations (schema/data/seed apply) run before
+    # pytest dispatch under sequential variant-seed steps that don't
+    # see this env; they continue to open read-write. The audit verify
+    # test subprocess inherits the env, which is correct — audit only
+    # SELECTs from the seeded DB to render the PDF.
+    if layer in ("db", "app2", "qs_browser"):
+        ve = variant_env or {}
+        url = ve.get(RECON_GEN_DEMO_DATABASE_URL.name, "")
+        if url.startswith("duckdb://"):
+            env_addl[RECON_GEN_DB_READ_ONLY.name] = "1"
     if opts.trace_all:
         env_addl[RECON_GEN_TRACE_ALL.name] = "1"
     if opts.fuzz_seed_value is not None:
@@ -575,7 +526,7 @@ def _layer_command(
     # JS surface (a few seconds). Post-BE.7.D the pyright scope is the
     # whole `src/recon_gen` + `tests/` (~470 files, ~15-30s) and the
     # matrix dispatches 5 layers × N cells = repeats those static gates
-    # dozens of times across a single `up_to=browser` sweep.
+    # dozens of times across a single `up_to=qs_browser` sweep.
     #
     # The unit prelude (`_run_unit_prelude`, runs ONCE) is the
     # authoritative static-gate run. Per-cell layers (db / app2 / deploy /
@@ -603,7 +554,7 @@ def _layer_command(
     # `--cov-report=` (empty) suppresses the per-layer terminal report — the
     # CI `coverage` aggregator (W.8b) globs every `.coverage.*` artifact and
     # `coverage combine`s them, so a per-layer report is just stdout.log clutter.
-    _is_pytest_layer = layer in ("unit", "db", "app2", "api", "browser")
+    _is_pytest_layer = layer in ("unit", "db", "app2", "qs_api", "qs_browser")
     _cov_args: list[str] = (
         ["--cov=recon_gen", "--cov-report="]
         if opts.coverage and _is_pytest_layer
@@ -631,31 +582,24 @@ def _layer_command(
         # for serial debug). Same pattern as api/browser layers.
         cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
+        # CB.7-followup (2026-06-02) — `--dist=loadgroup` was the cause
+        # of the qs_browser cascade (workers crash at session-start,
+        # cascade to max-worker-restart). Post-CB.7-unwind every test
+        # self-isolates via per-(file, worker) hash, so xdist_group
+        # pinning is no longer load-bearing. Scattered module-scope
+        # seed fixtures reseed their own prefix per worker — no DB
+        # contention, just N× wall on producer modules (acceptable).
         return (cmd, env_addl)
     if layer == "db":
-        # 3a — DB-touching pytest (behind RECON_GEN_E2E=1). Three test files:
-        #   - test_dataset_sql_smoke.py: parametrized over 37 datasets;
-        #     substitutes QS `<<$param>>` placeholders with declared
-        #     defaults, wraps in `WHERE 1=0`, runs against live DB.
-        #   - test_demo_apply_row_counts.py: asserts ≥1 row in every
-        #     named matview the seed populates (k.1.absorb — Phase 2 of
-        #     Y.2.gate.k.1+k.6 spike).
-        #   - test_audit_pdf_render_verify.py: invokes
-        #     `recon-gen audit apply --execute` + `audit verify`
-        #     against the variant's seeded DB (k.1.absorb-audit —
-        #     Phase 2.5). Reads RECON_GEN_TEST_L2_INSTANCE so the audit
-        #     CLI picks the variant's synthesized yaml and finds the
-        #     `<spec.name>_*` prefixed tables the seed populated.
-        # All three flow through the same RECON_GEN_TEST_L2_INSTANCE-aware
-        # test resolution, so the variant's synthesized prefix is the
-        # one source of truth for which tables to query / render from.
-        # Real DB connection comes from cfg; until cfg loading lands the test
-        # itself fails fast if cfg is missing. That's the expected shape.
+        # 3a — DB-touching pytest (behind RECON_GEN_E2E=1). CB.6: discover
+        # via the per-tier directory ``tests/e2e/db/`` — the conftest there
+        # auto-applies ``@tier(Tier.DB)``, so adding a new DB-tier test is
+        # ``touch tests/e2e/db/test_foo.py`` instead of editing this
+        # hardcoded list. The composition-rule conftest at
+        # ``tests/conftest.py`` validates tier marks at collection time.
         cmd = [
             str(_VENV_BIN / "pytest"),
-            "tests/e2e/test_dataset_sql_smoke.py",
-            "tests/e2e/test_demo_apply_row_counts.py",
-            "tests/e2e/test_audit_pdf_render_verify.py",
+            "tests/e2e/db/",
             "-q",
         ]
         if opts.only:
@@ -663,49 +607,18 @@ def _layer_command(
         # j.6 — see unit layer comment.
         cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
+        # CB.7-followup (2026-06-02) — loadgroup dropped; see unit-layer note.
         return (cmd, {**env_addl, RECON_GEN_E2E.name: "1"})
     if layer == "app2":
         # b.3.impl.layer — App2 e2e (HTMX dialect, Playwright WebKit
-        # against the App2 Starlette server). Stub-fetcher renderer tests:
-        # `test_html2_executives.py`, `test_html2_money_trail.py`, and
-        # `test_html2_l2ft.py` (Y.2.app2.cde.l2ft-wiring.c — proves the
-        # auto-derived MULTI_SELECT pushdown dropdowns render + the
-        # repeated-key `?param_<name>=A&param_<name>=B` refetch wire).
-        # `test_html2_executives_live.py` uses `make_tree_db_fetcher(
-        # tree_app, cfg)` against the variant DB — `connect_demo_db(cfg)`
-        # reads `RECON_GEN_DEMO_DATABASE_URL` env override (config.py:364),
-        # so the variant URL flows through naturally. Behind `RECON_GEN_E2E=1`
-        # like every other tests/e2e/ file. NO AWS contact (audit §7.10 LOCKED).
-        #
-        # X.2.u.6.followon — `test_dashboard_driver.py` joins the list: its 8
-        # `App2Driver.smoke()` protocol-parity tests (`test_showcase_*` /
-        # `test_app2_*`) need only Playwright + the bundled smoke app (no DB,
-        # no AWS), so this is their home.
-        #
-        # Z.B.14 (2026-05-15) — `-m "not browser"` deselects the 3
-        # `@pytest.mark.browser` tests in `test_dashboard_driver.py`
-        # (`test_qs_l1_*`). Earlier reasoning that they "skip cleanly here
-        # (no `RECON_E2E_USER_ARN`)" is no longer true: Y.2.gate.h.1 made the
-        # runner auto-derive `RECON_E2E_USER_ARN` from `cfg.auth.aws_profile`,
-        # so the QS-bound tests now actually try to run pre-deploy and probe
-        # whatever dashboard happens to be left in QS from a prior run
-        # (cross-cell coupling). The Z.B.12 verification matrix surfaced
-        # this on `sq_or_aw`: 3 timeouts on `[role="tab"]` against a stale
-        # spec_example dashboard. The browser layer already picks these up
-        # via `-m browser` against `tests/e2e/`, so no parallel addition
-        # needed there. The other html2 files in this list carry no marks
-        # (verified) so `-m "not browser"` keeps them in.
+        # against the App2 Starlette server). CB.6: discover via the
+        # per-tier directory ``tests/e2e/app2/`` — the conftest there
+        # auto-applies ``@tier(Tier.APP2)``, replacing the prior hardcoded
+        # ``test_html2_*.py`` + ``test_dashboard_driver.py`` list. NO AWS
+        # contact (audit §7.10 LOCKED).
         cmd = [
             str(_VENV_BIN / "pytest"),
-            "tests/e2e/test_html2_executives.py",
-            "tests/e2e/test_html2_executives_live.py",
-            "tests/e2e/test_html2_money_trail.py",
-            "tests/e2e/test_html2_l2ft.py",
-            # X.2.h.5 — Table sort + pagination round-trip (smoke app,
-            # Playwright-only, no DB / no AWS).
-            "tests/e2e/test_html2_table_pagination.py",
-            "tests/e2e/test_dashboard_driver.py",
-            "-m", "not browser",
+            "tests/e2e/app2/",
             "-q",
         ]
         if opts.only:
@@ -713,13 +626,14 @@ def _layer_command(
         # j.6 — see unit layer comment.
         cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
+        # CB.7-followup (2026-06-02) — loadgroup dropped; see unit-layer note.
         return (cmd, {**env_addl, RECON_GEN_E2E.name: "1"})
     if layer == "deploy":
         # Y.2.gate.c.5.deploy — `recon-gen json apply --execute` against
         # the cfg + L2 the runner discovered. Two cfg-path sources, in order:
         # (1) `variant_env[RECON_GEN_CONFIG]` — `_run_one_variant` only injects
         #     this for non-default variants (local-pg / local-oracle /
-        #     local-sqlite, where the per-variant cfg matches the variant's
+        #     local-duckdb, where the per-variant cfg matches the variant's
         #     dialect-flavored DB). For the default variant `_run_one_variant`
         #     doesn't inject it because the variant's cfg-discovery is
         #     subprocess-side via `tests/e2e/conftest.py` etc.
@@ -730,7 +644,11 @@ def _layer_command(
         # genuinely can't deploy and fall through to the dispatch-skip path
         # with an actionable error.
         ve = variant_env or {}
-        cfg_str = ve.get(RECON_GEN_CONFIG.name)
+        # CB.11.b — prefer the QS-side cfg (hotchkiss.io endpoint +
+        # qs_disable_pg_ssl) over the local cfg for the deploy layer.
+        # The QS data source created here must be reachable from QS
+        # in us-east-1; the local cfg's 127.0.0.1 is not.
+        cfg_str = ve.get(RECON_GEN_QS_CONFIG.name) or ve.get(RECON_GEN_CONFIG.name)
         if cfg_str is None:
             fallback_cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
             cfg_str = str(fallback_cfg_path) if fallback_cfg_path is not None else None
@@ -754,11 +672,14 @@ def _layer_command(
         # CLI doesn't have a tracked-changes refusal of its own, so no
         # pass-through is needed.
         return (cmd, env_addl)
-    if layer == "api":
+    if layer == "qs_api":
         # Y.2.gate.c.5.api — boto3-only e2e tests verifying deployed QS
-        # resources via `describe_*` calls. Pytest mark `api` (set by
-        # pytestmark in every e2e file) selects the right files; no
-        # hardcoded test-file list to drift. Behind `RECON_GEN_E2E=1`.
+        # resources via `describe_*` calls. CB.6: discover via the
+        # per-tier directory ``tests/e2e/qs_api/`` (which auto-applies
+        # ``@tier(Tier.QS_API)``) PLUS root-e2e files carrying the
+        # legacy ``pytest.mark.api`` mark (parametrized [qs, app2]
+        # tests that live at the root and partition by mark).
+        # Behind `RECON_GEN_E2E=1`.
         #
         # Default `-n 4` (capped) — pre-cap (2026-05-17), this layer
         # ran ``-n auto`` (= cpu_count, ~10-12 workers on a beefy Mac)
@@ -772,14 +693,17 @@ def _layer_command(
         # can still override via ``--parallel=N`` for serial debug or
         # explicit bump.
         cmd = [
-            str(_VENV_BIN / "pytest"), "tests/e2e/", "-m", "api", "-q",
+            str(_VENV_BIN / "pytest"),
+            "tests/e2e/qs_api/",
+            "-q",
         ]
         if opts.only:
             cmd += ["-k", opts.only]
         cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "4"]
+        # CB.7-followup (2026-06-02) — loadgroup dropped; see unit-layer note.
         return (cmd, {**env_addl, RECON_GEN_E2E.name: "1"})
-    if layer == "browser":
+    if layer == "qs_browser":
         # Y.2.gate.c.5.browser — Playwright WebKit e2e against deployed QS
         # embed URLs. Pytest mark `browser`. Default `-n 4` per existing
         # `./run_e2e.sh` pattern (browser tier is heavy enough that 8+
@@ -869,6 +793,7 @@ def _layer_command(
             # recovery time per affected test, well within the chain's
             # tolerance.
             "--reruns", "2", "--reruns-delay", "60",
+            # CB.7-followup (2026-06-02) — loadgroup dropped; see unit-layer note.
         ]
         agree_cmd = [
             str(_VENV_BIN / "pytest"), agree_file, "-q",
@@ -1312,7 +1237,7 @@ def chain_through(target: str) -> list[str]:
     """Y.2.gate.c.5 — return the slice of LAYERS from start through ``target``.
 
     Chain semantics (b.9 LOCKED): cross-layer is sequential. ``up_to=db`` means
-    pyright → unit → db; ``up_to=browser`` means the full chain.
+    pyright → unit → db; ``up_to=qs_browser`` means the full chain.
     """
     idx = LAYERS.index(target)
     return list(LAYERS[: idx + 1])
@@ -1432,7 +1357,7 @@ def is_layer_cached_green(layer: str, *, variant: str = "default") -> bool:
 # through (RECON_GEN_DEMO_DATABASE_URL etc.). Unit doesn't need it.
 # `app2` (b.3.impl.layer) reads the variant DB via the App2 fetcher
 # (`make_tree_db_fetcher`), so it lives here.
-DB_TOUCHING_LAYERS: Final = ("db", "app2", "deploy", "api", "browser")
+DB_TOUCHING_LAYERS: Final = ("db", "app2", "deploy", "qs_api", "qs_browser")
 
 # m.4.f — layers that need an AWS-reachable datasource. Lo-target
 # cells seed a localhost container that QuickSight in AWS can't reach;
@@ -1440,7 +1365,7 @@ DB_TOUCHING_LAYERS: Final = ("db", "app2", "deploy", "api", "browser")
 # is a guaranteed dead pointer (deploy succeeds, but every dashboard
 # render times out because QS can't query localhost). Cap lo cells at
 # `app2` (the local-Docker terminal, locked by audit §7.10).
-AWS_TOUCHING_LAYERS: Final = ("deploy", "api", "browser")
+AWS_TOUCHING_LAYERS: Final = ("deploy", "qs_api", "qs_browser")
 
 # Y.2.gate.j.5 — Oracle container reuse. **Per-cell** name (not single
 # shared) so two Oracle cells (e.g., sp_or_lo + sq_or_lo) running in
@@ -1456,7 +1381,21 @@ ORACLE_REUSE_CONTAINER_PREFIX: Final = "quicksight-test-oracle-"
 # behavior when `oracle_password` is explicitly set. Without pinning,
 # testcontainers randomizes per invocation (`hex(randbits(24))`) and
 # the adopt path can't predict the URL on subsequent runs.
-ORACLE_REUSE_PASSWORD: Final = "qs-gen-test-pwd-2026"  # typing-smell: ignore[qs-gen-prefix]: local Docker fixture password — not an AWS resource ID, not multi-tenant; the prefix is incidental string content, not a Config-prefixed resource name
+ORACLE_REUSE_PASSWORD: Final = "qsgentestpwd2026"  # typing-smell: ignore[qs-gen-prefix]: local Docker fixture password — not an AWS resource ID, not multi-tenant; the prefix is incidental string content, not a Config-prefixed resource name. CB.14 — must be alphanumeric: Oracle 19c's dbca-silent install rejects hyphens/special chars during the response-file pass (container exits at "Creating and starting Oracle instance" with "...ssword. If required refer Oracle documentation"). Stripped hyphens to keep the 8+chars + letter + digit shape Oracle 19c requires.
+
+# CB.11.b — fixed host port for the local PG container. Matches the
+# operator's hotchkiss.io:5433 forward target, so QS data sources
+# pointing at hotchkiss.io:5433 land here. Single PG cell at a time —
+# parallel PG cells collide on this port until CB.11.c adds port-pool
+# support (or sequentializes qs-touching layers per-dialect).
+_LOCAL_PG_HOST_PORT: Final = 5433
+_LOCAL_ORACLE_HOST_PORT: Final = 1522
+
+# CB.11.b — DDNS host the operator's port-forwards terminate on. QS in
+# us-east-1 reaches this Docker container via
+# `hotchkiss.io:<_LOCAL_*_HOST_PORT>` → home firewall → dev machine LAN.
+# Memory: [[project_cb10_qs_to_docker_pg_constraints]].
+_QS_FORWARD_HOST: Final = "hotchkiss.io"
 
 
 def _oracle_container_name_for(spec: VariantSpec) -> str:
@@ -1469,19 +1408,27 @@ def _oracle_container_name_for(spec: VariantSpec) -> str:
 def cell_chain(spec: VariantSpec, requested_chain: list[str]) -> list[str]:
     """m.4.f — filter the requested chain to layers this cell can run.
 
-    - ``target=aw`` cells run every layer the operator asked for;
-      passes ``requested_chain`` through unchanged.
-    - ``target=lo`` cells drop ``deploy`` / ``api`` / ``browser`` —
-      QuickSight can't reach the localhost container that backs the
-      cell's seeded data, so those layers would deploy a dead-pointer
-      dashboard. The natural lo terminal is ``app2`` (b.3.impl.layer
-      LOCKED that as the local-Docker fast-feedback layer).
+    Post-CB.11.b: ``lo`` cells can now drive the QS-touching layers
+    too. The runner generates a sibling QS-side cfg per cell whose
+    ``demo_database_url`` points at ``hotchkiss.io:<forwarded-port>``;
+    QuickSight in us-east-1 reaches the operator's dev-machine Docker
+    via the hotchkiss.io DDNS forward, so the lo container backs both
+    the local layers (db/app2 against 127.0.0.1) AND the deployed QS
+    data source (against hotchkiss.io). The cell_chain no longer drops
+    layers for lo cells; ``up_to=<layer>`` is the only cap.
 
-    The operator's ``up_to=<layer>`` is the *upper* cap; this function
-    further trims based on what the cell can physically support. Both
-    caps compose: ``up_to=db`` for any cell already excludes app2+.
+    DuckDB cells stay local-only — there's no remote-reachable DuckDB
+    shape, and QS can't read a file:// URL from us-east-1.
+
+    ``aw`` cells (the legacy Aurora-pointed shape, deleted in CB.12)
+    pass through unchanged for operators with their own external DB
+    pinned in cfg.
     """
     if spec.target == "aw":
+        return requested_chain
+    # lo cells with a QS-reachable dialect (pg/or) get the full chain;
+    # du lo cells still need to drop AWS-touching layers.
+    if spec.dialect in ("pg", "or"):
         return requested_chain
     return [layer for layer in requested_chain if layer not in AWS_TOUCHING_LAYERS]
 
@@ -1491,7 +1438,7 @@ def cell_chain(spec: VariantSpec, requested_chain: list[str]) -> list[str]:
 _LEGACY_VARIANT_HINTS: Final[dict[str, str]] = {
     "local-pg": "--dialects=pg --targets=lo",
     "local-oracle": "--dialects=or --targets=lo",
-    "local-sqlite": "--dialects=sl --targets=lo",
+    "local-duckdb": "--dialects=du --targets=lo",
     "default": "(no flags = full matrix; or --dialects=pg,or --targets=aw for the AWS subset)",
 }
 
@@ -1514,12 +1461,13 @@ def _check_legacy_variant_names(arg: str) -> None:
         )
 
 
-class _SqliteHandle:
-    """Y.2.gate.b.2.impl.sqlite — teardown handle for the local-sqlite
-    variant. Mirrors the duck-typed ``.stop()`` shape that
-    ``teardown_variant`` calls on testcontainer handles, but unlinks
-    the per-invocation SQLite DB file + temp cfg instead of stopping
-    a Docker container.
+class _DuckdbHandle:
+    """CA.3 — teardown handle for the local-duckdb variant.
+    ``.stop()`` unlinks the per-invocation .duckdb file + temp cfg via
+    the duck-typed contract ``teardown_variant`` invokes on
+    testcontainer handles. CB.7-followup (2026-06-02): the
+    `_SqliteHandle` sibling that originally paired with this was
+    deleted in the CB.7-followup cleanup after CB.8 dropped Dialect.SQLITE.
     """
 
     def __init__(self, db_path: Path, cfg_path: Path) -> None:
@@ -1527,63 +1475,74 @@ class _SqliteHandle:
         self.cfg_path = cfg_path
 
     def stop(self) -> None:
-        """Best-effort cleanup of the per-invocation files. Sidecar
-        contract preserved — never raises."""
+        """Best-effort cleanup. Sidecar contract preserved — never raises."""
         for path in (self.db_path, self.cfg_path):
             try:
                 path.unlink()
             except (FileNotFoundError, OSError):
-                # Already gone or unwritable — drop it.
                 pass
 
 
-def _setup_local_sqlite() -> tuple[dict[str, str], object | None]:
-    """Create the per-invocation SQLite DB file + minimal cfg, return
+def _setup_local_duckdb() -> tuple[dict[str, str], object | None]:
+    """Create the per-invocation DuckDB DB file + minimal cfg, return
     the env overrides + handle the variant lifecycle expects.
 
-    Allocates a fresh temp directory (``tempfile.mkdtemp(prefix=
-    "qs-gen-sqlite-")``) so the DB and cfg files are isolated from
-    other concurrent invocations. The DB file is created empty —
-    ``schema apply`` populates it via ``connect_demo_db`` (which
-    handles the SQLite branch + ``STDDEV_SAMP`` aggregate
-    registration). The cfg carries:
+    Allocates a tempdir; the cfg slots:
 
-    - ``dialect: sqlite`` so emit_schema / emit_full_seed /
-      refresh_matviews_sql pick the SQLite arms of the dialect helpers;
-    - ``demo_database_url: sqlite:///<path>`` so connect_demo_db
-      points at the right file;
-    - ``aws_account_id`` + ``aws_region`` placeholders that satisfy
-      ``Config`` validators (the local-sqlite variant never touches
-      AWS — these fields are required by the loader but unused).
+    - ``dialect: duckdb`` so emit_schema / emit_full_seed /
+      refresh_matviews_sql pick the DuckDB arms of the dialect
+      helpers (CA.2 landed these);
+    - ``demo_database_url: duckdb:///<path>`` so connect_demo_db
+      opens the file via ``duckdb.connect(duckdb_path(...))`` (CA.3
+      landed the db.py arm);
+    - ``aws_account_id`` + ``aws_region`` placeholders satisfying
+      ``Config`` validators (the local-duckdb variant never touches
+      AWS — fields required by the loader but unused).
 
-    Both ``RECON_GEN_DEMO_DATABASE_URL`` and ``RECON_GEN_CONFIG`` end up in
-    the env overrides so DB-touching layer subprocesses (``db``,
-    ``app2``) load the right cfg + connect to the right file.
+    The DB file is created empty — ``schema apply`` populates it
+    including the per-table CREATE SEQUENCE statements that feed the
+    ``entry`` column DEFAULT (DuckDB has no BIGSERIAL/IDENTITY-style
+    inline auto-increment; see ``common/l2/schema.py``).
+
+    Parallelism caveat (DuckDB docs):
+    https://duckdb.org/docs/current/clients/python/overview#using-connections-in-parallel-python-programs
+
+    - **Per-invocation isolation** — each runner cell + each
+      ``./run_tests.sh`` invocation allocates a *fresh* tempdir +
+      ``.duckdb`` file, so multi-cell parallel runs don't share a DB.
+    - **Per-thread connection** — DuckDB's connection object is NOT
+      thread-safe; ``cursor()`` returns a handle to the *same*
+      connection (no extra parallelism). ``connect_demo_db`` opens
+      a fresh connection per call, so layer subprocesses / pytest
+      workers / App2 async tasks each get their own — safe by
+      construction as long as nobody caches a shared handle.
+    - **pytest-xdist intra-invocation** — workers within ONE runner
+      cell share the cell's ``.duckdb`` file. Parallel readers are
+      fine; concurrent writers (parallel ``schema apply`` + seed
+      INSERTs) will serialize at the file lock — tests that mutate
+      the DB must either use xdist-worker-scoped fixtures (one DB
+      per worker) or serialize via ``@pytest.mark.xdist_group``.
+      CA.7 + CA.4 audit these patterns when integration tests +
+      Studio land.
     """
     import tempfile
 
-    tmp_dir = Path(tempfile.mkdtemp(prefix="qs-gen-sqlite-"))  # typing-smell: ignore[qs-gen-prefix]: tempfile dir name only — not an AWS resource ID, just disambiguates per-invocation runner-managed temp dirs from other tools' tempfiles for operator-visible cleanup
-    db_path = tmp_dir / "demo.sqlite"
-    cfg_path = tmp_dir / "config.sqlite.yaml"
-    # Z.C — synth cfg uses ``deployment_name`` + ``db_table_prefix``
-    # (Z.C.2 collapse). The runner injects per-cell overrides via
-    # RECON_GEN_DEPLOYMENT_NAME / RECON_GEN_DB_TABLE_PREFIX env vars in
-    # ``_run_one_variant`` so multi-cell parallel runs don't collide
-    # — the values written here are the per-invocation defaults that
-    # apply when a cell doesn't override.
+    tmp_dir = Path(tempfile.mkdtemp(prefix="qs-gen-duckdb-"))  # typing-smell: ignore[qs-gen-prefix]: tempfile dir name only — not an AWS resource ID, just disambiguates per-invocation runner-managed temp dirs from other tools' tempfiles for operator-visible cleanup
+    db_path = tmp_dir / "demo.duckdb"
+    cfg_path = tmp_dir / "config.duckdb.yaml"
     cfg_path.write_text(
         f"aws_account_id: \"111122223333\"\n"
         f"aws_region: \"us-east-1\"\n"
-        f"dialect: sqlite\n"
-        f"demo_database_url: \"sqlite:///{db_path}\"\n"
-        f"deployment_name: \"qsgen-sqlite\"\n"
-        f"db_table_prefix: \"qsgen_sqlite\"\n"
+        f"dialect: duckdb\n"
+        f"demo_database_url: \"duckdb:///{db_path}\"\n"
+        f"deployment_name: \"qsgen-duckdb\"\n"
+        f"db_table_prefix: \"qsgen_duckdb\"\n"
     )
     env: dict[str, str] = {
-        RECON_GEN_DEMO_DATABASE_URL.name: f"sqlite:///{db_path}",
+        RECON_GEN_DEMO_DATABASE_URL.name: f"duckdb:///{db_path}",
         RECON_GEN_CONFIG.name: str(cfg_path),
     }
-    return env, _SqliteHandle(db_path=db_path, cfg_path=cfg_path)
+    return env, _DuckdbHandle(db_path=db_path, cfg_path=cfg_path)
 
 
 @dataclass(frozen=True)
@@ -1684,6 +1643,47 @@ def _get_or_start_oracle_container(
     return url, _PersistentContainerHandle(name=name)
 
 
+# CB.14 — local-build image tag. Wrote by ``tools/oracle-19c/build.sh``
+# from Oracle's official ``oracle/docker-images`` recipe + operator-
+# downloaded binary; production-parity with AWS RDS Oracle SE2 19c.
+_LOCAL_ORACLE_19C_TAG: Final = "recon-gen/oracle-19c:local"
+# Fallback when the local image isn't built. Oracle 23ai, multi-arch.
+_FALLBACK_ORACLE_IMAGE: Final = "gvenzl/oracle-free:23-faststart"
+
+
+def _docker_image_exists_locally(tag: str) -> bool:
+    """True iff Docker reports the named image in the local store."""
+    import subprocess  # noqa: PLC0415
+    result = subprocess.run(
+        ["docker", "image", "inspect", tag],
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def _resolve_oracle_image() -> str:
+    """Pick the Oracle image: env override → local 19c build → 23ai fallback.
+
+    Warns once per process when falling back to 23ai so operators notice
+    the production-parity gap without it being noisy.
+    """
+    override = RECON_GEN_ORACLE_IMAGE.get_or_none()
+    if override:
+        return override
+    if _docker_image_exists_locally(_LOCAL_ORACLE_19C_TAG):
+        return _LOCAL_ORACLE_19C_TAG
+    if not getattr(_resolve_oracle_image, "_warned", False):
+        print(
+            f"runner: oracle image — {_LOCAL_ORACLE_19C_TAG} not built; "
+            f"falling back to {_FALLBACK_ORACLE_IMAGE} (Oracle 23ai). "
+            f"Build the 19c image once via tools/oracle-19c/build.sh "
+            f"for production-parity local testing.",
+        )
+        _resolve_oracle_image._warned = True  # type: ignore[attr-defined]: one-shot warning flag
+    return _FALLBACK_ORACLE_IMAGE
+
+
 def _start_fresh_oracle_container(
     name: str, password: str,
 ) -> tuple[str, _PersistentContainerHandle]:
@@ -1691,21 +1691,55 @@ def _start_fresh_oracle_container(
     password. Returns the URL + a persistent handle (`.stop()` no-op
     so the container outlives this invocation and the next run can
     adopt it).
+
+    Image selection (CB.14):
+
+    1. ``RECON_GEN_ORACLE_IMAGE`` env override, when set.
+    2. ``recon-gen/oracle-19c:local`` if Docker reports it locally —
+       production-parity with AWS RDS Oracle SE2 19c, built via
+       ``tools/oracle-19c/build.sh``. Cold-start ~90-120s.
+    3. ``gvenzl/oracle-free:23-faststart`` fallback — pre-initialized
+       23ai, multi-arch, ~20-30s cold-start. Correct-by-construction
+       parity because the codebase sticks to the conservative
+       19c-portable SQL/JSON subset.
+
+    Service name defaults to FREEPDB1 on either image.
     """
+    image = _resolve_oracle_image()
+    from testcontainers.core.waiting_utils import wait_for_logs  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
     from testcontainers.oracle import OracleDbContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
 
-    # gvenzl/oracle-free:23-faststart — pre-initialized DB starts in
-    # seconds vs. the multi-minute cold-start on :slim. Image is
-    # heavier (~3 GB) but the time savings dominate test-loop
-    # economics. Service name defaults to FREEPDB1 (the oracle-free
-    # image's pluggable DB).
-    container = OracleDbContainer(
-        "gvenzl/oracle-free:23-faststart",
-        oracle_password=password,
-    ).with_name(name)
+    if image == _FALLBACK_ORACLE_IMAGE:
+        # gvenzl path — testcontainers' OracleDbContainer expects this
+        # image's ``ORACLE_PASSWORD`` env var + FREEPDB1 PDB + 120s
+        # default ``wait_for_logs`` timeout, all of which match. Use
+        # the default integration unchanged.
+        container = OracleDbContainer(image, oracle_password=password).with_name(name)
+        container.start()  # type: ignore[no-untyped-call]: testcontainers .start() lacks return-type hint
+        return container.get_connection_url(), _PersistentContainerHandle(name=name)
+
+    # 19c path — Oracle's official image differs from gvenzl on three
+    # axes that the default ``OracleDbContainer`` integration can't
+    # bridge: it reads ``ORACLE_PWD`` (not ``ORACLE_PASSWORD``), its
+    # default PDB is ``ORCLPDB1`` (not ``FREEPDB1``), and a true cold
+    # start runs 3-4 min vs gvenzl's 20-30s (testcontainers' 120s
+    # default ``wait_for_logs`` fires mid-init). Subclass to bridge
+    # all three; pin ``ORACLE_PDB=FREEPDB1`` so the connection URL
+    # shape stays identical to the fallback path.
+    class _Oracle19cContainer(OracleDbContainer):
+        def _configure(self) -> None:  # type: ignore[no-untyped-def]: testcontainers method has no return-type hint
+            super()._configure()
+            self.with_env("ORACLE_PWD", self.oracle_password)
+            self.with_env("ORACLE_PDB", "FREEPDB1")
+
+        def _connect(self) -> None:  # type: ignore[no-untyped-def]: testcontainers method has no return-type hint
+            wait_for_logs(  # type: ignore[no-untyped-call]: testcontainers helper lacks return-type hint
+                self, ".*DATABASE IS READY TO USE!.*", timeout=900,
+            )
+
+    container = _Oracle19cContainer(image, oracle_password=password).with_name(name)
     container.start()  # type: ignore[no-untyped-call]: testcontainers .start() lacks return-type hint
-    url: str = container.get_connection_url()
-    return url, _PersistentContainerHandle(name=name)
+    return container.get_connection_url(), _PersistentContainerHandle(name=name)
 
 
 def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
@@ -1720,20 +1754,20 @@ def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
       (Aurora cluster, etc.); cfg-discovery for AWS auth happens
       separately in ``_run_one_variant``.
     - ``(pg, lo)``: postgres:17-alpine testcontainer; URL override.
-    - ``(or, lo)``: gvenzl/oracle-free:23-faststart testcontainer;
-      URL override.
-    - ``(sl, lo)``: per-invocation SQLite tempdir + cfg; both
+    - ``(or, lo)``: doctorkirk/oracle-19c testcontainer (production
+      parity w/ AWS RDS Oracle SE2 19c); URL override.
+    - ``(du, lo)``: per-invocation DuckDB tempfile + cfg; both
       ``RECON_GEN_DEMO_DATABASE_URL`` and ``RECON_GEN_CONFIG`` overrides
-      (no on-disk cfg under ``run/`` for sqlite — it's ephemeral).
-    - ``(sl, aw)``: rejected upstream by ``VariantSpec.is_valid()``
-      (sqlite is file-based; QS can't reach it remotely). Defensive
-      raise here for completeness.
+      (no on-disk cfg under ``run/`` for DuckDB — it's ephemeral).
 
     PG container takes ~10-15s to start. Oracle container
-    (``gvenzl/oracle-free:23-faststart``) takes ~20-30s — still
-    fast for a fresh Oracle DB. SQLite is instant (file-create
-    only). Lifetime is the chain (one DB / container reused across
-    all layers in a single ``up_to`` invocation), not per-layer.
+    (``doctorkirk/oracle-19c``) takes ~90-120s for a fresh DB —
+    longer than the 23-faststart predecessor but matches AWS RDS
+    Oracle SE2 19c production. DuckDB is instant (file-create only).
+    Lifetime is the chain (one DB / container reused across all
+    layers in a single ``up_to`` invocation), not per-layer; the
+    persistent-container path (`_check_or_start_persistent_oracle_container`)
+    amortizes the cold-start across runs.
     """
     if spec.target == "aw":
         return {}, None
@@ -1742,15 +1776,15 @@ def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
     # containers. Operator (or workflow) sets RECON_GEN_RUNNER_CI=1 +
     # RECON_GEN_DEMO_DATABASE_URL=<service-container-url>; setup_variant
     # is then a no-op and the variant URL passes through unchanged.
-    # SQLite has no container to skip — but we still honor CI mode
-    # for symmetry (the workflow can pre-create the SQLite file).
+    # DuckDB has no container to skip — but we still honor CI mode
+    # for symmetry (the workflow can pre-create the DuckDB file).
     if RECON_GEN_RUNNER_CI.get_or_none():
         # Loud-fail if the operator set CI mode but forgot the URL —
         # we'd otherwise silently fall back to cfg.demo_database_url
         # and break in confusing ways downstream.
         url = RECON_GEN_DEMO_DATABASE_URL.require()
         return {RECON_GEN_DEMO_DATABASE_URL.name: url}, None
-    # target == "lo" — local container or sqlite tempfile.
+    # target == "lo" — local container or DuckDB tempfile.
     if spec.dialect == "pg":
         # Lazy-import: testcontainers requires Docker, which not every
         # operator has. Importing only on demand keeps non-Docker
@@ -1770,8 +1804,16 @@ def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
         # (``test_date_filter_does_not_error_when_applied`` networkidle
         # timeout downstream). 300 leaves headroom for the matrix
         # without pushing PG anywhere near its real limits.
-        container = PostgresContainer("postgres:17-alpine").with_command(
-            "postgres -c max_connections=300",
+        #
+        # CB.11.b — bind container's 5432 to host's fixed 5433 so the
+        # hotchkiss.io:5433 forward terminates here when QS reaches in.
+        # Trade-off: parallel PG cells collide on the host port. Single
+        # PG cell at a time is the current contract; parallel-PG support
+        # via per-cell port pool is CB.11.c work.
+        container = (
+            PostgresContainer("postgres:17-alpine")
+            .with_command("postgres -c max_connections=300")
+            .with_bind_ports(5432, _LOCAL_PG_HOST_PORT)
         )
         container.start()
         raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]: testcontainers method has no type annotations
@@ -1791,13 +1833,13 @@ def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
             _oracle_container_name_for(spec), ORACLE_REUSE_PASSWORD,
         )
         return {RECON_GEN_DEMO_DATABASE_URL.name: url}, handle
-    if spec.dialect == "sl":
-        # Y.2.gate.b.2.impl.sqlite — no Docker, no network. Create
-        # a tempdir with a SQLite DB file + minimal cfg pointing at
-        # it; both env overrides flow to layer subprocesses. Teardown
-        # unlinks both files via the ``_SqliteHandle.stop()`` duck-
-        # typed contract ``teardown_variant`` already calls.
-        return _setup_local_sqlite()
+    if spec.dialect == "du":
+        # CA.3 — no Docker, no network. Allocate a tempdir with a
+        # .duckdb file + minimal cfg; both env overrides flow to
+        # layer subprocesses. Teardown unlinks both files via the
+        # ``_DuckdbHandle.stop()`` duck-typed contract
+        # ``teardown_variant`` already calls.
+        return _setup_local_duckdb()
     raise ValueError(
         f"setup_variant: unhandled (dialect={spec.dialect!r}, target={spec.target!r})"
     )
@@ -1837,7 +1879,7 @@ def _dump_top_queries_for_variant(
 
     Never raises — connection / query / format failures all degrade to a
     ``format_skipped`` marker so a flaky stats view can't break the
-    chain. SQLite has no equivalent stats view (skipped cleanly).
+    chain. DuckDB has no equivalent stats view (skipped cleanly).
     """
     # Lazy imports keep startup fast and avoid pulling psycopg/oracledb
     # into pyright-strict scope unless this helper actually fires.
@@ -1869,12 +1911,15 @@ def _dump_top_queries_for_variant(
         return
 
     dialect_str = perf.dialect_name(cfg.dialect)
-    if cfg.dialect is Dialect.SQLITE:
+    if cfg.dialect is Dialect.DUCKDB:
+        # CA.3 — DuckDB has no pg_stat_statements / v$sqlstats
+        # equivalent; the in-process columnar engine doesn't expose
+        # cumulative query stats. Skip with the same diagnostic shape.
         out_path.write_text(perf.format_skipped(
             title=title, dialect=dialect_str,
-            reason="SQLite has no pg_stat_statements / v$sqlstats equivalent",
+            reason="duckdb has no pg_stat_statements / v$sqlstats equivalent",
         ))
-        print(f"{terminal_prefix}runner: db-perf [{spec.name}] skipped (sqlite)")
+        print(f"{terminal_prefix}runner: db-perf [{spec.name}] skipped (duckdb)")
         return
 
     # Filter on the DB-table prefix so we drop the operator's
@@ -1998,7 +2043,7 @@ def _resolve_seed_config(candidates: tuple[str, ...]) -> Path | None:
 
 def _resolve_seed_config_for_dialect(dialect: DialectCode) -> Path | None:
     """Per-dialect cfg dispatcher — returns the dialect-flavored cfg
-    for ``pg`` / ``or``, ``None`` for ``sl`` (the per-invocation
+    for ``pg`` / ``or``, ``None`` for ``du`` (the per-invocation
     cfg is generated by ``setup_variant`` and threaded via
     ``env_overrides[RECON_GEN_CONFIG]``, not discovered on disk).
 
@@ -2042,6 +2087,104 @@ def _resolve_runner_cfg_path(spec: VariantSpec) -> Path | None:
     if dialect_cfg is not None:
         return dialect_cfg
     return _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
+
+
+def _write_qs_cfg_for_variant(
+    spec: VariantSpec,
+    *,
+    base_cfg_path: Path,
+    local_url: str,
+    run_dir: Path,
+) -> Path:
+    """CB.11.b — derive the per-cell QS-side cfg yaml.
+
+    Clones the operator's base cfg (``run/config.<dialect>.yaml``),
+    swaps ``demo_database_url`` from ``local_url`` (the
+    127.0.0.1:<container-port> form from setup_variant) to
+    ``hotchkiss.io:<forwarded-port>``, and sets ``qs_disable_pg_ssl: true``
+    for PG cells. Writes to ``<run_dir>/cfg/qs.yaml`` and returns the
+    path so the caller can set ``RECON_GEN_QS_CONFIG`` for the
+    ``deploy``/``qs_api``/``qs_browser`` layers.
+
+    Why a sibling file instead of mutating the env's DB URL: a per-cell
+    cfg yaml round-trips through ``load_config`` so every cfg field
+    (``deployment_name``, ``db_table_prefix``, ``principal_arns``,
+    ``auth.aws_profile``, ``qs_disable_pg_ssl``) lands together — env
+    overrides handle one field at a time, which would force the
+    composition rule into multiple env vars. The two-cfg approach also
+    keeps the local-layer cfg pure (``127.0.0.1`` works without QS
+    knowing the LAN), independent of the QS-side cfg's hotchkiss.io
+    forward target.
+    """
+    import yaml  # noqa: PLC0415 — lazy: yaml is already a tx dep but only this branch needs it
+
+    with base_cfg_path.open() as f:
+        raw: Any = yaml.safe_load(f) or {}
+    if not isinstance(raw, dict):
+        raise RuntimeError(
+            f"_write_qs_cfg_for_variant: base cfg {base_cfg_path} did not "
+            f"parse as a mapping (got {type(raw).__name__})"
+        )
+    # Swap demo_database_url to the hotchkiss.io form.
+    if spec.dialect == "pg":
+        new_url = _swap_url_host(local_url, _QS_FORWARD_HOST, _LOCAL_PG_HOST_PORT)
+        raw["demo_database_url"] = new_url
+        # PG branch needs SSL disable for vanilla postgres:17-alpine (which
+        # doesn't serve TLS) — see CB.11.a spike outcome.
+        raw["qs_disable_pg_ssl"] = True
+    elif spec.dialect == "or":
+        new_url = _swap_url_host(local_url, _QS_FORWARD_HOST, _LOCAL_ORACLE_HOST_PORT)
+        raw["demo_database_url"] = new_url
+        # Oracle datasource branch already hardcodes DisableSsl=True
+        # (common/datasource.py); no flag needed.
+    else:
+        # du dialect — no QS data source can point at a file DB.
+        # The runner should never call this path; raise loudly so a
+        # misroute surfaces during testing.
+        raise RuntimeError(
+            f"_write_qs_cfg_for_variant: dialect {spec.dialect!r} has no "
+            f"QS-reachable shape (file-based DB). Should not be called "
+            f"for du cells."
+        )
+
+    cfg_dir = run_dir / "cfg"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    qs_cfg_path = cfg_dir / "qs.yaml"
+    with qs_cfg_path.open("w") as f:
+        f.write(
+            f"# Runner-generated per-cell QS-side cfg (CB.11.b).\n"
+            f"# Sibling local-layer cfg: {base_cfg_path}\n"
+            f"# Spec: {spec.name}; generated by _write_qs_cfg_for_variant.\n"
+            f"# DO NOT commit — `runs/` is gitignored.\n",
+        )
+        yaml.safe_dump(raw, f, sort_keys=False)
+    return qs_cfg_path
+
+
+def _swap_url_host(url: str, new_host: str, new_port: int) -> str:
+    """Replace the host:port part of a postgresql:// or oracle:// URL.
+
+    Used by ``_write_qs_cfg_for_variant`` to map the local container
+    URL onto the hotchkiss.io-forwarded endpoint. Preserves user, pw,
+    and path/db components. Raises if the URL doesn't parse — we want
+    a misshapen URL to fail loudly, not silently land a wrong endpoint
+    in the QS data source.
+    """
+    from urllib.parse import urlparse, urlunparse  # noqa: PLC0415
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.hostname:
+        raise RuntimeError(
+            f"_swap_url_host: malformed URL {url!r} (missing scheme or host)"
+        )
+    # Rebuild netloc with auth + new host:port.
+    auth = ""
+    if parsed.username:
+        if parsed.password:
+            auth = f"{parsed.username}:{parsed.password}@"
+        else:
+            auth = f"{parsed.username}@"
+    new_netloc = f"{auth}{new_host}:{new_port}"
+    return urlunparse(parsed._replace(netloc=new_netloc))
 
 
 def _derive_qs_user_arn(cfg: "Config") -> str:
@@ -2181,14 +2324,13 @@ def seed_variant(
                 f"Create run/config.oracle.yaml (dialect: oracle) or "
                 f"set RECON_GEN_CONFIG to an oracle-dialect cfg path."
             )
-    elif spec.dialect == "sl":
-        # Y.2.gate.b.2.impl.sqlite — cfg path comes from
-        # ``setup_variant`` (it generates the per-invocation cfg + DB
-        # file under a tempdir and returns the cfg path in
-        # ``env_overrides[RECON_GEN_CONFIG]``). No on-disk cfg in
-        # ``run/`` — the SQLite variant is by-design ephemeral
-        # per-invocation. If the override isn't there, setup_variant
-        # was bypassed; fail loud.
+    elif spec.dialect == "du":
+        # CA.3 — cfg path comes from ``setup_variant`` (it generates
+        # the per-invocation cfg + DB file under a tempdir and returns
+        # the cfg path in ``env_overrides[RECON_GEN_CONFIG]``). No
+        # on-disk cfg in ``run/`` — DuckDB variants are by-design
+        # ephemeral per-invocation. If the override isn't there,
+        # setup_variant was bypassed; fail loud.
         cfg_str = env_overrides.get(RECON_GEN_CONFIG.name)
         if not cfg_str:
             raise RuntimeError(
@@ -2558,6 +2700,38 @@ def _run_one_variant(
     if dialect_cfg is not None and RECON_GEN_CONFIG.name not in variant_env:
         variant_env[RECON_GEN_CONFIG.name] = str(dialect_cfg)
 
+    # CB.11.b — when the chain reaches any QS-touching layer (deploy /
+    # qs_api / qs_browser) AND the dialect has a QS-reachable shape
+    # (pg / or; not du), generate a sibling QS-side cfg and thread
+    # it via RECON_GEN_QS_CONFIG. The deploy/qs layers prefer this cfg
+    # over RECON_GEN_CONFIG so the QS data source's endpoint is
+    # hotchkiss.io (not 127.0.0.1, which QS can't reach).
+    if (
+        spec.target == "lo"
+        and spec.dialect in ("pg", "or")
+        and any(layer in ("deploy", "qs_api", "qs_browser") for layer in chain)
+        and dialect_cfg is not None
+        and RECON_GEN_DEMO_DATABASE_URL.name in variant_env
+    ):
+        try:
+            qs_cfg_path = _write_qs_cfg_for_variant(
+                spec,
+                base_cfg_path=dialect_cfg,
+                local_url=variant_env[RECON_GEN_DEMO_DATABASE_URL.name],
+                run_dir=run_dir,
+            )
+            variant_env[RECON_GEN_QS_CONFIG.name] = str(qs_cfg_path)
+            print(
+                f"{terminal_prefix}runner: variant={spec.name} "
+                f"QS-side cfg written → {qs_cfg_path}"
+            )
+        except Exception as exc:  # noqa: BLE001 — surface as triage signal; deploy layer will fail loudly
+            print(
+                f"{terminal_prefix}runner: variant={spec.name} "
+                f"QS-side cfg gen failed: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+
     # Z.C.4 — per-cell ``deployment_name`` + ``db_table_prefix`` overrides
     # so multi-cell parallel runs (sp_pg_lo / sq_pg_lo / fuzz cells) don't
     # collide on AWS resource IDs (``deployment_name`` weaves into every
@@ -2681,9 +2855,26 @@ def _run_one_variant(
                 layer_results.append(cached_result)
                 continue
 
+            # CB.11.b — per-layer variant_env routing.
+            # - deploy reads the QS-side cfg (hotchkiss.io URL) so the
+            #   created data source points at the dev-machine forward
+            #   QS can reach. Drop the local-URL env so cfg precedence
+            #   wins.
+            # - qs_api is boto3-only and doesn't open the demo DB; cfg
+            #   choice doesn't matter, leave variant_env untouched.
+            # - qs_browser keeps the LOCAL cfg + local-URL env: consumer
+            #   tests read seeded state via `connect_demo_db(cfg)` and
+            #   would otherwise resolve hotchkiss.io → operator's
+            #   external IP, which the operator's own host can't route
+            #   to (firewall whitelist is QS egress only).
+            layer_env = dict(variant_env)
+            qs_cfg = layer_env.get(RECON_GEN_QS_CONFIG.name)
+            if qs_cfg is not None and layer == "deploy":
+                layer_env[RECON_GEN_CONFIG.name] = qs_cfg
+                layer_env.pop(RECON_GEN_DEMO_DATABASE_URL.name, None)
             result = dispatch_layer(
                 layer, run_dir, options,
-                variant_env=variant_env, terminal_prefix=terminal_prefix,
+                variant_env=layer_env, terminal_prefix=terminal_prefix,
             )
             # #986 followon, 2026-05-19 — extend the prelude's exit-5 + --only
             # tolerance to every per-cell layer. Same shape: when the operator
@@ -2932,12 +3123,12 @@ def cmd_up_to(args: argparse.Namespace) -> int:
             return EXIT_NEEDS_OPERATOR
         # m.4.b — surface invalid-cell skips so operators see the filter
         # happen rather than silently dropped cells. The only invalid
-        # combination today is sl × aw (sqlite is file-based; QuickSight
-        # has no remote DataSource for it).
+        # combination today is du × aw (DuckDB is file-based / in-process;
+        # QuickSight has no remote DataSource for it).
         for skipped in skipped_specs:
             reason = (
-                "sl × aw: sqlite is file-based; QuickSight can't reach it remotely"
-                if skipped.dialect == "sl" and skipped.target == "aw"
+                "du × aw: DuckDB is file-based / in-process; QuickSight can't reach it remotely"
+                if skipped.dialect == "du" and skipped.target == "aw"
                 else f"unhandled invalid combination ({skipped.dialect} × {skipped.target})"
             )
             print(f"runner: skip [{skipped.name}] ({reason})")
@@ -3020,7 +3211,7 @@ def cmd_up_to(args: argparse.Namespace) -> int:
         # create a container with the same fixed Ryuk name and the
         # second one crashes with HTTP 409 from Docker. Lazy-imported
         # so the runner stays Docker-free for AWS-only invocations.
-        if any(s.target == "lo" and s.dialect != "sl" for s in specs):
+        if any(s.target == "lo" and s.dialect != "du" for s in specs):
             try:
                 from testcontainers.core.container import Reaper  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
                 Reaper.get_instance()
@@ -3141,188 +3332,46 @@ def _compose_specs_from_options(
     return partition_matrix(sc_specs, di_codes, ta_codes)
 
 
-# Y.2.gate.l.2 — RDS lifecycle commands. Helpers below the cmd_*
-# triple. They depend on the cfg loader (lazy import keeps cmd_pyright
-# / cmd_up_to fast paths free of cfg parse cost when not needed).
-
-
-def _load_runner_cfg_for_lifecycle() -> Config | None:
-    """Find + load the operator's cfg for the lifecycle commands. Same
-    discovery shape as ``_probe_aws_creds`` — RECON_GEN_CONFIG override
-    first, then ``run/config.yaml`` / ``run/config.postgres.yaml`` /
-    ``run/config.oracle.yaml``. Returns None when none found OR when
-    the loaded cfg fails validation; caller surfaces operator-actionable
-    guidance.
-
-    Y.2.gate.l.2 — when cfg carries ``auth.aws_profile``, also injects
-    ``AWS_PROFILE`` into ``os.environ`` so the boto3 RDS client picks
-    up the operator's long-lived IAM keys (matches the per-variant
-    subprocess auth pattern from gate.h.1; lifecycle commands run in
-    the parent process so they need the env set here directly).
-    """
-    cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
-    if cfg_path is None:
-        return None
-    try:
-        from recon_gen.common.config import load_config  # noqa: PLC0415 — lazy
-        cfg = load_config(str(cfg_path))
-    except Exception as exc:  # noqa: BLE001 — operator-facing failure surface, not silent
-        print(
-            f"runner: failed to load cfg from {cfg_path}: {exc}",
-            file=sys.stderr,
-        )
-        return None
-    if cfg.auth is not None and cfg.auth.aws_profile is not None:
-        os.environ["AWS_PROFILE"] = cfg.auth.aws_profile
-    return cfg
-
-
-def _resolve_rds_resources(cfg: Config) -> tuple[Any, Any]:
-    """Build per-resource RdsResource objects from cfg. Returns
-    ``(pg_resource | None, oracle_resource | None)`` — None when the
-    matching cfg field is unset (operator hasn't configured that
-    resource yet). Lazy import of aws_rds so the cmd_pyright fast path
-    stays import-cheap.
-    """
-    from recon_gen.common.aws_rds import RdsResource  # noqa: PLC0415 — lazy: keep cmd_pyright fast path light
-
-    pg = (
-        RdsResource(kind="cluster", identifier=cfg.aws_pg_cluster_id,
-                    aws_region=cfg.aws_region)
-        if cfg.aws_pg_cluster_id is not None
-        else None
-    )
-    oracle = (
-        RdsResource(kind="instance", identifier=cfg.aws_oracle_instance_id,
-                    aws_region=cfg.aws_region)
-        if cfg.aws_oracle_instance_id is not None
-        else None
-    )
-    return pg, oracle
-
-
-def _poll_until(
-    resource: Any,
-    target_status: str,
-    *,
-    timeout_s: int = 900,
-    interval_s: int = 10,
-) -> str:
-    """Poll ``aws_rds.get_status`` until the status matches ``target_status``
-    or ``timeout_s`` elapses. Returns the final observed status. Logs
-    each poll to stdout so the operator sees progress.
-
-    Aurora cold-start is ~5-7 minutes; Oracle ~3-5 minutes. The 900s
-    (15min) cap leaves headroom for first-boot. Caller decides whether
-    a non-target final status is a failure or just a "still in flight".
-    """
-    from recon_gen.common.aws_rds import get_status  # noqa: PLC0415 — lazy
-    deadline = time.monotonic() + timeout_s
-    last_status: str = ""
-    while time.monotonic() < deadline:
-        status = get_status(resource)
-        if status != last_status:
-            print(f"runner: {resource.identifier} → {status}")
-            last_status = status
-        if status == target_status:
-            return status
-        time.sleep(interval_s)
-    return last_status or "timeout"
+# CB.11.a.2 (2026-06-01) — the previous Y.2.gate.l.2 RDS lifecycle
+# commands (_cmd_up_aws / _cmd_down_aws / _status_aws + the
+# _resolve_rds_resources / _poll_until / _load_runner_cfg_for_lifecycle
+# helpers + _ROUGH_HOURLY_COSTS) have been deleted. RDS Aurora is gone
+# post-CB.12 — Docker on the self-hosted runner is the only DB
+# substrate. `cmd_up` / `cmd_down` / `cmd_status` keep only the `local`
+# scope (docker container lifecycle); the `aws` scope is removed.
+# Per-cell Docker boot lands in CB.11.b.
 
 
 def cmd_up(args: argparse.Namespace) -> int:
-    """Boot dependencies. scope = local | aws | all (default).
+    """Boot dependencies. scope = local (default).
 
-    - **local**: no-op. Local PG / Oracle / SQLite spin on-demand
-      inside ``setup_variant`` per matrix cell — there's no shared
-      "local cluster" to start. Reported for symmetry with ``down``.
-    - **aws**: start the cfg-declared Aurora cluster + Oracle instance
-      (`cfg.aws_pg_cluster_id` / `cfg.aws_oracle_instance_id`). Polls
-      each until status hits ``available``. Idempotent — already-running
-      resources return immediately. Loud-fails when the cfg fields are
-      unset with a pointer to the gate.l provisioning runbook.
-    - **all** (default): both. Local first (fast no-op), then AWS.
+    Local PG / Oracle / DuckDB spin on-demand inside ``setup_variant``
+    per matrix cell — there's no shared "local cluster" to pre-boot.
+    Reported for symmetry with ``down``.
     """
-    scope = args.scope
-    if scope == "local":
-        return _cmd_up_local()
-    if scope == "aws":
-        return _cmd_up_aws()
-    if scope == "all":
-        rc_local = _cmd_up_local()
-        rc_aws = _cmd_up_aws()
-        return rc_local or rc_aws
-    print(f"runner: unknown up scope {scope!r}", file=sys.stderr)
+    scope = getattr(args, "scope", "local")
+    if scope in ("local", "all"):
+        print(
+            "runner: up — no-op "
+            "(local containers spin on-demand per matrix cell; "
+            "AWS RDS removed in CB.12)"
+        )
+        return EXIT_SUCCESS
+    print(
+        f"runner: unknown up scope {scope!r} "
+        "(only 'local' is supported post-CB.12)",
+        file=sys.stderr,
+    )
     return EXIT_NEEDS_OPERATOR
 
 
-def _cmd_up_local() -> int:
-    """Local containers are demand-spawned by setup_variant; nothing to
-    pre-boot. Reported for symmetry — operator can `up local` and the
-    next `up_to=db --targets=lo` invocation will just work."""
-    print(
-        "runner: up local — no-op "
-        "(local containers spin on-demand per matrix cell)"
-    )
-    return EXIT_SUCCESS
-
-
-def _cmd_up_aws() -> int:
-    """Start cfg-declared RDS resources + poll until available."""
-    cfg = _load_runner_cfg_for_lifecycle()
-    if cfg is None:
-        print(
-            "runner: up aws — no cfg discoverable. Set RECON_GEN_CONFIG or "
-            "place run/config.{postgres,oracle}.yaml.",
-            file=sys.stderr,
-        )
-        return EXIT_NEEDS_OPERATOR
-    pg, oracle = _resolve_rds_resources(cfg)
-    if pg is None and oracle is None:
-        print(
-            "runner: up aws — neither cfg.aws_pg_cluster_id nor "
-            "cfg.aws_oracle_instance_id set. Add them to your cfg "
-            "(see docs/audits/y_2_gate_l_ci_aws_provisioning.md) or "
-            "set RECON_GEN_AWS_PG_CLUSTER_ID / RECON_GEN_AWS_ORACLE_INSTANCE_ID.",
-            file=sys.stderr,
-        )
-        return EXIT_NEEDS_OPERATOR
-    from recon_gen.common.aws_rds import start  # noqa: PLC0415 — lazy
-    final_rc = EXIT_SUCCESS
-    for resource in (pg, oracle):
-        if resource is None:
-            continue
-        try:
-            print(f"runner: starting {resource.kind} {resource.identifier}…")
-            initial = start(resource)
-            if initial == "available":
-                print(
-                    f"runner: {resource.identifier} already available — no wait"
-                )
-                continue
-            final = _poll_until(resource, "available")
-            if final != "available":
-                print(
-                    f"runner: {resource.identifier} did not reach "
-                    f"'available' (final={final!r}) — check AWS console",
-                    file=sys.stderr,
-                )
-                final_rc = EXIT_FAILURE
-        except Exception as exc:  # noqa: BLE001 — surface AWS errors to operator
-            print(f"runner: start {resource.identifier} failed: {exc}", file=sys.stderr)
-            final_rc = EXIT_NEEDS_OPERATOR
-    return final_rc
-
-
 def cmd_down(args: argparse.Namespace) -> int:
-    """Tear down dependencies. scope = local | aws | all (default).
+    """Tear down dependencies. scope = local (default).
 
     Destructive — requires --yes (Y.2.gate.b.14.3 destructive-op
-    opt-in). For ``local``, stops the named persistent Oracle
-    containers (PG containers are ephemeral, no action needed). For
-    ``aws``, calls ``stop_db_cluster`` / ``stop_db_instance``;
-    idempotent + non-blocking (stop takes minutes; runner returns
-    after the stop request is accepted, doesn't poll).
+    opt-in). Stops the named persistent Oracle containers (PG
+    containers are ephemeral, no action needed). The `aws` scope was
+    removed in CB.11.a.2 along with RDS Aurora.
     """
     if not args.yes and not RECON_GEN_RUNNER_YES.get_or_none():
         print(
@@ -3331,16 +3380,14 @@ def cmd_down(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return EXIT_NEEDS_OPERATOR
-    scope = args.scope
-    if scope == "local":
+    scope = getattr(args, "scope", "local")
+    if scope in ("local", "all"):
         return _cmd_down_local()
-    if scope == "aws":
-        return _cmd_down_aws()
-    if scope == "all":
-        rc_local = _cmd_down_local()
-        rc_aws = _cmd_down_aws()
-        return rc_local or rc_aws
-    print(f"runner: unknown down scope {scope!r}", file=sys.stderr)
+    print(
+        f"runner: unknown down scope {scope!r} "
+        "(only 'local' is supported post-CB.12)",
+        file=sys.stderr,
+    )
     return EXIT_NEEDS_OPERATOR
 
 
@@ -3379,74 +3426,14 @@ def _cmd_down_local() -> int:
     return EXIT_SUCCESS
 
 
-def _cmd_down_aws() -> int:
-    """Stop cfg-declared RDS resources. Stop is asynchronous on the
-    RDS side; runner doesn't poll for ``stopped`` (would add ~5min).
-    Operator can ``./run_tests.sh status`` to confirm.
-    """
-    cfg = _load_runner_cfg_for_lifecycle()
-    if cfg is None:
-        print(
-            "runner: down aws — no cfg discoverable. Set RECON_GEN_CONFIG or "
-            "place run/config.{postgres,oracle}.yaml.",
-            file=sys.stderr,
-        )
-        return EXIT_NEEDS_OPERATOR
-    pg, oracle = _resolve_rds_resources(cfg)
-    if pg is None and oracle is None:
-        print(
-            "runner: down aws — neither cfg.aws_pg_cluster_id nor "
-            "cfg.aws_oracle_instance_id set. Nothing to stop.",
-            file=sys.stderr,
-        )
-        return EXIT_NEEDS_OPERATOR
-    from recon_gen.common.aws_rds import stop  # noqa: PLC0415 — lazy
-    final_rc = EXIT_SUCCESS
-    for resource in (pg, oracle):
-        if resource is None:
-            continue
-        try:
-            print(f"runner: stopping {resource.kind} {resource.identifier}…")
-            status = stop(resource)
-            print(f"runner: {resource.identifier} → {status}")
-        except Exception as exc:  # noqa: BLE001 — surface AWS errors
-            print(f"runner: stop {resource.identifier} failed: {exc}", file=sys.stderr)
-            final_rc = EXIT_NEEDS_OPERATOR
-    return final_rc
-
-
-# Y.2.gate.l.2 — rough hourly cost estimates for `status --cost`. We
-# don't query AWS pricing API; values are rounded approximations from
-# us-east-1 list prices for typical demo instance sizes (db.r5.large
-# Aurora, db.t3.small Oracle SE2). Marked "rough" in output so operator
-# isn't misled into treating these as billing-grade.
-_ROUGH_HOURLY_COSTS: Final[dict[str, float]] = {
-    "aurora-cluster-running": 0.30,    # db.r5.large compute
-    "aurora-cluster-stopped": 0.05,    # storage only (varies)
-    "oracle-instance-running": 0.10,   # db.t3.small SE2
-    "oracle-instance-stopped": 0.02,   # storage only
-}
-
-
 def cmd_status(args: argparse.Namespace) -> int:
-    """Show what's currently running. --cost adds rough hourly
-    estimates so the operator's cost surface stays visible.
-
-    Two sections:
-
-    - **local**: docker containers matching ``ORACLE_REUSE_CONTAINER_PREFIX``
-      (the j.5 named-Oracle reuse set). Ephemeral PG containers don't
-      show up here — they live ~test-session and `docker ps` may catch
-      them in flight, but the runner doesn't manage them.
-    - **aws**: cfg-declared RDS resources via ``aws_rds.get_status``.
-      Loud-fails when neither cfg field is set.
+    """Show what's currently running. Local-container only post-CB.12
+    (the AWS RDS section is gone). --cost flag retained for CLI
+    compat but no longer surfaces hourly estimates (no cloud DB cost).
     """
     print("runner: status — local containers")
     _status_local()
-    print()
-    print("runner: status — AWS RDS resources")
-    rc = _status_aws(show_cost=bool(args.cost))
-    return rc
+    return EXIT_SUCCESS
 
 
 def _status_local() -> None:
@@ -3465,51 +3452,6 @@ def _status_local() -> None:
         return
     for row in rows:
         print(f"  {row}")
-
-
-def _status_aws(*, show_cost: bool) -> int:
-    cfg = _load_runner_cfg_for_lifecycle()
-    if cfg is None:
-        print("  no cfg discoverable; skip AWS status")
-        return EXIT_NEEDS_OPERATOR
-    pg, oracle = _resolve_rds_resources(cfg)
-    if pg is None and oracle is None:
-        print(
-            "  cfg has no aws_pg_cluster_id or aws_oracle_instance_id; "
-            "nothing to query"
-        )
-        return EXIT_SUCCESS
-    from recon_gen.common.aws_rds import get_status  # noqa: PLC0415 — lazy
-    total_hourly = 0.0
-    for resource in (pg, oracle):
-        if resource is None:
-            continue
-        try:
-            status = get_status(resource)
-        except Exception as exc:  # noqa: BLE001 — operator-facing
-            print(f"  {resource.identifier}: ERROR — {exc}")
-            continue
-        line = f"  {resource.kind} {resource.identifier}: {status}"
-        if show_cost:
-            # Only the literal `stopped` state gets storage-only billing;
-            # everything else (available, starting, upgrading, backing-up,
-            # …) bills compute. The runner's pricing is rough by
-            # definition (no Pricing API call) but conflating
-            # transitional states with stopped underreports cost during
-            # multi-hour boots — meaningful when Oracle takes 30+ min.
-            running = status != "stopped"
-            cost_key = (
-                f"aurora-cluster-{'running' if running else 'stopped'}"
-                if resource.kind == "cluster"
-                else f"oracle-instance-{'running' if running else 'stopped'}"
-            )
-            cost = _ROUGH_HOURLY_COSTS.get(cost_key, 0.0)
-            total_hourly += cost
-            line += f"  (~${cost:.2f}/hr)"
-        print(line)
-    if show_cost:
-        print(f"  rough total: ~${total_hourly:.2f}/hr (estimates only)")
-    return EXIT_SUCCESS
 
 
 def cmd_pyright(args: argparse.Namespace) -> int:
@@ -3557,7 +3499,7 @@ def cmd_dump_last_errors(args: argparse.Namespace) -> int:
     - **Per failing test**: the ``FAILED ...`` summary line + the
       matched ``____ <test_id> ____`` traceback block from
       ``stdout.log`` (truncated at the next ``____`` / ``=====``).
-    - **Capture-artifact pointer**: ``$RECON_GEN_RUN_DIR/browser/<sanitized
+    - **Capture-artifact pointer**: ``$RECON_GEN_RUN_DIR/qs_browser/<sanitized
       test_id>/`` paths, with a loud warning if AA.H.6's 6 files
       (screenshot.png / dom.html / console.txt / network.txt /
       qs_errors.txt / trace.zip) are missing — AA.H.10 wired the hook
@@ -3743,13 +3685,13 @@ def _dump_pytest_failures(stdout: str) -> None:
 
 
 def _dump_capture_status(cell_dir: Path, layer_dir: Path, stdout: str) -> None:
-    """For a failing browser layer, check whether AA.H.6 capture
+    """For a failing qs_browser layer, check whether AA.H.6 capture
     artifacts landed for each failed test. Print a warning if any
     failed test has no matching capture dir — that's an AA.H.10
     regression worth investigating."""
-    if layer_dir.name != "browser":
+    if layer_dir.name != "qs_browser":
         return
-    browser_capture_root = cell_dir / "browser"
+    browser_capture_root = cell_dir / "qs_browser"
     failed = list(_FAILED_LINE_RE.finditer(stdout))
     if not failed:
         return
@@ -3932,7 +3874,7 @@ Auth (Y.2.gate.h+i):
       docs/audits/_iam/recon-gen-local-policy.json
 
 Layer chain (Y.2.gate.b/c/n):
-  unit -> db -> app2 -> deploy -> api -> browser
+  unit -> db -> app2 -> deploy -> qs_api -> qs_browser
   ./run_tests.sh up_to=<layer>  runs the chain through that layer.
   `unit` is variant-independent, so it runs ONCE per invocation as a
   prelude (artifacts → runs/<id>/_prelude/unit/) — not once per matrix
@@ -3941,9 +3883,9 @@ Layer chain (Y.2.gate.b/c/n):
   aborts before any cell dispatches.
 
 Variant matrix (Y.2.gate.m):
-  No flags = full 13-cell matrix (sp/sq named scenarios × pg/or/sl × lo/aw,
-  plus 3 fuzz cells × pg/or/sl × lo). Narrow via sub-flags or pin via --variants.
-  Invalid cells (sl × aw — sqlite isn't reachable from QS) auto-skip with a log.
+  No flags = full 13-cell matrix (sp/sq named scenarios × pg/or/du × lo/aw,
+  plus 3 fuzz cells × pg/or/du × lo). Narrow via sub-flags or pin via --variants.
+  Invalid cells (du × aw — DuckDB isn't reachable from QS) auto-skip with a log.
 
   Examples (all assume `up_to=db` or higher):
     --scenarios=sp,sq                       sp + sq named-scenario subset
@@ -3951,9 +3893,9 @@ Variant matrix (Y.2.gate.m):
     --scenarios=fuzz:5                      5 random fuzz seeds (× dialect axis)
     --scenarios=us:run/customer.yaml        operator-supplied L2 yaml
     --dialects=pg                           postgres only
-    --dialects=pg,or                        cross-dialect (no sqlite)
-    --targets=lo                            local containers / sqlite tempfile
-    --targets=aw                            operator's external Aurora / Oracle
+    --dialects=pg,or                        cross-dialect subset
+    --targets=lo                            local containers / DuckDB tempfile
+    --targets=aw                            operator's external PG / Oracle
     --variants=sp_pg_lo                     triage: pin a single cell
     --variants=f12345_pg_lo                 reproduce a fuzz failure by seed
 """
@@ -3996,13 +3938,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dialects",
         metavar="<csv>",
         default=None,
-        help="dialects axis CSV (pg / or / sl); default = pg,or,sl.",
+        help="dialects axis CSV (pg / or / du); default = pg,or,du.",
     )
     p_up_to.add_argument(
         "--targets",
         metavar="<csv>",
         default=None,
-        help="targets axis CSV (lo / aw); default = lo,aw. sl × aw auto-skips.",
+        help="targets axis CSV (lo / aw); default = lo,aw. du × aw auto-skips.",
     )
     # m.2.a — --variants is the triage escape: each entry is a single
     # ``<sc>_<di>_<ta>`` cell code (e.g., sp_pg_lo, f42_or_lo). Mutex with

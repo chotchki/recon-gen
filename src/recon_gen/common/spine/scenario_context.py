@@ -32,10 +32,10 @@ API shape (intentionally minimal):
 
 - ``ScenarioContext(scenario_id="...")`` — frozen dataclass owning
   the scenario_id string.
-- ``ctx.compose(conn, *generators, dialect=Dialect.SQLITE)`` — runs
+- ``ctx.compose(conn, *generators, dialect=Dialect.DUCKDB)`` — runs
   the pre-checks, calls each generator's ``emit(conn,
   scenario_id=ctx.scenario_id)``, commits.
-- ``ctx.cleanup(conn, dialect=Dialect.SQLITE)`` — DELETE FROM both
+- ``ctx.cleanup(conn, dialect=Dialect.DUCKDB)`` — DELETE FROM both
   base tables WHERE ``metadata.scenario_id`` matches; returns total
   rowcount.
 - ``ClaimedAccountsGenerator`` Protocol — extension of
@@ -55,7 +55,7 @@ Backward compat — every existing call site stays untouched:
 from __future__ import annotations
 
 import json
-import sqlite3
+import duckdb
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
@@ -151,14 +151,23 @@ class _DryRunCaptureOracle(_DryRunBase):
 _DryRunCaptureOracle.__module__ = "oracledb"
 
 
+class _DryRunCaptureDuckdb(_DryRunBase):
+    """DuckDB-dialect dry-run capture; ``_placeholder_style`` falls
+    through to ``qmark`` (``?``) — DuckDB accepts the SQLite-shape
+    positional binds the spine emits."""
+
+
+_DryRunCaptureDuckdb.__module__ = "_duckdb"
+
+
 _DRY_RUN_CLASSES: dict[Dialect, type[_DryRunBase]] = {
-    Dialect.SQLITE: _DryRunCaptureSqlite,
     Dialect.POSTGRES: _DryRunCapturePostgres,
     Dialect.ORACLE: _DryRunCaptureOracle,
+    Dialect.DUCKDB: _DryRunCaptureDuckdb,
 }
 
 
-def dry_run_capture(dialect: Dialect = Dialect.SQLITE) -> _DryRunBase:
+def dry_run_capture(dialect: Dialect = Dialect.DUCKDB) -> _DryRunBase:
     """Return a fresh dry-run capture conn for the given dialect.
 
     The returned object satisfies the dbapi 2.0 shape `insert_tx` /
@@ -191,7 +200,7 @@ class ClaimedAccountsGenerator(Protocol):
 
     def emit(
         self,
-        conn: sqlite3.Connection,
+        conn: duckdb.DuckDBPyConnection,
         *,
         scenario_id: str | None = None,
     ) -> None: ...
@@ -271,14 +280,14 @@ def _check_cross_scenario(
     accounts_tuple = tuple(accounts)
     if not accounts_tuple:
         return
-    placeholders = ", ".join("?" if dialect is Dialect.SQLITE else "%s"
-                              if dialect is Dialect.POSTGRES else f":{i + 1}"
-                              for i in range(len(accounts_tuple)))
-    sid_placeholder = (
-        "?" if dialect is Dialect.SQLITE
-        else "%s" if dialect is Dialect.POSTGRES
-        else f":{len(accounts_tuple) + 1}"
-    )
+    def _ph(idx: int) -> str:
+        if dialect is Dialect.POSTGRES:
+            return "%s"
+        if dialect is Dialect.DUCKDB:
+            return "?"
+        return f":{idx + 1}"
+    placeholders = ", ".join(_ph(i) for i in range(len(accounts_tuple)))
+    sid_placeholder = _ph(len(accounts_tuple))
     sid_extract = json_value("metadata", "'$.scenario_id'", dialect)
     cur = conn.cursor()
     try:
@@ -330,11 +339,11 @@ class ScenarioContext:
 
     scenario_id: str
     prefix: str = "spec_example"
-    dialect: Dialect = Dialect.SQLITE
+    dialect: Dialect = Dialect.DUCKDB
 
     def compose(
         self,
-        conn: sqlite3.Connection,
+        conn: duckdb.DuckDBPyConnection,
         *generators: ClaimedAccountsGenerator,
         dry_run: bool = False,
     ) -> list[tuple[str, tuple[object, ...]]] | None:
@@ -404,7 +413,7 @@ class ScenarioContext:
         conn.commit()
         return None
 
-    def cleanup(self, conn: sqlite3.Connection) -> int:
+    def cleanup(self, conn: duckdb.DuckDBPyConnection) -> int:
         """Delete every row on either base table whose
         ``metadata.scenario_id`` matches this scenario. Returns the
         total rowcount across both tables.
@@ -416,11 +425,12 @@ class ScenarioContext:
         sid_extract = json_value(
             "metadata", "'$.scenario_id'", self.dialect,
         )
-        placeholder = (
-            "?" if self.dialect is Dialect.SQLITE
-            else "%s" if self.dialect is Dialect.POSTGRES
-            else ":1"
-        )
+        if self.dialect is Dialect.POSTGRES:
+            placeholder = "%s"
+        elif self.dialect is Dialect.DUCKDB:
+            placeholder = "?"
+        else:
+            placeholder = ":1"
         total = 0
         cur = conn.cursor()
         try:
@@ -428,11 +438,21 @@ class ScenarioContext:
                 f"{self.prefix}_transactions",
                 f"{self.prefix}_daily_balances",
             ):
+                # DuckDB returns -1 from cur.rowcount on DELETE; count
+                # match-rows via SELECT first so the cross-dialect contract
+                # ("number deleted") holds. PG / Oracle would also accept
+                # this path, so no per-dialect branch.
+                cur.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE {sid_extract} = {placeholder}",
+                    (self.scenario_id,),
+                )
+                row = cur.fetchone()
+                match_count = int(row[0]) if row else 0
                 cur.execute(
                     f"DELETE FROM {table} WHERE {sid_extract} = {placeholder}",
                     (self.scenario_id,),
                 )
-                total += cur.rowcount
+                total += match_count
         finally:
             cur.close()
         conn.commit()

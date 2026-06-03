@@ -27,7 +27,7 @@ Promoted from `tests/unit/test_as0_drift_full_spine.py` by AS.1.
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from typing import Protocol, runtime_checkable
 
 from recon_gen.common.spine.violation import Violation
@@ -60,4 +60,4 @@ class ViolationGenerator(Protocol):
     @property
     def intended(self) -> Violation | None: ...
 
-    def emit(self, conn: sqlite3.Connection) -> None: ...
+    def emit(self, conn: duckdb.DuckDBPyConnection) -> None: ...

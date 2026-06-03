@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import duckdb
 import pytest
 
 from recon_gen.common.env_keys import RECON_GEN_AI_FUZZ_SAMPLE_N
@@ -302,12 +303,11 @@ def _build_l2_sqlite(reference_path: Path) -> tuple[object, str]:
     its source rows from the planted scenario.
     """
     import json as _json
-    import sqlite3
     from datetime import datetime as _datetime
 
     import yaml as _yaml
     from recon_gen.common.as_of_frame import LOCKED_ANCHOR
-    from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+    from recon_gen.common.db import execute_script
     from recon_gen.common.l2.auto_scenario import default_scenario_for
     from recon_gen.common.l2.config_table import emit_config_populate_sql
     from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
@@ -317,14 +317,11 @@ def _build_l2_sqlite(reference_path: Path) -> tuple[object, str]:
 
     instance = load_instance(reference_path)
     prefix = reference_path.stem.replace("-", "_").replace(".", "_")
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
-
+    conn = duckdb.connect(":memory:")
     cur = conn.cursor()
     execute_script(
-        cur, emit_schema(instance, prefix=prefix, dialect=Dialect.SQLITE),
-        dialect=Dialect.SQLITE,
+        cur, emit_schema(instance, prefix=prefix, dialect=Dialect.DUCKDB),
+        dialect=Dialect.DUCKDB,
     )
     conn.commit()
 
@@ -340,10 +337,10 @@ def _build_l2_sqlite(reference_path: Path) -> tuple[object, str]:
             LOCKED_ANCHOR.year, LOCKED_ANCHOR.month, LOCKED_ANCHOR.day,
             12, 0, 0,
         ),
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     cur = conn.cursor()
-    execute_script(cur, populate_sql, dialect=Dialect.SQLITE)
+    execute_script(cur, populate_sql, dialect=Dialect.DUCKDB)
     conn.commit()
 
     # Plants-only seed. Default scenario is deterministic per L2 +
@@ -352,20 +349,20 @@ def _build_l2_sqlite(reference_path: Path) -> tuple[object, str]:
     report = default_scenario_for(instance, today=LOCKED_ANCHOR)
     seed_sql = emit_seed(
         instance, report.scenario,
-        prefix=prefix, dialect=Dialect.SQLITE,
+        prefix=prefix, dialect=Dialect.DUCKDB,
     )
     if seed_sql:
         cur = conn.cursor()
-        execute_script(cur, seed_sql, dialect=Dialect.SQLITE)
+        execute_script(cur, seed_sql, dialect=Dialect.DUCKDB)
         conn.commit()
 
     # Refresh every matview against the planted scenario.
     cur = conn.cursor()
     execute_script(
         cur, refresh_matviews_sql(
-            instance, prefix=prefix, dialect=Dialect.SQLITE,
+            instance, prefix=prefix, dialect=Dialect.DUCKDB,
         ),
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     conn.commit()
 
@@ -408,7 +405,7 @@ def _collect_matview_rows(
     for suffix in _DASHBOARD_MATVIEWS:
         table = f"{prefix}_{suffix}"
         try:
-            rows = conn.execute(  # type: ignore[attr-defined]: sqlite3.Connection — `object` annotation kept for the driver-side opaque-conn handoff pattern
+            rows = conn.execute(  # type: ignore[attr-defined]: duckdb.DuckDBPyConnection — `object` annotation kept for the driver-side opaque-conn handoff pattern
                 f"SELECT * FROM {table}",
             ).fetchall()
         except Exception:
@@ -473,13 +470,13 @@ def test_dogfood_matview_rows_match_reference(
     try:
         ref_rows = _collect_matview_rows(ref_conn, ref_prefix)
     finally:
-        ref_conn.close()  # type: ignore[attr-defined]: sqlite3.Connection — `object` annotation kept for the driver-side opaque-conn handoff pattern
+        ref_conn.close()  # type: ignore[attr-defined]: duckdb.DuckDBPyConnection — `object` annotation kept for the driver-side opaque-conn handoff pattern
 
     dog_conn, dog_prefix = _build_l2_sqlite(dogfood_path)
     try:
         dog_rows = _collect_matview_rows(dog_conn, dog_prefix)
     finally:
-        dog_conn.close()  # type: ignore[attr-defined]: sqlite3.Connection — `object` annotation kept for the driver-side opaque-conn handoff pattern
+        dog_conn.close()  # type: ignore[attr-defined]: duckdb.DuckDBPyConnection — `object` annotation kept for the driver-side opaque-conn handoff pattern
 
     _assert_matview_rows_equal(ref_rows, dog_rows, variant=fixture_name)
 
@@ -506,13 +503,13 @@ def test_dogfood_matview_rows_match_reference_fuzz(
     try:
         ref_rows = _collect_matview_rows(ref_conn, ref_prefix)
     finally:
-        ref_conn.close()  # type: ignore[attr-defined]: sqlite3.Connection — `object` annotation kept for the driver-side opaque-conn handoff pattern
+        ref_conn.close()  # type: ignore[attr-defined]: duckdb.DuckDBPyConnection — `object` annotation kept for the driver-side opaque-conn handoff pattern
 
     dog_conn, dog_prefix = _build_l2_sqlite(dogfood_path)
     try:
         dog_rows = _collect_matview_rows(dog_conn, dog_prefix)
     finally:
-        dog_conn.close()  # type: ignore[attr-defined]: sqlite3.Connection — `object` annotation kept for the driver-side opaque-conn handoff pattern
+        dog_conn.close()  # type: ignore[attr-defined]: duckdb.DuckDBPyConnection — `object` annotation kept for the driver-side opaque-conn handoff pattern
 
     _assert_matview_rows_equal(
         ref_rows, dog_rows, variant=f"fuzz_{seed:010d}",

@@ -989,7 +989,7 @@ def capture_top_queries(
     title = f"Top expensive queries ({dialect_str})"
 
     # SQLite has no stats view — write a clean skipped marker and stop.
-    if cfg.dialect is Dialect.SQLITE:
+    if cfg.dialect is Dialect.DUCKDB:
         try:
             target_dir.mkdir(parents=True, exist_ok=True)
             target.write_text(

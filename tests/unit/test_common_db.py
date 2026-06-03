@@ -12,7 +12,7 @@ the import-error branches in ``connect_demo_db`` are covered here with
 
 from __future__ import annotations
 
-from pathlib import Path
+
 from typing import Any
 
 import pytest
@@ -22,11 +22,9 @@ from tests._test_helpers import make_test_config
 from recon_gen.common.db import (
     AsyncConnectionPool as AsyncConnectionPool,  # re-exported for protocol smoke
     connect_demo_db,
-    execute_script,
     make_connection_pool,
     oracle_dsn,
     split_oracle_script,
-    sqlite_path,
 )
 from recon_gen.common.sql import Dialect
 
@@ -166,13 +164,32 @@ class TestConnectDemoDb:
         import sys
         import types
 
-        called: dict[str, str] = {}
+        called: dict[str, object] = {}
 
         stub = types.ModuleType("oracledb")
 
-        def fake_connect(dsn: str) -> str:
+        # CB.14 — connect_demo_db now pins session NLS via
+        # `conn.cursor().execute("ALTER SESSION SET NLS_DATE_FORMAT = ...")`
+        # after oracledb.connect(). The fake conn needs a cursor() that
+        # returns something with execute() + close(); we also record the
+        # NLS statements so the test can assert the pin happened.
+        nls_statements: list[str] = []
+
+        class _FakeOraCursor:
+            def execute(self, stmt: str) -> None:
+                nls_statements.append(stmt)
+            def close(self) -> None:
+                pass
+
+        class _FakeOraConn:
+            def cursor(self) -> "_FakeOraCursor":
+                return _FakeOraCursor()
+
+        fake_conn = _FakeOraConn()
+
+        def fake_connect(dsn: str) -> "_FakeOraConn":
             called["dsn"] = dsn
-            return "fake_ora_conn"
+            return fake_conn
 
         stub.connect = fake_connect  # type: ignore[attr-defined]: monkey-patching the .connect attribute onto a fake module
         monkeypatch.setitem(sys.modules, "oracledb", stub)
@@ -182,215 +199,21 @@ class TestConnectDemoDb:
             url="oracle://admin:secret@db.example.com:1521/ORCL",
         )
         conn = connect_demo_db(cfg)
-        assert conn == "fake_ora_conn"
+        assert conn is fake_conn
         # The DSN was translated to oracledb's native shape.
         assert called["dsn"] == "admin/secret@db.example.com:1521/ORCL"
+        # NLS pinned to ISO so spine-emitted date strings parse.
+        assert any("NLS_DATE_FORMAT" in s and "YYYY-MM-DD" in s for s in nls_statements)
+        assert any("NLS_TIMESTAMP_FORMAT" in s for s in nls_statements)
 
-    def test_sqlite_branch_opens_inmemory(self) -> None:
-        # X.3.a — SQLite uses stdlib sqlite3 with no extra. ``:memory:``
-        # is the canonical in-memory DB string; SQLAlchemy-style URL
-        # form parses to the same path via ``sqlite_path``.
-        cfg = _cfg(dialect=Dialect.SQLITE, url="sqlite://:memory:")
-        conn = connect_demo_db(cfg)
-        try:
-            cur = conn.cursor()
-            cur.execute("SELECT 1")
-            assert cur.fetchone()[0] == 1
-        finally:
-            conn.close()
+# -- execute_script SQLite branch (CB.8: deleted) ----------------------------
+# `TestSqlitePath` + `TestExecuteScriptSqlite` removed in CB.8 along with the
+# `Dialect.SQLITE` enum value. The DuckDB equivalent runs through
+# `connect_demo_db` (covered by other tests in this file) — no separate
+# duckdb-script test class needed; the execute_script path is dialect-
+# agnostic per-statement once SQLite's special-case `executescript` arm
+# went away.
 
-    def test_sqlite_branch_opens_file(self, tmp_path: Path) -> None:
-        # SQLAlchemy-style ``sqlite:///path`` translates to the file
-        # path correctly. Round-trip a CREATE/INSERT/SELECT to confirm
-        # the connection is a real DB-API 2.0 sqlite3.Connection.
-        db_file = tmp_path / "demo.sqlite"
-        cfg = _cfg(dialect=Dialect.SQLITE, url=f"sqlite:///{db_file}")
-        conn = connect_demo_db(cfg)
-        try:
-            cur = conn.cursor()
-            cur.execute("CREATE TABLE t (a INTEGER)")
-            cur.execute("INSERT INTO t VALUES (42)")
-            cur.execute("SELECT a FROM t")
-            assert cur.fetchone() == (42,)
-        finally:
-            conn.close()
-        assert db_file.exists()
-
-
-# -- sqlite_path -------------------------------------------------------------
-
-
-class TestSqlitePath:
-    """X.3.a — URL-to-path translation for the sqlite3 connection."""
-
-    def test_inmemory_url_form(self) -> None:
-        assert sqlite_path("sqlite://:memory:") == ":memory:"
-
-    def test_inmemory_bare(self) -> None:
-        # Bare ``:memory:`` (no scheme) passes through unchanged for
-        # ergonomics — the integrator can paste either form.
-        assert sqlite_path(":memory:") == ":memory:"
-
-    def test_triple_slash_absolute_path(self) -> None:
-        # SQLAlchemy convention: three slashes for relative, four for
-        # absolute. The path component is everything after the third
-        # slash.
-        assert sqlite_path("sqlite:///tmp/demo.sqlite") == "tmp/demo.sqlite"
-
-    def test_triple_slash_keeps_leading_slash_on_quad(self) -> None:
-        # ``sqlite:////tmp/demo.sqlite`` (four slashes) → absolute.
-        assert sqlite_path("sqlite:////tmp/demo.sqlite") == "/tmp/demo.sqlite"
-
-    def test_bare_path_passes_through(self) -> None:
-        assert sqlite_path("/tmp/demo.sqlite") == "/tmp/demo.sqlite"
-        assert sqlite_path("./relative.sqlite") == "./relative.sqlite"
-
-
-# -- execute_script SQLite branch -------------------------------------------
-
-
-class TestExecuteScriptSqlite:
-    """X.3.a — multi-statement script execution against SQLite."""
-
-    def test_executes_multi_statement_script(self) -> None:
-        import sqlite3
-
-        conn = sqlite3.connect(":memory:")
-        try:
-            cur = conn.cursor()
-            sql = (
-                "CREATE TABLE t (a INTEGER);\n"
-                "INSERT INTO t VALUES (1);\n"
-                "INSERT INTO t VALUES (2);\n"
-                "INSERT INTO t VALUES (3);"
-            )
-            execute_script(cur, sql, dialect=Dialect.SQLITE)
-            cur.execute("SELECT COUNT(*) FROM t")
-            assert cur.fetchone()[0] == 3
-        finally:
-            conn.close()
-
-    def test_insert_with_columns_takes_bind_fast_path(self) -> None:
-        """X.4.j.sqlite-binds: INSERT INTO foo (cols) VALUES (...) form
-        gets coalesced into executemany. End-state must be identical to
-        plain executescript."""
-        import sqlite3
-
-        conn = sqlite3.connect(":memory:")
-        try:
-            cur = conn.cursor()
-            sql = (
-                "CREATE TABLE t (id TEXT, n INTEGER, x REAL, j TEXT);\n"
-                "INSERT INTO t (id, n, x, j) VALUES "
-                "('a', 1, 1.5, '{\"k\": \"v\"}');\n"
-                "INSERT INTO t (id, n, x, j) VALUES ('b', NULL, -2.0, NULL);\n"
-                "INSERT INTO t (id, n, x, j) VALUES ('c', 999, 0.0, 'plain');"
-            )
-            execute_script(cur, sql, dialect=Dialect.SQLITE)
-            cur.execute("SELECT id, n, x, j FROM t ORDER BY id")
-            rows = cur.fetchall()
-            assert rows == [
-                ("a", 1, 1.5, '{"k": "v"}'),
-                ("b", None, -2.0, None),
-                ("c", 999, 0.0, "plain"),
-            ]
-        finally:
-            conn.close()
-
-    def test_grouping_change_flushes_buffer(self) -> None:
-        """Mixed-table INSERTs flush the buffer on transition. Order
-        within each table is preserved."""
-        import sqlite3
-
-        conn = sqlite3.connect(":memory:")
-        try:
-            cur = conn.cursor()
-            sql = (
-                "CREATE TABLE a (v INTEGER);\n"
-                "CREATE TABLE b (v INTEGER);\n"
-                "INSERT INTO a (v) VALUES (1);\n"
-                "INSERT INTO a (v) VALUES (2);\n"
-                "INSERT INTO b (v) VALUES (10);\n"
-                "INSERT INTO a (v) VALUES (3);\n"  # transitions back
-            )
-            execute_script(cur, sql, dialect=Dialect.SQLITE)
-            cur.execute("SELECT v FROM a ORDER BY v")
-            assert [r[0] for r in cur.fetchall()] == [1, 2, 3]
-            cur.execute("SELECT v FROM b ORDER BY v")
-            assert [r[0] for r in cur.fetchall()] == [10]
-        finally:
-            conn.close()
-
-    def test_non_insert_statements_pass_through(self) -> None:
-        """DDL + DELETE between INSERTs run via per-statement cur.execute
-        — buffer flushes before each non-conforming statement runs."""
-        import sqlite3
-
-        conn = sqlite3.connect(":memory:")
-        try:
-            cur = conn.cursor()
-            sql = (
-                "CREATE TABLE t (v INTEGER);\n"
-                "INSERT INTO t (v) VALUES (1);\n"
-                "INSERT INTO t (v) VALUES (2);\n"
-                "DELETE FROM t WHERE v = 1;\n"
-                "INSERT INTO t (v) VALUES (3);"
-            )
-            execute_script(cur, sql, dialect=Dialect.SQLITE)
-            cur.execute("SELECT v FROM t ORDER BY v")
-            assert [r[0] for r in cur.fetchall()] == [2, 3]
-        finally:
-            conn.close()
-
-    def test_comments_dropped_not_executed(self) -> None:
-        """Header comment lines (-- SHA256: ...) the seed emit prepends
-        must not surface as bogus statements."""
-        import sqlite3
-
-        conn = sqlite3.connect(":memory:")
-        try:
-            cur = conn.cursor()
-            sql = (
-                "-- SHA256: deadbeef\n"
-                "-- =====================================\n"
-                "-- comment-only block before the inserts\n"
-                "-- =====================================\n"
-                "\n"
-                "CREATE TABLE t (v INTEGER);\n"
-                "INSERT INTO t (v) VALUES (1);\n"
-                "INSERT INTO t (v) VALUES (2);"
-            )
-            execute_script(cur, sql, dialect=Dialect.SQLITE)
-            cur.execute("SELECT COUNT(*) FROM t")
-            assert cur.fetchone()[0] == 2
-        finally:
-            conn.close()
-
-    def test_caller_owns_commit(self) -> None:
-        """Helper does NOT commit on its own — caller controls
-        transaction boundary. Verifies a rollback after the call wipes
-        all the inserted rows."""
-        import sqlite3
-
-        conn = sqlite3.connect(":memory:")
-        try:
-            cur = conn.cursor()
-            cur.execute("CREATE TABLE t (v INTEGER)")
-            conn.commit()
-            sql = (
-                "INSERT INTO t (v) VALUES (1);\n"
-                "INSERT INTO t (v) VALUES (2);\n"
-                "INSERT INTO t (v) VALUES (3);"
-            )
-            execute_script(cur, sql, dialect=Dialect.SQLITE)
-            # Pre-rollback rows visible to this connection (autocommit-ish view).
-            cur.execute("SELECT COUNT(*) FROM t")
-            assert cur.fetchone()[0] == 3
-            conn.rollback()
-            cur.execute("SELECT COUNT(*) FROM t")
-            assert cur.fetchone()[0] == 0
-        finally:
-            conn.close()
 
 
 # -- Oracle DDL lock-timeout retry ------------------------------------------
@@ -513,7 +336,7 @@ class TestMakeConnectionPool:
 
         cfg = make_test_config(
             aws_region="us-east-2",
-            dialect=Dialect.SQLITE,
+            dialect=Dialect.DUCKDB,
             demo_database_url=":memory:",
         )
 
@@ -546,7 +369,7 @@ class TestMakeConnectionPool:
 
         cfg = make_test_config(
             aws_region="us-east-2",
-            dialect=Dialect.SQLITE,
+            dialect=Dialect.DUCKDB,
             demo_database_url=None,
         )
         with pytest.raises(ValueError, match="demo_database_url is unset"):
@@ -575,7 +398,7 @@ class TestMakeConnectionPool:
 
         cfg = make_test_config(
             aws_region="us-east-2",
-            dialect=Dialect.SQLITE,
+            dialect=Dialect.DUCKDB,
             demo_database_url=":memory:",
         )
         pool = asyncio.run(make_connection_pool(cfg))
@@ -588,3 +411,123 @@ class TestMakeConnectionPool:
             # is enough to catch a missing method regression.
         finally:
             asyncio.run(pool.close())
+
+
+# -- _apply_seed_via_duckdb_pyarrow regressions (CA.11) ---------------------
+
+class TestApplySeedViaDuckdbPyarrow:
+    """Regression cases against the CA.11 fast path.
+
+    Two correctness bugs surfaced post-initial-CA.11 land — both worth
+    a permanent regression:
+
+    1. **Ordering bug**: residual DDL that appeared BEFORE an INSERT in
+       the script was queued for end-of-function execution; the INSERT
+       then flushed against a missing table. Fix: process residual
+       between each INSERT match boundary, before the next batch.
+
+    2. **Quote-aware scanner**: the naive `[^;]+` body capture
+       truncated when the seed text embedded ``;`` inside a string
+       literal (operator-authored config descriptions). Fix: body
+       alternation matches single-quoted strings OR non-`;` chars.
+
+    Tests intentionally hit the function directly via the in-process
+    `duckdb.connect(":memory:")` to keep the regression cheap
+    (~milliseconds) and dialect-isolated.
+    """
+
+    def test_ddl_before_insert_runs_in_order(self) -> None:
+        import duckdb
+
+        from recon_gen.common.db import _apply_seed_via_duckdb_pyarrow
+
+        con = duckdb.connect(":memory:")
+        try:
+            _apply_seed_via_duckdb_pyarrow(
+                con,
+                "CREATE TABLE foo (id INTEGER, name VARCHAR);\n"
+                "INSERT INTO foo (id, name) VALUES (1, 'a');\n"
+                "INSERT INTO foo (id, name) VALUES (2, 'b');\n",
+            )
+            assert con.execute(
+                "SELECT id, name FROM foo ORDER BY id"
+            ).fetchall() == [(1, "a"), (2, "b")]
+        finally:
+            con.close()
+
+    def test_ddl_between_two_insert_groups_runs_in_order(self) -> None:
+        """CREATE TABLE bar between an INSERT-into-foo and INSERT-into-bar
+        must run BEFORE the bar INSERT lands (group boundary triggers
+        both flush + residual execution)."""
+        import duckdb
+
+        from recon_gen.common.db import _apply_seed_via_duckdb_pyarrow
+
+        con = duckdb.connect(":memory:")
+        try:
+            _apply_seed_via_duckdb_pyarrow(
+                con,
+                "CREATE TABLE foo (id INTEGER);\n"
+                "INSERT INTO foo (id) VALUES (1);\n"
+                "CREATE TABLE bar (id INTEGER);\n"
+                "INSERT INTO bar (id) VALUES (10);\n"
+                "INSERT INTO foo (id) VALUES (2);\n",
+            )
+            assert con.execute("SELECT id FROM foo ORDER BY id").fetchall() == [(1,), (2,)]
+            assert con.execute("SELECT id FROM bar").fetchall() == [(10,)]
+        finally:
+            con.close()
+
+    def test_semicolon_inside_string_literal(self) -> None:
+        """Quote-aware body scanner: a `;` inside a VALUES string literal
+        must NOT be treated as a statement terminator. Repros the second
+        config-populate failure shape (operator-authored description text
+        containing punctuation)."""
+        import duckdb
+
+        from recon_gen.common.db import _apply_seed_via_duckdb_pyarrow
+
+        con = duckdb.connect(":memory:")
+        try:
+            _apply_seed_via_duckdb_pyarrow(
+                con,
+                "CREATE TABLE foo (id INTEGER, descr VARCHAR);\n"
+                "INSERT INTO foo (id, descr) VALUES (1, "
+                "'Inbound ACH credit; force-posts via the rail');\n"
+                "INSERT INTO foo (id, descr) VALUES (2, 'plain text');\n",
+            )
+            rows = con.execute(
+                "SELECT id, descr FROM foo ORDER BY id"
+            ).fetchall()
+            assert rows == [
+                (1, "Inbound ACH credit; force-posts via the rail"),
+                (2, "plain text"),
+            ]
+        finally:
+            con.close()
+
+    def test_comment_only_residual_does_not_choke_duckdb(self) -> None:
+        """The seed's `-- SHA256: ...` header lands as residual between
+        the script start and the first INSERT. Comment-only residual
+        must be stripped (DuckDB chokes on a bare `;` left over from
+        the comment-line strip)."""
+        import duckdb
+
+        from recon_gen.common.db import _apply_seed_via_duckdb_pyarrow
+
+        con = duckdb.connect(":memory:")
+        try:
+            _apply_seed_via_duckdb_pyarrow(
+                con,
+                "-- SHA256: fake-hash-header\n"
+                "-- another comment line\n"
+                "CREATE TABLE foo (id INTEGER);\n"
+                "-- mid-script comment\n"
+                "INSERT INTO foo (id) VALUES (1);\n"
+                "-- trailing comment\n",
+            )
+            assert con.execute(
+                "SELECT id FROM foo"
+            ).fetchall() == [(1,)]
+        finally:
+            con.close()

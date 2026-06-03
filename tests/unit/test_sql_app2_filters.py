@@ -91,17 +91,19 @@ class TestOracle:
         assert "') + 1" in sql
 
 
-class TestSqlite:
-    def test_uses_datetime_function(self) -> None:
-        """SQLite has no native DATE type — ``datetime(...)``
-        normalizes ISO TEXT inputs + supports the ``'+1 day'``
-        modifier for the day-inclusive upper bound."""
-        sql = _clause(Dialect.SQLITE)
-        assert "datetime(" in sql
-        assert "'+1 day'" in sql
+class TestDuckdb:
+    def test_uses_typed_timestamp_cast(self) -> None:
+        """DuckDB has a real TIMESTAMP type; the filter casts the
+        operator-provided ISO strings via ``CAST(... AS TIMESTAMP)``
+        and applies ``INTERVAL '1 day'`` for the day-inclusive upper
+        bound."""
+        sql = _clause(Dialect.DUCKDB)
+        assert "CAST(" in sql
+        assert "AS TIMESTAMP)" in sql
+        assert "INTERVAL '1 day'" in sql
 
     def test_includes_both_param_placeholders(self) -> None:
-        sql = _clause(Dialect.SQLITE)
+        sql = _clause(Dialect.DUCKDB)
         assert f"<<${_START}>>" in sql
         assert f"<<${_END}>>" in sql
 

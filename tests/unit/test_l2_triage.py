@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sqlite3
+import duckdb
 import tempfile
 from collections.abc import Callable, Iterator
 from decimal import Decimal
@@ -54,9 +54,10 @@ def _seed_db(rows: Sequence[SeedRow]) -> str:
     account_parent_role, amount_direction, transfer_parent_id,
     posting, metadata).
     """
-    fd, path = tempfile.mkstemp(suffix=".sqlite")
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
-    conn = sqlite3.connect(path)
+    os.unlink(path)
+    conn = duckdb.connect(path)
     conn.execute(
         f"CREATE TABLE {_PREFIX}_transactions ("
         "id TEXT PRIMARY KEY, "
@@ -69,13 +70,16 @@ def _seed_db(rows: Sequence[SeedRow]) -> str:
         "posting TIMESTAMP NOT NULL, "
         "metadata TEXT)"
     )
-    conn.executemany(
-        f"INSERT INTO {_PREFIX}_transactions "
-        "(id, rail_name, template_name, account_role, account_parent_role, "
-        " amount_direction, transfer_parent_id, posting, metadata) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        rows,
-    )
+    if rows:
+        # DuckDB rejects executemany with an empty list ("requires a
+        # non-empty list of parameter sets"); SQLite quietly no-op'd.
+        conn.executemany(
+            f"INSERT INTO {_PREFIX}_transactions "
+            "(id, rail_name, template_name, account_role, account_parent_role, "
+            " amount_direction, transfer_parent_id, posting, metadata) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
     conn.commit()
     conn.close()
     return path
@@ -104,7 +108,7 @@ def pool_factory() -> Iterator[PoolFactory]:
     paths: list[str] = []
 
     def _build(path: str) -> AsyncConnectionPool:
-        cfg = make_test_config(dialect=Dialect.SQLITE, demo_database_url=path)
+        cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
         pool = asyncio.run(make_connection_pool(cfg))
         pools.append(pool)
         paths.append(path)
@@ -124,7 +128,7 @@ def _detect(
 ) -> tuple[Gap, ...]:
     contracts = derive_column_contracts(instance)
     return asyncio.run(detect_gaps(
-        pool, _PREFIX, instance, contracts, dialect=Dialect.SQLITE,
+        pool, _PREFIX, instance, contracts, dialect=Dialect.DUCKDB,
     ))
 
 

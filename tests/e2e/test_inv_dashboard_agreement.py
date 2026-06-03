@@ -100,11 +100,14 @@ from tests.audit._scenario_expectations import (  # noqa: E402
     expected_l2_audit_counts,
 )
 from tests.e2e._drivers import App2Driver  # noqa: E402
+from tests._marks import Need, Tier, needs, tier  # noqa: E402
 
 
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
+    tier(Tier.QS_BROWSER),
+    needs(Need.AWS_QS, Need.PLAYWRIGHT),
     # The module-scope ``seeded_l2_db`` + ``isolated_inv_cfg`` fixtures
     # build a shared ``<prefix>_iagree`` schema. Under pytest-xdist's
     # default ``load`` distribution each parametrized variant of the
@@ -675,6 +678,16 @@ def _money_trail_root_edge_keys(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(
+    reason="CB.5 stage 2: superseded by per-renderer producers + "
+    "high-watermark validators. See "
+    "tests/e2e/qs_browser/test_inv_anomaly_agreement.py and "
+    "tests/e2e/qs_browser/test_inv_money_trail_agreement.py "
+    "(per-invariant validators with @inputs(...) chaining db/ + "
+    "app2/ + qs_browser/ producers). One commit transition: this "
+    "skip stays for one commit so the operator can confirm the new "
+    "shape passes; CB.5 follow-up deletes the file entirely."
+)
 @pytest.mark.parametrize("invariant", _ALL_L2_INVARIANTS)
 def test_invariant_three_way_agreement(
     seeded_l2_db: None,

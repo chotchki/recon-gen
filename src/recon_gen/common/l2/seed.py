@@ -118,12 +118,6 @@ def _sql_timestamp_literal(iso_8601_str: str, dialect: Dialect) -> str:
     naive = _strip_tz_offset(iso_8601_str)
     if dialect is Dialect.POSTGRES:
         return "'" + naive.replace("'", "''") + "'"
-    if dialect is Dialect.SQLITE:
-        # SQLite stores TIMESTAMP as TEXT; ISO-8601 with a space
-        # separator is the format ``date()`` / ``datetime()`` /
-        # ``julianday()`` recognize unambiguously.
-        sqlite_str = naive.replace("T", " ", 1).replace("'", "''")
-        return "'" + sqlite_str + "'"
     oracle_str = naive.replace("T", " ", 1).replace("'", "''")
     return f"TIMESTAMP '{oracle_str}'"
 
@@ -1291,20 +1285,6 @@ def emit_truncate_sql(
         body = (
             f"TRUNCATE TABLE {p}_transactions RESTART IDENTITY CASCADE;\n"
             f"TRUNCATE TABLE {p}_daily_balances RESTART IDENTITY CASCADE;\n"
-        )
-    elif dialect is Dialect.SQLITE:
-        # SQLite has no TRUNCATE — DELETE empties the table and
-        # sqlite_sequence reset reclaims the AUTOINCREMENT counter
-        # so the next INSERT starts at entry=1 (matches PG's RESTART
-        # IDENTITY semantics). The sqlite_sequence presence check
-        # avoids "no such table" on a fresh schema.
-        body = (
-            f"DELETE FROM {p}_transactions;\n"
-            f"DELETE FROM {p}_daily_balances;\n"
-            f"DELETE FROM sqlite_sequence "
-            f"WHERE name IN ('{p}_transactions', '{p}_daily_balances') "
-            f"AND EXISTS (SELECT 1 FROM sqlite_master "
-            f"WHERE name='sqlite_sequence');\n"
         )
     else:
         # Oracle: plain TRUNCATE; CASCADE in Oracle deletes child rows
@@ -4396,6 +4376,184 @@ def _resolve_any_account(
 
 
 
+# CA.11 — structural emit: the baseline + plant pipelines accumulate
+# tuples of Python natives in the column order below. Text emit renders
+# each tuple via `_txn_row_to_sql` / `_balance_row_to_sql`; the DuckDB
+# pyarrow apply path consumes the tuples directly (CA.11) and the PG
+# (CA.12) / Oracle (CA.13) adapters will share the same shape.
+
+# Column-name + ordering tuples — single source of truth.
+# CA.11: previously embedded in `emit_baseline_seed` as a comma-string;
+# the cols-as-tuple form lets the structured apply path build a pyarrow
+# schema from column names without re-parsing the string.
+_TXN_COLS: tuple[str, ...] = (
+    "id", "account_id", "account_name", "account_role", "account_scope",
+    "account_parent_role", "amount_money", "amount_direction", "status",
+    "posting", "transfer_id", "transfer_completion", "transfer_parent_id",
+    "rail_name", "template_name", "bundle_id", "supersedes", "origin",
+    "metadata",
+)
+_BALANCE_COLS: tuple[str, ...] = (
+    "account_id", "account_name", "account_role", "account_scope",
+    "account_parent_role", "expected_eod_balance",
+    "business_day_start", "business_day_end", "money", "metadata",
+    "supersedes",
+)
+
+
+def _txn_row_tuple(
+    *,
+    id_: str,
+    account_id: Identifier,
+    account_name: Name,
+    account_role: Identifier,
+    account_scope: str,
+    account_parent_role: Identifier | None,
+    money: Decimal,
+    direction: str,
+    posting: str,
+    transfer_id: str,
+    rail_name: Identifier,
+    origin: str,
+    metadata: dict[str, str],
+    status: str = "Posted",
+    bundle_id: str | None = None,
+    supersedes: str | None = None,
+    template_name: Identifier | None = None,
+    transfer_parent_id: str | None = None,
+) -> tuple[object, ...]:
+    """Build one structured row for the transactions INSERT.
+
+    CA.11 — the structured form: Python natives in `_TXN_COLS` order.
+    Money is rendered to integer cents at the boundary (the BIGINT
+    cents convention; AO.1); metadata is rendered to its compact JSON
+    string. Timestamps stay as ISO-8601 strings for byte-identity with
+    the legacy `_txn_row` text emit — `_txn_row_to_sql` wraps in
+    `TIMESTAMP '...'` literals; the pyarrow apply path passes the
+    string to DuckDB which casts on INSERT SELECT.
+
+    `status` defaults to 'Posted' — the M.2.2 baseline scenarios all
+    plant Posted legs. `bundle_id` and `supersedes` default to NULL —
+    M.2b.14 plants exercise them for stuck-Unbundled / supersession
+    scenarios. `template_name` defaults to NULL; the M.3.10g
+    TransferTemplate plant is the first scenario kind to populate it.
+    `transfer_parent_id` defaults to NULL; M.3.10h chain-child legs
+    populate it. `transfer_completion` isn't currently exercised,
+    emits as NULL.
+    """
+    money_cents = _to_cents(money)
+    metadata_json = (
+        "{" + ", ".join(
+            f'"{k}": "{v}"' for k, v in sorted(metadata.items())
+        ) + "}"
+    )
+    return (
+        id_,
+        account_id, account_name, account_role, account_scope,
+        account_parent_role,
+        money_cents, direction, status,
+        posting,
+        transfer_id,
+        None,
+        transfer_parent_id,
+        rail_name, template_name, bundle_id, supersedes,
+        origin, metadata_json,
+    )
+
+
+def _balance_row_tuple(
+    *,
+    account_id: Identifier,
+    account_name: Name,
+    account_role: Identifier,
+    account_scope: str,
+    account_parent_role: Identifier | None,
+    day: date,
+    money: Decimal,
+    offset_hours: int = 0,
+) -> tuple[object, ...]:
+    """Build one structured row for the daily_balances INSERT.
+
+    CA.11 — Python natives in `_BALANCE_COLS` order. ``offset_hours``
+    shifts ``business_day_start`` and ``business_day_end`` by the
+    same amount (M.4.4.14) — a role with offset=17 emits 17:00→17:00
+    next day. Default 0 keeps production midnight-aligned. Timestamps
+    stay as ISO-8601 strings; the same boundary convention as
+    `_txn_row_tuple`.
+    """
+    money_cents = _to_cents(money)
+    return (
+        account_id, account_name, account_role, account_scope,
+        account_parent_role,
+        None,
+        _bod_timestamp(day, offset_hours),
+        _eod_timestamp(day, offset_hours),
+        money_cents,
+        None, None,
+    )
+
+
+_TXN_TIMESTAMP_COL_INDEXES: tuple[int, ...] = (
+    _TXN_COLS.index("posting"),
+)
+_BALANCE_TIMESTAMP_COL_INDEXES: tuple[int, ...] = (
+    _BALANCE_COLS.index("business_day_start"),
+    _BALANCE_COLS.index("business_day_end"),
+)
+
+
+def _txn_row_to_sql(row: tuple[object, ...], dialect: Dialect) -> str:
+    """Render a `_txn_row_tuple` as the SQL VALUES `(…)` body.
+
+    CA.11 — pulled out of the legacy `_txn_row` so the text-emit path
+    (PG, Oracle, the on-disk locked seeds) and the structured-apply
+    path (DuckDB pyarrow) share one row builder. Byte-identical to
+    the pre-refactor `_txn_row` output.
+    """
+    return "(" + ", ".join(
+        _render_seed_value(v, dialect, is_timestamp=(i in _TXN_TIMESTAMP_COL_INDEXES))
+        for i, v in enumerate(row)
+    ) + ")"
+
+
+def _balance_row_to_sql(row: tuple[object, ...], dialect: Dialect) -> str:
+    """Render a `_balance_row_tuple` as the SQL VALUES `(…)` body.
+
+    CA.11 — same byte-identity contract as `_txn_row_to_sql`.
+    """
+    return "(" + ", ".join(
+        _render_seed_value(v, dialect, is_timestamp=(i in _BALANCE_TIMESTAMP_COL_INDEXES))
+        for i, v in enumerate(row)
+    ) + ")"
+
+
+def _render_seed_value(v: object, dialect: Dialect, *, is_timestamp: bool) -> str:
+    """Render one tuple value as a SQL literal.
+
+    CA.11 — handles the limited type set the seed actually emits:
+    None / str / int. Booleans don't appear (the schema has no BOOLEAN
+    columns); floats don't appear (money is always pre-converted to
+    integer cents). The `is_timestamp` flag tells us to wrap the string
+    in `TIMESTAMP '...'` instead of single-quoting as plain VARCHAR.
+    """
+    if v is None:
+        return "NULL"
+    if is_timestamp:
+        assert isinstance(v, str), f"timestamp value must be ISO string, got {type(v).__name__}"
+        return _sql_timestamp_literal(v, dialect)
+    if isinstance(v, str):
+        return "'" + v.replace("'", "''") + "'"
+    if isinstance(v, int) and not isinstance(v, bool):
+        return str(v)
+    raise TypeError(f"seed value of type {type(v).__name__!r} not renderable: {v!r}")
+
+
+# Legacy text-only wrappers (kept until callers migrate to the tuple
+# form). CA.11 — `_txn_row` / `_balance_row` now compose tuple +
+# render. Production seed.py callers already use these via
+# `rows.append(_txn_row(...))`; the wrappers preserve byte-identity
+# for the locked-seed gate.
+
 def _txn_row(
     *,
     id_: str,
@@ -4418,52 +4576,33 @@ def _txn_row(
     template_name: Identifier | None = None,
     transfer_parent_id: str | None = None,
 ) -> str:
-    """Build one VALUES row for the transactions INSERT.
+    """Build one VALUES row for the transactions INSERT (legacy text form).
 
-    `status` defaults to 'Posted' — the M.2.2 baseline scenarios all
-    plant Posted legs. `bundle_id` and `supersedes` default to NULL —
-    M.2b.14 plants exercise them for stuck-Unbundled / supersession
-    scenarios. `template_name` defaults to NULL; the M.3.10g
-    TransferTemplate plant is the first scenario kind to populate it.
-    `transfer_parent_id` defaults to NULL; the M.3.10h chain-child
-    legs are the first scenario kind to populate it (linking child
-    Transfers back to their parent Transfer's transfer_id so the L2
-    chain detection SQL sees a matched child). `transfer_completion`
-    isn't currently exercised, emits as NULL.
-
-    ``dialect`` flows into ``_sql_timestamp_literal`` for the
-    ``posting`` column — PG keeps the bare ISO-8601 string; Oracle
-    wraps in ``TIMESTAMP 'YYYY-MM-DD HH:MI:SS+TZ'``.
+    CA.11 — thin wrapper over `_txn_row_tuple` + `_txn_row_to_sql`.
+    Existing call sites and locked-seed byte-identity preserved.
     """
-    parent_role_lit = (
-        _sql_str(account_parent_role) if account_parent_role else "NULL"
-    )
-    metadata_json = (
-        "{" + ", ".join(
-            f'"{k}": "{v}"' for k, v in sorted(metadata.items())
-        ) + "}"
-    )
-    bundle_lit = _sql_str(bundle_id) if bundle_id is not None else "NULL"
-    supersedes_lit = _sql_str(supersedes) if supersedes is not None else "NULL"
-    template_lit = (
-        _sql_str(template_name) if template_name is not None else "NULL"
-    )
-    transfer_parent_lit = (
-        _sql_str(transfer_parent_id) if transfer_parent_id is not None
-        else "NULL"
-    )
-    return (
-        f"({_sql_str(id_)}, {_sql_str(account_id)}, "
-        f"{_sql_str(account_name)}, {_sql_str(account_role)}, "
-        f"{_sql_str(account_scope)}, {parent_role_lit}, "
-        f"{_sql_money_cents(money)}, {_sql_str(direction)}, "
-        f"{_sql_str(status)}, "
-        f"{_sql_timestamp_literal(posting, dialect)}, "
-        f"{_sql_str(transfer_id)}, "
-        f"NULL, {transfer_parent_lit}, "
-        f"{_sql_str(rail_name)}, {template_lit}, "
-        f"{bundle_lit}, {supersedes_lit}, "
-        f"{_sql_str(origin)}, {_sql_str(metadata_json)})"
+    return _txn_row_to_sql(
+        _txn_row_tuple(
+            id_=id_,
+            account_id=account_id,
+            account_name=account_name,
+            account_role=account_role,
+            account_scope=account_scope,
+            account_parent_role=account_parent_role,
+            money=money,
+            direction=direction,
+            posting=posting,
+            transfer_id=transfer_id,
+            rail_name=rail_name,
+            origin=origin,
+            metadata=metadata,
+            status=status,
+            bundle_id=bundle_id,
+            supersedes=supersedes,
+            template_name=template_name,
+            transfer_parent_id=transfer_parent_id,
+        ),
+        dialect,
     )
 
 
@@ -4479,57 +4618,44 @@ def _balance_row(
     dialect: Dialect,
     offset_hours: int = 0,
 ) -> str:
-    """Build one VALUES row for the daily_balances INSERT.
+    """Build one VALUES row for the daily_balances INSERT (legacy text form).
 
-    ``offset_hours`` shifts ``business_day_start`` and
-    ``business_day_end`` by the same amount (M.4.4.14) — a
-    role with offset=17 emits 17:00→17:00 next day. Default 0 keeps
-    production midnight-aligned (no hash drift).
-
-    ``dialect`` flows into ``_sql_timestamp_literal`` for the
-    business_day_start / business_day_end columns. Note these columns
-    are demoted to plain TIMESTAMP on Oracle (PK-eligibility, see
-    P.5.b), so the typed literal's TZ portion is dropped at insert
-    time — accepted by Oracle, lossless for our midnight-aligned
-    snapshot timestamps.
+    CA.11 — thin wrapper over `_balance_row_tuple` + `_balance_row_to_sql`.
     """
-    parent_role_lit = (
-        _sql_str(account_parent_role) if account_parent_role else "NULL"
+    return _balance_row_to_sql(
+        _balance_row_tuple(
+            account_id=account_id,
+            account_name=account_name,
+            account_role=account_role,
+            account_scope=account_scope,
+            account_parent_role=account_parent_role,
+            day=day,
+            money=money,
+            offset_hours=offset_hours,
+        ),
+        dialect,
     )
-    return (
-        f"({_sql_str(account_id)}, {_sql_str(account_name)}, "
-        f"{_sql_str(account_role)}, {_sql_str(account_scope)}, "
-        f"{parent_role_lit}, NULL, "
-        f"{_sql_timestamp_literal(_bod_timestamp(day, offset_hours), dialect)}, "
-        f"{_sql_timestamp_literal(_eod_timestamp(day, offset_hours), dialect)}, "
-        f"{_sql_money_cents(money)}, NULL, NULL)"
-    )
 
 
-def _sql_str(s: object) -> str:
-    """Render an arbitrary value as a SQL string literal (single-quoted,
-    embedded quotes doubled). Used for every text column in the seed."""
-    return "'" + str(s).replace("'", "''") + "'"
+def _to_cents(money: object) -> int:
+    """Coerce a polymorphic money value to integer cents.
 
-
-def _sql_money_cents(money: object) -> str:
-    """Render a money value as an integer-cents SQL literal.
-
-    AO.1: amount_money / money / expected_eod_balance columns are
-    BIGINT cents. The seed authors hold the value as Decimal dollars
-    (or already-Cents); this helper coerces at the write boundary so
-    the seed SQL emits ``7500`` rather than ``75.00``.
+    CA.11 — replaces `_sql_money_cents` (which returned a stringified
+    cents int). The tuple-form row builders need the raw int for the
+    structured-apply path (pyarrow stores BIGINT directly); the legacy
+    text-render path stringifies via `_render_seed_value`. AO.1:
+    amount_money / money / expected_eod_balance columns are BIGINT
+    cents — converting at the write boundary keeps `Decimal` dollars
+    out of the SQL output.
 
     Accepts ``Cents`` (use ``.value`` directly), ``Decimal`` / ``str``
-    / ``int`` / ``float`` (route through ``Cents.from_dollars`` so the
-    quantization is consistent with the rest of the codebase).
+    / ``int`` (route through ``Cents.from_dollars`` so quantization is
+    consistent), float (str() first to avoid float-dust in Decimal).
     """
     from recon_gen.common.money import Cents
 
     if isinstance(money, Cents):
-        return str(money.value)
+        return money.value
     if isinstance(money, (Decimal, str, int)) and not isinstance(money, bool):
-        return str(Cents.from_dollars(money).value)
-    # float: convert via str() so we don't bake float dust into the
-    # Decimal init (Decimal(0.1) != Decimal("0.1")).
-    return str(Cents.from_dollars(str(money)).value)
+        return Cents.from_dollars(money).value
+    return Cents.from_dollars(str(money)).value

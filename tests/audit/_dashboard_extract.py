@@ -170,8 +170,16 @@ def count_l1_invariant_rows(
     """Count rows in the named invariant's L1 dashboard table.
 
     Switches to the matching sheet, applies the period filter when the
-    invariant is time-series, then returns the post-filter total via
-    ``driver.table_row_count``.
+    invariant is time-series, then returns the post-filter total.
+
+    BO.1 fix: switched from `driver.table_row_count` to
+    `len(driver.table_rows_full(...))` so this matches
+    `l1_invariant_rows_seen` exactly (same materialization path =
+    consistent number). The pre-fix `table_row_count` orchestration's
+    scroll-accumulate occasionally under-counted on dense virtualized
+    tables (~86 of 119 observed on overdraft), failing the
+    `qs_seen == qs_count` row-identity guard even with the fixed
+    `table_rows_full` returning the full set.
 
     ``period=None`` skips the date-filter step regardless of whether the
     invariant supports one — useful when the caller wants to leave
@@ -179,7 +187,7 @@ def count_l1_invariant_rows(
     exercising default-period behavior).
     """
     table_title = _go_to_invariant_sheet(driver, invariant, period)
-    return driver.table_row_count(table_title)
+    return len(driver.table_rows_full(table_title))
 
 
 def l1_invariant_row_keys(
@@ -212,8 +220,12 @@ def l1_invariant_row_keys(
     # driver pluck-keys both renderers' row dicts to the SQL column
     # names regardless of which header text each one stamps (App2 raw,
     # QS display label).
+    # BO.1 fix — `table_rows_full` de-virtualizes on QS (scrolls + collects
+    # every row, not just the DOM window) so 100+ row invariants like
+    # overdraft get their full row set. App2 path delegates to table_rows
+    # since it renders all rows in DOM.
     key_cols = _KEY_COLS[invariant]
-    rows = driver.table_rows(table_title, columns=key_cols)
+    rows = driver.table_rows_full(table_title, columns=key_cols)
     out: set[tuple[str | date, ...]] = set()
     for r in rows:
         key: list[str | date] = []
@@ -231,9 +243,12 @@ def l1_invariant_rows_seen(
     invariant: L1Invariant,
     period: DateInterval | None,
 ) -> int:
-    """How many rows ``table_rows`` actually returned (the DOM window) —
-    distinct from ``count_l1_invariant_rows`` (the page-size-bump *total*).
-    The row-identity caller compares this against the total to confirm the
-    window wasn't truncated before trusting ``l1_invariant_row_keys``."""
+    """How many rows the driver materialized for the invariant's table.
+
+    BO.1 fix: now uses `table_rows_full` (de-virtualizes on QS) so this
+    matches `count_l1_invariant_rows` even on >37-row invariants like
+    overdraft. The pre-fix assertion `qs_seen == qs_count` was failing
+    because `table_rows` returned only the DOM window (37) vs the
+    page-size-bumped count (119)."""
     table_title = _go_to_invariant_sheet(driver, invariant, period)
-    return len(driver.table_rows(table_title))
+    return len(driver.table_rows_full(table_title))

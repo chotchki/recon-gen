@@ -22,7 +22,7 @@ starlette = pytest.importorskip("starlette")
 TestClient = pytest.importorskip("starlette.testclient").TestClient
 
 from recon_gen.common.config import Config
-from recon_gen.common.db import connect_demo_db, execute_script
+from recon_gen.common.db import connect_demo_db, execute_script, make_demo_database_url
 from recon_gen.common.html._smoke_app import (
     SMOKE_FILTER_SPECS,
     build_smoke_app,
@@ -47,8 +47,8 @@ def writable_l2_yaml(tmp_path: Path) -> Iterator[Path]:
     yield dst
 
 
-def _sqlite_cfg(tmp_path: Path, **overrides: object) -> Config:
-    db_path = tmp_path / "demo.sqlite"
+def _duckdb_cfg(tmp_path: Path, **overrides: object) -> Config:
+    db_path = tmp_path / "demo.duckdb"
     base = Config(
         aws_account_id="111122223333",
         aws_region="us-east-1",
@@ -57,8 +57,8 @@ def _sqlite_cfg(tmp_path: Path, **overrides: object) -> Config:
         datasource_arn=(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
         ),
-        demo_database_url=f"sqlite:///{db_path}",
-        dialect=Dialect.SQLITE,
+        demo_database_url=make_demo_database_url(Dialect.DUCKDB, db_path),
+        dialect=Dialect.DUCKDB,
     )
     if overrides:
         base = replace(base, **overrides)  # type: ignore[arg-type]: replace's overload erases the per-field types
@@ -82,7 +82,7 @@ def _apply_schema(cfg: Config, yaml_path: Path) -> None:
 
 def _build_app(yaml_path: Path, cfg: Config | None) -> object:
     cache = L2InstanceCache.from_path(yaml_path)
-    smoke_cfg = _sqlite_cfg(yaml_path.parent)  # smoke app needs a Config too
+    smoke_cfg = _duckdb_cfg(yaml_path.parent)  # smoke app needs a Config too
     tree_app, sheet = build_smoke_app(smoke_cfg)
     served = ServedDashboard(
         tree_app=tree_app, sheet=sheet, title="smoke",
@@ -102,7 +102,7 @@ def test_post_deploy_runs_pipeline_returns_summary(
 ) -> None:
     """POST /deploy with no etl_hook configured runs steps 2-5 against
     the demo DB; returns 200 + the DeploySummary JSON."""
-    cfg = _sqlite_cfg(tmp_path)
+    cfg = _duckdb_cfg(tmp_path)
     _apply_schema(cfg, writable_l2_yaml)
     app = _build_app(writable_l2_yaml, cfg)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -126,7 +126,7 @@ def test_post_deploy_halts_on_etl_hook_failure(
 ) -> None:
     """POST /deploy with a failing etl_hook returns 503 (Service
     Unavailable) + halted=True summary; demo DB stays untouched."""
-    cfg = _sqlite_cfg(tmp_path, etl_hook="false")
+    cfg = _duckdb_cfg(tmp_path, etl_hook="false")
     _apply_schema(cfg, writable_l2_yaml)
     app = _build_app(writable_l2_yaml, cfg)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any

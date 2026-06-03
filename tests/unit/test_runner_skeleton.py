@@ -66,8 +66,8 @@ def _spec_or_lo() -> VariantSpec:
     return VariantSpec(ScenarioCode("sp"), "or", "lo")
 
 
-def _spec_sl_lo() -> VariantSpec:
-    return VariantSpec(ScenarioCode("sp"), "sl", "lo")
+def _spec_du_lo() -> VariantSpec:
+    return VariantSpec(ScenarioCode("sp"), "du", "lo")
 
 
 def _spec_pg_aw() -> VariantSpec:
@@ -154,7 +154,7 @@ def test_layers_list_matches_audit_table() -> None:
     b.3.impl.layer (2026-05-07): `app2` inserted between `db` and
     `deploy` per audit §7.10 (App2 = layer 3.7 fast-feedback gate
     against local Docker, before AWS deploy)."""
-    assert runner.LAYERS == ("unit", "db", "app2", "deploy", "api", "browser")
+    assert runner.LAYERS == ("unit", "db", "app2", "deploy", "qs_api", "qs_browser")
 
 
 # Y.2.gate.c.8 — dependency probe tests.
@@ -178,15 +178,15 @@ def test_layer_deps_match_audit_table() -> None:
     unit is dependency-free (in-process; pyright runs via conftest sessionstart);
     db needs docker (containers per b.2); app2 needs docker (b.3.impl.layer —
     NO aws because App2 is local-only by audit §7.10);
-    deploy/api need aws + docker + aws_rds_running (gate.l.3); browser adds
-    qs_arn for embed signing. Edits to either side without the other should
-    fail loudly."""
+    deploy/api need aws + docker (CB.11.a.1 dropped aws_rds_running — Docker
+    substrate replaces RDS post-CB.12); browser adds qs_arn for embed signing.
+    Edits to either side without the other should fail loudly."""
     assert runner._LAYER_DEPS["unit"] == frozenset()
     assert runner._LAYER_DEPS["db"] == frozenset({"docker"})
     assert runner._LAYER_DEPS["app2"] == frozenset({"docker"})
-    assert runner._LAYER_DEPS["deploy"] == frozenset({"aws", "docker", "aws_rds_running"})
-    assert runner._LAYER_DEPS["api"] == frozenset({"aws", "docker", "aws_rds_running"})
-    assert runner._LAYER_DEPS["browser"] == frozenset({"aws", "docker", "qs_arn", "aws_rds_running"})
+    assert runner._LAYER_DEPS["deploy"] == frozenset({"aws", "docker"})
+    assert runner._LAYER_DEPS["qs_api"] == frozenset({"aws", "docker"})
+    assert runner._LAYER_DEPS["qs_browser"] == frozenset({"aws", "docker", "qs_arn"})
     assert "pyright" not in runner._LAYER_DEPS
 
 
@@ -328,12 +328,9 @@ def test_probe_dependencies_browser_aggregates_failures(monkeypatch: Any) -> Non
         "aws": lambda: runner.ProbeFailure(kind="aws_creds_expired", message="..."),
         "docker": lambda: runner.ProbeFailure(kind="docker_daemon_down", message="..."),
         "qs_arn": runner._probe_qs_e2e_user_arn,
-        # gate.l.3 — passes through when no cfg discoverable (which is
-        # the state monkeypatched above via `_resolve_seed_config → None`).
-        "aws_rds_running": runner._probe_aws_rds_running,
     }
     monkeypatch.setattr(runner, "_PROBE_FUNCTIONS", fake_probes)
-    failures = runner.probe_dependencies("browser")
+    failures = runner.probe_dependencies("qs_browser")
     kinds = {f.kind for f in failures}
     assert kinds == {"aws_creds_expired", "docker_daemon_down", "qs_arn_unset"}
 
@@ -455,7 +452,7 @@ def test_chain_through_db() -> None:
 def test_chain_through_browser_full() -> None:
     """b.3.impl.layer (2026-05-07): app2 inserted between db and deploy
     per audit §7.10."""
-    assert runner.chain_through("browser") == ["unit", "db", "app2", "deploy", "api", "browser"]
+    assert runner.chain_through("qs_browser") == ["unit", "db", "app2", "deploy", "qs_api", "qs_browser"]
 
 
 def test_chain_through_app2() -> None:
@@ -477,46 +474,27 @@ def test_layer_command_unit_runs_pytest() -> None:
 
 
 def test_layer_command_db_sets_e2e_gate() -> None:
-    """Layer 3 (DB SQL smoke) needs RECON_GEN_E2E=1 to bypass the e2e gate."""
+    """Layer 3 (DB SQL smoke) needs RECON_GEN_E2E=1 to bypass the e2e gate.
+
+    CB.6 — dispatch swapped from a hardcoded file list to the tier-dir
+    ``tests/e2e/db/`` (whose conftest auto-applies ``@tier(Tier.DB)``).
+    """
     cmd_env = runner._layer_command("db", Path("/tmp/run"))
     assert cmd_env is not None
     cmd, env_addl = cmd_env
-    assert "test_dataset_sql_smoke.py" in cmd[1]
+    assert "tests/e2e/db/" in cmd
     assert env_addl["RECON_GEN_E2E"] == "1"
 
 
-def test_layer_command_app2_dispatches_html2_tests() -> None:
-    """b.3.impl.layer — Layer 3.7 (App2 against local Docker) dispatches
-    the test_html2_*.py files (stub + live-DB fetcher), plus
-    test_dashboard_driver.py (X.2.u.6.followon — its App2Driver.smoke()
-    protocol-parity tests need only Playwright + the bundled smoke app).
-
-    Z.B.14 — the dispatch carries ``-m "not browser"`` so the 3
-    ``@pytest.mark.browser`` tests in test_dashboard_driver.py
-    (``test_qs_l1_*``) are deselected at collection time. Earlier
-    reasoning that they "skip cleanly here" stopped holding once
-    Y.2.gate.h.1 made the runner auto-derive ``RECON_E2E_USER_ARN``; the
-    QS-bound tests then actually try to run pre-deploy and probe a stale
-    cross-cell dashboard. Browser layer picks them up via its own
-    ``-m browser`` selector — no parallel addition needed there.
+def test_layer_command_app2_dispatches_tier_dir() -> None:
+    """CB.6 — the app2 layer dispatches the ``tests/e2e/app2/`` tier-dir
+    (auto-applies ``@tier(Tier.APP2)``). Replaces the prior hardcoded
+    ``test_html2_*.py`` + ``test_dashboard_driver.py`` list.
     """
     cmd_env = runner._layer_command("app2", Path("/tmp/run"))
     assert cmd_env is not None
     cmd, env_addl = cmd_env
-    cmd_str = " ".join(cmd)
-    assert "test_html2_executives.py" in cmd_str
-    assert "test_html2_executives_live.py" in cmd_str
-    assert "test_html2_money_trail.py" in cmd_str
-    assert "test_html2_l2ft.py" in cmd_str  # Y.2.app2.cde.l2ft-wiring.c
-    assert "test_dashboard_driver.py" in cmd_str  # X.2.u.6.followon
-    # Z.B.14 — the deselect of QS-marked tests must show up as
-    # consecutive ``-m`` and ``not browser`` argv elements (no shell
-    # quoting in this codepath — argv is delivered directly to
-    # subprocess, so the args are list-literal).
-    assert "-m" in cmd
-    assert "not browser" in cmd
-    m_idx = cmd.index("-m")
-    assert cmd[m_idx + 1] == "not browser"
+    assert "tests/e2e/app2/" in cmd
     # Behind RECON_GEN_E2E=1 like every other tests/e2e/ file.
     assert env_addl["RECON_GEN_E2E"] == "1"
     assert env_addl["RECON_GEN_LAYER"] == "app2"
@@ -563,17 +541,17 @@ def test_layer_command_deploy_returns_cmd_with_variant_env(tmp_path: Path) -> No
     assert cmd[out_idx].endswith("/deploy/out")
 
 
-def test_layer_command_api_dispatches_pytest_marked_api() -> None:
-    """Y.2.gate.c.5.api — pytest -m api selects the boto3-only e2e files
-    (every test_*_deployed_resources.py + test_*_dashboard_structure.py +
-    test_*_filters.py carries `pytest.mark.api`). RECON_GEN_E2E=1 like every
-    other tests/e2e/ file."""
-    cmd_env = runner._layer_command("api", Path("/tmp/run"))
+def test_layer_command_qs_api_dispatches_tier_dir() -> None:
+    """CB.6 — the qs_api layer dispatches the ``tests/e2e/qs_api/``
+    tier-dir (auto-applies ``@tier(Tier.QS_API)`` + ``@needs(AWS_QS)``).
+    Replaces the prior ``-m api`` selector against the full ``tests/e2e/``
+    sweep. RECON_GEN_E2E=1 like every other tests/e2e/ file.
+    """
+    cmd_env = runner._layer_command("qs_api", Path("/tmp/run"))
     assert cmd_env is not None
     cmd, env = cmd_env
     assert cmd[0].endswith("/pytest")
-    assert "-m" in cmd and "api" in cmd
-    assert "tests/e2e/" in cmd
+    assert "tests/e2e/qs_api/" in cmd
     assert env.get(RECON_GEN_E2E.name) == "1"
 
 
@@ -593,7 +571,7 @@ def test_layer_command_browser_dispatches_pytest_marked_browser(monkeypatch: Any
     multiple workers on persistent Aurora schema applies). So we
     assert against the joined shell string, not the argv list."""
     monkeypatch.delenv(RECON_E2E_PAGE_TIMEOUT.name, raising=False)
-    cmd_env = runner._layer_command("browser", Path("/tmp/run"))
+    cmd_env = runner._layer_command("qs_browser", Path("/tmp/run"))
     assert cmd_env is not None
     cmd, env = cmd_env
     # bash -c '<chained pytests>'
@@ -616,7 +594,7 @@ def test_layer_command_browser_dispatches_pytest_marked_browser(monkeypatch: Any
     # ...but an operator-set value wins (no env entry → subprocess
     # inherits the operator's).
     monkeypatch.setenv(RECON_E2E_PAGE_TIMEOUT.name, "120000")
-    cmd_env2 = runner._layer_command("browser", Path("/tmp/run"))
+    cmd_env2 = runner._layer_command("qs_browser", Path("/tmp/run"))
     assert cmd_env2 is not None
     _cmd2, env2 = cmd_env2
     assert RECON_E2E_PAGE_TIMEOUT.name not in env2
@@ -734,11 +712,11 @@ def test_cmd_up_to_runs_full_chain_when_all_pass() -> None:
         patch.object(runner, "_derive_qs_user_arn", return_value="arn:aws:quicksight:us-east-1:111122223333:user/default/recon-gen-admin"),
     ):
         # Pin single AW cell so the dispatch order is deterministic.
-        code = runner.main(["up_to=browser", "--variants=sp_pg_aw"])
+        code = runner.main(["up_to=qs_browser", "--variants=sp_pg_aw"])
     assert code == runner.EXIT_SUCCESS
     # Y.2.gate.n — `unit` is the prelude (dispatched once, before the cell);
     # the single AW cell then runs db→app2→deploy→api→browser.
-    assert dispatched == ["unit", "db", "app2", "deploy", "api", "browser"]
+    assert dispatched == ["unit", "db", "app2", "deploy", "qs_api", "qs_browser"]
 
 
 # Y.2.gate.n — the `unit` layer runs ONCE as a prelude, not per matrix cell.
@@ -819,7 +797,7 @@ def test_cmd_up_to_only_tolerates_prelude_exit_5() -> None:
     layers via ``-k``; the user's intent is that the matched tests live
     in a later layer (browser, app2, etc.).
 
-    Without this tolerance, ``./run_tests.sh up_to=browser --only=foo``
+    Without this tolerance, ``./run_tests.sh up_to=qs_browser --only=foo``
     halts at the prelude even when ``foo`` matches real tests in the
     browser layer."""
     dispatched: list[str] = []
@@ -857,7 +835,7 @@ def test_cmd_up_to_only_tolerates_prelude_exit_5() -> None:
 def test_cmd_up_to_only_tolerates_per_layer_exit_5() -> None:
     """#986 followon, 2026-05-19 — extends the prelude's exit-5 + --only
     tolerance to every per-cell layer. The operator may use
-    ``./run_tests.sh up_to=browser --only=foo`` to drive a single browser
+    ``./run_tests.sh up_to=qs_browser --only=foo`` to drive a single browser
     test through the chain; per-cell ``db``/``app2``/``deploy`` layers
     apply the same ``-k foo`` filter and collect nothing, exit 5, and
     (without this tolerance) halt the chain before browser dispatches.
@@ -870,7 +848,7 @@ def test_cmd_up_to_only_tolerates_per_layer_exit_5() -> None:
         dispatched.append(layer)
         # Simulate "no tests collected" for every layer EXCEPT browser when
         # --only is set. browser is where the matched test lives.
-        if layer != "browser" and options is not None and options.only is not None:
+        if layer != "qs_browser" and options is not None and options.only is not None:
             return runner.LayerResult(layer=layer, exit_code=5, duration_seconds=0.01)
         return runner.LayerResult(layer=layer, exit_code=0, duration_seconds=0.01)
 
@@ -885,7 +863,7 @@ def test_cmd_up_to_only_tolerates_per_layer_exit_5() -> None:
         patch.object(runner, "_derive_qs_user_arn", return_value="arn:aws:quicksight:us-east-1:111122223333:user/default/recon-gen-admin"),
     ):
         code = runner.main([
-            "up_to=browser",
+            "up_to=qs_browser",
             "--variants=sp_pg_aw",
             "--only=test_l1_additive_pickers",
         ])
@@ -896,7 +874,7 @@ def test_cmd_up_to_only_tolerates_per_layer_exit_5() -> None:
     # Prelude unit + per-cell db/app2/deploy/api all tolerate exit 5;
     # browser dispatches and returns 0 (it owns the matched test).
     assert "unit" in dispatched
-    assert "browser" in dispatched, (
+    assert "qs_browser" in dispatched, (
         f"chain should reach browser despite earlier exit-5s: {dispatched}"
     )
 
@@ -1136,7 +1114,7 @@ def test_compute_drift_layer_only_in_current() -> None:
 
 
 def test_compute_drift_ignores_layer_only_in_prior() -> None:
-    """Chain narrowing (`up_to=unit` after a prior `up_to=browser`) → don't
+    """Chain narrowing (`up_to=unit` after a prior `up_to=qs_browser`) → don't
     spam drift entries for layers we didn't run this time."""
     current = {"layer_durations": {"unit": 10.0}}
     prior = {"layer_durations": {"unit": 9.5, "db": 24.0, "deploy": 90.0}}
@@ -1295,8 +1273,8 @@ def test_is_deploy_or_later() -> None:
     assert runner._is_deploy_or_later("unit") is False
     assert runner._is_deploy_or_later("db") is False
     assert runner._is_deploy_or_later("deploy") is True
-    assert runner._is_deploy_or_later("api") is True
-    assert runner._is_deploy_or_later("browser") is True
+    assert runner._is_deploy_or_later("qs_api") is True
+    assert runner._is_deploy_or_later("qs_browser") is True
 
 
 def test_cmd_up_to_dirty_refuses_at_deploy_layer(monkeypatch: Any) -> None:
@@ -1471,8 +1449,8 @@ def test_audit_layers_table_mentions_every_runner_layer() -> None:
         # "App2 (HTMX) live e2e"; that phrase covers both placements.
         "app2": "App2 (HTMX) live e2e",
         "deploy": "Deploy",
-        "api": "API e2e",
-        "browser": "Browser e2e",
+        "qs_api": "API e2e",
+        "qs_browser": "Browser e2e",
     }
     assert set(runner_to_audit_name.keys()) == set(runner.LAYERS), (
         "test mapping out of sync with runner.LAYERS — update the dict above"
@@ -1498,7 +1476,7 @@ def test_audit_calls_out_qs_e2e_user_arn_for_browser() -> None:
     """High-signal cell: audit row 6 (Browser e2e) lists 'RECON_E2E_USER_ARN ...
     required'. Runner reflects: 'qs_arn' in browser deps. If audit drops the
     requirement OR runner removes 'qs_arn' from browser, drift gets flagged."""
-    assert "qs_arn" in runner._LAYER_DEPS["browser"]
+    assert "qs_arn" in runner._LAYER_DEPS["qs_browser"]
     audit = _read_audit_text()
     # AC.B.3 grace period — accept either prefix in the audit narrative
     # (audit doc is "leave history alone" scope; runtime registry's
@@ -2033,7 +2011,10 @@ def test_oracle_reuse_constants_are_stable() -> None:
     assert runner.ORACLE_REUSE_CONTAINER_PREFIX == "quicksight-test-oracle-"
     # Password value isn't sensitive (local-only test fixture) but its
     # stability matters — see class docstring above.
-    assert runner.ORACLE_REUSE_PASSWORD == "qs-gen-test-pwd-2026"
+    # CB.14 — stripped hyphens; Oracle 19c's dbca-silent install rejects
+    # special chars during the response-file pass (container exited mid-
+    # init with "...ssword. If required refer Oracle documentation").
+    assert runner.ORACLE_REUSE_PASSWORD == "qsgentestpwd2026"
 
 
 def test_oracle_container_name_is_per_cell() -> None:
@@ -2217,16 +2198,16 @@ def test_compose_specs_dialects_only_narrows() -> None:
     assert skipped == []
 
 
-def test_compose_specs_sl_aw_invalid_cell_surfaces_in_skipped() -> None:
-    """m.4.b — `--dialects=sl --targets=aw` produces 0 valid cells
-    (sl × aw is rejected by `is_valid()`) but the skipped list carries
+def test_compose_specs_du_aw_invalid_cell_surfaces_in_skipped() -> None:
+    """m.4.b — `--dialects=du --targets=aw` produces 0 valid cells
+    (du × aw is rejected by `is_valid()`) but the skipped list carries
     the cells the operator narrowed to so the runner can log them."""
-    opts = runner.RunOptions(dialects="sl", targets="aw")
+    opts = runner.RunOptions(dialects="du", targets="aw")
     specs, skipped = runner._compose_specs_from_options(opts)
     assert specs == []
     # 2 named scenarios × 1 dialect × 1 target = 2 invalid cells.
     assert len(skipped) == 2
-    assert all(s.dialect == "sl" and s.target == "aw" for s in skipped)
+    assert all(s.dialect == "du" and s.target == "aw" for s in skipped)
 
 
 def test_compose_specs_variants_triage_returns_pinned_cells() -> None:
@@ -2357,19 +2338,21 @@ def test_setup_variant_ci_mode_aw_unchanged(
 # Y.2.gate.m.4.f — per-cell layer cap (A) tests.
 
 
-def test_cell_chain_lo_caps_at_app2() -> None:
-    """m.4.f — lo cells drop deploy/api/browser. The local container
-    isn't reachable from QuickSight so dispatching those layers would
-    deploy a dead-pointer dashboard."""
-    chain = ["unit", "db", "app2", "deploy", "api", "browser"]
+def test_cell_chain_lo_pg_runs_full_chain() -> None:
+    """CB.11.b followup — lo cells with pg/or dialect can reach QS
+    via the hotchkiss.io forward (runner writes a sibling QS-side
+    cfg), so they run the full chain. Pre-CB.11.b they dropped
+    deploy/qs_api/qs_browser because QS couldn't reach the localhost
+    container; that constraint dissolved with the hotchkiss.io path."""
+    chain = ["unit", "db", "app2", "deploy", "qs_api", "qs_browser"]
     capped = runner.cell_chain(_spec_pg_lo(), chain)
-    assert capped == ["unit", "db", "app2"]
+    assert capped == chain
 
 
 def test_cell_chain_aw_passes_through() -> None:
     """aw cells run every layer the operator asked for — they hit
     the operator's external Aurora which QS can reach."""
-    chain = ["unit", "db", "app2", "deploy", "api", "browser"]
+    chain = ["unit", "db", "app2", "deploy", "qs_api", "qs_browser"]
     assert runner.cell_chain(_spec_pg_aw(), chain) == chain
 
 
@@ -2378,7 +2361,7 @@ def test_cell_chain_lo_with_db_only_chain_unaffected() -> None:
     include any AWS-touching layers, the cap is a no-op."""
     chain = ["unit", "db"]
     assert runner.cell_chain(_spec_pg_lo(), chain) == ["unit", "db"]
-    assert runner.cell_chain(_spec_sl_lo(), chain) == ["unit", "db"]
+    assert runner.cell_chain(_spec_du_lo(), chain) == ["unit", "db"]
 
 
 def test_teardown_variant_no_op_for_none() -> None:
@@ -3727,7 +3710,7 @@ def test_full_matrix_includes_three_fuzz_cells_with_shared_seed() -> None:
     assert len(seeds) == 1
     # And they cover all 3 local dialects.
     dialects = {c.dialect for c in fuzz_cells}
-    assert dialects == {"pg", "or", "sl"}
+    assert dialects == {"pg", "or", "du"}  # CA.7 swapped sl→du
     assert all(c.target == "lo" for c in fuzz_cells)
 
 
@@ -3744,89 +3727,17 @@ def test_full_matrix_fuzz_seed_is_random_across_calls() -> None:
     assert seed_a != seed_b
 
 
-# Y.2.gate.l.2 — RDS lifecycle command tests.
-# Strategy: mock _load_runner_cfg_for_lifecycle + aws_rds.{start,stop,get_status}
-# at the runner-module level. Tests don't touch real boto3 / Docker.
+# CB.11.a.2 (2026-06-01) — Y.2.gate.l.2 RDS-lifecycle tests deleted
+# along with `aws_rds` module + AWS lifecycle commands. Post-CB.12 the
+# DB substrate is Docker only; `cmd_up` / `cmd_down` / `cmd_status` are
+# local-container-only. The local-container test cases below survive.
 
 
-def _fake_cfg(
-    *, pg: str | None = "test-pg-cluster",
-    oracle: str | None = "test-oracle-instance",
-) -> Any:
-    """Minimal cfg object exposing the fields the lifecycle commands
-    read. Real Config(...) would also need datasource_arn / etc., but
-    duck-typing is fine for these unit tests."""
-    from types import SimpleNamespace
-    return SimpleNamespace(
-        aws_pg_cluster_id=pg,
-        aws_oracle_instance_id=oracle,
-        aws_region="us-east-1",
-    )
-
-
-def test_cmd_up_local_is_noop() -> None:
-    """Local containers spin on-demand; `up local` is just a status
-    line so the operator can call it for symmetry with `down local`."""
+def test_cmd_up_is_noop() -> None:
+    """Post-CB.11.a.2: `up` is a no-op (local containers spin on-demand;
+    no AWS RDS to start). Reported for symmetry with `down`."""
     code = runner.main(["up", "local"])
     assert code == runner.EXIT_SUCCESS
-
-
-def test_cmd_up_aws_loud_fails_when_no_cfg() -> None:
-    """No cfg discoverable → operator-actionable EXIT_NEEDS_OPERATOR."""
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=None):
-        code = runner.main(["up", "aws"])
-    assert code == runner.EXIT_NEEDS_OPERATOR
-
-
-def test_cmd_up_aws_loud_fails_when_no_rds_fields() -> None:
-    """Cfg loads but neither RDS field set → operator-actionable
-    EXIT_NEEDS_OPERATOR with provisioning-runbook pointer."""
-    cfg = _fake_cfg(pg=None, oracle=None)
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg):
-        code = runner.main(["up", "aws"])
-    assert code == runner.EXIT_NEEDS_OPERATOR
-
-
-def test_cmd_up_aws_idempotent_when_already_available() -> None:
-    """`start()` returns 'available' immediately → no poll, no failure."""
-    cfg = _fake_cfg(pg="my-pg", oracle=None)
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
-         patch("recon_gen.common.aws_rds.start", return_value="available"), \
-         patch("recon_gen.common.aws_rds.get_status", return_value="available"):
-        code = runner.main(["up", "aws"])
-    assert code == runner.EXIT_SUCCESS
-
-
-def test_cmd_up_aws_polls_until_available() -> None:
-    """`start()` returns 'starting'; poll loop hits 'available' next tick."""
-    cfg = _fake_cfg(pg="my-pg", oracle=None)
-    statuses = iter(["starting", "available"])
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
-         patch("recon_gen.common.aws_rds.start", return_value="starting"), \
-         patch("recon_gen.common.aws_rds.get_status",
-               side_effect=lambda _r: next(statuses)), \
-         patch.object(runner.time, "sleep"):  # don't actually sleep in tests
-        code = runner.main(["up", "aws"])
-    assert code == runner.EXIT_SUCCESS
-
-
-def test_cmd_down_aws_calls_stop() -> None:
-    """`down aws --yes` invokes `aws_rds.stop` for both resources."""
-    cfg = _fake_cfg()
-    stop_calls: list[Any] = []
-
-    def fake_stop(resource: Any) -> str:
-        stop_calls.append(resource)
-        return "stopping"
-
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
-         patch("recon_gen.common.aws_rds.stop", side_effect=fake_stop):
-        code = runner.main(["down", "aws", "--yes"])
-    assert code == runner.EXIT_SUCCESS
-    # One call for pg, one for oracle.
-    assert len(stop_calls) == 2
-    kinds = sorted(c.kind for c in stop_calls)
-    assert kinds == ["cluster", "instance"]
 
 
 def test_cmd_down_local_no_containers_succeeds(monkeypatch: Any) -> None:
@@ -3867,11 +3778,9 @@ def test_cmd_down_local_stops_named_containers(monkeypatch: Any) -> None:
     assert "quicksight-test-oracle-sp_or_lo" in stop_calls[0]
 
 
-def test_cmd_status_runs_local_and_aws_sections(monkeypatch: Any) -> None:
-    """`status` prints both the local docker section and the AWS RDS
-    section. AWS section needs a cfg + at least one identifier."""
-    cfg = _fake_cfg(pg="my-pg", oracle=None)
-
+def test_cmd_status_runs_local_section(monkeypatch: Any) -> None:
+    """`status` prints the local docker container section. Post-CB.11.a.2
+    there's no AWS RDS section."""
     def fake_run(cmd: list[str], **kwargs: Any) -> Any:
         from types import SimpleNamespace
         if cmd[:2] == ["docker", "ps"]:
@@ -3879,109 +3788,14 @@ def test_cmd_status_runs_local_and_aws_sections(monkeypatch: Any) -> None:
         raise RuntimeError(f"unexpected cmd: {cmd}")
 
     monkeypatch.setattr(runner.subprocess, "run", fake_run)
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
-         patch("recon_gen.common.aws_rds.get_status", return_value="available"):
-        code = runner.main(["status"])
+    code = runner.main(["status"])
     assert code == runner.EXIT_SUCCESS
 
 
-def test_cmd_status_with_cost_includes_estimates(
-    monkeypatch: Any, capsys: pytest.CaptureFixture[str],
-) -> None:
-    """`status --cost` adds rough hourly cost lines."""
-    cfg = _fake_cfg(pg="my-pg", oracle="my-oracle")
-
-    def fake_run(cmd: list[str], **kwargs: Any) -> Any:
-        from types import SimpleNamespace
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(runner.subprocess, "run", fake_run)
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
-         patch("recon_gen.common.aws_rds.get_status", return_value="available"):
-        runner.main(["status", "--cost"])
-    captured = capsys.readouterr()
-    assert "rough total" in captured.out
-    assert "/hr" in captured.out
-
-
-# Y.2.gate.l.3 — `aws_rds_running` probe tests. Same mocking pattern
-# as the lifecycle commands above.
-
-
-def test_probe_aws_rds_running_passes_when_no_cfg() -> None:
-    """No cfg discoverable → probe passes (the `aws` probe handles
-    the cfg-missing path; layered probes don't double-fail)."""
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=None):
-        assert runner._probe_aws_rds_running() is None
-
-
-def test_probe_aws_rds_running_passes_when_cfg_fields_unset() -> None:
-    """Cfg loads but neither RDS field set → operator opted out of
-    cfg-driven lifecycle. Probe passes through."""
-    cfg = _fake_cfg(pg=None, oracle=None)
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg):
-        assert runner._probe_aws_rds_running() is None
-
-
-def test_probe_aws_rds_running_passes_when_cluster_available() -> None:
-    """Cfg field set + cluster status='available' → probe passes."""
-    cfg = _fake_cfg(pg="my-pg", oracle=None)
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
-         patch("recon_gen.common.aws_rds.get_status", return_value="available"):
-        assert runner._probe_aws_rds_running() is None
-
-
-def test_probe_aws_rds_running_fails_when_cluster_stopped() -> None:
-    """Cluster status='stopped' → probe returns ProbeFailure with the
-    actionable 'run up aws first' message."""
-    cfg = _fake_cfg(pg="my-pg", oracle=None)
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
-         patch("recon_gen.common.aws_rds.get_status", return_value="stopped"):
-        result = runner._probe_aws_rds_running()
-    assert result is not None
-    assert result.kind == "aws_rds_not_running"
-    assert "stopped" in result.message
-    assert "up aws" in result.message
-
-
-def test_probe_aws_rds_running_fails_when_boto3_raises() -> None:
-    """boto3 raises (AccessDenied / NotFound) → probe surfaces the
-    error in the failure message instead of crashing."""
-    cfg = _fake_cfg(pg="my-pg", oracle=None)
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
-         patch("recon_gen.common.aws_rds.get_status",
-               side_effect=RuntimeError("AccessDenied: rds:DescribeDBClusters")):
-        result = runner._probe_aws_rds_running()
-    assert result is not None
-    assert result.kind == "aws_rds_not_running"
-    assert "AccessDenied" in result.message
-
-
-def test_probe_aws_rds_running_aggregates_pg_and_oracle_failures() -> None:
-    """Both cfg fields set + both not-available → both surface in one
-    failure (operator sees everything broken in one pass, not one at a time)."""
-    cfg = _fake_cfg(pg="my-pg", oracle="my-oracle")
-    statuses = iter(["stopped", "stopping"])
-    with patch.object(runner, "_load_runner_cfg_for_lifecycle", return_value=cfg), \
-         patch("recon_gen.common.aws_rds.get_status",
-               side_effect=lambda _r: next(statuses)):
-        result = runner._probe_aws_rds_running()
-    assert result is not None
-    assert "my-pg" in result.message
-    assert "my-oracle" in result.message
-    assert "stopped" in result.message
-    assert "stopping" in result.message
-
-
-def test_probe_aws_rds_running_registered_in_probe_functions() -> None:
-    """The new probe is wired into the runner's PROBE_FUNCTIONS map +
-    the deploy/api/browser layer deps. Locks the integration so a
-    rename / forgotten registration breaks loudly."""
-    assert "aws_rds_running" in runner._PROBE_FUNCTIONS
-    assert "aws_rds_running" in runner._LAYER_DEPS["deploy"]
-    assert "aws_rds_running" in runner._LAYER_DEPS["api"]
-    assert "aws_rds_running" in runner._LAYER_DEPS["browser"]
-    # And NOT in the local-only layers — those don't touch AWS.
-    assert "aws_rds_running" not in runner._LAYER_DEPS["unit"]
-    assert "aws_rds_running" not in runner._LAYER_DEPS["db"]
-    assert "aws_rds_running" not in runner._LAYER_DEPS["app2"]
+def test_aws_rds_running_no_longer_referenced() -> None:
+    """CB.11.a.2 — the `aws_rds_running` probe (and the surrounding
+    aws_rds module + RDS lifecycle commands) are deleted entirely.
+    No code path should reference it post-CB.12."""
+    assert "aws_rds_running" not in runner._PROBE_FUNCTIONS
+    for layer in runner._LAYER_DEPS:
+        assert "aws_rds_running" not in runner._LAYER_DEPS[layer]

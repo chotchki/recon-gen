@@ -13,13 +13,13 @@ leg_direction. No matching matview Invariant; `intended` returns a
 from __future__ import annotations
 
 import json
-import sqlite3
+import duckdb
 from datetime import date, datetime
 from pathlib import Path
 
 import pytest
 
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.config_table import replace_config
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema
@@ -30,6 +30,7 @@ from recon_gen.common.spine import (
     RailFiringGenerator,
 )
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 
 _SPEC_EXAMPLE = (
@@ -44,15 +45,13 @@ _SINGLE_LEG_DEBIT_RAIL = "SubledgerCharge"
 _SINGLE_LEG_CREDIT_RAIL = "BatchPayoutClose"
 
 
-def _fresh_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+def _fresh_db() -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(":memory:")
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
-        cur, emit_schema(instance, prefix=_PREFIX, dialect=Dialect.SQLITE),
-        dialect=Dialect.SQLITE,
+        cur, emit_schema(instance, prefix=_PREFIX, dialect=Dialect.DUCKDB),
+        dialect=Dialect.DUCKDB,
     )
     conn.commit()
     replace_config(
@@ -249,11 +248,9 @@ def test_tagged_emit_tags_every_leg() -> None:
     try:
         gen.emit(conn, scenario_id="test-ay2b-rail-firing")
         conn.commit()
-        tagged = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
-            f"WHERE json_extract(metadata, '$.scenario_id') = ?",
-            ("test-ay2b-rail-firing",),
-        ).fetchone()[0]
+        tagged = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+            f"WHERE json_extract_string(metadata, '$.scenario_id') = ?",
+            ("test-ay2b-rail-firing",),)
     finally:
         conn.close()
     assert tagged == 2

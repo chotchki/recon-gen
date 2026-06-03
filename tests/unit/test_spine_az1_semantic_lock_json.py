@@ -44,14 +44,14 @@ def test_empty_lock_renders_top_level_shape() -> None:
     out = lock_to_json(
         {},
         instance=DEFAULT_PREFIX,
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
         canonical_anchor=date(2030, 1, 1),
     )
     parsed = json.loads(out)
     assert set(parsed.keys()) == {"_comment", "scenario_fingerprint", "violations"}
     assert parsed["scenario_fingerprint"] == {
         "instance": DEFAULT_PREFIX,
-        "dialect": "sqlite",
+        "dialect": "duckdb",
         "canonical_anchor": "2030-01-01",
         "schema_version": 1,
     }
@@ -66,7 +66,7 @@ def test_terminating_newline_present() -> None:
     out = lock_to_json(
         {},
         instance=DEFAULT_PREFIX,
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
         canonical_anchor=date(2030, 1, 1),
     )
     assert out.endswith("\n")
@@ -80,7 +80,7 @@ def test_terminating_newline_present() -> None:
 def test_rule_violation_renders_as_rule_violation_kind() -> None:
     out = lock_to_json(
         {"drift": frozenset({_v_rule("drift", account_id="a", drift=5.0)})},
-        instance="i", dialect=Dialect.SQLITE,
+        instance="i", dialect=Dialect.DUCKDB,
         canonical_anchor=date(2030, 1, 1),
     )
     parsed = json.loads(out)
@@ -92,7 +92,7 @@ def test_coverage_observation_renders_as_coverage_kind() -> None:
         {"two_template_chain_healthy": frozenset({
             _v_coverage("two_template_chain_healthy", child_template_name="T"),
         })},
-        instance="i", dialect=Dialect.SQLITE,
+        instance="i", dialect=Dialect.DUCKDB,
         canonical_anchor=date(2030, 1, 1),
     )
     parsed = json.loads(out)
@@ -103,7 +103,7 @@ def test_coverage_observation_renders_as_coverage_kind() -> None:
 def test_audit_fixture_renders_as_audit_fixture_kind() -> None:
     out = lock_to_json(
         {"supersession": frozenset({_v_audit("supersession", account_id="a")})},
-        instance="i", dialect=Dialect.SQLITE,
+        instance="i", dialect=Dialect.DUCKDB,
         canonical_anchor=date(2030, 1, 1),
     )
     parsed = json.loads(out)
@@ -123,7 +123,7 @@ def test_date_identity_value_renders_as_iso_string() -> None:
             business_day=date(2030, 1, 2),
             drift=5.0,
         )})},
-        instance="i", dialect=Dialect.SQLITE,
+        instance="i", dialect=Dialect.DUCKDB,
         canonical_anchor=date(2030, 1, 1),
     )
     parsed = json.loads(out)
@@ -157,11 +157,11 @@ def test_two_runs_of_same_scenario_produce_byte_identical_output() -> None:
         }),
     }
     out_a = lock_to_json(
-        lock_a, instance="i", dialect=Dialect.SQLITE,  # pyright: ignore[reportArgumentType]: RuleViolation is the test alias for Violation; same runtime shape
+        lock_a, instance="i", dialect=Dialect.DUCKDB,  # pyright: ignore[reportArgumentType]: RuleViolation is the test alias for Violation; same runtime shape
         canonical_anchor=date(2030, 1, 1),
     )
     out_b = lock_to_json(
-        lock_b, instance="i", dialect=Dialect.SQLITE,  # pyright: ignore[reportArgumentType]: RuleViolation is the test alias for Violation; same runtime shape
+        lock_b, instance="i", dialect=Dialect.DUCKDB,  # pyright: ignore[reportArgumentType]: RuleViolation is the test alias for Violation; same runtime shape
         canonical_anchor=date(2030, 1, 1),
     )
     assert out_a == out_b
@@ -174,7 +174,7 @@ def test_invariant_names_sorted_alphabetically_in_output() -> None:
             "drift": frozenset(),
             "ledger_drift": frozenset(),
         },
-        instance="i", dialect=Dialect.SQLITE,
+        instance="i", dialect=Dialect.DUCKDB,
         canonical_anchor=date(2030, 1, 1),
     )
     # Find the positions of the three keys in the output.
@@ -192,7 +192,7 @@ def test_identity_keys_sorted_alphabetically_in_output() -> None:
             account_id="acct-x",
             business_day=date(2030, 1, 2),
         )})},
-        instance="i", dialect=Dialect.SQLITE,
+        instance="i", dialect=Dialect.DUCKDB,
         canonical_anchor=date(2030, 1, 1),
     )
     # Identity keys in the rendered output: account_id < business_day < drift.
@@ -208,7 +208,7 @@ def test_empty_invariants_kept_as_empty_arrays() -> None:
     diffs surface 'X used to fire, doesn't now' clearly."""
     out = lock_to_json(
         {"drift": frozenset(), "overdraft": frozenset()},
-        instance="i", dialect=Dialect.SQLITE,
+        instance="i", dialect=Dialect.DUCKDB,
         canonical_anchor=date(2030, 1, 1),
     )
     parsed = json.loads(out)
@@ -222,7 +222,7 @@ def test_empty_invariants_kept_as_empty_arrays() -> None:
 
 
 @pytest.mark.parametrize("dialect", [
-    Dialect.SQLITE, Dialect.POSTGRES, Dialect.ORACLE,
+    Dialect.DUCKDB, Dialect.POSTGRES, Dialect.ORACLE,
 ])
 def test_dialect_value_round_trips_through_fingerprint(dialect: Dialect) -> None:
     out = lock_to_json(

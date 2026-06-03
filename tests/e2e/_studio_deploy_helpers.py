@@ -176,7 +176,7 @@ def make_studio_cfg(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
         ),
         "demo_database_url": f"sqlite:///{sqlite_path}",
-        "dialect": Dialect.SQLITE,
+        "dialect": Dialect.DUCKDB,
         "test_generator": TestGeneratorConfig(scope="full"),
     }
     if etl_hook is not None:

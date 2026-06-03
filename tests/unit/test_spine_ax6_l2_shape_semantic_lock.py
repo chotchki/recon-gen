@@ -36,11 +36,11 @@ from __future__ import annotations
 from typing import Any
 
 import json
-import sqlite3
+import duckdb
 from datetime import date, datetime
 from pathlib import Path
 
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.config_table import replace_config
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema
@@ -60,11 +60,11 @@ _SPEC_EXAMPLE = (
     Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
 )
 _PREFIX = "spec_example"
-_DIALECT = Dialect.SQLITE
+_DIALECT = Dialect.DUCKDB
 _ANCHOR = date(2030, 1, 1)
 
 
-def _fresh_db() -> sqlite3.Connection:
+def _fresh_db() -> duckdb.DuckDBPyConnection:
     """Fresh in-memory DB with schema + AW config row populated.
 
     BS.5 (2026-05-29): populate the full L2 yaml into config_kv so the
@@ -73,9 +73,7 @@ def _fresh_db() -> sqlite3.Connection:
     masked chain/limit matview output (it left the view-derived CTEs
     empty); post-BS.5 the matviews depend on the populated tree.
     """
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+    conn = duckdb.connect(":memory:")
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(

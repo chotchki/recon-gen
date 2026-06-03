@@ -17,6 +17,8 @@ from decimal import Decimal
 
 import pytest
 
+from tests._marks import Need, Tier, needs, tier
+
 from recon_gen.apps.executives.datasets import (
     build_account_summary_active_dataset,
     build_account_summary_dataset,
@@ -34,7 +36,12 @@ if TYPE_CHECKING:
     from recon_gen.common.tree import App
     from tests.e2e._drivers import DashboardDriver
 
-pytestmark = [pytest.mark.e2e, pytest.mark.browser]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.browser,
+    tier(Tier.QS_BROWSER),
+    needs(Need.AWS_QS, Need.PLAYWRIGHT),
+]
 
 
 def _as_date(value: object) -> date:

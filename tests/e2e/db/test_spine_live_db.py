@@ -1,4 +1,12 @@
-"""AS.6 + AT.5.a — spine ⋈ live-deployed-DB agreement (the MANDATORY GATE).
+"""AS.6 + AT.5.a / CB.5 stage 2 — spine ⋈ live-deployed-DB agreement (DB tier).
+
+Was `tests/e2e/test_spine_live_agreement.py` at the e2e root; CB.5 stage 2
+moved it under `tests/e2e/db/` so it picks up the auto-applied
+`@tier(Tier.DB) + @needs(Need.DOCKER)` from `tests/e2e/db/conftest.py`.
+Both spine `detect()` and the direct matview SELECT are DB-tier
+operations (same connection, no QS/App2/browser legs), so this stays
+single-tier — there's nothing to decompose into producers + validator;
+the assertion already lives inside the producer's process.
 
 The bridge between the in-process semantic correctness AS.0-7 proved
 (`Invariant.detect(ViolationGenerator.emit()) ⊇ intended` on an
@@ -32,7 +40,7 @@ polish — because that's the exact failure mode it exists to catch.
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from typing import Any
 from pathlib import Path
 
@@ -66,6 +74,9 @@ from recon_gen.common.spine import (  # noqa: E402 — post-skip imports
 
 
 pytestmark = [pytest.mark.e2e, pytest.mark.api]
+# CB.5 stage 2 — `tests/e2e/db/conftest.py` auto-applies `@tier(Tier.DB)
+# + @needs(Need.DOCKER)`; the legacy `e2e` / `api` marks above stay for
+# back-compat with `pytest -m api` invocations until CB.6 drops them.
 
 
 def _resolve_cfg() -> Config:
@@ -94,7 +105,7 @@ def _resolve_cfg() -> Config:
 _CFG = _resolve_cfg()
 
 
-def _conn() -> sqlite3.Connection:  # type: ignore[return]: live PG/Oracle/SQLite — concrete return varies per dialect, no shared protocol
+def _conn() -> duckdb.DuckDBPyConnection:  # type: ignore[return]: live PG/Oracle/SQLite — concrete return varies per dialect, no shared protocol
     """Per-test live DB connection (psycopg / oracledb / sqlite3
     depending on `_CFG.dialect`). Caller closes."""
     return connect_demo_db(_CFG)

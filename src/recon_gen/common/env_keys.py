@@ -371,6 +371,27 @@ RECON_GEN_DEMO_DATABASE_URL: Final = EnvVar(
     # URL parsing here.
 )
 
+# CB.11.b — QS-side cfg path. Sibling to ``RECON_GEN_CONFIG``: points at
+# a cfg yaml whose ``demo_database_url`` is the hotchkiss.io-forwarded
+# endpoint (with ``qs_disable_pg_ssl: true`` for PG) so the QS data
+# source can validate-connect from us-east-1. The local-layer cfg
+# (``RECON_GEN_CONFIG``) keeps ``127.0.0.1:<port>`` for in-process
+# schema/seed/refresh. The runner writes both per-cell. Layer dispatch
+# routes ``deploy``/``qs_api``/``qs_browser`` to this cfg; ``db``/``app2``
+# stay on ``RECON_GEN_CONFIG``. See ``project_cb10_qs_to_docker_pg_constraints``
+# memory + ``docs/audits/cb_11_a_dev_machine_forward_spike.md`` (CB.11.a
+# spike outcome) for the underlying QS→home-firewall→dev-machine shape.
+RECON_GEN_QS_CONFIG: Final = EnvVar(
+    name="RECON_GEN_QS_CONFIG",
+    description=(
+        "QS-side cfg yaml path. Used by deploy/qs_api/qs_browser layers; "
+        "its demo_database_url points at hotchkiss.io:<port> + carries "
+        "qs_disable_pg_ssl=true for PG. Runner writes per-cell."
+    ),
+    coercer=str,
+    optional=True,
+)
+
 # Y.2.gate.c.11 — operator opt-in to capture Playwright traces on
 # every test (default is failure-only). Plumbed by RunOptions; the
 # webkit_page helper checks it in the finally block.
@@ -380,6 +401,26 @@ RECON_GEN_TRACE_ALL: Final = EnvVar(
     description=(
         "Bool — set to any non-empty value to capture Playwright traces "
         "on every test (default: failure-only)."
+    ),
+    coercer=_bool_coercer,
+    optional=True,
+)
+
+# CA.8 — DuckDB read_only-mode toggle for pytest workers. The runner
+# sets this on the db / app2 / browser layer's env_addl when the
+# cell's URL is duckdb:// so connect_demo_db + _AsyncDuckdbPool open
+# read_only=True (per the DuckDB single-writer-per-file constraint;
+# https://duckdb.org/docs/current/clients/python/dbapi#read_only-connections).
+# Production CLI invocations (schema/data apply) run before pytest
+# dispatch under sequential variant-seed steps that don't see this
+# env and continue to open read-write.
+RECON_GEN_DB_READ_ONLY: Final = EnvVar(
+    name="RECON_GEN_DB_READ_ONLY",
+    description=(
+        "Bool — set to '1' to force connect_demo_db / _AsyncDuckdbPool "
+        "to open the .duckdb file read_only=True (multi-process safe). "
+        "Runner injects this for pytest db/app2/browser layers against "
+        "DuckDB cells."
     ),
     coercer=_bool_coercer,
     optional=True,
@@ -558,6 +599,25 @@ RECON_GEN_PRINCIPAL_ARNS: Final = EnvVar(
     optional=True,
     # No validator — the parsed list is checked downstream by the cfg
     # loader (each ARN runs through the same regex used elsewhere).
+)
+
+# CB.14 — runner override for the Oracle 19c container image. Absent →
+# the runner prefers locally-built ``recon-gen/oracle-19c:local`` if
+# Docker reports it (production-parity RDS SE2 19c via ``tools/oracle-19c/
+# build.sh``), then falls back to ``gvenzl/oracle-free:23-faststart``
+# (Oracle 23ai, multi-arch) with a one-line warning when neither side
+# has been built. Operators set this to pin a specific tag (e.g. a
+# ``19.20`` PSU-patched build).
+RECON_GEN_ORACLE_IMAGE: Final = EnvVar(
+    name="RECON_GEN_ORACLE_IMAGE",
+    description=(
+        "Container image for the Oracle testcontainer. Absent → prefer "
+        "recon-gen/oracle-19c:local (built via tools/oracle-19c/build.sh) "
+        "with gvenzl/oracle-free:23-faststart fallback when the local "
+        "image isn't present."
+    ),
+    coercer=str,
+    optional=True,
 )
 
 # common/browser/helpers.py — operator override for where browser

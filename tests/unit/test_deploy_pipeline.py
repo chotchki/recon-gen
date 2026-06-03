@@ -12,6 +12,7 @@ see tests/unit/test_common_db.py) rather than relying on
 """
 from __future__ import annotations
 
+
 import asyncio
 from collections.abc import Mapping
 from dataclasses import replace
@@ -21,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from recon_gen.common.config import Config
-from recon_gen.common.db import connect_demo_db, execute_script
+from recon_gen.common.db import connect_demo_db, execute_script, make_demo_database_url
 from recon_gen.common.config import (
     TestGeneratorConfig,
 )
@@ -66,9 +67,9 @@ def spec_example_instance() -> L2Instance:
     return load_instance(Path("tests/l2/spec_example.yaml"))
 
 
-def _sqlite_cfg(tmp_path: Path) -> Config:
-    """Config bound to a fresh SQLite tempfile for orchestrator tests."""
-    db_path = tmp_path / "demo.sqlite"
+def _duckdb_cfg(tmp_path: Path) -> Config:
+    """Config bound to a fresh DuckDB tempfile for orchestrator tests."""
+    db_path = tmp_path / "demo.duckdb"
     return Config(
         aws_account_id="111122223333",
         aws_region="us-east-1",
@@ -79,15 +80,15 @@ def _sqlite_cfg(tmp_path: Path) -> Config:
         datasource_arn=(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
         ),
-        demo_database_url=f"sqlite:///{db_path}",
-        dialect=Dialect.SQLITE,
+        demo_database_url=make_demo_database_url(Dialect.DUCKDB, db_path),
+        dialect=Dialect.DUCKDB,
     )
 
 
 def _apply_schema_and_plant_two_rows(
     cfg: Config, instance: L2Instance,
 ) -> None:
-    """Set up a SQLite tempfile DB with the L2 schema + two planted rows
+    """Set up a DuckDB tempfile DB with the L2 schema + two planted rows
     so the wipe has something to delete. Plants conform to the L2 v6
     schema's CHECK constraints (amount_direction enum, sign-direction
     agreement, account_scope enum)."""
@@ -319,23 +320,23 @@ def test_wipe_demo_data_sql_oracle_format(
     assert f"DELETE FROM {p}_transactions;" in sql
 
 
-def test_wipe_demo_data_sql_sqlite_format(
+def test_wipe_demo_data_sql_duckdb_format(
     spec_example_instance: L2Instance,
 ) -> None:
     p = "spec_example"
     sql = wipe_demo_data_sql(
-        spec_example_instance, prefix=p, dialect=Dialect.SQLITE,
+        spec_example_instance, prefix=p, dialect=Dialect.DUCKDB,
     )
     assert f"DELETE FROM {p}_daily_balances;" in sql
     assert f"DELETE FROM {p}_transactions;" in sql
 
 
-# ---------- step_2_wipe orchestrator (SQLite tempfile) ----------
+# ---------- step_2_wipe orchestrator (DuckDB tempfile) ----------
 
 def test_step_2_wipe_clears_both_base_tables(
     tmp_path: Path, spec_example_instance: L2Instance,
 ) -> None:
-    cfg = _sqlite_cfg(tmp_path)
+    cfg = _duckdb_cfg(tmp_path)
     _apply_schema_and_plant_two_rows(cfg, spec_example_instance)
     pre_tx, pre_bal = _row_counts(cfg, spec_example_instance)
     assert (pre_tx, pre_bal) == (1, 1), (
@@ -356,7 +357,7 @@ def test_step_2_wipe_clears_both_base_tables(
 def test_step_2_wipe_emits_start_then_done_events(
     tmp_path: Path, spec_example_instance: L2Instance,
 ) -> None:
-    cfg = _sqlite_cfg(tmp_path)
+    cfg = _duckdb_cfg(tmp_path)
     _apply_schema_and_plant_two_rows(cfg, spec_example_instance)
     sink = _EventCollector()
     asyncio.run(step_2_wipe(cfg, spec_example_instance, dev_log=sink))
@@ -368,7 +369,7 @@ def test_step_2_wipe_emits_start_then_done_events(
     ]
     start = sink.by_kind("deploy:step2:wipe:start")[0]
     assert start["db_table_prefix"] == cfg.db_table_prefix
-    assert start["dialect"] == "sqlite"
+    assert start["dialect"] == "duckdb"
     done = sink.by_kind("deploy:step2:wipe:done")[0]
     assert done["transactions_deleted"] == 1
     assert done["daily_balances_deleted"] == 1
@@ -377,7 +378,7 @@ def test_step_2_wipe_emits_start_then_done_events(
 def test_step_2_wipe_dev_log_none_safe(
     tmp_path: Path, spec_example_instance: L2Instance,
 ) -> None:
-    cfg = _sqlite_cfg(tmp_path)
+    cfg = _duckdb_cfg(tmp_path)
     _apply_schema_and_plant_two_rows(cfg, spec_example_instance)
     tx, bal = asyncio.run(
         step_2_wipe(cfg, spec_example_instance, dev_log=None),
@@ -389,7 +390,7 @@ def test_step_2_wipe_idempotent_on_empty_tables(
     tmp_path: Path, spec_example_instance: L2Instance,
 ) -> None:
     """Wipe-then-wipe is safe — second call reports zero deletes."""
-    cfg = _sqlite_cfg(tmp_path)
+    cfg = _duckdb_cfg(tmp_path)
     _apply_schema_and_plant_two_rows(cfg, spec_example_instance)
     asyncio.run(step_2_wipe(cfg, spec_example_instance, dev_log=None))
     tx, bal = asyncio.run(
@@ -409,7 +410,7 @@ def test_step_3_generator_skip_when_disabled(
     tmp_path: Path, spec_example_instance: L2Instance,
 ) -> None:
     cfg = replace(
-        _sqlite_cfg(tmp_path),
+        _duckdb_cfg(tmp_path),
         test_generator=TestGeneratorConfig(enabled=False),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
@@ -435,7 +436,7 @@ def test_step_3_generator_full_writes_rows(
     pipeline and lands rows in both base tables."""
     from datetime import date
     cfg = replace(
-        _sqlite_cfg(tmp_path),
+        _duckdb_cfg(tmp_path),
         test_generator=TestGeneratorConfig(end_date=date(2030, 1, 1)),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
@@ -454,7 +455,7 @@ def test_step_3_generator_full_emits_start_then_done(
 ) -> None:
     from datetime import date
     cfg = replace(
-        _sqlite_cfg(tmp_path),
+        _duckdb_cfg(tmp_path),
         test_generator=TestGeneratorConfig(
             end_date=date(2030, 1, 1), seed=12345,
         ),
@@ -498,11 +499,11 @@ def test_step_3_generator_full_with_cutoff_truncates_emission(
     with_cutoff_dir = tmp_path / "with_cutoff"
     with_cutoff_dir.mkdir()
     cfg_no_cutoff = replace(
-        _sqlite_cfg(no_cutoff_dir),
+        _duckdb_cfg(no_cutoff_dir),
         test_generator=TestGeneratorConfig(end_date=date(2030, 1, 31)),
     )
     cfg_with_cutoff = replace(
-        _sqlite_cfg(with_cutoff_dir),
+        _duckdb_cfg(with_cutoff_dir),
         test_generator=TestGeneratorConfig(
             end_date=date(2030, 1, 31),
             cutoff_date=date(2030, 1, 15),  # truncate mid-month
@@ -541,7 +542,7 @@ def test_step_3_generator_no_cutoff_emits_unchanged(
     explicitly)."""
     from datetime import date
     cfg = replace(
-        _sqlite_cfg(tmp_path),
+        _duckdb_cfg(tmp_path),
         test_generator=TestGeneratorConfig(
             end_date=date(2030, 1, 31),
             cutoff_date=None,  # explicit — test the None path
@@ -568,7 +569,7 @@ def test_step_3_generator_full_anchor_determinism(
         sub = tmp_path / label
         sub.mkdir()
         cfg = replace(
-            _sqlite_cfg(sub),
+            _duckdb_cfg(sub),
             test_generator=TestGeneratorConfig(end_date=date(2030, 1, 1)),
         )
         _apply_demo_schema_only(cfg, spec_example_instance)
@@ -596,7 +597,7 @@ def test_step_3_generator_exceptions_only_writes_fewer_than_full(
         sub = tmp_path / label
         sub.mkdir()
         cfg = replace(
-            _sqlite_cfg(sub),
+            _duckdb_cfg(sub),
             test_generator=TestGeneratorConfig(
                 scope=scope,  # pyright: ignore[reportArgumentType]  # WHY: parametrized over Literal at the call site
                 end_date=date(2030, 1, 1),
@@ -626,7 +627,7 @@ def test_step_3_generator_exceptions_only_emits_lifecycle_events(
     tmp_path: Path, spec_example_instance: L2Instance,
 ) -> None:
     cfg = replace(
-        _sqlite_cfg(tmp_path),
+        _duckdb_cfg(tmp_path),
         test_generator=TestGeneratorConfig(scope="exceptions_only"),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
@@ -649,7 +650,7 @@ def test_step_3_generator_uncovered_rails_empty_db_full_baseline(
     full baseline. Should match scope=full minus the plants layer."""
     from datetime import date
     cfg = replace(
-        _sqlite_cfg(tmp_path),
+        _duckdb_cfg(tmp_path),
         test_generator=TestGeneratorConfig(
             scope="uncovered_rails", end_date=date(2030, 1, 1),
         ),
@@ -677,7 +678,7 @@ def test_step_3_generator_uncovered_rails_skips_covered(
         sub = tmp_path / label
         sub.mkdir()
         cfg = replace(
-            _sqlite_cfg(sub),
+            _duckdb_cfg(sub),
             test_generator=TestGeneratorConfig(
                 scope="uncovered_rails", end_date=date(2030, 1, 1),
             ),
@@ -694,7 +695,7 @@ def test_step_3_generator_uncovered_rails_skips_covered(
     sub = tmp_path / "partial"
     sub.mkdir()
     cfg = replace(
-        _sqlite_cfg(sub),
+        _duckdb_cfg(sub),
         test_generator=TestGeneratorConfig(
             scope="uncovered_rails", end_date=date(2030, 1, 1),
         ),
@@ -745,7 +746,7 @@ def test_covered_rail_names_distinct_set(
     """Helper: verify _covered_rail_names returns the de-duplicated set
     of rail_name values from <prefix>_transactions."""
     from recon_gen.common.l2.deploy_pipeline import _covered_rail_names
-    cfg = _sqlite_cfg(tmp_path)
+    cfg = _duckdb_cfg(tmp_path)
     _apply_demo_schema_only(cfg, spec_example_instance)
     # Empty table → empty set.
     assert _covered_rail_names(cfg, spec_example_instance) == frozenset()
@@ -785,7 +786,7 @@ def test_step_3_generator_full_adds_to_existing_rows(
     confirming the count is `1 + generator_output`."""
     from datetime import date
     cfg = replace(
-        _sqlite_cfg(tmp_path),
+        _duckdb_cfg(tmp_path),
         test_generator=TestGeneratorConfig(end_date=date(2030, 1, 1)),
     )
     _apply_schema_and_plant_two_rows(cfg, spec_example_instance)
@@ -838,7 +839,7 @@ def test_step_3_generator_only_template_requires_template_name(
     must loud-fail rather than silently degrade to scope=full."""
     from datetime import date
     cfg = replace(
-        _sqlite_cfg(tmp_path),
+        _duckdb_cfg(tmp_path),
         test_generator=TestGeneratorConfig(
             scope="only_template", end_date=date(2030, 1, 1),
             only_template=None,
@@ -862,7 +863,7 @@ def test_step_3_generator_only_template_emits_closure_baseline(
     is proven by the strictly-fewer-than-full sibling test."""
     from datetime import date
     cfg = replace(
-        _sqlite_cfg(tmp_path),
+        _duckdb_cfg(tmp_path),
         test_generator=TestGeneratorConfig(
             scope="only_template", end_date=date(2030, 1, 1),
             only_template="MerchantSettlementCycle",
@@ -913,7 +914,7 @@ def test_step_3_generator_only_template_writes_strictly_fewer_than_full(
         sub = tmp_path / label
         sub.mkdir()
         cfg = replace(
-            _sqlite_cfg(sub),
+            _duckdb_cfg(sub),
             test_generator=TestGeneratorConfig(
                 scope=scope,  # pyright: ignore[reportArgumentType]  # WHY: parametrized over Literal at the call site
                 end_date=date(2030, 1, 1),
@@ -939,7 +940,7 @@ def test_step_3_generator_only_template_writes_strictly_fewer_than_full(
 
 
 def _insert_test_transaction(
-    cur: object,  # sqlite3.Cursor
+    cur: object,  # duckdb.DuckDBPyConnection
     p: str,
     *,
     tid: str,
@@ -1007,7 +1008,7 @@ def test_derive_balances_no_op_when_disabled(
     """When cfg.test_generator.derive_balances=False, the pass returns
     0 and writes nothing."""
     cfg = replace(
-        _sqlite_cfg(tmp_path),
+        _duckdb_cfg(tmp_path),
         test_generator=TestGeneratorConfig(derive_balances=False),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
@@ -1031,7 +1032,7 @@ def test_derive_balances_default_account_roles_writes_control_only(
     """Default account-role set is control accounts only — DDA
     transactions are NOT derived into balances."""
     cfg = replace(
-        _sqlite_cfg(tmp_path),
+        _duckdb_cfg(tmp_path),
         test_generator=TestGeneratorConfig(derive_balances=True),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
@@ -1074,7 +1075,7 @@ def test_derive_balances_account_roles_override_widens_set(
     """Operator can opt DDA balances in via the override field — both
     control AND DDA rows get derived."""
     cfg = replace(
-        _sqlite_cfg(tmp_path),
+        _duckdb_cfg(tmp_path),
         test_generator=TestGeneratorConfig(
             derive_balances=True,
             derive_balances_account_roles=("gl_control", "dda"),
@@ -1113,7 +1114,7 @@ def test_derive_balances_failed_transactions_excluded(
     """Transactions in status='failed' don't contribute to derived
     balances — they never posted."""
     cfg = replace(
-        _sqlite_cfg(tmp_path),
+        _duckdb_cfg(tmp_path),
         test_generator=TestGeneratorConfig(derive_balances=True),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
@@ -1170,7 +1171,7 @@ def test_derive_balances_overwrites_existing_rows(
     """Re-running the derive overwrites existing daily_balances rows for
     the same (account, business_day) — operator can iteratively scrub."""
     cfg = replace(
-        _sqlite_cfg(tmp_path),
+        _duckdb_cfg(tmp_path),
         test_generator=TestGeneratorConfig(derive_balances=True),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
@@ -1232,7 +1233,7 @@ def test_derive_balances_emits_lifecycle_events(
     """When enabled, derive emits start + done events with the
     account_roles in the payload for visibility."""
     cfg = replace(
-        _sqlite_cfg(tmp_path),
+        _duckdb_cfg(tmp_path),
         test_generator=TestGeneratorConfig(
             derive_balances=True,
             derive_balances_account_roles=("gl_control",),
@@ -1268,7 +1269,7 @@ def test_step_4_matviews_refresh_emits_lifecycle_events(
 ) -> None:
     """SQLite refresh path: drops + re-creates every matview-as-table.
     Lifecycle = start → done."""
-    cfg = _sqlite_cfg(tmp_path)
+    cfg = _duckdb_cfg(tmp_path)
     _apply_demo_schema_only(cfg, spec_example_instance)
     sink = _EventCollector()
     asyncio.run(
@@ -1289,7 +1290,7 @@ def test_step_4_matviews_idempotent_on_empty_db(
     """Running matview refresh on an empty (post-wipe) DB must succeed —
     matviews exist (from the schema apply) but resolve to zero rows.
     Re-running is safe (drops + recreates)."""
-    cfg = _sqlite_cfg(tmp_path)
+    cfg = _duckdb_cfg(tmp_path)
     _apply_demo_schema_only(cfg, spec_example_instance)
     asyncio.run(
         step_4_matviews(cfg, spec_example_instance, dev_log=None),
@@ -1322,7 +1323,7 @@ def test_step_4_matviews_picks_up_new_rows(
     derive from)."""
     from datetime import date
     cfg = replace(
-        _sqlite_cfg(tmp_path),
+        _duckdb_cfg(tmp_path),
         test_generator=TestGeneratorConfig(end_date=date(2030, 1, 1)),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
@@ -1390,7 +1391,7 @@ def test_run_deploy_pipeline_no_etl_runs_all_steps(
     """No etl_hook configured: wipe runs (BS.4 order: wipe FIRST),
     step 1 etl_hook skips, steps 3-5 run. Summary reports per-step
     counts + the post-bump data_generation_id."""
-    cfg = _sqlite_cfg(tmp_path)
+    cfg = _duckdb_cfg(tmp_path)
     _apply_demo_schema_only(cfg, spec_example_instance)
     sink = _EventCollector()
     summary = asyncio.run(
@@ -1433,7 +1434,7 @@ def test_run_deploy_pipeline_halts_on_etl_failure(
     is gone (the test below now confirms the wipe RAN, not that it
     was skipped)."""
     cfg = replace(
-        _sqlite_cfg(tmp_path),
+        _duckdb_cfg(tmp_path),
         etl_hook="false",  # POSIX `false` exits 1 — universally available
     )
     _apply_schema_and_plant_two_rows(cfg, spec_example_instance)
@@ -1470,7 +1471,7 @@ def test_deploy_summary_to_json_serializes_every_field(
     dataclass-shaped values left over — POST /deploy serializes
     straight from this and Starlette's JSONResponse rejects nested
     dataclass instances."""
-    cfg = _sqlite_cfg(tmp_path)
+    cfg = _duckdb_cfg(tmp_path)
     _apply_demo_schema_only(cfg, spec_example_instance)
     summary = asyncio.run(
         run_deploy_pipeline(cfg, spec_example_instance, dev_log=None),
@@ -1506,7 +1507,7 @@ def test_orchestration_etl_hook_path(
     only ETL contract is the etl_hook subprocess writing directly to
     demo_db (no upstream copy)."""
     cfg = replace(
-        _sqlite_cfg(tmp_path),
+        _duckdb_cfg(tmp_path),
         etl_hook="true",  # POSIX `true` exits 0
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
@@ -1534,7 +1535,7 @@ def test_orchestration_no_etl_hook_path(
     """No etl_hook configured: step 1 skips, step 2 wipe runs, step 3
     generator populates demo_db on its own. Default cfg path — the
     pre-BS.4 "etl-free" mode is now the canonical mode."""
-    cfg = _sqlite_cfg(tmp_path)
+    cfg = _duckdb_cfg(tmp_path)
     assert cfg.etl_hook is None
     _apply_demo_schema_only(cfg, spec_example_instance)
     summary = asyncio.run(

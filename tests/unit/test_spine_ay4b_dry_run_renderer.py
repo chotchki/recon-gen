@@ -30,7 +30,7 @@ def test_renders_none_as_null() -> None:
     bug if it slips through)."""
     out = render_captured_sql(
         [("INSERT INTO t (a) VALUES (?)", (None,))],
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     assert "VALUES (NULL)" in out
     assert "'None'" not in out
@@ -41,7 +41,7 @@ def test_renders_str_with_single_quote_doubling() -> None:
     matches the OLD `_sql_str(s)` shape."""
     out = render_captured_sql(
         [("INSERT INTO t (a) VALUES (?)", ("can't",))],
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     assert "VALUES ('can''t')" in out
 
@@ -49,7 +49,7 @@ def test_renders_str_with_single_quote_doubling() -> None:
 def test_renders_int_as_bare_numeric() -> None:
     out = render_captured_sql(
         [("INSERT INTO t (n) VALUES (?)", (42,))],
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     assert "VALUES (42)" in out
 
@@ -57,7 +57,7 @@ def test_renders_int_as_bare_numeric() -> None:
 def test_renders_float_as_bare_numeric() -> None:
     out = render_captured_sql(
         [("INSERT INTO t (n) VALUES (?)", (3.14,))],
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     assert "VALUES (3.14)" in out
 
@@ -67,7 +67,7 @@ def test_renders_negative_amount() -> None:
     minus sign must survive."""
     out = render_captured_sql(
         [("INSERT INTO t (m) VALUES (?)", (-250.5,))],
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     assert "VALUES (-250.5)" in out
 
@@ -78,7 +78,7 @@ def test_renders_bool_as_zero_or_one() -> None:
             ("INSERT INTO t (b) VALUES (?)", (True,)),
             ("INSERT INTO t (b) VALUES (?)", (False,)),
         ],
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     assert "VALUES (1)" in out
     assert "VALUES (0)" in out
@@ -90,7 +90,7 @@ def test_renders_json_string_with_inner_quotes() -> None:
     json_blob = '{"scenario_id":"foo","sender_id":"acct-a"}'
     out = render_captured_sql(
         [("INSERT INTO t (m) VALUES (?)", (json_blob,))],
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     # The outer quote wraps; inner double-quotes pass through untouched.
     assert '\'{"scenario_id":"foo","sender_id":"acct-a"}\'' in out
@@ -104,7 +104,7 @@ def test_renders_json_string_with_inner_quotes() -> None:
 def test_sqlite_dialect_substitutes_question_mark() -> None:
     out = render_captured_sql(
         [("INSERT INTO t (a, b) VALUES (?, ?)", ("foo", 42))],
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     assert "VALUES ('foo', 42)" in out
     assert "?" not in out  # all placeholders substituted
@@ -150,14 +150,14 @@ def test_concats_multiple_statements_with_semicolons() -> None:
             ("INSERT INTO t (a) VALUES (?)", ("first",)),
             ("INSERT INTO t (a) VALUES (?)", ("second",)),
         ],
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     assert "VALUES ('first');" in out
     assert "VALUES ('second');" in out
 
 
 def test_empty_input_produces_empty_string() -> None:
-    out = render_captured_sql([], dialect=Dialect.SQLITE)
+    out = render_captured_sql([], dialect=Dialect.DUCKDB)
     assert out == ""
 
 
@@ -167,7 +167,7 @@ def test_custom_statement_separator() -> None:
             ("INSERT INTO t VALUES (?)", (1,)),
             ("INSERT INTO t VALUES (?)", (2,)),
         ],
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
         statement_separator=";\n\n",
     )
     assert "VALUES (1);\n\nINSERT" in out
@@ -184,7 +184,7 @@ def test_placeholder_count_mismatch_raises_loudly() -> None:
     with pytest.raises(ValueError, match="placeholder count mismatch"):
         render_captured_sql(
             [("INSERT INTO t (a, b) VALUES (?, ?)", ("only_one",))],
-            dialect=Dialect.SQLITE,
+            dialect=Dialect.DUCKDB,
         )
 
 
@@ -206,13 +206,13 @@ def test_round_trip_with_drift_generator_produces_valid_inserts() -> None:
     output is a string of INSERT statements with no leftover
     placeholders + recognizable spine emit shape."""
     ctx = ScenarioContext(scenario_id="test-ay4b-roundtrip")
-    cap = dry_run_capture(Dialect.SQLITE)
+    cap = dry_run_capture(Dialect.DUCKDB)
     gen = DriftInvariant().scenario_for(
         "CustomerSubledger", magnitude=5.0,
     )
     captured = ctx.compose(cap, gen, dry_run=True)  # pyright: ignore[reportArgumentType]: _DryRunBase is a test double of Connection
     assert captured is not None
-    sql = render_captured_sql(captured, dialect=Dialect.SQLITE)
+    sql = render_captured_sql(captured, dialect=Dialect.DUCKDB)
     # No leftover placeholders.
     assert "?" not in sql
     # At least one INSERT INTO statement.
@@ -282,7 +282,7 @@ def test_sqlite_does_not_wrap_timestamp_strings() -> None:
     """SQLite stores TEXT for timestamps; the wrap is Oracle-only."""
     out = render_captured_sql(
         [("INSERT INTO t (posting) VALUES (?)", ("2026-05-24 12:00:00",))],
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     assert "VALUES ('2026-05-24 12:00:00')" in out
     assert "TIMESTAMP" not in out

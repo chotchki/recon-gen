@@ -26,13 +26,13 @@ BC.12 specifics this gate locks:
 from __future__ import annotations
 
 import json
-import sqlite3
+import duckdb
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.config_table import (
     config_table_name,
     emit_config_populate_sql,
@@ -47,6 +47,7 @@ from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema
 from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 _PREFIX = "spec_example"
 _SPEC_EXAMPLE = (
@@ -54,28 +55,26 @@ _SPEC_EXAMPLE = (
 )
 
 
-def _fresh_db_with_config_only() -> sqlite3.Connection:
+def _fresh_db_with_config_only() -> duckdb.DuckDBPyConnection:
     """Minimal DB with JUST the config_kv table + index."""
-    conn = sqlite3.connect(":memory:")
+    conn = duckdb.connect(":memory:")
     cur = conn.cursor()
     execute_script(
-        cur, emit_config_table_ddl(_PREFIX, Dialect.SQLITE),
-        dialect=Dialect.SQLITE,
+        cur, emit_config_table_ddl(_PREFIX, Dialect.DUCKDB),
+        dialect=Dialect.DUCKDB,
     )
     conn.commit()
     return conn
 
 
-def _fresh_db_with_full_schema() -> sqlite3.Connection:
+def _fresh_db_with_full_schema() -> duckdb.DuckDBPyConnection:
     """Full L2 schema applied — exercises the emit_schema integration."""
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+    conn = duckdb.connect(":memory:")
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
-        cur, emit_schema(instance, prefix=_PREFIX, dialect=Dialect.SQLITE),
-        dialect=Dialect.SQLITE,
+        cur, emit_schema(instance, prefix=_PREFIX, dialect=Dialect.DUCKDB),
+        dialect=Dialect.DUCKDB,
     )
     conn.commit()
     return conn
@@ -99,7 +98,7 @@ def test_config_table_name_follows_kv_suffix_convention() -> None:
 
 
 def test_ddl_sqlite_creates_kv_table_with_expected_columns() -> None:
-    ddl = emit_config_table_ddl(_PREFIX, Dialect.SQLITE)
+    ddl = emit_config_table_ddl(_PREFIX, Dialect.DUCKDB)
     assert "CREATE TABLE spec_example_config_kv" in ddl
     assert "node_id" in ddl
     assert "parent_id" in ddl
@@ -109,10 +108,10 @@ def test_ddl_sqlite_creates_kv_table_with_expected_columns() -> None:
     assert "idx_spec_example_config_kv_parent_key" in ddl
 
     # Execute it.
-    conn = sqlite3.connect(":memory:")
+    conn = duckdb.connect(":memory:")
     try:
         cur = conn.cursor()
-        execute_script(cur, ddl, dialect=Dialect.SQLITE)
+        execute_script(cur, ddl, dialect=Dialect.DUCKDB)
         cols = {
             row[1] for row in conn.execute(
                 "PRAGMA table_info(spec_example_config_kv)",
@@ -128,16 +127,18 @@ def test_ddl_postgres_uses_text_value_type() -> None:
     ddl = emit_config_table_ddl(_PREFIX, Dialect.POSTGRES)
     assert "VARCHAR(4000)" not in ddl  # unbounded per text_type
     assert "TEXT" in ddl
-    # BIGINT for the node_id PK + parent_id self-ref.
-    assert "BIGINT" in ddl
+    # CB.8 widened node_id + parent_id to VARCHAR so the v_overlay's
+    # string sentinels (``__bv_applied__`` / ``__bv__``) coexist with
+    # walker-emitted integer ids.
+    assert "VARCHAR(64)" in ddl
 
 
 def test_drop_ddl_idempotent_on_missing_table() -> None:
-    drop = emit_config_table_drop(_PREFIX, Dialect.SQLITE)
+    drop = emit_config_table_drop(_PREFIX, Dialect.DUCKDB)
     assert "DROP TABLE IF EXISTS" in drop
     assert "spec_example_config_kv" in drop
 
-    conn = sqlite3.connect(":memory:")
+    conn = duckdb.connect(":memory:")
     try:
         conn.execute(drop)
     finally:
@@ -147,15 +148,15 @@ def test_drop_ddl_idempotent_on_missing_table() -> None:
 def test_drop_then_recreate_works() -> None:
     """Re-deploy story: schema CREATE + DROP can both run safely on
     the same DB without "table already exists" errors."""
-    create = emit_config_table_ddl(_PREFIX, Dialect.SQLITE)
-    drop = emit_config_table_drop(_PREFIX, Dialect.SQLITE)
+    create = emit_config_table_ddl(_PREFIX, Dialect.DUCKDB)
+    drop = emit_config_table_drop(_PREFIX, Dialect.DUCKDB)
 
-    conn = sqlite3.connect(":memory:")
+    conn = duckdb.connect(":memory:")
     try:
         cur = conn.cursor()
-        execute_script(cur, create, dialect=Dialect.SQLITE)
+        execute_script(cur, create, dialect=Dialect.DUCKDB)
         conn.execute(drop)
-        execute_script(cur, create, dialect=Dialect.SQLITE)
+        execute_script(cur, create, dialect=Dialect.DUCKDB)
         cols = {
             row[1] for row in conn.execute(
                 "PRAGMA table_info(spec_example_config_kv)",
@@ -254,26 +255,20 @@ def test_replace_config_replaces_existing_rows() -> None:
             l2_json=json.dumps({"rails": [{"name": "A"}]}),
             as_of=datetime(2030, 1, 1),
         )
-        first_count = conn.execute(
-            "SELECT COUNT(*) FROM spec_example_config_kv",
-        ).fetchone()[0]
+        first_count = fetch_scalar(conn, "SELECT COUNT(*) FROM spec_example_config_kv",)
         replace_config(
             conn, prefix=_PREFIX,
             cfg_json="{}",
             l2_json=json.dumps({"rails": [{"name": "B"}, {"name": "C"}]}),
             as_of=datetime(2030, 6, 1),
         )
-        second_count = conn.execute(
-            "SELECT COUNT(*) FROM spec_example_config_kv",
-        ).fetchone()[0]
+        second_count = fetch_scalar(conn, "SELECT COUNT(*) FROM spec_example_config_kv",)
         # The second walk has 2 rails → more rows than the first.
         assert second_count > first_count
         # The first walk's 'A' rail is GONE — single-row invariant on
         # the populate side (TRUNCATE-then-INSERT).
-        a_rows = conn.execute(
-            "SELECT COUNT(*) FROM spec_example_config_kv "
-            "WHERE key = 'name' AND value = 'A'",
-        ).fetchone()[0]
+        a_rows = fetch_scalar(conn, "SELECT COUNT(*) FROM spec_example_config_kv "
+            "WHERE key = 'name' AND value = 'A'",)
         assert a_rows == 0
     finally:
         conn.close()
@@ -319,6 +314,7 @@ def test_set_as_of_none_uses_current_timestamp() -> None:
         ).fetchone()
     finally:
         conn.close()
+    assert row is not None
     assert row[0] != "2020-01-01 00:00:00"
 
 
@@ -360,7 +356,7 @@ def test_get_as_of_raises_when_table_empty() -> None:
 def test_emit_schema_includes_config_kv_table_create() -> None:
     sql = emit_schema(
         load_instance(_SPEC_EXAMPLE),
-        prefix=_PREFIX, dialect=Dialect.SQLITE,
+        prefix=_PREFIX, dialect=Dialect.DUCKDB,
     )
     assert "CREATE TABLE spec_example_config_kv" in sql
 
@@ -368,7 +364,7 @@ def test_emit_schema_includes_config_kv_table_create() -> None:
 def test_emit_schema_includes_typed_projection_views() -> None:
     """BC.12: matview JOIN target views — must be in the emitted schema
     on every dialect, between config_kv CREATE and matview CREATEs."""
-    for dialect in (Dialect.SQLITE, Dialect.POSTGRES, Dialect.ORACLE):
+    for dialect in (Dialect.DUCKDB, Dialect.POSTGRES, Dialect.ORACLE):
         sql = emit_schema(
             load_instance(_SPEC_EXAMPLE),
             prefix=_PREFIX, dialect=dialect,
@@ -515,8 +511,7 @@ def test_v_config_chain_children_empty_when_no_chains() -> None:
     chains_arr matches and the view yields empty. (Critical: no
     NULL-row leakage from outer-join semantics.)"""
     from recon_gen.common.l2 import L2Instance
-    conn = sqlite3.connect(":memory:")
-    _register_sqlite_aggregates(conn)
+    conn = duckdb.connect(":memory:")
     instance = L2Instance(
         accounts=(),
         account_templates=(),
@@ -528,8 +523,8 @@ def test_v_config_chain_children_empty_when_no_chains() -> None:
     try:
         cur = conn.cursor()
         execute_script(
-            cur, emit_schema(instance, prefix="nc", dialect=Dialect.SQLITE),
-            dialect=Dialect.SQLITE,
+            cur, emit_schema(instance, prefix="nc", dialect=Dialect.DUCKDB),
+            dialect=Dialect.DUCKDB,
         )
         conn.commit()
         from recon_gen.common.l2.serializer import serialize_l2
@@ -554,7 +549,7 @@ def test_drop_schema_includes_config_kv_drop_and_typed_view_drops() -> None:
     from recon_gen.common.l2.schema import emit_schema_drop_sql
     sql = emit_schema_drop_sql(
         load_instance(_SPEC_EXAMPLE),
-        prefix=_PREFIX, dialect=Dialect.SQLITE,
+        prefix=_PREFIX, dialect=Dialect.DUCKDB,
     )
     assert "DROP TABLE IF EXISTS spec_example_config_kv" in sql
     assert "DROP VIEW IF EXISTS spec_example_v_config_rails" in sql
@@ -619,8 +614,7 @@ def test_v_config_transfer_templates_empty_when_no_templates() -> None:
     finds no tt_arr matches and the view yields empty. No NULL-row
     leakage from outer-join semantics."""
     from recon_gen.common.l2 import L2Instance
-    conn = sqlite3.connect(":memory:")
-    _register_sqlite_aggregates(conn)
+    conn = duckdb.connect(":memory:")
     instance = L2Instance(
         accounts=(),
         account_templates=(),
@@ -632,8 +626,8 @@ def test_v_config_transfer_templates_empty_when_no_templates() -> None:
     try:
         cur = conn.cursor()
         execute_script(
-            cur, emit_schema(instance, prefix="nt", dialect=Dialect.SQLITE),
-            dialect=Dialect.SQLITE,
+            cur, emit_schema(instance, prefix="nt", dialect=Dialect.DUCKDB),
+            dialect=Dialect.DUCKDB,
         )
         conn.commit()
         from recon_gen.common.l2.serializer import serialize_l2
@@ -666,7 +660,7 @@ def test_emit_config_populate_sql_starts_with_delete() -> None:
         cfg_json="{}",
         l2_json=json.dumps({"rails": [{"name": "ACH"}]}),
         as_of=datetime(2030, 1, 1),
-        dialect=Dialect.SQLITE,
+        dialect=Dialect.DUCKDB,
     )
     lines = [line for line in sql.split("\n") if line.strip()]
     assert lines[0].startswith("DELETE FROM spec_example_config_kv")

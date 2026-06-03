@@ -27,13 +27,13 @@ What's pinned:
 from __future__ import annotations
 
 import json
-import sqlite3
+import duckdb
 from datetime import date, datetime
 from pathlib import Path
 
 import pytest
 
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.config_table import replace_config
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema
@@ -46,18 +46,17 @@ from recon_gen.common.spine import (
 )
 from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from recon_gen.common.sql import Dialect
+from tests._test_helpers import fetch_scalar
 
 _SPEC_EXAMPLE = (
     Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
 )
 _PREFIX = "spec_example"
-_DIALECT = Dialect.SQLITE
+_DIALECT = Dialect.DUCKDB
 
 
-def _fresh_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+def _fresh_db() -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(":memory:")
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -175,12 +174,8 @@ def test_ledger_simulation_with_transfers_only_no_accounts() -> None:
     try:
         sim.emit(conn)
         conn.commit()
-        tx_count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions",
-        ).fetchone()[0]
-        balance_count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances",
-        ).fetchone()[0]
+        tx_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions",)
+        balance_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances",)
     finally:
         conn.close()
     assert tx_count == 2  # one row per leg
@@ -273,7 +268,9 @@ def test_transfer_posting_hour_defaults_to_noon() -> None:
         ).fetchall()
     finally:
         conn.close()
-    assert postings == [("2030-01-15 12:00:00",)]
+    # DuckDB reads TIMESTAMP columns back as Python datetime (unlike
+    # SQLite which returned ISO TEXT). Both shapes carry the same value.
+    assert postings == [(datetime(2030, 1, 15, 12, 0, 0),)]
 
 
 # ---------------------------------------------------------------------------
@@ -299,12 +296,8 @@ def test_mixed_accounts_and_transfers_both_emit() -> None:
     try:
         sim.emit(conn)
         conn.commit()
-        tx_count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions",
-        ).fetchone()[0]
-        balance_count = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances",
-        ).fetchone()[0]
+        tx_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions",)
+        balance_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances",)
     finally:
         conn.close()
     # Account fold: 1 leg tx + 1 balance row. Transfer: 2 legs. Total: 3 tx + 1 balance.
@@ -386,9 +379,7 @@ def test_multi_leg_unbalanced_transfer_is_representable() -> None:
     try:
         sim.emit(conn)
         conn.commit()
-        n = conn.execute(
-            f"SELECT COUNT(*) FROM {_PREFIX}_transactions",
-        ).fetchone()[0]
+        n = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions",)
     finally:
         conn.close()
     assert n == 3
@@ -428,9 +419,7 @@ def test_amount_sign_routes_direction(
     try:
         sim.emit(conn)
         conn.commit()
-        d = conn.execute(
-            f"SELECT amount_direction FROM {_PREFIX}_transactions",
-        ).fetchone()[0]
+        d = fetch_scalar(conn, f"SELECT amount_direction FROM {_PREFIX}_transactions",)
     finally:
         conn.close()
     assert d == expected_direction

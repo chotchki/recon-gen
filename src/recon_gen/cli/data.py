@@ -26,6 +26,7 @@ import click
 
 if TYPE_CHECKING:
     from recon_gen.common.l2.primitives import L2Instance
+    from recon_gen.common.sql import Dialect as _DialectT
 
 from recon_gen.common.as_of_frame import LOCKED_ANCHOR
 from recon_gen.cli._helpers import (
@@ -172,23 +173,28 @@ def data_clean(
         emit_to_target(sql, output, label="data TRUNCATE")
 
 
-def _build_fresh_semantic_lock_sqlite(
+def _build_fresh_semantic_lock(
     instance: "L2Instance", anchor: "date", *, prefix: str,
+    dialect: "_DialectT | None" = None,
 ) -> str:
-    """AZ.1 — build a fresh semantic lock JSON for the given
-    (instance, anchor) against an in-memory SQLite. Mirrors what
-    `test_locked_seeds.py` does for byte locks, but compose +
-    detect run live against a real conn rather than emitting SQL
-    text.
+    """AZ.1 / CA.6 — build a fresh semantic lock JSON for the given
+    (instance, anchor) against an in-process DB (defaults to DuckDB
+    post-CA.6; SQLite arm kept until CA.8 deletes it). Mirrors what
+    `test_locked_seeds.py` does for byte locks, but compose + detect
+    run live against a real conn rather than emitting SQL text.
 
-    SQLite-only initial AZ.1 (the dominant CI gate). PG / Oracle
-    locks require deployed DBs + the deploy_pipeline path; AZ.1.b
-    extension or AZ.4's CI gate swap will land them.
+    The VIOLATION set is dialect-invariant (BZ.4 + CA.0 audit
+    confirmed byte-equivalence across all matview engines), so the
+    on-disk lock files differ ONLY in the `scenario_fingerprint.dialect`
+    field. Per-dialect files exist for symmetry with the runner's
+    dialect-tagged tracking; CA.9 may collapse them once SQLite is
+    fully gone.
     """
-    import sqlite3
+    from recon_gen.common.sql import Dialect as _Dialect  # noqa: PLC0415
+    if dialect is None:
+        dialect = _Dialect.DUCKDB
 
     from recon_gen.common.db import (
-        _register_sqlite_aggregates,
         execute_script,
     )
     from recon_gen.common.l2.config_table import replace_config
@@ -206,17 +212,28 @@ def _build_fresh_semantic_lock_sqlite(
     )
     from recon_gen.common.sql import Dialect
 
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)
+    # Typing: SQLite + DuckDB connection objects don't share a base
+    # class, but every call site in this helper uses methods that BOTH
+    # support (execute / cursor / close + replace_config's bind shape).
+    # Widen to Any so the body type-checks under both branches.
+    from typing import Any as _Any  # noqa: PLC0415
+    conn: _Any
+    if dialect is Dialect.DUCKDB:
+        import duckdb
+        conn = duckdb.connect(":memory:")
+    else:
+        raise ValueError(
+            f"_build_fresh_semantic_lock: in-process build supports SQLite "
+            f"+ DuckDB only; got {dialect!r}. PG / Oracle locks need the "
+            f"deployed-DB path (AZ.1.b extension)."
+        )
     try:
         cur = conn.cursor()
         execute_script(
             cur,
-            emit_schema(instance, prefix=prefix, dialect=Dialect.SQLITE),
-            dialect=Dialect.SQLITE,
+            emit_schema(instance, prefix=prefix, dialect=dialect),
+            dialect=dialect,
         )
-        conn.commit()
         # Seed config row (matview reads as_of + BS.5 chain children
         # from here). Pre-BS.5 this passed l2_json="{}" because no matview
         # body read chain data through the kv projection — they baked
@@ -251,10 +268,10 @@ def _build_fresh_semantic_lock_sqlite(
         # spurious violations; lock files reflect that.)
         baseline_sql = emit_baseline_seed(
             instance, prefix=prefix,
-            window_days=90, anchor=anchor, dialect=Dialect.SQLITE,
+            window_days=90, anchor=anchor, dialect=dialect,
         )
-        conn.executescript(baseline_sql)
-        conn.commit()
+        # DuckDB accepts multi-statement scripts via conn.execute().
+        conn.execute(baseline_sql)
         # Compose the production seed via the spine pipeline.
         from recon_gen.cli._helpers import build_default_scenario  # pyright: ignore[reportUnknownVariableType]  # WHY: helper has pending untyped-def waiver
         scenario = build_default_scenario(instance, anchor=anchor)  # pyright: ignore[reportUnknownVariableType]: same helper-untyped waiver propagates to the call
@@ -275,20 +292,18 @@ def _build_fresh_semantic_lock_sqlite(
         ctx = ScenarioContext(
             scenario_id=f"semantic-lock-{prefix}",
             prefix=prefix,
-            dialect=Dialect.SQLITE,
+            dialect=dialect,
         )
         # Live emit (not dry_run) — the matview detector needs real rows.
         for gen in generators:
             gen.emit(conn, scenario_id=ctx.scenario_id)  # type: ignore[call-arg]: ViolationGenerator Protocol structural narrowing to ClaimedAccountsGenerator's scenario_id kwarg not inferred
-        conn.commit()
         # Refresh matviews so detect() reads up-to-date violations.
         cur2 = conn.cursor()
         execute_script(
             cur2,
-            refresh_matviews_sql(instance, prefix=prefix, dialect=Dialect.SQLITE),
-            dialect=Dialect.SQLITE,
+            refresh_matviews_sql(instance, prefix=prefix, dialect=dialect),
+            dialect=dialect,
         )
-        conn.commit()
         # Each Invariant defaults `prefix="spec_example"`; pass the
         # right prefix when the instance differs.
         invariants = [
@@ -299,7 +314,7 @@ def _build_fresh_semantic_lock_sqlite(
         return lock_to_json(
             lock,
             instance=prefix,
-            dialect=Dialect.SQLITE,
+            dialect=dialect,
             canonical_anchor=anchor,
         )
     finally:
@@ -351,11 +366,18 @@ def data_semantic_lock(
     instance = load_instance(yaml_path)
     instance_name = yaml_path.stem
 
-    fresh = _build_fresh_semantic_lock_sqlite(
+    from recon_gen.common.sql import Dialect as _Dialect  # noqa: PLC0415
+    # CA.6 — default lock dialect moved from SQLite to DuckDB. The
+    # SQLite arm stays alive until CA.8 deletes Dialect.DUCKDB; both
+    # files are kept on disk so the CI gate can be flipped without
+    # losing the recoverable point. Violation set is dialect-invariant
+    # (BZ.4 + CA.0 audit), only `scenario_fingerprint.dialect` differs.
+    fresh = _build_fresh_semantic_lock(
         instance, LOCKED_ANCHOR, prefix=instance_name,
+        dialect=_Dialect.DUCKDB,
     )
     locked_path = (
-        _SEMANTIC_LOCKS_DIR / f"{instance_name}.sqlite.json"
+        _SEMANTIC_LOCKS_DIR / f"{instance_name}.duckdb.json"
     )
 
     if check_only:

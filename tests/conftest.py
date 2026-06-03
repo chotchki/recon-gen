@@ -27,6 +27,7 @@ from recon_gen.common.env_keys import (
     RECON_GEN_LAYER,
     RECON_GEN_RUN_DIR,
     RECON_GEN_SQLITE_LEAK_GATE,
+    RECON_GEN_TEST_L2_INSTANCE,
 )
 
 
@@ -64,43 +65,18 @@ def pytest_configure(config: Any) -> None:
     if RECON_GEN_FUZZ_SEED.get_or_none() is None:
         os.environ[RECON_GEN_FUZZ_SEED.name] = str(secrets.randbits(32))
 
-    # Y.7-followup — when pytest-xdist is active and `-n` workers were
-    # requested (xdist then defaults `dist` to "load"), bump to "loadgroup"
-    # so `@pytest.mark.xdist_group` markers pin grouped tests to a single
-    # worker. Needed because xdist re-runs module/session-scoped fixtures
-    # ONCE PER WORKER: a module-scoped fixture that mutates a shared
-    # external resource (e.g. test_audit_dashboard_agreement.py's
-    # seeded_audit re-applying the Oracle schema) races across workers —
-    # Oracle's DDL auto-commits, so the second worker's CREATE TABLE hits
-    # ORA-00955 while the first worker's run is still in flight. Done here,
-    # NOT via pyproject `addopts = "--dist ..."`, because a no-xdist env
-    # (the CI `test` job, the wheel-smoke job) chokes on an unrecognized
-    # `--dist`. An explicit `--dist <mode>` on the command line still wins
-    # (only the implicit "load" default — set by `-n` alone — gets bumped).
-    # BM.5 (2026-05-28) — pre-BM the check was
-    # ``getattr(config.option, "dist", "no") == "load"`` but on at least
-    # pytest-xdist 3.8 `pytest -n 4` doesn't set `config.option.dist`
-    # to `"load"` by the time our `pytest_configure` runs — the bare
-    # `-n` shortcut's implicit dist defaulting happens later in xdist's
-    # own configure path. Result: our bump never fired under bare `-n
-    # N`, so every variant cell's `-n 4` invocation effectively ran in
-    # `dist=load` mode + ignored every `@pytest.mark.xdist_group` marker.
-    # The sp_pg_aw browser layer's `test_invariant_three_way_agreement`
-    # is the symptom: with default `load` the two parametrizations
-    # distribute to different workers, each races to `apply_db_seed`
-    # on the same iagree prefix, and one worker's DROP CASCADE wipes
-    # the matview the other just CREATEd. With `loadgroup` actually
-    # active, both parametrizations land on the same worker and share
-    # the module-scoped seed.
-    #
-    # Bump on EITHER `"load"` (explicit) OR `"no"` (default-when-
-    # xdist-plugin-loaded), so the `-n N` shortcut also gets bumped.
-    # An explicit user-supplied `--dist=<something-else>` would set
-    # `config.option.dist` to that other value and skip the bump (the
-    # NOT in {"load", "no"} branch).
-    dist = getattr(config.option, "dist", "no")
-    if config.pluginmanager.hasplugin("xdist") and dist in ("load", "no"):
-        config.option.dist = "loadgroup"
+    # CB.7-followup (2026-06-02) — the historic loadgroup auto-bump
+    # was deleted. Its rationale (pin a shared-prefix writer fixture's
+    # tests to one worker so module-scope seeds didn't race) was the
+    # exact thing CB.7-followup unwound when it dropped cross-tier
+    # shared prefixes. Each test now self-isolates via a per-(file,
+    # worker) hash suffix, so scattered module-scope fixtures reseed
+    # their own private prefix — no contention, no DDL collisions.
+    # Keeping the bump caused the qs_browser cascade: with full e2e
+    # collection + `-m browser` + loadgroup, worker session-start dies
+    # in ~5s on every worker (xdist 3.8 loadgroup interacts badly with
+    # marker-deselected items that carry xdist_group). See runner.py's
+    # unit-layer `_layer_command` comment for the full repro.
 
     # #741 — redirect runner.RUNS_DIR so in-process runner.main calls
     # land in session tmp instead of the operator's real runs/. Lazy
@@ -119,13 +95,19 @@ def pytest_configure(config: Any) -> None:
     session_runs_tmp = Path(tempfile.mkdtemp(prefix="qs-gen-test-runs-"))  # typing-smell: ignore[qs-gen-prefix]: tempdir disambiguator, not an AWS resource ID
     runner.RUNS_DIR = session_runs_tmp  # type: ignore[misc]: patching module-level Final at session start; the Final mark documents intent for prod, tests legitimately rebind
 
+    # CB.0 — register marker names so `PytestUnknownMarkWarning` doesn't
+    # fire on the new typed marks. `_CB_MARK_DOCS` is defined at module
+    # scope alongside `pytest_collection_modifyitems` further down.
+    for _mark_name, _mark_doc in _CB_MARK_DOCS.items():
+        config.addinivalue_line("markers", f"{_mark_name}: {_mark_doc}")
+
 
 # ---------------------------------------------------------------------------
 # SQLite connection-leak detector (opt-in via RECON_GEN_SQLITE_LEAK_GATE=1)
 # ---------------------------------------------------------------------------
 #
 # Surfaced 2026-05-27 — aiosqlite#258 (still open) leaks thread locks on
-# per-request connect+close, and `with sqlite3.connect(...)` (Python's
+# per-request connect+close, and `with duckdb.connect(...)` (Python's
 # sqlite3 context manager handles transactions, NOT close) is a common
 # foot-gun. Both shapes accumulate live Connection objects until OOM —
 # explains the local browser-tier OOM during the 13-variant sweep.
@@ -146,6 +128,7 @@ def _count_live_sqlite_connections() -> int:
     connections are reaped before the count. aiosqlite import is
     soft — environments without it count only stdlib sqlite3 conns.
     """
+    import duckdb as _duckdb  # noqa: PLC0415
     import gc as _gc  # noqa: PLC0415
     import sqlite3 as _sqlite3  # noqa: PLC0415
 
@@ -167,7 +150,7 @@ def _count_live_sqlite_connections() -> int:
         _gc.collect()
     live = 0
     for o in _gc.get_objects():
-        if isinstance(o, _sqlite3.Connection):
+        if isinstance(o, _duckdb.DuckDBPyConnection):
             try:
                 o.execute("SELECT 1")
                 live += 1
@@ -203,7 +186,7 @@ def pytest_runtest_teardown(item: Any) -> Generator[None, None, None]:  # typing
     """Fail if the test left more sqlite conns than it found (gate opt-in).
 
     Surfaced 2026-05-27 — aiosqlite#258 leaks thread locks on per-request
-    connect+close, and `with sqlite3.connect(...)` (Python's sqlite3
+    connect+close, and `with duckdb.connect(...)` (Python's sqlite3
     context manager handles transactions, NOT close) is a common
     foot-gun. Both accumulate live Connection objects until OOM.
 
@@ -223,7 +206,7 @@ def pytest_runtest_teardown(item: Any) -> Generator[None, None, None]:  # typing
         raise AssertionError(
             f"sqlite-leak-gate: test {item.nodeid!r} leaked {leaked} "
             f"Connection instance(s) (before={before} → after={after}). "
-            f"Likely culprits: `with sqlite3.connect(...) as c:` "
+            f"Likely culprits: `with duckdb.connect(...) as c:` "
             f"(commits transaction, DOES NOT close) or "
             f"`async with aiosqlite.connect(...)` (aiosqlite#258 leaks "
             f"thread locks). Use the `aiosqlitepool`-backed pool from "
@@ -280,3 +263,493 @@ def pytest_runtest_makereport(item: Any, call: Any) -> Generator[None, Any, None
             fh.write(json.dumps(record) + "\n")
     except OSError:
         pass
+
+
+# ---------------------------------------------------------------------------
+# CB.0 — Typed-mark filtering (`--tier`, `--dialect`, `--l2`, `--fuzz-count`)
+# ---------------------------------------------------------------------------
+#
+# The runner discovers tests via `pytest --tier=X --dialect=Y --l2=Z`
+# instead of hand-listed file paths. Marks are declared via the typed
+# wrappers in `tests/_marks.py` (pyright-checked at write time); these
+# hooks plumb them into pytest's selection + composition-validation
+# at collection time. See `docs/audits/cb_test_layers_update.md` for
+# the full design rationale.
+
+
+def pytest_addoption(parser: Any) -> None:  # typing-smell: ignore[explicit-any]: pytest.Parser from late import
+    """Register CB.0's runner-facing options.
+
+    All four default to None (= no filter); when set, the matching
+    `pytest_collection_modifyitems` step deselects every test whose
+    mark doesn't intersect with the supplied value. The runner sets
+    these per cell; bare `pytest tests/unit/` with no CB options
+    preserves the pre-CB behavior (all tests run unfiltered)."""
+    group = parser.getgroup("recon-gen layered tests (CB.0)")
+    group.addoption(
+        "--tier", default=None,
+        help="Run tests marked @tier(Tier.X) where X matches. "
+             "Choices: unit | db | app2 | qs_api | qs_browser.",
+    )
+    group.addoption(
+        "--dialect", default=None,
+        help="Run tests marked @dialects(...) containing this dialect. "
+             "Choices: pg | or | du.",
+    )
+    group.addoption(
+        "--l2", dest="cb_l2", default=None,
+        help="Run tests marked @l2(...) containing this L2 form. "
+             "Choices: spec_example | sasquatch_pr | fuzz.",
+    )
+    group.addoption(
+        "--fuzz-count", type=int, default=1,
+        help="Number of fuzz seeds to expand `@l2(L2.FUZZ)` tests over. "
+             "Local default 1; nightly bumps to 100+. CB.0 spike: "
+             "stored on config but not yet wired into seed expansion.",
+    )
+
+
+# CB.0 — known marker names; registered via `pytest_configure` to silence
+# the `PytestUnknownMarkWarning` that fires for custom marks. Listing them
+# here keeps the marker authority in one place.
+_CB_MARK_DOCS = {
+    "tier": "Test tier (one of unit | db | app2 | qs_api | qs_browser). Required on every test.",
+    "dialects": "DB dialects this test exercises (zero or more of pg | or | du).",
+    "l2": "L2 forms this test exercises (zero or more of spec_example | sasquatch_pr | fuzz).",
+    "needs": "Runtime deps (docker | playwright | aws_qs | oracledb_client).",
+    "writes": "Test mutates DB state — opt in to per-worker isolation.",
+    "inputs": "Cross-test artifact dependencies (pytest nodeids of tests whose artifacts this test reads). Collection-time-validated.",
+    "serial": "Test must run with `-n 1` (no parallel workers). Carry a reason argument explaining why — usually surfaces a `@writes()`-without-isolation debt entry.",
+    "isolation_scope": "Cross-tier isolation key (CB.7 refactor). Args: (scope_value, role) where role is 'producer' or 'consumer'. The `isolated_cfg` fixture uses scope_value as the prefix suffix.",
+}
+
+
+def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:  # typing-smell: ignore[explicit-any]: pytest.Config + Item from late import
+    """CB.0 — filter the collected test set by the runner's
+    `--tier / --dialect / --l2` options + run composition-rule
+    validation.
+
+    Validation rules (per `docs/audits/cb_test_layers_update.md`):
+
+    - No `@tier` mark on a test → ERROR (source of truth; can't
+      dispatch).
+    - `tier(unit)` + `dialects(...)` → ERROR.
+    - `tier(qs_*)` without `aws_qs` in `needs` → ERROR.
+    - `tier(qs_browser)` without `playwright` in `needs` → ERROR.
+
+    Errors are surfaced as collected pytest errors — pytest's
+    standard machinery puts them in the report.
+
+    Filtering: each `--tier=X / --dialect=Y / --l2=Z` selector
+    excludes items whose corresponding mark doesn't match. Selectors
+    are independent (`AND`). Items missing a relevant mark when the
+    selector is set are deselected (e.g., `--dialect=pg` on a unit
+    test with no `@dialects` mark drops it — unit-tier tests run
+    under `--tier=unit` only). CB.0 spike behavior: when NO CB
+    selector is passed, no filtering happens — backwards compatible
+    with the existing 3,436-test default-run.
+    """
+    cb_tier = config.getoption("--tier")
+    cb_dialect = config.getoption("--dialect")
+    cb_l2 = config.getoption("cb_l2")
+
+    # Composition-rule validation (always on, even when no selectors).
+    # CB.0 spike scope: only the hardest invariants — unmarked-tier
+    # ERROR + unit/dialects mismatch ERROR. The fuller rule set (needs
+    # / writes / l2 warnings) lands in CB.1 once the mark sweep is
+    # underway.
+    errors: list[str] = []
+
+    # CB.5 addendum — `@inputs(*nodeids)` collection-time validation.
+    # Build the collected-nodeid set once, then for every item that
+    # carries an `inputs` marker, verify every referenced nodeid
+    # actually exists in the collection. Parametrize-aware: a bare
+    # `<file>::<func>` matches any parametrize instance of that
+    # function (via prefix check); a full
+    # `<file>::<func>[<param-id>]` requires an exact match. This
+    # catches the renamed/moved/deleted-input-test case at collection
+    # time, before the validator silently reads a stale or missing
+    # artifact at runtime.
+    collected_nodeids = {item.nodeid for item in items}
+    # Build a parametrize-base index too — maps
+    # `<file>::<func>` → True for any item whose nodeid starts with
+    # that prefix followed by `[` (parametrize instance) OR equals it
+    # exactly (non-parametrized). Lets `@inputs("...test_x")` resolve
+    # against `...test_x[case1]` automatically.
+    parametrize_bases: set[str] = set()
+    for nodeid in collected_nodeids:
+        # Split off any `[<param>]` tail.
+        bracket = nodeid.find("[")
+        base = nodeid[:bracket] if bracket != -1 else nodeid
+        parametrize_bases.add(base)
+    for item in items:
+        inputs_marker = next(item.iter_markers("inputs"), None)
+        if inputs_marker is None:
+            continue
+        missing: list[str] = []
+        for ref in inputs_marker.args:
+            # Exact match? Direct nodeid (parametrize-aware authors who
+            # pinned a specific param instance).
+            if ref in collected_nodeids:
+                continue
+            # Prefix match against parametrize bases? Bare nodeid
+            # without `[...]` — matches any instance OR a
+            # non-parametrized test by exact base.
+            if ref in parametrize_bases:
+                continue
+            missing.append(ref)
+        if missing:
+            errors.append(
+                f"{item.nodeid}: declares @inputs(...) referencing "
+                f"nodeids that don't exist in this collection:\n    - "
+                + "\n    - ".join(missing)
+                + "\n  This usually means an input test was renamed, "
+                "moved, or deleted. Update the @inputs(...) on the "
+                "validator (or restore the input). If the input lives "
+                "in a tier that's not currently being collected (e.g. "
+                "running `--tier=qs_browser` standalone), chain via "
+                "`./run_tests.sh up_to=<higher-watermark-layer>` "
+                "instead."
+            )
+    # CB.6 — auto-apply `@tier(Tier.UNIT)` to any test that doesn't carry
+    # an explicit tier AND isn't under a tier-dir (tests/e2e/{db,app2,
+    # qs_api,qs_browser}/) whose own conftest auto-applies the matching
+    # tier. The four tier-dirs each have a conftest that adds their tier
+    # mark before this hook runs (pytest collection-modifyitems hooks
+    # chain in conftest discovery order, deepest-first), so by the time
+    # we get here every collected item under a tier-dir already has its
+    # mark — the auto-mark below only catches the residual: tests under
+    # tests/{unit,json,cli,docs,schema,l2,data}/ that didn't get an
+    # explicit @tier.
+    from tests._marks import Tier as _Tier, tier as _tier  # noqa: PLC0415
+    _UNIT_MARK = _tier(_Tier.UNIT)
+    for item in items:
+        if any(m.name == "tier" for m in item.iter_markers()):
+            continue
+        nodeid_path = str(item.path)
+        if "/tests/e2e/" in nodeid_path:
+            # E2E items without a tier landed here because the test sits
+            # at tests/e2e/ root (not in a tier-dir). Don't auto-mark —
+            # the test author needs to either move the file into a
+            # tier-dir or declare an explicit `@tier(...)`.
+            continue
+        item.add_marker(_UNIT_MARK)
+    for item in items:
+        markers = {m.name for m in item.iter_markers()}
+        tier_marker = next(item.iter_markers("tier"), None)
+        if tier_marker is None:
+            errors.append(
+                f"{item.nodeid}: missing `@tier(...)` mark. Apply one of "
+                f"`@tier(Tier.UNIT | DB | APP2 | QS_API | QS_BROWSER)` "
+                f"at the module/test level. Tests in tier-dirs "
+                f"(tests/e2e/{{db,app2,qs_api,qs_browser}}/) get the "
+                f"tier auto-applied by the dir's conftest — moving the "
+                f"file there is the cleanest fix."
+            )
+            continue
+        tier_value = (
+            tier_marker.args[0] if tier_marker.args else None
+        )
+        if tier_value == "unit" and "dialects" in markers:
+            errors.append(
+                f"{item.nodeid}: `tier(Tier.UNIT)` + `dialects(...)` "
+                f"is invalid (unit tier doesn't open a DB; tests that "
+                f"emit + assert SQL strings don't carry a dialects "
+                f"mark — they're cross-dialect by construction)."
+            )
+        if tier_value in ("qs_api", "qs_browser"):
+            needs_marker = next(item.iter_markers("needs"), None)
+            needs_values: set[str] = (
+                set(needs_marker.args) if needs_marker is not None else set()
+            )
+            if "aws_qs" not in needs_values:
+                errors.append(
+                    f"{item.nodeid}: `tier({tier_value!r})` requires "
+                    f"`needs(Need.AWS_QS)` so the runner can skip "
+                    f"when AWS is paused."
+                )
+            if tier_value == "qs_browser" and "playwright" not in needs_values:
+                errors.append(
+                    f"{item.nodeid}: `tier(Tier.QS_BROWSER)` requires "
+                    f"`needs(Need.PLAYWRIGHT)` (QS embed renders in a "
+                    f"browser)."
+                )
+        # CB.7 (refactored 2026-06-02) — the previous "@writes() requires
+        # db_cfg" rule was a workaround for the wrong abstraction.
+        # Provider-marked isolation (writer fixtures request
+        # `isolated_cfg` directly) made the rule vacuous. See
+        # `tests/e2e/db/conftest.py::isolated_cfg`.
+
+    if errors:
+        # Surface as a single collected error rather than per-item;
+        # gives the operator a clean diff of all violations.
+        import pytest  # noqa: PLC0415 — lazy
+        pytest.exit(
+            "CB.0 mark composition violations:\n  - "
+            + "\n  - ".join(errors),
+            returncode=2,
+        )
+
+    # Selector-based filtering.
+    if cb_tier is None and cb_dialect is None and cb_l2 is None:
+        return  # backwards compat — no CB selectors = unfiltered
+
+    kept: list[Any] = []  # typing-smell: ignore[explicit-any]: same posture as enclosing fn — pytest Item from late import
+    deselected: list[Any] = []
+    for item in items:
+        # `--tier=X` keeps only tests with exactly that tier value.
+        if cb_tier is not None:
+            tier_marker = next(item.iter_markers("tier"), None)
+            if (
+                tier_marker is None
+                or not tier_marker.args
+                or tier_marker.args[0] != cb_tier
+            ):
+                deselected.append(item)
+                continue
+        # `--dialect=Y` keeps tests whose @dialects mark contains Y.
+        # An empty / missing @dialects mark fails the selector (unit
+        # tests with no DB → naturally filtered out under --dialect).
+        if cb_dialect is not None:
+            dialects_marker = next(item.iter_markers("dialects"), None)
+            if (
+                dialects_marker is None
+                or cb_dialect not in dialects_marker.args
+            ):
+                deselected.append(item)
+                continue
+        # `--l2=Z` keeps tests whose @l2 mark contains Z. Same shape
+        # as `--dialect`. L2.FUZZ expansion (via --fuzz-count) is
+        # CB.1 territory; the spike preserves the bare-name match.
+        if cb_l2 is not None:
+            l2_marker = next(item.iter_markers("l2"), None)
+            if (
+                l2_marker is None
+                or cb_l2 not in l2_marker.args
+            ):
+                deselected.append(item)
+                continue
+        kept.append(item)
+
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+    items[:] = kept
+
+
+# CB.0 marker registration is folded into the existing pytest_configure
+# above — see the `_CB_MARK_DOCS` loop at the end of that hook body.
+
+
+def pytest_generate_tests(metafunc: Any) -> None:  # typing-smell: ignore[explicit-any]: pytest.Metafunc from late import
+    """CB.7-followup — auto-fuzz L2 parametrize.
+
+    A test that takes the `l2_instance` fixture but doesn't pin to a
+    named scenario via `@l2(L2.SP)` or `@l2(L2.SQ)` implicitly opts
+    into a per-run fuzz cell. See `tests/_marks.py::L2` docstring for
+    the resolution rules. Implementation pinned by the hook's
+    semantics:
+
+    - Compute the L2 set the test should run on (parametrize ids):
+      - Start from `@l2` markers' explicit args.
+      - If neither SP nor SQ is declared, add FUZZ (auto-fuzz).
+      - If no `@l2` marker at all but signature takes `l2_instance`,
+        treat as auto-fuzz (single FUZZ cell).
+    - Parametrize `l2_instance` indirectly over the resolved id set.
+
+    The `l2_instance` fixture (defined per-tier in
+    `tests/e2e/conftest.py`, `tests/json/conftest.py`, etc.) must
+    accept the indirect param and load the matching yaml:
+    - "spec_example" → load the spec_example yaml
+    - "sasquatch_pr" → load the sasquatch_pr yaml
+    - "fuzz" → synthesize from RECON_GEN_FUZZ_SEED
+
+    Currently DEFERRED to a CC-phase follow-up: most existing
+    `l2_instance` fixtures (e.g. `tests/e2e/conftest.py`) read the
+    runner-supplied env var directly + don't yet accept the
+    indirect param. Flipping this on without the fixture update
+    would break ~3000 tests. The hook below is a no-op stub until
+    the fixtures land — when enabled it gates on a small allow-list
+    so the auto-fuzz rolls out per tier.
+    """
+    if "l2_instance" not in metafunc.fixturenames:
+        return
+    # Resolve declared L2s from @l2 markers.
+    declared: set[str] = set()
+    for mark in metafunc.definition.iter_markers("l2"):
+        for arg in mark.args:
+            declared.add(arg)
+    has_sp = "spec_example" in declared
+    has_sq = "sasquatch_pr" in declared
+    has_fuzz = "fuzz" in declared
+
+    # Auto-fuzz rule: if neither SP nor SQ is pinned, treat as
+    # unrestricted → add FUZZ.
+    if not has_sp and not has_sq:
+        declared.add("fuzz")
+        has_fuzz = True
+
+    # Single-form (most common today): if only one form would be in
+    # declared, don't parametrize — the existing fixture's env-var
+    # path handles it. This keeps backward compat with the runner's
+    # per-cell L2 dispatch until the CC-phase fixture overhaul.
+    if len(declared) <= 1:
+        return
+    # Multi-form: parametrize indirectly. The root `l2_instance`
+    # fixture (defined below) accepts the string id as `request.param`
+    # and dispatches via `_load_l2_by_name`. Per-tier overrides (e2e
+    # session-scope `l2` shim, etc.) inherit this contract.
+    _ = has_fuzz  # noqa: F841 — kept for the fuzz-only diagnostic branch
+    metafunc.parametrize("l2_instance", sorted(declared), indirect=True)
+
+    # CC.2.a — same shape as the L2 hook above, applied to the dialect
+    # axis. Audit: docs/audits/cc_23_dialect_axis_to_markers.md.
+    if "cfg_for_dialect" in metafunc.fixturenames:
+        declared_dialects: set[str] = set()
+        for mark in metafunc.definition.iter_markers("dialects"):
+            for arg in mark.args:
+                declared_dialects.add(arg)
+        if len(declared_dialects) >= 2:
+            metafunc.parametrize(
+                "cfg_for_dialect", sorted(declared_dialects), indirect=True,
+            )
+
+
+# ---------------------------------------------------------------------------
+# CC.1 — root `l2_instance` fixture (audit: docs/audits/cc_0_l2_fixture_unification.md)
+#
+# Replaces three per-tier fixtures (`tests/data/test_l2_seed_contract.py
+# ::instance`, `tests/json/test_l2_flow_tracing_matrix.py::l2_instance`,
+# `tests/e2e/conftest.py::l2`). The marker-driven auto-fuzz hook above
+# decides whether this fires parametrized; if not, the env-var fallback
+# path mirrors the runner's per-cell single-instance dispatch (kept
+# during the CC roll-out; retires after CC.3 drops the cell concept).
+# ---------------------------------------------------------------------------
+
+
+def _load_l2_by_name(name: str) -> Any:  # typing-smell: ignore[explicit-any]: L2Instance import lives in src; lazy-imported below to keep tests/conftest.py side-effect-free
+    """Resolve a marker-driven L2 name (`"spec_example"` / `"sasquatch_pr"`
+    / `"fuzz"`) to a loaded `L2Instance`.
+
+    Per the CC.0 spike: the `@l2(L2.SP, L2.SQ, L2.FUZZ)` marker's
+    string values map 1:1 to the bundled yaml stems (and the `"fuzz"`
+    sentinel routes to the per-run synthesized topology pinned by
+    `RECON_GEN_FUZZ_SEED`).
+    """
+    from pathlib import Path  # noqa: PLC0415 — lazy
+    from recon_gen.common.l2 import load_instance  # noqa: PLC0415
+
+    if name == "fuzz":
+        # Mirror the runner's fuzz-seed contract: the auto-fuzz hook
+        # threads RECON_GEN_FUZZ_SEED so the same L2 topology fans
+        # across dialect axes. `random_l2_yaml` lives in tests/l2/
+        # (the runner already lazy-imports it from there; same shape).
+        from tests.l2.fuzz import random_l2_yaml  # noqa: PLC0415
+        seed_str = RECON_GEN_FUZZ_SEED.get_or_none()
+        seed = int(seed_str) if seed_str is not None else 0
+        import tempfile  # noqa: PLC0415
+        tmp = Path(tempfile.mkdtemp(prefix="cc1-fuzz-")) / "fuzz.yaml"
+        tmp.write_text(random_l2_yaml(seed))
+        return load_instance(tmp)
+
+    # Named scenarios — canonical yamls under tests/l2/ (matches
+    # `tests/data/test_l2_seed_contract.py::L2_DIR` exactly).
+    l2_dir = Path(__file__).resolve().parent / "l2"
+    yaml_path = l2_dir / f"{name}.yaml"
+    if not yaml_path.exists():
+        raise ValueError(
+            f"_load_l2_by_name: unknown L2 name {name!r} — "
+            f"expected spec_example / sasquatch_pr / fuzz"
+        )
+    return load_instance(yaml_path)
+
+
+@pytest.fixture
+def l2_instance(request: Any) -> Any:  # typing-smell: ignore[explicit-any]: pytest.FixtureRequest + L2Instance lazy-imported to avoid pulling src/ into conftest module scope
+    """Root `l2_instance` fixture — function-scoped, parametrize-aware.
+
+    Two modes (Option B from CC.0 spike):
+
+    - **Parametrized** (indirect via the auto-fuzz hook above):
+      `request.param` is a string id (`"spec_example"` / `"sasquatch_pr"`
+      / `"fuzz"`). Load that L2 via `_load_l2_by_name`.
+    - **Not parametrized** (no `l2_instance` parametrize, just a
+      fixture-injection): fall back to the runner-supplied
+      `RECON_GEN_TEST_L2_INSTANCE` env var, or `default_l2_instance()`
+      if unset. Matches the legacy single-cell behavior.
+
+    Tier-specific overrides (e.g. `tests/e2e/conftest.py::l2` — the
+    session-scope shim) inherit this contract — they're thin caches
+    around this function.
+    """
+    if hasattr(request, "param") and request.param is not None:
+        return _load_l2_by_name(request.param)
+    # Env-var fallback (runner per-cell path; survives until CC.3).
+    from recon_gen.common.l2 import default_l2_instance, load_instance  # noqa: PLC0415
+    override = RECON_GEN_TEST_L2_INSTANCE.get_or_none()
+    if override is not None:
+        return load_instance(override)
+    return default_l2_instance()
+
+
+# ---------------------------------------------------------------------------
+# CC.2.a — root `cfg_for_dialect` fixture (audit: docs/audits/cc_23_dialect_axis_to_markers.md)
+#
+# Marker-driven dialect dispatch. When a test declares @dialects(Dialect.PG,
+# Dialect.OR), the hook above parametrizes this fixture indirectly over those
+# values; this body loads the matching `run/config.<dialect>.yaml` (legacy
+# path) and returns the Config. Mirrors the CC.1 `l2_instance` shape exactly.
+#
+# Backward-compat with runner's current per-cell dispatch: when not
+# parametrized AND the runner injects `RECON_GEN_DEMO_DATABASE_URL` with a
+# dialect-scheme prefix, the existing `load_dialect_cfg` skip-logic in
+# `tests/e2e/_agreement_helpers.py` keeps suppressing wrong-cell callspecs.
+# CC.3 retires both paths in favor of per-dialect env URLs.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def cfg_for_dialect(request: Any) -> Any:  # typing-smell: ignore[explicit-any]: pytest.FixtureRequest + Config lazy-imported (Config lives in src/)
+    """Resolve a `Config` pointing at the requested dialect's DB.
+
+    Parametrized (indirect) by the `@dialects(Dialect.PG, Dialect.OR)`
+    auto-marker hook above: `request.param` is the marker's string
+    value (`"pg"` / `"or"` / `"du"`). Single-dialect callsites that
+    just request the fixture without a marker fall back to the
+    legacy per-cell cfg discovery.
+
+    Today's body delegates to the e2e tier's `load_dialect_cfg` helper
+    (skip-dedups wrong-cell callspecs during the CC roll-out). After
+    CC.3 the skip-dedup becomes unreachable and the body simplifies
+    to a direct cfg load keyed on per-dialect env URLs.
+    """
+    if hasattr(request, "param") and request.param is not None:
+        # Marker values are `"pg"` / `"or"` / `"du"` (the Dialect enum
+        # string values). load_dialect_cfg wants "postgres" / "oracle"
+        # / "duckdb" — translate.
+        dialect_short_to_long = {"pg": "postgres", "or": "oracle", "du": "duckdb"}
+        dialect_name = dialect_short_to_long.get(str(request.param), str(request.param))
+        from tests.e2e._agreement_helpers import load_dialect_cfg  # noqa: PLC0415
+        cfg, _path, _dialect_enum = load_dialect_cfg(dialect_name)
+        return cfg
+    # Unparametrized: fall back to the runner-supplied cfg (the legacy
+    # single-cell path). Mirrors `tests/e2e/conftest.py::cfg`'s discovery
+    # order so e2e tests that switch to this fixture keep working.
+    from recon_gen.common.config import load_config  # noqa: PLC0415
+    from recon_gen.common.env_keys import RECON_GEN_CONFIG  # noqa: PLC0415
+    try:
+        explicit = RECON_GEN_CONFIG.get_or_none()
+    except EnvVarInvalid:
+        explicit = None
+    if explicit is not None:
+        return load_config(str(explicit))
+    # Probe the canonical run/ paths.
+    from pathlib import Path as _Path  # noqa: PLC0415
+    for candidate in (
+        _Path("config.yaml"),
+        _Path("run/config.yaml"),
+        _Path("run/config.postgres.yaml"),
+        _Path("run/config.oracle.yaml"),
+    ):
+        if candidate.exists():
+            return load_config(str(candidate))
+    return load_config(None)

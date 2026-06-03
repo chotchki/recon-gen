@@ -12,6 +12,46 @@ from typing import Any
 
 from recon_gen.common.config import Config
 
+
+def fetch_one(
+    conn_or_cursor: Any, sql: str, params: Any = None,
+) -> tuple[Any, ...]:
+    """Test helper: execute `sql` and return the first row as a tuple.
+
+    Asserts the row exists (raises AssertionError when fetchone()
+    returns None). Replaces the unsafe ``conn.execute(sql).fetchone()``
+    pattern that pyright flags as ``reportOptionalSubscript`` —
+    DuckDB's ``fetchone()`` returns ``tuple | None`` and indexing
+    ``None`` is a runtime crash. CB.11.b-followup: introduced to
+    unblock the runner's sessionstart pyright gate without sprinkling
+    per-line ignore comments.
+
+    Accepts either a connection or a cursor — both support
+    ``.execute(sql).fetchone()`` (DuckDB connections return a fresh
+    cursor; psycopg / oracledb cursors return self).
+
+    ``params`` is a single positional arg (tuple/list/None) — mirrors
+    the dbapi shape of ``cursor.execute(sql, params)``.
+    """
+    if params is not None:
+        cursor = conn_or_cursor.execute(sql, params)
+    else:
+        cursor = conn_or_cursor.execute(sql)
+    row = cursor.fetchone()
+    assert row is not None, f"fetch_one: query returned no rows: {sql!r}"
+    return row
+
+
+def fetch_scalar(
+    conn_or_cursor: Any, sql: str, params: Any = None,
+) -> Any:
+    """Like `fetch_one` but returns just the first column (row[0]).
+
+    The most common shape in our test code:
+    ``COUNT(*)`` / ``SUM(...)`` / single-cell aggregate.
+    """
+    return fetch_one(conn_or_cursor, sql, params)[0]
+
 _TEST_ACCOUNT = "111122223333"
 _TEST_REGION = "us-west-2"
 _TEST_DATASOURCE_ARN = (

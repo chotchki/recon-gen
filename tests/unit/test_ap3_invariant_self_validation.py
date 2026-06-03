@@ -47,7 +47,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-import sqlite3
+import duckdb
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -55,7 +55,7 @@ from typing import Protocol
 
 import pytest
 
-from recon_gen.common.db import _register_sqlite_aggregates, execute_script
+from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.sql import Dialect
@@ -67,7 +67,7 @@ from recon_gen.common.sql import Dialect
 # inline cap CASE) is out of scope precisely because it isn't persona-blind.
 _SPEC_EXAMPLE = Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
 _PREFIX = "spec_example"
-_DIALECT = Dialect.SQLITE
+_DIALECT = Dialect.DUCKDB
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +101,7 @@ class Invariant(Protocol):
 
     name: str
 
-    def detect(self, conn: sqlite3.Connection) -> set[Violation]: ...
+    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]: ...
 
 
 class ViolationGenerator(Protocol):
@@ -114,7 +114,7 @@ class ViolationGenerator(Protocol):
     @property
     def intended(self) -> Violation: ...
 
-    def emit(self, conn: sqlite3.Connection) -> None: ...
+    def emit(self, conn: duckdb.DuckDBPyConnection) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -122,10 +122,8 @@ class ViolationGenerator(Protocol):
 # ---------------------------------------------------------------------------
 
 
-def _fresh_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    _register_sqlite_aggregates(conn)  # STDDEV_SAMP for the windowed matview
+def _fresh_db() -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(":memory:")
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -170,7 +168,7 @@ def _fresh_db() -> sqlite3.Connection:
     return conn
 
 
-def _refresh(conn: sqlite3.Connection) -> None:
+def _refresh(conn: duckdb.DuckDBPyConnection) -> None:
     instance = load_instance(_SPEC_EXAMPLE)
     cur = conn.cursor()
     execute_script(
@@ -192,7 +190,7 @@ _DB_COLS = (
 )
 
 
-def _insert_tx(conn: sqlite3.Connection, **vals: object) -> None:
+def _insert_tx(conn: duckdb.DuckDBPyConnection, **vals: object) -> None:
     # AO.1 — amount_money is BIGINT cents; coerce author-side floats
     # at the write boundary so this local helper mirrors `insert_tx`.
     from recon_gen.common.money import Cents
@@ -208,7 +206,7 @@ def _insert_tx(conn: sqlite3.Connection, **vals: object) -> None:
     )
 
 
-def _insert_balance(conn: sqlite3.Connection, **vals: object) -> None:
+def _insert_balance(conn: duckdb.DuckDBPyConnection, **vals: object) -> None:
     # AO.1 — money / expected_eod_balance are BIGINT cents; coerce.
     from recon_gen.common.money import Cents
     for col in ("money", "expected_eod_balance"):
@@ -257,7 +255,7 @@ def _day_bounds(day: date) -> tuple[str, str]:
 class DriftInvariant:
     name = "drift"
 
-    def detect(self, conn: sqlite3.Connection) -> set[Violation]:
+    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
         rows = conn.execute(
             f"SELECT account_id, drift FROM {_PREFIX}_drift",
         ).fetchall()
@@ -338,7 +336,7 @@ class DriftGenerator:
             drift=round(self.stored - self.posted, 2),
         )
 
-    def emit(self, conn: sqlite3.Connection) -> None:
+    def emit(self, conn: duckdb.DuckDBPyConnection) -> None:
         start, end = _day_bounds(_DAY)
         _insert_balance(
             conn, account_id=self.account_id, account_name="Drift Acct",
@@ -364,7 +362,7 @@ class DriftGenerator:
 class AnomalyInvariant:
     name = "inv_pair_rolling_anomalies"
 
-    def detect(self, conn: sqlite3.Connection) -> set[Violation]:
+    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
         # A "violation" here is a pair-window that crosses 3σ. The matview
         # computes the z-score; detect() applies the analyst threshold and
         # names the pair. (The threshold is a VIEW concern in the spine —
@@ -414,7 +412,7 @@ class AnomalyGenerator:
         )
 
     def _emit_pair(
-        self, conn: sqlite3.Connection, *, idx: int,
+        self, conn: duckdb.DuckDBPyConnection, *, idx: int,
         sender: str, recipient: str, amount: float, day: date,
     ) -> None:
         xfer = f"xfer-anom-{idx}"
@@ -434,7 +432,7 @@ class AnomalyGenerator:
             posting=_ts(day), transfer_id=xfer, rail_name="ach", origin="etl",
         ))
 
-    def emit(self, conn: sqlite3.Connection) -> None:
+    def emit(self, conn: duckdb.DuckDBPyConnection) -> None:
         for i in range(self.n_baseline):
             self._emit_pair(
                 conn, idx=i, sender=f"acct-quiet-src-{i}",
@@ -455,7 +453,7 @@ class AnomalyGenerator:
 class MoneyTrailInvariant:
     name = "inv_money_trail_edges"
 
-    def detect(self, conn: sqlite3.Connection) -> set[Violation]:
+    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
         # Violation = an edge at depth ≥ 2 (a multi-hop money trail). The
         # recursive walk assigns depth; detect() names deep edges by their
         # (root, transfer, depth) identity.
@@ -496,7 +494,7 @@ class MoneyTrailGenerator:
             transfer_id=f"xfer-trail-{self.depth}", depth=self.depth,
         )
 
-    def emit(self, conn: sqlite3.Connection) -> None:
+    def emit(self, conn: duckdb.DuckDBPyConnection) -> None:
         for hop in range(self.depth + 1):
             xfer = f"xfer-trail-{hop}"
             parent = f"xfer-trail-{hop - 1}" if hop > 0 else None
@@ -536,7 +534,7 @@ class MoneyTrailGenerator:
 class LimitBreachInvariant:
     name = "limit_breach"
 
-    def detect(self, conn: sqlite3.Connection) -> set[Violation]:
+    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
         rows = conn.execute(
             f"SELECT account_id, rail_name, direction "
             f"FROM {_PREFIX}_limit_breach",
@@ -610,7 +608,7 @@ class LimitBreachGenerator:
             rail_name=self.rail_name, direction=self.direction,
         )
 
-    def emit(self, conn: sqlite3.Connection) -> None:
+    def emit(self, conn: duckdb.DuckDBPyConnection) -> None:
         # Outbound breach = Debit legs (matview's Debit branch); Inbound =
         # Credit legs. |amount| crosses (or, delta<0, stays under) the cap.
         # account_parent_role + rail_name MUST be the shape's declared pair

@@ -82,6 +82,7 @@ from tests.audit._matview_extract import (
 from tests.audit._pdf_extract import count_invariant_table_rows
 from tests.audit._scenario_expectations import expected_audit_counts
 from tests.e2e._drivers import App2Driver, QsEmbedDriver
+from tests._marks import Need, Tier, needs, tier
 
 if TYPE_CHECKING:
     from mypy_boto3_quicksight.client import QuickSightClient
@@ -105,6 +106,8 @@ pytestmark = [
     # used"). Grouping forces the fixture to run exactly once. Bonus: no
     # redundant N× re-seed of the (slow) Aurora schema.
     pytest.mark.xdist_group("audit_dashboard_agreement_seed"),
+    tier(Tier.QS_BROWSER),
+    needs(Need.AWS_QS, Need.PLAYWRIGHT),
 ]
 
 
@@ -592,6 +595,15 @@ _ALL_INVARIANTS: tuple[str, ...] = (
 )
 
 
+@pytest.mark.skip(
+    reason="CB.5 stage 2: superseded by per-renderer producers + "
+    "high-watermark validators. See "
+    "tests/e2e/qs_browser/test_audit_invariants_agreement.py "
+    "(per-invariant validators with @inputs(...) chaining db/ + "
+    "app2/ + qs_browser/ producers). One commit transition: this "
+    "skip stays for one commit so the operator can confirm the new "
+    "shape passes; CB.5 follow-up deletes the file entirely."
+)
 @pytest.mark.parametrize("invariant", _ALL_INVARIANTS)
 def test_invariant_four_way_agreement(
     seeded_audit: "tuple[Path, ScenarioPlant]",
