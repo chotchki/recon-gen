@@ -1770,7 +1770,24 @@ def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:
     amortizes the cold-start across runs.
     """
     if spec.target == "aw":
-        return {}, None
+        # CB.14 followup — route QS layers to the qs-side cfg when one
+        # exists. The local cfg's 127.0.0.1 URL can't be reached from
+        # QS in us-east-1; the qs.yaml sibling carries the same DB
+        # behind the hotchkiss.io DDNS forward (operator-managed for
+        # dev runs, ci.yml-materialized for CI). dispatch_layer's
+        # deploy/qs_api/qs_browser arms already prefer
+        # RECON_GEN_QS_CONFIG over RECON_GEN_CONFIG, so setting it here
+        # is enough — db/app2 layers still use the default cfg
+        # discovery (RECON_GEN_CONFIG falls through to
+        # run/config.<dialect>.yaml).
+        aw_env: dict[str, str] = {}
+        dialect_to_suffix: dict[str, str] = {"pg": "postgres", "or": "oracle"}
+        suffix = dialect_to_suffix.get(spec.dialect)
+        if suffix is not None:
+            qs_cfg_path = REPO_ROOT / "run" / f"config.{suffix}.qs.yaml"
+            if qs_cfg_path.exists():
+                aw_env[RECON_GEN_QS_CONFIG.name] = str(qs_cfg_path)
+        return aw_env, None
     # Y.2.gate.k.1+k.6 — runner CI-mode: skip Docker for lo targets
     # when the workflow YAML pre-provisions the DB via GHA service
     # containers. Operator (or workflow) sets RECON_GEN_RUNNER_CI=1 +
