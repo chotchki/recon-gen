@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
 # Y.2.gate.k.5 — pre-push hook: catch obvious breakage before push.
 #
-# Runs the fast chain (~30s on local-pg) so a typo / pyright violation /
-# unit-test regression / dataset-SQL bug surfaces locally before
-# burning a CI cycle. Operator opts in once via:
+# Runs the unit tier (~3-4 min) so a typo / pyright violation /
+# typing-smell / unit-test regression surfaces locally before burning
+# a CI cycle. Operator opts in once via:
 #
 #     git config core.hooksPath .githooks
 #
 # Skippable per-push via `git push --no-verify` (CLAUDE.md discourages
 # this — investigate the failure rather than bypass).
 #
-# Why local-pg only: PR-quick mode (gate.k.3). The full matrix runs
-# in CI; the hook is a "didn't I forget to commit something" check,
-# not a release gate.
+# CB.14 (2026-06-03): bumped from `up_to=db --dialects=pg --targets=lo`
+# to `up_to=unit`. The day's CI flaps — env-leak shape on the
+# runner-yes tests, dead aiosqlite import, typing-smell on a fresh
+# suppression — were unit-tier and would have been caught here.
+# Dropping the db layer trades local-DB coverage for "no Docker
+# needed", making the hook usable when Docker Desktop is down + cutting
+# the wait from ~30s + container boot to ~3min of pure pytest.
 
 set -euo pipefail
 
@@ -31,9 +35,9 @@ if [ ! -x "${RUN_TESTS}" ]; then
     exit 0
 fi
 
-echo "[pre-push] Running fast chain (up_to=db --dialects=pg --targets=lo)..."
+echo "[pre-push] Running unit tier (up_to=unit) — ~3-4 min, no Docker required."
 echo "[pre-push] Skip with 'git push --no-verify' (discouraged — fix the failure)."
 echo ""
 
 cd "${REPO_ROOT}"
-exec "${RUN_TESTS}" up_to=db --dialects=pg --targets=lo
+exec "${RUN_TESTS}" up_to=unit
