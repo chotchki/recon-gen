@@ -18,6 +18,10 @@ runs/
 # Y.2.gate.b.8.impl — per-SHA per-layer green-pass cache for --skip-cheap.
 .run_tests_cache/
 
+# Sphinx (ReadTheDocs) build outputs — autosummary regenerates per build.
+docs-sphinx/_build/
+docs-sphinx/_autosummary/
+
 # IDE
 .idea/
 .vscode/
