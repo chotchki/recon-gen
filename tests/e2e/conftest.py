@@ -186,6 +186,51 @@ def cfg(request: pytest.FixtureRequest) -> Config:
     return _pin_cfg_to_kv_as_of(loaded)
 
 
+# ---------------------------------------------------------------------------
+# CB.17.b — cfg bridge from the shared-container fixtures
+#
+# Goal: produce a `Config` whose ``demo_database_url`` is sourced from the
+# matching shared container fixture, with everything else (deployment_name,
+# aws_account_id, theme, auth) inherited from the yaml-loaded `cfg`. Test
+# opts in by declaring `cfg_with_container_url` instead of `cfg` in its
+# signature.
+#
+# CB.17.d will migrate ``isolated_cfg`` to consume this directly so
+# prefix-per-worker isolation plugs straight into the shared session
+# container. Additive today.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def cfg_with_container_url(
+    cfg: Config,
+    pg_container_url: str,
+    oracle_container_url: str,
+) -> Config:
+    """Yield `cfg` with `demo_database_url` swapped for the matching
+    shared-container fixture's URL.
+
+    Dispatch by ``cfg.dialect``: POSTGRES → pg_container_url; ORACLE →
+    oracle_container_url; DUCKDB → passthrough (file-based; the yaml URL
+    is authoritative).
+
+    Both container fixtures are pulled in unconditionally so this fixture
+    works regardless of which dialect lands. The env-URL fast path on the
+    underlying fixtures (set ``RECON_GEN_DEMO_DATABASE_URL_PG`` / ``_OR``)
+    means non-needed containers don't actually spin Docker.
+    """
+    import dataclasses  # noqa: PLC0415
+
+    from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
+
+    if cfg.dialect is Dialect.POSTGRES:
+        return dataclasses.replace(cfg, demo_database_url=pg_container_url)
+    if cfg.dialect is Dialect.ORACLE:
+        return dataclasses.replace(cfg, demo_database_url=oracle_container_url)
+    # DuckDB falls through; the yaml-loaded URL is the source.
+    return cfg
+
+
 def _pin_cfg_to_kv_as_of(cfg: Config) -> Config:
     """Pin ``cfg.test_generator.end_date`` to the demo DB's kv ``as_of``
     row when reachable. See ``cfg`` fixture docstring for the why.

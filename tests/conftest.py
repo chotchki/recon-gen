@@ -868,3 +868,8 @@ def oracle_container_url() -> Generator[str, None, None]:
         yield _strip_sa_url_prefix(raw_url)
     finally:
         container.stop()
+
+
+# CB.17.b — `cfg_with_container_url` fixture (the bridge from the
+# shared-container fixtures above to the existing `cfg` chain) lives in
+# `tests/e2e/conftest.py` next to the `cfg` fixture it wraps.

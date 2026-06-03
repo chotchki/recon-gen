@@ -367,7 +367,7 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [ ] CB.16 - CB.16 — Re-type connect_demo_db -> SyncConnection to close the Any escape hatch
   - We should evaluate all "ignore[explicit-any]", its a huge smell.
 - [ ] CB.17 - CB.17 — Execute the cell-collapse migration (per cb_15_collapse_cells_design.md)
-  - [ ] CB.17.a - CB.17.a — Wire pg_container + oracle_container session fixtures
+  - [x] CB.17.a - CB.17.a — Wire pg_container + oracle_container session fixtures
   - [ ] CB.17.b - CB.17.b — Top-level cfg fixture sources from container fixtures
   - [ ] CB.17.c - CB.17.c — Confirm isolated_cfg worker-suffix covers QS resources end-to-end
   - [ ] CB.17.d - CB.17.d — Delete the cell loop
