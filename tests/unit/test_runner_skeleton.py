@@ -116,8 +116,18 @@ def test_normalize_argv_only_splits_first_token() -> None:
     ]
 
 
-def test_destructive_down_refuses_without_yes() -> None:
-    """b.14.3 — `down` is destructive; refuse with NEEDS_OPERATOR exit code."""
+def test_destructive_down_refuses_without_yes(monkeypatch: Any) -> None:
+    """b.14.3 — `down` is destructive; refuse with NEEDS_OPERATOR exit code.
+
+    CB.14 followup: CI sets RECON_GEN_RUNNER_YES=1 to auto-confirm
+    destructive ops in non-interactive runs. Without delenv'ing both
+    canonical + legacy names, this test asserts on the non-bypassed path
+    while CI takes the bypassed one — and fails with EXIT_SUCCESS instead
+    of EXIT_NEEDS_OPERATOR.
+    """
+    monkeypatch.delenv(RECON_GEN_RUNNER_YES.name, raising=False)
+    if RECON_GEN_RUNNER_YES.legacy_name:
+        monkeypatch.delenv(RECON_GEN_RUNNER_YES.legacy_name, raising=False)
     code = runner.main(["down"])
     assert code == runner.EXIT_NEEDS_OPERATOR
 
