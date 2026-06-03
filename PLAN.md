@@ -359,7 +359,7 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
   - [x] CB.11.b - CB.11.b — Runner-side per-cell Docker boot + QS data source rotation
   - [x] CB.11.c - CB.11.c — Collapse ci.yml + delete e2e.yml (CI side of the bridge)
 - [x] CB.12 - CB.12 — Drop AWS RDS Aurora resources
-- [ ] CB.13 - CB.13 — Docs + release notes + v13.0.0 release
+- [x] CB.13 - CB.13 — Docs + release notes + v13.0.0 release
 - [x] CB.7.followup - CB.7 followup — Triage qs_browser session-start cascade (workers die at session-start under the layer's pytest invocation; 4 "FAILED" entries are xdist queue residue, not real failures)
 
 - [x] CB.14 - CB.14 — In-repo Oracle 19c image build (multi-arch via host arch)

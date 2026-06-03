@@ -47,7 +47,7 @@ Five reference points:
   side. Two custom-SQL datasets, two `DatasetContract` declarations,
   one `build_all_datasets()` helper that registers contracts with
   `register_contract()` as a module-import side effect.
-- **[API Reference — Tree primitives](../../api/index.md)** — the L1
+- **[API Reference — Tree primitives](https://recon-gen.readthedocs.io/en/latest/)** — the L1
   API surface. Each typed Visual subtype, Filter wrapper, and Drill
   action's signature is the canonical place to look up parameter
   shape.
@@ -215,12 +215,12 @@ The L.1 primitives expose more than this walkthrough surfaces:
 
 - **Calculated fields**: `CalcField` for analysis-level computed
   columns. Ties to one `Dataset`; usable across visuals.
-  [`api/tree-data.md`](../../api/tree-data.md).
+  [recon_gen.common.tree (data)](https://recon-gen.readthedocs.io/en/latest/).
 - **Parameters + parameter controls**: `StringParameter` /
   `IntegerParameter` / etc. + their `Control` wrappers (dropdown,
   slider, datetime picker). Drills can write to parameters; filters
   can read from them.
-  [`api/tree-filters-controls.md`](../../api/tree-filters-controls.md).
+  [recon_gen.common.tree (filters / controls)](https://recon-gen.readthedocs.io/en/latest/).
 - **Cross-app drills**: `CustomActionURLOperation` builders in
   `common/drill.py` for jumping to another app's deployed dashboard
   with parameter values pre-set in the URL — but note the

@@ -37,6 +37,7 @@ from recon_gen.common.env_keys import (
     RECON_GEN_DEMO_DATABASE_URL,
     RECON_GEN_E2E,
     RECON_GEN_FUZZ_SEED,
+    RECON_GEN_QS_CONFIG,
     RECON_GEN_RUNNER_YES,
     RECON_GEN_TEST_L2_INSTANCE,
 )
@@ -2301,11 +2302,35 @@ def test_compose_specs_variants_mutex_with_subflags() -> None:
         runner._compose_specs_from_options(opts)
 
 
-def test_setup_variant_aw_target_is_no_op() -> None:
+def test_setup_variant_aw_target_is_no_op(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     """`target=aw` cells use the operator's external Aurora — no
-    container to spin up. Returns empty env + None handle."""
+    container to spin up. Returns empty env + None handle when no
+    qs.yaml sibling is materialized (CB.14 followup adds the routing
+    arm only when ``run/config.<dialect>.qs.yaml`` exists)."""
+    monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
     env, handle = runner.setup_variant(_spec_pg_aw())
     assert env == {}
+    assert handle is None
+
+
+def test_setup_variant_aw_target_routes_qs_to_qs_cfg(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """CB.14 followup — when ``run/config.<dialect>.qs.yaml`` exists,
+    aw cells must export ``RECON_GEN_QS_CONFIG`` so deploy/qs_api/
+    qs_browser layers reach the DB via hotchkiss.io (QS in us-east-1
+    can't see 127.0.0.1 / Docker bridge). db + app2 layers still use
+    the default cfg discovery (``RECON_GEN_CONFIG``)."""
+    monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
+    qs_cfg = tmp_path / "run" / "config.postgres.qs.yaml"
+    qs_cfg.parent.mkdir(parents=True)
+    qs_cfg.write_text("# placeholder\n")
+    env, handle = runner.setup_variant(_spec_pg_aw())
+    assert env == {RECON_GEN_QS_CONFIG.name: str(qs_cfg)}
     assert handle is None
 
 
@@ -2389,11 +2414,13 @@ def test_setup_variant_ci_mode_without_url_fails_loud(
 
 def test_setup_variant_ci_mode_aw_unchanged(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """gate.k.1+k.6 — CI mode is irrelevant for aw targets — those
     always cfg-discover. The early `target=aw` return path runs first;
     CI mode never gets consulted."""
     from recon_gen.common.env_keys import RECON_GEN_RUNNER_CI
+    monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
     monkeypatch.setenv(RECON_GEN_RUNNER_CI.name, "1")
     # Deliberately don't set RECON_GEN_DEMO_DATABASE_URL — aw doesn't need it.
     env, handle = runner.setup_variant(_spec_pg_aw())

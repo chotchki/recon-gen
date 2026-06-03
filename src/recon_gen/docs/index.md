@@ -69,5 +69,5 @@ when you know what you're after.
 - **[Demo Institution Tour](scenario/index.md)** — the L2 model
   rendered for the demo institution: chart of accounts, rails,
   transfer templates, chains, limit schedules.
-- **[API Reference](api/index.md)** — for building a custom
+- **[API Reference](https://recon-gen.readthedocs.io/en/latest/)** — for building a custom
   dashboard on the typed tree primitives.
