@@ -970,6 +970,13 @@ def _apply_seed_via_oracle_dpl(cur: Any, sql: str) -> None:  # typing-smell: ign
             for row in pending_rows
         ]
         arrow_table = pa.Table.from_pylist(rows_as_dicts, schema=arrow_schema)
+        # CB.14 — direct_path_load raises ORA-26085 when the connection
+        # has an active transaction. oracledb 3.x opens an implicit
+        # transaction on the first statement of any kind (including the
+        # SELECT user discovery above), and the non-INSERT residual
+        # chunks can also leave a write txn open. Commit before each
+        # flush so direct_path_load can start its own.
+        conn.commit()
         conn.direct_path_load(
             schema_name=schema_name,
             table_name=table_upper,
@@ -1007,7 +1014,13 @@ def _apply_seed_via_oracle_dpl(cur: Any, sql: str) -> None:  # typing-smell: ign
         if row is None:
             _flush_inserts()
             _execute_residual(residual_before)
-            _execute_oracle_stmt_with_lock_retry(cur, match.group(0))
+            # CB.14 — `_SEED_INSERT_SCAN_RE` captures through the trailing
+            # `;` (the regex anchor); oracledb's thin-mode `cur.execute()`
+            # rejects trailing semicolons with ORA-00933. Latent under
+            # 23ai (apparently lenient) — exposed by 19c. Strip before
+            # executing the verbatim fallback.
+            stmt = match.group(0).rstrip().rstrip(";")
+            _execute_oracle_stmt_with_lock_retry(cur, stmt)
             continue
         if (pending_table, pending_cols) != key:
             _flush_inserts()

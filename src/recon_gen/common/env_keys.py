@@ -601,6 +601,25 @@ RECON_GEN_PRINCIPAL_ARNS: Final = EnvVar(
     # loader (each ARN runs through the same regex used elsewhere).
 )
 
+# CB.14 — runner override for the Oracle 19c container image. Absent →
+# the runner prefers locally-built ``recon-gen/oracle-19c:local`` if
+# Docker reports it (production-parity RDS SE2 19c via ``tools/oracle-19c/
+# build.sh``), then falls back to ``gvenzl/oracle-free:23-faststart``
+# (Oracle 23ai, multi-arch) with a one-line warning when neither side
+# has been built. Operators set this to pin a specific tag (e.g. a
+# ``19.20`` PSU-patched build).
+RECON_GEN_ORACLE_IMAGE: Final = EnvVar(
+    name="RECON_GEN_ORACLE_IMAGE",
+    description=(
+        "Container image for the Oracle testcontainer. Absent → prefer "
+        "recon-gen/oracle-19c:local (built via tools/oracle-19c/build.sh) "
+        "with gvenzl/oracle-free:23-faststart fallback when the local "
+        "image isn't present."
+    ),
+    coercer=str,
+    optional=True,
+)
+
 # common/browser/helpers.py — operator override for where browser
 # screenshots / failure dumps land in legacy mode (when RECON_GEN_RUN_DIR
 # unset). Default: tests/e2e/screenshots.

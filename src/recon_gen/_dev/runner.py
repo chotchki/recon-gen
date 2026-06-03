@@ -63,6 +63,7 @@ from recon_gen.common.env_keys import (
     RECON_GEN_E2E,
     RECON_GEN_FUZZ_SEED,
     RECON_GEN_LAYER,
+    RECON_GEN_ORACLE_IMAGE,
     RECON_GEN_RUN_DIR,
     RECON_GEN_RUNNER_CI,
     RECON_GEN_RUNNER_YES,
@@ -1642,6 +1643,47 @@ def _get_or_start_oracle_container(
     return url, _PersistentContainerHandle(name=name)
 
 
+# CB.14 — local-build image tag. Wrote by ``tools/oracle-19c/build.sh``
+# from Oracle's official ``oracle/docker-images`` recipe + operator-
+# downloaded binary; production-parity with AWS RDS Oracle SE2 19c.
+_LOCAL_ORACLE_19C_TAG: Final = "recon-gen/oracle-19c:local"
+# Fallback when the local image isn't built. Oracle 23ai, multi-arch.
+_FALLBACK_ORACLE_IMAGE: Final = "gvenzl/oracle-free:23-faststart"
+
+
+def _docker_image_exists_locally(tag: str) -> bool:
+    """True iff Docker reports the named image in the local store."""
+    import subprocess  # noqa: PLC0415
+    result = subprocess.run(
+        ["docker", "image", "inspect", tag],
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def _resolve_oracle_image() -> str:
+    """Pick the Oracle image: env override → local 19c build → 23ai fallback.
+
+    Warns once per process when falling back to 23ai so operators notice
+    the production-parity gap without it being noisy.
+    """
+    override = RECON_GEN_ORACLE_IMAGE.get_or_none()
+    if override:
+        return override
+    if _docker_image_exists_locally(_LOCAL_ORACLE_19C_TAG):
+        return _LOCAL_ORACLE_19C_TAG
+    if not getattr(_resolve_oracle_image, "_warned", False):
+        print(
+            f"runner: oracle image — {_LOCAL_ORACLE_19C_TAG} not built; "
+            f"falling back to {_FALLBACK_ORACLE_IMAGE} (Oracle 23ai). "
+            f"Build the 19c image once via tools/oracle-19c/build.sh "
+            f"for production-parity local testing.",
+        )
+        _resolve_oracle_image._warned = True  # type: ignore[attr-defined]: one-shot warning flag
+    return _FALLBACK_ORACLE_IMAGE
+
+
 def _start_fresh_oracle_container(
     name: str, password: str,
 ) -> tuple[str, _PersistentContainerHandle]:
@@ -1650,32 +1692,54 @@ def _start_fresh_oracle_container(
     so the container outlives this invocation and the next run can
     adopt it).
 
-    gvenzl/oracle-free:23-faststart — pre-initialized 23ai DB starts
-    in ~20-30s. Service name defaults to FREEPDB1.
+    Image selection (CB.14):
 
-    CB.7-followup 19c switch DEFERRED 2026-06-03: production RDS is
-    Oracle SE2 19c, but `doctorkirk/oracle-19c` (the only CB.10-spike-
-    validated 19c image) ships **amd64-only**. On the Apple Silicon
-    dev Mac, Docker Desktop emulates via QEMU and the 19c cold-start
-    hangs at "10% complete / Copying database files" past 15 min,
-    making the image unusable for local iteration.
+    1. ``RECON_GEN_ORACLE_IMAGE`` env override, when set.
+    2. ``recon-gen/oracle-19c:local`` if Docker reports it locally —
+       production-parity with AWS RDS Oracle SE2 19c, built via
+       ``tools/oracle-19c/build.sh``. Cold-start ~90-120s.
+    3. ``gvenzl/oracle-free:23-faststart`` fallback — pre-initialized
+       23ai, multi-arch, ~20-30s cold-start. Correct-by-construction
+       parity because the codebase sticks to the conservative
+       19c-portable SQL/JSON subset.
 
-    Switch lands when the runner first executes on the WSL2 self-
-    hosted box (x86_64 native — where the CB.10 spike succeeded).
-    The codebase already sticks to the conservative 19c-portable
-    SQL/JSON subset, so 23ai exercising it is correct-by-construction
-    even if not production-honest. See `CB_11_C_NOTES.md` §"Oracle
-    image" for the swap-in plan.
+    Service name defaults to FREEPDB1 on either image.
     """
+    image = _resolve_oracle_image()
+    from testcontainers.core.waiting_utils import wait_for_logs  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
     from testcontainers.oracle import OracleDbContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
 
-    container = OracleDbContainer(
-        "gvenzl/oracle-free:23-faststart",
-        oracle_password=password,
-    ).with_name(name)
+    if image == _FALLBACK_ORACLE_IMAGE:
+        # gvenzl path — testcontainers' OracleDbContainer expects this
+        # image's ``ORACLE_PASSWORD`` env var + FREEPDB1 PDB + 120s
+        # default ``wait_for_logs`` timeout, all of which match. Use
+        # the default integration unchanged.
+        container = OracleDbContainer(image, oracle_password=password).with_name(name)
+        container.start()  # type: ignore[no-untyped-call]: testcontainers .start() lacks return-type hint
+        return container.get_connection_url(), _PersistentContainerHandle(name=name)
+
+    # 19c path — Oracle's official image differs from gvenzl on three
+    # axes that the default ``OracleDbContainer`` integration can't
+    # bridge: it reads ``ORACLE_PWD`` (not ``ORACLE_PASSWORD``), its
+    # default PDB is ``ORCLPDB1`` (not ``FREEPDB1``), and a true cold
+    # start runs 3-4 min vs gvenzl's 20-30s (testcontainers' 120s
+    # default ``wait_for_logs`` fires mid-init). Subclass to bridge
+    # all three; pin ``ORACLE_PDB=FREEPDB1`` so the connection URL
+    # shape stays identical to the fallback path.
+    class _Oracle19cContainer(OracleDbContainer):
+        def _configure(self) -> None:  # type: ignore[no-untyped-def]: testcontainers method has no return-type hint
+            super()._configure()
+            self.with_env("ORACLE_PWD", self.oracle_password)
+            self.with_env("ORACLE_PDB", "FREEPDB1")
+
+        def _connect(self) -> None:  # type: ignore[no-untyped-def]: testcontainers method has no return-type hint
+            wait_for_logs(  # type: ignore[no-untyped-call]: testcontainers helper lacks return-type hint
+                self, ".*DATABASE IS READY TO USE!.*", timeout=900,
+            )
+
+    container = _Oracle19cContainer(image, oracle_password=password).with_name(name)
     container.start()  # type: ignore[no-untyped-call]: testcontainers .start() lacks return-type hint
-    url: str = container.get_connection_url()
-    return url, _PersistentContainerHandle(name=name)
+    return container.get_connection_url(), _PersistentContainerHandle(name=name)
 
 
 def setup_variant(spec: VariantSpec) -> tuple[dict[str, str], object | None]:

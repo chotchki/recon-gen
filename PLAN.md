@@ -362,6 +362,7 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [ ] CB.13 - CB.13 — Docs + release notes + v13.0.0 release
 - [ ] CB.7.followup - CB.7 followup — Triage qs_browser session-start cascade (workers die at session-start under the layer's pytest invocation; 4 "FAILED" entries are xdist queue residue, not real failures)
 
+- [ ] CB.14 - CB.14 — In-repo Oracle 19c image build (multi-arch via host arch)
 ## Phase CC - Collapse cells; move scenario/dialect matrix to test markers
 
 **Why:** Post-CB the cell concept (`scenario × dialect × target`) duplicates work that test markers + parametrize would do. `target=aw` died in CB.12; `dialect` is already a typed mark (`@dialects(...)`); `scenario` is expressible via `@l2(...)` + the auto-fuzz hook designed in CB.7-followup; `isolation_scope` provides per-test prefix isolation. Cells provide nothing markers can't. Pushing the matrix to test-level lets the test author own coverage, drops ~1k+ runner lines, and reduces container management from 13-cell fan-out to 2 long-lived containers per `./run_tests.sh` invocation.
