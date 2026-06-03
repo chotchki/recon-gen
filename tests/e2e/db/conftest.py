@@ -49,7 +49,7 @@ import pytest as _pytest
 
 
 @_pytest.fixture(autouse=True)
-def _clear_db_read_only_env(monkeypatch: _pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]
+def _clear_db_read_only_env(monkeypatch: _pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]: autouse fixture invoked by pytest, not direct callers
     """CB.14 followup — clear RECON_GEN_DB_READ_ONLY for db-tier tests.
 
     The env var was designed for the pre-CB.7 model where the
