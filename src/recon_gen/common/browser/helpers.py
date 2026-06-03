@@ -1837,16 +1837,21 @@ def read_kpi_value(page: Page, visual_title: str, *, timeout_ms: int = 8_000) ->
     innerText sometimes includes the comparison label — prefer the center
     node and fall back to the automation-id if unavailable.
 
-    Polls up to ``timeout_ms`` for the value to appear. The caller's
-    `wait_loaded(...)` typically gates one visual, but sibling KPI visuals
-    on the same sheet often render a few hundred ms later — fixed BO.1
-    flakes (test_bg3_drift_sheet_kpis_match_matview_counts +
-    test_l1_dropdown_pickers_inverse_excludes_anchor[qs-Drift] +
-    test_l1_invariant_qs_extract[postgres-overdraft]) where the read
-    fired before the KPI's first paint.
+    **Stability poll**: returns only when 2 consecutive reads (200ms
+    apart) match. Handles both:
 
-    Raises ``AssertionError`` if the visual still has no value after
-    the poll window.
+    - *First-paint race* (BO.1 `test_bg3_drift_sheet_kpis_match_matview_counts`
+      fix): caller's `wait_loaded(...)` may settle one visual while
+      sibling KPIs on the same sheet are still rendering; poll past
+      the None window until the value appears stable.
+    - *Post-param-change stale-read* (BO.1
+      `test_bg2_daily_statement_kpis_match_summary_matview` fix): after
+      a date pick, QS's WS settle may return before the KPI cell
+      repaints — DOM transiently still shows the previous day's value.
+      Stability poll waits for the new value to land.
+
+    Raises ``AssertionError`` if the value never reaches a stable state
+    within the timeout.
     """
     js = """(title) => {
         const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
@@ -1862,16 +1867,24 @@ def read_kpi_value(page: Page, visual_title: str, *, timeout_ms: int = 8_000) ->
         return null;
     }"""
     deadline = time.monotonic() + timeout_ms / 1000.0
-    value: str | None = None
+    last: str | None = None
     while time.monotonic() < deadline:
         value = page.evaluate(js, visual_title)
-        if value is not None:
+        if value is not None and value == last:
+            # Two consecutive identical non-None reads — value has stabilized.
             return value
+        last = value
         time.sleep(0.2)  # typing-smell: ignore[no-sleep]: 200ms inter-poll backoff inside a bounded retry loop with overall timeout
-    # Final attempt for the assertion message — same JS, no retry.
-    value = page.evaluate(js, visual_title)
-    assert value is not None, f"No KPI value found for {visual_title!r} after {timeout_ms}ms"
-    return value
+    # Timed out without stabilizing. Surface the most recent value to
+    # aid triage (last seen, plus an explanation of which gate fired).
+    if last is None:
+        raise AssertionError(
+            f"No KPI value found for {visual_title!r} after {timeout_ms}ms"
+        )
+    raise AssertionError(
+        f"KPI value for {visual_title!r} never stabilized (last seen: "
+        f"{last!r}) within {timeout_ms}ms"
+    )
 
 
 
