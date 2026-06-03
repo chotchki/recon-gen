@@ -365,6 +365,16 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [x] CB.14 - CB.14 — In-repo Oracle 19c image build (multi-arch via host arch)
 - [ ] CB.15 - CB.15 — Collapse cells to fix CI-vs-local DB resource divergence (accelerated CC.3)
 - [ ] CB.16 - CB.16 — Re-type connect_demo_db -> SyncConnection to close the Any escape hatch
+  - We should evaluate all "ignore[explicit-any]", its a huge smell.
+- [ ] CB.17 - CB.17 — Execute the cell-collapse migration (per cb_15_collapse_cells_design.md)
+  - [ ] CB.17.a - CB.17.a — Wire pg_container + oracle_container session fixtures
+  - [ ] CB.17.b - CB.17.b — Top-level cfg fixture sources from container fixtures
+  - [ ] CB.17.c - CB.17.c — Confirm isolated_cfg worker-suffix covers QS resources end-to-end
+  - [ ] CB.17.d - CB.17.d — Delete the cell loop
+  - [ ] CB.17.e - CB.17.e — Rewrite run_tests.sh as a thin pytest alias
+  - [ ] CB.17.f - CB.17.f — Collapse ci.yml
+  - [ ] CB.17.g - CB.17.g — Delete custom coverage merge + bespoke artifact paths
+  - [ ] CB.17.h - CB.17.h — Re-verify on the WSL2 self-hosted runner + capture peak RSS
 ## Phase CC - Collapse cells; move scenario/dialect matrix to test markers
 
 **Why:** Post-CB the cell concept (`scenario × dialect × target`) duplicates work that test markers + parametrize would do. `target=aw` died in CB.12; `dialect` is already a typed mark (`@dialects(...)`); `scenario` is expressible via `@l2(...)` + the auto-fuzz hook designed in CB.7-followup; `isolation_scope` provides per-test prefix isolation. Cells provide nothing markers can't. Pushing the matrix to test-level lets the test author own coverage, drops ~1k+ runner lines, and reduces container management from 13-cell fan-out to 2 long-lived containers per `./run_tests.sh` invocation.

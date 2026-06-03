@@ -23,6 +23,8 @@ import pytest
 
 from recon_gen.common.env_keys import (
     EnvVarInvalid,
+    RECON_GEN_DEMO_DATABASE_URL_OR,
+    RECON_GEN_DEMO_DATABASE_URL_PG,
     RECON_GEN_FUZZ_SEED,
     RECON_GEN_LAYER,
     RECON_GEN_RUN_DIR,
@@ -744,3 +746,125 @@ def cfg_for_dialect(request: Any) -> Any:  # typing-smell: ignore[explicit-any]:
         if candidate.exists():
             return load_config(str(candidate))
     return load_config(None)
+
+
+# ---------------------------------------------------------------------------
+# CB.17.a — shared container fixtures (audit: docs/audits/cb_15_collapse_cells_design.md)
+#
+# Goal: ONE Postgres + ONE Oracle container per pytest run (memory-bounded,
+# prefix-isolated via the existing `isolated_cfg` fixture downstream).
+#
+# Resolution order:
+#
+# 1. **Env URL set** (CI / pre-provisioned path): yield the env value
+#    directly. ci.yml's "Start shared PG + Oracle" step provisions both
+#    containers and exports `RECON_GEN_DEMO_DATABASE_URL_PG` /
+#    `RECON_GEN_DEMO_DATABASE_URL_OR` onto the test step.
+# 2. **Env unset** (local path): spin testcontainers. Under pytest-xdist
+#    this means one container PER WORKER (~500MB PG + ~2GB Oracle per
+#    worker). On laptops with `-n 2` that's ~5GB total — fine. For
+#    single-container-per-run locally, operators set the env URLs
+#    explicitly before invoking pytest (the `./run_tests.sh` wrapper does
+#    this in CB.17.e).
+#
+# These fixtures yield *URLs* only — not Container objects — so callers
+# can't accidentally call `.stop()` mid-session. The container lifetime
+# is owned by the fixture's generator-finalize.
+#
+# CB.17.b chains the top-level `cfg` fixture to consume these URLs; for
+# now the fixtures just exist and existing tests are unaffected.
+# ---------------------------------------------------------------------------
+
+
+def _strip_sa_url_prefix(url: str) -> str:
+    """testcontainers returns SQLAlchemy-flavored URLs (``postgresql+psycopg2://``
+    / ``oracle+oracledb://``). recon_gen's `connect_demo_db` wants the plain
+    ``postgresql://`` / ``oracle://`` forms — libpq + python-oracledb both reject
+    the SA dialect suffix.
+    """
+    return (
+        url
+        .replace("postgresql+psycopg2://", "postgresql://", 1)
+        .replace("oracle+oracledb://", "oracle://", 1)
+    )
+
+
+@pytest.fixture(scope="session")
+def pg_container_url() -> Generator[str, None, None]:
+    """URL for a session-scoped Postgres container.
+
+    Yields the env URL if set, else spins ``postgres:17-alpine`` via
+    testcontainers. See module-level CB.17.a comment for the full
+    resolution contract.
+    """
+    env_url = RECON_GEN_DEMO_DATABASE_URL_PG.get_or_none()
+    if env_url is not None:
+        yield env_url
+        return
+
+    pytest.importorskip("testcontainers.postgres")
+    from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
+
+    container = PostgresContainer("postgres:17-alpine")
+    container.start()
+    try:
+        raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]: testcontainers method has no type annotations
+        yield _strip_sa_url_prefix(raw_url)
+    finally:
+        container.stop()
+
+
+@pytest.fixture(scope="session")
+def oracle_container_url() -> Generator[str, None, None]:
+    """URL for a session-scoped Oracle container.
+
+    Yields the env URL if set, else spins ``recon-gen/oracle-19c:local``
+    (or ``gvenzl/oracle-free:23-faststart`` fallback) via testcontainers
+    + the runner's existing `_Oracle19cContainer` bridge for the 19c
+    image's ``ORACLE_PWD`` / ``FREEPDB1`` / 900s wait-for-logs quirks.
+
+    Imports the bridge from `recon_gen._dev.runner` for now; CB.17.d
+    will lift `_Oracle19cContainer` + `_resolve_oracle_image` into
+    `tests/_oracle_container.py` as part of the runner deletion (the
+    runner has no other callers in the post-collapse world).
+    """
+    env_url = RECON_GEN_DEMO_DATABASE_URL_OR.get_or_none()
+    if env_url is not None:
+        yield env_url
+        return
+
+    pytest.importorskip("testcontainers.oracle")
+    from recon_gen._dev.runner import (  # noqa: PLC0415
+        ORACLE_REUSE_PASSWORD,
+        _resolve_oracle_image,
+        _FALLBACK_ORACLE_IMAGE,
+    )
+    from testcontainers.core.waiting_utils import wait_for_logs  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
+    from testcontainers.oracle import OracleDbContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
+
+    image = _resolve_oracle_image()
+    password = ORACLE_REUSE_PASSWORD
+
+    if image == _FALLBACK_ORACLE_IMAGE:
+        container = OracleDbContainer(image, oracle_password=password)
+    else:
+        # 19c bridge — see runner.py::_Oracle19cContainer for the rationale.
+        class _Oracle19cContainer(OracleDbContainer):
+            def _configure(self) -> None:  # type: ignore[no-untyped-def]: testcontainers method has no return-type hint
+                super()._configure()
+                self.with_env("ORACLE_PWD", self.oracle_password)
+                self.with_env("ORACLE_PDB", "FREEPDB1")
+
+            def _connect(self) -> None:  # type: ignore[no-untyped-def]: testcontainers method has no return-type hint
+                wait_for_logs(  # type: ignore[no-untyped-call]: testcontainers helper lacks return-type hint
+                    self, ".*DATABASE IS READY TO USE!.*", timeout=900,
+                )
+
+        container = _Oracle19cContainer(image, oracle_password=password)
+
+    container.start()  # type: ignore[no-untyped-call]: testcontainers .start() lacks return-type hint
+    try:
+        raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]: testcontainers method has no type annotations
+        yield _strip_sa_url_prefix(raw_url)
+    finally:
+        container.stop()

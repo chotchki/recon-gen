@@ -371,6 +371,41 @@ RECON_GEN_DEMO_DATABASE_URL: Final = EnvVar(
     # URL parsing here.
 )
 
+# CB.17.a — Per-dialect demo DB URL overrides. Sibling to
+# ``RECON_GEN_DEMO_DATABASE_URL`` (singular, set by the soon-to-die
+# per-cell runner): when collapsing the cell loop, BOTH PG + Oracle
+# containers run simultaneously, so the test-session fixtures need to
+# distinguish them. CI provisions both via ci.yml (the existing shared
+# PG + Oracle docker step) and exports these env URLs onto the pytest
+# step; local invocations leave these unset and the fixture spins
+# testcontainers. The singular ``RECON_GEN_DEMO_DATABASE_URL`` stays
+# as the per-test cfg override (operator-facing) and falls out of CI
+# usage after CB.17.d deletes the cell loop.
+RECON_GEN_DEMO_DATABASE_URL_PG: Final = EnvVar(
+    name="RECON_GEN_DEMO_DATABASE_URL_PG",
+    description=(
+        "Postgres demo DB URL override for the ``pg_container_url`` "
+        "session fixture. When set, the fixture yields this URL directly "
+        "(CI / pre-provisioned path). When unset, the fixture spins a "
+        "testcontainers postgres:17-alpine (local path)."
+    ),
+    coercer=str,
+    optional=True,
+)
+
+RECON_GEN_DEMO_DATABASE_URL_OR: Final = EnvVar(
+    name="RECON_GEN_DEMO_DATABASE_URL_OR",
+    description=(
+        "Oracle demo DB URL override for the ``oracle_container_url`` "
+        "session fixture. Same shape as ``RECON_GEN_DEMO_DATABASE_URL_PG``: "
+        "set → yield directly; unset → spin testcontainers Oracle "
+        "(``recon-gen/oracle-19c:local`` or gvenzl fallback)."
+    ),
+    coercer=str,
+    optional=True,
+)
+
+
 # CB.11.b — QS-side cfg path. Sibling to ``RECON_GEN_CONFIG``: points at
 # a cfg yaml whose ``demo_database_url`` is the hotchkiss.io-forwarded
 # endpoint (with ``qs_disable_pg_ssl: true`` for PG) so the QS data
