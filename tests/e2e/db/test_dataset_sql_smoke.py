@@ -259,7 +259,11 @@ def smoke_conn() -> Iterator[Any]:
     # release on commit, and the smoke tests don't write).
     if hasattr(conn, "autocommit"):
         try:
-            conn.autocommit = True
+            # `autocommit` is a psycopg-specific attribute (PG-only); the
+            # SyncConnection Protocol doesn't expose it because it isn't
+            # on PEP 249. Pyright-quiet via setattr — the hasattr guard
+            # above is the runtime check.
+            setattr(conn, "autocommit", True)  # noqa: B010
         except Exception:  # noqa: BLE001 — best-effort; SQLite raises here
             pass
     try:

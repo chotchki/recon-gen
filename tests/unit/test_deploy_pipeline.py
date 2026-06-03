@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from recon_gen.common.config import Config
-from recon_gen.common.db import connect_demo_db, execute_script, make_demo_database_url
+from recon_gen.common.db import connect_demo_db, execute_script, fetch_one_required, make_demo_database_url
 from recon_gen.common.config import (
     TestGeneratorConfig,
 )
@@ -138,9 +138,9 @@ def _row_counts(cfg: Config, instance: L2Instance) -> tuple[int, int]:
         cur = conn.cursor()
         try:
             cur.execute(f"SELECT COUNT(*) FROM {p}_transactions")
-            tx = int(cur.fetchone()[0])
+            tx = int(fetch_one_required(cur)[0])
             cur.execute(f"SELECT COUNT(*) FROM {p}_daily_balances")
-            bal = int(cur.fetchone()[0])
+            bal = int(fetch_one_required(cur)[0])
             return tx, bal
         finally:
             cur.close()
@@ -1154,7 +1154,7 @@ def test_derive_balances_failed_transactions_excluded(
                 f"SELECT money FROM {p}_daily_balances "
                 f"WHERE account_id = 'gl-1'",
             )
-            money = float(cur.fetchone()[0])
+            money = float(fetch_one_required(cur)[0])
         finally:
             cur.close()
     finally:
@@ -1215,7 +1215,7 @@ def test_derive_balances_overwrites_existing_rows(
                 f"SELECT COUNT(*), MAX(money) "
                 f"FROM {p}_daily_balances WHERE account_id = 'gl-1'",
             )
-            count, money = cur.fetchone()
+            count, money = fetch_one_required(cur)
         finally:
             cur.close()
     finally:
@@ -1306,9 +1306,9 @@ def test_step_4_matviews_idempotent_on_empty_db(
         cur = conn.cursor()
         try:
             cur.execute(f"SELECT COUNT(*) FROM {p}_drift")
-            assert int(cur.fetchone()[0]) == 0
+            assert int(fetch_one_required(cur)[0]) == 0
             cur.execute(f"SELECT COUNT(*) FROM {p}_overdraft")
-            assert int(cur.fetchone()[0]) == 0
+            assert int(fetch_one_required(cur)[0]) == 0
         finally:
             cur.close()
     finally:
@@ -1339,7 +1339,7 @@ def test_step_4_matviews_picks_up_new_rows(
         cur = conn.cursor()
         try:
             cur.execute(f"SELECT COUNT(*) FROM {p}_current_transactions")
-            n = int(cur.fetchone()[0])
+            n = int(fetch_one_required(cur)[0])
             assert n > 0, (
                 "step_4_matviews must surface step_3's writes into the "
                 "current_transactions matview"

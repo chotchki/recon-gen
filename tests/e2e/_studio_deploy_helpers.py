@@ -45,6 +45,7 @@ from recon_gen.common.db import (
     AsyncConnectionPool,
     connect_demo_db,
     execute_script,
+    fetch_one_required,
     make_connection_pool,
 )
 from recon_gen.common.html._studio_routes import make_studio_routes
@@ -304,7 +305,7 @@ def row_count(cfg: Config, table: str) -> int:
         cur = conn.cursor()
         try:
             cur.execute(f"SELECT COUNT(*) FROM {table}")
-            return int(cur.fetchone()[0])
+            return int(fetch_one_required(cur)[0])
         finally:
             cur.close()
     finally:

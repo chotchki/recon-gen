@@ -27,7 +27,7 @@ column handles the `entry` discriminator.
 
 from __future__ import annotations
 
-import duckdb
+from recon_gen.common.db import SyncConnection
 from dataclasses import dataclass
 from datetime import date
 
@@ -90,7 +90,7 @@ class SupersessionGenerator:
 
     def emit(
         self,
-        conn: duckdb.DuckDBPyConnection,
+        conn: SyncConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:

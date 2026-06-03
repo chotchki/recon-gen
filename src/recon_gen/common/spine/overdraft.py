@@ -37,7 +37,7 @@ What this module deliberately does NOT carry:
 
 from __future__ import annotations
 
-import duckdb
+from recon_gen.common.db import SyncConnection
 from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
@@ -71,7 +71,7 @@ class OverdraftInvariant:
     #: per-call override pattern drift uses.
     prefix: str = "spec_example"
 
-    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
+    def detect(self, conn: SyncConnection) -> set[Violation]:
         rows = fetch_all(
             conn,
             f"SELECT account_id, business_day_start, stored_balance "
@@ -202,7 +202,7 @@ class OverdraftGenerator:
 
     def emit(
         self,
-        conn: duckdb.DuckDBPyConnection,
+        conn: SyncConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:

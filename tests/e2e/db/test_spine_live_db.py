@@ -40,14 +40,13 @@ polish — because that's the exact failure mode it exists to catch.
 
 from __future__ import annotations
 
-import duckdb
 from typing import Any
 from pathlib import Path
 
 import pytest
 
 from recon_gen.common.config import Config, load_config
-from recon_gen.common.db import connect_demo_db
+from recon_gen.common.db import SyncConnection, connect_demo_db
 from recon_gen.common.env_keys import (
     EnvVarInvalid,
     RECON_GEN_CONFIG,
@@ -105,8 +104,8 @@ def _resolve_cfg() -> Config:
 _CFG = _resolve_cfg()
 
 
-def _conn() -> duckdb.DuckDBPyConnection:  # type: ignore[return]: live PG/Oracle/SQLite — concrete return varies per dialect, no shared protocol
-    """Per-test live DB connection (psycopg / oracledb / sqlite3
+def _conn() -> "SyncConnection":
+    """Per-test live DB connection (psycopg / oracledb / duckdb
     depending on `_CFG.dialect`). Caller closes."""
     return connect_demo_db(_CFG)
 

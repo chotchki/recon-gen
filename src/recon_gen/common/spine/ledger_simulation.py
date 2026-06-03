@@ -41,7 +41,7 @@ is the truth-source, the generator is honest.
 
 from __future__ import annotations
 
-import duckdb
+from recon_gen.common.db import SyncConnection
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal
@@ -147,7 +147,7 @@ class LedgerSimulation:
 
     def emit(
         self,
-        conn: duckdb.DuckDBPyConnection,
+        conn: SyncConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:
@@ -166,7 +166,7 @@ class LedgerSimulation:
 
     def _emit_transfer(
         self,
-        conn: duckdb.DuckDBPyConnection,
+        conn: SyncConnection,
         transfer: Transfer,
         *,
         scenario_id: str | None = None,
@@ -211,7 +211,7 @@ class LedgerSimulation:
     def violation_trajectory(
         self,
         invariant: Invariant,
-        conn: duckdb.DuckDBPyConnection,
+        conn: SyncConnection,
     ) -> list[set[Violation]]:
         """Per-day violation snapshots, like AccountSimulation's but
         emitting all accounts' rows for day i BEFORE refresh+detect.

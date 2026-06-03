@@ -321,16 +321,16 @@ def compute_provenance(
     if cfg.demo_database_url is None:
         return None
 
-    from recon_gen.common.db import connect_demo_db
+    from recon_gen.common.db import connect_demo_db, fetch_one_required
 
     prefix = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
         cur.execute(f"SELECT COALESCE(MAX(entry), 0) FROM {prefix}_transactions")
-        tx_hwm = int(cur.fetchone()[0] or 0)
+        tx_hwm = int(fetch_one_required(cur)[0] or 0)
         cur.execute(f"SELECT COALESCE(MAX(entry), 0) FROM {prefix}_daily_balances")
-        bal_hwm = int(cur.fetchone()[0] or 0)
+        bal_hwm = int(fetch_one_required(cur)[0] or 0)
         tx_sha = hash_table_rows(
             cur, table=f"{prefix}_transactions", hwm=tx_hwm,
         )

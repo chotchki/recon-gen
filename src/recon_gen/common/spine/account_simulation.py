@@ -30,7 +30,7 @@ accounts). AS.3 is the scalar foundation.
 from __future__ import annotations
 
 import random
-import duckdb
+from recon_gen.common.db import SyncConnection
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Literal
@@ -165,7 +165,7 @@ class AccountSimulation:
 
     def emit(
         self,
-        conn: duckdb.DuckDBPyConnection,
+        conn: SyncConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:
@@ -178,7 +178,7 @@ class AccountSimulation:
             self._emit_day(conn, em, scenario_id=scenario_id)
 
     def violation_trajectory(
-        self, invariant: Invariant, conn: duckdb.DuckDBPyConnection,
+        self, invariant: Invariant, conn: SyncConnection,
     ) -> list[set[Violation]]:
         """Run the fold day by day, refresh + detect after each day,
         return the per-day violation set. The carried-state shape
@@ -222,7 +222,7 @@ class AccountSimulation:
 
     def _emit_day(
         self,
-        conn: duckdb.DuckDBPyConnection,
+        conn: SyncConnection,
         em: DayEmission,
         *,
         scenario_id: str | None = None,

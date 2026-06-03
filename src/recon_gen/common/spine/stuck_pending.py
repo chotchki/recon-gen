@@ -36,7 +36,7 @@ seconds-unit knob.
 
 from __future__ import annotations
 
-import duckdb
+from recon_gen.common.db import SyncConnection
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import ClassVar
@@ -65,7 +65,7 @@ class StuckPendingInvariant:
     name: ClassVar[str] = "stuck_pending"
     prefix: str = "spec_example"
 
-    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
+    def detect(self, conn: SyncConnection) -> set[Violation]:
         rows = fetch_all(
             conn,
             f"SELECT transaction_id, rail_name "
@@ -191,7 +191,7 @@ class StuckPendingGenerator:
 
     def emit(
         self,
-        conn: duckdb.DuckDBPyConnection,
+        conn: SyncConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:

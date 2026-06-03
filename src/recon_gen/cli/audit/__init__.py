@@ -293,7 +293,7 @@ def _query_executive_summary(
     if cfg.demo_database_url is None:
         return None
 
-    from recon_gen.common.db import connect_demo_db
+    from recon_gen.common.db import connect_demo_db, fetch_one_required
 
     prefix = cfg.db_table_prefix
     posting_range = range_clause(
@@ -311,7 +311,7 @@ def _query_executive_summary(
             f" WHERE status = 'Posted'"
             f"   AND {posting_range}"
         )
-        leg_count, transfer_count = cur.fetchone()
+        leg_count, transfer_count = fetch_one_required(cur)
 
         cur.execute(
             f"SELECT COALESCE(SUM(transfer_gross), 0),"
@@ -325,7 +325,7 @@ def _query_executive_summary(
             f"   GROUP BY transfer_id"
             f" ) per_transfer"
         )
-        gross, net = cur.fetchone()
+        gross, net = fetch_one_required(cur)
 
         exception_counts: list[tuple[str, int]] = []
         for label, suffix, date_col in _EXCEPTION_INVARIANTS:
@@ -340,7 +340,7 @@ def _query_executive_summary(
                     f" WHERE {range_clause(frame.window, dialect=cfg.dialect, column=date_col)}"
                 )
             cur.execute(sql)
-            (count,) = cur.fetchone()
+            (count,) = fetch_one_required(cur)
             # Mark current-state labels with "*" so the renderer's
             # footnote attaches correctly.
             display_label = f"{label}*" if date_col is None else label
@@ -359,7 +359,7 @@ def _query_executive_summary(
                 f"SELECT COUNT(*) FROM {prefix}_{table_name}"
                 f" WHERE supersedes IS NOT NULL"
             )
-            (count,) = cur.fetchone()
+            (count,) = fetch_one_required(cur)
             total_supersession += int(count or 0)
         exception_counts.append(("Supersession*", total_supersession))
 
@@ -1701,7 +1701,7 @@ def audit_verify(
             "to recompute table hashes against the live DB."
         )
 
-    from recon_gen.common.db import connect_demo_db
+    from recon_gen.common.db import connect_demo_db, fetch_one_required
 
     prefix = cfg.db_table_prefix
     conn = connect_demo_db(cfg)
@@ -1713,11 +1713,11 @@ def audit_verify(
         cur.execute(
             f"SELECT COALESCE(MAX(entry), 0) FROM {prefix}_transactions"
         )
-        tx_max = int(cur.fetchone()[0] or 0)
+        tx_max = int(fetch_one_required(cur)[0] or 0)
         cur.execute(
             f"SELECT COALESCE(MAX(entry), 0) FROM {prefix}_daily_balances"
         )
-        bal_max = int(cur.fetchone()[0] or 0)
+        bal_max = int(fetch_one_required(cur)[0] or 0)
         if tx_max < embedded.transactions_hwm:
             raise click.ClickException(
                 f"transactions table MAX(entry)={tx_max} is below "

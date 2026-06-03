@@ -34,7 +34,7 @@ helper.
 
 from __future__ import annotations
 
-import duckdb
+from recon_gen.common.db import SyncConnection
 from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
@@ -63,7 +63,7 @@ class XorGroupViolationInvariant:
     name: ClassVar[str] = "xor_group_violation"
     prefix: str = "spec_example"
 
-    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
+    def detect(self, conn: SyncConnection) -> set[Violation]:
         rows = fetch_all(
             conn,
             f"SELECT transfer_id, template_name, xor_group_index "
@@ -198,7 +198,7 @@ class XorGroupMissedFiringGenerator:
 
     def emit(
         self,
-        conn: duckdb.DuckDBPyConnection,
+        conn: SyncConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:
@@ -280,7 +280,7 @@ class XorGroupOverlapGenerator:
 
     def emit(
         self,
-        conn: duckdb.DuckDBPyConnection,
+        conn: SyncConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:

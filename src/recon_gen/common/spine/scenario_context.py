@@ -55,7 +55,7 @@ Backward compat — every existing call site stays untouched:
 from __future__ import annotations
 
 import json
-import duckdb
+from recon_gen.common.db import SyncConnection
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
@@ -200,7 +200,7 @@ class ClaimedAccountsGenerator(Protocol):
 
     def emit(
         self,
-        conn: duckdb.DuckDBPyConnection,
+        conn: SyncConnection,
         *,
         scenario_id: str | None = None,
     ) -> None: ...
@@ -343,7 +343,7 @@ class ScenarioContext:
 
     def compose(
         self,
-        conn: duckdb.DuckDBPyConnection,
+        conn: SyncConnection,
         *generators: ClaimedAccountsGenerator,
         dry_run: bool = False,
     ) -> list[tuple[str, tuple[object, ...]]] | None:
@@ -413,7 +413,7 @@ class ScenarioContext:
         conn.commit()
         return None
 
-    def cleanup(self, conn: duckdb.DuckDBPyConnection) -> int:
+    def cleanup(self, conn: SyncConnection) -> int:
         """Delete every row on either base table whose
         ``metadata.scenario_id`` matches this scenario. Returns the
         total rowcount across both tables.

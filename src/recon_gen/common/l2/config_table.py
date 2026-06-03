@@ -66,7 +66,7 @@ loss because there was no data.
 from __future__ import annotations
 
 import json
-import duckdb
+from recon_gen.common.db import SyncConnection
 from collections.abc import Iterable
 from datetime import datetime
 from typing import Any  # typing-smell: ignore[explicit-any]: kv values are JSON-shaped — int/str/bool/None/dict/list — the union is wider than ergonomic; pinned at the walker boundary
@@ -360,7 +360,7 @@ def _sql_quote_long(s: str, dialect: Dialect) -> str:
 
 
 def replace_config(
-    conn: duckdb.DuckDBPyConnection,
+    conn: SyncConnection,
     *,
     prefix: str,
     cfg_json: str,
@@ -374,29 +374,34 @@ def replace_config(
     cfg + L2 to JSON strings (typically via ``dataclasses.asdict`` +
     ``json.dumps``, or by reading the source YAML and re-serializing).
 
-    Cursor flavor: the type annotation is ``duckdb.DuckDBPyConnection`` for
+    Cursor flavor: the type annotation is ``SyncConnection`` for
     SQLite-test convenience, but the function is duck-typed against the
     PEP 249 conn / cursor interface — psycopg2 + oracledb both work.
     """
     name = config_table_name(prefix)
-    conn.execute(f"DELETE FROM {name}")
-    rows = kv_rows_for(cfg_json, l2_json, as_of=as_of)
-    # Parameterized batch insert — single ``?``-style placeholder works
-    # on SQLite; psycopg2 + oracledb each have their own placeholder
-    # styles that callers of this function (production deploy path)
-    # don't currently exercise. The deploy path uses the emit_config_
-    # populate_sql + execute_script route instead so the placeholder
-    # mismatch doesn't bite.
-    conn.executemany(
-        f"INSERT INTO {name} (node_id, parent_id, key, value) "
-        f"VALUES (?, ?, ?, ?)",
-        rows,
-    )
+    cur = conn.cursor()
+    try:
+        cur.execute(f"DELETE FROM {name}")
+        rows = kv_rows_for(cfg_json, l2_json, as_of=as_of)
+        # Parameterized batch insert — single ``?``-style placeholder works
+        # on SQLite/DuckDB; psycopg2 + oracledb each have their own
+        # placeholder styles that callers of this function (production
+        # deploy path) don't currently exercise. The deploy path uses
+        # the emit_config_populate_sql + execute_script route instead so
+        # the placeholder mismatch doesn't bite.
+        for row in rows:
+            cur.execute(
+                f"INSERT INTO {name} (node_id, parent_id, key, value) "
+                f"VALUES (?, ?, ?, ?)",
+                row,
+            )
+    finally:
+        cur.close()
     conn.commit()
 
 
 def set_as_of(
-    conn: duckdb.DuckDBPyConnection,
+    conn: SyncConnection,
     *,
     prefix: str,
     as_of: datetime | None = None,
@@ -411,24 +416,28 @@ def set_as_of(
     once at deploy/init time before any ``set_as_of`` calls.
     """
     name = config_table_name(prefix)
-    if as_of is None:
-        # CB.8 — DuckDB doesn't recognize SQLite's ``'now'`` magic
-        # string in strftime; use the standard CURRENT_TIMESTAMP +
-        # cast-and-format path. PG/Oracle accept this shape too.
-        conn.execute(
-            f"UPDATE {name} SET value = strftime(CURRENT_TIMESTAMP, '%Y-%m-%d %H:%M:%S') "
-            f"WHERE parent_id IS NULL AND key = 'as_of'",
-        )
-    else:
-        conn.execute(
-            f"UPDATE {name} SET value = ? "
-            f"WHERE parent_id IS NULL AND key = 'as_of'",
-            (as_of.strftime("%Y-%m-%d %H:%M:%S"),),
-        )
+    cur = conn.cursor()
+    try:
+        if as_of is None:
+            # CB.8 — DuckDB doesn't recognize SQLite's ``'now'`` magic
+            # string in strftime; use the standard CURRENT_TIMESTAMP +
+            # cast-and-format path. PG/Oracle accept this shape too.
+            cur.execute(
+                f"UPDATE {name} SET value = strftime(CURRENT_TIMESTAMP, '%Y-%m-%d %H:%M:%S') "
+                f"WHERE parent_id IS NULL AND key = 'as_of'",
+            )
+        else:
+            cur.execute(
+                f"UPDATE {name} SET value = ? "
+                f"WHERE parent_id IS NULL AND key = 'as_of'",
+                (as_of.strftime("%Y-%m-%d %H:%M:%S"),),
+            )
+    finally:
+        cur.close()
     conn.commit()
 
 
-def get_as_of(conn: duckdb.DuckDBPyConnection, *, prefix: str) -> datetime:
+def get_as_of(conn: SyncConnection, *, prefix: str) -> datetime:
     """Read the current ``as_of`` value back as a Python datetime.
 
     Reads from the single ``as_of`` kv row at ``parent_id IS NULL``.
@@ -436,10 +445,15 @@ def get_as_of(conn: duckdb.DuckDBPyConnection, *, prefix: str) -> datetime:
     invariant: call ``replace_config`` before ``get_as_of`` / ``set_as_of``.
     """
     name = config_table_name(prefix)
-    row = conn.execute(
-        f"SELECT value FROM {name} "
-        f"WHERE parent_id IS NULL AND key = 'as_of'",
-    ).fetchone()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            f"SELECT value FROM {name} "
+            f"WHERE parent_id IS NULL AND key = 'as_of'",
+        )
+        row = cur.fetchone()
+    finally:
+        cur.close()
     if row is None or row[0] is None:
         raise RuntimeError(
             f"{name} has no row — call replace_config(...) before "

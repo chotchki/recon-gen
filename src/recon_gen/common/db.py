@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 from collections.abc import AsyncGenerator, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 from urllib.parse import parse_qs, urlparse
 
 from recon_gen.common.config import Config
@@ -148,7 +148,7 @@ def sqlite_path(url: str) -> str:
     return url
 
 
-def connect_demo_db(cfg: Config) -> Any:  # typing-smell: ignore[explicit-any]: DB-API 2.0 sync connection has no shared Protocol across psycopg/oracledb/sqlite3
+def connect_demo_db(cfg: Config) -> "SyncConnection":  # CB.16 — replaces the `-> Any` escape hatch with the structural Protocol defined below. Per-driver concrete types (psycopg.Connection / oracledb.Connection / duckdb.DuckDBPyConnection) all match SyncConnection structurally, so callers downcast at the boundary if they need driver-specific features.
     """Open a DB-API 2.0 connection to ``cfg.demo_database_url``.
 
     Branches on ``cfg.dialect``:
@@ -176,7 +176,7 @@ def connect_demo_db(cfg: Config) -> Any:  # typing-smell: ignore[explicit-any]: 
                 "psycopg is required for Postgres connections. "
                 "Install it with: pip install 'recon-gen[prod]'"
             ) from e
-        return psycopg.connect(cfg.demo_database_url)
+        return cast("SyncConnection", psycopg.connect(cfg.demo_database_url))  # psycopg.Connection.cursor accepts an optional `scrollable` kwarg; structurally compatible at the call shape we use, but pyright needs the cast
     if cfg.dialect is Dialect.ORACLE:
         try:
             import oracledb  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
@@ -200,7 +200,7 @@ def connect_demo_db(cfg: Config) -> Any:  # typing-smell: ignore[explicit-any]: 
             )
         finally:
             nls_cur.close()
-        return conn
+        return cast("SyncConnection", conn)  # oracledb.Connection.cursor accepts an optional `scrollable` kwarg; same shape as psycopg above
     if cfg.dialect is Dialect.DUCKDB:
         # CA.3 — DuckDB is a core dialect (in `[project.dependencies]`,
         # not extras). Pure-Python wheel, no extra install friction.
@@ -223,7 +223,7 @@ def connect_demo_db(cfg: Config) -> Any:  # typing-smell: ignore[explicit-any]: 
         from recon_gen.common.env_keys import RECON_GEN_DB_READ_ONLY
         path = duckdb_path(cfg.demo_database_url)
         read_only = bool(RECON_GEN_DB_READ_ONLY.get_or_none())
-        return duckdb.connect(path, read_only=read_only)
+        return cast("SyncConnection", duckdb.connect(path, read_only=read_only))  # DuckDBPyConnection.commit returns self for chaining; SyncConnection.commit returns None per PEP 249. The two-arg `cur.execute(sql, params)` shape callers use works on both
     raise ValueError(
         f"Unknown dialect {cfg.dialect!r}. "
         "Set 'dialect: postgres', 'dialect: oracle', 'dialect: duckdb', "
@@ -1368,35 +1368,79 @@ def _split_oracle_script_impl(sql: str) -> list[str]:
 
 
 class SyncCursor(Protocol):
-    """Minimal sync DB-API 2.0 cursor surface used by the spine
-    insert helpers (``_emit_helpers.insert_tx`` / ``insert_balance``)
-    and any other dialect-agnostic write path.
+    """DB-API 2.0 sync cursor surface — the union of methods actually
+    called across the spine + dialect-agnostic helpers.
 
     All sync dbapi drivers we touch (duckdb / sqlite3 / psycopg /
-    oracledb) expose at least these two methods. The Protocol matches
-    structurally so callers don't need to import a Union of driver
-    types — pass any DBAPI cursor and pyright is satisfied.
+    oracledb) expose this surface. The Protocol matches structurally
+    so callers don't need to import a Union of driver types — pass
+    any DBAPI cursor and pyright is satisfied.
+
+    CB.16 expansion (2026-06-03): grew from `execute` + `close` to
+    cover `fetchall` / `fetchone` / `description` / `rowcount` so the
+    spine + html/_sql_executor + html/_tree_fetcher modules can drop
+    their cursor-level `Any` annotations.
     """
 
     def execute(
         self, sql: str, params: Any = ..., /,  # typing-smell: ignore[explicit-any]: bind params are per-driver-coerced sequences; no shared shape covers tuple / list / dict across psycopg / oracledb / sqlite3 / duckdb
     ) -> object: ...
+    def fetchall(self) -> list[Any]: ...  # typing-smell: ignore[explicit-any]: rows are heterogeneous by query — per-call shape lives in the SQL contract, not the DBAPI surface (same posture as AsyncCursor below)
+    def fetchone(self) -> Any | None: ...  # typing-smell: ignore[explicit-any]: same — heterogeneous per query
+    def fetchmany(self, size: int = ..., /) -> list[Any]: ...  # typing-smell: ignore[explicit-any]: same — heterogeneous per query; default size is driver-specific (sqlite3 / duckdb default to `arraysize`)
+    @property
+    def description(self) -> Sequence[Sequence[Any]] | None: ...  # typing-smell: ignore[explicit-any]: DB-API 2.0 description tuples carry mixed types per column (mirrors AsyncCursor)
+    @property
+    def rowcount(self) -> int: ...
     def close(self) -> None: ...
+    # Context-manager surface (psycopg + oracledb + duckdb cursors all implement;
+    # sqlite3 doesn't, but SQLite is gone post-CB.8). `with conn.cursor() as cur`
+    # is the canonical close-on-exit shape used by cli/_helpers.py + others.
+    def __enter__(self) -> "SyncCursor": ...
+    def __exit__(self, *_args: object) -> object: ...
 
 
 class SyncConnection(Protocol):
-    """Minimal sync DB-API 2.0 connection surface — pair of
-    ``SyncCursor``.
+    """DB-API 2.0 sync connection surface — pair of ``SyncCursor``.
 
-    Used by ``_emit_helpers.insert_tx`` / ``insert_balance`` so the
-    annotation reflects the actual contract ("any DBAPI 2.0
-    connection") rather than the dominant call-site type
-    (``duckdb.DuckDBPyConnection``). Dispatch from the connection's
-    module name to per-dialect placeholder style happens inside the
-    helper via ``_placeholder_style``.
+    Replaces the ``connect_demo_db(cfg) -> Any`` escape hatch (the
+    upstream source of every downstream lie that made the spine
+    type-check as ``duckdb.DuckDBPyConnection`` regardless of the
+    actual driver). Dispatch from connection module name → per-dialect
+    placeholder style happens inside ``_emit_helpers._placeholder_style``;
+    the Protocol just captures the dbapi surface shared across drivers.
+
+    CB.16 expansion (2026-06-03): added `commit` + `close` so the
+    Protocol covers the connection-level call surface used by the
+    spine + cli/docs.py + _isolation.py teardown paths.
     """
 
     def cursor(self) -> SyncCursor: ...
+    def commit(self) -> object: ...  # PEP 249 says `None`; duckdb returns `self` for chaining. Widen to `object` so both match the Protocol — callers never use the return value
+    def rollback(self) -> object: ...  # Same shape as commit — error-path partner used by cli/_helpers.py + similar
+    def close(self) -> object: ...  # Same: PEP 249 says `None`; some drivers chain. Callers never use the return value
+
+
+def fetch_one_required(cur: SyncCursor) -> Sequence[Any]:  # typing-smell: ignore[explicit-any]: returns a heterogeneous row — caller knows the column shape from the SQL it just ran
+    """``cur.fetchone()`` with a non-None assertion baked in.
+
+    PEP 249's ``fetchone() -> Row | None`` is honest about the empty-result
+    case, but the bulk of internal callers run aggregate / single-row
+    queries (``SELECT COUNT(*)``, ``SELECT MAX(x)``, ``SELECT * FROM kv
+    WHERE key=?``) where None violates the SQL contract. This helper
+    raises loudly instead of letting the downstream tuple-unpack fail
+    with a confusing ``cannot unpack non-iterable NoneType`` traceback.
+
+    Callers that genuinely need the ``None`` branch (no-row-found
+    queries) use ``cur.fetchone()`` directly.
+    """
+    row = cur.fetchone()
+    if row is None:
+        raise RuntimeError(
+            "cursor.fetchone() returned None where one row was expected "
+            "by the SQL contract"
+        )
+    return row
 
 
 class AsyncCursor(Protocol):

@@ -35,7 +35,7 @@ single generator class avoids fragmenting the AY.2.b surface across
 
 from __future__ import annotations
 
-import duckdb
+from recon_gen.common.db import SyncConnection
 from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar, Literal
@@ -204,7 +204,7 @@ class RailFiringGenerator:
 
     def emit(
         self,
-        conn: duckdb.DuckDBPyConnection,
+        conn: SyncConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:

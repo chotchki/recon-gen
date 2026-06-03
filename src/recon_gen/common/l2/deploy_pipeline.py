@@ -43,6 +43,7 @@ from typing import TYPE_CHECKING
 from recon_gen.common.db import (
     connect_demo_db,
     execute_script,
+    fetch_one_required,
 )
 from recon_gen.common.l2.primitives import Identifier
 from recon_gen.common.l2.schema import (
@@ -207,9 +208,9 @@ async def step_2_wipe(
                 # Count first so the dev_log can report what was wiped.
                 p = cfg.db_table_prefix  # Z.C — was instance.instance
                 cur.execute(f"SELECT COUNT(*) FROM {p}_transactions")
-                tx_count = int(cur.fetchone()[0])
+                tx_count = int(fetch_one_required(cur)[0])
                 cur.execute(f"SELECT COUNT(*) FROM {p}_daily_balances")
-                bal_count = int(cur.fetchone()[0])
+                bal_count = int(fetch_one_required(cur)[0])
                 execute_script(cur, sql, dialect=cfg.dialect)
                 conn.commit()
                 return tx_count, bal_count
@@ -284,9 +285,9 @@ async def step_3_generator(
                 conn.commit()
                 p = cfg.db_table_prefix  # Z.C — was instance.instance
                 cur.execute(f"SELECT COUNT(*) FROM {p}_transactions")
-                tx = int(cur.fetchone()[0])
+                tx = int(fetch_one_required(cur)[0])
                 cur.execute(f"SELECT COUNT(*) FROM {p}_daily_balances")
-                bal = int(cur.fetchone()[0])
+                bal = int(fetch_one_required(cur)[0])
                 return tx, bal
             finally:
                 cur.close()
@@ -617,7 +618,7 @@ async def step_3_5_derive_balances(
                     f"SELECT COUNT(*) FROM {p}_daily_balances "
                     f"WHERE account_role IN ({roles_clause})",
                 )
-                rows_written = int(cur.fetchone()[0])
+                rows_written = int(fetch_one_required(cur)[0])
             else:
                 rows_written = cur.rowcount or 0
             conn.commit()

@@ -36,7 +36,7 @@ violations the data produces, not the SQL that built it.
 
 from __future__ import annotations
 
-import duckdb
+from recon_gen.common.db import SyncConnection
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Protocol
@@ -54,11 +54,11 @@ class _Emitter(Protocol):
     its Protocol) and `LedgerSimulation` (the AS.4 composition layer)
     plus any future `AccountSimulation`-using emitter."""
 
-    def emit(self, conn: duckdb.DuckDBPyConnection) -> None: ...
+    def emit(self, conn: SyncConnection) -> None: ...
 
 
 def apply_scenario(
-    conn: duckdb.DuckDBPyConnection,
+    conn: SyncConnection,
     *emitters: _Emitter,
     prefix: str = "spec_example",
     instance_path: Path | None = None,
@@ -100,7 +100,7 @@ def apply_scenario(
 
 
 def semantic_lock(
-    conn: duckdb.DuckDBPyConnection,
+    conn: SyncConnection,
     invariants: Iterable[Invariant],
 ) -> dict[str, frozenset[Violation]]:
     """Run `detect(conn)` for every invariant; return the lock dict.

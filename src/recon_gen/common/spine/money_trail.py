@@ -24,7 +24,7 @@ onto).
 
 from __future__ import annotations
 
-import duckdb
+from recon_gen.common.db import SyncConnection
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import ClassVar
@@ -58,7 +58,7 @@ class MoneyTrailInvariant:
     name: ClassVar[str] = "inv_money_trail_edges"
     prefix: str = "spec_example"
 
-    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
+    def detect(self, conn: SyncConnection) -> set[Violation]:
         rows = fetch_all(
             conn,
             f"SELECT root_transfer_id, transfer_id, depth "
@@ -235,7 +235,7 @@ class MoneyTrailGenerator:
 
     def emit(
         self,
-        conn: duckdb.DuckDBPyConnection,
+        conn: SyncConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:

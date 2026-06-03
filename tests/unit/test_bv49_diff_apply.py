@@ -9,7 +9,7 @@ the slow path rebuilds correctly.
 from __future__ import annotations
 
 import asyncio
-import duckdb
+from recon_gen.common.db import SyncConnection
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -248,7 +248,7 @@ def _count_phantom_rows(cfg: Config) -> int:
     """Count v-overlay transactions whose id marker indicates a
     phantom_rail plant. Used to verify whether the plant was
     re-applied or skipped."""
-    conn: duckdb.DuckDBPyConnection = connect_demo_db(cfg)
+    conn: SyncConnection = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
         try:

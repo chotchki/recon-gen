@@ -28,7 +28,7 @@ detector + scenario_for are stable across the refactor.
 
 from __future__ import annotations
 
-import duckdb
+from recon_gen.common.db import SyncConnection
 from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
@@ -74,7 +74,7 @@ class AnomalyInvariant:
     name: ClassVar[str] = "inv_pair_rolling_anomalies"
     prefix: str = "spec_example"
 
-    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
+    def detect(self, conn: SyncConnection) -> set[Violation]:
         rows = fetch_all(
             conn,
             f"SELECT sender_account_id, recipient_account_id, window_end, "
@@ -219,7 +219,7 @@ class AnomalyGenerator:
 
     def emit(
         self,
-        conn: duckdb.DuckDBPyConnection,
+        conn: SyncConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:

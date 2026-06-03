@@ -59,7 +59,7 @@ pytest.importorskip("playwright.sync_api")
 
 from recon_gen.cli._helpers import build_config_populate_sql
 from recon_gen.common.config import Config
-from recon_gen.common.db import connect_demo_db, execute_script
+from recon_gen.common.db import connect_demo_db, execute_script, fetch_one_required
 from recon_gen.common.env_keys import (
     RECON_GEN_DEMO_DATABASE_URL,
     RECON_GEN_DIALECT,
@@ -385,7 +385,7 @@ def _diagnose_v_state(
             ):
                 try:
                     cur.execute(f"SELECT COUNT(*) FROM {table}")
-                    out[f"{table}_count"] = int(cur.fetchone()[0])
+                    out[f"{table}_count"] = int(fetch_one_required(cur)[0])
                 except Exception as exc:  # noqa: BLE001 — diagnostic
                     out[f"{table}_count"] = f"<db err: {exc}>"
             # The plant emits a row with id like 'tx-limit-breach-...';
@@ -433,7 +433,7 @@ def _diagnose_v_state(
             ):
                 try:
                     cur.execute(f"SELECT COUNT(*) FROM {table}")
-                    out[f"{table}_rowcount"] = int(cur.fetchone()[0])
+                    out[f"{table}_rowcount"] = int(fetch_one_required(cur)[0])
                 except Exception as exc:  # noqa: BLE001 — diagnostic
                     out[f"{table}_rowcount"] = f"<db err: {exc}>"
             return out

@@ -29,7 +29,7 @@ balance-only invariant lands and the duplication becomes painful.
 
 from __future__ import annotations
 
-import duckdb
+from recon_gen.common.db import SyncConnection
 from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
@@ -57,7 +57,7 @@ class ExpectedEodBalanceInvariant:
     name: ClassVar[str] = "expected_eod_balance_breach"
     prefix: str = "spec_example"
 
-    def detect(self, conn: duckdb.DuckDBPyConnection) -> set[Violation]:
+    def detect(self, conn: SyncConnection) -> set[Violation]:
         rows = fetch_all(
             conn,
             f"SELECT account_id, business_day_start, variance "
@@ -179,7 +179,7 @@ class ExpectedEodBalanceGenerator:
 
     def emit(
         self,
-        conn: duckdb.DuckDBPyConnection,
+        conn: SyncConnection,
         *,
         scenario_id: str | None = None,
     ) -> None:
