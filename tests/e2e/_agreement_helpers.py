@@ -82,6 +82,13 @@ def env_demo_url_dialect() -> str | None:
         return "postgres"
     if env_url.startswith(("oracle", "oracle+oracledb")):
         return "oracle"
+    # CB.14 followup: post-CA the runner spins du_lo cells with
+    # `duckdb:///<tmpfile>` URLs. Tests that parametrize over
+    # ("postgres", "oracle", ...) need to skip on those cells; the
+    # missing arm here let them fall through and try to `psycopg.connect`
+    # against a duckdb URL, surfacing as obscure parse errors in CI.
+    if env_url.startswith("duckdb"):
+        return "duckdb"
     return None
 
 
