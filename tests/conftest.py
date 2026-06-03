@@ -27,6 +27,7 @@ from recon_gen.common.env_keys import (
     RECON_GEN_LAYER,
     RECON_GEN_RUN_DIR,
     RECON_GEN_SQLITE_LEAK_GATE,
+    RECON_GEN_TEST_L2_INSTANCE,
 )
 
 
@@ -593,12 +594,85 @@ def pytest_generate_tests(metafunc: Any) -> None:  # typing-smell: ignore[explic
     # per-cell L2 dispatch until the CC-phase fixture overhaul.
     if len(declared) <= 1:
         return
-    # Multi-form: parametrize indirectly. Fixtures that don't yet
-    # accept the indirect param will fail loudly — that's the signal
-    # to migrate them. Allow-list opt-in until all fixtures land.
-    _ = has_fuzz  # noqa: F841 — reserved for fuzz-only branch when fixtures support indirect param
-    # TODO(CB.7-followup): metafunc.parametrize(
-    #     "l2_instance", sorted(declared), indirect=True,
-    # )
-    # — left disabled until tier-level `l2_instance` fixtures accept
-    # the indirect param and route to the correct yaml-load path.
+    # Multi-form: parametrize indirectly. The root `l2_instance`
+    # fixture (defined below) accepts the string id as `request.param`
+    # and dispatches via `_load_l2_by_name`. Per-tier overrides (e2e
+    # session-scope `l2` shim, etc.) inherit this contract.
+    _ = has_fuzz  # noqa: F841 — kept for the fuzz-only diagnostic branch
+    metafunc.parametrize("l2_instance", sorted(declared), indirect=True)
+
+
+# ---------------------------------------------------------------------------
+# CC.1 — root `l2_instance` fixture (audit: docs/audits/cc_0_l2_fixture_unification.md)
+#
+# Replaces three per-tier fixtures (`tests/data/test_l2_seed_contract.py
+# ::instance`, `tests/json/test_l2_flow_tracing_matrix.py::l2_instance`,
+# `tests/e2e/conftest.py::l2`). The marker-driven auto-fuzz hook above
+# decides whether this fires parametrized; if not, the env-var fallback
+# path mirrors the runner's per-cell single-instance dispatch (kept
+# during the CC roll-out; retires after CC.3 drops the cell concept).
+# ---------------------------------------------------------------------------
+
+
+def _load_l2_by_name(name: str) -> Any:  # typing-smell: ignore[explicit-any]: L2Instance import lives in src; lazy-imported below to keep tests/conftest.py side-effect-free
+    """Resolve a marker-driven L2 name (`"spec_example"` / `"sasquatch_pr"`
+    / `"fuzz"`) to a loaded `L2Instance`.
+
+    Per the CC.0 spike: the `@l2(L2.SP, L2.SQ, L2.FUZZ)` marker's
+    string values map 1:1 to the bundled yaml stems (and the `"fuzz"`
+    sentinel routes to the per-run synthesized topology pinned by
+    `RECON_GEN_FUZZ_SEED`).
+    """
+    from pathlib import Path  # noqa: PLC0415 — lazy
+    from recon_gen.common.l2 import load_instance  # noqa: PLC0415
+
+    if name == "fuzz":
+        # Mirror the runner's fuzz-seed contract: the auto-fuzz hook
+        # threads RECON_GEN_FUZZ_SEED so the same L2 topology fans
+        # across dialect axes. `random_l2_yaml` lives in tests/l2/
+        # (the runner already lazy-imports it from there; same shape).
+        from tests.l2.fuzz import random_l2_yaml  # noqa: PLC0415
+        seed_str = RECON_GEN_FUZZ_SEED.get_or_none()
+        seed = int(seed_str) if seed_str is not None else 0
+        import tempfile  # noqa: PLC0415
+        tmp = Path(tempfile.mkdtemp(prefix="cc1-fuzz-")) / "fuzz.yaml"
+        tmp.write_text(random_l2_yaml(seed))
+        return load_instance(tmp)
+
+    # Named scenarios — bundled yamls under src/recon_gen/common/l2/.
+    l2_dir = Path(__file__).resolve().parents[1] / "src" / "recon_gen" / "common" / "l2"
+    yaml_path = l2_dir / f"{name}.yaml"
+    if not yaml_path.exists():
+        raise ValueError(
+            f"_load_l2_by_name: unknown L2 name {name!r} — "
+            f"expected spec_example / sasquatch_pr / fuzz"
+        )
+    return load_instance(yaml_path)
+
+
+@pytest.fixture
+def l2_instance(request: Any) -> Any:  # typing-smell: ignore[explicit-any]: pytest.FixtureRequest + L2Instance lazy-imported to avoid pulling src/ into conftest module scope
+    """Root `l2_instance` fixture — function-scoped, parametrize-aware.
+
+    Two modes (Option B from CC.0 spike):
+
+    - **Parametrized** (indirect via the auto-fuzz hook above):
+      `request.param` is a string id (`"spec_example"` / `"sasquatch_pr"`
+      / `"fuzz"`). Load that L2 via `_load_l2_by_name`.
+    - **Not parametrized** (no `l2_instance` parametrize, just a
+      fixture-injection): fall back to the runner-supplied
+      `RECON_GEN_TEST_L2_INSTANCE` env var, or `default_l2_instance()`
+      if unset. Matches the legacy single-cell behavior.
+
+    Tier-specific overrides (e.g. `tests/e2e/conftest.py::l2` — the
+    session-scope shim) inherit this contract — they're thin caches
+    around this function.
+    """
+    if hasattr(request, "param") and request.param is not None:
+        return _load_l2_by_name(request.param)
+    # Env-var fallback (runner per-cell path; survives until CC.3).
+    from recon_gen.common.l2 import default_l2_instance, load_instance  # noqa: PLC0415
+    override = RECON_GEN_TEST_L2_INSTANCE.get_or_none()
+    if override is not None:
+        return load_instance(override)
+    return default_l2_instance()
