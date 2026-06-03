@@ -354,15 +354,15 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [x] CB.8 - CB.8 — Drop Dialect.SQLITE + all SQLite-specific arms
 - [x] CB.9 - CB.9 — Drop aiosqlite/aiosqlitepool from [prod] extras
 - [x] CB.10 - CB.10 — Spike: hotchkiss.io DDNS + QS data source against Docker PG
-- [ ] CB.11 - CB.11 — Wire bridge into runner / CI
+- [x] CB.11 - CB.11 — Wire bridge into runner / CI
   - [x] CB.11.a - CB.11.a — Spike: hotchkiss.io forward → dev-machine Docker DBs
   - [x] CB.11.b - CB.11.b — Runner-side per-cell Docker boot + QS data source rotation
-  - [ ] CB.11.c - CB.11.c — Collapse ci.yml + delete e2e.yml (CI side of the bridge)
+  - [x] CB.11.c - CB.11.c — Collapse ci.yml + delete e2e.yml (CI side of the bridge)
 - [x] CB.12 - CB.12 — Drop AWS RDS Aurora resources
 - [ ] CB.13 - CB.13 — Docs + release notes + v13.0.0 release
-- [ ] CB.7.followup - CB.7 followup — Triage qs_browser session-start cascade (workers die at session-start under the layer's pytest invocation; 4 "FAILED" entries are xdist queue residue, not real failures)
+- [x] CB.7.followup - CB.7 followup — Triage qs_browser session-start cascade (workers die at session-start under the layer's pytest invocation; 4 "FAILED" entries are xdist queue residue, not real failures)
 
-- [ ] CB.14 - CB.14 — In-repo Oracle 19c image build (multi-arch via host arch)
+- [x] CB.14 - CB.14 — In-repo Oracle 19c image build (multi-arch via host arch)
 ## Phase CC - Collapse cells; move scenario/dialect matrix to test markers
 
 **Why:** Post-CB the cell concept (`scenario × dialect × target`) duplicates work that test markers + parametrize would do. `target=aw` died in CB.12; `dialect` is already a typed mark (`@dialects(...)`); `scenario` is expressible via `@l2(...)` + the auto-fuzz hook designed in CB.7-followup; `isolation_scope` provides per-test prefix isolation. Cells provide nothing markers can't. Pushing the matrix to test-level lets the test author own coverage, drops ~1k+ runner lines, and reduces container management from 13-cell fan-out to 2 long-lived containers per `./run_tests.sh` invocation.
@@ -373,9 +373,9 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 
 **Sequencing locked (2026-06-02):** CB.11.c → qs_browser triage → CB.13 ships v13.0.0 FIRST. CC starts on v14. Cells go away on v14, not v13 — keeps v13 scope focused on what's already in flight.
 
-- [ ] CC.0 - CC.0 — Spike: unify `l2_instance` fixtures to a single parametrize-aware loader
-- [ ] CC.1 - CC.1 — Enable the auto-fuzz `pytest_generate_tests` hook + sweep test signatures
-- [ ] CC.2 - CC.2 — Move dialect axis to test markers; drop cell-level `--dialects` fan-out
+- [x] CC.0 - CC.0 — Spike: unify `l2_instance` fixtures to a single parametrize-aware loader (commit 3c00efde)
+- [x] CC.1 - CC.1 — Enable the auto-fuzz `pytest_generate_tests` hook + sweep test signatures (commits 007382d4 + 47d7d615)
+- [x] CC.2 - CC.2 — Move dialect axis to test markers; drop cell-level `--dialects` fan-out (commits 1a9095d6 + 1f281937)
 - [ ] CC.3 - CC.3 — Reduce runner to 1 pytest-per-layer; delete `VariantSpec`/`cell_chain`/per-cell setup
 - [ ] CC.4 - CC.4 — Absorb BN.0 (sasquatch + AWS browser-layer flakes) into marker-based scoping
 
