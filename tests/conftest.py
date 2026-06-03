@@ -122,25 +122,22 @@ def pytest_configure(config: Any) -> None:
 
 
 def _count_live_sqlite_connections() -> int:
-    """Sweep ``gc.get_objects()`` for live sqlite3 / aiosqlite Connections.
+    """Sweep ``gc.get_objects()`` for live sqlite3 / DuckDB Connections.
 
     Forces a ``gc.collect()`` first so legitimately-out-of-scope
-    connections are reaped before the count. aiosqlite import is
-    soft — environments without it count only stdlib sqlite3 conns.
+    connections are reaped before the count.
+
+    CB.9 dropped aiosqlite (the dialect went away with Dialect.SQLITE
+    in CB.8); the soft-import branch was kept around through CB.14 but
+    pyright on a clean install (no aiosqlite in any extras) flagged
+    the import as unresolved. Removed the branch entirely — there's no
+    code path that still needs it.
     """
     import duckdb as _duckdb  # noqa: PLC0415
     import gc as _gc  # noqa: PLC0415
     import sqlite3 as _sqlite3  # noqa: PLC0415
 
-    aiosqlite_conn_cls: tuple[type, ...]
-    try:
-        import aiosqlite as _aiosqlite  # noqa: PLC0415
-
-        aiosqlite_conn_cls = (_aiosqlite.Connection,)
-    except ImportError:
-        aiosqlite_conn_cls = ()
-
-    # Count only OPEN sqlite3 / aiosqlite connections — a closed
+    # Count only OPEN sqlite3 / DuckDB connections — a closed
     # Connection object can linger in pytest's traceback / fixture-result
     # caches even after the test's own `conn.close()` ran, which would
     # false-positive the gate. We probe each candidate by calling
@@ -156,12 +153,6 @@ def _count_live_sqlite_connections() -> int:
                 live += 1
             except _sqlite3.ProgrammingError:
                 pass
-        elif aiosqlite_conn_cls and isinstance(o, aiosqlite_conn_cls):
-            # aiosqlite.Connection wraps a background thread; the thread's
-            # presence is the leak signal. `aiosqlite.Connection._running`
-            # is True while the worker thread is alive.
-            if getattr(o, "_running", False):
-                live += 1
     return live
 
 
