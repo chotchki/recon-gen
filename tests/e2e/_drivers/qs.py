@@ -615,8 +615,20 @@ class QsEmbedDriver:
         # circuits the empty case at 0 without paying any pagination/
         # bump cost. Test callers like `_assert_anchor_present_and_populated`
         # rely on this returning 0 to decide whether to `pytest.skip`.
+        #
+        # BO.1 fix — stability poll on the empty-state branch. After a
+        # picker pick that restored a previously-narrowed value, the
+        # DOM can carry the toggle's empty-state overlay momentarily
+        # before QS finishes painting the restored row. `pick_filter`'s
+        # `_settle_after_param_change` waits for WS frames to quiet but
+        # the DOM update lags by a few hundred ms. Without this poll,
+        # `test_l1_dropdown_pickers_inverse_excludes_anchor[qs-Drift]`
+        # read 0 from the stale empty-state.
         if visual_is_empty(self._page, visual_title):
-            return 0
+            # Re-check after a brief wait; if still empty, accept 0.
+            self._page.wait_for_timeout(800)  # typing-smell: ignore[no-sleep]: 800ms post-pick DOM-update window; bounded one-shot, not a poll loop
+            if visual_is_empty(self._page, visual_title):
+                return 0
         # AA.A.l2ft-rails-inverse.2 — three table shapes QS uses, three
         # paths to the true row count:
         #
