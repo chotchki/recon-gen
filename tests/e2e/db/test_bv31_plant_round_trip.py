@@ -52,7 +52,13 @@ from recon_gen.common.sql.dialect import Dialect
 from tests._test_helpers import make_test_config
 
 
-_FIXTURES = Path(__file__).resolve().parent.parent / "l2"
+# CB.14 followup — moved from tests/unit/ to tests/e2e/db/ on 2026-06-03
+# to take this off the unit-tier critical path (each parametrize case
+# rebuilds schema + config_kv + baseline seed + matview refresh = ~8s,
+# 20 cases × 8s = 160s pinned to unit prelude). Now runs at db tier
+# with the same `-n auto` xdist parallelism. Three levels up to clear
+# `tests/e2e/db/` and re-anchor on `tests/l2/`.
+_FIXTURES = Path(__file__).resolve().parents[2] / "l2"
 _PREFIX = "sasquatch_pr"
 _ANCHOR = datetime(2026, 5, 30, 12, 0, 0)
 
