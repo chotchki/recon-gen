@@ -170,8 +170,16 @@ def count_l1_invariant_rows(
     """Count rows in the named invariant's L1 dashboard table.
 
     Switches to the matching sheet, applies the period filter when the
-    invariant is time-series, then returns the post-filter total via
-    ``driver.table_row_count``.
+    invariant is time-series, then returns the post-filter total.
+
+    BO.1 fix: switched from `driver.table_row_count` to
+    `len(driver.table_rows_full(...))` so this matches
+    `l1_invariant_rows_seen` exactly (same materialization path =
+    consistent number). The pre-fix `table_row_count` orchestration's
+    scroll-accumulate occasionally under-counted on dense virtualized
+    tables (~86 of 119 observed on overdraft), failing the
+    `qs_seen == qs_count` row-identity guard even with the fixed
+    `table_rows_full` returning the full set.
 
     ``period=None`` skips the date-filter step regardless of whether the
     invariant supports one — useful when the caller wants to leave
@@ -179,7 +187,7 @@ def count_l1_invariant_rows(
     exercising default-period behavior).
     """
     table_title = _go_to_invariant_sheet(driver, invariant, period)
-    return driver.table_row_count(table_title)
+    return len(driver.table_rows_full(table_title))
 
 
 def l1_invariant_row_keys(
