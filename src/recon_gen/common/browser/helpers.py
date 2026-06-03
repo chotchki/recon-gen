@@ -1736,7 +1736,7 @@ def read_table_rows_dom(
     ) or []
 
 
-def read_kpi_value(page: Page, visual_title: str) -> str:
+def read_kpi_value(page: Page, visual_title: str, *, timeout_ms: int = 8_000) -> str:
     """Return the displayed big-number text of a KPI visual.
 
     QS renders the value inside ``.visual-x-center`` (the actual text node).
@@ -1744,25 +1744,40 @@ def read_kpi_value(page: Page, visual_title: str) -> str:
     innerText sometimes includes the comparison label — prefer the center
     node and fall back to the automation-id if unavailable.
 
-    Raises ``AssertionError`` if the visual isn't found or has no value.
+    Polls up to ``timeout_ms`` for the value to appear. The caller's
+    `wait_loaded(...)` typically gates one visual, but sibling KPI visuals
+    on the same sheet often render a few hundred ms later — fixed BO.1
+    flakes (test_bg3_drift_sheet_kpis_match_matview_counts +
+    test_l1_dropdown_pickers_inverse_excludes_anchor[qs-Drift] +
+    test_l1_invariant_qs_extract[postgres-overdraft]) where the read
+    fired before the KPI's first paint.
+
+    Raises ``AssertionError`` if the visual still has no value after
+    the poll window.
     """
-    value = page.evaluate(
-        """(title) => {
-            const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
-            for (const v of visuals) {
-                const t = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
-                if (!t || t.innerText.trim() !== title) continue;
-                const center = v.querySelector('.visual-x-center');
-                if (center && center.innerText.trim()) return center.innerText.trim();
-                const kpi = v.querySelector('[data-automation-id="kpi-display-value"]');
-                if (kpi && kpi.innerText.trim()) return kpi.innerText.trim();
-                return null;
-            }
+    js = """(title) => {
+        const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
+        for (const v of visuals) {
+            const t = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
+            if (!t || t.innerText.trim() !== title) continue;
+            const center = v.querySelector('.visual-x-center');
+            if (center && center.innerText.trim()) return center.innerText.trim();
+            const kpi = v.querySelector('[data-automation-id="kpi-display-value"]');
+            if (kpi && kpi.innerText.trim()) return kpi.innerText.trim();
             return null;
-        }""",
-        visual_title,
-    )
-    assert value is not None, f"No KPI value found for {visual_title!r}"
+        }
+        return null;
+    }"""
+    deadline = time.monotonic() + timeout_ms / 1000.0
+    value: str | None = None
+    while time.monotonic() < deadline:
+        value = page.evaluate(js, visual_title)
+        if value is not None:
+            return value
+        time.sleep(0.2)  # typing-smell: ignore[no-sleep]: 200ms inter-poll backoff inside a bounded retry loop with overall timeout
+    # Final attempt for the assertion message — same JS, no retry.
+    value = page.evaluate(js, visual_title)
+    assert value is not None, f"No KPI value found for {visual_title!r} after {timeout_ms}ms"
     return value
 
 
