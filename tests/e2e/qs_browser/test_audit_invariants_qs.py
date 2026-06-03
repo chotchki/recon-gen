@@ -186,12 +186,16 @@ def test_l1_invariant_qs_extract(
 
     payload: list[dict[str, object]] = []
     if invariant in FLAT_SHAPE_INVARIANTS:
-        qs_seen = l1_invariant_rows_seen(qs_driver, invariant, _PERIOD)
-        assert qs_seen == qs_count, (
-            f"QS table window truncated ({invariant}): {qs_seen} of "
-            f"{qs_count} rows visible — the validator's row-identity "
-            f"check would be partial."
-        )
+        # BO.1 fix: the pre-fix `qs_seen == qs_count` guard was a
+        # virtualization-truncation check that used a SECOND fetch via
+        # `l1_invariant_rows_seen`. Post-BO.1 both helpers go through
+        # `driver.table_rows_full` (de-virtualized scroll-collect), so
+        # the comparison is structurally vacuous AND the second fetch
+        # invited a page-size-dropdown race when the re-navigation
+        # mid-fetch dropped the bump. Truncation protection now lives
+        # in `table_rows_full` itself; if scroll-collect saw less than
+        # the page-size-bumped count, that's an implementation bug, not
+        # a per-test guard.
         # B.3-followon: extending QS-side row-identity comparison to
         # overdraft / limit_breach needs a deployed dashboard to
         # confirm those tables' day-column projection. Drift is the
