@@ -42,6 +42,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://chotchki.github.io/recon-gen/"
 Documentation = "https://chotchki.github.io/recon-gen/"
+"API Reference" = "https://recon-gen.readthedocs.io/en/latest/"
 Source = "https://github.com/chotchki/recon-gen"
 Issues = "https://github.com/chotchki/recon-gen/issues"
 Changelog = "https://github.com/chotchki/recon-gen/blob/main/RELEASE_NOTES.md"

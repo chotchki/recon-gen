@@ -26,7 +26,7 @@ Every surface speaks **your** institution's vocabulary — account names, role l
 - **[Spec Example](https://recon-gen-spec.hotchkiss.io/)** — the smallest viable bank, dashboards only. The four bundled apps served by the self-hosted HTMX runtime.
 - **[Sasquatch Bank Example](https://recon-gen-sasquatch.hotchkiss.io/)** — realistic community-bank flavor, served through the **Studio** surface in read-only demo mode (L2 editor, unified diagram, and data-shaping panel — with every mutation locked down).
 
-Both render straight from the bundled L2 YAMLs (`tests/l2/{spec_example,sasquatch_pr}.yaml`): read them to evaluate the tool, fork one to start your own. The full persona-driven handbooks, walkthroughs, and per-sheet explainers your operators would see live at **[GitHub Pages](https://chotchki.github.io/recon-gen/)**.
+Both render straight from the bundled L2 YAMLs (`tests/l2/{spec_example,sasquatch_pr}.yaml`): read them to evaluate the tool, fork one to start your own. The full persona-driven handbooks, walkthroughs, and per-sheet explainers your operators would see live at **[GitHub Pages](https://chotchki.github.io/recon-gen/)**; the Python API reference (tree primitives, dataset contract, db helpers, runner internals — everything ETL authors and integrators crib from) lives at **[ReadTheDocs](https://recon-gen.readthedocs.io/en/latest/)**.
 
 ## Not an ETL tool — but we'll help you wire one in
 
