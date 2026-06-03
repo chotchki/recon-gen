@@ -601,6 +601,18 @@ def pytest_generate_tests(metafunc: Any) -> None:  # typing-smell: ignore[explic
     _ = has_fuzz  # noqa: F841 — kept for the fuzz-only diagnostic branch
     metafunc.parametrize("l2_instance", sorted(declared), indirect=True)
 
+    # CC.2.a — same shape as the L2 hook above, applied to the dialect
+    # axis. Audit: docs/audits/cc_23_dialect_axis_to_markers.md.
+    if "cfg_for_dialect" in metafunc.fixturenames:
+        declared_dialects: set[str] = set()
+        for mark in metafunc.definition.iter_markers("dialects"):
+            for arg in mark.args:
+                declared_dialects.add(arg)
+        if len(declared_dialects) >= 2:
+            metafunc.parametrize(
+                "cfg_for_dialect", sorted(declared_dialects), indirect=True,
+            )
+
 
 # ---------------------------------------------------------------------------
 # CC.1 — root `l2_instance` fixture (audit: docs/audits/cc_0_l2_fixture_unification.md)
@@ -677,3 +689,67 @@ def l2_instance(request: Any) -> Any:  # typing-smell: ignore[explicit-any]: pyt
     if override is not None:
         return load_instance(override)
     return default_l2_instance()
+
+
+# ---------------------------------------------------------------------------
+# CC.2.a — root `cfg_for_dialect` fixture (audit: docs/audits/cc_23_dialect_axis_to_markers.md)
+#
+# Marker-driven dialect dispatch. When a test declares @dialects(Dialect.PG,
+# Dialect.OR), the hook above parametrizes this fixture indirectly over those
+# values; this body loads the matching `run/config.<dialect>.yaml` (legacy
+# path) and returns the Config. Mirrors the CC.1 `l2_instance` shape exactly.
+#
+# Backward-compat with runner's current per-cell dispatch: when not
+# parametrized AND the runner injects `RECON_GEN_DEMO_DATABASE_URL` with a
+# dialect-scheme prefix, the existing `load_dialect_cfg` skip-logic in
+# `tests/e2e/_agreement_helpers.py` keeps suppressing wrong-cell callspecs.
+# CC.3 retires both paths in favor of per-dialect env URLs.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def cfg_for_dialect(request: Any) -> Any:  # typing-smell: ignore[explicit-any]: pytest.FixtureRequest + Config lazy-imported (Config lives in src/)
+    """Resolve a `Config` pointing at the requested dialect's DB.
+
+    Parametrized (indirect) by the `@dialects(Dialect.PG, Dialect.OR)`
+    auto-marker hook above: `request.param` is the marker's string
+    value (`"pg"` / `"or"` / `"du"`). Single-dialect callsites that
+    just request the fixture without a marker fall back to the
+    legacy per-cell cfg discovery.
+
+    Today's body delegates to the e2e tier's `load_dialect_cfg` helper
+    (skip-dedups wrong-cell callspecs during the CC roll-out). After
+    CC.3 the skip-dedup becomes unreachable and the body simplifies
+    to a direct cfg load keyed on per-dialect env URLs.
+    """
+    if hasattr(request, "param") and request.param is not None:
+        # Marker values are `"pg"` / `"or"` / `"du"` (the Dialect enum
+        # string values). load_dialect_cfg wants "postgres" / "oracle"
+        # / "duckdb" — translate.
+        dialect_short_to_long = {"pg": "postgres", "or": "oracle", "du": "duckdb"}
+        dialect_name = dialect_short_to_long.get(str(request.param), str(request.param))
+        from tests.e2e._agreement_helpers import load_dialect_cfg  # noqa: PLC0415
+        cfg, _path, _dialect_enum = load_dialect_cfg(dialect_name)
+        return cfg
+    # Unparametrized: fall back to the runner-supplied cfg (the legacy
+    # single-cell path). Mirrors `tests/e2e/conftest.py::cfg`'s discovery
+    # order so e2e tests that switch to this fixture keep working.
+    from recon_gen.common.config import load_config  # noqa: PLC0415
+    from recon_gen.common.env_keys import RECON_GEN_CONFIG  # noqa: PLC0415
+    try:
+        explicit = RECON_GEN_CONFIG.get_or_none()
+    except EnvVarInvalid:
+        explicit = None
+    if explicit is not None:
+        return load_config(str(explicit))
+    # Probe the canonical run/ paths.
+    from pathlib import Path as _Path  # noqa: PLC0415
+    for candidate in (
+        _Path("config.yaml"),
+        _Path("run/config.yaml"),
+        _Path("run/config.postgres.yaml"),
+        _Path("run/config.oracle.yaml"),
+    ):
+        if candidate.exists():
+            return load_config(str(candidate))
+    return load_config(None)
