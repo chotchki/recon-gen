@@ -1650,53 +1650,31 @@ def _start_fresh_oracle_container(
     so the container outlives this invocation and the next run can
     adopt it).
 
-    CB.7-followup (2026-06-02) — image switched from
-    `gvenzl/oracle-free:23-faststart` (Oracle 23ai) to
-    `doctorkirk/oracle-19c` for production parity with AWS RDS Oracle
-    SE2 19c. The CB.10 spike validated this image with
-    `-e ORACLE_SID=FREEPDB1`, which keeps the service-name string the
-    rest of the codebase already expects (`db.py`, `datasource.py`,
-    docs, and the persistent-reuse path's URL formation above all
-    hard-coded `FREEPDB1`; preserving it = no cascading edits).
+    gvenzl/oracle-free:23-faststart — pre-initialized 23ai DB starts
+    in ~20-30s. Service name defaults to FREEPDB1.
 
-    The 19c image takes longer to boot (~90-120s vs 23-faststart's
-    ~20-30s) but it's the same SQL/JSON path engine production runs.
-    `testcontainers.oracle.OracleDbContainer` is hardcoded for gvenzl
-    images (different env vars + ready-detection log line); use the
-    generic `DockerContainer` + `wait_for_logs` instead.
+    CB.7-followup 19c switch DEFERRED 2026-06-03: production RDS is
+    Oracle SE2 19c, but `doctorkirk/oracle-19c` (the only CB.10-spike-
+    validated 19c image) ships **amd64-only**. On the Apple Silicon
+    dev Mac, Docker Desktop emulates via QEMU and the 19c cold-start
+    hangs at "10% complete / Copying database files" past 15 min,
+    making the image unusable for local iteration.
+
+    Switch lands when the runner first executes on the WSL2 self-
+    hosted box (x86_64 native — where the CB.10 spike succeeded).
+    The codebase already sticks to the conservative 19c-portable
+    SQL/JSON subset, so 23ai exercising it is correct-by-construction
+    even if not production-honest. See `CB_11_C_NOTES.md` §"Oracle
+    image" for the swap-in plan.
     """
-    from testcontainers.core.container import DockerContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415 — lazy: only oracle path needs it
-    from testcontainers.core.waiting_utils import wait_for_logs  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
+    from testcontainers.oracle import OracleDbContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
 
-    # doctorkirk/oracle-19c env vars (CB.10 spike-validated):
-    #   ORACLE_SID=FREEPDB1   — overrides the default CDB SID so the
-    #                           service-name + URL shape match the
-    #                           rest of the codebase.
-    #   ORACLE_PWD=<password> — image-specific (NOT ORACLE_PASSWORD).
-    #   ORACLE_CHARACTERSET=UTF8 — matches RDS character set.
-    container = (
-        DockerContainer("doctorkirk/oracle-19c")
-        .with_name(name)
-        .with_exposed_ports(1521)
-        .with_env("ORACLE_SID", "FREEPDB1")
-        .with_env("ORACLE_PWD", password)
-        .with_env("ORACLE_CHARACTERSET", "UTF8")
-    )
+    container = OracleDbContainer(
+        "gvenzl/oracle-free:23-faststart",
+        oracle_password=password,
+    ).with_name(name)
     container.start()  # type: ignore[no-untyped-call]: testcontainers .start() lacks return-type hint
-
-    # doctorkirk/oracle-19c emits "DATABASE IS READY TO USE!" on the
-    # listener once both SID open + listener registration complete.
-    # 900s (15 min) covers a true cold-start — first observed at ~10%
-    # complete after 240s, so the legacy gvenzl timeout was a bad
-    # baseline for 19c. The persistent-reuse path amortizes this to
-    # ~10s on subsequent runs.
-    wait_for_logs(container, "DATABASE IS READY TO USE!", timeout=900)  # type: ignore[no-untyped-call]: testcontainers helper lacks return-type hint
-
-    host_port = int(container.get_exposed_port(1521))  # type: ignore[no-untyped-call]: testcontainers helper lacks return-type hint
-    url = (
-        f"oracle+oracledb://system:{password}@localhost:{host_port}"
-        f"/?service_name=FREEPDB1"
-    )
+    url: str = container.get_connection_url()
     return url, _PersistentContainerHandle(name=name)
 
 

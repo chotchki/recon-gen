@@ -61,6 +61,35 @@ Net: bare `pytest --cov` is gone; the runner's per-layer coverage IS the coverag
 
 7. **The `Release commit` skip pattern** is preserved on `test-everything` (current ci.yml:31). Downstream jobs `needs:` it, so skipping there skips the chain. Release tags don't fire ci.yml's main path.
 
+## Oracle image — production-parity switch DEFERRED to WSL2 first-run
+
+The CB.7-followup initially swapped `gvenzl/oracle-free:23-faststart` (Oracle 23ai) for `doctorkirk/oracle-19c` to match production RDS Oracle SE2 19c. Reverted 2026-06-03: the doctorkirk image ships **amd64-only**, and on Apple Silicon the dev-machine Mac emulates via QEMU, which makes the cold-start hang at "10% complete / Copying database files" past 15 min. Unusable for local iteration.
+
+The CB.10 spike validated the doctorkirk image on the WSL2 self-hosted box (x86_64 native), so the switch is sound — just not on the Mac. When you're ready to re-attempt:
+
+```python
+# src/recon_gen/_dev/runner.py::_start_fresh_oracle_container
+from testcontainers.core.container import DockerContainer
+from testcontainers.core.waiting_utils import wait_for_logs
+
+container = (
+    DockerContainer("doctorkirk/oracle-19c")
+    .with_name(name)
+    .with_exposed_ports(1521)
+    .with_env("ORACLE_SID", "FREEPDB1")    # keeps URL shape unchanged
+    .with_env("ORACLE_PWD", password)       # NOT ORACLE_PASSWORD
+    .with_env("ORACLE_CHARACTERSET", "UTF8")
+)
+container.start()
+wait_for_logs(container, "DATABASE IS READY TO USE!", timeout=900)
+host_port = int(container.get_exposed_port(1521))
+url = f"oracle+oracledb://system:{password}@localhost:{host_port}/?service_name=FREEPDB1"
+```
+
+Validate on WSL2 via `./run_tests.sh up_to=db --variants=sp_or_lo`. Until then, the runner uses 23-faststart locally — same SQL/JSON subset, just a newer engine version. Locked seeds + invariants are correct-by-construction on both.
+
+## Delete e2e.yml
+
 ## Delete e2e.yml
 
 ```bash
