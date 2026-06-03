@@ -517,6 +517,26 @@ class QsEmbedDriver:
         # against the rendered header order.
         return rekey_by_columns(rows, columns) if columns else rows
 
+    def table_rows_full(
+        self,
+        visual_title: str,
+        *,
+        columns: Sequence[str] | None = None,
+    ) -> list[dict[str, str]]:
+        """De-virtualized table read — scroll-collects every row. BO.1
+        fix: the overdraft invariant's 119-row table previously failed
+        the row-identity check because `table_rows` returned only the
+        37-row DOM window.
+        """
+        from recon_gen.common.browser.helpers import read_table_rows_via_scroll  # noqa: PLC0415
+
+        scroll_visual_into_view(
+            self._page, visual_title, self._visual_timeout,
+            wait_for_cells=False,
+        )
+        rows = read_table_rows_via_scroll(self._page, visual_title)
+        return rekey_by_columns(rows, columns) if columns else rows
+
     def find_row(
         self, visual_title: str, predicate: Mapping[str, str],
     ) -> dict[str, str] | None:

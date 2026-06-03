@@ -396,6 +396,17 @@ class App2Driver:
             timeout_ms,
         )
 
+    def table_rows_full(
+        self,
+        visual_title: str,
+        *,
+        columns: Sequence[str] | None = None,
+    ) -> list[dict[str, str]]:
+        """App2 renders all rows in DOM (no virtualization), so the full
+        set IS the visible set — delegate to `table_rows`.
+        """
+        return self.table_rows(visual_title, columns=columns)
+
     def table_rows(
         self,
         visual_title: str,

@@ -1675,6 +1675,99 @@ def read_chart_categories(page: Page, visual_title: str) -> list[str]:
 
 
 
+def read_table_rows_via_scroll(
+    page: Page, visual_title: str,
+) -> list[dict[str, str]]:
+    """De-virtualized table read — scroll through the table and accumulate
+    every row that mounts. Returns a list of dicts keyed by column-header
+    text, in row-index order across the full dataset.
+
+    QS virtualizes ~10-37 rows in the DOM at a time. ``read_table_rows_dom``
+    captures only what's currently mounted; for tables with N > window,
+    callers need this scroll-collect shape to get every row. Used by
+    `l1_invariant_rows_seen` post-BO.1 fix: row-identity checks against
+    a 119-row overdraft table were comparing a 37-row DOM window to the
+    page-size-bumped count of 119 and failing the assertion.
+
+    Walks the same scroll-accumulate dance as
+    `find_row_in_table_via_scroll` but returns the ACCUMULATED row map
+    instead of early-exiting on the first predicate match. Dedupes by
+    the absolute row index in `sn-table-cell-{row}-{col}` (QS uses an
+    absolute index across the whole dataset, not the window-relative
+    index, so newly-mounted rows have row indices we haven't seen yet).
+
+    Returns ``[]`` if the visual isn't found or has no body cells.
+    Bounded by 500 scroll steps + the table's natural scroll-bottom.
+    """
+    return page.evaluate(
+        """async (title) => {
+            const visuals = document.querySelectorAll('[data-automation-id="analysis_visual"]');
+            let target = null;
+            for (const v of visuals) {
+                const t = v.querySelector('[data-automation-id="analysis_visual_title_label"]');
+                if (t && t.innerText.trim() === title) { target = v; break; }
+            }
+            if (!target) return [];
+            const readHeaders = () => {
+                const headers = [];
+                target.querySelectorAll('[data-automation-id^="sn-table-column-"]').forEach(c => {
+                    if (!/sn-table-column-\\d+$/.test(c.getAttribute('data-automation-id'))) return;
+                    const titleEl = c.querySelector('.table-title .title')
+                        || c.querySelector('.title');
+                    headers.push(titleEl ? titleEl.innerText.trim() : c.innerText.trim());
+                });
+                return headers;
+            };
+            const headers = readHeaders();
+            // rowsByIdx: { absoluteRowIdx: { colIdx: text } } — accumulated
+            // across scroll steps. Each step's mounted cells get merged in.
+            const rowsByIdx = {};
+            const accumulateMounted = () => {
+                target.querySelectorAll('[data-automation-id^="sn-table-cell-"]').forEach(c => {
+                    const m = c.getAttribute('data-automation-id').match(/sn-table-cell-(\\d+)-(\\d+)/);
+                    if (!m) return;
+                    const r = parseInt(m[1], 10), col = parseInt(m[2], 10);
+                    (rowsByIdx[r] = rowsByIdx[r] || {})[col] = c.innerText.trim();
+                });
+            };
+            accumulateMounted();
+            const container = target.querySelector('.grid-container');
+            if (container) {
+                let stable = 0;
+                let prevMax = -1;
+                const getMaxRow = () => Math.max(-1, ...Object.keys(rowsByIdx).map(Number));
+                for (let step = 0; step < 500; step++) {
+                    container.scrollTop = container.scrollTop + 400;
+                    await new Promise(r => setTimeout(r, 120));
+                    accumulateMounted();
+                    const now = getMaxRow();
+                    if (container.scrollTop + container.clientHeight >= container.scrollHeight - 1) {
+                        await new Promise(r => setTimeout(r, 400));
+                        accumulateMounted();
+                        break;
+                    }
+                    if (now === prevMax) { stable++; if (stable > 3) break; }
+                    else { stable = 0; prevMax = now; }
+                }
+            }
+            // Materialize as ordered list keyed by header text.
+            const rows = [];
+            Object.keys(rowsByIdx).map(Number).sort((a, b) => a - b).forEach(r => {
+                const cols = rowsByIdx[r];
+                const ordered = Object.keys(cols).map(Number).sort((a, b) => a - b)
+                    .map(col => cols[col]);
+                const row = {};
+                for (let i = 0; i < headers.length && i < ordered.length; i++) {
+                    row[headers[i]] = ordered[i];
+                }
+                rows.push(row);
+            });
+            return rows;
+        }""",
+        visual_title,
+    ) or []
+
+
 def read_table_rows_dom(
     page: Page, visual_title: str,
 ) -> list[dict[str, str]]:

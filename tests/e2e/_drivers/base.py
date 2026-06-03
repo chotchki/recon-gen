@@ -185,6 +185,24 @@ class DashboardDriver(Protocol):
         table / number — not a spinner, not empty)."""
         ...
 
+    def table_rows_full(
+        self,
+        visual_title: str,
+        *,
+        columns: Sequence[str] | None = None,
+    ) -> list[dict[str, str]]:
+        """Like ``table_rows`` but **de-virtualizes** — for renderers that
+        virtualize (QS), scroll through the table and accumulate every
+        row. Returns the FULL set, not just the DOM window.
+
+        Use for row-identity checks (the audit-agreement validator's
+        QS-side row keying). For App2 the body matches ``table_rows``
+        exactly (App2 renders all rows in DOM). Added in the BO.1 fix
+        when overdraft's 119-row table broke the row-identity check
+        against the 37-row DOM window.
+        """
+        ...
+
     def table_rows(
         self,
         visual_title: str,
@@ -197,7 +215,8 @@ class DashboardDriver(Protocol):
         App2 renders all rows in DOM). When the caller needs the
         post-filter total row count for a table that may exceed the
         viewport, ``table_row_count`` does the page-size-bump + scroll-
-        accumulate dance to surface the full number.
+        accumulate dance to surface the full number. For the FULL row
+        set on QS (de-virtualized), use ``table_rows_full``.
 
         AA.A.995 — by default rows are keyed by the rendered header text,
         which differs by renderer: QS stamps ``column.human_name``
