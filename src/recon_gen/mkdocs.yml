@@ -161,14 +161,12 @@ nav:
       - CLI reference: reference/cli.md
       - Disabling AWS resource tagging: reference/disable-tagging.md
       - QuickSight quirks log: reference/quicksight-quirks.md
-  - API Reference:
-    - Overview: api/index.md
-    - Tree — App / Analysis / Dashboard / Sheet: api/tree-structure.md
-    - Tree — Visuals (KPI / Table / BarChart / Sankey): api/tree-visuals.md
-    - Tree — Data (Dataset / Column / Dim / Measure / CalcField): api/tree-data.md
-    - Tree — Filters + Controls + Parameters: api/tree-filters-controls.md
-    - Tree — Drill Actions: api/tree-actions.md
-    - Common foundations (models / ids / dataset_contract / drill / persona): api/common-foundations.md
+  # API Reference moved to ReadTheDocs (Sphinx autodoc, .readthedocs.yaml
+  # + docs/sphinx/). The mkdocstrings-generated pages here were too
+  # shallow to be useful — Sphinx's autosummary + napoleon over the
+  # full module tree produces something developers actually want to
+  # read. mkdocs-built GitHub Pages stays as the end-user / integrator
+  # surface; RTD picks up the API surface separately.
 
 plugins:
   - search
@@ -189,24 +187,8 @@ plugins:
       # (``<repo>/src/recon_gen/docs/_macros/``) and installed
       # (``<site-packages>/recon_gen/docs/_macros/``).
       include_dir: docs/_macros
-  - mkdocstrings:
-      handlers:
-        python:
-          # No ``paths:`` — recon_gen is installed (uv sync /
-          # pip install) so mkdocstrings imports it through the
-          # active Python interpreter. Removes the dev-vs-installed
-          # path difference that ``paths: [src]`` would create.
-          options:
-            show_root_heading: true
-            show_root_full_path: false
-            show_if_no_docstring: true
-            show_source: false
-            members_order: source
-            docstring_style: google
-            heading_level: 2
-            separate_signature: true
-            show_signature_annotations: true
-            signature_crossrefs: true
+  # mkdocstrings removed — API docs build at ReadTheDocs (Sphinx). The
+  # mkdocs site is end-user / integrator-facing only.
 
 markdown_extensions:
   - toc:
