@@ -165,9 +165,13 @@ jobs:
         env:
           RECON_GEN_E2E: "1"
           RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
-          # QS_GEN_RUNNER_YES bypasses the destructive-op prompt; the
-          # runner needs it in non-interactive CI.
-          QS_GEN_RUNNER_YES: "1"
+          # RECON_GEN_RUNNER_YES bypasses the destructive-op prompt; the
+          # runner needs it in non-interactive CI. The legacy alias
+          # QS_GEN_RUNNER_YES still works at runtime but leaks past
+          # `monkeypatch.delenv(RECON_GEN_RUNNER_YES.name)` in the unit
+          # tier's runner-flow tests, breaking those tests on CI even
+          # though they pass locally.
+          RECON_GEN_RUNNER_YES: "1"
         run: ./run_tests.sh up_to=qs_browser --coverage
 
       - name: Collect runner coverage data

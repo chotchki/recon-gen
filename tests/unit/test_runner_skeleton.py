@@ -1281,6 +1281,14 @@ def test_cmd_up_to_dirty_refuses_at_deploy_layer(monkeypatch: Any) -> None:
     """b.10 — `up_to=deploy` (or higher) refuses on tracked-changes dirty
     state. NEEDS_OPERATOR exit, message tells operator what to do."""
     monkeypatch.delenv(RECON_GEN_RUNNER_YES.name, raising=False)
+    # Also clear the legacy alias — CI used to set QS_GEN_RUNNER_YES, and
+    # `EnvVar.get_or_none()` honors either name. delenv'ing only the
+    # canonical leaves the bypass set on CI; the test then runs the
+    # non-prompted path and asserts against the prompted path. Cleared
+    # here once-per-test rather than via a session-scope fixture so the
+    # gate stays explicit at each call site.
+    if RECON_GEN_RUNNER_YES.legacy_name:
+        monkeypatch.delenv(RECON_GEN_RUNNER_YES.legacy_name, raising=False)
     with patch.object(runner, "_is_dirty", return_value=True):
         code = runner.main(["up_to=deploy"])
     assert code == runner.EXIT_NEEDS_OPERATOR
@@ -1289,6 +1297,14 @@ def test_cmd_up_to_dirty_refuses_at_deploy_layer(monkeypatch: Any) -> None:
 def test_cmd_up_to_dirty_ok_below_deploy(monkeypatch: Any) -> None:
     """Layers 1-3 (pyright/unit/db) are local + idempotent; dirty state OK."""
     monkeypatch.delenv(RECON_GEN_RUNNER_YES.name, raising=False)
+    # Also clear the legacy alias — CI used to set QS_GEN_RUNNER_YES, and
+    # `EnvVar.get_or_none()` honors either name. delenv'ing only the
+    # canonical leaves the bypass set on CI; the test then runs the
+    # non-prompted path and asserts against the prompted path. Cleared
+    # here once-per-test rather than via a session-scope fixture so the
+    # gate stays explicit at each call site.
+    if RECON_GEN_RUNNER_YES.legacy_name:
+        monkeypatch.delenv(RECON_GEN_RUNNER_YES.legacy_name, raising=False)
 
     def fake_dispatch(layer: str, run_dir: Path, options: Any = None, **kwargs: Any) -> runner.LayerResult:
         return runner.LayerResult(layer=layer, exit_code=0, duration_seconds=0.01)
@@ -1309,6 +1325,14 @@ def test_cmd_up_to_dirty_ok_below_deploy(monkeypatch: Any) -> None:
 def test_cmd_up_to_allow_dirty_deploy_bypasses(monkeypatch: Any) -> None:
     """`--allow-dirty-deploy` bypasses the b.10 refusal."""
     monkeypatch.delenv(RECON_GEN_RUNNER_YES.name, raising=False)
+    # Also clear the legacy alias — CI used to set QS_GEN_RUNNER_YES, and
+    # `EnvVar.get_or_none()` honors either name. delenv'ing only the
+    # canonical leaves the bypass set on CI; the test then runs the
+    # non-prompted path and asserts against the prompted path. Cleared
+    # here once-per-test rather than via a session-scope fixture so the
+    # gate stays explicit at each call site.
+    if RECON_GEN_RUNNER_YES.legacy_name:
+        monkeypatch.delenv(RECON_GEN_RUNNER_YES.legacy_name, raising=False)
 
     def fake_dispatch(layer: str, run_dir: Path, options: Any = None, **kwargs: Any) -> runner.LayerResult:
         return runner.LayerResult(layer=layer, exit_code=0, duration_seconds=0.01)
@@ -1778,6 +1802,14 @@ def test_cmd_sweep_dry_run_collects_without_deleting(
     """No --yes → calls _collect, never calls sweep_qs_resources."""
     _install_fake_aws(monkeypatch)
     monkeypatch.delenv(RECON_GEN_RUNNER_YES.name, raising=False)
+    # Also clear the legacy alias — CI used to set QS_GEN_RUNNER_YES, and
+    # `EnvVar.get_or_none()` honors either name. delenv'ing only the
+    # canonical leaves the bypass set on CI; the test then runs the
+    # non-prompted path and asserts against the prompted path. Cleared
+    # here once-per-test rather than via a session-scope fixture so the
+    # gate stays explicit at each call site.
+    if RECON_GEN_RUNNER_YES.legacy_name:
+        monkeypatch.delenv(RECON_GEN_RUNNER_YES.legacy_name, raising=False)
     collect_calls, sweep_calls = _install_fake_harness_cleanup(
         monkeypatch,
         matched={
@@ -1803,6 +1835,14 @@ def test_cmd_sweep_with_yes_invokes_sweep(monkeypatch: Any, capsys: Any) -> None
     """--yes → sweep_qs_resources_by_tag is called; not _collect."""
     _install_fake_aws(monkeypatch)
     monkeypatch.delenv(RECON_GEN_RUNNER_YES.name, raising=False)
+    # Also clear the legacy alias — CI used to set QS_GEN_RUNNER_YES, and
+    # `EnvVar.get_or_none()` honors either name. delenv'ing only the
+    # canonical leaves the bypass set on CI; the test then runs the
+    # non-prompted path and asserts against the prompted path. Cleared
+    # here once-per-test rather than via a session-scope fixture so the
+    # gate stays explicit at each call site.
+    if RECON_GEN_RUNNER_YES.legacy_name:
+        monkeypatch.delenv(RECON_GEN_RUNNER_YES.legacy_name, raising=False)
     _collect_calls, sweep_calls = _install_fake_harness_cleanup(
         monkeypatch,
         matched={
@@ -2118,6 +2158,14 @@ def test_cmd_up_to_skip_cheap_short_circuits_cached_layer(
     monkeypatch.setattr(runner, "_is_dirty", lambda: False)
     monkeypatch.setattr(runner, "RUN_TESTS_CACHE_DIR", tmp_path / ".cache")
     monkeypatch.delenv(RECON_GEN_RUNNER_YES.name, raising=False)
+    # Also clear the legacy alias — CI used to set QS_GEN_RUNNER_YES, and
+    # `EnvVar.get_or_none()` honors either name. delenv'ing only the
+    # canonical leaves the bypass set on CI; the test then runs the
+    # non-prompted path and asserts against the prompted path. Cleared
+    # here once-per-test rather than via a session-scope fixture so the
+    # gate stays explicit at each call site.
+    if RECON_GEN_RUNNER_YES.legacy_name:
+        monkeypatch.delenv(RECON_GEN_RUNNER_YES.legacy_name, raising=False)
 
     # Y.2.gate.n — the `unit` cache marker is keyed by the `_PRELUDE_VARIANT`
     # sentinel (unit runs once as a run-level prelude, not per cell).
@@ -2152,6 +2200,14 @@ def test_cmd_up_to_skip_cheap_no_cache_runs_all_layers(
     monkeypatch.setattr(runner, "_is_dirty", lambda: False)
     monkeypatch.setattr(runner, "RUN_TESTS_CACHE_DIR", tmp_path / ".cache_empty")
     monkeypatch.delenv(RECON_GEN_RUNNER_YES.name, raising=False)
+    # Also clear the legacy alias — CI used to set QS_GEN_RUNNER_YES, and
+    # `EnvVar.get_or_none()` honors either name. delenv'ing only the
+    # canonical leaves the bypass set on CI; the test then runs the
+    # non-prompted path and asserts against the prompted path. Cleared
+    # here once-per-test rather than via a session-scope fixture so the
+    # gate stays explicit at each call site.
+    if RECON_GEN_RUNNER_YES.legacy_name:
+        monkeypatch.delenv(RECON_GEN_RUNNER_YES.legacy_name, raising=False)
 
     dispatched: list[str] = []
 
