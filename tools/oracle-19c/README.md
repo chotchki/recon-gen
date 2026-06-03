@@ -81,9 +81,20 @@ unzip -l tools/oracle-19c/LINUX.ARM64_1919000_db_home.zip \
 ./tools/oracle-19c/build.sh
 ```
 
-Takes ~5-10 min on Apple Silicon, ~3-5 min on the WSL2 box. The script
-clones Oracle's repo at the pinned SHA, runs their `buildContainerImage.sh`,
-and retags the output as `recon-gen/oracle-19c:local`.
+Takes ~10-15 min on Apple Silicon, ~6-8 min on the WSL2 box. The script:
+
+1. Clones Oracle's `oracle/docker-images` at the pinned SHA.
+2. Runs their `buildContainerImage.sh -v 19.3.0 -e -i` against the dropped-in
+   zip → tags as `oracle/database:19.3.0-ee`, retagged `recon-gen/oracle-19c:local`.
+3. **Pre-initializes the DB into the image** (one-time, ~3-4 min): boots a
+   throwaway container, waits for `DATABASE IS READY TO USE`, runs
+   `SHUTDOWN IMMEDIATE` via sqlplus to quiesce data files, then
+   `docker commit`s the writable layer back onto the same tag.
+
+After step 3, every subsequent container boot finds existing data files
+under `/opt/oracle/oradata/$ORACLE_SID` and skips DBCA — cold-start drops
+from ~240s to ~30s. The runner's persistent-named-container path still
+caches further runs at ~10s.
 
 ## Runner consumption
 
