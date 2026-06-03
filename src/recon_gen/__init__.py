@@ -1,3 +1,3 @@
 """Programmatic generator for AWS QuickSight + HTMX-rendered dashboards + audit PDFs."""
 
-__version__ = "12.0.2"
+__version__ = "13.0.0"

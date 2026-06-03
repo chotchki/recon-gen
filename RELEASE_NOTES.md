@@ -1,6 +1,91 @@
 # Release Notes
 
-## Unreleased — Phase CA: DuckDB swap
+## v13.0.0 — Phases CA + CB + CB.14: DuckDB default, typed test marks, Docker-to-AWS bridge, in-repo Oracle 19c
+
+Three intertwined phases — DuckDB swap (CA), test-layer architecture
+rewrite (CB), Oracle 19c image self-build (CB.14) — ship together as
+v13.0.0. Breaking changes are all on the test/dev surface: SQLite is
+gone, the runner reads typed markers instead of file lists, and CI is
+collapsed onto a single self-hosted runner. Production dialects
+(PostgreSQL, Oracle) and the four bundled dashboards are unchanged at
+the operator surface.
+
+**Headline impact:**
+
+- **DuckDB local-iteration backend** with **54.9× faster bundled
+  refresh at ~1M rows** vs the SQLite baseline (4.6s vs 252.9s) and
+  **byte-identical matview output across all 20 L1/Investigation
+  matviews**.
+- **Test-layer architecture rebuilt around typed markers**
+  (`@tier(...)`, `@dialects(...)`, `@writes(...)`); runner is a thin
+  `--tier=X --dialect=Y` dispatcher. Hardcoded file lists in
+  `_layer_command` deleted (CB.6). 4011 unit tests + 69 db tests + 137
+  qs_browser tests pass on the new dispatch shape.
+- **Provider-marked isolation** (CB.7 — `isolated_cfg` /
+  `IsolationScope`) closes the long-standing DuckDB pytest-xdist
+  intra-cell file-lock bug (#199) by branching on test-declared write
+  intent.
+- **`Dialect.SQLITE` deleted** + `aiosqlite` / `aiosqlitepool`
+  dropped from `[prod]` extras. SQLite was a 25k-row local-iteration
+  convenience that DuckDB replaced; keeping it incurred parallel-test
+  matrix overhead. Manual SQLite triage works on commits ≤ v12.0.2
+  (`--dialects=sl`); on v13+ the dialect is gone.
+- **AWS RDS Aurora decommissioned.** Production-parity testing moves
+  to Docker containers on the self-hosted CI runner; QS data sources
+  reach the runner via the `hotchkiss.io` DDNS forward documented in
+  the CB.10 spike. ~$45/mo of idle Aurora cost removed.
+- **In-repo Oracle 19c image build** (`tools/oracle-19c/build.sh`)
+  built from Oracle's own `oracle/docker-images` recipe + the
+  operator-downloaded binary, with a `docker commit` pre-init pass
+  baking the initialized DB into the image (~16× cold-start speedup:
+  240s DBCA → 15s on arm64 Mac, 26-28s on WSL2 amd64). Replaces the
+  stale `doctorkirk/oracle-19c` image (amd64-only, unmaintained ~2yr)
+  the CB.7-followup spike used.
+- **CI collapsed onto a single self-hosted job.** `ci.yml` runs
+  `./run_tests.sh up_to=qs_browser`; `e2e.yml` deleted; `release.yml`
+  stays tag-driven and on `ubuntu-latest` per the CB.7-followup
+  secret-isolation policy.
+
+### Migration
+
+For operators on v12.0.2:
+
+- **DuckDB local cells** are the default — `cfg.yaml`'s
+  `dialect: duckdb` + `demo_database_url: duckdb:///<path>` shape is
+  the canonical local-iteration form (operator workflow snippet
+  below).
+- **No code change required for production PG / Oracle deploys.** The
+  shape of `recon-gen schema apply / data apply / json apply` is
+  unchanged; only the local-dev backend swapped.
+- **If you pinned `recon-gen[prod]` with sqlite**: that extra is
+  gone. Either drop the pin (no replacement needed — sqlite/aiosqlite
+  weren't operator-facing) or replace with `recon-gen[prod]` (just
+  PostgreSQL + Oracle).
+- **Self-hosted CI runners** must install AWS CLI v2; the
+  `[interop]` and `[automount]` flags in `/etc/wsl.conf` lock down
+  Windows-host visibility (see `tools/oracle-19c/README.md` for the
+  WSL2 setup notes).
+
+### Operator workflow (unchanged at the surface)
+
+```bash
+cat > cfg.yaml <<EOF
+aws_account_id: "111122223333"
+aws_region: "us-east-1"
+dialect: duckdb
+demo_database_url: "duckdb:///./demo.duckdb"
+deployment_name: "my-demo"
+db_table_prefix: "my_demo"
+studio_enabled: true
+EOF
+recon-gen schema apply --execute -c cfg.yaml --l2 tests/l2/spec_example.yaml
+recon-gen data   apply --execute -c cfg.yaml --l2 tests/l2/spec_example.yaml
+recon-gen studio -c cfg.yaml --l2 tests/l2/spec_example.yaml
+# http://localhost:8765
+```
+
+### Phase CA — DuckDB swap (engine-level detail)
+
 
 DuckDB joins as the new default local-iteration backend alongside the
 existing PG / Oracle production targets. The CA.0 spike measured a
@@ -139,6 +224,123 @@ documented — PG was never the Python-bound bottleneck Oracle and
 DuckDB were (psycopg's `cur.execute(big_script)` already batches PG
 INSERTs efficiently; measured win was only 1.95×, not worth the
 complexity at current scale).
+
+### Phase CB — Typed test marks + Docker-to-AWS bridge + SQLite removal
+
+CB rebuilt the test-layer architecture around test-declared markers
+instead of operator-maintained file lists in the runner. The CB audit
+at `docs/audits/cb_test_layers_update.md` is the destination doc;
+implementation landed across CB.0 – CB.12.
+
+**Marks infrastructure (CB.0 – CB.6):**
+
+- **`tests/_marks.py`** declares the typed enums + decorators:
+  `Tier.{UNIT,APP2,DB,QS_API,QS_BROWSER}`, `@tier(...)`, `@dialects(...)`,
+  `@writes(...)`, `@needs(...)`. Each tier got migrated incrementally
+  (CB.2 – CB.5), with a progressive lint ratchet enforcing coverage
+  per tier.
+- **`@inputs(*nodeids)`** (CB.5 addendum) — typed cross-test
+  dependency marker used by the 4-way audit-dashboard agreement
+  pipeline (`scenario_plants ⊆ direct_matview_SELECT == QS == App2`).
+  Replaces the previous fragile string-based wiring.
+- **Hardcoded file lists deleted** (CB.6). The runner's
+  `_layer_command` now reads `--tier=X --dialect=Y` and dispatches
+  pytest with the matching marker. `MIGRATED_TIERS == all_tiers`.
+
+**Provider-marked isolation (CB.7):**
+
+- **`isolated_cfg`** fixture + `IsolationScope.AGREEMENT_AUDIT` /
+  `INV_PIPELINE` etc. branch isolation based on **what the test
+  declares it writes**, not on cell-shared prefixes. Closes #199
+  (DuckDB pytest-xdist intra-cell file-lock contention) by giving
+  each writer its own DuckDB file; readers share the producer's
+  output via the `isolation_consumer(scope)` decorator.
+- Producer + consumer share a scope-pinned short-hash prefix
+  derived from `(nodeid, l2_instance, dialect, worker_id)` — same
+  prefix → same isolated cfg → producer's writes are visible to
+  consumers without cross-test leakage.
+- 10 sibling test files migrated; the qs_browser audit-agreement
+  chain (`test_audit_dashboard_agreement.py`) reorganized so
+  producers write artifacts under `runs/<id>/<tier>/<inv>_<view>_*.json`
+  and consumers re-key by tier directory rather than by global prefix.
+
+**SQLite removal (CB.8 – CB.9):**
+
+- `Dialect.SQLITE` enum entry deleted. Runner's `sl` dialect arm
+  removed. ~600 lines of SQLite-specific seed-generator code, custom
+  aggregate registration (`STDDEV_SAMP` was missing in stdlib
+  sqlite3), and matview emulation removed.
+- `aiosqlite` + `aiosqlitepool` dropped from `[prod]` extras. They
+  were carried for the old async pool shape that DuckDB replaced.
+- `tests/schema/test_l2_schema_sqlite.py` → renamed for DuckDB;
+  several SQLite-only unit tests deleted outright (CB.8.c – CB.8.h).
+
+**Docker-to-AWS bridge (CB.10 – CB.12):**
+
+- **`hotchkiss.io` DDNS forward** (CB.10 spike): QuickSight data
+  sources point at `hotchkiss.io:<port>`, which routes to the dev /
+  CI runner's Docker PG over the same connection (PG + Oracle in
+  prod parity, no Aurora cluster idle cost). Cfg knob
+  `qs_disable_pg_ssl: true` for the local-Docker endpoint.
+- **Two-cfg-per-cell pattern** (CB.11.b): `runs/<id>/<cell>/cfg/local.yaml`
+  points at `127.0.0.1:<container-port>`; `qs.yaml` points at
+  `hotchkiss.io:<forwarded-port>`. Local layers (db / app2) use the
+  first; QS-touching layers (deploy / qs_api / qs_browser) use the
+  second. Exists because QS (us-east-1) and local pytest workers
+  need different hostnames pointing at the same Docker container.
+- **CI collapsed** (CB.11.c): `ci.yml` runs a single self-hosted
+  `test-everything` job driving `./run_tests.sh up_to=qs_browser`.
+  `e2e.yml` deleted. `release.yml` stays tag-driven + on
+  `ubuntu-latest` per the CB.7-followup secret-isolation policy.
+- **AWS RDS Aurora removed** (CB.12). `aws_rds` module deleted;
+  `start-db-cluster` / `stop-db-cluster` CLI verbs gone. ~$45/mo of
+  idle cluster cost reclaimed.
+
+### Phase CB.14 — In-repo Oracle 19c image build
+
+Replaces the stale `doctorkirk/oracle-19c` image (amd64-only,
+unmaintained ~2 years, broken on Apple Silicon under QEMU) with a
+build-it-yourself recipe at `tools/oracle-19c/`.
+
+- **`build.sh`** clones Oracle's own `oracle/docker-images` at a
+  pinned upstream SHA, drops in the operator-downloaded Oracle 19c
+  binary zip, runs the upstream `buildContainerImage.sh -v 19.3.0 -e -i`,
+  and retags as `recon-gen/oracle-19c:local`. Architecture is implicit
+  in which binary is present (arm64 `LINUX.ARM64_1919000_db_home.zip`,
+  amd64 `LINUX.X64_193000_db_home.zip`).
+- **Pre-init pass** boots the freshly-built image once, waits for
+  `DATABASE IS READY TO USE`, runs `SHUTDOWN IMMEDIATE` via sqlplus,
+  then `docker commit`s the writable layer back onto the same tag.
+  Subsequent boots find existing data files under
+  `/opt/oracle/oradata/$ORACLE_SID` and skip DBCA entirely. Measured:
+  cold-start drops from ~240s to 15s on Apple Silicon and 26-28s on
+  WSL2 native amd64 (~16× speedup).
+- **Runner adoption** auto-prefers `recon-gen/oracle-19c:local` when
+  Docker reports it, with `gvenzl/oracle-free:23-faststart` (Oracle
+  23ai) as a one-shot-warning fallback when the local image isn't
+  built. `RECON_GEN_ORACLE_IMAGE` env override pins a specific tag.
+- **Three latent oracledb bugs fixed** that 23ai's leniency hid but
+  19c's stricter behavior surfaced:
+  - ORA-26085 (`direct_path_load` requires no active txn) —
+    `conn.commit()` immediately before each flush.
+  - ORA-00933 (thin-mode rejects trailing `;`) — strip in the
+    INSERT-fallback path.
+  - ORA-01843 (NLS_DATE_FORMAT mismatch on the official 19c image's
+    default `DD-MON-YY`) — pin session NLS to ISO at connect.
+- **Oracle19cContainer subclass** (in `runner.py`) bridges three
+  gvenzl-vs-Oracle-official divergences: `ORACLE_PWD` (not
+  `ORACLE_PASSWORD`), `ORACLE_PDB=FREEPDB1` (default is `ORCLPDB1`),
+  900s `wait_for_logs` timeout (testcontainers' 120s fires
+  mid-init on the cold-start).
+
+### Tests
+
+- 4011 unit tests + 12 skipped (~3.5 min prelude under WSL2 amd64).
+- 69 db-layer tests + 12 skipped on the Oracle 19c image
+  (`sp_or_lo` cell); 137 qs_browser tests + 34 skipped + 15 xfailed
+  on the spec_example cell.
+- 8 semantic-lock fixtures cover DuckDB byte-identity vs PG / Oracle
+  for the 20 L1 + Investigation matviews.
 
 ## v11.24.2 — Emit-time guard for NumericalMeasureField over non-numeric columns
 
