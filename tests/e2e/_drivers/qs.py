@@ -523,17 +523,33 @@ class QsEmbedDriver:
         *,
         columns: Sequence[str] | None = None,
     ) -> list[dict[str, str]]:
-        """De-virtualized table read — scroll-collects every row. BO.1
-        fix: the overdraft invariant's 119-row table previously failed
-        the row-identity check because `table_rows` returned only the
-        37-row DOM window.
+        """De-virtualized table read — page-size bump + WS settle +
+        scroll-collect every row.
+
+        BO.1 fix: previously the overdraft invariant's 119-row table
+        returned only 37 rows because `read_table_rows_via_scroll`
+        scrolled within whatever page was shown (~37 rows). Mirrors the
+        `table_row_count` orchestration: bump page-size to 10000 if
+        paginated, settle the post-bump re-fetch, THEN scroll-collect.
         """
-        from recon_gen.common.browser.helpers import read_table_rows_via_scroll  # noqa: PLC0415
+        from recon_gen.common.browser.helpers import (  # noqa: PLC0415
+            bump_table_page_size_to_10000,
+            read_table_rows_via_scroll,
+            visual_is_empty,
+        )
 
         scroll_visual_into_view(
             self._page, visual_title, self._visual_timeout,
-            wait_for_cells=False,
         )
+        if visual_is_empty(self._page, visual_title):
+            return []
+        # Page-size-bump path: same shape as table_row_count. WS-settle
+        # after the bump triggers a re-fetch; failing to settle would
+        # leave the scroll-collect reading stale rows.
+        if bump_table_page_size_to_10000(
+            self._page, visual_title, self._visual_timeout,
+        ):
+            self._settle_after_param_change()
         rows = read_table_rows_via_scroll(self._page, visual_title)
         return rekey_by_columns(rows, columns) if columns else rows
 
