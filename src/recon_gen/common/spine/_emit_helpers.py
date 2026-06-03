@@ -39,11 +39,11 @@ What does NOT live here:
 
 from __future__ import annotations
 
-import duckdb
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+from recon_gen.common.db import SyncConnection
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.primitives import Account, L2Instance
 from recon_gen.common.money import Cents
@@ -178,7 +178,7 @@ identical to pre-AV.5)."""
 
 
 def insert_tx(
-    conn: duckdb.DuckDBPyConnection,
+    conn: SyncConnection,
     *,
     prefix: str = DEFAULT_PREFIX,
     **vals: object,
@@ -192,10 +192,10 @@ def insert_tx(
 
     AT.5.b: dialect-aware placeholder style + ``cursor.execute`` path
     so the spine generators emit into deployed PG / Oracle DBs (not
-    just the in-process SQLite harness). The annotation still reads
-    ``duckdb.DuckDBPyConnection`` because that's the dominant call shape; in
-    practice the function accepts any dbapi 2.0 connection (psycopg /
-    oracledb / sqlite3) and dispatches via ``_placeholder_style``.
+    just the in-process DuckDB harness). ``SyncConnection`` is a
+    ``Protocol`` covering the DB-API 2.0 surface — psycopg / oracledb
+    / sqlite3 / duckdb all match structurally; ``_placeholder_style``
+    sniffs the connection's module to pick the placeholder syntax.
     """
     style = _placeholder_style(conn)
     placeholders = _build_placeholders(style, len(TX_COLS))
@@ -219,13 +219,14 @@ def insert_tx(
 
 
 def insert_balance(
-    conn: duckdb.DuckDBPyConnection,
+    conn: SyncConnection,
     *,
     prefix: str = DEFAULT_PREFIX,
     **vals: object,
 ) -> None:
     """Insert one row into ``<prefix>_daily_balances``. Mirrors
-    `insert_tx` for the balance table — same dialect dispatch."""
+    `insert_tx` for the balance table — same dialect dispatch via the
+    ``SyncConnection`` Protocol."""
     style = _placeholder_style(conn)
     placeholders = _build_placeholders(style, len(DB_COLS))
     table = f"{prefix}_daily_balances"

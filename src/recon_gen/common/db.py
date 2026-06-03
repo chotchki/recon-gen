@@ -1367,6 +1367,38 @@ def _split_oracle_script_impl(sql: str) -> list[str]:
 # ``connection()`` vs oracledb's ``acquire()``) wrap cleanly behind it.
 
 
+class SyncCursor(Protocol):
+    """Minimal sync DB-API 2.0 cursor surface used by the spine
+    insert helpers (``_emit_helpers.insert_tx`` / ``insert_balance``)
+    and any other dialect-agnostic write path.
+
+    All sync dbapi drivers we touch (duckdb / sqlite3 / psycopg /
+    oracledb) expose at least these two methods. The Protocol matches
+    structurally so callers don't need to import a Union of driver
+    types — pass any DBAPI cursor and pyright is satisfied.
+    """
+
+    def execute(
+        self, sql: str, params: Any = ..., /,  # typing-smell: ignore[explicit-any]: bind params are per-driver-coerced sequences; no shared shape covers tuple / list / dict across psycopg / oracledb / sqlite3 / duckdb
+    ) -> object: ...
+    def close(self) -> None: ...
+
+
+class SyncConnection(Protocol):
+    """Minimal sync DB-API 2.0 connection surface — pair of
+    ``SyncCursor``.
+
+    Used by ``_emit_helpers.insert_tx`` / ``insert_balance`` so the
+    annotation reflects the actual contract ("any DBAPI 2.0
+    connection") rather than the dominant call-site type
+    (``duckdb.DuckDBPyConnection``). Dispatch from the connection's
+    module name to per-dialect placeholder style happens inside the
+    helper via ``_placeholder_style``.
+    """
+
+    def cursor(self) -> SyncCursor: ...
+
+
 class AsyncCursor(Protocol):
     """Minimal async DB-API cursor surface used by ``execute_visual_sql_async``.
 
