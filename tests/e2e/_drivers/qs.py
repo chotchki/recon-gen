@@ -538,8 +538,14 @@ class QsEmbedDriver:
             visual_is_empty,
         )
 
+        # `wait_for_cells=False` — the bump+settle below handles the
+        # actual "is the data ready" wait. Pre-fix used the default
+        # (`wait_for_cells=True`, 15s cap) which timed out on overdraft
+        # when the second call into the sheet re-applied the date
+        # filter and triggered a fresh fetch.
         scroll_visual_into_view(
             self._page, visual_title, self._visual_timeout,
+            wait_for_cells=False,
         )
         if visual_is_empty(self._page, visual_title):
             return []
