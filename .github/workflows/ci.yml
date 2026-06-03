@@ -106,6 +106,38 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
+      - name: Start shared PG + Oracle for aw-target cells
+        # CB.14 followup (2026-06-03): the `aw` cells (sp_pg_aw / sq_pg_aw
+        # / sp_or_aw / sq_or_aw) use the cfg's `demo_database_url`
+        # directly (no per-cell container spin-up). Previously this
+        # pointed at AWS RDS Aurora; CB.12 decommissioned that. Now CI
+        # runs a shared PG + Oracle on the runner itself — distinct
+        # ports from the per-cell `lo` containers
+        # (lo uses 5433 / 1522 per `_LOCAL_PG_HOST_PORT` +
+        # `_LOCAL_ORACLE_HOST_PORT`), so no collision.
+        #
+        # Postgres bound to host 5432 (PG default). Oracle bound to
+        # host 1521 (Oracle default), using the locally-built
+        # `recon-gen/oracle-19c:local` image with FREEPDB1 PDB +
+        # alphanumeric password matching the runner's
+        # `ORACLE_REUSE_PASSWORD`.
+        run: |
+          docker run -d --name ci-shared-pg \
+            -e POSTGRES_PASSWORD=postgres \
+            -p 5432:5432 \
+            postgres:17-alpine
+          docker run -d --name ci-shared-oracle \
+            -e ORACLE_PWD=qsgentestpwd2026 \
+            -e ORACLE_PDB=FREEPDB1 \
+            -p 1521:1521 \
+            recon-gen/oracle-19c:local
+          # Wait for both to accept connections.
+          echo "Waiting for shared PG..."
+          timeout 60 bash -c 'until docker exec ci-shared-pg pg_isready -U postgres -q; do sleep 2; done'
+          echo "Waiting for shared Oracle (pre-init'd image, ~15-30s)..."
+          timeout 180 bash -c 'until docker logs ci-shared-oracle 2>&1 | grep -q "DATABASE IS READY TO USE"; do sleep 3; done'
+          echo "Shared DBs ready."
+
       - name: Materialize per-dialect runner cfgs
         # The runner discovers cfg via `run/config.<dialect>.yaml`.
         # For the AWS-touching layers it needs `auth:` (aws_profile or
@@ -118,11 +150,11 @@ jobs:
         # to the default profile, so the cfg's `auth:` block uses
         # `quicksight_user_arn` directly (no profile lookup needed).
         #
-        # `demo_database_url` points at the Docker container the runner
-        # will spin up under `setup_variant` — testcontainers binds to
-        # 127.0.0.1:5433 (PG) / a dynamic port (Oracle); the runner
-        # rewrites `demo_database_url` in the per-variant cfg, so the
-        # value here is only the fallback / discovery anchor.
+        # `demo_database_url` points at the shared containers from the
+        # step above — 127.0.0.1:5432 (PG) + 127.0.0.1:1521 (Oracle).
+        # For `lo` cells, the runner overrides this URL with
+        # `127.0.0.1:<lo-container-port>` (5433 / 1522) at variant-seed
+        # time; for `aw` cells, this cfg value is used directly.
         run: |
           mkdir -p run
           cat > run/config.postgres.yaml <<'EOF'
@@ -131,7 +163,7 @@ jobs:
           deployment_name: "qs-ci-${{ github.run_id }}-pg"
           db_table_prefix: "qs_ci_${{ github.run_id }}_pg"
           dialect: "postgres"
-          demo_database_url: "postgresql://postgres:postgres@127.0.0.1:5433/postgres"
+          demo_database_url: "postgresql://postgres:postgres@127.0.0.1:5432/postgres"
           principal_arns:
             - "${{ secrets.RECON_E2E_USER_ARN }}"
           auth:
@@ -143,7 +175,7 @@ jobs:
           deployment_name: "qs-ci-${{ github.run_id }}-or"
           db_table_prefix: "qs_ci_${{ github.run_id }}_or"
           dialect: "oracle"
-          demo_database_url: "oracle://recon:recon@127.0.0.1:1521/FREEPDB1"
+          demo_database_url: "oracle+oracledb://system:qsgentestpwd2026@127.0.0.1:1521/?service_name=FREEPDB1"
           principal_arns:
             - "${{ secrets.RECON_E2E_USER_ARN }}"
           auth:
@@ -155,17 +187,11 @@ jobs:
         # invokes layers 1..6: unit (prelude, once) → db → app2 → deploy →
         # qs_api → qs_browser, fanned out across the matrix. --coverage
         # writes `.coverage.<variant>.<layer>` files into runs/<id>/.
-        # `--targets=lo` excludes the `aw` cells (sp_pg_aw / sq_pg_aw /
-        # sp_or_aw / sq_or_aw). CB.14 followup: those cells point at the
-        # operator's external DB endpoint, which on the dev box is
-        # `localhost:5433` (Docker PG bound to host 5433). CI's WSL2
-        # runner doesn't have a container at that port — the right CI
-        # endpoint is `hotchkiss.io:5432`, but the runner hardcodes 5433
-        # in `_LOCAL_PG_HOST_PORT`. Re-plumbing the URL generation to
-        # know CI vs local context is bigger than this release; for now
-        # pin lo-only on CI so the matrix stays green. `aw` cells still
-        # run locally where the routing matches. CC.3 collapses cells
-        # entirely.
+        # Full default matrix (13 cells = sp/sq/fuzz × pg/or/du × lo/aw).
+        # Lo cells spin per-cell containers via testcontainers; aw cells
+        # use the shared PG + Oracle from the "Start shared..." step at
+        # the top of the job. CB.15 (cells removal) is the longer-term
+        # destination; this restores the default matrix in the meantime.
         #
         # RECON_GEN_E2E=1 lets the e2e-tier pytest collections run.
         # RECON_E2E_USER_ARN is consumed by the qs_browser layer for
@@ -181,7 +207,7 @@ jobs:
           # tier's runner-flow tests, breaking those tests on CI even
           # though they pass locally.
           RECON_GEN_RUNNER_YES: "1"
-        run: ./run_tests.sh up_to=qs_browser --targets=lo --coverage
+        run: ./run_tests.sh up_to=qs_browser --coverage
 
       - name: Collect runner coverage data
         # Each layer wrote `.coverage.<variant>.<layer>` files under
@@ -219,6 +245,15 @@ jobs:
           if-no-files-found: warn
           include-hidden-files: true
           retention-days: 7
+
+      - name: Stop shared PG + Oracle containers
+        # CB.14 followup — teardown for the shared containers from the
+        # top of the job. Runs `if: always()` so the cleanup still fires
+        # on test failure / runner cancellation.
+        if: always()
+        run: |
+          docker stop ci-shared-pg ci-shared-oracle 2>/dev/null || true
+          docker rm ci-shared-pg ci-shared-oracle 2>/dev/null || true
 
       - name: Sweep deployed QS resources (always)
         # Belt-and-suspenders: even though the runner's per-cell teardown
