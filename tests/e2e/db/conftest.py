@@ -45,6 +45,33 @@ __all__ = [
 ]
 
 
+import pytest as _pytest
+
+
+@_pytest.fixture(autouse=True)
+def _clear_db_read_only_env(monkeypatch: _pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]
+    """CB.14 followup — clear RECON_GEN_DB_READ_ONLY for db-tier tests.
+
+    The env var was designed for the pre-CB.7 model where the
+    cell's variant-seed step pre-populated a shared DB file and pytest
+    workers opened it read-only for multi-process safety. Post-CB.7,
+    every db-tier test gets its own isolated cfg + DB via the
+    `isolated_cfg` / `db_conn` fixtures, so each test is its own
+    seeder + reader — RO mode breaks both the seed write AND the
+    common test pattern of opening the same file with mismatched
+    read_only flags (raises "Can't open a connection to same database
+    file with a different configuration").
+
+    Autouse + scope=function so the env is cleared per test, not
+    leaked to other test contexts that may legitimately want it.
+    Legacy `QS_GEN_DB_READ_ONLY` also cleared defensively.
+    """
+    from recon_gen.common.env_keys import RECON_GEN_DB_READ_ONLY
+    monkeypatch.delenv(RECON_GEN_DB_READ_ONLY.name, raising=False)
+    if RECON_GEN_DB_READ_ONLY.legacy_name:
+        monkeypatch.delenv(RECON_GEN_DB_READ_ONLY.legacy_name, raising=False)
+
+
 _DB_TIER_MARK = tier(Tier.DB)
 _DB_NEEDS_MARK = needs(Need.DOCKER)
 _OWN_DIR = pathlib.Path(__file__).resolve().parent
