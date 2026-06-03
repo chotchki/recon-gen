@@ -111,11 +111,35 @@ def _plant_anchor_day() -> date:
     return _TODAY - timedelta(days=2)
 
 
+def _pick_internal_leaf_role() -> str:
+    """Pick any internal-leaf account's role from the test L2 instance.
+
+    CB.14 — anomaly + money_trail scenarios need a role bound to an
+    internal-leaf account; the role NAME is incidental but a parent_role
+    IS NOT NULL leaf MUST exist because the matviews filter on
+    `account_parent_role IS NOT NULL`. spec_example's L2 carries
+    `CustomerSubledger` (templated leaves under a parent_role);
+    sasquatch's L2 models only top-level GL accounts with no parents,
+    so anomaly + money_trail are structurally unsupportable there.
+    pytest.skip is the right tool for "L2 doesn't model this invariant
+    shape" — auto-enables when a future L2 grows leaves; until then it
+    keeps the matrix green on shapes that can't carry the assertion.
+    """
+    for a in _INSTANCE.accounts:
+        if a.scope == "internal" and a.parent_role is not None and a.role is not None:
+            return str(a.role)
+    pytest.skip(
+        "L2 instance has no internal-leaf account (no `parent_role IS NOT NULL` "
+        "rows); anomaly + money_trail matviews require leaf recipients."
+    )
+
+
 def _build_anomaly_generator(
     cfg: "Config", anchor_day: date,
 ) -> "AnomalyGenerator":
+    role = _pick_internal_leaf_role()
     gen = AnomalyInvariant().scenario_for(
-        "CustomerSubledger", "CustomerSubledger",
+        role, role,
         baseline_pair_count=_ANOMALY_BASELINE_PAIRS,
         baseline_amount=_ANOMALY_BASELINE_AMOUNT,
         spike_magnitude=_ANOMALY_SPIKE_MAGNITUDE,
@@ -130,7 +154,7 @@ def _build_money_trail_generator(
     cfg: "Config", anchor_day: date,
 ) -> "MoneyTrailGenerator":
     gen = MoneyTrailInvariant().scenario_for(
-        "CustomerSubledger",
+        _pick_internal_leaf_role(),
         chain_length=_MONEY_TRAIL_CHAIN_LENGTH,
         amount=_MONEY_TRAIL_AMOUNT,
         anchor_day=anchor_day,
