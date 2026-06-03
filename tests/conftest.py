@@ -639,8 +639,9 @@ def _load_l2_by_name(name: str) -> Any:  # typing-smell: ignore[explicit-any]: L
         tmp.write_text(random_l2_yaml(seed))
         return load_instance(tmp)
 
-    # Named scenarios — bundled yamls under src/recon_gen/common/l2/.
-    l2_dir = Path(__file__).resolve().parents[1] / "src" / "recon_gen" / "common" / "l2"
+    # Named scenarios — canonical yamls under tests/l2/ (matches
+    # `tests/data/test_l2_seed_contract.py::L2_DIR` exactly).
+    l2_dir = Path(__file__).resolve().parent / "l2"
     yaml_path = l2_dir / f"{name}.yaml"
     if not yaml_path.exists():
         raise ValueError(

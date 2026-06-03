@@ -39,8 +39,6 @@ from __future__ import annotations
 
 from collections import Counter
 
-import pytest
-
 from recon_gen.apps.l2_flow_tracing.app import (
     _CHAINS_NAME,
     _GETTING_STARTED_NAME,
@@ -52,23 +50,21 @@ from recon_gen.apps.l2_flow_tracing.app import (
 from recon_gen.apps.l2_flow_tracing.datasets import (
     declared_metadata_keys,
 )
-from recon_gen.common.l2 import L2Instance, load_instance
+from recon_gen.common.l2 import L2Instance
 from recon_gen.common.sheets.app_info import APP_INFO_SHEET_NAME
 
-# Reuse the matrix definition from the seed-contract test so every
-# substep that adds an L2 instance to ``L2_INSTANCES`` automatically
-# extends the M.3.9 verification surface here.
+from tests._marks import L2, l2
 from tests._test_helpers import make_test_config
-from tests.data.test_l2_seed_contract import L2_INSTANCES
 
 
 _CFG = make_test_config()
 
-
-@pytest.fixture(params=L2_INSTANCES)
-def l2_instance(request: pytest.FixtureRequest) -> L2Instance:
-    """Load each parameterized L2 instance once per test."""
-    return load_instance(request.param)
+# CC.1.b — file-local `l2_instance` fixture deleted in favor of the
+# root `tests/conftest.py::l2_instance`. `@l2(L2.SP, L2.SQ, L2.FUZZ)`
+# at module level tells the auto-fuzz hook to parametrize over all
+# three forms — same coverage as the legacy `params=L2_INSTANCES`
+# loop, now uniform across the codebase. Spike: docs/audits/cc_0_l2_fixture_unification.md.
+pytestmark = l2(L2.SP, L2.SQ, L2.FUZZ)
 
 
 # -- Sheet structure invariants ----------------------------------------------
