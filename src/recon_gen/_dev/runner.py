@@ -1686,8 +1686,11 @@ def _start_fresh_oracle_container(
 
     # doctorkirk/oracle-19c emits "DATABASE IS READY TO USE!" on the
     # listener once both SID open + listener registration complete.
-    # 240s timeout covers a cold-start on a slow disk.
-    wait_for_logs(container, "DATABASE IS READY TO USE!", timeout=240)  # type: ignore[no-untyped-call]: testcontainers helper lacks return-type hint
+    # 900s (15 min) covers a true cold-start — first observed at ~10%
+    # complete after 240s, so the legacy gvenzl timeout was a bad
+    # baseline for 19c. The persistent-reuse path amortizes this to
+    # ~10s on subsequent runs.
+    wait_for_logs(container, "DATABASE IS READY TO USE!", timeout=900)  # type: ignore[no-untyped-call]: testcontainers helper lacks return-type hint
 
     host_port = int(container.get_exposed_port(1521))  # type: ignore[no-untyped-call]: testcontainers helper lacks return-type hint
     url = (
