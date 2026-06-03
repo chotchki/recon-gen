@@ -2243,8 +2243,16 @@ def set_dropdown_value(
             _OPTION_SELECTOR,
             timeout=timeout_ms, state="visible",
         )
+    # BO.1 fix — `has_text=value` is substring (case-insensitive)
+    # matching. When the search filled the autocomplete with a value
+    # whose prefix is shared with other options (e.g., on the L1 Drift
+    # sheet's Account picker, several options share the
+    # ``"Drift Child (..."`` prefix), `.first` could click a sibling
+    # alphabetically before the intended option. Use exact-match
+    # regex so the locator only resolves to the option whose full text
+    # equals ``value``.
     page.locator(
-        _OPTION_SELECTOR, has_text=value,
+        _OPTION_SELECTOR, has_text=re.compile(f"^{re.escape(value)}$"),
     ).first.click(timeout=timeout_ms)
     page.keyboard.press("Escape")
 

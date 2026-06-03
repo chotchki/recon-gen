@@ -39,7 +39,6 @@ import pytest
 from tests.audit._dashboard_extract import (
     count_l1_invariant_rows,
     l1_invariant_row_keys,
-    l1_invariant_rows_seen,
 )
 from tests._marks import IsolationScope, isolation_consumer  # noqa: E402
 from tests.e2e._agreement import write_rendered_rows
