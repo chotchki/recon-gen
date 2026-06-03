@@ -164,13 +164,32 @@ class TestConnectDemoDb:
         import sys
         import types
 
-        called: dict[str, str] = {}
+        called: dict[str, object] = {}
 
         stub = types.ModuleType("oracledb")
 
-        def fake_connect(dsn: str) -> str:
+        # CB.14 — connect_demo_db now pins session NLS via
+        # `conn.cursor().execute("ALTER SESSION SET NLS_DATE_FORMAT = ...")`
+        # after oracledb.connect(). The fake conn needs a cursor() that
+        # returns something with execute() + close(); we also record the
+        # NLS statements so the test can assert the pin happened.
+        nls_statements: list[str] = []
+
+        class _FakeOraCursor:
+            def execute(self, stmt: str) -> None:
+                nls_statements.append(stmt)
+            def close(self) -> None:
+                pass
+
+        class _FakeOraConn:
+            def cursor(self) -> "_FakeOraCursor":
+                return _FakeOraCursor()
+
+        fake_conn = _FakeOraConn()
+
+        def fake_connect(dsn: str) -> "_FakeOraConn":
             called["dsn"] = dsn
-            return "fake_ora_conn"
+            return fake_conn
 
         stub.connect = fake_connect  # type: ignore[attr-defined]: monkey-patching the .connect attribute onto a fake module
         monkeypatch.setitem(sys.modules, "oracledb", stub)
@@ -180,9 +199,12 @@ class TestConnectDemoDb:
             url="oracle://admin:secret@db.example.com:1521/ORCL",
         )
         conn = connect_demo_db(cfg)
-        assert conn == "fake_ora_conn"
+        assert conn is fake_conn
         # The DSN was translated to oracledb's native shape.
         assert called["dsn"] == "admin/secret@db.example.com:1521/ORCL"
+        # NLS pinned to ISO so spine-emitted date strings parse.
+        assert any("NLS_DATE_FORMAT" in s and "YYYY-MM-DD" in s for s in nls_statements)
+        assert any("NLS_TIMESTAMP_FORMAT" in s for s in nls_statements)
 
 # -- execute_script SQLite branch (CB.8: deleted) ----------------------------
 # `TestSqlitePath` + `TestExecuteScriptSqlite` removed in CB.8 along with the

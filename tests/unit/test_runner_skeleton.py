@@ -2011,7 +2011,10 @@ def test_oracle_reuse_constants_are_stable() -> None:
     assert runner.ORACLE_REUSE_CONTAINER_PREFIX == "quicksight-test-oracle-"
     # Password value isn't sensitive (local-only test fixture) but its
     # stability matters — see class docstring above.
-    assert runner.ORACLE_REUSE_PASSWORD == "qs-gen-test-pwd-2026"
+    # CB.14 — stripped hyphens; Oracle 19c's dbca-silent install rejects
+    # special chars during the response-file pass (container exited mid-
+    # init with "...ssword. If required refer Oracle documentation").
+    assert runner.ORACLE_REUSE_PASSWORD == "qsgentestpwd2026"
 
 
 def test_oracle_container_name_is_per_cell() -> None:

@@ -185,7 +185,22 @@ def connect_demo_db(cfg: Config) -> Any:  # typing-smell: ignore[explicit-any]: 
                 "oracledb is required for Oracle connections. "
                 "Install it with: pip install 'recon-gen[prod]'"
             ) from e
-        return oracledb.connect(oracle_dsn(cfg.demo_database_url))
+        conn = oracledb.connect(oracle_dsn(cfg.demo_database_url))
+        # CB.14 — pin session NLS to ISO so string-shaped date literals
+        # (e.g. spine generators emitting "2026-01-15") parse without
+        # ORA-01843. Oracle's default NLS_DATE_FORMAT (DD-MON-YY) made
+        # the spine inserts in tests/e2e/db/test_inv_direct.py fail at
+        # cur.execute(sql, params); pinning here makes every connection
+        # speak the same date dialect regardless of the image's locale.
+        nls_cur: Any = conn.cursor()  # typing-smell: ignore[explicit-any]: oracledb.Cursor partial-unknown without stubs; matches the Any-typed `cur` parameter shape used elsewhere in this module
+        try:
+            nls_cur.execute("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD'")
+            nls_cur.execute(
+                "ALTER SESSION SET NLS_TIMESTAMP_FORMAT = 'YYYY-MM-DD HH24:MI:SS.FF'"
+            )
+        finally:
+            nls_cur.close()
+        return conn
     if cfg.dialect is Dialect.DUCKDB:
         # CA.3 — DuckDB is a core dialect (in `[project.dependencies]`,
         # not extras). Pure-Python wheel, no extra install friction.

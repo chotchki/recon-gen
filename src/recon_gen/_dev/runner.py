@@ -1381,7 +1381,7 @@ ORACLE_REUSE_CONTAINER_PREFIX: Final = "quicksight-test-oracle-"
 # behavior when `oracle_password` is explicitly set. Without pinning,
 # testcontainers randomizes per invocation (`hex(randbits(24))`) and
 # the adopt path can't predict the URL on subsequent runs.
-ORACLE_REUSE_PASSWORD: Final = "qs-gen-test-pwd-2026"  # typing-smell: ignore[qs-gen-prefix]: local Docker fixture password — not an AWS resource ID, not multi-tenant; the prefix is incidental string content, not a Config-prefixed resource name
+ORACLE_REUSE_PASSWORD: Final = "qsgentestpwd2026"  # typing-smell: ignore[qs-gen-prefix]: local Docker fixture password — not an AWS resource ID, not multi-tenant; the prefix is incidental string content, not a Config-prefixed resource name. CB.14 — must be alphanumeric: Oracle 19c's dbca-silent install rejects hyphens/special chars during the response-file pass (container exits at "Creating and starting Oracle instance" with "...ssword. If required refer Oracle documentation"). Stripped hyphens to keep the 8+chars + letter + digit shape Oracle 19c requires.
 
 # CB.11.b — fixed host port for the local PG container. Matches the
 # operator's hotchkiss.io:5433 forward target, so QS data sources
