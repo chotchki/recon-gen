@@ -175,6 +175,17 @@ def seeded_l2_db(isolated_cfg: "Config") -> None:
     """
     from tests.e2e._seed_helpers import apply_db_seed
 
+    # CB.14 followup — clear `RECON_GEN_DB_READ_ONLY` before this
+    # module-scoped fixture's connect_demo_db. The runner sets the env
+    # for du_lo cells per the pre-CB.7 cell-shared-DB model, but this
+    # fixture is itself the seeder; RO mode rejects connect because the
+    # isolated cfg's per-worker DB file doesn't exist until seed runs.
+    # Module-scoped fixture so monkeypatch (function-scoped) doesn't fit
+    # — direct os.environ.pop persists only for the seed; the next
+    # test's reader-shape uses are unaffected.
+    import os
+    os.environ.pop("RECON_GEN_DB_READ_ONLY", None)
+    os.environ.pop("QS_GEN_DB_READ_ONLY", None)
     conn = connect_demo_db(isolated_cfg)
     try:
         apply_db_seed(

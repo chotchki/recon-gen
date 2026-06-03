@@ -263,9 +263,22 @@ _REGISTRY_PARAMS: list[object] = [
 
 @pytest.mark.parametrize("entry", _REGISTRY_PARAMS)
 def test_plant_surfaces_on_dashboard(
-    entry: PlantKindEntry, sasquatch_l2_path: Path, tmp_path: Path,
+    entry: PlantKindEntry,
+    sasquatch_l2_path: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """BV.3.1 clean-before / present-after round-trip.
+
+    CB.14 followup — clear `RECON_GEN_DB_READ_ONLY` (canonical + legacy)
+    at test start. The runner sets this for db-tier du_lo cells per the
+    pre-CB.7 cell-shared-DB model, but this test owns its DB lifecycle
+    (opens RW for seed, the signal probes via `make_connection_pool`
+    would otherwise honor the env and open RO, mismatching). Targeted
+    delenv here instead of an autouse-conftest pattern so tests like
+    `test_audit_pdf_render_verify` that DO want the env honored (their
+    audit-apply subprocess reads a fixture-seeded DB and must open RO
+    so it doesn't race the fixture's RW write) keep their behavior.
 
     Builds a fresh sqlite, snapshots the dashboard_check signal BEFORE
     planting, runs the plant + matview refresh, snapshots AFTER, then
@@ -274,6 +287,15 @@ def test_plant_surfaces_on_dashboard(
     Entries that fail are BV.3.2 fix queue — wrong plant SQL,
     mis-aimed dashboard_check, or missing picker coverage in
     sasquatch_pr."""
+    # CB.14 followup — clear `RECON_GEN_DB_READ_ONLY` (canonical + legacy)
+    # for this test. See test docstring above for rationale; it's per-test
+    # rather than autouse so reader-shape db-tier tests (which subprocess
+    # `recon-gen audit apply` and need that subprocess to honor the RO
+    # env) keep the env intact.
+    from recon_gen.common.env_keys import RECON_GEN_DB_READ_ONLY
+    monkeypatch.delenv(RECON_GEN_DB_READ_ONLY.name, raising=False)
+    if RECON_GEN_DB_READ_ONLY.legacy_name:
+        monkeypatch.delenv(RECON_GEN_DB_READ_ONLY.legacy_name, raising=False)
     inst = load_instance(sasquatch_l2_path)
     db_path = str(tmp_path / "bv31.duckdb")
     conn = _build_seeded_sqlite(sasquatch_l2_path, db_path=db_path)
