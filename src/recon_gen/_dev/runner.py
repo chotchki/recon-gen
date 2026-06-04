@@ -1640,6 +1640,61 @@ def _start_thin_container(
     )
 
 
+def _seed_thin_container(
+    cfg_path: Path,
+    l2_path: Path,
+    container_env: dict[str, str],
+    run_dir: Path,
+) -> int:
+    """CB.17.d — seed the runner-spun container's PLAIN cfg.db_table_prefix
+    before any pytest layer.
+
+    Restored transitionally — db-tier smoke tests migrated to
+    ``seeded_cfg`` (isolated prefix) but app2-tier live tests
+    (test_html2_executives_live et al) still consume the PLAIN
+    ``cfg`` fixture and expect populated tables. Until those migrate
+    too, the runner pre-seeds the plain prefix.
+
+    Shells::
+
+        recon-gen schema apply -c <cfg> --l2 <l2> --execute
+        recon-gen data apply   -c <cfg> --l2 <l2> --execute
+        recon-gen data refresh -c <cfg> --l2 <l2> --execute
+
+    Stdout/stderr tee'd to ``<run_dir>/seed/{stdout,stderr}.log``.
+    """
+    seed_dir = run_dir / "seed"
+    seed_dir.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, **container_env}
+    stdout_path = seed_dir / "stdout.log"
+    stderr_path = seed_dir / "stderr.log"
+
+    steps: list[tuple[str, str]] = [
+        ("schema", "apply"),
+        ("data", "apply"),
+        ("data", "refresh"),
+    ]
+    for verb, sub in steps:
+        cmd = [
+            str(_VENV_BIN / "recon-gen"), verb, sub,
+            "-c", str(cfg_path),
+            "--l2", str(l2_path),
+            "--execute",
+        ]
+        print(f"runner: thin seed [{verb} {sub}] {' '.join(cmd)}")
+        returncode, _ = _spawn_with_tee(
+            cmd,
+            cwd=REPO_ROOT,
+            env=env,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            terminal_prefix="[seed] ",
+        )
+        if returncode != 0:
+            return returncode
+    return 0
+
+
 @dataclass(frozen=True)
 class _PersistentContainerHandle:
     """Y.2.gate.j.5 — handle wrapper that signals "leave the container
@@ -3615,11 +3670,43 @@ def cmd_thin(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
 
-    # CB.17.d — seed step moved into the `seeded_cfg` pytest fixture
-    # (tests/e2e/_seed_helpers.py). Each (module, worker) applies its
-    # own schema + data + matview refresh against an isolated_cfg prefix
-    # on first use, then drops on teardown. The runner no longer shells
-    # `recon-gen schema/data apply` — that's fixture territory.
+    # CB.17.d — seed the PLAIN cfg prefix transitionally. db-tier smoke
+    # tests use the `seeded_cfg` fixture (isolated prefix per (module,
+    # worker)), but app2-tier live tests (test_html2_executives_live
+    # et al) still consume the PLAIN `cfg` fixture and expect populated
+    # tables. Until those migrate, the runner pre-seeds the plain
+    # prefix once at session start. After full migration this whole
+    # block goes away — fixtures own seeding.
+    l2_path_env = runner_variant_env.get(RECON_GEN_TEST_L2_INSTANCE.name)
+    if (
+        container_handle is not None
+        and cfg_path is not None
+        and l2_path_env is not None
+    ):
+        seed_rc = _seed_thin_container(
+            cfg_path, Path(l2_path_env), container_env, run_dir,
+        )
+        if seed_rc != 0:
+            print(
+                f"runner: thin seed failed rc={seed_rc}; "
+                f"aborting chain (see runs/<id>-thin/seed/ for triage)",
+                file=sys.stderr,
+            )
+            try:
+                container_handle.stop()  # type: ignore[attr-defined]: duck-typed teardown contract — testcontainers Container, _DuckdbHandle, _PersistentContainerHandle all expose .stop() but share no nominal parent
+            except Exception:  # noqa: BLE001 — teardown is best-effort
+                pass
+            return _finalize_run(
+                run_dir,
+                LayerResult(
+                    layer="unit", exit_code=EXIT_SUCCESS,
+                    duration_seconds=0.0, skipped=True,
+                ),
+                [LayerResult(
+                    layer="seed", exit_code=seed_rc, duration_seconds=0.0,
+                )],
+                seed_rc,
+            )
 
     chain = chain_through(args.layer)
     print(f"runner: chain={chain} (thin path: one subprocess per layer)")
