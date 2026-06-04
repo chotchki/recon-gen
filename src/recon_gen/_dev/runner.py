@@ -1568,9 +1568,17 @@ def _start_thin_container(
         # for the deploy/qs_api/qs_browser layers. Same contract as
         # setup_variant's pg path — single-PG-at-a-time (parallel via
         # per-cell port pool is CB.11.c work).
+        # CB.17.j — `shared_preload_libraries=pg_stat_statements` so the
+        # conftest's `capture_top_queries` teardown can read real perf
+        # data instead of a "skipped — extension not loaded" marker.
+        # PG needs the library at server startup; `CREATE EXTENSION` at
+        # session time isn't enough.
         container = (
             PostgresContainer("postgres:17-alpine")
-            .with_command("postgres -c max_connections=300")
+            .with_command(
+                "postgres -c max_connections=300 "
+                "-c shared_preload_libraries=pg_stat_statements"
+            )
             .with_bind_ports(5432, _LOCAL_PG_HOST_PORT)
         )
         container.start()
