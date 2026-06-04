@@ -433,6 +433,19 @@ RECON_GEN_DEMO_DATABASE_URL: Final = EnvVar(
 # testcontainers. The singular ``RECON_GEN_DEMO_DATABASE_URL`` stays
 # as the per-test cfg override (operator-facing) and falls out of CI
 # usage after CB.17.d deletes the cell loop.
+RECON_GEN_ENV_LOG_DIR: Final = EnvVar(
+    name="RECON_GEN_ENV_LOG_DIR",
+    description=(
+        "Directory for per-process EnvVar access logs. When set, "
+        "``pytest_sessionfinish`` writes a JSON summary of every env "
+        "read/write made during the session — feeds the CB.17.d "
+        "strangler-pattern diff between legacy + thin runner paths."
+    ),
+    coercer=str,
+    optional=True,
+)
+
+
 RECON_GEN_DEMO_DATABASE_URL_PG: Final = EnvVar(
     name="RECON_GEN_DEMO_DATABASE_URL_PG",
     description=(

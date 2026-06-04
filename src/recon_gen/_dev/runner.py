@@ -1010,6 +1010,13 @@ def dispatch_layer(
     effective_variant_env = (
         variant_env if variant_env and layer in DB_TOUCHING_LAYERS else {}
     )
+    # CB.17.d — point the subprocess's `pytest_sessionfinish` hook at a
+    # per-layer dir so its EnvVar access log lands somewhere we can find.
+    # Set in env_addl so cmd.json captures it as an override (visible
+    # diff vs prior runs).
+    env_log_dir = run_dir / layer / "env_log"
+    env_log_dir.mkdir(parents=True, exist_ok=True)
+    env_addl = {**env_addl, "RECON_GEN_ENV_LOG_DIR": str(env_log_dir)}
     env = {**os.environ, **env_addl, **effective_variant_env}
 
     # Per-layer capture artifacts. Created lazily so a stub-skip
@@ -3037,6 +3044,94 @@ def _run_unit_prelude(prelude_dir: Path, options: RunOptions) -> LayerResult:
     return result
 
 
+def _dump_env_access(out_path: Path) -> None:
+    """Write the run's consolidated EnvVar access log to ``out_path`` as JSON.
+
+    Sources merged:
+
+    1. **Runner-process** accesses — via ``env_keys.dump_env_access()``.
+       Covers cmd-line parsing, probe_dependencies, anything the
+       runner itself reads.
+    2. **Subprocess pytest** accesses — every ``<run_dir>/<layer>/env_log/
+       pytest-<pid>-<rand>.json`` file dropped by the conftest
+       ``pytest_sessionfinish`` hook (the runner sets
+       ``RECON_GEN_ENV_LOG_DIR`` per layer; xdist workers each drop a
+       file). Walked + merged here.
+
+    Output shape:
+
+    ``{
+        "by_name": {<name>: {"read_hit": N, "read_miss": N, "write": N}},
+        "by_source": {
+            "runner": {<name>: {...}},
+            "pytest:<layer>": {<name>: {...}},
+            ...
+        }
+      }``
+
+    ``by_name`` is the cross-source roll-up used by the strangler diff;
+    ``by_source`` keeps the per-layer slice for finer-grained
+    debugging ("which layer actually reads RECON_GEN_DB_READ_ONLY?").
+
+    CB.17.d — diff legacy vs thin paths via:
+    ``diff <(jq -S .by_name runs/<legacy>/env_access.json) \\
+           <(jq -S .by_name runs/<thin>/env_access.json)``
+    """
+    from recon_gen.common.env_keys import dump_env_access  # noqa: PLC0415
+
+    run_dir = out_path.parent
+    by_source: dict[str, dict[str, dict[str, int]]] = {}
+
+    def _accumulate(target: dict[str, dict[str, int]], pairs: list[Any]) -> None:  # typing-smell: ignore[explicit-any]: pairs are (name, op) tuples decoded from JSON arrays — Any is the JSON-decode shape, validated at use
+        for entry in pairs:
+            name, op = entry[0], entry[1]
+            bucket = target.setdefault(
+                name, {"read_hit": 0, "read_miss": 0, "write": 0},
+            )
+            bucket[op] = bucket.get(op, 0) + 1
+
+    # 1. Runner-process accesses.
+    runner_events = dump_env_access()
+    runner_summary: dict[str, dict[str, int]] = {}
+    _accumulate(runner_summary, [list(e) for e in runner_events])
+    if runner_summary:
+        by_source["runner"] = runner_summary
+
+    # 2. Subprocess pytest accesses — walk each layer's env_log/ dir.
+    for env_log_dir in sorted(run_dir.glob("**/env_log")):
+        layer = env_log_dir.parent.name
+        layer_summary: dict[str, dict[str, int]] = {}
+        for log_file in sorted(env_log_dir.glob("pytest-*.json")):
+            try:
+                doc = json.loads(log_file.read_text())
+                _accumulate(layer_summary, doc.get("events", []))
+            except (OSError, json.JSONDecodeError):
+                continue
+        if layer_summary:
+            by_source[f"pytest:{layer}"] = layer_summary
+
+    # Cross-source roll-up.
+    by_name: dict[str, dict[str, int]] = {}
+    for source_summary in by_source.values():
+        for name, counts in source_summary.items():
+            bucket = by_name.setdefault(
+                name, {"read_hit": 0, "read_miss": 0, "write": 0},
+            )
+            for op, n in counts.items():
+                bucket[op] = bucket.get(op, 0) + n
+
+    payload = {"by_name": by_name, "by_source": by_source}
+    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    total_accesses = sum(
+        n for bucket in by_name.values() for n in bucket.values()
+    )
+    print(
+        f"runner: wrote {_rel_or_abs(out_path)} "
+        f"({len(by_name)} env keys across {len(by_source)} sources, "
+        f"{total_accesses} accesses)",
+    )
+
+
 def _finalize_run(
     run_dir: Path,
     unit_result: LayerResult,
@@ -3063,6 +3158,10 @@ def _finalize_run(
     ]
     collect_run_outputs(run_dir, top_level)
     print(f"runner: wrote {_rel_or_abs(run_dir / 'timings.json')}")
+    # CB.17.d strangler verification — dump the EnvVar access log so
+    # the legacy + thin paths can be diff'd. Both runner entries write
+    # to the same `env_access.json` shape; comparison happens offline.
+    _dump_env_access(run_dir / "env_access.json")
     report_drift(run_dir)
     pruned = prune_old_runs()
     if pruned:

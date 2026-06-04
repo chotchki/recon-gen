@@ -30,6 +30,7 @@ from recon_gen.common.env_keys import (
     RECON_GEN_RUN_DIR,
     RECON_GEN_SQLITE_LEAK_GATE,
     RECON_GEN_TEST_L2_INSTANCE,
+    dump_env_access,
 )
 
 
@@ -102,6 +103,45 @@ def pytest_configure(config: Any) -> None:
     # scope alongside `pytest_collection_modifyitems` further down.
     for _mark_name, _mark_doc in _CB_MARK_DOCS.items():
         config.addinivalue_line("markers", f"{_mark_name}: {_mark_doc}")
+
+
+# CB.17.d — strangler-pattern env access aggregation.
+#
+# Every pytest sub-process writes its EnvVar access log to a unique
+# JSON file in the directory named by ``RECON_GEN_ENV_LOG_DIR`` (when
+# that env is set). The runner sets the env per subprocess and
+# aggregates after all complete. Filename includes PID + a random
+# suffix so concurrent xdist workers don't collide.
+#
+# When the env is unset, the hook is a no-op (so bare ``pytest`` runs
+# don't drop debris everywhere).
+
+def pytest_sessionfinish(session: Any, exitstatus: int) -> None:  # typing-smell: ignore[explicit-any]: pytest.Session is late-imported (test conftest avoids src/ pulls at module scope) — same pattern as `pytest_runtest_setup` above
+    """Write this pytest process's EnvVar access log to disk if requested.
+
+    The runner sets ``RECON_GEN_ENV_LOG_DIR`` per subprocess; absent
+    that env, this hook is a no-op (we don't want bare ``pytest``
+    invocations to leave files everywhere).
+    """
+    from recon_gen.common.env_keys import RECON_GEN_ENV_LOG_DIR  # noqa: PLC0415 — lazy
+    del session, exitstatus  # unused
+    log_dir_raw = RECON_GEN_ENV_LOG_DIR.get_or_none()
+    if not log_dir_raw:
+        return
+    log_dir = Path(log_dir_raw)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    events = dump_env_access()
+    summary: dict[str, dict[str, int]] = {}
+    for name, op in events:
+        bucket = summary.setdefault(
+            name, {"read_hit": 0, "read_miss": 0, "write": 0},
+        )
+        bucket[op] = bucket.get(op, 0) + 1
+    # PID + 12-char random suffix → unique per worker even under
+    # heavy xdist parallelism + identical PID reuse across runs.
+    fname = f"pytest-{os.getpid()}-{secrets.token_hex(6)}.json"
+    payload = {"by_name": summary, "events": events, "pid": os.getpid()}
+    (log_dir / fname).write_text(json.dumps(payload, indent=2, sort_keys=True))
 
 
 # ---------------------------------------------------------------------------
