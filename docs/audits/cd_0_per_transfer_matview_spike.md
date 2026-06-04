@@ -86,7 +86,31 @@ Shape B equivalence also verified (63 / 63 rows match).
 
 Option C costs ~22ms vs Option A on Shape A (extra downstream GROUP BY) but is byte-equivalent to baseline. Matview is only 300 rows larger (~0.4%) — multi-day transfers are rare in this seed. Net CI estimate: ~20-25 s/run saved (slightly less than Option A's 27s, but no behavior change).
 
-**Going with Option C for CD.1.**
+### Option C scaling — does multi-day spread break it?
+
+Synthetic perf curve: rebuild Option C matview with N copies of the data, each offset by N×5 days, to simulate every transfer spanning N×5-day windows. Same query measured.
+
+| Matview rows | Query time | vs baseline (~200ms) |
+|---:|---:|---|
+| 67k (1× — current) | 69 ms | **2.9× faster** |
+| 135k (2×) | 135 ms | 1.5× faster |
+| 202k (3×) | 200 ms | **break-even** |
+| 337k (5×) | 320 ms | 1.6× slower |
+| 674k (10×) | 530 ms | 2.6× slower |
+| 1.35M (20×) | 670 ms | 3.4× slower |
+
+Roughly linear up to ~5× (PG hash-agg in memory), then super-linear (spill). **Crossover with baseline at ~3× matview size**, which corresponds to an average transfer spanning ~3 days when all transfers are multi-day. For sasquatch_pr (0.4% multi-day today) Option C wins by 2.9×.
+
+**Practical risk by customer profile:**
+- Retail (ACH / card / wire same-day-settle): Option C wins big.
+- Wholesale / treasury (FX, large batch wires): could approach or exceed crossover.
+
+**Mitigations available:**
+1. Deploy-time probe: warn if `avg_transfer_day_span > 2` ("matview perf may not exceed CTE — consider per-customer override")
+2. Opt-in via L2 yaml flag (`executives.use_per_transfer_matview: bool`)
+3. Keep both shapes wired and pick at emit time based on measured spread
+
+**Going with Option C for CD.1 + mitigation #1 (deploy-time probe).** Demo and typical retail workloads are safely below the crossover; the probe gives an early signal for outlier customers.
 
 ## Spike infrastructure (cleanup)
 
