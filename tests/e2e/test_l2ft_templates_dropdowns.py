@@ -55,10 +55,16 @@ def test_templates_dropdown_narrows_does_not_empty(
     (Complete / Imbalanced / Orphaned) — must leave the Template
     Instances table with > 0 rows when picked alone.
 
-    Strict (``require_all_advertised`` default ``True``): spec_example's
-    pair of templates is designed to exercise every Completion outcome
-    (X.2.u.3.fix.demo). A value that empties the table is a regression —
-    stale enum, missing plants, or a pushdown break."""
+    ``Template``: strict (require_all_advertised=True). Each declared
+    template name must have ≥1 instance — a missing one is a stale enum,
+    missing plants, or pushdown break.
+
+    ``Completion``: relaxed (require_all_advertised=False). The enum is
+    universal-outcome (Complete / Imbalanced / Orphaned) — not every
+    deployed L2 will have plants in every outcome (e.g. sasquatch_pr's
+    seed may lack Complete/Orphaned instances; CB.17.c1). The relaxed
+    mode asserts ≥1 advertised value keeps the table non-empty, which
+    is sufficient to prove the binding works at all."""
     driver, dashboard_arg = l2ft_dashboard_driver
     driver.open(dashboard_arg, sheet=_TRANSFER_TEMPLATES_NAME)
     walk_dropdown(
@@ -66,4 +72,5 @@ def test_templates_dropdown_narrows_does_not_empty(
         sheet_label=_TRANSFER_TEMPLATES_NAME,
         dropdown_title=dropdown_title,
         table_title="Template Instances",
+        require_all_advertised=(dropdown_title != "Completion"),
     )
