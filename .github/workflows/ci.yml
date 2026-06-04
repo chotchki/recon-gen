@@ -112,35 +112,46 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
-      - name: Start shared PG + Oracle (post CB.17 — single substrate, no cells)
-        # The runner runs ONE pytest invocation per layer against this
-        # shared PG + Oracle pair. The env-URL short-circuit
-        # (`RECON_GEN_DEMO_DATABASE_URL_PG` / `_OR` on the test step
-        # below) tells the runner's `_start_thin_container` not to
-        # bring its own container — same shape as the lazy pg_container_url
-        # / oracle_container_url pytest session fixtures.
-        #
-        # Postgres bound to host 5432 (PG default). Oracle bound to
-        # host 1521 (Oracle default), using the locally-built
-        # `recon-gen/oracle-19c:local` image with FREEPDB1 PDB +
-        # alphanumeric password matching the runner's
-        # `ORACLE_REUSE_PASSWORD`.
+      - name: Ensure shared PG + Oracle are up (reuse persistent containers when present)
+        # The WSL2 self-hosted runner keeps PG (5432) + Oracle (1521)
+        # containers running across CI invocations to amortize Oracle's
+        # ~3 min cold-start. If they're already up — skip the start +
+        # record `STARTED_BY_CI=false` so the teardown step knows not
+        # to touch them. If they're not up — fall back to a fresh
+        # `docker run` and record `STARTED_BY_CI=true`. Same env-URL
+        # contract either way; the env vars on the test step below
+        # point the runner at `127.0.0.1:{5432,1521}` and the env-URL
+        # short-circuit in `_start_thin_container` does the rest.
+        id: ensure_dbs
         run: |
-          docker run -d --name ci-shared-pg \
-            -e POSTGRES_PASSWORD=postgres \
-            -p 5432:5432 \
-            postgres:17-alpine
-          docker run -d --name ci-shared-oracle \
-            -e ORACLE_PWD=qsgentestpwd2026 \
-            -e ORACLE_PDB=FREEPDB1 \
-            -p 1521:1521 \
-            recon-gen/oracle-19c:local
-          # Wait for both to accept connections.
-          echo "Waiting for shared PG..."
-          timeout 60 bash -c 'until docker exec ci-shared-pg pg_isready -U postgres -q; do sleep 2; done'
-          echo "Waiting for shared Oracle (pre-init'd image, ~15-30s)..."
-          timeout 180 bash -c 'until docker logs ci-shared-oracle 2>&1 | grep -q "DATABASE IS READY TO USE"; do sleep 3; done'
-          echo "Shared DBs ready."
+          STARTED_PG=false
+          STARTED_OR=false
+          if nc -z 127.0.0.1 5432 2>/dev/null; then
+            echo "Shared PG already listening on 127.0.0.1:5432 — reusing."
+          else
+            docker run -d --name ci-shared-pg \
+              -e POSTGRES_PASSWORD=postgres \
+              -p 5432:5432 \
+              postgres:17-alpine
+            STARTED_PG=true
+            echo "Waiting for fresh PG..."
+            timeout 60 bash -c 'until docker exec ci-shared-pg pg_isready -U postgres -q; do sleep 2; done'
+          fi
+          if nc -z 127.0.0.1 1521 2>/dev/null; then
+            echo "Shared Oracle already listening on 127.0.0.1:1521 — reusing."
+          else
+            docker run -d --name ci-shared-oracle \
+              -e ORACLE_PWD=qsgentestpwd2026 \
+              -e ORACLE_PDB=FREEPDB1 \
+              -p 1521:1521 \
+              recon-gen/oracle-19c:local
+            STARTED_OR=true
+            echo "Waiting for fresh Oracle (pre-init'd image, ~15-30s)..."
+            timeout 180 bash -c 'until docker logs ci-shared-oracle 2>&1 | grep -q "DATABASE IS READY TO USE"; do sleep 3; done'
+          fi
+          echo "started_pg=${STARTED_PG}" >> "$GITHUB_OUTPUT"
+          echo "started_or=${STARTED_OR}" >> "$GITHUB_OUTPUT"
+          echo "Shared DBs ready (CI-started: PG=${STARTED_PG} OR=${STARTED_OR})."
 
       - name: Materialize per-dialect runner cfgs (one cfg per dialect)
         # CB.17.f: dropped the `.qs.yaml` siblings. Post CB.17.d the
@@ -258,14 +269,20 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
-      - name: Stop shared PG + Oracle containers
-        # CB.14 followup — teardown for the shared containers from the
-        # top of the job. Runs `if: always()` so the cleanup still fires
-        # on test failure / runner cancellation.
+      - name: Stop shared PG + Oracle containers (only if this run started them)
+        # Teardown is conditional on the `ensure_dbs` step's outputs —
+        # if CI reused persistent containers, leave them running for
+        # the next run; if CI brought fresh ones up, tear them down.
         if: always()
         run: |
-          docker stop ci-shared-pg ci-shared-oracle 2>/dev/null || true
-          docker rm ci-shared-pg ci-shared-oracle 2>/dev/null || true
+          if [ "${{ steps.ensure_dbs.outputs.started_pg }}" = "true" ]; then
+            docker stop ci-shared-pg 2>/dev/null || true
+            docker rm ci-shared-pg 2>/dev/null || true
+          fi
+          if [ "${{ steps.ensure_dbs.outputs.started_or }}" = "true" ]; then
+            docker stop ci-shared-oracle 2>/dev/null || true
+            docker rm ci-shared-oracle 2>/dev/null || true
+          fi
 
       - name: Sweep deployed QS resources (always)
         # Belt-and-suspenders: even though the runner's per-cell teardown
