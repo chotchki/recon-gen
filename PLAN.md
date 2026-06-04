@@ -335,6 +335,26 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [x] CE.3 - CE.3 — Per-test setup calls `trainer_reset_overlay()` (cheap reclone) instead of `trainer_start_session()` + drops dead `isolated_studio_cfg` fixture
 - [ ] CE.4 - CE.4 — Unpin `RECON_GEN_TRAINER_DIALECTS=du` in `.github/workflows/ci.yml`; measure CI wall-clock delta; if green, sweep CB.17.m mitigation comment
 
+## Phase CF - v12 + v13.1.1 cold-read defects (carryover + DuckDB regressions)
+
+**Why:** Two cold-read reports, both unaddressed end-to-end. v12 (`docs/audits/v12_0_0_feedback.md`, 6 judges against sqlite v12.0.2) flagged 4 HIGH (U1-U4) + 8 MED (U5-U12) + 2 LOW (U13-U14). v13.1.1 (`docs/audits/v13_1_1_feedback.md`, 6 judges against DuckDB v13.1.1 / ~300k tx) confirms the CA DuckDB swap shipped a decisive operational win — U1 (App Info clock), U9 (drift KPI cross-sheet agreement), U12 (Session Start sqlite hang) all fixed; statements tie to the penny; the 60s sqlite sheet renders instantly. BUT most v12 UX HIGHs (U2 exec health rollup, U3 `limit_breach_outbound` plant no-op, U4 Apply status contradicting itself) and most v12 MEDs (U6 L2 hairball, U7 editor scroll-walls, U8 Templates Sankey, U10 blank-state sheets) are still open, AND a HIGH regression landed: `drift` plant joins `limit_breach_outbound` in failing-to-plant on DuckDB. Apply reports "2 plant(s) failed: drift, limit_breach_outbound" with byte-identical clean vs violation dashboards.
+
+**Approach:** Fix the plant regression first (CF.0) since it blocks re-verification of drift-magnitude items. Then sweep the trust-killer HIGHs (CF.1-CF.2). Then polish MEDs (CF.3-CF.6) and minor sweep (CF.7). Re-probe v12's unconfirmed items (U5 plant magnitude scaling, U11 drift→leg drill) during CF.7 since v13.1.1 didn't explicitly evaluate them.
+
+**Done when:** All 6 training plants pass on DuckDB; Apply status banner reflects per-plant truth; exec app has a program-health rollup tile w/ threshold banding; L2 diagram has entity-focus mode + self-loops-off default; editor entity-list pages have search/sort/filter; Templates Sankey is legible at realistic counts; blank-landing sheets prompt for the required picker; minor copy + caption fixes shipped; v13.2.0 cold-read confirms with a clean diff (or surfaces a tight CG followup).
+
+**Artifacts:** `docs/audits/v12_0_0_feedback.md` + `docs/audits/v13_1_1_feedback.md` (cold-read sources).
+
+- [ ] CF.0 - CF.0 — DuckDB plant regression: `drift` + `limit_breach_outbound` no-op (HIGH; covers v12 U3 + v13.1.1 NEW; Apply reports "2 plant(s) failed" with md5-equal clean/violation dashboards — blocks CF.1-CF.7 re-verification)
+- [ ] CF.1 - CF.1 — Apply status reflects per-plant truth (HIGH; v12 U4; stop stacking green "Apply done." over red "N plant(s) failed"; reconcile global vs per-section enabled counters)
+- [ ] CF.2 - CF.2 — Exec app program-health rollup tile (HIGH; v12 U2; needs rolled-up open-exception count + breach/drift signals w/ threshold banding + deep-link drill to exception sheets — exec users currently conclude the program is clean when it isn't)
+- [ ] CF.3 - CF.3 — L2 diagram readability (MED; v12 U6; entity-focus/neighborhood mode; self-loops off by default; tame ~91-node/108-edge hairball; explain the grey supernode aggregates)
+- [ ] CF.4 - CF.4 — Editor entity-list search/sort/filter (MED; v12 U7; rail list is ~40,000px scroll wall — add search/sort/virtualization/collapse-by-default)
+- [ ] CF.5 - CF.5 — Transfer-Templates Sankey legibility (MED; v12 U8; default view admits 11 cyclic edges — filtering/highlight-on-hover or layout swap above N flows)
+- [ ] CF.6 - CF.6 — Empty-state prompts on picker-driven sheets (MED; v12 U10; statement / money-trail / account-network land blank — render "Select an account to begin" instead of bare canvas)
+- [ ] CF.7 - CF.7 — Minor sweep + v12-leftover probes: ETL "5-step checklist" ↔ "Three steps" copy mismatch (v13.1.1 NEW); App-Info matview-staleness + business-day-rollup caption (v13.1.1 partial residual); "Net ≈ zero" numeric tolerance band (v12 U14 partial); re-probe U5 plant magnitude scaling + U11 drift→leg drill (v12 items v13.1.1 didn't evaluate)
+- [ ] CF.8 - CF.8 — Cut v13.2.0 + re-cold-read (same 6-persona shape; sweep CF to PLAN_ARCHIVE on clean diff or file a tight CG followup for any residual)
+
 ## Phase PLAN - Phase PLAN
 - [ ] PLAN.md - BS.5 — _v_config_chain_children + 7-path conversion
 
