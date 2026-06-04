@@ -370,6 +370,7 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
   - [x] CB.17.a - CB.17.a — Wire pg_container + oracle_container session fixtures
   - [x] CB.17.b - CB.17.b — Top-level cfg fixture sources from container fixtures
   - [x] CB.17.c - CB.17.c — Confirm isolated_cfg worker-suffix covers QS resources end-to-end
+  - [ ] CB.17.c1 - CB.17.c1 — fix 5 browser-layer [app2] failures surfaced by thin qs_browser
   - [ ] CB.17.d - CB.17.d — Delete the cell loop
   - [ ] CB.17.e - CB.17.e — Rewrite run_tests.sh as a thin pytest alias
   - [ ] CB.17.f - CB.17.f — Collapse ci.yml
@@ -535,3 +536,4 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - **CA.12 — PG pyarrow adapter via adbc-driver-postgresql** — deferred from CA.12 on 2026-06-02. **Why deferred**: Docker-PG probe @ 131k rows showed `psycopg.cursor.copy()` (the right tool here, not adbc) is only 1.95× faster than the existing `cur.execute(big_seed_text)` path (20.89s → 10.69s). PG was never a Python-bound bottleneck the way DuckDB was — psycopg streams big multi-statement INSERTs efficiently and PG's batch planner handles them well. **Revisit if** we step in a PG-perf problem at full prod scale (the COPY-vs-INSERT curve might widen above ~5× as N grows + indexes deepen), or if a user-facing flow (CB.10 QS-against-Docker-PG iteration, a CI seed-apply slowdown) makes the 2× materially valuable. Implementation if revisited: psycopg3 `cursor.copy()`, NOT adbc-driver-postgresql — psycopg is already a core dep and handles type coercion automatically.
 - **CA.8 — Nuke Dialect.SQLITE and all SQLite-specific arms** — deferred from CA.8 on 2026-06-02.
 - **BX backlog — anomaly/money_trail app2 tests fail on sasquatch_pr L2 (no CustomerSubledger sender)** — added 2026-06-04.
+- **App2 KPI binding gap — Distinct Senders + per-account KPI cards render as None** — added 2026-06-04.
