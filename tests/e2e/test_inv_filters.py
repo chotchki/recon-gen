@@ -310,10 +310,14 @@ def test_bg4_recipient_fanout_kpis_match_inflows_only_truth(
         f"distinct(recipient_account_id) = {len(qualifying_recipients)}"
     )
 
-    # (2) Distinct Senders — same shape.
-    rendered_senders = parse_int_kpi(driver.kpi_value("Distinct Senders"))
+    # (2) Distinct Senders (Union) — same shape. Title carries "(Union)"
+    # post-BO.7 (#75) to disambiguate from the per-recipient "Senders
+    # Feeding This Recipient" table column. CB.17.c1 surfaced this
+    # test-vs-source drift via thin qs_browser (sasquatch_pr has fanout
+    # data; spec_example was sparse → test skipped → drift unnoticed).
+    rendered_senders = parse_int_kpi(driver.kpi_value("Distinct Senders (Union)"))
     assert rendered_senders == len(senders), (
-        f"Distinct Senders KPI: rendered {rendered_senders} ≠ "
+        f"Distinct Senders (Union) KPI: rendered {rendered_senders} ≠ "
         f"distinct(sender_account_id) = {len(senders)}"
     )
 
