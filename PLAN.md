@@ -500,3 +500,4 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - **BX backlog — Oracle container fixture: share one container across xdist workers** — added 2026-06-04.
 - **Backlog — `per_transfer` CTE is a matview candidate (dominates PG top-queries)** — added 2026-06-04.
 - **BX backlog — randomize container passwords (drop static defaults)** — added 2026-06-04.
+- **BX backlog — Trainer dogfood [pg]/[or] times out under 16-worker xdist on shared containers** — added 2026-06-04.
