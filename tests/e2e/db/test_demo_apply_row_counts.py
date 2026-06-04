@@ -14,31 +14,24 @@ when ``demo apply --anchor`` makes the counts deterministic across runs.
 Each suffix is its own parametrized test so a single failure pinpoints
 which matview is empty. Cfg-driven dialect dispatch via
 ``connect_demo_db`` so the same test runs against PG / Oracle / SQLite.
+
+CB.17.d (2026-06-04) — migrated from module-import ``_CFG = _load_cfg()``
+to the ``seeded_cfg`` fixture, which wraps ``isolated_cfg`` with
+``apply_db_seed`` and yields a per-(module, worker) seeded prefix.
+Each xdist worker has its own prefix; the schema-drop in
+``isolated_cfg``'s teardown handles cleanup.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Iterator
 
 import pytest
 
-from recon_gen.common.l2 import default_l2_instance
-from recon_gen.common.config import Config, load_config
+from recon_gen.common.config import Config
 from recon_gen.common.db import connect_demo_db
-from recon_gen.common.env_keys import (
-    EnvVarInvalid,
-    RECON_GEN_CONFIG,
-    RECON_GEN_E2E,
-    RECON_GEN_TEST_L2_INSTANCE,
-)
-from recon_gen.common.l2 import L2Instance, load_instance
+from recon_gen.common.env_keys import RECON_GEN_E2E
 
-# Module-level cfg+L2 load (below) needs a live cfg yaml or env overrides;
-# under the unit-only CI job neither exists, and load_config(None) raises
-# the loud-fail ValueError, taking down pytest collection. Match the rest
-# of the e2e suite's RECON_GEN_E2E gate at import time so collection
-# cleanly skips this whole module when e2e is off.
 if not RECON_GEN_E2E.get_or_none():
     pytest.skip(
         "e2e tests disabled (set RECON_GEN_E2E=1)", allow_module_level=True,
@@ -56,44 +49,9 @@ _SMOKE_SUFFIXES = (
 )
 
 
-def _load_cfg() -> Config:
-    """Same cfg-resolution pattern as ``test_dataset_sql_smoke.py``."""
-    try:
-        explicit = RECON_GEN_CONFIG.get_or_none()
-    except EnvVarInvalid:
-        explicit = None
-    if explicit is not None:
-        return load_config(str(explicit))
-    candidates = (
-        Path("config.yaml"),
-        Path("run/config.yaml"),
-        Path("run/config.postgres.yaml"),
-        Path("run/config.oracle.yaml"),
-    )
-    for candidate in candidates:
-        if candidate.exists():
-            return load_config(str(candidate))
-    return load_config(None)
-
-
-def _load_l2() -> L2Instance:
-    override = RECON_GEN_TEST_L2_INSTANCE.get_or_none()
-    if override is not None:
-        return load_instance(override)
-    return default_l2_instance()
-
-
-_CFG = _load_cfg()
-_L2 = _load_l2()
-# Z.C — db_table_prefix is a required cfg field; the operator's cfg.yaml
-# carries the prefix that matches the seeded DB. (Was previously derived
-# from cfg.l2_instance_prefix or l2_instance.instance, both gone.)
-_PREFIX = _CFG.db_table_prefix
-
-
 @pytest.fixture(scope="module")
-def smoke_conn() -> Iterator[Any]:
-    conn = connect_demo_db(_CFG)
+def smoke_conn(seeded_cfg: Config) -> Iterator[Any]:
+    conn = connect_demo_db(seeded_cfg)
     try:
         yield conn
     finally:
@@ -101,14 +59,16 @@ def smoke_conn() -> Iterator[Any]:
 
 
 @pytest.mark.parametrize("suffix", _SMOKE_SUFFIXES)
-def test_matview_has_at_least_one_row(suffix: str, smoke_conn: Any) -> None:
+def test_matview_has_at_least_one_row(
+    suffix: str, smoke_conn: Any, seeded_cfg: Config,
+) -> None:
     """The named matview exists + carries at least one seeded row.
 
     Failure here = ``data apply`` / ``data refresh`` did not populate
     this matview against the live DB. Either the seed flow skipped the
     scenario, or the matview's source query produced zero rows.
     """
-    table = f"{_PREFIX}_{suffix}"
+    table = f"{seeded_cfg.db_table_prefix}_{suffix}"
     cur = smoke_conn.cursor()
     try:
         try:

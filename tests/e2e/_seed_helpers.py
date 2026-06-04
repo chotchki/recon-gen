@@ -4,15 +4,22 @@ Lifted from ``tests/e2e/_harness_seed.py`` (Y.2.gate.f.9) so the
 non-harness e2e tests that still need a per-test schema+seed+refresh
 flow have it at a stable location after the layer-8 harness drop.
 
-Currently the only consumer is ``test_audit_dashboard_agreement.py``.
+Consumers:
+- ``test_audit_dashboard_agreement.py`` (direct ``apply_db_seed`` call)
+- ``seeded_cfg`` fixture (CB.17.d) — wraps ``isolated_cfg`` with full
+  schema + data + refresh on setup, drops on teardown.
+
 ``build_planted_manifest`` did NOT lift — it was harness-specific
 (walked plants for the harness's per-test triage manifest).
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import date
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+import pytest
 
 from recon_gen.common.db import execute_script
 from recon_gen.common.intervals import DateInterval
@@ -34,6 +41,9 @@ from recon_gen.common.l2.seed import (
 )
 from recon_gen.common.as_of_frame import LOCKED_ANCHOR
 from recon_gen.common.sql import Dialect
+
+if TYPE_CHECKING:
+    from recon_gen.common.config import Config
 
 
 # BD.6 — `DEFAULT_SEED_TODAY` retired (was `date(2030, 1, 1)` — same value
@@ -210,3 +220,42 @@ def apply_db_seed(
     conn.commit()
 
     return scenario
+
+
+@pytest.fixture(scope="module")
+def seeded_cfg(isolated_cfg: "Config") -> Iterator["Config"]:
+    """CB.17.d — ``isolated_cfg`` + full schema+data+matview-refresh.
+
+    Setup applies the same shape as ``recon-gen schema apply`` →
+    ``recon-gen data apply --execute`` → ``recon-gen data refresh``
+    (via ``apply_db_seed`` with ``include_baseline=True``) against the
+    per-(module, worker) ``isolated_cfg``'s prefix. Each pytest-xdist
+    worker writes to its own prefix; no cross-worker coordination
+    needed (the per-worker hash in ``_isolated_cfg_key`` keeps writes
+    disjoint).
+
+    Yields the same ``isolated_cfg``. Cleanup happens automatically
+    via ``isolated_cfg``'s own teardown which drops the per-suffix
+    schema (``tests/e2e/_isolation.py``).
+
+    Replaces the runner-side ``_seed_thin_container`` step for tests
+    that have lazy cfg loading (drives the CB.17.d strangler endgame).
+    """
+    from recon_gen.common.db import connect_demo_db  # noqa: PLC0415
+    from recon_gen.common.l2 import default_l2_instance  # noqa: PLC0415
+
+    instance = default_l2_instance()
+    conn = connect_demo_db(isolated_cfg)
+    try:
+        apply_db_seed(
+            conn,
+            instance,
+            prefix=isolated_cfg.db_table_prefix,
+            mode="l1_plus_broad",
+            dialect=isolated_cfg.dialect,
+            include_baseline=True,
+        )
+    finally:
+        conn.close()
+
+    yield isolated_cfg

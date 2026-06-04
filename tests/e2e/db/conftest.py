@@ -41,11 +41,12 @@ from tests.e2e._isolation import (  # noqa: F401 — re-export so pytest discove
     enforce_readonly,
     isolated_cfg,
 )
+from tests.e2e._seed_helpers import seeded_cfg  # noqa: F401 — re-export so pytest discovers the seeded_cfg fixture
 from tests.e2e.conftest import _load_session_cfg, _substitute_container_url
 
 __all__ = [
     "_isolate_cfg", "_isolated_cfg_key", "db_conn", "enforce_readonly",
-    "isolated_cfg",
+    "isolated_cfg", "seeded_cfg",
 ]
 
 
