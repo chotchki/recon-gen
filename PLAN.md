@@ -504,3 +504,4 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - **BX backlog — asyncio executor not joining within 300s (thread leak signal)** — added 2026-06-04.
 - **BX backlog — Oracle container fixture: share one container across xdist workers** — added 2026-06-04.
 - **BX backlog — Trainer dogfood [pg]/[or] times out under 16-worker xdist on shared containers** — added 2026-06-04.
+- **BX backlog — Trainer Session Start hangs through browser→studio_server on CI's shared PG/Oracle (CE.4 retreat)** — added 2026-06-04.

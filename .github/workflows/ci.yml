@@ -280,17 +280,20 @@ jobs:
           # RECON_GEN_RUNNER_YES bypasses the destructive-op prompt;
           # the runner needs it in non-interactive CI.
           RECON_GEN_RUNNER_YES: "1"
-          # CE.4 (2026-06-04) — unpinned `RECON_GEN_TRAINER_DIALECTS`,
-          # restoring the full [du, pg, or] fan-out. Pre-CE the per-
-          # test `trainer_start_session()` re-ran `/etl/run` (~10 min
-          # Oracle / ~30s PG) on every test, blowing the 600s
-          # `_trainer_wait_until_finished` wire under 16-xdist
-          # contention. CE.2's session-scope `trainer_ready_session`
-          # fixture moves Session Start to once per (worker, dialect);
-          # CE.3 swaps per-test setup to the cheap `/training/reclone`
-          # path. PG: 33s once + ~13s/test (CE.0 measured); Oracle:
-          # ~10min once + ~1-2min/test extrapolated — all comfortably
-          # under the wire.
+          # CE.4-followup-4 (2026-06-04) — re-pin to DuckDB. CE.4 was
+          # the unpin; CE.4-followups #1-#3 fixed Oracle password
+          # length (ORA-00972 from 32-char quoted-identifier limit) +
+          # account-unlock (ORA-28000 from accumulated failed logins) +
+          # xdist_group cross-worker contention. But Session Start on
+          # the CI's shared persistent PG/Oracle containers STILL hangs
+          # at the browser→HTTP→studio_server stack — 14 trainer tests
+          # erred with Page.wait_for_function: Timeout 600000ms, same
+          # symptom 3 CI cycles running, despite CE.0 measuring 33s on
+          # a fresh local PG container via direct Python. The bug
+          # reproduces in CI but not locally and we can't trace why
+          # from log-only triage. Re-pin to DuckDB; file as backlog;
+          # CF cold-read defects have higher leverage.
+          RECON_GEN_TRAINER_DIALECTS: "du"
         # CB.17.h — wrap the chain in /usr/bin/time -v so the WSL2
         # runner records peak RSS (Maximum resident set size). The
         # value lands at the end of the step log and (via the
