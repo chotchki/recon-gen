@@ -402,6 +402,65 @@ infrastructure — it shipped CB.15's hard parts already.
 - **BX [#184](../../PLAN.md) coverage merge doesn't render in PR comments** — stop fighting pytest-cov.
 - **CB.16 (typing honesty)** lands independently — the fixture migration doesn't touch `connect_demo_db`'s return type.
 
+## CB.17.f + g + h completion (2026-06-04)
+
+- **CB.17.f — ci.yml collapse.** Dropped the two `.qs.yaml` sibling
+  cfg files (the runner now generates its own QS-side cfg per-run via
+  `_write_qs_cfg_for_thin`). Added `RECON_GEN_DEMO_DATABASE_URL_PG` /
+  `_OR` env on the test step so the runner's env-URL short-circuit
+  (added in the same commit) skips its own testcontainer spin and
+  uses CI's shared PG + Oracle directly. `_start_thin_container`'s
+  env-URL short-circuit is the missing CB.17.d homework (called out
+  in the strangler log) — landed here so CI's shared-container step
+  isn't fighting the runner's container.
+- **CB.17.g — coverage path cleanup.** Per-layer `.coverage.<layer>`
+  files now land at cwd (REPO_ROOT) instead of
+  `runs/<id>/.coverage.<run-id>.<layer>`. Dropped the
+  `find runs -name '.coverage.*' | xargs cp .` staging step in CI.
+  Runs artifact upload stays unchanged (the runs/ tree is operator
+  triage parity; coverage data is a sibling concern). Resolves BX
+  [#184](../../PLAN.md) "Coverage combine job: merge doesn't render."
+- **CB.17.h — RSS instrumentation in CI.** Wrapped the chain in
+  `/usr/bin/time -v` writing to `runs/peak-rss-time.log`. The peak
+  RSS value goes to the step log and the runs/ artifact. Verifying
+  the post-CB.15 OOM is gone happens at first WSL2 CI run — there's
+  no local action that can substitute for it.
+
+## CB.17.e completion (2026-06-04)
+
+- `run_tests.sh` rewritten as the thin operator entry: 47 lines, all
+  forwarding. `up_to=unit` has a direct-pytest fast path (no
+  orchestration). `up_to={db,app2,deploy,qs_api,qs_browser}` and
+  operational verbs (`sweep`, `up`, `down`, `status`, `pyright`,
+  `dump-last-errors`) forward to `recon_gen._dev.runner` which post
+  CB.17.d runs ONE pytest invocation per layer — the "thin pytest
+  alias" the design called for, even though the orchestration that
+  *prepares* each pytest invocation (container pre-spin, QS-side cfg
+  materialization, plain-prefix seeding, per-layer env routing) stays
+  in Python.
+- `tests/conftest.py::_derive_env_from_cfg` is the new cfg→env hook:
+  promotes `cfg.auth.aws_profile` → `AWS_PROFILE`,
+  `cfg.default_l2_instance` → `RECON_GEN_TEST_L2_INSTANCE`, resolved
+  cfg path → `RECON_GEN_CONFIG`. Bare `pytest` runs (no runner
+  wrapper) now get the same env injection the runner injects, so
+  developers iterating one test file at a time don't have to remember
+  to set `AWS_PROFILE`.
+- Why the bash script didn't absorb the Python orchestration: the
+  remaining Python work isn't "things conftest fixtures can't do" —
+  it's "things conftest fixtures can't do FOR SUBPROCESS-SHELLING
+  TESTS" (e.g. `test_audit_pdf_render_verify` shells
+  `recon-gen audit apply`; the subprocess needs
+  `RECON_GEN_DEMO_DATABASE_URL` in its own env, not just the parent
+  pytest's). The runner sets it before forking pytest; conftest
+  fixtures would have to monkey-patch `os.environ` at session start
+  to match, which is fine in principle but the runner already does it
+  correctly. Migrating those tests to never shell subprocesses (or to
+  pass the URL explicitly) is post-CB cleanup.
+- LOC delta: `run_tests.sh` 35 → 47 (+12, the comment block doing
+  most of the growth). `runner.py` unchanged. `tests/conftest.py`
+  +60. The structural win was CB.17.d's 5391-LOC deletion; CB.17.e is
+  the polish.
+
 ## CB.17.d strangler — progress log v3 (2026-06-04, late, db-tier green)
 
 **Thin db: 89 passed, 19 skipped, 21.78s. Zero failures.** Legacy

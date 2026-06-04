@@ -1,11 +1,17 @@
-# CI — collapsed onto a single self-hosted runner (CB.11.c, 2026-06-02).
+# CI — collapsed onto a single self-hosted runner (CB.11.c, 2026-06-02;
+# further collapsed CB.17.f, 2026-06-04).
 #
 # The pre-CB.11.c shape had six top-level jobs plus a sibling `e2e.yml`
 # workflow with another four. With the self-hosted recon-gen-ci-local
 # box online and `./run_tests.sh up_to=qs_browser` driving every layer
 # (unit → db → app2 → deploy → qs_api → qs_browser) under one roof —
-# Docker per-cell, AWS QuickSight deploys, Playwright WebKit, teardown —
-# the matrix can collapse onto one self-hosted job.
+# Docker, AWS QuickSight deploys, Playwright WebKit, teardown — the
+# matrix collapses onto one self-hosted job. Post CB.17.d there is no
+# cell loop: the runner runs ONE pytest invocation per layer; the
+# shared PG + Oracle containers below are the substrate for every
+# layer above unit; the CB.17.f env-URL short-circuit
+# (`RECON_GEN_DEMO_DATABASE_URL_PG` / `_OR`) tells the runner not to
+# re-spin its own container on top of CI's.
 #
 # What stays out:
 # - `e2e.yml` is deleted (the layered runner does its work). The nightly
@@ -106,15 +112,13 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
-      - name: Start shared PG + Oracle for aw-target cells
-        # CB.14 followup (2026-06-03): the `aw` cells (sp_pg_aw / sq_pg_aw
-        # / sp_or_aw / sq_or_aw) use the cfg's `demo_database_url`
-        # directly (no per-cell container spin-up). Previously this
-        # pointed at AWS RDS Aurora; CB.12 decommissioned that. Now CI
-        # runs a shared PG + Oracle on the runner itself — distinct
-        # ports from the per-cell `lo` containers
-        # (lo uses 5433 / 1522 per `_LOCAL_PG_HOST_PORT` +
-        # `_LOCAL_ORACLE_HOST_PORT`), so no collision.
+      - name: Start shared PG + Oracle (post CB.17 — single substrate, no cells)
+        # The runner runs ONE pytest invocation per layer against this
+        # shared PG + Oracle pair. The env-URL short-circuit
+        # (`RECON_GEN_DEMO_DATABASE_URL_PG` / `_OR` on the test step
+        # below) tells the runner's `_start_thin_container` not to
+        # bring its own container — same shape as the lazy pg_container_url
+        # / oracle_container_url pytest session fixtures.
         #
         # Postgres bound to host 5432 (PG default). Oracle bound to
         # host 1521 (Oracle default), using the locally-built
@@ -138,26 +142,21 @@ jobs:
           timeout 180 bash -c 'until docker logs ci-shared-oracle 2>&1 | grep -q "DATABASE IS READY TO USE"; do sleep 3; done'
           echo "Shared DBs ready."
 
-      - name: Materialize per-dialect runner cfgs
-        # The runner discovers cfg via `run/config.<dialect>.yaml`.
-        # For the AWS-touching layers it needs `auth:` (aws_profile or
-        # quicksight_user_arn) + the QS account / region. We can't
-        # depend on the runner box having these checked in (the whole
-        # `run/` dir is gitignored), so the job materializes them from
-        # secrets per-run.
-        #
-        # The AWS_ROLE_ARN step above already exported temporary creds
-        # to the default profile, so the cfg's `auth:` block uses
-        # `quicksight_user_arn` directly (no profile lookup needed).
+      - name: Materialize per-dialect runner cfgs (one cfg per dialect)
+        # CB.17.f: dropped the `.qs.yaml` siblings. Post CB.17.d the
+        # runner generates its own QS-side cfg per run via
+        # `_write_qs_cfg_for_thin` — swaps host 127.0.0.1 → hotchkiss.io
+        # so QS in us-east-1 can reach the dev/CI box, sets
+        # `qs_disable_pg_ssl` for the postgres:17-alpine container.
+        # All CI needs to materialize is the local cfg.
         #
         # `demo_database_url` points at the shared containers from the
-        # step above — 127.0.0.1:5432 (PG) + 127.0.0.1:1521 (Oracle).
-        # For `lo` cells, the runner overrides this URL with
-        # `127.0.0.1:<lo-container-port>` (5433 / 1522) at variant-seed
-        # time; for `aw` cells, this cfg value is used directly.
+        # step above. The env-URL short-circuit on the test step
+        # (`RECON_GEN_DEMO_DATABASE_URL_PG` / `_OR`) tells the runner
+        # not to re-spin its own; this URL is the cfg-side default
+        # used for seed/deploy CLI subprocess invocations.
         run: |
           mkdir -p run
-          # Postgres — local cfg (db + app2 layers).
           cat > run/config.postgres.yaml <<'EOF'
           aws_account_id: "470656905821"
           aws_region: "us-east-1"
@@ -170,25 +169,6 @@ jobs:
           auth:
             quicksight_user_arn: "${{ secrets.RECON_E2E_USER_ARN }}"
           EOF
-          # Postgres — qs-side cfg (deploy + qs_api + qs_browser layers).
-          # Same DB, reached via hotchkiss.io DDNS forward so QS in
-          # us-east-1 can connect. setup_variant's aw arm picks this up
-          # via RECON_GEN_QS_CONFIG; lo cells have their own per-cell
-          # qs.yaml generated by _run_one_variant.
-          cat > run/config.postgres.qs.yaml <<'EOF'
-          aws_account_id: "470656905821"
-          aws_region: "us-east-1"
-          deployment_name: "qs-ci-${{ github.run_id }}-pg"
-          db_table_prefix: "qs_ci_${{ github.run_id }}_pg"
-          dialect: "postgres"
-          demo_database_url: "postgresql://postgres:postgres@hotchkiss.io:5432/postgres"
-          qs_disable_pg_ssl: true
-          principal_arns:
-            - "${{ secrets.RECON_E2E_USER_ARN }}"
-          auth:
-            quicksight_user_arn: "${{ secrets.RECON_E2E_USER_ARN }}"
-          EOF
-          # Oracle — local cfg (db + app2 layers).
           cat > run/config.oracle.yaml <<'EOF'
           aws_account_id: "470656905821"
           aws_region: "us-east-1"
@@ -201,58 +181,53 @@ jobs:
           auth:
             quicksight_user_arn: "${{ secrets.RECON_E2E_USER_ARN }}"
           EOF
-          # Oracle — qs-side cfg (deploy + qs_api + qs_browser layers).
-          cat > run/config.oracle.qs.yaml <<'EOF'
-          aws_account_id: "470656905821"
-          aws_region: "us-east-1"
-          deployment_name: "qs-ci-${{ github.run_id }}-or"
-          db_table_prefix: "qs_ci_${{ github.run_id }}_or"
-          dialect: "oracle"
-          demo_database_url: "oracle+oracledb://system:qsgentestpwd2026@hotchkiss.io:1521/?service_name=FREEPDB1"
-          principal_arns:
-            - "${{ secrets.RECON_E2E_USER_ARN }}"
-          auth:
-            quicksight_user_arn: "${{ secrets.RECON_E2E_USER_ARN }}"
-          EOF
 
       - name: Run the full layered chain (unit → qs_browser)
-        # ./run_tests.sh is the canonical layered runner. up_to=qs_browser
-        # invokes layers 1..6: unit (prelude, once) → db → app2 → deploy →
-        # qs_api → qs_browser, fanned out across the matrix. --coverage
-        # writes `.coverage.<variant>.<layer>` files into runs/<id>/.
-        # Full default matrix (13 cells = sp/sq/fuzz × pg/or/du × lo/aw).
-        # Lo cells spin per-cell containers via testcontainers; aw cells
-        # use the shared PG + Oracle from the "Start shared..." step at
-        # the top of the job. CB.15 (cells removal) is the longer-term
-        # destination; this restores the default matrix in the meantime.
+        # ./run_tests.sh up_to=qs_browser invokes the chain
+        # unit → db → app2 → deploy → qs_api → qs_browser, ONE pytest
+        # invocation per layer (post CB.17.d cell removal).
+        # `--coverage` writes `.coverage.<run-id>.<layer>` files into
+        # runs/<id>/.
         #
-        # RECON_GEN_E2E=1 lets the e2e-tier pytest collections run.
-        # RECON_E2E_USER_ARN is consumed by the qs_browser layer for
-        # embed URL minting (also derivable from cfg.auth, kept explicit
-        # for parity with the legacy e2e.yml shape).
+        # The `RECON_GEN_DEMO_DATABASE_URL_PG` / `_OR` env vars below
+        # point at the shared containers from the top of the job. The
+        # CB.17.f short-circuit in `_start_thin_container` honors them
+        # and returns immediately — no testcontainers spin, no second
+        # container competing for resources.
+        #
+        # `RECON_GEN_E2E=1` lets the e2e-tier pytest collections run.
+        # `RECON_E2E_USER_ARN` is consumed by the qs_browser layer for
+        # embed URL minting (also derivable from cfg.auth, kept
+        # explicit for parity with the legacy e2e.yml shape).
         env:
           RECON_GEN_E2E: "1"
           RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
-          # RECON_GEN_RUNNER_YES bypasses the destructive-op prompt; the
-          # runner needs it in non-interactive CI. The legacy alias
-          # QS_GEN_RUNNER_YES still works at runtime but leaks past
-          # `monkeypatch.delenv(RECON_GEN_RUNNER_YES.name)` in the unit
-          # tier's runner-flow tests, breaking those tests on CI even
-          # though they pass locally.
+          # CB.17.f env-URL short-circuit — runner reads these from
+          # `_start_thin_container` and skips its own container spin.
+          # Both the seed (`recon-gen schema apply` etc.) and the
+          # deploy subprocess inherit them and reach the shared
+          # containers directly.
+          RECON_GEN_DEMO_DATABASE_URL_PG: "postgresql://postgres:postgres@127.0.0.1:5432/postgres"
+          RECON_GEN_DEMO_DATABASE_URL_OR: "oracle+oracledb://system:qsgentestpwd2026@127.0.0.1:1521/?service_name=FREEPDB1"
+          # RECON_GEN_RUNNER_YES bypasses the destructive-op prompt;
+          # the runner needs it in non-interactive CI.
           RECON_GEN_RUNNER_YES: "1"
-        run: ./run_tests.sh up_to=qs_browser --coverage
-
-      - name: Collect runner coverage data
-        # Each layer wrote `.coverage.<variant>.<layer>` files under
-        # `runs/<id>/<variant>/` (and `runs/<id>/_prelude/` for the unit
-        # prelude). Flatten to repo root so the upload step's
-        # `.coverage.*` glob catches them; the badge job's
-        # `coverage combine` will merge them. Best-effort — never fail
-        # the job over coverage collection.
-        if: always()
+        # CB.17.h — wrap the chain in /usr/bin/time -v so the WSL2
+        # runner records peak RSS (Maximum resident set size). The
+        # value lands at the end of the step log and (via the
+        # `tee runs/<id>-time.log` below) in the runs/ artifact for
+        # post-CB.15 drift tracking — the OOM that triggered the cell
+        # collapse should no longer reproduce. Per
+        # [[feedback_timings_as_smell]], capture as data — let drift
+        # speak.
         run: |
-          find runs -name '.coverage.*' 2>/dev/null | while read -r f; do cp "$f" .; done || true
-          echo "coverage data files: $(ls -la .coverage.* 2>/dev/null || echo '<none>')"
+          mkdir -p runs
+          /usr/bin/time -v -o runs/peak-rss-time.log \
+            ./run_tests.sh up_to=qs_browser --coverage
+          echo "--- /usr/bin/time -v summary ---"
+          cat runs/peak-rss-time.log
+          echo "--- peak RSS ---"
+          grep "Maximum resident set size" runs/peak-rss-time.log || true
 
       - name: Upload runner artifacts (triage parity)
         # The `runs/<run-id>/` tree is the same artifact shape an
@@ -268,8 +243,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload combined coverage data
-        # Aggregator (coverage-badge job below) downloads this artifact.
+      - name: Upload coverage data files
+        # CB.17.g: per-layer `.coverage.<layer>` files land directly at
+        # cwd (REPO_ROOT) — the runner's COVERAGE_FILE override sets
+        # them there. No `find runs -name '.coverage.*' | xargs cp .`
+        # staging step needed. The aggregator job downloads this
+        # artifact and runs `coverage combine`.
         if: always()
         uses: actions/upload-artifact@v7
         with:
