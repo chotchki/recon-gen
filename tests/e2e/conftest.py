@@ -1086,10 +1086,28 @@ def capture_top_queries(
     # ``like_pattern`` narrows the stats-view scan to OUR queries.
     # cfg.db_table_prefix is the canonical root every isolated test
     # suffixes (`qsgen_postgres_<hash>`), so a LIKE on the bare prefix
-    # matches both the base AND every isolated-test variant. Same
-    # pattern works for Oracle queries since the trainer fixture only
-    # rewrites cfg.dialect at parametrize time, not db_table_prefix.
-    like_pattern = cfg.db_table_prefix or "spec_example"
+    # matches both the base AND every isolated-test variant.
+    #
+    # CB.17.o — CI materializes per-dialect cfgs with dialect-suffixed
+    # prefixes (`qs_ci_<run>_pg` vs `qs_ci_<run>_or`); cfg-discovery
+    # returns only the PG cfg in a one-cfg-per-session model. Pre-
+    # CB.17.o we used that single prefix to probe BOTH containers, so
+    # Oracle's report came back empty (the queries it actually ran
+    # used `_or`-suffixed names). Swap the trailing dialect suffix
+    # per-container below; non-CI patterns (e.g. local `spec_example`)
+    # pass through unchanged.
+    base_pattern = cfg.db_table_prefix or "spec_example"
+
+    def _swap_dialect_suffix(pattern: str, dialect: Dialect) -> str:
+        target_suffix = {
+            Dialect.POSTGRES: "_pg",
+            Dialect.ORACLE: "_or",
+            Dialect.DUCKDB: "_du",
+        }[dialect]
+        for known in ("_pg", "_or", "_du"):
+            if pattern.endswith(known):
+                return pattern[: -len(known)] + target_suffix
+        return pattern
 
     def _snapshot(
         target_dir: Path, dialect: Dialect, url: str,
@@ -1097,6 +1115,7 @@ def capture_top_queries(
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / "top-queries.md"
         title = f"Top expensive queries ({dialect.value})"
+        like_pattern = _swap_dialect_suffix(base_pattern, dialect)
         # Build a minimal cfg pointing at this container.
         cfg_snap = _dc.replace(cfg, demo_database_url=url, dialect=dialect)
         try:
