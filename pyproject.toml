@@ -328,6 +328,22 @@ omit = [
     "*/__main__.py",
 ]
 
+[tool.coverage.paths]
+# CB.17.g followup — `coverage combine` was not normalizing absolute
+# paths recorded by the WSL2 self-hosted runner (under
+# `/home/recon-gen/actions-runner/_work/...`) into the ubuntu-latest
+# badge-aggregator job's checkout (`/home/runner/work/...`). With no
+# `[paths]` section, `coverage report` then exited 1 because no
+# recorded path matched a real file in the report job's checkout.
+# Mapping these aliases to the canonical `src/` location lets combine
+# fold them at merge time and report find them at render time.
+source = [
+    "src/",
+    "/home/recon-gen/actions-runner/_work/recon-gen/recon-gen/src/",
+    "/home/runner/work/recon-gen/recon-gen/src/",
+    "*/recon-gen/src/",
+]
+
 [tool.coverage.report]
 exclude_lines = [
     "pragma: no cover",
