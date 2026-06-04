@@ -114,17 +114,20 @@ jobs:
 
       - name: Generate random DB passwords (BX.248)
         # Per-workflow-run random passwords for the shared PG + Oracle
-        # containers. `openssl rand -hex 16` gives 32 alphanumeric chars
+        # containers. `openssl rand -hex 14` gives 28 alphanumeric chars
         # — satisfies Oracle 19c's "letter + digit + 8+chars" rule, no
-        # special chars to escape downstream. Exported via $GITHUB_ENV
-        # so all subsequent steps see PG_PASSWORD / ORACLE_PASSWORD.
-        # Replaces the pre-BX.248 source-checked `postgres` /
-        # `qsgentestpwd2026` literals (the latter constant has been
-        # deleted from `src/recon_gen/_dev/runner.py`).
+        # special chars to escape downstream, AND fits inside Oracle's
+        # 30-byte quoted-identifier limit on `ALTER USER ... IDENTIFIED
+        # BY "<pwd>"` (CE.4-followup; pre-fix used `-hex 16` = 32 chars
+        # which tripped ORA-00972, silently failed the reset, and let
+        # FAILED_LOGIN_ATTEMPTS lock the system account → ORA-28000).
+        # Exported via $GITHUB_ENV so all subsequent steps see
+        # PG_PASSWORD / ORACLE_PASSWORD. Replaces the pre-BX.248
+        # source-checked `postgres` / `qsgentestpwd2026` literals.
         run: |
           {
-            echo "PG_PASSWORD=$(openssl rand -hex 16)"
-            echo "ORACLE_PASSWORD=$(openssl rand -hex 16)"
+            echo "PG_PASSWORD=$(openssl rand -hex 14)"
+            echo "ORACLE_PASSWORD=$(openssl rand -hex 14)"
           } >> "$GITHUB_ENV"
 
       - name: Ensure shared PG + Oracle are up (reuse persistent containers when present)

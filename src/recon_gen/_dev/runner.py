@@ -1382,18 +1382,29 @@ ORACLE_REUSE_CONTAINER_PREFIX: Final = "quicksight-test-oracle-"
 def generate_db_password() -> str:
     """BX.248 — fresh random password for an ephemeral PG / Oracle container.
 
-    Returns 32 hex chars (`secrets.token_hex(16)`). Oracle 19c requires
-    password to be alphanumeric, ≥8 chars, and contain at least one
-    letter + one digit; `token_hex` satisfies all three by construction
-    (entropy-source guarantees mixed hex chars). Pre-BX.248 the runner
-    pinned a static `ORACLE_REUSE_PASSWORD` constant in source — that
-    string leaked DB credentials to anyone with repo access AND let the
-    same source-disclosed password reach the home-firewall-exposed
-    hotchkiss.io:5433/1522 forwards. Generating per-invocation closes
-    that hole.
+    Returns 28 hex chars (`secrets.token_hex(14)`). Sized to fit
+    inside Oracle's 30-byte quoted-identifier limit: ALTER USER ...
+    IDENTIFIED BY "<pwd>" treats the quoted form as a quoted
+    identifier, capping the password body at 30 bytes
+    (CE.4-followup; pre-fix `token_hex(16)` = 32 chars tripped
+    ORA-00972 "identifier is too long", the password reset silently
+    failed, and every login attempt counted toward
+    FAILED_LOGIN_ATTEMPTS → ORA-28000 "account is locked"). 28
+    chars leaves 2 bytes of headroom and still satisfies Oracle 19c's
+    "alphanumeric + ≥8 chars + ≥1 letter + ≥1 digit" rule by
+    construction (hex is mixed letter+digit).
+
+    Pre-BX.248 the runner pinned a static `ORACLE_REUSE_PASSWORD`
+    constant in source — that string leaked DB credentials to
+    anyone with repo access AND let the same source-disclosed
+    password reach the home-firewall-exposed hotchkiss.io:5433/1522
+    forwards. Generating per-invocation closes that hole.
+
+    112 bits of entropy — strong enough for an ephemeral container
+    credential.
     """
     import secrets  # noqa: PLC0415 — lazy: only used by container spinup
-    return secrets.token_hex(16)
+    return secrets.token_hex(14)
 
 
 def _reset_pg_password_via_socket(container_name: str, password: str) -> None:
