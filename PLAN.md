@@ -320,6 +320,21 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 **Done when:** sq_pg_aw + sq_or_aw + sp_or_aw browser layers green on `./run_tests.sh up_to=browser` (no xfail-to-mute per `feedback_no_xfail_to_sweep_under_rug`); sweep to PLAN_ARCHIVE.
 
 - [ ] BN.0 - Triage spike: snapshot per-failure repro shape against sq_pg_aw, sq_or_aw, sp_or_aw. Output: `docs/audits/bn_0_sq_aw_flake_snapshot.md` with per-test root-cause hypothesis + reproduction recipe. Prereq for BN.1+ fixes.
+
+## Phase CE - Trainer dogfood: Session Start as session fixture
+
+**Why:** Backlog #249 (CB.17.m followup) — every trainer dogfood test runs `/etl/run` via Session Start, which is the same heavy ETL replay across all tests (~10 min on Oracle per the in-code estimate at `_studio_routes.py:479`). With 16 xdist workers contending on one shared container per dialect, the cumulative load blows the 600s `_trainer_wait_until_finished` wire for [pg] / [or] parametrize. CI workaround: pin `RECON_GEN_TRAINER_DIALECTS=du` (CB.17.m). Real fix: treat the `/etl/run` payload as **session-scoped setup** — one full Session Start per xdist worker upfront, then per-test reset via the cheap `/training/reclone` path (drops + reclones v overlay from already-ready base prefix, no `/etl/run` re-run).
+
+**Approach:** `/training/reclone` exists already (BV.4.9 — diff-only Apply brought it back as force-full). It tears down + recreates the v overlay from the current base prefix WITHOUT re-running the ETL pipeline. Build the per-test trainer fixture around it: session-scope fixture does one Session Start, per-test fixture does a reclone. Per-test prefix isolation (`isolated_studio_cfg`) already gives every test its own worker-suffix prefix, so reclone-of-the-overlay is sufficient — no contamination across tests on the same worker.
+
+**Done when:** Trainer dogfood tests pass [du, pg, or] under CI's 16-xdist-worker model with the CB.17.m DuckDB pin removed; per-worker wall-clock for the trainer test set drops from N×10min to 10min + N×reclone; #249 sweeps to archive.
+
+- [ ] CE.0 - CE.0 — Spike: measure Session Start cost vs `/training/reclone` cost on PG + Oracle at 128k seed scale; confirm reclone gives an equivalent ready-to-plant surface that all 7 plant kinds can land on
+- [ ] CE.1 - CE.1 — `App2Driver.trainer_reset_overlay()` verb (clicks Reclone, waits for live-tail finished — mirrors `trainer_start_session()` wait shape)
+- [ ] CE.2 - CE.2 — Session-scope `trainer_session_started` fixture in `test_bv33_trainer_dogfood.py` that does Session Start once per xdist worker
+- [ ] CE.3 - CE.3 — Refactor per-test setup to call `trainer_reset_overlay()` instead of `trainer_start_session()`; preserve plant + apply + verify shape
+- [ ] CE.4 - CE.4 — Unpin `RECON_GEN_TRAINER_DIALECTS=du` in `.github/workflows/ci.yml`; measure CI wall-clock delta; if green, sweep CB.17.m mitigation comment
+
 ## Phase PLAN - Phase PLAN
 - [ ] PLAN.md - BS.5 — _v_config_chain_children + 7-path conversion
 
