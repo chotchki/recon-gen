@@ -104,6 +104,76 @@ def pytest_configure(config: Any) -> None:
     for _mark_name, _mark_doc in _CB_MARK_DOCS.items():
         config.addinivalue_line("markers", f"{_mark_name}: {_mark_doc}")
 
+    # CB.17.e — derive AWS_PROFILE + RECON_GEN_TEST_L2_INSTANCE from the
+    # operator cfg so bare `pytest` (no runner wrapper) gets the same env
+    # the runner used to inject. Pre-existing env wins (operator overrides
+    # cfg). Failure is silent — tests that need these will skip or fail
+    # loudly with their own actionable messages.
+    _derive_env_from_cfg()
+
+
+_DEFAULT_CFG_CANDIDATES: tuple[Path, ...] = (
+    Path("config.yaml"),
+    Path("run/config.yaml"),
+    Path("run/config.postgres.yaml"),
+    Path("run/config.oracle.yaml"),
+)
+
+
+def _derive_env_from_cfg() -> None:
+    """Cfg → env injection at session start, runner-free.
+
+    Promotes three values from the operator cfg into process env:
+    - ``RECON_GEN_CONFIG`` — the resolved cfg path (when not pre-set)
+    - ``AWS_PROFILE`` — from ``cfg.auth.aws_profile``
+    - ``RECON_GEN_TEST_L2_INSTANCE`` — from ``cfg.default_l2_instance``
+
+    Pre-existing env wins (operator overrides cfg). Mirrors the runner's
+    ``cmd_up_to`` env-derivation block — the runner still calls
+    ``main`` which calls ``pytest`` which lands here, so this hook
+    benefits both paths.
+    """
+    from recon_gen.common.env_keys import RECON_GEN_CONFIG  # noqa: PLC0415
+
+    explicit = None
+    try:
+        explicit = RECON_GEN_CONFIG.get_or_none()
+    except EnvVarInvalid:
+        explicit = None
+
+    cfg_path: Path | None = None
+    if explicit is not None:
+        cfg_path = Path(explicit)
+    else:
+        for candidate in _DEFAULT_CFG_CANDIDATES:
+            if candidate.exists():
+                cfg_path = candidate
+                os.environ[RECON_GEN_CONFIG.name] = str(candidate)
+                break
+
+    if cfg_path is None or not cfg_path.exists():
+        return
+
+    try:
+        from recon_gen.common.config import load_config  # noqa: PLC0415
+        peek_cfg = load_config(str(cfg_path))
+    except Exception:  # noqa: BLE001 — cfg peek is best-effort
+        return
+
+    aws_profile = getattr(getattr(peek_cfg, "auth", None), "aws_profile", None)
+    if aws_profile and "AWS_PROFILE" not in os.environ:
+        os.environ["AWS_PROFILE"] = aws_profile
+
+    l2_default = getattr(peek_cfg, "default_l2_instance", None)
+    if l2_default and RECON_GEN_TEST_L2_INSTANCE.get_or_none() is None:
+        l2_path = (
+            Path(l2_default)
+            if Path(l2_default).is_absolute()
+            else Path.cwd() / l2_default
+        )
+        if l2_path.exists():
+            os.environ[RECON_GEN_TEST_L2_INSTANCE.name] = str(l2_path)
+
 
 # CB.17.d — strangler-pattern env access aggregation.
 #
