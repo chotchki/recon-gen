@@ -175,6 +175,7 @@ jobs:
           db_table_prefix: "qs_ci_${{ github.run_id }}_pg"
           dialect: "postgres"
           demo_database_url: "postgresql://postgres:postgres@127.0.0.1:5432/postgres"
+          default_l2_instance: "tests/l2/sasquatch_pr.yaml"
           principal_arns:
             - "${{ secrets.RECON_E2E_USER_ARN }}"
           auth:
@@ -187,6 +188,7 @@ jobs:
           db_table_prefix: "qs_ci_${{ github.run_id }}_or"
           dialect: "oracle"
           demo_database_url: "oracle+oracledb://system:qsgentestpwd2026@127.0.0.1:1521/?service_name=FREEPDB1"
+          default_l2_instance: "tests/l2/sasquatch_pr.yaml"
           principal_arns:
             - "${{ secrets.RECON_E2E_USER_ARN }}"
           auth:
