@@ -1599,9 +1599,15 @@ def _start_thin_container(
     if peek_cfg.dialect is Dialect.POSTGRES:
         from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
 
+        # Bind container's 5432 to host's _LOCAL_PG_HOST_PORT (5433) so the
+        # hotchkiss.io:5433 DDNS forward terminates here when QS reaches in
+        # for the deploy/qs_api/qs_browser layers. Same contract as
+        # setup_variant's pg path — single-PG-at-a-time (parallel via
+        # per-cell port pool is CB.11.c work).
         container = (
             PostgresContainer("postgres:17-alpine")
             .with_command("postgres -c max_connections=300")
+            .with_bind_ports(5432, _LOCAL_PG_HOST_PORT)
         )
         container.start()
         raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]: testcontainers method has no type annotations
@@ -3629,6 +3635,12 @@ def cmd_thin(args: argparse.Namespace) -> int:
                         f"deploy/qs_* layers will dispatch-skip",
                         file=sys.stderr,
                     )
+            # CB.17.d — inject AWS_PROFILE so deploy/qs_api/qs_browser
+            # subprocesses see the long-lived IAM-user creds (avoids the
+            # SSO default-profile path that LoginRefreshRequired'd on
+            # an earlier thin run). Mirrors _run_one_variant's h+i.0 path.
+            if peek_cfg.auth is not None and peek_cfg.auth.aws_profile is not None:
+                runner_variant_env["AWS_PROFILE"] = peek_cfg.auth.aws_profile
         except Exception as exc:  # noqa: BLE001 — peek failure shouldn't gate the run
             print(f"runner: cfg peek for L2 discovery failed ({exc!r}); continuing")
     else:
