@@ -137,7 +137,25 @@ def _trainer_dialect_params() -> list[Any]:  # noqa: ANN401 — ParameterSet has
         dialect = name_to_dialect.get(short)
         if dialect is None:
             continue
-        out.append(pytest.param(dialect, id=short))
+        # CE.4-followup #3 — pin all trainer tests of a given dialect to
+        # ONE xdist worker via `xdist_group`. Without this, 16 workers
+        # × 3 dialects = 48 fixture instances all try to do Session
+        # Start in parallel at the start of `pytest -n auto`, blowing
+        # the same 600s `_trainer_wait_until_finished` wire that CB.17.m
+        # worked around — the session-scope fixture only shares Session
+        # Start WITHIN a worker, not ACROSS them. The `loadgroup` dist
+        # mode is already on (configured via tests/conftest.py::
+        # pytest_configure when xdist is active), so a `xdist_group`
+        # mark of "trainer-<dialect>" funnels all of one dialect's
+        # trainer tests onto a single worker. 3 workers total (one
+        # per dialect) instead of 16; each does its own Session Start
+        # once + N cheap reclones.
+        out.append(
+            pytest.param(
+                dialect, id=short,
+                marks=[pytest.mark.xdist_group(f"trainer-{short}")],
+            ),
+        )
     return out
 
 
