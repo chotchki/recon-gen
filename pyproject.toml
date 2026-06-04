@@ -129,6 +129,15 @@ dev = [
     # works. xdist therefore belongs in [dev], not just [e2e] — `uv sync
     # --extra dev && pytest -n auto` should work.
     "pytest-xdist>=3.5",
+    # CB.17.k — filelock for the xdist-canonical "session-scope-once"
+    # pattern in `tests/conftest.py::pg_container_url` /
+    # `oracle_container_url`. Without cross-worker file coordination,
+    # each xdist worker spins its own copy of the container (16 PG
+    # containers + 16 Oracle attempts per `pytest -n auto`); with the
+    # filelock pattern, the first worker creates and the other workers
+    # adopt. Also available transitively from pytest-xdist[testing] but
+    # we make it explicit here for the conftest's direct use.
+    "filelock>=3.13",
     # Y.7-followup — the runner's browser layer passes `--reruns 2` so a
     # genuinely-flaky live-cloud e2e (QS embed-render under -n 4 worker
     # contention occasionally drops a visual from the DOM at snapshot

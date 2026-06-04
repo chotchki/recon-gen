@@ -17,7 +17,7 @@ import os
 import secrets
 import tempfile
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any, Callable, Final, Generator
 
 import pytest
 
@@ -899,59 +899,121 @@ def _strip_sa_url_prefix(url: str) -> str:
     )
 
 
+def _shared_container_url(
+    *,
+    tmp_path_factory: pytest.TempPathFactory,
+    worker_id: str,
+    state_filename: str,
+    container_name: str,
+    spinup_fn: "Callable[[str], tuple[str, object]]",
+) -> str:
+    """xdist canonical "session-scope-once" coordinator for shared
+    Docker containers (CB.17.k).
+
+    Follows the pytest-xdist docs pattern: use
+    ``tmp_path_factory.getbasetemp().parent`` as the shared dir, a
+    ``FileLock`` to serialize first-firing across workers, and an
+    on-disk JSON state file as the rendezvous point.
+
+    The first worker to acquire the lock calls ``spinup_fn`` (which is
+    expected to be one of the runner's adopt-or-create helpers — extra
+    safety so even in a no-lock race, the Docker daemon's name-
+    uniqueness enforcement collapses concurrent creates onto one
+    container). Subsequent workers read the URL from the state file.
+
+    ``worker_id == "master"`` skips the lock dance — bare pytest with
+    no xdist plugin doesn't need cross-worker coordination.
+
+    Returns the container's connection URL. The container itself is
+    persistent — operator manages lifecycle via Docker or
+    ``./run_tests.sh down``.
+    """
+    from filelock import FileLock  # noqa: PLC0415 — lazy
+
+    # Bare pytest (no xdist): straight create.
+    if worker_id == "master":
+        url, _ = spinup_fn(container_name)
+        return url
+
+    # xdist path: the parent of each worker's basetemp is the dir
+    # shared across all workers (e.g. /tmp/pytest-of-<user>/pytest-<n>/).
+    root_tmp_dir = tmp_path_factory.getbasetemp().parent
+    state_file = root_tmp_dir / state_filename
+    lock = FileLock(str(state_file) + ".lock")
+    with lock:
+        if state_file.is_file():
+            return state_file.read_text().strip()
+        url, _ = spinup_fn(container_name)
+        state_file.write_text(url)
+        return url
+
+
+# Stable Docker container names — adopt-or-create rendezvous points
+# for the xdist-shared session fixtures. Containers persist across
+# `pytest` invocations (`_PersistentContainerHandle.stop()` is a
+# no-op). Lifecycle is operator-owned: `docker stop` or
+# `./run_tests.sh down`.
+_SHARED_PG_CONTAINER_NAME: Final = "recon-gen-test-pg"
+_SHARED_ORACLE_CONTAINER_NAME: Final = "recon-gen-test-oracle"
+
+
 @pytest.fixture(scope="session")
-def pg_container_url() -> Generator[str, None, None]:
-    """URL for a session-scoped Postgres container.
+def pg_container_url(
+    tmp_path_factory: pytest.TempPathFactory,
+    worker_id: str,
+) -> Generator[str, None, None]:
+    """URL for a session-shared Postgres container.
 
-    Yields the env URL if set, else spins ``postgres:17-alpine`` via
-    testcontainers. See module-level CB.17.a comment for the full
-    resolution contract.
+    CB.17.k — uses the xdist canonical "session-scope-once" pattern.
+    All workers in a `pytest -n auto` invocation converge on a SINGLE
+    container; only the first-firing worker creates it, others adopt
+    via on-disk URL rendezvous.
 
-    CB.17.j — when this fixture fires (env URL OR fresh container),
-    ``RECON_GEN_DEMO_DATABASE_URL_PG`` gets set to the yielded URL so
-    the conftest's `capture_top_queries` teardown can detect that the
-    session touched PG (independent of cfg.dialect) and write a
-    per-container perf snapshot. Mirror change in
-    ``oracle_container_url``.
+    Pre-CB.17.k this was a per-worker fixture: with -n auto we spun
+    16 PG containers per run, contending for memory and producing
+    16× the cold-start wall. Now one container is shared across all
+    workers and persists across runs (operator manages teardown via
+    `./run_tests.sh down` or `docker stop`).
+
+    Env URL escape hatch: `RECON_GEN_DEMO_DATABASE_URL_PG` skips both
+    creation and rendezvous (CI workflows set it to point at a
+    pre-spun container).
     """
     env_url = RECON_GEN_DEMO_DATABASE_URL_PG.get_or_none()
     if env_url is not None:
         yield env_url
         return
 
-    pytest.importorskip("testcontainers.postgres")
-    from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
-
-    # CB.17.j — `shared_preload_libraries=pg_stat_statements` so the
-    # `capture_top_queries` teardown can read real perf data. Mirror
-    # of the runner / ci.yml fix.
-    container = (
-        PostgresContainer("postgres:17-alpine")
-        .with_command("postgres -c shared_preload_libraries=pg_stat_statements")
+    from recon_gen._dev.runner import (  # noqa: PLC0415 — lazy
+        _get_or_start_pg_container,
     )
-    container.start()
-    try:
-        raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]: testcontainers method has no type annotations
-        url = _strip_sa_url_prefix(raw_url)
-        os.environ[RECON_GEN_DEMO_DATABASE_URL_PG.name] = url
-        yield url
-    finally:
-        container.stop()
+
+    url = _shared_container_url(
+        tmp_path_factory=tmp_path_factory,
+        worker_id=worker_id,
+        state_filename="pg-container-url.txt",
+        container_name=_SHARED_PG_CONTAINER_NAME,
+        spinup_fn=_get_or_start_pg_container,
+    )
+    os.environ[RECON_GEN_DEMO_DATABASE_URL_PG.name] = url
+    yield url
 
 
 @pytest.fixture(scope="session")
-def oracle_container_url() -> Generator[str, None, None]:
-    """URL for a session-scoped Oracle container.
+def oracle_container_url(
+    tmp_path_factory: pytest.TempPathFactory,
+    worker_id: str,
+) -> Generator[str, None, None]:
+    """URL for a session-shared Oracle container.
 
-    Yields the env URL if set, else spins ``recon-gen/oracle-19c:local``
-    (or ``gvenzl/oracle-free:23-faststart`` fallback) via testcontainers
-    + the runner's existing `_Oracle19cContainer` bridge for the 19c
-    image's ``ORACLE_PWD`` / ``FREEPDB1`` / 900s wait-for-logs quirks.
-
-    Imports the bridge from `recon_gen._dev.runner` for now; CB.17.d
-    will lift `_Oracle19cContainer` + `_resolve_oracle_image` into
-    `tests/_oracle_container.py` as part of the runner deletion (the
-    runner has no other callers in the post-collapse world).
+    CB.17.k — uses the same xdist canonical "session-scope-once"
+    coordinator as `pg_container_url`. Without it, every xdist worker
+    spun its own Oracle 19c container; all 16 raced through ~3min cold
+    starts simultaneously, exhausting system memory and timing out at
+    the 900s ready-wait. With the coordinator: first-firing worker
+    creates, others adopt via on-disk URL rendezvous. One container
+    per pytest invocation; persists across runs (adopt-or-create
+    against `recon-gen-test-oracle`).
     """
     env_url = RECON_GEN_DEMO_DATABASE_URL_OR.get_or_none()
     if env_url is not None:
@@ -959,43 +1021,24 @@ def oracle_container_url() -> Generator[str, None, None]:
         return
 
     pytest.importorskip("testcontainers.oracle")
-    from recon_gen._dev.runner import (  # noqa: PLC0415
+    from recon_gen._dev.runner import (  # noqa: PLC0415 — lazy
         ORACLE_REUSE_PASSWORD,
-        _resolve_oracle_image,
-        _FALLBACK_ORACLE_IMAGE,
+        _get_or_start_oracle_container,
     )
-    from testcontainers.core.waiting_utils import wait_for_logs  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
-    from testcontainers.oracle import OracleDbContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
 
-    image = _resolve_oracle_image()
-    password = ORACLE_REUSE_PASSWORD
+    def _spinup(name: str) -> tuple[str, object]:
+        raw_url, handle = _get_or_start_oracle_container(name, ORACLE_REUSE_PASSWORD)
+        return _strip_sa_url_prefix(raw_url), handle
 
-    if image == _FALLBACK_ORACLE_IMAGE:
-        container = OracleDbContainer(image, oracle_password=password)
-    else:
-        # 19c bridge — see runner.py::_Oracle19cContainer for the rationale.
-        class _Oracle19cContainer(OracleDbContainer):
-            def _configure(self) -> None:  # type: ignore[no-untyped-def]: testcontainers method has no return-type hint
-                super()._configure()
-                self.with_env("ORACLE_PWD", self.oracle_password)
-                self.with_env("ORACLE_PDB", "FREEPDB1")
-
-            def _connect(self) -> None:  # type: ignore[no-untyped-def]: testcontainers method has no return-type hint
-                wait_for_logs(  # type: ignore[no-untyped-call]: testcontainers helper lacks return-type hint
-                    self, ".*DATABASE IS READY TO USE!.*", timeout=900,
-                )
-
-        container = _Oracle19cContainer(image, oracle_password=password)
-
-    container.start()  # type: ignore[no-untyped-call]: testcontainers .start() lacks return-type hint
-    try:
-        raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]: testcontainers method has no type annotations
-        url = _strip_sa_url_prefix(raw_url)
-        # CB.17.j — see pg_container_url for the contract.
-        os.environ[RECON_GEN_DEMO_DATABASE_URL_OR.name] = url
-        yield url
-    finally:
-        container.stop()
+    url = _shared_container_url(
+        tmp_path_factory=tmp_path_factory,
+        worker_id=worker_id,
+        state_filename="oracle-container-url.txt",
+        container_name=_SHARED_ORACLE_CONTAINER_NAME,
+        spinup_fn=_spinup,
+    )
+    os.environ[RECON_GEN_DEMO_DATABASE_URL_OR.name] = url
+    yield url
 
 
 # CB.17.b — `cfg_with_container_url` fixture (the bridge from the

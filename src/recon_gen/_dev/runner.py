@@ -1750,6 +1750,89 @@ class _PersistentContainerHandle:
         down` (Y.2.gate.l.2)."""
 
 
+def _get_or_start_pg_container(
+    name: str, password: str = "postgres",
+) -> tuple[str, _PersistentContainerHandle]:
+    """CB.17.k — mirror of `_get_or_start_oracle_container` for Postgres.
+
+    Adopts a running named PG container if one exists, else creates a
+    fresh one with the same stable name. Returned handle's `.stop()` is
+    a no-op — containers persist across runs. Operator manages lifecycle
+    via `docker stop` or `./run_tests.sh down`.
+
+    Used by the conftest's `pg_container_url` fixture so xdist's 16
+    workers all converge on a SINGLE container per pytest run (the
+    Docker daemon serializes by name; the first worker to call create
+    wins, followers adopt). Without this, each worker spun its own
+    container — 16 PG processes for a single test session, wasting
+    ~5GB RAM.
+    """
+    try:
+        import docker  # type: ignore[import-untyped]: third-party SDK lacks PEP 561 stubs  # noqa: PLC0415 — lazy
+        from docker.errors import NotFound  # type: ignore[import-untyped]: third-party SDK lacks PEP 561 stubs  # noqa: PLC0415
+    except ImportError:
+        return _start_fresh_pg_container(name, password)
+
+    try:
+        client = docker.from_env()
+        existing = client.containers.get(name)
+    except NotFound:
+        return _start_fresh_pg_container(name, password)
+    except Exception:  # noqa: BLE001 — docker daemon unreachable / socket missing → fall through
+        return _start_fresh_pg_container(name, password)
+
+    if existing.status != "running":
+        try:
+            existing.start()
+            existing.reload()
+        except Exception:  # noqa: BLE001 — restart failed → recreate
+            try:
+                existing.remove(force=True)
+            except Exception:  # noqa: BLE001 — best-effort
+                pass
+            return _start_fresh_pg_container(name, password)
+
+    try:
+        ports = existing.attrs["NetworkSettings"]["Ports"]
+        host_port = int(ports["5432/tcp"][0]["HostPort"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        try:
+            existing.remove(force=True)
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+        return _start_fresh_pg_container(name, password)
+
+    url = f"postgresql://postgres:{password}@localhost:{host_port}/postgres"
+    return url, _PersistentContainerHandle(name=name)
+
+
+def _start_fresh_pg_container(
+    name: str, password: str,
+) -> tuple[str, _PersistentContainerHandle]:
+    """Spin a fresh named PG container with `pg_stat_statements` preloaded.
+
+    Race-safety: if another worker won the name-create race, Docker's
+    daemon rejects the second create with "container name already
+    exists". Caller's loop in the adopt-or-create flow handles that by
+    falling back to adopt.
+    """
+    from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
+
+    container = (
+        PostgresContainer("postgres:17-alpine", password=password)
+        .with_command("postgres -c shared_preload_libraries=pg_stat_statements")
+        .with_name(name)
+    )
+    try:
+        container.start()  # type: ignore[no-untyped-call]: testcontainers .start() lacks return-type hint
+    except Exception:  # noqa: BLE001 — likely a name-collision race; try adopt
+        # Another worker probably won — re-attempt the full adopt path.
+        return _get_or_start_pg_container(name, password)
+    raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]: testcontainers method has no type annotations
+    url = _normalize_pg_url(raw_url)
+    return url, _PersistentContainerHandle(name=name)
+
+
 def _get_or_start_oracle_container(
     name: str, password: str,
 ) -> tuple[str, _PersistentContainerHandle]:
@@ -1920,7 +2003,13 @@ def _start_fresh_oracle_container(
             )
 
     container = _Oracle19cContainer(image, oracle_password=password).with_name(name)
-    container.start()  # type: ignore[no-untyped-call]: testcontainers .start() lacks return-type hint
+    try:
+        container.start()  # type: ignore[no-untyped-call]: testcontainers .start() lacks return-type hint
+    except Exception:  # noqa: BLE001 — likely name-collision race; try adopt
+        # CB.17.k — another worker won the name race. Re-attempt the
+        # full adopt path; that worker's container should now show up
+        # via `docker.containers.get(name)`.
+        return _get_or_start_oracle_container(name, password)
     return container.get_connection_url(), _PersistentContainerHandle(name=name)
 
 

@@ -62,11 +62,17 @@ def test_strip_sa_url_prefix_already_plain_passes_through() -> None:
 
 def test_pg_container_url_yields_env_when_set(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
     """Env-URL fast path: yields the env value verbatim, no Docker spin.
 
     Drives the fixture's underlying generator directly so we don't need
     a sub-pytester to exercise it.
+
+    CB.17.k — fixture signature now includes
+    ``(tmp_path_factory, worker_id)`` for the xdist-shared-container
+    coordinator. The env-URL fast path bails before either is
+    consulted, so any values are fine.
     """
     fake = "postgresql://fake:5432/x"
     monkeypatch.setenv(RECON_GEN_DEMO_DATABASE_URL_PG.name, fake)
@@ -75,7 +81,9 @@ def test_pg_container_url_yields_env_when_set(
     # erases the return annotation under strict pyright.
     gen = cast(
         "Generator[str, None, None]",
-        pg_container_url.__wrapped__(),  # type: ignore[attr-defined]: pytest decorator stashes the generator
+        pg_container_url.__wrapped__(  # type: ignore[attr-defined]: pytest decorator stashes the generator
+            tmp_path_factory=tmp_path_factory, worker_id="master",
+        ),
     )
     assert next(gen) == fake
     # Exhaust the generator to trigger the (no-op) finalize.
@@ -85,13 +93,16 @@ def test_pg_container_url_yields_env_when_set(
 
 def test_oracle_container_url_yields_env_when_set(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
     """Env-URL fast path for Oracle. Same shape as the PG test above."""
     fake = "oracle://fake:1521/?service_name=FREEPDB1"
     monkeypatch.setenv(RECON_GEN_DEMO_DATABASE_URL_OR.name, fake)
     gen = cast(
         "Generator[str, None, None]",
-        oracle_container_url.__wrapped__(),  # type: ignore[attr-defined]: pytest decorator stashes the generator
+        oracle_container_url.__wrapped__(  # type: ignore[attr-defined]: pytest decorator stashes the generator
+            tmp_path_factory=tmp_path_factory, worker_id="master",
+        ),
     )
     assert next(gen) == fake
     with pytest.raises(StopIteration):

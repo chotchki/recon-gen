@@ -539,3 +539,5 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - **App2 KPI binding gap — Distinct Senders + per-account KPI cards render as None** — added 2026-06-04.
 - **BX backlog — recreate targeted tests for runner.py post-CB.17.d** — added 2026-06-04.
 - **BX backlog — asyncio executor not joining within 300s (thread leak signal)** — added 2026-06-04.
+- **BX backlog — Oracle container fixture: share one container across xdist workers** — added 2026-06-04.
+- **Backlog — `per_transfer` CTE is a matview candidate (dominates PG top-queries)** — added 2026-06-04.
