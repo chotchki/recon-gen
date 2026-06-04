@@ -54,11 +54,15 @@ from recon_gen.common.env_keys import (
 from recon_gen.common.l2 import L2Instance, load_instance
 from recon_gen.common.models import DataSet, DatasetParameter
 
-# Module-level cfg+L2 load (below) needs a live cfg yaml or env overrides;
-# under the unit-only CI job neither exists, and load_config(None) raises
-# the loud-fail ValueError, taking down pytest collection. Match the rest
-# of the e2e suite's RECON_GEN_E2E gate at import time so collection
-# cleanly skips this whole module when e2e is off.
+# CB.17.d (2026-06-04) — module-import still loads cfg+L2 because
+# pytest-parametrize needs the dataset NAME list at collection time.
+# Module-import is DB-INDEPENDENT (yaml parse + pure-python dataset
+# construction); the actual DB connection + seeded prefix lookup
+# happens via the `seeded_cfg` fixture inside each test. Names are
+# cfg-deployment_name-INDEPENDENT (each builder passes a human-readable
+# label) so the collection-time PLAIN cfg's names match the runtime
+# isolated cfg's names exactly.
+
 if not RECON_GEN_E2E.get_or_none():
     pytest.skip(
         "e2e tests disabled (set RECON_GEN_E2E=1)", allow_module_level=True,
@@ -219,18 +223,32 @@ def _load_l2() -> L2Instance:
     return default_l2_instance()
 
 
-# Resolve cfg + l2 + datasets at module-import time so pytest-parametrize
-# can name each test case by its DataSetId. Pure-Python builds — no DB or
-# AWS contact, safe to call at import; the actual DB connection happens
-# inside the per-test fixture.
-_CFG = _load_cfg()
-_L2 = _load_l2()
-_DATASETS = _build_all_datasets(_CFG, _L2)
-_DATASETS_BY_ID = {ds.DataSetId: ds for ds in _DATASETS}
+# Resolve cfg + L2 + dataset INDICES at module-import time so
+# pytest-parametrize can enumerate test cases at collection. Pure-Python
+# build — no DB or AWS contact. ``_build_all_datasets`` is deterministic
+# in its ordering, so collection-time PLAIN cfg index N corresponds to
+# runtime ``seeded_cfg`` index N — only the cfg-prefix-baked fields
+# (DataSetId, CustomSql.Name) differ; structural ordering is identical.
+# Names go into pytest's ``ids=`` for test-ID readability (pytest
+# auto-disambiguates duplicates as `name0`, `name1`, ...).
+_COLLECTION_CFG = _load_cfg()
+_COLLECTION_L2 = _load_l2()
+_COLLECTION_DATASETS = _build_all_datasets(_COLLECTION_CFG, _COLLECTION_L2)
+_DATASET_INDICES = list(range(len(_COLLECTION_DATASETS)))
+_DATASET_TEST_IDS = [ds.Name for ds in _COLLECTION_DATASETS]
 
 
 @pytest.fixture(scope="module")
-def smoke_conn() -> Iterator[Any]:
+def runtime_datasets(seeded_cfg: Config) -> list[DataSet]:
+    """Rebuild datasets against ``seeded_cfg`` (the per-worker isolated
+    prefix). Returns a list in the same order as ``_COLLECTION_DATASETS``
+    — index N at collection = index N at runtime.
+    """
+    return _build_all_datasets(seeded_cfg, _COLLECTION_L2)
+
+
+@pytest.fixture(scope="module")
+def smoke_conn(seeded_cfg: Config) -> Iterator[Any]:
     """Module-scoped DB connection — opened once, reused across every
     parametrized test, set to autocommit so AccessShareLocks release
     statement-by-statement.
@@ -245,25 +263,13 @@ def smoke_conn() -> Iterator[Any]:
     cumulative lock sets can intersect with an in-flight
     ``REFRESH MATERIALIZED VIEW`` (or autovacuum / autoanalyze taking
     AccessExclusiveLock briefly) and PG's deadlock detector kills one.
-    Symptom in CI was 3 datasets failing simultaneously
-    (app-info-matviews / daily-statement-transactions / transactions).
     Autocommit closes the inter-statement lock-holding window — locks
-    drop the instant each SELECT returns. ``_smoke_one``'s rollback
-    on the error path stays as defensive housekeeping; the success
-    path no longer needs one.
+    drop the instant each SELECT returns.
     """
-    conn = connect_demo_db(_CFG)
-    # Only the PG / Oracle drivers expose `autocommit` as a settable
-    # attribute; SQLite is already effectively autocommit at the
-    # statement level (it uses BEGIN-DEFERRED semantics + immediate
-    # release on commit, and the smoke tests don't write).
+    conn = connect_demo_db(seeded_cfg)
     if hasattr(conn, "autocommit"):
         try:
-            # `autocommit` is a psycopg-specific attribute (PG-only); the
-            # SyncConnection Protocol doesn't expose it because it isn't
-            # on PEP 249. Pyright-quiet via setattr — the hasattr guard
-            # above is the runtime check.
-            setattr(conn, "autocommit", True)  # noqa: B010
+            setattr(conn, "autocommit", True)  # noqa: B010 — psycopg-specific attribute set behind hasattr guard; SyncConnection Protocol doesn't expose it because it's not in PEP 249
         except Exception:  # noqa: BLE001 — best-effort; SQLite raises here
             pass
     try:
@@ -272,9 +278,11 @@ def smoke_conn() -> Iterator[Any]:
         conn.close()
 
 
-@pytest.mark.parametrize("dataset_id", sorted(_DATASETS_BY_ID))
+@pytest.mark.parametrize("dataset_idx", _DATASET_INDICES, ids=_DATASET_TEST_IDS)
 def test_dataset_sql_parses_and_executes(
-    dataset_id: str, smoke_conn: Any,
+    dataset_idx: int,
+    smoke_conn: Any,
+    runtime_datasets: list[DataSet],
 ) -> None:
     """The dataset's CustomSQL parses, binds default-value
     substitutions, and executes against the live demo DB without
@@ -286,5 +294,12 @@ def test_dataset_sql_parses_and_executes(
     column, bad syntax, unknown function); QS would render the visual
     blank or error opaquely.
     """
-    ok, msg = _smoke_one(smoke_conn, _DATASETS_BY_ID[dataset_id])
+    if dataset_idx >= len(runtime_datasets):
+        pytest.fail(
+            f"runtime_datasets has {len(runtime_datasets)} items; "
+            f"collection-time vs runtime _build_all_datasets ordering "
+            f"diverged at idx={dataset_idx}"
+        )
+    ds = runtime_datasets[dataset_idx]
+    ok, msg = _smoke_one(smoke_conn, ds)
     assert ok, msg

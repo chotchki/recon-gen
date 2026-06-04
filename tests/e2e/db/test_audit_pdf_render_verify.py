@@ -28,15 +28,19 @@ re-orders something the fingerprint hashes.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from recon_gen.common.config import Config
 from recon_gen.common.env_keys import (
     EnvVarInvalid,
     RECON_GEN_CONFIG,
+    RECON_GEN_DB_TABLE_PREFIX,
+    RECON_GEN_DEPLOYMENT_NAME,
     RECON_GEN_LAYER,
     RECON_GEN_RUN_DIR,
     RECON_GEN_TEST_L2_INSTANCE,
@@ -110,22 +114,38 @@ def _resolve_l2_path() -> Path | None:
     return Path(override) if override is not None else None
 
 
-def test_audit_apply_renders_pdf(tmp_path: Path) -> None:
+def _seeded_cli_env(seeded_cfg: Config) -> dict[str, str]:
+    """Build subprocess env that points the CLI at ``seeded_cfg``'s
+    isolated prefix + deployment_name. Config's env-override path
+    (``common/config.py::load_config``) reads these before yaml
+    fallback, so the CLI ends up with the same prefix the fixture
+    seeded against — `qsgen_postgres_<suffix>` instead of cfg yaml's
+    plain `qsgen_postgres`.
+    """
+    return {
+        **os.environ,
+        RECON_GEN_DB_TABLE_PREFIX.name: seeded_cfg.db_table_prefix,
+        RECON_GEN_DEPLOYMENT_NAME.name: seeded_cfg.deployment_name,
+    }
+
+
+def test_audit_apply_renders_pdf(tmp_path: Path, seeded_cfg: Config) -> None:
     """``audit apply --execute -o <pdf>`` produces a non-empty PDF.
 
     The render path queries every L1 invariant matview that the
-    variant's seed populated (via the variant's prefix). Failure at
+    fixture seeded against ``seeded_cfg.db_table_prefix``. Failure at
     this step usually means a SQL bug, an empty matview, or a
     reportlab regression.
     """
     cfg = _resolve_cfg_path()
     l2 = _resolve_l2_path()
     pdf = tmp_path / "report.pdf"
+    env = _seeded_cli_env(seeded_cfg)
 
     cmd = [str(_QS_GEN), "audit", "apply", "-c", str(cfg), "--execute", "-o", str(pdf)]
     if l2 is not None:
         cmd += ["--l2", str(l2)]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
     if result.returncode != 0 or not pdf.exists() or pdf.stat().st_size == 0:
         _stash_audit_failure(
             "test_audit_apply_renders_pdf", pdf,
@@ -140,7 +160,9 @@ def test_audit_apply_renders_pdf(tmp_path: Path) -> None:
     assert pdf.stat().st_size > 0, f"{pdf} written but empty"
 
 
-def test_audit_verify_recomputed_fingerprint_matches(tmp_path: Path) -> None:
+def test_audit_verify_recomputed_fingerprint_matches(
+    tmp_path: Path, seeded_cfg: Config,
+) -> None:
     """``audit verify <pdf>`` re-derives the ProvenanceFingerprint from
     current sources + asserts byte-equality with what the PDF baked in.
 
@@ -151,11 +173,12 @@ def test_audit_verify_recomputed_fingerprint_matches(tmp_path: Path) -> None:
     cfg = _resolve_cfg_path()
     l2 = _resolve_l2_path()
     pdf = tmp_path / "report.pdf"
+    env = _seeded_cli_env(seeded_cfg)
 
     apply_cmd = [str(_QS_GEN), "audit", "apply", "-c", str(cfg), "--execute", "-o", str(pdf)]
     if l2 is not None:
         apply_cmd += ["--l2", str(l2)]
-    apply_rc = subprocess.run(apply_cmd, capture_output=True, text=True, check=False)
+    apply_rc = subprocess.run(apply_cmd, capture_output=True, text=True, check=False, env=env)
     if apply_rc.returncode != 0:
         _stash_audit_failure(
             "test_audit_verify_recomputed_fingerprint_matches", pdf,
@@ -168,7 +191,7 @@ def test_audit_verify_recomputed_fingerprint_matches(tmp_path: Path) -> None:
     verify_cmd = [str(_QS_GEN), "audit", "verify", str(pdf), "-c", str(cfg)]
     if l2 is not None:
         verify_cmd += ["--l2", str(l2)]
-    verify_rc = subprocess.run(verify_cmd, capture_output=True, text=True, check=False)
+    verify_rc = subprocess.run(verify_cmd, capture_output=True, text=True, check=False, env=env)
     if verify_rc.returncode != 0:
         _stash_audit_failure(
             "test_audit_verify_recomputed_fingerprint_matches", pdf,

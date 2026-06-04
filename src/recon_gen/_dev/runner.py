@@ -1640,64 +1640,6 @@ def _start_thin_container(
     )
 
 
-def _seed_thin_container(
-    cfg_path: Path,
-    l2_path: Path,
-    container_env: dict[str, str],
-    run_dir: Path,
-) -> int:
-    """CB.17.d — seed the runner-spun container before any pytest layer.
-
-    Shells the same three CLI verbs the operator runs by hand in the
-    "Demo flow" section of CLAUDE.md::
-
-        recon-gen schema apply -c <cfg> --l2 <l2> --execute
-        recon-gen data apply   -c <cfg> --l2 <l2> --execute
-        recon-gen data refresh -c <cfg> --l2 <l2> --execute
-
-    container_env carries ``RECON_GEN_DEMO_DATABASE_URL`` (+ ``_PG`` /
-    ``_OR``) so each CLI invocation targets the runner-spun container
-    instead of cfg yaml's dead Aurora URL. cfg's ``db_table_prefix``
-    determines the table namespace (``qsgen_postgres_*`` etc.) — the
-    same prefix the test side sees, so test queries land on populated
-    tables.
-
-    Returns the first non-zero return code, or 0 if all three pass.
-    Stdout/stderr are inherited (terminal-visible) AND tee'd to
-    ``<run_dir>/seed/{stdout,stderr}.log`` for post-mortem.
-    """
-    seed_dir = run_dir / "seed"
-    seed_dir.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, **container_env}
-    stdout_path = seed_dir / "stdout.log"
-    stderr_path = seed_dir / "stderr.log"
-
-    steps: list[tuple[str, str]] = [
-        ("schema", "apply"),
-        ("data", "apply"),
-        ("data", "refresh"),
-    ]
-    for verb, sub in steps:
-        cmd = [
-            str(_VENV_BIN / "recon-gen"), verb, sub,
-            "-c", str(cfg_path),
-            "--l2", str(l2_path),
-            "--execute",
-        ]
-        print(f"runner: thin seed [{verb} {sub}] {' '.join(cmd)}")
-        returncode, _ = _spawn_with_tee(
-            cmd,
-            cwd=REPO_ROOT,
-            env=env,
-            stdout_path=stdout_path,
-            stderr_path=stderr_path,
-            terminal_prefix="[seed] ",
-        )
-        if returncode != 0:
-            return returncode
-    return 0
-
-
 @dataclass(frozen=True)
 class _PersistentContainerHandle:
     """Y.2.gate.j.5 — handle wrapper that signals "leave the container
@@ -3673,44 +3615,11 @@ def cmd_thin(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
 
-    # CB.17.d — seed the container with schema + data before pytest
-    # fires. Tests read cfg's plain `db_table_prefix` (`qsgen_postgres`
-    # etc., no per-cell suffix); schema/data apply with the SAME cfg
-    # writes to that same prefix. Without this, test queries hit
-    # `UndefinedTable: relation "qsgen_postgres_transactions" does not
-    # exist`. Skipped when L2 is missing (deploy/qs_* layers also fall
-    # through dispatch-skip without it).
-    l2_path_env = runner_variant_env.get(RECON_GEN_TEST_L2_INSTANCE.name)
-    if (
-        container_handle is not None
-        and cfg_path is not None
-        and l2_path_env is not None
-    ):
-        seed_rc = _seed_thin_container(
-            cfg_path, Path(l2_path_env), container_env, run_dir,
-        )
-        if seed_rc != 0:
-            print(
-                f"runner: thin seed failed rc={seed_rc}; "
-                f"aborting chain (see runs/<id>-thin/seed/ for triage)",
-                file=sys.stderr,
-            )
-            if container_handle is not None:
-                try:
-                    container_handle.stop()  # type: ignore[attr-defined]: duck-typed teardown contract matching setup_variant — testcontainers Container, _DuckdbHandle, _PersistentContainerHandle all expose .stop() but share no nominal parent
-                except Exception:  # noqa: BLE001 — teardown is best-effort
-                    pass
-            return _finalize_run(
-                run_dir,
-                LayerResult(
-                    layer="unit", exit_code=EXIT_SUCCESS,
-                    duration_seconds=0.0, skipped=True,
-                ),
-                [LayerResult(
-                    layer="seed", exit_code=seed_rc, duration_seconds=0.0,
-                )],
-                seed_rc,
-            )
+    # CB.17.d — seed step moved into the `seeded_cfg` pytest fixture
+    # (tests/e2e/_seed_helpers.py). Each (module, worker) applies its
+    # own schema + data + matview refresh against an isolated_cfg prefix
+    # on first use, then drops on teardown. The runner no longer shells
+    # `recon-gen schema/data apply` — that's fixture territory.
 
     chain = chain_through(args.layer)
     print(f"runner: chain={chain} (thin path: one subprocess per layer)")
