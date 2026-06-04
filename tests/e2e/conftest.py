@@ -1046,16 +1046,14 @@ def capture_top_queries(
 ) -> Iterator[None]:
     """Session-end perf-snapshot hook.
 
-    Yields immediately; on teardown, if ``RECON_GEN_RUN_DIR`` is set AND
-    the cfg has a demo_database_url, connects, runs the dialect's
-    stats-view query, and writes a markdown table. SQLite is silently
-    skipped (no equivalent stats view).
-
-    The like-pattern defaults to the cfg's ``db_table_prefix`` (Z.C —
-    was previously ``cfg.l2_instance_prefix`` or the loaded L2's
-    ``instance`` field; both are gone). Falls back to ``spec_example``
-    when cfg.db_table_prefix is somehow absent. That keeps multi-tenant
-    shared-DB output narrowed to OUR queries.
+    CB.17.j — snapshots EACH dialect-container that the session
+    actually touched, not just the one matching cfg.dialect. The
+    ``pg_container_url`` / ``oracle_container_url`` fixtures set
+    ``RECON_GEN_DEMO_DATABASE_URL_PG`` / ``_OR`` to the yielded URL
+    when they fire; teardown iterates those env vars and writes a
+    per-container ``$RECON_GEN_RUN_DIR/db/<dialect>/top-queries.md``.
+    Falls back to the cfg.dialect path when neither env var is set
+    (DuckDB-only or no-container session).
     """
     yield
 
@@ -1068,6 +1066,104 @@ def capture_top_queries(
     if run_dir_path is None:
         return
     run_dir = str(run_dir_path)
+
+    # CB.17.j — fan out over each container the session touched.
+    # Module-level imports keep these in scope here; only the perf
+    # helpers + connect_demo_db are lazy.
+    from recon_gen._dev.perf import (  # noqa: PLC0415
+        fetch_top_queries,
+        format_skipped,
+        format_top_queries_markdown,
+    )
+    from recon_gen.common.db import connect_demo_db  # noqa: PLC0415
+    from recon_gen.common.env_keys import (  # noqa: PLC0415
+        RECON_GEN_DEMO_DATABASE_URL_OR,
+        RECON_GEN_DEMO_DATABASE_URL_PG,
+    )
+    from recon_gen.common.sql import Dialect  # noqa: PLC0415
+    import dataclasses as _dc  # noqa: PLC0415
+
+    # ``like_pattern`` narrows the stats-view scan to OUR queries.
+    # cfg.db_table_prefix is the canonical root every isolated test
+    # suffixes (`qsgen_postgres_<hash>`), so a LIKE on the bare prefix
+    # matches both the base AND every isolated-test variant. Same
+    # pattern works for Oracle queries since the trainer fixture only
+    # rewrites cfg.dialect at parametrize time, not db_table_prefix.
+    like_pattern = cfg.db_table_prefix or "spec_example"
+
+    def _snapshot(
+        target_dir: Path, dialect: Dialect, url: str,
+    ) -> None:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / "top-queries.md"
+        title = f"Top expensive queries ({dialect.value})"
+        # Build a minimal cfg pointing at this container.
+        cfg_snap = _dc.replace(cfg, demo_database_url=url, dialect=dialect)
+        try:
+            conn = connect_demo_db(cfg_snap)
+        except Exception as exc:
+            try:
+                target.write_text(
+                    format_skipped(
+                        title=title, dialect=dialect.value,
+                        reason=f"could not connect: {exc!r}",
+                    ),
+                )
+            except OSError:
+                pass
+            return
+        try:
+            try:
+                rows = fetch_top_queries(
+                    conn, dialect, like_pattern=like_pattern, top=50,
+                )
+            except Exception as exc:
+                try:
+                    target.write_text(
+                        format_skipped(
+                            title=title, dialect=dialect.value,
+                            reason=(
+                                f"stats view unavailable: "
+                                f"{type(exc).__name__}: {exc}. Pre-req "
+                                f"for postgres: ``CREATE EXTENSION "
+                                f"pg_stat_statements`` + "
+                                f"`shared_preload_libraries`. For "
+                                f"oracle: SELECT on ``v$sqlstats``."
+                            ),
+                        ),
+                    )
+                except OSError:
+                    pass
+                return
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        try:
+            target.write_text(
+                format_top_queries_markdown(
+                    title=title, dialect=dialect.value,
+                    like_pattern=like_pattern, rows=rows,
+                ),
+            )
+        except OSError:
+            pass
+
+    pg_url = RECON_GEN_DEMO_DATABASE_URL_PG.get_or_none()
+    or_url = RECON_GEN_DEMO_DATABASE_URL_OR.get_or_none()
+    snapshot_count = 0
+    if pg_url:
+        _snapshot(Path(run_dir) / "db" / "postgres", Dialect.POSTGRES, pg_url)
+        snapshot_count += 1
+    if or_url:
+        _snapshot(Path(run_dir) / "db" / "oracle", Dialect.ORACLE, or_url)
+        snapshot_count += 1
+    if snapshot_count > 0:
+        return
+
+    # Fallback: neither container fixture was used. Keep the legacy
+    # cfg.dialect-only path for DuckDB-only or no-container sessions.
     if not cfg.demo_database_url:
         return
 

@@ -906,6 +906,13 @@ def pg_container_url() -> Generator[str, None, None]:
     Yields the env URL if set, else spins ``postgres:17-alpine`` via
     testcontainers. See module-level CB.17.a comment for the full
     resolution contract.
+
+    CB.17.j — when this fixture fires (env URL OR fresh container),
+    ``RECON_GEN_DEMO_DATABASE_URL_PG`` gets set to the yielded URL so
+    the conftest's `capture_top_queries` teardown can detect that the
+    session touched PG (independent of cfg.dialect) and write a
+    per-container perf snapshot. Mirror change in
+    ``oracle_container_url``.
     """
     env_url = RECON_GEN_DEMO_DATABASE_URL_PG.get_or_none()
     if env_url is not None:
@@ -915,11 +922,19 @@ def pg_container_url() -> Generator[str, None, None]:
     pytest.importorskip("testcontainers.postgres")
     from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
 
-    container = PostgresContainer("postgres:17-alpine")
+    # CB.17.j — `shared_preload_libraries=pg_stat_statements` so the
+    # `capture_top_queries` teardown can read real perf data. Mirror
+    # of the runner / ci.yml fix.
+    container = (
+        PostgresContainer("postgres:17-alpine")
+        .with_command("postgres -c shared_preload_libraries=pg_stat_statements")
+    )
     container.start()
     try:
         raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]: testcontainers method has no type annotations
-        yield _strip_sa_url_prefix(raw_url)
+        url = _strip_sa_url_prefix(raw_url)
+        os.environ[RECON_GEN_DEMO_DATABASE_URL_PG.name] = url
+        yield url
     finally:
         container.stop()
 
@@ -975,7 +990,10 @@ def oracle_container_url() -> Generator[str, None, None]:
     container.start()  # type: ignore[no-untyped-call]: testcontainers .start() lacks return-type hint
     try:
         raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]: testcontainers method has no type annotations
-        yield _strip_sa_url_prefix(raw_url)
+        url = _strip_sa_url_prefix(raw_url)
+        # CB.17.j — see pg_container_url for the contract.
+        os.environ[RECON_GEN_DEMO_DATABASE_URL_OR.name] = url
+        yield url
     finally:
         container.stop()
 
