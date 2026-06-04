@@ -32,6 +32,9 @@ from __future__ import annotations
 import pathlib
 from typing import Any
 
+import pytest
+
+from recon_gen.common.config import Config
 from tests._marks import Need, Tier, needs, tier
 
 # CB.7 (refactored 2026-06-02) — re-export the isolation primitives so
@@ -45,11 +48,20 @@ from tests.e2e._isolation import (  # noqa: F401 — re-export so pytest discove
     enforce_readonly,
     isolated_cfg,
 )
+from tests.e2e.conftest import _load_session_cfg, _substitute_container_url
 
 __all__ = [
     "_isolate_cfg", "_isolated_cfg_key", "db_conn", "enforce_readonly",
     "isolated_cfg",
 ]
+
+
+# CB.17.d — qs_browser-tier `cfg` override. See `tests/e2e/db/conftest.py`'s
+# `cfg` override for the full rationale; same shape here.
+@pytest.fixture(scope="session")
+def cfg(request: pytest.FixtureRequest) -> Config:
+    base = _load_session_cfg(request)
+    return _substitute_container_url(base, request)
 
 
 _QS_BROWSER_TIER_MARK = tier(Tier.QS_BROWSER)

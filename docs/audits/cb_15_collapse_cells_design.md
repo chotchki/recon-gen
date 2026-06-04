@@ -402,6 +402,92 @@ infrastructure — it shipped CB.15's hard parts already.
 - **BX [#184](../../PLAN.md) coverage merge doesn't render in PR comments** — stop fighting pytest-cov.
 - **CB.16 (typing honesty)** lands independently — the fixture migration doesn't touch `connect_demo_db`'s return type.
 
+## CB.17.d strangler — progress log v2 (2026-06-04, late)
+
+Conftest aliasing landed across all four tier conftests (db / app2 /
+qs_api / qs_browser). The override pattern:
+
+```python
+# tests/e2e/db/conftest.py
+@pytest.fixture(scope="session")
+def cfg(request: pytest.FixtureRequest) -> Config:
+    base = _load_session_cfg(request)
+    return _substitute_container_url(base, request)
+```
+
+The helper lives in `tests/e2e/conftest.py`:
+
+```python
+def _substitute_container_url(loaded, request):
+    if RECON_GEN_DEMO_DATABASE_URL.get_or_none():
+        return loaded  # legacy cell-loop already substituted via env
+    if loaded.dialect is Dialect.POSTGRES:
+        return dataclasses.replace(
+            loaded, demo_database_url=request.getfixturevalue("pg_container_url"))
+    if loaded.dialect is Dialect.ORACLE:
+        return dataclasses.replace(
+            loaded, demo_database_url=request.getfixturevalue("oracle_container_url"))
+    return loaded  # DuckDB passthrough
+```
+
+**Lazy dispatch via `request.getfixturevalue`** matters: a static
+signature dep on both `pg_container_url` + `oracle_container_url`
+forces Oracle 19c to spin even in POSTGRES-only sessions. The Mac dev
+box can't reliably boot Oracle 19c (15-min `wait_for_logs(900s)`
+timeout, PMON instance death), so this lazy path is load-bearing.
+
+**Legacy compat verified.** `up_to=db --variants=sp_pg_lo` after the
+override: 91 passed, 17 skipped, 20.52s. `setup_variant` injects
+`RECON_GEN_DEMO_DATABASE_URL=<per-cell-url>`, `Config`'s env-override
+substitutes the URL before the cfg fixture runs, and
+`_substitute_container_url`'s first check returns the loaded cfg
+unchanged. No double-spin, no behavioral drift.
+
+**Thin path partial-progress on db tier.** After the override:
+20 passed, 63 errors, 25s (down from 108 errors, 906s). Remaining
+errors are confined to test files that load cfg at *module-import
+time* — not via the pytest fixture:
+
+```python
+# tests/e2e/db/test_dataset_sql_smoke.py:226
+_CFG = _load_cfg()   # <- module import, bypasses fixture override
+_L2 = _load_l2()
+_DATASETS = _build_all_datasets(_CFG, _L2)
+# pytest needs the DataSetId list at collection time to name
+# parametrize cases, so the module-import call exists.
+```
+
+These files (test_dataset_sql_smoke, test_inv_direct, test_audit_direct,
+test_demo_apply_row_counts, test_spine_live_db, test_bv31_plant_round_trip,
+test_audit_pdf_render_verify) call `_load_cfg()` directly via
+`load_config(...)` — no fixture chain, no env-substitution path
+unless the runner pre-exports `RECON_GEN_DEMO_DATABASE_URL` to the
+subprocess.
+
+**Next CB.17.d sub-step.** Two paths:
+
+1. **Have cmd_thin pre-spin the dialect-matching container in the
+   runner process and export `RECON_GEN_DEMO_DATABASE_URL` +
+   `RECON_GEN_DEMO_DATABASE_URL_<PG|OR>` to the pytest subprocess.**
+   The runner-side `_PG` / `_OR` env makes the session container
+   fixtures honor the URL fast-path (no re-spin). This is what
+   `setup_variant` already does, simplified for the single-cfg case.
+   Smallest diff; restores the "runner provides substrate, pytest
+   consumes" pattern that already works in legacy.
+2. **Refactor module-import test files to lazy cfg loading via
+   fixture.** Each test file moves `_CFG = _load_cfg()` into a
+   `module_cfg` fixture (or similar) that depends on `cfg`. Need to
+   thread parametrize labeling through the fixture — pytest can
+   parametrize with `pytest.fixture(params=...)` but the test func
+   currently takes `dataset_id` as a parametrize value. Workable but
+   touches 7 files in a non-trivial way.
+
+Pick (1) for the next iteration. It's the runner-side investment that
+the design doc already foreshadowed ("Add `RECON_GEN_DEMO_DATABASE_URL_PG`
+/ `_OR` env on the test step pointing at the shared containers"). Once
+this lands, the test-file refactor in option 2 becomes a separate,
+optional cleanup that doesn't gate cell-loop deletion.
+
 ## CB.17.d strangler — progress log (2026-06-04)
 
 `cmd_thin` ships at `src/recon_gen/_dev/runner.py:3413` (commit `6be7ebb1`).

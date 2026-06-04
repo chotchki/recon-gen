@@ -22,7 +22,19 @@ from __future__ import annotations
 import pathlib
 from typing import Any
 
+import pytest
+
+from recon_gen.common.config import Config
 from tests._marks import Need, Tier, needs, tier
+from tests.e2e.conftest import _load_session_cfg, _substitute_container_url
+
+
+# CB.17.d — qs_api-tier `cfg` override. See `tests/e2e/db/conftest.py`'s
+# `cfg` override for the full rationale; same shape here.
+@pytest.fixture(scope="session")
+def cfg(request: pytest.FixtureRequest) -> Config:
+    base = _load_session_cfg(request)
+    return _substitute_container_url(base, request)
 
 
 _QS_API_TIER_MARK = tier(Tier.QS_API)

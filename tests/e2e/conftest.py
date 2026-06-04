@@ -131,26 +131,19 @@ IDENTITY_REGION = RECON_E2E_IDENTITY_REGION.get_or_none() or "us-east-1"
 # Fixtures
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(scope="session")
-def cfg(request: pytest.FixtureRequest) -> Config:
-    """Load project config — checks the legacy single-file location, then
-    the per-dialect copies (Phase P), then env vars.
+def _load_session_cfg(request: pytest.FixtureRequest) -> Config:
+    """CB.17.d — cfg-loading helper extracted from the `cfg` fixture body.
 
-    The candidate order favors the explicit single-file config before
-    falling back to the dialect-specific files. Override with the
-    ``RECON_GEN_CONFIG`` env var when both per-dialect files exist and
-    you need to pin to one.
+    Tier conftests (``tests/e2e/{db,app2,qs_api,qs_browser}/conftest.py``)
+    override the ``cfg`` fixture to substitute the session-scoped
+    container URL when the runner hasn't injected
+    ``RECON_GEN_DEMO_DATABASE_URL`` via env (the legacy ``cmd_up_to`` cell
+    loop path). Each override calls this helper to get the canonical
+    base cfg, then layers the substitution.
 
-    BG.3 / BG.6 anchor-drift fix: after loading, pin
-    ``test_generator.end_date`` to the demo DB's ``<prefix>_config_kv``
-    ``as_of`` row (stamped at ``data apply`` time). Without this,
-    ``cfg.test_generator.as_of_frame`` falls through to ``AsOfFrame.live()``
-    at test-call time — and when CI crosses the UTC midnight boundary
-    between deploy and test, ``query_db_via_cfg`` ends up shifted one
-    day past the window QS baked into its dataset defaults at deploy.
-    The kv row IS the deploy-time anchor; reading it back makes both
-    paths land on the same day. Fall-through (unpinned cfg) when the
-    DB isn't reachable — keeps offline unit-shape probes working.
+    Pulled out (vs an in-fixture override) because pytest fixture
+    overrides that name a parent's fixture-name in their deps create a
+    resolution cycle.
     """
     from recon_gen.common.config import load_config
 
@@ -184,6 +177,65 @@ def cfg(request: pytest.FixtureRequest) -> Config:
     if not _session_needs_aws(request.session):
         return loaded
     return _pin_cfg_to_kv_as_of(loaded)
+
+
+def _substitute_container_url(  # pyright: ignore[reportUnusedFunction]: re-exported via `from tests.e2e.conftest import _substitute_container_url` in the four tier conftests (db/app2/qs_api/qs_browser) — pyright doesn't follow that cross-module path
+    loaded: Config,
+    request: pytest.FixtureRequest,
+) -> Config:
+    """CB.17.d — swap ``cfg.demo_database_url`` for the matching
+    session-scoped container URL.
+
+    Honors the legacy ``cmd_up_to`` cell-loop path: when
+    ``RECON_GEN_DEMO_DATABASE_URL`` env is set (the runner's
+    ``setup_variant`` injected the per-cell URL), ``Config``'s
+    env-override has already substituted the cell URL into
+    ``loaded.demo_database_url`` — return unchanged. When unset
+    (thin path), substitute the container URL by dialect.
+
+    Container fixtures are resolved via ``request.getfixturevalue``
+    so ONLY the matching dialect's container spins. A static signature
+    dep on both ``pg_container_url`` + ``oracle_container_url`` would
+    force Oracle to spin even in a POSTGRES-only session — Oracle 19c
+    is slow + heavy + can fail to boot on a resource-constrained host,
+    so lazy dispatch matters.
+
+    DuckDB passthrough: the yaml URL (``duckdb:///...``) is file-based
+    and neither container fixture fires.
+    """
+    import dataclasses  # noqa: PLC0415
+
+    from recon_gen.common.env_keys import RECON_GEN_DEMO_DATABASE_URL  # noqa: PLC0415
+    from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
+
+    if RECON_GEN_DEMO_DATABASE_URL.get_or_none():
+        return loaded
+    if loaded.dialect is Dialect.POSTGRES:
+        pg_url = cast(str, request.getfixturevalue("pg_container_url"))
+        return dataclasses.replace(loaded, demo_database_url=pg_url)
+    if loaded.dialect is Dialect.ORACLE:
+        oracle_url = cast(str, request.getfixturevalue("oracle_container_url"))
+        return dataclasses.replace(loaded, demo_database_url=oracle_url)
+    return loaded
+
+
+@pytest.fixture(scope="session")
+def cfg(request: pytest.FixtureRequest) -> Config:
+    """Load project config — checks the legacy single-file location, then
+    the per-dialect copies (Phase P), then env vars.
+
+    The candidate order favors the explicit single-file config before
+    falling back to the dialect-specific files. Override with the
+    ``RECON_GEN_CONFIG`` env var when both per-dialect files exist and
+    you need to pin to one.
+
+    BG.3 / BG.6 anchor-drift fix: after loading, pin
+    ``test_generator.end_date`` to the demo DB's ``<prefix>_config_kv``
+    ``as_of`` row (stamped at ``data apply`` time). See
+    ``_load_session_cfg`` docstring for the helper-extract rationale
+    (CB.17.d strangler).
+    """
+    return _load_session_cfg(request)
 
 
 # ---------------------------------------------------------------------------
