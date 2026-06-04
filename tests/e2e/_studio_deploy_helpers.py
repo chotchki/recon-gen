@@ -251,6 +251,7 @@ def studio_server(cfg: Config) -> Generator[str, None, None]:
                 startup_error.append(e)
                 server_ready.set()
                 return
+            serve_task: asyncio.Task[None] | None = None
             try:
                 app = build_studio_app(cfg, pool)
                 config = uvicorn.Config(
@@ -277,6 +278,36 @@ def studio_server(cfg: Config) -> Generator[str, None, None]:
                 server_ready.set()
                 await serve_task
             finally:
+                # CB.17.l — cancel + await any orphan background tasks
+                # before the event loop closes. The studio routes do
+                # `asyncio.create_task(_run_session_start())` (and
+                # /etl/run, /training/reclone, /training/apply) — they
+                # return the HTTP response immediately and rely on the
+                # frontend's live-tail to poll for completion. In tests
+                # we kill uvicorn before the polling completes, leaving
+                # those tasks holding `asyncio.to_thread` workers that
+                # the event loop's executor must wait on at close time.
+                # Python 3.13 logs `RuntimeWarning: The executor did
+                # not finishing joining its threads within 300 seconds`
+                # if those workers don't return. Cancelling the tasks
+                # gives `asyncio.to_thread` a clean path to bubble up
+                # the cancel + release its worker.
+                pending: list[asyncio.Task[Any]] = [
+                    t for t in asyncio.all_tasks()
+                    if t is not asyncio.current_task()
+                    and t is not serve_task
+                    and not t.done()
+                ]
+                for t in pending:
+                    t.cancel()
+                if pending:
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(*pending, return_exceptions=True),
+                            timeout=10.0,
+                        )
+                    except (asyncio.TimeoutError, Exception):  # noqa: BLE001 — best-effort cleanup
+                        pass
                 await pool.close()
 
         asyncio.run(_serve())
