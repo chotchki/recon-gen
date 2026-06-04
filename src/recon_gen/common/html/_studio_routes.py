@@ -4752,7 +4752,16 @@ def make_studio_routes(
     ) -> bool:
         """Check if `<base>_v_transactions` exists. Cheap probe — the
         v overlay's lifecycle is all-or-nothing so testing one table
-        is sufficient."""
+        is sufficient.
+
+        CB.17.i.1 — the probe SQL is ``WHERE 1=0``, not ``LIMIT 1``.
+        Oracle has no ``LIMIT``; the query died with ORA-00933, the
+        ``except`` caught it, the probe returned False, and the
+        trainer's Apply button stayed disabled. ``WHERE 1=0`` is the
+        portable existence-probe idiom this codebase already uses
+        (see ``_column_names`` in
+        ``tests/e2e/app2/test_bv33_trainer_dogfood.py``).
+        """
         import asyncio as _asyncio  # noqa: PLC0415
 
         from recon_gen.common.db import connect_demo_db as _connect  # noqa: PLC0415
@@ -4769,7 +4778,7 @@ def make_studio_routes(
             try:
                 cur = conn.cursor()
                 try:
-                    cur.execute(f"SELECT 1 FROM {base_prefix}_v_transactions LIMIT 1")
+                    cur.execute(f"SELECT 1 FROM {base_prefix}_v_transactions WHERE 1=0")
                     return True
                 except Exception:  # noqa: BLE001
                     return False
