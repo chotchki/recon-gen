@@ -479,3 +479,67 @@ def test_pick_multi_xor_chain_inputs_returns_none_for_singleton_chain() -> None:
         limit_schedules=(),
     )
     assert _pick_multi_xor_chain_inputs(inst) is None
+
+
+# ---------------------------------------------------------------------------
+# CF.0 — _pick_template scoring
+# ---------------------------------------------------------------------------
+
+
+def test_pick_template_spec_example_skips_alpha_stub_for_rail_supported_template() -> None:
+    """CF.0 (Fix A) regression gate: spec_example.yaml declares
+    `AlphaCustomerStub` as the ALPHABETICAL FIRST AccountTemplate with
+    no rails / limit-schedules referencing it, and `CustomerSubledger`
+    as the rail-supported sibling. Pre-CF.0 the picker returned
+    `sorted(...)[0]` → AlphaCustomerStub → drift + limit_breach plants
+    raised `ValueError: drift plant: no 2-leg Rail with destination
+    matching the template role` BEFORE any SQL (reviewer-confirmed:
+    docs/audits/v13_1_1_repro.md).
+
+    Post-CF.0 the picker scores each template by materializable-plant
+    count and picks the highest; AlphaCustomerStub scores 0 while
+    CustomerSubledger scores all 5/5 L1-invariant pickers, so the
+    locked seed bytes stay identical. If the picker EVER returns
+    AlphaCustomerStub the locked-seed determinism test red-walls —
+    that's the regression gate working as intended.
+    """
+    from recon_gen.common.l2.auto_scenario import _pick_template
+    from recon_gen.common.l2.loader import load_instance
+
+    inst = load_instance("tests/l2/spec_example.yaml")
+    roles = [str(t.role) for t in inst.account_templates]
+    assert "AlphaCustomerStub" in roles, (
+        "regression fixture missing: AlphaCustomerStub must remain in "
+        "spec_example.yaml so this test exercises the picker-fragility "
+        "shape the reviewer hit on the v13.1.1 cold-read"
+    )
+    assert sorted(roles)[0] == "AlphaCustomerStub", (
+        "regression fixture invariant: AlphaCustomerStub must be the "
+        "ALPHABETICALLY FIRST template so a regression to "
+        "`sorted(...)[0]` picker re-introduces the silent no-op"
+    )
+    pick = _pick_template(inst)
+    assert pick is not None
+    assert str(pick.role) == "CustomerSubledger", (
+        f"CF.0 regression: picker chose {pick.role!r} but expected "
+        f"CustomerSubledger (the rail-supported sibling). Pre-CF.0's "
+        f"alphabetical-first `sorted(...)[0]` picker is back — drift "
+        f"and limit_breach plants will silently no-op."
+    )
+
+
+def test_pick_template_preserves_sasquatch_pr_choice() -> None:
+    """Locked-seed byte-identity guard: sasquatch_pr's CustomerDDA
+    template (alphabetical first AND highest-scoring at 5/5) MUST stay
+    the picked template under the CF.0 scoring picker, otherwise the
+    locked-seed determinism test red-walls."""
+    from recon_gen.common.l2.auto_scenario import _pick_template
+    from recon_gen.common.l2.loader import load_instance
+
+    inst = load_instance("tests/l2/sasquatch_pr.yaml")
+    pick = _pick_template(inst)
+    assert pick is not None
+    assert str(pick.role) == "CustomerDDA", (
+        f"sasquatch_pr picker MUST return CustomerDDA for seed-hash "
+        f"stability; got {pick.role!r}"
+    )

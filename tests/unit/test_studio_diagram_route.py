@@ -108,13 +108,15 @@ def test_studio_diagram_route_uses_sasquatch_pr_when_loaded() -> None:
         # And the sasquatch DOT block should be substantially larger
         # (it has dozens more rails / templates / chains). Ratio
         # softened post-AM.2 step 3 (2026-05-25) — page chrome
-        # migrated to raw Tailwind utility classes, which inflates
-        # spec_example's fixed overhead enough that the 1.3x ratio
-        # no longer holds (sas/spec ≈ 1.24x today, still proves the
-        # DOT block grows with the L2's size but the noise floor is
-        # higher). The CashDueFRB / not-in-spec_body assertion above
-        # is the load-bearing identity check.
-        assert len(sas_body) > len(spec_body) * 1.2
+        # migrated to raw Tailwind utility classes, which inflated
+        # spec_example's fixed overhead. CF.0 (2026-06-04) added
+        # `AlphaCustomerStub` to spec_example.yaml as a picker-
+        # robustness regression fixture, inflating it again — sas/spec
+        # now ≈ 1.18x. The CashDueFRB / not-in-spec_body assertion
+        # above is the load-bearing identity check; this ratio just
+        # proves the DOT block grows with L2 size, so >1.1x is enough
+        # signal without false-positiving on small fixture additions.
+        assert len(sas_body) > len(spec_body) * 1.1
 
 
 def test_studio_static_serves_diagram_js() -> None:

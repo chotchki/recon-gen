@@ -19,6 +19,7 @@ Five investigations turned up surprises that change what each CF task actually i
 4. **CF.5 fix is one line.** The Templates Sankey is the only Sankey in the codebase without `items_limit`. Investigation's three Sankeys all cap at 50. The cyclic-edge banner already exists (BS.3 follow-up, 2026-05-30). The fix: add `items_limit=30`, change the Template dropdown default from "all" to first-declared, and re-frame the cycle banner copy on this sheet.
 
 5. **CF.4 entity-count is unknown.** Cold-read measured 40,000px for one list, but sasquatch_pr has only ~7 rails. The reviewer ran against a much larger L2 (fuzz seed? customer L2?). Sub-1000 cards is client-side filterable; >1000 needs server-side pagination. Implementer must confirm the bracket before sizing.
+ - Comment: I'd match pagination that we have on other screens.
 
 The infrastructure-sweep findings (CF.X-infra) also matter: a shared `render_banner()` + `KPIValueThresholdBanding` primitive + `render_searchable_list()` helper would shrink CF.1 / CF.2 / CF.4 / CF.6 / CF.7 to consumers of shared infra rather than per-task re-implementations.
 

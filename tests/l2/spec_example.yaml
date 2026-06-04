@@ -54,6 +54,22 @@ accounts:
     parent_role: CustomerLedger
 
 account_templates:
+  # CF.0 (2026-06-04) regression fixture — AlphaCustomerStub is
+  # ALPHABETICALLY FIRST but has ZERO rails / limit-schedules referencing
+  # it. Pre-CF.0 `_pick_template` returned `sorted(...)[0]` →
+  # AlphaCustomerStub → drift + limit_breach plants raised ValueError
+  # before any SQL (reviewer-confirmed; see docs/audits/v13_1_1_repro.md).
+  # Post-CF.0 the picker scores each template by materializable-plant
+  # count and picks the highest; AlphaCustomerStub scores 0 while
+  # CustomerSubledger scores 5/5, so the locked seed bytes stay
+  # IDENTICAL. If this template ever silently picks AlphaCustomerStub
+  # the locked-seed determinism test red-walls — that's the regression
+  # gate working as intended.
+  - role: AlphaCustomerStub
+    scope: internal
+    parent_role: CustomerLedger
+    instance_id_template: alpha-stub-{n:03d}
+    instance_name_template: Alpha Stub {n}
   - role: CustomerSubledger
     scope: internal
     parent_role: CustomerLedger

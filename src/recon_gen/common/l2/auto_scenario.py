@@ -1336,10 +1336,51 @@ def _build_broad_rail_firings(
 
 
 def _pick_template(instance: L2Instance) -> AccountTemplate | None:
-    """First AccountTemplate sorted by role name; None if none declared."""
+    """Pick the AccountTemplate that supports the most L1-invariant plants.
+
+    CF.0 (Fix A, 2026-06-04) — pre-CF.0 this took the alphabetically-
+    first AccountTemplate (`sorted(..., key=role)[0]`). That choice
+    silently omits plants when the chosen role's rail / limit-schedule
+    topology doesn't match — e.g. DriftPlant needs an inbound 2-leg
+    rail with destination role matching the template role; LimitBreach
+    needs a matching outbound LimitSchedule. On an L2 whose first-
+    sorted role lacks these but sibling roles satisfy them, operators
+    saw "N plant(s) failed" via Studio Apply with no actionable
+    recourse beyond editing the L2.
+
+    Reviewer-confirmed root cause: ``docs/audits/v13_1_1_repro.md``.
+
+    Strategy: score each declared AccountTemplate by the count of
+    L1-invariant pickers that return non-None against its role. Pick
+    the maximum-score template. Tie-break alphabetical by role string
+    for seed-hash stability (sasquatch_pr verified: CustomerDDA wins
+    on both axes since it scores 5/5 AND sorts first; locked seed
+    bytes preserved).
+
+    When every template scores 0 (a truly plant-incapable L2), the
+    tie-break still returns the alphabetical first, preserving pre-
+    CF.0 behavior so the omitted-plant report still surfaces
+    actionable causes via `default_scenario_for`'s `omitted` list.
+
+    Returns None only when no AccountTemplate is declared.
+    """
     if not instance.account_templates:
         return None
-    return sorted(instance.account_templates, key=lambda t: str(t.role))[0]
+
+    def _score(tmpl: AccountTemplate) -> tuple[int, str]:
+        role = tmpl.role
+        materializable = sum((
+            1 if _pick_inbound_2leg_rail(instance, role) is not None else 0,
+            1 if _pick_breach_inputs(instance, role) is not None else 0,
+            1 if _pick_inbound_breach_inputs(instance, role) is not None else 0,
+            1 if _pick_supersession_rail(instance, role) is not None else 0,
+            1 if _pick_inv_fanout_inputs(instance, role) is not None else 0,
+        ))
+        # Higher score = more plants supported. Negate so min() picks
+        # the highest-scoring template; alphabetical tie-break second.
+        return (-materializable, str(role))
+
+    return min(instance.account_templates, key=_score)
 
 
 _TEMPLATE_INSTANCE_NS: tuple[int, int] = (1, 2)
