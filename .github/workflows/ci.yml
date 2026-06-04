@@ -304,6 +304,49 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
+      - name: Surface top-queries in Step Summary + upload as artifact
+        # CB.17.k — the `capture_top_queries` teardown writes
+        # `runs/<id>/db/<dialect>/top-queries.md` with pg_stat_statements
+        # / v$sqlstats top-50 for each dialect the session touched. Render
+        # them inline in the GitHub Step Summary (same UX as the coverage
+        # report) AND upload as a focused artifact so it's downloadable
+        # without grabbing the full multi-GB runs/ tree.
+        if: always()
+        run: |
+          {
+            echo "# Top expensive queries"
+            echo ""
+            echo "_From \`capture_top_queries\` session-teardown; "
+            echo "filter LIKE matches the cfg's \`db_table_prefix\`._"
+            echo ""
+            for f in $(find runs -name "top-queries.md" 2>/dev/null | sort); do
+              echo ""
+              echo "---"
+              echo ""
+              echo "<sub>${f}</sub>"
+              echo ""
+              cat "$f"
+            done
+          } > top-queries-summary.md
+          if [ -s top-queries-summary.md ]; then
+            cat top-queries-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No top-queries.md files found in runs/. " \
+              "Either no DB-touching test layer fired, " \
+              "or capture_top_queries hit its skip path." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload top-queries artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: top-queries-${{ github.run_id }}
+          path: |
+            top-queries-summary.md
+            runs/*/db/*/top-queries.md
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Stop shared PG + Oracle containers (only if this run started them)
         # Teardown is conditional on the `ensure_dbs` step's outputs —
         # if CI reused persistent containers, leave them running for
