@@ -1427,10 +1427,20 @@ def _reset_oracle_password_via_socket(container_name: str, password: str) -> Non
     heredoc is wrapped in `bash -lc` so sqlplus's environment (PATH,
     ORACLE_HOME, etc.) is set up; otherwise the binary isn't on the
     default exec path.
+
+    CE.4-followup — `ACCOUNT UNLOCK` covers the case where past
+    invocations racked up failed logins and tripped the DEFAULT
+    profile's `FAILED_LOGIN_ATTEMPTS=10` threshold (ORA-28000). The
+    profile bump to UNLIMITED makes future stale-password retries
+    during the password-rotation dance harmless. Both clauses are
+    idempotent.
     """
     import subprocess  # noqa: PLC0415 — lazy
     sql = (
-        f'ALTER USER system IDENTIFIED BY "{password}";\nEXIT;\n'
+        f'ALTER USER system IDENTIFIED BY "{password}" ACCOUNT UNLOCK;\n'
+        f'ALTER PROFILE default LIMIT '
+        f'FAILED_LOGIN_ATTEMPTS UNLIMITED PASSWORD_LIFE_TIME UNLIMITED;\n'
+        f'EXIT;\n'
     )
     subprocess.run(
         [

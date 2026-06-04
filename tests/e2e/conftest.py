@@ -1125,7 +1125,10 @@ def capture_top_queries(
                 target.write_text(
                     format_skipped(
                         title=title, dialect=dialect.value,
-                        reason=f"could not connect: {exc!r}",
+                        reason=(
+                            f"could not connect ({type(exc).__name__}): "
+                            f"{exc}"
+                        ),
                     ),
                 )
             except OSError:

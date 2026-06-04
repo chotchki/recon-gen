@@ -190,8 +190,14 @@ jobs:
         run: |
           docker exec ci-shared-pg \
             psql -U postgres -c "ALTER USER postgres WITH PASSWORD '${PG_PASSWORD}';"
+          # CE.4-followup — ACCOUNT UNLOCK in case past runs racked up
+          # FAILED_LOGIN_ATTEMPTS and locked the account (ORA-28000).
+          # Also bump the DEFAULT profile to UNLIMITED so transient
+          # stale-password retries during the BX.248 randomization
+          # dance don't re-lock us. Idempotent.
           docker exec -i ci-shared-oracle bash -lc "sqlplus -s / as sysdba <<EOF
-          ALTER USER system IDENTIFIED BY \"${ORACLE_PASSWORD}\";
+          ALTER USER system IDENTIFIED BY \"${ORACLE_PASSWORD}\" ACCOUNT UNLOCK;
+          ALTER PROFILE default LIMIT FAILED_LOGIN_ATTEMPTS UNLIMITED PASSWORD_LIFE_TIME UNLIMITED;
           EXIT;
           EOF"
 
