@@ -3818,6 +3818,23 @@ def cmd_thin(args: argparse.Namespace) -> int:
             result = dispatch_layer(
                 layer, run_dir, options, variant_env=layer_env,
             )
+            # #986 followon parity — when --only narrows to a single later-
+            # layer test, earlier-layer pytest invocations collect nothing
+            # and exit 5. Without this tolerance the chain halts before
+            # the target layer ever dispatches. The target layer's own
+            # invocation still fails loud if the expr typos.
+            if result.exit_code == 5 and options.only is not None:
+                result = LayerResult(
+                    layer=layer,
+                    exit_code=0,
+                    duration_seconds=result.duration_seconds,
+                    skipped=True,
+                )
+                print(
+                    f"runner: layer-skip [{layer}] rc=5 → 0 (--only="
+                    f"{options.only!r} matched no tests in this layer, "
+                    f"deferring to later layers)"
+                )
             layer_results.append(result)
             if not result.passed and not result.skipped:
                 final_code = result.exit_code
