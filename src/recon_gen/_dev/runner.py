@@ -1818,9 +1818,19 @@ def _start_fresh_pg_container(
     """
     from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
 
+    # CB.17.l — restore `max_connections=300` (dropped in the CB.17.k
+    # refactor). Under xdist `-n auto` the shared container takes
+    # 16 workers × up-to-4-conn studio_server pools × 1-2 conns from
+    # the test itself = ~96 concurrent connections at peak. PG's
+    # default `max_connections=100` was leaving no slack for the
+    # admin connection that `capture_top_queries`' pg_stat_statements
+    # query needs at teardown time.
     container = (
         PostgresContainer("postgres:17-alpine", password=password)
-        .with_command("postgres -c shared_preload_libraries=pg_stat_statements")
+        .with_command(
+            "postgres -c max_connections=300 "
+            "-c shared_preload_libraries=pg_stat_statements"
+        )
         .with_name(name)
     )
     try:
