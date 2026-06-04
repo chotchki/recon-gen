@@ -533,13 +533,18 @@ def _layer_command(
         # start — per-cell pytest invocations don't need to re-run.
         env_addl["RECON_GEN_SKIP_TAILWIND"] = "1"
     # Y.2.gate.k.1.coverage — every pytest layer (everything except `deploy`,
-    # which is a `recon-gen json apply` CLI call) writes a per-(variant,
-    # layer) `.coverage.<variant>.<layer>` data file when `--coverage` is set.
-    # `run_dir` is the per-variant dir (or `runs/<id>/_prelude` for the unit
-    # prelude); `run_dir.name` is the variant code (`sp_pg_lo`) or `_prelude`.
+    # which is a `recon-gen json apply` CLI call) writes a per-layer
+    # `.coverage.<layer>` data file when `--coverage` is set.
     # `--cov-report=` (empty) suppresses the per-layer terminal report — the
-    # CI `coverage` aggregator (W.8b) globs every `.coverage.*` artifact and
-    # `coverage combine`s them, so a per-layer report is just stdout.log clutter.
+    # CI `coverage combine` aggregator globs every `.coverage.*` file in
+    # cwd, so a per-layer report is just stdout.log clutter.
+    #
+    # CB.17.g (2026-06-04) — `.coverage.<layer>` files now land at cwd
+    # (REPO_ROOT) instead of `runs/<id>/.coverage.<run-id>.<layer>`. CI's
+    # coverage step calls `coverage combine` from REPO_ROOT and the data
+    # files are right there — no `find runs -name .coverage.* | xargs cp`
+    # bespoke staging. The runs/<id>/ tree stays focused on triage
+    # artifacts (cmd.json, stdout.log, timings.json).
     _is_pytest_layer = layer in ("unit", "db", "app2", "qs_api", "qs_browser")
     _cov_args: list[str] = (
         ["--cov=recon_gen", "--cov-report="]
@@ -549,7 +554,7 @@ def _layer_command(
     if opts.coverage and _is_pytest_layer:
         # COVERAGE_FILE is coverage.py's standard env var (not a RECON_GEN_*
         # registry var); set it on the layer's subprocess env directly.
-        env_addl["COVERAGE_FILE"] = str(run_dir / f".coverage.{run_dir.name}.{layer}")
+        env_addl["COVERAGE_FILE"] = f".coverage.{layer}"
     if layer == "unit":
         cmd = [
             str(_VENV_BIN / "pytest"),
@@ -1525,6 +1530,36 @@ def _start_thin_container(
 
     peek_cfg = load_config(str(cfg_path))
 
+    # CB.17.f — env-URL short-circuit. When the caller (CI workflow, dev
+    # using a pre-spun container) pre-sets ``RECON_GEN_DEMO_DATABASE_URL_PG``
+    # / ``_OR``, honor it and skip the testcontainer spin. The pytest
+    # session fixtures ``pg_container_url`` / ``oracle_container_url``
+    # already do this lazily; mirror the same fast-path here so the
+    # *eager* pre-spin doesn't fight CI's shared-container step.
+    # ``_DuckdbHandle`` / ``_PersistentContainerHandle`` stops are no-ops
+    # so the handle is also unneeded — return None for the handle.
+    if peek_cfg.dialect is Dialect.POSTGRES:
+        pre_set = RECON_GEN_DEMO_DATABASE_URL_PG.get_or_none()
+        if pre_set:
+            url = _normalize_pg_url(pre_set)
+            return (
+                {
+                    RECON_GEN_DEMO_DATABASE_URL.name: url,
+                    RECON_GEN_DEMO_DATABASE_URL_PG.name: url,
+                },
+                None,
+            )
+    elif peek_cfg.dialect is Dialect.ORACLE:
+        pre_set = RECON_GEN_DEMO_DATABASE_URL_OR.get_or_none()
+        if pre_set:
+            return (
+                {
+                    RECON_GEN_DEMO_DATABASE_URL.name: pre_set,
+                    RECON_GEN_DEMO_DATABASE_URL_OR.name: pre_set,
+                },
+                None,
+            )
+
     if peek_cfg.dialect is Dialect.POSTGRES:
         from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
 
@@ -2399,8 +2434,13 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     # prefix once at session start. After full migration this whole
     # block goes away — fixtures own seeding.
     l2_path_env = runner_variant_env.get(RECON_GEN_TEST_L2_INSTANCE.name)
+    # CB.17.f — gate seed on `container_env` (URL populated), not on
+    # `container_handle is not None`. The env-URL short-circuit
+    # returns ``(env, None)``: the container was pre-started by CI /
+    # the operator, so there's no handle to tear down, but the seed
+    # still needs to fire against the URL.
     if (
-        container_handle is not None
+        container_env
         and cfg_path is not None
         and l2_path_env is not None
     ):
@@ -2413,10 +2453,11 @@ def cmd_up_to(args: argparse.Namespace) -> int:
                 f"aborting chain (see runs/<id>-thin/seed/ for triage)",
                 file=sys.stderr,
             )
-            try:
-                container_handle.stop()  # type: ignore[attr-defined]: duck-typed teardown contract — testcontainers Container, _DuckdbHandle, _PersistentContainerHandle all expose .stop() but share no nominal parent
-            except Exception:  # noqa: BLE001 — teardown is best-effort
-                pass
+            if container_handle is not None:
+                try:
+                    container_handle.stop()  # type: ignore[attr-defined]: duck-typed teardown contract — testcontainers Container, _DuckdbHandle, _PersistentContainerHandle all expose .stop() but share no nominal parent
+                except Exception:  # noqa: BLE001 — teardown is best-effort
+                    pass
             return _finalize_run(
                 run_dir,
                 LayerResult(
