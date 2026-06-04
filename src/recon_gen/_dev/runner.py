@@ -3799,8 +3799,24 @@ def cmd_thin(args: argparse.Namespace) -> int:
     final_code = EXIT_SUCCESS
     try:
         for layer in chain:
+            # CB.11.b parity — for the deploy layer, the CLI must load
+            # the QS cfg (hotchkiss.io URL) so the created DataSource
+            # points at the dev-machine forward QS can reach. Drop
+            # `RECON_GEN_DEMO_DATABASE_URL` from env or it'd override
+            # cfg's URL back to localhost (which QS in us-east-1 can't
+            # route to). qs_browser keeps the local URL because consumer
+            # tests read seeded state via connect_demo_db(cfg) — they
+            # need the dev box's loopback, not the operator's external
+            # IP. Same shape as legacy _run_one_variant layer_env logic.
+            layer_env = dict(runner_variant_env)
+            qs_cfg = layer_env.get(RECON_GEN_QS_CONFIG.name)
+            if qs_cfg is not None and layer == "deploy":
+                layer_env[RECON_GEN_CONFIG.name] = qs_cfg
+                layer_env.pop(RECON_GEN_DEMO_DATABASE_URL.name, None)
+                layer_env.pop(RECON_GEN_DEMO_DATABASE_URL_PG.name, None)
+                layer_env.pop(RECON_GEN_DEMO_DATABASE_URL_OR.name, None)
             result = dispatch_layer(
-                layer, run_dir, options, variant_env=runner_variant_env,
+                layer, run_dir, options, variant_env=layer_env,
             )
             layer_results.append(result)
             if not result.passed and not result.skipped:
