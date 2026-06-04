@@ -278,20 +278,32 @@ def studio_server(cfg: Config) -> Generator[str, None, None]:
                 server_ready.set()
                 await serve_task
             finally:
-                # CB.17.l — cancel + await any orphan background tasks
-                # before the event loop closes. The studio routes do
-                # `asyncio.create_task(_run_session_start())` (and
-                # /etl/run, /training/reclone, /training/apply) — they
-                # return the HTTP response immediately and rely on the
-                # frontend's live-tail to poll for completion. In tests
-                # we kill uvicorn before the polling completes, leaving
-                # those tasks holding `asyncio.to_thread` workers that
-                # the event loop's executor must wait on at close time.
-                # Python 3.13 logs `RuntimeWarning: The executor did
-                # not finishing joining its threads within 300 seconds`
-                # if those workers don't return. Cancelling the tasks
-                # gives `asyncio.to_thread` a clean path to bubble up
-                # the cancel + release its worker.
+                # CB.17.l — close the connection pool BEFORE cancelling
+                # orphan tasks. Pool implementations (oracledb's thin
+                # pool, psycopg's async_pool) run their own internal
+                # housekeeping coroutine and call `await self._bg_task`
+                # during close. If we cancel that bg task in our
+                # blanket-cancel below, pool.close() raises
+                # `CancelledError` from awaiting an already-cancelled
+                # future, crashing the studio_server thread.
+                #
+                # After pool.close(), the remaining orphan tasks are
+                # the studio routes' `_run_session_start` /
+                # `_run_apply` / `_run_reclone` / `_run_pipeline_async`
+                # background tasks — they spawn via
+                # `asyncio.create_task` and use the now-closed pool, so
+                # their next `pool.acquire()` will surface a connection
+                # error and they'll exit. Give them 5s to bubble up;
+                # then close the event loop. The cancel signal flows
+                # through `asyncio.to_thread`'s internal `Future` so
+                # the threadpool worker returns and Python 3.13's
+                # `BaseEventLoop._do_shutdown` no longer warns
+                # `executor did not finishing joining its threads
+                # within 300 seconds`.
+                try:
+                    await pool.close()
+                except Exception:  # noqa: BLE001 — best-effort, see above
+                    pass
                 pending: list[asyncio.Task[Any]] = [
                     t for t in asyncio.all_tasks()
                     if t is not asyncio.current_task()
@@ -304,11 +316,10 @@ def studio_server(cfg: Config) -> Generator[str, None, None]:
                     try:
                         await asyncio.wait_for(
                             asyncio.gather(*pending, return_exceptions=True),
-                            timeout=10.0,
+                            timeout=5.0,
                         )
                     except (asyncio.TimeoutError, Exception):  # noqa: BLE001 — best-effort cleanup
                         pass
-                await pool.close()
 
         asyncio.run(_serve())
 
