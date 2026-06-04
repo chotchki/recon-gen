@@ -538,4 +538,4 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - **BX backlog — anomaly/money_trail app2 tests fail on sasquatch_pr L2 (no CustomerSubledger sender)** — added 2026-06-04.
 - **App2 KPI binding gap — Distinct Senders + per-account KPI cards render as None** — added 2026-06-04.
 - **BX backlog — recreate targeted tests for runner.py post-CB.17.d** — added 2026-06-04.
-- **CB.17.i — Parametrize app2 trainer e2e across DuckDB/PG/Oracle** — added 2026-06-04.
+- **BX backlog — asyncio executor not joining within 300s (thread leak signal)** — added 2026-06-04.

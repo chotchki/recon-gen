@@ -130,10 +130,19 @@ jobs:
           if nc -z 127.0.0.1 5432 2>/dev/null; then
             echo "Shared PG already listening on 127.0.0.1:5432 — reusing."
           else
+            # CB.17.j — `-c shared_preload_libraries=pg_stat_statements`
+            # so the conftest's `capture_top_queries` teardown fixture
+            # actually finds the extension loaded. `CREATE EXTENSION`
+            # alone isn't enough on Postgres — the extension's library
+            # also has to be in shared_preload_libraries at server
+            # startup. Without this the top-queries.md artifact lands
+            # as "Status: skipped — pg_stat_statements must be loaded
+            # via shared_preload_libraries" instead of real perf data.
             docker run -d --name ci-shared-pg \
               -e POSTGRES_PASSWORD=postgres \
               -p 5432:5432 \
-              postgres:17-alpine
+              postgres:17-alpine \
+              postgres -c shared_preload_libraries=pg_stat_statements
             STARTED_PG=true
             echo "Waiting for fresh PG..."
             timeout 60 bash -c 'until docker exec ci-shared-pg pg_isready -U postgres -q; do sleep 2; done'

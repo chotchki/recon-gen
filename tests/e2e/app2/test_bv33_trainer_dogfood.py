@@ -79,13 +79,15 @@ from tests.e2e._studio_deploy_helpers import (
 )
 
 
-# Module-level marker — file uses Playwright via ``App2Driver`` and
-# only fires under the runner's ``browser`` layer. The ``tests/e2e/
-# app2/`` dir-conftest auto-applies ``@tier(Tier.APP2)`` so the
-# layer/tier classification is complete: ``browser`` here + APP2 from
-# the dir-conftest. ``importorskip`` above handles the
-# Playwright-absent fallback.
-pytestmark = [pytest.mark.browser]
+# CB.17.j — no `pytest.mark.browser`. Pre-CB.17.d the runner used a
+# `-m browser` selector on the qs_browser layer; post-collapse the
+# qs_browser layer still runs `pytest tests/e2e/ -m browser` which
+# was pulling THIS file in too, causing every trainer-dogfood test
+# to run twice (once via the app2 layer's `tests/e2e/app2/` path
+# selection, once via the qs_browser layer's marker selection).
+# The dir-conftest auto-applies `@tier(Tier.APP2)`; that single
+# classification is what we want. `importorskip("playwright.sync_api")`
+# above handles the playwright-absent fallback at the test layer.
 
 
 # CB.7 followup — the seed + dashboard must agree on the as-of anchor
@@ -571,16 +573,27 @@ def _walkable_param_id(entry: PlantKindEntry) -> str:
 
 def _walkable_params() -> list[Any]:  # noqa: ANN401  — ParameterSet has no public pyright stub
     """Build ``pytest.param`` entries from the walkable registry,
-    applying ``@pytest.mark.xfail`` to BV.3.3.c.bug4-followup entries
-    so a known-fail kind doesn't red the run while the underlying
-    dashboard-rendering bug gets debugged separately."""
+    applying ``pytest.mark.skip`` to BV.3.3.c.bug4-followup entries so
+    a known-fail kind doesn't red the run while the underlying
+    dashboard-rendering bug gets debugged separately.
+
+    CB.17.j — was ``xfail(strict=False)``. xfail RUNS the test (it
+    just inverts the expected outcome), which on the trainer dogfood
+    flow means ~130s of Session Start + studio_server + Apply
+    timeout per kind × 8 kinds × both app2 + qs_browser layers — ~30
+    min of cumulative work and ~5 min of wall time we were burning
+    to verify "yes, the broken kinds are still broken." `skip`
+    short-circuits at collection time. When BV.3.3.c.bug4-followup
+    actually fixes the dashboard rendering, demote the entries out
+    of `_BUG4_FOLLOWUP_KNOWN_FAIL_KINDS` and they re-enter the
+    parametrize set.
+    """
     params: list[Any] = []  # noqa: ANN401
     for entry in _browser_walkable_kinds():
         marks: list[Any] = []  # noqa: ANN401
         if entry.kind in _BUG4_FOLLOWUP_KNOWN_FAIL_KINDS:
             marks.append(
-                pytest.mark.xfail(
-                    strict=False,
+                pytest.mark.skip(
                     reason=(
                         f"BV.3.3.c.bug4-followup: {entry.kind}'s "
                         f"matview row lands but its id-like columns "
