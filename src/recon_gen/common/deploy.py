@@ -112,6 +112,40 @@ def _wait_for_dashboard(
     return False
 
 
+def _wait_for_datasource(
+    client: QuickSightClient, account_id: str, datasource_id: str,
+) -> bool:
+    """Poll describe-data-source until terminal. On CREATION_FAILED, dump
+    the data source's ErrorInfo so the operator sees WHY (auth?
+    connection? wrong host?) rather than hitting the cryptic
+    `InvalidParameterValueException` on the next CreateDataSet."""
+    for attempt in range(1, POLL_MAX_ATTEMPTS + 1):
+        try:
+            resp = client.describe_data_source(
+                AwsAccountId=account_id, DataSourceId=datasource_id,
+            )
+        except ClientError as exc:
+            click.echo(f"    describe-data-source error: {exc}")
+            return False
+        status = resp.get("DataSource", {}).get("Status", "UNKNOWN")
+        if status in ("CREATION_SUCCESSFUL", "UPDATE_SUCCESSFUL"):
+            click.echo(f"    Status: {status}")
+            return True
+        if status in ("CREATION_FAILED", "UPDATE_FAILED"):
+            click.echo(f"    Status: {status}")
+            err = resp.get("DataSource", {}).get("ErrorInfo") or {}
+            err_type = err.get("Type", "<no type>")
+            err_msg = err.get("Message", "<no message>")
+            click.echo(f"      Type: {err_type}")
+            click.echo(f"      Message: {err_msg}")
+            return False
+        if attempt % 6 == 0:
+            click.echo(f"    Still waiting... ({status}, {attempt}/{POLL_MAX_ATTEMPTS})")
+        time.sleep(POLL_INTERVAL_SECONDS)
+    click.echo(f"    Timed out waiting for data source {datasource_id}")
+    return False
+
+
 def _resource_exists(
     describe_fn: Callable[..., Any], **kwargs: Any,
 ) -> bool:
@@ -237,13 +271,25 @@ def _delete_datasource(
 
 
 def _create_datasource(
-    client: QuickSightClient, datasource_path: Path,
+    client: QuickSightClient, account_id: str, datasource_path: Path,
 ) -> None:
     if not datasource_path.exists():
         return
     payload = _read_json(datasource_path)
-    click.echo(f"==> Creating DataSource: {payload['DataSourceId']}")
+    ds_id = payload["DataSourceId"]
+    click.echo(f"==> Creating DataSource: {ds_id}")
     client.create_data_source(**payload)
+    # Wait for the async connection-test to settle. On CREATION_FAILED,
+    # `_wait_for_datasource` dumps ErrorInfo (auth / host / SSL etc.)
+    # — without that, the next `create_data_set` would error with a
+    # cryptic `InvalidParameterValueException` and the operator has
+    # no idea why.
+    if not _wait_for_datasource(client, account_id, ds_id):
+        raise click.ClickException(
+            f"DataSource {ds_id} failed to reach ACTIVE state — see "
+            f"ErrorInfo above. Common causes: wrong host/port (DDNS "
+            f"down, firewall), bad credentials, SSL mismatch."
+        )
 
 
 def _create_theme(client: QuickSightClient, theme_path: Path) -> None:
@@ -382,7 +428,7 @@ def deploy(cfg: Config, out_dir: Path, app_names: list[str]) -> int:
 
     click.echo("\n--- Recreating all resources ---\n")
 
-    _create_datasource(client, datasource_path)
+    _create_datasource(client, account_id, datasource_path)
     _create_theme(client, theme_path)
     _create_datasets(client, out_dir, allowed_dataset_ids)
     analysis_ids = _create_analyses(client, apps)
