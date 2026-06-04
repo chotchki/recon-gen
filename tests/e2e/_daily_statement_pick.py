@@ -319,6 +319,15 @@ def find_one_account_day_per_role(
                 # balance-side name ("SNB Customer 1"). Joining to
                 # balances and selecting its name gives the display
                 # string the dropdown will actually advertise.
+                # CB.17.c1 — also require a row in daily_statement_summary
+                # for (account_id, business_day) so the Opening Balance /
+                # Closing Stored KPIs (which query that matview, not
+                # current_daily_balances or transactions) have data to
+                # render. Otherwise the picker offers a triple where
+                # daily_balances has rows + transactions has rows, but
+                # the KPI matview is empty → blank KPI cards (cold-read
+                # F1 failure shape). Surfaced by thin qs_browser against
+                # sasquatch_pr's "Drift Child" rollup-only account.
                 per_role_sql = (
                     f"SELECT b.account_name, b.account_id, "
                     f"       t.bday, t.n "
@@ -331,6 +340,9 @@ def find_one_account_day_per_role(
                     f"  GROUP BY account_id, {bday_expr} "
                     f"  HAVING COUNT(*) > 0"
                     f") t ON t.account_id = b.account_id "
+                    f"JOIN {prefix}_daily_statement_summary s "
+                    f"  ON s.account_id = b.account_id "
+                    f"  AND s.business_day_start = t.bday "
                     f"WHERE b.account_role = '{role_literal}' "
                     f"ORDER BY b.account_id ASC, t.bday DESC, t.n DESC "
                 )
