@@ -68,9 +68,25 @@ The two semantics diverge on transfers whose legs straddle the window boundary. 
 
 ## Recommendation
 
-**Option C.** Preserves exact baseline semantics, perf win ought to be ~60-70% (vs ~76% for naive). Worth the smaller matview-size cost and slightly less aggressive speedup to keep the contract identical. Avoids the "did these numbers change?" question after deployment.
+**Option C — measured and confirmed.**
 
-Followup measurement needed: re-run the spike with Option C's shape to confirm the perf headroom is still meaningful.
+Re-spike with Option C (`GROUP BY posted_date, transfer_id, rail_name` at refresh; re-aggregate per `(transfer_id, rail_name)` downstream of the date filter):
+
+| Metric | Baseline | Option A (naive) | Option C |
+|---|---:|---:|---:|
+| Shape A warm (ms) | 195 | 47 | **69** |
+| Shape B warm (ms) | 60 | n/m | **38** |
+| Shape A speedup | 1.0× | 4.1× | **2.8×** |
+| Shape B speedup | 1.0× | n/m | **1.6×** |
+| Refresh cost (ms) | — | 200 | 178 |
+| Matview row count | — | 67,140 | 67,440 |
+| Row-equiv to baseline | — | ❌ (1 of 1033 diverges) | **✅ 1033 / 1033 match** |
+
+Shape B equivalence also verified (63 / 63 rows match).
+
+Option C costs ~22ms vs Option A on Shape A (extra downstream GROUP BY) but is byte-equivalent to baseline. Matview is only 300 rows larger (~0.4%) — multi-day transfers are rare in this seed. Net CI estimate: ~20-25 s/run saved (slightly less than Option A's 27s, but no behavior change).
+
+**Going with Option C for CD.1.**
 
 ## Spike infrastructure (cleanup)
 
