@@ -41,22 +41,13 @@ polish — because that's the exact failure mode it exists to catch.
 from __future__ import annotations
 
 from typing import Any
-from pathlib import Path
 
 import pytest
 
-from recon_gen.common.config import Config, load_config
-from recon_gen.common.db import SyncConnection, connect_demo_db
-from recon_gen.common.env_keys import (
-    EnvVarInvalid,
-    RECON_GEN_CONFIG,
-    RECON_GEN_E2E,
-)
+from recon_gen.common.config import Config
+from recon_gen.common.db import connect_demo_db
+from recon_gen.common.env_keys import RECON_GEN_E2E
 
-# Module-level cfg load needs a live cfg yaml or env override; under
-# the unit-only CI job neither exists, and `load_config` raises the
-# loud-fail ValueError, taking down pytest collection. Match the rest
-# of the e2e suite's RECON_GEN_E2E gate at import time.
 if not RECON_GEN_E2E.get_or_none():
     pytest.skip(
         "spine live-agreement test requires RECON_GEN_E2E=1",
@@ -76,38 +67,6 @@ pytestmark = [pytest.mark.e2e, pytest.mark.api]
 # CB.5 stage 2 — `tests/e2e/db/conftest.py` auto-applies `@tier(Tier.DB)
 # + @needs(Need.DOCKER)`; the legacy `e2e` / `api` marks above stay for
 # back-compat with `pytest -m api` invocations until CB.6 drops them.
-
-
-def _resolve_cfg() -> Config:
-    """Same cfg-resolution shape as `test_dataset_sql_smoke.py`."""
-    try:
-        explicit_raw = RECON_GEN_CONFIG.get_or_none()
-    except EnvVarInvalid:
-        explicit_raw = None
-    if explicit_raw is not None:
-        return load_config(str(explicit_raw))
-    candidates = (
-        Path("config.yaml"),
-        Path("run/config.yaml"),
-        Path("run/config.postgres.yaml"),
-        Path("run/config.oracle.yaml"),
-    )
-    for candidate in candidates:
-        if candidate.exists():
-            return load_config(str(candidate))
-    raise RuntimeError(
-        "no cfg yaml found; set RECON_GEN_CONFIG=<path> or place "
-        "config.yaml / run/config.yaml in the cwd"
-    )
-
-
-_CFG = _resolve_cfg()
-
-
-def _conn() -> "SyncConnection":
-    """Per-test live DB connection (psycopg / oracledb / duckdb
-    depending on `_CFG.dialect`). Caller closes."""
-    return connect_demo_db(_CFG)
 
 
 def _violation_keys(violations: set[Violation]) -> set[tuple[str, str]]:
@@ -149,38 +108,35 @@ def _direct_matview_keys(
 # ---------------------------------------------------------------------------
 
 
-def test_drift_invariant_agrees_with_direct_matview() -> None:
-    inv = DriftInvariant(prefix=_CFG.db_table_prefix)
-    conn = _conn()
+def test_drift_invariant_agrees_with_direct_matview(seeded_cfg: Config) -> None:
+    prefix = seeded_cfg.db_table_prefix
+    inv = DriftInvariant(prefix=prefix)
+    conn = connect_demo_db(seeded_cfg)
     try:
         spine_keys = _violation_keys(inv.detect(conn))
-        direct_keys = _direct_matview_keys(
-            conn, _CFG.db_table_prefix, "drift",
-        )
+        direct_keys = _direct_matview_keys(conn, prefix, "drift")
     finally:
         conn.close()
     assert spine_keys == direct_keys, (
-        f"DriftInvariant.detect disagrees with direct {_CFG.db_table_prefix}_drift "
-        f"SELECT.\n"
+        f"DriftInvariant.detect disagrees with direct {prefix}_drift SELECT.\n"
         f"  spine-only: {sorted(spine_keys - direct_keys)[:5]}\n"
         f"  direct-only: {sorted(direct_keys - spine_keys)[:5]}\n"
         f"  spine count: {len(spine_keys)}, direct count: {len(direct_keys)}"
     )
 
 
-def test_ledger_drift_invariant_agrees_with_direct_matview() -> None:
-    inv = LedgerDriftInvariant(prefix=_CFG.db_table_prefix)
-    conn = _conn()
+def test_ledger_drift_invariant_agrees_with_direct_matview(seeded_cfg: Config) -> None:
+    prefix = seeded_cfg.db_table_prefix
+    inv = LedgerDriftInvariant(prefix=prefix)
+    conn = connect_demo_db(seeded_cfg)
     try:
         spine_keys = _violation_keys(inv.detect(conn))
-        direct_keys = _direct_matview_keys(
-            conn, _CFG.db_table_prefix, "ledger_drift",
-        )
+        direct_keys = _direct_matview_keys(conn, prefix, "ledger_drift")
     finally:
         conn.close()
     assert spine_keys == direct_keys, (
         f"LedgerDriftInvariant.detect disagrees with direct "
-        f"{_CFG.db_table_prefix}_ledger_drift SELECT.\n"
+        f"{prefix}_ledger_drift SELECT.\n"
         f"  spine-only: {sorted(spine_keys - direct_keys)[:5]}\n"
         f"  direct-only: {sorted(direct_keys - spine_keys)[:5]}\n"
         f"  spine count: {len(spine_keys)}, direct count: {len(direct_keys)}"
@@ -267,23 +223,22 @@ def _direct_money_trail_matview_keys(
     }
 
 
-def test_anomaly_invariant_agrees_with_direct_matview() -> None:
+def test_anomaly_invariant_agrees_with_direct_matview(seeded_cfg: Config) -> None:
     """AT.5.a — the post-AT.2 detector returns every bucket (no
     `WHERE z_bucket IN (...)` filter); a direct unfiltered SELECT
     should match exactly. The View slice happens DOWNSTREAM and is
     not part of this gate."""
-    inv = AnomalyInvariant(prefix=_CFG.db_table_prefix)
-    conn = _conn()
+    prefix = seeded_cfg.db_table_prefix
+    inv = AnomalyInvariant(prefix=prefix)
+    conn = connect_demo_db(seeded_cfg)
     try:
         spine_keys = _anomaly_keys_from_violations(inv.detect(conn))
-        direct_keys = _direct_anomaly_matview_keys(
-            conn, _CFG.db_table_prefix,
-        )
+        direct_keys = _direct_anomaly_matview_keys(conn, prefix)
     finally:
         conn.close()
     assert spine_keys == direct_keys, (
         f"AnomalyInvariant.detect disagrees with direct "
-        f"{_CFG.db_table_prefix}_inv_pair_rolling_anomalies SELECT. "
+        f"{prefix}_inv_pair_rolling_anomalies SELECT. "
         f"This often signals an accidental filter crept back onto the "
         f"detector — the AT.2 contract is detector returns every bucket; "
         f"View slices.\n"
@@ -293,22 +248,21 @@ def test_anomaly_invariant_agrees_with_direct_matview() -> None:
     )
 
 
-def test_money_trail_invariant_agrees_with_direct_matview() -> None:
+def test_money_trail_invariant_agrees_with_direct_matview(seeded_cfg: Config) -> None:
     """AT.5.a — money_trail detector returns every edge (root + every
     descendant); a direct unfiltered SELECT should match exactly. The
     `MoneyTrailView` depth-threshold slice is downstream."""
-    inv = MoneyTrailInvariant(prefix=_CFG.db_table_prefix)
-    conn = _conn()
+    prefix = seeded_cfg.db_table_prefix
+    inv = MoneyTrailInvariant(prefix=prefix)
+    conn = connect_demo_db(seeded_cfg)
     try:
         spine_keys = _money_trail_keys_from_violations(inv.detect(conn))
-        direct_keys = _direct_money_trail_matview_keys(
-            conn, _CFG.db_table_prefix,
-        )
+        direct_keys = _direct_money_trail_matview_keys(conn, prefix)
     finally:
         conn.close()
     assert spine_keys == direct_keys, (
         f"MoneyTrailInvariant.detect disagrees with direct "
-        f"{_CFG.db_table_prefix}_inv_money_trail_edges SELECT.\n"
+        f"{prefix}_inv_money_trail_edges SELECT.\n"
         f"  spine-only: {sorted(spine_keys - direct_keys)[:5]}\n"
         f"  direct-only: {sorted(direct_keys - spine_keys)[:5]}\n"
         f"  spine count: {len(spine_keys)}, direct count: {len(direct_keys)}"
