@@ -402,6 +402,62 @@ infrastructure — it shipped CB.15's hard parts already.
 - **BX [#184](../../PLAN.md) coverage merge doesn't render in PR comments** — stop fighting pytest-cov.
 - **CB.16 (typing honesty)** lands independently — the fixture migration doesn't touch `connect_demo_db`'s return type.
 
+## CB.17.d strangler — progress log v3 (2026-06-04, late, db-tier green)
+
+**Thin db: 89 passed, 19 skipped, 21.78s. Zero failures.** Legacy
+`up_to=db --variants=sp_pg_lo` for comparison: 91 passed / 17 skipped /
+20.52s. Essentially identical shapes — the strangler produces the same
+end-state as the cell loop at the db layer, with a single pytest
+process instead of 13.
+
+Path to get here was three small additions to `cmd_thin`:
+
+1. `_start_thin_container(cfg_path)` — dispatches by cfg.dialect, spins
+   the matching container (testcontainers PG, adopt-or-create Oracle,
+   tempfile DuckDB), exports `RECON_GEN_DEMO_DATABASE_URL` +
+   `_PG`/`_OR`-suffixed env. ~10-15s for PG cold-start.
+2. `_seed_thin_container(cfg, l2, env, run_dir)` — shells the three CLI
+   verbs (schema apply → data apply → data refresh) against the
+   container. cfg's plain `db_table_prefix` (`qsgen_postgres`) becomes
+   the table namespace, matching what test files see via module-import
+   `_CFG = _load_cfg()`.
+3. `finally:` teardown block in cmd_thin tears the container down at
+   end of chain (testcontainers Container, _DuckdbHandle,
+   _PersistentContainerHandle all expose `.stop()`).
+
+### Env-access diff (the canonical strangler deliverable)
+
+`diff <(jq -S .by_source.runner runs/<legacy>/env_access.json)
+      <(jq -S .by_source.runner runs/<thin>/env_access.json)`:
+
+- **Identical `by_name` env-key sets.** Both paths touch the same
+  surface; no env var is "thin-only" or "legacy-only" globally.
+- **One env var the legacy runner process touches but thin doesn't:
+  `RECON_GEN_RUNNER_CI`.** That's the CB.11.b "CI-mode skip Docker"
+  guard inside `setup_variant` — `if RECON_GEN_RUNNER_CI.get_or_none():
+  return {RECON_GEN_DEMO_DATABASE_URL: ...}, None`. The thin path
+  always spins via `_start_thin_container` (no CI-skip branch), so
+  the env is unreferenced.
+
+`RECON_GEN_RUNNER_CI` is the first concrete **kill candidate**. To
+delete it cleanly, the thin path needs an equivalent CI-mode escape:
+when `RECON_GEN_DEMO_DATABASE_URL_PG` / `_OR` is pre-set by the
+workflow, `_start_thin_container` should respect that and NOT spin
+its own container. Same logic as `pg_container_url`/`oracle_container_url`
+fixtures already use. ~5-line addition.
+
+### Still ahead for CB.17.d
+
+- Add the CI-mode short-circuit to `_start_thin_container` so
+  `RECON_GEN_RUNNER_CI` can be deleted.
+- Run `thin app2`, `thin deploy`, `thin qs_api`, `thin qs_browser`.
+  Each will surface its own gaps (qs_user_arn derivation, hotchkiss.io
+  routing, embed URL signing). Same iterate-and-fix loop.
+- Once the full chain is green on thin, delete `_run_one_variant`,
+  `setup_variant`, `teardown_variant`, `expand_full()`, `VariantSpec`,
+  and the asyncio.gather matrix orchestration. ~1500-2000 LOC out of
+  runner.py.
+
 ## CB.17.d strangler — progress log v2 (2026-06-04, late)
 
 Conftest aliasing landed across all four tier conftests (db / app2 /
