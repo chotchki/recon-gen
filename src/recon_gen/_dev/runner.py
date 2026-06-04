@@ -1639,11 +1639,15 @@ def _write_qs_cfg_for_thin(
         )
 
     if peek_cfg.dialect is Dialect.POSTGRES:
-        new_url = _swap_url_host(local_url, _QS_FORWARD_HOST, _LOCAL_PG_HOST_PORT)
+        # CB.17.h followup — port preserved from the source URL so
+        # CI's shared PG on 5432 routes through hotchkiss.io:5432 and
+        # local's testcontainer on 5433 routes through hotchkiss.io:5433.
+        # DDNS layer routes per-port to the right backend.
+        new_url = _swap_url_host(local_url, _QS_FORWARD_HOST)
         raw["demo_database_url"] = new_url
         raw["qs_disable_pg_ssl"] = True
     elif peek_cfg.dialect is Dialect.ORACLE:
-        new_url = _swap_url_host(local_url, _QS_FORWARD_HOST, _LOCAL_ORACLE_HOST_PORT)
+        new_url = _swap_url_host(local_url, _QS_FORWARD_HOST)
         raw["demo_database_url"] = new_url
         # Oracle datasource already hardcodes DisableSsl=True (common/datasource.py).
 
@@ -1975,14 +1979,20 @@ _DEFAULT_RUNNER_CFG_CANDIDATES: Final = (
 )
 
 
-def _swap_url_host(url: str, new_host: str, new_port: int) -> str:
-    """Replace the host:port part of a postgresql:// or oracle:// URL.
+def _swap_url_host(url: str, new_host: str, new_port: int | None = None) -> str:
+    """Replace the host (and optionally port) of a postgresql:// or
+    oracle:// URL.
 
-    Used by ``_write_qs_cfg_for_variant`` to map the local container
-    URL onto the hotchkiss.io-forwarded endpoint. Preserves user, pw,
-    and path/db components. Raises if the URL doesn't parse — we want
-    a misshapen URL to fail loudly, not silently land a wrong endpoint
-    in the QS data source.
+    Used by ``_write_qs_cfg_for_thin`` to map the local container URL
+    onto the hotchkiss.io-forwarded endpoint. When ``new_port`` is
+    None, preserves the URL's existing port — so CI's shared PG on
+    port 5432 routes through `hotchkiss.io:5432` while local dev's
+    testcontainer on 5433 routes through `hotchkiss.io:5433`. The
+    DDNS forwarding layer routes per-port to the right backend.
+
+    Preserves user, pw, and path/db components. Raises if the URL
+    doesn't parse — we want a misshapen URL to fail loudly, not
+    silently land a wrong endpoint in the QS data source.
     """
     from urllib.parse import urlparse, urlunparse  # noqa: PLC0415
     parsed = urlparse(url)
@@ -1990,6 +2000,12 @@ def _swap_url_host(url: str, new_host: str, new_port: int) -> str:
         raise RuntimeError(
             f"_swap_url_host: malformed URL {url!r} (missing scheme or host)"
         )
+    if new_port is None:
+        new_port = parsed.port or 0
+        if new_port == 0:
+            raise RuntimeError(
+                f"_swap_url_host: URL {url!r} has no port and no override given"
+            )
     # Rebuild netloc with auth + new host:port.
     auth = ""
     if parsed.username:
