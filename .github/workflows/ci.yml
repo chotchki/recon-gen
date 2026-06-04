@@ -154,6 +154,29 @@ jobs:
           echo "started_or=${STARTED_OR}" >> "$GITHUB_OUTPUT"
           echo "Shared DBs ready (CI-started: PG=${STARTED_PG} OR=${STARTED_OR})."
 
+      - name: Force-reset PG + Oracle passwords to the CI-known values
+        # Persistent containers may have been brought up in some past
+        # life with a different password. Re-set both to the values
+        # baked into the materialized cfgs and `RECON_GEN_DEMO_DATABASE_URL_*`
+        # env so QS in us-east-1 can actually authenticate via the
+        # hotchkiss.io DDNS forward. Both operations use container-local
+        # superuser auth that doesn't require knowing the prior password:
+        # PG via `psql -U postgres` over the unix socket (trust auth in
+        # pg_hba.conf for local connections), Oracle via `sqlplus / as
+        # sysdba` (OS auth for the in-container oracle user).
+        run: |
+          # PG — works on both fresh (no-op effect, same password) and
+          # reused containers regardless of their previous credential.
+          docker exec ci-shared-pg \
+            psql -U postgres -c "ALTER USER postgres WITH PASSWORD 'postgres';"
+          # Oracle — same shape, OS-auth via sqlplus inside the container.
+          # `--` in heredoc to avoid `bash -e` choking on a non-zero
+          # exit if sqlplus's prompt produces warnings.
+          docker exec -i ci-shared-oracle bash -lc 'sqlplus -s / as sysdba <<EOF
+          ALTER USER system IDENTIFIED BY "qsgentestpwd2026";
+          EXIT;
+          EOF'
+
       - name: Materialize per-dialect runner cfgs (one cfg per dialect)
         # CB.17.f: dropped the `.qs.yaml` siblings. Post CB.17.d the
         # runner generates its own QS-side cfg per run via
