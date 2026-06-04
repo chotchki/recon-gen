@@ -320,46 +320,6 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 **Done when:** sq_pg_aw + sq_or_aw + sp_or_aw browser layers green on `./run_tests.sh up_to=browser` (no xfail-to-mute per `feedback_no_xfail_to_sweep_under_rug`); sweep to PLAN_ARCHIVE.
 
 - [ ] BN.0 - Triage spike: snapshot per-failure repro shape against sq_pg_aw, sq_or_aw, sp_or_aw. Output: `docs/audits/bn_0_sq_aw_flake_snapshot.md` with per-test root-cause hypothesis + reproduction recipe. Prereq for BN.1+ fixes.
-## Phase BY - Self-hosted CI runner (Windows 11 + WSL2)
-
-**Why:** GitHub-hosted runner wallclock has degraded to ~1h+ per CI run as Studio buildout adds test load; release autopilot loops are wasting minutes on the runner itself rather than on the actual test surface. Available hardware: Windows 11 box, AMD 5800X3D (8c/16t, 96MB L3), 64GB RAM, on-network behind NAT. Runner lives inside WSL2 Ubuntu — native x86_64 amd64 docker (matches the `ubuntu-latest` shape our workflows target), POSIX paths, native bash; 64GB RAM supports 2-3 concurrent jobs.
-
-**Boundary (BY.3 is the contract):** all secret-bearing jobs stay on `ubuntu-latest` — `publish-testpypi`, `publish-pypi`, `release-e2e` (AWS OIDC), GitHub Release publish. Self-hosted picks up the slow non-secret-bearing CI/E2E load.
-
-**Done when:** ci.yml::test + e2e.yml::e2e-pg-browser run on the WSL2 runner with ≥2x speedup measured over 3-5 runs each, release.yml jobs verified unchanged on managed runners, operational docs in `docs/reference/self-host-ci.md`.
-
-- [x] BY.0 - BY.0 — Spike: register WSL2 runner, migrate ci.yml::test, measure
-- [x] BY.1 - BY.1 — Migrate ci.yml::test job to self-hosted
-- [ ] BY.2 - BY.2 — Migrate e2e.yml::e2e-pg-browser to self-hosted
-- [x] BY.3 - BY.3 — Secret-isolation policy: release.yml stays on ubuntu-latest
-- [x] BY.4 - BY.4 — Observability + cleanup automation on the WSL2 runner
-- [x] BY.5 - BY.5 — Verify + document operational model
-## Phase CC - Collapse cells; move scenario/dialect matrix to test markers
-
-**Why:** Post-CB the cell concept (`scenario × dialect × target`) duplicates work that test markers + parametrize would do. `target=aw` died in CB.12; `dialect` is already a typed mark (`@dialects(...)`); `scenario` is expressible via `@l2(...)` + the auto-fuzz hook designed in CB.7-followup; `isolation_scope` provides per-test prefix isolation. Cells provide nothing markers can't. Pushing the matrix to test-level lets the test author own coverage, drops ~1k+ runner lines, and reduces container management from 13-cell fan-out to 2 long-lived containers per `./run_tests.sh` invocation.
-
-**Approach:** Five steps. (1) Unify `l2_instance` fixtures to a single parametrize-aware loader (CC.0). (2) Enable the `pytest_generate_tests` auto-fuzz hook drafted in CB.7 (CC.1). (3) Move dialect axis to markers; drop cell-level `--dialects` fan-out (CC.2). (4) Reduce runner to single-pytest-per-layer with marker-driven xdist (CC.3). (5) Absorb BN.0 browser-flake task scope (CC.4).
-
-**Done when:** `runs/<run-id>/<variant>/` shape replaced by `runs/<run-id>/<layer>/`; runner code drops ~1k lines; auto-fuzz hook live; `--variants` knob retires; v14.0.0 release notes ship "test-author owns the matrix" story.
-
-**Sequencing locked (2026-06-02):** CB.11.c → qs_browser triage → CB.13 ships v13.0.0 FIRST. CC starts on v14. Cells go away on v14, not v13 — keeps v13 scope focused on what's already in flight.
-
-- [x] CC.0 - CC.0 — Spike: unify `l2_instance` fixtures to a single parametrize-aware loader (commit 3c00efde)
-- [x] CC.1 - CC.1 — Enable the auto-fuzz `pytest_generate_tests` hook + sweep test signatures (commits 007382d4 + 47d7d615)
-- [x] CC.2 - CC.2 — Move dialect axis to test markers; drop cell-level `--dialects` fan-out (commits 1a9095d6 + 1f281937)
-- [ ] CC.3 - CC.3 — Reduce runner to 1 pytest-per-layer; delete `VariantSpec`/`cell_chain`/per-cell setup
-- [ ] CC.4 - CC.4 — Absorb BN.0 (sasquatch + AWS browser-layer flakes) into marker-based scoping
-
-## Phase CD - per_transfer CTE → matview — CANCELLED 2026-06-04
-
-**Why cancelled (after CD.0 spike):** Naive matview (`GROUP BY transfer_id, rail_name`, filter post-aggregate by `MIN(posting)::date`) hits 4.1× speedup but produces wrong `net_amount` for transfers whose legs straddle the date window. Option C (`GROUP BY posted_date, transfer_id, rail_name` + downstream re-aggregate) is byte-equivalent to baseline at 2.8× speedup BUT has a multi-day-transfer scaling cliff: crosses over with baseline at ~3× matview size (avg transfer day-span ≥3). Demo + typical retail safely below; wholesale / treasury / FX-batch customers could exceed it without warning. Regression risk on outlier customer data outweighs the ~25s/CI-run savings; sasquatch_pr-only seed measurements don't generalize, and the deploy-time-probe mitigation becomes a new surface to maintain.
-
-**Decision:** Leave the CTE in place. Revisit if/when a real customer hits the per_transfer hot path or if seed densification pushes CI wall-clock back into the red.
-
-**Artifacts:** `docs/audits/cd_0_per_transfer_matview_spike.md` (numbers, options, crossover curve).
-
-- [x] CD.0 - CD.0 — Spike measured + cancelled (Option A: faster but breaks equivalence; Option C: equivalent but multi-day scaling cliff)
-
 ## Phase PLAN - Phase PLAN
 - [ ] PLAN.md - BS.5 — _v_config_chain_children + 7-path conversion
 
@@ -508,5 +468,4 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - **BX backlog — recreate targeted tests for runner.py post-CB.17.d** — added 2026-06-04.
 - **BX backlog — asyncio executor not joining within 300s (thread leak signal)** — added 2026-06-04.
 - **BX backlog — Oracle container fixture: share one container across xdist workers** — added 2026-06-04.
-- **BX backlog — randomize container passwords (drop static defaults)** — added 2026-06-04.
 - **BX backlog — Trainer dogfood [pg]/[or] times out under 16-worker xdist on shared containers** — added 2026-06-04.

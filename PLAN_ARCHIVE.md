@@ -1,3 +1,39 @@
+# PLAN — Phases BY + CC + CD (archived 2026-06-04)
+
+## Phase BY — Self-hosted CI runner (Windows 11 + WSL2)
+
+**Why:** GitHub-hosted runner wallclock had degraded to ~1h+ per CI run as Studio buildout added test load; release autopilot loops were wasting minutes on the runner itself rather than on the actual test surface. Available hardware: Windows 11 box, AMD 5800X3D (8c/16t, 96MB L3), 64GB RAM, on-network behind NAT. Runner lives inside WSL2 Ubuntu — native x86_64 amd64 docker (matches the `ubuntu-latest` shape our workflows target), POSIX paths, native bash; 64GB RAM supports 2-3 concurrent jobs.
+
+**Boundary (BY.3 was the contract):** all secret-bearing jobs stay on `ubuntu-latest` — `publish-testpypi`, `publish-pypi`, `release-e2e` (AWS OIDC), GitHub Release publish. Self-hosted picks up the slow non-secret-bearing CI/E2E load.
+
+- [x] BY.0 — Spike: register WSL2 runner, migrate ci.yml::test, measure
+- [x] BY.1 — Migrate ci.yml::test job to self-hosted
+- [x] BY.2 — Migrate e2e.yml::e2e-pg-browser to self-hosted (subsumed by CB.11.c — e2e.yml deleted, e2e-pg-browser absorbed into ci.yml's Layered runner which already runs on the WSL2 self-hosted runner via BY.1)
+- [x] BY.3 — Secret-isolation policy: release.yml stays on ubuntu-latest
+- [x] BY.4 — Observability + cleanup automation on the WSL2 runner
+- [x] BY.5 — Verify + document operational model
+
+## Phase CC — Collapse cells; move scenario/dialect matrix to test markers
+
+**Why:** Post-CB the cell concept (`scenario × dialect × target`) duplicated work that test markers + parametrize would do. `target=aw` died in CB.12; `dialect` is already a typed mark (`@dialects(...)`); `scenario` is expressible via `@l2(...)` + the auto-fuzz hook; `isolation_scope` provides per-test prefix isolation. Cells provided nothing markers can't. Pushing the matrix to test-level lets the test author own coverage, dropped ~1k+ runner lines, reduced container management from 13-cell fan-out to 2 long-lived containers per `./run_tests.sh` invocation.
+
+- [x] CC.0 — Spike: unify `l2_instance` fixtures to a single parametrize-aware loader (commit 3c00efde)
+- [x] CC.1 — Enable the auto-fuzz `pytest_generate_tests` hook + sweep test signatures (commits 007382d4 + 47d7d615)
+- [x] CC.2 — Move dialect axis to test markers; drop cell-level `--dialects` fan-out (commits 1a9095d6 + 1f281937)
+- [x] CC.3 — Reduce runner to 1 pytest-per-layer; delete `VariantSpec`/`cell_chain`/per-cell setup (shipped as CB.17.d — cell loop removed, runner is now thin pytest alias)
+- [x] CC.4 — Absorb BN.0 (sasquatch + AWS browser-layer flakes) into marker-based scoping (mooted by CB.12 — `target=aw` died so no AWS-variant flake surface left to absorb; BN.0 stays open as a separate triage if browser-layer flakes return)
+
+## Phase CD — per_transfer CTE → matview — CANCELLED 2026-06-04
+
+**Why cancelled (after CD.0 spike):** Naive matview (`GROUP BY transfer_id, rail_name`, filter post-aggregate by `MIN(posting)::date`) hit 4.1× speedup but produced wrong `net_amount` for transfers whose legs straddle the date window. Option C (`GROUP BY posted_date, transfer_id, rail_name` + downstream re-aggregate) was byte-equivalent to baseline at 2.8× speedup BUT had a multi-day-transfer scaling cliff: crossed over with baseline at ~3× matview size. Demo + typical retail safely below; wholesale / treasury / FX-batch customers could exceed it without warning. Regression risk on outlier customer data outweighed the ~25s/CI-run savings.
+
+**Decision:** Leave the CTE in place. Revisit if/when a real customer hits the per_transfer hot path or if seed densification pushes CI wall-clock back into the red.
+
+**Artifacts:** `docs/audits/cd_0_per_transfer_matview_spike.md` (numbers, options, crossover curve).
+
+- [x] CD.0 — Spike measured + cancelled (Option A: faster but breaks equivalence; Option C: equivalent but multi-day scaling cliff)
+
+
 # PLAN — Phase BO (archived 2026-05-29)
 
 ## Phase BO — v11.23.0 cold-read defects (NEW findings exposed by BM landing)
