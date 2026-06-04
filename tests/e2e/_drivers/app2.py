@@ -946,6 +946,53 @@ class App2Driver:
             timeout=15_000,
         )
 
+    def trainer_reset_overlay(self, timeout_ms: int = 120_000) -> None:
+        """Click Force rebuild from base; wait for the detached task
+        to finish.
+
+        CE.1 — companion to `trainer_start_session()`. Posts to
+        `/training/reclone` which runs `session_start(refresh_base=False)`:
+        drops + recreates the v overlay from the already-populated
+        base prefix, refreshes v matviews, skips the expensive
+        `/etl/run` leg. Wait shape mirrors `trainer_start_session`
+        because the route reuses the same `_training_start_state`
+        slot + same live-tail mount (`training-session-start-live-tail`).
+
+        Used as the per-test reset in the session-scope Session Start
+        fixture pattern (CE.2/CE.3): one full Session Start per
+        xdist worker upfront, then `trainer_reset_overlay()` between
+        tests. PG: ~13s. Oracle: ~1-2 min (vs ~10min for a full
+        Session Start). DuckDB: sub-second.
+
+        Default timeout 2 min — matches PG slow-path comfortably,
+        Oracle needs the caller to bump if it goes over.
+
+        ``v_overlay_exists`` precondition: the reclone button only
+        renders when there's already a v overlay to rebuild. Callers
+        must run `trainer_start_session()` first (typically once per
+        session via fixture).
+        """
+        self._page.click("#training-reclone-btn")
+        # In-progress banner appears (or page already reloaded for
+        # very-fast reclones — DuckDB is sub-second).
+        self._page.wait_for_selector(
+            "[data-test-training-session-start-banner], "
+            "[data-test-training-banner]",
+            timeout=15_000,
+        )
+        if self._page.locator("[data-test-training-banner]").count() > 0:
+            return
+        # Reclone uses the same _training_start_state slot + live-tail
+        # mount as Session Start (see _studio_routes.py::training_reclone).
+        self._trainer_wait_until_finished(
+            mount_id="training-session-start-live-tail",
+            timeout_ms=timeout_ms,
+        )
+        self._page.wait_for_selector(
+            "[data-test-training-banner]",
+            timeout=15_000,
+        )
+
     def _trainer_wait_until_finished(
         self, *, mount_id: str, timeout_ms: int,
     ) -> None:

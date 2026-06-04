@@ -329,10 +329,10 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 
 **Done when:** Trainer dogfood tests pass [du, pg, or] under CI's 16-xdist-worker model with the CB.17.m DuckDB pin removed; per-worker wall-clock for the trainer test set drops from N×10min to 10min + N×reclone; #249 sweeps to archive.
 
-- [ ] CE.0 - CE.0 — Spike: measure Session Start cost vs `/training/reclone` cost on PG + Oracle at 128k seed scale; confirm reclone gives an equivalent ready-to-plant surface that all 7 plant kinds can land on
-- [ ] CE.1 - CE.1 — `App2Driver.trainer_reset_overlay()` verb (clicks Reclone, waits for live-tail finished — mirrors `trainer_start_session()` wait shape)
-- [ ] CE.2 - CE.2 — Session-scope `trainer_session_started` fixture in `test_bv33_trainer_dogfood.py` that does Session Start once per xdist worker
-- [ ] CE.3 - CE.3 — Refactor per-test setup to call `trainer_reset_overlay()` instead of `trainer_start_session()`; preserve plant + apply + verify shape
+- [x] CE.0 - CE.0 — Spike measured (PG: 32.84s full → 13.51s reclone = 2.4× per-test; 50% saved at 7 tests; `docs/audits/ce_0_session_start_fixture_spike.md`)
+- [x] CE.1 - CE.1 — `App2Driver.trainer_reset_overlay()` verb (clicks Reclone, waits for live-tail finished — mirrors `trainer_start_session()` wait shape)
+- [x] CE.2 - CE.2 — Session-scope `trainer_ready_session` fixture in `test_bv33_trainer_dogfood.py`; does Session Start once per (worker, dialect)
+- [x] CE.3 - CE.3 — Per-test setup calls `trainer_reset_overlay()` (cheap reclone) instead of `trainer_start_session()` + drops dead `isolated_studio_cfg` fixture
 - [ ] CE.4 - CE.4 — Unpin `RECON_GEN_TRAINER_DIALECTS=du` in `.github/workflows/ci.yml`; measure CI wall-clock delta; if green, sweep CB.17.m mitigation comment
 
 ## Phase PLAN - Phase PLAN

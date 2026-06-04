@@ -51,7 +51,7 @@ from __future__ import annotations
 import dataclasses
 import re
 from datetime import date
-from pathlib import Path
+from collections.abc import Generator
 from typing import Any, cast
 
 import pytest
@@ -71,7 +71,7 @@ from recon_gen.common.l2.plant_registry import PLANT_REGISTRY, PlantKindEntry
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.l2.seed import emit_full_seed
 from recon_gen.common.sql import Dialect
-from tests.e2e._isolation import _isolate_cfg, _isolated_cfg_key
+from tests.e2e._isolation import _isolate_cfg
 from tests.e2e._studio_deploy_helpers import (
     SASQUATCH_YAML,
     make_studio_cfg,
@@ -141,60 +141,83 @@ def _trainer_dialect_params() -> list[Any]:  # noqa: ANN401 — ParameterSet has
     return out
 
 
-@pytest.fixture(params=_trainer_dialect_params())
-def isolated_studio_cfg(
+@pytest.fixture(scope="session", params=_trainer_dialect_params())
+def trainer_ready_session(
     request: pytest.FixtureRequest,
-    tmp_path: Path,
     tmp_path_factory: pytest.TempPathFactory,
-) -> tuple[Config, Path]:
-    """Per-test isolated Studio cfg fanned out over Dialect.{DU,PG,OR}.
+    worker_id: str,
+) -> Generator[tuple[Config, str], None, None]:
+    """CE.2 — session-scope Session Start fixture, shared across all
+    trainer dogfood tests on the same xdist worker × dialect cell.
 
-    Builds a Studio-flavored cfg via :func:`make_studio_cfg` (which
-    defaults to DuckDB at ``tmp_path``), then for the PG / Oracle
-    cells substitutes the URL from the session-scoped container
-    fixture (``pg_container_url`` / ``oracle_container_url``) — pulled
-    lazily via ``request.getfixturevalue`` so the DuckDB cell does
-    NOT spin Docker. Finally ``_isolate_cfg`` suffixes
-    ``db_table_prefix`` + ``deployment_name`` with a per-(test nodeid,
-    dialect, worker) hash so concurrent xdist workers + parametrize
-    cells don't race on the shared container.
+    Backlog #249 root cause: each test was running `_seed_demo_db` +
+    Session Start (`/etl/run`) afresh against its own per-test
+    isolated prefix. On 16-xdist-worker CI with one shared PG /
+    Oracle container per dialect, that's N × 10-min Oracle ETL +
+    seed-apply contention — easily blew the 600s
+    `_trainer_wait_until_finished` wire for [pg] / [or] parametrize
+    cells.
 
-    Pinning a single dialect for fast iteration:
-        ``RECON_GEN_TRAINER_DIALECTS=du pytest tests/e2e/app2/...``
+    New shape (CE.0 spike confirmed PG: 2.4× per-test speedup):
 
-    Returns ``(cfg, db_path)`` where ``db_path`` is informational
-    (DuckDB tempfile for local cells, URL-cast for PG / Oracle).
+    - Per-(worker × dialect) STABLE prefix (`trainer_<dialect>_<worker>`)
+      — no nodeid in the key, so all tests on the same worker share
+      the same base.
+    - `_seed_demo_db` once.
+    - `studio_server` once (uvicorn instance shared across tests).
+    - One-shot driver opens, clicks Session Start, closes — base + v
+      overlay are now both populated.
+    - Yield `(cfg, base_url)` for tests to attach their own drivers
+      against the same server.
+
+    Tests then call `driver.trainer_reset_overlay()` (CE.1 — clicks
+    Re-clone) at the start of each test body — wipes + reclones the
+    v overlay from base, refreshes v matviews, skips `/etl/run`.
+    Cheap (PG ~13s, Oracle ~1-2min, DuckDB sub-second).
+
+    Cross-test contamination guard: each test reclones at the start
+    of its body. Plants from prior tests on the same worker are
+    cleared by the reclone before the new test plants.
     """
-    base_cfg, sqlite_path = make_studio_cfg(tmp_path)
+    from tests.e2e._drivers.app2 import App2Driver  # noqa: PLC0415
 
     dialect: Dialect = request.param
+    base_dir = tmp_path_factory.mktemp(f"trainer-{dialect.value}-{worker_id}")
+    base_cfg, _ = make_studio_cfg(base_dir)
     base_cfg.dialect = dialect
 
     if dialect is Dialect.POSTGRES:
-        url = cast(str, request.getfixturevalue("pg_container_url"))
-        base_cfg.demo_database_url = url
-        db_path = Path(url)
+        base_cfg.demo_database_url = cast(
+            str, request.getfixturevalue("pg_container_url"),
+        )
     elif dialect is Dialect.ORACLE:
-        url = cast(str, request.getfixturevalue("oracle_container_url"))
-        base_cfg.demo_database_url = url
-        db_path = Path(url)
-    else:
-        # DuckDB — make_studio_cfg already wired the tempfile URL.
-        db_path = sqlite_path
+        base_cfg.demo_database_url = cast(
+            str, request.getfixturevalue("oracle_container_url"),
+        )
 
-    # Pin as-of to the seed anchor so the L1 dashboard's default
-    # 7-day window `[as_of-7d, as_of]` covers the plants. Without this
-    # pin the dashboard reads the wall-clock day and the trainer
-    # silently drops plants that land more than 7 days back from now.
     base_cfg.test_generator = dataclasses.replace(
         base_cfg.test_generator, end_date=_TRAINER_ANCHOR,
     )
 
-    suffix = _isolated_cfg_key(request, base_cfg)
-    isolated = _isolate_cfg(
+    # Stable per-(worker, dialect) suffix — drops the nodeid component
+    # that the per-test `isolated_studio_cfg` includes, so all tests
+    # sharing this session fixture land on the same prefix.
+    suffix = f"trainer_{dialect.value}_{worker_id}"
+    cfg = _isolate_cfg(
         base_cfg, suffix=suffix, tmp_path_factory=tmp_path_factory,
     )
-    return isolated, db_path
+
+    _seed_demo_db(cfg)
+
+    with studio_server(cfg) as base_url:
+        # One-shot driver to drive the initial full Session Start.
+        # Subsequent tests open their own drivers + call
+        # `trainer_reset_overlay()` (cheap reclone) against the same
+        # server.
+        with App2Driver.attached_to(base_url=base_url, cfg=cfg) as driver:
+            driver.open_training()
+            driver.trainer_start_session()
+        yield (cfg, base_url)
 
 
 def _seed_demo_db(cfg: Config) -> None:
@@ -512,7 +535,7 @@ def _v_matview_account_ids(
 
 
 def test_bv33a_limit_breach_outbound_trainer_dogfood(
-    isolated_studio_cfg: tuple[Config, Path],
+    trainer_ready_session: tuple[Config, str],
 ) -> None:
     """BV.3.3.a vertical slice — drive the Trainer end-to-end for
     ``limit_breach_outbound`` and assert the planted row surfaces in
@@ -522,20 +545,24 @@ def test_bv33a_limit_breach_outbound_trainer_dogfood(
     after the BV.3.3.c per-kind decomposition as the bare-minimum
     sanity gate — the per-kind parametrize covers every kind including
     this one, but a failure here pinpoints the smallest possible
-    breakage shape (one specific plant, one specific matview)."""
+    breakage shape (one specific plant, one specific matview).
+
+    CE.3 — consumes the session-scope `trainer_ready_session`
+    fixture: base + initial v overlay already populated. This test
+    just reclones the v overlay (cheap), plants, applies, verifies.
+    """
     from tests.e2e._drivers.app2 import App2Driver  # noqa: PLC0415
 
-    cfg, _db_path = isolated_studio_cfg
-    _seed_demo_db(cfg)
+    cfg, base_url = trainer_ready_session
 
     entry = _pick_kind("limit_breach_outbound")
     v_matview = f"{cfg.db_table_prefix}_v_limit_breach"
 
-    with studio_server(cfg) as base_url, App2Driver.attached_to(
+    with App2Driver.attached_to(
         base_url=base_url, cfg=cfg,
     ) as driver:
         driver.open_training()
-        driver.trainer_start_session()
+        driver.trainer_reset_overlay()
 
         before = _v_matview_account_ids(cfg, v_matview)
         driver.trainer_enable_plant(entry.kind, entry.family)
@@ -610,30 +637,30 @@ def _walkable_params() -> list[Any]:  # noqa: ANN401  — ParameterSet has no pu
 @pytest.mark.parametrize("entry", _walkable_params())
 def test_trainer_dogfood_per_kind(
     entry: PlantKindEntry,
-    isolated_studio_cfg: tuple[Config, Path],
+    trainer_ready_session: tuple[Config, str],
 ) -> None:
-    """Per-kind trainer dogfood — each plant runs against a fresh
-    studio + fresh DB; failure on one kind doesn't taint the rest.
+    """Per-kind trainer dogfood — each plant runs against a cleanly-
+    recloned v overlay sharing one base + Session Start per worker ×
+    dialect. CE.3 — consumes the session-scope `trainer_ready_session`
+    fixture; the per-test reclone wipes plants from prior tests on
+    the same worker so each test starts from a clean overlay.
 
-    The runner cell determines dialect (``sp_pg_lo`` → PG;
-    ``sp_or_lo`` → Oracle; ``sp_du_lo`` → DuckDB). Cross-dialect
-    coverage emerges from re-running this test file per cell — no
-    explicit ``@pytest.mark.parametrize("dialect", ...)`` here.
+    Dialect parametrization comes from the session fixture's `params`
+    list (RECON_GEN_TRAINER_DIALECTS env-overridable).
     """
     from tests.e2e._drivers.app2 import App2Driver  # noqa: PLC0415
 
-    cfg, _db_path = isolated_studio_cfg
-    _seed_demo_db(cfg)
+    cfg, base_url = trainer_ready_session
 
     matview = entry.dashboard_check.matview_name
     assert matview is not None  # _browser_walkable_kinds() guarantees this
     v_matview = f"{cfg.db_table_prefix}_v_{matview}"
 
-    with studio_server(cfg) as base_url, App2Driver.attached_to(
+    with App2Driver.attached_to(
         base_url=base_url, cfg=cfg,
     ) as driver:
         driver.open_training()
-        driver.trainer_start_session()
+        driver.trainer_reset_overlay()
 
         before = _v_matview_signatures(cfg, v_matview, matview)
         driver.trainer_enable_plant(entry.kind, entry.family)

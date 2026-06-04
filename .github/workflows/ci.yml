@@ -271,17 +271,17 @@ jobs:
           # RECON_GEN_RUNNER_YES bypasses the destructive-op prompt;
           # the runner needs it in non-interactive CI.
           RECON_GEN_RUNNER_YES: "1"
-          # CB.17.m — pin trainer dogfood parametrization to DuckDB
-          # in CI. The full PG/Oracle fan-out hits 16-xdist-worker
-          # contention on one shared container per dialect: each
-          # test's Session Start re-runs `/etl/run` (~10 min on
-          # Oracle per `_studio_routes.py:479`), and N workers ×
-          # one container × 10-min op exceeds the 600s
-          # `_trainer_wait_until_finished` wire. DuckDB stays
-          # in-process per worker so contention disappears.
-          # See backlog #246 (Oracle xdist container sharing) and
-          # the new BX entry for trainer-dogfood resource contention.
-          RECON_GEN_TRAINER_DIALECTS: "du"
+          # CE.4 (2026-06-04) — unpinned `RECON_GEN_TRAINER_DIALECTS`,
+          # restoring the full [du, pg, or] fan-out. Pre-CE the per-
+          # test `trainer_start_session()` re-ran `/etl/run` (~10 min
+          # Oracle / ~30s PG) on every test, blowing the 600s
+          # `_trainer_wait_until_finished` wire under 16-xdist
+          # contention. CE.2's session-scope `trainer_ready_session`
+          # fixture moves Session Start to once per (worker, dialect);
+          # CE.3 swaps per-test setup to the cheap `/training/reclone`
+          # path. PG: 33s once + ~13s/test (CE.0 measured); Oracle:
+          # ~10min once + ~1-2min/test extrapolated — all comfortably
+          # under the wire.
         # CB.17.h — wrap the chain in /usr/bin/time -v so the WSL2
         # runner records peak RSS (Maximum resident set size). The
         # value lands at the end of the step log and (via the
