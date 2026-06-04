@@ -364,7 +364,7 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 
 - [x] CB.14 - CB.14 — In-repo Oracle 19c image build (multi-arch via host arch)
 - [ ] CB.15 - CB.15 — Collapse cells to fix CI-vs-local DB resource divergence (accelerated CC.3)
-- [ ] CB.16 - CB.16 — Re-type connect_demo_db -> SyncConnection to close the Any escape hatch
+- [x] CB.16 - CB.16 — Re-type connect_demo_db -> SyncConnection to close the Any escape hatch
   - We should evaluate all "ignore[explicit-any]", its a huge smell.
 - [ ] CB.17 - CB.17 — Execute the cell-collapse migration (per cb_15_collapse_cells_design.md)
   - [x] CB.17.a - CB.17.a — Wire pg_container + oracle_container session fixtures

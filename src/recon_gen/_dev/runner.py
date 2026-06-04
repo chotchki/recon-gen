@@ -3410,6 +3410,125 @@ def cmd_up_to(args: argparse.Namespace) -> int:
         return _finalize_run(run_dir, unit_result, aggregated_results, final_code)
 
 
+def cmd_thin(args: argparse.Namespace) -> int:
+    """CB.17.d strangler — thin pytest-alias path alongside ``cmd_up_to``.
+
+    Skips the variant matrix + per-cell ``_run_one_variant`` loop. Each
+    layer runs ONCE as a single subprocess; ``pytest-xdist`` handles
+    in-layer parallelism; session-scoped ``pg_container_url`` /
+    ``oracle_container_url`` fixtures (tests/conftest.py CB.17.a)
+    provision substrate on first consumption; ``isolated_cfg`` gives
+    each (file, worker) its own ``deployment_name`` / ``db_table_prefix``
+    suffix (CB.7 + CB.17.c).
+
+    Verification: drops the SAME ``env_access.json`` shape as
+    ``cmd_up_to`` (via ``_finalize_run`` → ``_dump_env_access``).
+    Operator diffs the two::
+
+        diff <(jq -S .by_name runs/<legacy>/env_access.json) \\
+             <(jq -S .by_name runs/<thin>/env_access.json)
+
+    Reads-in-legacy-but-not-thin → dead env vars to delete. Reads in
+    both → still load-bearing.
+
+    ``run_dir`` is suffixed ``-thin`` so legacy + thin runs are
+    visually distinguishable in ``runs/`` and don't collide.
+
+    Cfg discovery mirrors legacy fallback: ``RECON_GEN_CONFIG`` env
+    override → ``_DEFAULT_RUNNER_CFG_CANDIDATES``. L2 path comes from
+    ``cfg.default_l2_instance`` (h.6) when present; missing →
+    ``deploy``/``qs_api``/``qs_browser`` layers' ``_layer_command``
+    returns None and dispatch prints ``dispatch-skip`` (same fallback
+    as legacy).
+    """
+    options = _options_from_args(args)
+
+    if _is_deploy_or_later(args.layer) and _is_dirty():
+        if not options.allow_dirty_deploy and not RECON_GEN_RUNNER_YES.get_or_none():
+            print(
+                "runner: refusing to deploy: tracked changes present "
+                "(commit / stash, or pass --allow-dirty-deploy)",
+                file=sys.stderr,
+            )
+            return EXIT_NEEDS_OPERATOR
+
+    failures = probe_dependencies(args.layer)
+    if failures:
+        for failure in failures:
+            print(f"runner: probe-fail [{failure.kind}] {failure.message}", file=sys.stderr)
+        return EXIT_NEEDS_OPERATOR
+
+    run_id = create_run_id() + "-thin"
+    run_dir = RUNS_DIR / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    print(f"runner: run_id={run_id}")
+    print(f"runner: run_dir={_rel_or_abs(run_dir)}")
+    print(f"runner: thin up_to={args.layer}")
+    if options.fuzz_seed_value is not None:
+        print(f"runner: fuzz_seed={options.fuzz_seed_value} (pin via RECON_GEN_FUZZ_SEED env to repro)")
+
+    # Resolve cfg + L2 ONCE for the whole run (vs cmd_up_to which does it
+    # per cell). Deploy/qs_api/qs_browser layers need both; pytest-only
+    # layers (unit/db/app2) tolerate absence (their pytest fixtures
+    # discover cfg themselves via load_config's precedence chain).
+    cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
+    runner_variant_env: dict[str, str] = {}
+    if cfg_path is not None:
+        runner_variant_env[RECON_GEN_CONFIG.name] = str(cfg_path)
+        try:
+            from recon_gen.common.config import load_config  # noqa: PLC0415
+            peek_cfg = load_config(str(cfg_path))
+            l2_default = getattr(peek_cfg, "default_l2_instance", None)
+            if l2_default:
+                l2_path = REPO_ROOT / l2_default if not Path(l2_default).is_absolute() else Path(l2_default)
+                if l2_path.exists():
+                    runner_variant_env[RECON_GEN_TEST_L2_INSTANCE.name] = str(l2_path)
+                else:
+                    print(
+                        f"runner: cfg.default_l2_instance={l2_default!r} not found on disk; "
+                        f"deploy/qs_* layers will dispatch-skip",
+                        file=sys.stderr,
+                    )
+        except Exception as exc:  # noqa: BLE001 — peek failure shouldn't gate the run
+            print(f"runner: cfg peek for L2 discovery failed ({exc!r}); continuing")
+    else:
+        print(
+            "runner: no cfg found via _DEFAULT_RUNNER_CFG_CANDIDATES; "
+            "deploy/qs_* layers will dispatch-skip",
+            file=sys.stderr,
+        )
+
+    chain = chain_through(args.layer)
+    print(f"runner: chain={chain} (thin path: one subprocess per layer)")
+
+    layer_results: list[LayerResult] = []
+    final_code = EXIT_SUCCESS
+    for layer in chain:
+        result = dispatch_layer(
+            layer, run_dir, options, variant_env=runner_variant_env,
+        )
+        layer_results.append(result)
+        if not result.passed and not result.skipped:
+            final_code = result.exit_code
+            break  # stop-on-first-failure (matches cmd_up_to's cross-layer lock)
+
+    # Synthesize a ``unit`` LayerResult for _finalize_run's signature
+    # (legacy splits prelude vs cells; thin has no prelude). When unit
+    # ran, use its real result; when it didn't (e.g., bail-before-chain),
+    # use a synthetic skipped entry.
+    if layer_results and layer_results[0].layer == "unit":
+        unit_result = layer_results[0]
+        rest = layer_results[1:]
+    else:
+        unit_result = LayerResult(
+            layer="unit", exit_code=EXIT_SUCCESS,
+            duration_seconds=0.0, skipped=True,
+        )
+        rest = layer_results
+
+    return _finalize_run(run_dir, unit_result, rest, final_code)
+
+
 def _compose_specs_from_options(
     options: RunOptions,
 ) -> tuple[list[VariantSpec], list[VariantSpec]]:
@@ -4105,6 +4224,37 @@ def _build_parser() -> argparse.ArgumentParser:
         help="emit per-(variant, layer) .coverage.<variant>.<layer> data files under runs/<id>/ (pytest layers run with --cov=recon_gen). CI's W.8b coverage aggregator globs coverage-data-* artifacts. Off by default (k.1.coverage).",
     )
     p_up_to.set_defaults(func=cmd_up_to)
+
+    # CB.17.d — `thin` strangler. Same flags as `up_to` minus the matrix
+    # axes (no per-cell loop = no scenarios/dialects/targets/variants).
+    # Lives alongside cmd_up_to so legacy + thin can be compared on the
+    # same chain (see env_access.json diff workflow in cmd_thin docstring).
+    p_thin = subs.add_parser(
+        "thin",
+        help="CB.17.d strangler — single-pytest-per-layer alternative to up_to",
+    )
+    p_thin.add_argument("layer", choices=LAYERS)
+    p_thin.add_argument(
+        "--only", metavar="<expr>", default=None,
+        help="pytest -k <expr>: narrow within-layer tests.",
+    )
+    p_thin.add_argument(
+        "--parallel", type=int, default=1, metavar="N",
+        help="within-layer pytest-xdist worker count. Default = `-n auto` (= cpu_count); pin via `--parallel=N`.",
+    )
+    p_thin.add_argument(
+        "--trace-all", action="store_true",
+        help="Playwright capture every test (failure-only is the default).",
+    )
+    p_thin.add_argument(
+        "--allow-dirty-deploy", action="store_true",
+        help="bypass the tracked-changes refusal on layers >= deploy.",
+    )
+    p_thin.add_argument(
+        "--coverage", action="store_true",
+        help="emit .coverage.<run-id>-thin.<layer> data files under runs/<id>-thin/.",
+    )
+    p_thin.set_defaults(func=cmd_thin)
 
     p_up = subs.add_parser("up", help="Boot dependencies (default scope = all)")
     p_up.add_argument("scope", nargs="?", default="all", choices=["local", "aws", "all"])
