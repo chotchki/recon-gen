@@ -1379,7 +1379,68 @@ ORACLE_REUSE_CONTAINER_PREFIX: Final = "quicksight-test-oracle-"
 # behavior when `oracle_password` is explicitly set. Without pinning,
 # testcontainers randomizes per invocation (`hex(randbits(24))`) and
 # the adopt path can't predict the URL on subsequent runs.
-ORACLE_REUSE_PASSWORD: Final = "qsgentestpwd2026"  # typing-smell: ignore[qs-gen-prefix]: local Docker fixture password — not an AWS resource ID, not multi-tenant; the prefix is incidental string content, not a Config-prefixed resource name. CB.14 — must be alphanumeric: Oracle 19c's dbca-silent install rejects hyphens/special chars during the response-file pass (container exits at "Creating and starting Oracle instance" with "...ssword. If required refer Oracle documentation"). Stripped hyphens to keep the 8+chars + letter + digit shape Oracle 19c requires.
+def generate_db_password() -> str:
+    """BX.248 — fresh random password for an ephemeral PG / Oracle container.
+
+    Returns 32 hex chars (`secrets.token_hex(16)`). Oracle 19c requires
+    password to be alphanumeric, ≥8 chars, and contain at least one
+    letter + one digit; `token_hex` satisfies all three by construction
+    (entropy-source guarantees mixed hex chars). Pre-BX.248 the runner
+    pinned a static `ORACLE_REUSE_PASSWORD` constant in source — that
+    string leaked DB credentials to anyone with repo access AND let the
+    same source-disclosed password reach the home-firewall-exposed
+    hotchkiss.io:5433/1522 forwards. Generating per-invocation closes
+    that hole.
+    """
+    import secrets  # noqa: PLC0415 — lazy: only used by container spinup
+    return secrets.token_hex(16)
+
+
+def _reset_pg_password_via_socket(container_name: str, password: str) -> None:
+    """BX.248 — force-reset Postgres `postgres` user password via unix
+    socket inside the container.
+
+    `psql -U postgres` over the container's local socket uses `trust`
+    auth (default in pg_hba.conf for local connections), so we don't
+    need to know the current password to set a new one. Used on the
+    adopt path when a container exists from a prior run with an
+    unknown password.
+    """
+    import subprocess  # noqa: PLC0415 — lazy
+    subprocess.run(
+        [
+            "docker", "exec", container_name,
+            "psql", "-U", "postgres",
+            "-c", f"ALTER USER postgres WITH PASSWORD '{password}';",
+        ],
+        check=False,
+        capture_output=True,
+    )
+
+
+def _reset_oracle_password_via_socket(container_name: str, password: str) -> None:
+    """BX.248 — force-reset Oracle `system` user password via in-container
+    sysdba auth.
+
+    `sqlplus / as sysdba` uses OS authentication for the in-container
+    `oracle` user — works regardless of the current password. The
+    heredoc is wrapped in `bash -lc` so sqlplus's environment (PATH,
+    ORACLE_HOME, etc.) is set up; otherwise the binary isn't on the
+    default exec path.
+    """
+    import subprocess  # noqa: PLC0415 — lazy
+    sql = (
+        f'ALTER USER system IDENTIFIED BY "{password}";\nEXIT;\n'
+    )
+    subprocess.run(
+        [
+            "docker", "exec", "-i", container_name,
+            "bash", "-lc", "sqlplus -s / as sysdba",
+        ],
+        input=sql.encode(),
+        check=False,
+        capture_output=True,
+    )
 
 # CB.11.b — fixed host port for the local PG container. Matches the
 # operator's hotchkiss.io:5433 forward target, so QS data sources
@@ -1593,7 +1654,7 @@ def _start_thin_container(
     if peek_cfg.dialect is Dialect.ORACLE:
         # Adopt-or-create; stable name so subsequent thin runs reuse.
         url, handle = _get_or_start_oracle_container(
-            "recon-gen-thin-oracle", ORACLE_REUSE_PASSWORD,  # typing-smell: ignore[recon-prefix]: Docker container name (not a cfg-prefixed AWS / DB resource ID) — stable across thin-path runs so adopt-or-create can find the persistent container; not multi-tenant
+            "recon-gen-thin-oracle", generate_db_password(),  # typing-smell: ignore[recon-prefix]: Docker container name (not a cfg-prefixed AWS / DB resource ID) — stable across thin-path runs so adopt-or-create can find the persistent container; not multi-tenant
         )
         env = {
             RECON_GEN_DEMO_DATABASE_URL.name: url,
@@ -1751,7 +1812,7 @@ class _PersistentContainerHandle:
 
 
 def _get_or_start_pg_container(
-    name: str, password: str = "postgres",
+    name: str, password: str,
 ) -> tuple[str, _PersistentContainerHandle]:
     """CB.17.k — mirror of `_get_or_start_oracle_container` for Postgres.
 
@@ -1802,6 +1863,11 @@ def _get_or_start_pg_container(
             pass
         return _start_fresh_pg_container(name, password)
 
+    # BX.248 — existing container was started by an earlier invocation
+    # with that invocation's password (now unknown to us). Force-reset
+    # via unix-socket trust auth so our caller's password becomes the
+    # live one. Cheap (~50ms) and idempotent.
+    _reset_pg_password_via_socket(name, password)
     url = f"postgresql://postgres:{password}@localhost:{host_port}/postgres"
     return url, _PersistentContainerHandle(name=name)
 
@@ -1911,6 +1977,12 @@ def _get_or_start_oracle_container(
             pass
         return _start_fresh_oracle_container(name, password)
 
+    # BX.248 — existing container was started by an earlier invocation
+    # with that invocation's password (now unknown to us). Force-reset
+    # via in-container sysdba so our caller's password becomes the live
+    # one. Idempotent; Oracle's ALTER USER accepts the same password
+    # without error.
+    _reset_oracle_password_via_socket(name, password)
     url = (
         f"oracle+oracledb://system:{password}@localhost:{host_port}"
         f"/?service_name=FREEPDB1"

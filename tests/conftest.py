@@ -986,14 +986,23 @@ def pg_container_url(
 
     from recon_gen._dev.runner import (  # noqa: PLC0415 — lazy
         _get_or_start_pg_container,
+        generate_db_password,
     )
+
+    # BX.248 — fresh per-pytest-invocation password. If the container
+    # already exists, the adopt path force-resets via unix-socket
+    # trust-auth so the credential survives the rendezvous round-trip.
+    password = generate_db_password()
+
+    def _spinup_pg(name: str) -> tuple[str, object]:
+        return _get_or_start_pg_container(name, password)
 
     url = _shared_container_url(
         tmp_path_factory=tmp_path_factory,
         worker_id=worker_id,
         state_filename="pg-container-url.txt",
         container_name=_SHARED_PG_CONTAINER_NAME,
-        spinup_fn=_get_or_start_pg_container,
+        spinup_fn=_spinup_pg,
     )
     os.environ[RECON_GEN_DEMO_DATABASE_URL_PG.name] = url
     yield url
@@ -1022,12 +1031,17 @@ def oracle_container_url(
 
     pytest.importorskip("testcontainers.oracle")
     from recon_gen._dev.runner import (  # noqa: PLC0415 — lazy
-        ORACLE_REUSE_PASSWORD,
         _get_or_start_oracle_container,
+        generate_db_password,
     )
 
+    # BX.248 — fresh per-pytest-invocation password (token_hex satisfies
+    # Oracle 19c's letter+digit+8chars rule). Adopt path force-resets
+    # via in-container sysdba.
+    password = generate_db_password()
+
     def _spinup(name: str) -> tuple[str, object]:
-        raw_url, handle = _get_or_start_oracle_container(name, ORACLE_REUSE_PASSWORD)
+        raw_url, handle = _get_or_start_oracle_container(name, password)
         return _strip_sa_url_prefix(raw_url), handle
 
     url = _shared_container_url(

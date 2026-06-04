@@ -112,6 +112,21 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
+      - name: Generate random DB passwords (BX.248)
+        # Per-workflow-run random passwords for the shared PG + Oracle
+        # containers. `openssl rand -hex 16` gives 32 alphanumeric chars
+        # — satisfies Oracle 19c's "letter + digit + 8+chars" rule, no
+        # special chars to escape downstream. Exported via $GITHUB_ENV
+        # so all subsequent steps see PG_PASSWORD / ORACLE_PASSWORD.
+        # Replaces the pre-BX.248 source-checked `postgres` /
+        # `qsgentestpwd2026` literals (the latter constant has been
+        # deleted from `src/recon_gen/_dev/runner.py`).
+        run: |
+          {
+            echo "PG_PASSWORD=$(openssl rand -hex 16)"
+            echo "ORACLE_PASSWORD=$(openssl rand -hex 16)"
+          } >> "$GITHUB_ENV"
+
       - name: Ensure shared PG + Oracle are up (reuse persistent containers when present)
         # CI box exposes PG on host port 5432 and Oracle on host port
         # 1521. `hotchkiss.io:5432` / `:1521` DDNS forwards point at
@@ -139,7 +154,7 @@ jobs:
             # as "Status: skipped — pg_stat_statements must be loaded
             # via shared_preload_libraries" instead of real perf data.
             docker run -d --name ci-shared-pg \
-              -e POSTGRES_PASSWORD=postgres \
+              -e POSTGRES_PASSWORD="${PG_PASSWORD}" \
               -p 5432:5432 \
               postgres:17-alpine \
               postgres -c shared_preload_libraries=pg_stat_statements
@@ -151,7 +166,7 @@ jobs:
             echo "Shared Oracle already listening on 127.0.0.1:1521 — reusing."
           else
             docker run -d --name ci-shared-oracle \
-              -e ORACLE_PWD=qsgentestpwd2026 \
+              -e ORACLE_PWD="${ORACLE_PASSWORD}" \
               -e ORACLE_PDB=FREEPDB1 \
               -p 1521:1521 \
               recon-gen/oracle-19c:local
@@ -163,28 +178,22 @@ jobs:
           echo "started_or=${STARTED_OR}" >> "$GITHUB_OUTPUT"
           echo "Shared DBs ready (CI-started: PG=${STARTED_PG} OR=${STARTED_OR})."
 
-      - name: Force-reset PG + Oracle passwords to the CI-known values
-        # Persistent containers may have been brought up in some past
-        # life with a different password. Re-set both to the values
-        # baked into the materialized cfgs and `RECON_GEN_DEMO_DATABASE_URL_*`
-        # env so QS in us-east-1 can actually authenticate via the
-        # hotchkiss.io DDNS forward. Both operations use container-local
-        # superuser auth that doesn't require knowing the prior password:
-        # PG via `psql -U postgres` over the unix socket (trust auth in
-        # pg_hba.conf for local connections), Oracle via `sqlplus / as
-        # sysdba` (OS auth for the in-container oracle user).
+      - name: Force-reset PG + Oracle passwords to this run's random values
+        # BX.248 — passwords are random per workflow_run (above), so on
+        # adopted containers the in-container credential is whatever
+        # the PREVIOUS workflow_run set it to. Reset both to this run's
+        # values via local superuser auth that doesn't need the prior
+        # password: PG via `psql -U postgres` over unix socket (trust
+        # auth in pg_hba.conf for local connections), Oracle via
+        # `sqlplus / as sysdba` (OS auth for the in-container oracle
+        # user). Idempotent on fresh containers too.
         run: |
-          # PG — works on both fresh (no-op effect, same password) and
-          # reused containers regardless of their previous credential.
           docker exec ci-shared-pg \
-            psql -U postgres -c "ALTER USER postgres WITH PASSWORD 'postgres';"
-          # Oracle — same shape, OS-auth via sqlplus inside the container.
-          # `--` in heredoc to avoid `bash -e` choking on a non-zero
-          # exit if sqlplus's prompt produces warnings.
-          docker exec -i ci-shared-oracle bash -lc 'sqlplus -s / as sysdba <<EOF
-          ALTER USER system IDENTIFIED BY "qsgentestpwd2026";
+            psql -U postgres -c "ALTER USER postgres WITH PASSWORD '${PG_PASSWORD}';"
+          docker exec -i ci-shared-oracle bash -lc "sqlplus -s / as sysdba <<EOF
+          ALTER USER system IDENTIFIED BY \"${ORACLE_PASSWORD}\";
           EXIT;
-          EOF'
+          EOF"
 
       - name: Materialize per-dialect runner cfgs (one cfg per dialect)
         # CB.17.f: dropped the `.qs.yaml` siblings. Post CB.17.d the
@@ -199,28 +208,32 @@ jobs:
         # (`RECON_GEN_DEMO_DATABASE_URL_PG` / `_OR`) tells the runner
         # not to re-spin its own; this URL is the cfg-side default
         # used for seed/deploy CLI subprocess invocations.
+        # BX.248 — heredoc is UNquoted so `${PG_PASSWORD}` / `${ORACLE_PASSWORD}`
+        # expand from the env. `${{ github.run_id }}` is GitHub template
+        # syntax substituted by the runner BEFORE the shell sees it, so
+        # unquoting the heredoc is safe.
         run: |
           mkdir -p run
-          cat > run/config.postgres.yaml <<'EOF'
+          cat > run/config.postgres.yaml <<EOF
           aws_account_id: "470656905821"
           aws_region: "us-east-1"
           deployment_name: "qs-ci-${{ github.run_id }}-pg"
           db_table_prefix: "qs_ci_${{ github.run_id }}_pg"
           dialect: "postgres"
-          demo_database_url: "postgresql://postgres:postgres@127.0.0.1:5432/postgres"
+          demo_database_url: "postgresql://postgres:${PG_PASSWORD}@127.0.0.1:5432/postgres"
           default_l2_instance: "tests/l2/sasquatch_pr.yaml"
           principal_arns:
             - "${{ secrets.RECON_E2E_USER_ARN }}"
           auth:
             quicksight_user_arn: "${{ secrets.RECON_E2E_USER_ARN }}"
           EOF
-          cat > run/config.oracle.yaml <<'EOF'
+          cat > run/config.oracle.yaml <<EOF
           aws_account_id: "470656905821"
           aws_region: "us-east-1"
           deployment_name: "qs-ci-${{ github.run_id }}-or"
           db_table_prefix: "qs_ci_${{ github.run_id }}_or"
           dialect: "oracle"
-          demo_database_url: "oracle+oracledb://system:qsgentestpwd2026@127.0.0.1:1521/?service_name=FREEPDB1"
+          demo_database_url: "oracle+oracledb://system:${ORACLE_PASSWORD}@127.0.0.1:1521/?service_name=FREEPDB1"
           default_l2_instance: "tests/l2/sasquatch_pr.yaml"
           principal_arns:
             - "${{ secrets.RECON_E2E_USER_ARN }}"
@@ -253,8 +266,8 @@ jobs:
           # Both the seed (`recon-gen schema apply` etc.) and the
           # deploy subprocess inherit them and reach the shared
           # containers directly.
-          RECON_GEN_DEMO_DATABASE_URL_PG: "postgresql://postgres:postgres@127.0.0.1:5432/postgres"
-          RECON_GEN_DEMO_DATABASE_URL_OR: "oracle+oracledb://system:qsgentestpwd2026@127.0.0.1:1521/?service_name=FREEPDB1"
+          RECON_GEN_DEMO_DATABASE_URL_PG: "postgresql://postgres:${{ env.PG_PASSWORD }}@127.0.0.1:5432/postgres"
+          RECON_GEN_DEMO_DATABASE_URL_OR: "oracle+oracledb://system:${{ env.ORACLE_PASSWORD }}@127.0.0.1:1521/?service_name=FREEPDB1"
           # RECON_GEN_RUNNER_YES bypasses the destructive-op prompt;
           # the runner needs it in non-interactive CI.
           RECON_GEN_RUNNER_YES: "1"

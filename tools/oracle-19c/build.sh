@@ -105,13 +105,16 @@ docker tag oracle/database:19.3.0-ee "${LOCAL_TAG}"
 # Oracle's runOracle.sh sees the existing data files and skips DBCA —
 # cold-start drops from ~240s to ~30s.
 #
-# Defaults match the runner's `_Oracle19cContainer._configure` so the
-# baked-in DB shape matches what the runtime expects:
-#   ORACLE_PWD=qsgentestpwd2026  (must equal ORACLE_REUSE_PASSWORD in
-#                                 src/recon_gen/_dev/runner.py — alphanumeric
-#                                 only; dbca-silent rejects hyphens)
-#   ORACLE_PDB=FREEPDB1          (matches gvenzl PDB name so the URL shape
-#                                 stays unified across image fallbacks)
+# INIT_PWD is the image-build-time placeholder — DBCA bakes it during the
+# first-boot init step, then the image carries it as the post-commit default.
+# It's NEVER the runtime password: post-BX.248 the runner (`_get_or_start_
+# oracle_container` adopt path) and CI (`Force-reset` workflow step) both
+# overwrite it with a per-invocation random value via
+# `_reset_oracle_password_via_socket` / `sqlplus / as sysdba`. The image
+# password is essentially scratch — but DBCA still needs SOMETHING during
+# init, and it must be alphanumeric (dbca-silent rejects hyphens).
+# `ORACLE_PDB=FREEPDB1` matches gvenzl's PDB name so URL shape stays
+# unified across image fallbacks.
 INIT_PWD="qsgentestpwd2026"
 INIT_PDB="FREEPDB1"
 INIT_NAME="recon-gen-oracle-init-$$"
