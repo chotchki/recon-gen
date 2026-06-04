@@ -350,21 +350,15 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [ ] CC.3 - CC.3 — Reduce runner to 1 pytest-per-layer; delete `VariantSpec`/`cell_chain`/per-cell setup
 - [ ] CC.4 - CC.4 — Absorb BN.0 (sasquatch + AWS browser-layer flakes) into marker-based scoping
 
-## Phase CD - per_transfer CTE → matview
+## Phase CD - per_transfer CTE → matview — CANCELLED 2026-06-04
 
-**Why:** CI top-queries (run 26971887549, PG) shows the same `WITH per_transfer AS (SELECT MIN(t.posting)::date, t.transfer_id, t.rail_name, MAX(ABS(t.amount_money)), SUM(t.amount_money) FROM <prefix>_transactions GROUP BY transfer_id, rail_name)` aggregation repeated across 70+ Executives dataset calls per run for **~38s aggregate wall time** — the biggest single hot-path remaining after Phase BZ. Every Rails / Flow / Drift chart in the Executives app recomputes it from scratch. The CTE has two callers (`build_transaction_summary_dataset` shape A, `build_transaction_daily_dataset` shape B in `apps/executives/datasets.py`) and shape B is derivable from shape A by re-aggregating away `rail_name`. One matview kills both.
+**Why cancelled (after CD.0 spike):** Naive matview (`GROUP BY transfer_id, rail_name`, filter post-aggregate by `MIN(posting)::date`) hits 4.1× speedup but produces wrong `net_amount` for transfers whose legs straddle the date window. Option C (`GROUP BY posted_date, transfer_id, rail_name` + downstream re-aggregate) is byte-equivalent to baseline at 2.8× speedup BUT has a multi-day-transfer scaling cliff: crosses over with baseline at ~3× matview size (avg transfer day-span ≥3). Demo + typical retail safely below; wholesale / treasury / FX-batch customers could exceed it without warning. Regression risk on outlier customer data outweighs the ~25s/CI-run savings; sasquatch_pr-only seed measurements don't generalize, and the deploy-time-probe mitigation becomes a new surface to maintain.
 
-**Approach:** Single materialized view `<prefix>_per_transfer_rollup` with columns `posted_date, transfer_id, rail_name, transfer_amount (MAX(ABS)), transfer_net (SUM)`. Wire it through `common/l2/schema.py::emit_schema` (PG/Oracle MV + DuckDB `CREATE TABLE AS`) and `refresh_matviews_sql`. Replace both CTE bodies in `apps/executives/datasets.py` with `SELECT ... FROM <prefix>_per_transfer_rollup WHERE <date_clause on posted_date>`. Shape B re-aggregates over the per-(transfer, rail) rollup. Re-lock seeds (CA.6 pattern). App Info matview-status panel picks it up automatically.
+**Decision:** Leave the CTE in place. Revisit if/when a real customer hits the per_transfer hot path or if seed densification pushes CI wall-clock back into the red.
 
-**Done when:** Top-queries CI snapshot no longer surfaces the `per_transfer` CTE pattern in the top 20; mean Executives dataset query times drop ≥60% on the affected shapes; locked seeds re-emit byte-identically; 4-way agreement test still passes.
+**Artifacts:** `docs/audits/cd_0_per_transfer_matview_spike.md` (numbers, options, crossover curve).
 
-- [ ] CD.0 - CD.0 — Spike: prototype matview locally, EXPLAIN ANALYZE before/after, measure mean ms on Rails/Volume sheets
-- [ ] CD.1 - CD.1 — `emit_schema`: add `<prefix>_per_transfer_rollup` MV (PG/Oracle) + DuckDB CTAS arm
-- [ ] CD.2 - CD.2 — `refresh_matviews_sql`: append per_transfer_rollup refresh statement
-- [ ] CD.3 - CD.3 — `apps/executives/datasets.py`: rewrite shape A + shape B to consume the matview; preserve `<<$pExecDate*>>` pushdown
-- [ ] CD.4 - CD.4 — Re-lock seeds for all three dialects + regenerate semantic_lock fixtures
-- [ ] CD.5 - CD.5 — Regression: dataset-projection contract test, 4-way agreement test, app-info matview-status panel pickup
-- [ ] CD.6 - CD.6 — Measure: capture new top-queries snapshot, write delta into release notes, sweep PLAN entries to archive
+- [x] CD.0 - CD.0 — Spike measured + cancelled (Option A: faster but breaks equivalence; Option C: equivalent but multi-day scaling cliff)
 
 ## Phase PLAN - Phase PLAN
 - [ ] PLAN.md - BS.5 — _v_config_chain_children + 7-path conversion
@@ -514,6 +508,5 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - **BX backlog — recreate targeted tests for runner.py post-CB.17.d** — added 2026-06-04.
 - **BX backlog — asyncio executor not joining within 300s (thread leak signal)** — added 2026-06-04.
 - **BX backlog — Oracle container fixture: share one container across xdist workers** — added 2026-06-04.
-- **Backlog — `per_transfer` CTE is a matview candidate (dominates PG top-queries)** — added 2026-06-04.
 - **BX backlog — randomize container passwords (drop static defaults)** — added 2026-06-04.
 - **BX backlog — Trainer dogfood [pg]/[or] times out under 16-worker xdist on shared containers** — added 2026-06-04.
