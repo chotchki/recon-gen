@@ -832,6 +832,21 @@ RECON_GEN_DIALECT: Final = EnvVar(
     validator=matches(re.compile(r"postgres|oracle|sqlite")),
 )
 
+RECON_GEN_TRAINER_DIALECTS: Final = EnvVar(
+    name="RECON_GEN_TRAINER_DIALECTS",
+    description=(
+        "Comma-separated subset of trainer dialects to fan the BV.3.3 "
+        "trainer dogfood e2e over. Members: du,pg,or. Empty / unset "
+        "defaults to all three. CB.17.i."
+    ),
+    coercer=str,
+    optional=True,
+    # Loose validator — comma-separated short codes. Per-code checks
+    # happen at fixture-parametrize time so a typo there yields a
+    # well-located skip rather than an env-load failure.
+    validator=matches(re.compile(r"[a-z,]+")),
+)
+
 RECON_GEN_APP2_DB_POOL_SIZE: Final = EnvVar(
     name="RECON_GEN_APP2_DB_POOL_SIZE",
     description=(
