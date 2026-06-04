@@ -370,7 +370,7 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
   - [x] CB.17.a - CB.17.a — Wire pg_container + oracle_container session fixtures
   - [x] CB.17.b - CB.17.b — Top-level cfg fixture sources from container fixtures
   - [x] CB.17.c - CB.17.c — Confirm isolated_cfg worker-suffix covers QS resources end-to-end
-  - [ ] CB.17.c1 - CB.17.c1 — fix 5 browser-layer [app2] failures surfaced by thin qs_browser
+  - [x] CB.17.c1 - CB.17.c1 — fix 5 browser-layer [app2] failures surfaced by thin qs_browser
   - [ ] CB.17.d - CB.17.d — Delete the cell loop
   - [ ] CB.17.e - CB.17.e — Rewrite run_tests.sh as a thin pytest alias
   - [ ] CB.17.f - CB.17.f — Collapse ci.yml
@@ -537,3 +537,4 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - **CA.8 — Nuke Dialect.SQLITE and all SQLite-specific arms** — deferred from CA.8 on 2026-06-02.
 - **BX backlog — anomaly/money_trail app2 tests fail on sasquatch_pr L2 (no CustomerSubledger sender)** — added 2026-06-04.
 - **App2 KPI binding gap — Distinct Senders + per-account KPI cards render as None** — added 2026-06-04.
+- **BX backlog — recreate targeted tests for runner.py post-CB.17.d** — added 2026-06-04.
