@@ -113,15 +113,16 @@ jobs:
           aws-region: us-east-1
 
       - name: Ensure shared PG + Oracle are up (reuse persistent containers when present)
-        # The WSL2 self-hosted runner keeps PG (5432) + Oracle (1521)
-        # containers running across CI invocations to amortize Oracle's
-        # ~3 min cold-start. If they're already up — skip the start +
-        # record `STARTED_BY_CI=false` so the teardown step knows not
-        # to touch them. If they're not up — fall back to a fresh
-        # `docker run` and record `STARTED_BY_CI=true`. Same env-URL
-        # contract either way; the env vars on the test step below
-        # point the runner at `127.0.0.1:{5432,1521}` and the env-URL
-        # short-circuit in `_start_thin_container` does the rest.
+        # CI box exposes PG on host port 5432 and Oracle on host port
+        # 1521. `hotchkiss.io:5432` / `:1521` DDNS forwards point at
+        # the CI box so QS-in-us-east-1 can reach the CI containers
+        # from the runner-generated qs.yaml. (Dev-box pair owns 5433
+        # / 1522; the port-preserve in `_swap_url_host` keeps the two
+        # environments separable through DDNS.)
+        #
+        # If a persistent container is already bound to those ports —
+        # reuse it (skip the start, record `STARTED_BY_CI=false` so
+        # teardown leaves it alone). Otherwise bring fresh ones up.
         id: ensure_dbs
         run: |
           STARTED_PG=false
