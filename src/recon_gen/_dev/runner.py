@@ -58,6 +58,8 @@ from recon_gen.common.env_keys import (
     RECON_GEN_DB_READ_ONLY,
     RECON_GEN_DB_TABLE_PREFIX,
     RECON_GEN_DEMO_DATABASE_URL,
+    RECON_GEN_DEMO_DATABASE_URL_OR,
+    RECON_GEN_DEMO_DATABASE_URL_PG,
     RECON_GEN_DEPLOYMENT_NAME,
     RECON_GEN_QS_CONFIG,
     RECON_GEN_E2E,
@@ -1550,6 +1552,86 @@ def _setup_local_duckdb() -> tuple[dict[str, str], object | None]:
         RECON_GEN_CONFIG.name: str(cfg_path),
     }
     return env, _DuckdbHandle(db_path=db_path, cfg_path=cfg_path)
+
+
+def _start_thin_container(
+    cfg_path: Path,
+) -> tuple[dict[str, str], object | None]:
+    """CB.17.d — pre-spin the cfg-matching container for the thin path.
+
+    Returns ``(env_overrides, handle)`` where ``handle.stop()`` tears down
+    at end of run. Mirrors ``setup_variant`` but for a single (operator-
+    discovered) cfg rather than a per-cell ``VariantSpec``.
+
+    Why this exists: ``cmd_thin``'s design lock relied on test-side
+    pytest fixtures (``pg_container_url`` / ``oracle_container_url``) to
+    provision substrate lazily. That works for tests that consume ``cfg``
+    via fixture, but several db-tier test files (``test_dataset_sql_smoke``,
+    ``test_inv_direct``, ``test_audit_direct``, etc.) call
+    ``_CFG = _load_cfg()`` at module-import time so pytest-parametrize
+    can name DataSetId-keyed test cases. Module-import bypasses the
+    fixture chain entirely. To make those files work under thin, the
+    runner pre-spins the substrate + exports
+    ``RECON_GEN_DEMO_DATABASE_URL`` to the pytest subprocess. ``Config``'s
+    env-override path picks it up at module-import time.
+
+    The ``_PG`` / ``_OR`` env is also exported so the session-scoped
+    fixtures' env-URL fast-path kicks in (they yield the runner-provided
+    URL and don't re-spin). Same singleton, two consumers.
+
+    Dispatch by ``cfg.dialect``:
+
+    - POSTGRES: ``postgres:17-alpine`` testcontainer, container takes
+      ~10-15s to start. ``.stop()`` tears down at end. No fixed host
+      port (unlike ``setup_variant``'s legacy ``_LOCAL_PG_HOST_PORT``
+      bind) so thin + legacy don't collide on 5433.
+    - ORACLE: ``_get_or_start_oracle_container`` adopts a running named
+      container if one exists (saves ~90-120s cold-start). Container is
+      persistent — handle's ``.stop()`` is a no-op.
+    - DUCKDB: ``_setup_local_duckdb`` returns a tempdir + .duckdb file
+      and a handle whose ``.stop()`` unlinks both. No Docker involvement.
+    """
+    from recon_gen.common.config import load_config  # noqa: PLC0415
+    from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
+
+    peek_cfg = load_config(str(cfg_path))
+
+    if peek_cfg.dialect is Dialect.POSTGRES:
+        from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
+
+        container = (
+            PostgresContainer("postgres:17-alpine")
+            .with_command("postgres -c max_connections=300")
+        )
+        container.start()
+        raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]: testcontainers method has no type annotations
+        url = _normalize_pg_url(raw_url)
+        env: dict[str, str] = {
+            RECON_GEN_DEMO_DATABASE_URL.name: url,
+            RECON_GEN_DEMO_DATABASE_URL_PG.name: url,
+        }
+        return env, container
+
+    if peek_cfg.dialect is Dialect.ORACLE:
+        # Adopt-or-create; stable name so subsequent thin runs reuse.
+        url, handle = _get_or_start_oracle_container(
+            "recon-gen-thin-oracle", ORACLE_REUSE_PASSWORD,  # typing-smell: ignore[recon-prefix]: Docker container name (not a cfg-prefixed AWS / DB resource ID) — stable across thin-path runs so adopt-or-create can find the persistent container; not multi-tenant
+        )
+        env = {
+            RECON_GEN_DEMO_DATABASE_URL.name: url,
+            RECON_GEN_DEMO_DATABASE_URL_OR.name: url,
+        }
+        return env, handle
+
+    if peek_cfg.dialect is Dialect.DUCKDB:
+        # _setup_local_duckdb already sets RECON_GEN_DEMO_DATABASE_URL +
+        # RECON_GEN_CONFIG; no `_PG` / `_OR` suffix needed (the container
+        # fixtures only check those).
+        return _setup_local_duckdb()
+
+    raise ValueError(
+        f"_start_thin_container: unhandled dialect={peek_cfg.dialect!r}"
+    )
 
 
 @dataclass(frozen=True)
@@ -3498,19 +3580,51 @@ def cmd_thin(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
 
+    # CB.17.d (2026-06-04) — pre-spin the cfg-matching container so
+    # module-import `_load_cfg()` calls (test_dataset_sql_smoke et al)
+    # see the URL via `RECON_GEN_DEMO_DATABASE_URL`. The pytest session
+    # fixtures (`pg_container_url` / `oracle_container_url`) honor the
+    # `_PG` / `_OR`-suffixed env fast-path and don't re-spin. Skipped
+    # for layers that don't need DB (unit-only invocations).
+    container_handle: object | None = None
+    if cfg_path is not None and args.layer != "unit":
+        try:
+            container_env, container_handle = _start_thin_container(cfg_path)
+            runner_variant_env.update(container_env)
+            print(
+                f"runner: thin container up (dialect-matching) — "
+                f"{RECON_GEN_DEMO_DATABASE_URL.name}=...exported"
+            )
+        except Exception as exc:  # noqa: BLE001 — container start failure should fail loud
+            print(
+                f"runner: thin container start failed ({exc!r}); "
+                f"db/app2/deploy/qs_* layers will likely fail",
+                file=sys.stderr,
+            )
+
     chain = chain_through(args.layer)
     print(f"runner: chain={chain} (thin path: one subprocess per layer)")
 
     layer_results: list[LayerResult] = []
     final_code = EXIT_SUCCESS
-    for layer in chain:
-        result = dispatch_layer(
-            layer, run_dir, options, variant_env=runner_variant_env,
-        )
-        layer_results.append(result)
-        if not result.passed and not result.skipped:
-            final_code = result.exit_code
-            break  # stop-on-first-failure (matches cmd_up_to's cross-layer lock)
+    try:
+        for layer in chain:
+            result = dispatch_layer(
+                layer, run_dir, options, variant_env=runner_variant_env,
+            )
+            layer_results.append(result)
+            if not result.passed and not result.skipped:
+                final_code = result.exit_code
+                break  # stop-on-first-failure (matches cmd_up_to's cross-layer lock)
+    finally:
+        if container_handle is not None:
+            try:
+                # Duck-typed: testcontainers Container, _DuckdbHandle,
+                # _PersistentContainerHandle all expose .stop().
+                container_handle.stop()  # type: ignore[attr-defined]: duck-typed teardown matching setup_variant's contract
+                print("runner: thin container down")
+            except Exception as exc:  # noqa: BLE001 — teardown is best-effort
+                print(f"runner: thin container teardown skipped ({exc!r})", file=sys.stderr)
 
     # Synthesize a ``unit`` LayerResult for _finalize_run's signature
     # (legacy splits prelude vs cells; thin has no prelude). When unit
