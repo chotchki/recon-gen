@@ -1640,6 +1640,62 @@ def _start_thin_container(
     )
 
 
+def _write_qs_cfg_for_thin(
+    base_cfg_path: Path,
+    local_url: str,
+    run_dir: Path,
+) -> Path | None:
+    """CB.17.d — thin equivalent of _write_qs_cfg_for_variant.
+
+    Clones the operator's base cfg, swaps ``demo_database_url`` from
+    the 127.0.0.1:RANDOM_PORT form to the hotchkiss.io:_LOCAL_PG_HOST_PORT
+    form so QS in us-east-1 can reach the dev box via DDNS. PG branch
+    sets ``qs_disable_pg_ssl: true`` (postgres:17-alpine has no TLS).
+    Returns None for DuckDB (no QS-reachable shape).
+
+    Operator cfg's deployment_name / db_table_prefix / auth carry
+    through unchanged so the deploy + downstream qs_api/qs_browser
+    layers all reference the same QS resource namespace.
+    """
+    import yaml  # noqa: PLC0415
+
+    from recon_gen.common.config import load_config  # noqa: PLC0415
+    from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
+
+    peek_cfg = load_config(str(base_cfg_path))
+    if peek_cfg.dialect is Dialect.DUCKDB:
+        return None
+
+    with base_cfg_path.open() as f:
+        raw: Any = yaml.safe_load(f) or {}
+    if not isinstance(raw, dict):
+        raise RuntimeError(
+            f"_write_qs_cfg_for_thin: base cfg {base_cfg_path} did not "
+            f"parse as a mapping (got {type(raw).__name__})"
+        )
+
+    if peek_cfg.dialect is Dialect.POSTGRES:
+        new_url = _swap_url_host(local_url, _QS_FORWARD_HOST, _LOCAL_PG_HOST_PORT)
+        raw["demo_database_url"] = new_url
+        raw["qs_disable_pg_ssl"] = True
+    elif peek_cfg.dialect is Dialect.ORACLE:
+        new_url = _swap_url_host(local_url, _QS_FORWARD_HOST, _LOCAL_ORACLE_HOST_PORT)
+        raw["demo_database_url"] = new_url
+        # Oracle datasource already hardcodes DisableSsl=True (common/datasource.py).
+
+    cfg_dir = run_dir / "cfg"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    qs_cfg_path = cfg_dir / "qs.yaml"
+    with qs_cfg_path.open("w") as f:
+        f.write(
+            f"# Runner-generated thin-path QS-side cfg (CB.17.d).\n"
+            f"# Sibling local-layer cfg: {base_cfg_path}\n"
+            f"# DO NOT commit — `runs/` is gitignored.\n",
+        )
+        yaml.safe_dump(raw, f, sort_keys=False)
+    return qs_cfg_path
+
+
 def _seed_thin_container(
     cfg_path: Path,
     l2_path: Path,
@@ -3663,6 +3719,34 @@ def cmd_thin(args: argparse.Namespace) -> int:
                 f"runner: thin container up (dialect-matching) — "
                 f"{RECON_GEN_DEMO_DATABASE_URL.name}=...exported"
             )
+            # CB.17.d — when the chain reaches deploy/qs_api/qs_browser
+            # AND dialect is QS-reachable (pg/or, not du), materialize
+            # a QS-side cfg yaml with hotchkiss.io-routable URL. The
+            # CLI's deploy step + qs_* layers prefer RECON_GEN_QS_CONFIG
+            # over RECON_GEN_CONFIG so the QS DataSource endpoint
+            # routes via DDNS, not 127.0.0.1.
+            qs_layers = ("deploy", "qs_api", "qs_browser")
+            chain_includes_qs = any(
+                layer in qs_layers for layer in chain_through(args.layer)
+            )
+            if chain_includes_qs and RECON_GEN_DEMO_DATABASE_URL.name in container_env:
+                try:
+                    qs_cfg_path = _write_qs_cfg_for_thin(
+                        cfg_path,
+                        container_env[RECON_GEN_DEMO_DATABASE_URL.name],
+                        run_dir,
+                    )
+                    if qs_cfg_path is not None:
+                        runner_variant_env[RECON_GEN_QS_CONFIG.name] = str(qs_cfg_path)
+                        print(
+                            f"runner: thin QS-side cfg written → {qs_cfg_path}"
+                        )
+                except Exception as exc:  # noqa: BLE001 — surface as triage signal
+                    print(
+                        f"runner: thin QS-side cfg gen failed "
+                        f"({type(exc).__name__}: {exc})",
+                        file=sys.stderr,
+                    )
         except Exception as exc:  # noqa: BLE001 — container start failure should fail loud
             print(
                 f"runner: thin container start failed ({exc!r}); "
