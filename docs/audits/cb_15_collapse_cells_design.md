@@ -402,6 +402,60 @@ infrastructure — it shipped CB.15's hard parts already.
 - **BX [#184](../../PLAN.md) coverage merge doesn't render in PR comments** — stop fighting pytest-cov.
 - **CB.16 (typing honesty)** lands independently — the fixture migration doesn't touch `connect_demo_db`'s return type.
 
+## CB.17.d strangler — progress log (2026-06-04)
+
+`cmd_thin` ships at `src/recon_gen/_dev/runner.py:3413` (commit `6be7ebb1`).
+Thin subcommand wired into `_build_parser` so operators invoke
+`./run_tests.sh thin up_to=<layer>`.
+
+**Verified at unit layer.** Thin `up_to=unit` and legacy `up_to=unit`
+produce env_access.json files with:
+- Identical `by_source` keys (`pytest:unit` + `runner`)
+- Identical env-key set across `by_name`
+- Off-by-one `read_miss` deltas (thin reads `RECON_GEN_CONFIG` once
+  during cfg-discovery; legacy doesn't because cmd_up_to threads cfg
+  via variant_env)
+
+**Caught a real gap at db layer.** Thin `up_to=db` reaches PG via the
+`pg_container_url` session fixture (containers spin successfully) but
+every db-tier test errors with:
+
+```
+psycopg.OperationalError: failed to resolve host
+  'database-2.cluster-cup0y2gmc2hu.us-east-1.rds.amazonaws.com'
+```
+
+Root cause: tests consume the legacy `cfg` fixture
+(`tests/e2e/conftest.py:135`) which reads `demo_database_url` from
+`run/config.yaml` — and the yaml still has the dead RDS Aurora URL
+(post-CB.12). The `cfg_with_container_url` bridge (CB.17.b) exists
+and is unit-tested, but **zero real e2e tests consume it yet**.
+
+Under legacy `cmd_up_to`, this works because `setup_variant` injects
+`RECON_GEN_DEMO_DATABASE_URL=<per-cell-container-url>` into the
+subprocess env — `Config.demo_database_url` reads that env override
+and tests see the per-cell container URL. The thin path skips
+`setup_variant` entirely, so no env injection happens.
+
+**Next sub-step in CB.17.d** — migrate the `cfg` fixture chain so
+db-tier tests consume the container URL by default. Two paths:
+
+1. **Alias `cfg` to `cfg_with_container_url` inside
+   `tests/e2e/db/conftest.py`.** Smallest diff. Risk: under legacy
+   cell loop, the alias would spin a SECOND session-scoped container
+   on top of the per-cell one (the OOM hazard the design called out).
+   Mitigation: cell loop sets `RECON_GEN_DEMO_DATABASE_URL` (no
+   suffix); `pg_container_url` reads `RECON_GEN_DEMO_DATABASE_URL_PG`
+   — different env keys. Cleanest fix: also set `_PG`/`_OR` in
+   `setup_variant` so the session fixture honors the per-cell URL.
+2. **Wait to alias** until legacy `cmd_up_to` is deleted in CB.17.d
+   (the next-to-last step of the strangler). No legacy compatibility
+   risk; tests stay broken on `thin` until cmd_up_to is gone.
+
+Pick (1) — keeps thin + legacy green during the migration window.
+`tests/e2e/app2/`, `tests/e2e/qs_api/`, `tests/e2e/qs_browser/` get
+the same conftest treatment in the same commit.
+
 ## Things to confirm before cutting
 
 - [ ] **The `scope="session"` vs xdist contract.** pytest-xdist's "session" is per-worker, not per-pytest-run. For `pg_container` to be a true singleton, we need a file-lock pattern (`FileLock` on a shared tmp file, first worker spins, rest read URL). Alternative: rely on the CI env-URL injection so the container is workflow-owned, and locally let testcontainers per-worker spawn (laptops have memory for 2–4 PGs). Pick before CB.17.a.
