@@ -56,6 +56,79 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # Gate the entire release pipeline on CI green for this exact SHA.
+  #
+  # CB.17.n — pre-CB.17.n the tag-push trigger fired publish jobs
+  # immediately, with no proof CI had passed on the tagged commit.
+  # That was fine in practice (operator always pushes `main v<tag>`
+  # together so ci.yml was running in parallel), but nothing in the
+  # automation enforced it — a tag pushed to a never-merged SHA would
+  # publish unconditionally.
+  #
+  # This job blocks every downstream job until the CI workflow on
+  # `github.sha` reaches `completed`/`success`. ci.yml triggers on
+  # `push: branches: [main]`, not on tags, so we look up the CI run by
+  # commit SHA (same SHA was pushed to main moments before the tag).
+  #
+  # Bootstrap window: tag push can outrun main push by seconds. We
+  # poll for up to 5 min for a CI run to APPEAR before declaring the
+  # tag orphaned. After that, we poll for up to 90 min for it to
+  # FINISH (CI's qs_browser layer can take ~30 min; 90 min is comfort
+  # margin without going unbounded).
+  # ---------------------------------------------------------------------------
+  wait-for-ci:
+    name: Wait for CI to pass on tagged commit
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Poll CI run status on ${{ github.sha }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          echo "Looking for CI run on $SHA"
+          RUN_ID=""
+          # Bootstrap: wait up to 5 min for a CI run to appear.
+          for i in $(seq 1 30); do
+            RUN_ID=$(gh api "repos/${REPO}/actions/runs?head_sha=${SHA}" \
+              --jq '[.workflow_runs[] | select(.name == "CI")][0].id // empty')
+            if [ -n "${RUN_ID}" ]; then
+              echo "Found CI run ${RUN_ID} after $((i * 10))s"
+              break
+            fi
+            echo "[bootstrap ${i}/30] no CI run yet for ${SHA}"
+            sleep 10
+          done
+          if [ -z "${RUN_ID}" ]; then
+            echo "::error::No CI run appeared for ${SHA} within 5 min — was main pushed?"
+            exit 1
+          fi
+          # Poll for completion: up to 90 min.
+          for i in $(seq 1 90); do
+            RESULT=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}" \
+              --jq '"\(.status) \(.conclusion)"')
+            STATUS=$(echo "${RESULT}" | awk '{print $1}')
+            CONCL=$(echo "${RESULT}" | awk '{print $2}')
+            echo "[poll ${i}/90] CI ${RUN_ID}: status=${STATUS} conclusion=${CONCL}"
+            if [ "${STATUS}" = "completed" ]; then
+              if [ "${CONCL}" = "success" ]; then
+                echo "CI passed on ${SHA}; release pipeline cleared."
+                exit 0
+              fi
+              echo "::error::CI on ${SHA} concluded ${CONCL}; refusing to publish."
+              exit 1
+            fi
+            sleep 60
+          done
+          echo "::error::CI on ${SHA} did not complete within 90 min."
+          exit 1
+
+  # ---------------------------------------------------------------------------
   # Build sdist + wheel.
   #
   # CB.11.c — `tests` job is gone. ci.yml is the layered runner that
@@ -66,6 +139,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build:
     name: Build distribution
+    needs: [wait-for-ci]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
