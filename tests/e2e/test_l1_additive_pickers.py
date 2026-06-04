@@ -540,7 +540,17 @@ def test_l1_dropdown_pickers_inverse_excludes_anchor(
     driver.open(dashboard_arg, sheet=spec.sheet_name)
     driver.wait_loaded(spec.target_visual)
 
-    anchor = fetch_anchor_row(cfg, l2, spec)
+    try:
+        anchor = fetch_anchor_row(cfg, l2, spec)
+    except RuntimeError as exc:
+        if "returned zero rows" in str(exc):
+            pytest.skip(
+                f"{spec.sheet_name!r}: dataset SQL returns 0 rows on the "
+                f"deployed L2 — no anchor row to invert from. CB.17.c1 — "
+                f"surfaced by thin qs_browser against sasquatch_pr "
+                f"(BK.6/#35 Limit Breach seed gap)."
+            )
+        raise
     apply_anchor_to_pickers(driver, spec, anchor)
     driver.wait_loaded(spec.target_visual)
     # AA.A.l2ft-rails-inverse.2 — table_row_count is the true filtered
