@@ -76,6 +76,51 @@ from typing import Final
 _legacy_warned: set[str] = set()
 
 
+# CB.17.d — access log. Every EnvVar read / write goes through this
+# log so the strangler-pattern verification can answer "is this env
+# var actually used?" empirically instead of by code inspection.
+#
+# Entries are ``(canonical_name, op)`` where op is one of:
+# - ``"read_hit"``  — a get_or_none()/require() call found a value
+#                     and coerced+validated successfully.
+# - ``"read_miss"`` — a get_or_none()/require() call found the var
+#                     unset (or empty). For require() this also means
+#                     EnvVarRequired was raised.
+# - ``"write"``     — a serialize() call converted a value to a string
+#                     for placement in a subprocess env dict.
+#
+# The strangler-comparison shape: read_hit somewhere is "consumed";
+# write-only-no-read-hit is "produced but never consumed" → dead.
+# read_miss-only is "registered but never set" → also dead unless
+# the absence is itself meaningful (e.g., a feature-flag env that's
+# *expected* to be unset most of the time).
+#
+# A legacy-name read counts under the canonical name (same semantics
+# as ``_read_raw``).
+_env_access_log: list[tuple[str, str]] = []
+
+
+def dump_env_access() -> list[tuple[str, str]]:
+    """Return a snapshot of every env-var access made by this process,
+    in order. Each entry is ``(canonical_name, op)`` where op is
+    ``"read_hit"`` / ``"read_miss"`` / ``"write"``.
+
+    Useful for CB.17.d's strangler-pattern verification: run both the
+    legacy + thin paths through this hook, compare the access lists,
+    surface any env-var that one path uses but the other doesn't.
+
+    The snapshot is shallow-copied so callers can clear / inspect
+    without racing the next access.
+    """
+    return list(_env_access_log)
+
+
+def reset_env_access() -> None:
+    """Clear the access log. Useful when the same process runs both
+    legacy + thin paths back-to-back and wants per-path diffs."""
+    _env_access_log.clear()
+
+
 class EnvVarError(Exception):
     """Base for env-var registry errors. Carries the spec name +
     description so the operator-facing message is always
@@ -226,8 +271,11 @@ class EnvVar[T]:
         """
         raw = self._read_raw()
         if raw is None or raw == "":
+            _env_access_log.append((self.name, "read_miss"))
             return None
-        return self._coerce_and_validate(raw)
+        value = self._coerce_and_validate(raw)
+        _env_access_log.append((self.name, "read_hit"))
+        return value
 
     def require(self) -> T:
         """Read the env var. Raises ``EnvVarRequired`` when unset
@@ -236,12 +284,15 @@ class EnvVar[T]:
         """
         raw = self._read_raw()
         if raw is None or raw == "":
+            _env_access_log.append((self.name, "read_miss"))
             raise EnvVarRequired(
                 self.name,
                 self.description,
                 "env var is required but is unset (or empty)",
             )
-        return self._coerce_and_validate(raw)
+        value = self._coerce_and_validate(raw)
+        _env_access_log.append((self.name, "read_hit"))
+        return value
 
     def serialize(self, value: T) -> str:
         """Convert ``value`` to a string for placement in a
@@ -256,6 +307,7 @@ class EnvVar[T]:
                 raise EnvVarInvalid(
                     self.name, self.description, str(exc),
                 ) from exc
+        _env_access_log.append((self.name, "write"))
         return str(value)
 
     def _coerce_and_validate(self, raw: str) -> T:
