@@ -141,12 +141,41 @@ def render_training_v3_landing(
         failed_summary = ", ".join(sorted(failed.keys())[:5])
         if len(failed) > 5:
             failed_summary += f", … +{len(failed) - 5} more"
+        # CF.0 Fix B — surface the per-kind failure REASON inline, not
+        # just the kind name. Pre-CF.0 the banner read "Hover the
+        # card's error badge for the underlying message" which made
+        # the operator hover each failing card to learn WHY (and the
+        # cold-read reviewer never did — they reported "drift +
+        # limit_breach_outbound failed" without the L2-shape detail).
+        # Render each kind with the first line of its captured error
+        # inside a collapsed `<details>` block — operator can self-
+        # diagnose ("this L2 cannot demo limit_breach_outbound: no
+        # outbound LimitSchedule on a 2-leg rail with external
+        # counter") without leaving the banner. Cause is already
+        # persisted in `<base>_v_config_kv` under key
+        # `trainer_failed_plants` (`v_overlay.py:_FAILED_STATE_KEY`).
+        per_kind_details = "".join(
+            (
+                '<li class="ml-4 list-disc">'
+                f'<code class="font-mono">{escape(kind)}</code>: '
+                f'<span class="text-secondary-fg">'
+                f'{escape(_first_line_of_error(failed[kind]))}'
+                '</span>'
+                '</li>'
+            )
+            for kind in sorted(failed.keys())
+        )
         banner_html += (
             '<div class="bg-danger/10 border border-danger rounded-md '
             'px-3 py-2 mb-3 text-sm" data-test-failed-banner>'
             f'<strong class="text-danger">✗</strong> {len(failed)} plant(s) '
-            f'failed on the last Apply: {escape(failed_summary)}. '
-            "Hover the card's error badge for the underlying message."
+            f'failed on the last Apply: {escape(failed_summary)}.'
+            ' <details class="mt-1 inline-block">'
+            '<summary class="cursor-pointer text-danger">'
+            'show why each plant failed'
+            '</summary>'
+            f'<ul class="mt-1 text-xs">{per_kind_details}</ul>'
+            '</details>'
             "</div>"
         )
     # BV.4.10.d — Session-Start-in-flight banner with collapsible
@@ -727,6 +756,19 @@ def _first_sentence(text: str) -> str:
     if first and not first.endswith("."):
         first += "."
     return first
+
+
+def _first_line_of_error(text: str) -> str:
+    """CF.0 Fix B — trim a `trainer_failed_plants` kv value to its
+    first line for banner-inline rendering. The kv carries the full
+    `f"{type(exc).__name__}: {exc}"` shape per `v_overlay.py:464`;
+    we want just the actionable summary (the picker's ValueError
+    message, e.g. "drift plant: no 2-leg Rail with destination
+    matching the template role declared in this L2."), not any
+    multi-line traceback content."""
+    if not text:
+        return ""
+    return text.split("\n", 1)[0].strip()
 
 
 # Unused import suppressor — PlantCategory is reserved for BV.4.5

@@ -226,6 +226,53 @@ def test_failed_banner_truncates_at_5_kinds() -> None:
     assert "+2 more" in html
 
 
+def test_failed_banner_exposes_per_kind_reason_inline() -> None:
+    """CF.0 Fix B — banner ships a <details> expander listing each
+    failing kind alongside the first line of its error message so
+    operators don't have to hunt across cards to learn why a
+    Session-Start Apply skipped a plant on their own L2."""
+    failed = {
+        "limit_breach_outbound": (
+            "ValueError: limit_breach_outbound plant: no Account-class "
+            "template with a Limits Schedule declared in this L2."
+        ),
+        "drift": (
+            "ValueError: drift plant: no 2-leg Rail with destination "
+            "matching the template role declared in this L2."
+        ),
+    }
+    html = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=True,
+        failed_kinds=failed,
+    )
+    assert "show why each plant failed" in html
+    assert "limit_breach_outbound" in html
+    assert "no Account-class template with a Limits Schedule" in html
+    assert "no 2-leg Rail with destination" in html
+
+
+def test_first_line_of_error_helper() -> None:
+    """Unit-level guard so future refactors of the per-kind banner
+    keep stripping multi-line tracebacks. Single-line input passes
+    through unchanged; multi-line collapses to the first line."""
+    from recon_gen.common.html._studio_training_v3 import (
+        _first_line_of_error,
+    )
+
+    assert _first_line_of_error("") == ""
+    assert (
+        _first_line_of_error("ValueError: no rail")
+        == "ValueError: no rail"
+    )
+    multi = (
+        "ValueError: no rail\n"
+        '  File "auto_scenario.py", line 1338, in _pick_template\n'
+        "    raise ValueError(...)"
+    )
+    assert _first_line_of_error(multi) == "ValueError: no rail"
+
+
 def test_renders_session_status_banner() -> None:
     """Session status banner (the 303-redirect ?status= param)
     renders as a success banner. P1 fix from BV.4.0 cold-read."""
