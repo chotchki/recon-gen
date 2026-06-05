@@ -666,6 +666,89 @@ class TestKPIVisual:
         assert emitted.KPIVisual is not None
         assert emitted.KPIVisual.ConditionalFormatting is None
 
+    def test_cf_x_value_threshold_banding_emits_three_band_cf(self):
+        """CF.X-infra — single-value KPI with KPIValueThresholdBanding
+        emits a 3-band ConditionalFormatting set: X + red-700 when
+        value >= red_at, EXCLAMATION_CIRCLE + amber-700 when
+        amber_at <= value < red_at, CHECKMARK + green-700 when
+        value < amber_at. Options are ordered MOST-RESTRICTIVE-FIRST
+        so amber doesn't shadow red and green only fires when
+        nothing else matched. Same three QS shape gotchas as BK.2
+        (uppercase hex, column-name expression refs, aggregation-fn
+        wrap)."""
+        from recon_gen.common.tree import KPIValueThresholdBanding
+        from recon_gen.common.tree.visuals import (
+            _KPI_AMBER_COLOR_HEX,
+            _KPI_AMBER_ICON_QS,
+            _KPI_BROKEN_COLOR_HEX,
+            _KPI_BROKEN_ICON_QS,
+            _KPI_HEALTHY_COLOR_HEX,
+            _KPI_HEALTHY_ICON_QS,
+        )
+        kpi = KPI(
+            visual_id=VisualId("v-kpi"),
+            title="Open Exceptions",
+            subtitle="Program-health rollup; amber=1 / red=20",
+            values=[Measure.sum(_DS_FOO, "total_open_count", field_id="f-toc")],
+            value_threshold_banding=KPIValueThresholdBanding(
+                amber_at=1, red_at=20,
+            ),
+        )
+        emitted = kpi.emit()
+        assert emitted.KPIVisual is not None
+        cf = emitted.KPIVisual.ConditionalFormatting
+        assert cf is not None
+        options = cf["ConditionalFormattingOptions"]
+        assert len(options) == 3
+
+        # RED — most restrictive first.
+        red = options[0]["PrimaryValue"]["Icon"]["CustomCondition"]
+        assert red["Expression"] == "sum({total_open_count}) >= 20"
+        assert red["IconOptions"]["Icon"] == _KPI_BROKEN_ICON_QS
+        assert red["Color"] == _KPI_BROKEN_COLOR_HEX
+
+        # AMBER — middle band.
+        amber = options[1]["PrimaryValue"]["Icon"]["CustomCondition"]
+        assert amber["Expression"] == "sum({total_open_count}) >= 1"
+        assert amber["IconOptions"]["Icon"] == _KPI_AMBER_ICON_QS
+        assert amber["Color"] == _KPI_AMBER_COLOR_HEX
+
+        # GREEN — fall-through.
+        green = options[2]["PrimaryValue"]["Icon"]["CustomCondition"]
+        assert green["Expression"] == "sum({total_open_count}) < 1"
+        assert green["IconOptions"]["Icon"] == _KPI_HEALTHY_ICON_QS
+        assert green["Color"] == _KPI_HEALTHY_COLOR_HEX
+
+    def test_cf_x_value_threshold_banding_rejects_red_le_amber(self):
+        """CF.X-infra — red_at must be strictly greater than amber_at.
+        Equal or reversed thresholds collapse the amber band to zero
+        width and the 3-state contract degenerates to binary."""
+        from recon_gen.common.tree import KPIValueThresholdBanding
+        with pytest.raises(ValueError, match="strictly greater"):
+            KPIValueThresholdBanding(amber_at=5, red_at=5)
+        with pytest.raises(ValueError, match="strictly greater"):
+            KPIValueThresholdBanding(amber_at=10, red_at=3)
+
+    def test_cf_x_value_threshold_banding_blocks_mixed_with_zero(self):
+        """CF.X-infra — threshold_banding + zero_indicator on the same
+        KPI raises at construction. 3-way mutex (zero/sign/threshold)
+        prevents undefined renders where QS picks the first matching
+        ConditionalFormatting option from a stacked set."""
+        from recon_gen.common.tree import (
+            KPIValueThresholdBanding, KPIValueZeroIndicator,
+        )
+        with pytest.raises(ValueError, match="pick ONE"):
+            KPI(
+                visual_id=VisualId("v-kpi"),
+                title="Mixed indicator test",  # typing-smell: ignore[no-inline-production-constants]: arbitrary test label; KPI never emits — construction raises
+                subtitle="should fail at __post_init__",
+                values=[Measure.sum(_DS_FOO, "n", field_id="f-n")],
+                value_zero_indicator=KPIValueZeroIndicator(),
+                value_threshold_banding=KPIValueThresholdBanding(
+                    amber_at=1, red_at=20,
+                ),
+            )
+
 
 class TestTableVisual:
     def test_emits_table_with_group_by_and_values(self):

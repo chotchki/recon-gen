@@ -170,6 +170,7 @@ from recon_gen.common.tree.visuals import (
     KPI,
     BarChart,
     KPIValueSignIndicator,
+    KPIValueThresholdBanding,
     KPIValueZeroIndicator,
     LineChart,
     Sankey,
@@ -194,8 +195,9 @@ __all__ = [
     "ParameterDeclLike", "StringParam", "IntegerParam", "DateTimeParam",
     # Visuals
     "VisualLike", "KPI", "Table", "BarChart", "LineChart", "Sankey",
-    # KPI conditional formatting (BK.2 / BK.9)
+    # KPI conditional formatting (BK.2 / BK.9 / CF.X-infra)
     "KPIValueZeroIndicator", "KPIValueSignIndicator",
+    "KPIValueThresholdBanding",
     # Text boxes (typed wrapper for landing-page rich text)
     "TextBox",
     # Layout

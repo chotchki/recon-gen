@@ -39,6 +39,7 @@ def shape_kpi(
     delta: float | None = None,
     zero_is_healthy: bool = False,
     inflow_is_healthy: bool = False,
+    threshold_banding: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
     """Shape one or more SQL rows as a KPI payload.
 
@@ -58,6 +59,15 @@ def shape_kpi(
     ``"danger"`` (semantic keywords the renderer maps to Tailwind
     ``text-success`` / ``text-danger``). Icon is the load-bearing
     channel for colorblind users; color is a parallel signal.
+
+    CF.X-infra — ``threshold_banding`` adds the App2-side 3-band
+    indicator (parity with QS-side ``KPIValueThresholdBanding``):
+    tuple ``(amber_at, red_at)``. Each value entry gets ``state_icon``
+    = ``"✓"`` (value < amber_at, green), ``"⚠"`` (amber_at ≤ value
+    < red_at, amber), or ``"✗"`` (value ≥ red_at, red), plus
+    ``state_color`` = ``"success"`` / ``"warning"`` / ``"danger"``.
+    Mutually exclusive with ``zero_is_healthy`` / ``inflow_is_healthy``
+    (caller guarantees this via the KPI dataclass's 3-way mutex).
     """
     del columns  # name preserved for parity with other shape fns
     values: list[dict[str, Any]] = []
@@ -98,6 +108,20 @@ def shape_kpi(
             is_inflow = row[0] >= 0
             entry["state_icon"] = "▲" if is_inflow else "▼"
             entry["state_color"] = "success" if is_inflow else "danger"
+        elif threshold_banding is not None and row[0] is not None:
+            # CF.X-infra — same neutral-on-null treatment. 3-band split
+            # ordered most-restrictive-first so amber doesn't shadow red.
+            amber_at, red_at = threshold_banding
+            v = row[0]
+            if v >= red_at:
+                entry["state_icon"] = "✗"
+                entry["state_color"] = "danger"
+            elif v >= amber_at:
+                entry["state_icon"] = "⚠"
+                entry["state_color"] = "warning"
+            else:
+                entry["state_icon"] = "✓"
+                entry["state_color"] = "success"
         values.append(entry)
     payload: dict[str, Any] = {"values": values}
     # BQ.2 — empty-state signal for the App2 KPI renderer. Two shapes get

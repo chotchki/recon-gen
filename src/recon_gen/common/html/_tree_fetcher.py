@@ -285,6 +285,13 @@ class _VisualPlan:
     #: with the QS-side ``KPIValueSignIndicator``. Mutually exclusive
     #: with ``kpi_zero_is_healthy`` (the KPI constructor blocks both).
     kpi_inflow_is_healthy: bool
+    #: CF.X-infra — (amber_at, red_at) tuple when the KPI carries a
+    #: ``KPIValueThresholdBanding``; ``shape_kpi`` stamps the 3-band
+    #: indicator (✓ green / ⚠ amber / ✗ red). None on KPIs without
+    #: the indicator + every non-KPI. Mutually exclusive with
+    #: ``kpi_zero_is_healthy`` / ``kpi_inflow_is_healthy`` (the KPI
+    #: constructor's 3-way mutex blocks combinations).
+    kpi_threshold_banding: tuple[int, int] | None
 
 
 def _apply_cents_to_dollars(
@@ -526,6 +533,23 @@ def _kpi_inflow_is_healthy(visual: object) -> bool:
     return bool(getattr(indicator, "inflow_is_healthy", False))
 
 
+def _kpi_threshold_banding(visual: object) -> tuple[int, int] | None:
+    """CF.X-infra — read the tree KPI's ``value_threshold_banding``
+    setting. Returns ``(amber_at, red_at)`` tuple when set, None
+    otherwise. Mirror of ``_kpi_zero_is_healthy`` for the 3-band
+    threshold shape."""
+    if type(visual).__name__ != "KPI":
+        return None
+    indicator: Any = getattr(visual, "value_threshold_banding", None)  # typing-smell: ignore[explicit-any]: dynamic getattr against KPI subtype — narrowing to KPIValueThresholdBanding | None would force a tree → html dependency that inverts the existing layer
+    if indicator is None:
+        return None
+    amber_at = getattr(indicator, "amber_at", None)
+    red_at = getattr(indicator, "red_at", None)
+    if not isinstance(amber_at, int) or not isinstance(red_at, int):
+        return None
+    return (amber_at, red_at)
+
+
 def make_tree_db_fetcher(
     tree_app: App,
     cfg: Config,
@@ -620,6 +644,7 @@ def make_tree_db_fetcher(
                 kpi_format=_kpi_format(visual),
                 kpi_zero_is_healthy=_kpi_zero_is_healthy(visual),
                 kpi_inflow_is_healthy=_kpi_inflow_is_healthy(visual),
+                kpi_threshold_banding=_kpi_threshold_banding(visual),
             )
 
     base_prefix = str(cfg.db_table_prefix)
@@ -752,6 +777,8 @@ def make_tree_db_fetcher(
                 kpi_kwargs["zero_is_healthy"] = True
             if plan.kpi_inflow_is_healthy:
                 kpi_kwargs["inflow_is_healthy"] = True
+            if plan.kpi_threshold_banding is not None:
+                kpi_kwargs["threshold_banding"] = plan.kpi_threshold_banding
             return shape_for_kind(kind, rows, columns, **kpi_kwargs)
         # ForceGraph + Sankey have specialized projectors today
         # (_db_fetcher._topology_to_force_graph, etc.); the generic

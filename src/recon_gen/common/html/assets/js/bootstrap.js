@@ -189,12 +189,17 @@
     cards
       .append("div")
       .attr("class", (d) => {
+        // CF.X-infra — 3-band state: success / warning / danger.
+        // `text-warning` is already compiled into output.css from
+        // Studio surfaces; no @source dance needed for the new band.
         var color =
           d.state_color === "success"
             ? "text-success"
-            : d.state_color === "danger"
-              ? "text-danger"
-              : "text-accent";
+            : d.state_color === "warning"
+              ? "text-warning"
+              : d.state_color === "danger"
+                ? "text-danger"
+                : "text-accent";
         return "kpi-value text-4xl font-bold " + color + " tabular-nums";
       })
       .text((d) => {

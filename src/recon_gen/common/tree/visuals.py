@@ -341,6 +341,144 @@ def _emit_kpi_sign_indicator(value_measure: "Measure") -> dict[str, Any]:
     }
 
 
+# CF.X-infra (2026-06-05) — 3-band threshold indicator. Green icon
+# below `amber_at`, amber between `amber_at` and `red_at`, red at or
+# above `red_at`. Icon is the load-bearing channel for accessibility
+# (per BK.2 convention: distinct glyphs for colorblind operators);
+# color rides along as parallel signal. Same UPPERCASE-hex + column-
+# name expression + aggregation-wrap gotchas as the BK.2/BK.9
+# emitters above.
+_KPI_AMBER_ICON_QS = "EXCLAMATION_CIRCLE"  # deploy-probe note: BK.2/BK.9 used CHECKMARK / X / ARROW_*; EXCLAMATION_CIRCLE not yet QS-validated as of 2026-06-05. If CreateAnalysis rejects, fall back to TRIANGLE then FLAG.
+_KPI_AMBER_COLOR_HEX = "#B45309"  # tailwind amber-700 — WCAG-AA on white
+
+
+def _emit_kpi_threshold_banding(
+    value_measure: "Measure", banding: "KPIValueThresholdBanding",
+) -> dict[str, Any]:
+    """CF.X-infra — render a 3-band threshold indicator as a QS
+    ``KPIConditionalFormatting`` block. Three ``ConditionalFormattingOption``
+    entries on ``PrimaryValue.Icon``, evaluated in MOST-RESTRICTIVE-
+    FIRST order:
+
+    1. ``aggregated_ref >= red_at`` → ``X`` icon + red-700.
+    2. ``aggregated_ref >= amber_at`` → ``EXCLAMATION_CIRCLE`` icon
+       + amber-700.
+    3. ``aggregated_ref < amber_at`` → ``CHECKMARK`` icon + green-700.
+
+    QS picks the first matching expression; ordering RED → AMBER →
+    GREEN means amber doesn't shadow red and green only fires when
+    nothing else matched.
+
+    Same three shape gotchas as ``_emit_kpi_zero_indicator`` apply
+    (uppercase hex, column-name expression refs, aggregation-fn
+    wrap). count / distinct_count are blocked at construction with
+    guidance to use a sum-of-1s shape in the dataset SQL.
+    """
+    column_name = resolve_column(value_measure.column)
+    kind = value_measure.kind
+    if kind not in _KPI_INDICATOR_AGG_FN:
+        raise AssertionError(
+            f"KPIValueThresholdBanding on Measure(kind={kind!r}) — only "
+            f"numerical aggregations sum/max/min/average can drive the "
+            f"indicator. count / distinct_count return row counts; "
+            f"project a sum-of-1s in the dataset SQL and use kind='sum' "
+            f"instead."
+        )
+    agg = _KPI_INDICATOR_AGG_FN[kind]
+    aggregated_ref = f"{agg}({{{column_name}}})"
+    return {
+        "ConditionalFormattingOptions": [
+            {
+                "PrimaryValue": {
+                    "Icon": {
+                        "CustomCondition": {
+                            "Expression": f"{aggregated_ref} >= {banding.red_at}",
+                            "IconOptions": {"Icon": _KPI_BROKEN_ICON_QS},
+                            "Color": _KPI_BROKEN_COLOR_HEX,
+                            "DisplayConfiguration": {
+                                "IconDisplayOption": "ICON_ONLY",
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                "PrimaryValue": {
+                    "Icon": {
+                        "CustomCondition": {
+                            "Expression": f"{aggregated_ref} >= {banding.amber_at}",
+                            "IconOptions": {"Icon": _KPI_AMBER_ICON_QS},
+                            "Color": _KPI_AMBER_COLOR_HEX,
+                            "DisplayConfiguration": {
+                                "IconDisplayOption": "ICON_ONLY",
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                "PrimaryValue": {
+                    "Icon": {
+                        "CustomCondition": {
+                            "Expression": f"{aggregated_ref} < {banding.amber_at}",
+                            "IconOptions": {"Icon": _KPI_HEALTHY_ICON_QS},
+                            "Color": _KPI_HEALTHY_COLOR_HEX,
+                            "DisplayConfiguration": {
+                                "IconDisplayOption": "ICON_ONLY",
+                            },
+                        },
+                    },
+                },
+            },
+        ],
+    }
+
+
+@dataclass(frozen=True)
+class KPIValueThresholdBanding:
+    """CF.X-infra — 3-band threshold indicator on a KPI's primary
+    value. Renders ``CHECKMARK`` (green) when the aggregated value
+    is below ``amber_at``, ``EXCLAMATION_CIRCLE`` (amber) between
+    ``amber_at`` and ``red_at``, and ``X`` (red) at or above
+    ``red_at``.
+
+    Accessibility (per BK.2 convention): ICON is the load-bearing
+    channel — colorblind users see distinct ✓ / ⚠ / ✗ glyphs.
+    Color rides along as parallel signal.
+
+    Use this on count-style KPIs where the operator wants a glance-
+    readable "is anything wrong, anywhere?" tripwire. Bound Measure
+    kind must be sum / max / min / average — count / distinct_count
+    are blocked at the emit boundary (use a sum-of-1s shape in the
+    dataset SQL and ``kind='sum'`` instead).
+
+    Wire shape:
+    - **QS**: emits ``KPIVisual.ConditionalFormatting`` with three
+      ``ConditionalFormattingOptions`` entries ordered RED → AMBER →
+      GREEN (most-restrictive-first); QS picks the first matching
+      expression at render time.
+    - **App2**: the data-fetcher reads the primary value and emits
+      ``state_icon`` (Unicode glyph) + ``state_color`` (semantic
+      keyword — ``success`` / ``warning`` / ``danger``) on each
+      ``values`` entry. ``bootstrap.js::renderKPI`` prepends the
+      glyph + applies the color class.
+
+    First consumer: CF.2 Exec program-health rollup
+    (amber_at=1, red_at=20).
+    """
+    amber_at: int
+    red_at: int
+
+    def __post_init__(self) -> None:
+        if self.red_at <= self.amber_at:
+            raise ValueError(
+                f"KPIValueThresholdBanding(amber_at={self.amber_at}, "
+                f"red_at={self.red_at}): red_at must be strictly greater "
+                f"than amber_at — otherwise the amber band has zero "
+                f"width and the indicator collapses to binary."
+            )
+
+
 @dataclass(frozen=True)
 class KPIValueSignIndicator:
     """BK.9 — sign-aware (▲ inflow / ▼ outflow) state indicator for a
@@ -409,28 +547,30 @@ class KPI:
     values: list[Measure] = field(default_factory=list[Measure])
     value_zero_indicator: KPIValueZeroIndicator | None = None
     value_sign_indicator: KPIValueSignIndicator | None = None
+    value_threshold_banding: KPIValueThresholdBanding | None = None
     visual_id: VisualId | AutoResolved = AUTO
 
     _AUTO_KIND: ClassVar[str] = "kpi"
 
     def __post_init__(self) -> None:
         _require_non_blank_subtitle(self)
-        if (
-            self.value_zero_indicator is not None
-            and self.value_sign_indicator is not None
-        ):
+        indicators = (
+            self.value_zero_indicator,
+            self.value_sign_indicator,
+            self.value_threshold_banding,
+        )
+        n_indicators = sum(1 for i in indicators if i is not None)
+        if n_indicators > 1:
             raise ValueError(
                 f"KPI on {self.title!r}: pick ONE of "
-                f"value_zero_indicator (healthy = $0) or "
-                f"value_sign_indicator (healthy = inflow). They emit "
-                f"competing ConditionalFormattingOptions and QS picks "
-                f"the first match — mixing them produces an undefined "
+                f"value_zero_indicator (healthy = $0), "
+                f"value_sign_indicator (healthy = inflow), or "
+                f"value_threshold_banding (3-band amber/red). They "
+                f"emit competing ConditionalFormattingOptions and QS "
+                f"picks the first match — mixing produces an undefined "
                 f"render."
             )
-        if (
-            self.value_zero_indicator is not None
-            or self.value_sign_indicator is not None
-        ) and len(self.values) != 1:
+        if n_indicators > 0 and len(self.values) != 1:
             raise ValueError(
                 f"KPI(value_*_indicator=...) only supports single-"
                 f"value KPIs; got {len(self.values)} values on "
@@ -465,6 +605,10 @@ class KPI:
             kpi_conditional = _emit_kpi_zero_indicator(self.values[0])
         elif self.value_sign_indicator is not None:
             kpi_conditional = _emit_kpi_sign_indicator(self.values[0])
+        elif self.value_threshold_banding is not None:
+            kpi_conditional = _emit_kpi_threshold_banding(
+                self.values[0], self.value_threshold_banding,
+            )
         else:
             kpi_conditional = None
         return Visual(

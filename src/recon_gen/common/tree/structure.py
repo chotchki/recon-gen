@@ -64,6 +64,7 @@ from recon_gen.common.tree.visuals import (
     KPI,
     BarChart,
     KPIValueSignIndicator,
+    KPIValueThresholdBanding,
     KPIValueZeroIndicator,
     LineChart,
     Sankey,
@@ -572,6 +573,7 @@ class Row:
         subtitle: str,
         value_zero_indicator: KPIValueZeroIndicator | None = None,
         value_sign_indicator: KPIValueSignIndicator | None = None,
+        value_threshold_banding: KPIValueThresholdBanding | None = None,
         visual_id: VisualId | AutoResolved = AUTO,
     ) -> KPI:
         """Construct + register + place a KPI in this row."""
@@ -580,6 +582,7 @@ class Row:
             title=title, subtitle=subtitle, values=values or [],
             value_zero_indicator=value_zero_indicator,
             value_sign_indicator=value_sign_indicator,
+            value_threshold_banding=value_threshold_banding,
             visual_id=visual_id,
         )
         self.sheet.visuals.append(kpi)
@@ -788,12 +791,14 @@ class AbsoluteSlot:
         subtitle: str,
         value_zero_indicator: KPIValueZeroIndicator | None = None,
         value_sign_indicator: KPIValueSignIndicator | None = None,
+        value_threshold_banding: KPIValueThresholdBanding | None = None,
         visual_id: VisualId | AutoResolved = AUTO,
     ) -> KPI:
         kpi = KPI(
             title=title, subtitle=subtitle, values=values or [],
             value_zero_indicator=value_zero_indicator,
             value_sign_indicator=value_sign_indicator,
+            value_threshold_banding=value_threshold_banding,
             visual_id=visual_id,
         )
         self.sheet.visuals.append(kpi)

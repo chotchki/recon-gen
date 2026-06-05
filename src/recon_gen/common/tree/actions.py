@@ -51,6 +51,7 @@ from recon_gen.common.tree.fields import Dim, Measure
 # uses for the FilterGroup → Sheet ref. Avoids circular import.
 from typing import TYPE_CHECKING, Union
 if TYPE_CHECKING:
+    from recon_gen.common.ids import SheetId
     from recon_gen.common.tree.structure import Sheet
 
 
@@ -186,6 +187,55 @@ class Drill:
             writes=resolved_writes,
             trigger=self.trigger,
         )
+
+
+@dataclass(eq=False)
+class CrossAppDrill:
+    """CF.X-infra — drill action that targets a DIFFERENT app's
+    dashboard (not just another sheet inside the owning app's tree).
+
+    App2 (HTMX renderer) supports clickable cross-app drills via a
+    ``target_path = /dashboards/<target_dashboard_id>/sheets/<target_sheet_id>``
+    URL; ``bootstrap.js::wireRowDrills`` consumes ``target_path``
+    opaquely + appends ``?param_<name>=<row cell value>`` for each
+    write — works across dashboards because the inbound side
+    (``server.py::_apply_url_param_overrides``) handles ``?param_*``
+    regardless of dashboard slug.
+
+    QS leg is **structurally polite-only** (see memory entry
+    ``project_qs_url_parameter_no_control_sync`` — QS URL params don't
+    sync sheet controls so cross-app drill is broken there). This
+    primitive's ``emit()`` for QS is a no-op; the QS dashboard
+    substitutes a ``TextBox`` carrying a hyperlink to the target
+    console URL. Use ``rich_text.link`` on the sibling TextBox for
+    the QS substitute — both renderers ship side-by-side from the
+    same tree wiring.
+
+    ``writes`` parallels ``Drill.writes`` (same DrillParam +
+    DrillSourceField shape). ``target_dashboard_id`` is the deployed
+    QS dashboard ID (matches the routing slug on App2 side too — the
+    deployment_name-prefixed ARN tail is what the URL serializer
+    consumes).
+    """
+    writes: list[DrillWrite]
+    name: str
+    target_dashboard_id: str
+    target_sheet_id: "SheetId"
+    trigger: Literal["DATA_POINT_CLICK", "DATA_POINT_MENU"] = "DATA_POINT_MENU"
+    action_id: str | AutoResolved = AUTO
+
+    _AUTO_KIND: ClassVar[str] = "cross_app_drill"
+
+    def emit(self) -> None:
+        """QS emit — intentional no-op. The QS renderer's substitute
+        for a cross-app drill is a sibling ``TextBox`` with a
+        rich-text hyperlink (see ``rich_text.link``); CF.2 wires both
+        on the same sheet. Returning None signals "no QS action" to
+        the emit walker, which the per-Visual action collector
+        filters out (same shape as a same-sheet drill with no writes
+        — produces no VisualCustomAction at the QS layer).
+        """
+        return None
 
 
 # Forward reference — VisualLike is in visuals.py; import via TYPE_CHECKING.

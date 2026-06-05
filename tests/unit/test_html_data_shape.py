@@ -55,6 +55,66 @@ def test_shape_kpi_omits_metadata_when_not_supplied() -> None:
     assert "delta" not in out["values"][0]
 
 
+def test_shape_kpi_threshold_banding_green_below_amber() -> None:
+    """CF.X-infra — value < amber_at renders the GREEN state: ✓ icon
+    + success color. Mirrors the QS-side CHECKMARK + green-700
+    emit."""
+    out = shape_kpi(
+        rows=[(0,)], columns=["n"], threshold_banding=(1, 20),
+    )
+    entry = out["values"][0]
+    assert entry["value"] == 0
+    assert entry["state_icon"] == "✓"
+    assert entry["state_color"] == "success"
+
+
+def test_shape_kpi_threshold_banding_amber_at_threshold() -> None:
+    """CF.X-infra — value == amber_at hits the AMBER band: ⚠ icon +
+    warning color. Threshold is inclusive on the lower end."""
+    out = shape_kpi(
+        rows=[(1,)], columns=["n"], threshold_banding=(1, 20),
+    )
+    entry = out["values"][0]
+    assert entry["state_icon"] == "⚠"
+    assert entry["state_color"] == "warning"
+
+
+def test_shape_kpi_threshold_banding_amber_between_thresholds() -> None:
+    """CF.X-infra — amber_at < value < red_at stays in the AMBER
+    band."""
+    out = shape_kpi(
+        rows=[(10,)], columns=["n"], threshold_banding=(1, 20),
+    )
+    entry = out["values"][0]
+    assert entry["state_icon"] == "⚠"
+    assert entry["state_color"] == "warning"
+
+
+def test_shape_kpi_threshold_banding_red_at_threshold() -> None:
+    """CF.X-infra — value == red_at hits the RED band: ✗ icon +
+    danger color. Threshold is inclusive on the lower end (matches
+    the QS expression ``>= red_at``)."""
+    out = shape_kpi(
+        rows=[(20,)], columns=["n"], threshold_banding=(1, 20),
+    )
+    entry = out["values"][0]
+    assert entry["state_icon"] == "✗"
+    assert entry["state_color"] == "danger"
+
+
+def test_shape_kpi_threshold_banding_null_value_stays_neutral() -> None:
+    """CF.X-infra — None values stay neutral (no state_icon /
+    state_color). Parity with the BK.2 / BK.9 neutral-on-null
+    contract: empty-source / no-data-yet renders as neutral, not as
+    an alarming red."""
+    out = shape_kpi(
+        rows=[(None,)], columns=["n"], threshold_banding=(1, 20),
+    )
+    entry = out["values"][0]
+    assert "state_icon" not in entry
+    assert "state_color" not in entry
+
+
 # ---------------------------------------------------------------------------
 # Table
 # ---------------------------------------------------------------------------
