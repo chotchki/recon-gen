@@ -413,6 +413,14 @@ function _wireFocus(svg) {
       const id = node.getAttribute('data-id');
       if (id) _navigateToFocus(id);
     });
+    // CF.3.m — right-click → context menu with "Open in editor".
+    node.addEventListener("contextmenu", (e) => {
+      const id = node.getAttribute('data-id');
+      if (!id) return;  // bail; let the browser menu fire
+      e.preventDefault();
+      e.stopPropagation();
+      _showNodeContextMenu(e.clientX, e.clientY, id);
+    });
   }
 
   // Click on empty SVG (background) clears focus. e.target === svg
@@ -423,6 +431,81 @@ function _wireFocus(svg) {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") _navigateToFocus(null);
   });
+}
+
+// CF.3.m — node-id → L2 Editor URL. Mirror of the Python
+// `_editor_url_for_focus_node` in `_studio_routes.py`; drift between
+// the two is a UX bug (sidebar "View in editor" disagrees with
+// right-click "Open in editor").
+function _editorUrlForNode(nodeId) {
+  if (!nodeId) return "/";
+  if (nodeId.startsWith("rail__bundle_")) return "/l2_shape/rail/";
+  if (nodeId.startsWith("rail__")) {
+    return "/l2_shape/rail/" + nodeId.slice("rail__".length);
+  }
+  if (nodeId.startsWith("tmpl__")) {
+    return "/l2_shape/transfer_template/" + nodeId.slice("tmpl__".length);
+  }
+  if (nodeId.startsWith("role__")) {
+    // Multiple accounts / templates can share a role; punt to the list.
+    return "/l2_shape/account/";
+  }
+  return "/";
+}
+
+// CF.3.m — single-item right-click menu. Lazily-created floating div;
+// dismisses on next click anywhere, Esc, or scroll. Keeps the surface
+// tiny — when we need a second item we can lift this into a typed
+// menu primitive.
+let _contextMenuEl = null;
+function _showNodeContextMenu(x, y, nodeId) {
+  _hideNodeContextMenu();
+  const editorUrl = _editorUrlForNode(nodeId);
+  const menu = document.createElement("div");
+  menu.id = "diagram-node-contextmenu";
+  // Tailwind utilities — match the sidebar's chrome shape.
+  menu.className = (
+    "absolute z-30 bg-white border border-surface-border " +
+    "shadow-md rounded-md text-sm py-1 min-w-44"
+  );
+  menu.style.top = y + "px";
+  menu.style.left = x + "px";
+  const link = document.createElement("a");
+  link.href = editorUrl;
+  link.className = (
+    "block px-3 py-1.5 text-primary-fg no-underline " +
+    "hover:bg-link-tint"
+  );
+  link.textContent = "Open in editor";
+  link.setAttribute("data-node-id", nodeId);
+  menu.appendChild(link);
+  document.body.appendChild(menu);
+  _contextMenuEl = menu;
+  // One-shot dismiss handlers.
+  const dismiss = (e) => {
+    if (e && e.target && menu.contains(e.target)) return;
+    _hideNodeContextMenu();
+  };
+  // Defer the listeners so the click that opened the menu doesn't
+  // immediately close it.
+  setTimeout(() => {
+    document.addEventListener("click", dismiss, { once: true });
+    document.addEventListener("contextmenu", dismiss, { once: true });
+    document.addEventListener("scroll", _hideNodeContextMenu, { once: true, capture: true });
+  }, 0);
+  document.addEventListener("keydown", _contextMenuKeydown);
+}
+
+function _hideNodeContextMenu() {
+  if (_contextMenuEl && _contextMenuEl.parentNode) {
+    _contextMenuEl.parentNode.removeChild(_contextMenuEl);
+  }
+  _contextMenuEl = null;
+  document.removeEventListener("keydown", _contextMenuKeydown);
+}
+
+function _contextMenuKeydown(e) {
+  if (e.key === "Escape") _hideNodeContextMenu();
 }
 
 // X.4.c.5.d/e — Coverage overlay. The chrome's `#toggle-coverage`

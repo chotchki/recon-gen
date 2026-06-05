@@ -184,6 +184,33 @@ _WASM_GRAPHVIZ_DIR = (
 )
 
 
+def _editor_url_for_focus_node(node_id: str | None) -> str:
+    """CF.3.m — best-effort inverse of `_focus_node_for_entity`.
+
+    Maps a graphviz node id (`rail__X` / `tmpl__X` / `role__X`) back
+    to the closest L2 Editor URL. For node IDs that don't uniquely
+    identify an editable entity (synthetic rail bundles, roles
+    referenced by multiple accounts), fall back to the editor home
+    or the per-kind list. Mirror these prefix arms in the diagram.js
+    right-click context-menu handler — drift between the two is a
+    UX bug.
+    """
+    if not node_id:
+        return "/"
+    if node_id.startswith("rail__bundle_"):
+        # Synthetic CF.3.b bundle node — no source-side entity.
+        return "/l2_shape/rail/"
+    if node_id.startswith("rail__"):
+        return f"/l2_shape/rail/{node_id[len('rail__'):]}"
+    if node_id.startswith("tmpl__"):
+        return f"/l2_shape/transfer_template/{node_id[len('tmpl__'):]}"
+    if node_id.startswith("role__"):
+        # Multiple accounts / templates / limit_schedules can share a
+        # role; punt to the per-kind list rather than guess.
+        return "/l2_shape/account/"
+    return "/"
+
+
 def _dev_log_head_snippets(dev_log: bool) -> tuple[str, str]:
     """Return ``(meta_tag, script_tag)`` to inject when ``dev_log=True``.
 
@@ -2841,17 +2868,127 @@ def _render_diagram_page(
     )
 
     # Focus indicator + clear link. Visible only when ?focus= is set.
-    # Clear preserves the current layer.
+    # Clear preserves the current layer. Renders inside the sidebar's
+    # Focus section (CF.3.m), which auto-opens when a focus is active.
     if focus_node_id is not None:
         focus_indicator = (
-            f'<span class="inline-flex items-center gap-1 ml-2 text-sm '
-            f'text-secondary-fg">focused: '
-            f'<code class="font-mono text-primary-fg">{escape(focus_node_id)}</code> '
-            f'<a class="{chrome_button_classes()}" '
-            f'href="{_qs(layer_val=layer, focus_val=None)}">clear</a></span>'
+            f'<details open class="border-t border-surface-border">'
+            f'<summary class="cursor-pointer font-semibold px-3 py-2 '
+            f'hover:bg-link-tint">Focus</summary>'
+            f'<div class="px-3 pb-2 flex flex-col gap-1 text-xs '
+            f'text-secondary-fg">'
+            f'<code class="font-mono text-primary-fg break-all">'
+            f'{escape(focus_node_id)}</code>'
+            f'<a class="{chrome_button_classes()} self-start mt-1" '
+            f'href="{_qs(layer_val=layer, focus_val=None)}">clear focus</a>'
+            f'</div></details>'
         )
     else:
         focus_indicator = ""
+
+    # CF.3.m — focus-node → editor-URL inverse for the sidebar's
+    # "View in editor" button. Same prefix vocabulary the JS contextmenu
+    # uses; kept in sync via `tests/unit/test_cf3m_diagram_sidebar.py`.
+    view_in_editor_url = _editor_url_for_focus_node(focus_node_id)
+    view_in_editor_label = (
+        "View in editor" if focus_node_id is None
+        else "Open focused entity in editor"
+    )
+
+    # CF.3.m — collapsible floating sidebar replaces the prior
+    # page-local header + two horizontal chrome rows. Operator
+    # complaint: the chrome ate ~30 % of viewport before the canvas
+    # even started. Sidebar floats over the canvas (canvas is not
+    # padding-pushed); collapsing it gives the canvas full width
+    # without a relayout.
+    sidebar_section_summary_cls = (
+        "cursor-pointer font-semibold px-3 py-2 select-none "
+        "hover:bg-link-tint flex items-center gap-2 "
+        "marker:text-secondary-fg"
+    )
+    sidebar_section_body_cls = "px-3 pb-2 flex flex-col gap-1"
+    sidebar_html = f"""
+    <details id="diagram-sidebar" open
+             class="absolute top-2 left-2 z-10 bg-white border border-surface-border
+                    shadow-md rounded-md text-sm flex flex-col
+                    max-h-[calc(100%-1rem)] open:w-64 not-open:w-10
+                    overflow-hidden">
+      <summary class="flex items-center justify-between gap-2 px-3 py-2
+                      border-b border-surface-border cursor-pointer
+                      list-none select-none hover:bg-link-tint
+                      [&::-webkit-details-marker]:hidden"
+               title="Toggle chrome sidebar">
+        <span class="font-mono text-xs text-secondary-fg truncate
+                     not-open:hidden">{prefix}</span>
+        <span class="text-base leading-none text-secondary-fg
+                     ml-auto" aria-hidden="true">⇆</span>
+      </summary>
+      <div class="flex flex-col overflow-y-auto">
+        <div class="px-3 py-1 text-xs text-secondary-fg border-b border-surface-border"
+             id="diagram-status">loading…</div>
+        {focus_indicator}
+        <details open class="border-t border-surface-border">
+          <summary class="{sidebar_section_summary_cls}">Layer</summary>
+          <div class="{sidebar_section_body_cls}">
+            {layer_links}
+          </div>
+        </details>
+        <details open class="border-t border-surface-border">
+          <summary class="{sidebar_section_summary_cls}">Show</summary>
+          <div class="{sidebar_section_body_cls}">
+            <label class="{toggle_label_cls}">
+              <input type="checkbox" id="toggle-role-internal" checked>
+              Internal roles <span class="text-xs text-secondary-fg font-normal">({n_role_internal})</span>
+            </label>
+            <label class="{toggle_label_cls}">
+              <input type="checkbox" id="toggle-role-external" checked>
+              External roles <span class="text-xs text-secondary-fg font-normal">({n_role_external})</span>
+            </label>
+            {rail_toggle_html}
+            {template_toggle_html}
+            {chain_toggle_html}
+            {control_parent_toggle_html}
+          </div>
+        </details>
+        <details class="border-t border-surface-border">
+          <summary class="{sidebar_section_summary_cls}">Edge labels</summary>
+          <div class="{sidebar_section_body_cls}">
+            <label class="{toggle_label_cls}">
+              <input type="checkbox" id="toggle-edge-label-rail_bundle" checked>
+              Bundles <span class="text-xs text-secondary-fg font-normal">({n_bundle})</span>
+            </label>
+            <label class="{toggle_label_cls}">
+              <input type="checkbox" id="toggle-edge-label-self_loop" checked>
+              Self-loops <span class="text-xs text-secondary-fg font-normal">({n_self_loop})</span>
+            </label>
+            <label class="{toggle_label_cls}">
+              <input type="checkbox" id="toggle-edge-label-chain" checked>
+              Chain badges <span class="text-xs text-secondary-fg font-normal">({n_chain})</span>
+            </label>
+            <label class="{toggle_label_cls}">
+              <input type="checkbox" id="toggle-edge-label-control_parent" checked>
+              Control labels
+            </label>
+          </div>
+        </details>
+        <details class="border-t border-surface-border">
+          <summary class="{sidebar_section_summary_cls}">Overlays</summary>
+          <div class="{sidebar_section_body_cls}">
+            {coverage_toggle_html}
+            {trainer_toggle_html}
+            {hide_singleleg_toggle_html}
+            <a id="toggle-reset" class="{chrome_button_classes()} mt-2 text-center"
+               href="{"?embed=1" if embed else "?"}">Reset all</a>
+          </div>
+        </details>
+        <div class="border-t border-surface-border px-3 py-2">
+          <a id="view-in-editor"
+             class="{chrome_button_classes()} block text-center"
+             href="{view_in_editor_url}"
+             title="Open this view in the L2 Editor">{view_in_editor_label}</a>
+        </div>
+      </div>
+    </details>"""
 
     return f"""<!doctype html>
 <html lang="en">
@@ -2864,69 +3001,15 @@ def _render_diagram_page(
 <body class="{"flex flex-col m-0 p-0 font-sans bg-surface-bg text-primary-fg h-screen" if embed else "flex flex-col font-sans bg-surface-bg text-primary-fg h-screen"}">
   {top_nav_html}
   {_demo_mode_banner(demo_mode and not embed)}
-  {("" if embed else (
-    '<header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">'
-    f'<h1>Studio · diagram</h1>'
-    f'<span class="text-sm text-secondary-fg font-mono">{prefix}</span>'
-    # BS.3 part 3 (2026-05-29): shared top-nav now injected above this
-    # page-local header (when not in iframe-embed mode). Per-page
-    # cross-links live in {top_nav_html}; the page-local header carries
-    # only the diagram title + prefix.
-    '</header>'
-  ))}
 
-  <div class="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-surface-border bg-white">
-    <span class="inline-flex items-center gap-2 text-sm text-secondary-fg" aria-label="Conceptual layers">
-      layer: {layer_links}
-    </span>
-    <a id="toggle-reset" class="{chrome_button_classes()}" href="{"?embed=1" if embed else "?"}">Reset</a>
-    {coverage_toggle_html}
-    {trainer_toggle_html}
-    {hide_singleleg_toggle_html}
-    {focus_indicator}
-    <span class="text-xs text-secondary-fg ml-auto" id="diagram-status">loading…</span>
-  </div>
-
-  <div class="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-surface-border bg-white">
-    <strong class="font-semibold text-sm text-primary-fg mr-1">Show:</strong>
-    <label class="{toggle_label_cls}">
-      <input type="checkbox" id="toggle-role-internal" checked>
-      Internal roles <span class="text-xs text-secondary-fg font-normal">({n_role_internal})</span>
-    </label>
-    <label class="{toggle_label_cls}">
-      <input type="checkbox" id="toggle-role-external" checked>
-      External roles <span class="text-xs text-secondary-fg font-normal">({n_role_external})</span>
-    </label>
-    {rail_toggle_html}
-    {template_toggle_html}
-    {chain_toggle_html}
-    {control_parent_toggle_html}
-    <strong class="font-semibold text-sm text-primary-fg mr-1">Edge labels:</strong>
-    <label class="{toggle_label_cls}">
-      <input type="checkbox" id="toggle-edge-label-rail_bundle" checked>
-      Bundles <span class="text-xs text-secondary-fg font-normal">({n_bundle})</span>
-    </label>
-    <label class="{toggle_label_cls}">
-      <input type="checkbox" id="toggle-edge-label-self_loop" checked>
-      Self-loops <span class="text-xs text-secondary-fg font-normal">({n_self_loop})</span>
-    </label>
-    <label class="{toggle_label_cls}">
-      <input type="checkbox" id="toggle-edge-label-chain" checked>
-      Chain badges <span class="text-xs text-secondary-fg font-normal">({n_chain})</span>
-    </label>
-    <label class="{toggle_label_cls}">
-      <input type="checkbox" id="toggle-edge-label-control_parent" checked>
-      Control labels
-    </label>
-  </div>
-
-  <!-- AM.2 step 3 fix-up (2026-05-25): viewport needs `flex` +
-       `min-h-0` (without min-h-0 a flex child falls back to its
-       intrinsic content size — graphviz's native SVG pixel size —
-       and the diagram overflows the iframe). `#diagram-target`
-       likewise needs its own `flex-1 min-h-0 min-w-0` so the
-       injected SVG can fit to the viewBox via preserveAspectRatio. -->
-  <div class="flex flex-1 min-h-0 overflow-hidden p-4 bg-white">
+  <!-- CF.3.m — canvas wrapper becomes the positioning context for
+       the floating sidebar. AM.2 step 3 fix-up (2026-05-25) preserved:
+       `flex` + `min-h-0` keep the SVG from overflowing to its
+       intrinsic graphviz pixel size; `#diagram-target` keeps
+       `flex-1 min-h-0 min-w-0` so the injected SVG fits the viewBox
+       via preserveAspectRatio. -->
+  <div class="relative flex flex-1 min-h-0 overflow-hidden bg-white">
+    {sidebar_html if not embed else ""}
     <div id="diagram-target" class="flex-1 min-h-0 min-w-0"></div>
   </div>
 

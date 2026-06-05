@@ -331,29 +331,22 @@ def test_diagram_visible_route_filters_by_focus(
     assert "north-pool" not in accounts
 
 
-def test_diagram_embed_mode_drops_studio_header(
+def test_diagram_embed_mode_drops_sidebar_chrome(
     writable_l2_yaml: Path,
 ) -> None:
-    """When the diagram is embedded inside the home-page iframe, its
-    own studio-header chrome must drop so the operator doesn't see
-    two stacked nav bars (the home's + the diagram's). Triggered by
-    ``?embed=1`` on the diagram URL."""
+    """``?embed=1`` is for external embedders (Studio no longer iframes
+    the diagram post-CF.3.l). Embed mode drops the floating sidebar so
+    the host page can render its own chrome; standalone mode keeps it.
+    """
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         embedded = c.get("/diagram?embed=1").text
         standalone = c.get("/diagram").text
 
-    # Phase BS.3 part 2b (2026-05-29) — the inline `← landing` /
-    # `→ data` / `→ dashboards` nav strip in the diagram chrome was
-    # removed (BF.11 dual-nav close). Standalone diagram keeps a
-    # minimal chrome (header + Studio · diagram title); embedded
-    # diagram still drops the chrome entirely (no double-stack inside
-    # the home iframe).
-    assert "<header" in standalone
-    assert "Studio · diagram" in standalone
-    # Embedded variant drops the chrome entirely.
-    assert "<header" not in embedded
-    assert "Studio · diagram" not in embedded
+    # CF.3.m — standalone diagram carries the floating sidebar
+    # (`<details id="diagram-sidebar">`); embed mode drops it.
+    assert 'id="diagram-sidebar"' in standalone
+    assert 'id="diagram-sidebar"' not in embedded
 
 
 def test_card_titles_link_to_diagram_focus_per_kind(
@@ -524,7 +517,10 @@ def test_studio_pages_no_top_nav_when_factory_not_supplied(
     # shared nav). The page-local <h1>Studio</h1> still anchors home.
     for body in (home, diagram, data):
         assert ">L2 Editor<" not in body
-    # Sanity: pages still render their own chrome.
+    # Sanity: pages still render their own chrome. CF.3.m moved the
+    # diagram's chrome into a floating sidebar, so the page-local
+    # "Studio · diagram" header is gone — the sidebar root id is the
+    # stable presence marker.
     assert "Studio" in home
-    assert "Studio · diagram" in diagram
+    assert 'id="diagram-sidebar"' in diagram
     assert "Studio · data shaping" in data
