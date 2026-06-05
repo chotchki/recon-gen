@@ -28,8 +28,8 @@
 <!-- role__ACHOrigSettlement&#45;&gt;rail__ACHOriginationDailySweep -->
 <g id="edge12" class="edge">
 <title>role__ACHOrigSettlement&#45;&gt;rail__ACHOriginationDailySweep</title>
-<path fill="none" stroke="#d95f02" d="M128.42,-35C140.96,-35 154.72,-35 168.36,-35"/>
-<polygon fill="#d95f02" stroke="#d95f02" points="168.24,-38.5 178.24,-35 168.24,-31.5 168.24,-38.5"/>
+<path fill="none" stroke="#b34a02" stroke-width="1.5" d="M128.42,-35C140.71,-35 154.17,-35 167.54,-35"/>
+<polygon fill="#b34a02" stroke="#b34a02" stroke-width="1.5" points="167.48,-38.5 177.48,-35 167.48,-31.5 167.48,-38.5"/>
 </g>
 <!-- role__CashDueFRB -->
 <g id="node2" class="node">
@@ -55,8 +55,8 @@
 <!-- role__ConcentrationMaster&#45;&gt;rail__ConcentrationToFRBSweep -->
 <g id="edge10" class="edge">
 <title>role__ConcentrationMaster&#45;&gt;rail__ConcentrationToFRBSweep</title>
-<path fill="none" stroke="#d95f02" d="M624.09,-289C634.62,-289 645.91,-289 657.18,-289"/>
-<polygon fill="#d95f02" stroke="#d95f02" points="656.9,-292.5 666.9,-289 656.9,-285.5 656.9,-292.5"/>
+<path fill="none" stroke="#b34a02" stroke-width="1.5" d="M624.09,-289C634.4,-289 645.44,-289 656.48,-289"/>
+<polygon fill="#b34a02" stroke="#b34a02" stroke-width="1.5" points="656.14,-292.5 666.14,-289 656.14,-285.5 656.14,-292.5"/>
 </g>
 <!-- role__CustomerDDA -->
 <g id="node4" class="node">
@@ -88,8 +88,8 @@
 <!-- role__CustomerDDA&#45;&gt;rail__InternalTransferDebit -->
 <g id="edge3" class="edge">
 <title>role__CustomerDDA&#45;&gt;rail__InternalTransferDebit</title>
-<path fill="none" stroke="#d95f02" d="M1326.75,-175.81C1357.12,-175.67 1399.74,-175.47 1435.04,-175.3"/>
-<polygon fill="#d95f02" stroke="#d95f02" points="1434.72,-178.81 1444.7,-175.26 1434.69,-171.81 1434.72,-178.81"/>
+<path fill="none" stroke="#b34a02" stroke-width="1.5" d="M1326.75,-175.81C1356.85,-175.67 1399,-175.47 1434.12,-175.31"/>
+<polygon fill="#b34a02" stroke="#b34a02" stroke-width="1.5" points="1433.96,-178.81 1443.94,-175.26 1433.93,-171.81 1433.96,-178.81"/>
 </g>
 <!-- rail__CustomerFeeAccrual -->
 <g id="node19" class="node">
@@ -100,8 +100,8 @@
 <!-- role__CustomerDDA&#45;&gt;rail__CustomerFeeAccrual -->
 <g id="edge6" class="edge">
 <title>role__CustomerDDA&#45;&gt;rail__CustomerFeeAccrual</title>
-<path fill="none" stroke="#d95f02" d="M1304.8,-194.3C1337.66,-228.79 1405.5,-300 1405.5,-300 1405.5,-300 1418.72,-304.51 1435.23,-310.14"/>
-<polygon fill="#d95f02" stroke="#d95f02" points="1433.83,-313.35 1444.42,-313.27 1436.09,-306.73 1433.83,-313.35"/>
+<path fill="none" stroke="#b34a02" stroke-width="1.5" d="M1304.8,-194.3C1337.66,-228.79 1405.5,-300 1405.5,-300 1405.5,-300 1418.22,-304.34 1434.3,-309.82"/>
+<polygon fill="#b34a02" stroke="#b34a02" stroke-width="1.5" points="1433.11,-313.11 1443.71,-313.02 1435.37,-306.48 1433.11,-313.11"/>
 </g>
 <!-- rail__CustomerInboundACHReturnNSF -->
 <g id="node25" class="node">
@@ -113,8 +113,8 @@
 <!-- role__CustomerDDA&#45;&gt;rail__CustomerInboundACHReturnNSF -->
 <g id="edge17" class="edge">
 <title>role__CustomerDDA&#45;&gt;rail__CustomerInboundACHReturnNSF</title>
-<path fill="none" stroke="#d95f02" d="M1318.38,-194.49C1337.93,-206.14 1359.5,-219 1359.5,-219 1359.5,-219 1405.5,-245 1405.5,-245 1405.5,-245 1408.33,-245.85 1413.02,-247.24"/>
-<polygon fill="#d95f02" stroke="#d95f02" points="1412.01,-250.59 1422.6,-250.1 1414.01,-243.89 1412.01,-250.59"/>
+<path fill="none" stroke="#b34a02" stroke-width="1.5" d="M1318.38,-194.49C1337.93,-206.14 1359.5,-219 1359.5,-219 1359.5,-219 1405.5,-245 1405.5,-245 1405.5,-245 1408.05,-245.76 1412.31,-247.03"/>
+<polygon fill="#b34a02" stroke="#b34a02" stroke-width="1.5" points="1411.29,-250.38 1421.87,-249.88 1413.29,-243.67 1411.29,-250.38"/>
 </g>
 <!-- rail__CustomerInboundACHReturnStopPay -->
 <g id="node26" class="node">
@@ -126,8 +126,8 @@
 <!-- role__CustomerDDA&#45;&gt;rail__CustomerInboundACHReturnStopPay -->
 <g id="edge19" class="edge">
 <title>role__CustomerDDA&#45;&gt;rail__CustomerInboundACHReturnStopPay</title>
-<path fill="none" stroke="#d95f02" d="M1326.75,-166.34C1346.68,-161.45 1371.88,-155.27 1396.83,-149.15"/>
-<polygon fill="#d95f02" stroke="#d95f02" points="1397.52,-152.59 1406.4,-146.81 1395.85,-145.79 1397.52,-152.59"/>
+<path fill="none" stroke="#b34a02" stroke-width="1.5" d="M1326.75,-166.34C1346.5,-161.5 1371.43,-155.38 1396.16,-149.32"/>
+<polygon fill="#b34a02" stroke="#b34a02" stroke-width="1.5" points="1396.79,-152.77 1405.66,-146.99 1395.12,-145.97 1396.79,-152.77"/>
 </g>
 <!-- rail__bundle_1 -->
 <g id="node41" class="node">
@@ -142,8 +142,8 @@
 <!-- role__CustomerDDA&#45;&gt;rail__bundle_1 -->
 <g id="edge41" class="edge">
 <title>role__CustomerDDA&#45;&gt;rail__bundle_1</title>
-<path fill="none" stroke="#d95f02" stroke-width="1.9" d="M1314.48,-157.65C1349.35,-134.03 1405.5,-96 1405.5,-96 1405.5,-96 1410.74,-93.99 1418.75,-90.92"/>
-<polygon fill="#d95f02" stroke="#d95f02" stroke-width="1.9" points="1419.89,-94.23 1427.97,-87.38 1417.38,-87.7 1419.89,-94.23"/>
+<path fill="none" stroke="#b34a02" stroke-width="1.9" d="M1314.48,-157.65C1349.35,-134.03 1405.5,-96 1405.5,-96 1405.5,-96 1410.74,-93.99 1418.75,-90.92"/>
+<polygon fill="#b34a02" stroke="#b34a02" stroke-width="1.9" points="1419.89,-94.23 1427.97,-87.38 1417.38,-87.7 1419.89,-94.23"/>
 </g>
 <!-- role__ExternalCardNetwork -->
 <g id="node6" class="node">
@@ -163,8 +163,8 @@
 <!-- role__ExternalCardNetwork&#45;&gt;rail__MerchantCardSale -->
 <g id="edge21" class="edge">
 <title>role__ExternalCardNetwork&#45;&gt;rail__MerchantCardSale</title>
-<path fill="none" stroke="#d95f02" d="M307.77,-133C321.85,-133 337.14,-133 351.64,-133"/>
-<polygon fill="#d95f02" stroke="#d95f02" points="351.55,-136.5 361.55,-133 351.55,-129.5 351.55,-136.5"/>
+<path fill="none" stroke="#b34a02" stroke-width="1.5" d="M307.77,-133C321.71,-133 336.83,-133 351.21,-133"/>
+<polygon fill="#b34a02" stroke="#b34a02" stroke-width="1.5" points="350.79,-136.5 360.79,-133 350.79,-129.5 350.79,-136.5"/>
 </g>
 <!-- role__ExternalCounterparty -->
 <g id="node7" class="node">
@@ -184,8 +184,8 @@
 <!-- role__ExternalCounterparty&#45;&gt;rail__CustomerInboundACH -->
 <g id="edge1" class="edge">
 <title>role__ExternalCounterparty&#45;&gt;rail__CustomerInboundACH</title>
-<path fill="none" stroke="#d95f02" d="M966.35,-234C989.98,-234 1018.11,-234 1043.55,-234"/>
-<polygon fill="#d95f02" stroke="#d95f02" points="1043.51,-237.5 1053.51,-234 1043.51,-230.5 1043.51,-237.5"/>
+<path fill="none" stroke="#b34a02" stroke-width="1.5" d="M966.35,-234C989.77,-234 1017.61,-234 1042.87,-234"/>
+<polygon fill="#b34a02" stroke="#b34a02" stroke-width="1.5" points="1042.76,-237.5 1052.76,-234 1042.76,-230.5 1042.76,-237.5"/>
 </g>
 <!-- rail__CustomerFeeMonthlySettlement -->
 <g id="node23" class="node">
@@ -199,8 +199,8 @@
 <!-- role__ExternalCounterparty&#45;&gt;rail__CustomerFeeMonthlySettlement -->
 <g id="edge14" class="edge">
 <title>role__ExternalCounterparty&#45;&gt;rail__CustomerFeeMonthlySettlement</title>
-<path fill="none" stroke="#d95f02" d="M921.68,-252.16C949.74,-309.2 1034.25,-481 1034.25,-481 1034.25,-481 1035.32,-481.35 1037.21,-481.98"/>
-<polygon fill="#d95f02" stroke="#d95f02" points="1036.05,-485.28 1046.64,-485.1 1038.25,-478.64 1036.05,-485.28"/>
+<path fill="none" stroke="#b34a02" stroke-width="1.5" d="M921.68,-252.16C949.74,-309.2 1034.25,-481 1034.25,-481 1034.25,-481 1035.04,-481.26 1036.45,-481.73"/>
+<polygon fill="#b34a02" stroke="#b34a02" stroke-width="1.5" points="1035.33,-485.04 1045.92,-484.87 1037.53,-478.4 1035.33,-485.04"/>
 </g>
 <!-- rail__InternalBalanceMaintenance -->
 <g id="node24" class="node">
@@ -212,8 +212,8 @@
 <!-- role__ExternalCounterparty&#45;&gt;rail__InternalBalanceMaintenance -->
 <g id="edge15" class="edge">
 <title>role__ExternalCounterparty&#45;&gt;rail__InternalBalanceMaintenance</title>
-<path fill="none" stroke="#d95f02" d="M928.14,-252.36C960.83,-291.38 1034.25,-379 1034.25,-379 1034.25,-379 1035.32,-379.35 1037.21,-379.98"/>
-<polygon fill="#d95f02" stroke="#d95f02" points="1036.05,-383.28 1046.64,-383.1 1038.25,-376.64 1036.05,-383.28"/>
+<path fill="none" stroke="#b34a02" stroke-width="1.5" d="M928.14,-252.36C960.83,-291.38 1034.25,-379 1034.25,-379 1034.25,-379 1035.04,-379.26 1036.45,-379.73"/>
+<polygon fill="#b34a02" stroke="#b34a02" stroke-width="1.5" points="1035.33,-383.04 1045.92,-382.87 1037.53,-376.4 1035.33,-383.04"/>
 </g>
 <!-- rail__bundle_0 -->
 <g id="node40" class="node">
@@ -227,8 +227,8 @@
 <!-- role__ExternalCounterparty&#45;&gt;rail__bundle_0 -->
 <g id="edge39" class="edge">
 <title>role__ExternalCounterparty&#45;&gt;rail__bundle_0</title>
-<path fill="none" stroke="#d95f02" stroke-width="1.6" d="M966.35,-218.69C989.78,-211.99 1017.62,-204.04 1042.88,-196.82"/>
-<polygon fill="#d95f02" stroke="#d95f02" stroke-width="1.6" points="1043.68,-200.23 1052.33,-194.12 1041.76,-193.5 1043.68,-200.23"/>
+<path fill="none" stroke="#b34a02" stroke-width="1.6" d="M966.35,-218.69C989.78,-211.99 1017.62,-204.04 1042.88,-196.82"/>
+<polygon fill="#b34a02" stroke="#b34a02" stroke-width="1.6" points="1043.68,-200.23 1052.33,-194.12 1041.76,-193.5 1043.68,-200.23"/>
 </g>
 <!-- role__InternalSuspenseRecon -->
 <g id="node8" class="node">
@@ -240,8 +240,8 @@
 <!-- role__InternalSuspenseRecon&#45;&gt;rail__CustomerFeeAccrual -->
 <g id="edge7" class="edge">
 <title>role__InternalSuspenseRecon&#45;&gt;rail__CustomerFeeAccrual</title>
-<path fill="none" stroke="#d95f02" d="M1346.99,-348.53C1374.33,-345.57 1406.8,-342.04 1434.73,-339.01"/>
-<polygon fill="#d95f02" stroke="#d95f02" points="1434.92,-342.51 1444.48,-337.96 1434.16,-335.55 1434.92,-342.51"/>
+<path fill="none" stroke="#b34a02" stroke-width="1.5" d="M1346.99,-348.53C1374.09,-345.59 1406.22,-342.11 1433.98,-339.09"/>
+<polygon fill="#b34a02" stroke="#b34a02" stroke-width="1.5" points="1434.17,-342.6 1443.73,-338.04 1433.41,-335.64 1434.17,-342.6"/>
 </g>
 <!-- role__InternalTransferSuspense -->
 <g id="node9" class="node">
@@ -288,8 +288,8 @@
 <!-- role__MerchantPayableClearing&#45;&gt;rail__MerchantPayoutACH -->
 <g id="edge23" class="edge">
 <title>role__MerchantPayableClearing&#45;&gt;rail__MerchantPayoutACH</title>
-<path fill="none" stroke="#d95f02" d="M588.53,-126.94C614.56,-99.13 661.5,-49 661.5,-49 661.5,-49 665.61,-47.59 671.96,-45.42"/>
-<polygon fill="#d95f02" stroke="#d95f02" points="672.88,-48.8 681.21,-42.25 670.61,-42.18 672.88,-48.8"/>
+<path fill="none" stroke="#b34a02" stroke-width="1.5" d="M588.53,-126.94C614.56,-99.13 661.5,-49 661.5,-49 661.5,-49 665.24,-47.72 671.09,-45.72"/>
+<polygon fill="#b34a02" stroke="#b34a02" stroke-width="1.5" points="672.16,-49.05 680.49,-42.5 669.89,-42.43 672.16,-49.05"/>
 </g>
 <!-- rail__MerchantPayoutWire -->
 <g id="node29" class="node">
@@ -301,8 +301,8 @@
 <!-- role__MerchantPayableClearing&#45;&gt;rail__MerchantPayoutWire -->
 <g id="edge25" class="edge">
 <title>role__MerchantPayableClearing&#45;&gt;rail__MerchantPayoutWire</title>
-<path fill="none" stroke="#d95f02" d="M598.59,-163.3C625.06,-181.27 661.5,-206 661.5,-206 661.5,-206 666.01,-207.6 672.86,-210.03"/>
-<polygon fill="#d95f02" stroke="#d95f02" points="671.45,-213.25 682.04,-213.29 673.79,-206.65 671.45,-213.25"/>
+<path fill="none" stroke="#b34a02" stroke-width="1.5" d="M598.59,-163.3C625.06,-181.27 661.5,-206 661.5,-206 661.5,-206 665.61,-207.46 671.94,-209.71"/>
+<polygon fill="#b34a02" stroke="#b34a02" stroke-width="1.5" points="670.74,-212.99 681.33,-213.04 673.08,-206.4 670.74,-212.99"/>
 </g>
 <!-- rail__MerchantPayoutCheck -->
 <g id="node30" class="node">
@@ -314,8 +314,8 @@
 <!-- role__MerchantPayableClearing&#45;&gt;rail__MerchantPayoutCheck -->
 <g id="edge27" class="edge">
 <title>role__MerchantPayableClearing&#45;&gt;rail__MerchantPayoutCheck</title>
-<path fill="none" stroke="#d95f02" d="M634.94,-157.76C645.81,-159.95 657.18,-162.24 668.27,-164.47"/>
-<polygon fill="#d95f02" stroke="#d95f02" points="667.24,-167.84 677.74,-166.38 668.63,-160.97 667.24,-167.84"/>
+<path fill="none" stroke="#b34a02" stroke-width="1.5" d="M634.94,-157.76C645.47,-159.88 656.47,-162.1 667.23,-164.26"/>
+<polygon fill="#b34a02" stroke="#b34a02" stroke-width="1.5" points="666.5,-167.69 677,-166.23 667.88,-160.82 666.5,-167.69"/>
 </g>
 <!-- rail__MerchantDailySettleAggregator -->
 <g id="node38" class="node">
@@ -327,8 +327,8 @@
 <!-- role__MerchantPayableClearing&#45;&gt;rail__MerchantDailySettleAggregator -->
 <g id="edge36" class="edge">
 <title>role__MerchantPayableClearing&#45;&gt;rail__MerchantDailySettleAggregator</title>
-<path fill="none" stroke="#d95f02" d="M634.94,-137.12C639.86,-136.51 644.88,-135.88 649.94,-135.25"/>
-<polygon fill="#d95f02" stroke="#d95f02" points="650.02,-138.77 659.51,-134.06 649.15,-131.83 650.02,-138.77"/>
+<path fill="none" stroke="#b34a02" stroke-width="1.5" d="M634.94,-137.12C639.6,-136.54 644.34,-135.95 649.12,-135.36"/>
+<polygon fill="#b34a02" stroke="#b34a02" stroke-width="1.5" points="649.27,-138.86 658.76,-134.16 648.4,-131.92 649.27,-138.86"/>
 </g>
 <!-- role__WireSettlementSuspense -->
 <g id="node13" class="node">
@@ -360,14 +360,14 @@
 <!-- role__ZBASubAccount&#45;&gt;rail__ZBASweep -->
 <g id="edge8" class="edge">
 <title>role__ZBASubAccount&#45;&gt;rail__ZBASweep</title>
-<path fill="none" stroke="#d95f02" d="M297.26,-305.58C319.02,-309.36 345.38,-313.93 367.62,-317.79"/>
-<polygon fill="#d95f02" stroke="#d95f02" points="366.88,-321.22 377.34,-319.48 368.08,-314.32 366.88,-321.22"/>
+<path fill="none" stroke="#b34a02" stroke-width="1.5" d="M297.26,-305.58C318.82,-309.32 344.89,-313.85 367,-317.69"/>
+<polygon fill="#b34a02" stroke="#b34a02" stroke-width="1.5" points="366.14,-321.09 376.59,-319.35 367.34,-314.19 366.14,-321.09"/>
 </g>
 <!-- rail__CustomerInboundACH&#45;&gt;role__CustomerDDA -->
 <g id="edge2" class="edge">
 <title>rail__CustomerInboundACH&#45;&gt;role__CustomerDDA</title>
-<path fill="none" stroke="#1b9e77" d="M1178.68,-213.07C1190.48,-209.01 1199.25,-206 1199.25,-206 1199.25,-206 1216.3,-200.06 1235.23,-193.47"/>
-<polygon fill="#1b9e77" stroke="#1b9e77" points="1236.12,-196.86 1244.41,-190.27 1233.82,-190.25 1236.12,-196.86"/>
+<path fill="none" stroke="#0f5f47" stroke-width="1.5" d="M1178.68,-213.07C1190.48,-209.01 1199.25,-206 1199.25,-206 1199.25,-206 1215.83,-200.22 1234.44,-193.74"/>
+<polygon fill="#0f5f47" stroke="#0f5f47" stroke-width="1.5" points="1235.41,-197.11 1243.7,-190.52 1233.1,-190.5 1235.41,-197.11"/>
 </g>
 <!-- rail__InternalTransferCredit -->
 <g id="node17" class="node">
@@ -378,8 +378,8 @@
 <!-- rail__InternalTransferCredit&#45;&gt;role__CustomerDDA -->
 <g id="edge4" class="edge">
 <title>rail__InternalTransferCredit&#45;&gt;role__CustomerDDA</title>
-<path fill="none" stroke="#1b9e77" d="M1172.11,-138.01C1187.06,-142.41 1199.25,-146 1199.25,-146 1199.25,-146 1216.3,-151.94 1235.23,-158.53"/>
-<polygon fill="#1b9e77" stroke="#1b9e77" points="1233.82,-161.75 1244.41,-161.73 1236.12,-155.14 1233.82,-161.75"/>
+<path fill="none" stroke="#0f5f47" stroke-width="1.5" d="M1172.11,-138.01C1187.06,-142.41 1199.25,-146 1199.25,-146 1199.25,-146 1215.83,-151.78 1234.44,-158.26"/>
+<polygon fill="#0f5f47" stroke="#0f5f47" stroke-width="1.5" points="1233.1,-161.5 1243.7,-161.48 1235.41,-154.89 1233.1,-161.5"/>
 </g>
 <!-- rail__InternalTransferSuspenseClose -->
 <g id="node18" class="node">
@@ -390,70 +390,70 @@
 <!-- rail__InternalTransferSuspenseClose&#45;&gt;role__InternalTransferSuspense -->
 <g id="edge5" class="edge">
 <title>rail__InternalTransferSuspenseClose&#45;&gt;role__InternalTransferSuspense</title>
-<path fill="none" stroke="#7570b3" d="M165.18,-345C165.3,-345 165.42,-345 165.55,-345"/>
-<polygon fill="#7570b3" stroke="#7570b3" points="165.2,-341.5 155.2,-345 165.2,-348.5 165.2,-341.5"/>
-<polygon fill="#7570b3" stroke="#7570b3" points="176.97,-348.5 186.97,-345 176.97,-341.5 176.97,-348.5"/>
-<polygon fill="none" stroke="#7570b3" points="164.95,-348.5 174.95,-345 164.95,-341.5 164.95,-348.5"/>
+<path fill="none" stroke="#4a4682" stroke-width="1.5" d="M165.73,-345C165.85,-345 165.97,-345 166.09,-345"/>
+<polygon fill="#4a4682" stroke="#4a4682" stroke-width="1.5" points="165.96,-341.5 155.96,-345 165.96,-348.5 165.96,-341.5"/>
+<polygon fill="#4a4682" stroke="#4a4682" stroke-width="1.5" points="176.21,-348.5 186.21,-345 176.21,-341.5 176.21,-348.5"/>
+<polygon fill="none" stroke="#4a4682" stroke-width="1.5" points="163.19,-348.5 173.19,-345 163.19,-341.5 163.19,-348.5"/>
 </g>
 <!-- rail__ZBASweep&#45;&gt;role__ConcentrationMaster -->
 <g id="edge9" class="edge">
 <title>rail__ZBASweep&#45;&gt;role__ConcentrationMaster</title>
-<path fill="none" stroke="#1b9e77" d="M453.07,-317.23C468.86,-313.41 487.84,-308.81 505.85,-304.45"/>
-<polygon fill="#1b9e77" stroke="#1b9e77" points="506.54,-307.88 515.44,-302.13 504.9,-301.08 506.54,-307.88"/>
+<path fill="none" stroke="#0f5f47" stroke-width="1.5" d="M453.07,-317.23C468.63,-313.46 487.3,-308.94 505.09,-304.63"/>
+<polygon fill="#0f5f47" stroke="#0f5f47" stroke-width="1.5" points="505.81,-308.06 514.7,-302.3 504.16,-301.26 505.81,-308.06"/>
 </g>
 <!-- rail__ConcentrationToFRBSweep&#45;&gt;role__ExternalCounterparty -->
 <g id="edge11" class="edge">
 <title>rail__ConcentrationToFRBSweep&#45;&gt;role__ExternalCounterparty</title>
-<path fill="none" stroke="#1b9e77" d="M810.86,-266.63C822.59,-262.8 834.74,-258.83 846.36,-255.03"/>
-<polygon fill="#1b9e77" stroke="#1b9e77" points="847.44,-258.36 855.86,-251.93 845.27,-251.71 847.44,-258.36"/>
+<path fill="none" stroke="#0f5f47" stroke-width="1.5" d="M810.86,-266.63C822.35,-262.88 834.24,-258.99 845.64,-255.27"/>
+<polygon fill="#0f5f47" stroke="#0f5f47" stroke-width="1.5" points="846.72,-258.6 855.14,-252.16 844.55,-251.94 846.72,-258.6"/>
 </g>
 <!-- rail__ACHOriginationDailySweep&#45;&gt;role__CashDueFRB -->
 <g id="edge13" class="edge">
 <title>rail__ACHOriginationDailySweep&#45;&gt;role__CashDueFRB</title>
-<path fill="none" stroke="#1b9e77" d="M325.29,-35C338.94,-35 352.94,-35 365.7,-35"/>
-<polygon fill="#1b9e77" stroke="#1b9e77" points="365.5,-38.5 375.5,-35 365.5,-31.5 365.5,-38.5"/>
+<path fill="none" stroke="#0f5f47" stroke-width="1.5" d="M325.29,-35C338.66,-35 352.37,-35 364.91,-35"/>
+<polygon fill="#0f5f47" stroke="#0f5f47" stroke-width="1.5" points="364.74,-38.5 374.74,-35 364.74,-31.5 364.74,-38.5"/>
 </g>
 <!-- rail__InternalBalanceMaintenance&#45;&gt;role__InternalSuspenseRecon -->
 <g id="edge16" class="edge">
 <title>rail__InternalBalanceMaintenance&#45;&gt;role__InternalSuspenseRecon</title>
-<path fill="none" stroke="#1b9e77" d="M1190.3,-383.93C1199.54,-381.11 1208.98,-378.24 1218.14,-375.46"/>
-<polygon fill="#1b9e77" stroke="#1b9e77" points="1219.14,-378.81 1227.69,-372.55 1217.11,-372.11 1219.14,-378.81"/>
+<path fill="none" stroke="#0f5f47" stroke-width="1.5" d="M1190.3,-383.93C1199.34,-381.18 1208.56,-378.37 1217.53,-375.64"/>
+<polygon fill="#0f5f47" stroke="#0f5f47" stroke-width="1.5" points="1218.42,-379.03 1226.97,-372.77 1216.38,-372.33 1218.42,-379.03"/>
 </g>
 <!-- rail__CustomerInboundACHReturnNSF&#45;&gt;role__ExternalCounterparty -->
 <g id="edge18" class="edge">
 <title>rail__CustomerInboundACHReturnNSF&#45;&gt;role__ExternalCounterparty</title>
-<path fill="none" stroke="#1b9e77" d="M1413.79,-270.79C1279.46,-267.33 1034.25,-261 1034.25,-261 1034.25,-261 1006.29,-254.79 977.19,-248.32"/>
-<polygon fill="#1b9e77" stroke="#1b9e77" points="978.04,-244.92 967.52,-246.17 976.52,-251.76 978.04,-244.92"/>
+<path fill="none" stroke="#0f5f47" stroke-width="1.5" d="M1413.79,-270.79C1279.46,-267.33 1034.25,-261 1034.25,-261 1034.25,-261 1006.78,-254.9 977.96,-248.49"/>
+<polygon fill="#0f5f47" stroke="#0f5f47" stroke-width="1.5" points="978.78,-245.09 968.26,-246.34 977.26,-251.92 978.78,-245.09"/>
 </g>
 <!-- rail__CustomerInboundACHReturnStopPay&#45;&gt;role__ExternalCounterparty -->
 <g id="edge20" class="edge">
 <title>rail__CustomerInboundACHReturnStopPay&#45;&gt;role__ExternalCounterparty</title>
-<path fill="none" stroke="#1b9e77" d="M1405.24,-115.84C1317.22,-108.22 1199.25,-98 1199.25,-98 1199.25,-98 1034.25,-98 1034.25,-98 1034.25,-98 972.06,-167.61 936.67,-207.23"/>
-<polygon fill="#1b9e77" stroke="#1b9e77" points="934.2,-204.74 930.14,-214.53 939.42,-209.4 934.2,-204.74"/>
+<path fill="none" stroke="#0f5f47" stroke-width="1.5" d="M1405.24,-115.84C1317.22,-108.22 1199.25,-98 1199.25,-98 1199.25,-98 1034.25,-98 1034.25,-98 1034.25,-98 972.58,-167.03 937.12,-206.73"/>
+<polygon fill="#0f5f47" stroke="#0f5f47" stroke-width="1.5" points="934.7,-204.18 930.65,-213.97 939.92,-208.84 934.7,-204.18"/>
 </g>
 <!-- rail__MerchantCardSale&#45;&gt;role__MerchantPayableClearing -->
 <g id="edge22" class="edge">
 <title>rail__MerchantCardSale&#45;&gt;role__MerchantPayableClearing</title>
-<path fill="none" stroke="#1b9e77" d="M468.59,-137.06C477.11,-137.73 486.09,-138.44 495.03,-139.14"/>
-<polygon fill="#1b9e77" stroke="#1b9e77" points="494.56,-142.61 504.8,-139.91 495.11,-135.63 494.56,-142.61"/>
+<path fill="none" stroke="#0f5f47" stroke-width="1.5" d="M468.59,-137.06C476.83,-137.71 485.49,-138.39 494.14,-139.07"/>
+<polygon fill="#0f5f47" stroke="#0f5f47" stroke-width="1.5" points="493.8,-142.55 504.05,-139.85 494.35,-135.58 493.8,-142.55"/>
 </g>
 <!-- rail__MerchantPayoutACH&#45;&gt;role__MerchantDDA -->
 <g id="edge24" class="edge">
 <title>rail__MerchantPayoutACH&#45;&gt;role__MerchantDDA</title>
-<path fill="none" stroke="#1b9e77" d="M800.32,-22C820.01,-22 841.84,-22 860.85,-22"/>
-<polygon fill="#1b9e77" stroke="#1b9e77" points="860.76,-25.5 870.76,-22 860.76,-18.5 860.76,-25.5"/>
+<path fill="none" stroke="#0f5f47" stroke-width="1.5" d="M800.32,-22C819.74,-22 841.22,-22 860.04,-22"/>
+<polygon fill="#0f5f47" stroke="#0f5f47" stroke-width="1.5" points="860.01,-25.5 870.01,-22 860.01,-18.5 860.01,-25.5"/>
 </g>
 <!-- rail__MerchantPayoutWire&#45;&gt;role__ExternalCounterparty -->
 <g id="edge26" class="edge">
 <title>rail__MerchantPayoutWire&#45;&gt;role__ExternalCounterparty</title>
-<path fill="none" stroke="#1b9e77" d="M799.38,-234C814.28,-234 830.45,-234 845.74,-234"/>
-<polygon fill="#1b9e77" stroke="#1b9e77" points="845.7,-237.5 855.7,-234 845.7,-230.5 845.7,-237.5"/>
+<path fill="none" stroke="#0f5f47" stroke-width="1.5" d="M799.38,-234C814.13,-234 830.14,-234 845.29,-234"/>
+<polygon fill="#0f5f47" stroke="#0f5f47" stroke-width="1.5" points="844.94,-237.5 854.94,-234 844.94,-230.5 844.94,-237.5"/>
 </g>
 <!-- rail__MerchantPayoutCheck&#45;&gt;role__ExternalCounterparty -->
 <g id="edge28" class="edge">
 <title>rail__MerchantPayoutCheck&#45;&gt;role__ExternalCounterparty</title>
-<path fill="none" stroke="#1b9e77" d="M803.64,-199.01C817.65,-203.59 832.58,-208.47 846.7,-213.08"/>
-<polygon fill="#1b9e77" stroke="#1b9e77" points="845.29,-216.3 855.88,-216.08 847.46,-209.65 845.29,-216.3"/>
+<path fill="none" stroke="#0f5f47" stroke-width="1.5" d="M803.64,-199.01C817.38,-203.5 831.99,-208.27 845.87,-212.81"/>
+<polygon fill="#0f5f47" stroke="#0f5f47" stroke-width="1.5" points="844.57,-216.06 855.16,-215.84 846.74,-209.41 844.57,-216.06"/>
 </g>
 <!-- rail__ExternalCardSettlement -->
 <g id="node31" class="node">
@@ -467,8 +467,8 @@
 <!-- rail__ExternalCardSettlement&#45;&gt;role__ExternalCardNetwork -->
 <g id="edge29" class="edge">
 <title>rail__ExternalCardSettlement&#45;&gt;role__ExternalCardNetwork</title>
-<path fill="none" stroke="#1b9e77" d="M140.94,-133C155.65,-133 171.34,-133 186.14,-133"/>
-<polygon fill="#1b9e77" stroke="#1b9e77" points="185.74,-136.5 195.74,-133 185.74,-129.5 185.74,-136.5"/>
+<path fill="none" stroke="#0f5f47" stroke-width="1.5" d="M140.94,-133C155.36,-133 170.72,-133 185.27,-133"/>
+<polygon fill="#0f5f47" stroke="#0f5f47" stroke-width="1.5" points="184.99,-136.5 194.99,-133 184.99,-129.5 184.99,-136.5"/>
 </g>
 <!-- rail__SettlementAutoSettle -->
 <g id="node32" class="node">
@@ -479,10 +479,10 @@
 <!-- rail__SettlementAutoSettle&#45;&gt;role__MerchantPayableClearing -->
 <g id="edge30" class="edge">
 <title>rail__SettlementAutoSettle&#45;&gt;role__MerchantPayableClearing</title>
-<path fill="none" stroke="#7570b3" d="M478.06,-104.38C479.15,-104.78 479.75,-105 479.75,-105 479.75,-105 491.88,-110.4 507.23,-117.23"/>
-<polygon fill="#7570b3" stroke="#7570b3" points="479.34,-101.12 468.75,-100.98 476.94,-107.7 479.34,-101.12"/>
-<polygon fill="#7570b3" stroke="#7570b3" points="516.17,-125.04 526.72,-125.91 519.01,-118.64 516.17,-125.04"/>
-<polygon fill="none" stroke="#7570b3" points="505.19,-120.15 515.75,-121.02 508.04,-113.76 505.19,-120.15"/>
+<path fill="none" stroke="#4a4682" stroke-width="1.5" d="M478.84,-104.67C479.43,-104.88 479.75,-105 479.75,-105 479.75,-105 491.08,-110.04 505.69,-116.55"/>
+<polygon fill="#4a4682" stroke="#4a4682" stroke-width="1.5" points="480.05,-101.38 469.46,-101.24 477.65,-107.96 480.05,-101.38"/>
+<polygon fill="#4a4682" stroke="#4a4682" stroke-width="1.5" points="515.47,-124.73 526.03,-125.6 518.32,-118.34 515.47,-124.73"/>
+<polygon fill="none" stroke="#4a4682" stroke-width="1.5" points="503.58,-119.44 514.14,-120.3 506.43,-113.04 503.58,-119.44"/>
 </g>
 <!-- rail__SettlementStandardSettle -->
 <g id="node33" class="node">
@@ -493,10 +493,10 @@
 <!-- rail__SettlementStandardSettle&#45;&gt;role__MerchantPayableClearing -->
 <g id="edge31" class="edge">
 <title>rail__SettlementStandardSettle&#45;&gt;role__MerchantPayableClearing</title>
-<path fill="none" stroke="#7570b3" d="M475.62,-208.57C478.21,-207.59 479.75,-207 479.75,-207 479.75,-207 502.04,-191.62 524.42,-176.19"/>
-<polygon fill="#7570b3" stroke="#7570b3" points="474.68,-205.19 466.58,-212.03 477.17,-211.73 474.68,-205.19"/>
-<polygon fill="#7570b3" stroke="#7570b3" points="535.66,-172.69 541.9,-164.13 531.68,-166.92 535.66,-172.69"/>
-<polygon fill="none" stroke="#7570b3" points="525.77,-179.51 532.01,-170.95 521.79,-173.75 525.77,-179.51"/>
+<path fill="none" stroke="#4a4682" stroke-width="1.5" d="M476.55,-208.22C478.57,-207.45 479.75,-207 479.75,-207 479.75,-207 501.15,-192.24 523.07,-177.12"/>
+<polygon fill="#4a4682" stroke="#4a4682" stroke-width="1.5" points="475.38,-204.92 467.29,-211.76 477.88,-211.46 475.38,-204.92"/>
+<polygon fill="#4a4682" stroke="#4a4682" stroke-width="1.5" points="535.03,-173.12 541.28,-164.56 531.06,-167.35 535.03,-173.12"/>
+<polygon fill="none" stroke="#4a4682" stroke-width="1.5" points="524.32,-180.51 530.56,-171.95 520.34,-174.75 524.32,-180.51"/>
 </g>
 <!-- rail__SettlementSlowSettle -->
 <g id="node34" class="node">
@@ -507,10 +507,10 @@
 <!-- rail__SettlementSlowSettle&#45;&gt;role__MerchantPayableClearing -->
 <g id="edge32" class="edge">
 <title>rail__SettlementSlowSettle&#45;&gt;role__MerchantPayableClearing</title>
-<path fill="none" stroke="#7570b3" d="M482.62,-167.21C483.24,-167.06 483.86,-166.9 484.48,-166.74"/>
-<polygon fill="#7570b3" stroke="#7570b3" points="481.88,-163.79 473.06,-169.66 483.61,-170.57 481.88,-163.79"/>
-<polygon fill="#7570b3" stroke="#7570b3" points="496.16,-167.37 504.99,-161.5 494.43,-160.59 496.16,-167.37"/>
-<polygon fill="none" stroke="#7570b3" points="484.52,-170.34 493.35,-164.48 482.79,-163.56 484.52,-170.34"/>
+<path fill="none" stroke="#4a4682" stroke-width="1.5" d="M483.44,-167C483.56,-166.97 483.68,-166.94 483.8,-166.91"/>
+<polygon fill="#4a4682" stroke="#4a4682" stroke-width="1.5" points="482.61,-163.6 473.79,-169.47 484.34,-170.39 482.61,-163.6"/>
+<polygon fill="#4a4682" stroke="#4a4682" stroke-width="1.5" points="495.43,-167.56 504.25,-161.69 493.7,-160.77 495.43,-167.56"/>
+<polygon fill="none" stroke="#4a4682" stroke-width="1.5" points="482.81,-170.78 491.64,-164.91 481.08,-163.99 482.81,-170.78"/>
 </g>
 <!-- rail__NoFraudReview -->
 <g id="node35" class="node">
@@ -521,10 +521,10 @@
 <!-- rail__NoFraudReview&#45;&gt;role__InternalSuspenseRecon -->
 <g id="edge33" class="edge">
 <title>rail__NoFraudReview&#45;&gt;role__InternalSuspenseRecon</title>
-<path fill="none" stroke="#7570b3" d="M1171.56,-355C1181.59,-355 1192.28,-355 1202.94,-355"/>
-<polygon fill="#7570b3" stroke="#7570b3" points="1172,-351.5 1162,-355 1172,-358.5 1172,-351.5"/>
-<polygon fill="#7570b3" stroke="#7570b3" points="1214.45,-358.5 1224.45,-355 1214.45,-351.5 1214.45,-358.5"/>
-<polygon fill="none" stroke="#7570b3" points="1202.44,-358.5 1212.44,-355 1202.44,-351.5 1202.44,-358.5"/>
+<path fill="none" stroke="#4a4682" stroke-width="1.5" d="M1172.55,-355C1181.9,-355 1191.8,-355 1201.69,-355"/>
+<polygon fill="#4a4682" stroke="#4a4682" stroke-width="1.5" points="1172.75,-351.5 1162.75,-355 1172.75,-358.5 1172.75,-351.5"/>
+<polygon fill="#4a4682" stroke="#4a4682" stroke-width="1.5" points="1213.69,-358.5 1223.69,-355 1213.69,-351.5 1213.69,-358.5"/>
+<polygon fill="none" stroke="#4a4682" stroke-width="1.5" points="1200.67,-358.5 1210.67,-355 1200.67,-351.5 1200.67,-358.5"/>
 </g>
 <!-- rail__StandardFraudReview -->
 <g id="node36" class="node">
@@ -535,10 +535,10 @@
 <!-- rail__StandardFraudReview&#45;&gt;role__InternalSuspenseRecon -->
 <g id="edge34" class="edge">
 <title>rail__StandardFraudReview&#45;&gt;role__InternalSuspenseRecon</title>
-<path fill="none" stroke="#7570b3" d="M1184.37,-326.68C1190.78,-328.48 1197.33,-330.31 1203.87,-332.15"/>
-<polygon fill="#7570b3" stroke="#7570b3" points="1185.6,-323.39 1175.02,-324.06 1183.71,-330.13 1185.6,-323.39"/>
-<polygon fill="#7570b3" stroke="#7570b3" points="1213.74,-338.55 1224.32,-337.88 1215.63,-331.81 1213.74,-338.55"/>
-<polygon fill="none" stroke="#7570b3" points="1202.18,-335.31 1212.75,-334.64 1204.07,-328.57 1202.18,-335.31"/>
+<path fill="none" stroke="#4a4682" stroke-width="1.5" d="M1185.18,-326.91C1190.85,-328.5 1196.62,-330.11 1202.38,-331.73"/>
+<polygon fill="#4a4682" stroke="#4a4682" stroke-width="1.5" points="1186.33,-323.59 1175.75,-324.26 1184.44,-330.33 1186.33,-323.59"/>
+<polygon fill="#4a4682" stroke="#4a4682" stroke-width="1.5" points="1213.02,-338.35 1223.59,-337.68 1214.91,-331.61 1213.02,-338.35"/>
+<polygon fill="none" stroke="#4a4682" stroke-width="1.5" points="1200.48,-334.83 1211.05,-334.16 1202.37,-328.09 1200.48,-334.83"/>
 </g>
 <!-- rail__EnhancedFraudReview -->
 <g id="node37" class="node">
@@ -549,16 +549,16 @@
 <!-- rail__EnhancedFraudReview&#45;&gt;role__InternalSuspenseRecon -->
 <g id="edge35" class="edge">
 <title>rail__EnhancedFraudReview&#45;&gt;role__InternalSuspenseRecon</title>
-<path fill="none" stroke="#7570b3" d="M1186.52,-437.59C1194.16,-435.44 1199.25,-434 1199.25,-434 1199.25,-434 1225.1,-410.29 1248.48,-388.85"/>
-<polygon fill="#7570b3" stroke="#7570b3" points="1185.81,-434.16 1177.13,-440.24 1187.71,-440.89 1185.81,-434.16"/>
-<polygon fill="#7570b3" stroke="#7570b3" points="1259.28,-383.68 1264.28,-374.35 1254.55,-378.53 1259.28,-383.68"/>
-<polygon fill="none" stroke="#7570b3" points="1250.43,-391.81 1255.43,-382.47 1245.7,-386.65 1250.43,-391.81"/>
+<path fill="none" stroke="#4a4682" stroke-width="1.5" d="M1187.03,-437.45C1194.38,-435.37 1199.25,-434 1199.25,-434 1199.25,-434 1224.34,-410.98 1247.44,-389.79"/>
+<polygon fill="#4a4682" stroke="#4a4682" stroke-width="1.5" points="1186.54,-433.95 1177.86,-440.04 1188.44,-440.69 1186.54,-433.95"/>
+<polygon fill="#4a4682" stroke="#4a4682" stroke-width="1.5" points="1258.72,-384.2 1263.73,-374.86 1253.99,-379.04 1258.72,-384.2"/>
+<polygon fill="none" stroke="#4a4682" stroke-width="1.5" points="1249.13,-393 1254.13,-383.66 1244.4,-387.84 1249.13,-393"/>
 </g>
 <!-- rail__MerchantDailySettleAggregator&#45;&gt;role__WireSettlementSuspense -->
 <g id="edge37" class="edge">
 <title>rail__MerchantDailySettleAggregator&#45;&gt;role__WireSettlementSuspense</title>
-<path fill="none" stroke="#1b9e77" d="M821.63,-108C826.76,-106.96 831.91,-105.92 837.01,-104.89"/>
-<polygon fill="#1b9e77" stroke="#1b9e77" points="837.48,-108.37 846.58,-102.96 836.09,-101.51 837.48,-108.37"/>
+<path fill="none" stroke="#0f5f47" stroke-width="1.5" d="M821.63,-108C826.48,-107.02 831.36,-106.03 836.19,-105.06"/>
+<polygon fill="#0f5f47" stroke="#0f5f47" stroke-width="1.5" points="836.73,-108.52 845.84,-103.11 835.35,-101.66 836.73,-108.52"/>
 </g>
 <!-- rail__MerchantWeeklyBatchClose -->
 <g id="node39" class="node">
@@ -569,20 +569,20 @@
 <!-- rail__MerchantWeeklyBatchClose&#45;&gt;role__WireSettlementSuspense -->
 <g id="edge38" class="edge">
 <title>rail__MerchantWeeklyBatchClose&#45;&gt;role__WireSettlementSuspense</title>
-<path fill="none" stroke="#1b9e77" d="M811.35,-79.96C819.65,-80.8 828.16,-81.66 836.53,-82.51"/>
-<polygon fill="#1b9e77" stroke="#1b9e77" points="836.03,-85.97 846.33,-83.5 836.74,-79.01 836.03,-85.97"/>
+<path fill="none" stroke="#0f5f47" stroke-width="1.5" d="M811.35,-79.96C819.37,-80.77 827.58,-81.6 835.68,-82.42"/>
+<polygon fill="#0f5f47" stroke="#0f5f47" stroke-width="1.5" points="835.28,-85.9 845.58,-83.42 835.98,-78.93 835.28,-85.9"/>
 </g>
 <!-- rail__bundle_0&#45;&gt;role__CustomerDDA -->
 <g id="edge40" class="edge">
 <title>rail__bundle_0&#45;&gt;role__CustomerDDA</title>
-<path fill="none" stroke="#1b9e77" stroke-width="1.6" d="M1178.74,-176C1196.74,-176 1216.27,-176 1233.63,-176"/>
-<polygon fill="#1b9e77" stroke="#1b9e77" stroke-width="1.6" points="1233.42,-179.5 1243.42,-176 1233.42,-172.5 1233.42,-179.5"/>
+<path fill="none" stroke="#0f5f47" stroke-width="1.6" d="M1178.74,-176C1196.74,-176 1216.27,-176 1233.63,-176"/>
+<polygon fill="#0f5f47" stroke="#0f5f47" stroke-width="1.6" points="1233.42,-179.5 1243.42,-176 1233.42,-172.5 1233.42,-179.5"/>
 </g>
 <!-- rail__bundle_1&#45;&gt;role__ExternalCounterparty -->
 <g id="edge42" class="edge">
 <title>rail__bundle_1&#45;&gt;role__ExternalCounterparty</title>
-<path fill="none" stroke="#1b9e77" stroke-width="1.9" d="M1430.74,-65.31C1301.36,-75.33 1034.25,-96 1034.25,-96 1034.25,-96 988.25,-111 988.25,-111 988.25,-111 952.82,-168.71 930.51,-205.07"/>
-<polygon fill="#1b9e77" stroke="#1b9e77" stroke-width="1.9" points="927.81,-202.78 925.56,-213.13 933.77,-206.44 927.81,-202.78"/>
+<path fill="none" stroke="#0f5f47" stroke-width="1.9" d="M1430.74,-65.31C1301.36,-75.33 1034.25,-96 1034.25,-96 1034.25,-96 988.25,-111 988.25,-111 988.25,-111 952.82,-168.71 930.51,-205.07"/>
+<polygon fill="#0f5f47" stroke="#0f5f47" stroke-width="1.9" points="927.81,-202.78 925.56,-213.13 933.77,-206.44 927.81,-202.78"/>
 </g>
 </g>
 </svg>

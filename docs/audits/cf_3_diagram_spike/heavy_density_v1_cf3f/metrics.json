@@ -18,7 +18,7 @@
       "crossings": 0,
       "width_pt": 242.0,
       "height_pt": 1324.0,
-      "layout_ms": 75.4,
+      "layout_ms": 76.0,
       "dot_bytes": 4376,
       "svg_bytes": 19905,
       "png_bytes": 80952
@@ -31,9 +31,9 @@
       "width_pt": 2967.0,
       "height_pt": 1154.0,
       "layout_ms": 93.0,
-      "dot_bytes": 26922,
-      "svg_bytes": 122540,
-      "png_bytes": 651931
+      "dot_bytes": 28742,
+      "svg_bytes": 127878,
+      "png_bytes": 680033
     },
     {
       "layer": 3,
@@ -42,10 +42,10 @@
       "crossings": 586,
       "width_pt": 1355.0,
       "height_pt": 3754.0,
-      "layout_ms": 186.9,
-      "dot_bytes": 37569,
-      "svg_bytes": 178963,
-      "png_bytes": 1136492
+      "layout_ms": 188.6,
+      "dot_bytes": 39389,
+      "svg_bytes": 184372,
+      "png_bytes": 1181941
     }
   ]
 }

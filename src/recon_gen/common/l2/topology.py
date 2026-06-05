@@ -195,14 +195,23 @@ _TEMPLATE_LEG_FILL = "#fff2e0"
 _TEMPLATE_XOR_FILL = "#ffe1c2"  # slightly tinted leg fill for XOR-group rows
 _TRANSFER_TEMPLATE_FILL = "#fce4d6"  # kept for backwards-compat (used by typed-tree code paths)
 _TRANSFER_TEMPLATE_BORDER = "#a6622c"
-# CF.3.f edge palette (ColorBrewer "Dark2" — accessibility-tested,
-# color-blind-friendly). Direction is encoded by the EDGE color +
-# arrowhead; we drop the "debit/credit" labels by default since
-# operators filter to the rail/role and click for details.
-_RAIL_EDGE_DEBIT_COLOR = "#d95f02"     # warm — money OUT of the role
-_RAIL_EDGE_CREDIT_COLOR = "#1b9e77"    # cool — money IN to the role
-_RAIL_EDGE_VARIABLE_COLOR = "#7570b3"  # neutral — direction set per-fire (XOR templates)
-_CHAIN_EDGE_COLOR = "#9e0142"          # distinct magenta-purple from rail edges
+# CF.3.f.b WCAG palette (darker variants of the Dark2 hue family —
+# operator-locked to be visually distinct + accessibility-conscious
+# instead of the prior Dark2 spec-fill colors). Each rail-edge color
+# now hits ≥3.5:1 contrast against the template-header fill
+# (#ffcc99) and ≥5:1 against the lighter leg fill (#fff2e0),
+# satisfying WCAG SC 1.4.11 (3:1 non-text). Hue families preserved
+# (warm/cool/neutral/magenta) for operator recognition continuity.
+_RAIL_EDGE_DEBIT_COLOR = "#b34a02"     # warm — money OUT of the role (was #d95f02)
+_RAIL_EDGE_CREDIT_COLOR = "#0f5f47"    # cool — money IN to the role (was #1b9e77)
+_RAIL_EDGE_VARIABLE_COLOR = "#4a4682"  # neutral — direction set per-fire (was #7570b3)
+_CHAIN_EDGE_COLOR = "#7a0033"          # distinct magenta-purple (was #9e0142 — darkened for parity)
+# CF.3.f.b — bumped rail-edge stroke width to 1.5 (was 1.0 default).
+# Combined with the darkened palette this satisfies the WCAG
+# graphical-objects threshold and makes the direction-color signal
+# read at dense layouts where 1pt strokes were getting lost in the
+# template orange.
+_RAIL_EDGE_PENWIDTH = "1.5"
 _BUNDLE_EDGE_COLOR = "#1f4e79"         # kept for top-level bundle edges
 _SELF_LOOP_COLOR = "#7f6000"
 _CONTROL_PARENT_COLOR = "#888888"
@@ -1284,6 +1293,7 @@ def build_topology_graph_per_rail(
                     _role_id(src_role), port_west,
                     color=_RAIL_EDGE_DEBIT_COLOR,
                     arrowhead="normal",
+                    penwidth=_RAIL_EDGE_PENWIDTH,
                 )
             for dst_role in rail.destination_role:
                 if not _in_focus(_role_id(dst_role)):
@@ -1292,6 +1302,7 @@ def build_topology_graph_per_rail(
                     port_east, _role_id(dst_role),
                     color=_RAIL_EDGE_CREDIT_COLOR,
                     arrowhead="normal",
+                    penwidth=_RAIL_EDGE_PENWIDTH,
                 )
         else:
             color = _rail_edge_color_for_direction(str(rail.leg_direction))
@@ -1309,6 +1320,7 @@ def build_topology_graph_per_rail(
                         port_east, _role_id(leg_role),
                         color=color,
                         arrowhead="normal",
+                        penwidth=_RAIL_EDGE_PENWIDTH,
                     )
                 elif rail.leg_direction == "Variable":
                     g.edge(
@@ -1316,12 +1328,14 @@ def build_topology_graph_per_rail(
                         color=color,
                         arrowhead=variable_arrow,
                         dir="both",
+                        penwidth=_RAIL_EDGE_PENWIDTH,
                     )
                 else:
                     g.edge(
                         _role_id(leg_role), port_west,
                         color=color,
                         arrowhead="normal",
+                        penwidth=_RAIL_EDGE_PENWIDTH,
                     )
 
     # CF.3.f — bundle edges use the same direction color palette as
