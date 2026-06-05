@@ -1828,39 +1828,24 @@ def _render_read_value(spec: FieldSpec, value: object) -> str:
     return escape(raw)
 
 
-def _render_read_card(
+def _render_read_card_summary(
     kind: EntityKind, entity: object,
-    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed to suppress fields hidden by the two-layer rule
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — passed through to _focus_node_for_entity
+    entity_id: str,
+    html_id: str,
     *, demo_mode: bool = False,
 ) -> str:
-    """Read-only card — the post-PUT response + the click-to-expand
-    target for the list view.
+    """CF.4.c split — the always-visible part of a read card (title +
+    Edit/Delete actions). Renders without the heavy `<dl>` body so
+    `<details>`-wrapped cards stay cheap when collapsed.
 
     AH.4: ``demo_mode`` drops the Edit / Delete actions (their routes
-    are 404'd in demo-mode anyway — the buttons shouldn't appear).
+    are 404'd in demo-mode anyway).
     """
-    specs = _filter_specs_for_entity(_FIELD_SPECS_BY_KIND[kind], entity)
-    entity_id = _entity_id(kind, entity)
-    hidden = _hidden_fields_for_entity(kind, entity, instance)
-    # AM.1 step 6 — read-card migrated. Semantic classes drop in favor
-    # of the entity_card_classes() helper + raw utilities for inner
-    # `<dl>` rows, `<header>`, action links, and the subtype badge.
-    dt_cls = "font-semibold text-xs text-secondary-fg mt-2"
-    dd_cls = "ml-0 mt-0.5 text-sm text-primary-fg break-words"
-    rows = "".join(
-        f'<dt class="{dt_cls}">{escape(s.label)}</dt>'
-        f'<dd class="{dd_cls}">'
-        f"{_render_read_value(s, getattr(entity, s.name, None))}"
-        f"</dd>"
-        for s in specs
-        if s.name not in hidden
-    )
     # X.4.f.8.reverse — card title becomes a click target that navigates
-    # the diagram iframe to ?focus=<node_id>. The home page's iframe-load
-    # listener then fans out the existing filter pipeline. data-focus-node
-    # on the card carries the right node-id prefix per kind; absent when
-    # the entity has no natural diagram target (e.g., an Account with no
-    # role) so the JS falls through to a plain-text title.
+    # to /diagram?focus=<node_id>. data-focus-node on the card carries
+    # the right node-id prefix per kind; absent when the entity has no
+    # natural diagram target.
     focus_node = _focus_node_for_entity(kind, entity, instance)
     # X.4.f.11 — surface rail subtype as a small badge on the read
     # card so the operator can tell a TwoLeg apart from a SingleLeg
@@ -1877,70 +1862,154 @@ def _render_read_card(
             f' <span class="{badge_cls}">{escape(subtype_label)}</span>'
         )
     # `min-w-0` lets the h3 shrink inside the flex header so
-    # `break-all` can wrap composite IDs (chain / limit_schedule
-    # use `::` separators which aren't natural break points;
-    # without break-all + min-w-0 they overflow into the
-    # Edit/Delete actions column — user dogfood 2026-05-25).
+    # `break-all` can wrap composite IDs (chain / limit_schedule use
+    # `::` separators which aren't natural break points; without
+    # break-all + min-w-0 they overflow into the Edit/Delete actions
+    # column — user dogfood 2026-05-25).
     h3_base = "text-base font-semibold m-0 text-primary-fg min-w-0 break-all"
     if focus_node is None:
-        title_html = f'<h3 class="{h3_base}">{escape(entity_id)}{subtype_badge}</h3>'
+        title_html = (
+            f'<h3 class="{h3_base}">{escape(entity_id)}{subtype_badge}</h3>'
+        )
     else:
-        # CF.3.l (2026-06-05) — was an `<h3 data-focus-node="…"
-        # tabindex="0" role="button">` simulated button that the
-        # editor's iframe-focus JS read on click. After CF.3.l
-        # promoted Diagram to a top-level surface and dropped the
-        # editor iframe, the natural primitive is a plain anchor
-        # carrying the focus param. Browsers get right-click → open
-        # in new tab, keyboard focus rings, screen-reader treatment
-        # for free.
+        # CF.3.l — plain anchor; browsers get right-click → open in
+        # new tab, keyboard focus rings, screen-reader treatment for
+        # free. CF.4.c: `onclick="event.stopPropagation()"` so a click
+        # on the anchor inside `<summary>` navigates without toggling
+        # the parent `<details>`.
         title_html = (
             f'<h3 class="{h3_base}">'
             f'<a class="text-primary-fg no-underline hover:text-accent '
             f'hover:underline" '
             f'href="/diagram?focus={escape(focus_node)}" '
+            f'onclick="event.stopPropagation()" '
             f'title="Focus the diagram on this entity">'
             f"{escape(entity_id)}{subtype_badge}</a></h3>"
         )
-    # CSS-safe id slug — composite-keyed kinds use ``::`` in their
-    # addressing string, which CSS parses as pseudo-element syntax in a
-    # selector like ``#entity-chain-Foo::Bar``. The URL-side path stays
-    # ``::`` (matches the L2 API key contract); only the HTML id swaps.
-    html_id = f"entity-{kind}-{escape(_html_id_slug(entity_id))}"
     # X.4.f.9.delete — DELETE on success returns empty (card disappears
     # via outerHTML swap); on validator-rejected structural break returns
-    # 400 + the error fragment which swaps in place. No cascade — the
-    # operator clears the dependent reference first. AH.4: omitted in
-    # demo-mode (the edit / delete routes are 404'd there).
+    # 400 + the error fragment which swaps in place. CF.4.c —
+    # `event.stopPropagation()` so clicking Edit/Delete inside a
+    # `<summary>` fires the action without expanding the parent
+    # `<details>`. AH.4: omitted in demo-mode (routes 404'd there).
     action_link_cls = (
         "text-accent no-underline text-xs cursor-pointer hover:underline"
     )
     actions_html = "" if demo_mode else (
         f'<div class="flex items-center gap-3 shrink-0">'
-        f'<a class="{action_link_cls}" href="/l2_shape/{kind}/{escape(entity_id)}/edit">Edit</a>'
-        f'<a class="{action_link_cls}" hx-delete="/l2_shape/{kind}/{escape(entity_id)}" '
+        f'<a class="{action_link_cls}" '
+        f'href="/l2_shape/{kind}/{escape(entity_id)}/edit" '
+        f'onclick="event.stopPropagation()">Edit</a>'
+        f'<a class="{action_link_cls}" '
+        f'hx-delete="/l2_shape/{kind}/{escape(entity_id)}" '
         f'hx-target="#{html_id}" hx-swap="outerHTML" '
+        f'onclick="event.stopPropagation()" '
         f'hx-confirm="Delete this entity? References that block deletion '
         f'will be reported inline.">Delete</a>'
         f"</div>"
     )
-    card_cls = entity_card_classes()
-    header_cls = "flex items-start justify-between gap-3 mb-2"
+    header_cls = "flex items-start justify-between gap-3"
+    return (
+        f'<header class="{header_cls}">{title_html}{actions_html}</header>'
+    )
+
+
+def _render_read_card_body(
+    kind: EntityKind, entity: object,
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed to suppress fields hidden by the two-layer rule
+) -> str:
+    """CF.4.c split — the heavy `<dl>` rows. Lazy-fetched via HTMX
+    `?body_only=1` when the parent card is collapse-by-default."""
+    specs = _filter_specs_for_entity(_FIELD_SPECS_BY_KIND[kind], entity)
+    hidden = _hidden_fields_for_entity(kind, entity, instance)
+    dt_cls = "font-semibold text-xs text-secondary-fg mt-2"
+    dd_cls = "ml-0 mt-0.5 text-sm text-primary-fg break-words"
+    rows = "".join(
+        f'<dt class="{dt_cls}">{escape(s.label)}</dt>'
+        f'<dd class="{dd_cls}">'
+        f"{_render_read_value(s, getattr(entity, s.name, None))}"
+        f"</dd>"
+        for s in specs
+        if s.name not in hidden
+    )
     # `minmax(0, 1fr)` on the dd column (not bare `1fr`) lets long
     # unbroken values shrink + the `break-words` utility on `dd_cls`
-    # then wraps them inside the card. Without minmax(0,…), grid
-    # items can grow past the parent on long content.
+    # then wraps them inside the card.
     dl_cls = "m-0 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4"
-    # `data-kind` + `data-entity-id` are the stable home-page
-    # focus-filter hooks (AM.2 step 2 migrated the JS off the
-    # `entity-card` marker class to these attribute selectors).
+    return f'<dl class="{dl_cls}">{rows}</dl>'
+
+
+# CF.4.c — crossover threshold: when a page renders ≤10 cards, eager
+# render is cheaper than 10 HTMX round-trips on first expand. Above
+# the threshold, collapse-by-default + lazy-fetch keeps the response
+# bytes proportional to the toolbar + summaries, not the heavy `<dl>`s.
+# Operator can tune via the `collapsed=` arg on the renderer.
+COLLAPSE_THRESHOLD = 10
+
+
+def _render_read_card(
+    kind: EntityKind, entity: object,
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — passed through to body / summary helpers
+    *, demo_mode: bool = False,
+    collapsed: bool = False,
+) -> str:
+    """Read-only card — the post-PUT response + the click-to-expand
+    target for the list view.
+
+    CF.4.c: ``collapsed=True`` wraps the heavy `<dl>` body inside a
+    `<details>` whose body fragment is HTMX-fetched on first expand
+    (`/l2_shape/<kind>/<id>?body_only=1`, the existing read_card
+    endpoint with a query flag). The crossover
+    threshold is ``COLLAPSE_THRESHOLD`` — `_render_list_page` decides
+    based on total_count. Sasquatch_pr (7 rails) stays eager;
+    heavy_density_v1 (100+ rails) collapses.
+
+    AH.4: ``demo_mode`` drops the Edit / Delete actions.
+    """
+    entity_id = _entity_id(kind, entity)
+    # CSS-safe id slug — composite-keyed kinds use ``::`` in their
+    # addressing string, which CSS parses as pseudo-element syntax;
+    # the URL-side path stays ``::``, only the HTML id swaps.
+    html_id = f"entity-{kind}-{escape(_html_id_slug(entity_id))}"
+    summary_html = _render_read_card_summary(
+        kind, entity, instance, entity_id, html_id, demo_mode=demo_mode,
+    )
+    card_cls = entity_card_classes()
+    if collapsed:
+        # CF.4.c — body fragment loaded on first `toggle` event from
+        # the parent `<details>`. `hx-trigger="toggle once"` fires
+        # exactly once; subsequent open/close cycles re-use the
+        # already-fetched body. Placeholder reads "loading…" until
+        # the swap completes; reader-friendly for screen readers.
+        body_url = f"/l2_shape/{kind}/{escape(entity_id)}?body_only=1"
+        body_placeholder = (
+            '<div data-role="card-body" class="text-xs '
+            'text-secondary-fg italic mt-1">loading…</div>'
+        )
+        summary_wrapper_cls = (
+            "list-none cursor-pointer "
+            "[&::-webkit-details-marker]:hidden"
+        )
+        return (
+            f'<article class="{card_cls}" id="{html_id}" '
+            f'data-kind="{escape(kind)}" '
+            f'data-entity-id="{escape(entity_id)}">'
+            f'<details hx-get="{body_url}" '
+            f'hx-target="find [data-role=\'card-body\']" '
+            f'hx-swap="outerHTML" hx-trigger="toggle once">'
+            f'<summary class="{summary_wrapper_cls}">{summary_html}</summary>'
+            f"{body_placeholder}"
+            f"</details>"
+            f"</article>"
+        )
+    # Eager render — the historical behavior + the small-L2 path.
+    body_html = _render_read_card_body(kind, entity, instance)
     return (
         f'<article class="{card_cls}" id="{html_id}" '
         f'data-kind="{escape(kind)}" data-entity-id="{escape(entity_id)}">'
-        f'<header class="{header_cls}">'
-        f"{title_html}"
-        f"{actions_html}"
-        f"</header>"
-        f'<dl class="{dl_cls}">{rows}</dl>'
+        f"{summary_html}"
+        f'<div class="mb-2"></div>'  # vertical gap between header and body
+        f"{body_html}"
         f"</article>"
     )
 
@@ -3722,6 +3791,7 @@ def _render_list_page(
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — passed through to per-card hide logic
     *,
     toolbar_html: str = "",
+    total_count: int | None = None,
     embed: bool = False,
     demo_mode: bool = False,
 ) -> str:
@@ -3738,8 +3808,18 @@ def _render_list_page(
     htmx + the editor CSS + the htmx:beforeSwap fix, so the embed
     fragment doesn't need to redeclare them.
     """
+    # CF.4.c — pick the collapse strategy off TOTAL count (not page
+    # count). A small L2 with 7 rails on page 1 should stay eager;
+    # a heavy L2 paginated to 25-per-page still collapses because the
+    # full set is heavy. ``total_count=None`` (legacy callers) defaults
+    # to eager render.
+    collapsed = (
+        total_count is not None and total_count > COLLAPSE_THRESHOLD
+    )
     cards = "\n".join(
-        _render_read_card(kind, e, instance, demo_mode=demo_mode)
+        _render_read_card(
+            kind, e, instance, demo_mode=demo_mode, collapsed=collapsed,
+        )
         for e in entities
     )
     # AM.1 step 6 — list-page chrome migrated. `entity-list` /
@@ -4006,6 +4086,7 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
             _render_list_page(
                 kind, page_entities, inst,
                 toolbar_html=toolbar_html,
+                total_count=state.total_count,
                 embed=embed, demo_mode=demo_mode,
             ),
         )
@@ -4019,6 +4100,12 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
         entity = _find_entity_or_none(inst, kind, entity_id)
         if entity is None:
             return HTMLResponse("not found", status_code=404)
+        # CF.4.c — ``?body_only=1`` returns just the `<dl>` rows so
+        # collapse-by-default cards can lazy-fetch the heavy body on
+        # first expand. Same endpoint, same auth path, no new route
+        # to drift against the full-card one.
+        if request.query_params.get("body_only") == "1":
+            return HTMLResponse(_render_read_card_body(kind, entity, inst))
         return HTMLResponse(
             _render_read_card(kind, entity, inst, demo_mode=demo_mode),
         )
