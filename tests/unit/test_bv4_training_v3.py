@@ -188,16 +188,27 @@ def test_post_apply_303s_when_cfg_missing(writable_l2_yaml: Path) -> None:
 # -- Banner rendering ------------------------------------------------------
 
 
-def test_renders_failed_banner_when_failed_kinds_present() -> None:
-    """DL.12 — page-top failed banner summarizes the failing kinds."""
+def test_renders_red_banner_when_all_failed() -> None:
+    """CF.1 — all-failed Apply renders a RED banner sourced from
+    kv (`trainer_last_apply`). Pins the `data-test-failed-banner` +
+    `data-test-last-apply-banner` attrs and the "all N failed" copy."""
     html = render_training_v3_landing(
         base_prefix="recon-test",
         v_overlay_exists=True,
-        failed_kinds={"phantom_rail": "ValueError: picker can't satisfy"},
+        last_apply={
+            "attempted": ["phantom_rail"],
+            "succeeded": [],
+            "failed": {"phantom_rail": "ValueError: picker can't satisfy"},
+            "finished_at": "2026-06-04T10:00:00",
+            "path": "fast",
+        },
     )
     assert "data-test-failed-banner" in html
-    assert "1 plant(s) failed" in html
+    assert "data-test-last-apply-banner" in html
+    assert "data-test-partial-banner" not in html
+    assert "all 1 plant(s) failed" in html
     assert "phantom_rail" in html
+    assert "bg-danger" in html
 
 
 def test_renders_l2_stale_banner_when_l2_stale_flag_set() -> None:
@@ -214,23 +225,11 @@ def test_renders_l2_stale_banner_when_l2_stale_flag_set() -> None:
     assert "2026-05-31T10:00:00" in html
 
 
-def test_failed_banner_truncates_at_5_kinds() -> None:
-    """Long failure lists collapse to first 5 + "+N more" so the
-    banner doesn't wrap a screen."""
-    failed = {f"kind_{i}": f"err {i}" for i in range(7)}
-    html = render_training_v3_landing(
-        base_prefix="recon-test",
-        v_overlay_exists=True,
-        failed_kinds=failed,
-    )
-    assert "+2 more" in html
-
-
-def test_failed_banner_exposes_per_kind_reason_inline() -> None:
-    """CF.0 Fix B — banner ships a <details> expander listing each
-    failing kind alongside the first line of its error message so
-    operators don't have to hunt across cards to learn why a
-    Session-Start Apply skipped a plant on their own L2."""
+def test_red_banner_exposes_per_kind_reason_inline() -> None:
+    """CF.0 Fix B carried into CF.1 — the red banner ships a
+    `<details>` expander listing each failing kind alongside the first
+    line of its error so operators don't have to hunt across cards to
+    learn why a Session-Start Apply skipped a plant on their L2."""
     failed = {
         "limit_breach_outbound": (
             "ValueError: limit_breach_outbound plant: no Account-class "
@@ -244,12 +243,154 @@ def test_failed_banner_exposes_per_kind_reason_inline() -> None:
     html = render_training_v3_landing(
         base_prefix="recon-test",
         v_overlay_exists=True,
-        failed_kinds=failed,
+        last_apply={
+            "attempted": sorted(failed.keys()),
+            "succeeded": [],
+            "failed": failed,
+            "finished_at": "2026-06-04T10:00:00",
+            "path": "fast",
+        },
     )
     assert "show why each plant failed" in html
     assert "limit_breach_outbound" in html
     assert "no Account-class template with a Limits Schedule" in html
     assert "no 2-leg Rail with destination" in html
+
+
+def test_renders_amber_partial_banner_when_partial_failure() -> None:
+    """CF.1 lock — partial-failure renders AMBER (not red). Both
+    `data-test-partial-banner` AND `data-test-failed-banner` are
+    present (test-selector back-compat). Copy reads "N succeeded,
+    M failed" + per-kind <details> expander."""
+    html = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=True,
+        last_apply={
+            "attempted": ["drift", "phantom_rail"],
+            "succeeded": ["drift"],
+            "failed": {"phantom_rail": "ValueError: picker can't satisfy"},
+            "finished_at": "2026-06-04T10:00:00",
+            "path": "fast",
+        },
+    )
+    assert "data-test-partial-banner" in html
+    assert "data-test-failed-banner" in html
+    assert "data-test-last-apply-banner" in html
+    assert "bg-warning" in html
+    assert "1 succeeded, 1 failed" in html
+    assert "phantom_rail" in html
+    assert "show why each plant failed" in html
+
+
+def test_renders_green_last_apply_banner_when_all_succeeded() -> None:
+    """CF.1 — all-succeeded Apply renders a GREEN banner with
+    `data-test-training-banner` + `data-test-last-apply-banner`."""
+    html = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=True,
+        last_apply={
+            "attempted": ["drift"],
+            "succeeded": ["drift"],
+            "failed": {},
+            "finished_at": "2026-06-04T10:00:00",
+            "path": "fast",
+        },
+    )
+    assert "data-test-training-banner" in html
+    assert "data-test-last-apply-banner" in html
+    assert "data-test-failed-banner" not in html
+    assert "data-test-partial-banner" not in html
+    assert "1 plant(s) succeeded" in html
+    assert "bg-success" in html
+    assert "2026-06-04T10:00:00" in html
+
+
+def test_renders_no_apply_banner_when_last_apply_none() -> None:
+    """CF.1 — `last_apply=None` (kv unreachable OR no read site)
+    renders no last-apply banner. Banner-absent is honest under DB
+    error; lying-green would hide real failures."""
+    html = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=True,
+        last_apply=None,
+    )
+    assert "data-test-last-apply-banner" not in html
+    assert "data-test-partial-banner" not in html
+    assert "data-test-failed-banner" not in html
+
+
+def test_renders_no_apply_banner_when_last_apply_empty_dict() -> None:
+    """CF.1 — `last_apply={}` (Session Start ran, no Apply yet)
+    renders no last-apply banner. Distinguishes post-Session-Start
+    state from never-applied state."""
+    html = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=True,
+        last_apply={},
+    )
+    assert "data-test-last-apply-banner" not in html
+    assert "data-test-partial-banner" not in html
+    assert "data-test-failed-banner" not in html
+
+
+def test_renders_no_apply_banner_when_attempted_empty() -> None:
+    """CF.1 — empty Apply (operator submitted nothing checked)
+    suppresses the banner instead of rendering misleading "0 plant(s)
+    succeeded" copy. Defensive — `apply_plants` doesn't actually run
+    empty-form submissions, but the kv-read path must tolerate any
+    payload."""
+    html = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=True,
+        last_apply={
+            "attempted": [],
+            "succeeded": [],
+            "failed": {},
+            "finished_at": "2026-06-04T10:00:00",
+            "path": "fast",
+        },
+    )
+    assert "data-test-last-apply-banner" not in html
+
+
+def test_red_banner_truncates_at_5_kinds() -> None:
+    """CF.1 — long all-failed lists collapse to first 5 + "+N more"
+    so the banner doesn't wrap a screen."""
+    failed = {f"kind_{i}": f"err {i}" for i in range(7)}
+    html = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=True,
+        last_apply={
+            "attempted": sorted(failed.keys()),
+            "succeeded": [],
+            "failed": failed,
+            "finished_at": "2026-06-04T10:00:00",
+            "path": "fast",
+        },
+    )
+    # Per-kind <details> expander lists every failing kind (no
+    # truncation); the inline summary line ("Last apply: all N
+    # plant(s) failed") reports the count without truncating names.
+    for i in range(7):
+        assert f"kind_{i}" in html
+    assert "all 7 plant(s) failed" in html
+
+
+def test_progress_banner_redirect_drops_apply_done_status() -> None:
+    """CF.1 — the in-flight Apply progress banner's JS redirect no
+    longer claims `?status=Apply+done.`. The post-Apply landing now
+    reads the kv `trainer_last_apply` row + renders honest
+    green/amber/red, so appending a lying-green ribbon would stack a
+    false claim on top of the kv truth."""
+    html = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=True,
+        apply_running=True,
+        apply_pending_count=3,
+    )
+    assert "data-test-training-apply-banner" in html
+    assert "Apply+done." not in html
+    assert "?status=Apply" not in html
 
 
 def test_first_line_of_error_helper() -> None:

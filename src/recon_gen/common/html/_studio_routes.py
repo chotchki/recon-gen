@@ -4260,7 +4260,7 @@ def make_studio_routes(
             render_training_v3_landing,
         )
         from recon_gen.common.l2.v_overlay import (  # noqa: PLC0415
-            read_applied_state, read_failed_kinds,
+            read_applied_state, read_failed_kinds, read_last_apply,
             read_session_metadata,
             session_metadata_l2_mtime_key,
             session_metadata_session_start_key,
@@ -4270,13 +4270,20 @@ def make_studio_routes(
         v_overlay_exists = await _v_overlay_exists(
             cfg, instance, base_prefix,
         )
+        # CF.1 — the Session-Start ribbon stays ?status= driven because
+        # it's a transient post-action signal with no failure mode. The
+        # post-Apply banner reads from kv (read_last_apply) so it
+        # survives nav + Studio restart and renders honest amber on
+        # partial-failure instead of an unconditional green claim.
         session_status = request.query_params.get("status") or None
         applied: dict[str, dict[str, str]] = {}
         failed: dict[str, str] = {}
+        last_apply: dict[str, object] | None = None
         l2_stale = False
         if v_overlay_exists and cfg is not None:
             applied = await read_applied_state(cfg)
             failed = await read_failed_kinds(cfg)
+            last_apply = await read_last_apply(cfg)
             metadata = await read_session_metadata(cfg)
             stored_mtime_str = metadata.get(session_metadata_l2_mtime_key(), "")
             if stored_mtime_str:
@@ -4333,6 +4340,7 @@ def make_studio_routes(
             pending_kinds=pending_kinds,
             form_values=applied,
             failed_kinds=failed,
+            last_apply=last_apply,
             l2_stale=l2_stale,
             session_start_time=session_start_time,
             session_start_running=session_start_running,

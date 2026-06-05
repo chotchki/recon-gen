@@ -56,6 +56,7 @@ def render_training_v3_landing(
     pending_kinds: tuple[str, ...] = (),
     form_values: Mapping[str, Mapping[str, str]] | None = None,
     failed_kinds: Mapping[str, str] | None = None,
+    last_apply: Mapping[str, object] | None = None,
     l2_stale: bool = False,
     session_start_time: str = "",
     session_start_running: bool = False,
@@ -70,7 +71,9 @@ def render_training_v3_landing(
       v_overlay_exists: ``True`` when ``<base>_v_*`` tables are
         present (Session Start has run). Drives enable/disable of
         Apply + Tour buttons.
-      session_status: optional banner text to display.
+      session_status: optional banner text to display. CF.1 narrows
+        this to the Session-Start ribbon only — post-Apply state
+        comes from ``last_apply``.
       enabled_kinds: kinds whose checkboxes were last applied.
       pending_kinds: BV.4.10.e — kinds the operator had checked when
         they clicked Session Start, NOT yet applied. Rendered as
@@ -78,6 +81,11 @@ def render_training_v3_landing(
         still reflects only ``enabled_kinds`` and the diff preview
         ("+N new — Apply to commit") works correctly.
       form_values: per-kind form-value snapshot.
+      last_apply: CF.1 — kv-sourced last-Apply outcome.
+        ``None`` = unknown / kv unreachable (render no banner).
+        ``{}`` = no Apply since last Session Start (render no banner).
+        Populated dict (must include ``finished_at``) → render
+        green / amber / red based on ``succeeded`` + ``failed`` sets.
     """
     enabled_set = set(enabled_kinds)
     pending_set = set(pending_kinds) - enabled_set
@@ -119,6 +127,9 @@ def render_training_v3_landing(
         ))
 
     banner_html = ""
+    # CF.1 — Session-Start success ribbon (transient, ?status= driven).
+    # The Apply path no longer feeds session_status; only the
+    # Session-Start 303-redirect does.
     if session_status:
         banner_html += (
             '<div class="bg-success/10 border border-success rounded-md '
@@ -137,47 +148,103 @@ def render_training_v3_landing(
             '+ reseed the base + re-clone the v overlay.'
             "</div>"
         )
-    if failed:
-        failed_summary = ", ".join(sorted(failed.keys())[:5])
-        if len(failed) > 5:
-            failed_summary += f", … +{len(failed) - 5} more"
-        # CF.0 Fix B — surface the per-kind failure REASON inline, not
-        # just the kind name. Pre-CF.0 the banner read "Hover the
-        # card's error badge for the underlying message" which made
-        # the operator hover each failing card to learn WHY (and the
-        # cold-read reviewer never did — they reported "drift +
-        # limit_breach_outbound failed" without the L2-shape detail).
-        # Render each kind with the first line of its captured error
-        # inside a collapsed `<details>` block — operator can self-
-        # diagnose ("this L2 cannot demo limit_breach_outbound: no
-        # outbound LimitSchedule on a 2-leg rail with external
-        # counter") without leaving the banner. Cause is already
-        # persisted in `<base>_v_config_kv` under key
-        # `trainer_failed_plants` (`v_overlay.py:_FAILED_STATE_KEY`).
-        per_kind_details = "".join(
-            (
-                '<li class="ml-4 list-disc">'
-                f'<code class="font-mono">{escape(kind)}</code>: '
-                f'<span class="text-secondary-fg">'
-                f'{escape(_first_line_of_error(failed[kind]))}'
-                '</span>'
-                '</li>'
-            )
-            for kind in sorted(failed.keys())
+    # CF.1 — kv-sourced 3-state last-Apply banner. last_apply is read
+    # from `<base>_v_config_kv` on every /training/ landing GET, so
+    # the banner survives navigation + Studio restart and renders
+    # honest amber on partial-failure (was: unconditional green via
+    # ?status=Apply+done. URL redirect). Three branches:
+    #
+    #   * all succeeded → GREEN (data-test-training-banner +
+    #     data-test-last-apply-banner)
+    #   * partial failure → AMBER (data-test-partial-banner +
+    #     data-test-failed-banner + data-test-last-apply-banner)
+    #   * all failed → RED (data-test-failed-banner +
+    #     data-test-last-apply-banner)
+    #
+    # `data-test-failed-banner` is retained for the failure cases so
+    # existing test selectors keep working; the amber branch carries
+    # both attrs because it IS a failure surface (some plants failed)
+    # AND a partial surface (some succeeded). When last_apply is
+    # populated, the legacy `if failed:` fallback below is skipped.
+    if last_apply is not None and "finished_at" in last_apply:
+        from typing import cast as _cast  # noqa: PLC0415
+        succeeded_raw: object = last_apply.get("succeeded")
+        failed_dict_raw: object = last_apply.get("failed")
+        attempted_raw: object = last_apply.get("attempted")
+        finished_at = str(last_apply.get("finished_at", ""))
+        succeeded_list: list[str] = (
+            [str(k) for k in _cast(list[object], succeeded_raw)]
+            if isinstance(succeeded_raw, list) else []
         )
-        banner_html += (
-            '<div class="bg-danger/10 border border-danger rounded-md '
-            'px-3 py-2 mb-3 text-sm" data-test-failed-banner>'
-            f'<strong class="text-danger">✗</strong> {len(failed)} plant(s) '
-            f'failed on the last Apply: {escape(failed_summary)}.'
-            ' <details class="mt-1 inline-block">'
-            '<summary class="cursor-pointer text-danger">'
-            'show why each plant failed'
-            '</summary>'
-            f'<ul class="mt-1 text-xs">{per_kind_details}</ul>'
-            '</details>'
-            "</div>"
+        attempted_list: list[str] = (
+            [str(k) for k in _cast(list[object], attempted_raw)]
+            if isinstance(attempted_raw, list) else []
         )
+        failed_dict: dict[str, str] = (
+            {str(k): str(v) for k, v in _cast(dict[object, object], failed_dict_raw).items()}
+            if isinstance(failed_dict_raw, dict) else {}
+        )
+        # Empty Apply (operator submitted with nothing checked) renders
+        # no banner — `attempted=[]` is the only state where succeeded
+        # AND failed are both empty AND the apply path actually ran;
+        # suppress so the operator isn't confronted with "0 plant(s)
+        # succeeded" copy.
+        if attempted_list or succeeded_list or failed_dict:
+            n_succeeded = len(succeeded_list)
+            n_failed = len(failed_dict)
+            per_kind_details_html = ""
+            if failed_dict:
+                per_kind_details_html = "".join(
+                    (
+                        '<li class="ml-4 list-disc">'
+                        f'<code class="font-mono">{escape(kind)}</code>: '
+                        f'<span class="text-secondary-fg">'
+                        f'{escape(_first_line_of_error(failed_dict[kind]))}'
+                        '</span>'
+                        '</li>'
+                    )
+                    for kind in sorted(failed_dict.keys())
+                )
+            details_block = (
+                ' <details class="mt-1 inline-block">'
+                '<summary class="cursor-pointer">'
+                'show why each plant failed'
+                '</summary>'
+                f'<ul class="mt-1 text-xs">{per_kind_details_html}</ul>'
+                '</details>'
+            ) if failed_dict else ""
+            if n_failed == 0 and n_succeeded > 0:
+                banner_html += (
+                    '<div class="bg-success/10 border border-success rounded-md '
+                    'px-3 py-2 mb-3 text-sm" data-test-training-banner '
+                    'data-test-last-apply-banner>'
+                    f'<strong class="text-success">✓</strong> '
+                    f'Last apply: {n_succeeded} plant(s) succeeded at '
+                    f'{escape(finished_at)}.'
+                    "</div>"
+                )
+            elif n_failed > 0 and n_succeeded > 0:
+                banner_html += (
+                    '<div class="bg-warning/10 border border-warning rounded-md '
+                    'px-3 py-2 mb-3 text-sm" data-test-partial-banner '
+                    'data-test-failed-banner data-test-last-apply-banner>'
+                    '<strong class="text-warning">⚠</strong> '
+                    f'Last apply: {n_succeeded} succeeded, {n_failed} '
+                    f'failed at {escape(finished_at)}.'
+                    f'{details_block}'
+                    "</div>"
+                )
+            elif n_failed > 0 and n_succeeded == 0:
+                banner_html += (
+                    '<div class="bg-danger/10 border border-danger rounded-md '
+                    'px-3 py-2 mb-3 text-sm" data-test-failed-banner '
+                    'data-test-last-apply-banner>'
+                    '<strong class="text-danger">✗</strong> '
+                    f'Last apply: all {n_failed} plant(s) failed at '
+                    f'{escape(finished_at)}.'
+                    f'{details_block}'
+                    "</div>"
+                )
     # BV.4.10.d — Session-Start-in-flight banner with collapsible
     # live tail. The wrapper polls `/training/session-start/stream`
     # every 1s; on completion the response carries
@@ -216,7 +283,12 @@ def render_training_v3_landing(
                 "you're only adding new plants."
             ),
             finished_event="training-apply-finished",
-            redirect_url="/training/?status=Apply+done.",
+            # CF.1 — drop the unconditional ?status=Apply+done. green
+            # ribbon. The post-Apply landing now reads `last_apply`
+            # from kv and renders honest green/amber/red based on the
+            # actual outcome; appending a green ?status= here would
+            # stack a lying claim on top of an amber kv truth.
+            redirect_url="/training/",
         )
 
     total_enabled = sum(

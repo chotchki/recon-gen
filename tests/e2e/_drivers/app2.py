@@ -919,30 +919,37 @@ class App2Driver:
 
         BV.4.10.d.2 — Apply mirrors Session Start: POST 303s back
         to /training/ with an apply-in-progress banner + live-tail.
-        On completion the HX-Trigger fires JS reload to
-        `/training/?status=Apply+done.`
+        On completion the HX-Trigger fires JS reload to /training/.
 
         Wait shape mirrors `trainer_start_session` (in-progress
-        banner → live-tail finished state → JS-reloaded success
-        banner). Default timeout 2 min — sqlite Apply finishes in
+        banner → live-tail finished state → JS-reloaded last-apply
+        banner). Default timeout 2 min — DuckDB Apply finishes in
         seconds, PG slow-path reclone takes ~30s, oracle ~few min.
+
+        CF.1 — terminal-state detection waits on the unified
+        `data-test-last-apply-banner` attr (carried by all three
+        post-Apply banner colors: green all-succeeded, amber
+        partial, red all-failed) so partial-failure scenarios
+        don't time out the way they would against the legacy
+        green-only `data-test-training-banner` selector.
         """
         self._page.click("#training-apply-btn")
         # In-progress banner appears (or page already reloaded for
-        # very-fast no-op applies).
+        # very-fast no-op applies — the last-apply banner is the
+        # CF.1 post-reload terminal state).
         self._page.wait_for_selector(
             "[data-test-training-apply-banner], "
-            "[data-test-training-banner]",
+            "[data-test-last-apply-banner]",
             timeout=15_000,
         )
-        if self._page.locator("[data-test-training-banner]").count() > 0:
+        if self._page.locator("[data-test-last-apply-banner]").count() > 0:
             return
         self._trainer_wait_until_finished(
             mount_id="training-apply-live-tail",
             timeout_ms=timeout_ms,
         )
         self._page.wait_for_selector(
-            "[data-test-training-banner]",
+            "[data-test-last-apply-banner]",
             timeout=15_000,
         )
 

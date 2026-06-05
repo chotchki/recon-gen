@@ -255,6 +255,17 @@ async def session_start(
                     ),
                     dialect=cfg.dialect,
                 )
+                # CF.1 — wipe last-Apply banner state too so a fresh
+                # Session Start (incl. reclone via refresh_base=False)
+                # starts with no stale green/amber/red banner.
+                execute_script(
+                    cur,
+                    _kv_write_sql(
+                        base_prefix, _LAST_APPLY_KEY, "{}",
+                        "__bv_last_apply__",
+                    ),
+                    dialect=cfg.dialect,
+                )
 
                 conn.commit()
             finally:
@@ -487,6 +498,33 @@ async def apply_plants(
                 )
                 execute_script(cur, failed_sql, dialect=cfg.dialect)
 
+                # CF.1 — record last-Apply outcome in one atomic
+                # row so the v3 landing's banner can render
+                # green/amber/red from kv on every GET (persists
+                # across nav + Studio restart). datetime.now() at
+                # the apply boundary, not at write-site, is
+                # acceptable because this commit IS the apply
+                # boundary.
+                # Apply finish stamp is intentional wall-clock for
+                # the operator-facing banner — not part of any locked
+                # seed or deterministic artifact.
+                finished_at_str = datetime.now().isoformat(timespec="seconds")  # typing-smell: ignore[no-datetime-now]: operator-facing apply timestamp, not seed-determinism input
+                last_apply_payload = {
+                    "attempted": sorted(
+                        set(succeeded.keys()) | set(failures.keys())
+                    ),
+                    "succeeded": sorted(succeeded.keys()),
+                    "failed": failures,
+                    "finished_at": finished_at_str,
+                    "path": "slow" if needs_reclone else "fast",
+                }
+                last_apply_sql = _kv_write_sql(
+                    base_prefix, _LAST_APPLY_KEY,
+                    json.dumps(last_apply_payload, separators=(",", ":")),
+                    "__bv_last_apply__",
+                )
+                execute_script(cur, last_apply_sql, dialect=cfg.dialect)
+
                 conn.commit()
             finally:
                 cur.close()
@@ -515,6 +553,7 @@ _ = date
 
 _APPLIED_STATE_KEY = "trainer_applied_plants"
 _FAILED_STATE_KEY = "trainer_failed_plants"
+_LAST_APPLY_KEY = "trainer_last_apply"
 _SESSION_START_KEY = "trainer_session_start_time"
 _L2_YAML_MTIME_KEY = "trainer_l2_yaml_mtime"
 
@@ -589,6 +628,63 @@ async def read_failed_kinds(cfg: "Config") -> dict[str, str]:
                     return {}
                 d = cast(dict[object, object], raw)
                 return {str(k): str(v) for k, v in d.items()}
+            finally:
+                cur.close()
+        finally:
+            conn.close()
+
+    return await asyncio.to_thread(_run)
+
+
+async def read_last_apply(cfg: "Config") -> dict[str, object] | None:
+    """CF.1 — last-Apply outcome for the kv-sourced banner. Three
+    return states:
+
+    - ``None`` — kv unreachable (connect error / cursor error / JSON
+      parse error / non-dict shape). Banner should render nothing
+      under this state, NOT fall back to a stale optimistic claim.
+    - ``{}`` — empty dict, row exists with value '{}' (Session Start
+      has fired but no Apply yet). Banner renders nothing.
+    - populated dict with ``finished_at`` — render
+      green/amber/red based on ``succeeded`` + ``failed``.
+
+    Payload shape (last-Apply-wins, not cumulative):
+    ``{"attempted": [<kind>, ...],
+        "succeeded": [<kind>, ...],
+        "failed": {<kind>: <ExcName: msg>, ...},
+        "finished_at": <ISO seconds, local TZ>,
+        "path": "fast" | "slow"}``
+    """
+    import json  # noqa: PLC0415
+
+    base_prefix = cfg.db_table_prefix
+
+    def _run() -> dict[str, object] | None:
+        try:
+            conn = connect_demo_db(cfg)
+        except Exception:  # noqa: BLE001
+            return None
+        try:
+            cur = conn.cursor()
+            try:
+                try:
+                    cur.execute(_kv_read_sql(base_prefix, _LAST_APPLY_KEY))
+                    row = cur.fetchone()
+                except Exception:  # noqa: BLE001
+                    return None
+                if row is None or row[0] is None:
+                    return None
+                try:
+                    raw: object = json.loads(str(row[0]))
+                except (ValueError, TypeError):
+                    return None
+                if not isinstance(raw, dict):
+                    return None
+                # Empty kv row (Session Start wipe) → empty dict; banner
+                # render branch on `not last_apply` short-circuits.
+                from typing import cast  # noqa: PLC0415
+                d = cast(dict[object, object], raw)
+                return {str(k): v for k, v in d.items()}
             finally:
                 cur.close()
         finally:
