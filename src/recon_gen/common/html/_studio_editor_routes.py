@@ -47,6 +47,11 @@ from recon_gen.common.html._studio_assets.tw_classes import (
     field_row_classes,
     primary_button_classes,
 )
+from recon_gen.common.html._components import (
+    SortAxis,
+    parse_toolbar_state,
+    render_list_toolbar,
+)
 from recon_gen.common.html._studio_routes import studio_theme_head
 from recon_gen.common.l2.cache import L2InstanceCache
 from recon_gen.common.l2.editor import (
@@ -66,6 +71,7 @@ from recon_gen.common.l2.primitives import (
     Money,
     Name,
     Period,
+    TwoLegRail,
 )
 from recon_gen.common.l2.validate import L2ValidationError, validate
 
@@ -3715,10 +3721,16 @@ def _render_list_page(
     kind: EntityKind, entities: tuple[object, ...],
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — passed through to per-card hide logic
     *,
+    toolbar_html: str = "",
     embed: bool = False,
     demo_mode: bool = False,
 ) -> str:
     """Full HTML page — every entity of the kind rendered as a read card.
+
+    ``toolbar_html`` (CF.4.b) is the search/sort/page chrome from
+    ``render_list_toolbar()``; the caller pre-slices ``entities`` so
+    this function only renders the current page. Empty string skips
+    the toolbar (legacy callers + tests).
 
     ``embed=True`` returns just the cards container (no html/head/body)
     so the X.4.f.7 home page can ``hx-get`` it into a section without
@@ -3738,8 +3750,18 @@ def _render_list_page(
         "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 "
         "max-w-7xl mx-auto px-4 pt-4 pb-12"
     )
+    # CF.4.b — toolbar wraps the cards container in a column so the
+    # toolbar sits above and the pager actions target the cards
+    # `hx-target="#entity-list"`.
+    toolbar_wrapper_open = (
+        '<div class="max-w-7xl mx-auto px-4 pt-4">' if toolbar_html else ""
+    )
+    toolbar_wrapper_close = "</div>" if toolbar_html else ""
     if embed:
-        return f'<div class="{grid_cls}" data-kind="{escape(kind)}">{cards}</div>'
+        return (
+            f"{toolbar_wrapper_open}{toolbar_html}{toolbar_wrapper_close}"
+            f'<div class="{grid_cls}" data-kind="{escape(kind)}">{cards}</div>'
+        )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -3772,6 +3794,7 @@ def _render_list_page(
     <a class="text-accent no-underline text-sm hover:underline" href="/">← landing</a>
     <a class="text-accent no-underline text-sm hover:underline" href="/diagram">→ diagram</a>
   </header>
+  {toolbar_wrapper_open}{toolbar_html}{toolbar_wrapper_close}
   <main id="entity-list" class="{grid_cls}">
     {cards}
   </main>
@@ -3805,6 +3828,82 @@ def _entity_id(kind: EntityKind, entity: object) -> str:
         f"{getattr(entity, 'rail')}::"
         f"{getattr(entity, 'direction')}"
     )
+
+
+# ---------------------------------------------------------------------------
+# CF.4.b — filter + sort for the editor list view
+# ---------------------------------------------------------------------------
+
+
+def _filter_entities(
+    entities: tuple[object, ...], kind: EntityKind, q: str,
+) -> tuple[object, ...]:
+    """Case-insensitive substring match against the entity_id. CF.4.b
+    ships id-only search; richer "search by role name, by leg rail,
+    by description" can land as a CF.4.h refinement once the cold-read
+    flags what operators actually search by."""
+    if not q:
+        return entities
+    needle = q.lower()
+    return tuple(
+        e for e in entities
+        if needle in _entity_id(kind, e).lower()
+    )
+
+
+def _sort_entities(
+    entities: tuple[object, ...],
+    kind: EntityKind,
+    sort_axis: SortAxis,
+) -> tuple[object, ...]:
+    """Apply ``sort_axis`` to ``entities``. Tiebreak on entity_id
+    always so pagination is stable across pages (risk #7) — the order
+    tuples put the operator-chosen axis first, entity_id last. Per-axis
+    branches are inlined so pyright can read each key as a uniformly-
+    typed tuple (a unified ``Callable[[object], object]`` indirection
+    breaks sorted()'s SupportsRichComparison bound).
+    """
+    if sort_axis == "default":
+        return entities
+
+    def eid(e: object) -> str:
+        return _entity_id(kind, e)
+
+    if sort_axis == "name_asc":
+        return tuple(sorted(entities, key=eid))
+    if sort_axis == "name_desc":
+        return tuple(sorted(entities, key=eid, reverse=True))
+    if sort_axis == "rail_subtype":
+        # Two-leg first (TwoLegRail before SingleLegRail), then by name.
+        def rail_key(e: object) -> tuple[int, str]:
+            return (0 if isinstance(e, TwoLegRail) else 1, eid(e))
+        return tuple(sorted(entities, key=rail_key))
+    if sort_axis == "template_leg_count":
+        def template_key(e: object) -> tuple[int, str]:
+            leg_rails = getattr(e, "leg_rails", ())
+            return (len(leg_rails), eid(e))
+        return tuple(sorted(entities, key=template_key))
+    if sort_axis == "chain_parent":
+        def chain_key(e: object) -> tuple[str, str]:
+            return (str(getattr(e, "parent", "")), eid(e))
+        return tuple(sorted(entities, key=chain_key))
+    # Unreachable — sort_axis is a closed Literal; pyright catches
+    # every miss at the call site. Keep an explicit fallthrough so
+    # the function's type is well-defined.
+    return entities
+
+
+def _safe_sort_axis(kind: EntityKind, raw: str | None) -> SortAxis:
+    """Clamp an unknown / out-of-universe sort axis to ``default``.
+    Symmetric with ``parse_toolbar_state``'s clamping — used here so
+    the filter+sort path doesn't double-validate inside
+    `ListToolbarState`."""
+    from recon_gen.common.html._components import (  # noqa: PLC0415
+        SORT_AXES_BY_KIND,
+    )
+    if raw is None or raw not in SORT_AXES_BY_KIND[kind]:
+        return "default"
+    return raw  # type: ignore[return-value]: raw membership-checked against SORT_AXES_BY_KIND[kind] above; pyright loses the narrowing across the str-to-Literal return
 
 
 def _html_id_slug(entity_id: str) -> str:
@@ -3871,8 +3970,44 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
         # body) so the home page can hx-get it into a <details> section
         # without nesting full documents.
         embed = request.query_params.get("embed") == "1"
+        # CF.4.b — parse the search/sort/page query params, filter +
+        # sort the entities tuple, slice to the current page, build
+        # the toolbar HTML, and pass everything to the renderer. The
+        # primitive (`_components.py`) handles clamping bad input so
+        # the route doesn't need defensive code.
+        filtered = _filter_entities(
+            entities, kind,
+            (request.query_params.get("q") or "").strip(),
+        )
+        sorted_filtered = _sort_entities(
+            filtered, kind,
+            _safe_sort_axis(
+                kind, request.query_params.get("sort_column"),
+            ),
+        )
+        state = parse_toolbar_state(
+            request.query_params,
+            kind=kind,
+            total_count=len(sorted_filtered),
+        )
+        page_entities = sorted_filtered[
+            state.page_offset:state.page_offset + state.page_size
+        ]
+        toolbar_html = render_list_toolbar(
+            state,
+            submit_url=(
+                f"/l2_shape/{kind}/?embed=1" if embed
+                else f"/l2_shape/{kind}/"
+            ),
+            swap_target_id="entity-list",
+            embed=embed,
+        )
         return HTMLResponse(
-            _render_list_page(kind, entities, inst, embed=embed, demo_mode=demo_mode),
+            _render_list_page(
+                kind, page_entities, inst,
+                toolbar_html=toolbar_html,
+                embed=embed, demo_mode=demo_mode,
+            ),
         )
 
     async def read_card(request: Request) -> HTMLResponse:

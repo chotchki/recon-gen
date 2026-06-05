@@ -360,6 +360,64 @@ def render_list_toolbar(
     )
 
 
+# ---------------------------------------------------------------------------
+# Query-param parsing (CF.4.b)
+# ---------------------------------------------------------------------------
+
+
+def parse_toolbar_state(
+    query_params: Mapping[str, str],
+    *,
+    kind: EntityKind,
+    total_count: int,
+    url_prefix: str = "",
+) -> ListToolbarState:
+    """Pull toolbar state from a request's query params, clamping
+    every input that ``ListToolbarState.__post_init__`` would reject.
+
+    Callers pass ``request.query_params`` (Starlette's
+    ``QueryParams``). Unknown / malformed values fall back to safe
+    defaults — the rendered toolbar then reads as "no search, default
+    sort, first page" rather than 500ing the request. Risk #6 (DoS via
+    crafted ``?page_size=9999999``) is mitigated here: any value
+    outside ``[1, PAGE_SIZE_MAX]`` clamps to the cap.
+
+    ``url_prefix`` chooses Q1A vs Q1B URL keys (bare keys for the
+    per-kind page; ``<prefix>_`` namespaced for the home page where
+    every section's state co-exists in the URL).
+    """
+    def key(base: str) -> str:
+        return f"{url_prefix}_{base}" if url_prefix else base
+
+    raw_q = (query_params.get(key("q")) or "").strip()
+
+    raw_sort = query_params.get(key("sort_column")) or "default"
+    if raw_sort not in SORT_AXES_BY_KIND[kind]:
+        raw_sort = "default"
+
+    try:
+        raw_offset = int(query_params.get(key("page_offset")) or "0")
+    except ValueError:
+        raw_offset = 0
+    raw_offset = max(0, raw_offset)
+
+    try:
+        raw_size = int(query_params.get(key("page_size")) or PAGE_SIZE_DEFAULT)
+    except ValueError:
+        raw_size = PAGE_SIZE_DEFAULT
+    raw_size = max(1, min(raw_size, PAGE_SIZE_MAX))
+
+    return ListToolbarState(
+        kind=kind,
+        q=raw_q,
+        sort_axis=raw_sort,  # type: ignore[arg-type]: post-validated above against SORT_AXES_BY_KIND[kind]
+        page_offset=raw_offset,
+        page_size=raw_size,
+        total_count=max(0, total_count),
+        url_prefix=url_prefix,
+    )
+
+
 __all__ = [
     "PAGE_SIZE_DEFAULT",
     "PAGE_SIZE_MAX",
@@ -367,5 +425,6 @@ __all__ = [
     "SORT_AXIS_LABELS",
     "ListToolbarState",
     "SortAxis",
+    "parse_toolbar_state",
     "render_list_toolbar",
 ]
