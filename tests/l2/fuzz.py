@@ -63,13 +63,34 @@ def random_l2_yaml(seed: int) -> str:
     )
 
 
+def random_l2_yaml_from_plan(plan: FuzzPlan) -> str:
+    """Generate a deterministic valid L2 YAML from an explicit plan.
+
+    Companion to ``random_l2_yaml(seed)``. Where ``random_l2_yaml`` samples
+    knobs (rails/templates/chains/...) inside the default ranges, this
+    accepts an already-constructed ``FuzzPlan`` so callers can drive the
+    generator outside those ranges — heavy-density stress fixtures
+    (CF.3.spike diagram audit, scale-perf benchmarks), surgical
+    reproductions, deliberate edge-density configurations, etc.
+
+    The default-ranged ``random_l2_yaml`` path remains the byte-stable
+    dogfood-pool seed source; this entry is for purpose-built plans
+    that aren't part of the random pool.
+    """
+    rng = Random(plan.seed)
+    inst = _build_instance(rng, plan)
+    return yaml.safe_dump(
+        inst, sort_keys=False, default_flow_style=False, width=120,
+    )
+
+
 # ---------------------------------------------------------------------------
 # The plan: per-seed-sampled counts + ratios + flags
 # ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
-class _FuzzPlan:
+class FuzzPlan:
     """Top-level variation knobs sampled once per seed."""
 
     seed: int
@@ -86,9 +107,9 @@ class _FuzzPlan:
     description_probability: float     # P(primitive gets a description) (0.5-1.0)
 
 
-def _sample_plan(rng: Random, seed: int) -> _FuzzPlan:
+def _sample_plan(rng: Random, seed: int) -> FuzzPlan:
     n_rails = rng.randint(3, 8)
-    return _FuzzPlan(
+    return FuzzPlan(
         seed=seed,
         n_singleton_internal=rng.randint(2, 6),
         n_singleton_external=rng.randint(1, 3),
@@ -118,7 +139,7 @@ class _BuildState:
     structure that makes cross-entity validity a structural property.
     """
 
-    plan: _FuzzPlan
+    plan: FuzzPlan
     # Singleton-account roles: parent-template candidates (R3).
     singleton_internal_roles: list[str] = field(default_factory=list[str])
     singleton_external_roles: list[str] = field(default_factory=list[str])
@@ -151,7 +172,7 @@ class _BuildState:
 # ---------------------------------------------------------------------------
 
 
-def _build_instance(rng: Random, plan: _FuzzPlan) -> dict[str, Any]:
+def _build_instance(rng: Random, plan: FuzzPlan) -> dict[str, Any]:
     state = _BuildState(plan=plan)
 
     # Z.C (2026-05-15) — the legacy `instance:` YAML key is gone; the

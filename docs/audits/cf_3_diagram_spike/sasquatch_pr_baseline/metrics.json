@@ -1,0 +1,48 @@
+{
+  "label": "sasquatch_pr_baseline",
+  "yaml": "tests/l2/sasquatch_pr.yaml",
+  "yaml_bytes": 54946,
+  "instance_counts": {
+    "accounts": 16,
+    "account_templates": 3,
+    "rails": 30,
+    "transfer_templates": 3,
+    "chains": 5,
+    "limit_schedules": 7
+  },
+  "layers": [
+    {
+      "layer": 1,
+      "n_nodes": 14,
+      "n_edges": 3,
+      "crossings": 0,
+      "width_pt": 305.0,
+      "height_pt": 514.0,
+      "layout_ms": 76.1,
+      "dot_bytes": 2330,
+      "svg_bytes": 9989
+    },
+    {
+      "layer": 2,
+      "n_nodes": 41,
+      "n_edges": 45,
+      "crossings": 0,
+      "width_pt": 1682.0,
+      "height_pt": 502.0,
+      "layout_ms": 77.6,
+      "dot_bytes": 10073,
+      "svg_bytes": 38411
+    },
+    {
+      "layer": 3,
+      "n_nodes": 44,
+      "n_edges": 65,
+      "crossings": 1086,
+      "width_pt": 2517.0,
+      "height_pt": 827.0,
+      "layout_ms": 80.9,
+      "dot_bytes": 14491,
+      "svg_bytes": 55935
+    }
+  ]
+}
