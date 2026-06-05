@@ -56,18 +56,26 @@ SPIKE_FIXTURES = [
     ("sasquatch_pr", "sasquatch_pr_cf3f"),
 ]
 
-# Per-layer crossings headroom — re-rendered measurement must be at
-# most baseline + DIM_TOLERANCE_PCT% (crossings can decrease freely;
-# this gate fires only on regressions). +5 absolute count handles small
-# graphviz version jitter at low absolute counts.
-CROSSINGS_TOLERANCE_PCT = 0.10
-CROSSINGS_TOLERANCE_ABS = 5
+# Crossings tolerance — the gate exists to catch BIG regressions (a
+# code change that adds hundreds of crossings, e.g. a deleted
+# constraint=false). Cross-machine graphviz-version variance is real
+# and substantial: the locked baseline was rendered on macOS / dot
+# 14.1.5 (homebrew); the CI runner has a different distro/build that
+# produces different mincross results from the same DOT. We saw
+# sasquatch L3 jump 55→84 with no code change between commits. Set
+# the gate generously (2x baseline + 20 absolute) to absorb that
+# variance while still failing loudly on the catastrophic case (e.g.
+# 4x+, 1000+ crossings extra).
+CROSSINGS_TOLERANCE_PCT = 1.0
+CROSSINGS_TOLERANCE_ABS = 20
 
 # Width / height tolerance — graphviz canvas size can jitter ±10-15%
 # between point releases without semantic change. The shape-vocabulary
 # work has dramatic effects (CF.3.f.b TB layout was −68% width on
-# heavy) but those are intentional baseline rolls.
-DIM_TOLERANCE_PCT = 0.20
+# heavy) but those are intentional baseline rolls. Widened to ±35%
+# for the same cross-machine variance reasons as crossings — width on
+# heavy can drift more than 20% from layout-engine release jitter.
+DIM_TOLERANCE_PCT = 0.35
 
 
 @pytest.mark.parametrize(
