@@ -10,7 +10,7 @@ DB backends: PostgreSQL 17+ / Oracle 19c+ for prod; **DuckDB** as the local-iter
 
 ## Quick Reference
 
-- **Python 3.13** + **uv** (lock at `uv.lock`, venv at `.venv/`; `uv sync --all-extras` after pull; invoke via `.venv/bin/...`)
+- **Python 3.14** + **uv** (lock at `uv.lock`, venv at `.venv/`; `uv sync --all-extras` after pull; invoke via `.venv/bin/...`)
 - **Entry point**: `python -m recon_gen` or `recon-gen`; **CLI**: Click; **Output**: JSON in `out/`
 - **Dialects**: PostgreSQL 17+ / Oracle 19c+ / DuckDB (default local) / SQLite 3.38+ (legacy, manual opt-in until CB removes it); SQL emitters branch on `Dialect` enum (`common/sql/dialect.py`); DuckDB uses `json_extract_string` (not `JSON_VALUE` — DuckDB's `JSON_VALUE` returns quoted JSON form, see [[project_duckdb_local_default_post_ca]]) and matviews are `CREATE TABLE … AS SELECT` (refresh = re-CREATE, same shape as the SQLite path).
 
