@@ -18,13 +18,13 @@ digraph l2_topology_per_rail_spike {
 	role__WireSettlementSuspense [label=WireSettlementSuspense color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
 	role__ZBASubAccount [label=ZBASubAccount color="#1f4e79" fillcolor="#e8f0ff" fontcolor="#1f4e79" shape=folder]
 	tmpl__InternalTransferCycle [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>InternalTransferCycle</B><BR/><FONT POINT-SIZE="8">(&#x27;internal_transfer_id&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>InternalTransferCycle</B><BR/><FONT POINT-SIZE="8">internal_transfer_id</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_InternalTransferDebit" ALIGN="LEFT">InternalTransferDebit  (D)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_InternalTransferCredit" ALIGN="LEFT">InternalTransferCredit  (C)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_InternalTransferSuspenseClose" ALIGN="LEFT">InternalTransferSuspenseClose  (V)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__MerchantSettlementCycle [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>MerchantSettlementCycle</B><BR/><FONT POINT-SIZE="8">(&#x27;merchant_id&#x27;, &#x27;settlement_period&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>MerchantSettlementCycle</B><BR/><FONT POINT-SIZE="8">merchant_id, settlement_period</FONT></TD></TR>
   <TR><TD BGCOLOR="#ffe1c2" PORT="leg_SettlementAutoSettle" ALIGN="LEFT">SettlementAutoSettle  (V)</TD></TR>
   <TR><TD BGCOLOR="#ffe1c2" PORT="leg_SettlementStandardSettle" ALIGN="LEFT">SettlementStandardSettle  (V)</TD></TR>
   <TR><TD BGCOLOR="#ffe1c2" PORT="leg_SettlementSlowSettle" ALIGN="LEFT">SettlementSlowSettle  (V)</TD></TR>
@@ -34,7 +34,7 @@ digraph l2_topology_per_rail_spike {
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_MerchantCardSale" ALIGN="LEFT">MerchantCardSale  (↔)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__MerchantWeeklyPayoutBatch [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>MerchantWeeklyPayoutBatch</B><BR/><FONT POINT-SIZE="8">(&#x27;merchant_id&#x27;, &#x27;payout_batch_id&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>MerchantWeeklyPayoutBatch</B><BR/><FONT POINT-SIZE="8">merchant_id, payout_batch_id</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_MerchantWeeklyBatchClose" ALIGN="LEFT">MerchantWeeklyBatchClose  (C)</TD></TR>
 </TABLE>> shape=plaintext]
 	rail__CustomerInboundACH [label=CustomerInboundACH color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]

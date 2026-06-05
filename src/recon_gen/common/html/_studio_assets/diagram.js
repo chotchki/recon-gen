@@ -40,16 +40,28 @@ const EDGE_LABEL_KINDS = [
   "rail_bundle", "self_loop", "chain", "control_parent",
 ];
 
+// CF.3.f — port-suffixed edge endpoints. When a chain/rail edge docks
+// at an HTML-table cell PORT (e.g. `tmpl__T:leg_R:e` source or
+// `tmpl__T2:w` target), graphviz emits the title with the port name
+// dropped but the compass anchor (`:e`/`:w`/`:n`/`:s`) preserved. We
+// strip the compass suffix BEFORE prefix-matching so id/kind extraction
+// works on both port-anchored and plain endpoints.
+function _stripCompass(s) {
+  return s.replace(/:[ewns]$/, "");
+}
+
 function _idFromTitle(title) {
+  const stripped = _stripCompass(title);
   for (const [prefix, _kind] of Object.entries(PREFIX_TO_KIND)) {
-    if (title.startsWith(prefix)) return title.slice(prefix.length);
+    if (stripped.startsWith(prefix)) return stripped.slice(prefix.length);
   }
-  return title;
+  return stripped;
 }
 
 function _kindFromTitle(title) {
+  const stripped = _stripCompass(title);
   for (const [prefix, kind] of Object.entries(PREFIX_TO_KIND)) {
-    if (title.startsWith(prefix)) return kind;
+    if (stripped.startsWith(prefix)) return kind;
   }
   return "unknown";
 }
@@ -63,19 +75,31 @@ function _parseEdgeTitle(title) {
 // Edge kind heuristic — the typed graph's edge kinds aren't carried in
 // the graphviz title (graphviz only knows source->target). We classify
 // from the title-extracted node-kinds + self-loop test.
+// CF.3.f post-fix: any role↔template-port edge is a rail edge (the
+// template's leg cell is the rail's port surrogate post-CF.3.f). The
+// old `template_member` arm is dead (CF.3.f deletes membership edges
+// entirely — templates are composite shapes, not clusters with rails
+// inside). Anything role↔template OR template↔role is rail_bundle.
 function _edgeKind(srcId, dstId) {
   const srcKind = _kindFromTitle(srcId);
   const dstKind = _kindFromTitle(dstId);
   if (srcId === dstId) return "self_loop";
   if (srcKind === "role" && dstKind === "role") {
-    // Could be rail_bundle or control_parent — both go role→role. Without
-    // sidecar metadata to disambiguate (control_parent edges aren't
-    // distinct in the graphviz title), default to rail_bundle. The post-
-    // process below cross-references the typed graph's edge list to
-    // overwrite this when needed.
+    // Could be rail_bundle or control_parent — both go role→role.
+    // Default to rail_bundle; the post-process below uses the typed
+    // graph's edge list to overwrite control-parent cases.
     return "rail_bundle";
   }
-  if (srcKind === "template" && dstKind === "rail") return "template_member";
+  if (
+    (srcKind === "role" && dstKind === "template") ||
+    (srcKind === "template" && dstKind === "role")
+  ) {
+    // CF.3.f — rail edges dock at the template's leg port; the title
+    // looks like role↔template after port stripping. Pre-CF.3.f rail
+    // nodes were separate (role→rail→role); post-CF.3.f they're cells
+    // in the composite. Both renderings carry the rail-flow semantic.
+    return "rail_bundle";
+  }
   return "chain";
 }
 

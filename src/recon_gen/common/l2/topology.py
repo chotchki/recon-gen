@@ -451,6 +451,8 @@ def _template_composite_label(
     template: TransferTemplate,
     rails_by_name: Mapping[Identifier, Rail],
     rail_to_xor_group: Mapping[Identifier, int],
+    *,
+    leg_in_focus: Any = None,
 ) -> str:
     """CF.3.f composite template label (HTML-<table>).
 
@@ -464,11 +466,15 @@ def _template_composite_label(
     import html as _html
 
     name_html = _html.escape(str(template.name))
-    transfer_key = getattr(template, "transfer_key", None)
+    # transfer_key is tuple[Identifier, ...]; `str()` would call
+    # tuple.__repr__ and render `('key1', 'key2')` literally in the
+    # template header. Join with ", " so the operator sees plain text.
+    transfer_key = getattr(template, "transfer_key", None) or ()
     if transfer_key:
+        key_text = ", ".join(_html.escape(str(k)) for k in transfer_key)
         header_inner = (
             f"<B>{name_html}</B>"
-            f'<BR/><FONT POINT-SIZE="8">{_html.escape(str(transfer_key))}</FONT>'
+            f'<BR/><FONT POINT-SIZE="8">{key_text}</FONT>'
         )
     else:
         header_inner = f"<B>{name_html}</B>"
@@ -481,6 +487,11 @@ def _template_composite_label(
     ]
     for rail_name in template.leg_rails:
         if rail_name not in rails_by_name:
+            continue
+        # CF.3.f focus-gate: when a focus filter is active, skip
+        # out-of-focus leg rows so the composite matches pre-CF.3.f
+        # per-rail focus behavior. None = no filter, emit all.
+        if leg_in_focus is not None and not leg_in_focus(rail_name):
             continue
         rail = rails_by_name[rail_name]
         rail_html = _html.escape(str(rail.name))
@@ -1126,8 +1137,14 @@ def build_topology_graph_per_rail(
         for gi, group in enumerate(template.leg_rail_xor_groups):
             for member in group:
                 rail_to_group[member] = gi
+        # When focus is active, render only the in-focus legs in the
+        # composite + only mark THOSE as rails_in_clusters (the others
+        # fall back to standalone-rail rendering at Phase C/D/E).
+        def _leg_in_focus(rn: Identifier) -> bool:
+            return focus_set is None or _rail_id(rn) in focus_set
         html_label = _template_composite_label(
             template, rails_by_name, rail_to_group,
+            leg_in_focus=_leg_in_focus,
         )
         g.node(
             tmpl_id,
@@ -1135,8 +1152,11 @@ def build_topology_graph_per_rail(
             shape="plaintext",
         )
         for rail_name in template.leg_rails:
-            if rail_name in rail_names_set:
-                rails_in_clusters.add(rail_name)
+            if rail_name not in rail_names_set:
+                continue
+            if not _leg_in_focus(rail_name):
+                continue
+            rails_in_clusters.add(rail_name)
 
     # Phase C — Top-level individual rails (not bundled, not in a cluster).
     # Layer-gated: rail nodes only show at L2+.

@@ -18,7 +18,7 @@
       "crossings": 0,
       "width_pt": 305.0,
       "height_pt": 514.0,
-      "layout_ms": 77.8,
+      "layout_ms": 82.8,
       "dot_bytes": 2378,
       "svg_bytes": 10974,
       "png_bytes": 53456
@@ -30,7 +30,7 @@
       "crossings": 0,
       "width_pt": 1564.0,
       "height_pt": 539.0,
-      "layout_ms": 76.2,
+      "layout_ms": 76.0,
       "dot_bytes": 10310,
       "svg_bytes": 43784,
       "png_bytes": 233191
@@ -42,10 +42,10 @@
       "crossings": 57,
       "width_pt": 3160.0,
       "height_pt": 697.0,
-      "layout_ms": 111.8,
-      "dot_bytes": 13036,
-      "svg_bytes": 56929,
-      "png_bytes": 363647
+      "layout_ms": 95.0,
+      "dot_bytes": 12969,
+      "svg_bytes": 56869,
+      "png_bytes": 362752
     }
   ]
 }

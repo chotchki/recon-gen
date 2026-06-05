@@ -86,7 +86,7 @@
 <polygon fill="#ffcc99" stroke="none" points="1719.5,-543.88 1719.5,-575.88 1889.5,-575.88 1889.5,-543.88 1719.5,-543.88"/>
 <polygon fill="none" stroke="black" points="1719.5,-543.88 1719.5,-575.88 1889.5,-575.88 1889.5,-543.88 1719.5,-543.88"/>
 <text xml:space="preserve" text-anchor="start" x="1754.62" y="-560.38" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="10.00">InternalTransferCycle</text>
-<text xml:space="preserve" text-anchor="start" x="1764.38" y="-552.27" font-family="Helvetica,sans-Serif" font-size="8.00">(&#39;internal_transfer_id&#39;,)</text>
+<text xml:space="preserve" text-anchor="start" x="1770" y="-552.27" font-family="Helvetica,sans-Serif" font-size="8.00">internal_transfer_id</text>
 <polygon fill="#fff2e0" stroke="none" points="1719.5,-518.62 1719.5,-543.88 1889.5,-543.88 1889.5,-518.62 1719.5,-518.62"/>
 <polygon fill="none" stroke="black" points="1719.5,-518.62 1719.5,-543.88 1889.5,-543.88 1889.5,-518.62 1719.5,-518.62"/>
 <text xml:space="preserve" text-anchor="start" x="1726.5" y="-528.62" font-family="Helvetica,sans-Serif" font-size="10.00">InternalTransferDebit &#160;(D)</text>
@@ -172,7 +172,7 @@
 <polygon fill="#ffcc99" stroke="none" points="1360.12,-259.75 1360.12,-291.75 1504.62,-291.75 1504.62,-259.75 1360.12,-259.75"/>
 <polygon fill="none" stroke="black" points="1360.12,-259.75 1360.12,-291.75 1504.62,-291.75 1504.62,-259.75 1360.12,-259.75"/>
 <text xml:space="preserve" text-anchor="start" x="1373.12" y="-276.25" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="10.00">MerchantSettlementCycle</text>
-<text xml:space="preserve" text-anchor="start" x="1370.12" y="-268.15" font-family="Helvetica,sans-Serif" font-size="8.00">(&#39;merchant_id&#39;, &#39;settlement_period&#39;)</text>
+<text xml:space="preserve" text-anchor="start" x="1376.12" y="-268.15" font-family="Helvetica,sans-Serif" font-size="8.00">merchant_id, settlement_period</text>
 <polygon fill="#ffe1c2" stroke="none" points="1360.12,-234.5 1360.12,-259.75 1504.62,-259.75 1504.62,-234.5 1360.12,-234.5"/>
 <polygon fill="none" stroke="black" points="1360.12,-234.5 1360.12,-259.75 1504.62,-259.75 1504.62,-234.5 1360.12,-234.5"/>
 <text xml:space="preserve" text-anchor="start" x="1367.12" y="-244.5" font-family="Helvetica,sans-Serif" font-size="10.00">SettlementAutoSettle &#160;(V)</text>
@@ -459,7 +459,7 @@
 <polygon fill="#ffcc99" stroke="none" points="2800.5,-189.62 2800.5,-221.62 2957.75,-221.62 2957.75,-189.62 2800.5,-189.62"/>
 <polygon fill="none" stroke="black" points="2800.5,-189.62 2800.5,-221.62 2957.75,-221.62 2957.75,-189.62 2800.5,-189.62"/>
 <text xml:space="preserve" text-anchor="start" x="2811.62" y="-206.12" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="10.00">MerchantWeeklyPayoutBatch</text>
-<text xml:space="preserve" text-anchor="start" x="2819.5" y="-198.03" font-family="Helvetica,sans-Serif" font-size="8.00">(&#39;merchant_id&#39;, &#39;payout_batch_id&#39;)</text>
+<text xml:space="preserve" text-anchor="start" x="2825.5" y="-198.03" font-family="Helvetica,sans-Serif" font-size="8.00">merchant_id, payout_batch_id</text>
 <polygon fill="#fff2e0" stroke="none" points="2800.5,-164.38 2800.5,-189.62 2957.75,-189.62 2957.75,-164.38 2800.5,-164.38"/>
 <polygon fill="none" stroke="black" points="2800.5,-164.38 2800.5,-189.62 2957.75,-189.62 2957.75,-164.38 2800.5,-164.38"/>
 <text xml:space="preserve" text-anchor="start" x="2807.5" y="-174.38" font-family="Helvetica,sans-Serif" font-size="10.00">MerchantWeeklyBatchClose &#160;(C)</text>

@@ -35,156 +35,156 @@ digraph l2_topology_per_rail_spike {
 	role__TemplateRole_02 [label=TemplateRole_02 color="#1f4e79" fillcolor="#e8f0ff" fontcolor="#1f4e79" shape=folder]
 	role__TemplateRole_03 [label=TemplateRole_03 color="#1f4e79" fillcolor="#e8f0ff" fontcolor="#1f4e79" shape=folder]
 	tmpl__TransferTemplate_00 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_00</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_00</B><BR/><FONT POINT-SIZE="8">key_0, key_1</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_04" ALIGN="LEFT">Rail_04  (↔)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_67" ALIGN="LEFT">Rail_67  (D)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_96" ALIGN="LEFT">Rail_96  (D)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_01 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_01</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_01</B><BR/><FONT POINT-SIZE="8">key_0</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_23" ALIGN="LEFT">Rail_23  (↔)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_02 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_02</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_02</B><BR/><FONT POINT-SIZE="8">key_0, key_1</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_36" ALIGN="LEFT">Rail_36  (D)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_78" ALIGN="LEFT">Rail_78  (↔)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_03 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_03</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_03</B><BR/><FONT POINT-SIZE="8">key_0, key_1</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_47" ALIGN="LEFT">Rail_47  (D)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_04 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_04</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_04</B><BR/><FONT POINT-SIZE="8">key_0</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_25" ALIGN="LEFT">Rail_25  (↔)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_05 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_05</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_05</B><BR/><FONT POINT-SIZE="8">key_0</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_13" ALIGN="LEFT">Rail_13  (↔)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_66" ALIGN="LEFT">Rail_66  (↔)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_93" ALIGN="LEFT">Rail_93  (C)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_06 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_06</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_06</B><BR/><FONT POINT-SIZE="8">key_0, key_1</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_11" ALIGN="LEFT">Rail_11  (D)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_28" ALIGN="LEFT">Rail_28  (↔)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_07 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_07</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_07</B><BR/><FONT POINT-SIZE="8">key_0</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_49" ALIGN="LEFT">Rail_49  (↔)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_08 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_08</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_08</B><BR/><FONT POINT-SIZE="8">key_0</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_18" ALIGN="LEFT">Rail_18  (↔)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_42" ALIGN="LEFT">Rail_42  (D)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_84" ALIGN="LEFT">Rail_84  (C)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_09 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_09</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_09</B><BR/><FONT POINT-SIZE="8">key_0</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_57" ALIGN="LEFT">Rail_57  (↔)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_60" ALIGN="LEFT">Rail_60  (C)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_78" ALIGN="LEFT">Rail_78  (↔)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_10 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_10</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_10</B><BR/><FONT POINT-SIZE="8">key_0, key_1</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_67" ALIGN="LEFT">Rail_67  (D)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_77" ALIGN="LEFT">Rail_77  (↔)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_95" ALIGN="LEFT">Rail_95  (D)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_11 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_11</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_11</B><BR/><FONT POINT-SIZE="8">key_0, key_1</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_53" ALIGN="LEFT">Rail_53  (C)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_12 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_12</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_12</B><BR/><FONT POINT-SIZE="8">key_0</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_30" ALIGN="LEFT">Rail_30  (D)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_65" ALIGN="LEFT">Rail_65  (↔)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_73" ALIGN="LEFT">Rail_73  (↔)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_13 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_13</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_13</B><BR/><FONT POINT-SIZE="8">key_0</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_23" ALIGN="LEFT">Rail_23  (↔)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_53" ALIGN="LEFT">Rail_53  (C)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_86" ALIGN="LEFT">Rail_86  (D)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_14 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_14</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_14</B><BR/><FONT POINT-SIZE="8">key_0, key_1</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_02" ALIGN="LEFT">Rail_02  (↔)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_64" ALIGN="LEFT">Rail_64  (D)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_70" ALIGN="LEFT">Rail_70  (C)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_15 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_15</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_15</B><BR/><FONT POINT-SIZE="8">key_0, key_1</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_02" ALIGN="LEFT">Rail_02  (↔)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_97" ALIGN="LEFT">Rail_97  (↔)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_16 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_16</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_16</B><BR/><FONT POINT-SIZE="8">key_0</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_42" ALIGN="LEFT">Rail_42  (D)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_96" ALIGN="LEFT">Rail_96  (D)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_98" ALIGN="LEFT">Rail_98  (↔)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_17 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_17</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_17</B><BR/><FONT POINT-SIZE="8">key_0, key_1</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_89" ALIGN="LEFT">Rail_89  (↔)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_18 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_18</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_18</B><BR/><FONT POINT-SIZE="8">key_0, key_1</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_93" ALIGN="LEFT">Rail_93  (C)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_19 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_19</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_19</B><BR/><FONT POINT-SIZE="8">key_0, key_1</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_40" ALIGN="LEFT">Rail_40  (↔)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_20 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_20</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_20</B><BR/><FONT POINT-SIZE="8">key_0, key_1</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_06" ALIGN="LEFT">Rail_06  (↔)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_45" ALIGN="LEFT">Rail_45  (C)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_21 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_21</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_21</B><BR/><FONT POINT-SIZE="8">key_0</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_43" ALIGN="LEFT">Rail_43  (↔)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_49" ALIGN="LEFT">Rail_49  (↔)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_56" ALIGN="LEFT">Rail_56  (D)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_22 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_22</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_22</B><BR/><FONT POINT-SIZE="8">key_0, key_1</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_10" ALIGN="LEFT">Rail_10  (↔)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_34" ALIGN="LEFT">Rail_34  (D)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_95" ALIGN="LEFT">Rail_95  (D)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_23 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_23</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_23</B><BR/><FONT POINT-SIZE="8">key_0, key_1</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_10" ALIGN="LEFT">Rail_10  (↔)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_24 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_24</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_24</B><BR/><FONT POINT-SIZE="8">key_0, key_1</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_90" ALIGN="LEFT">Rail_90  (D)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_25 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_25</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_25</B><BR/><FONT POINT-SIZE="8">key_0, key_1</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_55" ALIGN="LEFT">Rail_55  (C)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_78" ALIGN="LEFT">Rail_78  (↔)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_26 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_26</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_26</B><BR/><FONT POINT-SIZE="8">key_0</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_65" ALIGN="LEFT">Rail_65  (↔)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_97" ALIGN="LEFT">Rail_97  (↔)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_27 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_27</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_27</B><BR/><FONT POINT-SIZE="8">key_0, key_1</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_83" ALIGN="LEFT">Rail_83  (D)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_28 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_28</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_28</B><BR/><FONT POINT-SIZE="8">key_0</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_47" ALIGN="LEFT">Rail_47  (D)</TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_56" ALIGN="LEFT">Rail_56  (D)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_29 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_29</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_29</B><BR/><FONT POINT-SIZE="8">key_0</FONT></TD></TR>
   <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_14" ALIGN="LEFT">Rail_14  (D)</TD></TR>
 </TABLE>> shape=plaintext]
 	tmpl__TransferTemplate_FuzzXor [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
-  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_FuzzXor</B><BR/><FONT POINT-SIZE="8">(&#x27;fuzz_xor_key&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_FuzzXor</B><BR/><FONT POINT-SIZE="8">fuzz_xor_key</FONT></TD></TR>
   <TR><TD BGCOLOR="#ffe1c2" PORT="leg_FuzzXorVariantAuto" ALIGN="LEFT">FuzzXorVariantAuto  (V)</TD></TR>
   <TR><TD BGCOLOR="#ffe1c2" PORT="leg_FuzzXorVariantStandard" ALIGN="LEFT">FuzzXorVariantStandard  (V)</TD></TR>
   <TR><TD BGCOLOR="#ffe1c2" PORT="leg_FuzzXorVariantSlow" ALIGN="LEFT">FuzzXorVariantSlow  (V)</TD></TR>
