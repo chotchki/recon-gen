@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import secrets
+from collections import OrderedDict
 from collections.abc import Callable, Mapping
 from dataclasses import replace as dataclass_replace
 from html import escape
@@ -2622,6 +2623,55 @@ def _render_gap_card(gap: Gap) -> str:
 """
 
 
+# CF.3.k — bounded LRU cache for the digraph build. Studio is
+# single-user / single-process so a module-level dict is sufficient
+# (no thread/Redis layer needed). Cache key includes the L2 instance
+# identity (`id(...)` — invalidates naturally when cache.get()
+# returns a fresh instance after the yaml is saved) plus every render
+# axis (prefix / focus / layer / hide_singleleg). Bound at 32 entries
+# to handle focus-mode browsing without unbounded growth.
+_DIAGRAM_DIGRAPH_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
+_DIAGRAM_DIGRAPH_CACHE_MAX = 32
+
+
+def _build_digraph_cached(
+    instance: Any,
+    *,
+    db_table_prefix: str,
+    focus_node_id: str | None,
+    layer: int,
+    hide_singleleg: bool,
+) -> Any:
+    """LRU-cached wrapper over ``build_topology_graph_per_rail``.
+
+    Cache key uses ``id(instance)`` as the version signal: when the
+    operator saves the L2 yaml, ``cache.get()`` returns a fresh
+    L2Instance object → new key → cache miss → fresh render. No
+    explicit invalidation needed.
+    """
+    key: tuple[Any, ...] = (
+        id(instance), db_table_prefix, focus_node_id, layer, hide_singleleg,
+    )
+    cached = _DIAGRAM_DIGRAPH_CACHE.get(key)
+    if cached is not None:
+        # Move-to-end → most-recently-used
+        _DIAGRAM_DIGRAPH_CACHE.move_to_end(key)
+        return cached
+    digraph = build_topology_graph_per_rail(
+        instance,
+        db_table_prefix=db_table_prefix,
+        bundle_parallel_rails=True,
+        focus_node_id=focus_node_id,
+        layer=layer,
+        hide_singleleg=hide_singleleg,
+    )
+    _DIAGRAM_DIGRAPH_CACHE[key] = digraph
+    # Bound the cache — drop oldest when over the limit.
+    while len(_DIAGRAM_DIGRAPH_CACHE) > _DIAGRAM_DIGRAPH_CACHE_MAX:
+        _DIAGRAM_DIGRAPH_CACHE.popitem(last=False)
+    return digraph
+
+
 def _render_diagram_page(
     cache: L2InstanceCache,
     dev_log: bool,
@@ -2668,10 +2718,14 @@ def _render_diagram_page(
     db_prefix = (
         cfg.db_table_prefix if cfg is not None else "unbound"
     )
-    digraph = build_topology_graph_per_rail(
+    # CF.3.k — cache the digraph build (the expensive step) keyed by
+    # (instance, prefix, focus, layer, hide_singleleg). Layout time
+    # is operator-locked as "not a constraint" so we can trade compute
+    # freely, but operator-PERCEIVED latency benefits from caching
+    # on every revisit of the same focus / layer / filter combination.
+    digraph = _build_digraph_cached(
         instance,
         db_table_prefix=db_prefix,
-        bundle_parallel_rails=True,
         focus_node_id=focus_node_id,
         layer=layer,
         hide_singleleg=hide_singleleg,
