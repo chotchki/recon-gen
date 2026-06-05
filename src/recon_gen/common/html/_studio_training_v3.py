@@ -265,8 +265,8 @@ def render_training_v3_landing(
             title="Session Start in progress",
             hint=(
                 "re-fetches the base prefix + rebuilds the v overlay "
-                "(~10s sqlite / ~30s Postgres / ~10 min Oracle for "
-                "the /etl/run leg)"
+                "(~sub-second DuckDB / ~30s Postgres / ~10 min Oracle "
+                "for the /etl/run leg)"
             ),
             finished_event="training-session-start-finished",
             redirect_url="/training/?status=Session+started+%E2%80%94+v+overlay+ready.",
@@ -582,8 +582,8 @@ def _render_session_controls(
     session_start_title = (
         "Full lifecycle: runs the /etl/run flow (so base prefix is "
         "current) + drops + creates the v overlay schema + clones "
-        "base data + refreshes v matviews. On Oracle this takes ~10 "
-        "min for the /etl/run leg; PG ~30s; sqlite ~30s."
+        "base data + refreshes v matviews. DuckDB finishes in seconds; "
+        "PG takes ~30s; Oracle takes ~10 min for the /etl/run leg."
     )
     disabled_attr = " disabled" if any_op_running else ""
     # Tailwind `disabled:` variant doesn't always cover hover overrides,
