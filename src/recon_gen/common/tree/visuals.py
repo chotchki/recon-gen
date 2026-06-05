@@ -348,7 +348,18 @@ def _emit_kpi_sign_indicator(value_measure: "Measure") -> dict[str, Any]:
 # color rides along as parallel signal. Same UPPERCASE-hex + column-
 # name expression + aggregation-wrap gotchas as the BK.2/BK.9
 # emitters above.
-_KPI_AMBER_ICON_QS = "EXCLAMATION_CIRCLE"  # deploy-probe note: BK.2/BK.9 used CHECKMARK / X / ARROW_*; EXCLAMATION_CIRCLE not yet QS-validated as of 2026-06-05. If CreateAnalysis rejects, fall back to TRIANGLE then FLAG.
+# CF.X-infra deploy-probe (2026-06-05) — AWS run 26991328435 rejected
+# EXCLAMATION_CIRCLE with the FULL valid set inline:
+#   [TWO_BAR, THUMBS_DOWN, FACE_DOWN, ARROW_RIGHT, TRIANGLE, FLAG,
+#    ARROW_UP_RIGHT, ARROW_DOWN_LEFT, CIRCLE, MINUS, ARROW_UP,
+#    THREE_BAR, CHECKMARK, ARROW_DOWN_RIGHT, ARROW_UP_LEFT, CARET_UP,
+#    X, ARROW_DOWN, ONE_BAR, PLUS, FACE_FLAT, THUMBS_UP, SQUARE,
+#    FACE_UP, ARROW_LEFT, CARET_DOWN]
+# TRIANGLE is the universal warning glyph (matches the ⚠ App2-side
+# emit) and is the pre-locked fallback. FLAG was the secondary
+# fallback but reads as "marked for review" rather than "warning
+# state." See docs/reference/quicksight-quirks.md KPI icon enum entry.
+_KPI_AMBER_ICON_QS = "TRIANGLE"
 _KPI_AMBER_COLOR_HEX = "#B45309"  # tailwind amber-700 — WCAG-AA on white
 
 

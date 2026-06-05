@@ -327,3 +327,50 @@ trigger the dropdown / cascade. Any 400 with
 shape. The dataset id is in the URL path; verify it has declared
 `DatasetParameters` in the emitted JSON. If yes, this quirk
 applies.
+
+---
+
+## `KPIVisual.ConditionalFormatting.PrimaryValue.Icon.CustomCondition.IconOptions.Icon` rejects most semantic-icon names — CF.X-infra, 2026-06-05
+
+### Symptom
+
+`create_analysis` rejects the KPI with a generic
+``ValidationException: Value 'EXCLAMATION_CIRCLE' at … failed to
+satisfy constraint``. The error message itself lists every value
+QS accepts (so this is the de-facto API doc).
+
+### The valid enum (full set, per the AWS error)
+
+```
+TWO_BAR, THUMBS_DOWN, FACE_DOWN, ARROW_RIGHT, TRIANGLE, FLAG,
+ARROW_UP_RIGHT, ARROW_DOWN_LEFT, CIRCLE, MINUS, ARROW_UP,
+THREE_BAR, CHECKMARK, ARROW_DOWN_RIGHT, ARROW_UP_LEFT, CARET_UP,
+X, ARROW_DOWN, ONE_BAR, PLUS, FACE_FLAT, THUMBS_UP, SQUARE,
+FACE_UP, ARROW_LEFT, CARET_DOWN
+```
+
+Conspicuously absent: `EXCLAMATION_CIRCLE`, `WARNING`,
+`EXCLAMATION_MARK`, `ALERT`, every "exclamation-shaped" or
+"warning-shaped" name a designer would reach for first. The
+warning-state slot is `TRIANGLE` — full stop.
+
+### What works
+
+- **Healthy / OK**: `CHECKMARK`
+- **Warning / amber**: `TRIANGLE` (the warning-glyph slot)
+- **Error / red**: `X`
+- **Trend up**: `ARROW_UP` (or `CARET_UP` for a smaller glyph)
+- **Trend down**: `ARROW_DOWN` (or `CARET_DOWN`)
+
+### Notes
+
+The AWS docs page for `KPIIcon` doesn't enumerate the valid set —
+the validation error is the only source of truth. Deploy-probe
+any new icon choice via `./run_tests.sh up_to=deploy --dialects=pg
+--targets=aw` against a minimal KPI; if AWS green-lights it, also
+write the new name into this quirks-log entry so we don't relearn.
+
+Confirmed-via: AWS run 26991328435 on commit `bb36bf94`
+(CF.X-infra ship). `EXCLAMATION_CIRCLE` was the original
+`_KPI_AMBER_ICON_QS` value; CF.X-infra hotfix swapped to
+`TRIANGLE`.
