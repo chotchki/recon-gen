@@ -748,7 +748,11 @@ def build_topology_graph_per_rail(
         overlap="false",
         nodesep="0.15",
         ranksep="0.35",
-        mclimit="2.0",
+        # CF.3.a — bumped 2.0→10.0 (v13.1.1 audit "free add-on"). More
+        # mincross iterations for ~no marginal layout cost on our graph
+        # sizes; pairs with the template_member constraint=false change
+        # below to land the audit's 65% crossings reduction at L3.
+        mclimit="10.0",
     )
     g.attr("node", style="filled,rounded", fontname="Helvetica", fontsize="10")
     g.attr("edge", fontname="Helvetica", fontsize="9")
@@ -1032,6 +1036,15 @@ def build_topology_graph_per_rail(
                         style="dotted",
                         color=_TRANSFER_TEMPLATE_BORDER,
                         arrowhead="none",
+                        # CF.3.a — template_member edges are MEMBERSHIP,
+                        # not flow. constraint=false stops dot from
+                        # rank-coupling each template to its leg-rails,
+                        # which was smearing the cluster across the
+                        # canvas and raking dotted edges through
+                        # everything else. Cluster containment is
+                        # preserved (the subgraph boundary handles it);
+                        # only rank coupling drops.
+                        constraint="false",
                     )
             # AB.3.8: per-XOR-group nested sub-clusters.
             for gi in sorted(grouped_in_focus):
@@ -1062,6 +1075,11 @@ def build_topology_graph_per_rail(
                                 style="dashed",
                                 color=_XOR_GROUP_BORDER,
                                 arrowhead="none",
+                                # CF.3.a — same membership-not-flow
+                                # rationale as the non-XOR member edge
+                                # above; XOR partitioning is still
+                                # conveyed by the dashed cluster boundary.
+                                constraint="false",
                             )
 
     # Phase C — Top-level individual rails (not bundled, not in a cluster).

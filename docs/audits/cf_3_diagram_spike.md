@@ -94,6 +94,48 @@ After the fixture locks, `cf3_spike.py render` becomes a permanent CI gate:
 
 Layout time is NOT a regression criterion (operator lock). CF.3.k caching absorbs any growth at operator-perceived layer.
 
+## CF.3.a — measured against the spike fixture (2026-06-04)
+
+Shipped: `topology.py:745-757` `mclimit` 2.0→10.0; `:1029-1042` + `:1059-1072` add `constraint="false"` to the template_member edges (the dotted dot non-XOR + dashed XOR ones — same membership-not-flow rationale). ~5 lines of attribute changes; no nodes / edges / labels affected. All 28 `tests/unit/test_l2_topology_typed.py` + `test_studio_diagram_route.py` + `test_visible_entities.py` cases pass.
+
+### Crossing reduction at scale
+
+| L3 metric          | sasquatch_pr (baseline) | sasquatch_pr (CF.3.a) | Δ              | heavy_density_v1 (baseline) | heavy_density_v1 (CF.3.a) | Δ              |
+|--------------------|--------------------------|------------------------|-----------------|------------------------------|-----------------------------|------------------|
+| crossings          | 1 086                    | **59**                 | **−94.6 %**    | 139 990                      | **542**                     | **−99.6 %**     |
+| width (pt)         | 2 517                    | 2 628                  | +4.4 %         | 2 071                        | 2 156                       | +4.1 %           |
+| height (pt)        | 827                      | 965                    | +16.7 %        | 2 283                        | 2 608                       | +14.2 %          |
+| layout (ms)        | 87                       | 88                     | +1             | 116                          | 133                         | +17              |
+| nodes / edges      | 44 / 65                  | 44 / 65                | —              | 158 / 223                    | 158 / 223                   | —                |
+
+**Read.** Crossings collapse by 18× on sasquatch and **258×** on heavy. The v13.1.1 audit's prediction was −65 % at L3 on the demo L2 — actual is far more dramatic at scale, exactly because the heavy fixture has many more template clusters whose rank coupling was smearing the canvas. L1 / L2 are unchanged at the metric level (no template_member edges exist below L3).
+
+**Height divergence.** Audit predicted −15 % height; measured +14-17 %. Releasing rank constraints lets templates spread vertically inside their clusters; at heavy density the net is a taller canvas. Per operator lock (2026-06-04), this is the correct trade — height is a presentation knob (scroll), crossings are a legibility blocker.
+
+**Layout time.** Stays sub-second (heavy L3 116ms→133ms = +17ms). Mclimit 10.0 buys more mincross iterations; the operator-perceived render path is the SVG one (the PNG sidecar re-runs layout for cold-read embeds).
+
+### Visual proof — heavy_density_v1 L3
+
+| baseline (139 990 crossings) | CF.3.a (542 crossings) |
+|---|---|
+| ![heavy L3 baseline](cf_3_diagram_spike/heavy_density_v1/l3.png) | ![heavy L3 CF.3.a](cf_3_diagram_spike/heavy_density_v1_cf3a/l3.png) |
+
+### Visual proof — sasquatch_pr L3
+
+| baseline (1 086 crossings) | CF.3.a (59 crossings) |
+|---|---|
+| ![sasquatch L3 baseline](cf_3_diagram_spike/sasquatch_pr_baseline/l3.png) | ![sasquatch L3 CF.3.a](cf_3_diagram_spike/sasquatch_pr_cf3a/l3.png) |
+
+SVG sidecars (`l3.svg`) ship in both dirs for zoom-in detail.
+
+### Awaiting operator confirmation on CF.3.a
+
+1. Does the heavy L3 visual now read meaningfully better, or is the density still the blocker?
+2. Is the +14-17 % height growth fine, or do operators feel it (scroll fatigue)?
+3. Should CF.3.b (template recast — drops 24 nodes + 58 edges) supersede CF.3.a, or stack on top?
+
 ## Audit history
 
 - **2026-06-04 v0** — Harness shipped, heavy_density_v1.yaml generated (seed 42, 103 rails / 31 templates / 12 chains), v0 measurements above, operator cold-read pending.
+- **2026-06-04 v0.1** — PNG renders embedded inline for cold-read in markdown viewers.
+- **2026-06-04 CF.3.a measured** — 2-liner shipped against the spike fixture; **−94.6 % crossings on sasquatch, −99.6 % on heavy**. Height grew +14-17 % (vs audit's predicted −15 %); layout +17ms. Awaiting operator visual sign-off before merging.

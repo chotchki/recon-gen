@@ -1,0 +1,523 @@
+// L2 topology (rails as nodes) for instance 'spike'
+digraph l2_topology_per_rail_spike {
+	mclimit=10.0 nodesep=0.15 overlap=false rankdir=LR ranksep=0.35 splines=polyline
+	node [fontname=Helvetica fontsize=10 style="filled,rounded"]
+	edge [fontname=Helvetica fontsize=9]
+	role__ExternalRole_00 [label=ExternalRole_00 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__ExternalRole_01 [label=ExternalRole_01 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__ExternalRole_03 [label=ExternalRole_03 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__ExternalRole_04 [label=ExternalRole_04 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__ExternalRole_05 [label=ExternalRole_05 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__ExternalRole_06 [label=ExternalRole_06 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__ExternalRole_07 [label=ExternalRole_07 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__ExternalRole_08 [label=ExternalRole_08 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__ExternalRole_09 [label=ExternalRole_09 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__ExternalRole_10 [label=ExternalRole_10 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__ExternalRole_11 [label=ExternalRole_11 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__ExternalRole_12 [label=ExternalRole_12 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__ExternalRole_13 [label=ExternalRole_13 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__ExternalRole_14 [label=ExternalRole_14 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__ExternalRole_15 [label=ExternalRole_15 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__ExternalRole_16 [label=ExternalRole_16 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__ExternalRole_17 [label=ExternalRole_17 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__ExternalRole_18 [label=ExternalRole_18 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__ExternalRole_19 [label=ExternalRole_19 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=box]
+	role__InternalRole_00 [label=InternalRole_00 color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=box]
+	role__InternalRole_01 [label=InternalRole_01 color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=box]
+	role__InternalRole_02 [label=InternalRole_02 color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=box]
+	role__InternalRole_03 [label=InternalRole_03 color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=box]
+	role__InternalRole_04 [label=InternalRole_04 color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=box]
+	role__InternalRole_05 [label=InternalRole_05 color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=box]
+	role__InternalRole_06 [label=InternalRole_06 color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=box]
+	role__InternalRole_07 [label=InternalRole_07 color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=box]
+	role__TemplateRole_00 [label=TemplateRole_00 color="#1f4e79" fillcolor="#e8f0ff" fontcolor="#1f4e79" shape=folder]
+	role__TemplateRole_01 [label=TemplateRole_01 color="#1f4e79" fillcolor="#e8f0ff" fontcolor="#1f4e79" shape=folder]
+	role__TemplateRole_02 [label=TemplateRole_02 color="#1f4e79" fillcolor="#e8f0ff" fontcolor="#1f4e79" shape=folder]
+	role__TemplateRole_03 [label=TemplateRole_03 color="#1f4e79" fillcolor="#e8f0ff" fontcolor="#1f4e79" shape=folder]
+	subgraph cluster_tmpl_TransferTemplate_00 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_00 style="dashed,rounded"
+		tmpl__TransferTemplate_00 [label=TransferTemplate_00 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_04 [label=Rail_04 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_00 -> rail__Rail_04 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_67 [label=Rail_67 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_00 -> rail__Rail_67 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_96 [label=Rail_96 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_00 -> rail__Rail_96 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_01 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_01 style="dashed,rounded"
+		tmpl__TransferTemplate_01 [label=TransferTemplate_01 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_23 [label=Rail_23 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_01 -> rail__Rail_23 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_02 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_02 style="dashed,rounded"
+		tmpl__TransferTemplate_02 [label=TransferTemplate_02 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_36 [label=Rail_36 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_02 -> rail__Rail_36 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_78 [label=Rail_78 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_02 -> rail__Rail_78 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_03 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_03 style="dashed,rounded"
+		tmpl__TransferTemplate_03 [label=TransferTemplate_03 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_47 [label=Rail_47 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_03 -> rail__Rail_47 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_04 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_04 style="dashed,rounded"
+		tmpl__TransferTemplate_04 [label=TransferTemplate_04 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_25 [label=Rail_25 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_04 -> rail__Rail_25 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_05 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_05 style="dashed,rounded"
+		tmpl__TransferTemplate_05 [label=TransferTemplate_05 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_13 [label=Rail_13 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_05 -> rail__Rail_13 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_66 [label=Rail_66 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_05 -> rail__Rail_66 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_93 [label=Rail_93 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_05 -> rail__Rail_93 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_06 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_06 style="dashed,rounded"
+		tmpl__TransferTemplate_06 [label=TransferTemplate_06 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_11 [label=Rail_11 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_06 -> rail__Rail_11 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_28 [label=Rail_28 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_06 -> rail__Rail_28 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_07 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_07 style="dashed,rounded"
+		tmpl__TransferTemplate_07 [label=TransferTemplate_07 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_49 [label=Rail_49 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_07 -> rail__Rail_49 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_08 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_08 style="dashed,rounded"
+		tmpl__TransferTemplate_08 [label=TransferTemplate_08 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_18 [label=Rail_18 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_08 -> rail__Rail_18 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_42 [label=Rail_42 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_08 -> rail__Rail_42 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_84 [label=Rail_84 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_08 -> rail__Rail_84 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_09 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_09 style="dashed,rounded"
+		tmpl__TransferTemplate_09 [label=TransferTemplate_09 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_57 [label=Rail_57 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_09 -> rail__Rail_57 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_60 [label=Rail_60 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_09 -> rail__Rail_60 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_78 [label=Rail_78 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_09 -> rail__Rail_78 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_10 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_10 style="dashed,rounded"
+		tmpl__TransferTemplate_10 [label=TransferTemplate_10 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_67 [label=Rail_67 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_10 -> rail__Rail_67 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_77 [label=Rail_77 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_10 -> rail__Rail_77 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_95 [label=Rail_95 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_10 -> rail__Rail_95 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_11 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_11 style="dashed,rounded"
+		tmpl__TransferTemplate_11 [label=TransferTemplate_11 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_53 [label=Rail_53 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_11 -> rail__Rail_53 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_12 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_12 style="dashed,rounded"
+		tmpl__TransferTemplate_12 [label=TransferTemplate_12 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_30 [label=Rail_30 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_12 -> rail__Rail_30 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_65 [label=Rail_65 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_12 -> rail__Rail_65 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_73 [label=Rail_73 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_12 -> rail__Rail_73 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_13 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_13 style="dashed,rounded"
+		tmpl__TransferTemplate_13 [label=TransferTemplate_13 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_23 [label=Rail_23 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_13 -> rail__Rail_23 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_53 [label=Rail_53 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_13 -> rail__Rail_53 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_86 [label=Rail_86 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_13 -> rail__Rail_86 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_14 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_14 style="dashed,rounded"
+		tmpl__TransferTemplate_14 [label=TransferTemplate_14 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_02 [label=Rail_02 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_14 -> rail__Rail_02 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_64 [label=Rail_64 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_14 -> rail__Rail_64 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_70 [label=Rail_70 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_14 -> rail__Rail_70 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_15 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_15 style="dashed,rounded"
+		tmpl__TransferTemplate_15 [label=TransferTemplate_15 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_02 [label=Rail_02 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_15 -> rail__Rail_02 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_97 [label=Rail_97 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_15 -> rail__Rail_97 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_16 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_16 style="dashed,rounded"
+		tmpl__TransferTemplate_16 [label=TransferTemplate_16 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_42 [label=Rail_42 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_16 -> rail__Rail_42 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_96 [label=Rail_96 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_16 -> rail__Rail_96 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_98 [label=Rail_98 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_16 -> rail__Rail_98 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_17 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_17 style="dashed,rounded"
+		tmpl__TransferTemplate_17 [label=TransferTemplate_17 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_89 [label=Rail_89 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_17 -> rail__Rail_89 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_18 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_18 style="dashed,rounded"
+		tmpl__TransferTemplate_18 [label=TransferTemplate_18 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_93 [label=Rail_93 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_18 -> rail__Rail_93 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_19 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_19 style="dashed,rounded"
+		tmpl__TransferTemplate_19 [label=TransferTemplate_19 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_40 [label=Rail_40 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_19 -> rail__Rail_40 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_20 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_20 style="dashed,rounded"
+		tmpl__TransferTemplate_20 [label=TransferTemplate_20 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_06 [label=Rail_06 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_20 -> rail__Rail_06 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_45 [label=Rail_45 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_20 -> rail__Rail_45 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_21 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_21 style="dashed,rounded"
+		tmpl__TransferTemplate_21 [label=TransferTemplate_21 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_43 [label=Rail_43 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_21 -> rail__Rail_43 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_49 [label=Rail_49 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_21 -> rail__Rail_49 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_56 [label=Rail_56 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_21 -> rail__Rail_56 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_22 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_22 style="dashed,rounded"
+		tmpl__TransferTemplate_22 [label=TransferTemplate_22 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_10 [label=Rail_10 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_22 -> rail__Rail_10 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_34 [label=Rail_34 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_22 -> rail__Rail_34 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_95 [label=Rail_95 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_22 -> rail__Rail_95 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_23 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_23 style="dashed,rounded"
+		tmpl__TransferTemplate_23 [label=TransferTemplate_23 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_10 [label=Rail_10 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_23 -> rail__Rail_10 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_24 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_24 style="dashed,rounded"
+		tmpl__TransferTemplate_24 [label=TransferTemplate_24 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_90 [label=Rail_90 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_24 -> rail__Rail_90 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_25 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_25 style="dashed,rounded"
+		tmpl__TransferTemplate_25 [label=TransferTemplate_25 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_55 [label=Rail_55 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_25 -> rail__Rail_55 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_78 [label=Rail_78 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_25 -> rail__Rail_78 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_26 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_26 style="dashed,rounded"
+		tmpl__TransferTemplate_26 [label=TransferTemplate_26 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_65 [label=Rail_65 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_26 -> rail__Rail_65 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_97 [label=Rail_97 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_26 -> rail__Rail_97 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_27 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_27 style="dashed,rounded"
+		tmpl__TransferTemplate_27 [label=TransferTemplate_27 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_83 [label=Rail_83 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_27 -> rail__Rail_83 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_28 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_28 style="dashed,rounded"
+		tmpl__TransferTemplate_28 [label=TransferTemplate_28 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_47 [label=Rail_47 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_28 -> rail__Rail_47 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+		rail__Rail_56 [label=Rail_56 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_28 -> rail__Rail_56 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_29 {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_29 style="dashed,rounded"
+		tmpl__TransferTemplate_29 [label=TransferTemplate_29 color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		rail__Rail_14 [label=Rail_14 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+		tmpl__TransferTemplate_29 -> rail__Rail_14 [arrowhead=none color="#a6622c" constraint=false style=dotted]
+	}
+	subgraph cluster_tmpl_TransferTemplate_FuzzXor {
+		color="#a6622c" fontcolor="#a6622c" fontname=Helvetica fontsize=11 label=TransferTemplate_FuzzXor style="dashed,rounded"
+		tmpl__TransferTemplate_FuzzXor [label=TransferTemplate_FuzzXor color="#a6622c" fillcolor="#fce4d6" fontcolor="#a6622c" shape=component style=filled]
+		subgraph cluster_tmpl_TransferTemplate_FuzzXor_xor_0 {
+			color="#5a6f9c" fillcolor="#f0f4ff" fontcolor="#5a6f9c" fontname=Helvetica fontsize=10 label="XOR group 1 (exactly 1 fires)" style="dashed,rounded,filled"
+			rail__FuzzXorVariantAuto [label=FuzzXorVariantAuto color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+			tmpl__TransferTemplate_FuzzXor -> rail__FuzzXorVariantAuto [arrowhead=none color="#5a6f9c" constraint=false style=dashed]
+			rail__FuzzXorVariantStandard [label=FuzzXorVariantStandard color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+			tmpl__TransferTemplate_FuzzXor -> rail__FuzzXorVariantStandard [arrowhead=none color="#5a6f9c" constraint=false style=dashed]
+			rail__FuzzXorVariantSlow [label=FuzzXorVariantSlow color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+			tmpl__TransferTemplate_FuzzXor -> rail__FuzzXorVariantSlow [arrowhead=none color="#5a6f9c" constraint=false style=dashed]
+		}
+	}
+	rail__Rail_00 [label=Rail_00 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_03 [label=Rail_03 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_05 [label=Rail_05 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_07 [label=Rail_07 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_08 [label=Rail_08 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_12 [label=Rail_12 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_16 [label=Rail_16 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_17 [label=Rail_17 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_19 [label=Rail_19 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_20 [label=Rail_20 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_22 [label=Rail_22 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_24 [label=Rail_24 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_26 [label=Rail_26 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_29 [label=Rail_29 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_31 [label=Rail_31 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_32 [label=Rail_32 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_33 [label=Rail_33 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_35 [label=Rail_35 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_37 [label=Rail_37 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_38 [label=Rail_38 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_41 [label=Rail_41 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_44 [label=Rail_44 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_46 [label=Rail_46 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_48 [label=Rail_48 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_50 [label=Rail_50 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_51 [label=Rail_51 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_54 [label=Rail_54 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_59 [label=Rail_59 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_61 [label=Rail_61 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_63 [label=Rail_63 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_68 [label=Rail_68 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_71 [label=Rail_71 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_72 [label=Rail_72 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_74 [label=Rail_74 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_75 [label=Rail_75 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_76 [label=Rail_76 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_79 [label=Rail_79 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_80 [label=Rail_80 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_81 [label=Rail_81 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_82 [label=Rail_82 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_87 [label=Rail_87 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_88 [label=Rail_88 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_91 [label=Rail_91 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_92 [label=Rail_92 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__Rail_94 [label=Rail_94 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=ellipse style=filled]
+	rail__bundle_0 [label="3 rails:
+Rail_01
+Rail_15
+Rail_62" color="#1f4e79" fillcolor="#e8e8e8" fontcolor="#666666" penwidth=1.5 shape=ellipse style=filled]
+	rail__bundle_1 [label="2 rails:
+Rail_09
+Rail_21" color="#1f4e79" fillcolor="#e8e8e8" fontcolor="#666666" penwidth=1.5 shape=ellipse style=filled]
+	rail__bundle_2 [label="2 rails:
+Rail_27
+Rail_85" color="#1f4e79" fillcolor="#e8e8e8" fontcolor="#666666" penwidth=1.5 shape=ellipse style=filled]
+	rail__bundle_3 [label="2 rails:
+Rail_39
+Rail_99" color="#1f4e79" fillcolor="#e8e8e8" fontcolor="#666666" penwidth=1.5 shape=ellipse style=filled]
+	rail__bundle_4 [label="3 rails:
+Rail_52
+Rail_58
+Rail_69" color="#1f4e79" fillcolor="#e8e8e8" fontcolor="#666666" penwidth=1.5 shape=ellipse style=filled]
+	role__InternalRole_02 -> rail__Rail_00 [arrowhead=none color="#1f4e79"]
+	rail__Rail_00 -> role__ExternalRole_12 [arrowhead=open color="#1f4e79"]
+	role__InternalRole_03 -> rail__Rail_02 [arrowhead=none color="#1f4e79"]
+	rail__Rail_02 -> role__InternalRole_07 [arrowhead=open color="#1f4e79"]
+	rail__Rail_03 -> role__ExternalRole_09 [arrowhead=open color="#7f6000"]
+	role__InternalRole_06 -> rail__Rail_04 [arrowhead=none color="#1f4e79"]
+	rail__Rail_04 -> role__ExternalRole_11 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_12 -> rail__Rail_05 [arrowhead=none color="#1f4e79"]
+	rail__Rail_05 -> role__TemplateRole_03 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_00 -> rail__Rail_06 [arrowhead=none color="#1f4e79"]
+	rail__Rail_06 -> role__TemplateRole_02 [arrowhead=open color="#1f4e79"]
+	rail__Rail_07 -> role__ExternalRole_17 [arrowhead=open color="#7f6000"]
+	role__InternalRole_04 -> rail__Rail_08 [arrowhead=none color="#1f4e79"]
+	rail__Rail_08 -> role__InternalRole_03 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_04 -> rail__Rail_10 [arrowhead=none color="#1f4e79"]
+	rail__Rail_10 -> role__ExternalRole_04 [arrowhead=open color="#1f4e79"]
+	role__InternalRole_05 -> rail__Rail_11 [arrowhead=none color="#7f6000"]
+	role__ExternalRole_16 -> rail__Rail_12 [arrowhead=none color="#1f4e79"]
+	rail__Rail_12 -> role__ExternalRole_08 [arrowhead=open color="#1f4e79"]
+	role__InternalRole_03 -> rail__Rail_13 [arrowhead=none color="#1f4e79"]
+	rail__Rail_13 -> role__ExternalRole_12 [arrowhead=open color="#1f4e79"]
+	role__InternalRole_04 -> rail__Rail_14 [arrowhead=none color="#7f6000"]
+	role__InternalRole_04 -> rail__Rail_16 [arrowhead=none color="#1f4e79"]
+	rail__Rail_16 -> role__ExternalRole_07 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_11 -> rail__Rail_17 [arrowhead=none color="#7f6000"]
+	role__ExternalRole_08 -> rail__Rail_18 [arrowhead=none color="#1f4e79"]
+	rail__Rail_18 -> role__InternalRole_03 [arrowhead=open color="#1f4e79"]
+	role__InternalRole_04 -> rail__Rail_19 [arrowhead=none color="#1f4e79"]
+	rail__Rail_19 -> role__ExternalRole_01 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_01 -> rail__Rail_20 [arrowhead=none color="#7f6000"]
+	role__ExternalRole_04 -> rail__Rail_22 [arrowhead=none color="#1f4e79"]
+	rail__Rail_22 -> role__ExternalRole_17 [arrowhead=open color="#1f4e79"]
+	role__InternalRole_02 -> rail__Rail_23 [arrowhead=none color="#1f4e79"]
+	rail__Rail_23 -> role__InternalRole_06 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_15 -> rail__Rail_24 [arrowhead=none color="#1f4e79"]
+	rail__Rail_24 -> role__ExternalRole_19 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_00 -> rail__Rail_25 [arrowhead=none color="#1f4e79"]
+	rail__Rail_25 -> role__ExternalRole_04 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_12 -> rail__Rail_26 [arrowhead=none color="#1f4e79"]
+	rail__Rail_26 -> role__TemplateRole_01 [arrowhead=open color="#1f4e79"]
+	role__TemplateRole_03 -> rail__Rail_28 [arrowhead=none color="#1f4e79"]
+	rail__Rail_28 -> role__ExternalRole_17 [arrowhead=open color="#1f4e79"]
+	role__TemplateRole_01 -> rail__Rail_29 [arrowhead=none color="#7f6000"]
+	role__TemplateRole_00 -> rail__Rail_30 [arrowhead=none color="#7f6000"]
+	role__InternalRole_04 -> rail__Rail_31 [arrowhead=none color="#1f4e79"]
+	rail__Rail_31 -> role__ExternalRole_10 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_18 -> rail__Rail_32 [arrowhead=none color="#1f4e79"]
+	rail__Rail_32 -> role__InternalRole_03 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_18 -> rail__Rail_33 [arrowhead=none color="#1f4e79"]
+	rail__Rail_33 -> role__ExternalRole_06 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_17 -> rail__Rail_34 [arrowhead=none color="#7f6000"]
+	role__InternalRole_05 -> rail__Rail_35 [arrowhead=none color="#1f4e79"]
+	rail__Rail_35 -> role__TemplateRole_02 [arrowhead=open color="#1f4e79"]
+	role__TemplateRole_02 -> rail__Rail_36 [arrowhead=none color="#7f6000"]
+	role__ExternalRole_11 -> rail__Rail_37 [arrowhead=none color="#1f4e79"]
+	rail__Rail_37 -> role__ExternalRole_16 [arrowhead=open color="#1f4e79"]
+	rail__Rail_38 -> role__InternalRole_02 [arrowhead=open color="#7f6000"]
+	role__ExternalRole_12 -> rail__Rail_40 [arrowhead=none color="#1f4e79"]
+	rail__Rail_40 -> role__ExternalRole_07 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_08 -> rail__Rail_41 [arrowhead=none color="#1f4e79"]
+	rail__Rail_41 -> role__ExternalRole_13 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_10 -> rail__Rail_42 [arrowhead=none color="#7f6000"]
+	role__ExternalRole_09 -> rail__Rail_43 [arrowhead=none color="#1f4e79"]
+	rail__Rail_43 -> role__ExternalRole_11 [arrowhead=open color="#1f4e79"]
+	rail__Rail_44 -> role__TemplateRole_02 [arrowhead=open color="#7f6000"]
+	rail__Rail_45 -> role__ExternalRole_03 [arrowhead=open color="#7f6000"]
+	role__ExternalRole_03 -> rail__Rail_46 [arrowhead=none color="#1f4e79"]
+	rail__Rail_46 -> role__InternalRole_03 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_07 -> rail__Rail_47 [arrowhead=none color="#7f6000"]
+	role__InternalRole_03 -> rail__Rail_48 [arrowhead=none color="#1f4e79"]
+	rail__Rail_48 -> role__InternalRole_06 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_06 -> rail__Rail_49 [arrowhead=none color="#1f4e79"]
+	rail__Rail_49 -> role__ExternalRole_08 [arrowhead=open color="#1f4e79"]
+	role__InternalRole_03 -> rail__Rail_50 [arrowhead=none color="#7f6000"]
+	role__TemplateRole_00 -> rail__Rail_51 [arrowhead=none color="#7f6000"]
+	rail__Rail_53 -> role__ExternalRole_18 [arrowhead=open color="#7f6000"]
+	rail__Rail_54 -> role__InternalRole_05 [arrowhead=open color="#7f6000"]
+	rail__Rail_55 -> role__ExternalRole_15 [arrowhead=open color="#7f6000"]
+	role__ExternalRole_11 -> rail__Rail_56 [arrowhead=none color="#7f6000"]
+	role__ExternalRole_18 -> rail__Rail_57 [arrowhead=none color="#1f4e79"]
+	rail__Rail_57 -> role__TemplateRole_02 [arrowhead=open color="#1f4e79"]
+	role__TemplateRole_01 -> rail__Rail_59 [arrowhead=none color="#1f4e79"]
+	rail__Rail_59 -> role__ExternalRole_12 [arrowhead=open color="#1f4e79"]
+	rail__Rail_60 -> role__ExternalRole_00 [arrowhead=open color="#7f6000"]
+	role__TemplateRole_02 -> rail__Rail_61 [arrowhead=none color="#1f4e79"]
+	rail__Rail_61 -> role__ExternalRole_08 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_10 -> rail__Rail_63 [arrowhead=none color="#1f4e79"]
+	rail__Rail_63 -> role__ExternalRole_14 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_01 -> rail__Rail_64 [arrowhead=none color="#7f6000"]
+	role__InternalRole_04 -> rail__Rail_65 [arrowhead=none color="#1f4e79"]
+	rail__Rail_65 -> role__TemplateRole_00 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_10 -> rail__Rail_66 [arrowhead=none color="#1f4e79"]
+	rail__Rail_66 -> role__InternalRole_01 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_06 -> rail__Rail_67 [arrowhead=none color="#7f6000"]
+	rail__Rail_68 -> role__ExternalRole_11 [arrowhead=open color="#7f6000"]
+	rail__Rail_70 -> role__ExternalRole_17 [arrowhead=open color="#7f6000"]
+	role__TemplateRole_02 -> rail__Rail_71 [arrowhead=none color="#7f6000"]
+	role__ExternalRole_00 -> rail__Rail_72 [arrowhead=none color="#7f6000"]
+	role__InternalRole_06 -> rail__Rail_73 [arrowhead=none color="#1f4e79"]
+	rail__Rail_73 -> role__TemplateRole_03 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_09 -> rail__Rail_74 [arrowhead=none color="#1f4e79"]
+	rail__Rail_74 -> role__ExternalRole_04 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_05 -> rail__Rail_75 [arrowhead=none color="#1f4e79"]
+	rail__Rail_75 -> role__InternalRole_04 [arrowhead=open color="#1f4e79"]
+	role__InternalRole_01 -> rail__Rail_76 [arrowhead=none color="#7f6000"]
+	role__TemplateRole_02 -> rail__Rail_77 [arrowhead=none color="#1f4e79"]
+	rail__Rail_77 -> role__TemplateRole_00 [arrowhead=open color="#1f4e79"]
+	role__InternalRole_03 -> rail__Rail_78 [arrowhead=none color="#1f4e79"]
+	rail__Rail_78 -> role__TemplateRole_02 [arrowhead=open color="#1f4e79"]
+	rail__Rail_79 -> role__ExternalRole_10 [arrowhead=open color="#7f6000"]
+	role__TemplateRole_00 -> rail__Rail_80 [arrowhead=none color="#7f6000"]
+	role__InternalRole_02 -> rail__Rail_81 [arrowhead=none color="#1f4e79"]
+	rail__Rail_81 -> role__InternalRole_05 [arrowhead=open color="#1f4e79"]
+	rail__Rail_82 -> role__InternalRole_03 [arrowhead=open color="#7f6000"]
+	role__ExternalRole_05 -> rail__Rail_83 [arrowhead=none color="#7f6000"]
+	rail__Rail_84 -> role__InternalRole_01 [arrowhead=open color="#7f6000"]
+	role__InternalRole_03 -> rail__Rail_86 [arrowhead=none color="#7f6000"]
+	role__ExternalRole_14 -> rail__Rail_87 [arrowhead=none color="#1f4e79"]
+	rail__Rail_87 -> role__ExternalRole_19 [arrowhead=open color="#1f4e79"]
+	role__InternalRole_00 -> rail__Rail_88 [arrowhead=none color="#1f4e79"]
+	rail__Rail_88 -> role__InternalRole_01 [arrowhead=open color="#1f4e79"]
+	role__InternalRole_00 -> rail__Rail_89 [arrowhead=none color="#1f4e79"]
+	rail__Rail_89 -> role__TemplateRole_03 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_17 -> rail__Rail_90 [arrowhead=none color="#7f6000"]
+	role__TemplateRole_01 -> rail__Rail_91 [arrowhead=none color="#1f4e79"]
+	rail__Rail_91 -> role__ExternalRole_15 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_04 -> rail__Rail_92 [arrowhead=none color="#1f4e79"]
+	rail__Rail_92 -> role__ExternalRole_14 [arrowhead=open color="#1f4e79"]
+	rail__Rail_93 -> role__TemplateRole_01 [arrowhead=open color="#7f6000"]
+	role__TemplateRole_02 -> rail__Rail_94 [arrowhead=none color="#1f4e79"]
+	rail__Rail_94 -> role__TemplateRole_00 [arrowhead=open color="#1f4e79"]
+	role__TemplateRole_00 -> rail__Rail_95 [arrowhead=none color="#7f6000"]
+	role__ExternalRole_03 -> rail__Rail_96 [arrowhead=none color="#7f6000"]
+	role__ExternalRole_13 -> rail__Rail_97 [arrowhead=none color="#1f4e79"]
+	rail__Rail_97 -> role__InternalRole_03 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_11 -> rail__Rail_98 [arrowhead=none color="#1f4e79"]
+	rail__Rail_98 -> role__ExternalRole_17 [arrowhead=open color="#1f4e79"]
+	role__ExternalRole_08 -> rail__FuzzXorVariantAuto [arrowhead=none color="#7f6000"]
+	role__ExternalRole_08 -> rail__FuzzXorVariantStandard [arrowhead=none color="#7f6000"]
+	role__ExternalRole_08 -> rail__FuzzXorVariantSlow [arrowhead=none color="#7f6000"]
+	rail__bundle_0 -> role__ExternalRole_07 [arrowhead=open color="#7f6000" penwidth=1.5]
+	rail__bundle_1 -> role__InternalRole_06 [arrowhead=open color="#7f6000" penwidth=1.5]
+	role__InternalRole_05 -> rail__bundle_2 [arrowhead=none color="#7f6000" penwidth=1.5]
+	rail__bundle_3 -> role__ExternalRole_19 [arrowhead=open color="#7f6000" penwidth=1.5]
+	role__ExternalRole_09 -> rail__bundle_4 [arrowhead=none color="#7f6000" penwidth=1.5]
+	rail__Rail_32 -> rail__Rail_82 [label="chain
+(required)" color="#5a5a5a" fontcolor="#5a5a5a" style=dashed]
+	rail__Rail_18 -> tmpl__TransferTemplate_14 [label="chain
+(required)" color="#5a5a5a" fontcolor="#5a5a5a" style=dashed]
+	rail__Rail_90 -> rail__Rail_32 [label="chain
+(required)" color="#5a5a5a" fontcolor="#5a5a5a" style=dashed]
+	rail__Rail_48 -> rail__Rail_33 [label="chain
+(required)" color="#5a5a5a" fontcolor="#5a5a5a" style=dashed]
+	tmpl__TransferTemplate_11 -> tmpl__TransferTemplate_27 [label="chain
+(required)" color="#5a5a5a" fontcolor="#5a5a5a" style=dashed]
+	rail__Rail_14 -> rail__Rail_31 [label="chain
+(required)" color="#5a5a5a" fontcolor="#5a5a5a" style=dashed]
+	rail__Rail_42 -> rail__Rail_77 [label="chain
+(required)" color="#5a5a5a" fontcolor="#5a5a5a" style=dashed]
+	rail__Rail_23 -> rail__Rail_41 [label="chain
+(required)" color="#5a5a5a" fontcolor="#5a5a5a" style=dashed]
+	rail__Rail_46 -> rail__Rail_57 [label="chain
+(required)" color="#5a5a5a" fontcolor="#5a5a5a" style=dashed]
+	rail__Rail_51 -> rail__Rail_72 [label="chain
+(required)" color="#5a5a5a" fontcolor="#5a5a5a" style=dashed]
+	tmpl__TransferTemplate_15 -> rail__Rail_20 [label="chain
+(required)" color="#5a5a5a" fontcolor="#5a5a5a" style=dashed]
+	rail__Rail_36 -> rail__Rail_50 [label="chain
+(required)" color="#5a5a5a" fontcolor="#5a5a5a" style=dashed]
+	role__TemplateRole_00 -> role__InternalRole_05 [label=controls arrowhead=onormal color="#888888" fontcolor="#888888" style=dashed]
+	role__TemplateRole_01 -> role__InternalRole_03 [label=controls arrowhead=onormal color="#888888" fontcolor="#888888" style=dashed]
+	role__TemplateRole_02 -> role__InternalRole_02 [label=controls arrowhead=onormal color="#888888" fontcolor="#888888" style=dashed]
+	role__TemplateRole_03 -> role__InternalRole_02 [label=controls arrowhead=onormal color="#888888" fontcolor="#888888" style=dashed]
+}
