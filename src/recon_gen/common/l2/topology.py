@@ -819,6 +819,7 @@ def build_topology_graph_per_rail(
     bundle_parallel_rails: bool = True,
     focus_node_id: str | None = None,
     layer: int = 1,
+    hide_singleleg: bool = False,
 ) -> Any:
     """Build a Graphviz Digraph with Rails as first-class nodes (X.4.b dot pivot).
 
@@ -1186,12 +1187,18 @@ def build_topology_graph_per_rail(
 
     # Phase C — Top-level individual rails (not bundled, not in a cluster).
     # Layer-gated: rail nodes only show at L2+.
+    # CF.3.h — when ``hide_singleleg`` is set, skip STANDALONE
+    # SingleLegRails (single-leg rails that are NOT a leg of a template).
+    # Template-resident single-leg rails stay as cells in the composite
+    # shape — hiding them would break the template's port system.
     for rail in instance.rails:
         if not show_rails:
             break
         if rail.name in rail_to_bundle:
             continue
         if rail.name in rails_in_clusters:
+            continue
+        if hide_singleleg and isinstance(rail, SingleLegRail):
             continue
         if not _in_focus(_rail_id(rail.name)):
             continue
@@ -1206,6 +1213,9 @@ def build_topology_graph_per_rail(
         if not show_rails:
             break
         if not _in_focus(bundle_id):
+            continue
+        # CF.3.h — single-leg bundles disappear too when hide_singleleg.
+        if hide_singleleg and key[0] != "twoleg":
             continue
         bundle_shape = "cds"
         bundle_peripheries = "2" if key[0] == "twoleg" else "1"
@@ -1232,6 +1242,15 @@ def build_topology_graph_per_rail(
         if not show_rails:
             break
         if rail.name in rail_to_bundle:
+            continue
+        # CF.3.h — skip edges for hidden standalone single-leg rails.
+        # Template-resident rails (rails_in_clusters) keep their edges
+        # since their port row is still rendered inside the composite.
+        if (
+            hide_singleleg
+            and isinstance(rail, SingleLegRail)
+            and rail.name not in rails_in_clusters
+        ):
             continue
         rail_node_id = _rail_id(rail.name)
         if not _in_focus(rail_node_id):
@@ -1295,6 +1314,9 @@ def build_topology_graph_per_rail(
         if not show_rails:
             break
         if not _in_focus(bundle_id):
+            continue
+        # CF.3.h — single-leg bundle edges go too.
+        if hide_singleleg and key[0] != "twoleg":
             continue
         if key[0] == "twoleg":
             src_tuple = key[1]
@@ -1371,15 +1393,35 @@ def build_topology_graph_per_rail(
             )
         return _rail_id(name), _rail_id(name)
 
+    def _is_hidden_singleleg(name: Identifier) -> bool:
+        """CF.3.h — chain edges to a hidden single-leg rail dangle.
+
+        Skip the edge when its endpoint is a standalone single-leg
+        rail and ``hide_singleleg`` is set. Template-resident rails
+        stay reachable via the template's leg port even when their
+        underlying primitive is single-leg, so this only fires on
+        the standalone case.
+        """
+        if not hide_singleleg:
+            return False
+        rail = rails_by_name.get(name)
+        if rail is None or not isinstance(rail, SingleLegRail):
+            return False
+        return name not in rails_in_clusters
+
     for chain in instance.chains:
         if not show_chains_and_templates:
             break
+        if _is_hidden_singleleg(chain.parent):
+            continue
         parent_id, parent_focus_id = _chain_endpoint(chain.parent, side="e")
         cardinality: Literal["required", "xor"] = (
             "required" if len(chain.children) == 1 else "xor"
         )
         for child_index, child_spec in enumerate(chain.children):
             child_name = child_spec.name
+            if _is_hidden_singleleg(child_name):
+                continue
             child_id, child_focus_id = _chain_endpoint(child_name, side="w")
             if not (_in_focus(parent_focus_id) and _in_focus(child_focus_id)):
                 continue

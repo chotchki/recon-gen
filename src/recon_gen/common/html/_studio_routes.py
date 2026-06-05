@@ -2633,6 +2633,7 @@ def _render_diagram_page(
     cfg: Config | None = None,
     demo_mode: bool = False,
     top_nav_html: str = "",
+    hide_singleleg: bool = False,
 ) -> str:
     """Render the L2 topology diagram (per-rail / dot, X.4.b spike winner).
 
@@ -2673,6 +2674,7 @@ def _render_diagram_page(
         bundle_parallel_rails=True,
         focus_node_id=focus_node_id,
         layer=layer,
+        hide_singleleg=hide_singleleg,
     )
     dot_source: str = digraph.source
 
@@ -2726,12 +2728,26 @@ def _render_diagram_page(
     # iframe was dropping the embed flag, so the iframe re-rendered
     # with the standalone diagram's full studio chrome stacked
     # below the home page's own chrome → two nav bars).
-    def _qs(*, layer_val: int, focus_val: str | None) -> str:
+    def _qs(
+        *,
+        layer_val: int,
+        focus_val: str | None,
+        hide_singleleg_val: bool | None = None,
+    ) -> str:
+        """Build a URL query string preserving navigation context.
+
+        ``hide_singleleg_val`` defaults to the current request's value
+        (so layer/focus links carry it forward); explicitly passing
+        ``True`` / ``False`` overrides for the toggle's links.
+        """
         bits: list[str] = [f"layer={layer_val}"]
         if focus_val:
             bits.append(f"focus={escape(focus_val)}")
         if embed:
             bits.append("embed=1")
+        hs = hide_singleleg if hide_singleleg_val is None else hide_singleleg_val
+        if hs:
+            bits.append("hide_singleleg=1")
         return "?" + "&".join(bits)
 
     # AM.2 step 3 — chrome buttons share the chrome_button_classes()
@@ -2769,6 +2785,28 @@ def _render_diagram_page(
         '<input type="checkbox" id="toggle-trainer">'
         ' Trainer'
         '</label>'
+    )
+    # CF.3.h — server-side SingleLegRail hide. Server re-emit (not
+    # CSS hide) so dot re-lays-out the smaller subset cleanly. Modeled
+    # as a navigating anchor (URL = source of state truth) rather
+    # than a checkbox + JS handler — the layer link family does the
+    # same thing and gives us a consistent operator mental model.
+    hide_singleleg_url = _qs(
+        layer_val=layer,
+        focus_val=focus_node_id,
+        hide_singleleg_val=(not hide_singleleg),
+    )
+    hide_singleleg_label = (
+        "single-leg rails: hidden" if hide_singleleg
+        else "single-leg rails: visible"
+    )
+    hide_singleleg_toggle_html = (
+        f'<a class="{chrome_button_classes()}" '
+        f'href="{hide_singleleg_url}" '
+        f'aria-label="toggle single-leg rail visibility" '
+        f'title="Server-side re-emit; templates keep their single-leg legs">'
+        f'{hide_singleleg_label}'
+        f'</a>'
     )
 
     # Focus indicator + clear link. Visible only when ?focus= is set.
@@ -2813,6 +2851,7 @@ def _render_diagram_page(
     <a id="toggle-reset" class="{chrome_button_classes()}" href="{"?embed=1" if embed else "?"}">Reset</a>
     {coverage_toggle_html}
     {trainer_toggle_html}
+    {hide_singleleg_toggle_html}
     {focus_indicator}
     <span class="text-xs text-secondary-fg ml-auto" id="diagram-status">loading…</span>
   </div>
@@ -4233,6 +4272,10 @@ def make_studio_routes(
         # iframe, drop the studio-header so the page doesn't carry two
         # nav bars (the home's + the diagram's).
         embed = request.query_params.get("embed") == "1"
+        # CF.3.h — server-side hide of standalone SingleLegRails.
+        # URL = source of state truth (operator lock). Template-resident
+        # single-leg rails stay in their composite shape's port row.
+        hide_singleleg = request.query_params.get("hide_singleleg") == "1"
         # BS.3 part 3 — embedded diagram (inside the home iframe) skips
         # the top nav too; the host page already carries it.
         nav_html = "" if embed else _top_nav_html("/diagram")
@@ -4244,6 +4287,7 @@ def make_studio_routes(
                 cfg=cfg,
                 demo_mode=demo_mode,
                 top_nav_html=nav_html,
+                hide_singleleg=hide_singleleg,
             ),
         )
 

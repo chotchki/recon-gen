@@ -454,6 +454,56 @@ def test_topology_graphviz_per_rail_renders_fan_in_chain_distinctly() -> None:
     assert "fan-in 2→1" in src
 
 
+def test_topology_graphviz_per_rail_hide_singleleg_drops_standalone_single_legs() -> None:
+    """CF.3.h — ``hide_singleleg=True`` re-emits the topology with
+    standalone SingleLegRails filtered out at the node, bundle, edge,
+    and chain-endpoint levels.
+    """
+    import pytest
+    graphviz = pytest.importorskip("graphviz")
+    del graphviz
+    from recon_gen.common.l2 import Account, L2Instance, SingleLegRail
+    from recon_gen.common.l2.topology import build_topology_graph_per_rail
+
+    # Hand-built fixture with one standalone single-leg rail. spec_example
+    # has none (all its SingleLegRails are template-resident), so we
+    # synthesize the smallest legal L2 that pins the filter behavior.
+    inst = L2Instance(
+        accounts=(
+            Account(
+                id=Identifier("acct-int"),
+                role=Identifier("Internal"),
+                scope="internal",
+            ),
+        ),
+        account_templates=(),
+        rails=(
+            SingleLegRail(
+                name=Identifier("Standalone1L"),
+                leg_role=(Identifier("Internal"),),
+                leg_direction="Debit",
+                origin="InternalInitiated",
+                metadata_keys=(),
+            ),
+        ),
+        transfer_templates=(),
+        chains=(),
+        limit_schedules=(),
+    )
+
+    rail_id = "rail__Standalone1L"
+
+    g_visible = build_topology_graph_per_rail(
+        inst, db_table_prefix=DEFAULT_PREFIX, layer=3,
+    )
+    g_hidden = build_topology_graph_per_rail(
+        inst, db_table_prefix=DEFAULT_PREFIX, layer=3, hide_singleleg=True,
+    )
+
+    assert rail_id in g_visible.source
+    assert rail_id not in g_hidden.source
+
+
 # -- Typed projection against shipped fixtures ------------------------------
 
 
