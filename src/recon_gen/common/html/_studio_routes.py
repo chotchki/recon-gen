@@ -78,6 +78,8 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from recon_gen.common.config import Config, PlantKind, ScopeKind
+from recon_gen.common.html._components import render_summary_search_input
+from recon_gen.common.l2.editor import EntityKind
 from recon_gen.common.html._studio_assets.tw_classes import (
     chrome_button_classes,
     compact_input_classes,
@@ -366,14 +368,33 @@ def _render_home_page(
             f'onclick="event.stopPropagation()" '
             f'title="Create a new {escape(kind)}">+ Add</a>'
         )
+        # CF.4 followup (2026-06-05): search input lives in the
+        # summary so the operator can search without expanding first.
+        # The body toolbar drops its search input (via
+        # `header_owns_search=True`) so there's one search per kind.
+        # Typing auto-opens the details (`oninput=...open=true`).
+        section_url = f"/l2_shape/{kind}/?embed=1{section_query[kind]}"
+        summary_search_html = render_summary_search_input(
+            # `_HOME_SECTIONS` is typed `tuple[str, str, str]` for historical
+            # reasons; every literal value above IS an EntityKind by
+            # construction so the cast is the safe narrowing point.
+            kind=cast("EntityKind", kind),
+            initial_q=qp.get(f"{kind}_q", ""),
+            section_url=section_url,
+            body_id=body_id,
+            url_prefix=kind,
+        )
         section_blocks.append(
             f'<details class="bg-white border border-surface-border '
             f'rounded-md mb-3 overflow-hidden" '
             f'data-kind="{escape(kind)}"{open_attr}>'
             f'<summary class="cursor-pointer px-4 py-2 font-semibold '
-            f'text-accent bg-surface-bg select-none hover:bg-link-tint">'
-            f"{escape(label)} "
-            f'<span class="text-xs text-secondary-fg font-normal">({n})</span> '
+            f'text-accent bg-surface-bg select-none hover:bg-link-tint '
+            f'flex items-center gap-2 flex-wrap">'
+            f'<span>{escape(label)} '
+            f'<span class="text-xs text-secondary-fg font-normal">({n})</span>'
+            f"</span>"
+            f"{summary_search_html}"
             f"{add_link}"
             f'<a class="ml-2 text-accent no-underline font-normal text-sm hover:underline" '
             f'href="/l2_shape/{kind}/" '

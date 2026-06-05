@@ -349,33 +349,28 @@ def test_diagram_embed_mode_drops_sidebar_chrome(
     assert 'id="diagram-sidebar"' not in embedded
 
 
-def test_card_titles_link_to_diagram_focus_per_kind(
+def test_card_titles_are_plain_text_not_diagram_links(
     writable_l2_yaml: Path,
 ) -> None:
-    """CF.3.l — clicking a card title navigates to the standalone
-    Diagram page with ``?focus=<node_id>`` set. Was a JS-driven iframe
-    URL mutation under X.4.f.8.reverse; rewritten as a plain anchor
-    once Diagram became its own top-level surface. Each kind still
-    maps to its natural node prefix (accounts → role__X, rails →
-    rail__X, etc.)."""
+    """CF.4 followup (2026-06-05) — card titles are plain `<h3>`. The
+    earlier title-as-diagram-focus link (CF.3.l) was dropped: jumping
+    out of the editor surface on what looked like a heading was
+    surprising. The Edit button next to the title is the explicit
+    affordance; the Diagram is reachable from the top-level nav."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
-        # Account → role node.
-        body = c.get("/l2_shape/account/?embed=1").text
-        assert 'href="/diagram?focus=role__CustomerSubledger"' in body
-        # Rail → rail node.
-        body = c.get("/l2_shape/rail/?embed=1").text
-        assert 'href="/diagram?focus=rail__ExternalRailInbound"' in body
-        # AccountTemplate → role node (addressing key is role).
-        body = c.get("/l2_shape/account_template/?embed=1").text
-        assert 'href="/diagram?focus=role__CustomerSubledger"' in body
-        # The pre-CF.3.l simulated-button attributes are gone everywhere.
         for kind in (
             "account", "account_template", "rail", "transfer_template",
+            "chain", "limit_schedule",
         ):
-            kind_body = c.get(f"/l2_shape/{kind}/?embed=1").text
-            assert "data-focus-node=" not in kind_body
-            assert 'role="button"' not in kind_body
+            body = c.get(f"/l2_shape/{kind}/?embed=1").text
+            # No /diagram?focus=… anchors anywhere in the card grid.
+            assert "/diagram?focus=" not in body, (
+                f"{kind} embed leaks a /diagram?focus= link"
+            )
+            # The pre-CF.3.l simulated-button attributes also stay gone.
+            assert "data-focus-node=" not in body
+            assert 'role="button"' not in body
 
 
 def test_home_page_cards_carry_data_attributes_for_filter(

@@ -225,6 +225,7 @@ def render_list_toolbar(
     submit_url: str,
     swap_target_id: str,
     embed: bool = False,
+    header_owns_search: bool = False,
 ) -> str:
     """Render the search / sort / paginate toolbar for one section.
 
@@ -239,6 +240,11 @@ def render_list_toolbar(
             without a full-page navigation).
         embed: When True, the form omits ``hx-push-url`` so the
             iframe / embed host page's URL stays unchanged.
+        header_owns_search: When True, the search input is dropped
+            (the host page's section header is responsible for it,
+            e.g. the home page's ``<details>`` summary). Sort dropdown
+            + pager still render. CF.4 followup — search-in-summary
+            lock; one input across the whole rendered surface.
 
     Output shape (top to bottom):
         - Row 1: search input + sort dropdown (debounce-on-input,
@@ -251,28 +257,23 @@ def render_list_toolbar(
     as a CF.4.j sub-cell if a cold-read calls for it.
     """
     # CF.4 Q9A — `hx-push-url` only on navigation events. Search input
-    # debounces and pushes URL on Enter (`changed delay:300ms`); sort
-    # dropdown pushes immediately; pager buttons (real links, not form
-    # submits) push via the browser navigation.
+    # debounces and pushes URL on Enter (`changed delay:300ms`); pager
+    # buttons (real links, not form submits) push via the browser
+    # navigation. CF.4 followup (2026-06-05): the sort dropdown UI was
+    # removed — operator dogfood reported it doubled the toolbar
+    # height for no daily value (default YAML-declaration order is
+    # what the operator authors and reads back). Server-side
+    # `?sort_column=` URL parsing still works (parse_toolbar_state +
+    # _sort_entities), so shared URLs / external tooling keep
+    # functioning; just no widget.
     push_attr = ' hx-push-url="true"' if not embed else ""
     input_cls = (
         "flex-1 min-w-0 px-2 py-1 border border-surface-border "
         "rounded-sm text-sm focus:border-accent focus:outline-none"
     )
-    select_cls = (
-        "px-2 py-1 border border-surface-border rounded-sm text-sm "
-        "bg-white focus:border-accent focus:outline-none"
-    )
     btn_cls = chrome_button_classes()
     btn_disabled_cls = (
         f"{btn_cls} opacity-50 cursor-not-allowed pointer-events-none"
-    )
-
-    sort_options = "".join(
-        f'<option value="{axis}"'
-        + (' selected' if axis == state.sort_axis else "")
-        + f">{escape(SORT_AXIS_LABELS[axis])}</option>"
-        for axis in SORT_AXES_BY_KIND[state.kind]
     )
 
     # Range indicator reads "Showing 1-25 of 117" when populated, or
@@ -330,31 +331,41 @@ def render_list_toolbar(
         else f'<span class="{btn_disabled_cls}">Next →</span>'
     )
 
+    # When the summary header owns the search input, the body toolbar
+    # is just range + pager — no inputs to submit, so drop the form
+    # entirely. Pager links are anchor-based GETs (htmx-intercepted)
+    # which already serialize `q` into their URL via `_page_url`.
+    if header_owns_search:
+        return (
+            f'<div class="flex items-center justify-between gap-2 '
+            f'px-2 py-1 mb-2 bg-link-tint border border-surface-border '
+            f'rounded-sm" '
+            f'data-role="list-toolbar" data-kind="{state.kind}">'
+            f"{range_html}"
+            f'<div class="flex items-center gap-1">'
+            f"{prev_html}{next_html}"
+            f"</div>"
+            f"</div>"
+        )
+    # Standalone per-kind page: no `<details>` summary upstream, so
+    # the toolbar still hosts the search input. Single row (search +
+    # range + pager) — no sort dropdown anywhere.
     return (
-        f'<form class="flex flex-col gap-2 p-2 mb-2 bg-link-tint '
+        f'<form class="flex items-center gap-2 p-2 mb-2 bg-link-tint '
         f'border border-surface-border rounded-sm" '
         f'data-role="list-toolbar" data-kind="{state.kind}" '
         f'method="get" action="{escape(submit_url)}" '
         f'hx-get="{escape(submit_url)}" '
         f'hx-target="#{swap_target_id}" hx-swap="innerHTML" '
-        f'hx-trigger="submit, change from:select"{push_attr}>'
-        f'<div class="flex items-center gap-2">'
+        f'hx-trigger="submit"{push_attr}>'
         f'<input type="search" name="{escape(state.key_q)}" '
         f'value="{escape(state.q)}" '
         f'placeholder="Search {escape(state.kind)}s…" '
         f'class="{input_cls}" '
         f'autocomplete="off">'
-        f'<select name="{escape(state.key_sort)}" '
-        f'class="{select_cls}" '
-        f'aria-label="Sort {escape(state.kind)}s">'
-        f"{sort_options}"
-        f"</select>"
-        f"</div>"
-        f'<div class="flex items-center justify-between gap-2">'
         f"{range_html}"
-        f'<div class="flex items-center gap-1">'
+        f'<div class="flex items-center gap-1 shrink-0">'
         f"{prev_html}{next_html}"
-        f"</div>"
         f"</div>"
         f"</form>"
     )
@@ -418,6 +429,67 @@ def parse_toolbar_state(
     )
 
 
+def render_summary_search_input(
+    *,
+    kind: EntityKind,
+    initial_q: str,
+    section_url: str,
+    body_id: str,
+    url_prefix: str = "",
+) -> str:
+    """Render the per-section search input that lives in the
+    `<details>` summary.
+
+    Operator lock (CF.4 followup, 2026-06-05): search-in-summary +
+    auto-open. Typing fires an htmx refetch of the section body and
+    sets `details[open]` so results show up immediately.
+
+    Args:
+        kind: The section's entity kind. Drives the placeholder text
+            + the kind-aware ``aria-label``.
+        initial_q: Current value of the search input — comes from the
+            home URL's ``<kind>_q`` param so the input reflects the
+            active search after a refresh.
+        section_url: The lazy-fetch URL for the section body. Already
+            carries ``?embed=1`` and any other state baked by the home
+            page (sort, page, etc.). htmx appends the search input's
+            value to this URL on every keystroke (debounced) via
+            `hx-include`.
+        body_id: HTML id of the `<details>` body so htmx swaps the
+            cards container, not the summary.
+        url_prefix: Kind-namespaced URL key prefix (e.g. ``"rail"``);
+            an empty string means bare ``q`` (no prefix). Matches
+            ``ListToolbarState.url_prefix`` for consistency.
+
+    Output is one ``<input type="search">`` styled to fit in the
+    summary row. ``onclick="event.stopPropagation()"`` so clicking the
+    input doesn't toggle the parent ``<details>``; ``oninput`` opens
+    the details so first keystroke surfaces results.
+    """
+    key_q = f"{url_prefix}_q" if url_prefix else "q"
+    input_cls = (
+        "ml-2 px-2 py-0.5 border border-surface-border rounded-sm "
+        "text-xs font-normal w-40 focus:border-accent focus:outline-none"
+    )
+    # Trigger: debounce 300ms on input changed; submit immediately on
+    # Enter. `hx-trigger="search"` would also fire on the X-clear
+    # button click in WebKit/Chrome — folded into the same trigger.
+    return (
+        f'<input type="search" name="{escape(key_q)}" '
+        f'value="{escape(initial_q)}" '
+        f'placeholder="Search…" '
+        f'aria-label="Search {escape(kind)}s" '
+        f'class="{input_cls}" '
+        f'autocomplete="off" '
+        f'hx-get="{escape(section_url)}" '
+        f'hx-target="#{escape(body_id)}" hx-swap="innerHTML" '
+        f'hx-trigger="input changed delay:300ms, search" '
+        f'hx-include="this" '
+        f"onclick=\"event.stopPropagation()\" "
+        f"oninput=\"this.closest('details').open=true\">"
+    )
+
+
 __all__ = [
     "PAGE_SIZE_DEFAULT",
     "PAGE_SIZE_MAX",
@@ -427,4 +499,5 @@ __all__ = [
     "SortAxis",
     "parse_toolbar_state",
     "render_list_toolbar",
+    "render_summary_search_input",
 ]

@@ -144,7 +144,11 @@ def writable_l2_yaml(tmp_path: Path) -> Iterator[Path]:
 def test_list_view_renders_toolbar_for_rail_kind(
     writable_l2_yaml: Path,
 ) -> None:
-    """`/l2_shape/rail/` produces a toolbar + the per-card grid."""
+    """`/l2_shape/rail/` produces a toolbar + the per-card grid.
+    Standalone page carries the search input + pager (no sort
+    dropdown — operator lock 2026-06-05: dropdown doubled toolbar
+    height for no daily value; default YAML-order is the canonical
+    read shape)."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/l2_shape/rail/").text
@@ -152,9 +156,10 @@ def test_list_view_renders_toolbar_for_rail_kind(
     assert 'data-role="list-toolbar"' in body
     assert 'data-kind="rail"' in body
     assert 'name="q"' in body
-    assert 'name="sort_column"' in body
-    # Rail-specific sort axis shows up.
-    assert 'value="rail_subtype"' in body
+    # No sort UI — only the URL parser still honors ?sort_column=… for
+    # shared / external URLs (covered by test_list_view_sort_axis_…).
+    assert 'name="sort_column"' not in body
+    assert '<select' not in body
 
 
 def test_list_view_search_filters_cards(writable_l2_yaml: Path) -> None:
@@ -220,16 +225,15 @@ def test_list_view_sort_axis_orders_alphabetically(
     writable_l2_yaml: Path,
 ) -> None:
     """`?sort_column=name_asc` orders entity ids A→Z; `name_desc`
-    reverses. Spot-check that the two responses differ."""
+    reverses. Server-side sort still honors URL params even though
+    the dropdown UI was removed (2026-06-05) — kept so external
+    tooling / shared URLs / power-user manual override still work."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         asc = c.get("/l2_shape/rail/?sort_column=name_asc").text
         desc = c.get("/l2_shape/rail/?sort_column=name_desc").text
 
-    # The toolbar's <option selected> moves between the two responses.
-    assert 'value="name_asc" selected' in asc
-    assert 'value="name_desc" selected' in desc
-    # The card order differs between asc and desc (assuming >1 rail
+    # Card order differs between asc and desc (assuming >1 rail
     # in the fixture, which spec_example satisfies).
     asc_ids = _extract_article_ids(asc)
     desc_ids = _extract_article_ids(desc)
@@ -256,7 +260,9 @@ def test_list_view_embed_mode_returns_only_toolbar_plus_grid(
     writable_l2_yaml: Path,
 ) -> None:
     """`?embed=1` returns the toolbar + cards fragment (no <html>);
-    that's the home-page hx-get target shape."""
+    that's the home-page hx-get target shape. Body toolbar is just
+    range + pager — search is owned by the summary upstream and the
+    sort dropdown was removed 2026-06-05."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/l2_shape/rail/?embed=1").text
@@ -268,6 +274,18 @@ def test_list_view_embed_mode_returns_only_toolbar_plus_grid(
     assert "<body" not in body
     assert 'data-role="list-toolbar"' in body
     assert 'data-kind="rail"' in body
-    # Toolbar submits back to the embed URL so subsequent searches
-    # stay in the embed fragment.
-    assert 'hx-get="/l2_shape/rail/?embed=1"' in body
+
+
+def test_list_view_embed_pager_url_stays_in_embed_mode(
+    writable_l2_yaml: Path,
+) -> None:
+    """When pagination is active (more than `page_size` rows post-
+    filter), the Prev/Next hx-get URLs carry `embed=1` so clicking
+    them refetches another embed fragment instead of a full page."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        # Force pagination with a small page_size so the Next button
+        # is enabled.
+        body = c.get("/l2_shape/rail/?embed=1&page_size=2").text
+    assert "/l2_shape/rail/?embed=1" in body
+    assert "embed=1" in body

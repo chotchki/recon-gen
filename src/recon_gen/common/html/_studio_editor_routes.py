@@ -1884,7 +1884,7 @@ def _render_read_value(spec: FieldSpec, value: object) -> str:
 
 def _render_read_card_summary(
     kind: EntityKind, entity: object,
-    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — passed through to _focus_node_for_entity
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — retained for callsite parity with body helper
     entity_id: str,
     html_id: str,
     *, demo_mode: bool = False,
@@ -1896,11 +1896,7 @@ def _render_read_card_summary(
     AH.4: ``demo_mode`` drops the Edit / Delete actions (their routes
     are 404'd in demo-mode anyway).
     """
-    # X.4.f.8.reverse — card title becomes a click target that navigates
-    # to /diagram?focus=<node_id>. data-focus-node on the card carries
-    # the right node-id prefix per kind; absent when the entity has no
-    # natural diagram target.
-    focus_node = _focus_node_for_entity(kind, entity, instance)
+    del instance  # parity with `_render_read_card_body` — kept for the API
     # X.4.f.11 — surface rail subtype as a small badge on the read
     # card so the operator can tell a TwoLeg apart from a SingleLeg
     # at a glance. Non-rail entities don't get a badge.
@@ -1921,25 +1917,17 @@ def _render_read_card_summary(
     # break-all + min-w-0 they overflow into the Edit/Delete actions
     # column — user dogfood 2026-05-25).
     h3_base = "text-base font-semibold m-0 text-primary-fg min-w-0 break-all"
-    if focus_node is None:
-        title_html = (
-            f'<h3 class="{h3_base}">{escape(entity_id)}{subtype_badge}</h3>'
-        )
-    else:
-        # CF.3.l — plain anchor; browsers get right-click → open in
-        # new tab, keyboard focus rings, screen-reader treatment for
-        # free. CF.4.c: `onclick="event.stopPropagation()"` so a click
-        # on the anchor inside `<summary>` navigates without toggling
-        # the parent `<details>`.
-        title_html = (
-            f'<h3 class="{h3_base}">'
-            f'<a class="text-primary-fg no-underline hover:text-accent '
-            f'hover:underline" '
-            f'href="/diagram?focus={escape(focus_node)}" '
-            f'onclick="event.stopPropagation()" '
-            f'title="Focus the diagram on this entity">'
-            f"{escape(entity_id)}{subtype_badge}</a></h3>"
-        )
+    # CF.4 followup (2026-06-05): title is plain text. The
+    # CF.3.l title-as-diagram-focus link was a holdover from before
+    # the diagram became its own top-level surface; jumping out of
+    # the editor on a click that looks like a heading is surprising.
+    # The Edit button right next to the title is the explicit
+    # affordance. Collapsed cards still toggle on title click via
+    # native `<details>`/`<summary>` semantics (the title has no
+    # `onclick="stopPropagation"` so the click bubbles to the parent).
+    title_html = (
+        f'<h3 class="{h3_base}">{escape(entity_id)}{subtype_badge}</h3>'
+    )
     # X.4.f.9.delete — DELETE on success returns empty (card disappears
     # via outerHTML swap); on validator-rejected structural break returns
     # 400 + the error fragment which swaps in place. CF.4.c —
@@ -2057,18 +2045,34 @@ def _render_read_card(
             '<div data-role="card-body" class="text-xs '
             'text-secondary-fg italic mt-1">loading…</div>'
         )
+        # CF.4 followup (2026-06-05): `group` on `<details>` so the
+        # chevron can read the parent's `[open]` state via Tailwind's
+        # `group-open:` variant. Native browser marker is suppressed
+        # because we render our own — placement, color, and rotation
+        # all need to match the rest of the design system.
         summary_wrapper_cls = (
-            "list-none cursor-pointer "
+            "list-none cursor-pointer flex items-start gap-2 "
             "[&::-webkit-details-marker]:hidden"
+        )
+        # `▸` (U+25B8) rotates 90° on open. `transition-transform`
+        # smooths the spin; `mt-1` aligns the glyph with the h3's
+        # x-height so it doesn't float above the title.
+        chevron_html = (
+            '<span class="inline-block transition-transform '
+            'group-open:rotate-90 text-secondary-fg mt-1 select-none" '
+            'aria-hidden="true" data-role="card-chevron">▸</span>'
         )
         return (
             f'<article class="{card_cls}" id="{html_id}" '
             f'data-kind="{escape(kind)}" '
             f'data-entity-id="{escape(entity_id)}">'
-            f'<details hx-get="{body_url}" '
+            f'<details class="group" hx-get="{body_url}" '
             f'hx-target="find [data-role=\'card-body\']" '
             f'hx-swap="outerHTML" hx-trigger="toggle once">'
-            f'<summary class="{summary_wrapper_cls}">{summary_html}</summary>'
+            f'<summary class="{summary_wrapper_cls}">'
+            f'{chevron_html}'
+            f'<div class="flex-1 min-w-0">{summary_html}</div>'
+            f"</summary>"
             f"{body_placeholder}"
             f"</details>"
             f"</article>"
@@ -2083,53 +2087,6 @@ def _render_read_card(
         f"{body_html}"
         f"</article>"
     )
-
-
-def _focus_node_for_entity(
-    kind: EntityKind,
-    entity: object,
-    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed to disambiguate chain.parent shape (rail vs template)
-) -> str | None:
-    """Map an entity to its natural diagram-node id (prefix-encoded
-    per the topology helpers — ``role__X`` / ``rail__X`` / ``tmpl__X``).
-
-    Used by the home page's reverse filter (X.4.f.8.reverse): clicking
-    the card title focuses the diagram on this node, which fans out
-    the existing /diagram/visible pipeline.
-
-    Returns None when there's no meaningful target — Account without a
-    role, AccountTemplate (impossible — role is required), etc. The
-    renderer then drops the click affordance and shows plain text.
-    """
-    if kind in ("account", "account_template"):
-        role = getattr(entity, "role", None)
-        if role is None or not str(role):
-            return None
-        return f"role__{role}"
-    if kind in ("rail", "transfer_template"):
-        name = getattr(entity, "name", None)
-        if name is None or not str(name):
-            return None
-        prefix = "rail__" if kind == "rail" else "tmpl__"
-        return f"{prefix}{name}"
-    if kind == "chain":
-        # parent could be a rail name OR a template name — pick the
-        # right prefix by checking which collection it belongs to.
-        parent = getattr(entity, "parent", None)
-        if parent is None or not str(parent):
-            return None
-        template_names = {
-            t.name for t in getattr(instance, "transfer_templates", ())
-        }
-        prefix = "tmpl__" if parent in template_names else "rail__"
-        return f"{prefix}{parent}"
-    if kind == "limit_schedule":
-        # Anchor on the parent_role node.
-        parent_role = getattr(entity, "parent_role", None)
-        if parent_role is None or not str(parent_role):
-            return None
-        return f"role__{parent_role}"
-    return None
 
 
 _CREATE_INTRO_BY_KIND: Mapping[EntityKind, str] = {
@@ -4152,6 +4109,13 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
             ),
             swap_target_id="entity-list",
             embed=embed,
+            # CF.4 followup (2026-06-05): when the body is fetched as
+            # an embedded fragment, the home page's `<details>`
+            # summary owns the search input — drop ours so there's
+            # one search per kind across the rendered surface. The
+            # body toolbar keeps a hidden `q` field so sort + pager
+            # submits preserve the active filter.
+            header_owns_search=embed,
         )
         return HTMLResponse(
             _render_list_page(

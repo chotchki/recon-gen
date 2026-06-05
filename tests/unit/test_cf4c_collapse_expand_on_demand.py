@@ -199,17 +199,21 @@ def test_card_route_without_body_only_returns_full_card(
 def test_action_links_stop_propagation_in_collapsed_card(
     writable_l2_yaml: Path,
 ) -> None:
-    """Edit + Delete + the focus-anchor inside `<summary>` carry
+    """Edit + Delete inside `<summary>` carry
     `onclick="event.stopPropagation()"` so clicking them doesn't
     toggle the parent `<details>` (which would expand the card just
-    to immediately navigate away)."""
+    to immediately navigate away). The card title itself is plain
+    `<h3>` — title-as-diagram-focus was dropped 2026-06-05 (a holdover
+    from before Diagram became its own top-level surface), so title
+    clicks NOW intentionally bubble to toggle the details."""
     from recon_gen.common.html._studio_editor_routes import (  # noqa: PLC0415
         _render_read_card,
     )
     cache = L2InstanceCache.from_path(writable_l2_yaml)
     inst = cache.get()
-    # cust-001 is an Account with a role → focus-anchor present.
     account = next(a for a in inst.accounts if a.id == "cust-001")
     card = _render_read_card("account", account, inst, collapsed=True)
-    # Three onclick=stopPropagation occurrences: Edit + Delete + focus.
-    assert card.count('onclick="event.stopPropagation()"') >= 3
+    # Edit + Delete each guard against toggle propagation.
+    assert card.count('onclick="event.stopPropagation()"') >= 2
+    # Title carries no anchor → no `/diagram?focus=…` link.
+    assert "/diagram?focus=" not in card

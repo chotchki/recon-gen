@@ -232,31 +232,22 @@ def test_render_emits_search_input_with_current_value() -> None:
     assert 'placeholder="Search rails…"' in html
 
 
-def test_render_emits_sort_dropdown_with_kind_options() -> None:
-    """rail's dropdown must include `rail_subtype`; account's must not."""
-    rail_html = render_list_toolbar(
-        ListToolbarState(kind="rail"),
-        submit_url="/l2_shape/rail/", swap_target_id="x",
-    )
-    assert 'value="rail_subtype"' in rail_html
-    assert ">Two-leg first<" in rail_html
-
-    account_html = render_list_toolbar(
-        ListToolbarState(kind="account"),
-        submit_url="/l2_shape/account/", swap_target_id="x",
-    )
-    assert 'value="rail_subtype"' not in account_html
-
-
-def test_render_selects_current_sort_axis() -> None:
-    state = ListToolbarState(
-        kind="rail", sort_axis="name_desc",
-    )
-    html = render_list_toolbar(
-        state, submit_url="/l2_shape/rail/", swap_target_id="x",
-    )
-    # The Z→A option carries `selected`.
-    assert 'value="name_desc" selected>Z → A<' in html
+def test_render_omits_sort_ui() -> None:
+    """Sort dropdown was removed 2026-06-05 (operator dogfood: doubled
+    toolbar height for no daily value; default YAML-declaration order
+    is the canonical read shape). Server-side `?sort_column=` URL
+    parsing still works for shared URLs / external tooling."""
+    for kind in ("rail", "account", "transfer_template", "chain"):
+        html = render_list_toolbar(
+            ListToolbarState(kind=kind),
+            submit_url=f"/l2_shape/{kind}/", swap_target_id="x",
+        )
+        assert "<select" not in html
+        assert 'name="sort_column"' not in html
+        # Per-kind sort axes still typed in SORT_AXES_BY_KIND (for the
+        # server-side branch); they just don't have a UI to set them.
+        assert "Two-leg first" not in html
+        assert "By parent" not in html
 
 
 def test_render_emits_pager_with_range_indicator() -> None:
@@ -366,7 +357,9 @@ def test_render_pager_urls_carry_state() -> None:
 
 def test_render_url_prefix_namespacing_carries_through() -> None:
     """Home page embed: the pager's URL uses prefixed keys so the home
-    URL can carry every section's state without collision."""
+    URL can carry every section's state without collision. (Note the
+    standalone toolbar shape is unprefixed; this calls render with
+    `url_prefix="rail"` to confirm `_page_url`'s key serialization.)"""
     state = ListToolbarState(
         kind="rail", url_prefix="rail",
         page_offset=25, page_size=25, total_count=117,
@@ -375,5 +368,9 @@ def test_render_url_prefix_namespacing_carries_through() -> None:
         state, submit_url="/", swap_target_id="x",
     )
     assert "rail_page_offset=50" in html
+    # Search input lives in the form (standalone shape).
     assert 'name="rail_q"' in html
-    assert 'name="rail_sort_column"' in html
+    # Sort UI is gone — no `rail_sort_column` form key. The URL
+    # parser still accepts the same key (test_cf4b covers the
+    # server-side branch).
+    assert 'name="rail_sort_column"' not in html
