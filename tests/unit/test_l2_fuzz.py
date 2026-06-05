@@ -27,7 +27,7 @@ import pytest
 
 from recon_gen.common.l2 import load_instance
 
-from tests.l2.fuzz import random_l2_yaml
+from tests.l2.fuzz import FuzzPlan, random_l2_yaml, random_l2_yaml_from_plan
 
 
 # 100 seeds covers a lot of variation while keeping wall time low
@@ -235,3 +235,77 @@ def test_fuzzer_seed_emits_distinct_business_day_offsets_for_at_least_two_roles(
         f"Variation across roles is the whole point of M.4.4.14 — check "
         f"_BUSINESS_DAY_OFFSET_CHOICES + _build_role_business_day_offsets."
     )
+
+
+# ---------------------------------------------------------------------------
+# CF.3.spike — public ``random_l2_yaml_from_plan(plan)`` entry
+# ---------------------------------------------------------------------------
+
+
+def test_random_l2_yaml_from_plan_heavy_density(tmp_path: Path) -> None:
+    """`random_l2_yaml_from_plan(plan)` accepts plans outside the default
+    ranges sampled by `random_l2_yaml(seed)` — heavy density (100 rails /
+    30 templates / 12 chains) loads + validates without raising.
+
+    This is the CF.3.spike harness's entry point. The default
+    `random_l2_yaml` knob ranges cap at 8 rails / 3 templates / 3 chains;
+    `_build_instance` was untested at the heavy end before the spike,
+    so this guards against future regressions in any layer that scales
+    super-linearly on the heavy axes (transfer template reconciliation,
+    chain anchoring, leg_rail_xor_groups partitioning).
+    """
+    plan = FuzzPlan(
+        seed=42,
+        n_singleton_internal=8,
+        n_singleton_external=20,
+        n_templates=4,
+        n_rails=100,
+        n_transfer_templates=30,
+        n_chains=12,
+        n_limit_schedules=6,
+        two_leg_ratio=0.6,
+        aggregating_count=2,
+        pending_age_probability=0.3,
+        description_probability=0.7,
+    )
+    yaml_text = random_l2_yaml_from_plan(plan)
+    p = tmp_path / "heavy.yaml"
+    p.write_text(yaml_text)
+    inst = load_instance(p)
+    # _build_instance may round up by 1-3 entities in each axis as it
+    # reconciles constraints (e.g. XOR template injection); assert at
+    # least the requested counts, not exact equality.
+    assert len(inst.rails) >= plan.n_rails, (
+        f"requested {plan.n_rails} rails, got {len(inst.rails)} — "
+        f"heavy plan was clamped or pruned somewhere downstream"
+    )
+    assert len(inst.transfer_templates) >= plan.n_transfer_templates
+    assert len(inst.chains) == plan.n_chains
+    assert len(inst.limit_schedules) == plan.n_limit_schedules
+
+
+def test_random_l2_yaml_from_plan_is_byte_deterministic() -> None:
+    """Same plan = byte-identical YAML across calls.
+
+    `random_l2_yaml(seed)` already pins this for the sampling path;
+    `random_l2_yaml_from_plan(plan)` reuses the same _build_instance
+    pipeline so it should hold too. Cheap check; expensive to debug
+    if it ever stops being true.
+    """
+    plan = FuzzPlan(
+        seed=2026,
+        n_singleton_internal=4,
+        n_singleton_external=5,
+        n_templates=2,
+        n_rails=20,
+        n_transfer_templates=5,
+        n_chains=3,
+        n_limit_schedules=2,
+        two_leg_ratio=0.5,
+        aggregating_count=1,
+        pending_age_probability=0.25,
+        description_probability=0.5,
+    )
+    a = random_l2_yaml_from_plan(plan)
+    b = random_l2_yaml_from_plan(plan)
+    assert a == b

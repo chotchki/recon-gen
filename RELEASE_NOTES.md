@@ -1,5 +1,120 @@
 # Release Notes
 
+## v13.2.0 — Phase CF foundations + Python 3.14 + release-pipeline rescue + heavy-density fuzz API
+
+CF-phase typed primitives + sheet land, with infrastructure carries:
+Python 3.14 across the board (CI install via `astral-sh/setup-uv`),
+pyright 1.1.410, BX backlog #173 (Studio Session Start self-heals
+missing base schema), and a `release.yml` waiter that no longer
+self-foot-shoots when post-tag PLAN edits cancel CI on the tagged SHA.
+Side-benefit from the CF.3 spike: the L2 fuzzer now exposes a public
+`FuzzPlan` + `random_l2_yaml_from_plan(plan)` for purpose-built
+high-density fixtures.
+
+**Headline impact:**
+
+- **CF.X-infra typed primitives.** `KPIValueThresholdBanding(amber_at,
+  red_at)` (3-band amber/red KPI states, construction-guarded
+  `red_at > amber_at`, 3-way mutex with the BK.2/BK.9 indicators);
+  `CrossAppDrill(target_dashboard_id, target_sheet_id)` (QS emit
+  returns None per the URL-param-no-control-sync defect — App2 wires
+  through normally). Both land in `common/tree/visuals.py` /
+  `common/tree/actions.py` next to their siblings. **AWS QS amber-icon
+  enum quirk captured**: only `TRIANGLE`/`CHECKMARK`/`X` are accepted
+  by `KPIVisual` icon position (no `EXCLAMATION_CIRCLE`/`WARNING`/
+  `ALERT` — see `docs/reference/quicksight-quirks.md`).
+- **CF.0 — Studio plant picker robustness.** `_pick_template` now
+  scores templates by materializable-plant count instead of taking the
+  first alphabetical match; surfaces per-kind failure reasons in the
+  Apply danger banner so operators know WHY a kind didn't land
+  (previously: "0 plants applied", no context).
+- **CF.1 — kv-sourced 3-state last-Apply banner.** The Apply-result
+  banner persists across navigation (kv = source of truth, not
+  session state); reads green/amber/red from a single
+  `__bv_last_apply__` kv read. The 3-state pattern matches the
+  CF.X-infra KPI banding semantics.
+- **CF.2 — Exec Program Health sheet.** Single-row L1 violation
+  rollup driven by `KPIValueThresholdBanding` from the typed primitive;
+  inserted at Exec sheet index 1. Scope narrowed to L1-only after
+  design audit flagged that L1 + L2FT + Inv violation counts don't
+  cleanly sum (different denominator semantics).
+- **CF.3 spike (preview)** — heavy-density fuzz fixture lands at
+  `tests/l2/heavy_density_v1.yaml` (seed 42 / 100 rails / 30 transfer
+  templates / 12 chains) + measurement harness at
+  `tests/l2/cf3_spike.py` + the iteration-state audit at
+  `docs/audits/cf_3_diagram_spike.md`. The harness drives the CF.3
+  diagram-density work; the docs audit is the operator-facing
+  cold-read loop's persistent state. Heavy L3 hits 139 990 crossings
+  vs 1 086 baseline at 116 ms layout — the legibility apocalypse is
+  measured, ready for CF.3.a→.f to land against.
+- **Fuzzer API enhancement.** `tests/l2/fuzz.py` promotes `_FuzzPlan`
+  → public `FuzzPlan` + adds `random_l2_yaml_from_plan(plan)` as
+  companion to `random_l2_yaml(seed)`. The default-ranged
+  `random_l2_yaml` dogfood-pool entry stays byte-stable; the new
+  function lets callers drive `_build_instance` outside the default
+  knob ranges — heavy-density stress fixtures, surgical reproductions,
+  deliberate edge-density configurations. `_build_instance` survives
+  heavy density unmodified (no caps tripped at 100 rails / 30
+  templates / 12 chains).
+- **Python 3.14 across the board.** `requires-python = ">=3.14"`,
+  `.python-version` pinned to 3.14, CI swapped from `actions/setup-
+  python` → `astral-sh/setup-uv@v6` (which pulls python-build-
+  standalone 3.14 even on self-hosted runners that ship 3.12). PEP 768
+  (`sys.remote_exec`), asyncio.timeout() overhead reductions, and
+  free-threaded mode now available.
+- **Release pipeline rescue path** (BX #251). The `wait-for-ci` gate
+  used to refuse-to-publish if a post-tag PLAN.md push cancelled CI
+  on the tag SHA (cancel-in-progress concurrency). New behavior: when
+  CI on tag SHA is `cancelled`, the waiter checks if a descendant on
+  main has green CI AND the descendant's diff vs tag touches ONLY
+  doc/plan paths (PLAN.md, PLAN_ARCHIVE.md, RELEASE_NOTES.md,
+  README.md, CHANGELOG.md, LICENSE*, SPEC.md, docs/*.{md,rst,txt,
+  svg,png,jpg,jpeg,gif,webp,css}) — then the descendant's green CI
+  provably validates the tag's code surface, accept. All other
+  cancelled cases still refuse. Adversarially reviewed; tight regex
+  anchors prevent path-traversal-shape bypasses
+  (`LICENSE[._-][^/]*` not `LICENSE.*`).
+- **BX #173 — Studio Session Start self-heal.** When operator hits
+  Session Start on a virgin DuckDB (no base schema yet), step_2_wipe
+  now probes via `SELECT * FROM <prefix>_transactions WHERE 1=0`,
+  catches the catalog error, and emits the base schema before
+  proceeding. Previously: silent no-op + Studio crash on next page.
+- **pyright 1.1.410** (was 1.1.409); **mkdocs 1.6.3** via uv pin.
+- **5 small CF audit wins from v13.1.1 design review** (3e0c1e1b):
+  L2FT Multi-Leg Flow Sankey items_limit=30; bv-families pb-24 fix
+  for Apply-bar overlap; Investigation "trust the data" copy dropped;
+  audit text typo fixes.
+
+### Migration
+
+- **Python 3.14 is now required.** Operators on 3.13 will see `pip
+  install recon-gen==13.2.0` refuse. `uv` (recommended) pulls the
+  python-build-standalone 3.14 on-demand; `pyenv` users `pyenv
+  install 3.14` first.
+- **No API breaking changes on the production surface.** The four
+  bundled dashboards + CLI shape (`schema apply` / `data apply` /
+  `json apply` / `audit apply` / `studio` / `dashboards`) are
+  unchanged.
+- **Test API enhancement (non-breaking).** `tests.l2.fuzz` now exports
+  `FuzzPlan` (was `_FuzzPlan`) + new `random_l2_yaml_from_plan(plan)`.
+  Existing `random_l2_yaml(seed)` callers unchanged.
+
+### CI / pipeline
+
+- `actions/setup-python@v6` removed from `ci.yml` / `pages.yml` /
+  `release.yml`; replaced by `astral-sh/setup-uv@v6` with
+  `python-version: "3.14"`. Pulls python-build-standalone on first
+  invocation; cached thereafter via `enable-cache: true`.
+- `release.yml::docs-portable-install` now uses `uv build --wheel`
+  (was `uv pip install --system build && python -m build` — the
+  `--system` flag tried to write to the runner's nonexistent 3.14
+  system install).
+- `release.yml::wait-for-ci` adds the rescue path described above
+  plus pagination ceiling checks (refuse if compare truncated >250
+  commits or ≥300 files — can't fully verify).
+
+---
+
 ## v13.0.0 — Phases CA + CB + CB.14: DuckDB default, typed test marks, Docker-to-AWS bridge, in-repo Oracle 19c
 
 Three intertwined phases — DuckDB swap (CA), test-layer architecture
