@@ -440,9 +440,12 @@ jobs:
           python-version: "3.14"
 
       - name: Build wheel
-        run: |
-          uv pip install --system build
-          python -m build --wheel --outdir /tmp/wheelhouse
+        # `uv build` uses uv's managed Python automatically (no
+        # `actions/setup-python` step → no system Python to install
+        # `build` against). Replaces the prior
+        # `uv pip install --system build && python -m build` shape
+        # which broke when we dropped setup-python on 2026-06-05.
+        run: uv build --wheel --out-dir /tmp/wheelhouse
 
       - name: Install wheel into a fresh venv (NOT editable)
         run: |
