@@ -31,23 +31,30 @@ FIXTURES_DIR = Path(__file__).parent.parent / "l2"
 @pytest.mark.parametrize(
     "node_id, expected_url",
     [
-        # Rails: bijective.
-        ("rail__ExternalRailInbound", "/l2_shape/rail/ExternalRailInbound"),
-        # Templates: bijective.
-        ("tmpl__CustomerSettlement", "/l2_shape/transfer_template/CustomerSettlement"),
-        # Roles: ambiguous (multiple accounts can share), punt to list.
-        ("role__CustomerSubledger", "/l2_shape/account/"),
+        # Rails: bijective. Lands on the EDIT form per operator lock.
+        (
+            "rail__ExternalRailInbound",
+            "/l2_shape/rail/ExternalRailInbound/edit",
+        ),
+        # Templates: bijective. Lands on the EDIT form.
+        (
+            "tmpl__CustomerSettlement",
+            "/l2_shape/transfer_template/CustomerSettlement/edit",
+        ),
+        # Roles: ambiguous (a role is shared by multiple accounts /
+        # templates / limit_schedules). No unique edit target;
+        # deferred until disambiguation surface exists.
+        ("role__CustomerSubledger", None),
         # Synthetic bundle nodes: no source-side entity.
-        ("rail__bundle_42", "/l2_shape/rail/"),
-        # Empty / None: editor home.
-        (None, "/"),
-        ("", "/"),
-        # Unknown prefix: editor home.
-        ("mystery__X", "/"),
+        ("rail__bundle_42", None),
+        # Empty / None / unknown: nothing to edit.
+        (None, None),
+        ("", None),
+        ("mystery__X", None),
     ],
 )
 def test_editor_url_for_focus_node_inverse(
-    node_id: str | None, expected_url: str,
+    node_id: str | None, expected_url: str | None,
 ) -> None:
     assert _editor_url_for_focus_node(node_id) == expected_url
 
@@ -82,13 +89,22 @@ def test_diagram_sidebar_replaces_horizontal_chrome_rows() -> None:
     assert "Studio · diagram" not in html
     # The two pre-CF.3.m chrome bar rows are gone.
     assert 'class="flex flex-wrap items-center gap-3 px-4 py-2' not in html
-    # Each of the five primary section labels appears as a <summary>.
+    # Each of the four primary section labels appears as a <summary>.
+    # Section title stayed "Layer" after operator clarified that the
+    # "Roles & Structure" label belongs on the FIRST BUTTON inside
+    # the section (replacing "1 · Roles + structure"), not on the
+    # section header.
     for label in ("Layer", "Show", "Edge labels", "Overlays"):
         assert f">{label}</summary>" in html, f"missing section: {label!r}"
+    # First layer button is "Roles & Structure" — the L1 lock label
+    # the operator already uses.
+    assert ">Roles &amp; Structure</a>" in html
 
 
-def test_diagram_sidebar_view_in_editor_button_default() -> None:
-    """No focus → the View in editor button points at the editor home."""
+def test_diagram_sidebar_view_in_editor_button_suppressed_when_no_focus() -> None:
+    """No focus → no resolvable edit target → the button is omitted
+    entirely. Operator lock (2026-06-05): rather than dump them on a
+    list / home page, suppress the affordance until they pick a node."""
     pytest.importorskip("graphviz")
     from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
         _render_diagram_page,
@@ -97,18 +113,13 @@ def test_diagram_sidebar_view_in_editor_button_default() -> None:
 
     cache = L2InstanceCache.from_path(FIXTURES_DIR / "spec_example.yaml")
     html = _render_diagram_page(
-        cache,
-        dev_log=False,
-        focus_node_id=None,
-        layer=1,
-        embed=False,
+        cache, dev_log=False, focus_node_id=None, layer=1, embed=False,
     )
-    assert 'id="view-in-editor"' in html
-    assert 'href="/"' in html
+    assert 'id="view-in-editor"' not in html
 
 
-def test_diagram_sidebar_view_in_editor_button_with_focus() -> None:
-    """Focus set → button targets the resolved entity URL."""
+def test_diagram_sidebar_view_in_editor_button_with_rail_focus() -> None:
+    """Focus on a rail → button targets the rail's EDIT form."""
     pytest.importorskip("graphviz")
     from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
         _render_diagram_page,
@@ -125,8 +136,108 @@ def test_diagram_sidebar_view_in_editor_button_with_focus() -> None:
     )
     assert (
         'id="view-in-editor"' in html
-        and 'href="/l2_shape/rail/ExternalRailInbound"' in html
+        and 'href="/l2_shape/rail/ExternalRailInbound/edit"' in html
     )
+
+
+def test_diagram_sidebar_view_in_editor_button_suppressed_for_role_focus() -> None:
+    """Role focus is ambiguous (multiple accounts can share the role) —
+    deferred per operator lock. Button stays hidden."""
+    pytest.importorskip("graphviz")
+    from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
+        _render_diagram_page,
+    )
+    from recon_gen.common.l2.cache import L2InstanceCache  # noqa: PLC0415
+
+    cache = L2InstanceCache.from_path(FIXTURES_DIR / "spec_example.yaml")
+    html = _render_diagram_page(
+        cache,
+        dev_log=False,
+        focus_node_id="role__CustomerSubledger",
+        layer=1,
+        embed=False,
+    )
+    assert 'id="view-in-editor"' not in html
+
+
+def test_diagram_sidebar_chevron_flips_on_collapse() -> None:
+    """The master collapse chevron uses « when expanded and » when
+    collapsed. Both glyphs are present in the rendered HTML — Tailwind
+    `not-open:hidden` / `open:hidden` arbitrary variants flip them
+    based on the root `<details>` open state."""
+    pytest.importorskip("graphviz")
+    from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
+        _render_diagram_page,
+    )
+    from recon_gen.common.l2.cache import L2InstanceCache  # noqa: PLC0415
+
+    cache = L2InstanceCache.from_path(FIXTURES_DIR / "spec_example.yaml")
+    html = _render_diagram_page(
+        cache, dev_log=False, focus_node_id=None, layer=1, embed=False,
+    )
+    # Both chevron glyphs and their show-when-{open,closed} variants.
+    assert 'class="not-open:hidden">«' in html
+    assert 'class="open:hidden">»' in html
+
+
+def test_diagram_sidebar_status_carries_prefix() -> None:
+    """The bottom status line (`#diagram-status`) carries
+    `data-prefix="<L2 stem>"`, which `diagram.js` prepends to the
+    "<N> nodes · <M> edges" text. Operator wanted the breadcrumb so
+    the bottom info line tells you both the L2 and the counts at once.
+    """
+    pytest.importorskip("graphviz")
+    from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
+        _render_diagram_page,
+    )
+    from recon_gen.common.l2.cache import L2InstanceCache  # noqa: PLC0415
+
+    cache = L2InstanceCache.from_path(FIXTURES_DIR / "spec_example.yaml")
+    html = _render_diagram_page(
+        cache, dev_log=False, focus_node_id=None, layer=1, embed=False,
+    )
+    # Stem of the cache path is `spec_example` (the unit fixture).
+    assert 'id="diagram-status" data-prefix="spec_example"' in html
+    # JS prepends it.
+    diagram_js = (
+        Path(__file__).parent.parent.parent
+        / "src" / "recon_gen" / "common" / "html"
+        / "_studio_assets" / "diagram.js"
+    ).read_text()
+    assert "status.dataset.prefix" in diagram_js
+
+
+def test_diagram_sidebar_unified_checkbox_shape() -> None:
+    """CF.3.m polish: Show / Edge labels / Overlays render as
+    `<input type="checkbox">` rows — the previously-anchor-styled
+    show-category toggles and the single-leg pill became real
+    checkboxes that navigate on change. Visual uniformity + native
+    keyboard handling (space toggles) come for free."""
+    pytest.importorskip("graphviz")
+    from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
+        _render_diagram_page,
+    )
+    from recon_gen.common.l2.cache import L2InstanceCache  # noqa: PLC0415
+
+    cache = L2InstanceCache.from_path(FIXTURES_DIR / "spec_example.yaml")
+    html = _render_diagram_page(
+        cache, dev_log=False, focus_node_id=None, layer=3, embed=False,
+    )
+    # Show categories — onchange navigates with the flipped show-set.
+    for category in ("rail", "template", "chain", "control_parent"):
+        assert (
+            f'data-show-category="{category}" data-show-state="on" '
+            in html
+        ), f"{category!r} missing label wrapper"
+    # All four are wired as <input type="checkbox"> with onchange-navigate.
+    assert html.count("onchange=\"window.location.href=&#x27;") >= 5, (
+        "expected ≥5 navigating checkboxes "
+        "(rail/template/chain/control_parent + single-leg)"
+    )
+    # Edge label checkboxes still present and inside the Edge labels
+    # section.
+    assert 'id="toggle-edge-label-rail_bundle"' in html
+    assert 'id="toggle-edge-label-chain"' in html
 
 
 def test_diagram_sidebar_omitted_in_embed_mode() -> None:
@@ -163,15 +274,16 @@ def test_diagram_sidebar_omitted_in_embed_mode() -> None:
 
 def test_diagram_js_inverse_arms_match_python() -> None:
     """The JS `_editorUrlForNode` arms must mirror the Python
-    `_editor_url_for_focus_node` arms. If you add a new prefix arm
-    to either side, this gate fails until you update both."""
+    `_editor_url_for_focus_node` arms. Both sides must:
+    (a) handle the same four prefixes; (b) emit `/edit` URLs for
+    resolvable cases; (c) return null/None for ambiguous cases."""
     diagram_js = (
         Path(__file__).parent.parent.parent
         / "src" / "recon_gen" / "common" / "html"
         / "_studio_assets" / "diagram.js"
     ).read_text()
-    # Every prefix the Python inverse handles must also appear in
-    # the JS dispatch.
+    # Every prefix the Python inverse handles must also appear in the
+    # JS dispatch.
     for prefix in (
         '"rail__bundle_"',
         '"rail__"',
@@ -182,7 +294,14 @@ def test_diagram_js_inverse_arms_match_python() -> None:
             f"diagram.js _editorUrlForNode is missing the {prefix} arm — "
             "Python and JS inverses must agree"
         )
-    # And the right-click handler routes contextmenu events to it.
+    # Resolvable arms emit /edit URLs.
+    assert '"/l2_shape/rail/" + nodeId.slice("rail__".length) + "/edit"' in diagram_js
+    assert "+ nodeId.slice(\"tmpl__\".length) + \"/edit\"" in diagram_js
+    # The right-click handler routes contextmenu events through the
+    # inverse, and skips when it returns null (defers to native menu).
     assert 'addEventListener("contextmenu"' in diagram_js
     assert "_showNodeContextMenu" in diagram_js
     assert "_editorUrlForNode" in diagram_js
+    assert "if (!editorUrl) return" in diagram_js  # null → defer
+    # Menu item label calls out the action explicitly.
+    assert '"Edit this entity"' in diagram_js

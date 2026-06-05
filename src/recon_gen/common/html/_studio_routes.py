@@ -184,31 +184,40 @@ _WASM_GRAPHVIZ_DIR = (
 )
 
 
-def _editor_url_for_focus_node(node_id: str | None) -> str:
-    """CF.3.m — best-effort inverse of `_focus_node_for_entity`.
+def _editor_url_for_focus_node(node_id: str | None) -> str | None:
+    """CF.3.m polish — bijective inverse of `_focus_node_for_entity`,
+    pointing at the EDIT form for the entity.
 
-    Maps a graphviz node id (`rail__X` / `tmpl__X` / `role__X`) back
-    to the closest L2 Editor URL. For node IDs that don't uniquely
-    identify an editable entity (synthetic rail bundles, roles
-    referenced by multiple accounts), fall back to the editor home
-    or the per-kind list. Mirror these prefix arms in the diagram.js
-    right-click context-menu handler — drift between the two is a
-    UX bug.
+    Per operator lock (2026-06-05): right-click "Open in editor" must
+    land *directly* on the entity's `/edit` page, not on a list or a
+    view page. When the node id doesn't uniquely identify an editable
+    entity — synthetic `rail__bundle_N` aggregator nodes (no source-
+    side entity) and `role__X` nodes (a role is shared by multiple
+    accounts / templates / limit_schedules, so there's no unique
+    target) — return ``None`` so the caller suppresses the affordance
+    entirely rather than dumping the operator on a disambiguation
+    surface. Roles + bundles intentionally deferred until we wire a
+    proper "which entity uses this role?" picker, since unblocking
+    them would require leaving the diagram.
+
+    Mirror these prefix arms in the diagram.js `_editorUrlForNode` —
+    test gates drift via `test_diagram_js_inverse_arms_match_python`.
     """
     if not node_id:
-        return "/"
+        return None
     if node_id.startswith("rail__bundle_"):
-        # Synthetic CF.3.b bundle node — no source-side entity.
-        return "/l2_shape/rail/"
+        # Synthetic CF.3.b aggregator node — no source-side entity.
+        return None
     if node_id.startswith("rail__"):
-        return f"/l2_shape/rail/{node_id[len('rail__'):]}"
+        return f"/l2_shape/rail/{node_id[len('rail__'):]}/edit"
     if node_id.startswith("tmpl__"):
-        return f"/l2_shape/transfer_template/{node_id[len('tmpl__'):]}"
+        return f"/l2_shape/transfer_template/{node_id[len('tmpl__'):]}/edit"
     if node_id.startswith("role__"):
         # Multiple accounts / templates / limit_schedules can share a
-        # role; punt to the per-kind list rather than guess.
-        return "/l2_shape/account/"
-    return "/"
+        # role; no unique edit target. Deferred until we add a
+        # role-disambiguation picker; until then, suppress the link.
+        return None
+    return None
 
 
 def _dev_log_head_snippets(dev_log: bool) -> tuple[str, str]:
@@ -2728,6 +2737,11 @@ def _render_diagram_page(
             bits.append("show=" + ",".join(sorted(active_show)))
         return "?" + "&".join(bits)
 
+    # CF.3.m — shared label utility for every checkbox row in the
+    # sidebar (Show / Edge labels / Overlays). Defined before
+    # `_show_anchor` since the closure references it.
+    toggle_label_cls = "inline-flex items-center gap-1 cursor-pointer text-sm text-primary-fg"
+
     # CF.3.d — resolve the active show-set the same way topology.py
     # does, so the chrome anchors below can render the correct
     # on/off state and emit toggle URLs that flip one category at a
@@ -2757,39 +2771,59 @@ def _render_diagram_page(
         )
 
     def _show_anchor(category: str, label_html: str, *, aria: str) -> str:
-        """Render a server-side category toggle anchor.
+        """Render a server-side category toggle as a checkbox.
 
-        Visually mirrors the existing checkbox row (chrome_button
-        style; current-state indicator) and reads as ``Rails: on`` /
-        ``Rails: off`` so operator intent stays obvious.
+        CF.3.m polish (2026-06-05): unified with the CSS-toggle
+        checkboxes in the sidebar (Show / Edge labels / Overlays) for
+        visual coherence. The checkbox carries `data-show-category` /
+        `data-show-state` so contract tests + the JS shim can read
+        the active set; `onchange` navigates to a flipped-show URL
+        which server-re-emits + dot-relays-out. Real `<input>` gives
+        keyboard handling (space toggles) for free.
         """
         on = category in active_show
         state_word = "on" if on else "off"
-        cls = (
-            f"{chrome_button_classes()} "
-            f"{'bg-accent text-accent-fg border-accent' if on else ''}"
-        ).strip()
+        url = _toggle_show_url(category)
+        checked_attr = " checked" if on else ""
         return (
-            f'<a class="{cls}" '
-            f'href="{_toggle_show_url(category)}" '
-            f'aria-label="{aria}" '
+            f'<label class="{toggle_label_cls}" '
             f'data-show-category="{category}" '
             f'data-show-state="{state_word}" '
             f'title="Server-side re-emit; dot relays out the diagram">'
-            f'{label_html}: {state_word}'
-            f'</a>'
+            f'<input type="checkbox"{checked_attr} '
+            f'onchange="window.location.href=&#x27;{url}&#x27;" '
+            f'aria-label="{aria}">'
+            f'{label_html}'
+            f'</label>'
         )
 
-    # AM.2 step 3 — chrome buttons share the chrome_button_classes()
-    # helper. Active variant overrides the hover state with a solid
-    # accent fill so the current layer is visually pinned.
-    btn_base = chrome_button_classes()
-    btn_active = f"{btn_base} bg-accent text-accent-fg border-accent hover:bg-accent hover:text-accent-fg"
+    # CF.3.m polish — layer pills want a stronger active/inactive
+    # contrast than `chrome_button_classes()` provides. The previous
+    # `btn_base + bg-accent` overlay lost the cascade fight against
+    # `bg-link-tint` in some Tailwind paint orders, leaving the
+    # "active" pill near-indistinguishable from inactive. Build a
+    # dedicated pair instead. Active = solid dark `primary-fg`
+    # fill + white text + `font-semibold` so the picked layer is
+    # unmistakable across themes (DEFAULT_PRESET's mid-blue accent
+    # is the typical low-contrast culprit when paired with white).
+    btn_shared = (
+        "block w-full px-3 py-1 rounded-sm cursor-pointer text-sm "
+        "border text-center"
+    )
+    btn_inactive = (
+        f"{btn_shared} bg-link-tint text-accent border-surface-border "
+        f"hover:bg-accent hover:text-white"
+    )
+    btn_active = (
+        f"{btn_shared} bg-primary-fg text-white border-primary-fg "
+        f"font-semibold shadow-inner cursor-default "
+        f"hover:bg-primary-fg hover:text-white"
+    )
     layer_links = " ".join(
-        f'<a class="{btn_active if n == layer else btn_base}" '
+        f'<a class="{btn_active if n == layer else btn_inactive}" '
         f'href="{_qs(layer_val=n, focus_val=focus_node_id)}">{label}</a>'
         for n, label in (
-            (1, "1 · Roles + structure"),
+            (1, "Roles &amp; Structure"),
             (2, "+ Rails"),
             (3, "+ Chains&nbsp;&amp;&nbsp;Templates"),
         )
@@ -2827,7 +2861,6 @@ def _render_diagram_page(
     # is wired (which the JS shim also gates by reading the
     # diagram-coverage-available meta). Off by default — clean diagram;
     # on overlays presence/absence tint per node.
-    toggle_label_cls = "inline-flex items-center gap-1 cursor-pointer text-sm text-primary-fg"
     coverage_toggle_html = (
         f'<label class="{toggle_label_cls}">'
         '<input type="checkbox" id="toggle-coverage">'
@@ -2854,17 +2887,19 @@ def _render_diagram_page(
         focus_val=focus_node_id,
         hide_singleleg_val=(not hide_singleleg),
     )
-    hide_singleleg_label = (
-        "single-leg rails: hidden" if hide_singleleg
-        else "single-leg rails: visible"
-    )
+    # CF.3.m polish — render as a checkbox to match the rest of the
+    # sidebar. ``checked`` ⇒ "single-leg rails shown" (hide-singleleg
+    # is OFF). Unchecking navigates to ``?hide_singleleg=1`` so the
+    # server re-emits without standalone single-leg rails.
+    hide_singleleg_checked = "" if hide_singleleg else " checked"
     hide_singleleg_toggle_html = (
-        f'<a class="{chrome_button_classes()}" '
-        f'href="{hide_singleleg_url}" '
-        f'aria-label="toggle single-leg rail visibility" '
+        f'<label class="{toggle_label_cls}" '
         f'title="Server-side re-emit; templates keep their single-leg legs">'
-        f'{hide_singleleg_label}'
-        f'</a>'
+        f'<input type="checkbox"{hide_singleleg_checked} '
+        f'onchange="window.location.href=&#x27;{hide_singleleg_url}&#x27;" '
+        f'aria-label="toggle single-leg rail visibility">'
+        f'Single-leg rails'
+        f'</label>'
     )
 
     # Focus indicator + clear link. Visible only when ?focus= is set.
@@ -2886,14 +2921,25 @@ def _render_diagram_page(
     else:
         focus_indicator = ""
 
-    # CF.3.m — focus-node → editor-URL inverse for the sidebar's
-    # "View in editor" button. Same prefix vocabulary the JS contextmenu
-    # uses; kept in sync via `tests/unit/test_cf3m_diagram_sidebar.py`.
+    # CF.3.m polish — "Open in editor" button at the sidebar foot.
+    # Only render when there's a focused node whose id maps to a
+    # uniquely-editable entity (rail / template). With no focus, or
+    # focus on a synthetic bundle / shared role, suppress the button
+    # entirely — landing on a list page is the operator's "deferred"
+    # case per the 2026-06-05 lock.
     view_in_editor_url = _editor_url_for_focus_node(focus_node_id)
-    view_in_editor_label = (
-        "View in editor" if focus_node_id is None
-        else "Open focused entity in editor"
-    )
+    if view_in_editor_url is not None:
+        view_in_editor_html = (
+            f'<div class="border-t border-surface-border px-3 py-2">'
+            f'<a id="view-in-editor" '
+            f'class="{chrome_button_classes()} block text-center" '
+            f'href="{view_in_editor_url}" '
+            f'title="Edit this entity in the L2 Editor">'
+            f'Open focused entity in editor'
+            f'</a></div>'
+        )
+    else:
+        view_in_editor_html = ""
 
     # CF.3.m — collapsible floating sidebar replaces the prior
     # page-local header + two horizontal chrome rows. Operator
@@ -2920,12 +2966,15 @@ def _render_diagram_page(
                title="Toggle chrome sidebar">
         <span class="font-mono text-xs text-secondary-fg truncate
                      not-open:hidden">{prefix}</span>
-        <span class="text-base leading-none text-secondary-fg
-                     ml-auto" aria-hidden="true">⇆</span>
+        <span class="text-base leading-none text-secondary-fg ml-auto"
+              aria-hidden="true">
+          <span class="not-open:hidden">«</span>
+          <span class="open:hidden">»</span>
+        </span>
       </summary>
       <div class="flex flex-col overflow-y-auto">
         <div class="px-3 py-1 text-xs text-secondary-fg border-b border-surface-border"
-             id="diagram-status">loading…</div>
+             id="diagram-status" data-prefix="{prefix}">loading…</div>
         {focus_indicator}
         <details open class="border-t border-surface-border">
           <summary class="{sidebar_section_summary_cls}">Layer</summary>
@@ -2981,12 +3030,7 @@ def _render_diagram_page(
                href="{"?embed=1" if embed else "?"}">Reset all</a>
           </div>
         </details>
-        <div class="border-t border-surface-border px-3 py-2">
-          <a id="view-in-editor"
-             class="{chrome_button_classes()} block text-center"
-             href="{view_in_editor_url}"
-             title="Open this view in the L2 Editor">{view_in_editor_label}</a>
-        </div>
+        {view_in_editor_html}
       </div>
     </details>"""
 

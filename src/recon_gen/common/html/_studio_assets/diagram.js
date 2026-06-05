@@ -236,7 +236,13 @@ async function renderDiagram() {
   if (status) {
     const totalEdges = Object.values(edgeCounts).reduce((s, n) => s + n, 0);
     const nodes = counts.role + counts.rail + counts.template;
-    status.textContent = `${nodes} nodes · ${totalEdges} edges`;
+    // CF.3.m polish — surface the deployment prefix in the bottom
+    // status line too (data-prefix is the L2 stem the server already
+    // shows in the sidebar's summary strip). Reads as a single
+    // breadcrumb-style line: `<prefix> · <nodes> · <edges>`.
+    const prefix = status.dataset.prefix || "";
+    const counts_str = `${nodes} nodes · ${totalEdges} edges`;
+    status.textContent = prefix ? `${prefix} · ${counts_str}` : counts_str;
   }
 
   // Wire chrome interactivity now that the SVG is annotated.
@@ -414,12 +420,17 @@ function _wireFocus(svg) {
       if (id) _navigateToFocus(id);
     });
     // CF.3.m — right-click → context menu with "Open in editor".
+    // Skip when the node id can't be mapped to a unique edit URL
+    // (bundles + roles) — the browser's native menu fires instead,
+    // so the operator isn't stuck with a no-op popup.
     node.addEventListener("contextmenu", (e) => {
       const id = node.getAttribute('data-id');
-      if (!id) return;  // bail; let the browser menu fire
+      if (!id) return;
+      const editorUrl = _editorUrlForNode(id);
+      if (!editorUrl) return;  // unresolvable; defer to browser menu
       e.preventDefault();
       e.stopPropagation();
-      _showNodeContextMenu(e.clientX, e.clientY, id);
+      _showNodeContextMenu(e.clientX, e.clientY, id, editorUrl);
     });
   }
 
@@ -433,24 +444,26 @@ function _wireFocus(svg) {
   });
 }
 
-// CF.3.m — node-id → L2 Editor URL. Mirror of the Python
-// `_editor_url_for_focus_node` in `_studio_routes.py`; drift between
-// the two is a UX bug (sidebar "View in editor" disagrees with
-// right-click "Open in editor").
+// CF.3.m polish — node-id → L2 Editor *edit* URL. Mirror of the
+// Python `_editor_url_for_focus_node` in `_studio_routes.py`; drift
+// between the two is a UX bug. Per operator lock (2026-06-05):
+// right-click "Open in editor" must land directly on `/edit`, not a
+// list / view page. Synthetic bundles + roles (shared across
+// multiple accounts) return null and the caller suppresses the
+// context menu entirely — disambiguation deferred until we wire a
+// "which entity uses this role?" picker.
 function _editorUrlForNode(nodeId) {
-  if (!nodeId) return "/";
-  if (nodeId.startsWith("rail__bundle_")) return "/l2_shape/rail/";
+  if (!nodeId) return null;
+  if (nodeId.startsWith("rail__bundle_")) return null;
   if (nodeId.startsWith("rail__")) {
-    return "/l2_shape/rail/" + nodeId.slice("rail__".length);
+    return "/l2_shape/rail/" + nodeId.slice("rail__".length) + "/edit";
   }
   if (nodeId.startsWith("tmpl__")) {
-    return "/l2_shape/transfer_template/" + nodeId.slice("tmpl__".length);
+    return "/l2_shape/transfer_template/"
+      + nodeId.slice("tmpl__".length) + "/edit";
   }
-  if (nodeId.startsWith("role__")) {
-    // Multiple accounts / templates can share a role; punt to the list.
-    return "/l2_shape/account/";
-  }
-  return "/";
+  if (nodeId.startsWith("role__")) return null;  // ambiguous; deferred
+  return null;
 }
 
 // CF.3.m — single-item right-click menu. Lazily-created floating div;
@@ -458,9 +471,8 @@ function _editorUrlForNode(nodeId) {
 // tiny — when we need a second item we can lift this into a typed
 // menu primitive.
 let _contextMenuEl = null;
-function _showNodeContextMenu(x, y, nodeId) {
+function _showNodeContextMenu(x, y, nodeId, editorUrl) {
   _hideNodeContextMenu();
-  const editorUrl = _editorUrlForNode(nodeId);
   const menu = document.createElement("div");
   menu.id = "diagram-node-contextmenu";
   // Tailwind utilities — match the sidebar's chrome shape.
@@ -476,7 +488,7 @@ function _showNodeContextMenu(x, y, nodeId) {
     "block px-3 py-1.5 text-primary-fg no-underline " +
     "hover:bg-link-tint"
   );
-  link.textContent = "Open in editor";
+  link.textContent = "Edit this entity";
   link.setAttribute("data-node-id", nodeId);
   menu.appendChild(link);
   document.body.appendChild(menu);
