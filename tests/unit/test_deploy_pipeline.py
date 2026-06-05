@@ -399,6 +399,64 @@ def test_step_2_wipe_idempotent_on_empty_tables(
     assert (tx, bal) == (0, 0)
 
 
+def test_step_2_wipe_auto_emits_schema_on_virgin_db(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """BX backlog #173 — Studio's Session Start lands here on a fresh
+    DuckDB / Postgres / Oracle that's never been seeded. Pre-fix the
+    WIPE blew up with a CatalogException ("table
+    ``<prefix>_transactions`` does not exist") and the operator had
+    to drop to the CLI for ``recon-gen schema apply --execute``. The
+    self-heal probe now emits the base schema in-place + records the
+    ``deploy:step2:schema_emitted`` event so the operator sees it
+    happened. Subsequent WIPE proceeds normally on the freshly-empty
+    tables."""
+    cfg = _duckdb_cfg(tmp_path)
+    # NO _apply_schema_and_plant_two_rows() — leave the DB virgin.
+    sink: list[Mapping[str, object]] = []
+
+    async def _capture(event: Mapping[str, object]) -> None:
+        sink.append(event)
+
+    tx, bal = asyncio.run(
+        step_2_wipe(cfg, spec_example_instance, dev_log=_capture),
+    )
+    # Virgin DB → wipe is a no-op on freshly-emitted empty tables.
+    assert (tx, bal) == (0, 0)
+    # Schema-emitted event surfaces in the live-tail so the operator
+    # sees what just happened.
+    event_names = [str(e.get("event", "")) for e in sink]
+    assert "deploy:step2:schema_emitted" in event_names, (
+        f"expected deploy:step2:schema_emitted event, got {event_names}"
+    )
+    # Sanity: a second WIPE is now idempotent (proves the schema-emit
+    # left the DB in a valid state — no half-created tables).
+    tx2, bal2 = asyncio.run(
+        step_2_wipe(cfg, spec_example_instance, dev_log=None),
+    )
+    assert (tx2, bal2) == (0, 0)
+
+
+def test_step_2_wipe_skips_schema_emit_when_base_exists(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """The self-heal probe must NOT re-emit schema on populated DBs
+    (would crash with duplicate-table errors and cost real wall-time
+    on every Session Start). Probe + skip is the steady-state path."""
+    cfg = _duckdb_cfg(tmp_path)
+    _apply_schema_and_plant_two_rows(cfg, spec_example_instance)
+    sink: list[Mapping[str, object]] = []
+
+    async def _capture(event: Mapping[str, object]) -> None:
+        sink.append(event)
+
+    asyncio.run(step_2_wipe(cfg, spec_example_instance, dev_log=_capture))
+    event_names = [str(e.get("event", "")) for e in sink]
+    assert "deploy:step2:schema_emitted" not in event_names, (
+        f"populated DB triggered schema re-emit: {event_names}"
+    )
+
+
 # ============================================================
 # step_3_generator (X.4.g.7+8)
 # ============================================================

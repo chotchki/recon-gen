@@ -47,6 +47,7 @@ from recon_gen.common.db import (
 )
 from recon_gen.common.l2.primitives import Identifier
 from recon_gen.common.l2.schema import (
+    emit_schema,
     refresh_matviews_sql,
     wipe_demo_data_sql,
 )
@@ -200,13 +201,41 @@ async def step_2_wipe(
         "dialect": cfg.dialect.value,
     })
 
+    # BX backlog #173 (2026-06-05) — Studio's Session Start lands here
+    # on a fresh DuckDB / Postgres / Oracle that's never been seeded.
+    # Pre-fix the WIPE blew up with a CatalogException / UndefinedTable
+    # ("table ``<prefix>_transactions`` does not exist") and the
+    # operator had to drop to the CLI for ``recon-gen schema apply
+    # --execute`` before re-trying — an unrecoverable UI dead-end. The
+    # probe below catches the missing-base case and emits the full
+    # schema in-place so Session Start is self-sufficient on a virgin
+    # DB. Populated DBs cost one no-op SELECT.
+    schema_emitted: bool = False
+
     def _run_wipe() -> tuple[int, int]:
+        nonlocal schema_emitted
         conn = connect_demo_db(cfg)
         try:
             cur = conn.cursor()
             try:
-                # Count first so the dev_log can report what was wiped.
                 p = cfg.db_table_prefix  # Z.C — was instance.instance
+                try:
+                    # Cheap probe: SELECT * FROM ... WHERE 1=0 returns
+                    # zero rows on every dialect we target but raises a
+                    # catalog-shaped error when the table is missing.
+                    cur.execute(f"SELECT * FROM {p}_transactions WHERE 1=0")
+                    cur.fetchall()
+                except Exception:  # noqa: BLE001 — dialect-specific catalog errors are not a shared exception type (DuckDB CatalogException / psycopg2 UndefinedTable / cx_Oracle ORA-00942 all subclass different bases)
+                    # Base tables absent — emit the full schema.
+                    schema_sql = emit_schema(
+                        instance,
+                        prefix=p,
+                        dialect=cfg.dialect,
+                    )
+                    execute_script(cur, schema_sql, dialect=cfg.dialect)
+                    conn.commit()
+                    schema_emitted = True
+                # Count first so the dev_log can report what was wiped.
                 cur.execute(f"SELECT COUNT(*) FROM {p}_transactions")
                 tx_count = int(fetch_one_required(cur)[0])
                 cur.execute(f"SELECT COUNT(*) FROM {p}_daily_balances")
@@ -220,6 +249,11 @@ async def step_2_wipe(
             conn.close()
 
     tx_count, bal_count = await asyncio.to_thread(_run_wipe)
+    if schema_emitted:
+        await _emit(dev_log, {
+            "event": "deploy:step2:schema_emitted",
+            "reason": "base tables missing — auto-emitted via emit_schema",
+        })
     await _emit(dev_log, {
         "event": "deploy:step2:wipe:done",
         "transactions_deleted": tx_count,
