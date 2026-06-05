@@ -980,9 +980,7 @@ def _build_account_network_sheet(
             "Counterparty column shows the side that isn't the "
             "current anchor — right-click any row and pick \"Walk "
             "to other account on this edge\" to make that "
-            "counterparty the new anchor. The dropdown above may "
-            "take a moment to catch up; trust the data, not the "
-            "control text."
+            "counterparty the new anchor."
         ),
         group_by=[
             ds_anet["transfer_id"].dim(),

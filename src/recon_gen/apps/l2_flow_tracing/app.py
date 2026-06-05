@@ -1051,19 +1051,29 @@ def _populate_transfer_templates_sheet(
     # Sankey — multi-leg flow. flow_source / flow_target derive from
     # amount_direction (debit account → template → credit account).
     # Width = SUM(amount_abs).
+    # CF.5 + audit Dashboards Med #4 (2026-06-05) — items_limit=30 so
+    # the hairball-by-default L2 (90+ accounts × any-template) collapses
+    # to top-N-by-magnitude + an "Other" bucket QS renders automatically
+    # (`OtherCategories=INCLUDE` is the QS default once ItemsLimit
+    # is set). Matches Investigation's `_SANKEY_NODE_CAP=50` convention
+    # but tuned to 30 per the operator lock — the reviewer flagged
+    # this surface specifically as a legibility crisis.
     sheet.layout.row(height=12).add_sankey(
         width=36,
         title="Multi-Leg Flow — Account → Template → Account",
         subtitle=(
             "Width = total absolute amount through the edge in the "
             "filtered window. Pick a single Template to see just that "
-            "template's flow shape. Ribbon colors are QuickSight's "
-            "auto-assignment per source node — the matched-vs-orphan "
-            "distinction is in the node names (see legend above)."
+            "template's flow shape. Capped to the top 30 source/target "
+            "nodes by magnitude; the rest roll up into an \"Other\" "
+            "bucket. Ribbon colors are QuickSight's auto-assignment "
+            "per source node — the matched-vs-orphan distinction is "
+            "in the node names (see legend above)."
         ),
         source=ds_tt_legs["flow_source"].dim(),
         target=ds_tt_legs["flow_target"].dim(),
         weight=ds_tt_legs["amount_abs"].sum(currency=True),
+        items_limit=30,
     )
 
     sheet.layout.row(height=12).add_table(

@@ -192,6 +192,17 @@
         // CF.X-infra — 3-band state: success / warning / danger.
         // `text-warning` is already compiled into output.css from
         // Studio surfaces; no @source dance needed for the new band.
+        // CF audit followup (Color usage, 2026-06-05) — default
+        // (no state) renders the KPI big-number as the near-black
+        // `text-primary-fg` token (#1f2933, slate-800-ish) rather
+        // than the brand accent. Three wins: (1) fixes the
+        // hierarchy inversion where the primary value previously
+        // read as secondary/clickable; (2) drops the 4.5:1
+        // contrast requirement on the accent token (most mid-tone
+        // brand blues fail it); (3) leaves the accent free for
+        // actual clickable affordances. Routed through the
+        // semantic token so the typing-smells `no-hardcoded-palette`
+        // gate stays clean.
         var color =
           d.state_color === "success"
             ? "text-success"
@@ -199,7 +210,7 @@
               ? "text-warning"
               : d.state_color === "danger"
                 ? "text-danger"
-                : "text-accent";
+                : "text-primary-fg";
         return "kpi-value text-4xl font-bold " + color + " tabular-nums";
       })
       .text((d) => {

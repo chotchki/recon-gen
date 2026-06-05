@@ -384,7 +384,12 @@ def render_training_v3_landing(
           </select>
         </div>
       </section>
-      <div id="bv-families" class="flex flex-col gap-2">
+      <!-- CF audit followup (Studio Med #2) — the bottom apply bar
+           is `sticky bottom-0` and was overlapping the final plant
+           card's header on scroll. `pb-24` (6rem) reserves enough
+           viewport headroom for the bar's height (≈ p-4 + content
+           ≈ 3.5rem) so the last card stays legible. -->
+      <div id="bv-families" class="flex flex-col gap-2 pb-24">
         {chr(10).join(families_html)}
       </div>
       <div id="bv-empty-state" data-test-empty-state
