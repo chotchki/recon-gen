@@ -49,19 +49,24 @@ def _visual_ids(sheet: dict[str, Any]) -> list[str]:
 
 
 class TestSheets:
+    # CF.2 (commit 87c0e5a1) — Program Health inserted at index 1 so
+    # the board-cadence rollup reads BEFORE the volume / coverage
+    # tabs. App Info ("Info") stays last per the M.4.4.5 canary
+    # convention.
     EXPECTED_NAMES = [
         "Getting Started",
+        "Program Health",
         "Account Coverage",
         "Transaction Volume Over Time",
         "Money Moved",
         "Info",  # M.4.4.5 — App Info canary, always last
     ]
 
-    def test_has_five_sheets(
+    def test_has_six_sheets(
         self,
         exec_dashboard_definition: "DashboardVersionDefinitionOutputTypeDef",
     ) -> None:
-        assert len(exec_dashboard_definition["Sheets"]) == 5
+        assert len(exec_dashboard_definition["Sheets"]) == 6
 
     def test_sheet_order(
         self,
