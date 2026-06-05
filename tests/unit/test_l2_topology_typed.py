@@ -369,7 +369,7 @@ def test_topology_graphviz_per_rail_signals_xor_membership() -> None:
     )
     inst = load_instance(FIXTURES / "spec_example.yaml")
     g = build_topology_graph_per_rail(
-        inst, db_table_prefix=DEFAULT_PREFIX,
+        inst, db_table_prefix=DEFAULT_PREFIX, layer=3,
     )
     src = g.source
     # SettlementTimingCycle's HTML-table label exists as one composite
@@ -447,7 +447,7 @@ def test_topology_graphviz_per_rail_renders_fan_in_chain_distinctly() -> None:
     from recon_gen.common.l2.topology import build_topology_graph_per_rail
     inst = load_instance(FIXTURES / "spec_example.yaml")
     g = build_topology_graph_per_rail(
-        inst, db_table_prefix=DEFAULT_PREFIX,
+        inst, db_table_prefix=DEFAULT_PREFIX, layer=3,
     )
     src = g.source
     # Fan-in label annotation embedded in the chain edge label.

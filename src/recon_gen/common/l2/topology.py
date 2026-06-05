@@ -818,7 +818,7 @@ def build_topology_graph_per_rail(
     db_table_prefix: str,
     bundle_parallel_rails: bool = True,
     focus_node_id: str | None = None,
-    layer: int = 3,
+    layer: int = 1,
 ) -> Any:
     """Build a Graphviz Digraph with Rails as first-class nodes (X.4.b dot pivot).
 
