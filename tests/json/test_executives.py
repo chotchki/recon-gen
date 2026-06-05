@@ -22,6 +22,7 @@ from recon_gen.apps.executives.app import (
     SHEET_EXEC_ACCOUNT_COVERAGE,
     SHEET_EXEC_GETTING_STARTED,
     SHEET_EXEC_MONEY_MOVED,
+    SHEET_EXEC_PROGRAM_HEALTH,
     SHEET_EXEC_TRANSACTION_VOLUME,
     build_executives_app,
 )
@@ -65,13 +66,17 @@ def exec_analysis(exec_app: "_App") -> "_ModelsAnalysis":
 # Top-level shape
 # ---------------------------------------------------------------------------
 
-def test_analysis_has_five_sheets_in_expected_order(exec_analysis: "_ModelsAnalysis") -> None:
-    """4 content sheets + the M.4.4.5 App Info ("i") sheet last."""
+def test_analysis_has_six_sheets_in_expected_order(exec_analysis: "_ModelsAnalysis") -> None:
+    """5 content sheets + the M.4.4.5 App Info ("i") sheet last.
+    CF.2 inserted Program Health between Getting Started and Account
+    Coverage so the board-cadence tripwire reads before the volume
+    tabs."""
     from recon_gen.apps.executives.app import SHEET_EXEC_APP_INFO
 
     sheet_ids = [s.SheetId for s in exec_analysis.Definition.Sheets]
     assert sheet_ids == [
         SHEET_EXEC_GETTING_STARTED,
+        SHEET_EXEC_PROGRAM_HEALTH,
         SHEET_EXEC_ACCOUNT_COVERAGE,
         SHEET_EXEC_TRANSACTION_VOLUME,
         SHEET_EXEC_MONEY_MOVED,
@@ -92,7 +97,7 @@ def test_analysis_serializes_to_aws_json(exec_analysis: "_ModelsAnalysis") -> No
     """to_aws_json() must succeed end-to-end — no None-strip crashes."""
     j = exec_analysis.to_aws_json()
     assert j["AnalysisId"] == _TEST_CFG.prefixed("executives-analysis")
-    assert len(j["Definition"]["Sheets"]) == 5
+    assert len(j["Definition"]["Sheets"]) == 6
 
 
 def test_dashboard_mirrors_analysis(exec_app: "_App") -> None:
@@ -119,12 +124,12 @@ def test_every_sheet_has_a_description(exec_analysis: "_ModelsAnalysis") -> None
 # ---------------------------------------------------------------------------
 
 def test_datasets_in_expected_order():
-    """5 content datasets (BH.8 follow-up added the transaction-legs
-    per-leg / all-status counter for the sibling KPI; Y.2.h split
-    account into base + active; AO.5 added daily rollup) + 2 M.4.4.5
-    App Info datasets, in order."""
+    """6 content datasets (CF.2 added program-health rollup; BH.8 added
+    transaction-legs per-leg / all-status counter; Y.2.h split account
+    into base + active; AO.5 added daily rollup) + 2 M.4.4.5 App Info
+    datasets, in order."""
     datasets = build_all_datasets(_TEST_CFG)
-    assert len(datasets) == 7
+    assert len(datasets) == 8
     assert datasets[0].DataSetId == _TEST_CFG.prefixed(
         "exec-transaction-summary-dataset",
     )
@@ -141,19 +146,23 @@ def test_datasets_in_expected_order():
         "exec-account-summary-active-dataset",
     )
     assert datasets[5].DataSetId == _TEST_CFG.prefixed(
-        "exec-app-info-liveness-dataset",
+        "exec-program-health-dataset",
     )
     assert datasets[6].DataSetId == _TEST_CFG.prefixed(
+        "exec-app-info-liveness-dataset",
+    )
+    assert datasets[7].DataSetId == _TEST_CFG.prefixed(
         "exec-app-info-matviews-dataset",
     )
 
 
 def test_datasets_declared_in_analysis(exec_analysis: "_ModelsAnalysis") -> None:
-    """5 content datasets (BH.8 added transaction-legs; Y.2.h split
-    account into base + active; AO.5 added daily rollup) + the 2
-    M.4.4.5 App Info datasets."""
+    """6 content datasets (CF.2 added program-health rollup; BH.8
+    added transaction-legs; Y.2.h split account into base + active;
+    AO.5 added daily rollup) + the 2 M.4.4.5 App Info datasets."""
     from recon_gen.apps.executives.datasets import (
         DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
+        DS_EXEC_PROGRAM_HEALTH,
         DS_EXEC_TRANSACTION_DAILY,
         DS_EXEC_TRANSACTION_LEGS,
         DS_EXEC_TRANSACTION_SUMMARY,
@@ -172,6 +181,7 @@ def test_datasets_declared_in_analysis(exec_analysis: "_ModelsAnalysis") -> None
         DS_EXEC_TRANSACTION_LEGS,
         DS_EXEC_ACCOUNT_SUMMARY,
         DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
+        DS_EXEC_PROGRAM_HEALTH,
         app_info_liveness_id("exec"),
         app_info_matviews_id("exec"),
     ]
@@ -246,6 +256,10 @@ def test_both_content_datasets_filter_to_status_posted():
         # BH.8 — transaction-legs deliberately skips the Posted filter
         # so its count matches App Info's per-leg / all-status row_count.
         _TEST_CFG.prefixed("exec-transaction-legs-dataset"),
+        # CF.2 — program-health rollup reads from <prefix>_l1_exceptions
+        # (a matview that's already pre-filtered to violations); status
+        # filter would be a no-op.
+        _TEST_CFG.prefixed("exec-program-health-dataset"),
     }
     for ds in build_all_datasets(_TEST_CFG):
         if ds.DataSetId in skip_ids:

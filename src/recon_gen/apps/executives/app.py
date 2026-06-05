@@ -59,6 +59,7 @@ from recon_gen.common.tree import (
     DateTimeParam,
     DateView,
     KPIValueSignIndicator,
+    KPIValueThresholdBanding,
     Sheet,
     TextBox,
 )
@@ -66,6 +67,7 @@ from recon_gen.common.tree import (
 from recon_gen.apps.executives.datasets import (
     DS_EXEC_ACCOUNT_SUMMARY,
     DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
+    DS_EXEC_PROGRAM_HEALTH,
     DS_EXEC_TRANSACTION_DAILY,
     DS_EXEC_TRANSACTION_LEGS,
     DS_EXEC_TRANSACTION_SUMMARY,
@@ -88,6 +90,7 @@ _TABLE_ROW_SPAN = 18
 # vs internal-IDs convention from L.1.16). Internal visual / action /
 # layout IDs auto-resolve at emit time.
 SHEET_EXEC_GETTING_STARTED = SheetId("exec-sheet-getting-started")
+SHEET_EXEC_PROGRAM_HEALTH = SheetId("exec-sheet-program-health")  # CF.2
 SHEET_EXEC_ACCOUNT_COVERAGE = SheetId("exec-sheet-account-coverage")
 SHEET_EXEC_TRANSACTION_VOLUME = SheetId("exec-sheet-transaction-volume")
 SHEET_EXEC_MONEY_MOVED = SheetId("exec-sheet-money-moved")
@@ -121,6 +124,21 @@ _MONEY_MOVED_DESCRIPTION = (
     "from."
 )
 
+# CF.2 — board-cadence tripwire. v0 tracks L1 invariant violations
+# only; the count answers "is anything wrong with the ledger right
+# now?" without forcing the board to open the L1 dashboard to find
+# out. Amber = at least one violation, red = systemic (≥20 in the
+# window). Pillars beyond L1 (L2FT hygiene checks, Inv σ anomalies)
+# don't aggregate cleanly across date semantics so they're deferred
+# to a follow-up.
+_PROGRAM_HEALTH_DESCRIPTION = (
+    "Single-tile read on whether the bank's ledger is healthy. "
+    "Counts L1 invariant violations open within the dashboard's "
+    "30-day window — green when zero, amber on any violation, red "
+    "at the 20-violation systemic mark. Drill into the L1 Dashboard "
+    "for per-row triage."
+)
+
 
 _ACCOUNT_COVERAGE_BULLETS = [
     "KPIs: total open accounts + active accounts in the period",
@@ -138,6 +156,12 @@ _MONEY_MOVED_BULLETS = [
     "KPIs: net money moved (Σ signed) + gross money moved (Σ |signed|)",
     "Daily gross money moved, coloured by rail_name",
     "Period total per rail_name",
+]
+
+_PROGRAM_HEALTH_BULLETS = [
+    "Single KPI tile: 3-band threshold indicator (green / amber / red)",
+    "Source: <prefix>_l1_exceptions, narrowed by the dashboard date picker",
+    "Hyperlink to the L1 Dashboard for per-row drill",
 ]
 
 
@@ -220,6 +244,10 @@ def _populate_getting_started(
 
     sheet_blocks = [
         (
+            "exec-gs-program-health", "Program Health",
+            _PROGRAM_HEALTH_DESCRIPTION, _PROGRAM_HEALTH_BULLETS,
+        ),
+        (
             "exec-gs-account-coverage", "Account Coverage",
             _ACCOUNT_COVERAGE_DESCRIPTION, _ACCOUNT_COVERAGE_BULLETS,
         ),
@@ -267,6 +295,8 @@ def _datasets(cfg: Config) -> dict[str, Dataset]:
         DS_EXEC_ACCOUNT_SUMMARY,
         # Y.2.h — second account dataset; same shape, baked WHERE.
         DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
+        # CF.2 — single-row L1-violation rollup feeding Program Health.
+        DS_EXEC_PROGRAM_HEALTH,
         _DS_APP_INFO_LIVENESS,
         _DS_APP_INFO_MATVIEWS,
     ]
@@ -426,6 +456,62 @@ def _populate_account_coverage(
 # Visual subtype + an `add_line_chart` layout DSL helper is queued
 # for the L.6.12 iteration gate.
 # ---------------------------------------------------------------------------
+
+def _populate_program_health(
+    cfg: Config,
+    sheet: Sheet,
+    *,
+    datasets: dict[str, Dataset],
+) -> None:
+    """CF.2 — Program Health sheet. One threshold-banded KPI tile
+    counting L1 invariant violations open in the dashboard's date
+    window, with amber=1 / red=20 thresholds (operator-locked v0).
+
+    The cross-app drill to the L1 Dashboard is a polite TextBox
+    hyperlink (the design's CrossAppDrill primitive landed in the
+    CF.X-infra commit but no consumer wires it yet — first-use is
+    deferred to keep CF.2 MVP scope tight; QS URL params don't sync
+    sheet controls anyway, so the textbox shape is the structurally
+    correct substitute on the QS leg).
+    """
+    del cfg
+    ds_health = datasets[DS_EXEC_PROGRAM_HEALTH]
+    sheet.layout.row(height=_KPI_ROW_SPAN).add_kpi(
+        width=_FULL,
+        visual_id=VisualId("exec-program-health-kpi-total"),
+        title="Open L1 Invariant Violations",
+        subtitle=(
+            "Sum of L1 invariant violations open in the selected "
+            "30-day window. **Green** when zero, **amber** on any "
+            "violation, **red** at the 20-violation systemic mark. "
+            "Open the L1 Dashboard (below) to triage per-row."
+        ),
+        values=[
+            ds_health["total_open_count"].sum(
+                field_id="exec-program-health-total-sum",
+            ),
+        ],
+        value_threshold_banding=KPIValueThresholdBanding(
+            amber_at=1, red_at=20,
+        ),
+    )
+    sheet.layout.row(height=4).add_text_box(
+        TextBox(
+            text_box_id="exec-program-health-l1-link",
+            content=rt.text_box(
+                rt.markdown(
+                    "**Per-violation triage** lives in the L1 "
+                    "Dashboard — drift, overdraft, limit-breach, "
+                    "and the chain-coherence invariants. Open that "
+                    "dashboard from the nav (or your QuickSight "
+                    "console) to filter by account / date / "
+                    "check_type."
+                ),
+            ),
+        ),
+        width=_FULL,
+    )
+
 
 def _populate_transaction_volume(
     cfg: Config,
@@ -664,6 +750,7 @@ def _wire_date_range_filter(
     analysis: Analysis,
     *,
     datasets: dict[str, Dataset],
+    program_health_sheet: Sheet,
     account_coverage_sheet: Sheet,
     transaction_volume_sheet: Sheet,
     money_moved_sheet: Sheet,
@@ -704,15 +791,22 @@ def _wire_date_range_filter(
     ds_acct_active = datasets[DS_EXEC_ACCOUNT_SUMMARY_ACTIVE]
     ds_txn = datasets[DS_EXEC_TRANSACTION_SUMMARY]
     ds_daily = datasets[DS_EXEC_TRANSACTION_DAILY]
+    # CF.2 — program-health rollup declares pExecDateStart /
+    # pExecDateEnd dataset parameters (see
+    # build_program_health_dataset); add it to the bridge so QS
+    # doesn't surface the "unmapped DatasetParameter" editor warning.
+    ds_health = datasets[DS_EXEC_PROGRAM_HEALTH]
     start_bridges = [
         (ds_acct_active, str(P_EXEC_DATE_START)),
         (ds_txn, str(P_EXEC_DATE_START)),
         (ds_daily, str(P_EXEC_DATE_START)),
+        (ds_health, str(P_EXEC_DATE_START)),
     ]
     end_bridges = [
         (ds_acct_active, str(P_EXEC_DATE_END)),
         (ds_txn, str(P_EXEC_DATE_END)),
         (ds_daily, str(P_EXEC_DATE_END)),
+        (ds_health, str(P_EXEC_DATE_END)),
     ]
     # AR.4 — 30-day window via DateView (pre-AR.4 RollingDate exprs gone).
     date_start = analysis.add_parameter(DateTimeParam(
@@ -729,6 +823,7 @@ def _wire_date_range_filter(
     ))
 
     for sheet in (
+        program_health_sheet,
         account_coverage_sheet, transaction_volume_sheet, money_moved_sheet,
     ):
         sheet.add_parameter_datetime_picker(
@@ -759,6 +854,10 @@ _EXEC_SHEET_SPECS: tuple[tuple[SheetId, str, str, str], ...] = (
     (SHEET_EXEC_GETTING_STARTED, "Getting Started", "Getting Started",
      "Landing page — summarises each tab in this dashboard so readers "
      "know where to look first. No filters or visuals."),
+    # CF.2 — board-cadence rollup right after Getting Started so the
+    # tripwire reads BEFORE the volume / coverage tabs.
+    (SHEET_EXEC_PROGRAM_HEALTH, "Program Health", "Program Health",
+     _PROGRAM_HEALTH_DESCRIPTION),
     (SHEET_EXEC_ACCOUNT_COVERAGE, "Account Coverage", "Account Coverage",
      _ACCOUNT_COVERAGE_DESCRIPTION),
     (SHEET_EXEC_TRANSACTION_VOLUME, "Transaction Volume Over Time",
@@ -819,6 +918,9 @@ def build_executives_app(
     _populate_getting_started(
         cfg, sheets[SHEET_EXEC_GETTING_STARTED], theme=theme,
     )
+    _populate_program_health(
+        cfg, sheets[SHEET_EXEC_PROGRAM_HEALTH], datasets=datasets,
+    )
     _populate_account_coverage(
         cfg, sheets[SHEET_EXEC_ACCOUNT_COVERAGE], datasets=datasets,
     )
@@ -839,6 +941,7 @@ def build_executives_app(
     _wire_date_range_filter(
         analysis,
         datasets=datasets,
+        program_health_sheet=sheets[SHEET_EXEC_PROGRAM_HEALTH],
         account_coverage_sheet=sheets[SHEET_EXEC_ACCOUNT_COVERAGE],
         transaction_volume_sheet=sheets[SHEET_EXEC_TRANSACTION_VOLUME],
         money_moved_sheet=sheets[SHEET_EXEC_MONEY_MOVED],

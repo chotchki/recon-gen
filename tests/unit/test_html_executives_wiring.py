@@ -58,13 +58,14 @@ class _NoConnectPool:
 
 
 def test_executives_tree_builds_with_expected_sheet_count() -> None:
-    """5 sheets: Getting Started, Account Coverage, Transaction Volume,
-    Money Moved, Info. Pinned so a sheet-add or sheet-drop in
-    apps/executives/app.py is a deliberate decision, not a silent shift."""
+    """6 sheets: Getting Started, Program Health (CF.2), Account
+    Coverage, Transaction Volume, Money Moved, Info. Pinned so a
+    sheet-add or sheet-drop in apps/executives/app.py is a deliberate
+    decision, not a silent shift."""
     build_all_datasets(_TEST_CFG)
     tree_app = build_executives_app(_TEST_CFG)
     assert tree_app.analysis is not None
-    assert len(tree_app.analysis.sheets) == 5
+    assert len(tree_app.analysis.sheets) == 6
 
 
 def test_make_tree_db_fetcher_builds_for_executives_with_no_missing_sql() -> None:

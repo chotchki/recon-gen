@@ -90,6 +90,16 @@ DS_EXEC_ACCOUNT_SUMMARY_ACTIVE = "exec-account-summary-active-ds"
 #: side-by-side in the headline tile makes the predicate-mismatch
 #: visible.
 DS_EXEC_TRANSACTION_LEGS = "exec-transaction-legs-ds"
+#: CF.2 — single-row program-health rollup dataset bound to the new
+#: "Program Health" sheet's KPI tile. Reads ``<prefix>_l1_exceptions``
+#: directly; the magnitude filter excludes zero-magnitude rows
+#: (account_id NULLs on the transfer-keyed branches use the
+#: ``magnitude_count`` side, never both branches). Date pushdown via
+#: ``<<$pExecDate*>>`` so the rollup obeys the Exec 30-day picker.
+#: v0 is L1-only (pillar-count semantic-incompatibility flagged in the
+#: CF.2 design audit); L2FT + Inv pillars deferred to a follow-up
+#: when the operator's manual Studio drive surfaces the next ask.
+DS_EXEC_PROGRAM_HEALTH = "exec-program-health-ds"
 
 
 # Phase BM — universal date-range filter param names. Pre-BM Exec used
@@ -174,6 +184,16 @@ EXEC_ACCOUNT_SUMMARY_CONTRACT = DatasetContract(columns=[
     ColumnSpec("account_type", "STRING"),
     ColumnSpec("last_activity_date", "DATETIME"),
     ColumnSpec("activity_count", "INTEGER"),
+])
+
+
+# CF.2 — single-row program-health rollup. ``l1_open_count`` and
+# ``total_open_count`` are identical in v0 (L1-only); the column split
+# is forward-compat so adding L2FT / Inv pillars later is an additive
+# SQL change without a contract bump.
+EXEC_PROGRAM_HEALTH_CONTRACT = DatasetContract(columns=[
+    ColumnSpec("l1_open_count", "INTEGER"),
+    ColumnSpec("total_open_count", "INTEGER"),
 ])
 
 
@@ -479,6 +499,48 @@ def build_transaction_legs_dataset(cfg: Config) -> DataSet:
     )
 
 
+def build_program_health_dataset(cfg: Config) -> DataSet:
+    """CF.2 — single-row program-health rollup feeding the Exec
+    "Program Health" sheet's KPI tile + threshold-banded indicator.
+
+    v0 reads ``<prefix>_l1_exceptions`` (L1 invariant violations)
+    with a date-window pushdown matching the Exec 30-day picker, a
+    magnitude filter that excludes zero-magnitude rows (account
+    branches use ``magnitude_amount``, transfer-keyed branches use
+    ``magnitude_count`` — never both; the OR-IS-NOT-NULL shape
+    handles both).
+
+    L2FT hygiene checks and Investigation σ-anomalies are
+    NOT-YET-INCLUDED in v0; the per-pillar counts are not cleanly
+    summable across the three (L1 obeys the date picker; L2FT is
+    declared-vs-runtime point-in-time; Inv is a continuous σ score,
+    not a discrete "open" set). The CF.2 audit flagged this; v0
+    scopes to L1-only as the honest tripwire shape. Operator can
+    expand in a follow-up when the manual Studio drive surfaces
+    the next ask.
+    """
+    p = cfg.db_table_prefix
+    date_clause = _exec_date_range_clause("business_day", cfg)
+    sql = f"""\
+SELECT
+    COUNT(*) AS l1_open_count,
+    COUNT(*) AS total_open_count
+FROM {p}_l1_exceptions
+WHERE {date_clause}
+  AND ((magnitude_amount IS NOT NULL AND magnitude_amount > 0)
+    OR (magnitude_count IS NOT NULL AND magnitude_count > 0))"""
+    return build_dataset(
+        cfg,
+        cfg.prefixed("exec-program-health-dataset"),
+        "Executives Program Health",
+        "exec-program-health",
+        sql,
+        EXEC_PROGRAM_HEALTH_CONTRACT,
+        visual_identifier=DS_EXEC_PROGRAM_HEALTH,
+        dataset_parameters=_exec_universal_range_params(cfg),
+    )
+
+
 def build_all_datasets(cfg: Config) -> list[DataSet]:
     """Return every dataset used by the Executives app."""
     return [
@@ -487,6 +549,7 @@ def build_all_datasets(cfg: Config) -> list[DataSet]:
         build_transaction_legs_dataset(cfg),
         build_account_summary_dataset(cfg),
         build_account_summary_active_dataset(cfg),
+        build_program_health_dataset(cfg),
         # M.4.4.5 — App Info ("i") sheet datasets, ALWAYS LAST.
         # M.4.4.7 — per-app segment so deploy <single-app> doesn't
         # delete-then-create another app's App Info dataset.
@@ -508,6 +571,7 @@ _CONTRACT_REGISTRATIONS: tuple[tuple[str, DatasetContract], ...] = (
     (DS_EXEC_ACCOUNT_SUMMARY, EXEC_ACCOUNT_SUMMARY_CONTRACT),
     # Y.2.h — same shape as the base; reuses the contract.
     (DS_EXEC_ACCOUNT_SUMMARY_ACTIVE, EXEC_ACCOUNT_SUMMARY_CONTRACT),
+    (DS_EXEC_PROGRAM_HEALTH, EXEC_PROGRAM_HEALTH_CONTRACT),
 )
 for _vid, _contract in _CONTRACT_REGISTRATIONS:
     register_contract(_vid, _contract)
