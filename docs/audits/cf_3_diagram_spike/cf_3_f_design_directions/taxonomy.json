@@ -1,0 +1,365 @@
+{
+  "types": [
+    {
+      "type_name": "Role (Account-scope)",
+      "source_class_path": "src/recon_gen/common/l2/primitives.py:195-214 (Account)",
+      "variants": [
+        "Internal singleton (Account.scope='internal') \u2014 institution-side balance-tracked",
+        "External singleton (Account.scope='external') \u2014 counterparty, balance-untracked",
+        "Singleton + parent_role set (subledger that rolls up to a control account)",
+        "Singleton acting as control parent (target of control_parent edges)",
+        "Control parent that ALSO carries one or more LimitSchedule entries (cap-bearing)",
+        "Undeclared role (referenced by a rail but no Account/AccountTemplate declares it \u2014 degraded state, render but flag)",
+        "Orphan role (declared but not referenced by any rail or control_parent \u2014 currently filtered out, but Layer 1 view shows them)"
+      ],
+      "facts_to_encode": [
+        "Scope (internal vs external) \u2014 the institution-perimeter divide; today encoded as fill color (#dbe9f6 blue vs #fff2cc yellow)",
+        "Has a name / display label vs identifier-only",
+        "Is a control parent (target of one or more control_parent edges) \u2014 structural role in the chart of accounts",
+        "Carries LimitSchedule(s) \u2014 and if so: how many, Outbound vs Inbound mix, total cap magnitude",
+        "Is a subledger (has parent_role set itself)",
+        "Has expected_eod_balance set vs unset (declared invariant vs free-floating)",
+        "Has a description vs missing (data-quality smell)",
+        "Connectivity degree \u2014 how many rails terminate here (high-fan-out hub vs leaf)",
+        "Declared vs undeclared (data-quality issue if a rail references a role no Account names)",
+        "Whether this role appears as both Account and AccountTemplate (collision case \u2014 singleton wins per _scope_for_role)"
+      ],
+      "current_render": "shape=box, style='filled,rounded'; internal: fill=#dbe9f6 / border+font=#1f4e79; external: fill=#fff2cc / border+font=#7f6000. Label is the bare role name. No badge for limits, no badge for control-parent status, no badge for fan-out degree. 28 singleton accounts in heavy fixture (8 internal + 20 external).",
+      "click_target_requirement": "Whole shape clickable; data-id = role__<role_name>. Used for focus filter (build_topology_graph_per_rail focus_node_id), Studio entity-card filter (visible_entities_for), coverage tint stamping (_stampCoverage), trainer knob targeting."
+    },
+    {
+      "type_name": "Role (AccountTemplate-scope)",
+      "source_class_path": "src/recon_gen/common/l2/primitives.py:217-251 (AccountTemplate)",
+      "variants": [
+        "Internal templated role (scope='internal') \u2014 many runtime instances",
+        "External templated role (scope='external')",
+        "Templated role with parent_role set (validator enforces parent_role MUST be a singleton Account, never another template)",
+        "Templated role that ALSO is the target of rail flows (acts as both a class-of-accounts AND a flow endpoint)",
+        "Templated role with instance_id_template / instance_name_template customization vs default fallback",
+        "Templated role with expected_eod_balance set vs unset"
+      ],
+      "facts_to_encode": [
+        "Templated (vs singleton) \u2014 currently shape=folder to signal 'this role exists in many instances at runtime'",
+        "Scope (internal vs external) \u2014 though heavy fixture only has internal templates",
+        "Parent control role it rolls up to (rendered as control_parent edge target)",
+        "Has expected_eod_balance set (declared invariant per instance)",
+        "Has custom instance_id_template / instance_name_template vs default synthetic naming",
+        "Number of distinct rails that touch this template (templated roles in heavy fixture, e.g. TemplateRole_02, are high-fan-out)",
+        "Acts as a chain-anchor (templated role flowing into a TransferTemplate's leg-rail)"
+      ],
+      "current_render": "shape=folder, style='filled,rounded', fill=#e8f0ff / border+font=#1f4e79 \u2014 SAME blue palette as internal singletons, only the shape (folder vs box) distinguishes. External-scope templates would share the folder shape but the code's _style_for falls back to _TEMPLATE_STYLE blue regardless of declared scope, which is a latent bug for scope='external' templates. 4 templates in heavy fixture (all internal).",
+      "click_target_requirement": "Whole shape clickable; data-id = role__<template_role_name>. Same downstream uses as Account roles."
+    },
+    {
+      "type_name": "Rail (TwoLegRail)",
+      "source_class_path": "src/recon_gen/common/l2/primitives.py:278-365 (TwoLegRail)",
+      "variants": [
+        "Standalone TwoLegRail (not in any template's leg_rails, not in any chain) \u2014 bundleable",
+        "Template leg-rail member (appears in TransferTemplate.leg_rails) \u2014 anchored, never bundled",
+        "Chain endpoint (parent or child in a Chain row) \u2014 anchored, never bundled",
+        "Aggregating TwoLegRail (aggregating=true, has cadence + bundles_activity) \u2014 sweep on cadence, never appears in chain children",
+        "TwoLegRail with expected_net set (standalone) vs expected_net unset (template-bundled \u2014 template owns the invariant)",
+        "TwoLegRail with rail-level origin only vs per-leg source_origin+destination_origin overrides",
+        "TwoLegRail with multi-role source_role and/or destination_role (RoleExpression tuple > 1) \u2014 fans out across cross-product into multiple bundled edges",
+        "TwoLegRail with self-source==destination (e.g. Rail_10 in heavy: ExternalRole_04\u2192ExternalRole_04 \u2014 visual self-loop on a role)",
+        "TwoLegRail involving a templated-role endpoint (visually distinct because endpoint is folder, not box)",
+        "TwoLegRail with aging watches (max_pending_age and/or max_unbundled_age set)",
+        "TwoLegRail with amount_typical_range set (AB.5 magnitude bound)",
+        "TwoLegRail with firings_typical_per_period set (AF count bound)",
+        "TwoLegRail XOR-group member inside a TransferTemplate (variant of template leg-rail with mutual-exclusion contract)"
+      ],
+      "facts_to_encode": [
+        "2-leg vs 1-leg discriminant \u2014 fundamentally different accounting shape; currently both render as identical ellipses",
+        "Direction of flow (source\u2192destination) \u2014 currently conveyed by edge arrowheads (none on src\u2192rail, open on rail\u2192dst)",
+        "Aggregating-ness \u2014 sweep behavior, cadence, list of bundled activity refs (currently zero visual distinction from non-aggregating)",
+        "Origin assignment \u2014 InternalInitiated / ExternalForcePosted / ExternalAggregated / custom; whether per-leg differs",
+        "Anchoring state \u2014 bundled vs anchored-individual; if anchored, why (template-member vs chain-endpoint vs both)",
+        "Bundle membership \u2014 if collapsed into a bundle, what bundle and how many siblings",
+        "Membership in a TransferTemplate cluster (and which one) \u2014 currently conveyed by being drawn inside a dashed cluster",
+        "Membership in a TransferTemplate XOR-group \u2014 currently conveyed by nested cluster around the rail",
+        "Chain participation \u2014 is this rail a chain parent? a chain child? both? required (singleton chain) or XOR (multi)?",
+        "Aging-watch presence (max_pending_age / max_unbundled_age) \u2014 invariants the L1 dashboards surface as exceptions",
+        "Magnitude band (amount_typical_range) presence and size \u2014 operator's gut on 'is this a $5 rail or a $5M rail'",
+        "Firing cadence (firings_typical_per_period) presence \u2014 'fires often' vs 'fires rarely'",
+        "Metadata key count and identity \u2014 what dimensions the rail carries for joins",
+        "Subject to a LimitSchedule (matched by rail name in any LimitSchedule.rail) \u2014 Outbound and/or Inbound cap"
+      ],
+      "current_render": "shape=ellipse, style='filled', fill=#f5f5f5 / border+font=#666666. Label is bare rail name. Endpoint edges color #1f4e79 (blue), arrowhead='none' on src\u2192rail, arrowhead='open' on rail\u2192dst. No badge for aggregating, no visual for origin, no indicator of magnitude/cadence/limits/aging. 103 rails in heavy fixture; ~49 two-leg by source_role count.",
+      "click_target_requirement": "Whole ellipse clickable; data-id = rail__<rail_name> (individual) or rail__bundle_<idx> (collapsed). Used for focus, coverage tint, Studio entity routing."
+    },
+    {
+      "type_name": "Rail (SingleLegRail)",
+      "source_class_path": "src/recon_gen/common/l2/primitives.py:368-428 (SingleLegRail)",
+      "variants": [
+        "SingleLegRail Debit-direction \u2014 leg_role \u2192 rail (money OUT of leg_role)",
+        "SingleLegRail Credit-direction \u2014 rail \u2192 leg_role (money IN to leg_role)",
+        "SingleLegRail Variable-direction \u2014 closing leg of a TransferTemplate, amount AND direction determined at posting by template's expected_net (used in leg_rail_xor_groups members)",
+        "Standalone SingleLegRail reconciled by an aggregating rail's bundles_activity (NOT in any template's leg_rails)",
+        "SingleLegRail listed in a TransferTemplate's leg_rails (the typical reconciliation path)",
+        "Aggregating SingleLegRail (aggregating=true, has cadence + bundles_activity)",
+        "SingleLegRail with multi-role leg_role (RoleExpression tuple > 1) \u2014 fans out into multiple self-loop edges",
+        "SingleLegRail with aging watches set",
+        "SingleLegRail with amount_typical_range / firings_typical_per_period",
+        "SingleLegRail with metadata_value_examples populated (rare; broad-mode plant fodder)"
+      ],
+      "facts_to_encode": [
+        "Single-leg discriminant \u2014 vs two-leg, MUST be reconciled by a template or aggregating rail to be valid",
+        "Leg direction (Debit / Credit / Variable) \u2014 currently encoded only by edge arrow direction; Variable has no special visual today though it's a distinct posting-time semantic",
+        "Whether this rail is the Variable closing leg of an XOR group (FuzzXorVariant* in heavy fixture)",
+        "Reconciliation source \u2014 which template or aggregating rail covers it (and whether it's covered at all \u2014 uncovered is invalid)",
+        "Single-role vs multi-role leg_role expression",
+        "Same aggregating-ness / origin / aging / magnitude / cadence / limit-subject / metadata-key facts as TwoLegRail",
+        "Membership in template / chain / XOR group (same anchoring story as TwoLegRail)"
+      ],
+      "current_render": "Identical ellipse shape as TwoLegRail (shape=ellipse, fill=#f5f5f5, border #666666). Direction conveyed solely by which side of the rail node carries the arrow. Color of endpoint edge is #7f6000 (yellow/brown) vs TwoLegRail's blue #1f4e79 \u2014 only visible distinction is on the edge, not the node. ~54 single-leg rails in heavy fixture (by leg_role count).",
+      "click_target_requirement": "Whole ellipse clickable; data-id = rail__<rail_name> or rail__bundle_<idx>. Same downstream uses."
+    },
+    {
+      "type_name": "Rail Bundle (collapsed-parallel)",
+      "source_class_path": "src/recon_gen/common/l2/topology.py:782-827 (rail_to_bundle / bundles list) + 198-204 (_BundledEdge)",
+      "variants": [
+        "TwoLegRail bundle \u2014 N>=2 unanchored TwoLegRails sharing exact source_role + destination_role tuples (key prefix 'twoleg')",
+        "SingleLegRail bundle \u2014 N>=2 unanchored SingleLegRails sharing leg_role + leg_direction (key prefix 'singleleg')",
+        "Small bundle (2-3 rails) vs medium (4-9) vs large (10+) \u2014 collapse magnitude varies and currently only label N reveals it",
+        "Mixed-direction bundle \u2014 not possible by construction (direction is part of key), but visually it would be a separate Debit-bundle and Credit-bundle on the same role-pair"
+      ],
+      "facts_to_encode": [
+        "N (count of collapsed rails) \u2014 currently in label as '<N> rails:' prefix",
+        "Direction (Debit/Credit/Variable for singleleg, src\u2192dst for twoleg) \u2014 currently in arrowhead",
+        "List of member rail names \u2014 currently splatted into the label (newline-joined sorted names), inflates node size as N grows",
+        "Endpoint role pair (which roles this bundle connects) \u2014 implicit from edges",
+        "Aggregating bundle members exist? (would they ever bundle? aggregating rails could share src+dst but typically the cadence/bundles_activity makes them anchored-by-purpose \u2014 currently they CAN bundle since aggregating doesn't anchor)",
+        "Whether expansion would be useful (operator wants to drill into the bundle to see individual rails)"
+      ],
+      "current_render": "shape=ellipse, fill=#e8e8e8 (slightly darker than individual #f5f5f5), border #1f4e79 (blue), penwidth=1.5 (thicker than individual), label = '<N> rails:\\n<name1>\\n<name2>...' \u2014 the label balloons into a tall ellipse listing every member. Endpoint edges scale penwidth as min(1.0 + 0.3 * N, 3.0). In heavy fixture, bundles are visible as a few of the larger ellipses near the right side. Click data-id = rail__bundle_<idx> but this is SYNTHETIC \u2014 visible_entities_for treats unknown bundle ids as un-filter trigger (line 1410-1411).",
+      "click_target_requirement": "Whole ellipse clickable; data-id = rail__bundle_<idx>. Synthetic id is NOT one of the Studio entity-card kinds \u2014 clicking a bundle should ideally expand the bundle into its constituents in a sidebar OR navigate to one member; currently it falls back to 'un-filter all kinds'."
+    },
+    {
+      "type_name": "Aggregating Rail (sweeper)",
+      "source_class_path": "src/recon_gen/common/l2/primitives.py:319-321, 401-405 (aggregating + bundles_activity + cadence fields on either Rail variant)",
+      "variants": [
+        "Aggregating TwoLegRail (e.g. Rail_81 in heavy: InternalRole_02\u2192InternalRole_05, intraday-4h, bundles 29 rails)",
+        "Aggregating SingleLegRail (rarer)",
+        "Aggregating rail bundling a small set (2-3 activity refs, e.g. Rail_88: daily-eod bundling Rail_12 + Rail_64)",
+        "Aggregating rail bundling a large set (Rail_81 bundles 29 in heavy)",
+        "Aggregating with intraday-Nh cadence vs daily-eod / daily-bod vs weekly-<weekday> vs monthly-eom/bom/<day>",
+        "BundlesActivity ref to a TransferType (matches everything of that type) vs to a specific RailName or TransferTemplateName"
+      ],
+      "facts_to_encode": [
+        "Is-aggregating flag \u2014 currently INVISIBLE in the diagram, only readable via the YAML; this is the spike's most-obvious missing visual",
+        "Cadence (intraday-4h / daily-eod / weekly-mon / monthly-eom / etc.) \u2014 operational rhythm of the sweep",
+        "Bundle scope \u2014 how many activity refs, are they rails/templates/types",
+        "Direction of the sweep (which role gets the netted credit/debit)",
+        "Activity-ref convergence \u2014 visually, the rail 'sweeps inbound' from N rails into one settlement; today these are invisible (the bundled rails fire independently and the sweep is a separate rail with no edges to its members)"
+      ],
+      "current_render": "Renders as a normal Rail ellipse (TwoLegRail or SingleLegRail style). The aggregating flag is NOT surfaced. No visual cue that Rail_81 is a sweeper that consumes 29 other rails' activity. Cadence is invisible. The bundles_activity list creates no edges in the diagram \u2014 the relationship is data-only.",
+      "click_target_requirement": "Same as regular Rail (rail__<name>). Future: clicking should ideally highlight the bundled-activity members."
+    },
+    {
+      "type_name": "TransferTemplate (cluster + inner node)",
+      "source_class_path": "src/recon_gen/common/l2/primitives.py:437-472 (TransferTemplate)",
+      "variants": [
+        "Single-leg-rail template (1 leg_rail, simplest \u2014 e.g. TransferTemplate_01)",
+        "Multi-leg template with all-non-XOR rails (typical)",
+        "Multi-leg template with one or more leg_rail_xor_groups (XOR partition \u2014 e.g. TransferTemplate_FuzzXor with 3-way XOR)",
+        "Template appearing as chain parent (TransferTemplate_11 in heavy) \u2014 flows into another rail/template",
+        "Template appearing as chain child (TransferTemplate_14 in heavy)",
+        "Template with completion = business_day_end (the default-ish)",
+        "Template with completion = business_day_end+Nd (delayed)",
+        "Template with completion = month_end",
+        "Template with completion = metadata.<key> (dynamic \u2014 depends on a posting field)",
+        "Template with multi-key transfer_key (e.g. ['key_0', 'key_1'] \u2014 composite join key)",
+        "Template with firings_typical_per_period set",
+        "Template containing a rail that ALSO appears in another template's leg_rails (Rail_23 appears in TransferTemplate_01 AND TransferTemplate_13; the rail goes to whichever template was emitted first per the seen_rail_ids guard \u2014 visually this means template-membership is non-unique and the cluster boundary lies)"
+      ],
+      "facts_to_encode": [
+        "Cluster identity \u2014 which template's leg-rails this is",
+        "Template name (analyst-facing identifier)",
+        "Transfer key fields (the join dimension that groups rail firings into one Transfer) \u2014 currently stored in TopologyNode.metadata but NOT rendered in the cluster label",
+        "Completion expression (business_day_end / +Nd / month_end / metadata.<key>) \u2014 fundamental timeliness contract; currently invisible in the diagram",
+        "Expected_net (typically 0 \u2014 the conservation contract for the bundle)",
+        "Leg-rail count (cardinality of the template \u2014 small vs large multi-leg)",
+        "Presence and count of XOR groups (mutual-exclusion contracts)",
+        "Cluster-internal arrangement \u2014 XOR groups as nested sub-clusters",
+        "Whether this template is a chain participant (parent or child)",
+        "Per-period firing count band (firings_typical_per_period) \u2014 operator's gut on template firing rhythm",
+        "Whether a leg-rail in this template ALSO appears elsewhere (shared-rail anomaly)"
+      ],
+      "current_render": "DOUBLE-RENDERED: (1) a graphviz cluster (subgraph cluster_tmpl_<name>) with style='dashed,rounded', border=#a6622c (orange/brown), label=template name; (2) INSIDE the cluster, an internal component-shape node (shape='component', fill=#fce4d6, border=#a6622c) with the same name as inner label. The cluster boundary IS the template; the inner component node duplicates the label and acts as the chain-edge anchor. Membership edges (dotted, constraint=false post-CF.3.a, arrowhead=none) connect the inner node to each leg-rail. XOR groups render as nested sub-clusters (dashed,rounded,filled, fill=#f0f4ff, border=#5a6f9c, label='XOR group N (exactly 1 fires)'). 31 templates in heavy fixture.",
+      "click_target_requirement": "Today: the inner component node carries data-id = tmpl__<name>. The cluster itself is not directly clickable. The v13.1.1 audit's 'template recast' proposal would make the cluster the single representation (demote inner to invisible point) \u2014 that changes the click-target surface: cluster header / cluster body / per-leg-rail port would need their own data-ids."
+    },
+    {
+      "type_name": "TransferTemplate XOR-group (nested sub-cluster)",
+      "source_class_path": "src/recon_gen/common/l2/primitives.py:465 (leg_rail_xor_groups field on TransferTemplate); rendered at src/recon_gen/common/l2/topology.py:1049-1083",
+      "variants": [
+        "2-member XOR (binary mutual-exclusion, e.g. auto-pay vs manual)",
+        "3-member XOR (e.g. TransferTemplate_FuzzXor: Auto / Standard / Slow)",
+        "N-member XOR (validator requires >=2)",
+        "Single XOR group in a template (typical)",
+        "Multiple XOR groups in a template (validator allows; members must not overlap between groups)",
+        "XOR group whose members are all Variable-direction (validator requirement \u2014 closing legs)",
+        "Mixed template \u2014 some leg_rails in XOR group, others standalone in the cluster"
+      ],
+      "facts_to_encode": [
+        "XOR-group identity within the parent template (index gi)",
+        "Member count (cardinality of the alternation)",
+        "Member rail names (and which one fires per real Transfer at runtime is data-only, not topology)",
+        "'Exactly 1 fires per Transfer' invariant \u2014 currently in the cluster label",
+        "Variable-direction closing-leg semantic of members",
+        "Relationship to parent template's expected_net (the XOR member's variable amount closes the bundle)"
+      ],
+      "current_render": "Nested subgraph cluster_tmpl_<tmpl>_xor_<gi> inside the template cluster. style='dashed,rounded,filled', fill=#f0f4ff (pale blue, distinct from template's orange), border=#5a6f9c, label='XOR group <gi+1> (exactly 1 fires)'. Membership edges from template inner node to each XOR member are style='dashed' (vs 'dotted' for non-XOR), constraint=false. 5 'xor' references in heavy fixture YAML (1 XOR group on TransferTemplate_FuzzXor with 3 members + chain-edge xor metadata uses).",
+      "click_target_requirement": "Currently no dedicated data-id on the XOR sub-cluster \u2014 only the individual rail nodes inside carry data-id=rail__<name>. Future: the sub-cluster itself may want a data-id for 'show me the XOR contract' filtering."
+    },
+    {
+      "type_name": "Chain (edge between rail/template)",
+      "source_class_path": "src/recon_gen/common/l2/primitives.py:507-531 (Chain) + 478-504 (ChainChildSpec)",
+      "variants": [
+        "Required chain (singleton children \u2014 len(chain.children)==1): the child SHOULD fire when the parent fires; missing = orphan exception",
+        "XOR chain (multi children: len > 1): exactly one of the listed children SHOULD fire per parent instance",
+        "Chain parent = Rail, child = Rail (typical, most chains in heavy)",
+        "Chain parent = Rail, child = TransferTemplate (rail flows into a bundled settlement, e.g. Rail_18 \u2192 TransferTemplate_14)",
+        "Chain parent = TransferTemplate, child = Rail (template completion triggers a rail, e.g. TransferTemplate_15 \u2192 Rail_20)",
+        "Chain parent = TransferTemplate, child = TransferTemplate (template \u2192 template, e.g. TransferTemplate_11 \u2192 TransferTemplate_27)",
+        "Chain child with fan_in=true (N parent firings \u2192 1 child Transfer; child must be a TransferTemplate)",
+        "Chain child with fan_in=true AND expected_parent_count set (exact-mismatch flagging)",
+        "Chain child with fan_in=false (default, 1:1)",
+        "Mixed-cardinality chain (some fan_in children, some not \u2014 AB.6 motivation)"
+      ],
+      "facts_to_encode": [
+        "Required vs XOR cardinality \u2014 the chain row's firing semantic; today in label as '(required)' or '(xor: <siblings>)'",
+        "Fan-in vs not \u2014 N:1 vs 1:1 batching shape; today as ' [fan-in N\u21921]' label suffix + penwidth=2.0",
+        "Expected parent count when set (exact target for fan_in)",
+        "XOR siblings as a group \u2014 multiple chain edges that share a parent and are alternative children; today only individual edges, sibling names baked into each edge's label",
+        "Parent kind (rail vs template) \u2014 endpoint shape conveys it",
+        "Child kind (rail vs template) \u2014 endpoint shape conveys it",
+        "Whether the chain crosses a template-cluster boundary (visual smell \u2014 long chain edge raking the canvas)",
+        "Chain edges to/from XOR-group-member rails (variable direction; the chain is sequencing the variable closure)"
+      ],
+      "current_render": "Edge between two nodes (parent_id \u2192 child_id), style='dashed', color=#5a5a5a, fontcolor=#5a5a5a. Label = 'chain\\n(required)' or 'chain\\n(xor: c1,c2,...)'. Fan-in edges: penwidth=2.0, arrowhead='onormalonormal' (double-arrow), label suffix ' [fan-in N\u21921]'. Non-fan-in: default penwidth, default arrowhead (normal). 12 chains in heavy fixture, all singleton (required) per yaml inspection.",
+      "click_target_requirement": "Edges in graphviz SVG carry id but JS layer keys by data-source/data-target attributes (per audit). Chain rows are entity-routable via composite key '<parent>::<sorted-children-csv>'; the diagram-edge \u2192 entity mapping may need explicit data-id per edge in the recast."
+    },
+    {
+      "type_name": "Control-parent edge (subledger \u2192 control)",
+      "source_class_path": "src/recon_gen/common/l2/primitives.py:212 + 247 (Account.parent_role / AccountTemplate.parent_role); rendered at src/recon_gen/common/l2/topology.py:1267-1306",
+      "variants": [
+        "Account subledger \u2192 singleton control role (child_kind='account')",
+        "AccountTemplate \u2192 singleton control role (child_kind='template' \u2014 validator enforces parent is a singleton, never another template)",
+        "Control parent that carries LimitSchedule(s) \u2014 currently labeled 'controls\\n($ caps)'",
+        "Control parent without limits \u2014 labeled 'controls'",
+        "Chain of control (subledger A \u2192 control B, where B itself has parent_role=C \u2014 unusual but possible per the type system)"
+      ],
+      "facts_to_encode": [
+        "Direction of roll-up (subledger to parent)",
+        "Child kind (Account vs AccountTemplate) \u2014 affects the visual at the source endpoint, today implicit via endpoint shape",
+        "Whether parent carries LimitSchedule(s) \u2014 today as '($ caps)' label decoration",
+        "Number of subledgers rolling up to one control (fan-in count on the control side) \u2014 operator's gut on 'this is a hot control account'",
+        "Distinct from rail flow \u2014 control_parent is structural (chart of accounts), not money-movement; the visual must say 'this is hierarchy not flow'"
+      ],
+      "current_render": "Edge style='dashed' (same as chain \u2014 VISUAL COLLISION), color=#888888 (gray, slightly different from chain's #5a5a5a but easy to confuse), arrowhead='onormal' (hollow). Label='controls' or 'controls\\n($ caps)'. 10 parent_role occurrences in heavy yaml (most on the 20 external counterparties + 4 templates).",
+      "click_target_requirement": "Edge \u2014 no specific data-id today; the relationship is implicit from the role nodes it connects. Studio's home-page entity filter resolves control_parent via the role's account/template entity."
+    },
+    {
+      "type_name": "LimitSchedule (cap, NOT rendered as node/edge today)",
+      "source_class_path": "src/recon_gen/common/l2/primitives.py:537-561 (LimitSchedule)",
+      "variants": [
+        "Outbound cap (default direction='Outbound') \u2014 classic per-rail send cap on the parent's children",
+        "Inbound cap (direction='Inbound') \u2014 AML/structuring threshold on inbound volume; 2 in heavy fixture",
+        "Cap on a rail that is also a chain participant (the chain + the cap interact at runtime)",
+        "Cap on an aggregating rail (the sweep itself is throttled)",
+        "Multiple LimitSchedules on the same parent_role (different rails, different directions)",
+        "Single LimitSchedule on a parent_role (the 'this rail watched on this control' singleton)"
+      ],
+      "facts_to_encode": [
+        "Existence \u2014 today only surfaced as a label decoration '($ caps)' on the control_parent edge if the parent_role appears in ANY LimitSchedule, regardless of rail/direction/cap size",
+        "Cap amount (currency magnitude) \u2014 invisible today; operators have no way to read 'this cap is $1k vs $1M' from the diagram",
+        "Direction (Outbound vs Inbound) \u2014 invisible; the 2 Inbound caps in heavy are indistinguishable from Outbound",
+        "Specific rail the cap applies to \u2014 invisible; the cap is per (parent_role, rail, direction) but the diagram only flags 'this parent has caps'",
+        "Count of caps on this parent_role \u2014 invisible",
+        "Composite identity for entity routing (parent_role::rail)"
+      ],
+      "current_render": "NO direct visual representation. The LimitSchedule entity is rendered ONLY as a label decoration ('controls\\n($ caps)') on the control_parent edge IF ls.parent_role appears in any LimitSchedule. 6 LimitSchedules in heavy fixture (4 Outbound + 2 Inbound) \u2014 currently zero shape distinction. visible_entities_for includes them via the parent_role::rail composite key but the diagram has no shape with data-id matching that.",
+      "click_target_requirement": "TODAY: none. FUTURE: a per-rail or per-control-edge cap badge with data-id=ls__<parent_role>__<rail> would unblock entity-card click-through. Cap badge needs to live at the intersection of the rail and the control parent (since both are involved)."
+    },
+    {
+      "type_name": "Self-loop (single-leg rail on its own leg_role)",
+      "source_class_path": "src/recon_gen/common/l2/topology.py:487-501 (self-loop edge emit in topology_graph_for); per-rail renderer Phase E single-leg path at :1143-1158",
+      "variants": [
+        "Debit self-loop (leg_role \u2192 rail edge, with rail consuming money)",
+        "Credit self-loop (rail \u2192 leg_role edge, with rail depositing money)",
+        "Variable-direction self-loop (the XOR variable-closing-leg case)",
+        "Self-loop where leg_role is a templated role (folder-shape endpoint)",
+        "Self-loop bundled into a singleleg bundle (when N>=2 single-leg rails share leg_role + direction)"
+      ],
+      "facts_to_encode": [
+        "Direction (Debit/Credit/Variable) \u2014 currently in the rail node's label as '(Direction)' in topology_graph_for's _self_loop_label, but the per-rail renderer drops this and uses arrow direction alone",
+        "Whether it reconciles to a template (the typical case) vs an aggregating-rail's bundles_activity (the alternative)",
+        "Whether the leg_role is hot (degree, fan-out)"
+      ],
+      "current_render": "In the per-rail renderer there is no 'self-loop' shape per se \u2014 the SingleLegRail is a normal ellipse and the edge runs between the rail node and the leg_role node. The TopologyEdge.kind='self_loop' is set in the typed projection but the per-rail renderer's Phase E emits a regular role\u2194rail edge with color=#7f6000 (yellow/brown, distinct from twoleg blue) \u2014 that color IS the only signal that this is a single-leg flow.",
+      "click_target_requirement": "Rail node clickable (rail__<name>); the edge has no dedicated id."
+    },
+    {
+      "type_name": "Undeclared / orphan role (data-quality)",
+      "source_class_path": "src/recon_gen/common/l2/topology.py:228-249 (_scope_for_role returns None) + :1319-1322 (_style_for fallback)",
+      "variants": [
+        "Role referenced by a rail but not declared on any Account/AccountTemplate \u2014 undeclared (loud data error)",
+        "Role declared on an Account but no rail references it \u2014 orphan (filtered out by referenced_roles set today)",
+        "Role declared with no scope (impossible per type system \u2014 scope is required)"
+      ],
+      "facts_to_encode": [
+        "Data-quality flag \u2014 render but flag visually so the operator sees the diagnostic",
+        "Reason for the flag (undeclared vs orphan)",
+        "Which rail references the undeclared role"
+      ],
+      "current_render": "Undeclared roles render with the internal style as the least-surprising fallback (per _style_for fallback comment) \u2014 currently NO visual diagnostic. Orphans don't render at all (filtered by referenced_roles). Layer-1 view does include all roles but still without a 'orphan' flag.",
+      "click_target_requirement": "Same as Role (role__<name>); future could add data-state='undeclared' attribute for trainer/coverage filters."
+    }
+  ],
+  "visual_idioms_needed": [
+    "Rail-collapse idiom: parallel rails sharing src+dst (or leg_role+direction) get folded into a bundle node; the bundle must visually encode N (count), direction, and afford expansion-on-click to reveal individuals. Today the bundle just stacks the names vertically in the label \u2014 at N>=10 it overflows. Need a compact 'N rails' badge with on-hover or on-click expansion to a list/sidebar/popout.",
+    "XOR-group framing: nested sub-cluster inside a template cluster with a 'exactly 1 fires' contract label. Members are typically Variable-direction. The framing must (a) distinguish from the parent template's chrome (currently pale blue vs orange \u2014 works) AND (b) not get lost when the template cluster itself is dense.",
+    "Anchored-vs-bundled distinction: a rail is 'anchored' (rendered individually) if referenced by a chain or a template's leg_rails. Unanchored parallel rails collapse. The visual needs to make 'this is one of many' (bundle) vs 'this stands alone because it's load-bearing' (anchored) instantly readable \u2014 today both are identical ellipses, only the label differs.",
+    "Aggregating-rail decoration: aggregating rails (~2 in heavy) are sweep nodes with a cadence + an activity-ref list. Today INVISIBLE \u2014 needs a sweep glyph (clock/rhythm icon, or a 'sweeps N rails @ cadence' badge) AND optionally a ghost/dashed convergence visual from the bundled-activity rails into the sweep.",
+    "Direction-as-shape encoding (not just arrowheads): single-leg rails Debit vs Credit vs Variable should be readable from the rail node ITSELF, not just the edge it spawns. Variable direction (the XOR closing-leg case) has no special visual today; it's distinct posting-time semantic that operators need.",
+    "Origin-as-decoration: every rail (or leg) has an Origin (InternalInitiated / ExternalForcePosted / ExternalAggregated / custom). Today INVISIBLE in the diagram. Could be a small badge or border-stroke pattern on the rail node.",
+    "Cap-bearing role badge: roles that are LimitSchedule.parent_role need a cap badge (or stack of badges) on the role node, indicating direction (Outbound vs Inbound), cap magnitude, and target rail. Today only a label decoration on the control_parent edge.",
+    "Cap-subject rail tag: rails that appear in any LimitSchedule.rail field deserve a 'capped by N' indicator on the rail node so the operator sees 'this rail is throttled' without tracing edges.",
+    "Aging-watch indicator: rails with max_pending_age or max_unbundled_age set deserve a clock badge \u2014 they generate L1 exception views; today invisible.",
+    "Magnitude band: rails with amount_typical_range set have an implicit '$5 rail vs $5M rail' character; today invisible. Could be a thickness modulation on the rail node border or a $-icon scale.",
+    "Cadence band: rails with firings_typical_per_period set have a 'fires often vs rarely' character; today invisible.",
+    "Control-parent style distinct from chain style: today both are dashed gray edges, easy to confuse. Need clear visual separation between 'hierarchy / chart of accounts' (structural) and 'sequencing / firing rule' (behavioral).",
+    "Required vs XOR chain styling: chain rows with one child (required) vs multiple children (XOR) should look meaningfully different \u2014 operators scanning the diagram for 'where could a missing-fire exception come from' read these differently. Today only the label text disambiguates.",
+    "Fan-in chain emphasis: AB.6 fan-in edges already use penwidth=2.0 + double-arrow + label suffix; works but inconsistently 'emphasized' vs other chain decorations. Make this a deliberate idiom (e.g. 'funnel' glyph on the target).",
+    "Template-as-cluster vs template-as-port-node: the v13.1.1 audit's CF.3.f port-node proposal is the highest-payoff long-form change \u2014 each template becomes one Mrecord/HTML-table glyph with per-leg ports, edges dock at the exact leg, the entire template + its rails compress to one shape. The vocabulary needs to support either rendering with the same per-leg data-ids.",
+    "Focus dimming: when a node is focused (focus_node_id set), in-focus nodes are emitted, out-of-focus are skipped. The audit's CF.3.c proposal is 'fisheye': scale focus subgraph up, shrink everything else to label-less pins. Must use scale+opacity, NEVER display:none, so data-ids stay addressable for coverage/trainer tint.",
+    "Coverage tint: per-rail/per-template data coverage (X.4.c.5) stamps a tint over the node; the vocabulary must keep a 'tint surface' on every shape \u2014 the existing fill colors compete with this. Reserve a paintable region (e.g. left stripe or top bar) per shape kind.",
+    "Trainer-knob targeting: trainer mutations target specific entities; clicking a shape navigates to the editor. Every visible entity needs a stable data-id; bundle synthetic ids are a known gap.",
+    "Scope-perimeter framing: internal vs external roles divide the institution from counterparties. A higher-level visual (e.g. a soft envelope around all internal nodes, or a 'perimeter line' across the canvas) would let the operator see 'where does the institution end' at a glance.",
+    "Multi-role RoleExpression fan-out: when a rail has source_role=[A,B] and destination_role=[C], it currently fans into A\u2192rail\u2192C and B\u2192rail\u2192C edges via the cross-product. The visual must say 'this rail accepts any of these admissible roles' rather than 'this is three distinct rails'.",
+    "Cross-template rail sharing: Rail_23 in heavy is in BOTH TransferTemplate_01 AND TransferTemplate_13's leg_rails; current emit puts it in whichever template wins the seen_rail_ids race. The visual should either dual-cluster (rare, hard) OR flag the sharing.",
+    "Layer onion (L1 \u2192 L2 \u2192 L3): the layer parameter already gates rails+templates+chains by reveal level. The vocabulary must compose \u2014 shapes used at L3 must degrade gracefully at L1 (rails hidden) and L2 (templates+chains hidden). All elements must remain consistent in the data layer (so click-to-zoom on a role at L1 still produces the same role node at L3).",
+    "Stable identity across renders: bundle ids are deterministic from instance.rails iteration order (per :853-854 comment). The vocabulary mustn't introduce new synthetic ids that change between renders or between layers.",
+    "Density-graceful collapse: heavy_density_v1 has 158 nodes / 223 edges at L3 \u2014 every shape must remain at least small-readable at this scale. Per-shape information density is a real constraint (operator brief says 2-3 facts per shape minimum without label clutter). At smaller scales (sasquatch, 44 nodes), the same shapes should not look starved or over-decorated."
+  ],
+  "cardinality_in_heavy": {
+    "accounts": 28,
+    "internal_accounts": 8,
+    "external_accounts": 20,
+    "account_templates": 4,
+    "rails_total": 103,
+    "two_leg_rails": 49,
+    "single_leg_rails": 54,
+    "aggregating_rails": 2,
+    "transfer_templates": 31,
+    "templates_with_xor_groups": 1,
+    "chains": 12,
+    "limit_schedules": 6,
+    "inbound_limit_schedules": 2,
+    "outbound_limit_schedules": 4,
+    "parent_role_relations": 10,
+    "l3_nodes_rendered": 158,
+    "l3_edges_rendered": 223,
+    "l3_crossings_post_cf3a": 542
+  }
+}
