@@ -2955,21 +2955,43 @@ def _render_diagram_page(
     sidebar_section_body_cls = "px-3 pb-2 flex flex-col gap-1"
     sidebar_html = f"""
     <details id="diagram-sidebar" open
-             class="absolute top-2 left-2 z-10 bg-white border border-surface-border
+             class="group absolute top-2 left-2 z-10 bg-white border border-surface-border
                     shadow-md rounded-md text-sm flex flex-col
                     max-h-[calc(100%-1rem)] open:w-64 not-open:w-10
                     overflow-hidden">
-      <summary class="flex items-center justify-between gap-2 px-3 py-2
+      <summary class="flex items-center gap-2 px-3 py-2
                       border-b border-surface-border cursor-pointer
                       list-none select-none hover:bg-link-tint
                       [&::-webkit-details-marker]:hidden"
                title="Toggle chrome sidebar">
-        <span class="font-mono text-xs text-secondary-fg truncate
-                     not-open:hidden">{prefix}</span>
-        <span class="text-base leading-none text-secondary-fg ml-auto"
+        <!-- CF.3.m polish (2026-06-05) — children of the <details>
+             use `group-open:`/`group-not-open:` to read the PARENT's
+             open state (the `open:`/`not-open:` variants on a child
+             element would check the child's own [open] attribute,
+             which it never has — every child would silently stay
+             hidden). The `group` class on the <details> wires this.
+             L2 stem dropped from the header: it already appears in
+             the status line directly below as
+             "<stem> · N nodes · M edges". -->
+        <!-- Reset zoom + Reset all live in the always-visible header
+             strip so a misadjusted view can be recovered without
+             re-expanding the collapsible body. Hidden when the
+             sidebar itself is collapsed (chevron-only strip).
+             `event.stopPropagation()` on both stops the click from
+             toggling the parent <details>. -->
+        <button id="reset-zoom-btn" type="button"
+                class="group-not-open:hidden bg-link-tint text-accent border border-surface-border px-2 py-0.5 rounded-sm cursor-pointer text-xs hover:bg-accent hover:text-white"
+                onclick="event.stopPropagation()"
+                title="Reset zoom &amp; pan to fit canvas">Reset zoom</button>
+        <a id="toggle-reset"
+           class="group-not-open:hidden bg-link-tint text-accent border border-surface-border px-2 py-0.5 rounded-sm cursor-pointer text-xs hover:bg-accent hover:text-white"
+           href="{"?embed=1" if embed else "?"}"
+           onclick="event.stopPropagation()"
+           title="Reset every chrome toggle to defaults">Reset all</a>
+        <span class="text-2xl leading-none font-bold text-secondary-fg ml-auto"
               aria-hidden="true">
-          <span class="not-open:hidden">«</span>
-          <span class="open:hidden">»</span>
+          <span class="group-not-open:hidden">«</span>
+          <span class="group-open:hidden">»</span>
         </span>
       </summary>
       <div class="flex flex-col overflow-y-auto">
@@ -3026,8 +3048,6 @@ def _render_diagram_page(
             {coverage_toggle_html}
             {trainer_toggle_html}
             {hide_singleleg_toggle_html}
-            <a id="toggle-reset" class="{chrome_button_classes()} mt-2 text-center"
-               href="{"?embed=1" if embed else "?"}">Reset all</a>
           </div>
         </details>
         {view_in_editor_html}

@@ -353,6 +353,16 @@ function _wirePanZoom(svg) {
   svg.addEventListener("dblclick", (e) => {
     if (e.target === svg) reset();
   });
+  // CF.3.m polish — sidebar header "Reset zoom" button. Lives in the
+  // always-visible part of the floating sidebar so a misadjusted view
+  // can be recovered when the collapsible body is closed.
+  const resetZoomBtn = document.getElementById("reset-zoom-btn");
+  if (resetZoomBtn) {
+    resetZoomBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      reset();
+    });
+  }
 }
 
 function _setHideClass(svg, kind, hidden) {

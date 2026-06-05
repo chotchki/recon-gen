@@ -160,11 +160,72 @@ def test_diagram_sidebar_view_in_editor_button_suppressed_for_role_focus() -> No
     assert 'id="view-in-editor"' not in html
 
 
+def test_diagram_sidebar_reset_buttons_in_always_visible_header() -> None:
+    """CF.3.m polish: Reset zoom + Reset all live in the sidebar's
+    always-visible header strip (`<summary>`), not in the collapsible
+    body. Operator needs both reachable when the collapsible body is
+    closed — scroll-zoom can leave you stuck at an unhelpful view.
+
+    Both hide when the sidebar itself is collapsed (`not-open:hidden`)
+    so the collapsed-strip width stays narrow. Click handlers stop
+    propagation so the buttons don't toggle the parent `<details>`."""
+    pytest.importorskip("graphviz")
+    from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
+        _render_diagram_page,
+    )
+    from recon_gen.common.l2.cache import L2InstanceCache  # noqa: PLC0415
+
+    cache = L2InstanceCache.from_path(FIXTURES_DIR / "spec_example.yaml")
+    html = _render_diagram_page(
+        cache, dev_log=False, focus_node_id=None, layer=3, embed=False,
+    )
+
+    # Both buttons render.
+    assert 'id="reset-zoom-btn"' in html
+    assert 'id="toggle-reset"' in html
+    # Both hide when the parent <details> is closed.
+    assert 'id="reset-zoom-btn" type="button"' in html
+    # Sidebar root summary contains both (i.e., they're in the always-
+    # visible header strip, not the collapsible body).
+    summary_end = html.index("</summary>")
+    summary_start = html.index('<summary class="flex items-center')
+    summary_block = html[summary_start:summary_end]
+    assert 'id="reset-zoom-btn"' in summary_block, (
+        "Reset zoom button must live inside <summary> — "
+        "operator needs it reachable when body is collapsed"
+    )
+    assert 'id="toggle-reset"' in summary_block, (
+        "Reset all link must live inside <summary>"
+    )
+    # Hidden when the sidebar itself collapses — use the `group-*`
+    # variants so children read the PARENT <details>'s open state
+    # (a bare `not-open:` on a non-<details> child checks the child's
+    # own [open] attr, which it never has, so the child silently
+    # stays hidden in BOTH states — bug we hit on the first try).
+    assert "group-not-open:hidden" in summary_block
+    # Click handlers stop propagation so the buttons don't toggle
+    # the parent <details>.
+    assert 'onclick="event.stopPropagation()"' in summary_block
+
+    # JS wires the Reset zoom button to the pan/zoom reset() closure.
+    diagram_js = (
+        Path(__file__).parent.parent.parent
+        / "src" / "recon_gen" / "common" / "html"
+        / "_studio_assets" / "diagram.js"
+    ).read_text()
+    assert 'getElementById("reset-zoom-btn")' in diagram_js
+
+
 def test_diagram_sidebar_chevron_flips_on_collapse() -> None:
     """The master collapse chevron uses « when expanded and » when
-    collapsed. Both glyphs are present in the rendered HTML — Tailwind
-    `not-open:hidden` / `open:hidden` arbitrary variants flip them
-    based on the root `<details>` open state."""
+    collapsed. Both glyphs render; the parent `<details>` carries the
+    `group` class so children use `group-open:` / `group-not-open:`
+    to read its open state.
+
+    Why `group-*` and not bare `open:` / `not-open:`: the bare
+    variants check the CHILD's own `[open]` attribute, not the
+    parent. A `<span>` never has `[open]`, so a bare `not-open:hidden`
+    on it stays hidden in both states (the first-render bug)."""
     pytest.importorskip("graphviz")
     from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
         _render_diagram_page,
@@ -175,9 +236,12 @@ def test_diagram_sidebar_chevron_flips_on_collapse() -> None:
     html = _render_diagram_page(
         cache, dev_log=False, focus_node_id=None, layer=1, embed=False,
     )
+    # Parent <details> carries the `group` marker so children can
+    # read its open state.
+    assert 'class="group absolute' in html or 'class="group ' in html
     # Both chevron glyphs and their show-when-{open,closed} variants.
-    assert 'class="not-open:hidden">«' in html
-    assert 'class="open:hidden">»' in html
+    assert 'class="group-not-open:hidden">«' in html
+    assert 'class="group-open:hidden">»' in html
 
 
 def test_diagram_sidebar_status_carries_prefix() -> None:
