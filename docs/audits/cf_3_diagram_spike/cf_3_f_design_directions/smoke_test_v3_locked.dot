@@ -1,0 +1,45 @@
+digraph shape_test_v3 {
+  rankdir=LR
+  splines=polyline
+  nodesep=0.3
+  ranksep=0.5
+  node [style="filled,rounded", fontname=Helvetica, fontsize=10]
+
+  // Roles
+  internal [shape=cylinder, fillcolor="#dbe9f6", color="#1f4e79", label="InternalRole"]
+  internal2 [shape=cylinder, fillcolor="#dbe9f6", color="#1f4e79", label="InternalRole_2"]
+  external [shape=note, fillcolor="#fff2cc", color="#7f6000", label="ExternalRole"]
+  templ_role [shape=folder, fillcolor="#e8f0ff", color="#1f4e79", label="TemplateRole"]
+
+  // Rails — cds family, distinguished by stroke count
+  single_leg [shape=cds, fillcolor="#f5f5f5", color="#666666", label="SingleLegRail"]
+  two_leg [shape=cds, peripheries=2, fillcolor="#f5f5f5", color="#666666", label="TwoLegRail"]
+  bundle [shape=cds, peripheries=2, fillcolor="#f5f5f5", color="#666666", label="TwoLegRail ×5"]
+  agg [shape=cylinder, peripheries=2, fillcolor="#f5f5f5", color="#666666", label="AggregatingRail"]
+
+  // TransferTemplate v3: top header + leg-row stack
+  tmpl [shape=plaintext, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+    <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_X</B></TD></TR>
+    <TR><TD BGCOLOR="#fff2e0" PORT="leg_a" ALIGN="LEFT">leg_rail_a  (D)</TD></TR>
+    <TR><TD BGCOLOR="#fff2e0" PORT="leg_b" ALIGN="LEFT">leg_rail_b  (C)</TD></TR>
+    <TR><TD BGCOLOR="#fff2e0" PORT="leg_c" ALIGN="LEFT">leg_rail_c  (V)</TD></TR>
+  </TABLE>>]
+  tmpl2 [shape=plaintext, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+    <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_Y</B></TD></TR>
+    <TR><TD BGCOLOR="#fff2e0" PORT="leg_x" ALIGN="LEFT">leg_rail_x  (D)</TD></TR>
+    <TR><TD BGCOLOR="#fff2e0" PORT="leg_y" ALIGN="LEFT">leg_rail_y  (C)</TD></TR>
+  </TABLE>>]
+
+  // Edges
+  // Rail edges into/out of template legs: NO label, color by direction
+  // (debit = warm color, credit = cool color, var = neutral)
+  internal -> tmpl:leg_a:w  [color="#d95f02"]              // Debit, no label
+  internal2 -> tmpl:leg_c:w [color="#7570b3"]              // Variable, no label
+  tmpl:leg_b:e -> external  [color="#1b9e77"]              // Credit, no label
+  // Chain edge: labeled, dashed, distinct color
+  tmpl:leg_b:e -> tmpl2:leg_x:w [color="#9e0142", style="dashed", label="chain (required)", fontcolor="#9e0142"]
+  // Multi-template-leg edge from a template downstream: keep label
+  tmpl2:leg_y:e -> external [color="#1b9e77"]
+  // Standalone two-leg rail in flow: no label, arrow + color carry meaning
+  internal -> two_leg -> templ_role [color="#d95f02"]
+}
