@@ -286,6 +286,7 @@ def _demo_mode_banner(demo_mode: bool) -> str:
 def _render_home_page(
     cache: L2InstanceCache, dev_log: bool, *, cfg: Config | None = None,
     demo_mode: bool = False, top_nav_html: str = "",
+    query_params: Mapping[str, str] | None = None,
 ) -> str:
     """X.4.f.7 — unified Studio home page (diagram + every entity kind).
 
@@ -315,10 +316,40 @@ def _render_home_page(
     prefix = escape(cfg.deployment_name if cfg is not None else cache.path.stem)
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
 
+    # CF.4.d — home URL carries kind-namespaced toolbar state. Each
+    # section's hx-get URL translates those into the bare keys the
+    # /l2_shape/<kind>/ endpoint expects (Q1A for the section,
+    # Q1B for the home URL). Sections with active state auto-open
+    # (Q6A — a collapsed section that quietly hides its search hits
+    # is a footgun). Listed by kind here so the loop below can read
+    # both the per-section URL fragment and the auto-open decision.
+    qp: Mapping[str, str] = query_params if query_params is not None else {}
+    _TOOLBAR_KEYS = ("q", "sort_column", "page_offset", "page_size")
+    section_query: dict[str, str] = {}
+    section_has_state: dict[str, bool] = {}
+    for kind, _label, _accessor in _HOME_SECTIONS:
+        parts: list[str] = []
+        active = False
+        for base in _TOOLBAR_KEYS:
+            home_key = f"{kind}_{base}"
+            val = qp.get(home_key)
+            if val:
+                parts.append(f"{base}={quote(val)}")
+                active = True
+        section_query[kind] = ("&" + "&".join(parts)) if parts else ""
+        section_has_state[kind] = active
+
+    # If no section has active state, default open is the first
+    # (legacy behavior). If any section does, only those auto-open.
+    any_state_active = any(section_has_state.values())
+
     section_blocks: list[str] = []
     for idx, (kind, label, accessor) in enumerate(_HOME_SECTIONS):
         n = len(getattr(instance, accessor))
-        open_attr = " open" if idx == 0 else ""
+        if any_state_active:
+            open_attr = " open" if section_has_state[kind] else ""
+        else:
+            open_attr = " open" if idx == 0 else ""
         body_id = f"home-section-body-{kind}"
         # AH.4 — hide the create affordance in demo-mode (the /new route
         # is 404'd there anyway; the button shouldn't tease it).
@@ -350,7 +381,7 @@ def _render_home_page(
             f'title="Open in dedicated page">↗</a>'
             f"</summary>"
             f'<div id="{body_id}" '
-            f'hx-get="/l2_shape/{kind}/?embed=1" '
+            f'hx-get="/l2_shape/{kind}/?embed=1{section_query[kind]}" '
             f'hx-trigger="load, l2-cascade-reload from:body" '
             f'hx-swap="innerHTML">'
             f'<p class="p-4 text-secondary-fg italic m-0">loading…</p>'
@@ -4135,11 +4166,14 @@ def make_studio_routes(
             return ""
         return top_nav_fn(active_href)
 
-    async def landing(_request: Request) -> HTMLResponse:
+    async def landing(request: Request) -> HTMLResponse:
         return HTMLResponse(
             _render_home_page(
                 cache, dev_log, cfg=cfg, demo_mode=demo_mode,
                 top_nav_html=_top_nav_html("/"),
+                # CF.4.d — pass through kind-namespaced toolbar state
+                # so each section's hx-get URL carries it (Q1B).
+                query_params=request.query_params,
             ),
         )
 
