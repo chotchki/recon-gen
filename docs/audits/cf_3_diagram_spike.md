@@ -198,9 +198,48 @@ SVG sidecars in both `_cf3f/` dirs for zoom-in detail.
 4. Should self-loops on roles get the absorbed-into-shape treatment now, or hold for v0.2?
 5. XOR matched edge-style across sibling chain edges (deferred from v0.1) — implement next, or fine with the tinted-row signal alone?
 
+## CF.3.f.b — TB layout + XOR-short labels + compass-pin drop (2026-06-05)
+
+Operator used CF.3.f against a real upstream graph and measured the residuals. Three locked decisions shipped here:
+
+1. **`rankdir=TB`** for layer 3 only (L1 / L2 stay LR — sparse, read naturally LR). Operator measurement on upstream L3: 6125×1371pt (4.5:1) → 3711pt wide (1.3:1), −30 % crossings.
+2. **Drop `:w`/`:e` compass pins** from leg-port edge endpoints — perpendicular to TB flow once vertical; +−2 % width and −19 crossings on top.
+3. **XOR-SHORT labels** — `(xor i of N)` per edge instead of the full sibling list repeated on every edge. The full sibling list stays in the typed-model `metadata.xor_siblings` for tooltip/sidecar use. Operator measured: −26 % width on TB upstream L3 from this alone.
+
+### Aspect-ratio shift on the spike fixtures
+
+| L3 metric         | sasquatch (CF.3.f LR) | sasquatch (CF.3.f.b TB) | Δ              | heavy (CF.3.f LR) | heavy (CF.3.f.b TB) | Δ                  |
+|-------------------|------------------------|--------------------------|-----------------|---------------------|----------------------|---------------------|
+| width (pt)        | 3 160                  | **1 530**                | **−52 %**       | 5 152               | **1 653**            | **−68 %**          |
+| height (pt)       | 697                    | 1 187                    | +70 %           | 1 198               | 3 665                | +206 %             |
+| aspect ratio (W:H)| 4.53 : 1               | **1.29 : 1**             | near-square     | 4.30 : 1            | **0.45 : 1**         | tall-vertical      |
+| crossings         | 57                     | 53                       | −4              | 560                 | 545                  | −15                |
+| layout (ms)       | 102                    | 96                       | −6              | 212                 | 208                  | −4                 |
+
+**Read.** The graph rotates 90° — same node + edge count, similar crossings, but the wide-ribbon problem is gone. Sasquatch becomes near-square (1.3:1 — fits in a typical iframe viewport at native zoom). Heavy becomes tall-vertical (more scroll, less squint). Both formats fit screen-shaped viewports better than the 4.5:1 ribbon CF.3.f LR produced.
+
+Crossings dropped slightly on both because TB's rank ordering naturally aligns role-stacks above template-stacks instead of forcing them to interleave horizontally.
+
+### Visual proof — sasquatch L3 (representative; heavy in dir)
+
+| CF.3.f LR — 3160×697pt | CF.3.f.b TB — 1530×1187pt |
+|---|---|
+| (`docs/audits/cf_3_diagram_spike/sasquatch_pr_cf3f/l3.png` — re-rendered at TB) | same path, latest is TB |
+
+## Still open (CF.3.f.c — hub replication + toggle)
+
+Operator measured + decided: hub replication is the next big win for genuinely-dense graphs (high-degree pool/sweep nodes that back everything). Locked design:
+- Replicate high-degree hubs per-consumer with color-coded copies (legend + visual "same account, here too")
+- "Duplicate hubs" toggle default ON; OFF reverts to single-hub honest topology
+- Wire toggle into existing `?show=` control row
+- Add hub-color legend chip
+
+Measured on upstream: 113→**31 crossings (−73 %)** with hub replication; longest edge 3993→2013px (−50 %).
+
 ## Audit history
 
 - **2026-06-04 v0** — Harness shipped, heavy_density_v1.yaml generated (seed 42, 103 rails / 31 templates / 12 chains), v0 measurements above, operator cold-read pending.
 - **2026-06-04 v0.1** — PNG renders embedded inline for cold-read in markdown viewers.
 - **2026-06-04 CF.3.a measured + merged** — 2-liner shipped against the spike fixture; **−94.6 % crossings on sasquatch, −99.6 % on heavy**. Height grew +14-17 % (vs audit's predicted −15 %); layout +17ms. Merged to main (commit `25429a3a`).
-- **2026-06-04 CF.3.f v0.1 shipped on cf-3-f branch** — custom shape vocabulary: cylinder/note/folder roles, cds-family rails, HTML-table composite templates with chain/rail edges port-docking at exact leg cells. **−25 % / −29 % nodes, −17 % / −28 % edges, −28 % / −54 % height (sasquatch / heavy)**. Crossings stable. 28 topology unit tests pass. Awaiting operator cold-read.
+- **2026-06-04 CF.3.f v0.1 shipped on cf-3-f branch** — custom shape vocabulary: cylinder/note/folder roles, cds-family rails, HTML-table composite templates with chain/rail edges port-docking at exact leg cells. **−25 % / −29 % nodes, −17 % / −28 % edges, −28 % / −54 % height (sasquatch / heavy)**. Crossings stable. 28 topology unit tests pass.
+- **2026-06-05 CF.3.f.b on cf-3-f branch** — operator-measured upstream feedback into v13_1_1_diagram.md → `rankdir=TB` for L3 + drop compass pins + XOR-short labels. Width −52 % / −68 % on spike fixtures (sasquatch / heavy); aspect shifted from 4.5:1 ribbon to ~1.3:1 (sasquatch) / 0.45:1 (heavy); crossings still slightly down. CF.3.f.c (hub replication + toggle) is the next deferred chunk.

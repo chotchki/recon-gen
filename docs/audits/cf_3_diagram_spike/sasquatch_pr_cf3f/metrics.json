@@ -18,7 +18,7 @@
       "crossings": 0,
       "width_pt": 305.0,
       "height_pt": 514.0,
-      "layout_ms": 82.8,
+      "layout_ms": 75.5,
       "dot_bytes": 2378,
       "svg_bytes": 10974,
       "png_bytes": 53456
@@ -30,7 +30,7 @@
       "crossings": 0,
       "width_pt": 1564.0,
       "height_pt": 539.0,
-      "layout_ms": 76.0,
+      "layout_ms": 75.0,
       "dot_bytes": 10310,
       "svg_bytes": 43784,
       "png_bytes": 233191
@@ -39,13 +39,13 @@
       "layer": 3,
       "n_nodes": 33,
       "n_edges": 54,
-      "crossings": 57,
-      "width_pt": 3160.0,
-      "height_pt": 697.0,
-      "layout_ms": 95.0,
-      "dot_bytes": 12969,
-      "svg_bytes": 56869,
-      "png_bytes": 362752
+      "crossings": 53,
+      "width_pt": 1530.0,
+      "height_pt": 1187.0,
+      "layout_ms": 96.0,
+      "dot_bytes": 12515,
+      "svg_bytes": 57450,
+      "png_bytes": 331465
     }
   ]
 }

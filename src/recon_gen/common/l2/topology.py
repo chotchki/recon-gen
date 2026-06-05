@@ -366,17 +366,31 @@ def _self_loop_label(rail: SingleLegRail) -> str:
     return f"{rail.name}\n({rail.leg_direction})"
 
 
-def _chain_label(chain: Chain, *, cardinality: Literal["required", "xor"]) -> str:
+def _chain_label(
+    chain: Chain,
+    *,
+    cardinality: Literal["required", "xor"],
+    child_index: int | None = None,
+) -> str:
     """Pretty label for a chain edge — required (singleton) / xor (multi).
 
-    For an ``xor`` edge the label calls out the sibling set so the
-    renderer makes the alternation visible alongside any one
-    individual edge.
+    CF.3.f.b — XOR chain edges used to label themselves with the full
+    comma-joined sibling list ON EVERY EDGE. Operator measured on a real
+    upstream graph: a 4-sibling XOR group repeated 663 chars across 7
+    edges — a ~750px label box dot had to make room for, the dominant
+    width driver after composite landing. New shape: each XOR edge gets
+    a short `(xor i of N)` position label; the full sibling list is
+    discoverable via the model / tooltip / future group header. Width
+    drops by −26 % (TB), info preserved at the L2-yaml + sidecar level.
+
+    `child_index` (0-based) lets the caller place the edge within the
+    XOR group; when None, fall back to the bare `(xor)` form.
     """
     if cardinality == "required":
         return "chain\n(required)"
-    siblings = ", ".join(str(c.name) for c in chain.children)
-    return f"chain\n(xor: {siblings})"
+    if child_index is None:
+        return "chain\n(xor)"
+    return f"chain\n(xor {child_index + 1} of {len(chain.children)})"
 
 
 def _template_inner_label(template: TransferTemplate) -> str:
@@ -718,7 +732,7 @@ def topology_graph_for(
             "required" if len(chain.children) == 1 else "xor"
         )
         siblings_str = ",".join(str(c.name) for c in chain.children)
-        for child_spec in chain.children:
+        for child_index, child_spec in enumerate(chain.children):
             child_name = child_spec.name
             child_id = (
                 _template_id(child_name)
@@ -744,7 +758,10 @@ def topology_graph_for(
                 source=parent_id,
                 target=child_id,
                 kind="chain",
-                label=_chain_label(chain, cardinality=cardinality),
+                label=_chain_label(
+                    chain, cardinality=cardinality,
+                    child_index=child_index if cardinality == "xor" else None,
+                ),
                 metadata=chain_metadata,
             ))
 
@@ -885,8 +902,17 @@ def build_topology_graph_per_rail(
     # NaN coordinates → 8x8 viewBox, all paths `Mnan,-nan…`. Dropping
     # the option costs minor parallel-edge consolidation we never
     # really benefited from (rail edges are 1:1 src→dst by construction).
+    # CF.3.f.b — Layer 3 swaps to rankdir=TB. The CF.3.f composite shape
+    # (templates as port-docked HTML tables) chains template-A's
+    # credit-east to template-B's debit-west, which under LR pushes each
+    # chained template rightward and balloons width. Operator measurement
+    # on a real upstream graph (115/182 → composite L3): LR 6125×1371pt
+    # (~4.5:1 ribbon), TB 3711pt wide (~1.3:1), −30 % crossings.
+    # L1 / L2 keep LR (sparse roles + control_parent / rails + endpoints
+    # read naturally left-to-right; the width pain is L3-specific).
+    rank_direction = "TB" if layer >= 3 else "LR"
     g.attr(
-        rankdir="LR",
+        rankdir=rank_direction,
         splines="polyline",
         overlap="false",
         nodesep="0.15",
@@ -1214,8 +1240,15 @@ def build_topology_graph_per_rail(
         # through the composite shape's leg port.
         if rail.name in rails_in_clusters:
             tmpl_name = rail_to_template[rail.name]
-            port_west = f"{_template_id(tmpl_name)}:{_leg_port(rail.name)}:w"
-            port_east = f"{_template_id(tmpl_name)}:{_leg_port(rail.name)}:e"
+            # CF.3.f.b — no `:w`/`:e` compass pin. Under rankdir=TB the
+            # west/east pinning is perpendicular to the flow direction
+            # (vertical) and was forcing horizontal sprawl. Letting dot
+            # pick the port docking side wins ~−2% width and −19 crossings
+            # vs the pinned variant (operator measured). Same port id,
+            # graphviz picks the side per layout.
+            port_node = f"{_template_id(tmpl_name)}:{_leg_port(rail.name)}"
+            port_west = port_node
+            port_east = port_node
         else:
             port_west = rail_node_id
             port_east = rail_node_id
@@ -1320,10 +1353,12 @@ def build_topology_graph_per_rail(
     def _chain_endpoint(name: Identifier, *, side: str) -> tuple[str, str]:
         """Return (graphviz_target, focus_check_id) for a chain endpoint.
 
-        `side` is "e" for east (source-of-chain) or "w" for west
-        (target-of-chain). focus_check_id is the un-ported node id so
+        CF.3.f.b: `side` is preserved as a kwarg for API stability but no
+        longer used (compass-pin dropped — see the port-docking comment
+        in Phase E for why). focus_check_id is the un-ported node id so
         the focus filter can match per-node, not per-port.
         """
+        del side  # CF.3.f.b — compass pin dropped; param kept for API stability
         if name in template_names_set:
             tid = _template_id(name)
             return tid, tid
@@ -1331,7 +1366,7 @@ def build_topology_graph_per_rail(
             owning = rail_to_template[name]
             tmpl_id_str = _template_id(owning)
             return (
-                f"{tmpl_id_str}:{_leg_port(name)}:{side}",
+                f"{tmpl_id_str}:{_leg_port(name)}",
                 _rail_id(name),
             )
         return _rail_id(name), _rail_id(name)
@@ -1343,7 +1378,7 @@ def build_topology_graph_per_rail(
         cardinality: Literal["required", "xor"] = (
             "required" if len(chain.children) == 1 else "xor"
         )
-        for child_spec in chain.children:
+        for child_index, child_spec in enumerate(chain.children):
             child_name = child_spec.name
             child_id, child_focus_id = _chain_endpoint(child_name, side="w")
             if not (_in_focus(parent_focus_id) and _in_focus(child_focus_id)):
@@ -1362,6 +1397,7 @@ def build_topology_graph_per_rail(
                 )
                 label = _chain_label(
                     chain, cardinality=cardinality,
+                    child_index=child_index if cardinality == "xor" else None,
                 ) + fan_in_suffix
                 g.edge(
                     parent_id, child_id,
@@ -1375,7 +1411,10 @@ def build_topology_graph_per_rail(
             else:
                 g.edge(
                     parent_id, child_id,
-                    label=_chain_label(chain, cardinality=cardinality),
+                    label=_chain_label(
+                        chain, cardinality=cardinality,
+                        child_index=child_index if cardinality == "xor" else None,
+                    ),
                     color=_CHAIN_EDGE_COLOR,
                     style="dashed",
                     fontcolor=_CHAIN_EDGE_COLOR,
