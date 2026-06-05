@@ -73,19 +73,21 @@ def _build_app(yaml_path: Path) -> object:
 def test_home_page_renders_diagram_iframe_and_six_entity_sections(
     writable_l2_yaml: Path,
 ) -> None:
-    """GET / returns the unified home page: diagram iframe + a <details>
-    for each of the 6 editable entity kinds."""
+    """GET / returns the editor home page — one <details> per editable
+    entity kind, no embedded diagram (CF.3.l promoted the diagram to a
+    sibling top-level surface)."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.get("/")
         assert resp.status_code == 200
         body = resp.text
 
-    # Diagram iframe is present and points at the existing /diagram
-    # route in embed mode (so its studio-header doesn't double up
-    # with the home page's).
-    assert 'id="diagram-frame"' in body
-    assert 'src="/diagram?layer=1&amp;embed=1"' in body
+    # CF.3.l — the diagram iframe was removed; Diagram is its own page
+    # reachable via the top-nav. (The section-body `hx-get` calls still
+    # ask for `?embed=1` fragments — that's the entity-list lazy load,
+    # not the diagram.)
+    assert 'id="diagram-frame"' not in body
+    assert "<iframe" not in body  # no iframe of any kind on the editor home
 
     # All six entity kinds get a <details> with the right data-kind.
     for kind in (
@@ -216,22 +218,26 @@ def test_home_page_sections_wire_lazy_load_and_cascade_reload(
     )
 
 
-def test_home_page_includes_iframe_cascade_reload_listener(
+def test_home_page_drops_iframe_supporting_js(
     writable_l2_yaml: Path,
 ) -> None:
-    """Diagram iframe is its own document context; HTMX doesn't forward
-    HX-Trigger events into iframes. The home page's inline JS must
-    listen for the cascade event on document and bump iframe.src to
-    force a same-origin reload."""
+    """CF.3.l — the iframe-cascade-reload listener + iframe-focus
+    filter pipeline + click-to-focus iframe-URL mutator are all gone.
+    The home page no longer reaches into a diagram iframe."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/").text
 
-    assert "addEventListener('l2-cascade-reload'" in body
-    # The reload mechanism must reach the iframe by id.
-    assert "getElementById('diagram-frame')" in body
-    # Reassigning src=src forces the reload (vs. setting a new URL).
-    assert "f.src = f.src" in body
+    # Iframe-cascade-reload bump (gone with the iframe).
+    assert "addEventListener('l2-cascade-reload'" not in body
+    assert "getElementById('diagram-frame')" not in body
+    assert "f.src = f.src" not in body
+    # X.4.f.8 iframe-focus filter pipeline (gone).
+    assert "applyFocusFilter" not in body
+    assert "refreshFocusFromIframe" not in body
+    assert "/diagram/visible?focus=" not in body
+    # X.4.f.8.reverse click-to-focus iframe-URL mutator (gone).
+    assert "_focusDiagramOnNode" not in body
 
 
 # ---------------------------------------------------------------------------
@@ -350,63 +356,33 @@ def test_diagram_embed_mode_drops_studio_header(
     assert "Studio · diagram" not in embedded
 
 
-def test_home_page_carries_diagram_filter_listener(
+def test_card_titles_link_to_diagram_focus_per_kind(
     writable_l2_yaml: Path,
 ) -> None:
-    """The home page's inline JS must wire iframe-load → fetch
-    /diagram/visible → toggle .is-hidden-by-focus on cards."""
-    app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
-        body = c.get("/").text
-
-    # Iframe load listener present.
-    assert "addEventListener('load', refreshFocusFromIframe)" in body
-    # The fetch URL points at the new route.
-    assert "/diagram/visible?focus=" in body
-    # Hide-class application is in the script.
-    assert "is-hidden-by-focus" in body
-    # Re-apply on cascade-driven HTMX swap so the filter survives refetch.
-    assert "addEventListener('htmx:afterSettle', applyFocusFilter)" in body
-
-
-def test_card_titles_carry_focus_node_attribute_per_kind(
-    writable_l2_yaml: Path,
-) -> None:
-    """X.4.f.8.reverse — clicking a card title focuses the diagram on
-    the entity's natural node. Each kind maps to a different prefix:
-    accounts/templates/limit_schedules → role__X; rails → rail__X;
-    transfer_templates → tmpl__X; chains → rail__X or tmpl__X
-    depending on the parent endpoint."""
+    """CF.3.l — clicking a card title navigates to the standalone
+    Diagram page with ``?focus=<node_id>`` set. Was a JS-driven iframe
+    URL mutation under X.4.f.8.reverse; rewritten as a plain anchor
+    once Diagram became its own top-level surface. Each kind still
+    maps to its natural node prefix (accounts → role__X, rails →
+    rail__X, etc.)."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         # Account → role node.
         body = c.get("/l2_shape/account/?embed=1").text
-        assert 'data-focus-node="role__CustomerSubledger"' in body
+        assert 'href="/diagram?focus=role__CustomerSubledger"' in body
         # Rail → rail node.
         body = c.get("/l2_shape/rail/?embed=1").text
-        assert 'data-focus-node="rail__ExternalRailInbound"' in body
+        assert 'href="/diagram?focus=rail__ExternalRailInbound"' in body
         # AccountTemplate → role node (addressing key is role).
         body = c.get("/l2_shape/account_template/?embed=1").text
-        assert 'data-focus-node="role__CustomerSubledger"' in body
-
-
-def test_home_page_carries_card_title_click_listener(
-    writable_l2_yaml: Path,
-) -> None:
-    """The home page's inline JS catches clicks on .entity-card-title
-    via document-level delegation (so HTMX-refetched cards work too)
-    and navigates the iframe to ?focus=<node_id>."""
-    app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
-        body = c.get("/").text
-
-    # Click handler is on document so dynamically inserted cards work.
-    assert "addEventListener('click'" in body
-    # Helper navigates the iframe to a new focus URL.
-    assert "_focusDiagramOnNode" in body
-    assert "searchParams.set('focus'" in body
-    # Keyboard support: Enter / Space on focused title fires the same.
-    assert "addEventListener('keydown'" in body
+        assert 'href="/diagram?focus=role__CustomerSubledger"' in body
+        # The pre-CF.3.l simulated-button attributes are gone everywhere.
+        for kind in (
+            "account", "account_template", "rail", "transfer_template",
+        ):
+            kind_body = c.get(f"/l2_shape/{kind}/?embed=1").text
+            assert "data-focus-node=" not in kind_body
+            assert 'role="button"' not in kind_body
 
 
 def test_home_page_cards_carry_data_attributes_for_filter(
@@ -486,30 +462,37 @@ def test_studio_home_page_renders_shared_top_nav(
     writable_l2_yaml: Path,
 ) -> None:
     """BS.3 part 3: GET / renders the shared top-nav before its
-    page-local header, with /  (the home page) flagged active."""
+    page-local header, with /  (the home page) flagged active.
+
+    CF.3.l: top-nav surface now includes Diagram as the first
+    authoring entry (left of L2 Editor)."""
     app = _build_app_with_top_nav(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/").text
+    assert ">Diagram<" in body
     assert ">L2 Editor<" in body
     assert ">ETL Support<" in body
     assert ">Training<" in body
     assert ">Smoke<" in body
     assert ">Docs<" in body
+    # Diagram entry sits LEFT of L2 Editor.
+    assert body.index(">Diagram<") < body.index(">L2 Editor<")
 
 
 def test_studio_diagram_page_renders_shared_top_nav_when_not_embedded(
     writable_l2_yaml: Path,
 ) -> None:
     """BS.3 part 3: GET /diagram (standalone) renders the top-nav.
-    The ?embed=1 variant suppresses it (avoid double-stacking when
-    rendered inside the home page's iframe)."""
+    The ?embed=1 variant suppresses it (kept post-CF.3.l for external
+    embedders even though Studio no longer iframes the diagram)."""
     app = _build_app_with_top_nav(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         standalone = c.get("/diagram").text
         embedded = c.get("/diagram?embed=1").text
+    assert ">Diagram<" in standalone
     assert ">L2 Editor<" in standalone
     assert ">Smoke<" in standalone
-    # Embedded variant drops the nav (host page already carries it).
+    # Embedded variant drops the nav.
     assert ">L2 Editor<" not in embedded
 
 

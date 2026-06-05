@@ -163,7 +163,8 @@ def test_html_escapes_labels_and_hrefs() -> None:
 
 def test_build_entries_studio_enabled_with_dashboards_and_docs() -> None:
     """Full deploy: Studio + dashboards + docs. Order per BS.0 Lock 2:
-    authoring entries first, then viewing, then reading."""
+    authoring entries first, then viewing, then reading. CF.3.l added
+    Diagram as the first authoring entry."""
     entries = build_top_nav_entries(
         dashboards=[("l1", "L1 Dashboard"), ("inv", "Investigation")],
         studio_enabled=True,
@@ -171,12 +172,13 @@ def test_build_entries_studio_enabled_with_dashboards_and_docs() -> None:
     )
     labels = [e.label for e in entries]
     assert labels == [
-        "L2 Editor", "ETL Support", "Training",
+        "Diagram", "L2 Editor", "ETL Support", "Training",
         "L1 Dashboard", "Investigation",
         "Docs",
     ]
     # Studio entries are authoring; dashboards viewing; Docs reading.
     by_label = {e.label: e for e in entries}
+    assert by_label["Diagram"].group == "authoring"
     assert by_label["L2 Editor"].group == "authoring"
     assert by_label["L1 Dashboard"].group == "viewing"
     assert by_label["Docs"].group == "reading"
@@ -204,17 +206,18 @@ def test_build_entries_no_docs_no_studio() -> None:
 
 
 def test_build_entries_studio_only_no_dashboards_no_docs() -> None:
-    """Edge case: Studio-only deploy. Nav surfaces just the 3 Studio
-    entries. (Caller would normally render no nav at all per BS.0
-    Lock 1's `single-surface = no nav`, but the helper is honest
-    about what's deployed.)"""
+    """Edge case: Studio-only deploy. Nav surfaces the 4 Studio
+    entries (CF.3.l added Diagram to the 3-entry baseline). Caller
+    would normally render no nav at all per BS.0 Lock 1's
+    `single-surface = no nav`, but the helper is honest about what's
+    deployed."""
     entries = build_top_nav_entries(
         dashboards=[],
         studio_enabled=True,
         docs_url=None,
     )
     labels = [e.label for e in entries]
-    assert labels == ["L2 Editor", "ETL Support", "Training"]
+    assert labels == ["Diagram", "L2 Editor", "ETL Support", "Training"]
 
 
 def test_dividers_between_entries() -> None:

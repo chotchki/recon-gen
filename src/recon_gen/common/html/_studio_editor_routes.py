@@ -1879,16 +1879,21 @@ def _render_read_card(
     if focus_node is None:
         title_html = f'<h3 class="{h3_base}">{escape(entity_id)}{subtype_badge}</h3>'
     else:
-        # `data-focus-node` IS the focus-target hook — AM.2 step 2
-        # rewrote the home-page JS to walk parents looking for that
-        # attribute, so the previous `.entity-card-title` marker
-        # class is no longer load-bearing.
+        # CF.3.l (2026-06-05) — was an `<h3 data-focus-node="…"
+        # tabindex="0" role="button">` simulated button that the
+        # editor's iframe-focus JS read on click. After CF.3.l
+        # promoted Diagram to a top-level surface and dropped the
+        # editor iframe, the natural primitive is a plain anchor
+        # carrying the focus param. Browsers get right-click → open
+        # in new tab, keyboard focus rings, screen-reader treatment
+        # for free.
         title_html = (
-            f'<h3 class="{h3_base} cursor-pointer hover:text-accent" '
-            f'tabindex="0" role="button" '
-            f'data-focus-node="{escape(focus_node)}" '
+            f'<h3 class="{h3_base}">'
+            f'<a class="text-primary-fg no-underline hover:text-accent '
+            f'hover:underline" '
+            f'href="/diagram?focus={escape(focus_node)}" '
             f'title="Focus the diagram on this entity">'
-            f"{escape(entity_id)}{subtype_badge}</h3>"
+            f"{escape(entity_id)}{subtype_badge}</a></h3>"
         )
     # CSS-safe id slug — composite-keyed kinds use ``::`` in their
     # addressing string, which CSS parses as pseudo-element syntax in a

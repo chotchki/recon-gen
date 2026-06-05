@@ -974,6 +974,11 @@ def build_top_nav_entries(
     """
     entries: list[TopNavEntry] = []
     if studio_enabled:
+        # CF.3.l (2026-06-05) — Diagram promoted to a top-level surface
+        # left of the editor. Was an iframe in the L2 Editor page;
+        # cold-read on the heavy_density_v1 fixture surfaced enough
+        # value in the diagram that it deserves its own destination.
+        entries.append(TopNavEntry("Diagram", "/diagram", group="authoring"))
         entries.append(TopNavEntry("L2 Editor", "/", group="authoring"))
         entries.append(TopNavEntry("ETL Support", "/etl/", group="authoring"))
         entries.append(TopNavEntry("Training", "/training/", group="authoring"))

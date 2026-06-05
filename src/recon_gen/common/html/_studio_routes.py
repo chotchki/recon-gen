@@ -404,143 +404,18 @@ def _render_home_page(
         evt.detail.isError = false;
       }}
     }});
-    // X.4.f.7 — HX-Trigger fires `l2-cascade-reload` on document.body
-    // (bubbles to document). The diagram iframe is its own document
-    // context and HTMX doesn't forward triggers across that boundary;
-    // reassign iframe.src to force a same-origin reload.
-    document.addEventListener('l2-cascade-reload', function() {{
-      var f = document.getElementById('diagram-frame');
-      if (f) {{ f.src = f.src; }}
-    }});
+    // CF.3.l (2026-06-05) — the iframe-cascade-reload listener +
+    // X.4.f.8 iframe-focus filter pipeline were removed when Diagram
+    // got promoted to its own top-level surface. The editor's
+    // cascade-reload still triggers section refetches via the
+    // hx-trigger pair on each section body (load + cascade).
 
-    // X.4.f.8 — diagram-click → entity-card filter. The diagram page
-    // already navigates its own URL to ?focus=<node_id> when a node is
-    // clicked. The iframe is same-origin, so we read its location on
-    // load, fetch the visible-entity set from the server, and toggle a
-    // CSS class on cards whose id isn't in the set. Re-applied on
-    // htmx:afterSettle so cascade-reload doesn't drop the filter.
-    var lastVisibleByKind = null;  // null = no filter
-    var lastFocus = null;
-    function applyFocusFilter() {{
-      // AM.2 step 2 (2026-05-25): scope by the stable [data-kind]
-      // [data-entity-id] attribute pair (semantic — encodes app
-      // domain, not styling). Use the native HTML `hidden` attribute
-      // instead of an `is-hidden-by-focus` class toggle so the
-      // browser's accessibility tree picks up the visibility change
-      // automatically (assistive tech reads `hidden`).
-      var cards = document.querySelectorAll(
-        '#home-entities [data-kind][data-entity-id]'
-      );
-      cards.forEach(function(card) {{
-        var hide = false;
-        if (lastVisibleByKind !== null) {{
-          var k = card.dataset.kind;
-          var id = card.dataset.entityId;
-          var ids = lastVisibleByKind[k];
-          hide = !ids || ids.indexOf(id) === -1;
-        }}
-        card.hidden = hide;
-      }});
-      // Per-section "(N shown)" indicator update.
-      document.querySelectorAll('details[data-kind]').forEach(function(d) {{
-        var entities = d.querySelectorAll('[data-kind][data-entity-id]');
-        var total = entities.length;
-        var visible = 0;
-        entities.forEach(function(e) {{ if (!e.hidden) visible += 1; }});
-        var summary = d.querySelector('summary');
-        if (!summary) return;
-        var ind = summary.querySelector('[data-role="focus-indicator"]');
-        if (lastVisibleByKind === null || total === 0 || visible === total) {{
-          if (ind) ind.remove();
-        }} else {{
-          if (!ind) {{
-            ind = document.createElement('span');
-            ind.dataset.role = 'focus-indicator';
-            ind.className = 'text-secondary-fg font-normal text-sm';
-            summary.appendChild(ind);
-          }}
-          ind.textContent = ' · ' + visible + ' shown';
-        }}
-      }});
-    }}
-    function refreshFocusFromIframe() {{
-      var f = document.getElementById('diagram-frame');
-      if (!f || !f.contentWindow) return;
-      var sp;
-      try {{
-        sp = new URLSearchParams(f.contentWindow.location.search);
-      }} catch (e) {{
-        return;  // cross-origin (shouldn't happen — iframe is same-origin)
-      }}
-      var focus = sp.get('focus') || null;
-      if (focus === lastFocus) {{ applyFocusFilter(); return; }}
-      lastFocus = focus;
-      if (!focus) {{
-        lastVisibleByKind = null;
-        applyFocusFilter();
-        return;
-      }}
-      fetch('/diagram/visible?focus=' + encodeURIComponent(focus))
-        .then(function(r) {{ return r.json(); }})
-        .then(function(j) {{
-          lastVisibleByKind = j;
-          applyFocusFilter();
-        }})
-        .catch(function() {{}});
-    }}
-    document.addEventListener('DOMContentLoaded', function() {{
-      var f = document.getElementById('diagram-frame');
-      if (f) f.addEventListener('load', refreshFocusFromIframe);
-    }});
-    // Re-apply after every HTMX swap (section refetch on cascade-reload
-    // brings back fresh cards without our hide class).
-    document.addEventListener('htmx:afterSettle', applyFocusFilter);
-
-    // X.4.f.8.reverse — click an entity-card title → focus the diagram
-    // on that entity's node. Navigates the iframe to ?focus=<node_id>;
-    // its load event fires our existing iframe-focus listener which
-    // fetches /diagram/visible and re-runs applyFocusFilter — so this
-    // is purely a "set focus on the diagram, let the existing pipeline
-    // do the rest" hop. Event delegation on #home-entities catches
-    // titles from cards added by hx-get refetches too.
-    function _focusDiagramOnNode(nodeId) {{
-      var f = document.getElementById('diagram-frame');
-      if (!f || !f.contentWindow) return;
-      var url;
-      try {{
-        url = new URL(f.contentWindow.location.href);
-      }} catch (e) {{
-        url = new URL('/diagram', window.location.origin);
-        url.searchParams.set('layer', '1');
-      }}
-      url.searchParams.set('focus', nodeId);
-      f.contentWindow.location.href = url.toString();
-    }}
-    function _maybeFocusFromTitle(target) {{
-      // AM.2 step 2 (2026-05-25): detect by the stable
-      // `data-focus-node` attribute (semantic — what the JS
-      // actually reads next) instead of the `.entity-card-title`
-      // marker class. `data-focus-node` is set on the read-card
-      // h3 by `_render_read_card` precisely so the focus-on-click
-      // affordance has a target; checking for it here means the
-      // class is no longer load-bearing.
-      var el = target;
-      while (el && el !== document.body) {{
-        if (el.dataset && el.dataset.focusNode) {{
-          _focusDiagramOnNode(el.dataset.focusNode);
-          return true;
-        }}
-        el = el.parentNode;
-      }}
-      return false;
-    }}
-    document.addEventListener('click', function(evt) {{
-      _maybeFocusFromTitle(evt.target);
-    }});
-    document.addEventListener('keydown', function(evt) {{
-      if (evt.key !== 'Enter' && evt.key !== ' ') return;
-      if (_maybeFocusFromTitle(evt.target)) {{ evt.preventDefault(); }}
-    }});
+    // CF.3.l (2026-06-05) — the X.4.f.8 iframe-focus filter pipeline
+    // + the X.4.f.8.reverse click-card-title iframe-URL mutator were
+    // removed when Diagram got promoted to its own top-level surface.
+    // Per-card focus is now a plain anchor in the read-card template;
+    // the editor's entity-card focus-filter has no counterpart since
+    // the editor surface no longer hosts the diagram.
   </script>
   {devlog_script}</head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
@@ -599,11 +474,6 @@ def _render_home_page(
         }});
     }}
   </script>
-
-  <section class="border-b border-surface-border bg-white h-[50vh] min-h-96">
-    <iframe id="diagram-frame" src="/diagram?layer=1&amp;embed=1"
-            title="L2 topology diagram" class="w-full h-full border-0 block"></iframe>
-  </section>
 
   <section class="px-4 pt-2 pb-8" id="home-entities">
     {sections_html}
