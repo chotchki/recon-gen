@@ -128,6 +128,8 @@ from recon_gen.common.l2.trainer_timeline import (
     hits_by_kind,
 )
 from recon_gen.common.l2.topology import (
+    _VALID_SHOW_CATEGORIES,
+    _categories_for_layer,
     _rail_id,
     _template_id,
     build_topology_graph_per_rail,
@@ -2641,6 +2643,7 @@ def _build_digraph_cached(
     focus_node_id: str | None,
     layer: int,
     hide_singleleg: bool,
+    show: frozenset[str] | None = None,
 ) -> Any:
     """LRU-cached wrapper over ``build_topology_graph_per_rail``.
 
@@ -2648,9 +2651,13 @@ def _build_digraph_cached(
     operator saves the L2 yaml, ``cache.get()`` returns a fresh
     L2Instance object → new key → cache miss → fresh render. No
     explicit invalidation needed.
+
+    CF.3.d — `show` is part of the key. Categorical filtering changes
+    the emit; each show-set deserves its own cached entry.
     """
     key: tuple[Any, ...] = (
-        id(instance), db_table_prefix, focus_node_id, layer, hide_singleleg,
+        id(instance), db_table_prefix, focus_node_id, layer,
+        hide_singleleg, show,
     )
     cached = _DIAGRAM_DIGRAPH_CACHE.get(key)
     if cached is not None:
@@ -2664,6 +2671,7 @@ def _build_digraph_cached(
         focus_node_id=focus_node_id,
         layer=layer,
         hide_singleleg=hide_singleleg,
+        show=show,
     )
     _DIAGRAM_DIGRAPH_CACHE[key] = digraph
     # Bound the cache — drop oldest when over the limit.
@@ -2684,6 +2692,7 @@ def _render_diagram_page(
     demo_mode: bool = False,
     top_nav_html: str = "",
     hide_singleleg: bool = False,
+    show: frozenset[str] | None = None,
 ) -> str:
     """Render the L2 topology diagram (per-rail / dot, X.4.b spike winner).
 
@@ -2729,6 +2738,7 @@ def _render_diagram_page(
         focus_node_id=focus_node_id,
         layer=layer,
         hide_singleleg=hide_singleleg,
+        show=show,
     )
     dot_source: str = digraph.source
 
@@ -2796,12 +2806,13 @@ def _render_diagram_page(
         layer_val: int,
         focus_val: str | None,
         hide_singleleg_val: bool | None = None,
+        show_val: frozenset[str] | None = None,
     ) -> str:
         """Build a URL query string preserving navigation context.
 
-        ``hide_singleleg_val`` defaults to the current request's value
-        (so layer/focus links carry it forward); explicitly passing
-        ``True`` / ``False`` overrides for the toggle's links.
+        Optional kwargs override the corresponding request value (used
+        by the "Show:" + "single-leg rails" toggle anchors); the
+        layer/focus links pass nothing and inherit the current values.
         """
         bits: list[str] = [f"layer={layer_val}"]
         if focus_val:
@@ -2811,7 +2822,66 @@ def _render_diagram_page(
         hs = hide_singleleg if hide_singleleg_val is None else hide_singleleg_val
         if hs:
             bits.append("hide_singleleg=1")
+        # CF.3.d — preserve the show-set across navigation. When the
+        # caller passes show_val, use it; otherwise inherit from the
+        # current request. Encoded as `show=a,b,c` (sorted for stable
+        # cache keys + URL diffability).
+        active_show = show if show_val is None else show_val
+        if active_show is not None and len(active_show) < 5:  # 5 = full default
+            bits.append("show=" + ",".join(sorted(active_show)))
         return "?" + "&".join(bits)
+
+    # CF.3.d — resolve the active show-set the same way topology.py
+    # does, so the chrome anchors below can render the correct
+    # on/off state and emit toggle URLs that flip one category at a
+    # time. When the request omits `?show=...`, fall through to the
+    # layer compat shim (`role` + `control_parent` at L1; +`rail` at
+    # L2; +`template` +`chain` at L3).
+    active_show: frozenset[str] = (
+        show if show is not None else _categories_for_layer(layer)
+    ) & _VALID_SHOW_CATEGORIES
+
+    def _toggle_show_url(category: str) -> str:
+        """URL flipping `category` in or out of the active show-set.
+
+        Server re-emit (not CSS hide) — dot re-lays-out the smaller
+        / larger subset cleanly, same pattern as the layer-link
+        family + the single-leg hide toggle.
+        """
+        next_show = (
+            active_show - {category}
+            if category in active_show
+            else active_show | {category}
+        )
+        return _qs(
+            layer_val=layer,
+            focus_val=focus_node_id,
+            show_val=next_show,
+        )
+
+    def _show_anchor(category: str, label_html: str, *, aria: str) -> str:
+        """Render a server-side category toggle anchor.
+
+        Visually mirrors the existing checkbox row (chrome_button
+        style; current-state indicator) and reads as ``Rails: on`` /
+        ``Rails: off`` so operator intent stays obvious.
+        """
+        on = category in active_show
+        state_word = "on" if on else "off"
+        cls = (
+            f"{chrome_button_classes()} "
+            f"{'bg-accent text-accent-fg border-accent' if on else ''}"
+        ).strip()
+        return (
+            f'<a class="{cls}" '
+            f'href="{_toggle_show_url(category)}" '
+            f'aria-label="{aria}" '
+            f'data-show-category="{category}" '
+            f'data-show-state="{state_word}" '
+            f'title="Server-side re-emit; dot relays out the diagram">'
+            f'{label_html}: {state_word}'
+            f'</a>'
+        )
 
     # AM.2 step 3 — chrome buttons share the chrome_button_classes()
     # helper. Active variant overrides the hover state with a solid
@@ -2826,6 +2896,34 @@ def _render_diagram_page(
             (2, "+ Rails"),
             (3, "+ Chains&nbsp;&amp;&nbsp;Templates"),
         )
+    )
+
+    # CF.3.d — server-side category toggle anchors. Each click
+    # navigates with a flipped `?show=...` set, triggering a fresh
+    # dot relayout of the smaller/larger subgraph. Replaces the four
+    # CSS-hide checkboxes that left the layout frozen + gappy.
+    rail_toggle_html = _show_anchor(
+        "rail",
+        f'Rails <span class="text-xs font-normal">({n_rail})</span>',
+        aria="toggle rail category",
+    )
+    template_toggle_html = _show_anchor(
+        "template",
+        f'Templates <span class="text-xs font-normal">({n_template})</span>',
+        aria="toggle template category",
+    )
+    chain_toggle_html = _show_anchor(
+        "chain",
+        f'Chains <span class="text-xs font-normal">({n_chain})</span>',
+        aria="toggle chain category",
+    )
+    control_parent_toggle_html = _show_anchor(
+        "control_parent",
+        (
+            'Control hierarchy '
+            f'<span class="text-xs font-normal">({n_control_parent})</span>'
+        ),
+        aria="toggle control hierarchy category",
     )
 
     # X.4.c.5.d — Coverage toggle. Mounted only when the demo-DB pool
@@ -2929,22 +3027,10 @@ def _render_diagram_page(
       <input type="checkbox" id="toggle-role-external" checked>
       External roles <span class="text-xs text-secondary-fg font-normal">({n_role_external})</span>
     </label>
-    <label class="{toggle_label_cls}">
-      <input type="checkbox" id="toggle-rail" checked>
-      Rails <span class="text-xs text-secondary-fg font-normal">({n_rail})</span>
-    </label>
-    <label class="{toggle_label_cls}">
-      <input type="checkbox" id="toggle-template" checked>
-      Templates <span class="text-xs text-secondary-fg font-normal">({n_template})</span>
-    </label>
-    <label class="{toggle_label_cls}">
-      <input type="checkbox" id="toggle-chain" checked>
-      Chains <span class="text-xs text-secondary-fg font-normal">({n_chain})</span>
-    </label>
-    <label class="{toggle_label_cls}">
-      <input type="checkbox" id="toggle-control_parent" checked>
-      Control hierarchy <span class="text-xs text-secondary-fg font-normal">({n_control_parent})</span>
-    </label>
+    {rail_toggle_html}
+    {template_toggle_html}
+    {chain_toggle_html}
+    {control_parent_toggle_html}
     <strong class="font-semibold text-sm text-primary-fg mr-1">Edge labels:</strong>
     <label class="{toggle_label_cls}">
       <input type="checkbox" id="toggle-edge-label-rail_bundle" checked>
@@ -4339,6 +4425,20 @@ def make_studio_routes(
         # URL = source of state truth (operator lock). Template-resident
         # single-leg rails stay in their composite shape's port row.
         hide_singleleg = request.query_params.get("hide_singleleg") == "1"
+        # CF.3.d — categorical show-set via `?show=role,rail,template`.
+        # Parsed as a comma-separated list and intersected with valid
+        # categories ("role" / "rail" / "template" / "chain" /
+        # "control_parent"). When absent, the layer compat shim
+        # derives the set; when present, it overrides layer's gating.
+        show_raw = request.query_params.get("show")
+        if show_raw:
+            show_param: frozenset[str] | None = (
+                frozenset(
+                    p.strip() for p in show_raw.split(",") if p.strip()
+                ) & _VALID_SHOW_CATEGORIES
+            )
+        else:
+            show_param = None
         # BS.3 part 3 — embedded diagram (inside the home iframe) skips
         # the top nav too; the host page already carries it.
         nav_html = "" if embed else _top_nav_html("/diagram")
@@ -4351,6 +4451,7 @@ def make_studio_routes(
                 demo_mode=demo_mode,
                 top_nav_html=nav_html,
                 hide_singleleg=hide_singleleg,
+                show=show_param,
             ),
         )
 

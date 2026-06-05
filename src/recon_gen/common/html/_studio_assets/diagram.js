@@ -32,9 +32,15 @@ const PREFIX_TO_KIND = {
   "tmpl__": "template",
 };
 
+// CF.3.d — `rail` / `template` / `chain` / `control_parent` are now
+// server-emit toggles (URL `?show=...`), not CSS hide. Only the
+// internal/external role scope split remains a CSS-toggle pair (v0
+// scope cut — server-side scope split is a smaller win, queued for
+// v0.1). The `if (!cb) continue;` guard in `_wireToggles` already
+// handles missing IDs gracefully, so dropping the four entries here
+// is intent-documentation, not a functional change.
 const TOGGLE_KINDS = [
-  "role-internal", "role-external", "rail", "template", "chain",
-  "control_parent",
+  "role-internal", "role-external",
 ];
 const EDGE_LABEL_KINDS = [
   "rail_bundle", "self_loop", "chain", "control_parent",

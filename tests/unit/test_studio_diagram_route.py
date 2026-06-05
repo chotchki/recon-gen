@@ -66,16 +66,22 @@ def test_studio_diagram_route_renders_with_dot_source() -> None:
         assert "<title>Studio diagram — spec_example</title>" in body
         assert 'id="topology-dot"' in body
         assert 'id="diagram-target"' in body
-        # The chrome carries the visibility checkboxes (X.4.b.3 chrome iteration:
-        # roles split into internal/external + edge-label sub-toggles).
+        # The chrome carries the visibility checkboxes for the two
+        # CSS-toggle role scopes + the edge-label sub-toggles, plus
+        # the four server-side category anchors that CF.3.d swapped
+        # in for the prior `toggle-rail` / `toggle-template` /
+        # `toggle-chain` / `toggle-control_parent` checkboxes.
         for kind in (
             "toggle-role-internal", "toggle-role-external",
-            "toggle-rail", "toggle-template", "toggle-chain",
             "toggle-edge-label-rail_bundle",
             "toggle-edge-label-self_loop",
             "toggle-edge-label-chain",
         ):
             assert f'id="{kind}"' in body, f"missing checkbox {kind}"
+        for category in ("rail", "template", "chain", "control_parent"):
+            assert f'data-show-category="{category}"' in body, (
+                f"missing server-side category anchor {category}"
+            )
         # Layer stepper landed (the mode dropdown + engine pills were
         # dropped in X.4.b.cleanup once dot won the spike). AM.2 step
         # 3 (2026-05-25): `.layer-btn` semantic class retired in favor

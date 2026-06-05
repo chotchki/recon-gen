@@ -826,6 +826,32 @@ def _focus_set(
     return focused
 
 
+# CF.3.d — categorical show-set. Each entry gates one Phase of the
+# emit. The chrome's 4 server-side "Show:" checkboxes round-trip
+# through the URL `?show=...` param; the JS-CSS scope split
+# (internal/external roles) stays separate. Unknown values are
+# silently dropped — defensive against malformed URLs.
+_VALID_SHOW_CATEGORIES = frozenset(
+    {"role", "rail", "template", "chain", "control_parent"},
+)
+
+
+def _categories_for_layer(layer: int) -> frozenset[str]:
+    """Compat shim: derive show-set from the legacy ``layer`` param.
+
+    - layer 1: roles + control hierarchy only
+    - layer 2: adds rails
+    - layer 3: adds chains + templates
+    """
+    cats: set[str] = {"role", "control_parent"}
+    if layer >= 2:
+        cats.add("rail")
+    if layer >= 3:
+        cats.add("template")
+        cats.add("chain")
+    return frozenset(cats)
+
+
 def build_topology_graph_per_rail(
     instance: L2Instance,
     *,
@@ -834,6 +860,7 @@ def build_topology_graph_per_rail(
     focus_node_id: str | None = None,
     layer: int = 1,
     hide_singleleg: bool = False,
+    show: frozenset[str] | None = None,
 ) -> Any:
     """Build a Graphviz Digraph with Rails as first-class nodes (X.4.b dot pivot).
 
@@ -1114,16 +1141,35 @@ def build_topology_graph_per_rail(
     def _in_focus(node_id: str) -> bool:
         return focus_set is None or node_id in focus_set
 
-    # Layer thresholds. Layer 1 = roles + control_parent only. Layer 2
-    # = + rails + their endpoint connectivity. Layer 3 = + chains +
-    # transfer-template clusters. Server-side filter so dot re-lays-out
-    # the smaller subset cleanly per layer.
-    show_rails = layer >= 2
-    show_chains_and_templates = layer >= 3
+    # CF.3.d — categorical show-set. When the caller passes `show=`
+    # use it directly (each entry gates one emit Phase). When None,
+    # derive from the legacy ``layer`` param (1/2/3) — backwards
+    # compatible: Phase B and Phase F gates retain their old
+    # bool-from-layer behavior.
+    active_categories: frozenset[str] = (
+        show if show is not None else _categories_for_layer(layer)
+    )
+    # Defensive: drop unknown entries the route might pass through.
+    active_categories = active_categories & _VALID_SHOW_CATEGORIES
+    show_roles = "role" in active_categories
+    show_rails = "rail" in active_categories
+    show_chains = "chain" in active_categories
+    show_templates = "template" in active_categories
+    show_control_parent = "control_parent" in active_categories
+    # CF.3.d — templates and chains used to share a single gate
+    # (``show_chains_and_templates``). The chrome's "Show:" toggles
+    # now let the operator hide chains OR templates independently —
+    # Phase B's template iter consults ``show_templates`` and Phase F
+    # gates chain edges on ``show_chains``.
 
     # Phase A — Role nodes (top-level, referenced only, in focus).
+    # CF.3.d — gated by ``show_roles``; when off, dot still emits any
+    # edges that reference role IDs as anonymous nodes — operator
+    # opt-in to dangling-edge behavior is documented in the spec.
     typed = topology_graph_for(instance, db_table_prefix=db_table_prefix)
     for n in typed.nodes:
+        if not show_roles:
+            break
         if n.kind != "role":
             continue
         role_name = Identifier(n.id.removeprefix("role__"))
@@ -1175,7 +1221,7 @@ def build_topology_graph_per_rail(
 
     rails_in_clusters: set[Identifier] = set()
     template_iter = (
-        instance.transfer_templates if show_chains_and_templates else ()
+        instance.transfer_templates if show_templates else ()
     )
     for template in template_iter:
         tmpl_id = _template_id(template.name)
@@ -1477,7 +1523,7 @@ def build_topology_graph_per_rail(
         return name not in rails_in_clusters
 
     for chain in instance.chains:
-        if not show_chains_and_templates:
+        if not show_chains:
             break
         if _is_hidden_singleleg(chain.parent):
             continue
@@ -1532,10 +1578,14 @@ def build_topology_graph_per_rail(
                 _record_edge(parent_id, child_id, "chain")
 
     # Phase G — Control-parent edges (subledger → control role).
+    # CF.3.d — gated by ``show_control_parent``; when off, the two
+    # iterators below short-circuit via the loop guards.
     parents_with_limits: set[Identifier] = {
         ls.parent_role for ls in instance.limit_schedules
     }
     for account in instance.accounts:
+        if not show_control_parent:
+            break
         if account.parent_role is None or account.role is None:
             continue
         src = _role_id(account.role)
@@ -1555,6 +1605,8 @@ def build_topology_graph_per_rail(
         )
         _record_edge(src, dst, "control_parent")
     for tmpl_acc in instance.account_templates:
+        if not show_control_parent:
+            break
         if tmpl_acc.parent_role is None:
             continue
         src = _role_id(tmpl_acc.role)
