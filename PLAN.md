@@ -349,12 +349,109 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [ ] CF.0a - CF.0a — Pre-Apply card hint: disable checkbox + show "this L2 cannot demo \<kind\>: missing \<dep\>" copy for kinds whose pickers will throw. Needs a static "can this L2 materialize this kind?" probe run at page render — basically dry-running every picker without executing the plant. Currently the operator only learns the picker-blocked status post-Apply via CF.0 Fix B's banner; this surface prevents the failed Apply visit entirely. Lower priority than the rest of CF since the post-Apply path is now actionable.
 - [x] CF.1 - CF.1 — Apply status reflects per-plant truth (HIGH; v12 U4). **SHIPPED** (commit 4b6c78e9): new `trainer_last_apply` kv key, 3-state banner (green/amber/red) keyed off succeeded ∩ failed sets, drops the lying `?status=Apply+done.` URL redirect, kv = source of truth (in-memory `_training_apply_state` stays for in-flight live-tail only — design audit confirmed PLAN line 349's "in-memory summary" was prescriptive, not descriptive; no post-Apply summary ever lived in-memory). Locks honored: amber on partial, persist across /training/* nav, survives Studio restart. App2Driver.trainer_apply migrated to unified `data-test-last-apply-banner` selector so partial-failure scenarios don't time out.
 - [x] CF.2 - CF.2 — Exec app program-health rollup tile (HIGH; v12 U2). **SHIPPED v0** (commit 87c0e5a1): new Program Health sheet at index 1, full-width KPI tile bound to `<prefix>_l1_exceptions` (date-windowed, magnitude-filtered) with `KPIValueThresholdBanding(amber_at=1, red_at=20)`. TextBox hyperlink to the L1 Dashboard serves as the cross-app substitute on both renderers (operator-locked QS leg + the CrossAppDrill primitive's first-consumer wiring deferred since QS URL params don't sync sheet controls anyway). **Scope-narrowed** from the design audit: v0 is L1-only because the audit flagged L1+L2FT+Inv counts as "not cleanly summable across pillars" (L1 obeys date picker, L2FT is declared-vs-runtime point-in-time, Inv is σ-threshold continuous). L2FT + Inv expansion deferred until the operator's manual Studio drive surfaces the actual next ask.
-- [ ] CF.3 - CF.3 — L2 diagram readability (MED; v12 U6). **LOCKED:** focus picker = typeahead (90+ flat options unworkable); SingleLegRail hide = SERVER-SIDE re-emit (URL is source of state truth); default layer = L1. **META-LOCK from operator:** user explicitly wants more time spent on making very large diagrams legible — scope expands beyond the minimal pass; consider neighborhood-depth slider, entity-focus default-on for L3, possibly diagram-as-its-own-top-level-tab.
-- [ ] CF.4 - CF.4 — Editor entity-list search/sort/filter (MED; v12 U7). **LOCKED:** reviewer's L2 is MUCH larger than sasquatch_pr (100+ rails, heavy templates) — SERVER-side pagination/search REQUIRED (client-side JS filter insufficient); universal collapse-by-default per card; match pagination patterns from existing screens.
-- [ ] CF.5 - CF.5 — Transfer-Templates Sankey legibility (MED; v12 U8). **LOCKED:** default Template = first-declared (deterministic); cap N=30; small-multiples deferred to a CG follow-up if v13.2.0 cold-read still flags.
-- [ ] CF.6 - CF.6 — Empty-state prompts on picker-driven sheets (MED; v12 U10). **LOCKED:** TextBox always-visible (no auto-hide); Daily Statement gets a SMART DEFAULT — picker auto-selects the first 1:1 Account with a balance instead of just prompting (operator says this recurring pattern wins over "Select an account to begin" copy); enforce invariant via unit test, not `__post_init__`.
-- [ ] CF.7 - CF.7 — Minor sweep + v12 re-probes. **LOCKED:** U11 drift→leg drill = ADD RUNNING BALANCE COLUMN to Daily Statement detail (operator-clearest; supersedes status-badge cheap option); Net Money tolerance = industry-standard fiat thresholds (1%/5%); App Info `latest_date_basis` renders as operator-friendly labels ("end-of-day" / "start-of-day" / "posting time"), not column-name literals. Other sub-items: ETL copy mismatch fix; matview-staleness + business-day caption; U5 plant magnitude re-probe (blocked-by CF.0 Fix B).
-- [ ] CF.8 - CF.8 — Cut v13.2.0 + re-cold-read (same 6-persona shape; sweep CF to PLAN_ARCHIVE on clean diff or file CG followup for any residual)
+- [ ] CF.3 - CF.3 — L2 diagram readability (MED; v12 U6). **LOCKED:** focus picker = typeahead (90+ flat options unworkable); SingleLegRail hide = SERVER-SIDE re-emit (URL is source of state truth); default layer = L1. **META-LOCK from operator:** user explicitly wants more time spent on making very large diagrams legible — scope expands beyond the minimal pass; consider neighborhood-depth slider, entity-focus default-on for L3, possibly diagram-as-its-own-top-level-tab. **CF audit followup 2026-06-05 absorbs:** layer pills inverted active/inactive emphasis (treat as stepper: active=solid, upcoming=outline; never disabled-grey for an included step) — Studio Med. **Status:** on hold pending operator's parallel design review. Internal design workflow returned (parked at `/private/tmp/.../wpdiir3e3.output`); will merge with operator's review when shared. Beast-class effort expected.
+- [ ] CF.4 - CF.4 — Editor entity-list search/sort/filter (MED; v12 U7). **LOCKED:** reviewer's L2 is MUCH larger than sasquatch_pr (100+ rails, heavy templates) — SERVER-side pagination/search REQUIRED (client-side JS filter insufficient); universal collapse-by-default per card; match pagination patterns from existing screens. **CF audit followup 2026-06-05 absorbs:** (a) per-card Edit/Delete/+Add promote from bare text links to ghost/outline buttons + danger color on Delete (Studio Med); (b) editor home `<h1>` + purpose blurb + primary action above the accordion (Studio Med — partial Studio Med #14); (c) value-column widening + key-list-as-wrapping-chips so underscored identifiers stop wrapping mid-token (Studio Med). **NOTE:** the shared list-toolbar primitive (sticky search + count + group headers) is moved to **Phase CG** since it's cross-app — CF.4 consumes the primitive once CG ships.
+- [x] CF.5 - CF.5 — Transfer-Templates Sankey legibility (MED; v12 U8). **PARTIALLY SHIPPED 2026-06-05** (commit 3e0c1e1b): added `items_limit=30` to the L2FT Multi-Leg Flow Sankey — collapses the default-render hairball to top-30 + automatic "Other" bucket, matches Investigation's `_SANKEY_NODE_CAP` convention. Subtitle calls out the cap so operators know to expect rollup. **Lock residual:** first-declared default Template picker selection still TODO (operator-locked: deterministic per-L2 default so the sheet doesn't open blank). Re-open if v13.2.0 cold-read still flags hairball-on-render.
+- [ ] CF.6 - CF.6 — Empty-state prompts on picker-driven sheets (MED; v12 U10). **LOCKED:** TextBox always-visible (no auto-hide); Daily Statement gets a SMART DEFAULT — picker auto-selects the first 1:1 Account with a balance instead of just prompting (operator says this recurring pattern wins over "Select an account to begin" copy); enforce invariant via unit test, not `__post_init__`. **CF audit followup 2026-06-05 absorbs:** (a) build an empty-state typed primitive that branches on `selection_required` vs `truly_empty` (audit Dashboards Med #1 — "Pick an account to begin" vs "No data matches"); (b) the empty-state shown twice with mismatched wording (Studio Low). v0 lands the primitive + Daily Statement consumer; other consumers extend in CF.7.
+- [ ] CF.7 - CF.7 — Minor sweep + v12 re-probes. **LOCKED:** U11 drift→leg drill = ADD RUNNING BALANCE COLUMN to Daily Statement detail (operator-clearest; supersedes status-badge cheap option); Net Money tolerance = industry-standard fiat thresholds (1%/5%); App Info `latest_date_basis` renders as operator-friendly labels ("end-of-day" / "start-of-day" / "posting time"), not column-name literals. Other sub-items: ETL copy mismatch fix; matview-staleness + business-day caption; U5 plant magnitude re-probe (blocked-by CF.0 Fix B). **CF audit followup 2026-06-05 absorbs the cross-cutting "small": ** (a) value-first KPI cards — lead with one-line lede + value, not multi-line prose above (Dashboards Med #3); (b) tabular-nums everywhere on currency/numeric cells (Dashboards Low — partial; the table-component fix is CH); (c) inconsistent KPI severity glyphs within a row (Dashboards Low); (d) ragged masonry / equal-height marooning a tiny KPI beside a dense table (Dashboards Low); (e) single-category bar charts read as render errors — add a one-row caption (Dashboards Low); (f) active nav item quieter than group labels (Dashboards Low); (g) slider value shown twice — drop one (Dashboards Low); (h) transient success banners persisting + piling up (Studio Low); (i) "i" failing-card error badge looks like a status label not the hoverable affordance — change shape to make hover discoverable (Studio Low); (j) ETL workflow numbered as "5 steps" AND "3" in two components (Studio Low); (k) drop the "[Select all] / [None]" literal bracketed-text shortcuts — promote to actual buttons (Studio Med — partial; control-vocab full pass is CI).
+- [ ] CF.8 - CF.8 — Cut v13.2.0 + re-cold-read (same 6-persona shape; sweep CF to PLAN_ARCHIVE on clean diff or file the cross-cutting followups CG-CK below for any residual)
+
+## Phase CG - Shared list primitive + toolbar (Studio High)
+
+**Why:** v13.1.1 design review (`docs/audits/v13_1_1_design_feedback.md` — Studio High #1, the audit's #1 highest-leverage systemic fix): the rail list is ~40,000px (65 fully-expanded ~14-row cards), templates ~11,000px, with no sticky toolbar / no search / no count / no grouping / no collapse. Audit's bluntest call: "Biggest single studio UX problem; also an a11y page-height problem." Net-new typed primitive shape: shared list with toolbar (search + category filter + count), group headers, and collapse-to-one-line-summary per row that expands on demand. Cross-app — applies to CF.4's editor entity-list pages, the studio l2_shape browser, and any future entity-list surface.
+
+**Locks (operator to confirm):**
+- Server-side search + paginate (matches CF.4's lock since CF.4 is the first consumer)
+- Collapse-to-summary BY DEFAULT — operator clicks to expand
+- Group headers count + identity (e.g. "Rails — Two-leg / 12" + "Single-leg / 15")
+- Sticky toolbar at viewport top within the list region (not page-level fixed)
+- Live count updates as filters/search narrow
+
+**Done when:** Typed `ListSurface` primitive + Tailwind/HTMX render shell ships; CF.4's editor consumes it; one Studio surface (rail-list) shows the collapsed-summary default; rail-list page-height drops below 5000px on sasquatch_pr; accessibility audit on the list surface shows no overlap regressions.
+
+- [ ] CG.0 - **REPLAN.** Re-read the audit's Studio High #1 + Studio High #2 alongside CF.4's lock. Decide whether the primitive lives in `common/html/_components.py` (the CF.X-infra deferred module) or stays in `common/html/render.py`. Inventory consumers (CF.4 first, then l2_shape browser, then potentially the studio Training plant cards).
+- [ ] CG.1 - **Typed primitive + Tailwind/HTMX render shell.** Dataclass for `ListSurface(items, toolbar, group_by, summary_renderer, expand_renderer)`. HTMX-driven expand-on-demand so collapsed default doesn't render the heavy body until needed.
+- [ ] CG.2 - **First consumer: CF.4 editor rail-list.** Migrate the existing rail list to the primitive; assert the height drop + a11y wins. Adds the server-side search/paginate from CF.4's lock.
+- [ ] CG.3 - **Expand to templates + chains + limit_schedules.** Other heavy editor lists follow rail's shape.
+- [ ] CG.4 - **Cold-read v3 confirmation.** Same persona shape as v13.1.1's reviewer; confirms the "wall of cards" finding cleared.
+
+## Phase CH - Table component (Dashboards Med #2)
+
+**Why:** v13.1.1 design review Dashboards Med #2 + the audit's #5 highest-leverage systemic fix: "Dense ledger tables are undifferentiated dumps — no zebra, no header-row background, money columns not right-aligned/tabular-nums. Standardize one table component." Currently every table emits ad-hoc styling; money columns drift visually because numbers aren't tabular-nums and aren't right-aligned. Cross-app.
+
+**Locks (operator to confirm):**
+- Zebra striping (alternating row backgrounds — use `bg-surface` / `bg-surface-alt` token if it exists; else add)
+- Header row sticky + visually distinguished from body (background fill + bottom border)
+- Money columns auto-right-aligned + `tabular-nums` when ColumnSpec carries `currency=True`
+- Header-row bg uses a theme token (no hardcoded palette per the existing `no-hardcoded-palette` lint)
+
+**Done when:** Typed `TableSurface` extends or adapts the existing tree `Table` Visual w/ the zebra/sticky/tabular contract; both renderers (QS + App2) honor it; Daily Statement detail + Limit Breach table + ledger tables across L1 / L2FT / Investigation / Exec all read consistently.
+
+- [ ] CH.0 - **REPLAN.** Re-read CF.7's "tabular-nums everywhere" lock against this phase — they overlap. Decide whether the primitive carries the zebra+sticky+tabular as inseparable, or whether tabular-nums lands in CF.7 and the table primitive bundles only zebra+sticky+right-align. Recommend the latter — tabular-nums is a cheap cross-cutting CSS class, no primitive needed.
+- [ ] CH.1 - **Tabular-nums money rule (probably part of CF.7).** Every column whose ColumnSpec has `currency=True` gets `tabular-nums` + right-align at the renderer layer. Probably 1-2 lines of CSS + 1-2 lines of render-time class injection.
+- [ ] CH.2 - **Zebra + sticky-header + header-bg theme token.** Either extend the existing `Table` Visual or add a `TableSurface` typed adapter; ensure App2 + QS reach the same look.
+- [ ] CH.3 - **Migrate the audit-flagged dense tables.** Daily Statement detail + Limit Breach + Drift detail + the ledger tables across the four apps.
+
+## Phase CI - Control vocabulary + Badge primitive (Studio Med)
+
+**Why:** v13.1.1 design review (multiple Studio Med findings): solid-primary + white-outline + solid-amber + bare text-links + literal `[Select all]`/`[None]` bracket-text shortcuts all coexist with no shared vocabulary. Same audit notes "no shared badge component (state/type/id badges render in 3 idioms)." And: "Three side-by-side buttons in three fill languages with severity contradicting risk — the genuinely destructive 'rebuild from base' looks secondary while a benign action is solid-amber." Severity mismatched to action risk is a real footgun, not just polish.
+
+**Locks (operator to confirm):**
+- Pick ONE vocabulary: solid-primary (highest-emphasis safe action), outline-primary (secondary safe action), ghost (tertiary safe action), text-link (in-paragraph navigation), danger-solid (destructive primary), danger-outline (destructive confirmation). Bare bracketed-text shortcuts deleted everywhere.
+- Severity must match risk: destructive actions can never look secondary
+- Shared `Badge` primitive: ONE state badge shape (state-success / state-warning / state-danger / state-neutral), ONE type/id badge shape (neutral pill w/ monospace text for IDs)
+
+**Done when:** All Studio surfaces use the new button vocabulary; all badges use the `Badge` primitive; the "destructive looks secondary" Studio Med finding closes; visual review confirms one button language across `/training/`, `/l2_shape/*`, `/etl/*`, `/data`.
+
+- [ ] CI.0 - **REPLAN.** Audit every button/badge callsite across studio (`grep` for `bg-accent` / `bg-danger` / `border-accent` and similar in `common/html/`). Group by surface. Decide whether the primitive ships incrementally per-surface or as one big rewrite.
+- [ ] CI.1 - **`Button` + `Badge` typed primitives + Tailwind shells.** Land the dataclass + render helpers.
+- [ ] CI.2 - **Migrate `/training/` surface.** Highest-traffic Studio surface; "rebuild from base" gets danger-solid.
+- [ ] CI.3 - **Migrate `/l2_shape/*` + `/etl/*` + `/data` surfaces.** Per-card Edit/Delete promotion in CF.4 consumes this primitive once it's available.
+- [ ] CI.4 - **Cold-read v3 confirmation.** Same persona; assert "destructive looks secondary" finding closes + bracketed-text shortcuts are gone.
+
+## Phase CJ - Color tokens + amber semantics (Color usage)
+
+**Why:** v13.1.1 design review (Color usage section): `accent` is overloaded — it's used for body text, links, table cells, active-tab text, AND KPI big-numbers, which forces brand accent to clear 4.5:1 on white. Most mid-tone brand blues won't. AND: amber is overloaded with three meanings simultaneously — external-counterparty node category (diagrams), neutral descriptive copy (ETL), and caution (buttons/warnings). Audit's fix: derive a separate AA-safe `accent-text` token (auto-darkened from brand accent); reserve amber for caution; move the diagram node-category hue elsewhere; force dark-text-on-amber not white-on-amber (both white-on-amber and amber-on-white fail contrast — dark-on-amber passes).
+
+**Note:** CF audit followup 2026-06-05 already swapped the KPI default state color from `accent` to `text-primary-fg` (commit 3e0c1e1b). That's a partial CJ down-payment but doesn't close the phase — the broader accent-overload still applies to body text, links, active-tab indicators, and table cell links.
+
+**Locks (operator to confirm):**
+- New `accent-text` token auto-derives from brand accent (e.g. `oklch(0.4 0.2 hue)`) so it's WCAG-AA against white regardless of how light the brand accent is — keeps brand consistency without contrast failure
+- Amber's three roles split: amber-caution (warnings / buttons), node-counterparty (move to a new token like `external-counterparty-node`), neutral-descriptive (move to plain `text-secondary-fg` — the prose doesn't need its own hue)
+- Dark text on amber buttons (e.g. `text-slate-900`) — never white on amber
+- Audit every `bg-accent` / `text-accent` / `bg-warning` / `text-warning` callsite across the codebase + reclassify against the new tokens
+
+**Done when:** All accent-as-prose surfaces switch to `accent-text` (AA-safe); all amber-as-prose switches to `text-secondary-fg`; all amber-as-button uses dark text; diagram counterparty color moved to its own token; visual regression confirms no surface inadvertently changes color intent.
+
+- [ ] CJ.0 - **REPLAN.** Audit every accent + amber callsite. Decide whether `accent-text` is a separate CSS variable computed at theme-build time, or a Tailwind plugin that derives at render time.
+- [ ] CJ.1 - **Token surface — define `accent-text` + audit-replacement targets.** Add `--color-accent-text` to `input.css`; ensure it computes WCAG-AA from `--color-accent` at theme generation.
+- [ ] CJ.2 - **Sweep accent-as-prose callsites.** body text, links, active-tab text, table cell links all switch to `text-accent-text`. Theme integration test confirms no callsite uses bare `text-accent` for prose.
+- [ ] CJ.3 - **Sweep amber callsites — three-way split.** Audit + reclassify caution/node/neutral occurrences against the new tokens.
+- [ ] CJ.4 - **Dark-on-amber rule for button surfaces.** Audit every amber-bg with white text → flip to dark text.
+- [ ] CJ.5 - **Cold-read v3 contrast check.** axe-core pass + visual confirm.
+
+## Phase CK - Accessibility pass (axe-core findings)
+
+**Why:** v13.1.1 design review Accessibility section: app-wide missing `<main>` landmark + missing `<h1>` on several studio pages + `nested-interactive` on training controls + `aria-allowed-role` on entity lists (~140 nodes!) + unlabeled pickers + `empty-table-header` + one `select-name`. Plus 67 bounding-box overlaps documented by the axe-core probe (the Studio Med #2 Apply-bar overlap was one; CF audit followup 3e0c1e1b cleared it). The audit's #7 highest-leverage systemic fix: "Add landmarks + `<h1>`s."
+
+**Locks (operator to confirm):**
+- Every page ships `<main>` + a single `<h1>`
+- Training controls fix `nested-interactive` (a button-inside-button issue likely)
+- Entity-list ARIA `aria-allowed-role` warnings clear via correct role assignments
+- Pickers ship explicit `aria-label`
+- Table headers have non-empty content
+- axe-core CI gate: any new finding fails the build (BX backlog #107 probe-name badges adjacent; if BX ships first absorb)
+
+**Done when:** axe-core CI pass on all 31 audited routes; manual screen-reader spot-check on the highest-traffic Studio surfaces (Training landing + L2 editor home + Diagram); no bounding-box overlaps from the probe.
+
+- [ ] CK.0 - **REPLAN.** Pull the audit's full axe-core findings list into a tracking artifact. Decide whether to bring axe-core into CI as a gate or as a report.
+- [ ] CK.1 - **Landmarks + `<h1>` sweep.** `<main>` on every page + single `<h1>`; some studio pages had nothing.
+- [ ] CK.2 - **Training `nested-interactive` fix.** Likely a button-inside-clickable-card issue; pull the inner control out.
+- [ ] CK.3 - **Entity-list `aria-allowed-role` sweep.** ~140 nodes flagged — likely a single role wrong somewhere replicated by the renderer.
+- [ ] CK.4 - **Picker `aria-label` sweep.** Audit every `<select>` / typeahead / dropdown for an explicit label.
+- [ ] CK.5 - **Bounding-box overlap sweep.** Apply-bar overlap already shipped; sweep the remaining 66 (some are likely auto-cleared by CG list primitive + CH table primitive).
+- [ ] CK.6 - **axe-core CI gate.** If operator OKs, fail the build on new axe-core findings.
+- [ ] CK.7 - **Cold-read v3 a11y confirmation.** Manual screen-reader spot-check + axe-core green.
 - [x] CF.X-infra - CF.X-infra **SHIPPED** (commit ef19737c): `KPIValueThresholdBanding` typed primitive (3-band amber/red, frozen dataclass with `red_at > amber_at` construction guard, 3-way mutex with the BK.2 zero / BK.9 sign indicators) + `CrossAppDrill` typed primitive (target_dashboard_id + target_sheet_id; QS emit = None per the URL-param-no-control-sync defect). QS emit + App2 shape_kpi + bootstrap.js renderKPI extended with the `warning` semantic color (`text-warning` already compiled into output.css from Studio surfaces). 9 new unit tests pin all three bands + the construction guards + the neutral-on-null contract. EXCLAMATION_CIRCLE icon enum still needs deploy-probe before first QS-side render — fallback list (TRIANGLE → FLAG) inline in the helper. Module-level `common/html/_components.py` deferred until a follow-up needs it; current primitives land cleanly in `common/tree/visuals.py` next to the BK.2/BK.9 siblings.
 
 ## Phase PLAN - Phase PLAN
