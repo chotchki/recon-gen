@@ -214,10 +214,16 @@ def render_training_v3_landing(
                 '</details>'
             ) if failed_dict else ""
             if n_failed == 0 and n_succeeded > 0:
+                # CF.1 followup — the GREEN last_apply branch uses
+                # ONLY `data-test-last-apply-banner`. The
+                # `data-test-training-banner` attr is reserved for the
+                # Session-Start success ribbon (driven by ?status=),
+                # so e2e drivers that wait on it as a
+                # "Session Start finished" signal don't get fooled by
+                # a stale GREEN last_apply painted by a prior Apply.
                 banner_html += (
                     '<div class="bg-success/10 border border-success rounded-md '
-                    'px-3 py-2 mb-3 text-sm" data-test-training-banner '
-                    'data-test-last-apply-banner>'
+                    'px-3 py-2 mb-3 text-sm" data-test-last-apply-banner>'
                     f'<strong class="text-success">✓</strong> '
                     f'Last apply: {n_succeeded} plant(s) succeeded at '
                     f'{escape(finished_at)}.'

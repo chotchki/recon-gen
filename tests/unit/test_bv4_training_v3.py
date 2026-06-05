@@ -283,8 +283,12 @@ def test_renders_amber_partial_banner_when_partial_failure() -> None:
 
 
 def test_renders_green_last_apply_banner_when_all_succeeded() -> None:
-    """CF.1 — all-succeeded Apply renders a GREEN banner with
-    `data-test-training-banner` + `data-test-last-apply-banner`."""
+    """CF.1 — all-succeeded Apply renders a GREEN banner marked with
+    ONLY `data-test-last-apply-banner`. The `data-test-training-banner`
+    attr is reserved for the Session-Start success ribbon (driven by
+    ?status=) so e2e verbs that wait on it as a "Session Start
+    finished" signal aren't fooled by a stale GREEN last_apply from a
+    prior Apply."""
     html = render_training_v3_landing(
         base_prefix="recon-test",
         v_overlay_exists=True,
@@ -296,13 +300,44 @@ def test_renders_green_last_apply_banner_when_all_succeeded() -> None:
             "path": "fast",
         },
     )
-    assert "data-test-training-banner" in html
     assert "data-test-last-apply-banner" in html
+    assert "data-test-training-banner" not in html
     assert "data-test-failed-banner" not in html
     assert "data-test-partial-banner" not in html
     assert "1 plant(s) succeeded" in html
     assert "bg-success" in html
     assert "2026-06-04T10:00:00" in html
+
+
+def test_session_start_ribbon_and_green_last_apply_distinct_attrs() -> None:
+    """CF.1 followup — passing BOTH session_status AND a GREEN
+    last_apply renders TWO distinct banners. The Session-Start ribbon
+    keeps `data-test-training-banner`; the GREEN last_apply keeps
+    `data-test-last-apply-banner`. This is the exact race that broke
+    `trainer_reset_overlay()`'s wait selector in CI: a stale GREEN
+    from a prior test would have matched `data-test-training-banner`
+    and let the verb early-return before the reclone finished
+    recreating matviews."""
+    html = render_training_v3_landing(
+        base_prefix="recon-test",
+        v_overlay_exists=True,
+        session_status="Session started — v overlay ready.",
+        last_apply={
+            "attempted": ["drift"],
+            "succeeded": ["drift"],
+            "failed": {},
+            "finished_at": "2026-06-04T10:00:00",
+            "path": "fast",
+        },
+    )
+    assert "data-test-training-banner" in html
+    assert "Session started" in html
+    assert "data-test-last-apply-banner" in html
+    assert "1 plant(s) succeeded" in html
+    # The two banners' marker attrs must NOT appear on the same DOM
+    # node — count each substring to prove there's exactly one of each.
+    assert html.count("data-test-training-banner") == 1
+    assert html.count("data-test-last-apply-banner") == 1
 
 
 def test_renders_no_apply_banner_when_last_apply_none() -> None:
