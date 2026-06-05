@@ -454,6 +454,38 @@ def test_topology_graphviz_per_rail_renders_fan_in_chain_distinctly() -> None:
     assert "fan-in 2→1" in src
 
 
+def test_topology_graphviz_per_rail_emits_edge_meta_sidecar() -> None:
+    """CF.3.c — ``build_topology_graph_per_rail`` attaches an
+    ``edge_meta`` dict to the returned digraph keyed by the exact
+    ``"<src>-><dst>"`` form graphviz emits. Each value is the typed
+    kind ("chain" / "rail_bundle" / "control_parent"). The Studio
+    JS shim consults this map to bypass the title-based heuristic.
+    """
+    import pytest
+    graphviz = pytest.importorskip("graphviz")
+    del graphviz
+    from recon_gen.common.l2.topology import build_topology_graph_per_rail
+    inst = load_instance(FIXTURES / "spec_example.yaml")
+    g = build_topology_graph_per_rail(
+        inst, db_table_prefix=DEFAULT_PREFIX, layer=3,
+    )
+    import typing as _t  # noqa: PLC0415
+    edge_meta_attr: object = getattr(g, "edge_meta", None)
+    assert isinstance(edge_meta_attr, dict)
+    edge_meta = _t.cast("dict[str, str]", edge_meta_attr)
+    assert edge_meta, "expected non-empty edge_meta on a layer-3 render"
+    # Every entry should be a known kind.
+    known = {"chain", "rail_bundle", "control_parent", "self_loop"}
+    for key, kind in edge_meta.items():
+        assert kind in known, f"unknown kind {kind!r} for edge {key!r}"
+    # spec_example has chains, control-parent edges, and rail edges
+    # at L3. All three kinds should be present.
+    kinds: set[str] = set(edge_meta.values())
+    assert "chain" in kinds
+    assert "rail_bundle" in kinds
+    assert "control_parent" in kinds
+
+
 def test_topology_graphviz_per_rail_hide_singleleg_drops_standalone_single_legs() -> None:
     """CF.3.h — ``hide_singleleg=True`` re-emits the topology with
     standalone SingleLegRails filtered out at the node, bundle, edge,

@@ -120,12 +120,16 @@ function _getRenderer() {
 
 function _readSidecar() {
   const el = document.getElementById("topology-meta");
-  if (!el) return { role_meta: {} };
+  if (!el) return { role_meta: {}, edge_meta: {} };
   try {
-    return JSON.parse(el.textContent || "{}");
+    const parsed = JSON.parse(el.textContent || "{}");
+    return {
+      role_meta: parsed.role_meta || {},
+      edge_meta: parsed.edge_meta || {},
+    };
   } catch (err) {
     console.error("studio/diagram: bad sidecar JSON", err);
-    return { role_meta: {} };
+    return { role_meta: {}, edge_meta: {} };
   }
 }
 
@@ -202,12 +206,21 @@ async function renderDiagram() {
   let edgeCounts = {
     rail_bundle: 0, self_loop: 0, template_member: 0, chain: 0,
   };
+  // CF.3.c — the server-provided edge_meta sidecar carries the typed
+  // edge kind keyed by the exact `<src>-><dst>` form graphviz emits,
+  // letting us bypass the title heuristic. Falls back to the
+  // heuristic only when the sidecar misses (defensive — should be
+  // rare; e.g. an edge graphviz emitted but the server didn't
+  // instrument).
+  const edgeMeta = sidecar.edge_meta || {};
   for (const g of svg.querySelectorAll('g.edge')) {
     const titleEl = g.querySelector('title');
     if (!titleEl) continue;
-    const parsed = _parseEdgeTitle(titleEl.textContent.trim());
+    const titleText = titleEl.textContent.trim();
+    const parsed = _parseEdgeTitle(titleText);
     if (!parsed) continue;
-    const kind = _edgeKind(parsed.source, parsed.target);
+    const fromMeta = edgeMeta[titleText];
+    const kind = fromMeta || _edgeKind(parsed.source, parsed.target);
     g.setAttribute('data-source', parsed.source);
     g.setAttribute('data-target', parsed.target);
     g.setAttribute('data-kind', kind);

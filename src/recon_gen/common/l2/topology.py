@@ -903,6 +903,20 @@ def build_topology_graph_per_rail(
             f"'{db_table_prefix}'"
         ),
     )
+    # CF.3.c — edge-kind sidecar. As edges are emitted, record their
+    # typed kind in `edge_meta` so the JS shim can classify by exact
+    # known kind instead of the `_edgeKind` heuristic at diagram.js:
+    # the heuristic misclassified role↔role control_parent edges as
+    # rail_bundle (no disambiguation in title) and conflated some
+    # corner cases. Key = the exact `"<src>-><dst>"` form graphviz
+    # emits (including any port suffix); value = "chain" /
+    # "rail_bundle" / "control_parent" / "self_loop". Read by the
+    # route's sidecar serializer + attached to the digraph via
+    # `setattr` (graphviz.Digraph allows ad-hoc attrs).
+    edge_meta: dict[str, str] = {}
+
+    def _record_edge(src: str, dst: str, kind: str) -> None:
+        edge_meta[f"{src}->{dst}"] = kind
     # Compactness pass: tighter node/rank spacing, higher mclimit (more
     # iterations spent reducing edge crossings), splines=polyline
     # (straight segments with bends — at-least-as-good as spline at
@@ -1295,6 +1309,7 @@ def build_topology_graph_per_rail(
                     arrowhead="normal",
                     penwidth=_RAIL_EDGE_PENWIDTH,
                 )
+                _record_edge(_role_id(src_role), port_west, "rail_bundle")
             for dst_role in rail.destination_role:
                 if not _in_focus(_role_id(dst_role)):
                     continue
@@ -1304,6 +1319,7 @@ def build_topology_graph_per_rail(
                     arrowhead="normal",
                     penwidth=_RAIL_EDGE_PENWIDTH,
                 )
+                _record_edge(port_east, _role_id(dst_role), "rail_bundle")
         else:
             color = _rail_edge_color_for_direction(str(rail.leg_direction))
             # CF.3.f.b review: Variable direction means direction is
@@ -1322,6 +1338,7 @@ def build_topology_graph_per_rail(
                         arrowhead="normal",
                         penwidth=_RAIL_EDGE_PENWIDTH,
                     )
+                    _record_edge(port_east, _role_id(leg_role), "rail_bundle")
                 elif rail.leg_direction == "Variable":
                     g.edge(
                         port_east, _role_id(leg_role),
@@ -1330,6 +1347,7 @@ def build_topology_graph_per_rail(
                         dir="both",
                         penwidth=_RAIL_EDGE_PENWIDTH,
                     )
+                    _record_edge(port_east, _role_id(leg_role), "rail_bundle")
                 else:
                     g.edge(
                         _role_id(leg_role), port_west,
@@ -1337,6 +1355,7 @@ def build_topology_graph_per_rail(
                         arrowhead="normal",
                         penwidth=_RAIL_EDGE_PENWIDTH,
                     )
+                    _record_edge(_role_id(leg_role), port_west, "rail_bundle")
 
     # CF.3.f — bundle edges use the same direction color palette as
     # standalone rail edges (orange=Debit/source-leg, teal=Credit/
@@ -1366,6 +1385,7 @@ def build_topology_graph_per_rail(
                     arrowhead="normal",
                     penwidth=penwidth,
                 )
+                _record_edge(_role_id(src_role), bundle_id, "rail_bundle")
             for dst_role in dst_tuple:
                 if not _in_focus(_role_id(dst_role)):
                     continue
@@ -1375,6 +1395,7 @@ def build_topology_graph_per_rail(
                     arrowhead="normal",
                     penwidth=penwidth,
                 )
+                _record_edge(bundle_id, _role_id(dst_role), "rail_bundle")
         else:
             leg_tuple = key[1]
             direction = str(key[2])
@@ -1389,6 +1410,7 @@ def build_topology_graph_per_rail(
                         arrowhead="normal",
                         penwidth="1.5",
                     )
+                    _record_edge(bundle_id, _role_id(leg_role), "rail_bundle")
                 elif direction == "Variable":
                     # CF.3.f.b — bundle Variable bundle parity with the
                     # standalone branch above (double-arrow + dir=both
@@ -1400,6 +1422,7 @@ def build_topology_graph_per_rail(
                         dir="both",
                         penwidth="1.5",
                     )
+                    _record_edge(bundle_id, _role_id(leg_role), "rail_bundle")
                 else:
                     g.edge(
                         _role_id(leg_role), bundle_id,
@@ -1407,6 +1430,7 @@ def build_topology_graph_per_rail(
                         arrowhead="normal",
                         penwidth="1.5",
                     )
+                    _record_edge(_role_id(leg_role), bundle_id, "rail_bundle")
 
     # Phase F — Chain edges (rail → rail or template → template).
     # CF.3.f — when a chain endpoint is a TEMPLATE-RESIDENT rail (i.e.
@@ -1493,6 +1517,7 @@ def build_topology_graph_per_rail(
                     arrowhead="onormalonormal",
                     fontcolor=_CHAIN_EDGE_COLOR,
                 )
+                _record_edge(parent_id, child_id, "chain")
             else:
                 g.edge(
                     parent_id, child_id,
@@ -1504,6 +1529,7 @@ def build_topology_graph_per_rail(
                     style="dashed",
                     fontcolor=_CHAIN_EDGE_COLOR,
                 )
+                _record_edge(parent_id, child_id, "chain")
 
     # Phase G — Control-parent edges (subledger → control role).
     parents_with_limits: set[Identifier] = {
@@ -1527,6 +1553,7 @@ def build_topology_graph_per_rail(
             fontcolor=_CONTROL_PARENT_COLOR,
             arrowhead="onormal",
         )
+        _record_edge(src, dst, "control_parent")
     for tmpl_acc in instance.account_templates:
         if tmpl_acc.parent_role is None:
             continue
@@ -1545,7 +1572,12 @@ def build_topology_graph_per_rail(
             fontcolor=_CONTROL_PARENT_COLOR,
             arrowhead="onormal",
         )
+        _record_edge(src, dst, "control_parent")
 
+    # CF.3.c — stash the edge-kind sidecar on the digraph so the route
+    # serializer can pick it up. Used by diagram.js's `_edgeKind` to
+    # classify edges from server-truth instead of the title-heuristic.
+    setattr(g, "edge_meta", edge_meta)
     return g
 
 

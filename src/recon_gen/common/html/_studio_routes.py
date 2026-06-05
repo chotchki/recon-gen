@@ -2705,8 +2705,17 @@ def _render_diagram_page(
         for n in typed.nodes
         if n.kind == "role" and n.scope is not None
     }
+    # CF.3.c — edge-kind sidecar populated server-side by
+    # ``build_topology_graph_per_rail`` at each ``g.edge`` call. Keys
+    # are ``"<src>-><dst>"`` strings matching what graphviz puts in
+    # the SVG `<title>`; values are the typed kind
+    # ("chain"/"rail_bundle"/"control_parent"). JS reads this to skip
+    # the title-based ``_edgeKind`` heuristic, which was misclassifying
+    # post-CF.3.f port-anchored edges.
+    edge_meta_raw = getattr(digraph, "edge_meta", None)
+    edge_meta: dict[str, str] = dict(edge_meta_raw) if edge_meta_raw else {}
     sidecar = json.dumps(  # typing-smell: ignore[json-indent]: inline page payload — compact saves bytes
-        {"role_meta": role_meta},
+        {"role_meta": role_meta, "edge_meta": edge_meta},
     )
 
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)

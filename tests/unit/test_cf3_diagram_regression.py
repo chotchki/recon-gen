@@ -28,7 +28,6 @@ alongside the topology change.
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 
 import pytest
@@ -38,13 +37,13 @@ from recon_gen.common.l2.loader import load_instance
 
 # CF.3.j note — the spike harness measures via `subprocess.run(['dot', ...])`
 # to extract crossings from graphviz's verbose stderr + dimensions from
-# the rendered SVG. The Studio prod path renders client-side via
+# the rendered SVG. Studio prod renders client-side via
 # @hpcc-js/wasm-graphviz, so the system `dot` binary is NOT a runtime
-# dep. It IS however a test-bench dep — install via homebrew (`brew
-# install graphviz`) locally, or `apt-get install graphviz` on Linux
-# CI runners. Until the CI runner has it, the test skips gracefully
-# instead of failing. Pre-push (local) still runs the gate.
-_DOT_BINARY_AVAILABLE = shutil.which("dot") is not None
+# dep. It IS a test-bench dep — installed on the macOS dev box via
+# homebrew and on the WSL2 CI runner via apt-get (operator-confirmed
+# 2026-06-05). If the dependency goes missing on a runner, the test
+# fails with FileNotFoundError — re-install graphviz rather than
+# papering over.
 
 
 REPO_ROOT = Path(__file__).parent.parent.parent
@@ -71,17 +70,6 @@ CROSSINGS_TOLERANCE_ABS = 5
 DIM_TOLERANCE_PCT = 0.20
 
 
-@pytest.mark.skipif(
-    not _DOT_BINARY_AVAILABLE,
-    reason=(
-        "system `dot` binary not on PATH — the regression gate measures "
-        "via subprocess to extract crossings + dimensions. Studio prod "
-        "renders client-side via @hpcc-js/wasm-graphviz so this is a "
-        "test-only dep. Install via `brew install graphviz` (macOS) or "
-        "`apt-get install graphviz` (Linux). Pre-push (local) covers "
-        "the gate when CI runners don't have it."
-    ),
-)
 @pytest.mark.parametrize(
     "yaml_stem,baseline_dir",
     SPIKE_FIXTURES,
