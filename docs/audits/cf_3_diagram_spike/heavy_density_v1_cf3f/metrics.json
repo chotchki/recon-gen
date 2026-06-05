@@ -18,7 +18,7 @@
       "crossings": 0,
       "width_pt": 242.0,
       "height_pt": 1324.0,
-      "layout_ms": 94.6,
+      "layout_ms": 75.4,
       "dot_bytes": 4376,
       "svg_bytes": 19905,
       "png_bytes": 80952
@@ -27,25 +27,25 @@
       "layer": 2,
       "n_nodes": 127,
       "n_edges": 149,
-      "crossings": 242,
+      "crossings": 238,
       "width_pt": 2967.0,
-      "height_pt": 1179.0,
-      "layout_ms": 99.0,
-      "dot_bytes": 26874,
-      "svg_bytes": 121652,
-      "png_bytes": 563209
+      "height_pt": 1154.0,
+      "layout_ms": 93.0,
+      "dot_bytes": 26922,
+      "svg_bytes": 122540,
+      "png_bytes": 651931
     },
     {
       "layer": 3,
       "n_nodes": 112,
       "n_edges": 161,
-      "crossings": 545,
-      "width_pt": 1653.0,
-      "height_pt": 3665.0,
-      "layout_ms": 208.2,
-      "dot_bytes": 37521,
-      "svg_bytes": 177541,
-      "png_bytes": 1174328
+      "crossings": 586,
+      "width_pt": 1355.0,
+      "height_pt": 3754.0,
+      "layout_ms": 186.9,
+      "dot_bytes": 37569,
+      "svg_bytes": 178963,
+      "png_bytes": 1136492
     }
   ]
 }

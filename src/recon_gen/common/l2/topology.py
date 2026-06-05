@@ -451,14 +451,19 @@ def _rail_leg_marker(rail: Rail) -> str:
     """Short direction-marker shown inside a template's leg-rail cell.
 
     SingleLegRails carry a leg_direction (Debit/Credit/Variable) → D/C/V.
-    TwoLegRails span two roles; their leg-row marker is "↔" (movement
-    between roles, no single direction encoded by the row itself).
+    TwoLegRails span source→destination; the leg-row uses "→" to
+    indicate one-directional flow source→destination (vs the previous
+    "↔" which read as bidirectional and was a CF.3.f.b review finding).
+    Aggregating TwoLegRails get "⇉" (paired-arrow = sweep semantics)
+    so they're visually distinct from a non-aggregating leg row.
     """
     if isinstance(rail, SingleLegRail):
         return {"Debit": "D", "Credit": "C", "Variable": "V"}.get(
             str(rail.leg_direction), "?",
         )
-    return "↔"
+    if getattr(rail, "aggregating", False):
+        return "⇉"
+    return "→"
 
 
 def _template_composite_label(
@@ -1290,6 +1295,12 @@ def build_topology_graph_per_rail(
                 )
         else:
             color = _rail_edge_color_for_direction(str(rail.leg_direction))
+            # CF.3.f.b review: Variable direction means direction is
+            # set per-fire (unknown at design time). Double-arrow makes
+            # the silhouette match the purple color's semantic; pre-fix
+            # the arrowhead was "normal" (Debit-shape) regardless and
+            # the visual lied about Credit + Variable.
+            variable_arrow = "normalonormal"
             for leg_role in rail.leg_role:
                 if not _in_focus(_role_id(leg_role)):
                     continue
@@ -1298,6 +1309,13 @@ def build_topology_graph_per_rail(
                         port_east, _role_id(leg_role),
                         color=color,
                         arrowhead="normal",
+                    )
+                elif rail.leg_direction == "Variable":
+                    g.edge(
+                        port_east, _role_id(leg_role),
+                        color=color,
+                        arrowhead=variable_arrow,
+                        dir="both",
                     )
                 else:
                     g.edge(
@@ -1355,6 +1373,17 @@ def build_topology_graph_per_rail(
                         bundle_id, _role_id(leg_role),
                         color=color,
                         arrowhead="normal",
+                        penwidth="1.5",
+                    )
+                elif direction == "Variable":
+                    # CF.3.f.b — bundle Variable bundle parity with the
+                    # standalone branch above (double-arrow + dir=both
+                    # so the silhouette matches the purple semantic).
+                    g.edge(
+                        bundle_id, _role_id(leg_role),
+                        color=color,
+                        arrowhead="normalonormal",
+                        dir="both",
                         penwidth="1.5",
                     )
                 else:
