@@ -20,15 +20,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-
-      - name: Install uv
+      - name: Install uv (also installs Python 3.14 per .python-version)
+        # See ci.yml for the rationale on dropping actions/setup-python.
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+          python-version: "3.14"
 
       - name: Install docs dependencies (V.2 — uv sync from uv.lock)
         # BS.6 follow-up — mkdocs moved from [dev] to [prod] (since

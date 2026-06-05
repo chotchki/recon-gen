@@ -72,15 +72,19 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-
-      - name: Install uv
+      - name: Install uv (also installs Python 3.14 per .python-version)
+        # `actions/setup-python` was dropped 2026-06-05: on the WSL2
+        # self-hosted runner it only sees the OS-baked Python (e.g.
+        # 3.12) and can't download arbitrary versions. uv downloads
+        # python-build-standalone wheels for whatever .python-version
+        # pins (default `python-preference = managed`), so a
+        # 3.12-only host upgrades transparently. Hosted runners keep
+        # working the same way — uv prefers its own managed Python
+        # over the runner-provided one when the version mismatches.
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+          python-version: "3.14"
 
       - name: Install dependencies (uv sync from uv.lock)
         # `--extra dev --extra prod` matches the broadest extras any
@@ -421,15 +425,19 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-
-      - name: Install uv
+      - name: Install uv (also installs Python 3.14 per .python-version)
+        # `actions/setup-python` was dropped 2026-06-05: on the WSL2
+        # self-hosted runner it only sees the OS-baked Python (e.g.
+        # 3.12) and can't download arbitrary versions. uv downloads
+        # python-build-standalone wheels for whatever .python-version
+        # pins (default `python-preference = managed`), so a
+        # 3.12-only host upgrades transparently. Hosted runners keep
+        # working the same way — uv prefers its own managed Python
+        # over the runner-provided one when the version mismatches.
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+          python-version: "3.14"
 
       - name: Build wheel
         run: |
@@ -495,15 +503,19 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-
-      - name: Install uv
+      - name: Install uv (also installs Python 3.14 per .python-version)
+        # `actions/setup-python` was dropped 2026-06-05: on the WSL2
+        # self-hosted runner it only sees the OS-baked Python (e.g.
+        # 3.12) and can't download arbitrary versions. uv downloads
+        # python-build-standalone wheels for whatever .python-version
+        # pins (default `python-preference = managed`), so a
+        # 3.12-only host upgrades transparently. Hosted runners keep
+        # working the same way — uv prefers its own managed Python
+        # over the runner-provided one when the version mismatches.
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+          python-version: "3.14"
 
       - name: Install dependencies (just coverage tooling)
         run: uv sync --frozen --extra dev
