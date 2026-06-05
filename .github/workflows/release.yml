@@ -108,6 +108,16 @@ jobs:
             echo "::error::No CI run appeared for ${SHA} within 5 min — was main pushed?"
             exit 1
           fi
+          # Doc/plan paths that don't affect what tests would test. If a
+          # descendant's diff vs the tag is contained in this set, the
+          # descendant's green CI provably validates the tag's testable
+          # surface. Tight on purpose. Regex notes:
+          #   - `LICENSE([._-].*)?` — only LICENSE itself or LICENSE-foo /
+          #     LICENSE_foo / LICENSE.foo (NOT LICENSEsuffix/path.py — bare
+          #     `LICENSE.*` allowed dirs because `.` matches `/`).
+          #   - `docs/.+\.(md|rst|...)` — only known doc-format extensions
+          #     under docs/ (bare `docs/.*` allowed docs/conftest.py).
+          ALLOWLIST_RE='^(PLAN\.md|PLAN_ARCHIVE\.md|RELEASE_NOTES\.md|README\.md|CHANGELOG\.md|LICENSE([._-][^/]*)?|SPEC\.md|docs/.+\.(md|rst|txt|svg|png|jpg|jpeg|gif|webp|css))$'
           # Poll for completion: up to 90 min.
           for i in $(seq 1 90); do
             RESULT=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}" \
@@ -130,6 +140,104 @@ jobs:
               # for the operator to cut the tag in the first place.
               if [ "${CONCL}" = "skipped" ]; then
                 echo "CI on ${SHA} was skipped (Release commit gate, ci.yml line 59); release pipeline cleared."
+                exit 0
+              fi
+              # Rescue path for `cancelled`. v13.2.0 self-foot-shot
+              # (2026-06-04, BX backlog #251): operator pushed PLAN
+              # edits to main after tagging; `concurrency: cancel-in-
+              # progress` in ci.yml cancelled the tag SHA's CI; waiter
+              # treated cancelled as failure. Fix: accept cancelled IFF
+              # (a) tag SHA is ancestor of current main HEAD AND
+              # (b) some descendant on main has a green CI AND
+              # (c) the diff from tag to that descendant touches ONLY
+              #     doc/plan paths (allowlist above) — so the green CI
+              #     provably covers the tag's testable code surface.
+              # Any of (a)/(b)/(c) failing falls through to refuse.
+              if [ "${CONCL}" = "cancelled" ]; then
+                # gh api failures are FATAL here (refuses to publish on
+                # transient errors); no `|| true` suppression — a 5xx
+                # mid-rescue must NOT collapse into accept.
+                MAIN_HEAD=$(gh api "repos/${REPO}/commits/heads/main" --jq '.sha')
+                if [ -z "${MAIN_HEAD}" ] || [ "${MAIN_HEAD}" = "${SHA}" ]; then
+                  echo "::error::CI on ${SHA} cancelled; tag is current main HEAD or HEAD unresolvable. Refusing."
+                  exit 1
+                fi
+                # `compare/A...B` truncates: max 250 commits in `.commits[]`,
+                # max 300 files in `.files[]`. Don't `--paginate` (jq semantics
+                # over a stream of per-page objects are confusing); instead
+                # refuse loudly when truncation indicators trip.
+                CMP_JSON=$(gh api "repos/${REPO}/compare/${SHA}...${MAIN_HEAD}")
+                COMPARE_STATUS=$(echo "${CMP_JSON}" | jq -r '.status // empty')
+                if [ "${COMPARE_STATUS}" != "ahead" ]; then
+                  echo "::error::CI on ${SHA} cancelled; tag is not a strict ancestor of main HEAD (compare=${COMPARE_STATUS}). Refusing."
+                  exit 1
+                fi
+                TOTAL_COMMITS=$(echo "${CMP_JSON}" | jq -r '.total_commits')
+                COMMITS_IN_PAGE=$(echo "${CMP_JSON}" | jq -r '.commits | length')
+                if [ "${COMMITS_IN_PAGE}" -lt "${TOTAL_COMMITS}" ]; then
+                  echo "::error::CI on ${SHA} cancelled; compare truncated (${COMMITS_IN_PAGE} of ${TOTAL_COMMITS} commits). Refusing — can't fully verify."
+                  exit 1
+                fi
+                # Sort by committer date descending — `.commits` from compare
+                # is topological order, which equals chronological only on
+                # linear main; merge commits can reorder. Sort to be safe.
+                DESCENDANTS=$(echo "${CMP_JSON}" \
+                  | jq -r '[.commits[]] | sort_by(.commit.committer.date) | reverse | .[].sha')
+                RESCUE_SHA=""
+                ANY_PENDING=0
+                for D in ${DESCENDANTS}; do
+                  D_RUN_ID=$(gh api "repos/${REPO}/actions/runs?head_sha=${D}" \
+                    --jq '[.workflow_runs[] | select(.name == "CI")][0].id // empty')
+                  if [ -z "${D_RUN_ID}" ]; then
+                    echo "[rescue ${D:0:8}] no CI run, skipping"
+                    continue
+                  fi
+                  D_RESULT=$(gh api "repos/${REPO}/actions/runs/${D_RUN_ID}" \
+                    --jq '"\(.status) \(.conclusion)"')
+                  D_STATUS=$(echo "${D_RESULT}" | awk '{print $1}')
+                  D_CONCL=$(echo "${D_RESULT}" | awk '{print $2}')
+                  echo "[rescue ${D:0:8}] CI ${D_RUN_ID} status=${D_STATUS} conclusion=${D_CONCL}"
+                  if [ "${D_STATUS}" != "completed" ]; then
+                    ANY_PENDING=1
+                    continue
+                  fi
+                  if [ "${D_CONCL}" = "success" ] || [ "${D_CONCL}" = "skipped" ]; then
+                    RESCUE_SHA="${D}"
+                    break
+                  fi
+                done
+                if [ -z "${RESCUE_SHA}" ]; then
+                  if [ "${ANY_PENDING}" = "1" ]; then
+                    echo "[rescue] no descendant green yet (some still pending); will re-poll."
+                    sleep 60
+                    continue
+                  fi
+                  echo "::error::CI on ${SHA} cancelled; no descendant on main has green CI. Refusing."
+                  exit 1
+                fi
+                # Allowlist check done ENTIRELY in jq — no bash pipeline.
+                # Reason: filenames can contain newlines (legal in git), and
+                # a line-oriented `grep -vE` against `--jq '.[].filename'`
+                # output would split such filenames and let an allow-prefixed
+                # half mask a code-suffix half. jq's `test()` operates on the
+                # raw decoded string. Compare `.files` caps at 300; treat
+                # at-cap as "diff too large, refuse loudly."
+                RESCUE_CMP=$(gh api "repos/${REPO}/compare/${SHA}...${RESCUE_SHA}")
+                FILES_COUNT=$(echo "${RESCUE_CMP}" | jq -r '.files // [] | length')
+                if [ "${FILES_COUNT}" -ge 300 ]; then
+                  echo "::error::CI on ${SHA} cancelled; rescue diff has ${FILES_COUNT} files (>= 300 page cap). Refusing — can't fully verify."
+                  exit 1
+                fi
+                NON_ALLOWLIST=$(echo "${RESCUE_CMP}" \
+                  | jq -r --arg re "${ALLOWLIST_RE}" \
+                      '.files // [] | map(select(.filename | test($re) | not)) | .[].filename')
+                if [ -n "${NON_ALLOWLIST}" ]; then
+                  echo "::error::CI on ${SHA} cancelled; rescue SHA ${RESCUE_SHA:0:8} diff touches non-doc paths:"
+                  echo "${NON_ALLOWLIST}" | sed 's/^/  /'
+                  echo "::error::Refusing — the green CI on the rescue SHA does NOT validate the tag's code surface."
+                  exit 1
+                fi
+                echo "CI on ${SHA} cancelled, but rescue SHA ${RESCUE_SHA:0:8} is doc-equivalent and has green CI. Release pipeline cleared."
                 exit 0
               fi
               echo "::error::CI on ${SHA} concluded ${CONCL}; refusing to publish."
