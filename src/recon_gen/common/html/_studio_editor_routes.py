@@ -35,7 +35,7 @@ import dataclasses
 from collections.abc import Mapping
 from datetime import timedelta
 from html import escape
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal, TypeAlias, cast
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
@@ -92,6 +92,23 @@ FieldKind: TypeAlias = Literal[
 RailSubtype: TypeAlias = Literal["two_leg", "single_leg"]
 
 
+# CF.4.g — typed read-view rendering tag. Drives how
+# `_render_read_value` formats a field's value on the read card. The
+# Literal is closed; adding a new variant is a typed change that
+# pyright catches at every `_render_read_value` branch (per
+# `[feedback_invariants_in_types]`). Defaults to "text" — the safe
+# escape-into-plain-text path that worked pre-CF.4.g.
+RenderAs: TypeAlias = Literal[
+    "text",        # plain escape (default; current behavior)
+    "chip_list",   # tuple-of-identifiers → flex-wrap of <span> pills
+                   # with `break-keep` so underscored ids don't wrap
+                   # mid-token (operator complaint root cause)
+    "monospace",   # render in `font-mono` (id-like values)
+    "markdown",    # description-style prose, current `_render_read_value`
+                   # markdown path (kept for completeness)
+]
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class FieldSpec:
     """One form field's render instructions.
@@ -143,6 +160,12 @@ class FieldSpec:
     # in the rendered HTML. Limit to ``kind="textarea"`` per BF.0 L2
     # (free-form prose; description fields are the canonical use).
     preview_markdown: bool = False
+    # CF.4.g — typed read-view rendering tag (closed Literal). See
+    # ``RenderAs`` above. Default "text" preserves the pre-CF.4.g
+    # behavior; per-kind ``_FIELD_SPECS_BY_KIND`` opts list-of-id
+    # fields into "chip_list" so underscored identifiers stop
+    # wrapping mid-token in the value column (operator complaint).
+    render_as: RenderAs = "text"
 
 
 _ACCOUNT_FIELDS: tuple[FieldSpec, ...] = (
@@ -436,6 +459,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         ),
         kind="multi_select",
         select_from="rails_or_templates",
+        render_as="chip_list",  # CF.4.g — list of identifiers
     ),
     # X.4.f.11.6.5 — Tier-3 metadata_value_examples as a YAML block.
     # tuple[(Identifier, tuple[str, ...]), ...] — operator types/edits
@@ -591,6 +615,7 @@ _TRANSFER_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
         kind="multi_select",
         select_from="rails",
         required=True,
+        render_as="chip_list",  # CF.4.g — list of identifiers
     ),
     # AI.2.b — transfer_key: the metadata-key field names that group leg
     # firings into one shared Transfer. tuple[Identifier, ...], same
@@ -1807,9 +1832,38 @@ def _render_read_value(spec: FieldSpec, value: object) -> str:
                 )
             items.append(f"<li>{escape(name)}{tag}</li>")
         return f'<ul class="{ul_cls}">{"".join(items)}</ul>'
+    # CF.4.g — chip-list rendering for fields tagged
+    # `render_as="chip_list"`. Tuple-typed values become a flex-wrap
+    # of small chips with `break-keep` so underscored identifiers
+    # don't split mid-token in the value column (operator complaint
+    # root cause — the value-column widening alone wasn't enough
+    # because the underscore is a word-break opportunity for
+    # `break-words`).
+    if spec.render_as == "chip_list" and isinstance(value, tuple):
+        chip_items = cast("tuple[object, ...]", value)
+        if not chip_items:
+            return "—"
+        chip_cls = (
+            "inline-block px-1.5 py-0.5 text-xs rounded-sm "
+            "bg-link-tint text-accent border border-accent/25 "
+            "font-mono break-keep"
+        )
+        chips = "".join(
+            f'<span class="{chip_cls}">{escape(str(v))}</span>'
+            for v in chip_items
+        )
+        return (
+            f'<div class="flex flex-wrap gap-1 mt-0.5">{chips}</div>'
+        )
     raw = _value_to_input_str(value)
     if not raw:
         return "—"
+    # CF.4.g — `render_as="monospace"` wraps in a font-mono span so
+    # id-shaped values read as identifiers rather than prose.
+    if spec.render_as == "monospace":
+        return (
+            f'<span class="font-mono text-sm">{escape(raw)}</span>'
+        )
     # BF.9 follow-on (2026-05-25): render description / markdown
     # fields as HTML on the read card so an operator sees the
     # actual formatted prose (bullets, code spans, bold) — same
@@ -1892,15 +1946,32 @@ def _render_read_card_summary(
     # `event.stopPropagation()` so clicking Edit/Delete inside a
     # `<summary>` fires the action without expanding the parent
     # `<details>`. AH.4: omitted in demo-mode (routes 404'd there).
-    action_link_cls = (
-        "text-accent no-underline text-xs cursor-pointer hover:underline"
+    # CF.4.f (followup a) — promoted from bare text links to
+    # ghost-outline buttons; Delete uses danger-solid so destructive
+    # actions are visually distinct. Local Tailwind utility classes
+    # for now; Phase CI.3 will replace these with the typed `Button`
+    # primitive when it lands. CI.3 followup: search for
+    # `# CI.3 followup` in this codebase to find both call sites.
+    edit_btn_cls = (
+        # ghost-outline: accent border + accent text, fills on hover
+        "inline-flex items-center px-2 py-0.5 text-xs font-semibold "
+        "border border-accent text-accent rounded-sm "
+        "no-underline cursor-pointer "
+        "hover:bg-accent hover:text-white"
+    )
+    delete_btn_cls = (
+        # danger-solid: red fill, lighter on hover
+        "inline-flex items-center px-2 py-0.5 text-xs font-semibold "
+        "border border-danger text-danger rounded-sm "
+        "no-underline cursor-pointer "
+        "hover:bg-danger hover:text-white"
     )
     actions_html = "" if demo_mode else (
-        f'<div class="flex items-center gap-3 shrink-0">'
-        f'<a class="{action_link_cls}" '
+        f'<div class="flex items-center gap-2 shrink-0">'
+        f'<a class="{edit_btn_cls}" '
         f'href="/l2_shape/{kind}/{escape(entity_id)}/edit" '
         f'onclick="event.stopPropagation()">Edit</a>'
-        f'<a class="{action_link_cls}" '
+        f'<a class="{delete_btn_cls}" '
         f'hx-delete="/l2_shape/{kind}/{escape(entity_id)}" '
         f'hx-target="#{html_id}" hx-swap="outerHTML" '
         f'onclick="event.stopPropagation()" '

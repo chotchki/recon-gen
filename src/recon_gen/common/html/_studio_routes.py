@@ -542,6 +542,21 @@ def _render_home_page(
     }}
   </script>
 
+  <!-- CF.4.e (followup b): editor home h1 + purpose blurb. No
+       top-level create CTA per operator lock; per-section create
+       affordances stay the entry. -->
+  <section class="px-4 pt-4 max-w-7xl mx-auto" id="home-intro">
+    <h1 class="text-xl font-semibold m-0 text-primary-fg">
+      L2 Editor
+    </h1>
+    <p class="text-sm text-secondary-fg m-0 mt-1">
+      Browse and edit the institution's accounts, rails, transfer
+      templates, chains, and limit schedules. Click a card title to
+      focus the diagram on that entity; create a new one from the
+      per-section affordance below. Saves cascade across sections
+      automatically.
+    </p>
+  </section>
   <section class="px-4 pt-2 pb-8" id="home-entities">
     {sections_html}
   </section>
