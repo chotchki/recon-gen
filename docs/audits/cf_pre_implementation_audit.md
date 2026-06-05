@@ -105,8 +105,11 @@ CF.X-infra (shared banner + KPI banding + searchable-list)
 
 **Open questions for the operator:**
 - Color for partial-failure: amber or red? (Recommend amber — operator's selection mostly applied.)
+  - Comment: Agreed
 - Should the unified banner persist across navigations within /training/* or clear on first non-Apply interaction?
+  - Comment: I think it should persist as a last apply state whatever that was.
 - On Studio restart (in-memory summary lost, kv rows survive): render the banner from kv-only or skip until next Apply?
+  - Comment: If we can render easily let's do it and also make it the source of truth.
 
 ---
 
@@ -133,8 +136,13 @@ Threshold-banding primitives are **binary only**: `KPIValueZeroIndicator` + `KPI
 
 **Open questions for the operator:**
 - Substitute for cross-app drill: in-sheet detail table replica, sheet-description URL pointer, or both?
+  - Comment: I am willing to support definition of cross app drills that ONLY work on app2 and instead on quicksight provide some amount of verbiage that says (nicely) go look it up yourself.
 - Default thresholds for "Open Exceptions" (amber=1 / red=20 v0)?
+  - Comment: I'm okay to start there
 - Should the count obey the Exec date picker (30-day window) or use a fixed "last business day" frame?
+  - Comment: I'd align with the picker.
+
+
 
 ---
 
@@ -164,8 +172,13 @@ Threshold-banding primitives are **binary only**: `KPIValueZeroIndicator` + `KPI
 
 **Open questions for the operator:**
 - Selector with `<optgroup>` (simple, 90+ flat options) or typeahead (more JS)?
+  - Comment: typeahead, 90+ options is awful
 - SingleLegRail nodes: hide via CSS or server-side re-emit? Recommend CSS.
+  - Comment: server-side because the url should be the source of state truth
 - Default layer L1 (clean, minimal) or L2 (rails — the connectivity story)?
+  - Comment: I feel like L1 is less scary
+
+- Meta Comment: On a real implementation, this diagram is overwhelming even for me, its incredibly valueable but I am will to spend more time to try and find a way to make very large diagrams easier to understand.
 
 ---
 
@@ -188,8 +201,11 @@ Threshold-banding primitives are **binary only**: `KPIValueZeroIndicator` + `KPI
 
 **Open questions for the operator:**
 - What L2 was the cold-read at? sasquatch_pr or larger (customer/fuzz)?
+  - Comment: MUCH larger - 100+ rails, VERY heavy with transfer templates.
 - Carry the toolbar in the home-page embed (`?embed=1`) too, or only on the dedicated page?
+  - Comment: I have debated if the diagram should just be its own top level tab. I don't know if that is any easier or harder.
 - Per-card collapse-by-default for rail + transfer_template only, or universal?
+  - Comment: I think universal
 
 ---
 
@@ -215,8 +231,11 @@ Threshold-banding primitives are **binary only**: `KPIValueZeroIndicator` + `KPI
 
 **Open questions for the operator:**
 - Default Template: first declared (deterministic, ordering-dependent) or highest-volume in window (data-driven, extra dataset)?
+  - Comment: first declared is a reasonable starting point
 - Cap N = 30 OK or different value?
+  -  Comment: Probably reasonable
 - Does cap+default sufficiently address, or also need small-multiples? Recommend cap+default in CF.5; if v13.2.0 cold-read still flags, file CG follow-up.
+  - Comment: I agree, wait and see
 
 ---
 
@@ -240,8 +259,11 @@ Threshold-banding primitives are **binary only**: `KPIValueZeroIndicator` + `KPI
 
 **Open questions for the operator:**
 - Should the TextBox auto-hide once a non-sentinel picker value is committed, or stay always-visible? Recommend always-visible.
+  - Comment: Agree
 - Daily Statement: "Select an account to begin" enough, or mention role/date too? Recommend terse.
+  - Comment: This comes up repeatedly, I'm okay picking the first 1:1 Account that has a balance as a default pick
 - Enforce `Sheet.empty_state_hint → top-row TextBox` invariant in `__post_init__` or stay loose with a unit test? Recommend loose for now.
+  - Comment: Agreed
 
 ---
 
@@ -265,8 +287,11 @@ Five sub-items:
 
 **Open questions for the operator:**
 - U11 fix shape: status-badge + subtotal (cheapest) or split-table (clearest)?
+  - Comment: running balance I think would make troubleshooting the easiest I think, I'm willing to discuss
 - Net Money tolerance threshold (1% / 5%): industry-standard fiat or derive from L2 yaml `expected_net_tolerance_pct`?
+  - Comment: Willing to do industry standard for now.
 - App Info `latest_date_basis`: column-name literal or operator-friendly label ("end-of-day")?
+  - Comment: end-of-day
 
 ---
 
@@ -290,8 +315,11 @@ Five shared primitives multiple CF tasks would benefit from:
 
 **Open questions for the operator:**
 - New `common/html/_components.py` module vs add to `render.py`? Recommend new module.
+  - Comment: I'm supportive of splitting
 - CF.4 client-side JS filter (works to N≈500) vs htmx server-search (works to ∞)? Decide from CF.4's L2 entity-count answer.
+  - Coment: See my answer above, server search is likely
 - CF.7 tolerance band: KPI dataclass field (typed) vs subtitle copy (mutable)? Typed aligns with `[feedback_invariants_in_types]` but copy may suffice.
+  - Comment: Typed always make sure we include icons not just color so we are accessible
 
 ---
 
