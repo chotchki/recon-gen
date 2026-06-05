@@ -41,11 +41,30 @@
 ## Rendered output (operator cold-read)
 
 Files at:
-- `docs/audits/cf_3_diagram_spike/heavy_density_v1/{l1,l2,l3}.svg` (+ `.dot` for repro)
-- `docs/audits/cf_3_diagram_spike/sasquatch_pr_baseline/{l1,l2,l3}.svg`
-- per-instance `metrics.json` with the table above in machine-readable form
+- `docs/audits/cf_3_diagram_spike/heavy_density_v1/{l1,l2,l3}.{svg,png,dot}` (+ `metrics.json`)
+- `docs/audits/cf_3_diagram_spike/sasquatch_pr_baseline/{l1,l2,l3}.{svg,png,dot}` (+ `metrics.json`)
 
-Open the SVGs side-by-side in a browser at 100% zoom. The L3 pair is the critical comparison — that's where every CF.3.a→.f sub-task is going to land.
+SVG = vector, infinite zoom, browser viewer for detail inspection. PNG = bitmap, inline-renderable in markdown viewers + GitHub, embedded below for at-a-glance comparison. DOT = the source graphviz layout text for reproducibility (`dot -Tsvg <file.dot>` re-renders independently).
+
+### L1 — roles + control hierarchy
+
+| sasquatch_pr (baseline) | heavy_density_v1 |
+|---|---|
+| ![sasquatch L1](cf_3_diagram_spike/sasquatch_pr_baseline/l1.png) | ![heavy L1](cf_3_diagram_spike/heavy_density_v1/l1.png) |
+
+### L2 — adds rails + connectivity
+
+| sasquatch_pr | heavy_density_v1 |
+|---|---|
+| ![sasquatch L2](cf_3_diagram_spike/sasquatch_pr_baseline/l2.png) | ![heavy L2](cf_3_diagram_spike/heavy_density_v1/l2.png) |
+
+### L3 — full diagram (chains + templates) — **the critical comparison**
+
+| sasquatch_pr | heavy_density_v1 |
+|---|---|
+| ![sasquatch L3](cf_3_diagram_spike/sasquatch_pr_baseline/l3.png) | ![heavy L3](cf_3_diagram_spike/heavy_density_v1/l3.png) |
+
+The L3 pair is where every CF.3.a→.f sub-task lands. Open both at full resolution; the SVGs (`l3.svg` in each dir) let you zoom in further when the cold-read calls for it.
 
 ## Awaiting operator cold-read
 

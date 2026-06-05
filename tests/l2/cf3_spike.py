@@ -61,6 +61,7 @@ class LayerMetrics:
     layout_ms: float
     dot_bytes: int
     svg_bytes: int
+    png_bytes: int
 
 
 def _count_nodes_edges(svg_text: str) -> tuple[int, int]:
@@ -97,10 +98,13 @@ def _render_with_dot(
 
 def measure_layer(
     instance: Any, *, db_table_prefix: str, layer: int
-) -> tuple[LayerMetrics, str, bytes]:
+) -> tuple[LayerMetrics, str, bytes, bytes]:
     """Render one layer and capture metrics + outputs.
 
-    Returns ``(metrics, dot_source, svg_bytes)``.
+    Returns ``(metrics, dot_source, svg_bytes, png_bytes)``. SVG drives
+    crossings + dimension extraction (graphviz's verbose stderr is
+    format-independent, but SVG attributes are the easiest to parse).
+    PNG is rendered separately for inline-in-markdown previews.
     """
     g: Any = build_topology_graph_per_rail(
         instance, db_table_prefix=db_table_prefix, layer=layer,
@@ -111,6 +115,12 @@ def measure_layer(
     stderr_text = stderr_bytes.decode("utf-8", errors="replace")
     svg_text = svg_bytes.decode("utf-8", errors="replace")
     n_nodes, n_edges = _count_nodes_edges(svg_text)
+
+    # PNG render is a separate dot invocation. The layout_ms above is the
+    # cost of going DOT -> SVG; PNG re-runs layout (graphviz can't share
+    # state across formats). We report the SVG time only — that's what
+    # the operator-facing render path uses.
+    png_bytes, _, _ = _render_with_dot(dot_source, fmt="png")
 
     crossings_m = _CROSSINGS_RE.search(stderr_text)
     crossings = int(crossings_m.group(1)) if crossings_m else None
@@ -131,9 +141,11 @@ def measure_layer(
             layout_ms=round(layout_ms, 1),
             dot_bytes=len(dot_source.encode("utf-8")),
             svg_bytes=len(svg_bytes),
+            png_bytes=len(png_bytes),
         ),
         dot_source,
         svg_bytes,
+        png_bytes,
     )
 
 
@@ -162,16 +174,18 @@ def cmd_render(args: argparse.Namespace) -> int:
     layers: list[LayerMetrics] = []
     for layer in (1, 2, 3):
         print(f"[L{layer}] rendering...", flush=True)
-        m, dot_source, svg_bytes = measure_layer(
+        m, dot_source, svg_bytes, png_bytes = measure_layer(
             instance, db_table_prefix=prefix, layer=layer,
         )
         (out_dir / f"l{layer}.svg").write_bytes(svg_bytes)
+        (out_dir / f"l{layer}.png").write_bytes(png_bytes)
         (out_dir / f"l{layer}.dot").write_text(dot_source)
         layers.append(m)
         print(
             f"[L{layer}]   nodes={m.n_nodes:>4d} edges={m.n_edges:>4d} "
             f"crossings={m.crossings!s:>5s} "
             f"size={m.width_pt}x{m.height_pt}pt "
+            f"svg={m.svg_bytes//1024}KB png={m.png_bytes//1024}KB "
             f"layout={m.layout_ms:.0f}ms",
         )
 
