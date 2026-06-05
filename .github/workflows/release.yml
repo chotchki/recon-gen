@@ -120,6 +120,18 @@ jobs:
                 echo "CI passed on ${SHA}; release pipeline cleared."
                 exit 0
               fi
+              # ci.yml::test-everything intentionally skips when the
+              # commit message starts with "Release v" (so push-CI
+              # doesn't duplicate this Release workflow's pipeline).
+              # The downstream jobs all `needs: test-everything`, so
+              # the whole CI run reports `skipped` for Release
+              # commits. That's a deliberate green, not a failure —
+              # the LAST pre-Release CI on main must have been green
+              # for the operator to cut the tag in the first place.
+              if [ "${CONCL}" = "skipped" ]; then
+                echo "CI on ${SHA} was skipped (Release commit gate, ci.yml line 59); release pipeline cleared."
+                exit 0
+              fi
               echo "::error::CI on ${SHA} concluded ${CONCL}; refusing to publish."
               exit 1
             fi
