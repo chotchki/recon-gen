@@ -346,12 +346,15 @@ def test_topology_graph_template_member_edge_carries_xor_group_metadata() -> Non
     assert "xor_group_index" not in by_target["rail__Slow"].metadata
 
 
-def test_topology_graphviz_per_rail_emits_xor_subcluster() -> None:
-    """AB.3.8 — the graphviz per-rail renderer wraps XOR-grouped
-    leg_rails in a nested sub-cluster inside the template cluster.
-    The sub-cluster's label is "XOR group N (exactly 1 fires)" so
-    the analyst can see the mutual-exclusion contract directly on
-    the topology diagram.
+def test_topology_graphviz_per_rail_signals_xor_membership() -> None:
+    """AB.3.8 (CF.3.f-revised) — the graphviz per-rail renderer signals
+    XOR-group membership on each member leg-rail's row inside the
+    template's composite HTML-table label. Pre-CF.3.f this was a
+    nested sub-cluster with a "XOR group N (exactly 1 fires)" boundary;
+    post-CF.3.f the template is one composite node (no cluster, no
+    nested sub-cluster) and XOR-membership is signaled by a tinted
+    background fill (``_TEMPLATE_XOR_FILL`` = #ffe1c2) on the
+    member rows.
 
     Skipped if the ``graphviz`` package isn't installed in the test
     env (it's a soft dep — typed projection covers the contract).
@@ -359,15 +362,31 @@ def test_topology_graphviz_per_rail_emits_xor_subcluster() -> None:
     import pytest
     graphviz = pytest.importorskip("graphviz")
     del graphviz  # only used as availability check
-    from recon_gen.common.l2.topology import build_topology_graph_per_rail
+    from recon_gen.common.l2.topology import (
+        _TEMPLATE_LEG_FILL,
+        _TEMPLATE_XOR_FILL,
+        build_topology_graph_per_rail,
+    )
     inst = load_instance(FIXTURES / "spec_example.yaml")
     g = build_topology_graph_per_rail(
         inst, db_table_prefix=DEFAULT_PREFIX,
     )
     src = g.source
-    # spec_example's SettlementTimingCycle declares one XOR group.
-    assert "cluster_tmpl_SettlementTimingCycle_xor_0" in src
-    assert "XOR group 1 (exactly 1 fires)" in src
+    # SettlementTimingCycle's HTML-table label exists as one composite
+    # node (no cluster boundary, no inner component node).
+    assert "tmpl__SettlementTimingCycle" in src
+    assert "cluster_tmpl_SettlementTimingCycle" not in src  # no cluster post-CF.3.f
+    # XOR-group rows use the tinted XOR fill; non-XOR rows use the
+    # plain leg fill. Both colors appear in the source (spec_example
+    # has at least one XOR group + at least one non-grouped leg row).
+    assert _TEMPLATE_XOR_FILL.lstrip("#").lower() in src.lower(), (
+        "expected XOR-group tinted background fill to appear in the "
+        "template's HTML-table label for the XOR-group member rows"
+    )
+    assert _TEMPLATE_LEG_FILL.lstrip("#").lower() in src.lower(), (
+        "expected the standard leg-row fill to appear too (template "
+        "should have both XOR and non-XOR leg rows in spec_example)"
+    )
 
 
 def test_topology_graph_chain_edge_carries_fan_in_metadata() -> None:

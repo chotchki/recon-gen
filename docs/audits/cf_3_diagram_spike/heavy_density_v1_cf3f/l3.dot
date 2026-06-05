@@ -1,0 +1,427 @@
+// L2 topology (rails as nodes) for instance 'spike'
+digraph l2_topology_per_rail_spike {
+	mclimit=10.0 nodesep=0.15 overlap=false rankdir=LR ranksep=0.35 splines=polyline
+	node [fontname=Helvetica fontsize=10 style="filled,rounded"]
+	edge [fontname=Helvetica fontsize=9]
+	role__ExternalRole_00 [label=ExternalRole_00 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalRole_01 [label=ExternalRole_01 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalRole_03 [label=ExternalRole_03 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalRole_04 [label=ExternalRole_04 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalRole_05 [label=ExternalRole_05 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalRole_06 [label=ExternalRole_06 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalRole_07 [label=ExternalRole_07 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalRole_08 [label=ExternalRole_08 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalRole_09 [label=ExternalRole_09 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalRole_10 [label=ExternalRole_10 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalRole_11 [label=ExternalRole_11 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalRole_12 [label=ExternalRole_12 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalRole_13 [label=ExternalRole_13 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalRole_14 [label=ExternalRole_14 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalRole_15 [label=ExternalRole_15 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalRole_16 [label=ExternalRole_16 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalRole_17 [label=ExternalRole_17 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalRole_18 [label=ExternalRole_18 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalRole_19 [label=ExternalRole_19 color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__InternalRole_00 [label=InternalRole_00 color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__InternalRole_01 [label=InternalRole_01 color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__InternalRole_02 [label=InternalRole_02 color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__InternalRole_03 [label=InternalRole_03 color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__InternalRole_04 [label=InternalRole_04 color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__InternalRole_05 [label=InternalRole_05 color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__InternalRole_06 [label=InternalRole_06 color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__InternalRole_07 [label=InternalRole_07 color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__TemplateRole_00 [label=TemplateRole_00 color="#1f4e79" fillcolor="#e8f0ff" fontcolor="#1f4e79" shape=folder]
+	role__TemplateRole_01 [label=TemplateRole_01 color="#1f4e79" fillcolor="#e8f0ff" fontcolor="#1f4e79" shape=folder]
+	role__TemplateRole_02 [label=TemplateRole_02 color="#1f4e79" fillcolor="#e8f0ff" fontcolor="#1f4e79" shape=folder]
+	role__TemplateRole_03 [label=TemplateRole_03 color="#1f4e79" fillcolor="#e8f0ff" fontcolor="#1f4e79" shape=folder]
+	tmpl__TransferTemplate_00 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_00</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_04" ALIGN="LEFT">Rail_04  (↔)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_67" ALIGN="LEFT">Rail_67  (D)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_96" ALIGN="LEFT">Rail_96  (D)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_01 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_01</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_23" ALIGN="LEFT">Rail_23  (↔)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_02 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_02</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_36" ALIGN="LEFT">Rail_36  (D)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_78" ALIGN="LEFT">Rail_78  (↔)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_03 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_03</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_47" ALIGN="LEFT">Rail_47  (D)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_04 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_04</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_25" ALIGN="LEFT">Rail_25  (↔)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_05 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_05</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_13" ALIGN="LEFT">Rail_13  (↔)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_66" ALIGN="LEFT">Rail_66  (↔)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_93" ALIGN="LEFT">Rail_93  (C)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_06 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_06</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_11" ALIGN="LEFT">Rail_11  (D)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_28" ALIGN="LEFT">Rail_28  (↔)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_07 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_07</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_49" ALIGN="LEFT">Rail_49  (↔)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_08 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_08</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_18" ALIGN="LEFT">Rail_18  (↔)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_42" ALIGN="LEFT">Rail_42  (D)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_84" ALIGN="LEFT">Rail_84  (C)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_09 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_09</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_57" ALIGN="LEFT">Rail_57  (↔)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_60" ALIGN="LEFT">Rail_60  (C)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_78" ALIGN="LEFT">Rail_78  (↔)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_10 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_10</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_67" ALIGN="LEFT">Rail_67  (D)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_77" ALIGN="LEFT">Rail_77  (↔)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_95" ALIGN="LEFT">Rail_95  (D)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_11 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_11</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_53" ALIGN="LEFT">Rail_53  (C)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_12 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_12</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_30" ALIGN="LEFT">Rail_30  (D)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_65" ALIGN="LEFT">Rail_65  (↔)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_73" ALIGN="LEFT">Rail_73  (↔)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_13 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_13</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_23" ALIGN="LEFT">Rail_23  (↔)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_53" ALIGN="LEFT">Rail_53  (C)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_86" ALIGN="LEFT">Rail_86  (D)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_14 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_14</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_02" ALIGN="LEFT">Rail_02  (↔)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_64" ALIGN="LEFT">Rail_64  (D)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_70" ALIGN="LEFT">Rail_70  (C)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_15 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_15</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_02" ALIGN="LEFT">Rail_02  (↔)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_97" ALIGN="LEFT">Rail_97  (↔)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_16 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_16</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_42" ALIGN="LEFT">Rail_42  (D)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_96" ALIGN="LEFT">Rail_96  (D)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_98" ALIGN="LEFT">Rail_98  (↔)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_17 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_17</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_89" ALIGN="LEFT">Rail_89  (↔)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_18 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_18</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_93" ALIGN="LEFT">Rail_93  (C)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_19 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_19</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_40" ALIGN="LEFT">Rail_40  (↔)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_20 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_20</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_06" ALIGN="LEFT">Rail_06  (↔)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_45" ALIGN="LEFT">Rail_45  (C)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_21 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_21</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_43" ALIGN="LEFT">Rail_43  (↔)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_49" ALIGN="LEFT">Rail_49  (↔)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_56" ALIGN="LEFT">Rail_56  (D)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_22 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_22</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_10" ALIGN="LEFT">Rail_10  (↔)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_34" ALIGN="LEFT">Rail_34  (D)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_95" ALIGN="LEFT">Rail_95  (D)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_23 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_23</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_10" ALIGN="LEFT">Rail_10  (↔)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_24 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_24</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_90" ALIGN="LEFT">Rail_90  (D)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_25 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_25</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_55" ALIGN="LEFT">Rail_55  (C)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_78" ALIGN="LEFT">Rail_78  (↔)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_26 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_26</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_65" ALIGN="LEFT">Rail_65  (↔)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_97" ALIGN="LEFT">Rail_97  (↔)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_27 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_27</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;, &#x27;key_1&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_83" ALIGN="LEFT">Rail_83  (D)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_28 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_28</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_47" ALIGN="LEFT">Rail_47  (D)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_56" ALIGN="LEFT">Rail_56  (D)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_29 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_29</B><BR/><FONT POINT-SIZE="8">(&#x27;key_0&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_Rail_14" ALIGN="LEFT">Rail_14  (D)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__TransferTemplate_FuzzXor [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>TransferTemplate_FuzzXor</B><BR/><FONT POINT-SIZE="8">(&#x27;fuzz_xor_key&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffe1c2" PORT="leg_FuzzXorVariantAuto" ALIGN="LEFT">FuzzXorVariantAuto  (V)</TD></TR>
+  <TR><TD BGCOLOR="#ffe1c2" PORT="leg_FuzzXorVariantStandard" ALIGN="LEFT">FuzzXorVariantStandard  (V)</TD></TR>
+  <TR><TD BGCOLOR="#ffe1c2" PORT="leg_FuzzXorVariantSlow" ALIGN="LEFT">FuzzXorVariantSlow  (V)</TD></TR>
+</TABLE>> shape=plaintext]
+	rail__Rail_00 [label=Rail_00 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_03 [label=Rail_03 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=cds style=filled]
+	rail__Rail_05 [label=Rail_05 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_07 [label=Rail_07 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=cds style=filled]
+	rail__Rail_08 [label=Rail_08 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_12 [label=Rail_12 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_16 [label=Rail_16 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_17 [label=Rail_17 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=cds style=filled]
+	rail__Rail_19 [label=Rail_19 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_20 [label=Rail_20 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=cds style=filled]
+	rail__Rail_22 [label=Rail_22 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_24 [label=Rail_24 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_26 [label=Rail_26 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_29 [label=Rail_29 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=cds style=filled]
+	rail__Rail_31 [label=Rail_31 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_32 [label=Rail_32 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_33 [label=Rail_33 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_35 [label=Rail_35 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_37 [label=Rail_37 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_38 [label=Rail_38 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=cds style=filled]
+	rail__Rail_41 [label=Rail_41 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_44 [label=Rail_44 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=cds style=filled]
+	rail__Rail_46 [label=Rail_46 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_48 [label=Rail_48 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_50 [label=Rail_50 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=cds style=filled]
+	rail__Rail_51 [label=Rail_51 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=cds style=filled]
+	rail__Rail_54 [label=Rail_54 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=cds style=filled]
+	rail__Rail_59 [label=Rail_59 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_61 [label=Rail_61 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_63 [label=Rail_63 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_68 [label=Rail_68 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=cds style=filled]
+	rail__Rail_71 [label=Rail_71 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=cds style=filled]
+	rail__Rail_72 [label=Rail_72 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=cds style=filled]
+	rail__Rail_74 [label=Rail_74 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_75 [label=Rail_75 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_76 [label=Rail_76 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=cds style=filled]
+	rail__Rail_79 [label=Rail_79 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=cds style=filled]
+	rail__Rail_80 [label=Rail_80 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=cds style=filled]
+	rail__Rail_81 [label=Rail_81 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cylinder style=filled]
+	rail__Rail_82 [label=Rail_82 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=cds style=filled]
+	rail__Rail_87 [label=Rail_87 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_88 [label=Rail_88 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cylinder style=filled]
+	rail__Rail_91 [label=Rail_91 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_92 [label=Rail_92 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__Rail_94 [label=Rail_94 color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__bundle_0 [label="3 rails:
+Rail_01
+Rail_15
+Rail_62" color="#666666" fillcolor="#e8e8e8" fontcolor="#666666" peripheries=1 shape=cds style=filled]
+	rail__bundle_1 [label="2 rails:
+Rail_09
+Rail_21" color="#666666" fillcolor="#e8e8e8" fontcolor="#666666" peripheries=1 shape=cds style=filled]
+	rail__bundle_2 [label="2 rails:
+Rail_27
+Rail_85" color="#666666" fillcolor="#e8e8e8" fontcolor="#666666" peripheries=1 shape=cds style=filled]
+	rail__bundle_3 [label="2 rails:
+Rail_39
+Rail_99" color="#666666" fillcolor="#e8e8e8" fontcolor="#666666" peripheries=1 shape=cds style=filled]
+	rail__bundle_4 [label="3 rails:
+Rail_52
+Rail_58
+Rail_69" color="#666666" fillcolor="#e8e8e8" fontcolor="#666666" peripheries=1 shape=cds style=filled]
+	role__InternalRole_02 -> rail__Rail_00 [arrowhead=normal color="#d95f02"]
+	rail__Rail_00 -> role__ExternalRole_12 [arrowhead=normal color="#1b9e77"]
+	role__InternalRole_03 -> tmpl__TransferTemplate_15:leg_Rail_02:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_15:leg_Rail_02:e -> role__InternalRole_07 [arrowhead=normal color="#1b9e77"]
+	rail__Rail_03 -> role__ExternalRole_09 [arrowhead=normal color="#1b9e77"]
+	role__InternalRole_06 -> tmpl__TransferTemplate_00:leg_Rail_04:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_00:leg_Rail_04:e -> role__ExternalRole_11 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_12 -> rail__Rail_05 [arrowhead=normal color="#d95f02"]
+	rail__Rail_05 -> role__TemplateRole_03 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_00 -> tmpl__TransferTemplate_20:leg_Rail_06:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_20:leg_Rail_06:e -> role__TemplateRole_02 [arrowhead=normal color="#1b9e77"]
+	rail__Rail_07 -> role__ExternalRole_17 [arrowhead=normal color="#1b9e77"]
+	role__InternalRole_04 -> rail__Rail_08 [arrowhead=normal color="#d95f02"]
+	rail__Rail_08 -> role__InternalRole_03 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_04 -> tmpl__TransferTemplate_23:leg_Rail_10:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_23:leg_Rail_10:e -> role__ExternalRole_04 [arrowhead=normal color="#1b9e77"]
+	role__InternalRole_05 -> tmpl__TransferTemplate_06:leg_Rail_11:w [arrowhead=normal color="#d95f02"]
+	role__ExternalRole_16 -> rail__Rail_12 [arrowhead=normal color="#d95f02"]
+	rail__Rail_12 -> role__ExternalRole_08 [arrowhead=normal color="#1b9e77"]
+	role__InternalRole_03 -> tmpl__TransferTemplate_05:leg_Rail_13:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_05:leg_Rail_13:e -> role__ExternalRole_12 [arrowhead=normal color="#1b9e77"]
+	role__InternalRole_04 -> tmpl__TransferTemplate_29:leg_Rail_14:w [arrowhead=normal color="#d95f02"]
+	role__InternalRole_04 -> rail__Rail_16 [arrowhead=normal color="#d95f02"]
+	rail__Rail_16 -> role__ExternalRole_07 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_11 -> rail__Rail_17 [arrowhead=normal color="#d95f02"]
+	role__ExternalRole_08 -> tmpl__TransferTemplate_08:leg_Rail_18:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_08:leg_Rail_18:e -> role__InternalRole_03 [arrowhead=normal color="#1b9e77"]
+	role__InternalRole_04 -> rail__Rail_19 [arrowhead=normal color="#d95f02"]
+	rail__Rail_19 -> role__ExternalRole_01 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_01 -> rail__Rail_20 [arrowhead=normal color="#d95f02"]
+	role__ExternalRole_04 -> rail__Rail_22 [arrowhead=normal color="#d95f02"]
+	rail__Rail_22 -> role__ExternalRole_17 [arrowhead=normal color="#1b9e77"]
+	role__InternalRole_02 -> tmpl__TransferTemplate_13:leg_Rail_23:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_13:leg_Rail_23:e -> role__InternalRole_06 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_15 -> rail__Rail_24 [arrowhead=normal color="#d95f02"]
+	rail__Rail_24 -> role__ExternalRole_19 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_00 -> tmpl__TransferTemplate_04:leg_Rail_25:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_04:leg_Rail_25:e -> role__ExternalRole_04 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_12 -> rail__Rail_26 [arrowhead=normal color="#d95f02"]
+	rail__Rail_26 -> role__TemplateRole_01 [arrowhead=normal color="#1b9e77"]
+	role__TemplateRole_03 -> tmpl__TransferTemplate_06:leg_Rail_28:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_06:leg_Rail_28:e -> role__ExternalRole_17 [arrowhead=normal color="#1b9e77"]
+	role__TemplateRole_01 -> rail__Rail_29 [arrowhead=normal color="#d95f02"]
+	role__TemplateRole_00 -> tmpl__TransferTemplate_12:leg_Rail_30:w [arrowhead=normal color="#d95f02"]
+	role__InternalRole_04 -> rail__Rail_31 [arrowhead=normal color="#d95f02"]
+	rail__Rail_31 -> role__ExternalRole_10 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_18 -> rail__Rail_32 [arrowhead=normal color="#d95f02"]
+	rail__Rail_32 -> role__InternalRole_03 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_18 -> rail__Rail_33 [arrowhead=normal color="#d95f02"]
+	rail__Rail_33 -> role__ExternalRole_06 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_17 -> tmpl__TransferTemplate_22:leg_Rail_34:w [arrowhead=normal color="#d95f02"]
+	role__InternalRole_05 -> rail__Rail_35 [arrowhead=normal color="#d95f02"]
+	rail__Rail_35 -> role__TemplateRole_02 [arrowhead=normal color="#1b9e77"]
+	role__TemplateRole_02 -> tmpl__TransferTemplate_02:leg_Rail_36:w [arrowhead=normal color="#d95f02"]
+	role__ExternalRole_11 -> rail__Rail_37 [arrowhead=normal color="#d95f02"]
+	rail__Rail_37 -> role__ExternalRole_16 [arrowhead=normal color="#1b9e77"]
+	rail__Rail_38 -> role__InternalRole_02 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_12 -> tmpl__TransferTemplate_19:leg_Rail_40:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_19:leg_Rail_40:e -> role__ExternalRole_07 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_08 -> rail__Rail_41 [arrowhead=normal color="#d95f02"]
+	rail__Rail_41 -> role__ExternalRole_13 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_10 -> tmpl__TransferTemplate_16:leg_Rail_42:w [arrowhead=normal color="#d95f02"]
+	role__ExternalRole_09 -> tmpl__TransferTemplate_21:leg_Rail_43:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_21:leg_Rail_43:e -> role__ExternalRole_11 [arrowhead=normal color="#1b9e77"]
+	rail__Rail_44 -> role__TemplateRole_02 [arrowhead=normal color="#1b9e77"]
+	tmpl__TransferTemplate_20:leg_Rail_45:e -> role__ExternalRole_03 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_03 -> rail__Rail_46 [arrowhead=normal color="#d95f02"]
+	rail__Rail_46 -> role__InternalRole_03 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_07 -> tmpl__TransferTemplate_28:leg_Rail_47:w [arrowhead=normal color="#d95f02"]
+	role__InternalRole_03 -> rail__Rail_48 [arrowhead=normal color="#d95f02"]
+	rail__Rail_48 -> role__InternalRole_06 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_06 -> tmpl__TransferTemplate_21:leg_Rail_49:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_21:leg_Rail_49:e -> role__ExternalRole_08 [arrowhead=normal color="#1b9e77"]
+	role__InternalRole_03 -> rail__Rail_50 [arrowhead=normal color="#d95f02"]
+	role__TemplateRole_00 -> rail__Rail_51 [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_13:leg_Rail_53:e -> role__ExternalRole_18 [arrowhead=normal color="#1b9e77"]
+	rail__Rail_54 -> role__InternalRole_05 [arrowhead=normal color="#1b9e77"]
+	tmpl__TransferTemplate_25:leg_Rail_55:e -> role__ExternalRole_15 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_11 -> tmpl__TransferTemplate_28:leg_Rail_56:w [arrowhead=normal color="#d95f02"]
+	role__ExternalRole_18 -> tmpl__TransferTemplate_09:leg_Rail_57:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_09:leg_Rail_57:e -> role__TemplateRole_02 [arrowhead=normal color="#1b9e77"]
+	role__TemplateRole_01 -> rail__Rail_59 [arrowhead=normal color="#d95f02"]
+	rail__Rail_59 -> role__ExternalRole_12 [arrowhead=normal color="#1b9e77"]
+	tmpl__TransferTemplate_09:leg_Rail_60:e -> role__ExternalRole_00 [arrowhead=normal color="#1b9e77"]
+	role__TemplateRole_02 -> rail__Rail_61 [arrowhead=normal color="#d95f02"]
+	rail__Rail_61 -> role__ExternalRole_08 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_10 -> rail__Rail_63 [arrowhead=normal color="#d95f02"]
+	rail__Rail_63 -> role__ExternalRole_14 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_01 -> tmpl__TransferTemplate_14:leg_Rail_64:w [arrowhead=normal color="#d95f02"]
+	role__InternalRole_04 -> tmpl__TransferTemplate_26:leg_Rail_65:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_26:leg_Rail_65:e -> role__TemplateRole_00 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_10 -> tmpl__TransferTemplate_05:leg_Rail_66:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_05:leg_Rail_66:e -> role__InternalRole_01 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_06 -> tmpl__TransferTemplate_10:leg_Rail_67:w [arrowhead=normal color="#d95f02"]
+	rail__Rail_68 -> role__ExternalRole_11 [arrowhead=normal color="#1b9e77"]
+	tmpl__TransferTemplate_14:leg_Rail_70:e -> role__ExternalRole_17 [arrowhead=normal color="#1b9e77"]
+	role__TemplateRole_02 -> rail__Rail_71 [arrowhead=normal color="#d95f02"]
+	role__ExternalRole_00 -> rail__Rail_72 [arrowhead=normal color="#d95f02"]
+	role__InternalRole_06 -> tmpl__TransferTemplate_12:leg_Rail_73:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_12:leg_Rail_73:e -> role__TemplateRole_03 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_09 -> rail__Rail_74 [arrowhead=normal color="#d95f02"]
+	rail__Rail_74 -> role__ExternalRole_04 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_05 -> rail__Rail_75 [arrowhead=normal color="#d95f02"]
+	rail__Rail_75 -> role__InternalRole_04 [arrowhead=normal color="#1b9e77"]
+	role__InternalRole_01 -> rail__Rail_76 [arrowhead=normal color="#d95f02"]
+	role__TemplateRole_02 -> tmpl__TransferTemplate_10:leg_Rail_77:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_10:leg_Rail_77:e -> role__TemplateRole_00 [arrowhead=normal color="#1b9e77"]
+	role__InternalRole_03 -> tmpl__TransferTemplate_25:leg_Rail_78:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_25:leg_Rail_78:e -> role__TemplateRole_02 [arrowhead=normal color="#1b9e77"]
+	rail__Rail_79 -> role__ExternalRole_10 [arrowhead=normal color="#1b9e77"]
+	role__TemplateRole_00 -> rail__Rail_80 [arrowhead=normal color="#d95f02"]
+	role__InternalRole_02 -> rail__Rail_81 [arrowhead=normal color="#d95f02"]
+	rail__Rail_81 -> role__InternalRole_05 [arrowhead=normal color="#1b9e77"]
+	rail__Rail_82 -> role__InternalRole_03 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_05 -> tmpl__TransferTemplate_27:leg_Rail_83:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_08:leg_Rail_84:e -> role__InternalRole_01 [arrowhead=normal color="#1b9e77"]
+	role__InternalRole_03 -> tmpl__TransferTemplate_13:leg_Rail_86:w [arrowhead=normal color="#d95f02"]
+	role__ExternalRole_14 -> rail__Rail_87 [arrowhead=normal color="#d95f02"]
+	rail__Rail_87 -> role__ExternalRole_19 [arrowhead=normal color="#1b9e77"]
+	role__InternalRole_00 -> rail__Rail_88 [arrowhead=normal color="#d95f02"]
+	rail__Rail_88 -> role__InternalRole_01 [arrowhead=normal color="#1b9e77"]
+	role__InternalRole_00 -> tmpl__TransferTemplate_17:leg_Rail_89:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_17:leg_Rail_89:e -> role__TemplateRole_03 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_17 -> tmpl__TransferTemplate_24:leg_Rail_90:w [arrowhead=normal color="#d95f02"]
+	role__TemplateRole_01 -> rail__Rail_91 [arrowhead=normal color="#d95f02"]
+	rail__Rail_91 -> role__ExternalRole_15 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_04 -> rail__Rail_92 [arrowhead=normal color="#d95f02"]
+	rail__Rail_92 -> role__ExternalRole_14 [arrowhead=normal color="#1b9e77"]
+	tmpl__TransferTemplate_18:leg_Rail_93:e -> role__TemplateRole_01 [arrowhead=normal color="#1b9e77"]
+	role__TemplateRole_02 -> rail__Rail_94 [arrowhead=normal color="#d95f02"]
+	rail__Rail_94 -> role__TemplateRole_00 [arrowhead=normal color="#1b9e77"]
+	role__TemplateRole_00 -> tmpl__TransferTemplate_22:leg_Rail_95:w [arrowhead=normal color="#d95f02"]
+	role__ExternalRole_03 -> tmpl__TransferTemplate_16:leg_Rail_96:w [arrowhead=normal color="#d95f02"]
+	role__ExternalRole_13 -> tmpl__TransferTemplate_26:leg_Rail_97:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_26:leg_Rail_97:e -> role__InternalRole_03 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_11 -> tmpl__TransferTemplate_16:leg_Rail_98:w [arrowhead=normal color="#d95f02"]
+	tmpl__TransferTemplate_16:leg_Rail_98:e -> role__ExternalRole_17 [arrowhead=normal color="#1b9e77"]
+	role__ExternalRole_08 -> tmpl__TransferTemplate_FuzzXor:leg_FuzzXorVariantAuto:w [arrowhead=normal color="#7570b3"]
+	role__ExternalRole_08 -> tmpl__TransferTemplate_FuzzXor:leg_FuzzXorVariantStandard:w [arrowhead=normal color="#7570b3"]
+	role__ExternalRole_08 -> tmpl__TransferTemplate_FuzzXor:leg_FuzzXorVariantSlow:w [arrowhead=normal color="#7570b3"]
+	rail__bundle_0 -> role__ExternalRole_07 [arrowhead=normal color="#1b9e77" penwidth=1.5]
+	rail__bundle_1 -> role__InternalRole_06 [arrowhead=normal color="#1b9e77" penwidth=1.5]
+	role__InternalRole_05 -> rail__bundle_2 [arrowhead=normal color="#d95f02" penwidth=1.5]
+	rail__bundle_3 -> role__ExternalRole_19 [arrowhead=normal color="#1b9e77" penwidth=1.5]
+	role__ExternalRole_09 -> rail__bundle_4 [arrowhead=normal color="#d95f02" penwidth=1.5]
+	rail__Rail_32 -> rail__Rail_82 [label="chain
+(required)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	tmpl__TransferTemplate_08:leg_Rail_18:e -> tmpl__TransferTemplate_14 [label="chain
+(required)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	tmpl__TransferTemplate_24:leg_Rail_90:e -> rail__Rail_32 [label="chain
+(required)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	rail__Rail_48 -> rail__Rail_33 [label="chain
+(required)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	tmpl__TransferTemplate_11 -> tmpl__TransferTemplate_27 [label="chain
+(required)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	tmpl__TransferTemplate_29:leg_Rail_14:e -> rail__Rail_31 [label="chain
+(required)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	tmpl__TransferTemplate_16:leg_Rail_42:e -> tmpl__TransferTemplate_10:leg_Rail_77:w [label="chain
+(required)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	tmpl__TransferTemplate_13:leg_Rail_23:e -> rail__Rail_41 [label="chain
+(required)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	rail__Rail_46 -> tmpl__TransferTemplate_09:leg_Rail_57:w [label="chain
+(required)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	rail__Rail_51 -> rail__Rail_72 [label="chain
+(required)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	tmpl__TransferTemplate_15 -> rail__Rail_20 [label="chain
+(required)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	tmpl__TransferTemplate_02:leg_Rail_36:e -> rail__Rail_50 [label="chain
+(required)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	role__TemplateRole_00 -> role__InternalRole_05 [label=controls arrowhead=onormal color="#888888" fontcolor="#888888" style=dashed]
+	role__TemplateRole_01 -> role__InternalRole_03 [label=controls arrowhead=onormal color="#888888" fontcolor="#888888" style=dashed]
+	role__TemplateRole_02 -> role__InternalRole_02 [label=controls arrowhead=onormal color="#888888" fontcolor="#888888" style=dashed]
+	role__TemplateRole_03 -> role__InternalRole_02 [label=controls arrowhead=onormal color="#888888" fontcolor="#888888" style=dashed]
+}

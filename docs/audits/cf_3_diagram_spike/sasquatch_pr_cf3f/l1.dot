@@ -1,0 +1,25 @@
+// L2 topology (rails as nodes) for instance 'spike'
+digraph l2_topology_per_rail_spike {
+	mclimit=10.0 nodesep=0.15 overlap=false rankdir=LR ranksep=0.35 splines=polyline
+	node [fontname=Helvetica fontsize=10 style="filled,rounded"]
+	edge [fontname=Helvetica fontsize=9]
+	role__ACHOrigSettlement [label=ACHOrigSettlement color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__CashDueFRB [label=CashDueFRB color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__ConcentrationMaster [label=ConcentrationMaster color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__CustomerDDA [label=CustomerDDA color="#1f4e79" fillcolor="#e8f0ff" fontcolor="#1f4e79" shape=folder]
+	role__DDAControl [label=DDAControl color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__ExternalCardNetwork [label=ExternalCardNetwork color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalCounterparty [label=ExternalCounterparty color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__InternalSuspenseRecon [label=InternalSuspenseRecon color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__InternalTransferSuspense [label=InternalTransferSuspense color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__MerchantDDA [label=MerchantDDA color="#1f4e79" fillcolor="#e8f0ff" fontcolor="#1f4e79" shape=folder]
+	role__MerchantDDAControl [label=MerchantDDAControl color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__MerchantPayableClearing [label=MerchantPayableClearing color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__WireSettlementSuspense [label=WireSettlementSuspense color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__ZBASubAccount [label=ZBASubAccount color="#1f4e79" fillcolor="#e8f0ff" fontcolor="#1f4e79" shape=folder]
+	role__CustomerDDA -> role__DDAControl [label="controls
+($ caps)" arrowhead=onormal color="#888888" fontcolor="#888888" style=dashed]
+	role__MerchantDDA -> role__MerchantDDAControl [label="controls
+($ caps)" arrowhead=onormal color="#888888" fontcolor="#888888" style=dashed]
+	role__ZBASubAccount -> role__ConcentrationMaster [label=controls arrowhead=onormal color="#888888" fontcolor="#888888" style=dashed]
+}

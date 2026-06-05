@@ -170,21 +170,40 @@ class _RoleStyle:
 # rounded rectangles for accounts; templates get a different shape so
 # the analyst can tell "the role exists as a singleton" from "the role
 # is templated and exists in many instances at runtime".
+# CF.3.f — shape vocabulary v0.1 (operator-locked 2026-06-04).
+# Roles get distinct silhouettes by scope: cylinder = institution-side
+# ledger; note = external counterparty; folder = templated role (many
+# runtime instances). Distinct shape signals type at a glance — no
+# badges, no info-density chrome.
 _INTERNAL_STYLE = _RoleStyle(
-    fill="#dbe9f6", border="#1f4e79", font="#1f4e79", shape="box",
+    fill="#dbe9f6", border="#1f4e79", font="#1f4e79", shape="cylinder",
 )
 _EXTERNAL_STYLE = _RoleStyle(
-    fill="#fff2cc", border="#7f6000", font="#7f6000", shape="box",
+    fill="#fff2cc", border="#7f6000", font="#7f6000", shape="note",
 )
 _TEMPLATE_STYLE = _RoleStyle(
     fill="#e8f0ff", border="#1f4e79", font="#1f4e79", shape="folder",
 )
 _RAIL_NODE_FILL = "#f5f5f5"
 _RAIL_NODE_BORDER = "#666666"
-_TRANSFER_TEMPLATE_FILL = "#fce4d6"
+# CF.3.f — TransferTemplate composite: HTML-table label with a header
+# row + one leg-rail row per leg, each with a `PORT="leg_<rail>"` for
+# east/west edge docking. Header fill is a brighter orange than legs
+# so the title reads as the "head" of the shape.
+_TEMPLATE_HEADER_FILL = "#ffcc99"
+_TEMPLATE_LEG_FILL = "#fff2e0"
+_TEMPLATE_XOR_FILL = "#ffe1c2"  # slightly tinted leg fill for XOR-group rows
+_TRANSFER_TEMPLATE_FILL = "#fce4d6"  # kept for backwards-compat (used by typed-tree code paths)
 _TRANSFER_TEMPLATE_BORDER = "#a6622c"
-_CHAIN_EDGE_COLOR = "#5a5a5a"
-_BUNDLE_EDGE_COLOR = "#1f4e79"
+# CF.3.f edge palette (ColorBrewer "Dark2" — accessibility-tested,
+# color-blind-friendly). Direction is encoded by the EDGE color +
+# arrowhead; we drop the "debit/credit" labels by default since
+# operators filter to the rail/role and click for details.
+_RAIL_EDGE_DEBIT_COLOR = "#d95f02"     # warm — money OUT of the role
+_RAIL_EDGE_CREDIT_COLOR = "#1b9e77"    # cool — money IN to the role
+_RAIL_EDGE_VARIABLE_COLOR = "#7570b3"  # neutral — direction set per-fire (XOR templates)
+_CHAIN_EDGE_COLOR = "#9e0142"          # distinct magenta-purple from rail edges
+_BUNDLE_EDGE_COLOR = "#1f4e79"         # kept for top-level bundle edges
 _SELF_LOOP_COLOR = "#7f6000"
 _CONTROL_PARENT_COLOR = "#888888"
 # AB.3.8 — XOR group sub-cluster styling. Distinct hue + tighter fill
@@ -374,6 +393,119 @@ def _template_inner_label(template: TransferTemplate) -> str:
 def _template_cluster_label(template: TransferTemplate) -> str:
     """The cluster's outer header text — name only, see _template_inner_label."""
     return str(template.name)
+
+
+# ---------------------------------------------------------------------------
+# CF.3.f helpers — port docking + composite template label
+# ---------------------------------------------------------------------------
+
+
+def _leg_port(rail_name: Identifier) -> str:
+    """CF.3.f port id for a template leg-rail cell.
+
+    Graphviz port identifiers must be alphanumeric + underscore. We
+    sanitize the rail name and prefix with ``leg_`` so chain/rail edges
+    can dock at the exact leg via ``tmpl__<template>:leg_<rail>``.
+    """
+    safe = "".join(c if c.isalnum() or c == "_" else "_" for c in str(rail_name))
+    return f"leg_{safe}"
+
+
+def _rail_node_attrs(rail: Rail) -> dict[str, str]:
+    """CF.3.f shape attributes for STANDALONE rail nodes (not in a template).
+
+    Family signal:
+      - cylinder peripheries=2 → aggregating rail (sweep semantics; the
+        ``aggregating`` flag is set on either TwoLegRail or SingleLegRail
+        per SPEC — checked first since it dominates the shape choice)
+      - cds peripheries=2      → TwoLegRail (double-stroke; "two legs converge")
+      - cds                    → SingleLegRail (single-stroke chevron)
+
+    Bundles reuse the underlying shape with a ``×N`` label suffix; the
+    stroke count stays the same since "bundled" is orthogonal to
+    "two-leg vs single-leg". Caller picks shape per rail; bundle code
+    picks shape per the canonical first rail in the bundle.
+    """
+    if getattr(rail, "aggregating", False):
+        return {"shape": "cylinder", "peripheries": "2"}
+    if isinstance(rail, TwoLegRail):
+        return {"shape": "cds", "peripheries": "2"}
+    return {"shape": "cds"}
+
+
+def _rail_leg_marker(rail: Rail) -> str:
+    """Short direction-marker shown inside a template's leg-rail cell.
+
+    SingleLegRails carry a leg_direction (Debit/Credit/Variable) → D/C/V.
+    TwoLegRails span two roles; their leg-row marker is "↔" (movement
+    between roles, no single direction encoded by the row itself).
+    """
+    if isinstance(rail, SingleLegRail):
+        return {"Debit": "D", "Credit": "C", "Variable": "V"}.get(
+            str(rail.leg_direction), "?",
+        )
+    return "↔"
+
+
+def _template_composite_label(
+    template: TransferTemplate,
+    rails_by_name: Mapping[Identifier, Rail],
+    rail_to_xor_group: Mapping[Identifier, int],
+) -> str:
+    """CF.3.f composite template label (HTML-<table>).
+
+    Top row = template name + (transfer_key small-font, if set).
+    Each subsequent row = one leg-rail, with PORT="leg_<rail>" for
+    east/west chain/rail edge docking. XOR-group rows get a tinted
+    background fill so the operator sees the grouping inside the
+    shape (paired with matched edge style on the chain edges into
+    those leg ports).
+    """
+    import html as _html
+
+    name_html = _html.escape(str(template.name))
+    transfer_key = getattr(template, "transfer_key", None)
+    if transfer_key:
+        header_inner = (
+            f"<B>{name_html}</B>"
+            f'<BR/><FONT POINT-SIZE="8">{_html.escape(str(transfer_key))}</FONT>'
+        )
+    else:
+        header_inner = f"<B>{name_html}</B>"
+
+    lines = [
+        '<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" '
+        'CELLPADDING="6">',
+        f'  <TR><TD BGCOLOR="{_TEMPLATE_HEADER_FILL}" PORT="hdr">'
+        f'{header_inner}</TD></TR>',
+    ]
+    for rail_name in template.leg_rails:
+        if rail_name not in rails_by_name:
+            continue
+        rail = rails_by_name[rail_name]
+        rail_html = _html.escape(str(rail.name))
+        marker = _rail_leg_marker(rail)
+        bg = (
+            _TEMPLATE_XOR_FILL
+            if rail_name in rail_to_xor_group
+            else _TEMPLATE_LEG_FILL
+        )
+        port_id = _leg_port(rail_name)
+        lines.append(
+            f'  <TR><TD BGCOLOR="{bg}" PORT="{port_id}" '
+            f'ALIGN="LEFT">{rail_html}  ({marker})</TD></TR>',
+        )
+    lines.append("</TABLE>>")
+    return "\n".join(lines)
+
+
+def _rail_edge_color_for_direction(direction: str | None) -> str:
+    """CF.3.f rail-edge color by direction (Debit warm / Credit cool / Var neutral)."""
+    if direction == "Debit":
+        return _RAIL_EDGE_DEBIT_COLOR
+    if direction == "Credit":
+        return _RAIL_EDGE_CREDIT_COLOR
+    return _RAIL_EDGE_VARIABLE_COLOR
 
 
 def topology_graph_for(
@@ -944,29 +1076,37 @@ def build_topology_graph_per_rail(
         )
 
     def _emit_rail_node(g_or_sub: Any, rail: Rail) -> None:
-        # Rail name only — transfer_type was on a second line but added
-        # noise that made every rail visually dominant. Direction for
-        # single-leg rails is conveyed by the arrowhead direction
-        # (rail → leg_role for Credit, leg_role → rail for Debit).
+        # CF.3.f — standalone rails get a cds-family shape (chevron with
+        # direction baked into the silhouette); single-stroke for
+        # SingleLegRail, double-stroke (peripheries=2) for TwoLegRail,
+        # cylinder + peripheries=2 for AggregatingRail. Bundles reuse
+        # the underlying shape; the "×N" lives in the bundle label.
+        attrs = _rail_node_attrs(rail)
         g_or_sub.node(
             _rail_id(rail.name),
             label=str(rail.name),
-            shape="ellipse",
             fillcolor=_RAIL_NODE_FILL,
             color=_RAIL_NODE_BORDER,
             fontcolor=_RAIL_NODE_BORDER,
             style="filled",
+            **attrs,
         )
 
-    # Phase B — Templates as clusters with their leg-rail nodes inside.
-    # Cluster only emits if either the template itself OR any of its
-    # leg-rails are in focus. Inside the cluster, each leg-rail is
-    # emitted only if in focus. Layer-gated: clusters only show at L3.
-    # AB.3.8: an XOR group renders as a nested sub-cluster inside the
-    # template cluster — graphviz renders this as a labeled boundary
-    # ("XOR group 1 (exactly 1 fires)") so the analyst can see the
-    # mutual-exclusion contract at a glance without leaving the
-    # topology.
+    # CF.3.f — Templates as composite HTML-table nodes.
+    # Each template renders as ONE node: a `plaintext`-shaped graphviz
+    # node whose label is an HTML table with a top header row (template
+    # name) and one row per leg-rail (PORT="leg_<rail>"). Chain edges
+    # and rail edges dock at the exact leg ports
+    # (`tmpl__<template>:leg_<rail>:e` / `:w`). The dashed cluster
+    # boundary, the inner `tmpl__<name>` component node, and the dotted
+    # template_member edges from the pre-CF.3.f emit are all gone —
+    # the composite shape IS the template (operator lock 2026-06-04:
+    # "whole over parts; click for details").
+    rail_to_template: dict[Identifier, Identifier] = {}
+    for _template in instance.transfer_templates:
+        for _rail_name in _template.leg_rails:
+            rail_to_template[_rail_name] = _template.name
+
     rails_in_clusters: set[Identifier] = set()
     template_iter = (
         instance.transfer_templates if show_chains_and_templates else ()
@@ -979,108 +1119,24 @@ def build_topology_graph_per_rail(
         ]
         if not _in_focus(tmpl_id) and not in_template_legs:
             continue
-        cluster_name = f"cluster_tmpl_{template.name}"
-        cluster_label = _template_cluster_label(template)
-        # Per-rail XOR-group lookup; absent → not grouped.
+        # Mark all of this template's rails as "owned by template" so
+        # Phase C / D / E skip them as standalone-rail emits — they're
+        # port rows in the composite shape now, not separate nodes.
         rail_to_group: dict[Identifier, int] = {}
         for gi, group in enumerate(template.leg_rail_xor_groups):
             for member in group:
                 rail_to_group[member] = gi
-        with g.subgraph(name=cluster_name) as sub:
-            assert sub is not None
-            sub.attr(
-                label=cluster_label,
-                style="dashed,rounded",
-                color=_TRANSFER_TEMPLATE_BORDER,
-                fontcolor=_TRANSFER_TEMPLATE_BORDER,
-                fontname="Helvetica",
-                fontsize="11",
-            )
-            if _in_focus(tmpl_id):
-                sub.node(
-                    tmpl_id,
-                    label=_template_inner_label(template),
-                    shape="component",
-                    fillcolor=_TRANSFER_TEMPLATE_FILL,
-                    color=_TRANSFER_TEMPLATE_BORDER,
-                    fontcolor=_TRANSFER_TEMPLATE_BORDER,
-                    style="filled",
-                )
-            # AB.3.8: collect XOR-grouped rails per group so we can
-            # emit them inside nested sub-clusters. Non-grouped rails
-            # render at the template-cluster level (unchanged shape).
-            grouped_in_focus: dict[int, list[Identifier]] = {}
-            for rail_name in template.leg_rails:
-                if rail_name not in rail_names_set:
-                    continue
-                if not _in_focus(_rail_id(rail_name)):
-                    continue
-                if rail_name in rail_to_group:
-                    gi = rail_to_group[rail_name]
-                    grouped_in_focus.setdefault(gi, []).append(rail_name)
-            for rail_name in template.leg_rails:
-                if rail_name not in rail_names_set:
-                    continue
-                if not _in_focus(_rail_id(rail_name)):
-                    continue
-                if rail_name in rail_to_group:
-                    # Emitted inside the per-group sub-cluster below.
-                    continue
-                rail = rails_by_name[rail_name]
-                _emit_rail_node(sub, rail)
+        html_label = _template_composite_label(
+            template, rails_by_name, rail_to_group,
+        )
+        g.node(
+            tmpl_id,
+            label=html_label,
+            shape="plaintext",
+        )
+        for rail_name in template.leg_rails:
+            if rail_name in rail_names_set:
                 rails_in_clusters.add(rail_name)
-                if _in_focus(tmpl_id):
-                    sub.edge(
-                        tmpl_id,
-                        _rail_id(rail_name),
-                        style="dotted",
-                        color=_TRANSFER_TEMPLATE_BORDER,
-                        arrowhead="none",
-                        # CF.3.a — template_member edges are MEMBERSHIP,
-                        # not flow. constraint=false stops dot from
-                        # rank-coupling each template to its leg-rails,
-                        # which was smearing the cluster across the
-                        # canvas and raking dotted edges through
-                        # everything else. Cluster containment is
-                        # preserved (the subgraph boundary handles it);
-                        # only rank coupling drops.
-                        constraint="false",
-                    )
-            # AB.3.8: per-XOR-group nested sub-clusters.
-            for gi in sorted(grouped_in_focus):
-                members = grouped_in_focus[gi]
-                xor_cluster_name = (
-                    f"cluster_tmpl_{template.name}_xor_{gi}"
-                )
-                xor_label = f"XOR group {gi + 1} (exactly 1 fires)"
-                with sub.subgraph(name=xor_cluster_name) as xor_sub:
-                    assert xor_sub is not None
-                    xor_sub.attr(
-                        label=xor_label,
-                        style="dashed,rounded,filled",
-                        color=_XOR_GROUP_BORDER,
-                        fillcolor=_XOR_GROUP_FILL,
-                        fontcolor=_XOR_GROUP_BORDER,
-                        fontname="Helvetica",
-                        fontsize="10",
-                    )
-                    for rail_name in members:
-                        rail = rails_by_name[rail_name]
-                        _emit_rail_node(xor_sub, rail)
-                        rails_in_clusters.add(rail_name)
-                        if _in_focus(tmpl_id):
-                            xor_sub.edge(
-                                tmpl_id,
-                                _rail_id(rail_name),
-                                style="dashed",
-                                color=_XOR_GROUP_BORDER,
-                                arrowhead="none",
-                                # CF.3.a — same membership-not-flow
-                                # rationale as the non-XOR member edge
-                                # above; XOR partitioning is still
-                                # conveyed by the dashed cluster boundary.
-                                constraint="false",
-                            )
 
     # Phase C — Top-level individual rails (not bundled, not in a cluster).
     # Layer-gated: rail nodes only show at L2+.
@@ -1096,25 +1152,36 @@ def build_topology_graph_per_rail(
         _emit_rail_node(g, rail)
 
     # Phase D — Bundle nodes (top-level). Layer-gated.
-    for bundle_id, bundle_label, _key in bundles:
+    # CF.3.f — bundles render with the same cds-family shape as their
+    # underlying rails (TwoLeg = cds + peripheries=2). The `×N` lives
+    # in the bundle_label, so stroke count is the type signal and the
+    # label is the cardinality signal.
+    for bundle_id, bundle_label, key in bundles:
         if not show_rails:
             break
         if not _in_focus(bundle_id):
             continue
+        bundle_shape = "cds"
+        bundle_peripheries = "2" if key[0] == "twoleg" else "1"
         g.node(
             bundle_id,
             label=bundle_label,
-            shape="ellipse",
+            shape=bundle_shape,
+            peripheries=bundle_peripheries,
             fillcolor="#e8e8e8",
-            color=_BUNDLE_EDGE_COLOR,
+            color=_RAIL_NODE_BORDER,
             fontcolor=_RAIL_NODE_BORDER,
             style="filled",
-            penwidth="1.5",
         )
 
     # Phase E — Endpoint edges. Individual rails: src→rail→dst as 2 edges.
     # Bundles: same shape but consolidated onto the bundle node.
-    # Each edge requires both endpoints in focus. Layer-gated.
+    # CF.3.f — template-resident rails dock at the template's leg port
+    # (`tmpl__X:leg_<rail>:w` for incoming, `:e` for outgoing) instead
+    # of the standalone rail_node_id. Direction-encoded edge colors:
+    # orange = money OUT (Debit/source-leg), teal = money IN
+    # (Credit/dest-leg), purple = Variable. Drops the rail-edge labels
+    # (operator: arrow + color carry direction; click for details).
     for rail in instance.rails:
         if not show_rails:
             break
@@ -1123,40 +1190,54 @@ def build_topology_graph_per_rail(
         rail_node_id = _rail_id(rail.name)
         if not _in_focus(rail_node_id):
             continue
+        # Resolve the edge endpoints — template-resident rails route
+        # through the composite shape's leg port.
+        if rail.name in rails_in_clusters:
+            tmpl_name = rail_to_template[rail.name]
+            port_west = f"{_template_id(tmpl_name)}:{_leg_port(rail.name)}:w"
+            port_east = f"{_template_id(tmpl_name)}:{_leg_port(rail.name)}:e"
+        else:
+            port_west = rail_node_id
+            port_east = rail_node_id
         if isinstance(rail, TwoLegRail):
             for src_role in rail.source_role:
                 if not _in_focus(_role_id(src_role)):
                     continue
                 g.edge(
-                    _role_id(src_role), rail_node_id,
-                    color=_BUNDLE_EDGE_COLOR,
-                    arrowhead="none",
+                    _role_id(src_role), port_west,
+                    color=_RAIL_EDGE_DEBIT_COLOR,
+                    arrowhead="normal",
                 )
             for dst_role in rail.destination_role:
                 if not _in_focus(_role_id(dst_role)):
                     continue
                 g.edge(
-                    rail_node_id, _role_id(dst_role),
-                    color=_BUNDLE_EDGE_COLOR,
-                    arrowhead="open",
+                    port_east, _role_id(dst_role),
+                    color=_RAIL_EDGE_CREDIT_COLOR,
+                    arrowhead="normal",
                 )
         else:
+            color = _rail_edge_color_for_direction(str(rail.leg_direction))
             for leg_role in rail.leg_role:
                 if not _in_focus(_role_id(leg_role)):
                     continue
                 if rail.leg_direction == "Credit":
                     g.edge(
-                        rail_node_id, _role_id(leg_role),
-                        color=_SELF_LOOP_COLOR,
-                        arrowhead="open",
+                        port_east, _role_id(leg_role),
+                        color=color,
+                        arrowhead="normal",
                     )
                 else:
                     g.edge(
-                        _role_id(leg_role), rail_node_id,
-                        color=_SELF_LOOP_COLOR,
-                        arrowhead="none",
+                        _role_id(leg_role), port_west,
+                        color=color,
+                        arrowhead="normal",
                     )
 
+    # CF.3.f — bundle edges use the same direction color palette as
+    # standalone rail edges (orange=Debit/source-leg, teal=Credit/
+    # dest-leg, purple=Variable). penwidth still scales with bundle
+    # size so high-traffic edges visually pop.
     for bundle_id, _label, key in bundles:
         if not show_rails:
             break
@@ -1174,8 +1255,8 @@ def build_topology_graph_per_rail(
                     continue
                 g.edge(
                     _role_id(src_role), bundle_id,
-                    color=_BUNDLE_EDGE_COLOR,
-                    arrowhead="none",
+                    color=_RAIL_EDGE_DEBIT_COLOR,
+                    arrowhead="normal",
                     penwidth=penwidth,
                 )
             for dst_role in dst_tuple:
@@ -1183,53 +1264,69 @@ def build_topology_graph_per_rail(
                     continue
                 g.edge(
                     bundle_id, _role_id(dst_role),
-                    color=_BUNDLE_EDGE_COLOR,
-                    arrowhead="open",
+                    color=_RAIL_EDGE_CREDIT_COLOR,
+                    arrowhead="normal",
                     penwidth=penwidth,
                 )
         else:
             leg_tuple = key[1]
             direction = str(key[2])
+            color = _rail_edge_color_for_direction(direction)
             for leg_role in leg_tuple:
                 if not _in_focus(_role_id(leg_role)):
                     continue
                 if direction == "Credit":
                     g.edge(
                         bundle_id, _role_id(leg_role),
-                        color=_SELF_LOOP_COLOR,
-                        arrowhead="open",
+                        color=color,
+                        arrowhead="normal",
                         penwidth="1.5",
                     )
                 else:
                     g.edge(
                         _role_id(leg_role), bundle_id,
-                        color=_SELF_LOOP_COLOR,
-                        arrowhead="none",
+                        color=color,
+                        arrowhead="normal",
                         penwidth="1.5",
                     )
 
     # Phase F — Chain edges (rail → rail or template → template).
-    # Layer-gated: chains only show at L3. Z.A: emit one edge per
-    # child in the row.
+    # CF.3.f — when a chain endpoint is a TEMPLATE-RESIDENT rail (i.e.
+    # a leg of a TransferTemplate), the edge docks at the template's
+    # leg port (`tmpl__X:leg_<rail>:e` for source, `:w` for target)
+    # so the connection visually lands on the exact leg row of the
+    # composite shape. Standalone rails + whole-template chain
+    # endpoints route through their plain node IDs as before.
+    def _chain_endpoint(name: Identifier, *, side: str) -> tuple[str, str]:
+        """Return (graphviz_target, focus_check_id) for a chain endpoint.
+
+        `side` is "e" for east (source-of-chain) or "w" for west
+        (target-of-chain). focus_check_id is the un-ported node id so
+        the focus filter can match per-node, not per-port.
+        """
+        if name in template_names_set:
+            tid = _template_id(name)
+            return tid, tid
+        if name in rail_to_template:
+            owning = rail_to_template[name]
+            tmpl_id_str = _template_id(owning)
+            return (
+                f"{tmpl_id_str}:{_leg_port(name)}:{side}",
+                _rail_id(name),
+            )
+        return _rail_id(name), _rail_id(name)
+
     for chain in instance.chains:
         if not show_chains_and_templates:
             break
-        parent_id = (
-            _template_id(chain.parent)
-            if chain.parent in template_names_set
-            else _rail_id(chain.parent)
-        )
+        parent_id, parent_focus_id = _chain_endpoint(chain.parent, side="e")
         cardinality: Literal["required", "xor"] = (
             "required" if len(chain.children) == 1 else "xor"
         )
         for child_spec in chain.children:
             child_name = child_spec.name
-            child_id = (
-                _template_id(child_name)
-                if child_name in template_names_set
-                else _rail_id(child_name)
-            )
-            if not (_in_focus(parent_id) and _in_focus(child_id)):
+            child_id, child_focus_id = _chain_endpoint(child_name, side="w")
+            if not (_in_focus(parent_focus_id) and _in_focus(child_focus_id)):
                 continue
             # AB.6 (per-child) — fan-in edges render with a distinct
             # visual hint: "bold" pen weight + a label annotation

@@ -1,0 +1,51 @@
+{
+  "label": "heavy_density_v1_cf3f",
+  "yaml": "tests/l2/heavy_density_v1.yaml",
+  "yaml_bytes": 40866,
+  "instance_counts": {
+    "accounts": 28,
+    "account_templates": 4,
+    "rails": 103,
+    "transfer_templates": 31,
+    "chains": 12,
+    "limit_schedules": 6
+  },
+  "layers": [
+    {
+      "layer": 1,
+      "n_nodes": 31,
+      "n_edges": 4,
+      "crossings": 0,
+      "width_pt": 242.0,
+      "height_pt": 1324.0,
+      "layout_ms": 78.0,
+      "dot_bytes": 4376,
+      "svg_bytes": 19905,
+      "png_bytes": 80952
+    },
+    {
+      "layer": 2,
+      "n_nodes": 127,
+      "n_edges": 149,
+      "crossings": 242,
+      "width_pt": 2967.0,
+      "height_pt": 1179.0,
+      "layout_ms": 97.4,
+      "dot_bytes": 26874,
+      "svg_bytes": 121652,
+      "png_bytes": 563209
+    },
+    {
+      "layer": 3,
+      "n_nodes": 112,
+      "n_edges": 161,
+      "crossings": 560,
+      "width_pt": 5152.0,
+      "height_pt": 1198.0,
+      "layout_ms": 194.9,
+      "dot_bytes": 38323,
+      "svg_bytes": 180700,
+      "png_bytes": 1143169
+    }
+  ]
+}

@@ -1,0 +1,126 @@
+// L2 topology (rails as nodes) for instance 'spike'
+digraph l2_topology_per_rail_spike {
+	mclimit=10.0 nodesep=0.15 overlap=false rankdir=LR ranksep=0.35 splines=polyline
+	node [fontname=Helvetica fontsize=10 style="filled,rounded"]
+	edge [fontname=Helvetica fontsize=9]
+	role__ACHOrigSettlement [label=ACHOrigSettlement color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__CashDueFRB [label=CashDueFRB color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__ConcentrationMaster [label=ConcentrationMaster color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__CustomerDDA [label=CustomerDDA color="#1f4e79" fillcolor="#e8f0ff" fontcolor="#1f4e79" shape=folder]
+	role__DDAControl [label=DDAControl color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__ExternalCardNetwork [label=ExternalCardNetwork color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__ExternalCounterparty [label=ExternalCounterparty color="#7f6000" fillcolor="#fff2cc" fontcolor="#7f6000" shape=note]
+	role__InternalSuspenseRecon [label=InternalSuspenseRecon color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__InternalTransferSuspense [label=InternalTransferSuspense color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__MerchantDDA [label=MerchantDDA color="#1f4e79" fillcolor="#e8f0ff" fontcolor="#1f4e79" shape=folder]
+	role__MerchantDDAControl [label=MerchantDDAControl color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__MerchantPayableClearing [label=MerchantPayableClearing color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__WireSettlementSuspense [label=WireSettlementSuspense color="#1f4e79" fillcolor="#dbe9f6" fontcolor="#1f4e79" shape=cylinder]
+	role__ZBASubAccount [label=ZBASubAccount color="#1f4e79" fillcolor="#e8f0ff" fontcolor="#1f4e79" shape=folder]
+	tmpl__InternalTransferCycle [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>InternalTransferCycle</B><BR/><FONT POINT-SIZE="8">(&#x27;internal_transfer_id&#x27;,)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_InternalTransferDebit" ALIGN="LEFT">InternalTransferDebit  (D)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_InternalTransferCredit" ALIGN="LEFT">InternalTransferCredit  (C)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_InternalTransferSuspenseClose" ALIGN="LEFT">InternalTransferSuspenseClose  (V)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__MerchantSettlementCycle [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>MerchantSettlementCycle</B><BR/><FONT POINT-SIZE="8">(&#x27;merchant_id&#x27;, &#x27;settlement_period&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#ffe1c2" PORT="leg_SettlementAutoSettle" ALIGN="LEFT">SettlementAutoSettle  (V)</TD></TR>
+  <TR><TD BGCOLOR="#ffe1c2" PORT="leg_SettlementStandardSettle" ALIGN="LEFT">SettlementStandardSettle  (V)</TD></TR>
+  <TR><TD BGCOLOR="#ffe1c2" PORT="leg_SettlementSlowSettle" ALIGN="LEFT">SettlementSlowSettle  (V)</TD></TR>
+  <TR><TD BGCOLOR="#ffe1c2" PORT="leg_NoFraudReview" ALIGN="LEFT">NoFraudReview  (V)</TD></TR>
+  <TR><TD BGCOLOR="#ffe1c2" PORT="leg_StandardFraudReview" ALIGN="LEFT">StandardFraudReview  (V)</TD></TR>
+  <TR><TD BGCOLOR="#ffe1c2" PORT="leg_EnhancedFraudReview" ALIGN="LEFT">EnhancedFraudReview  (V)</TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_MerchantCardSale" ALIGN="LEFT">MerchantCardSale  (↔)</TD></TR>
+</TABLE>> shape=plaintext]
+	tmpl__MerchantWeeklyPayoutBatch [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+  <TR><TD BGCOLOR="#ffcc99" PORT="hdr"><B>MerchantWeeklyPayoutBatch</B><BR/><FONT POINT-SIZE="8">(&#x27;merchant_id&#x27;, &#x27;payout_batch_id&#x27;)</FONT></TD></TR>
+  <TR><TD BGCOLOR="#fff2e0" PORT="leg_MerchantWeeklyBatchClose" ALIGN="LEFT">MerchantWeeklyBatchClose  (C)</TD></TR>
+</TABLE>> shape=plaintext]
+	rail__CustomerInboundACH [label=CustomerInboundACH color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__CustomerFeeAccrual [label=CustomerFeeAccrual color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" shape=cds style=filled]
+	rail__ZBASweep [label=ZBASweep color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__ConcentrationToFRBSweep [label=ConcentrationToFRBSweep color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__ACHOriginationDailySweep [label=ACHOriginationDailySweep color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cylinder style=filled]
+	rail__CustomerFeeMonthlySettlement [label=CustomerFeeMonthlySettlement color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cylinder style=filled]
+	rail__InternalBalanceMaintenance [label=InternalBalanceMaintenance color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__CustomerInboundACHReturnNSF [label=CustomerInboundACHReturnNSF color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__CustomerInboundACHReturnStopPay [label=CustomerInboundACHReturnStopPay color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__MerchantPayoutACH [label=MerchantPayoutACH color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__MerchantPayoutWire [label=MerchantPayoutWire color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__MerchantPayoutCheck [label=MerchantPayoutCheck color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__ExternalCardSettlement [label=ExternalCardSettlement color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cylinder style=filled]
+	rail__MerchantDailySettleAggregator [label=MerchantDailySettleAggregator color="#666666" fillcolor="#f5f5f5" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__bundle_0 [label="2 rails:
+CustomerCashDeposit
+CustomerInboundWire" color="#666666" fillcolor="#e8e8e8" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	rail__bundle_1 [label="3 rails:
+CustomerCashWithdrawal
+CustomerOutboundACH
+CustomerOutboundWire" color="#666666" fillcolor="#e8e8e8" fontcolor="#666666" peripheries=2 shape=cds style=filled]
+	role__ExternalCounterparty -> rail__CustomerInboundACH [arrowhead=normal color="#d95f02"]
+	rail__CustomerInboundACH -> role__CustomerDDA [arrowhead=normal color="#1b9e77"]
+	role__CustomerDDA -> tmpl__InternalTransferCycle:leg_InternalTransferDebit:w [arrowhead=normal color="#d95f02"]
+	tmpl__InternalTransferCycle:leg_InternalTransferCredit:e -> role__CustomerDDA [arrowhead=normal color="#1b9e77"]
+	role__InternalTransferSuspense -> tmpl__InternalTransferCycle:leg_InternalTransferSuspenseClose:w [arrowhead=normal color="#7570b3"]
+	role__CustomerDDA -> rail__CustomerFeeAccrual [arrowhead=normal color="#d95f02"]
+	role__InternalSuspenseRecon -> rail__CustomerFeeAccrual [arrowhead=normal color="#d95f02"]
+	role__ZBASubAccount -> rail__ZBASweep [arrowhead=normal color="#d95f02"]
+	rail__ZBASweep -> role__ConcentrationMaster [arrowhead=normal color="#1b9e77"]
+	role__ConcentrationMaster -> rail__ConcentrationToFRBSweep [arrowhead=normal color="#d95f02"]
+	rail__ConcentrationToFRBSweep -> role__ExternalCounterparty [arrowhead=normal color="#1b9e77"]
+	role__ACHOrigSettlement -> rail__ACHOriginationDailySweep [arrowhead=normal color="#d95f02"]
+	rail__ACHOriginationDailySweep -> role__CashDueFRB [arrowhead=normal color="#1b9e77"]
+	role__ExternalCounterparty -> rail__CustomerFeeMonthlySettlement [arrowhead=normal color="#d95f02"]
+	role__ExternalCounterparty -> rail__InternalBalanceMaintenance [arrowhead=normal color="#d95f02"]
+	rail__InternalBalanceMaintenance -> role__InternalSuspenseRecon [arrowhead=normal color="#1b9e77"]
+	role__CustomerDDA -> rail__CustomerInboundACHReturnNSF [arrowhead=normal color="#d95f02"]
+	rail__CustomerInboundACHReturnNSF -> role__ExternalCounterparty [arrowhead=normal color="#1b9e77"]
+	role__CustomerDDA -> rail__CustomerInboundACHReturnStopPay [arrowhead=normal color="#d95f02"]
+	rail__CustomerInboundACHReturnStopPay -> role__ExternalCounterparty [arrowhead=normal color="#1b9e77"]
+	role__ExternalCardNetwork -> tmpl__MerchantSettlementCycle:leg_MerchantCardSale:w [arrowhead=normal color="#d95f02"]
+	tmpl__MerchantSettlementCycle:leg_MerchantCardSale:e -> role__MerchantPayableClearing [arrowhead=normal color="#1b9e77"]
+	role__MerchantPayableClearing -> rail__MerchantPayoutACH [arrowhead=normal color="#d95f02"]
+	rail__MerchantPayoutACH -> role__MerchantDDA [arrowhead=normal color="#1b9e77"]
+	role__MerchantPayableClearing -> rail__MerchantPayoutWire [arrowhead=normal color="#d95f02"]
+	rail__MerchantPayoutWire -> role__ExternalCounterparty [arrowhead=normal color="#1b9e77"]
+	role__MerchantPayableClearing -> rail__MerchantPayoutCheck [arrowhead=normal color="#d95f02"]
+	rail__MerchantPayoutCheck -> role__ExternalCounterparty [arrowhead=normal color="#1b9e77"]
+	rail__ExternalCardSettlement -> role__ExternalCardNetwork [arrowhead=normal color="#1b9e77"]
+	role__MerchantPayableClearing -> tmpl__MerchantSettlementCycle:leg_SettlementAutoSettle:w [arrowhead=normal color="#7570b3"]
+	role__MerchantPayableClearing -> tmpl__MerchantSettlementCycle:leg_SettlementStandardSettle:w [arrowhead=normal color="#7570b3"]
+	role__MerchantPayableClearing -> tmpl__MerchantSettlementCycle:leg_SettlementSlowSettle:w [arrowhead=normal color="#7570b3"]
+	role__InternalSuspenseRecon -> tmpl__MerchantSettlementCycle:leg_NoFraudReview:w [arrowhead=normal color="#7570b3"]
+	role__InternalSuspenseRecon -> tmpl__MerchantSettlementCycle:leg_StandardFraudReview:w [arrowhead=normal color="#7570b3"]
+	role__InternalSuspenseRecon -> tmpl__MerchantSettlementCycle:leg_EnhancedFraudReview:w [arrowhead=normal color="#7570b3"]
+	role__MerchantPayableClearing -> rail__MerchantDailySettleAggregator [arrowhead=normal color="#d95f02"]
+	rail__MerchantDailySettleAggregator -> role__WireSettlementSuspense [arrowhead=normal color="#1b9e77"]
+	tmpl__MerchantWeeklyPayoutBatch:leg_MerchantWeeklyBatchClose:e -> role__WireSettlementSuspense [arrowhead=normal color="#1b9e77"]
+	role__ExternalCounterparty -> rail__bundle_0 [arrowhead=normal color="#d95f02" penwidth=1.6]
+	rail__bundle_0 -> role__CustomerDDA [arrowhead=normal color="#1b9e77" penwidth=1.6]
+	role__CustomerDDA -> rail__bundle_1 [arrowhead=normal color="#d95f02" penwidth=1.9]
+	rail__bundle_1 -> role__ExternalCounterparty [arrowhead=normal color="#1b9e77" penwidth=1.9]
+	rail__ACHOriginationDailySweep -> rail__ConcentrationToFRBSweep [label="chain
+(required)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	rail__CustomerInboundACH -> rail__CustomerInboundACHReturnNSF [label="chain
+(xor: CustomerInboundACHReturnNSF, CustomerInboundACHReturnStopPay)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	rail__CustomerInboundACH -> rail__CustomerInboundACHReturnStopPay [label="chain
+(xor: CustomerInboundACHReturnNSF, CustomerInboundACHReturnStopPay)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	tmpl__MerchantSettlementCycle -> rail__MerchantPayoutACH [label="chain
+(xor: MerchantPayoutACH, MerchantPayoutWire, MerchantPayoutCheck, MerchantWeeklyPayoutBatch)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	tmpl__MerchantSettlementCycle -> rail__MerchantPayoutWire [label="chain
+(xor: MerchantPayoutACH, MerchantPayoutWire, MerchantPayoutCheck, MerchantWeeklyPayoutBatch)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	tmpl__MerchantSettlementCycle -> rail__MerchantPayoutCheck [label="chain
+(xor: MerchantPayoutACH, MerchantPayoutWire, MerchantPayoutCheck, MerchantWeeklyPayoutBatch)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	tmpl__MerchantSettlementCycle -> tmpl__MerchantWeeklyPayoutBatch [label="chain
+(xor: MerchantPayoutACH, MerchantPayoutWire, MerchantPayoutCheck, MerchantWeeklyPayoutBatch) [fan-in 5→1]" arrowhead=onormalonormal color="#9e0142" fontcolor="#9e0142" penwidth=2.0 style=dashed]
+	rail__CustomerFeeAccrual -> tmpl__InternalTransferCycle [label="chain
+(required)" color="#9e0142" fontcolor="#9e0142" style=dashed]
+	rail__MerchantDailySettleAggregator -> tmpl__MerchantWeeklyPayoutBatch [label="chain
+(required) [fan-in 5→1]" arrowhead=onormalonormal color="#9e0142" fontcolor="#9e0142" penwidth=2.0 style=dashed]
+	role__CustomerDDA -> role__DDAControl [label="controls
+($ caps)" arrowhead=onormal color="#888888" fontcolor="#888888" style=dashed]
+	role__MerchantDDA -> role__MerchantDDAControl [label="controls
+($ caps)" arrowhead=onormal color="#888888" fontcolor="#888888" style=dashed]
+	role__ZBASubAccount -> role__ConcentrationMaster [label=controls arrowhead=onormal color="#888888" fontcolor="#888888" style=dashed]
+}

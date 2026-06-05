@@ -134,8 +134,73 @@ SVG sidecars (`l3.svg`) ship in both dirs for zoom-in detail.
 2. Is the +14-17 % height growth fine, or do operators feel it (scroll fatigue)?
 3. Should CF.3.b (template recast — drops 24 nodes + 58 edges) supersede CF.3.a, or stack on top?
 
+## CF.3.f — custom shape vocabulary (2026-06-04)
+
+Operator cold-read → 5-agent design workflow → locked vocabulary in [`cf_3_f_design_directions/06_locked_spec.md`](cf_3_f_design_directions/06_locked_spec.md) → shipped against the spike fixture.
+
+**Shape vocabulary (smoke-tested + operator-approved):**
+
+| Type | Shape |
+|---|---|
+| Internal singleton role | `cylinder` (ledger silhouette) |
+| External singleton role | `note` (folded-corner external metaphor) |
+| Template role | `folder` |
+| SingleLegRail | `cds` (single-stroke chevron) |
+| TwoLegRail | `cds` + `peripheries=2` (double-stroke; "two legs converge") |
+| Aggregating Rail | `cylinder` + `peripheries=2` |
+| Rail Bundle ×N | same shape as underlying + `×N` label |
+| **TransferTemplate** | **HTML-`<table>` composite — top header + leg-rail rows with `PORT="leg_<rail>"` for chain/rail edges to dock at exact leg cells** |
+| Chain edge | dashed `#9e0142`, label kept |
+| Rail edge (Debit) | solid `#d95f02`, no label |
+| Rail edge (Credit) | solid `#1b9e77`, no label |
+| Rail edge (Variable) | solid `#7570b3`, no label |
+| XOR-group member rows | tinted background fill (`#ffe1c2`) on the row inside the template |
+
+**Removed vs CF.3.a:**
+- Template cluster boundary (`subgraph cluster_tmpl_<name>`)
+- Template inner component node (`tmpl__<name>` separate node)
+- Template membership edges (dotted `template_member`)
+- Template-resident rails as separate nodes (now port rows in the composite)
+- "debit"/"credit" labels on rail edges (color + arrow carry it)
+
+**Measurements vs CF.3.a:**
+
+| L3 metric          | sasquatch_pr (CF.3.a) | sasquatch_pr (CF.3.f) | Δ              | heavy_density_v1 (CF.3.a) | heavy_density_v1 (CF.3.f) | Δ                |
+|--------------------|------------------------|------------------------|-----------------|-----------------------------|-----------------------------|-------------------|
+| **nodes**          | 44                     | **33**                 | **−25 %**       | 158                         | **112**                     | **−29 %**         |
+| **edges**          | 65                     | **54**                 | **−17 %**       | 223                         | **161**                     | **−28 %**         |
+| crossings          | 59                     | 57                     | −2              | 542                         | 560                         | +18 (negligible) |
+| width (pt)         | 2 628                  | 3 160                  | +20 %           | 2 156                       | **5 152**                   | **+139 %**        |
+| **height (pt)**    | 965                    | **697**                | **−28 %**       | 2 608                       | **1 198**                   | **−54 %**         |
+| layout (ms)        | 88                     | 112                    | +24             | 133                         | 195                         | +62              |
+
+**Read.** Height collapses dramatically (−28 % / −54 %) because template-resident rails no longer demand vertical rank slots. Width grows because the composite shape lets templates spread horizontally instead of stacking. Crossings are stable — CF.3.a's `constraint=false` lever survives the structural rewrite. Layout time stays sub-second (heavy L3 195ms = +62ms vs CF.3.a). Operator's "whole over parts" principle holds: identifier + connection are visible at a glance, no info-density chrome.
+
+**Visual proof — heavy_density_v1 L3:**
+
+| CF.3.a (baseline) — 158 nodes / 542 crossings / 2 608pt tall | CF.3.f — 112 nodes / 560 crossings / 1 198pt tall |
+|---|---|
+| ![heavy L3 CF.3.a](cf_3_diagram_spike/heavy_density_v1_cf3a/l3.png) | ![heavy L3 CF.3.f](cf_3_diagram_spike/heavy_density_v1_cf3f/l3.png) |
+
+**Visual proof — sasquatch_pr L3:**
+
+| CF.3.a (baseline) — 44 nodes / 59 crossings | CF.3.f — 33 nodes / 57 crossings |
+|---|---|
+| ![sasquatch L3 CF.3.a](cf_3_diagram_spike/sasquatch_pr_cf3a/l3.png) | ![sasquatch L3 CF.3.f](cf_3_diagram_spike/sasquatch_pr_cf3f/l3.png) |
+
+SVG sidecars in both `_cf3f/` dirs for zoom-in detail.
+
+## Open items for operator cold-read post-CF.3.f
+
+1. Visual sign-off on the heavy L3 + sasquatch L3 — does the composite template + cylinder/note/cds vocabulary read as one consistent language?
+2. Standalone rails — still visually noisy at heavy density, or fine?
+3. Direction-color palette (orange Debit / teal Credit / purple Variable) — accessible enough, or revisit?
+4. Should self-loops on roles get the absorbed-into-shape treatment now, or hold for v0.2?
+5. XOR matched edge-style across sibling chain edges (deferred from v0.1) — implement next, or fine with the tinted-row signal alone?
+
 ## Audit history
 
 - **2026-06-04 v0** — Harness shipped, heavy_density_v1.yaml generated (seed 42, 103 rails / 31 templates / 12 chains), v0 measurements above, operator cold-read pending.
 - **2026-06-04 v0.1** — PNG renders embedded inline for cold-read in markdown viewers.
-- **2026-06-04 CF.3.a measured** — 2-liner shipped against the spike fixture; **−94.6 % crossings on sasquatch, −99.6 % on heavy**. Height grew +14-17 % (vs audit's predicted −15 %); layout +17ms. Awaiting operator visual sign-off before merging.
+- **2026-06-04 CF.3.a measured + merged** — 2-liner shipped against the spike fixture; **−94.6 % crossings on sasquatch, −99.6 % on heavy**. Height grew +14-17 % (vs audit's predicted −15 %); layout +17ms. Merged to main (commit `25429a3a`).
+- **2026-06-04 CF.3.f v0.1 shipped on cf-3-f branch** — custom shape vocabulary: cylinder/note/folder roles, cds-family rails, HTML-table composite templates with chain/rail edges port-docking at exact leg cells. **−25 % / −29 % nodes, −17 % / −28 % edges, −28 % / −54 % height (sasquatch / heavy)**. Crossings stable. 28 topology unit tests pass. Awaiting operator cold-read.
