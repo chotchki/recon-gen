@@ -349,6 +349,18 @@ def _render_home_page(
 
     # If no section has active state, default open is the first
     # (legacy behavior). If any section does, only those auto-open.
+    #
+    # CG.14 (2026-06-05) — operator lock: stay with account-only on
+    # first load. Accounts are the persistent ledger; rails are the
+    # verb but more numerous (a dense L2 can carry 100+) and would
+    # blow up the fresh-visit scroll. Open-the-top-three was an
+    # option but front-loads three accordions worth of vertical
+    # space; localStorage-persisted last-open was an option but
+    # would be the first piece of custom JS in the studio surface
+    # (current studio is HTMX-only) and the cold-read didn't surface
+    # this default as actively painful — just "surprising." Document
+    # + keep, don't reshape until a returning-operator dogfood says
+    # otherwise.
     any_state_active = any(section_has_state.values())
 
     section_blocks: list[str] = []
