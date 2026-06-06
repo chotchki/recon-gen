@@ -589,6 +589,12 @@ def test_put_rail_name_rename_cascades_to_templates_and_chains(
 
     new_name = f"{referenced_rail_name}_RENAMED"
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        # CO.5 — deliberate field-isolation probe: submit ONLY `name` to
+        # prove that mutate_l2 (dataclasses.replace semantics) preserves
+        # every other field on the rail AND that the rename-cascade
+        # rewrites every chain reference. A browser form would always
+        # submit the full body; this test exercises the per-field PATCH
+        # shape that operator-facing per-field-edit endpoints rely on.
         resp = c.put(
             f"/l2_shape/rail/{referenced_rail_name}",
             data={
@@ -2153,3 +2159,121 @@ def test_bb2_create_new_validation_failure_rolls_back_atomically(
     reloaded = load_instance(writable_l2_yaml)
     assert len(reloaded.rails) == rail_count_before
     assert len(reloaded.transfer_templates) == tt_count_before
+
+
+# ---------------------------------------------------------------------------
+# CO.2 — multi_select chip-list + order-override
+# ---------------------------------------------------------------------------
+
+def test_co2_multi_select_renders_chip_list_above_checkboxes(
+    writable_l2_yaml: Path,
+) -> None:
+    """The TT edit form's `leg_rails` field renders a draggable chip
+    list above the checkbox grid. Each selected rail appears as a
+    `<li>` with `data-multiselect-order-value`. The hidden
+    `<name>__order` input is pre-populated with the comma-joined
+    current order so a no-op submit preserves order."""
+    from recon_gen.common.l2.cache import L2InstanceCache
+    cache = L2InstanceCache.from_path(writable_l2_yaml)
+    inst = cache.get()
+    tt = inst.transfer_templates[0]
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get(f"/l2_shape/transfer_template/{tt.name}/edit").text
+    # The chip-list container exists with the right data attribute
+    assert 'data-multiselect-order-list="leg_rails"' in body
+    # The hidden order input is pre-populated with the tuple order
+    expected_order = ",".join(str(r) for r in tt.leg_rails)
+    assert (
+        f'data-multiselect-order-input="leg_rails" value="{expected_order}"'
+        in body
+        or f'value="{expected_order}" data-multiselect-order-input="leg_rails"'
+        in body
+    ), body[:5000]
+    # At least one chip carries the value-data attribute
+    for r in tt.leg_rails:
+        assert f'data-multiselect-order-value="{r}"' in body
+    # Checkboxes still emitted with name=leg_rails AND the bootstrap-hook attr
+    assert 'data-multiselect-name="leg_rails"' in body
+    # Sortable.js script vendored locally
+    assert "sortable.min.js" in body
+
+
+def test_co2_order_override_drives_coercer(
+    writable_l2_yaml: Path,
+) -> None:
+    """When the PUT body carries `<name>__order` with the canonical
+    sequence (set-equal to the checkbox values), the coercer uses
+    that order — not the checkbox DOM submit order. This is the
+    invariant that makes the dogfood gate's structural round-trip
+    work."""
+    from recon_gen.common.l2.cache import L2InstanceCache
+    from recon_gen.common.l2.loader import load_instance
+    cache = L2InstanceCache.from_path(writable_l2_yaml)
+    inst = cache.get()
+    tt = next(
+        (t for t in inst.transfer_templates if len(t.leg_rails) >= 2),
+        None,
+    )
+    if tt is None:
+        pytest.skip("fixture has no TT with >=2 leg_rails")
+    # Swap order vs current
+    current = [str(r) for r in tt.leg_rails]
+    reversed_order = list(reversed(current))
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(
+            f"/l2_shape/transfer_template/{tt.name}",
+            data={
+                "leg_rails__present": "1",
+                "leg_rails__order": ",".join(reversed_order),
+                "leg_rails": current,
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303, resp.text
+    reloaded = load_instance(writable_l2_yaml)
+    rebuilt_tt = next(
+        t for t in reloaded.transfer_templates if str(t.name) == str(tt.name)
+    )
+    assert [str(r) for r in rebuilt_tt.leg_rails] == reversed_order
+
+
+def test_co2_order_override_ignored_on_set_mismatch(
+    writable_l2_yaml: Path,
+) -> None:
+    """If `__order` lists values not in the checkbox selection (or
+    vice-versa), the override is silently ignored — falls back to
+    checkbox DOM order. Prevents a stale browser state from
+    smuggling missing values."""
+    from recon_gen.common.l2.cache import L2InstanceCache
+    from recon_gen.common.l2.loader import load_instance
+    cache = L2InstanceCache.from_path(writable_l2_yaml)
+    inst = cache.get()
+    tt = next(
+        (t for t in inst.transfer_templates if len(t.leg_rails) >= 2),
+        None,
+    )
+    if tt is None:
+        pytest.skip("fixture has no TT with >=2 leg_rails")
+    current = [str(r) for r in tt.leg_rails]
+    # Order field references a phantom rail not in the checkbox set
+    bogus_order = current + ["__NOT_A_RAIL__"]
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(
+            f"/l2_shape/transfer_template/{tt.name}",
+            data={
+                "leg_rails__present": "1",
+                "leg_rails__order": ",".join(bogus_order),
+                "leg_rails": current,
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303, resp.text
+    reloaded = load_instance(writable_l2_yaml)
+    rebuilt_tt = next(
+        t for t in reloaded.transfer_templates if str(t.name) == str(tt.name)
+    )
+    # The phantom value is rejected; checkbox order (current) wins.
+    assert [str(r) for r in rebuilt_tt.leg_rails] == current
