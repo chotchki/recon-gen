@@ -107,6 +107,11 @@ def _encode_spec(spec: object, value: object, data: FormData) -> None:
     if kind == "multi_select":
         items = [str(v) for v in (value or ())]  # type: ignore[union-attr]: multi_select field values are always iterable tuples; `or ()` guards None
         data[f"{name}__present"] = ["1"]
+        # CO.2 — comma-joined canonical order; server prefers this over
+        # checkbox DOM order when set-equal. Empty selection emits the
+        # empty-string sentinel; the server treats absent + empty
+        # identically (falls back to checkbox order which is also empty).
+        data[f"{name}__order"] = [",".join(items)]
         if items:
             data[name] = items
     elif kind in ("text", "select", "money", "textarea", "yaml_block"):

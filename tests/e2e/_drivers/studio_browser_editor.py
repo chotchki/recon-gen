@@ -162,6 +162,20 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
             if name.endswith("__present") or name.endswith("__num_groups"):
                 # Server-rendered hidden marker — already present.
                 continue
+            if name.endswith("__order"):
+                # CO.2 — hidden order-override input. Stop skipping;
+                # fill it so the server's multi_select coercer prefers
+                # this canonical order over the checkbox DOM order.
+                # Use evaluate (not fill) because Playwright's fill
+                # rejects hidden inputs on actionability grounds.
+                self._page.evaluate(
+                    "([n, v]) => {"
+                    " const el = document.querySelector(`input[type=hidden][name='${n}']`);"
+                    " if (el) el.value = v;"
+                    "}",
+                    [name, values[0]],
+                )
+                continue
             locator = self._page.locator(f'[name="{name}"]')
             count = locator.count()
             if count == 0:

@@ -56,7 +56,7 @@ from recon_gen.common.html._components import (
     render_list_pager,
     render_list_search,
 )
-from recon_gen.common.html._studio_routes import studio_theme_head
+from recon_gen.common.html._studio_routes import asset_url, studio_theme_head
 from recon_gen.common.l2.cache import L2InstanceCache
 from recon_gen.common.l2.editor import (
     SINGLETON_KINDS,
@@ -986,6 +986,22 @@ def _coerce_form(
             raw_list = tuple(
                 str(v) for v in form.getlist(spec.name) if str(v).strip()
             )
+            # CO.2 — order-override via `<name>__order` hidden field.
+            # Browser submits checkboxes in DOM order (alphabetical for
+            # our universe-rendered fieldsets); leg_rails order is
+            # semantic (xor_groups reference rails by name; the YAML
+            # declaration order IS the canonical form). The hidden
+            # order field carries that canonical sequence; when present
+            # + non-empty + set-equal to raw_list, it overrides. Set
+            # mismatch is silently ignored so stale browser state can't
+            # smuggle missing entries.
+            order_raw = str(form.get(f"{spec.name}__order") or "").strip()
+            if order_raw:
+                candidate = tuple(
+                    s.strip() for s in order_raw.split(",") if s.strip()
+                )
+                if set(candidate) == set(raw_list):
+                    raw_list = candidate
             overrides[spec.name] = raw_list
             # Identifier-typed list per FieldSpec convention; the
             # specific dataclass field decides the inner type but
@@ -1322,13 +1338,48 @@ def _render_field(
             f'<label class="flex items-center gap-2 font-normal text-sm cursor-pointer text-primary-fg">'
             f'<input type="checkbox" name="{escape(spec.name)}" '
             f'value="{escape(o)}"'
-            f'{" checked" if o in selected else ""}>'
+            f'{" checked" if o in selected else ""}'
+            f' data-multiselect-name="{escape(spec.name)}">'
             f' {escape(o)}</label>'
             for o in options
         ]
+        # CO.2 — Sortable.js-backed "selected (in order)" chip list
+        # rendered above the checkbox grid. Operator drag-reorders to
+        # change canonical order; the hidden `__order` field syncs on
+        # every reorder + on every checkbox toggle. Empty list renders
+        # an empty-state hint so the affordance is discoverable even
+        # before the operator checks anything.
+        order_chips = "".join(
+            f'<li class="inline-flex items-center gap-1 bg-link-tint border border-surface-border rounded-sm px-2 py-1 cursor-grab text-sm" '
+            f'data-multiselect-order-value="{escape(s)}">'
+            f'<span aria-hidden="true" class="text-secondary-fg select-none">⋮⋮</span>'
+            f'<span>{escape(s)}</span>'
+            f'</li>'
+            for s in selected
+        )
+        empty_hint = (
+            ' <span class="text-xs italic text-secondary-fg" '
+            'data-multiselect-empty-hint="1">'
+            "Check a box below; drag chips here to reorder."
+            "</span>"
+        )
         input_html = (
             # Hidden marker — see comment above.
             f'<input type="hidden" name="{escape(spec.name)}__present" value="1">'
+            # CO.2 — hidden order-override field, pre-populated with the
+            # entity's current tuple order. The chip-list above + the
+            # multiselect.js bootstrap keep it in sync with the visual
+            # state; the server prefers it over checkbox DOM order when
+            # the two sets match.
+            f'<input type="hidden" name="{escape(spec.name)}__order" '
+            f'value="{escape(",".join(selected))}" '
+            f'data-multiselect-order-input="{escape(spec.name)}">'
+            f'<ul data-multiselect-order-list="{escape(spec.name)}" '
+            f'class="flex flex-wrap gap-2 px-2 py-2 mb-1 border border-dashed border-surface-border rounded-sm bg-surface-bg min-h-10" '
+            f'aria-label="Selected {escape(spec.label)} in order">'
+            f"{order_chips}"
+            f"{empty_hint if not selected else ''}"
+            f"</ul>"
             f'<div id="field-{spec.name}" class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 px-2 py-2 border border-surface-border rounded-sm bg-white max-h-56 overflow-y-auto" '
             f'role="group">'
             f'{"".join(check_blocks)}</div>'
@@ -2398,9 +2449,22 @@ def _htmx_head_block() -> str:
     markdown-Preview tab's `hx-post` — both silently no-op'd
     because htmx wasn't on the page. Dogfood found the Preview
     no-op; the Delete button's no-op was latent.
+
+    CO.2 (2026-06-06) — also pulls in Sortable.js + the
+    multi-select chip-list bootstrap. The multi-select widget
+    renders a draggable "Selected (in order)" chip list above the
+    checkbox grid; Sortable powers the drag, and a small
+    bootstrap syncs the hidden `<name>__order` input on every
+    reorder + every checkbox toggle. The bootstrap is a no-op on
+    pages that don't render any multi-select fields (e.g., the
+    list view, the 404 chrome).
     """
     return (
         '<script src="https://unpkg.com/htmx.org@1.9.10"></script>\n'
+        # CO.2 — Sortable.js vendored locally (was CDN, broke Playwright's
+        # navigation-wait race; local serving is also less brittle in
+        # offline / CI scenarios). Source: sortablejs@1.15.6.
+        f'  <script src="{asset_url("/static/js/sortable.min.js")}"></script>\n'
         "  <script>\n"
         "    // X.4.e.5 fix — HTMX defaults to NOT swapping 4xx response bodies\n"
         "    // (treats them as errors). The validator returns 400 + an inline\n"
@@ -2418,6 +2482,64 @@ def _htmx_head_block() -> str:
         "        evt.detail.isError = false;\n"
         "      }\n"
         "    });\n"
+        "    // CO.2 — multi-select chip-list bootstrap. For each\n"
+        "    // `[data-multiselect-order-list]` element on the page: wire\n"
+        "    // Sortable.js for drag-reorder, sync the hidden `__order`\n"
+        "    // input on every reorder, and add/remove chips when the\n"
+        "    // sibling checkbox group toggles. Safe to run on pages\n"
+        "    // without multi-selects — the querySelectorAll returns [].\n"
+        "    function bootstrapMultiSelectOrder() {\n"
+        "      document.querySelectorAll('[data-multiselect-order-list]').forEach(function(list) {\n"
+        "        var name = list.getAttribute('data-multiselect-order-list');\n"
+        "        var hidden = document.querySelector('input[data-multiselect-order-input=\"' + name + '\"]');\n"
+        "        if (!hidden) return;\n"
+        "        function syncOrder() {\n"
+        "          var vals = Array.prototype.map.call(\n"
+        "            list.querySelectorAll('[data-multiselect-order-value]'),\n"
+        "            function(it) { return it.getAttribute('data-multiselect-order-value'); }\n"
+        "          );\n"
+        "          hidden.value = vals.join(',');\n"
+        "        }\n"
+        "        if (typeof Sortable !== 'undefined') {\n"
+        "          new Sortable(list, {\n"
+        "            animation: 150,\n"
+        "            filter: '[data-multiselect-empty-hint]',\n"
+        "            onEnd: syncOrder,\n"
+        "          });\n"
+        "        }\n"
+        "        document.querySelectorAll('input[type=\"checkbox\"][data-multiselect-name=\"' + name + '\"]').forEach(function(cb) {\n"
+        "          cb.addEventListener('change', function() {\n"
+        "            var val = cb.value;\n"
+        "            var sel = '[data-multiselect-order-value=\"' + val.replace(/\"/g, '\\\\\"') + '\"]';\n"
+        "            var existing = list.querySelector(sel);\n"
+        "            if (cb.checked && !existing) {\n"
+        "              var hint = list.querySelector('[data-multiselect-empty-hint]');\n"
+        "              if (hint) hint.remove();\n"
+        "              var li = document.createElement('li');\n"
+        "              li.className = 'inline-flex items-center gap-1 bg-link-tint border border-surface-border rounded-sm px-2 py-1 cursor-grab text-sm';\n"
+        "              li.setAttribute('data-multiselect-order-value', val);\n"
+        "              var handle = document.createElement('span');\n"
+        "              handle.setAttribute('aria-hidden', 'true');\n"
+        "              handle.className = 'text-secondary-fg select-none';\n"
+        "              handle.textContent = '\\u22EE\\u22EE';\n"
+        "              var label = document.createElement('span');\n"
+        "              label.textContent = val;\n"
+        "              li.appendChild(handle);\n"
+        "              li.appendChild(label);\n"
+        "              list.appendChild(li);\n"
+        "            } else if (!cb.checked && existing) {\n"
+        "              existing.remove();\n"
+        "            }\n"
+        "            syncOrder();\n"
+        "          });\n"
+        "        });\n"
+        "      });\n"
+        "    }\n"
+        "    if (document.readyState === 'loading') {\n"
+        "      document.addEventListener('DOMContentLoaded', bootstrapMultiSelectOrder);\n"
+        "    } else {\n"
+        "      bootstrapMultiSelectOrder();\n"
+        "    }\n"
         "  </script>"
     )
 
