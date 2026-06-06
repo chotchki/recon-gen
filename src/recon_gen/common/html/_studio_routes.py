@@ -78,7 +78,10 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from recon_gen.common.config import Config, PlantKind, ScopeKind
-from recon_gen.common.html._components import render_summary_search_input
+from recon_gen.common.html._components import (
+    kind_label_singular,
+    render_summary_search_input,
+)
 from recon_gen.common.l2.editor import EntityKind
 from recon_gen.common.html._studio_assets.tw_classes import (
     chrome_button_classes,
@@ -369,7 +372,10 @@ def _render_home_page(
             # Stop the click from triggering the surrounding <details>
             # toggle. The browser still follows the href to the create page.
             f'onclick="event.stopPropagation()" '
-            f'title="Create a new {escape(kind)}">+ Add</a>'
+            # `_HOME_SECTIONS` is typed `tuple[str, str, str]` for historical
+            # reasons; every literal value above IS an EntityKind by
+            # construction so the cast is the safe narrowing point.
+            f'title="Create a new {escape(kind_label_singular(cast("EntityKind", kind)))}">+ Add</a>'
         )
         # CF.4 followup (2026-06-05): search input lives in the
         # summary so the operator can search without expanding first.

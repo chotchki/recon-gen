@@ -48,6 +48,57 @@ from recon_gen.common.l2.editor import SINGLETON_KINDS, EntityKind
 
 
 # ---------------------------------------------------------------------------
+# Operator-readable kind labels (CG.13 — 2026-06-05)
+# ---------------------------------------------------------------------------
+#
+# Underscored `EntityKind` enum values (`account_template`,
+# `transfer_template`, `limit_schedule`) leaked into screen-reader
+# announcements ("Search account_templates"), `<title>` bars
+# ("Edit account_template: cust-001 — Studio"), and tooltip hovers
+# ("Create a new transfer_template"). Map each enum value to its
+# operator-readable form once + thread through every aria-label /
+# tooltip / title / h1 site so the underscore is gone everywhere.
+
+_KIND_LABEL_SINGULAR: Mapping[EntityKind, str] = {
+    "account": "account",
+    "account_template": "account template",
+    "rail": "rail",
+    "transfer_template": "transfer template",
+    "chain": "chain",
+    "limit_schedule": "limit schedule",
+    "theme": "theme",
+    "instance": "instance settings",
+}
+
+_KIND_LABEL_PLURAL: Mapping[EntityKind, str] = {
+    "account": "Accounts",
+    "account_template": "Account templates",
+    "rail": "Rails",
+    "transfer_template": "Transfer templates",
+    "chain": "Chains",
+    "limit_schedule": "Limit schedules",
+    "theme": "Theme",
+    "instance": "Instance settings",
+}
+
+
+def kind_label_singular(kind: EntityKind) -> str:
+    """Operator-readable singular form ("account template", "rail").
+    Lowercase — fits mid-sentence ("Create a new account template").
+    Falls back to the raw enum value on an unknown kind so a new
+    `EntityKind` variant fails loud rather than silent."""
+    return _KIND_LABEL_SINGULAR.get(kind, kind)
+
+
+def kind_label_plural(kind: EntityKind, *, lowercase: bool = False) -> str:
+    """Operator-readable plural form. Title Case by default ("Account
+    templates") for h1s + `<title>` bars; pass ``lowercase=True``
+    for aria-labels / mid-sentence use ("Search account templates")."""
+    label = _KIND_LABEL_PLURAL.get(kind, f"{kind}s")
+    return label.lower() if lowercase else label
+
+
+# ---------------------------------------------------------------------------
 # Typed axes
 # ---------------------------------------------------------------------------
 
@@ -467,7 +518,7 @@ def render_summary_search_input(
         f'<input type="search" name="q" '
         f'value="{escape(initial_q)}" '
         f'placeholder="Search…" '
-        f'aria-label="Search {escape(kind)}s" '
+        f'aria-label="Search {escape(kind_label_plural(kind, lowercase=True))}" '
         f'class="{input_cls}" '
         f'autocomplete="off" '
         f'hx-get="{escape(section_url)}" '

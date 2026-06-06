@@ -50,6 +50,8 @@ from recon_gen.common.html._studio_assets.tw_classes import (
 )
 from recon_gen.common.html._components import (
     SortAxis,
+    kind_label_plural,
+    kind_label_singular,
     parse_toolbar_state,
     render_list_pager,
     render_list_search,
@@ -2125,20 +2127,10 @@ def _render_read_card(
     )
 
 
-# CG.6 + CG.13 (2026-06-05) — operator-readable kind labels for h1 +
-# aria-label sites. Underscored kind enum values (`account_template`,
-# `transfer_template`, `limit_schedule`) leak into screen-reader
-# announcements and tooltip hovers; map them once and use everywhere.
-_KIND_LABEL_PLURAL: Mapping[EntityKind, str] = {
-    "account": "Accounts",
-    "account_template": "Account templates",
-    "rail": "Rails",
-    "transfer_template": "Transfer templates",
-    "chain": "Chains",
-    "limit_schedule": "Limit schedules",
-    "theme": "Theme",
-    "instance": "Instance settings",
-}
+# CG.13 (2026-06-05) — operator-readable kind labels moved to
+# `_components.py` as the shared source of truth, so the aria-label
+# site there and the h1 / page-title sites here read the same map.
+# Import the helpers via `kind_label_singular` / `kind_label_plural`.
 
 # CG.6 (2026-06-05) — one-sentence blurb per list kind, used by
 # `_render_list_page` to render the trainer-style header strip
@@ -3124,12 +3116,12 @@ def _render_create_page(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Create new {escape(kind)}{escape(title_suffix)} — Studio</title>
+  <title>Create new {escape(kind_label_singular(kind))}{escape(title_suffix)} — Studio</title>
   {studio_theme_head(instance)}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
-  {_form_page_header_html(f"Create new {kind}{title_suffix}")}
+  {_form_page_header_html(f"Create new {kind_label_singular(kind)}{title_suffix}")}
   {_back_breadcrumb_html(from_param)}
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
     {_render_intro_details(intro_html)}
@@ -3215,12 +3207,12 @@ def _render_edit_page(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Edit {escape(kind)}: {escape(entity_id)} — Studio</title>
+  <title>Edit {escape(kind_label_singular(kind))}: {escape(entity_id)} — Studio</title>
   {studio_theme_head(instance)}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
-  {_form_page_header_html(f"Edit {kind}{title_suffix}: {entity_id}")}
+  {_form_page_header_html(f"Edit {kind_label_singular(kind)}{title_suffix}: {entity_id}")}
   {_back_breadcrumb_html(from_param)}
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
     {_render_intro_details(intro_html)}
@@ -3875,7 +3867,7 @@ def _render_singleton_page(
             f'class="{input_cls} font-mono whitespace-pre resize-y min-h-16" '
             f'spellcheck="false">{escape(current_yaml)}</textarea>'
             f'<small class="text-xs text-secondary-fg">'
-            f'Empty block ⇒ clears the {escape(kind)} (silent-fallback). '
+            f'Empty block ⇒ clears the {escape(kind_label_singular(kind))} (silent-fallback). '
             f'Bad YAML or missing required fields ⇒ form re-renders with '
             f'your typed content + the validator error inline.'
             f'</small>'
@@ -3973,7 +3965,7 @@ def _render_list_page(
     # Both center inside the grid wrapper so the message lands where
     # the operator's eyes already are (cards are missing).
     if total_count == 0 and not entities:
-        plural = _KIND_LABEL_PLURAL.get(kind, kind).lower()
+        plural = kind_label_plural(kind, lowercase=True)
         if q:
             # Clear-search URL: strip `q=…` by going to the base list URL.
             # base_url is `/l2_shape/<kind>/` standalone or
@@ -4050,7 +4042,7 @@ def _render_list_page(
     # the same trainer-style header strip as `/`, `/training/`, and
     # `/etl/`. h1 = operator-readable plural label; blurb = one-line
     # per-kind anchor pulled from `_LIST_PAGE_BLURB_BY_KIND`.
-    page_title = escape(_KIND_LABEL_PLURAL.get(kind, kind))
+    page_title = escape(kind_label_plural(kind))
     page_blurb = _LIST_PAGE_BLURB_BY_KIND.get(kind, "")
     page_header_html = (
         f'<header class="px-8 py-4 border-b border-surface-border bg-white">'
@@ -4064,7 +4056,7 @@ def _render_list_page(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Studio editor — {escape(kind)}</title>
+  <title>Studio editor — {escape(kind_label_plural(kind))}</title>
   {studio_theme_head(instance)}
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <script>
