@@ -4198,14 +4198,28 @@ def _html_id_slug(entity_id: str) -> str:
     """Sanitize an entity_id for use in an HTML ``id`` attribute.
 
     Composite-keyed kinds (chain / limit_schedule) use ``::`` as the
-    separator in their addressing string. CSS treats ``::`` as
-    pseudo-element syntax, so an ``hx-target="#entity-chain-Foo::Bar"``
-    targets nothing — chain edit / delete / save would silently miss
-    the card and the swap would fail with no surface error. Replacing
-    ``::`` with ``__`` keeps the id CSS-selectable while leaving the
-    URL-side addressing (``/l2_shape/chain/Foo::Bar``) untouched.
+    separator in their addressing string, and chain's composite also
+    inlines a comma-separated children list (e.g.
+    ``MerchantSettlementCycle::PayoutACH,PayoutCheck,PayoutWire``).
+
+    Two characters need substitution:
+    - ``::`` → ``__`` — CSS treats the double-colon as pseudo-element
+      syntax (``#foo::bar`` matches no id).
+    - ``,`` → ``_C_`` — CSS treats the comma as the selector-list
+      separator (``#a,b`` parses as "id #a OR descendant b", NOT one
+      id literally containing a comma). Without this swap, HTMX's
+      ``hx-target="#entity-chain-Foo,Bar,Baz"`` lands on the wrong DOM
+      node — chain Delete on multi-child chains would either swap a
+      sibling out or silently no-op. CG.16 (cold-read v4 P0 #3).
+
+    Both substitutions are reversible: ``_C_`` is conspicuous enough
+    to round-trip back to ``,`` if a caller ever needs the original
+    composite, and ``__`` is the slug already in use since CF.4.
+    URL-side addressing (``/l2_shape/chain/Foo::Bar,Baz``) is
+    untouched — Starlette routes happily accept both characters in
+    the path segment; only the HTML ``id`` needs scrubbing.
     """
-    return entity_id.replace("::", "__")
+    return entity_id.replace("::", "__").replace(",", "_C_")
 
 
 def _entities_for_kind(
