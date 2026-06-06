@@ -719,11 +719,14 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
 
     def summary_search_locator(self, kind: str) -> Any:  # typing-smell: ignore[explicit-any]: Playwright Locator — see __init__ docstring
         """Locator for the summary search input of the given kind's
-        section. Pinpoints to the kind-prefixed `<input type="search"
-        name="<kind>_q">` rendered by `render_summary_search_input()`."""
+        section. Pinpoints by `data-kind` on the parent `<details>` +
+        the `<input type="search">` inside its `<summary>`. The
+        input's `name="q"` (bare — section endpoint parses Q1A
+        shape; the original CF.4.k `name="<kind>_q"` silently
+        no-op'd the filter, bug fixed 2026-06-05)."""
         return self._page.locator(
             f'details[data-kind="{kind}"] summary '
-            f'input[type="search"][name="{kind}_q"]',
+            f'input[type="search"][name="q"]',
         )
 
     def set_summary_search(self, kind: str, term: str) -> None:

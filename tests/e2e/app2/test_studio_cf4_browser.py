@@ -70,27 +70,33 @@ def test_summary_search_filters_section_under_heavy_density(
     their own search hits)."""
     asgi = _build_studio_asgi(heavy_cache)
     with StudioBrowserEditorDriver.serving(asgi) as driver:
-        # Baseline: a stable, deterministic fragment of a rail's
-        # entity_id from heavy_density_v1 — the test is naive about
-        # which one, just picks the first rail and searches a
-        # 5-char slice of its id.
         baseline_ids = driver.home_section_card_ids("rail")
         assert baseline_ids, (
             f"heavy_density_v1 rail section rendered no cards.\n"
             f"page body (first 2KB):\n{driver.page_body()[:2048]}"
         )
-        # Substring of a real rail id — search must surface ≥1 card.
-        probe_id = baseline_ids[0]
-        probe = probe_id[:5]
-
+        # Operator dogfood 2026-06-05: the first version of this test
+        # used `probe = baseline_ids[0][:5]` which (in heavy_density_v1)
+        # is "Rail_" — a substring of EVERY single rail id. So even
+        # when the filter silently no-op'd (the bug below), filtered
+        # == baseline and the assertion passed because every id
+        # contained "Rail_". Probe with the FULL first id instead so
+        # the filter must return exactly that one card.
+        probe = baseline_ids[0]
         driver.set_summary_search("rail", probe)
         filtered_ids = driver.home_section_card_ids("rail")
-        # Every filtered id must contain the substring; nothing
-        # outside the match leaks through.
         assert filtered_ids, (
-            f"summary-search for {probe!r} returned zero cards; "
-            f"expected ≥1 since the substring came from a real id.\n"
+            f"summary-search for {probe!r} returned zero cards.\n"
             f"page body (first 2KB):\n{driver.page_body()[:2048]}"
+        )
+        # The filter MUST have run — strictly fewer cards than baseline
+        # (a full-id search returns 1 row; baseline is 100+). This is
+        # the gate that caught the rail_q-vs-q wire bug.
+        assert len(filtered_ids) < len(baseline_ids), (
+            f"summary-search didn't filter: baseline={len(baseline_ids)} "
+            f"filtered={len(filtered_ids)}; the input's `name=` may "
+            f"mismatch what the section endpoint parses (regression of "
+            f"the rail_q-vs-q dogfood bug 2026-06-05)."
         )
         for entity_id in filtered_ids:
             assert probe.lower() in entity_id.lower(), (
@@ -101,8 +107,6 @@ def test_summary_search_filters_section_under_heavy_density(
         # Clear → restore baseline count.
         driver.clear_summary_search("rail")
         restored = driver.home_section_card_ids("rail")
-        # Clearing should re-render the whole baseline (or first
-        # page of it, if pagination kicked in for the baseline).
         assert len(restored) >= len(filtered_ids), (
             f"clear-search regressed: filtered={len(filtered_ids)} "
             f"baseline-after-clear={len(restored)}"

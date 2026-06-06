@@ -100,7 +100,14 @@ def test_each_list_section_summary_has_search_input(
         assert 'type="search"' in summary, (
             f"summary for {kind} has no search input"
         )
-        assert f'name="{kind}_q"' in summary
+        # name=bare `q` — the input fires htmx directly at the
+        # section endpoint which parses bare `q`. (The original
+        # CF.4.k shape used `name=<kind>_q`, but that silently
+        # no-op'd the filter — bug fixed 2026-06-05.)
+        assert 'name="q"' in summary, (
+            f"summary for {kind} doesn't submit bare `q`; "
+            f"section endpoint will no-op the filter"
+        )
     # Singletons have no search input — they edit a single form, no list.
     for kind in ("theme", "instance"):
         summary = _summary_for(body, kind)
@@ -111,18 +118,20 @@ def test_summary_search_initial_value_reflects_url(
     writable_l2_yaml: Path,
 ) -> None:
     """`/?rail_q=external` → the rail section's summary search input
-    has `value="external"` so a page refresh / shared URL surfaces the
-    active filter immediately."""
+    has `value="external"` so a page refresh / shared URL surfaces
+    the active filter immediately. The home URL uses the kind-
+    prefixed `<kind>_q` key (Q1B); the input submits bare `q` (Q1A
+    — what the section endpoint parses)."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/?rail_q=external").text
     rail_summary = _summary_for(body, "rail")
-    assert 'name="rail_q"' in rail_summary
+    # The input itself: bare `q`, value reflects the URL state.
+    assert 'name="q"' in rail_summary
     assert 'value="external"' in rail_summary
     # Other sections stay empty.
     account_summary = _summary_for(body, "account")
-    # The input is there but with empty value.
-    assert 'name="account_q"' in account_summary
+    assert 'name="q"' in account_summary
     assert 'value=""' in account_summary
 
 
@@ -189,12 +198,43 @@ def test_summary_search_input_includes_itself_in_request(
     writable_l2_yaml: Path,
 ) -> None:
     """`hx-include="this"` so the typed value reaches the section
-    endpoint (which parses `<kind>_q` via parse_toolbar_state)."""
+    endpoint (which parses bare `q` via parse_toolbar_state)."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/").text
     rail_summary = _summary_for(body, "rail")
     assert 'hx-include="this"' in rail_summary
+
+
+def test_summary_search_input_submits_bare_q_key(
+    writable_l2_yaml: Path,
+) -> None:
+    """Regression for the 2026-06-05 dogfood bug. The summary search
+    input's `name` MUST be the bare `q`, NOT the kind-prefixed
+    `<kind>_q`. The input's htmx GET targets the section endpoint
+    (`/l2_shape/rail/?embed=1`) which `parse_toolbar_state` reads as
+    bare `q` (Q1A shape). Submitting `rail_q=foo` made the endpoint
+    parse `q=""` and return all rails — the filter silently no-op'd.
+
+    The kind-prefix only matters for the home URL state truth
+    (Q1B — `/?rail_q=foo`); that's read+rendered by the home page,
+    not submitted by this input."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/").text
+    for kind in (
+        "account", "account_template", "rail",
+        "transfer_template", "chain", "limit_schedule",
+    ):
+        summary = _summary_for(body, kind)
+        # Bare key — the section endpoint expects this.
+        assert 'name="q"' in summary, (
+            f"{kind} summary search input doesn't submit bare `q`; "
+            f"section endpoint will parse empty q and no-op the "
+            f"filter"
+        )
+        # Kind-prefixed key must NOT leak — that'd reintroduce the bug.
+        assert f'name="{kind}_q"' not in summary
 
 
 # ---------------------------------------------------------------------------
@@ -257,9 +297,9 @@ def test_body_toolbar_pager_url_carries_q(writable_l2_yaml: Path) -> None:
 def test_search_in_summary_only_one_input_per_kind(
     writable_l2_yaml: Path,
 ) -> None:
-    """Belt-and-braces — count the kind-prefixed `name="<kind>_q"`
-    occurrences on the home page. Each list-kind section should have
-    exactly one search input (the summary one)."""
+    """Belt-and-braces — each list-kind section should have exactly
+    one `<input type="search">` (the summary one). Counted via the
+    section-scoped slice since every input now shares `name="q"`."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/").text
@@ -267,8 +307,8 @@ def test_search_in_summary_only_one_input_per_kind(
         "account", "account_template", "rail",
         "transfer_template", "chain", "limit_schedule",
     ):
-        # The home page renders one summary search per list kind.
-        assert body.count(f'name="{kind}_q"') == 1, (
-            f"expected exactly 1 search input for {kind}, "
-            f"got {body.count(f'name={kind}_q')}"
+        summary = _summary_for(body, kind)
+        assert summary.count('type="search"') == 1, (
+            f"expected exactly 1 search input for {kind} summary, "
+            f"got {summary.count('type=search')}"
         )

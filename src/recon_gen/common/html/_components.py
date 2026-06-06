@@ -438,16 +438,24 @@ def render_summary_search_input(
             `hx-include`.
         body_id: HTML id of the `<details>` body so htmx swaps the
             cards container, not the summary.
-        url_prefix: Kind-namespaced URL key prefix (e.g. ``"rail"``);
-            an empty string means bare ``q`` (no prefix). Matches
-            ``ListToolbarState.url_prefix`` for consistency.
+        url_prefix: Kept for API symmetry with `ListToolbarState`,
+            but currently unused — the input's submission key is
+            ALWAYS the bare `q` because the htmx GET targets the
+            section endpoint (`/l2_shape/<kind>/?embed=1`) which
+            parses the bare key (Q1A shape). The kind-prefix only
+            matters for the home page URL state truth (Q1B —
+            `/?rail_q=foo`), and that's read+rendered by the home
+            page render code, not submitted by this input.
+            Operator dogfood 2026-06-05: submitting `rail_q=foo` to
+            the section endpoint silently dropped the filter — the
+            endpoint parsed `q=""` and returned all rails.
 
     Output is one ``<input type="search">`` styled to fit in the
     summary row. ``onclick="event.stopPropagation()"`` so clicking the
     input doesn't toggle the parent ``<details>``; ``oninput`` opens
     the details so first keystroke surfaces results.
     """
-    key_q = f"{url_prefix}_q" if url_prefix else "q"
+    del url_prefix  # see note above — kept for API symmetry only
     input_cls = (
         "ml-2 px-2 py-0.5 border border-surface-border rounded-sm "
         "text-xs font-normal w-40 focus:border-accent focus:outline-none"
@@ -456,7 +464,7 @@ def render_summary_search_input(
     # Enter. `hx-trigger="search"` would also fire on the X-clear
     # button click in WebKit/Chrome — folded into the same trigger.
     return (
-        f'<input type="search" name="{escape(key_q)}" '
+        f'<input type="search" name="q" '
         f'value="{escape(initial_q)}" '
         f'placeholder="Search…" '
         f'aria-label="Search {escape(kind)}s" '
