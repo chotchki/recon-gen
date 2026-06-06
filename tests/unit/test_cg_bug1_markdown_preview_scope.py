@@ -76,6 +76,33 @@ def writable_l2_yaml(tmp_path: Path) -> Iterator[Path]:
 # Rendered button carries hx-params filter
 # ---------------------------------------------------------------------------
 
+@pytest.mark.parametrize("path", [
+    "/l2_shape/account/cust-001/edit",
+    "/l2_shape/account/new",
+    "/l2_shape/rail/new",  # rail subtype picker
+    "/l2_shape/theme/",  # singleton
+    "/l2_shape/account/",  # list view
+    "/l2_shape/persona/",  # 404 chrome
+])
+def test_form_pages_load_htmx(
+    writable_l2_yaml: Path, path: str,
+) -> None:
+    """Every editor surface that carries `hx-*` attributes must
+    actually load htmx so the attributes fire. Pre-CG-bug.2 only
+    the list view loaded htmx; the edit / create / singleton /
+    subtype-picker / 404 pages had `hx-delete`, `hx-post`,
+    `hx-confirm` attrs silently no-op-ing because htmx wasn't on
+    the page. Dogfood surfaced it via the markdown-Preview button;
+    CG.19's edit-form Delete button was a latent victim too."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get(path).text
+    assert "htmx.org@1.9.10" in body, (
+        f"{path}: htmx script tag missing — every `hx-*` attribute "
+        f"on this page silently no-ops without it"
+    )
+
+
 def test_account_edit_preview_button_filters_to_description(
     writable_l2_yaml: Path,
 ) -> None:

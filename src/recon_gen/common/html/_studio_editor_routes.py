@@ -2380,6 +2380,41 @@ def _edit_h1_parts(
     return h1_inner, title_detail
 
 
+def _htmx_head_block() -> str:
+    """CG-bug.2 (2026-06-05) — htmx script tag + the X.4.e.5
+    `beforeSwap` 4xx-as-data shim. Used by every editor page that
+    carries `hx-*` attributes: list view, create form, edit form,
+    singleton form, rail subtype picker, 404 chrome.
+
+    Pre-fix: only the list view loaded htmx. The edit + create
+    forms carry `hx-delete` (CG.19's Delete button) and the
+    markdown-Preview tab's `hx-post` — both silently no-op'd
+    because htmx wasn't on the page. Dogfood found the Preview
+    no-op; the Delete button's no-op was latent.
+    """
+    return (
+        '<script src="https://unpkg.com/htmx.org@1.9.10"></script>\n'
+        "  <script>\n"
+        "    // X.4.e.5 fix — HTMX defaults to NOT swapping 4xx response bodies\n"
+        "    // (treats them as errors). The validator returns 400 + an inline\n"
+        "    // error fragment; we WANT that fragment swapped in so the user\n"
+        "    // sees the error + their typed-but-invalid form content. Enable\n"
+        "    // 4xx swaps explicitly. (5xx still treated as errors.)\n"
+        "    // Attach to `document`, not `document.body` — this script runs in\n"
+        "    // <head> before <body> is parsed, so document.body is null and\n"
+        "    // .addEventListener would throw a TypeError. HTMX events bubble\n"
+        "    // all the way up to document, so this catches them just the same.\n"
+        "    document.addEventListener('htmx:beforeSwap', function(evt) {\n"
+        "      var status = evt.detail.xhr.status;\n"
+        "      if (status >= 400 && status < 500) {\n"
+        "        evt.detail.shouldSwap = true;\n"
+        "        evt.detail.isError = false;\n"
+        "      }\n"
+        "    });\n"
+        "  </script>"
+    )
+
+
 def _form_page_header_html(title: str) -> str:
     """CG.7 (2026-06-05) — trainer-style header strip for the form
     pages (create / edit / singleton / subtype-picker). Title sits
@@ -2427,6 +2462,7 @@ def _render_unknown_kind_page(
   <meta charset="utf-8">
   <title>Recon-Gen · Studio · 404</title>
   {studio_theme_head(instance)}
+  {_htmx_head_block()}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
@@ -2729,6 +2765,7 @@ def _render_rail_subtype_picker(
   <meta charset="utf-8">
   <title>Recon-Gen · Studio · Editor · Create rail · pick subtype</title>
   {studio_theme_head(instance)}
+  {_htmx_head_block()}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
@@ -3390,6 +3427,7 @@ def _render_create_page(
   <meta charset="utf-8">
   <title>Recon-Gen · Studio · Editor · Create {escape(kind_label_singular(kind))}{escape(title_suffix)}</title>
   {studio_theme_head(instance)}
+  {_htmx_head_block()}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
@@ -3505,6 +3543,7 @@ def _render_edit_page(
   <meta charset="utf-8">
   <title>Recon-Gen · Studio · Editor · {escape(edit_title_detail)}</title>
   {studio_theme_head(instance)}
+  {_htmx_head_block()}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
@@ -4177,6 +4216,7 @@ def _render_singleton_page(
   <meta charset="utf-8">
   <title>Recon-Gen · Studio · Editor · {escape(label)}</title>
   {studio_theme_head(instance)}
+  {_htmx_head_block()}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
@@ -4356,25 +4396,7 @@ def _render_list_page(
   <meta charset="utf-8">
   <title>Recon-Gen · Studio · Editor · {escape(kind_label_plural(kind))}</title>
   {studio_theme_head(instance)}
-  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-  <script>
-    // X.4.e.5 fix — HTMX defaults to NOT swapping 4xx response bodies
-    // (treats them as errors). The validator returns 400 + an inline
-    // error fragment; we WANT that fragment swapped in so the user
-    // sees the error + their typed-but-invalid form content. Enable
-    // 4xx swaps explicitly. (5xx still treated as errors.)
-    // Attach to `document`, not `document.body` — this script runs in
-    // <head> before <body> is parsed, so document.body is null and
-    // .addEventListener would throw a TypeError. HTMX events bubble
-    // all the way up to document, so this catches them just the same.
-    document.addEventListener('htmx:beforeSwap', function(evt) {{
-      var status = evt.detail.xhr.status;
-      if (status >= 400 && status < 500) {{
-        evt.detail.shouldSwap = true;
-        evt.detail.isError = false;
-      }}
-    }});
-  </script>
+  {_htmx_head_block()}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}

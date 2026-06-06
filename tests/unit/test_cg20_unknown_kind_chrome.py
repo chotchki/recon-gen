@@ -126,8 +126,19 @@ def test_invalid_kind_slug_xss_escaped(
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/l2_shape/%3Cscript%3E/").text
-    assert "<script>" not in body  # would have escaped
+    # The page now legitimately carries `<script>` tags in <head>
+    # (htmx loader + the beforeSwap shim from `_htmx_head_block`),
+    # so a bare `<script>` substring is no longer a valid XSS
+    # canary. What we care about: the URL-supplied `<script>` from
+    # the path slug renders escaped in the `<code>` block where the
+    # kind is displayed, never raw. Slice the <body> region and
+    # assert no `<script>` survived escaping there.
     assert "&lt;script&gt;" in body
+    body_start = body.index("<body")
+    body_section = body[body_start:]
+    assert "<script>" not in body_section, (
+        "URL-supplied <script> payload leaked into <body> unescaped"
+    )
 
 
 # ---------------------------------------------------------------------------
