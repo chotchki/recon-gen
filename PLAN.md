@@ -491,6 +491,40 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 
 - [ ] CM.0 - Replan + design — survey state escheatment rule diversity; lock policy-declaration site + filing-output scope (informational vs NAUPA-emitting). SPEC.md update. Output: `docs/audits/cm_0_escheatment_design.md`.
 
+## Phase CN - Docs + repo-root hygiene + page-aware `?` help surface (TBD — placeholder)
+
+**Placeholder filed 2026-06-06.** Three pain points converging into one phase: (1) `docs/audits/` has accumulated 108 files (all <60 days old) — unsustainable working set, but the content is too referentially-useful to delete; (2) project root has accumulated sprint-archaeology `.md` files (`CB_11_C_NOTES.md`, `Q3_CLI_REDESIGN.md`, `SPEC_studio.md`, `SPEC_gap_feedback.md`) alongside the load-bearing ones (PLAN/SPEC/CLAUDE/README); (3) the handbook (`docs/` outside `audits/` + `reference/`) is wildly stale — design-thoughts files from before the L1/L2/L3 architecture solidified, no current operator-help content.
+
+**Operator locks (2026-06-06):**
+
+1. **Audit retention = archive don't delete.** Shipped + superseded audits move to `docs/audits/_archive/` so git history + grep still find them, but the working set drops by ~80%. Living invariants (`quicksight-quirks`, `date_range_model_audit`), active-phase replans, current-cycle sign-offs stay at `docs/audits/`.
+2. **Handbook = rewrite, coupled to `?` help surface.** The handbook is treated as a **load-bearing operator surface**, not static docs. Pages are restructured around the dashboard tree's L1/L2/L3 vocabulary; each dashboard sheet maps to a handbook page that explains what the sheet teaches (per the error-class teaching contract — see `[[feedback_demo_teaches_error_classes]]`). Old design-thoughts files (`bs_design_thoughts.md`, `x_2_design_thoughts.md`, `x_4_5_design_thoughts.md`) get archived into `docs/audits/_archive/` (per #1).
+3. **`?` help surface = App2-only — DECLARED QS PARITY BREAK.** Every App2 dashboard sheet gets a `?` button (top-right or in the sub-nav) that opens the corresponding handbook page in a side panel or modal. The mapping is dashboard tree → handbook page (typed primitive — Sheet carries an optional `handbook_path: HandbookPath | None`). QS can't host this same affordance because QS embeds don't have a portable extension surface for our static handbook content — operators on QS get the existing per-sheet description text and link out to the handbook URL. This widens the App2-vs-QS parity gap deliberately; the gap is recorded in the QS-parity-break registry (#4 below) and surfaced in `docs/reference/quicksight-quirks.md` per `[[feedback_quirks_log_ever_growing]]`. Reinforces `[[project_app2_parity_for_offline_iteration]]` — App2 is the editorial/offline iteration path, and now also the operator-help-richer path.
+4. **Typed `QSParityBreak` registry — INVARIANT-IN-TYPES.** Every place the App2 renderer deliberately exceeds what QS can host gets a typed, registered declaration so we always know on purpose what we're past. Per `[[feedback_invariants_in_types]]`: a typed dataclass at construction time beats a scattered grep over `# QS-PARITY-BREAK:` comments. The registry (`common/parity/breaks.py` or similar) lives next to `common/sql/dialect.py`'s `Dialect` enum — same "load-bearing typed enumeration" shape. Initial population sweeps existing breaks (URL-param-no-control-sync, the 32-element StaticValues cap, the App2 markdown-prose richer-than-QS-text rendering, anywhere else the codebase encodes "we know QS won't do this"). Lint check: every `# QS-PARITY-BREAK:` comment in the codebase points at a registered entry; CI fails on un-registered drift. Doc generation: the quirks log + this PLAN.md's `## Phase CN` block both read from the registry (single source of truth — no copy-paste drift). The `?` help surface in #3 registers itself as the first NEW entry under CN.
+5. **CN comes after CK+CH branches merge.** Phase is parked behind the autonomous branches landing on main; the repo-root cleanup needs main to be the canonical state before sweeping.
+
+**Open design questions (lock before any sub-cells fire):**
+
+- Audit archive structure: flat `_archive/` directory or year-bucketed (`_archive/2026-q2/`)? Names already carry phase prefixes (`cg_0_*`, `bu_0_*`), so flat is probably fine.
+- Root `.md` policy: `CB_11_C_NOTES.md` + `Q3_CLI_REDESIGN.md` — fold into `SPEC_ARCHIVE.md`, move to `docs/audits/_archive/`, or delete? Probably archive.
+- `SPEC_studio.md` + `SPEC_gap_feedback.md` — fold into `SPEC.md` proper or keep as living sibling docs? They're load-bearing for current SPEC work, so likely fold or keep at root.
+- `?` help mapping site: does the handbook path live on `Sheet` (operator-facing) or `Dashboard` (one-per-dashboard intro)? Both? Per-sheet is more specific; per-dashboard is the common case.
+- Handbook hosting in App2: side panel (slides in from right, doesn't navigate away) or modal? Side panel preserves the operator's data context; modal is simpler. Side panel likely wins.
+- Help-content authoring: Markdown source under `docs/handbook/<dashboard>/<sheet>.md`, fetched by App2 at runtime; or compiled into the App2 bundle? Runtime fetch keeps edit-iterate-deploy tight + doesn't bloat the bundle.
+- mkdocs gate: should the CI gate also fail on handbook drift (e.g., a Sheet declares `handbook_path="<x>"` that doesn't exist)? Probably yes — Lock 11 BU.5-style docs-freshness check.
+
+**Done when:** `docs/audits/` working set ≤25 files; root `.md` count ≤7 (only load-bearing); handbook walks current architecture cleanly; every App2 dashboard sheet ships a `?` that opens its handbook page; QS-side parity break documented in the quirks log; mkdocs CI gate fails on handbook ↔ dashboard tree drift.
+
+- [ ] CN.0 - Replan + design — finalize the open questions; produce `docs/audits/cn_0_handbook_redesign.md` with the page-tree mapping (which dashboard sheet → which handbook page) + the `QSParityBreak` registry shape.
+- [ ] CN.1 - Typed `QSParityBreak` registry — new module (`common/parity/breaks.py` or similar) defining the frozen dataclass + the initial population. Sweep the codebase for existing breaks; register each. Lint check: every `# QS-PARITY-BREAK:` comment in the codebase references a registered entry (typing-smell test). Quirks doc generation reads from the registry. This blocks CN.4 (the `?` surface declares itself a parity break against this registry).
+- [ ] CN.2 - Audit archive sweep — move shipped/superseded to `docs/audits/_archive/`; target ≤25 in `docs/audits/`. Mechanical.
+- [ ] CN.3 - Root `.md` cleanup — apply the policy from CN.0.
+- [ ] CN.4 - Handbook rewrite — page-by-page against the current architecture; mapped to the dashboard tree per CN.0; flags App2-only sections via the CN.1 registry.
+- [ ] CN.5 - `?` help surface in App2 — typed `HandbookPath` primitive on `Sheet`; renderer adds the `?` button; side-panel implementation per CN.0 lock. Registers itself in CN.1.
+- [ ] CN.6 - mkdocs CI gate — build clean + no broken refs + Sheet.handbook_path liveness check + QSParityBreak-registry-vs-comments consistency check.
+- [ ] CN.7 - Cold-read v0 against the new handbook surface — agent walks the dashboards via `?` and reports gaps.
+- [ ] CN.8 - Sign-off + sweep CN to PLAN_ARCHIVE.md.
+
 ## Phase PLAN - Phase PLAN
 - [ ] PLAN.md - BS.5 — _v_config_chain_children + 7-path conversion
 
