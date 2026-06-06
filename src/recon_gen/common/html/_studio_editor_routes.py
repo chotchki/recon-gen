@@ -1957,14 +1957,45 @@ def _render_read_card_summary(
     # (FieldSpec.kind="chain_children", label="Children") already
     # lists the children, so dropping them from the title is pure
     # signal-to-noise. Cold-read v3 P1 finding.
+    #
+    # CG.18 (2026-06-05) — same treatment for limit_schedule, whose
+    # composite is "Role::Rail::Direction" (e.g.
+    # "DDAControl::CustomerOutboundACH::Outbound"). The cold-read v4
+    # suggested role-only, but multiple limit_schedules can share the
+    # same parent_role (one role, many rails, ± direction), so
+    # title-as-role-alone would render N indistinguishable cards.
+    # Title becomes `{role} → {rail}` so each (role, rail) pair has
+    # a unique scannable title; direction renders as a smaller
+    # secondary-fg badge after the title (similar to display_name on
+    # accounts) since direction is binary (Inbound / Outbound) and
+    # carries enough weight to belong in the title row, just smaller.
+    # Cold-read v4 P1 #1 — CG.12 was incomplete; finishes the
+    # analogous kind.
     title_text = entity_id
+    direction_badge_html = ""
     if kind == "chain":
         parent_attr = getattr(entity, "parent", None)
         if parent_attr is not None:
             title_text = str(parent_attr)
+    elif kind == "limit_schedule":
+        parent_role_attr = getattr(entity, "parent_role", None)
+        rail_attr = getattr(entity, "rail", None)
+        direction_attr = getattr(entity, "direction", None)
+        if parent_role_attr is not None and rail_attr is not None:
+            title_text = f"{parent_role_attr} → {rail_attr}"
+        if direction_attr is not None:
+            direction_cls = (
+                "ml-2 text-sm font-normal text-secondary-fg "
+                "break-words"
+            )
+            direction_badge_html = (
+                f' <span class="{direction_cls}" '
+                f'data-role="card-direction-badge">'
+                f"{escape(str(direction_attr))}</span>"
+            )
     title_html = (
         f'<h3 class="{h3_base}">{escape(title_text)}'
-        f'{display_name_html}{subtype_badge}</h3>'
+        f'{display_name_html}{direction_badge_html}{subtype_badge}</h3>'
     )
     # X.4.f.9.delete — DELETE on success returns empty (card disappears
     # via outerHTML swap); on validator-rejected structural break returns
