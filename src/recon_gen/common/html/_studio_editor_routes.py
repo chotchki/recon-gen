@@ -3941,21 +3941,37 @@ def _render_list_page(
     if total_count == 0 and not entities:
         plural = _KIND_LABEL_PLURAL.get(kind, kind).lower()
         if q:
-            # Clear-search URL: strip `q=…` from the current base, keep
-            # any other state (sort, page) the embed flow may have
-            # threaded. Hand-build because the toolbar primitives don't
-            # expose a "drop param" helper.
+            # Clear-search URL: strip `q=…` by going to the base list URL.
+            # base_url is `/l2_shape/<kind>/` standalone or
+            # `/l2_shape/<kind>/?embed=1` from the home page embed.
+            # Two wire shapes:
+            # - Standalone: plain anchor. Browser navigates to the
+            #   unfiltered standalone page. NO htmx — hx-get'ing the
+            #   standalone URL returns a full HTML document and
+            #   swapping it into #entity-list would render the
+            #   whole page (top-nav + header + cards) INSIDE the
+            #   cards grid (caught on dogfood 2026-06-05).
+            # - Embed: htmx-fetch the embed URL into
+            #   #home-section-body-<kind> — same target the pager
+            #   uses (CG.6 fix for the CF.4.j P0). Section body
+            #   refreshes in place; the rest of the home page stays.
             clear_url = base_url or f"/l2_shape/{kind}/"
-            clear_btn = (
-                f'<a class="{chrome_button_classes()} mt-3" '
-                f'href="{escape(clear_url)}" '
-                f'hx-get="{escape(clear_url)}" '
-                f'hx-target="#entity-list" hx-swap="innerHTML">'
-                f"Clear search</a>"
-            )
+            if embed:
+                clear_btn = (
+                    f'<a class="{chrome_button_classes()} mt-3" '
+                    f'href="{escape(clear_url)}" '
+                    f'hx-get="{escape(clear_url)}" '
+                    f'hx-target="#home-section-body-{kind}" '
+                    f'hx-swap="innerHTML">Clear search</a>'
+                )
+            else:
+                clear_btn = (
+                    f'<a class="{chrome_button_classes()} mt-3" '
+                    f'href="{escape(clear_url)}">Clear search</a>'
+                )
             empty_state_html = (
-                '<div class="flex flex-col items-center justify-center '
-                'py-12 text-center" data-role="empty-state">'
+                '<div class="col-span-full flex flex-col items-center '
+                'justify-center py-12 text-center" data-role="empty-state">'
                 '<p class="text-base m-0 text-secondary-fg">'
                 f"No {escape(plural)} match "
                 f'<code class="bg-link-tint px-1 rounded-sm">{escape(q)}</code>.'
@@ -3967,8 +3983,8 @@ def _render_list_page(
             )
         else:
             empty_state_html = (
-                '<div class="flex flex-col items-center justify-center '
-                'py-12 text-center" data-role="empty-state">'
+                '<div class="col-span-full flex flex-col items-center '
+                'justify-center py-12 text-center" data-role="empty-state">'
                 '<p class="text-base m-0 text-secondary-fg">'
                 f"No {escape(plural)} in this L2 yet.</p>"
                 '</div>'

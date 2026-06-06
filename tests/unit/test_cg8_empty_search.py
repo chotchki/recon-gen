@@ -79,22 +79,49 @@ def test_search_no_matches_renders_in_place_message(
     assert "zzzzz" in body
     # Action prompt.
     assert "Clear search or check spelling" in body
+    # `col-span-full` so the empty-state spans the whole grid width
+    # — otherwise it lands in the first grid cell and looks like a
+    # narrow column hanging in the top-left (operator dogfood
+    # 2026-06-05).
+    assert "col-span-full" in body
 
 
-def test_search_no_matches_renders_clear_button(
+def test_standalone_clear_button_is_plain_anchor(
     writable_l2_yaml: Path,
 ) -> None:
-    """Clear-search button is a button-shaped anchor that htmx-fetches
-    the same URL minus the q (or, equivalently, the standalone
-    URL)."""
+    """Standalone page: Clear-search is a plain `<a href="…">`. NO
+    htmx — `hx-get`ing the standalone URL returns a FULL HTML
+    document; swapping that into `#entity-list` would render the
+    whole page (top-nav + header + cards) INSIDE the cards grid.
+    Caught on dogfood 2026-06-05."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/l2_shape/rail/?q=zzzzz").text
-    # Anchor is htmx-wired so the cards refresh in place.
     assert ">Clear search</a>" in body
-    # And it targets the cards container so the empty-state vanishes
-    # the moment a real query goes back.
-    assert 'hx-target="#entity-list"' in body
+    # Pin the empty-state block specifically — there are other
+    # anchors on the page; we want THIS anchor to be plain.
+    empty_start = body.index('data-role="empty-state"')
+    empty_end = body.index("</div>", empty_start)
+    empty_block = body[empty_start:empty_end]
+    assert "hx-get" not in empty_block
+    assert "hx-target" not in empty_block
+
+
+def test_embed_clear_button_is_htmx_wired(
+    writable_l2_yaml: Path,
+) -> None:
+    """Embed flow: Clear-search uses htmx targeting
+    `#home-section-body-<kind>` (same pattern the pager uses
+    post-CG.6 / the CF.4.j P0 fix). The home page's section body
+    refreshes in place; the rest of the home page stays put."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/l2_shape/rail/?embed=1&q=zzzzz").text
+    empty_start = body.index('data-role="empty-state"')
+    empty_end = body.index("</div>", empty_start)
+    empty_block = body[empty_start:empty_end]
+    assert 'hx-target="#home-section-body-rail"' in empty_block
+    assert 'hx-get="/l2_shape/rail/?embed=1"' in empty_block
 
 
 def test_kind_empty_no_search_shows_quieter_message(
