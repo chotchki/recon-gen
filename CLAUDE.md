@@ -106,6 +106,7 @@ Full runbook + IAM policy + onboarding steps + cfg shape: `docs/audits/y_2_gate_
   - **pre-push** — runs `./run_tests.sh up_to=db --dialects=pg --targets=lo` (~30s).
   - `--no-verify` discouraged on either hook — investigate the failure rather than bypass.
 - **Failure surface parity (`k.7`)** — same exit codes + artifact paths locally and in CI: `runs/<run-id>/<variant>/<layer>/{cmd.json,stdout.log,stderr.log,timings.json}` + per-cell `db-perf/top-queries.md`. Coverage data and timings upload as GHA artifacts. `EXIT_NEEDS_OPERATOR=2` for cfg / probe / boto3 failures with the actionable message in stderr; `EXIT_FAILURE=1` for pytest. No "decode the GH log" step — the artifact set IS the local triage shape.
+- **Local ≡ CI for QS support.** Same `./run_tests.sh` invocation, same `cfg.auth.aws_profile` → `sts:GetCallerIdentity` → `quicksight:ListUsers` derivation, same QS user (`recon-gen-admin`). The WSL2 self-hosted CI runner has its own long-lived `recon-gen-local`-class IAM keys identical to local — no static `QS_E2E_USER_ARN` secret, no browser-login asymmetry, no test that runs only on one side. If a QS-leg test passes locally, it passes on CI (modulo the actual QS subscription state, which both environments share).
 
 ## Project Structure
 
@@ -208,7 +209,7 @@ Two layers gated behind `QS_GEN_E2E=1`: API (boto3, `-m api`) and browser (Playw
 
 `QsEmbedDriver` internals (you don't touch these): QS `data-automation-id` selectors; racy tab switches (snapshot-and-wait); virtualized tables (~10 DOM rows, `table_row_count()` does the page-size-bump dance); parameter-write waits on the `START_VIS` / `STOP_VIS` WebSocket frames (X.2.r) — no fixed sleeps; embed URLs are single-use; failure diagnostics auto-capture to `$QS_GEN_RUN_DIR/browser/<test_id>/`. Full internals + quirks: `docs/reference/quicksight-quirks.md`.
 
-CI: `e2e.yml` runs `e2e-pg-api` + `e2e-pg-browser` + `e2e-oracle-api` (auth-smoke gate first); browser job includes the 4-way agreement test (`test_audit_dashboard_agreement.py`: `scenario_plants ⊆ direct_matview_SELECT == QS == App2 (== PDF for drift)`). `release.yml::e2e-against-testpypi` is the prod-publish gate. Per-job perf dumps upload top-50 expensive queries as workflow artifact.
+CI: post-CB.11.c, `e2e.yml` is gone — the e2e legs absorbed into `ci.yml`'s Layered runner job on the WSL2 self-hosted runner (per BY phase). The runner invokes the same `./run_tests.sh up_to=qs_browser` shape that runs locally; same `cfg.auth.aws_profile` → derived `QS_E2E_USER_ARN` path, same QS subscription, same 4-way agreement test (`test_audit_dashboard_agreement.py`: `scenario_plants ⊆ direct_matview_SELECT == QS == App2 (== PDF for drift)`). `release.yml::e2e-against-testpypi` is the prod-publish gate (kept on `ubuntu-latest` per BY.3's secret-isolation policy). Per-job perf dumps upload top-50 expensive queries as workflow artifact.
 
 ## Demo Data Conventions
 
