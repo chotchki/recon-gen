@@ -559,9 +559,9 @@ def _render_home_page(
       The diagram link in the top nav shows how the kinds connect.
     </p>
   </header>
-  <section class="px-4 pt-4 pb-8 max-w-7xl mx-auto" id="home-entities">
+  <main class="px-4 pt-4 pb-8 max-w-7xl mx-auto" id="home-entities">
     {sections_html}
-  </section>
+  </main>
 </body>
 </html>
 """
@@ -868,9 +868,9 @@ def _render_etl_landing_page(
     </p>
   </header>
   {tutorial_banner}
-  <section class="px-8 pb-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-[1fr_auto_1fr_auto_1fr] lg:items-stretch" id="etl-landing-cards">
+  <main class="px-8 pb-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-[1fr_auto_1fr_auto_1fr] lg:items-stretch" id="etl-landing-cards">
     {cards_with_arrows}
-  </section>
+  </main>
 </body>
 </html>
 """
@@ -968,8 +968,17 @@ async def _render_etl_probe_page(
   {top_nav_html}
   {demo_banner}
   {_render_etl_sub_nav("/etl/probe")}
+  <header class="px-8 py-4 border-b border-surface-border bg-white">
+    <h1 class="text-xl font-semibold m-0">Probe</h1>
+    <p class="text-sm text-secondary-fg max-w-3xl m-0 mt-1">
+      Slice the L2 to see how many rails / templates / chains the
+      configured ETL needs to land. Run before staging customer data.
+    </p>
+  </header>
+  <main>
   {picker_html}
   {body_html}
+  </main>
 </body>
 </html>
 """
@@ -1594,10 +1603,19 @@ async def _render_etl_run_page(
   {top_nav_html}
   {demo_banner}
   {_render_etl_sub_nav("/etl/run")}
+  <header class="px-8 py-4 border-b border-surface-border bg-white">
+    <h1 class="text-xl font-semibold m-0">Refresh Data</h1>
+    <p class="text-sm text-secondary-fg max-w-3xl m-0 mt-1">
+      Re-run the bundled deploy pipeline (schema + seed + matview
+      refresh + dashboard regeneration) against the demo database.
+    </p>
+  </header>
+  <main>
   {run_form_html}
   {live_tail_html}
   {log_html}
   {coverage_html}
+  </main>
   {flash_script}
 </body>
 </html>
@@ -2327,8 +2345,18 @@ async def _render_etl_triage_page(
   {top_nav_html}
   {demo_banner}
   {_render_etl_sub_nav("/etl/triage")}
+  <header class="px-8 py-4 border-b border-surface-border bg-white">
+    <h1 class="text-xl font-semibold m-0">Triage</h1>
+    <p class="text-sm text-secondary-fg max-w-3xl m-0 mt-1">
+      ETL feed gaps the Probe + Refresh Data passes surfaced. Each
+      row points at the L2 shape + the SQL fragment that would
+      close the gap.
+    </p>
+  </header>
   {demo_plant_banner}
+  <main>
   {body_html}
+  </main>
 </body>
 </html>
 """
@@ -3130,16 +3158,22 @@ def _render_diagram_page(
     and offered "document the exemption" as the alternative to
     adding the strip — taking that path deliberately.
   -->
+  <!-- CK.1 (2026-06-05) — visually-hidden h1 + `<main>` landmark
+       so screen readers can announce the page + skip-to-content
+       works. CG.10's vertical-budget exemption stands for the
+       trainer-style header strip (visible h1 would steal canvas
+       pixels); the .sr-only h1 doesn't paint anything visible. -->
+  <h1 class="sr-only">Recon-Gen Studio — L2 diagram</h1>
   <!-- CF.3.m — canvas wrapper becomes the positioning context for
        the floating sidebar. AM.2 step 3 fix-up (2026-05-25) preserved:
        `flex` + `min-h-0` keep the SVG from overflowing to its
        intrinsic graphviz pixel size; `#diagram-target` keeps
        `flex-1 min-h-0 min-w-0` so the injected SVG fits the viewBox
        via preserveAspectRatio. -->
-  <div class="relative flex flex-1 min-h-0 overflow-hidden bg-white">
+  <main class="relative flex flex-1 min-h-0 overflow-hidden bg-white">
     {sidebar_html if not embed else ""}
     <div id="diagram-target" class="flex-1 min-h-0 min-w-0"></div>
-  </div>
+  </main>
 
   <template id="topology-dot">{escape(dot_source)}</template>
   <script id="topology-meta" type="application/json">{sidecar}</script>

@@ -376,6 +376,7 @@ def render_training_v3_landing(
         <div class="flex items-center gap-2">
           <label class="text-xs text-secondary-fg">Show:</label>
           <select id="bv-show-filter"
+                  aria-label="Filter plant kinds by enabled state"
                   class="text-xs px-2 py-1 border border-surface-border rounded-sm bg-white cursor-pointer"
                   onchange="window._bvApplyFilter(this.value)">
             <option value="all">All</option>

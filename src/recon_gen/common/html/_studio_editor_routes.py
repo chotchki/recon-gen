@@ -1379,8 +1379,15 @@ def _render_field(
                 f"{escape(o)}</option>"
                 for o in options
             )
+        # CK.4 (2026-06-05) — every dynamic-form <select> ships an
+        # aria-label sourced from the FieldSpec.label so axe-core's
+        # `select-name` check passes. The existing
+        # `<label for="field-...">` provides implicit labelling for
+        # sighted operators, but axe-core treats the explicit
+        # aria-label as the canonical accessible name.
         input_html = (
-            f'<select id="field-{spec.name}" name="{escape(spec.name)}" class="{input_cls}">'
+            f'<select id="field-{spec.name}" name="{escape(spec.name)}" '
+            f'aria-label="{escape(spec.label)}" class="{input_cls}">'
             f'{"".join(opt_blocks)}</select>'
         )
     elif spec.kind == "textarea":
@@ -3066,14 +3073,16 @@ def _render_reconciler_section(
         f'<div class="{block_cls}" data-reconciler-block="attach"{attach_hidden}>'
         f'<div class="{row_cls}">'
         f'<label for="field-reconciler_kind" class="{label_cls}">Reconciler kind</label>'
-        f'<select id="field-reconciler_kind" name="reconciler_kind" class="{input_cls}">'
+        f'<select id="field-reconciler_kind" name="reconciler_kind" '
+        f'aria-label="Reconciler kind" class="{input_cls}">'
         f'<option value=""{" selected" if not rk_override else ""}>— pick —</option>'
         f'{kind_html}'
         '</select>'
         '</div>'
         f'<div class="{row_cls}">'
         f'<label for="field-reconciler_name" class="{label_cls}">Reconciler name</label>'
-        f'<select id="field-reconciler_name" name="reconciler_name" class="{input_cls}">'
+        f'<select id="field-reconciler_name" name="reconciler_name" '
+        f'aria-label="Reconciler name" class="{input_cls}">'
         f'<option value=""{" selected" if not rn_override else ""}>— pick —</option>'
         f'<optgroup label="TransferTemplates">{tt_opts}</optgroup>'
         f'<optgroup label="Aggregating Rails">{agg_opts}</optgroup>'
@@ -3108,7 +3117,9 @@ def _render_reconciler_section(
         '</div>'
         f'<div class="{row_cls}">'
         f'<label for="field-reconciler_new_kind" class="{label_cls}">New reconciler kind{req}</label>'
-        f'<select id="field-reconciler_new_kind" name="reconciler_new_kind" data-reconciler-new-kind class="{input_cls}">'
+        f'<select id="field-reconciler_new_kind" name="reconciler_new_kind" '
+        f'aria-label="New reconciler kind" '
+        f'data-reconciler-new-kind class="{input_cls}">'
         f'<option value=""{" selected" if not rk_override else ""}>— pick —</option>'
         f'<option value="transfer_template"{" selected" if rk_override == "transfer_template" else ""}>TransferTemplate</option>'
         f'<option value="aggregating_rail"{" selected" if rk_override == "aggregating_rail" else ""}>Aggregating Rail</option>'
@@ -3137,7 +3148,9 @@ def _render_reconciler_section(
         f'<div class="{sub_block_cls}" data-reconciler-new-kind-fields="aggregating_rail"{"" if rk_override == "aggregating_rail" else " hidden"}>'
         f'<div class="{row_cls}">'
         f'<label for="field-reconciler_new_subtype" class="{label_cls}">Subtype{req}</label>'
-        f'<select id="field-reconciler_new_subtype" name="reconciler_new_subtype" data-reconciler-new-subtype class="{input_cls}">'
+        f'<select id="field-reconciler_new_subtype" name="reconciler_new_subtype" '
+        f'aria-label="Aggregating rail subtype" '
+        f'data-reconciler-new-subtype class="{input_cls}">'
         f'<option value=""{" selected" if not rnn_subtype_override else ""}>— pick —</option>'
         f'{subtype_opts}'
         '</select>'
@@ -3163,7 +3176,8 @@ def _render_reconciler_section(
         '</div>'
         f'<div class="{row_cls}">'
         f'<label for="field-reconciler_new_leg_direction" class="{label_cls}">Leg direction{req}</label>'
-        f'<select id="field-reconciler_new_leg_direction" name="reconciler_new_leg_direction" class="{input_cls}">'
+        f'<select id="field-reconciler_new_leg_direction" name="reconciler_new_leg_direction" '
+        f'aria-label="Leg direction" class="{input_cls}">'
         f'<option value=""{" selected" if not rnn_leg_direction_override else ""}>— pick —</option>'
         f'{leg_dir_opts}'
         '</select>'
