@@ -42,6 +42,7 @@ from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from recon_gen.common.html._studio_assets.tw_classes import (
+    chrome_button_classes,
     entity_card_classes,
     field_input_classes,
     field_row_classes,
@@ -3883,8 +3884,10 @@ def _render_list_page(
     pager_html: str = "",
     top_nav_html: str = "",
     total_count: int | None = None,
+    q: str = "",
     embed: bool = False,
     demo_mode: bool = False,
+    base_url: str = "",
 ) -> str:
     """Full HTML page — every entity of the kind rendered as a read card.
 
@@ -3926,6 +3929,51 @@ def _render_list_page(
         )
         for e in entities
     )
+    # CG.8 (2026-06-05) — empty-state in-place message. When the
+    # cards grid is empty AND there's an active search, render a
+    # centered prompt inside the grid area instead of letting the
+    # operator stare at a blank page with only "No matches" tucked
+    # next to the pager. Two shapes:
+    #   - search-empty: "No <plural> match `<q>`."  + clear-search btn
+    #   - kind-empty:    "No <plural> in this L2 yet." (no clear btn)
+    # Both center inside the grid wrapper so the message lands where
+    # the operator's eyes already are (cards are missing).
+    if total_count == 0 and not entities:
+        plural = _KIND_LABEL_PLURAL.get(kind, kind).lower()
+        if q:
+            # Clear-search URL: strip `q=…` from the current base, keep
+            # any other state (sort, page) the embed flow may have
+            # threaded. Hand-build because the toolbar primitives don't
+            # expose a "drop param" helper.
+            clear_url = base_url or f"/l2_shape/{kind}/"
+            clear_btn = (
+                f'<a class="{chrome_button_classes()} mt-3" '
+                f'href="{escape(clear_url)}" '
+                f'hx-get="{escape(clear_url)}" '
+                f'hx-target="#entity-list" hx-swap="innerHTML">'
+                f"Clear search</a>"
+            )
+            empty_state_html = (
+                '<div class="flex flex-col items-center justify-center '
+                'py-12 text-center" data-role="empty-state">'
+                '<p class="text-base m-0 text-secondary-fg">'
+                f"No {escape(plural)} match "
+                f'<code class="bg-link-tint px-1 rounded-sm">{escape(q)}</code>.'
+                '</p>'
+                '<p class="text-sm m-0 mt-1 text-secondary-fg">'
+                'Clear search or check spelling.</p>'
+                f"{clear_btn}"
+                '</div>'
+            )
+        else:
+            empty_state_html = (
+                '<div class="flex flex-col items-center justify-center '
+                'py-12 text-center" data-role="empty-state">'
+                '<p class="text-base m-0 text-secondary-fg">'
+                f"No {escape(plural)} in this L2 yet.</p>"
+                '</div>'
+            )
+        cards = empty_state_html
     # AM.1 step 6 — list-page chrome migrated. `entity-list` /
     # `studio-header` / `nav-link` semantic classes drop in favor
     # of raw utilities. `id="entity-list"` kept as the hx-target
@@ -4258,6 +4306,8 @@ def _make_handlers(
                 pager_html=pager_html,
                 top_nav_html=top_nav_html_fn("/") if not embed else "",
                 total_count=state.total_count,
+                q=state.q,
+                base_url=submit_url,
                 embed=embed, demo_mode=demo_mode,
             ),
         )
