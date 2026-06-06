@@ -256,8 +256,13 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         """
         # Wait for ANY navigation (success → /, failure → POST target
         # re-render). expect_navigation with no url= matches any.
+        # Selector covers both create + edit shapes (the source emits
+        # `class="create-form"` and `class="edit-form"` respectively).
         with self._page.expect_navigation():
-            self._page.click('form.create-form button[type="submit"]')
+            self._page.click(
+                'form.create-form button[type="submit"], '
+                'form.edit-form button[type="submit"]'
+            )
         landed = self._page.url
         if landed.rstrip("/") == self._base:
             return  # success path: 303 → home

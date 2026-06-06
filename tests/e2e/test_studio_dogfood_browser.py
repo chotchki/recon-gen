@@ -200,18 +200,6 @@ def test_browser_operator_creates_rail_with_role_checkbox(
         )
 
 
-@pytest.mark.skip(
-    reason=(
-        "AI.10 (xor_groups textarea) + AI.13 (BB.2 aggregator-two-leg "
-        "expected_net + origin) + piece-4 `_edit` verb shipped. Full "
-        "create_l2 walk runs end-to-end via real browser, but BB.2 "
-        "create-new sub-form misses optional rail / TT fields "
-        "(metadata_keys, amount_typical_range, transfer_key, "
-        "completion, description, posted_requirements). AI.14 + "
-        "AI.15 consolidated as 'BB.2 form completeness + structured "
-        "pickers' work — defer until post-AM per user 2026-05-25."
-    ),
-)
 @pytest.mark.browser
 def test_browser_full_create_l2_structural_equality(
     tmp_path: Path,

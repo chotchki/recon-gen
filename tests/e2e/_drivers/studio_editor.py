@@ -414,7 +414,7 @@ class _BaseStudioEditorDriver:
             )
             self._edit(
                 "transfer_template", tt_name,
-                _reorder_leg_rails_form_data(ref_tt),
+                _post_reconciler_backfill_form_data("transfer_template", ref_tt),
             )
         for agg_name in {n for (k, n) in created_reconcilers if k == "aggregating_rail"}:
             ref_agg = next(
@@ -423,7 +423,7 @@ class _BaseStudioEditorDriver:
             )
             self._edit(
                 "rail", agg_name,
-                _reorder_bundles_activity_form_data(ref_agg),
+                _post_reconciler_backfill_form_data("rail", ref_agg),
             )
 
         for rail in deferred_max_unbundled_age:
@@ -450,28 +450,33 @@ class _BaseStudioEditorDriver:
             )
 
 
-def _reorder_leg_rails_form_data(template: TransferTemplate) -> FormData:
-    """BB.4 — PUT body that resets a TT's leg_rails to a known order.
+def _post_reconciler_backfill_form_data(
+    kind: EntityKind, entity: object,
+) -> FormData:
+    """CO.2 — PUT body that backfills every field on a reconciler that
+    was bulk-created by the wave-3a BB.2 create-new sub-form.
 
-    Used after wave-3a create-new + attach-existing builds the TT
-    rail-list in driver-walk order; this restores reference-yaml
-    order so struct equality holds.
+    The BB.2 reconciler-new sub-form intentionally surfaces only the
+    structural minimum (name + keys + subtype + roles + cadence).
+    Optional polish fields — ``metadata_keys`` / ``description`` /
+    ``posted_requirements`` / ``amount_typical_range`` / etc. — never
+    appear in the sub-form, so an aggregator or TT created via that
+    path lands with default ``()`` / ``None`` for those fields.
+
+    This helper reuses ``create_form_data`` to build the FULL create
+    body, then sends it through ``_edit`` as a PUT. ``mutate_l2`` uses
+    ``dataclasses.replace(**fields)`` semantics, so every submitted
+    field overwrites the reconciler's thin defaults with the
+    reference's values — including the ``bundles_activity`` /
+    ``leg_rails`` rail-list ORDER that BB.4 originally targeted.
+
+    Pre-CO this helper was two narrower siblings
+    (``_reorder_leg_rails_form_data`` / ``_reorder_bundles_activity_form_data``)
+    that only sent the rail-list field — fine for ORDER but blind to
+    every other missing field. Unified into one form-data builder so
+    the wave-5 edit pass is exhaustive by construction.
     """
-    rails = [str(r) for r in template.leg_rails]
-    return {
-        "leg_rails__present": ["1"],
-        "leg_rails": rails,
-    }
-
-
-def _reorder_bundles_activity_form_data(rail: Rail) -> FormData:
-    """BB.4 — PUT body that resets an aggregating Rail's
-    bundles_activity to a known order."""
-    bundles = [str(b) for b in rail.bundles_activity]
-    return {
-        "bundles_activity__present": ["1"],
-        "bundles_activity": bundles,
-    }
+    return create_form_data(kind, entity)
 
 
 def _max_unbundled_age_edit_form_data(rail: Rail) -> FormData:
