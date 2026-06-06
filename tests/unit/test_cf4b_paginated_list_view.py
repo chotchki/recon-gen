@@ -144,20 +144,27 @@ def writable_l2_yaml(tmp_path: Path) -> Iterator[Path]:
 def test_list_view_renders_toolbar_for_rail_kind(
     writable_l2_yaml: Path,
 ) -> None:
-    """`/l2_shape/rail/` produces a toolbar + the per-card grid.
-    Standalone page carries the search input + pager (no sort
-    dropdown — operator lock 2026-06-05: dropdown doubled toolbar
-    height for no daily value; default YAML-order is the canonical
-    read shape)."""
+    """`/l2_shape/rail/` produces a search input above the grid + a
+    pager below it (dashboard-parity layout — operator lock
+    2026-06-05). No sort dropdown — default YAML-order is the
+    canonical read shape; URL-level `?sort_column=…` still honored
+    for shared / external URLs."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/l2_shape/rail/").text
 
-    assert 'data-role="list-toolbar"' in body
-    assert 'data-kind="rail"' in body
+    assert 'data-role="list-search"' in body
+    assert 'data-role="list-pager"' in body
+    # Search sits above the cards grid; pager below. The grid is
+    # marked `id="entity-list"`; assert string ordering.
+    assert (
+        body.index('data-role="list-search"')
+        < body.index('id="entity-list"')
+        < body.index('data-role="list-pager"')
+    )
     assert 'name="q"' in body
-    # No sort UI — only the URL parser still honors ?sort_column=… for
-    # shared / external URLs (covered by test_list_view_sort_axis_…).
+    # No sort UI — only the URL parser still honors ?sort_column=…
+    # for shared / external URLs (covered by test_list_view_sort_axis_…).
     assert 'name="sort_column"' not in body
     assert '<select' not in body
 
@@ -253,7 +260,7 @@ def test_list_view_oversized_page_size_does_not_500(
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.get("/l2_shape/rail/?page_size=9999999")
     assert resp.status_code == 200
-    assert 'data-role="list-toolbar"' in resp.text
+    assert 'data-role="list-pager"' in resp.text
 
 
 def test_list_view_embed_mode_returns_only_toolbar_plus_grid(
@@ -272,7 +279,7 @@ def test_list_view_embed_mode_returns_only_toolbar_plus_grid(
     assert "<head>" not in body
     assert "</head>" not in body
     assert "<body" not in body
-    assert 'data-role="list-toolbar"' in body
+    assert 'data-role="list-pager"' in body
     assert 'data-kind="rail"' in body
 
 

@@ -93,13 +93,13 @@ def test_editor_home_no_top_level_add_cta(
     writable_l2_yaml: Path,
 ) -> None:
     """No top-level + Add CTA — per-section + Add stays the entry
-    point. The home-intro section's blurb references the per-section
-    affordance descriptively but doesn't emit one."""
+    point. The home-intro `<header>` block's blurb references the
+    per-section affordance descriptively but emits no anchor."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/").text
     intro_start = body.index('id="home-intro"')
-    intro_end = body.index("</section>", intro_start)
+    intro_end = body.index("</header>", intro_start)
     intro = body[intro_start:intro_end]
     # The intro section itself has no anchor/button targeting `/new`.
     assert "/new" not in intro

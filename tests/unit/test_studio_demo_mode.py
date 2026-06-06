@@ -292,10 +292,13 @@ class TestDemoModeChrome:
             yaml_path, tmp_path, demo_mode=True,
         )
 
-    def test_home_deploy_button_hidden_in_demo_mode(
+    def test_home_deploy_button_absent_in_both_modes(
         self, yaml_path: Path, tmp_path: Path,
     ) -> None:
-        assert 'id="deploy-btn"' in self._home(
+        """CF.4 followup (2026-06-05) — the Deploy changes button was
+        dropped on operator request. Demo-mode no longer needs a
+        per-mode test since the button is absent in both modes."""
+        assert 'id="deploy-btn"' not in self._home(
             yaml_path, tmp_path, demo_mode=False,
         )
         assert 'id="deploy-btn"' not in self._home(

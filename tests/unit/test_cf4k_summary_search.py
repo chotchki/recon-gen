@@ -199,21 +199,21 @@ def test_summary_search_input_includes_itself_in_request(
 # Body toolbar: search input dropped, but hidden q preserves state
 # ---------------------------------------------------------------------------
 
-def test_embed_body_toolbar_drops_search_input(
+def test_embed_body_drops_search_input(
     writable_l2_yaml: Path,
 ) -> None:
     """`?embed=1` (the home section's lazy fetch) returns a body
-    toolbar with NO `<input type="search">` (summary owns it) and NO
-    sort dropdown (removed 2026-06-05 — toolbar height tax for no
-    daily value). The toolbar is just range + pager."""
+    fragment with NO `<input type="search">` (summary owns it) and
+    NO sort dropdown (removed 2026-06-05). Just cards + pager."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         embed = c.get("/l2_shape/rail/?embed=1").text
-    assert 'data-role="list-toolbar"' in embed
+    assert 'data-role="list-search"' not in embed
     assert 'type="search"' not in embed
     assert 'name="sort_column"' not in embed
     assert "<select" not in embed
-    # Range indicator IS present.
+    # Pager IS present, below the cards.
+    assert 'data-role="list-pager"' in embed
     assert 'data-role="toolbar-range"' in embed
 
 
@@ -221,14 +221,16 @@ def test_standalone_page_still_has_search_input(
     writable_l2_yaml: Path,
 ) -> None:
     """Non-embed (`/l2_shape/rail/`) is the dedicated per-kind page —
-    no `<details>` summary, so the body toolbar keeps the search
-    input (no regression for that surface)."""
+    no `<details>` summary upstream, so the page keeps the search
+    input above the cards grid (no regression for that surface)."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/l2_shape/rail/").text
-    assert 'data-role="list-toolbar"' in body
+    assert 'data-role="list-search"' in body
     assert 'type="search"' in body
     assert 'name="q"' in body
+    # Pager is also there, below the cards.
+    assert 'data-role="list-pager"' in body
 
 
 # ---------------------------------------------------------------------------

@@ -137,32 +137,21 @@ def test_home_page_lists_instance_settings_singleton(
     assert 'href="/l2_shape/instance/"' in body
 
 
-def test_home_page_renders_deploy_button_in_header(
+def test_home_page_no_legacy_deploy_button(
     writable_l2_yaml: Path,
 ) -> None:
-    """X.4.g.14 — header carries the global "Deploy changes" button +
-    a status indicator for surfacing deploy-pipeline outcomes."""
+    """CF.4 followup (2026-06-05) — the X.4.g.14 "Studio · <prefix> /
+    Deploy changes" header strip was dropped on operator request
+    (it duplicated info the top-nav carries, and the deploy button
+    is a chrome distraction for the editor surface). Deploy is
+    reachable via `recon-gen json apply --execute`; the in-page
+    button + `quicksightDeploy` JS handler are gone."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/").text
-
-    # Button + status indicator land in the page header (not buried
-    # in an entity section). AM.2 step 1 (2026-05-25): `.studio-header`
-    # semantic class retired in favor of raw Tailwind utilities; the
-    # only `<header` element on the page is the studio chrome, so
-    # locate by tag + the back-link text that pins identity.
-    header_start = body.index('<header')
-    header_end = body.index('</header>', header_start)
-    header_html = body[header_start:header_end]
-    assert 'id="deploy-btn"' in header_html
-    assert 'onclick="quicksightDeploy()"' in header_html
-    assert 'id="deploy-status"' in header_html
-
-    # JS handler is wired to POST /deploy + branches on halted vs ok.
-    assert "function quicksightDeploy()" in body
-    assert "fetch('/deploy', { method: 'POST' })" in body
-    assert "halted" in body
-    assert "step5_data_generation_id" in body
+    assert 'id="deploy-btn"' not in body
+    assert "quicksightDeploy" not in body
+    assert 'id="deploy-status"' not in body
 
 
 def test_home_page_first_section_open_default_others_collapsed(
@@ -508,14 +497,14 @@ def test_studio_pages_no_top_nav_when_factory_not_supplied(
         home = c.get("/").text
         diagram = c.get("/diagram").text
         data = c.get("/data").text
-    # No L2 Editor anchor (only present when top_nav_fn renders the
-    # shared nav). The page-local <h1>Studio</h1> still anchors home.
+    # No shared-nav root element (only emitted by `emit_top_nav` when
+    # top_nav_fn is supplied). The home page's intro <header> + h1
+    # still anchors identity.
     for body in (home, diagram, data):
-        assert ">L2 Editor<" not in body
-    # Sanity: pages still render their own chrome. CF.3.m moved the
-    # diagram's chrome into a floating sidebar, so the page-local
-    # "Studio · diagram" header is gone — the sidebar root id is the
-    # stable presence marker.
-    assert "Studio" in home
+        assert 'aria-label="App nav"' not in body
+        assert ">Recon-Gen<" not in body
+    # Sanity: home still carries its page-local intro chrome.
+    assert "L2 Editor" in home
+    assert 'id="home-intro"' in home
     assert 'id="diagram-sidebar"' in diagram
     assert "Studio · data shaping" in data

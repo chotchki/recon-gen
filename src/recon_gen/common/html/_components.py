@@ -219,66 +219,51 @@ class ListToolbarState:
 # ---------------------------------------------------------------------------
 
 
-def render_list_toolbar(
+def _page_url(state: ListToolbarState, submit_url: str, embed: bool,
+               new_offset: int) -> str:
+    """Pager-link URL — serializes every state key the toolbar tracks
+    so back/forward navigation reproduces the same view."""
+    parts = [
+        f"{escape(state.key_offset)}={new_offset}",
+        f"{escape(state.key_size)}={state.page_size}",
+    ]
+    if state.q:
+        parts.append(f"{escape(state.key_q)}={escape(state.q)}")
+    if state.sort_axis != "default":
+        parts.append(
+            f"{escape(state.key_sort)}={escape(state.sort_axis)}",
+        )
+    if embed:
+        parts.append("embed=1")
+    sep = "&" if "?" in submit_url else "?"
+    return f"{submit_url}{sep}{'&'.join(parts)}"
+
+
+def render_list_pager(
     state: ListToolbarState,
     *,
     submit_url: str,
     swap_target_id: str,
     embed: bool = False,
-    header_owns_search: bool = False,
 ) -> str:
-    """Render the search / sort / paginate toolbar for one section.
+    """Range indicator + Prev/Next pager bar — sits BELOW the cards
+    grid to match the dashboard table-pager convention (`mt-3`
+    margin-top on the dashboard pager — operator lock 2026-06-05 to
+    use the same vertical placement here).
 
-    Args:
-        state: The current toolbar state.
-        submit_url: GET URL that receives ``state.key_*`` params on
-            change. For the dedicated per-kind page this is
-            ``/l2_shape/<kind>/``; for the home page embed this is
-            also ``/l2_shape/<kind>/?embed=1``.
-        swap_target_id: HTML id of the element htmx swaps the response
-            into (typically the section body so the cards refresh
-            without a full-page navigation).
-        embed: When True, the form omits ``hx-push-url`` so the
-            iframe / embed host page's URL stays unchanged.
-        header_owns_search: When True, the search input is dropped
-            (the host page's section header is responsible for it,
-            e.g. the home page's ``<details>`` summary). Sort dropdown
-            + pager still render. CF.4 followup — search-in-summary
-            lock; one input across the whole rendered surface.
-
-    Output shape (top to bottom):
-        - Row 1: search input + sort dropdown (debounce-on-input,
-          submit-on-Enter for the search; immediate submit on sort
-          change).
-        - Row 2: ``Showing X-Y of Z`` indicator + Prev / Next buttons.
-
-    Per CF.4 Q7A, the toolbar is NOT sticky in CF.4 — the markup is a
-    plain `<form>` inside the section body. A sticky variant can land
-    as a CF.4.j sub-cell if a cold-read calls for it.
+    Output: a flex row with the range on the left ("Showing 26–50 of
+    117", "No matches", or "0 entities") and Prev / Next on the
+    right. No form — both buttons are anchor-based GETs serializing
+    state into the URL via `_page_url`. Renders nothing visible when
+    there's only one page AND no filter is active (still emits the
+    container so `data-role="list-pager"` is locatable by tests).
     """
-    # CF.4 Q9A — `hx-push-url` only on navigation events. Search input
-    # debounces and pushes URL on Enter (`changed delay:300ms`); pager
-    # buttons (real links, not form submits) push via the browser
-    # navigation. CF.4 followup (2026-06-05): the sort dropdown UI was
-    # removed — operator dogfood reported it doubled the toolbar
-    # height for no daily value (default YAML-declaration order is
-    # what the operator authors and reads back). Server-side
-    # `?sort_column=` URL parsing still works (parse_toolbar_state +
-    # _sort_entities), so shared URLs / external tooling keep
-    # functioning; just no widget.
     push_attr = ' hx-push-url="true"' if not embed else ""
-    input_cls = (
-        "flex-1 min-w-0 px-2 py-1 border border-surface-border "
-        "rounded-sm text-sm focus:border-accent focus:outline-none"
-    )
     btn_cls = chrome_button_classes()
     btn_disabled_cls = (
         f"{btn_cls} opacity-50 cursor-not-allowed pointer-events-none"
     )
 
-    # Range indicator reads "Showing 1-25 of 117" when populated, or
-    # "No matches" when the filter excludes everything, or "0 entities"
-    # when the kind itself is empty.
     if state.total_count == 0:
         range_html = (
             '<span class="text-xs text-secondary-fg">No matches</span>'
@@ -293,67 +278,61 @@ def render_list_toolbar(
             f"{state.total_count}</span>"
         )
 
-    # Pager: prev / next buttons. Real anchors so browser back works
-    # naturally; htmx intercepts via `hx-get` / `hx-boost`-style attrs.
-    # Build the URL by serializing every key the toolbar tracks.
-    def _page_url(new_offset: int) -> str:
-        parts = [
-            f"{escape(state.key_offset)}={new_offset}",
-            f"{escape(state.key_size)}={state.page_size}",
-        ]
-        if state.q:
-            parts.append(f"{escape(state.key_q)}={escape(state.q)}")
-        if state.sort_axis != "default":
-            parts.append(
-                f"{escape(state.key_sort)}={escape(state.sort_axis)}",
-            )
-        if embed:
-            parts.append("embed=1")
-        sep = "&" if "?" in submit_url else "?"
-        return f"{submit_url}{sep}{'&'.join(parts)}"
-
     prev_offset = max(0, state.page_offset - state.page_size)
     next_offset = state.page_offset + state.page_size
+    prev_url = _page_url(state, submit_url, embed, prev_offset)
+    next_url = _page_url(state, submit_url, embed, next_offset)
     prev_html = (
         f'<a class="{btn_cls}" '
-        f'hx-get="{_page_url(prev_offset)}" '
+        f'hx-get="{prev_url}" '
         f'hx-target="#{swap_target_id}" hx-swap="innerHTML"{push_attr} '
-        f'href="{_page_url(prev_offset)}">← Prev</a>'
+        f'href="{prev_url}">← Prev</a>'
         if state.has_prev
         else f'<span class="{btn_disabled_cls}">← Prev</span>'
     )
     next_html = (
         f'<a class="{btn_cls}" '
-        f'hx-get="{_page_url(next_offset)}" '
+        f'hx-get="{next_url}" '
         f'hx-target="#{swap_target_id}" hx-swap="innerHTML"{push_attr} '
-        f'href="{_page_url(next_offset)}">Next →</a>'
+        f'href="{next_url}">Next →</a>'
         if state.has_next
         else f'<span class="{btn_disabled_cls}">Next →</span>'
     )
+    # `mt-3` matches `bootstrap.js`'s table-pager class so the visual
+    # rhythm is the same as dashboard tables.
+    return (
+        f'<div class="flex items-center justify-between gap-2 mt-3 '
+        f'px-3 text-sm text-secondary-fg" '
+        f'data-role="list-pager" data-kind="{state.kind}">'
+        f"{range_html}"
+        f'<div class="flex items-center gap-1">'
+        f"{prev_html}{next_html}"
+        f"</div>"
+        f"</div>"
+    )
 
-    # When the summary header owns the search input, the body toolbar
-    # is just range + pager — no inputs to submit, so drop the form
-    # entirely. Pager links are anchor-based GETs (htmx-intercepted)
-    # which already serialize `q` into their URL via `_page_url`.
-    if header_owns_search:
-        return (
-            f'<div class="flex items-center justify-between gap-2 '
-            f'px-2 py-1 mb-2 bg-link-tint border border-surface-border '
-            f'rounded-sm" '
-            f'data-role="list-toolbar" data-kind="{state.kind}">'
-            f"{range_html}"
-            f'<div class="flex items-center gap-1">'
-            f"{prev_html}{next_html}"
-            f"</div>"
-            f"</div>"
-        )
-    # Standalone per-kind page: no `<details>` summary upstream, so
-    # the toolbar still hosts the search input. Single row (search +
-    # range + pager) — no sort dropdown anywhere.
+
+def render_list_search(
+    state: ListToolbarState,
+    *,
+    submit_url: str,
+    swap_target_id: str,
+    embed: bool = False,
+) -> str:
+    """Standalone-page search input form — sits ABOVE the cards.
+    Used only when the upstream surface (e.g. the home page's
+    `<details>` summary) doesn't already own the search input. In
+    the home-page embed flow, return the empty string at the call
+    site (see `list_view`)."""
+    push_attr = ' hx-push-url="true"' if not embed else ""
+    input_cls = (
+        "flex-1 min-w-0 px-2 py-1 border border-surface-border "
+        "rounded-sm text-sm focus:border-accent focus:outline-none"
+    )
     return (
         f'<form class="flex items-center gap-2 p-2 mb-2 bg-link-tint '
         f'border border-surface-border rounded-sm" '
-        f'data-role="list-toolbar" data-kind="{state.kind}" '
+        f'data-role="list-search" data-kind="{state.kind}" '
         f'method="get" action="{escape(submit_url)}" '
         f'hx-get="{escape(submit_url)}" '
         f'hx-target="#{swap_target_id}" hx-swap="innerHTML" '
@@ -363,10 +342,6 @@ def render_list_toolbar(
         f'placeholder="Search {escape(state.kind)}s…" '
         f'class="{input_cls}" '
         f'autocomplete="off">'
-        f"{range_html}"
-        f'<div class="flex items-center gap-1 shrink-0">'
-        f"{prev_html}{next_html}"
-        f"</div>"
         f"</form>"
     )
 
@@ -498,6 +473,7 @@ __all__ = [
     "ListToolbarState",
     "SortAxis",
     "parse_toolbar_state",
-    "render_list_toolbar",
+    "render_list_pager",
+    "render_list_search",
     "render_summary_search_input",
 ]

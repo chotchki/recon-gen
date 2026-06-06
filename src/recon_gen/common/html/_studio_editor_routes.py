@@ -32,7 +32,7 @@ factory is called.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import timedelta
 from html import escape
 from typing import Any, Literal, TypeAlias, cast
@@ -50,7 +50,8 @@ from recon_gen.common.html._studio_assets.tw_classes import (
 from recon_gen.common.html._components import (
     SortAxis,
     parse_toolbar_state,
-    render_list_toolbar,
+    render_list_pager,
+    render_list_search,
 )
 from recon_gen.common.html._studio_routes import studio_theme_head
 from recon_gen.common.l2.cache import L2InstanceCache
@@ -3818,17 +3819,26 @@ def _render_list_page(
     kind: EntityKind, entities: tuple[object, ...],
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — passed through to per-card hide logic
     *,
-    toolbar_html: str = "",
+    search_html: str = "",
+    pager_html: str = "",
+    top_nav_html: str = "",
     total_count: int | None = None,
     embed: bool = False,
     demo_mode: bool = False,
 ) -> str:
     """Full HTML page — every entity of the kind rendered as a read card.
 
-    ``toolbar_html`` (CF.4.b) is the search/sort/page chrome from
-    ``render_list_toolbar()``; the caller pre-slices ``entities`` so
-    this function only renders the current page. Empty string skips
-    the toolbar (legacy callers + tests).
+    Layout (top to bottom, matching the dashboard table-pager
+    convention — operator lock 2026-06-05):
+      - ``search_html`` (CF.4.b) — standalone-page search form
+        (empty in the home-page embed flow because the section
+        summary upstream already owns the input).
+      - cards grid — the current page's read cards.
+      - ``pager_html`` — range indicator + Prev/Next, sitting BELOW
+        the cards (mirrors `bootstrap.js`'s `table-pager` strip).
+
+    The caller pre-slices ``entities`` so this function only renders
+    the current page.
 
     ``embed=True`` returns just the cards container (no html/head/body)
     so the X.4.f.7 home page can ``hx-get`` it into a section without
@@ -3856,19 +3866,21 @@ def _render_list_page(
     # hook the routes' delete + save fragments swap into.
     grid_cls = (
         "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 "
-        "max-w-7xl mx-auto px-4 pt-4 pb-12"
+        "max-w-7xl mx-auto px-4 pt-4 pb-2"
     )
-    # CF.4.b — toolbar wraps the cards container in a column so the
-    # toolbar sits above and the pager actions target the cards
-    # `hx-target="#entity-list"`.
-    toolbar_wrapper_open = (
-        '<div class="max-w-7xl mx-auto px-4 pt-4">' if toolbar_html else ""
+    search_wrap_open = (
+        '<div class="max-w-7xl mx-auto px-4 pt-4">' if search_html else ""
     )
-    toolbar_wrapper_close = "</div>" if toolbar_html else ""
+    search_wrap_close = "</div>" if search_html else ""
+    pager_wrap_open = (
+        '<div class="max-w-7xl mx-auto px-4 pb-12">' if pager_html else ""
+    )
+    pager_wrap_close = "</div>" if pager_html else ""
     if embed:
         return (
-            f"{toolbar_wrapper_open}{toolbar_html}{toolbar_wrapper_close}"
+            f"{search_wrap_open}{search_html}{search_wrap_close}"
             f'<div class="{grid_cls}" data-kind="{escape(kind)}">{cards}</div>'
+            f"{pager_wrap_open}{pager_html}{pager_wrap_close}"
         )
     return f"""<!doctype html>
 <html lang="en">
@@ -3897,15 +3909,12 @@ def _render_list_page(
   </script>
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
-  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
-    <h1 class="text-base m-0 font-semibold text-accent">Studio · editor · {escape(kind)}</h1>
-    <a class="text-accent no-underline text-sm hover:underline" href="/">← landing</a>
-    <a class="text-accent no-underline text-sm hover:underline" href="/diagram">→ diagram</a>
-  </header>
-  {toolbar_wrapper_open}{toolbar_html}{toolbar_wrapper_close}
+  {top_nav_html}
+  {search_wrap_open}{search_html}{search_wrap_close}
   <main id="entity-list" class="{grid_cls}">
     {cards}
   </main>
+  {pager_wrap_open}{pager_html}{pager_wrap_close}
 </body>
 </html>
 """
@@ -4046,12 +4055,23 @@ def _entities_for_kind(
 # ---------------------------------------------------------------------------
 
 
-def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-handler ASGI callables; uniform shape but per-route closure
+def _make_handlers(
+    cache: L2InstanceCache,
+    *,
+    demo_mode: bool = False,
+    top_nav_fn: Callable[[str], str] | None = None,
+) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-handler ASGI callables; uniform shape but per-route closure
     """Build closures over the cache for each route handler.
 
     Returned as a dict keyed by route name so ``make_editor_routes``
     can register them all in one pass.
+
+    ``top_nav_fn`` (CF.4 followup 2026-06-05) is the shared Studio
+    top-nav renderer threaded from ``make_studio_routes``. When None
+    (unit-test surface), editor pages render without a top nav.
     """
+    def top_nav_html_fn(active_href: str) -> str:
+        return top_nav_fn(active_href) if top_nav_fn is not None else ""
 
     async def list_view(request: Request) -> HTMLResponse:
         kind = _kind_from_path(request.path_params["kind"])
@@ -4101,26 +4121,41 @@ def _make_handlers(cache: L2InstanceCache, *, demo_mode: bool = False) -> dict[s
         page_entities = sorted_filtered[
             state.page_offset:state.page_offset + state.page_size
         ]
-        toolbar_html = render_list_toolbar(
+        submit_url = (
+            f"/l2_shape/{kind}/?embed=1" if embed
+            else f"/l2_shape/{kind}/"
+        )
+        # CF.4 followup (2026-06-05): the pager sits BELOW the cards
+        # to match the dashboard table-pager convention (`mt-3` strip
+        # in `bootstrap.js`). The search input lives ABOVE the cards
+        # on the standalone page (no upstream <details> summary); the
+        # home-page embed has its search input in the section summary
+        # so the embed renders no body-level search.
+        pager_html = render_list_pager(
             state,
-            submit_url=(
-                f"/l2_shape/{kind}/?embed=1" if embed
-                else f"/l2_shape/{kind}/"
-            ),
+            submit_url=submit_url,
             swap_target_id="entity-list",
             embed=embed,
-            # CF.4 followup (2026-06-05): when the body is fetched as
-            # an embedded fragment, the home page's `<details>`
-            # summary owns the search input — drop ours so there's
-            # one search per kind across the rendered surface. The
-            # body toolbar keeps a hidden `q` field so sort + pager
-            # submits preserve the active filter.
-            header_owns_search=embed,
         )
+        search_html = "" if embed else render_list_search(
+            state,
+            submit_url=submit_url,
+            swap_target_id="entity-list",
+            embed=embed,
+        )
+        # CF.4 followup (2026-06-05): editor sub-pages reuse the
+        # Studio top-nav (the same chrome the Trainer wears) instead
+        # of the bespoke "Studio · editor · <kind>" inline header.
+        # `_top_nav_html("/")` makes the L2 Editor entry the active
+        # one (entry_href == "/" requires an exact match per
+        # `emit_top_nav._is_active`; passing `/` from sub-pages is
+        # the convention).
         return HTMLResponse(
             _render_list_page(
                 kind, page_entities, inst,
-                toolbar_html=toolbar_html,
+                search_html=search_html,
+                pager_html=pager_html,
+                top_nav_html=top_nav_html_fn("/") if not embed else "",
                 total_count=state.total_count,
                 embed=embed, demo_mode=demo_mode,
             ),
@@ -4856,6 +4891,7 @@ def make_editor_routes(
     cache: L2InstanceCache,
     *,
     demo_mode: bool = False,
+    top_nav_fn: Callable[[str], str] | None = None,
 ) -> list[Route]:
     """Build the editor route list bound to ``cache``.
 
@@ -4870,7 +4906,7 @@ def make_editor_routes(
     are preserved so the demo still surfaces "here are the accounts /
     rails / templates / chains in this L2".
     """
-    h = _make_handlers(cache, demo_mode=demo_mode)
+    h = _make_handlers(cache, demo_mode=demo_mode, top_nav_fn=top_nav_fn)
     # ``/new`` MUST be declared before ``/{entity_id}`` so Starlette's
     # path matcher doesn't treat the literal "new" as an entity_id.
     # In demo-mode the /new GET is stripped — list + read-card are the

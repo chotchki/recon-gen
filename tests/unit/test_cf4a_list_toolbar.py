@@ -17,7 +17,8 @@ from recon_gen.common.html._components import (
     SORT_AXES_BY_KIND,
     SORT_AXIS_LABELS,
     ListToolbarState,
-    render_list_toolbar,
+    render_list_pager,
+    render_list_search,
 )
 from recon_gen.common.l2.editor import SINGLETON_KINDS
 
@@ -220,9 +221,9 @@ def test_pagination_math_empty_total() -> None:
 # render_list_toolbar markup contract
 # ---------------------------------------------------------------------------
 
-def test_render_emits_search_input_with_current_value() -> None:
+def test_render_search_emits_input_with_current_value() -> None:
     state = ListToolbarState(kind="rail", q="ach", total_count=42)
-    html = render_list_toolbar(
+    html = render_list_search(
         state, submit_url="/l2_shape/rail/", swap_target_id="rail-list",
     )
     assert 'type="search"' in html
@@ -232,48 +233,46 @@ def test_render_emits_search_input_with_current_value() -> None:
     assert 'placeholder="Search rails…"' in html
 
 
-def test_render_omits_sort_ui() -> None:
+def test_render_search_omits_sort_ui() -> None:
     """Sort dropdown was removed 2026-06-05 (operator dogfood: doubled
     toolbar height for no daily value; default YAML-declaration order
     is the canonical read shape). Server-side `?sort_column=` URL
     parsing still works for shared URLs / external tooling."""
     for kind in ("rail", "account", "transfer_template", "chain"):
-        html = render_list_toolbar(
+        html = render_list_search(
             ListToolbarState(kind=kind),
             submit_url=f"/l2_shape/{kind}/", swap_target_id="x",
         )
         assert "<select" not in html
         assert 'name="sort_column"' not in html
-        # Per-kind sort axes still typed in SORT_AXES_BY_KIND (for the
-        # server-side branch); they just don't have a UI to set them.
-        assert "Two-leg first" not in html
-        assert "By parent" not in html
 
 
-def test_render_emits_pager_with_range_indicator() -> None:
+def test_render_pager_emits_range_indicator() -> None:
     state = ListToolbarState(
         kind="rail", page_offset=25, page_size=25, total_count=117,
     )
-    html = render_list_toolbar(
+    html = render_list_pager(
         state, submit_url="/l2_shape/rail/", swap_target_id="x",
     )
     assert "Showing 26–50 of 117" in html
     assert "← Prev" in html
     assert "Next →" in html
+    # Pager carries `mt-3` so it sits below the cards (dashboard
+    # parity — operator lock 2026-06-05).
+    assert "mt-3" in html
+    assert 'data-role="list-pager"' in html
 
 
 def test_render_pager_disables_prev_on_first_page() -> None:
     state = ListToolbarState(
         kind="rail", page_offset=0, page_size=25, total_count=117,
     )
-    html = render_list_toolbar(
+    html = render_list_pager(
         state, submit_url="/l2_shape/rail/", swap_target_id="x",
     )
     # Disabled state renders as a span with `opacity-50 cursor-not-allowed`
     # so the anchor doesn't fire htmx — operator can't go below offset 0.
     assert "opacity-50 cursor-not-allowed" in html
-    # And the disabled Prev is a span, not an anchor; the enabled Next
-    # is still an anchor with hx-get.
     assert "<span class=" in html and "← Prev" in html
     assert 'hx-get=' in html  # the Next button
 
@@ -282,7 +281,7 @@ def test_render_pager_disables_next_on_last_page() -> None:
     state = ListToolbarState(
         kind="rail", page_offset=100, page_size=25, total_count=117,
     )
-    html = render_list_toolbar(
+    html = render_list_pager(
         state, submit_url="/l2_shape/rail/", swap_target_id="x",
     )
     assert "opacity-50 cursor-not-allowed" in html
@@ -290,53 +289,54 @@ def test_render_pager_disables_next_on_last_page() -> None:
     assert html.index("← Prev") < html.index("Next →")
 
 
-def test_render_empty_total_says_no_entities() -> None:
+def test_render_pager_empty_total_says_no_entities() -> None:
     state = ListToolbarState(
         kind="chain", page_offset=0, page_size=25, total_count=0,
     )
-    html = render_list_toolbar(
+    html = render_list_pager(
         state, submit_url="/l2_shape/chain/", swap_target_id="x",
     )
     assert "0 entities" in html
 
 
-def test_render_search_with_no_matches_says_no_matches() -> None:
+def test_render_pager_search_no_matches_says_no_matches() -> None:
     state = ListToolbarState(
         kind="rail", q="bogus",
         page_offset=0, page_size=25, total_count=0,
     )
-    html = render_list_toolbar(
+    html = render_list_pager(
         state, submit_url="/l2_shape/rail/", swap_target_id="x",
     )
     assert "No matches" in html
 
 
-def test_render_wires_htmx_target_and_submit_url() -> None:
-    state = ListToolbarState(kind="rail", total_count=100)
-    html = render_list_toolbar(
+def test_render_pager_wires_htmx_target() -> None:
+    state = ListToolbarState(kind="rail", page_size=10, total_count=100)
+    html = render_list_pager(
         state,
         submit_url="/l2_shape/rail/?embed=1",
         swap_target_id="rail-section-body",
     )
     assert 'hx-target="#rail-section-body"' in html
-    assert 'hx-get="/l2_shape/rail/?embed=1"' in html
+    # The Next anchor's hx-get URL points back at the same embed URL.
+    assert "/l2_shape/rail/?embed=1" in html
 
 
-def test_render_omits_hx_push_url_in_embed_mode() -> None:
-    """Embed mode keeps the host page's URL stable (operator clicks a
-    Prev button inside the home page section, the home URL still
-    reads `/`, not the section's `/l2_shape/rail/?…`)."""
-    state = ListToolbarState(kind="rail", total_count=100)
-    embed = render_list_toolbar(
+def test_render_pager_omits_hx_push_url_in_embed_mode() -> None:
+    """Embed mode keeps the host page's URL stable (clicking Next in
+    a home-section embed shouldn't push the section URL onto the bar
+    — the home URL stays `/`)."""
+    state = ListToolbarState(kind="rail", page_size=10, total_count=100)
+    embed_html = render_list_pager(
         state, submit_url="/l2_shape/rail/?embed=1",
         swap_target_id="x", embed=True,
     )
-    standalone = render_list_toolbar(
+    standalone_html = render_list_pager(
         state, submit_url="/l2_shape/rail/",
         swap_target_id="x", embed=False,
     )
-    assert 'hx-push-url="true"' not in embed
-    assert 'hx-push-url="true"' in standalone
+    assert 'hx-push-url="true"' not in embed_html
+    assert 'hx-push-url="true"' in standalone_html
 
 
 def test_render_pager_urls_carry_state() -> None:
@@ -346,7 +346,7 @@ def test_render_pager_urls_carry_state() -> None:
         kind="rail", q="foo", sort_axis="name_desc",
         page_offset=25, page_size=25, total_count=117,
     )
-    html = render_list_toolbar(
+    html = render_list_pager(
         state, submit_url="/l2_shape/rail/", swap_target_id="x",
     )
     # Next button points at offset=50 and carries q + sort.
@@ -357,20 +357,14 @@ def test_render_pager_urls_carry_state() -> None:
 
 def test_render_url_prefix_namespacing_carries_through() -> None:
     """Home page embed: the pager's URL uses prefixed keys so the home
-    URL can carry every section's state without collision. (Note the
-    standalone toolbar shape is unprefixed; this calls render with
-    `url_prefix="rail"` to confirm `_page_url`'s key serialization.)"""
+    URL can carry every section's state without collision."""
     state = ListToolbarState(
         kind="rail", url_prefix="rail",
         page_offset=25, page_size=25, total_count=117,
     )
-    html = render_list_toolbar(
+    html = render_list_pager(
         state, submit_url="/", swap_target_id="x",
     )
     assert "rail_page_offset=50" in html
-    # Search input lives in the form (standalone shape).
-    assert 'name="rail_q"' in html
-    # Sort UI is gone — no `rail_sort_column` form key. The URL
-    # parser still accepts the same key (test_cf4b covers the
-    # server-side branch).
+    # Sort UI gone everywhere — no `rail_sort_column` key.
     assert 'name="rail_sort_column"' not in html

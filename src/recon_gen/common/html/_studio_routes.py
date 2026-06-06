@@ -464,15 +464,12 @@ def _render_home_page(
         )
     sections_html = "\n    ".join(section_blocks)
     demo_banner = _demo_mode_banner(demo_mode)
-    deploy_controls = "" if demo_mode else (
-        '<button id="deploy-btn" class="ml-auto bg-accent text-accent-fg border '
-        'border-accent px-3 py-1 rounded-sm cursor-pointer text-sm '
-        'hover:opacity-85 disabled:opacity-60 disabled:cursor-not-allowed" '
-        'type="button"\n'
-        '            onclick="quicksightDeploy()">Deploy changes</button>\n'
-        '    <span id="deploy-status" class="text-xs text-secondary-fg" '
-        'aria-live="polite"></span>'
-    )
+    # CF.4 followup (2026-06-05): the "Studio · qsgen-duckdb" +
+    # `Deploy changes` strip was removed. Operator dogfood: it
+    # duplicated info the top-nav already carries (which surface
+    # you're on) and the deployment_name was secondary chrome.
+    # Deploy is reachable via `recon-gen json apply --execute` (or a
+    # future top-nav action) — no button here.
 
     return f"""<!doctype html>
 <html lang="en">
@@ -509,76 +506,16 @@ def _render_home_page(
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
   {demo_banner}
-  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
-    <h1>Studio</h1>
-    <span class="text-sm text-secondary-fg font-mono">{prefix}</span>
-    <!-- BS.3 part 3 (2026-05-29): shared top-nav injected before this
-         page-local header. Per-page navigation links live in
-         {top_nav_html} above; the page-local header now only carries
-         the Studio title + prefix + deploy controls. -->
-    {deploy_controls}
-  </header>
-  <script>
-    // X.4.g.14 — Studio "Deploy changes" button. POSTs /deploy, swaps
-    // the deploy-status span to reflect the result.
-    function quicksightDeploy() {{
-      var btn = document.getElementById('deploy-btn');
-      var status = document.getElementById('deploy-status');
-      btn.disabled = true;
-      status.className = 'text-xs text-secondary-fg';
-      status.dataset.state = 'running';
-      status.textContent = 'Deploying…';
-      fetch('/deploy', {{ method: 'POST' }})
-        .then(function(resp) {{
-          return resp.json().then(function(body) {{
-            return {{ ok: resp.ok, status: resp.status, body: body }};
-          }});
-        }})
-        .then(function(result) {{
-          btn.disabled = false;
-          if (result.body.halted) {{
-            status.className = 'text-xs text-warning font-semibold';
-            status.dataset.state = 'halted';
-            status.textContent = 'Halted: ' + result.body.halt_reason;
-          }} else if (result.ok) {{
-            var s3 = result.body.step3_generator;
-            status.className = 'text-xs text-success';
-            status.dataset.state = 'ok';
-            status.textContent = (
-              'Deployed (gen ' + result.body.step5_data_generation_id +
-              ', ' + s3.transactions_after + ' tx)'
-            );
-          }} else {{
-            status.className = 'text-xs text-danger font-semibold';
-            status.dataset.state = 'error';
-            status.textContent = 'Failed: HTTP ' + result.status;
-          }}
-        }})
-        .catch(function(err) {{
-          btn.disabled = false;
-          status.className = 'text-xs text-danger font-semibold';
-          status.dataset.state = 'error';
-          status.textContent = 'Failed: ' + (err && err.message || err);
-        }});
-    }}
-  </script>
-
-  <!-- CF.4.e (followup b): editor home h1 + purpose blurb. No
-       top-level create CTA per operator lock; per-section create
-       affordances stay the entry. -->
-  <section class="px-4 pt-4 max-w-7xl mx-auto" id="home-intro">
-    <h1 class="text-xl font-semibold m-0 text-primary-fg">
-      L2 Editor
-    </h1>
-    <p class="text-sm text-secondary-fg m-0 mt-1">
+  <header class="px-8 py-4 border-b border-surface-border bg-white" id="home-intro">
+    <h1 class="text-xl font-semibold m-0">L2 Editor</h1>
+    <p class="text-sm text-secondary-fg max-w-3xl m-0 mt-1">
       Browse and edit the institution's accounts, rails, transfer
-      templates, chains, and limit schedules. Click a card title to
-      focus the diagram on that entity; create a new one from the
-      per-section affordance below. Saves cascade across sections
-      automatically.
+      templates, chains, and limit schedules. Create a new one from
+      the per-section affordance below; saves cascade across
+      sections automatically.
     </p>
-  </section>
-  <section class="px-4 pt-2 pb-8" id="home-entities">
+  </header>
+  <section class="px-4 pt-4 pb-8 max-w-7xl mx-auto" id="home-entities">
     {sections_html}
   </section>
 </body>
@@ -875,18 +812,15 @@ def _render_etl_landing_page(
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
   {demo_banner}
-  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
-    <h1>Studio · ETL Support</h1>
-    <span class="text-sm text-secondary-fg font-mono">{prefix}</span>
-  </header>
-  {tutorial_banner}
-  <section class="px-8 pt-6 pb-3">
-    <p class="text-sm text-secondary-fg max-w-3xl m-0">
+  <header class="px-8 py-4 border-b border-surface-border bg-white">
+    <h1 class="text-xl font-semibold m-0">ETL Support</h1>
+    <p class="text-sm text-secondary-fg max-w-3xl m-0 mt-1">
       Three steps to land your customer's ETL feed cleanly. Walk them
       in order on a first pass; once you know the surface, jump
       anywhere via the numbered cards.
     </p>
-  </section>
+  </header>
+  {tutorial_banner}
   <section class="px-8 pb-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-[1fr_auto_1fr_auto_1fr] lg:items-stretch" id="etl-landing-cards">
     {cards_with_arrows}
   </section>
@@ -5183,7 +5117,9 @@ def make_studio_routes(
     from recon_gen.common.html._studio_editor_routes import (  # noqa: PLC0415
         make_editor_routes,
     )
-    routes.extend(make_editor_routes(cache, demo_mode=demo_mode))
+    routes.extend(make_editor_routes(
+        cache, demo_mode=demo_mode, top_nav_fn=top_nav_fn,
+    ))
 
     # X.4.c.6 — trainer JSON route. Always mounted (no DB needed —
     # the scenario walk is pure Python over the cached L2).
