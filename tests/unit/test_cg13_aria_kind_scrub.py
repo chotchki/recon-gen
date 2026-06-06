@@ -90,8 +90,8 @@ def test_helpers_strip_underscores_for_user_facing_kinds() -> None:
         ("chain", "chain", "Chains"),
     )
     for kind, want_singular, want_plural in cases:
-        assert kind_label_singular(kind) == want_singular  # type: ignore[arg-type]: parameterized fixture
-        assert kind_label_plural(kind) == want_plural  # type: ignore[arg-type]: parameterized fixture
+        assert kind_label_singular(kind) == want_singular  # type: ignore[arg-type]: literal tuple from local case list narrows to EntityKind at runtime
+        assert kind_label_plural(kind) == want_plural  # type: ignore[arg-type]: literal tuple from local case list narrows to EntityKind at runtime
 
 
 def test_kind_label_plural_lowercase_flag() -> None:
@@ -147,8 +147,8 @@ def test_home_page_add_button_tooltip_no_underscores(
     ("transfer_template", "Transfer templates"),
     ("limit_schedule", "Limit schedules"),
     ("account", "Accounts"),
-    ("rail", "Rails"),
-    ("chain", "Chains"),
+    ("rail", "Rails"),  # typing-smell: ignore[no-inline-production-constants]: same string as l2_flow_tracing/app.py::_RAILS_NAME by coincidence (sheet name) but semantically the kind_label_plural value, not a shared contract
+    ("chain", "Chains"),  # typing-smell: ignore[no-inline-production-constants]: same string as l2_flow_tracing/app.py::_CHAINS_NAME by coincidence (sheet name) but semantically the kind_label_plural value, not a shared contract
 ])
 def test_list_page_title_uses_plural_label(
     writable_l2_yaml: Path, kind: str, want_plural: str,

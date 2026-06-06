@@ -1199,7 +1199,7 @@ def _resolve_select_options(
 
 
 def _resolve_grouped_roles(
-    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance type concrete import creates circular dep with common.l2
     current_value: str,
 ) -> tuple[tuple[tuple[str, tuple[str, ...]], ...], bool]:
     """CG.22 (2026-06-05) — partition the "roles" option universe
@@ -2452,7 +2452,7 @@ def _form_page_header_raw_html(h1_inner_html: str) -> str:
 
 
 def _render_unknown_kind_page(
-    raw_kind: str, top_nav_html: str, instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance
+    raw_kind: str, top_nav_html: str, instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance type concrete import creates circular dep with common.l2
 ) -> str:
     """CG.20 (2026-06-05) — chrome a 404-style "kind not editable"
     page so a stale bookmark / runbook link / browser-history entry

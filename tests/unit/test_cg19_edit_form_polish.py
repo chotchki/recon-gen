@@ -114,9 +114,9 @@ def test_rail_edit_h1_does_not_carry_display_name(
 
 @pytest.mark.parametrize("kind,plural_label", [
     ("account", "Accounts"),
-    ("rail", "Rails"),
+    ("rail", "Rails"),  # typing-smell: ignore[no-inline-production-constants]: coincidentally matches l2_flow_tracing/app.py::_RAILS_NAME (a sheet name) but semantically this is the kind_label_plural value
     ("transfer_template", "Transfer templates"),
-    ("chain", "Chains"),
+    ("chain", "Chains"),  # typing-smell: ignore[no-inline-production-constants]: coincidentally matches l2_flow_tracing/app.py::_CHAINS_NAME (a sheet name) but semantically this is the kind_label_plural value
     ("limit_schedule", "Limit schedules"),
     ("account_template", "Account templates"),
 ])
