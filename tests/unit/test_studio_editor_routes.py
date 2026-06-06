@@ -1913,18 +1913,29 @@ def test_bb2_create_form_single_leg_renders_reconciler_picker(
     assert "MerchantSettlementCycle" in body
 
 
-def test_bb2_create_form_two_leg_skips_reconciler_picker(
+def test_bb2_create_form_two_leg_renders_reconciler_picker(
     writable_l2_yaml: Path,
 ) -> None:
-    """BB.2 — two-leg rails reconcile via expected_net; the Reconciler
-    picker is irrelevant + must not render (operator-confusion guard)."""
+    """CO.3 (2026-06-06) — two-leg rails WITHOUT ``expected_net`` set
+    must reconcile via a TransferTemplate (S5 bilateral); the form
+    needs to render the picker so the operator can attach. Pre-CO.3
+    the form omitted the picker for two_leg on the rationale that
+    "two_leg reconciles via expected_net" — true for two_leg-with-
+    expected_net, but the server's `needs_reconciler` gate fires for
+    two_leg-without-expected_net too, so the form had to render it.
+
+    The picker is now rendered for both single_leg and two_leg
+    subtypes. For two_leg-with-expected_net, the picker remains
+    visible but optional (the server's gate skips it when
+    expected_net is filled); a future polish ticket may hide it
+    conditionally via JS."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.get("/l2_shape/rail/new?subtype=two_leg")
     assert resp.status_code == 200, resp.text
     body = resp.text
-    assert "reconciler-section" not in body
-    assert 'name="reconciler_kind"' not in body
+    assert 'name="reconciler_kind"' in body
+    assert 'name="reconciler_mode"' in body
 
 
 def test_bb2_validation_failure_preserves_reconciler_picker_state(

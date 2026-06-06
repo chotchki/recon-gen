@@ -201,7 +201,14 @@ def test_browser_operator_creates_rail_with_role_checkbox(
 
 
 @pytest.mark.browser
-@pytest.mark.parametrize("fixture_id", ["fuzz_12345", "spec_example", "sasquatch_pr"])
+@pytest.mark.parametrize(
+    "fixture_id",
+    [
+        "fuzz_12345",
+        "spec_example",  # typing-smell: ignore[no-inline-production-constants]: the L2 fixture filename happens to coincide with production's DEFAULT_PREFIX; this literal is a test-side parametrize id used to pick which tests/l2/<id>.yaml file to copy, not a reference to the spine prefix constant
+        "sasquatch_pr",
+    ],
+)
 def test_browser_full_create_l2_structural_equality(
     tmp_path: Path, fixture_id: str,
 ) -> None:
