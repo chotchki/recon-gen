@@ -1198,6 +1198,63 @@ def _resolve_select_options(
     raise ValueError(f"Unknown select_from source: {select_from!r}")
 
 
+def _resolve_grouped_roles(
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance
+    current_value: str,
+) -> tuple[tuple[tuple[str, tuple[str, ...]], ...], bool]:
+    """CG.22 (2026-06-05) — partition the "roles" option universe
+    for the `parent_role` field into operator-meaningful groups so
+    a first-time operator can see WHICH roles are parent-eligible
+    without reading the SPEC.
+
+    Per SPEC + `common/l2/primitives.py::Account` docstring:
+    "Account is a 1-of-1 account that exists exactly once in the
+    institution"; `parent_role` MUST resolve to a singleton Account
+    (validator rejects template-role parents). So the eligible
+    universe is exactly `{a.role for a in instance.accounts}`; the
+    template-only roles surface under "Template roles (not eligible)"
+    so the operator can SEE what's not valid without losing the
+    at-a-glance scan. A current-value not present in either set
+    (stale post-delete, hand-edited YAML) lands in a "Stale (review)"
+    group so the operator notices + corrects instead of having it
+    silently vanish.
+
+    Returns ((group_label, sorted_roles), ...) + allow_empty=True
+    (parent_role is always optional — empty = "this is a top-level
+    singleton, no parent").
+    """
+    singleton_roles: set[str] = set()
+    for a in getattr(instance, "accounts", ()):
+        r = getattr(a, "role", None)
+        if r is not None and str(r):
+            singleton_roles.add(str(r))
+    template_roles: set[str] = set()
+    for t in getattr(instance, "account_templates", ()):
+        r = getattr(t, "role", None)
+        if r is not None and str(r):
+            template_roles.add(str(r))
+    template_only = template_roles - singleton_roles
+    stale: set[str] = set()
+    if (
+        current_value
+        and current_value not in singleton_roles
+        and current_value not in template_roles
+    ):
+        stale.add(current_value)
+    groups: list[tuple[str, tuple[str, ...]]] = []
+    if singleton_roles:
+        groups.append(
+            ("Singleton parents (eligible)", tuple(sorted(singleton_roles))),
+        )
+    if template_only:
+        groups.append(
+            ("Template roles (not eligible)", tuple(sorted(template_only))),
+        )
+    if stale:
+        groups.append(("Stale (review)", tuple(sorted(stale))))
+    return tuple(groups), True
+
+
 def _render_field(
     spec: FieldSpec,
     value: object,
@@ -1278,23 +1335,50 @@ def _render_field(
         )
     elif spec.kind == "select":
         val_str = _value_to_input_str(value)
-        if spec.select_from is not None:
-            options, allow_empty = _resolve_select_options(
-                spec.select_from, instance, val_str,
-            )
-        else:
-            options, allow_empty = spec.options, False
-        opt_blocks: list[str] = []
-        if allow_empty:
-            opt_blocks.append(
-                f'<option value=""{" selected" if val_str == "" else ""}>'
-                f"— none —</option>"
-            )
-        opt_blocks.extend(
-            f'<option value="{escape(o)}"{" selected" if o == val_str else ""}>'
-            f"{escape(o)}</option>"
-            for o in options
+        # CG.22 (2026-06-05) — `parent_role` fields use the grouped
+        # resolver so singleton-eligible roles render in an
+        # <optgroup> on top, template-only roles below, and any
+        # stale value gets its own group with a "review" hint.
+        # Other "roles" select sites (which DON'T have the validator's
+        # singleton-only constraint) stay flat.
+        use_grouped_roles = (
+            spec.name == "parent_role" and spec.select_from == "roles"
         )
+        opt_blocks: list[str] = []
+        if use_grouped_roles:
+            grouped, allow_empty = _resolve_grouped_roles(instance, val_str)
+            if allow_empty:
+                opt_blocks.append(
+                    f'<option value=""{" selected" if val_str == "" else ""}>'
+                    f"— none —</option>"
+                )
+            for group_label, group_opts in grouped:
+                opt_blocks.append(
+                    f'<optgroup label="{escape(group_label)}">'
+                )
+                opt_blocks.extend(
+                    f'<option value="{escape(o)}"{" selected" if o == val_str else ""}>'
+                    f"{escape(o)}</option>"
+                    for o in group_opts
+                )
+                opt_blocks.append("</optgroup>")
+        else:
+            if spec.select_from is not None:
+                options, allow_empty = _resolve_select_options(
+                    spec.select_from, instance, val_str,
+                )
+            else:
+                options, allow_empty = spec.options, False
+            if allow_empty:
+                opt_blocks.append(
+                    f'<option value=""{" selected" if val_str == "" else ""}>'
+                    f"— none —</option>"
+                )
+            opt_blocks.extend(
+                f'<option value="{escape(o)}"{" selected" if o == val_str else ""}>'
+                f"{escape(o)}</option>"
+                for o in options
+            )
         input_html = (
             f'<select id="field-{spec.name}" name="{escape(spec.name)}" class="{input_cls}">'
             f'{"".join(opt_blocks)}</select>'
