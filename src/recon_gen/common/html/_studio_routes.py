@@ -3093,6 +3093,31 @@ def _render_diagram_page(
   {top_nav_html}
   {_demo_mode_banner(demo_mode and not embed)}
 
+  <!--
+    CG.10 (2026-06-05) — the diagram page is the only nav-chrome
+    surface that intentionally OMITS the trainer-style
+    `<header class="px-8 py-4 border-b ... bg-white">` strip that
+    `/`, `/training/`, `/etl/`, and `/l2_shape/<kind>/` carry. Two
+    reasons:
+
+    1. Vertical budget. The body uses `h-screen flex flex-col` so
+       the canvas (`#diagram-target`, `flex-1 min-h-0`) fills the
+       viewport. A 60-80px header strip would directly steal
+       canvas height — the SVG already fights for room on dense L2s.
+
+    2. Chrome identity. CF.3.m promoted the floating diagram
+       sidebar (rendered above, gated on `not embed`) into the
+       diagram's primary chrome. Adding a static header strip would
+       compete with it for the operator's attention; the sidebar
+       already exposes layer toggles, layout reset, view-in-editor
+       — everything a page header would normally anchor.
+
+    The top-nav above this comment already announces the surface
+    (the L2 Editor / Diagram / Training... row is the operator's
+    "where am I" signal). Cold-read v3 P1 flagged the inconsistency
+    and offered "document the exemption" as the alternative to
+    adding the strip — taking that path deliberately.
+  -->
   <!-- CF.3.m — canvas wrapper becomes the positioning context for
        the floating sidebar. AM.2 step 3 fix-up (2026-05-25) preserved:
        `flex` + `min-h-0` keep the SVG from overflowing to its
