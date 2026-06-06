@@ -2142,6 +2142,21 @@ _LIST_PAGE_BLURB_BY_KIND: Mapping[EntityKind, str] = {
 }
 
 
+def _form_page_header_html(title: str) -> str:
+    """CG.7 (2026-06-05) — trainer-style header strip for the form
+    pages (create / edit / singleton / subtype-picker). Title sits
+    where the back-arrow used to live; the top-nav above provides
+    navigation. Same h1 + 1-sentence-blurb shape as the list-page
+    header from CG.6, except form pages don't carry a blurb — the
+    `_render_intro_details(intro_html)` box inside the main content
+    already carries the detailed orientation copy."""
+    return (
+        f'<header class="px-8 py-4 border-b border-surface-border bg-white">'
+        f'<h1 class="text-xl font-semibold m-0">{escape(title)}</h1>'
+        f"</header>"
+    )
+
+
 _CREATE_INTRO_BY_KIND: Mapping[EntityKind, str] = {
     "account": (
         "<p><strong>An Account</strong> is one row in the institution's "
@@ -2375,6 +2390,7 @@ def _render_rail_subtype_picker(
     *,
     from_param: str | None = None,
     prefill_name: str = "",
+    top_nav_html: str = "",
 ) -> str:
     """The Rail-only subtype picker landing page.
 
@@ -2416,11 +2432,8 @@ def _render_rail_subtype_picker(
   {studio_theme_head(instance)}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
-  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
-    <h1 class="text-base m-0 font-semibold text-accent">Create new rail</h1>
-    <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
-    <a class="text-accent no-underline text-sm hover:underline" href="/l2_shape/rail/">→ list all rails</a>
-  </header>
+  {top_nav_html}
+  {_form_page_header_html("Create new rail — pick subtype")}
   {_back_breadcrumb_html(from_param)}
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
     {_render_intro_details(_RAIL_SUBTYPE_PICKER_INTRO)}
@@ -3000,6 +3013,7 @@ def _render_create_page(
     global_error: str | None = None,
     subtype: RailSubtype | None = None,
     from_param: str | None = None,
+    top_nav_html: str = "",
 ) -> str:
     """X.4.f.9.create-page — full HTML page for creating a new entity.
 
@@ -3079,11 +3093,8 @@ def _render_create_page(
   {studio_theme_head(instance)}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
-  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
-    <h1 class="text-base m-0 font-semibold text-accent">Create new {escape(kind)}{escape(title_suffix)}</h1>
-    <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
-    <a class="text-accent no-underline text-sm hover:underline" href="/l2_shape/{escape(kind)}/">→ list all {escape(kind)}s</a>
-  </header>
+  {top_nav_html}
+  {_form_page_header_html(f"Create new {kind}{title_suffix}")}
   {_back_breadcrumb_html(from_param)}
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
     {_render_intro_details(intro_html)}
@@ -3114,6 +3125,7 @@ def _render_edit_page(
     form_overrides: Mapping[str, str | tuple[str, ...]] | None = None,
     global_error: str | None = None,
     from_param: str | None = None,
+    top_nav_html: str = "",
 ) -> str:
     """AI.2.e — full HTML page for editing an existing entity: the dedicated
     edit screen, symmetric with ``_render_create_page``. Replaces the X.4.e
@@ -3172,11 +3184,8 @@ def _render_edit_page(
   {studio_theme_head(instance)}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
-  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
-    <h1 class="text-base m-0 font-semibold text-accent">Edit {escape(kind)}{escape(title_suffix)}: {escape(entity_id)}</h1>
-    <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
-    <a class="text-accent no-underline text-sm hover:underline" href="/l2_shape/{escape(kind)}/">→ list all {escape(kind)}s</a>
-  </header>
+  {top_nav_html}
+  {_form_page_header_html(f"Edit {kind}{title_suffix}: {entity_id}")}
   {_back_breadcrumb_html(from_param)}
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
     {_render_intro_details(intro_html)}
@@ -3786,6 +3795,7 @@ def _render_singleton_page(
     yaml_text: str | None = None,
     global_error: str | None = None,
     structured_overrides: Mapping[str, object] | None = None,
+    top_nav_html: str = "",
 ) -> str:
     """X.4.f.12 — singleton edit page (Theme / Persona).
 
@@ -3844,10 +3854,8 @@ def _render_singleton_page(
   {studio_theme_head(instance)}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
-  <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
-    <h1 class="text-base m-0 font-semibold text-accent">{escape(label)}</h1>
-    <a class="text-accent no-underline text-sm hover:underline" href="/">← back to Studio</a>
-  </header>
+  {top_nav_html}
+  {_form_page_header_html(label)}
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
     {_render_intro_details(intro_html)}
     <section class="bg-white border border-surface-border rounded-md p-5">
@@ -4145,6 +4153,17 @@ def _make_handlers(
     """
     def top_nav_html_fn(active_href: str) -> str:
         return top_nav_fn(active_href) if top_nav_fn is not None else ""
+    # CG.7 (2026-06-05) — wrappers that auto-inject the shared
+    # top-nav into the structured-form pages. Same chrome unification
+    # as CF.4.l did for the list page.
+    def _render_create_page_local(*args: Any, **kwargs: Any) -> str:
+        return _render_create_page(*args, top_nav_html=top_nav_html_fn("/"), **kwargs)
+    def _render_edit_page_local(*args: Any, **kwargs: Any) -> str:
+        return _render_edit_page(*args, top_nav_html=top_nav_html_fn("/"), **kwargs)
+    def _render_singleton_page_local(*args: Any, **kwargs: Any) -> str:
+        return _render_singleton_page(*args, top_nav_html=top_nav_html_fn("/"), **kwargs)
+    def _render_rail_subtype_picker_local(*args: Any, **kwargs: Any) -> str:
+        return _render_rail_subtype_picker(*args, top_nav_html=top_nav_html_fn("/"), **kwargs)
 
     async def list_view(request: Request) -> HTMLResponse:
         kind = _kind_from_path(request.path_params["kind"])
@@ -4158,7 +4177,7 @@ def _make_handlers(
         # entirely; GET /l2_shape/<singleton-kind>/ renders the
         # singleton edit page directly.
         if kind in SINGLETON_KINDS:
-            return HTMLResponse(_render_singleton_page(kind, cache.get()))
+            return HTMLResponse(_render_singleton_page_local(kind, cache.get()))
         if kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse(
                 f"<h1>404</h1><p>{escape(request.path_params['kind'])} "
@@ -4272,7 +4291,7 @@ def _make_handlers(
         if entity is None:
             return HTMLResponse("not found", status_code=404)
         from_param = request.query_params.get("from")
-        return HTMLResponse(_render_edit_page(kind, entity, inst, from_param=from_param))
+        return HTMLResponse(_render_edit_page_local(kind, entity, inst, from_param=from_param))
 
     async def save(request: Request) -> Response:
         """AI.2.e — dedicated-screen save: coerce → mutate → validate →
@@ -4303,7 +4322,7 @@ def _make_handlers(
             # operator's typed values aren't lost.
             best_effort = {str(k): str(v) for k, v in form.items()}
             return HTMLResponse(
-                _render_edit_page(
+                _render_edit_page_local(
                     kind, entity if entity is not None else _placeholder(kind),
                     inst,
                     form_overrides=best_effort,
@@ -4359,7 +4378,7 @@ def _make_handlers(
             inst = cache.get()
             entity = _find_entity_or_none(inst, kind, entity_id)
             return HTMLResponse(
-                _render_edit_page(
+                _render_edit_page_local(
                     kind, entity if entity is not None else _placeholder(kind),
                     inst,
                     form_overrides=coerced_overrides,
@@ -4405,7 +4424,7 @@ def _make_handlers(
                 subtype = "single_leg"
             elif raw_subtype is None:
                 return HTMLResponse(
-                    _render_rail_subtype_picker(
+                    _render_rail_subtype_picker_local(
                         cache.get(),
                         from_param=from_param,
                         prefill_name=prefill_name,
@@ -4417,14 +4436,14 @@ def _make_handlers(
                     status_code=400,
                 )
             return HTMLResponse(
-                _render_create_page(
+                _render_create_page_local(
                     kind, cache.get(), subtype=subtype,
                     from_param=from_param,
                     form_overrides=form_overrides or None,
                 ),
             )
         return HTMLResponse(
-            _render_create_page(
+            _render_create_page_local(
                 kind, cache.get(),
                 from_param=from_param,
                 form_overrides=form_overrides or None,
@@ -4495,7 +4514,7 @@ def _make_handlers(
                 new_inst = singleton_save_l2(cache.get(), kind, yaml_text)
             except ValueError as exc:
                 return HTMLResponse(
-                    _render_singleton_page(
+                    _render_singleton_page_local(
                         kind, cache.get(),
                         yaml_text=yaml_text,
                         global_error=str(exc),
@@ -4507,7 +4526,7 @@ def _make_handlers(
                 validate(new_inst)
             except L2ValidationError as exc:
                 return HTMLResponse(
-                    _render_singleton_page(
+                    _render_singleton_page_local(
                         kind, cache.get(),
                         yaml_text=yaml_text,
                         global_error=str(exc),
@@ -4546,7 +4565,7 @@ def _make_handlers(
         except (ValueError, TypeError) as exc:
             best_effort = {str(k): str(v) for k, v in form.items()}
             return HTMLResponse(
-                _render_create_page(
+                _render_create_page_local(
                     kind, cache.get(),
                     form_overrides=best_effort,
                     global_error=f"Field coercion failed: {exc}",
@@ -4674,7 +4693,7 @@ def _make_handlers(
                 )
             if missing_required:
                 return HTMLResponse(
-                    _render_create_page(
+                    _render_create_page_local(
                         kind, cache.get(),
                         form_overrides=coerced_overrides,
                         global_error=(
@@ -4694,7 +4713,7 @@ def _make_handlers(
                 )
             if reconciler_kind not in ("transfer_template", "aggregating_rail"):
                 return HTMLResponse(
-                    _render_create_page(
+                    _render_create_page_local(
                         kind, cache.get(),
                         form_overrides=coerced_overrides,
                         global_error=(
@@ -4712,7 +4731,7 @@ def _make_handlers(
             new_inst = create_l2_entity(cache.get(), kind, new_fields)
         except ValueError as exc:
             return HTMLResponse(
-                _render_create_page(
+                _render_create_page_local(
                     kind, cache.get(),
                     form_overrides=coerced_overrides,
                     global_error=str(exc),
@@ -4743,7 +4762,7 @@ def _make_handlers(
                     )
                 except (KeyError, ValueError, TypeError) as exc:
                     return HTMLResponse(
-                        _render_create_page(
+                        _render_create_page_local(
                             kind, cache.get(),
                             form_overrides=coerced_overrides,
                             global_error=(
@@ -4763,7 +4782,7 @@ def _make_handlers(
                     )
                 except (KeyError, ValueError) as exc:
                     return HTMLResponse(
-                        _render_create_page(
+                        _render_create_page_local(
                             kind, cache.get(),
                             form_overrides=coerced_overrides,
                             global_error=(
@@ -4792,7 +4811,7 @@ def _make_handlers(
                         )
                     except (KeyError, ValueError) as exc:
                         return HTMLResponse(
-                            _render_create_page(
+                            _render_create_page_local(
                                 kind, cache.get(),
                                 form_overrides=coerced_overrides,
                                 global_error=(
@@ -4808,7 +4827,7 @@ def _make_handlers(
             validate(new_inst)
         except L2ValidationError as exc:
             return HTMLResponse(
-                _render_create_page(
+                _render_create_page_local(
                     kind, cache.get(),
                     form_overrides=coerced_overrides,
                     global_error=str(exc),

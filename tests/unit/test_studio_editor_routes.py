@@ -111,7 +111,11 @@ def test_edit_form_is_full_page_with_post_form(writable_l2_yaml: Path) -> None:
         body = resp.text
         # Full page (doctype + chrome), not a bare fragment.
         assert "<!doctype html>" in body
-        assert "← back to Studio" in body
+        # CG.7 — back-arrow links retired in favor of the shared top-nav.
+        # (Pyright `# noqa` not needed; this is an in-place sed
+        # replace + reindent. Assertion just confirms the page rendered;
+        # nav presence is exercised by the integration-style tests.)
+        assert "<header" in body
         # Plain POST form targeting the entity's save route.
         assert 'method="post"' in body
         assert 'action="/l2_shape/account/cust-001"' in body
@@ -317,7 +321,11 @@ def test_get_new_form_returns_full_page_with_intro_prose(
     # `<header>` element with the back-nav link — not the
     # implementation-detail class name.
     assert "<header" in body
-    assert "← back to Studio" in body
+    # CG.7 — back-arrow links retired; the trainer-style `<header>`
+    # carries identity; the shared top-nav lands above it when the
+    # renderer is called from a route handler. Unit tests that build
+    # the renderer directly pass `top_nav_html=""`, so we only assert
+    # the trainer-style strip's presence here.
     # Back nav to home.
     assert 'href="/"' in body
     # Per-kind intro prose explaining what an Account is.
@@ -475,7 +483,11 @@ def test_post_create_with_duplicate_id_returns_400_full_page(
     # behavior-based check (header element + back-nav text) instead
     # of semantic class.
     assert "<header" in body
-    assert "← back to Studio" in body
+    # CG.7 — back-arrow links retired; the trainer-style `<header>`
+    # carries identity; the shared top-nav lands above it when the
+    # renderer is called from a route handler. Unit tests that build
+    # the renderer directly pass `top_nav_html=""`, so we only assert
+    # the trainer-style strip's presence here.
     assert "An Account" in body
     # User's typed name preserved so they can fix just the id.
     assert 'value="Conflicting"' in body
