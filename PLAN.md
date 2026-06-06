@@ -525,6 +525,37 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [ ] CN.7 - Cold-read v0 against the new handbook surface — agent walks the dashboards via `?` and reports gaps.
 - [ ] CN.8 - Sign-off + sweep CN to PLAN_ARCHIVE.md.
 
+## Phase CO - Honest L2 dogfood: un-skip the full create_l2 browser gate (TBD — placeholder)
+
+**Placeholder filed 2026-06-06.** Audit triggered by chotchki's gut-check post-CH+CK merge: "can the editor honestly recreate the L2 yaml from the browser, or are the tests cheating?" Per-entity forms cover every primitive field. `/l2_shape/instance/` + `/l2_shape/theme/` cover singletons. BUT the canonical end-to-end proof — `tests/e2e/test_studio_dogfood_browser.py::test_browser_full_create_l2_structural_equality` — is `@pytest.mark.skip` (deferral note: "BB.2 create-new sub-form misses optional rail / TT fields … AI.14 + AI.15 consolidated as 'BB.2 form completeness + structured pickers' work — defer until post-AM"). We're past AM. This phase ships the missing fields and un-skips the gate.
+
+**Circular-dependency callout (2026-06-06).** Every prior deferral (AI.10 → AI.14+AI.15 → "BB.2 form completeness" → post-AM → CO via cold-read) added a "let's audit first" step in front of the work. Each audit found new gaps → new locks → new sub-phases → each wanting their own audit. The skip-reason already names the missing fields; the structural-equality assert already IS the cold-read (it tells you per-field what doesn't round-trip). **CO breaks the loop by un-skipping the test FIRST.** The failure trace becomes the work list — no upfront field-by-field design pass, no "what if it surfaces more" loop. Linear: fail → fix → run → next failure → fix → green.
+
+**Gap inventory (from cold-grep against `primitives.py` + the skip reason):**
+
+- **BB.2 create-new sub-form (rail + TT inside the reconciler toggle)** missing:
+  - Rail: `metadata_keys: tuple[Identifier, ...]`, `amount_typical_range: tuple[Money, Money] | None`, `posted_requirements: tuple[Identifier, ...]`, `description: str`.
+  - TT: `transfer_key: tuple[Identifier, ...]`, `completion: CompletionExpression`, `description: str`, `leg_rail_xor_groups: tuple[tuple[Identifier, ...], ...]` (the AI.10 ungated case).
+- **`/l2_shape/instance/`**: `role_business_day_offsets` is a raw YAML textarea, not structured. If the dogfood gate's structural-equality round-trips this through YAML it's not blocking; if not, structured form needed.
+- **Test 591 cheat** (`tests/unit/test_studio_editor_routes.py:591`): rail rename PUTs `{"name": new_name}` — a real form would send the full field set. Lower-stakes than the BB.2 skip (works only because `dataclasses.replace` leaves omitted fields alone) but is a "form behavior diverges from test behavior" gap.
+
+**Operator locks (kept tight — only the calls that genuinely need pre-locking):**
+
+1. **Un-skip first, fail loudly, treat the trace as the work list.** No upfront cold-read. The `_assert_l2_structurally_equal` failure mode tells you per-field what doesn't round-trip; that IS the cold-read. Per [[feedback_invariants_in_process]]: the failing test is the authority, not an audit doc.
+2. **`mutate_l2` stays forgiving.** Single-field PATCH is a legit shape the rest of the editor relies on. Test 591's "partial PUT works" behavior is a consequence; not a bug to fight upstream.
+3. **role_business_day_offsets becomes structured.** Operators editing offsets via raw YAML in the browser is a regression against the "no raw YAML in the editor" principle this phase pins. Per-role labeled int rows; roles discovered from the in-memory L2Instance (no extra lookup needed).
+4. **Lint against future cheating — at the END, after green.** Per [[feedback_cheapest_validation_must_fire]]: ship the lint AFTER the gate is green, with planted-fixture proof it fires. Validates the lint catches the exact shape we just fixed.
+
+**Done when:** `test_browser_full_create_l2_structural_equality` runs un-skipped against BOTH fuzz seed 12345 AND `spec_example.yaml`; structural-equality assert holds end-to-end; `role_business_day_offsets` editable without raw YAML; `no-partial-form-PUT-in-tests` lint fires on a planted regression probe; CO sweeps to PLAN_ARCHIVE.md. NO follow-up "CO-bug" or "CN+1" cold-read defers — anything surfaced post-green files as concrete backlog with a code-grounded reason, not "we should re-cold-read."
+
+- [ ] CO.1 - Un-skip `test_browser_full_create_l2_structural_equality` + capture the failure trace verbatim into `docs/audits/co_1_failure_trace.md` (no analysis — just the raw output). This is the work list.
+- [ ] CO.2 - Walk the trace top-down: fix each surfaced gap. Expected hits (from cold-grep): rail create-new `metadata_keys` / `amount_typical_range` / `posted_requirements` / `description`; TT create-new `transfer_key` / `completion` / `description`. Each fix runs the gate; trace shrinks until the fuzz-seed fixture passes.
+- [ ] CO.3 - Extend fixture set to `spec_example.yaml`; trace will fail on xor_groups (AI.10). Reuse `_render_xor_groups_form` widget on the TT create-new sub-form. Gate runs green on both fixtures.
+- [ ] CO.4 - `role_business_day_offsets` structured form (per-role labeled int rows; YAML textarea retired).
+- [ ] CO.5 - Test 591 fixed — send full body. (If a single-field edit path is genuinely worth probing, add a dedicated test with a `# field-isolation-probe` comment, but only if a use case names itself; don't pre-build.)
+- [ ] CO.6 - Lint `no-partial-form-PUT-in-tests` — AST/regex flag any test under `tests/` POSTing to `/l2_shape/<kind>/<id>` with fewer than the entity's required-field count. Planted-fixture proof fires.
+- [ ] CO.7 - Sign-off + sweep CO to PLAN_ARCHIVE.md. No CO+1.
+
 ## Phase PLAN - Phase PLAN
 - [ ] PLAN.md - BS.5 — _v_config_chain_children + 7-path conversion
 
