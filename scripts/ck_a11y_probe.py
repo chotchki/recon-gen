@@ -63,6 +63,9 @@ def fetch(path: str) -> str:
 
 
 def scan(path: str, body: str) -> dict:
+    # Strip HTML comments before counting — code-comments that
+    # reference `<main>` / `<h1>` are not landmarks.
+    body = re.sub(r"<!--.*?-->", "", body, flags=re.DOTALL)
     issues: list[str] = []
     main_count = len(re.findall(r"<main\b", body))
     if main_count == 0:
