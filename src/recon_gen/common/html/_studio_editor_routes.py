@@ -3234,6 +3234,34 @@ def _render_edit_page(
     # browser-driver `form.edit-form button[type="submit"]`. Drops
     # when the driver migrates to `form[action^="/l2_shape/{kind}/{id}"]`.
     primary_btn = primary_button_classes()
+    # CG.19 (2026-06-05) — h1 carries the account's display name for
+    # the kind that has one (same operator-readability principle as
+    # CG.11's card title), and a back-link below the form-page header
+    # points at the kind's list page so the operator doesn't have to
+    # bounce through the top-nav. Delete button on the right of the
+    # form actions row deletes the entity in place + the handler
+    # responds with HX-Redirect to the list (see ?from=edit branch in
+    # delete_handler).
+    h1_suffix = title_suffix
+    if kind == "account":
+        name_attr = getattr(entity, "name", None)
+        if name_attr is not None and str(name_attr).strip():
+            h1_suffix = f"{title_suffix} — {name_attr}"
+    list_url = f"/l2_shape/{kind}/"
+    back_link_html = (
+        f'<div class="max-w-4xl mx-auto px-4 pt-3 -mb-1">'
+        f'<a class="text-accent no-underline text-xs cursor-pointer hover:underline" '
+        f'href="{escape(list_url)}">← back to {escape(kind_label_plural(kind))}</a>'
+        f'</div>'
+    )
+    delete_btn_classes = chrome_button_classes()
+    delete_btn_html = (
+        f'<a class="{delete_btn_classes} ml-auto" '
+        f'data-role="form-delete" '
+        f'hx-delete="/l2_shape/{escape(kind)}/{escape(entity_id)}?from=edit" '
+        f'hx-confirm="Delete this entity? References that block deletion '
+        f'will be reported inline.">Delete</a>'
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -3243,7 +3271,8 @@ def _render_edit_page(
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
-  {_form_page_header_html(f"Edit {kind_label_singular(kind)}{title_suffix}: {entity_id}")}
+  {_form_page_header_html(f"Edit {kind_label_singular(kind)}{h1_suffix}: {entity_id}")}
+  {back_link_html}
   {_back_breadcrumb_html(from_param)}
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
     {_render_intro_details(intro_html)}
@@ -3256,6 +3285,7 @@ def _render_edit_page(
         <div class="flex items-center gap-3 mt-4">
           <button type="submit" class="{primary_btn}">Save</button>
           <a class="text-accent no-underline text-xs cursor-pointer hover:underline" href="/">Cancel</a>
+          {delete_btn_html}
         </div>
       </form>
     </section>
@@ -5005,6 +5035,18 @@ def _make_handlers(
             )
 
         cache.save(new_inst)
+        # CG.19 (2026-06-05) — the edit form's Delete button passes
+        # ?from=edit; on success the handler responds with HX-Redirect
+        # to the list page so the operator lands on the kind's list
+        # instead of seeing the now-stale edit form. Card-source
+        # deletes keep the empty-body shape (HX-Swap removes the
+        # card in place).
+        from_source = request.query_params.get("from", "")
+        if from_source == "edit":
+            resp = HTMLResponse("")
+            resp.headers["HX-Redirect"] = f"/l2_shape/{kind}/"
+            resp.headers["HX-Trigger"] = "l2-cascade-reload"
+            return resp
         # Empty body — the chrome's HX-Swap removes the card.
         resp = HTMLResponse("")
         resp.headers["HX-Trigger"] = "l2-cascade-reload"
