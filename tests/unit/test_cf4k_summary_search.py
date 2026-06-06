@@ -86,7 +86,9 @@ def test_each_list_section_summary_has_search_input(
 ) -> None:
     """Every list-kind section's `<summary>` carries an
     `<input type="search">` named `<kind>_q`. Singleton kinds (theme /
-    instance / persona) DON'T have one — no list view to search."""
+    instance) DON'T have one — no list view to search. (Persona was
+    a singleton too pre-BXa.1 but its routes were deleted; CF.4.j
+    cold-read P0 removed the orphaned home section.)"""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/").text

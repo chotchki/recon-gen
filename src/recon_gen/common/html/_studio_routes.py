@@ -252,7 +252,10 @@ _HOME_SECTIONS: tuple[tuple[str, str, str], ...] = (
 _HOME_SINGLETONS: tuple[tuple[str, str, str], ...] = (
     # (kind, label, attr on L2Instance — None means "not set yet")
     ("theme", "Theme", "theme"),
-    ("persona", "Persona", "persona"),
+    # CF.4.j cold-read P0: persona singleton removed from the home
+    # surface 2026-06-05 because `BXa.1` deleted the persona form
+    # routes but left the home section in place — the Edit link
+    # 404'd. Re-add when the persona structured form ships.
     # AI.2.c — top-level instance settings (description +
     # role_business_day_offsets) as one YAML block. The attr field is a
     # placeholder; the is_set check below branches for this kind because

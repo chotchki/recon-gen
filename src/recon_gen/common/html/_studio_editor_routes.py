@@ -4131,10 +4131,19 @@ def _make_handlers(
         # on the standalone page (no upstream <details> summary); the
         # home-page embed has its search input in the section summary
         # so the embed renders no body-level search.
+        # CF.4.j cold-read P0 #2 (2026-06-05): when embed=True the
+        # pager's hx-target must point at the home page's section-
+        # body wrapper (`#home-section-body-<kind>`), NOT
+        # `#entity-list` which only exists on the standalone page.
+        # The Next/Prev click silently fell back to no-op without
+        # this fix.
+        pager_target_id = (
+            f"home-section-body-{kind}" if embed else "entity-list"
+        )
         pager_html = render_list_pager(
             state,
             submit_url=submit_url,
-            swap_target_id="entity-list",
+            swap_target_id=pager_target_id,
             embed=embed,
         )
         search_html = "" if embed else render_list_search(

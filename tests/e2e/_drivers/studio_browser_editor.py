@@ -688,3 +688,152 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         resort — when an assertion needs raw HTML for a focused diff
         message. Prefer the typed verbs above when one fits."""
         return str(self._page.content())
+
+    # ---- CF.4.i (2026-06-05): home-page list-toolbar verbs ----------------
+    #
+    # These verbs drive the home-page entity sections through the
+    # summary search input, pager, and collapsed-card expand-on-toggle.
+    # All locators use data-role / data-kind / data-entity-id anchors
+    # (the user-facing surface markers per
+    # `[feedback_browser_drivers_user_facing_locators]`) — never the
+    # Tailwind utility classes, which change with the design system.
+
+    def open_home_section(self, kind: str) -> None:
+        """Open the kind's home-page `<details>` section if it isn't
+        already. Match the operator workflow: clicking the summary
+        toggles `open`. Most CF.4 home verbs (`paginate`,
+        `expand_collapsed_card`) need the section open so their
+        targets are inside the visible viewport — closed `<details>`
+        children are not painted by the browser, so Playwright's
+        scroll-into-view treats them as off-screen forever."""
+        details = self._page.locator(f'details[data-kind="{kind}"]')
+        if details.get_attribute("open") is not None:
+            return
+        # Click the section's header summary (NOT a card summary).
+        # The home page uses one `<summary>` directly under the
+        # section `<details>` — scope strictly to that direct child.
+        section_summary = self._page.locator(
+            f'details[data-kind="{kind}"] > summary',
+        )
+        section_summary.first.click()
+
+    def summary_search_locator(self, kind: str) -> Any:  # typing-smell: ignore[explicit-any]: Playwright Locator — see __init__ docstring
+        """Locator for the summary search input of the given kind's
+        section. Pinpoints to the kind-prefixed `<input type="search"
+        name="<kind>_q">` rendered by `render_summary_search_input()`."""
+        return self._page.locator(
+            f'details[data-kind="{kind}"] summary '
+            f'input[type="search"][name="{kind}_q"]',
+        )
+
+    def set_summary_search(self, kind: str, term: str) -> None:
+        """Type ``term`` into the summary search box for the kind's
+        section. Auto-opens the parent `<details>` via the input's
+        `oninput=...open=true` handler. htmx debounces 300ms before
+        firing the refetch; the verb waits for the section body to
+        settle by re-checking the rendered card grid contents."""
+        loc = self.summary_search_locator(kind)
+        loc.fill(term)
+        # The htmx debounce is 300ms; give the response 500ms to land.
+        self._page.wait_for_timeout(500)
+        # Confirm the section opened (matches the oninput behavior).
+        details = self._page.locator(f'details[data-kind="{kind}"]')
+        details.wait_for(state="visible")
+
+    def clear_summary_search(self, kind: str) -> None:
+        """Clear the section's summary search input + fire the htmx
+        refetch (operator hits the X clear button or selects-all +
+        delete)."""
+        self.set_summary_search(kind, "")
+
+    def home_section_card_ids(self, kind: str) -> list[str]:
+        """Read the entity_ids of cards currently rendered in the
+        kind's section. Reads `data-entity-id="…"` off each `<article>`
+        so a future markup change doesn't drift the verb."""
+        articles = self._page.locator(
+            f'details[data-kind="{kind}"] '
+            f'article[data-entity-id]',
+        )
+        count = int(articles.count())
+        return [
+            str(articles.nth(i).get_attribute("data-entity-id"))
+            for i in range(count)
+        ]
+
+    def home_section_pager_range(self, kind: str) -> str:
+        """Return the pager's range indicator text — "Showing 1–25 of
+        117", "No matches", or "0 entities". Locator anchors on the
+        pager's `data-role` so it survives Tailwind class churn."""
+        pager = self._page.locator(
+            f'div[data-role="list-pager"][data-kind="{kind}"]',
+        )
+        return str(pager.inner_text()).strip()
+
+    def paginate(self, kind: str, direction: str) -> None:
+        """Click the Prev or Next pager button in the kind's section.
+
+        ``direction`` is "prev" or "next"; anything else raises.
+        Reads the link via its text glyph (← Prev / Next →) inside
+        the typed pager container. Disabled `<span>` buttons are
+        skipped — the verb raises if the operator tries to advance
+        past the end."""
+        if direction not in ("prev", "next"):
+            raise ValueError(
+                f"paginate(direction) must be 'prev' or 'next', "
+                f"got {direction!r}",
+            )
+        label = "← Prev" if direction == "prev" else "Next →"
+        # The pager container scopes the click so the standalone-page
+        # pager doesn't collide with embed pagers when both render.
+        button = self._page.locator(
+            f'div[data-role="list-pager"][data-kind="{kind}"] '
+            f'a:has-text("{label}")',
+        )
+        if button.count() == 0:
+            raise RuntimeError(
+                f"pager {direction!r} for kind={kind!r} is disabled "
+                f"(no <a>; only a disabled <span>)",
+            )
+        # The first-section-open default leaves later-section pagers
+        # below the viewport on a long home page. Scroll-into-view
+        # before clicking so WebKit's "element outside of the
+        # viewport" retry-storm doesn't timeout.
+        target = button.first
+        target.scroll_into_view_if_needed()
+        target.click()
+
+    def expand_collapsed_card(self, kind: str, entity_id: str) -> None:
+        """Open a collapsed `<details>` card by clicking its summary.
+        The summary's title text is plain `<h3>` (CF.4.l-era — no
+        diagram link), so a click inside the summary natively
+        toggles the parent `<details>`."""
+        article = self._page.locator(
+            f'article[data-kind="{kind}"][data-entity-id="{entity_id}"]',
+        )
+        summary = article.locator("details > summary")
+        if summary.count() == 0:
+            raise RuntimeError(
+                f"card {kind!r}/{entity_id!r} is not collapsed "
+                f"(no <details>); already eager-rendered",
+            )
+        target = summary.first
+        target.scroll_into_view_if_needed()
+        target.click()
+        # `hx-trigger="toggle once"` fetches the body — wait for the
+        # `<dl>` fragment to swap in (replaces the placeholder div
+        # via `hx-swap="outerHTML"`). Don't capture an element_handle
+        # before the swap — after the outerHTML replace, the handle
+        # points at the detached old node and querySelector returns
+        # null forever. Locate the `<dl>` directly inside the article.
+        article.locator("dl").first.wait_for(
+            state="visible", timeout=self.DEFAULT_TIMEOUT_MS,
+        )
+
+    def card_is_collapsed(self, kind: str, entity_id: str) -> bool:
+        """True iff the card for ``entity_id`` is wrapped in `<details>`
+        (collapsed-card render). False = eager render (no `<details>`).
+        Drives the conditional shape of the rest of the CF.4 verbs."""
+        article = self._page.locator(
+            f'article[data-kind="{kind}"][data-entity-id="{entity_id}"]',
+        )
+        return article.locator("details").count() > 0

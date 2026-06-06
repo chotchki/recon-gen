@@ -233,7 +233,13 @@ def _page_url(state: ListToolbarState, submit_url: str, embed: bool,
         parts.append(
             f"{escape(state.key_sort)}={escape(state.sort_axis)}",
         )
-    if embed:
+    # CF.4.j cold-read P0 #3 (2026-06-05): submit_url already carries
+    # `?embed=1` for the embed flow (see list_view), so appending
+    # `embed=1` again produced `?embed=1&...&embed=1`. Query parsers
+    # take the last value, so it doesn't break — but it's a smell
+    # that bites the next consumer who adds a third param. Only
+    # append when submit_url doesn't already have it.
+    if embed and "embed=1" not in submit_url:
         parts.append("embed=1")
     sep = "&" if "?" in submit_url else "?"
     return f"{submit_url}{sep}{'&'.join(parts)}"
