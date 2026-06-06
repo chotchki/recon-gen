@@ -450,6 +450,19 @@ def parse_toolbar_state(
         raw_size = PAGE_SIZE_DEFAULT
     raw_size = max(1, min(raw_size, PAGE_SIZE_MAX))
 
+    # CG.17 (2026-06-05) — high-end clamp on page_offset.
+    # Cold-read v4 P0 #2: ?page_offset=999 on a 16-row list rendered
+    # `Showing 1000–16 of 16` (negative was already clamped to 0;
+    # high end was missing). Clamp to the offset of the page that
+    # CONTAINS the last item, so a stale URL on a shrunken list
+    # lands the operator on the actual last page instead of the
+    # first. Empty list → 0 (the only valid offset).
+    safe_total = max(0, total_count)
+    last_page_offset = (
+        ((safe_total - 1) // raw_size) * raw_size if safe_total > 0 else 0
+    )
+    raw_offset = min(raw_offset, last_page_offset)
+
     return ListToolbarState(
         kind=kind,
         q=raw_q,
