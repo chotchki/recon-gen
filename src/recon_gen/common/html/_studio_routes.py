@@ -387,13 +387,27 @@ def _render_home_page(
             body_id=body_id,
             url_prefix=kind,
         )
+        # CG.9 (2026-06-05) — explicit `▸` chevron at the left edge of
+        # the section summary, rotating 90° via `group-open:rotate-90`
+        # when the operator opens the section. Matches the card-level
+        # chevron added in CF.4.l so the open/close affordance reads
+        # the same at both surface levels. Native browser marker
+        # suppressed (`list-none` + the webkit attr-selector) so we
+        # control the glyph + color + animation.
+        section_chevron_html = (
+            '<span class="inline-block transition-transform '
+            'group-open:rotate-90 text-secondary-fg select-none" '
+            'aria-hidden="true" data-role="section-chevron">▸</span>'
+        )
         section_blocks.append(
-            f'<details class="bg-white border border-surface-border '
+            f'<details class="group bg-white border border-surface-border '
             f'rounded-md mb-3 overflow-hidden" '
             f'data-kind="{escape(kind)}"{open_attr}>'
             f'<summary class="cursor-pointer px-4 py-2 font-semibold '
             f'text-accent bg-surface-bg select-none hover:bg-link-tint '
-            f'flex items-center gap-2 flex-wrap">'
+            f'flex items-center gap-2 flex-wrap list-none '
+            f'[&::-webkit-details-marker]:hidden">'
+            f"{section_chevron_html}"
             f'<span>{escape(label)} '
             f'<span class="text-xs text-secondary-fg font-normal">({n})</span>'
             f"</span>"
@@ -450,12 +464,21 @@ def _render_home_page(
             f"{escape(label)} is a {singleton_form_kind} — "
             f"click <strong>Edit</strong> to view / change it."
         )
+        # CG.9 — same chevron treatment on singleton sections so the
+        # whole accordion reads consistently.
+        singleton_chevron_html = (
+            '<span class="inline-block transition-transform '
+            'group-open:rotate-90 text-secondary-fg select-none mr-2" '
+            'aria-hidden="true" data-role="section-chevron">▸</span>'
+        )
         section_blocks.append(
-            f'<details class="bg-white border border-surface-border '
+            f'<details class="group bg-white border border-surface-border '
             f'rounded-md mb-3 overflow-hidden" '
             f'data-kind="{escape(kind)}">'
             f'<summary class="cursor-pointer px-4 py-2 font-semibold '
-            f'text-accent bg-surface-bg select-none hover:bg-link-tint">'
+            f'text-accent bg-surface-bg select-none hover:bg-link-tint '
+            f'list-none [&::-webkit-details-marker]:hidden">'
+            f"{singleton_chevron_html}"
             f"{escape(label)} "
             f'<span class="text-xs text-secondary-fg font-normal">({escape(status)})</span> '
             f"{singleton_link}"
