@@ -553,10 +553,10 @@ def _render_home_page(
   <header class="px-8 py-4 border-b border-surface-border bg-white" id="home-intro">
     <h1 class="text-xl font-semibold m-0">L2 Editor</h1>
     <p class="text-sm text-secondary-fg max-w-3xl m-0 mt-1">
-      Browse and edit the institution's accounts, rails, transfer
-      templates, chains, and limit schedules. Create a new one from
-      the per-section affordance below; saves cascade across
-      sections automatically.
+      Each section below is a kind of building block in this
+      institution's L2 shape. Expand one to browse its entries —
+      search the summary or click a card title to see the detail.
+      The diagram link in the top nav shows how the kinds connect.
     </p>
   </header>
   <section class="px-4 pt-4 pb-8 max-w-7xl mx-auto" id="home-entities">
