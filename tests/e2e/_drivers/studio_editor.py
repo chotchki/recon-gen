@@ -157,7 +157,10 @@ def _append_chain_children(chain: object, data: FormData) -> None:
     """
     children = getattr(chain, "children", ())
     data["children__present"] = ["1"]
-    data["children"] = [str(c.name) for c in children]
+    names = [str(c.name) for c in children]
+    data["children"] = names
+    # CO.3 — canonical order override (same pattern as multi_select).
+    data["children__order"] = [",".join(names)]
     for c in children:
         if getattr(c, "fan_in", False):
             data[f"fan_in_{c.name}"] = ["true"]

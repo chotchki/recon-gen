@@ -954,6 +954,18 @@ def _coerce_form(
             selected_names = tuple(
                 str(v) for v in form.getlist("children") if str(v).strip()
             )
+            # CO.3 — order-override via `children__order` hidden field,
+            # same pattern as multi_select. Browser submits checkboxes
+            # in DOM order; chain children order is semantic (yaml
+            # declaration order). When __order is set + set-equal to
+            # the selection, it overrides.
+            order_raw = str(form.get("children__order") or "").strip()
+            if order_raw:
+                candidate = tuple(
+                    s.strip() for s in order_raw.split(",") if s.strip()
+                )
+                if set(candidate) == set(selected_names):
+                    selected_names = candidate
             overrides[spec.name] = selected_names
             child_specs: list[ChainChildSpec] = []
             for name in selected_names:
@@ -1056,6 +1068,13 @@ def _coerce_form(
             if spec.name not in form:
                 continue
             raw = str(form[spec.name])
+            # CO.3 (2026-06-06) — normalize CRLF to LF at the form
+            # boundary. Browsers submit `<textarea>` content with
+            # `\r\n` line endings per the HTTP form spec; the L2 yaml
+            # canonical form uses LF, so the round-trip would diverge
+            # on multi-line descriptions. Surfaced by the spec_example
+            # dogfood test against Chain.description fields.
+            raw = raw.replace("\r\n", "\n").replace("\r", "\n")
             overrides[spec.name] = raw
             fields[spec.name] = _coerce_field(spec, raw, kind)
     return fields, overrides
@@ -1817,7 +1836,8 @@ def _render_chain_children_field(
             f'<div class="{row_cls}" data-child="{escape(opt)}">'
             f'<label class="{item_cls}">'
             f'<input type="checkbox" name="children" '
-            f'value="{escape(opt)}"{" checked" if is_selected else ""}>'
+            f'value="{escape(opt)}"{" checked" if is_selected else ""}'
+            f' data-multiselect-name="children">'
             f' {escape(opt)}</label>'
             f'<label class="{item_cls}">'
             f'<input type="checkbox" name="fan_in_{escape(opt)}" '
@@ -1839,8 +1859,34 @@ def _render_chain_children_field(
         "flex flex-col gap-0 px-2 py-1 border border-surface-border "
         "rounded-sm bg-white max-h-72 overflow-y-auto"
     )
+    # CO.3 — same chip-list/__order pattern as multi_select. Lets the
+    # operator drag-reorder selected children + syncs the hidden field.
+    selected_in_order = [name for name, _, _ in existing]
+    order_chips = "".join(
+        f'<li class="inline-flex items-center gap-1 bg-link-tint border border-surface-border rounded-sm px-2 py-1 cursor-grab text-sm" '
+        f'data-multiselect-order-value="{escape(s)}">'
+        f'<span aria-hidden="true" class="text-secondary-fg select-none">⋮⋮</span>'
+        f'<span>{escape(s)}</span>'
+        f'</li>'
+        for s in selected_in_order
+    )
+    empty_hint = (
+        ' <span class="text-xs italic text-secondary-fg" '
+        'data-multiselect-empty-hint="1">'
+        "Check a child below; drag chips here to reorder."
+        "</span>"
+    )
     input_html = (
         f'<input type="hidden" name="children__present" value="1">'
+        f'<input type="hidden" name="children__order" '
+        f'value="{escape(",".join(selected_in_order))}" '
+        f'data-multiselect-order-input="children">'
+        f'<ul data-multiselect-order-list="children" '
+        f'class="flex flex-wrap gap-2 px-2 py-2 mb-1 border border-dashed border-surface-border rounded-sm bg-surface-bg min-h-10" '
+        f'aria-label="Selected {escape(spec.label)} in order">'
+        f"{order_chips}"
+        f"{empty_hint if not selected_in_order else ''}"
+        f"</ul>"
         f'<div id="field-{spec.name}" class="{group_cls}" '
         f'role="group">{"".join(rows)}</div>'
     )
@@ -3516,15 +3562,21 @@ def _render_create_page(
         _render_field(s, overrides.get(s.name, ""), instance)
         for s in specs
     )
-    # BB.2 — Reconciler picker fieldset. Only renders for single-leg
-    # rails (any subtype). The picker is *required for non-aggregating*
-    # by the BB.1 handler (it validates server-side); aggregating
-    # single-leg rails are self-reconciling per SPEC's exemption and
-    # the picker is ignored if filled. Two-leg rails skip this
-    # entirely — they reconcile internally via expected_net.
+    # BB.2 — Reconciler picker fieldset. Renders for single_leg rails
+    # (any subtype variant) AND for two_leg rails (CO.3, 2026-06-06).
+    # The picker is *required for non-aggregating single_leg* and for
+    # *two_leg without expected_net* by the BB.1 handler (server-side
+    # `needs_reconciler` gate); aggregating single-leg rails are
+    # self-reconciling per SPEC's exemption + the picker is ignored
+    # if filled. Pre-CO.3 the picker was omitted for two_leg because
+    # "two_leg reconciles via expected_net" — true when expected_net
+    # is set, but for two_leg without expected_net (S5 bilateral) the
+    # rail still needs forward-reference reconciliation via a TT, so
+    # the picker is genuinely required. The browser dogfood gate
+    # surfaced the inconsistency.
     reconciler_html = (
         _render_reconciler_section(instance, overrides)
-        if kind == "rail" and subtype == "single_leg"
+        if kind == "rail" and subtype in ("single_leg", "two_leg")
         else ""
     )
     # Hidden subtype input — POST handler picks it up via _coerce_form's
@@ -3843,6 +3895,8 @@ def _instance_form_to_dict(form: Mapping[str, str]) -> dict[str, object]:
     # description ends with a newline. Empty-string still treated as
     # "clear" via the falsy check below.
     description = str(form.get("description", ""))
+    # CO.3 — normalize CRLF→LF; browsers submit textarea with \r\n.
+    description = description.replace("\r\n", "\n").replace("\r", "\n")
     if description.strip():
         out["description"] = description
     offsets_yaml = str(form.get("role_business_day_offsets_yaml", "")).strip()
