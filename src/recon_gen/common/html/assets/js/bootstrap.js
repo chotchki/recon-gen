@@ -315,11 +315,19 @@
       .attr("class", "table-data min-w-full text-sm");
 
     // Header row — sticky so long-scroll tables don't lose context.
+    // CH.2 (2026-06-05) — v13.1.1 audit Dashboards Med #2 asked
+    // for header-row fill from a theme token. Pre-CH this used
+    // `bg-surface-bg` (the LIGHTEST token — same as the page fill,
+    // so the header didn't stand out against body rows striped
+    // with `bg-white` / `bg-surface-bg`). Swap to `bg-surface-alt`
+    // (the slightly-darker fill, defined in input.css next to
+    // `surface` / `surface-bg` / `surface-border`). `z-10` keeps
+    // the sticky header above the body rows during scroll.
     var thead = table
       .append("thead")
       .attr(
         "class",
-        "sticky top-0 bg-surface-bg text-secondary-fg font-semibold",
+        "sticky top-0 z-10 bg-surface-alt text-secondary-fg font-semibold",
       );
     var headerRow = thead.append("tr");
     headerRow
@@ -327,7 +335,10 @@
       .data(columns)
       .enter()
       .append("th")
-      .attr("class", "px-3 py-2 text-left border-b border-surface-border")
+      .attr(
+        "class",
+        "px-3 py-2 text-left border-b border-surface-border bg-surface-alt",
+      )
       .each(function (col) {
         var th = d3.select(this);
         // Sort link — clicking flips sort direction (asc → desc →
@@ -694,7 +705,7 @@
       categories.forEach((_c, ci) => {
         var colSum = 0;
         series.forEach((s) => {
-          var v = s.values && s.values[ci];
+          var v = s.values?.[ci];
           if (typeof v === "number") colSum += v;
         });
         if (Math.abs(colSum) > estMaxAbs) estMaxAbs = Math.abs(colSum);
