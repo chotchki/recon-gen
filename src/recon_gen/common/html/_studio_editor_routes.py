@@ -2090,6 +2090,58 @@ def _render_read_card(
     )
 
 
+# CG.6 + CG.13 (2026-06-05) — operator-readable kind labels for h1 +
+# aria-label sites. Underscored kind enum values (`account_template`,
+# `transfer_template`, `limit_schedule`) leak into screen-reader
+# announcements and tooltip hovers; map them once and use everywhere.
+_KIND_LABEL_PLURAL: Mapping[EntityKind, str] = {
+    "account": "Accounts",
+    "account_template": "Account templates",
+    "rail": "Rails",
+    "transfer_template": "Transfer templates",
+    "chain": "Chains",
+    "limit_schedule": "Limit schedules",
+    "theme": "Theme",
+    "instance": "Instance settings",
+}
+
+# CG.6 (2026-06-05) — one-sentence blurb per list kind, used by
+# `_render_list_page` to render the trainer-style header strip
+# (matches `/training/` and `/etl/` shape: h1 + 1-sentence blurb on
+# a white `border-b` strip). Keep blurbs short — the operator
+# already knows the kind by name; the strip is anchor + context,
+# not documentation.
+_LIST_PAGE_BLURB_BY_KIND: Mapping[EntityKind, str] = {
+    "account": (
+        "One row per ledger position the institution holds — "
+        "internal GLs and external counterparty accounts both live "
+        "here, distinguished by scope."
+    ),
+    "account_template": (
+        "Patterns that materialize many parallel accounts at ETL "
+        "time (e.g. one customer DDA per customer-id)."
+    ),
+    "rail": (
+        "The lowest-level money-movement leg — ACH credit, internal "
+        "GL move, wire debit. Two-leg rails post symmetric debits "
+        "and credits; single-leg rails post one side."
+    ),
+    "transfer_template": (
+        "Multi-leg event templates that bundle two or more rails "
+        "into one logical transfer (e.g. card-purchase = auth + "
+        "post)."
+    ),
+    "chain": (
+        "Parent → child dependencies between transfers — ACH "
+        "settlement triggers GL clearing 1-2 days later, etc."
+    ),
+    "limit_schedule": (
+        "Per-account limit windows the L1 invariants check against "
+        "(e.g. customer-DDA NSF must be ≥ 0 by end-of-day)."
+    ),
+}
+
+
 _CREATE_INTRO_BY_KIND: Mapping[EntityKind, str] = {
     "account": (
         "<p><strong>An Account</strong> is one row in the institution's "
@@ -3888,6 +3940,20 @@ def _render_list_page(
             f'<div class="{grid_cls}" data-kind="{escape(kind)}">{cards}</div>'
             f"{pager_wrap_open}{pager_html}{pager_wrap_close}"
         )
+    # CG.6 (2026-06-05) — dedicated `/l2_shape/<kind>/` pages wear
+    # the same trainer-style header strip as `/`, `/training/`, and
+    # `/etl/`. h1 = operator-readable plural label; blurb = one-line
+    # per-kind anchor pulled from `_LIST_PAGE_BLURB_BY_KIND`.
+    page_title = escape(_KIND_LABEL_PLURAL.get(kind, kind))
+    page_blurb = _LIST_PAGE_BLURB_BY_KIND.get(kind, "")
+    page_header_html = (
+        f'<header class="px-8 py-4 border-b border-surface-border bg-white">'
+        f'<h1 class="text-xl font-semibold m-0">{page_title}</h1>'
+        f'<p class="text-sm text-secondary-fg max-w-3xl m-0 mt-1">'
+        f"{page_blurb}"
+        f"</p>"
+        f"</header>"
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -3916,6 +3982,7 @@ def _render_list_page(
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
+  {page_header_html}
   {search_wrap_open}{search_html}{search_wrap_close}
   <main id="entity-list" class="{grid_cls}">
     {cards}
