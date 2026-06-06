@@ -2215,6 +2215,51 @@ def _form_page_header_html(title: str) -> str:
     )
 
 
+def _render_unknown_kind_page(
+    raw_kind: str, top_nav_html: str, instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance
+) -> str:
+    """CG.20 (2026-06-05) — chrome a 404-style "kind not editable"
+    page so a stale bookmark / runbook link / browser-history entry
+    pointing at e.g. `/l2_shape/persona/` lands on a recoverable
+    page (top-nav + L2 Editor link) instead of a bare
+    `<h1>404</h1><p>persona is not an editable entity kind</p>`
+    dead-end. The page reads in the studio's voice: explains why
+    this kind isn't editable AND offers a one-click bounce back to
+    the home page."""
+    safe_kind = escape(raw_kind)
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Recon-Gen · Studio · 404</title>
+  {studio_theme_head(instance)}
+</head>
+<body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
+  {top_nav_html}
+  <header class="px-8 py-4 border-b border-surface-border bg-white">
+    <h1 class="text-xl font-semibold m-0">Page not found</h1>
+    <p class="text-sm text-secondary-fg max-w-3xl m-0 mt-1">
+      <code class="font-mono">{safe_kind}</code> isn't an editable
+      kind in the L2 editor. It may have been retired, or the link
+      you followed is stale.
+    </p>
+  </header>
+  <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
+    <section class="bg-white border border-surface-border rounded-md p-5">
+      <p class="text-sm m-0">
+        Head back to the
+        <a class="text-accent no-underline hover:underline" href="/">L2 Editor</a>
+        to browse the kinds that do edit here, or jump to the
+        <a class="text-accent no-underline hover:underline" href="/diagram">diagram</a>
+        to see the L2 shape end-to-end.
+      </p>
+    </section>
+  </main>
+</body>
+</html>
+"""
+
+
 _CREATE_INTRO_BY_KIND: Mapping[EntityKind, str] = {
     "account": (
         "<p><strong>An Account</strong> is one row in the institution's "
@@ -4334,8 +4379,11 @@ def _make_handlers(
         kind = _kind_from_path(request.path_params["kind"])
         if kind is None:
             return HTMLResponse(
-                f"<h1>404</h1><p>{escape(request.path_params['kind'])} "
-                f"is not an editable entity kind (yet).</p>",
+                _render_unknown_kind_page(
+                    request.path_params["kind"],
+                    top_nav_html_fn("/"),
+                    cache.get(),
+                ),
                 status_code=404,
             )
         # X.4.f.12 — singletons (theme, persona) skip the list view
@@ -4345,8 +4393,11 @@ def _make_handlers(
             return HTMLResponse(_render_singleton_page_local(kind, cache.get()))
         if kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse(
-                f"<h1>404</h1><p>{escape(request.path_params['kind'])} "
-                f"is not an editable entity kind (yet).</p>",
+                _render_unknown_kind_page(
+                    request.path_params["kind"],
+                    top_nav_html_fn("/"),
+                    cache.get(),
+                ),
                 status_code=404,
             )
         inst = cache.get()
