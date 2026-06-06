@@ -1948,8 +1948,20 @@ def _render_read_card_summary(
                 f'data-role="card-display-name">'
                 f"{escape(str(name_attr))}</span>"
             )
+    # CG.12 (2026-06-05) — chain card titles render the parent only;
+    # the composite "Parent::ChildA,ChildB,..." is the URL/addressing
+    # key (kept on `data-entity-id` for hx-target plumbing) but it's
+    # unscannable in the title. The body's `<dt>Children</dt>` row
+    # (FieldSpec.kind="chain_children", label="Children") already
+    # lists the children, so dropping them from the title is pure
+    # signal-to-noise. Cold-read v3 P1 finding.
+    title_text = entity_id
+    if kind == "chain":
+        parent_attr = getattr(entity, "parent", None)
+        if parent_attr is not None:
+            title_text = str(parent_attr)
     title_html = (
-        f'<h3 class="{h3_base}">{escape(entity_id)}'
+        f'<h3 class="{h3_base}">{escape(title_text)}'
         f'{display_name_html}{subtype_badge}</h3>'
     )
     # X.4.f.9.delete — DELETE on success returns empty (card disappears
