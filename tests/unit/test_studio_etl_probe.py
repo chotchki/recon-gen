@@ -65,7 +65,7 @@ def test_etl_probe_returns_200_with_picker_form(
         resp = c.get("/etl/probe")
         assert resp.status_code == 200
         body = resp.text
-    assert "<title>Studio · ETL · Probe" in body
+    assert "<title>Recon-Gen · Studio · ETL · Probe</title>" in body
     # Picker form with the 3 radios.
     assert '<form method="get" action="/etl/probe"' in body
     for kind_value in ("rail", "transfer_template", "chain"):

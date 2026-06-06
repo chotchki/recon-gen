@@ -2531,7 +2531,7 @@ def _render_rail_subtype_picker(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Create new rail — pick subtype — Studio</title>
+  <title>Recon-Gen · Studio · Editor · Create rail · pick subtype</title>
   {studio_theme_head(instance)}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
@@ -3192,7 +3192,7 @@ def _render_create_page(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Create new {escape(kind_label_singular(kind))}{escape(title_suffix)} — Studio</title>
+  <title>Recon-Gen · Studio · Editor · Create {escape(kind_label_singular(kind))}{escape(title_suffix)}</title>
   {studio_theme_head(instance)}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
@@ -3311,7 +3311,7 @@ def _render_edit_page(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Edit {escape(kind_label_singular(kind))}: {escape(entity_id)} — Studio</title>
+  <title>Recon-Gen · Studio · Editor · Edit {escape(kind_label_singular(kind))} · {escape(entity_id)}</title>
   {studio_theme_head(instance)}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
@@ -3983,7 +3983,7 @@ def _render_singleton_page(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>{escape(label)} — Studio</title>
+  <title>Recon-Gen · Studio · Editor · {escape(label)}</title>
   {studio_theme_head(instance)}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
@@ -4162,7 +4162,7 @@ def _render_list_page(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Studio editor — {escape(kind_label_plural(kind))}</title>
+  <title>Recon-Gen · Studio · Editor · {escape(kind_label_plural(kind))}</title>
   {studio_theme_head(instance)}
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <script>

@@ -63,7 +63,7 @@ def test_studio_diagram_route_renders_with_dot_source() -> None:
         assert resp.status_code == 200
         body = resp.text
         # The page renders the chrome + the DOT template.
-        assert "<title>Studio diagram — spec_example</title>" in body
+        assert "<title>Recon-Gen · Studio · Diagram</title>" in body
         assert 'id="topology-dot"' in body
         assert 'id="diagram-target"' in body
         # The chrome carries the visibility checkboxes for the two

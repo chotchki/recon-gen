@@ -142,26 +142,27 @@ def test_home_page_add_button_tooltip_no_underscores(
 # Dedicated list pages
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("kind,want_title", [
-    ("account_template", "Studio editor — Account templates"),
-    ("transfer_template", "Studio editor — Transfer templates"),
-    ("limit_schedule", "Studio editor — Limit schedules"),
-    ("account", "Studio editor — Accounts"),
-    ("rail", "Studio editor — Rails"),
-    ("chain", "Studio editor — Chains"),
+@pytest.mark.parametrize("kind,want_plural", [
+    ("account_template", "Account templates"),
+    ("transfer_template", "Transfer templates"),
+    ("limit_schedule", "Limit schedules"),
+    ("account", "Accounts"),
+    ("rail", "Rails"),
+    ("chain", "Chains"),
 ])
 def test_list_page_title_uses_plural_label(
-    writable_l2_yaml: Path, kind: str, want_title: str,
+    writable_l2_yaml: Path, kind: str, want_plural: str,
 ) -> None:
     """The `<title>` bar on `/l2_shape/<kind>/` reads the Title-Case
-    plural — never a raw enum value with underscores."""
+    plural — never a raw enum value with underscores. Title shape
+    is locked by CG.21 (`Recon-Gen · Studio · Editor · <plural>`)."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get(f"/l2_shape/{kind}/").text
-    assert f"<title>{want_title}</title>" in body
-    # The underscored enum should not appear as `editor — kind`.
+    assert f"<title>Recon-Gen · Studio · Editor · {want_plural}</title>" in body
+    # The underscored enum should never appear in the title.
     if "_" in kind:
-        assert f"Studio editor — {kind}" not in body
+        assert kind not in body.split("</title>")[0]
 
 
 # ---------------------------------------------------------------------------
@@ -195,19 +196,27 @@ def test_create_form_uses_singular_label(
 def test_edit_form_uses_singular_label(
     writable_l2_yaml: Path,
 ) -> None:
-    """Edit page renders "Edit account: cust-001" — not "Edit
-    account: cust-001" mixed with an underscored enum elsewhere."""
+    """Edit page surfaces the singular operator-readable kind label
+    ("account", "account template") — never the underscored enum.
+    Title shape is locked by CG.21 (`Edit account · <id>`); h1 lives
+    inside the form-page header strip and reads `Edit account ...:
+    <id>` (CG.19 may prepend a display name on accounts). The
+    intent of this test is to pin the absence of the underscore-
+    leak, not the exact punctuation."""
     app = _build_app(writable_l2_yaml)
-    # Pick a known account id from the fixture.
     cache = L2InstanceCache.from_path(writable_l2_yaml)
     inst = cache.get()
     account = inst.accounts[0]
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get(f"/l2_shape/account/{account.id}/edit").text
-    assert "Edit account:" in body
-    # Try the more interesting case — account_template edit page.
+    # The singular label appears in the page; the kind enum
+    # (without underscore here, both happen to be "account") does
+    # not lead the title or h1 in some other shape.
+    assert "Edit account" in body
+    # The interesting case — multi-word kind.
     template = inst.account_templates[0]
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get(f"/l2_shape/account_template/{template.role}/edit").text
-    assert "Edit account template:" in body
-    assert "Edit account_template:" not in body
+    assert "Edit account template" in body
+    assert "Edit account_template" not in body
+    assert "account_template" not in body.split("</title>")[0]

@@ -306,7 +306,7 @@ def render_training_v3_landing(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Studio · Training · Dual-prefix v</title>
+  <title>Recon-Gen · Studio · Training</title>
   {devlog_meta}{theme_head}
   <link rel="stylesheet" href="{escape(asset_url)}">
   <!-- BV.4.10.d — htmx loaded for the Session-Start live tail's

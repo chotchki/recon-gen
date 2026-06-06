@@ -60,7 +60,7 @@ def test_etl_triage_returns_200_with_header(writable_l2_yaml: Path) -> None:
         resp = c.get("/etl/triage")
         assert resp.status_code == 200
         body = resp.text
-    assert "<title>Studio · ETL · Triage" in body
+    assert "<title>Recon-Gen · Studio · ETL · Triage</title>" in body
     assert "Studio · ETL · Triage" in body
 
 

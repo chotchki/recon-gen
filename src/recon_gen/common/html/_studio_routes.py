@@ -519,7 +519,7 @@ def _render_home_page(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Studio — {prefix}</title>
+  <title>Recon-Gen · Studio · {prefix}</title>
   {devlog_meta}{studio_theme_head(instance)}
   <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
@@ -801,7 +801,10 @@ def _render_etl_landing_page(
     sub-pages will make their own demo-mode decisions when they land.
     """
     instance = cache.get()
-    prefix = escape(cfg.deployment_name if cfg is not None else cache.path.stem)
+    # CG.21 (2026-06-05) — deployment name lives only on the home page
+    # `<title>`. Other surfaces (this ETL home + sub-pages, the diagram,
+    # the data page, the editor list / form / singleton pages) drop it
+    # so the canonical `Recon-Gen · Studio · <surface>` shape stays tight.
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
     demo_banner = _demo_mode_banner(demo_mode)
 
@@ -848,7 +851,7 @@ def _render_etl_landing_page(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Studio · ETL Support — {prefix}</title>
+  <title>Recon-Gen · Studio · ETL</title>
   {devlog_meta}{studio_theme_head(instance)}
   <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
@@ -921,9 +924,6 @@ async def _render_etl_probe_page(
     instance = cache.get()
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
     demo_banner = _demo_mode_banner(demo_mode)
-    prefix_label = escape(
-        cfg.deployment_name if cfg is not None else cache.path.stem,
-    )
     prefix = (
         prefix_override
         if prefix_override is not None
@@ -959,7 +959,7 @@ async def _render_etl_probe_page(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Studio · ETL · Probe — {prefix_label}</title>
+  <title>Recon-Gen · Studio · ETL · Probe</title>
   {devlog_meta}{studio_theme_head(instance)}
   <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
@@ -1534,9 +1534,6 @@ async def _render_etl_run_page(
     instance = cache.get()
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
     demo_banner = _demo_mode_banner(demo_mode)
-    prefix_label = escape(
-        cfg.deployment_name if cfg is not None else cache.path.stem,
-    )
     prefix = (
         prefix_override
         if prefix_override is not None
@@ -1587,7 +1584,7 @@ async def _render_etl_run_page(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Studio · ETL · Refresh Data — {prefix_label}</title>
+  <title>Recon-Gen · Studio · ETL · Refresh Data</title>
   {devlog_meta}{studio_theme_head(instance)}
   <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
@@ -2270,9 +2267,6 @@ async def _render_etl_triage_page(
     instance = cache.get()
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
     demo_banner = _demo_mode_banner(demo_mode)
-    prefix_label = escape(
-        cfg.deployment_name if cfg is not None else cache.path.stem,
-    )
     prefix = (
         prefix_override
         if prefix_override is not None
@@ -2324,7 +2318,7 @@ async def _render_etl_triage_page(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Studio · ETL · Triage — {prefix_label}</title>
+  <title>Recon-Gen · Studio · ETL · Triage</title>
   {devlog_meta}{studio_theme_head(instance)}
   <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
@@ -3103,7 +3097,7 @@ def _render_diagram_page(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Studio diagram — {prefix}</title>
+  <title>Recon-Gen · Studio · Diagram</title>
   {devlog_meta}{coverage_meta}{trainer_meta}{studio_theme_head(instance)}
   <link rel="stylesheet" href="{asset_url("diagram-svg.css")}">
   {devlog_script}</head>
@@ -4059,7 +4053,7 @@ def _render_data_page(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Studio · data — {prefix}</title>
+  <title>Recon-Gen · Studio · Data</title>
   {devlog_meta}{studio_theme_head(instance)}
   {devlog_script}</head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">

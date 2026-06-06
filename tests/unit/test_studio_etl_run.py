@@ -70,7 +70,7 @@ def test_etl_run_get_returns_200_with_run_button(
         resp = c.get("/etl/run")
         assert resp.status_code == 200
         body = resp.text
-    assert "<title>Studio · ETL · Refresh Data" in body
+    assert "<title>Recon-Gen · Studio · ETL · Refresh Data</title>" in body
     assert 'id="etl-run-btn"' in body
     # Form posts back to /etl/run.
     assert '<form method="post" action="/etl/run">' in body
@@ -497,7 +497,9 @@ def test_etl_run_page_drops_redundant_page_header(
     # The `<h1>Studio · ETL · Refresh Data</h1>` row is gone.
     assert "<h1>Studio · ETL · Refresh Data</h1>" not in body
     # But the page title in <head> stays — that's the browser tab.
-    assert "<title>Studio · ETL · Refresh Data" in body
+    # CG.21 (2026-06-05) unified the title shape; deployment-name
+    # dropped from non-home titles.
+    assert "<title>Recon-Gen · Studio · ETL · Refresh Data</title>" in body
 
 
 # -- BTa.9 — live tail + cancel ------------------------------------------

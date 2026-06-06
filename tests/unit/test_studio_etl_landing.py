@@ -69,10 +69,12 @@ def test_etl_landing_returns_200_and_renders_header(
         assert resp.status_code == 200
         body = resp.text
 
-    assert "<title>Studio · ETL Support" in body
+    assert "<title>Recon-Gen · Studio · ETL</title>" in body
     # The Studio header title sets the operator's mental model — they're
-    # in the ETL slice, not the L2 editor or Training.
-    assert "Studio · ETL Support" in body
+    # in the ETL slice, not the L2 editor or Training. CG.21 unified
+    # the title shape to `Recon-Gen · Studio · ETL` (was "Studio · ETL
+    # Support — <deployment>" with mixed em-dash).
+    assert "Studio · ETL" in body
 
 
 def test_etl_landing_emits_three_cards_with_expected_routes(
