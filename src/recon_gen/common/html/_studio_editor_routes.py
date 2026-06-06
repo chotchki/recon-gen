@@ -1927,8 +1927,30 @@ def _render_read_card_summary(
     # affordance. Collapsed cards still toggle on title click via
     # native `<details>`/`<summary>` semantics (the title has no
     # `onclick="stopPropagation"` so the click bubbles to the parent).
+    # CG.11 (2026-06-05) — surface the analyst-readable name next to
+    # the kebab id on account / account_template cards. Cold-read
+    # v3: accountants read by Fed-statement name ("Cash & Due From
+    # Federal Reserve"), not by GL kebab ("gl-1010-cash-due-frb"),
+    # so the at-a-glance scan was broken until the operator
+    # expanded each card. The name (`Account.name` field) renders
+    # smaller + `text-secondary-fg` next to the id, like the rail
+    # subtype badge. Other kinds keep the existing title shape.
+    display_name_html = ""
+    if kind == "account":
+        name_attr = getattr(entity, "name", None)
+        if name_attr is not None and str(name_attr).strip():
+            name_cls = (
+                "ml-2 text-sm font-normal text-secondary-fg "
+                "break-words"
+            )
+            display_name_html = (
+                f' <span class="{name_cls}" '
+                f'data-role="card-display-name">'
+                f"{escape(str(name_attr))}</span>"
+            )
     title_html = (
-        f'<h3 class="{h3_base}">{escape(entity_id)}{subtype_badge}</h3>'
+        f'<h3 class="{h3_base}">{escape(entity_id)}'
+        f'{display_name_html}{subtype_badge}</h3>'
     )
     # X.4.f.9.delete — DELETE on success returns empty (card disappears
     # via outerHTML swap); on validator-rejected structural break returns
