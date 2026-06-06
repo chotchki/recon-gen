@@ -3846,14 +3846,20 @@ def _render_list_page(
     htmx + the editor CSS + the htmx:beforeSwap fix, so the embed
     fragment doesn't need to redeclare them.
     """
-    # CF.4.c — pick the collapse strategy off TOTAL count (not page
-    # count). A small L2 with 7 rails on page 1 should stay eager;
-    # a heavy L2 paginated to 25-per-page still collapses because the
-    # full set is heavy. ``total_count=None`` (legacy callers) defaults
-    # to eager render.
-    collapsed = (
-        total_count is not None and total_count > COLLAPSE_THRESHOLD
-    )
+    # CG.5 (2026-06-05): chevron + lazy-load uniformly across ALL
+    # kinds. CF.4.c's count-threshold (>10 = collapse) was a graceful
+    # rollout — but the cold-read v3 flagged that an operator
+    # browsing a 7-rail L2 and a 100-rail L2 saw "two different
+    # products" depending on which sections happened to be heavy.
+    # Operator lock (2026-06-05): trade an extra click on small
+    # kinds for uniform UX. `COLLAPSE_THRESHOLD` kept as a dead
+    # constant for historical traceability; the next consumer can
+    # delete it once nothing references it.
+    # Legacy callers (post-save card refresh, the read_card route)
+    # still pass `total_count=None` and get the eager render via
+    # `_render_read_card`'s default — they're rendering ONE card,
+    # not a list, so the chevron pattern doesn't apply.
+    collapsed = total_count is not None
     cards = "\n".join(
         _render_read_card(
             kind, e, instance, demo_mode=demo_mode, collapsed=collapsed,

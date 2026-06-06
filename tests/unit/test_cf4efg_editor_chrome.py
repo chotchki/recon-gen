@@ -185,10 +185,21 @@ def test_leg_rails_renders_as_chip_list(
     """`TransferTemplate.leg_rails` (`tuple[str, ...]` of rail ids) is
     tagged `render_as="chip_list"`. Each rail id renders as a chip
     `<span>` with `break-keep` so `cust_2_treasury_internal_book` no
-    longer breaks at `_` boundaries in the read card's value column."""
+    longer breaks at `_` boundaries in the read card's value column.
+
+    Post-CG.5 cards are collapsed-by-default for all kinds, so the
+    body fragment is fetched via `?body_only=1` rather than rendered
+    inline on the list page."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
-        body = c.get("/l2_shape/transfer_template/").text
+        list_body = c.get("/l2_shape/transfer_template/").text
+        # Pick a real template id from the list and fetch its body.
+        import re
+        ids = re.findall(r'data-entity-id="([^"]+)"', list_body)
+        assert ids, "fixture has no transfer templates"
+        body = c.get(
+            f"/l2_shape/transfer_template/{ids[0]}?body_only=1",
+        ).text
     # At least one chip wrapper present (templates have leg_rails).
     assert "flex flex-wrap" in body
     assert "break-keep" in body

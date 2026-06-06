@@ -63,27 +63,28 @@ def writable_l2_yaml(tmp_path: Path) -> Iterator[Path]:
 # Eager vs collapsed render
 # ---------------------------------------------------------------------------
 
-def test_under_threshold_kind_renders_eager_inline(
+def test_small_kind_still_renders_collapsed(
     writable_l2_yaml: Path,
 ) -> None:
-    """spec_example has 7 accounts — under `COLLAPSE_THRESHOLD = 10`.
-    Account cards render eagerly with the `<dl>` body inlined (no
-    `<details>` wrapper)."""
+    """CG.5 (2026-06-05): chevron + lazy-load applies UNIFORMLY
+    regardless of count. spec_example's 7 accounts now render with
+    the same `<details>` + chevron + body lazy-fetch pattern that
+    rails always used. Operator lock: the asymmetry between small
+    and large kinds read as "two different products" in cold-read
+    v3; uniform UX trumps the extra-click cost on tiny L2s."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/l2_shape/account/").text
-    # No <details>-wrapped cards on a small kind.
-    assert "<details" not in body
-    # `<dl>` rendered inline (not behind a placeholder).
-    assert "<dl class=" in body
-    assert 'data-role="card-body"' not in body
+    assert "<details" in body
+    assert 'data-role="card-body"' in body
+    assert 'hx-trigger="toggle once"' in body
 
 
-def test_over_threshold_kind_renders_collapsed(
+def test_large_kind_renders_collapsed(
     writable_l2_yaml: Path,
 ) -> None:
-    """spec_example has 21 rails — over `COLLAPSE_THRESHOLD = 10`.
-    Rail cards wrap in `<details>` and lazy-fetch their body."""
+    """spec_example has 21 rails. Rail cards wrap in `<details>` and
+    lazy-fetch their body (post-CG.5 same as small kinds)."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/l2_shape/rail/").text
