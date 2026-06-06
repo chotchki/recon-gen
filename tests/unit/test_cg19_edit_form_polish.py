@@ -77,18 +77,22 @@ def test_account_edit_h1_carries_display_name(
     writable_l2_yaml: Path,
 ) -> None:
     """Accounts with a `name` field surface it in the edit-page h1
-    so the operator sees "Edit account: gl-... — Cash & Due From
-    Federal Reserve" instead of just the kebab id."""
+    so the operator sees "Edit account · cust-001  Customer Number
+    One" (the name lives in a `data-role="edit-h1-display-name"`
+    span after the kebab id; CG-followup.2 swapped the em-dash +
+    colon ambiguous shape for the consistent middle-dot + display-
+    name-span idiom locked by CG.11)."""
     cache = L2InstanceCache.from_path(writable_l2_yaml)
     inst = cache.get()
     account = next(a for a in inst.accounts if a.name and a.id == "cust-001")
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get(f"/l2_shape/account/{account.id}/edit").text
-    assert f"Edit account — {account.name}: {account.id}" in body or (
-        f"Edit account — {account.name}: {account.id}".replace(" — ", "")
-        in body
-    ) or f"— {account.name}: {account.id}" in body
+    # The h1 reads `Edit account · <kebab>` and the name renders in
+    # a secondary-fg span next to it.
+    assert f"Edit account · {account.id}" in body
+    assert 'data-role="edit-h1-display-name"' in body
+    assert str(account.name) in body
 
 
 def test_rail_edit_h1_does_not_carry_display_name(

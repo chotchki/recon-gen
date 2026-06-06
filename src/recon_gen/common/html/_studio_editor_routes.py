@@ -2284,6 +2284,90 @@ _LIST_PAGE_BLURB_BY_KIND: Mapping[EntityKind, str] = {
 }
 
 
+def _edit_h1_parts(
+    kind: EntityKind,
+    entity: object,
+    entity_id: str,
+    title_suffix: str,
+) -> tuple[str, str]:
+    """CG-followup.1+2 (2026-06-05) — compute the edit-page h1's
+    visible HTML + the matching `<title>` detail slot.
+
+    The list-card titles (CG.11, CG.12, CG.18) already chose a
+    per-kind operator-readable display key:
+    - account → kebab `id`, plus the `name` field as a secondary-fg
+      span (CG.11 applied to card titles; mirrored here).
+    - account_template / transfer_template / rail → entity_id is
+      already operator-readable (role / name).
+    - chain → parent only (the composite "Parent::children" stays on
+      `data-entity-id` and the URL path; CG.12 lock).
+    - limit_schedule → "{role} → {rail}" with direction parenthesized
+      for clarity (CG.18 lock; the card title renders direction as a
+      separate badge, but the title bar / h1 prose can absorb it).
+
+    Pre-followup the h1 read `Edit account — Cash...: gl-..` (em-dash
+    + colon, ambiguous) and chain / limit_schedule h1s leaked the
+    full composite. This helper unifies on middle-dot separators in
+    both the h1 prose and the CG.21 title detail.
+
+    Returns (h1_inner_html, title_detail_text). The h1 carries any
+    `<span>` chrome (escape-safe). The title detail is a plain
+    string (callers escape it at the `<title>` interpolation).
+    """
+    singular = kind_label_singular(kind)
+    if kind == "chain":
+        parent_attr = getattr(entity, "parent", None)
+        display_key = str(parent_attr) if parent_attr is not None else entity_id
+        h1_inner = (
+            f"Edit {escape(singular)} · {escape(display_key)}"
+            f"{escape(title_suffix)}"
+        )
+        title_detail = (
+            f"Edit {singular} · {display_key}{title_suffix}"
+        )
+        return h1_inner, title_detail
+    if kind == "limit_schedule":
+        parent_role_attr = getattr(entity, "parent_role", None)
+        rail_attr = getattr(entity, "rail", None)
+        direction_attr = getattr(entity, "direction", None)
+        if parent_role_attr is not None and rail_attr is not None:
+            display_key = f"{parent_role_attr} → {rail_attr}"
+            if direction_attr is not None:
+                display_key += f" ({direction_attr})"
+        else:
+            display_key = entity_id
+        h1_inner = (
+            f"Edit {escape(singular)} · {escape(display_key)}"
+            f"{escape(title_suffix)}"
+        )
+        title_detail = (
+            f"Edit {singular} · {display_key}{title_suffix}"
+        )
+        return h1_inner, title_detail
+    # account / account_template / transfer_template / rail —
+    # entity_id is already the operator-readable key.
+    display_name_span = ""
+    if kind == "account":
+        name_attr = getattr(entity, "name", None)
+        if name_attr is not None and str(name_attr).strip():
+            name_cls = (
+                "ml-2 text-base font-normal text-secondary-fg break-words"
+            )
+            display_name_span = (
+                f' <span class="{name_cls}" '
+                f'data-role="edit-h1-display-name">'
+                f"{escape(str(name_attr))}</span>"
+            )
+    h1_inner = (
+        f"Edit {escape(singular)} · {escape(entity_id)}"
+        f"{escape(title_suffix)}{display_name_span}"
+    )
+    title_detail = (
+        f"Edit {singular} · {entity_id}{title_suffix}"
+    )
+    return h1_inner, title_detail
+
+
 def _form_page_header_html(title: str) -> str:
     """CG.7 (2026-06-05) — trainer-style header strip for the form
     pages (create / edit / singleton / subtype-picker). Title sits
@@ -2295,6 +2379,20 @@ def _form_page_header_html(title: str) -> str:
     return (
         f'<header class="px-8 py-4 border-b border-surface-border bg-white">'
         f'<h1 class="text-xl font-semibold m-0">{escape(title)}</h1>'
+        f"</header>"
+    )
+
+
+def _form_page_header_raw_html(h1_inner_html: str) -> str:
+    """CG-followup.1 (2026-06-05) — same trainer-style header strip
+    as `_form_page_header_html` but the caller hands over the h1's
+    inner HTML pre-escaped + pre-chrome-attached. Used by
+    `_render_edit_page` so the edit-h1 can carry a typed
+    display-name `<span>` next to the kebab id (CG.11 pattern),
+    which the escape-everything wrapper would mangle."""
+    return (
+        f'<header class="px-8 py-4 border-b border-surface-border bg-white">'
+        f'<h1 class="text-xl font-semibold m-0">{h1_inner_html}</h1>'
         f"</header>"
     )
 
@@ -2354,7 +2452,9 @@ _CREATE_INTRO_BY_KIND: Mapping[EntityKind, str] = {
         "from the rest of the L2 model's perspective; rails / templates / "
         "limit-schedules reference accounts by role, not by id.</p>"
         "<p>Required: <code>id</code> (the addressing key — used in "
-        "URLs and on every transaction row's <code>account_id</code>). "
+        "URLs and on every transaction row's <code>account_id</code>) "
+        "and <code>scope</code> (institution-internal vs external "
+        "counterparty — controls limit + drift visibility). "
         "Strongly recommended: <code>role</code> (without it the account "
         "isn't reachable by any rail) and <code>name</code> (what shows "
         "up in dashboards).</p>"
@@ -3363,19 +3463,15 @@ def _render_edit_page(
     # browser-driver `form.edit-form button[type="submit"]`. Drops
     # when the driver migrates to `form[action^="/l2_shape/{kind}/{id}"]`.
     primary_btn = primary_button_classes()
-    # CG.19 (2026-06-05) — h1 carries the account's display name for
-    # the kind that has one (same operator-readability principle as
-    # CG.11's card title), and a back-link below the form-page header
-    # points at the kind's list page so the operator doesn't have to
-    # bounce through the top-nav. Delete button on the right of the
-    # form actions row deletes the entity in place + the handler
-    # responds with HX-Redirect to the list (see ?from=edit branch in
-    # delete_handler).
-    h1_suffix = title_suffix
-    if kind == "account":
-        name_attr = getattr(entity, "name", None)
-        if name_attr is not None and str(name_attr).strip():
-            h1_suffix = f"{title_suffix} — {name_attr}"
+    # CG.19 + CG-followup.1+2 (2026-06-05) — `_edit_h1_parts` computes
+    # the visible h1 HTML (with display-name span on accounts; parent-
+    # only for chains; role-arrow-rail-(direction) for limit_schedule)
+    # AND the matching `<title>` detail slot. Pre-followup the h1
+    # leaked the full composite key for chain / limit_schedule and
+    # mixed em-dash + colon as separators on accounts.
+    edit_h1_inner, edit_title_detail = _edit_h1_parts(
+        kind, entity, entity_id, title_suffix,
+    )
     list_url = f"/l2_shape/{kind}/"
     back_link_html = (
         f'<div class="max-w-4xl mx-auto px-4 pt-3 -mb-1">'
@@ -3395,12 +3491,12 @@ def _render_edit_page(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Recon-Gen · Studio · Editor · Edit {escape(kind_label_singular(kind))} · {escape(entity_id)}</title>
+  <title>Recon-Gen · Studio · Editor · {escape(edit_title_detail)}</title>
   {studio_theme_head(instance)}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
-  {_form_page_header_html(f"Edit {kind_label_singular(kind)}{h1_suffix}: {entity_id}")}
+  {_form_page_header_raw_html(edit_h1_inner)}
   {back_link_html}
   {_back_breadcrumb_html(from_param)}
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
