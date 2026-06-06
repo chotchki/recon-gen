@@ -1425,6 +1425,18 @@ def _render_field(
                 f'<button type="button" id="{tab_preview_id}" '
                 f'class="{tab_btn_inactive}" '
                 f'hx-post="/preview/markdown" '
+                # CG-bug.1 (2026-06-05) — `hx-params` restricts the
+                # POST body to ONLY this field. The button sits
+                # inside the edit `<form>`, and HTMX's default
+                # behavior when the trigger is inside a form is to
+                # serialize the WHOLE form's data + still pull
+                # `hx-include` extras. The server's
+                # "first non-meta form value" loop then picked the
+                # `id` field, not `description`, so Preview rendered
+                # the kebab id instead of the markdown. `hx-params`
+                # filters the body down to just this field. Surfaced
+                # in dogfood post-CG sweep.
+                f'hx-params="{escape(spec.name)}" '
                 f'hx-include="#field-{spec.name}" '
                 f'hx-target="#{preview_id}" '
                 f'hx-swap="innerHTML" '
