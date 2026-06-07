@@ -966,6 +966,7 @@ def build_executives_app(
         liveness_ds=datasets[_DS_APP_INFO_LIVENESS],
         matview_status_ds=datasets[_DS_APP_INFO_MATVIEWS],
         theme=theme,
+        l2_instance=l2_instance,
     )
 
     app.create_dashboard(

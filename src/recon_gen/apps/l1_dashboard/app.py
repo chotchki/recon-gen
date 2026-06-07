@@ -2868,6 +2868,7 @@ def build_l1_dashboard_app(
         liveness_ds=datasets[_DS_APP_INFO_LIVENESS],
         matview_status_ds=datasets[_DS_APP_INFO_MATVIEWS],
         theme=theme,
+        l2_instance=l2_instance,
     )
 
     # M.2b.1 — Universal date-range filter wires the sheets together.

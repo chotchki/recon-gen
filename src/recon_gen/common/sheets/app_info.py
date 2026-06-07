@@ -71,8 +71,9 @@ from recon_gen.common.dataset_contract import (
     DatasetContract,
     build_dataset,
 )
-from recon_gen.common.models import DataSet
 from recon_gen.common.l2 import ThemePreset
+from recon_gen.common.l2.primitives import L2Instance, resolve_cadence
+from recon_gen.common.models import DataSet
 from recon_gen.common.sql import Dialect, dual_from
 from recon_gen.common.tree.datasets import Dataset
 from recon_gen.common.tree.structure import Sheet
@@ -313,6 +314,36 @@ _TABLE_HEIGHT = 12
 _TEXT_HEIGHT = 6
 
 
+def _cadence_summary_line(l2_instance: L2Instance) -> str:
+    """CL.9 — count internal entities by ``balance_cadence`` and
+    render a one-line stat for the App Info deploy stamp.
+
+    Counts both singleton accounts AND templates (the template
+    cadence fans out to every materialized instance per CL.2 Lock
+    4). External-scope accounts are excluded — they don't emit
+    balance rows at all. ``resolve_cadence`` applies the None →
+    sparse default so the line reflects the runtime behavior, not
+    the literal YAML.
+    """
+    sparse_n = 0
+    explicit_n = 0
+    for a in l2_instance.accounts:
+        if str(a.scope) != "internal":
+            continue
+        if resolve_cadence(a) == "explicit_daily":
+            explicit_n += 1
+        else:
+            sparse_n += 1
+    for t in l2_instance.account_templates:
+        if str(t.scope) != "internal":
+            continue
+        if resolve_cadence(t) == "explicit_daily":
+            explicit_n += 1
+        else:
+            sparse_n += 1
+    return f"cadence: {sparse_n} sparse, {explicit_n} explicit_daily"
+
+
 def populate_app_info_sheet(
     cfg: Config,
     sheet: Sheet,
@@ -320,6 +351,7 @@ def populate_app_info_sheet(
     liveness_ds: Dataset,
     matview_status_ds: Dataset,
     theme: ThemePreset,
+    l2_instance: L2Instance | None = None,
 ) -> None:
     """Populate the "i" sheet with three visuals (KPI + table + text box).
 
@@ -327,6 +359,13 @@ def populate_app_info_sheet(
     for adding ``sheet`` to the Analysis as the LAST sheet (this helper
     doesn't enforce position because ``analysis.add_sheet`` order is
     the position).
+
+    CL.9 — pass ``l2_instance`` to append a per-deploy
+    ``cadence: N sparse, M explicit_daily`` line to the deploy
+    stamp text box. Counts internal singleton + template entities;
+    template counts apply per-template (a 1-template fan-out
+    counts as 1, not as N materialized instances) so the line
+    reflects the *declaration* shape, not the runtime row count.
     """
     accent = theme.accent
     version, sha, ts = _deploy_stamp()
@@ -376,18 +415,21 @@ def populate_app_info_sheet(
         if cfg.dialect in (Dialect.DUCKDB)
         else f"dialect: {dialect}"
     )
+    bullet_lines = [
+        f"recon-gen: v{version}",
+        f"git: {sha}",
+        f"generated: {ts}",
+        dialect_line,
+        f"prefix: {prefix}",
+    ]
+    if l2_instance is not None:
+        bullet_lines.append(_cadence_summary_line(l2_instance))
     sheet.layout.row(height=_TEXT_HEIGHT).add_text_box(
         TextBox(
             text_box_id="app-info-deploy-stamp",
             content=rt.text_box(
                 rt.subheading("Deploy Stamp", color=accent),
-                rt.bullets([
-                    f"recon-gen: v{version}",
-                    f"git: {sha}",
-                    f"generated: {ts}",
-                    dialect_line,
-                    f"prefix: {prefix}",
-                ]),
+                rt.bullets(bullet_lines),
             ),
         ),
         width=_FULL,
