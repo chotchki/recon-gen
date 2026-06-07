@@ -3131,6 +3131,22 @@ SELECT 'expected_eod_balance_breach', account_id, account_name,
        account_role, NULL, business_day_start, NULL, ABS(variance),
        CAST(NULL AS INTEGER)
 FROM {p}_expected_eod_balance_breach
+-- CL.6 — balance_cadence_gap: keyed on (account, day) like the other
+-- per-day cells. Two gap_kind firing modes (declared_daily_missing /
+-- sparse_with_activity) share the same matview, surfacing here as a
+-- single check_type, gap_kind threads through the rail_name slot so
+-- the L1 Exceptions sheet's drill copy can distinguish the two modes.
+-- magnitude_amount carries the gap day's net_flow (NULL for the
+-- declared_daily_missing benign mode, -net_flow for sparse_with_
+-- activity, which IS the drift the dashboard would otherwise hide).
+-- magnitude_count holds the leg_count for diagnostic context.
+UNION ALL
+SELECT 'balance_cadence_gap', account_id, account_name, account_role,
+       account_parent_role, business_day_start,
+       gap_kind AS rail_name,
+       ABS(COALESCE(gap_day_net_flow, 0)),
+       gap_day_leg_count AS magnitude_count
+FROM {p}_balance_cadence_gap
 -- Currently-open branches (M.4.4.12) — stuck_pending and stuck_unbundled
 -- are matviews of legs whose age has exceeded a per-rail cap measured
 -- against CURRENT_TIMESTAMP. By construction every row is "currently

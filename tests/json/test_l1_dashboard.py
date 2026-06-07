@@ -1913,6 +1913,7 @@ def test_y2g_enum_value_helpers_reflect_l2_instance() -> None:
         "BundleAssignment", "Inflight", "TechnicalCorrection",
     ]
     assert l1_check_type_values() == [
+        "balance_cadence_gap",  # CL.6 — cadence-aware missing balance
         "drift", "expected_eod_balance_breach", "ledger_drift",
         "limit_breach", "overdraft", "stuck_pending", "stuck_unbundled",
     ]

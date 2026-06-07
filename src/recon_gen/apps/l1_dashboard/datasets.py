@@ -132,6 +132,7 @@ _L1_DS_ACCOUNT_SENTINEL_SQL = f"'{_L1_DS_ACCOUNT_SENTINEL}'"
 # matview's UNION ALL projects (common/l2/schema.py). Schema-level, not
 # L2-dependent.
 _L1_CHECK_TYPE_VALUES: tuple[str, ...] = (
+    "balance_cadence_gap",  # CL.6 — cadence-aware missing balance
     "drift",
     "expected_eod_balance_breach",
     "ledger_drift",
