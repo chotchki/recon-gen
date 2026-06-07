@@ -211,7 +211,11 @@
               : d.state_color === "danger"
                 ? "text-danger"
                 : "text-primary-fg";
-        return "kpi-value text-4xl font-bold " + color + " tabular-nums";
+        // chotchki 2026-06-07 — text-4xl (36px) overflowed the card
+        // on 13-char balances like $5,634,512.24; text-3xl (30px) +
+        // tabular-nums fits comfortably in the min-w-[180px] flex-1
+        // card while still reading as the primary KPI number.
+        return "kpi-value text-3xl font-bold " + color + " tabular-nums";
       })
       .text((d) => {
         var prefix = d.state_icon ? d.state_icon + " " : "";
@@ -1792,8 +1796,45 @@
         visuals.forEach((div) => {
           htmx.trigger(div, "refresh");
         });
+        // chotchki 2026-06-07 — push filter form state into the
+        // browser URL so bookmark / reload / share reproduce the
+        // current view. ``replaceState`` (not pushState) so back /
+        // forward isn't polluted with every filter pick during a
+        // single triage session. Visuals' ``hx-get`` requests
+        // already serialize the form via ``hx-include``; this only
+        // syncs the address-bar.
+        pushFilterStateToUrl(form);
       }, 300);
     });
+  }
+
+  function pushFilterStateToUrl(form) {
+    if (!form || typeof URL === "undefined") return;
+    try {
+      var url = new URL(window.location.href);
+      // Drop existing form-owned keys so values cleared by the user
+      // disappear from the URL too (not just stay stale).
+      var owned = [];
+      url.searchParams.forEach((_v, k) => {
+        if (
+          k.indexOf("param_") === 0 ||
+          k.indexOf("filter_") === 0 ||
+          k === "date_from" ||
+          k === "date_to"
+        ) {
+          owned.push(k);
+        }
+      });
+      owned.forEach((k) => url.searchParams.delete(k));
+      // Re-add from the current form. Empty values are "no pick" — leave
+      // them out so the URL stays readable.
+      new FormData(form).forEach((v, k) => {
+        if (v !== "" && v != null) url.searchParams.append(k, v);
+      });
+      history.replaceState(null, "", url.toString());
+    } catch (e) {
+      console.debug("[trace] pushFilterStateToUrl failed", e);
+    }
   }
 
   // X.2.d / X.2.l.4 — CategoryFilter sync. Each .category-filter wrapper
