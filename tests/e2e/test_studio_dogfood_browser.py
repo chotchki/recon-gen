@@ -318,6 +318,34 @@ def test_browser_full_create_l2_structural_equality(
                 f"vs rebuilt {got_t!r}."
             )
 
+        # CL.12 — same explicit-field check for balance_cadence.
+        # spec_example carries one declared cadence (clearing-suspense
+        # = explicit_daily per CL.11), so the per-account loop
+        # exercises both the declared-non-None and None-skip paths.
+        for acct_id, ref_acct in reference_accounts.items():
+            if ref_acct.balance_cadence is None:
+                continue
+            got_cad = rebuilt_accounts[acct_id].balance_cadence
+            assert got_cad == ref_acct.balance_cadence, (
+                f"CL.12 — account {acct_id!r} balance_cadence did not "
+                f"round-trip through the browser form: reference "
+                f"declared {ref_acct.balance_cadence!r} but the rebuilt "
+                f"L2 shows {got_cad!r}. The Studio account form likely "
+                f"dropped or mis-coerced the field at the form layer "
+                f"(FieldSpec name='balance_cadence' in "
+                f"_studio_editor_routes.py)."
+            )
+        for role, ref_t in reference_templates.items():
+            if ref_t.balance_cadence is None:
+                continue
+            got_t_cad = rebuilt_templates[role].balance_cadence
+            assert got_t_cad == ref_t.balance_cadence, (
+                f"CL.12 — account_template role={role!r} "
+                f"balance_cadence did not round-trip through the "
+                f"browser form: reference {ref_t.balance_cadence!r} "
+                f"vs rebuilt {got_t_cad!r}."
+            )
+
 
 @pytest.mark.browser
 def test_browser_operator_creates_rail_with_bb2_create_new_reconciler(
