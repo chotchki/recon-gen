@@ -39,7 +39,7 @@ import re
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import yaml
 
@@ -289,48 +289,6 @@ _THEME_COLOR_FIELDS: tuple[str, ...] = (
     "measure",
     "measure_fg",
 )
-
-
-def _load_role_business_day_offsets(
-    raw: object, *, path: str,
-) -> dict[str, int] | None:
-    """Optional ``{role_name: hours}`` map (M.4.4.14).
-
-    Each value must be an int in [0, 24); the seed adds the hours to
-    midnight-of-day to compute ``business_day_start`` (and the same
-    offset propagates to ``business_day_end`` so the 24-hour window
-    contract holds). Roles absent from the map default to
-    midnight-aligned.
-
-    None / missing returns None — caller treats that as
-    "every role midnight-aligned".
-    """
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        raise L2LoaderError(
-            f"{path}: role_business_day_offsets must be a mapping, "
-            f"got {type(raw).__name__}"
-        )
-    raw_dict = cast(dict[Any, Any], raw)
-    out: dict[str, int] = {}
-    for role_raw, hours_raw in raw_dict.items():
-        if not isinstance(role_raw, str) or not role_raw:
-            raise L2LoaderError(
-                f"{path}.{role_raw!r}: keys must be non-empty role-name "
-                f"strings, got {type(role_raw).__name__}"
-            )
-        if not isinstance(hours_raw, int) or isinstance(hours_raw, bool):
-            raise L2LoaderError(
-                f"{path}.{role_raw!r}={hours_raw!r}: value must be an int "
-                f"hours offset, got {type(hours_raw).__name__}"
-            )
-        if not (0 <= hours_raw < 24):
-            raise L2LoaderError(
-                f"{path}.{role_raw!r}={hours_raw!r}: hours must be in [0, 24)"
-            )
-        out[role_raw] = hours_raw
-    return out or None
 
 
 def _load_hex_color(raw: object, *, path: str) -> str:
@@ -1389,6 +1347,22 @@ def load_instance(path: Path | str, *, validate: bool = True) -> L2Instance:
             "identifiers."
         )
 
+    # CP (2026-06-06) — top-level `role_business_day_offsets:` map
+    # promoted onto each Account.business_day_offset /
+    # AccountTemplate.business_day_offset. The old map's role-keys
+    # silently no-op'd against template-materialized accounts; the
+    # per-entity field puts the offset at the same level as the entity
+    # that owns the EOD window. Reject the old key with an actionable
+    # migration pointer rather than silently ignoring it.
+    if "role_business_day_offsets" in raw_d:
+        raise L2LoaderError(
+            f"{yaml_path}: top-level 'role_business_day_offsets:' key "
+            "removed in Phase CP. Move offsets onto each "
+            "Account.business_day_offset / "
+            "AccountTemplate.business_day_offset (signed int hours from "
+            "midnight UTC, [-23, 23])."
+        )
+
     # Per-run debug capture (Y.2.gate.c.12) keys off the yaml basename
     # since there's no longer a per-instance identifier in the L2 yaml.
     _capture_to_run_dir(raw_text, yaml_path.stem)
@@ -1433,10 +1407,6 @@ def load_instance(path: Path | str, *, validate: bool = True) -> L2Instance:
         limit_schedules=limit_schedules,
         description=_load_description(
             raw_d.get("description"), path="description",
-        ),
-        role_business_day_offsets=_load_role_business_day_offsets(
-            raw_d.get("role_business_day_offsets"),
-            path="role_business_day_offsets",
         ),
         theme=_load_theme(
             raw_d.get("theme"), path="theme", base_dir=yaml_path.parent,

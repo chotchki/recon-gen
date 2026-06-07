@@ -213,7 +213,6 @@ def _build_instance(rng: Random, plan: FuzzPlan) -> dict[str, Any]:
 
     chains = _build_chains(rng, state)
     limit_schedules = _build_limit_schedules(rng, state)
-    role_business_day_offsets = _build_role_business_day_offsets(rng, state)
 
     out: dict[str, Any] = {
         "description": _maybe_description(rng, state, "fuzz instance"),
@@ -227,43 +226,13 @@ def _build_instance(rng: Random, plan: FuzzPlan) -> dict[str, Any]:
         out["chains"] = chains
     if limit_schedules:
         out["limit_schedules"] = limit_schedules
-    if role_business_day_offsets:
-        out["role_business_day_offsets"] = role_business_day_offsets
+    # Phase CP (2026-06-06) — top-level role_business_day_offsets was
+    # removed; offsets now live per-Account / per-AccountTemplate.
+    # CP.7 will add the per-entity emission to the fuzzer.
     # Drop None descriptions for cleanliness.
     if out["description"] is None:
         del out["description"]
     return out
-
-
-# Hour-of-day choices for per-role business-day offsets (M.4.4.14).
-# Mix of midnight (0), early-morning, midday, evening, near-midnight to
-# guarantee tests that depend on distinct (start, end) tuples per role
-# see meaningful spread.
-_BUSINESS_DAY_OFFSET_CHOICES = (0, 5, 9, 14, 17, 23)
-
-
-def _build_role_business_day_offsets(
-    rng: Random, state: _BuildState,
-) -> dict[str, int]:
-    """Pick a deterministic per-role business-day offset (M.4.4.14).
-
-    Every declared role (singleton + template) gets one hour-offset from
-    ``_BUSINESS_DAY_OFFSET_CHOICES``. Sample with replacement so multiple
-    roles can share an offset, but the L2 instance as a whole carries
-    enough variation to expose any future view that depends on per-role
-    business-day boundaries differing.
-
-    Returns ``{}`` when no roles exist (defensive — production paths
-    always declare at least one). The dict is wrapped under
-    ``role_business_day_offsets`` in the emitted YAML; the loader and
-    seed honor it (M.4.4.14).
-    """
-    if not state.all_role_names:
-        return {}
-    return {
-        role: rng.choice(_BUSINESS_DAY_OFFSET_CHOICES)
-        for role in sorted(state.all_role_names)
-    }
 
 
 # ---------------------------------------------------------------------------

@@ -65,9 +65,10 @@ EntityKind: TypeAlias = Literal[
     # name + acronym now live on the instance singleton's structured
     # form alongside ``description``.
     # AI.2.c — top-level L2Instance settings (``description`` + new
-    # post-BXa.1 fields ``institution_name`` / ``institution_acronym`` +
-    # ``role_business_day_offsets``) edited via a structured form
-    # (BXa.1 upgraded from raw YAML textarea).
+    # post-BXa.1 fields ``institution_name`` / ``institution_acronym``)
+    # edited via a structured form (BXa.1 upgraded from raw YAML
+    # textarea). Phase CP removed ``role_business_day_offsets`` —
+    # offsets moved onto per-Account / per-AccountTemplate.
     "instance",
 ]
 
@@ -635,7 +636,6 @@ def singleton_save_l2(
         L2LoaderError,
         _load_description,
         _load_optional_string,
-        _load_role_business_day_offsets,
         _load_theme,
     )
     raw = yaml_text.strip()
@@ -644,12 +644,12 @@ def singleton_save_l2(
         if kind == "theme":
             return dataclasses.replace(instance, theme=None)
         # AI.2.c + BXa.1 — instance settings: empty block clears the
-        # top-level fields (description + role_business_day_offsets +
-        # institution_name + institution_acronym).
+        # top-level fields (description + institution_name +
+        # institution_acronym). Phase CP removed
+        # role_business_day_offsets from the singleton.
         return dataclasses.replace(
             instance,
             description=None,
-            role_business_day_offsets=None,
             institution_name=None,
             institution_acronym=None,
         )
@@ -673,10 +673,6 @@ def singleton_save_l2(
             instance,
             description=_load_description(
                 parsed_map.get("description"), path="description",
-            ),
-            role_business_day_offsets=_load_role_business_day_offsets(
-                parsed_map.get("role_business_day_offsets"),
-                path="role_business_day_offsets",
             ),
             institution_name=_load_optional_string(
                 parsed_map.get("institution_name"),

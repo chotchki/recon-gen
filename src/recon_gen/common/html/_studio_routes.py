@@ -260,9 +260,11 @@ _HOME_SINGLETONS: tuple[tuple[str, str, str], ...] = (
     # routes but left the home section in place — the Edit link
     # 404'd. Re-add when the persona structured form ships.
     # AI.2.c — top-level instance settings (description +
-    # role_business_day_offsets) as one YAML block. The attr field is a
+    # institution_name + institution_acronym). The attr field is a
     # placeholder; the is_set check below branches for this kind because
-    # it spans two fields.
+    # it spans multiple fields. Phase CP removed
+    # role_business_day_offsets from the singleton — offsets now live
+    # per-Account / per-AccountTemplate.
     ("instance", "Instance settings", "description"),
 )
 
@@ -449,12 +451,12 @@ def _render_home_page(
     # No list, no +Add — just an Edit link to the singleton form.
     for kind, label, attr in _HOME_SINGLETONS:
         if kind == "instance":
-            # AI.2.c — two-field singleton: "set" when EITHER top-level
+            # AI.2.c — multi-field singleton: "set" when ANY top-level
             # field is populated.
             is_set = (
                 getattr(instance, "description", None) is not None
-                or getattr(instance, "role_business_day_offsets", None)
-                is not None
+                or getattr(instance, "institution_name", None) is not None
+                or getattr(instance, "institution_acronym", None) is not None
             )
         else:
             is_set = getattr(instance, attr, None) is not None

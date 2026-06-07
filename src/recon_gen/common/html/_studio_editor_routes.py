@@ -3996,17 +3996,15 @@ def _singleton_yaml_text(instance: object, kind: EntityKind) -> str:
     import yaml  # noqa: PLC0415 — lazy
 
     if kind == "instance":
-        # AI.2.c — two top-level scalars (description +
-        # role_business_day_offsets) dumped as one block. Omit a key when
-        # its field is None; both-None ⇒ blank textarea (the "clear"
-        # state). Round-trips through singleton_save_l2's instance branch.
+        # AI.2.c — top-level scalars dumped as one block. Omit a key
+        # when its field is None; all-None ⇒ blank textarea (the
+        # "clear" state). Round-trips through singleton_save_l2's
+        # instance branch. Phase CP removed role_business_day_offsets
+        # from the instance singleton — offsets now per-entity.
         instance_map: dict[str, object] = {}
         desc = getattr(instance, "description", None)
         if desc is not None:
             instance_map["description"] = desc
-        offsets = getattr(instance, "role_business_day_offsets", None)
-        if offsets is not None:
-            instance_map["role_business_day_offsets"] = offsets
         if not instance_map:
             return ""
         return yaml.safe_dump(
@@ -4034,9 +4032,8 @@ def _singleton_yaml_text(instance: object, kind: EntityKind) -> str:
 # BXa.1 — instance singleton's structured form fields (replaces the
 # raw YAML textarea per BX.0.5b cold-read P1.1). Three top-level
 # L2Instance fields edited per-input; description gets markdown
-# preview per BF.9; role_business_day_offsets stays as YAML for now
-# (rare-use, dev-flavored — operator can grow a structured form
-# later if needed).
+# preview per BF.9. Phase CP removed role_business_day_offsets from
+# the singleton — offsets now per-Account / per-AccountTemplate.
 _INSTANCE_STRUCTURED_FIELDS: tuple[tuple[str, str, str, bool], ...] = (
     # (form-name, label, helper, required)
     ("institution_name", "Institution name",
@@ -4052,17 +4049,10 @@ _INSTANCE_STRUCTURED_FIELDS: tuple[tuple[str, str, str, bool], ...] = (
 
 def _instance_dict_from_instance(instance: Any) -> dict[str, str]:  # typing-smell: ignore[explicit-any]: L2Instance dataclass shape — getattr threads through
     """Pre-populate the instance singleton structured form. BXa.1."""
-    import yaml as _yaml  # noqa: PLC0415 — lazy
-    offsets = getattr(instance, "role_business_day_offsets", None)
-    offsets_yaml = (
-        _yaml.safe_dump(dict(offsets), default_flow_style=False, sort_keys=True)
-        if offsets else ""
-    )
     return {
         "institution_name": str(getattr(instance, "institution_name", None) or ""),
         "institution_acronym": str(getattr(instance, "institution_acronym", None) or ""),
         "description": str(getattr(instance, "description", None) or ""),
-        "role_business_day_offsets_yaml": offsets_yaml,
     }
 
 
@@ -4070,12 +4060,11 @@ def _instance_form_to_dict(form: Mapping[str, str]) -> dict[str, object]:
     """BXa.1 — read the instance singleton structured form into a dict
     `singleton_save_l2`'s yaml.safe_load path consumes.
 
-    Structured fields cover the 3 common ones (institution_name +
-    acronym + description); role_business_day_offsets stays as a YAML
-    escape hatch (rare-use + dev-flavored — no in-UI editor for
-    role → hours).
+    Structured fields cover the 3 top-level scalars
+    (institution_name + acronym + description). Phase CP removed
+    role_business_day_offsets from the singleton — offsets now live
+    per-Account / per-AccountTemplate.
     """
-    import yaml as _yaml  # noqa: PLC0415 — lazy
     out: dict[str, object] = {}
     for fname, _, _, _ in _INSTANCE_STRUCTURED_FIELDS:
         v = str(form.get(fname, "")).strip()
@@ -4091,11 +4080,6 @@ def _instance_form_to_dict(form: Mapping[str, str]) -> dict[str, object]:
     description = description.replace("\r\n", "\n").replace("\r", "\n")
     if description.strip():
         out["description"] = description
-    offsets_yaml = str(form.get("role_business_day_offsets_yaml", "")).strip()
-    if offsets_yaml:
-        parsed = _yaml.safe_load(offsets_yaml)
-        if parsed is not None:
-            out["role_business_day_offsets"] = parsed
     return out
 
 
@@ -4128,21 +4112,6 @@ def _render_instance_form(values: Mapping[str, str]) -> str:
         f'Free-form prose (markdown OK). Handbook templates render this '
         f'as the "what is this institution" intro paragraph; the '
         f'institution_name regex extracts from here when not set above.'
-        f'</small>'
-        f'</div>'
-    )
-    offsets_yaml = values.get("role_business_day_offsets_yaml", "")
-    parts.append(
-        f'<div class="{row_cls}">'
-        f'<label for="field-rbdo" class="{label_cls}">Role business-day offsets (YAML)</label>'
-        f'<textarea id="field-rbdo" name="role_business_day_offsets_yaml" rows="5" '
-        f'class="{input_cls} font-mono whitespace-pre resize-y min-h-16">'
-        f'{escape(offsets_yaml)}</textarea>'
-        f'<small class="{helper_cls}">'
-        f'Optional <code>role → hours</code> map shifting a role\'s '
-        f'emitted business-day window off midnight. Each value must be '
-        f'an int in [0, 24). Empty ⇒ default midnight-aligned. Shape: '
-        f'<code>CustomerSubledger: 17</code>'
         f'</small>'
         f'</div>'
     )
@@ -4561,9 +4530,9 @@ def _render_singleton_page(
     input_cls = field_input_classes()
     row_cls = field_row_classes()
     # BXa.1 — persona singleton removed. theme + instance singletons
-    # render as structured forms (BF.8 + BXa.1 respectively);
-    # role_business_day_offsets falls back to YAML below since
-    # rare-use + dev-flavored.
+    # render as structured forms (BF.8 + BXa.1 respectively). Phase CP
+    # removed role_business_day_offsets from the instance singleton —
+    # offsets now per-Account / per-AccountTemplate.
     if kind == "theme":
         theme_dict = (
             dict(structured_overrides) if structured_overrides is not None
@@ -5306,8 +5275,8 @@ def _make_handlers(
             structured_dict: dict[str, object] | None = None
             # BXa.1 — persona dispatch removed (kind no longer in
             # SINGLETON_KINDS). theme + instance both render as
-            # structured forms; role_business_day_offsets falls back
-            # to the raw `yaml` field on the instance form.
+            # structured forms. Phase CP removed
+            # role_business_day_offsets from the instance form.
             if kind == "theme":
                 structured_dict = _theme_form_to_dict(
                     {k: str(v) for k, v in form.multi_items()},
@@ -5756,7 +5725,7 @@ _VALID_KINDS: frozenset[str] = frozenset(
      # URL path; the route handlers branch on SINGLETON_KINDS to use
      # the singleton form/save flow instead of list/CRUD.
      # AI.2.c — ``instance`` is the third singleton (top-level
-     # description + role_business_day_offsets as one YAML block).
+     # description + institution_name + institution_acronym).
      "theme", "persona", "instance"),
 )
 

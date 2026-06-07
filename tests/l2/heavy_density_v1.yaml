@@ -1606,36 +1606,3 @@ limit_schedules:
   rail: Rail_01
   cap: 50000
   description: "Synthetic primitive \u2014 not a real-world counterparty. (limit schedule)"
-role_business_day_offsets:
-  ExternalRole_00: 14
-  ExternalRole_01: 5
-  ExternalRole_02: 23
-  ExternalRole_03: 14
-  ExternalRole_04: 9
-  ExternalRole_05: 14
-  ExternalRole_06: 0
-  ExternalRole_07: 23
-  ExternalRole_08: 0
-  ExternalRole_09: 5
-  ExternalRole_10: 14
-  ExternalRole_11: 14
-  ExternalRole_12: 14
-  ExternalRole_13: 14
-  ExternalRole_14: 5
-  ExternalRole_15: 9
-  ExternalRole_16: 17
-  ExternalRole_17: 5
-  ExternalRole_18: 9
-  ExternalRole_19: 23
-  InternalRole_00: 9
-  InternalRole_01: 23
-  InternalRole_02: 9
-  InternalRole_03: 14
-  InternalRole_04: 5
-  InternalRole_05: 9
-  InternalRole_06: 17
-  InternalRole_07: 17
-  TemplateRole_00: 0
-  TemplateRole_01: 9
-  TemplateRole_02: 5
-  TemplateRole_03: 14

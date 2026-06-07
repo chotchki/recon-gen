@@ -664,17 +664,6 @@ class L2Instance:
     # / regex-extracted-from-description / "Your Institution" downstream.
     institution_name: str | None = None
     institution_acronym: str | None = None
-    # Optional per-role business-day offset in hours (M.4.4.14). When
-    # set, an account whose role appears in this map gets its emitted
-    # ``daily_balances.business_day_start`` shifted by the offset
-    # (e.g., 17 → "5pm"). ``business_day_end`` shifts the same amount
-    # so the 24-hour window contract holds. Roles not in the map
-    # default to midnight-aligned (00:00 → 00:00 next day) — preserves
-    # the deterministic baseline shape that the locked SQL files
-    # under ``tests/data/_locked_seeds/`` pin (X.1.k). Used by the
-    # fuzz matrix to exercise any future L1 view that depends on
-    # per-role business-day boundaries differing.
-    role_business_day_offsets: dict[str, int] | None = None
     # Optional brand theme for this institution (N.1.b). When set, the
     # apps consume colors from here instead of from the per-CLI
     # ``--theme-preset`` flag — one theme per L2 instance, declared

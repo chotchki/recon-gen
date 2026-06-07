@@ -79,8 +79,6 @@ def serialize_l2(instance: L2Instance) -> str:
         out["limit_schedules"] = [
             _dump_limit_schedule(ls) for ls in instance.limit_schedules
         ]
-    if instance.role_business_day_offsets:
-        out["role_business_day_offsets"] = dict(instance.role_business_day_offsets)
     if instance.theme is not None:
         out["theme"] = _dump_theme(instance.theme)
     if instance.institution_name is not None:

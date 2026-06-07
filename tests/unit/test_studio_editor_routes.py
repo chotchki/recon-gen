@@ -1675,9 +1675,10 @@ def test_singleton_instance_get_renders_description(
 ) -> None:
     """BXa.1 (2026-05-30): GET /l2_shape/instance/ renders the
     structured form (institution_name + acronym text inputs +
-    description markdown textarea + role_business_day_offsets YAML
-    escape-hatch). spec_example carries a top-level description → it
-    prefills the description textarea."""
+    description markdown textarea). spec_example carries a top-level
+    description → it prefills the description textarea. Phase CP
+    removed the role_business_day_offsets escape-hatch — offsets now
+    per-Account / per-AccountTemplate."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.get("/l2_shape/instance/")
@@ -1685,7 +1686,7 @@ def test_singleton_instance_get_renders_description(
     assert 'name="institution_name"' in resp.text
     assert 'name="institution_acronym"' in resp.text
     assert 'name="description"' in resp.text
-    assert 'name="role_business_day_offsets_yaml"' in resp.text
+    assert 'name="role_business_day_offsets_yaml"' not in resp.text
     # spec_example declares a top-level description → the value lands
     # inside the description textarea.
     assert "Generic SPEC-shaped" in resp.text or "Generic" in resp.text
@@ -1694,12 +1695,10 @@ def test_singleton_instance_get_renders_description(
 def test_singleton_instance_save_round_trips(
     writable_l2_yaml: Path,
 ) -> None:
-    """BXa.1 (2026-05-30): POST /l2_shape/instance/ writes the new
+    """BXa.1 (2026-05-30): POST /l2_shape/instance/ writes the
     top-level structured fields (institution_name / acronym /
-    description) PLUS the role_business_day_offsets YAML escape-hatch
-    (rare-use, no structured editor for the role-hours map). The
-    round-trip survives reload — fuzz seeds that emit
-    role_business_day_offsets still work."""
+    description). The round-trip survives reload. Phase CP removed
+    role_business_day_offsets from the instance singleton."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.post(
@@ -1708,9 +1707,6 @@ def test_singleton_instance_save_round_trips(
                 "institution_name": "Test Bank Two",
                 "institution_acronym": "TB2",
                 "description": "Independent reconciliation validator demo.",
-                "role_business_day_offsets_yaml": (
-                    "CustomerSubledger: 17\nClearingSuspense: 0\n"
-                ),
             },
             follow_redirects=False,
         )
@@ -1720,10 +1716,6 @@ def test_singleton_instance_save_round_trips(
     assert reloaded.institution_name == "Test Bank Two"
     assert reloaded.institution_acronym == "TB2"
     assert reloaded.description == "Independent reconciliation validator demo."
-    assert reloaded.role_business_day_offsets == {
-        "CustomerSubledger": 17,
-        "ClearingSuspense": 0,
-    }
 
 
 def test_singleton_instance_empty_clears_both(
@@ -1731,7 +1723,8 @@ def test_singleton_instance_empty_clears_both(
 ) -> None:
     """BXa.1 (2026-05-30) — submitting all structured fields blank
     clears every top-level field (description + institution_name +
-    institution_acronym + role_business_day_offsets)."""
+    institution_acronym). Phase CP removed role_business_day_offsets
+    from the instance singleton."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.post(
@@ -1740,7 +1733,6 @@ def test_singleton_instance_empty_clears_both(
                 "institution_name": "",
                 "institution_acronym": "",
                 "description": "",
-                "role_business_day_offsets_yaml": "",
             },
             follow_redirects=False,
         )
@@ -1748,35 +1740,8 @@ def test_singleton_instance_empty_clears_both(
 
     reloaded = load_instance(writable_l2_yaml)
     assert reloaded.description is None
-    assert reloaded.role_business_day_offsets is None
     assert reloaded.institution_name is None
     assert reloaded.institution_acronym is None
-
-
-def test_singleton_instance_bad_offset_returns_400(
-    writable_l2_yaml: Path,
-) -> None:
-    """BXa.1 (2026-05-30) — the role_business_day_offsets YAML escape-
-    hatch reuses the loader's per-field validator, so an out-of-range
-    offset (hours must be in [0, 24)) returns 400 + the form
-    re-renders with the error inline."""
-    app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
-        resp = c.post(
-            "/l2_shape/instance/",
-            data={
-                "role_business_day_offsets_yaml": (
-                    "CustomerSubledger: 25\n"
-                ),
-            },
-            follow_redirects=False,
-        )
-    assert resp.status_code == 400, resp.text
-    assert "CustomerSubledger" in resp.text
-
-    # Disk unchanged — the bad save never reached cache.save().
-    reloaded = load_instance(writable_l2_yaml)
-    assert reloaded.role_business_day_offsets is None
 
 
 def test_delete_unreferenced_account_persists(writable_l2_yaml: Path) -> None:

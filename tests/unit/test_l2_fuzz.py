@@ -174,67 +174,13 @@ def test_fuzzer_exercises_every_primitive_kind_across_seeds(
     )
 
 
-@pytest.mark.parametrize("seed", [0, 7, 42, 999, 12345, 227844959])
-def test_fuzzer_emits_role_business_day_offsets(
-    seed: int, tmp_path: Path,
-) -> None:
-    """Every fuzz instance carries `role_business_day_offsets` covering
-    every declared role (M.4.4.14). The fuzzer is the consumer of this
-    capability — production fixtures stay midnight-aligned. The map's
-    presence is what guarantees the fuzz matrix exercises any future
-    L1 view that depends on per-role business-day boundaries differing.
-    """
-    yaml_text = random_l2_yaml(seed)
-    yaml_path = tmp_path / f"fuzz_{seed}.yaml"
-    yaml_path.write_text(yaml_text)
-    inst = load_instance(yaml_path)
-
-    offsets = inst.role_business_day_offsets
-    assert offsets is not None and offsets, (
-        f"seed={seed}: fuzzer must emit role_business_day_offsets so the "
-        f"emitted seed exercises per-role business-day variation"
-    )
-
-    declared_roles = (
-        {str(a.role) for a in inst.accounts}
-        | {str(t.role) for t in inst.account_templates}
-    )
-    assert set(offsets.keys()) == declared_roles, (
-        f"seed={seed}: role_business_day_offsets keys {set(offsets.keys())!r} "
-        f"don't match declared roles {declared_roles!r} — should cover every "
-        f"role exactly once"
-    )
-    for role, hours in offsets.items():
-        assert 0 <= hours < 24, (
-            f"seed={seed}: role {role!r} offset {hours} out of [0, 24)"
-        )
-
-
-def test_fuzzer_seed_emits_distinct_business_day_offsets_for_at_least_two_roles() -> None:
-    """Across the offset matrix the fuzzer picks from
-    ``_BUSINESS_DAY_OFFSET_CHOICES`` (0, 5, 9, 14, 17, 23). Any seed
-    with >=2 declared roles should typically produce >=2 distinct hour
-    values. Hitting all-same is statistically possible (p = 1/6 per
-    additional role) but vanishingly unlikely across 100 seeds — assert
-    that AT LEAST one fuzz instance in our standard 100-seed matrix
-    produces non-uniform offsets, otherwise the variation is broken.
-    """
-    saw_distinct = False
-    for seed in META_GUARD_SEEDS:
-        yaml_text = random_l2_yaml(seed)
-        from io import StringIO
-        import yaml as _yaml
-        parsed = _yaml.safe_load(StringIO(yaml_text))
-        offsets = parsed.get("role_business_day_offsets", {})
-        if len(set(offsets.values())) >= 2:
-            saw_distinct = True
-            break
-    assert saw_distinct, (
-        f"After {len(META_GUARD_SEEDS)} seeds the fuzzer never produced a "
-        f"role_business_day_offsets dict with >=2 distinct hour values. "
-        f"Variation across roles is the whole point of M.4.4.14 — check "
-        f"_BUSINESS_DAY_OFFSET_CHOICES + _build_role_business_day_offsets."
-    )
+# Phase CP (2026-06-06) — the two tests that lived here
+# (test_fuzzer_emits_role_business_day_offsets +
+# test_fuzzer_seed_emits_distinct_business_day_offsets_for_at_least_two_roles)
+# were deleted with the top-level role_business_day_offsets field.
+# Offsets now live per-Account / per-AccountTemplate; CP.7 / CP.8 cover
+# the new per-entity bookkeeping under the generalized fuzz coverage
+# gate.
 
 
 # ---------------------------------------------------------------------------

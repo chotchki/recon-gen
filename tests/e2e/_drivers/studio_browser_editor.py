@@ -393,39 +393,28 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         self,
         *,
         description: str | None,
-        role_business_day_offsets: "dict[str, int] | None",
         institution_name: str | None,
         institution_acronym: str | None,
     ) -> None:
         """BXa.1 (2026-05-30): fill + submit the singleton instance
         structured form. 3 text/textarea fields (institution_name +
-        institution_acronym + description) + a YAML escape-hatch for
-        role_business_day_offsets. POSTs to `/l2_shape/instance/`
-        (with `_method=PUT` hidden) and 303s home on success.
+        institution_acronym + description). POSTs to
+        `/l2_shape/instance/` (with `_method=PUT` hidden) and 303s home
+        on success. Phase CP (2026-06-06) removed the
+        role_business_day_offsets YAML escape-hatch — offsets now per-
+        Account / per-AccountTemplate.
 
         No-op when every arg is None (no settings to set)."""
-        import yaml as _yaml  # noqa: PLC0415 — lazy
         if (
             description is None
-            and not role_business_day_offsets
             and institution_name is None
             and institution_acronym is None
         ):
             return
-        offsets_yaml = (
-            _yaml.safe_dump(
-                dict(role_business_day_offsets),
-                default_flow_style=False, sort_keys=True,
-            )
-            if role_business_day_offsets else ""
-        )
         self._page.click('a[href="/l2_shape/instance/"]')
         self._page.fill('input[name="institution_name"]', institution_name or "")
         self._page.fill('input[name="institution_acronym"]', institution_acronym or "")
         self._page.fill('textarea[name="description"]', description or "")
-        self._page.fill(
-            'textarea[name="role_business_day_offsets_yaml"]', offsets_yaml,
-        )
         self._submit_create_form("instance settings")
 
     def save_l2_to_path(self, path: Path) -> Path:

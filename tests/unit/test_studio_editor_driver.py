@@ -212,9 +212,6 @@ def _assert_l2_structurally_equal(
         for ls in _normalize_descriptions(reference.limit_schedules)
     }
     assert rebuilt_ls == reference_ls
-    assert rebuilt.role_business_day_offsets == (
-        reference.role_business_day_offsets
-    )
     assert rebuilt.description == reference.description
 
 
