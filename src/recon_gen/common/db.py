@@ -24,8 +24,12 @@ import asyncio
 import sys
 import time
 from pathlib import Path
-from collections.abc import AsyncGenerator, Callable, Sequence
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from collections.abc import AsyncGenerator, Callable, Generator, Sequence
+from contextlib import (
+    AbstractAsyncContextManager,
+    asynccontextmanager,
+    contextmanager,
+)
 from typing import Any, Protocol, cast
 from urllib.parse import parse_qs, urlparse
 
@@ -41,6 +45,7 @@ __all__ = [
     "connect_demo_db",
     "execute_script",
     "make_connection_pool",
+    "open_demo_db",
     "oracle_dsn",
     "split_oracle_script",
     "duckdb_path",
@@ -229,6 +234,68 @@ def connect_demo_db(cfg: Config) -> "SyncConnection":  # CB.16 — replaces the 
         "Set 'dialect: postgres', 'dialect: oracle', 'dialect: duckdb', "
         "or 'dialect: sqlite' in your config."
     )
+
+
+@contextmanager
+def open_demo_db(cfg: Config) -> Generator["SyncConnection"]:
+    """Context-managed `connect_demo_db(cfg)` — commits on success,
+    rolls back on exception (best-effort), always closes.
+
+    The per-driver `with conn:` shapes diverge (psycopg keeps the
+    connection open + commits the txn; oracledb / duckdb close on
+    exit), so `SyncConnection.__enter__/__exit__` deliberately stays
+    off the Protocol. This helper papers over the divergence with
+    one consistent shape: commit-on-success + always-close, identical
+    on every dialect. Use it for ETL hooks + any "open, write a
+    batch, close" pattern.
+
+    **Transaction semantics caveat (DuckDB).** PG and Oracle use
+    implicit-transaction-on-write — every cursor's write joins the
+    connection's pending transaction, and `conn.rollback()` undoes
+    every pending write across every cursor. DuckDB defaults to
+    autocommit-per-cursor — each cursor's writes commit immediately
+    when the cursor is closed (or sometimes per-statement), so the
+    rollback path can't undo them. For ETL hooks that need
+    transactional batching against DuckDB, drive `BEGIN` /
+    `COMMIT` / `ROLLBACK` through ONE cursor explicitly and don't
+    close it mid-batch. PG/Oracle behave the way you'd expect from
+    PEP 249 — `open_demo_db` is fully transactional there.
+
+    Example::
+
+        from recon_gen.common.db import open_demo_db
+        from recon_gen.common.etl import write_daily_balance
+
+        with open_demo_db(cfg) as conn:
+            cur = conn.cursor()
+            try:
+                for row in feed:
+                    write_daily_balance(cur, cfg.dialect, ...)
+            finally:
+                cur.close()
+
+    For per-day batches, call `conn.commit()` explicitly in the body
+    and a fresh transaction starts on the next write; the final
+    commit-on-success becomes a no-op.
+    """
+    conn = connect_demo_db(cfg)
+    try:
+        yield conn
+    except BaseException:
+        # DuckDB's per-cursor autocommit means there may be nothing
+        # to roll back even when an exception fires mid-batch — the
+        # driver raises "cannot rollback - no transaction is active".
+        # Swallow it: the helper's promise on DuckDB is best-effort
+        # rollback, not strict-transactional rollback (see docstring).
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001 — driver-specific "no transaction" shapes vary
+            pass
+        raise
+    else:
+        conn.commit()
+    finally:
+        conn.close()
 
 
 

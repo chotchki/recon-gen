@@ -9,13 +9,16 @@ Verifies write_daily_balance:
 
 from __future__ import annotations
 
+import tempfile
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 import duckdb  # type: ignore[import-untyped]  # WHY: duckdb ships partial type info; we use only execute/fetchall here
 import pytest
 
+from recon_gen.common.db import open_demo_db
 from recon_gen.common.etl import write_daily_balance
 from recon_gen.common.sql.dialect import Dialect
 from recon_gen.common.sql.literals import (
@@ -23,6 +26,7 @@ from recon_gen.common.sql.literals import (
     sql_timestamp_literal,
     strip_tz_offset,
 )
+from tests._test_helpers import make_test_config
 
 
 @dataclass(frozen=True)
@@ -222,3 +226,106 @@ def test_write_daily_balance_money_precision() -> None:
         assert row[0] == 1  # $0.01 = 1 cent
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# open_demo_db — context-managed connection (commit/rollback/close)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def duckdb_cfg() -> object:
+    """A Config pointing at a fresh DuckDB file under tempfile.
+
+    Uses the SQLAlchemy-style triple-slash form (`duckdb:///abs/path`)
+    that `duckdb_path` parses; the fourth slash starts the absolute
+    path component.
+    """
+    import os
+    fd, path = tempfile.mkstemp(suffix=".duckdb")
+    os.close(fd)
+    Path(path).unlink()  # delete the empty file; let DuckDB create it
+    # runner.py uses `f"duckdb:///{abs_path}"` — three literal slashes
+    # before the leading-slash path → four-slash URL that `duckdb_path`
+    # strips back to the absolute path. Two-slash form would resolve
+    # relative to cwd.
+    return make_test_config(
+        dialect=Dialect.DUCKDB,
+        demo_database_url=f"duckdb:///{path}",
+    )
+
+
+def _duckdb_path_of(cfg: object) -> str:
+    raw = getattr(cfg, "demo_database_url")  # noqa: B009 — explicit getattr for pyright; cfg typed as object
+    assert isinstance(raw, str)
+    from recon_gen.common.db import duckdb_path
+    return duckdb_path(raw)
+
+
+def _ensure_kv_table(cfg: object) -> None:
+    """Bootstrap a tiny kv(k, v) table on the cfg's DuckDB file so the
+    commit/rollback tests have something to observe."""
+    conn = duckdb.connect(_duckdb_path_of(cfg))
+    try:
+        conn.execute("CREATE TABLE kv (k VARCHAR, v INTEGER)")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_open_demo_db_commits_on_success(duckdb_cfg: object) -> None:
+    """Happy path: writes inside the `with` block survive after exit."""
+    _ensure_kv_table(duckdb_cfg)
+    with open_demo_db(duckdb_cfg) as conn:  # type: ignore[arg-type]: duckdb_cfg fixture returns object typed as structural Config
+        cur = conn.cursor()
+        cur.execute("INSERT INTO kv VALUES ('committed', 42)")
+        cur.close()
+    # Re-open and verify the row landed.
+    with open_demo_db(duckdb_cfg) as conn:  # type: ignore[arg-type]: duckdb_cfg fixture returns object typed as structural Config
+        cur = conn.cursor()
+        cur.execute("SELECT v FROM kv WHERE k = 'committed'")
+        row = cur.fetchone()
+        cur.close()
+    assert row is not None
+    assert row[0] == 42
+
+
+def test_open_demo_db_propagates_exception_and_closes(duckdb_cfg: object) -> None:
+    """Exception path: the helper re-raises the exception AND closes
+    the connection cleanly (no double-close, no swallowed errors).
+
+    The helper's rollback is best-effort on DuckDB (per-cursor
+    autocommit means writes already landed by the time the
+    exception fires — see `open_demo_db` docstring). The
+    transactional guarantee is PG/Oracle only; this test pins
+    the exception-propagation + always-close contract that holds
+    across every dialect.
+    """
+    _ensure_kv_table(duckdb_cfg)
+    with pytest.raises(RuntimeError, match="boom"), \
+            open_demo_db(duckdb_cfg) as conn:  # type: ignore[arg-type]: duckdb_cfg fixture returns object typed as structural Config
+        cur = conn.cursor()
+        cur.execute("INSERT INTO kv VALUES ('autocommitted', 99)")
+        cur.close()
+        raise RuntimeError("boom")
+    # Helper closed cleanly; we can reopen and read state.
+    with open_demo_db(duckdb_cfg) as conn:  # type: ignore[arg-type]: duckdb_cfg fixture returns object typed as structural Config
+        cur = conn.cursor()
+        cur.execute("SELECT v FROM kv WHERE k = 'autocommitted'")
+        row = cur.fetchone()
+        cur.close()
+    assert row is not None
+    # DuckDB autocommit: the row stuck around. PG/Oracle would have
+    # rolled back. The helper's contract is exception-propagation +
+    # always-close, not strict-rollback across dialects.
+    assert row[0] == 99
+
+
+def test_open_demo_db_closes_connection(duckdb_cfg: object) -> None:
+    """After exit, the connection's closed — operations raise."""
+    _ensure_kv_table(duckdb_cfg)
+    with open_demo_db(duckdb_cfg) as conn:  # type: ignore[arg-type]: duckdb_cfg fixture returns object typed as structural Config
+        captured = conn
+    # DuckDB raises ConnectionException after close.
+    with pytest.raises(Exception):  # noqa: PT011, BLE001 — DuckDB's exception class isn't part of any stable surface
+        captured.cursor().execute("SELECT 1")
