@@ -149,8 +149,25 @@ jobs:
         run: |
           STARTED_PG=false
           STARTED_OR=false
+          # v13.3.0 followup — the reuse-by-port path didn't normalize
+          # the existing container's name to ``ci-shared-pg`` /
+          # ``ci-shared-oracle``, so the subsequent Force-reset step
+          # (which hardcodes those names in ``docker exec``) blew up
+          # with "No such container: ci-shared-pg". Rename the existing
+          # container to the canonical name on the reuse path so every
+          # downstream step works regardless of how the container got
+          # there.
           if nc -z 127.0.0.1 5432 2>/dev/null; then
-            echo "Shared PG already listening on 127.0.0.1:5432 — reusing."
+            EXISTING_PG=$(docker ps --filter "publish=5432" --format '{{.Names}}' | head -1)
+            if [ -n "${EXISTING_PG}" ] && [ "${EXISTING_PG}" != "ci-shared-pg" ]; then
+              echo "Shared PG already listening on :5432 as '${EXISTING_PG}' — renaming to ci-shared-pg."
+              docker rename "${EXISTING_PG}" ci-shared-pg
+            elif [ -z "${EXISTING_PG}" ]; then
+              echo "::error::Port 5432 is bound but no Docker container owns it — runner is in an unexpected state." >&2
+              exit 1
+            else
+              echo "Shared PG already named ci-shared-pg — reusing in place."
+            fi
           else
             # CB.17.j — `-c shared_preload_libraries=pg_stat_statements`
             # so the conftest's `capture_top_queries` teardown fixture
@@ -170,7 +187,16 @@ jobs:
             timeout 60 bash -c 'until docker exec ci-shared-pg pg_isready -U postgres -q; do sleep 2; done'
           fi
           if nc -z 127.0.0.1 1521 2>/dev/null; then
-            echo "Shared Oracle already listening on 127.0.0.1:1521 — reusing."
+            EXISTING_OR=$(docker ps --filter "publish=1521" --format '{{.Names}}' | head -1)
+            if [ -n "${EXISTING_OR}" ] && [ "${EXISTING_OR}" != "ci-shared-oracle" ]; then
+              echo "Shared Oracle already listening on :1521 as '${EXISTING_OR}' — renaming to ci-shared-oracle."
+              docker rename "${EXISTING_OR}" ci-shared-oracle
+            elif [ -z "${EXISTING_OR}" ]; then
+              echo "::error::Port 1521 is bound but no Docker container owns it — runner is in an unexpected state." >&2
+              exit 1
+            else
+              echo "Shared Oracle already named ci-shared-oracle — reusing in place."
+            fi
           else
             docker run -d --name ci-shared-oracle \
               -e ORACLE_PWD="${ORACLE_PASSWORD}" \
