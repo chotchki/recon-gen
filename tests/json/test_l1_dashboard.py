@@ -659,24 +659,33 @@ def test_daily_statement_sheet_present_after_m2b4() -> None:
 
 
 def test_daily_statement_has_five_kpis_and_one_table() -> None:
-    """Daily Statement structure: 2 context KPIs (Accounts available /
-    Roles available — BR.x, bind the cascade-source datasets as
-    configured-on-sheet) + 5 statement KPIs (Opening / Debits / Credits
-    / Closing Stored / Posting Drift) + 1 detail table. BO.6 — the
-    bare "Drift" KPI got the "Posting Drift" rename to disambiguate
-    from the Drift sheet's leaf/parent drift (different math)."""
+    """Daily Statement structure: 5 statement KPIs (Opening / Debits /
+    Credits / Closing Stored / Posting Drift) + 1 detail table + 2
+    context KPIs (Accounts available / Roles available — BR.x, bind
+    the cascade-source datasets as configured-on-sheet).
+
+    chotchki Studio drive 2026-06-07: the context KPIs moved from the
+    TOP of the sheet to the BOTTOM. The cascade-binding side-effect
+    is preserved (they're still on the sheet, still visual-bound to
+    their datasets); the at-a-glance scan space at the top now goes
+    to the 5 statement KPIs the operator actually wants to read.
+
+    BO.6 — the bare "Drift" KPI got the "Posting Drift" rename to
+    disambiguate from the Drift sheet's leaf/parent drift (different
+    math).
+    """
     app = build_l1_dashboard_app(_CFG)
     ds = _sheet_by_name(app, _DAILY_STATEMENT_NAME)
     titles = [_visual_title(v) for v in ds.visuals]
     assert titles == [
-        "Accounts available",
-        "Roles available",
         "Opening Balance",
         "Debits (signed)",
         "Credits (signed)",
         "Closing Stored",
         "Posting Drift",
         "Posted Money Records",
+        "Accounts available",
+        "Roles available",
     ]
 
 

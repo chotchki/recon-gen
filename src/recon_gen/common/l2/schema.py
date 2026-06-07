@@ -307,6 +307,13 @@ def refresh_matviews_sql(
         # Helpers: read from current_*.
         f"{p}_computed_subledger_balance",
         f"{p}_computed_ledger_balance",
+        # CL.5 — carry-forward effective balance: every (account, day)
+        # in scope, with sparse-day gaps filled via LAST_VALUE IGNORE
+        # NULLS window. Drift / ledger_drift / overdraft now read this
+        # so sparse accounts surface the institution's REAL position
+        # (not just emitted rows). Reads from current_daily_balances +
+        # current_transactions; refresh after those two.
+        f"{p}_effective_balances",
         # L1 invariants: read from current_* + helpers.
         f"{p}_drift",
         f"{p}_ledger_drift",
@@ -414,6 +421,8 @@ def _emit_table_based_matview_refresh(
         f"{p}_current_daily_balances",
         f"{p}_computed_subledger_balance",
         f"{p}_computed_ledger_balance",
+        # CL.5 — carry-forward source for drift / ledger_drift / overdraft.
+        f"{p}_effective_balances",
         f"{p}_drift",
         f"{p}_ledger_drift",
         f"{p}_overdraft",
@@ -1796,6 +1805,9 @@ _L1_INVARIANT_DROP_NAMES: tuple[str, ...] = (
     "overdraft",
     "ledger_drift",
     "drift",
+    # CL.5 — effective_balances is a carry-forward source for the 3
+    # invariants above; drop after them.
+    "effective_balances",
     "computed_ledger_balance",
     "computed_subledger_balance",
 )
@@ -2189,10 +2201,118 @@ CREATE INDEX idx_{p}_clb_account_day
     ON {p}_computed_ledger_balance (account_id, business_day_start);
 
 -- ---------------------------------------------------------------------
+-- CL.5 — Carry-forward effective balance per (account, business_day).
+-- Sparse accounts emit a daily_balances row only on activity days
+-- (CL.4); this view fills the gaps with the prior emitted balance so
+-- the L1 invariants (drift / ledger_drift / overdraft) see the
+-- institution's REAL position every day, not just emitted days.
+--
+-- Spine = every internal account × every business_day_start that
+-- appeared in the daily_balances feed (the union with transactions
+-- feed dates is intentionally left out: matview-internal coupling.
+-- An account with NO emit in scope contributes nothing to the spine,
+-- which is correct — we have no balance to carry forward).
+--
+-- ``source`` discriminator: `'emitted'` when there's a daily_balances
+-- row for this (account, day); `'carried'` when the row came from a
+-- prior business day's emit. The 3-state form (carried_no_activity /
+-- carried_with_activity_gap) lives on daily_statement_summary (CL.8)
+-- — the carry-forward source itself is binary; the gap detection
+-- happens at the Daily Statement aggregation layer where today's
+-- net_flow is known.
+--
+-- Dialect compatibility: PostgreSQL does NOT support ``IGNORE NULLS``
+-- in window functions (long-standing TODO, still pending as of PG
+-- 17). Oracle 19c + DuckDB do. Per
+-- [[feedback_sql_dialect_convergence_preferred]] — pick the SQL
+-- shape that ALL three dialects accept rather than branch. The
+-- correlated subquery form below works everywhere; the planner cost
+-- is bounded by ``(scope_days × accounts)`` lookups against the
+-- daily_balances composite index. CL.0 audit incorrectly claimed PG
+-- had IGNORE NULLS support — corrected here.
+-- ---------------------------------------------------------------------
+{matview_create_kw} {p}_effective_balances{matview_options} AS
+WITH all_internal_accounts AS (
+    SELECT DISTINCT
+        account_id, account_name, account_role,
+        account_parent_role, account_scope
+    FROM {p}_current_daily_balances
+    WHERE account_scope = 'internal'
+),
+in_scope_days AS (
+    SELECT DISTINCT business_day_start
+    FROM {p}_current_daily_balances
+    WHERE account_scope = 'internal'
+),
+spine AS (
+    SELECT
+        a.account_id, a.account_name, a.account_role,
+        a.account_parent_role, a.account_scope,
+        d.business_day_start
+    FROM all_internal_accounts a
+    CROSS JOIN in_scope_days d
+)
+SELECT
+    s.account_id, s.account_name, s.account_role,
+    s.account_parent_role, s.account_scope,
+    s.business_day_start,
+    -- Carry-forward business_day_end so JOINs that key off
+    -- business_day_end (computed_subledger_balance's `posting <=
+    -- business_day_end` filter) resolve on carried rows. Use the
+    -- most-recent emitted business_day_end at-or-before this day.
+    (SELECT db.business_day_end
+     FROM {p}_current_daily_balances db
+     WHERE db.account_id = s.account_id
+       AND db.business_day_start <= s.business_day_start
+     ORDER BY db.business_day_start DESC
+     LIMIT 1) AS business_day_end,
+    -- emitted_money: the on-the-day money column, NULL when no emit.
+    (SELECT db.money
+     FROM {p}_current_daily_balances db
+     WHERE db.account_id = s.account_id
+       AND db.business_day_start = s.business_day_start
+     LIMIT 1) AS emitted_money,
+    -- effective_money: carry-forward of the most-recent emit at-or-
+    -- before this day. NULL only for an account that has zero emits
+    -- at or before this day in scope.
+    (SELECT db.money
+     FROM {p}_current_daily_balances db
+     WHERE db.account_id = s.account_id
+       AND db.business_day_start <= s.business_day_start
+     ORDER BY db.business_day_start DESC
+     LIMIT 1) AS effective_money,
+    -- expected_eod_balance carries the on-the-day declaration when
+    -- emitted; otherwise the most-recent expected (since L2 declares
+    -- per-account, not per-day, it should rarely change).
+    (SELECT db.expected_eod_balance
+     FROM {p}_current_daily_balances db
+     WHERE db.account_id = s.account_id
+       AND db.business_day_start <= s.business_day_start
+     ORDER BY db.business_day_start DESC
+     LIMIT 1) AS expected_eod_balance,
+    CASE WHEN EXISTS (
+        SELECT 1 FROM {p}_current_daily_balances db
+        WHERE db.account_id = s.account_id
+          AND db.business_day_start = s.business_day_start
+    ) THEN 'emitted' ELSE 'carried' END AS source
+FROM spine s;
+-- Composite covers per-(account, day) joins from the L1 invariants;
+-- mirrors the current_daily_balances composite index shape.
+CREATE INDEX idx_{p}_eff_balances_account_day
+    ON {p}_effective_balances (account_id, business_day_start);
+
+-- ---------------------------------------------------------------------
 -- L1 invariant: Sub-ledger drift.
 -- SPEC: For every CurrentStoredBalance where Account.Scope = Internal
 -- and ¬IsParent(Account), Drift(Account, BusinessDay) SHOULD equal 0.
 -- Rows in this view are the violations: stored ≠ computed.
+--
+-- CL.5 — reads from effective_balances (carry-forward over sparse-day
+-- gaps), NOT current_daily_balances directly. The carried-forward
+-- "stored" balance is what the institution would report as today's
+-- close if asked — drift is the disagreement between THAT and the
+-- computed sub-ledger. ``effective_money`` is NULL only for accounts
+-- with no emitted row anywhere in scope; the COALESCE excludes those.
 -- ---------------------------------------------------------------------
 {matview_create_kw} {p}_drift{matview_options} AS
 SELECT
@@ -2202,16 +2322,18 @@ SELECT
     sb.account_parent_role,
     sb.business_day_start,
     sb.business_day_end,
-    sb.money AS stored_balance,
+    sb.effective_money AS stored_balance,
     cb.computed_balance,
-    sb.money - cb.computed_balance AS drift
-FROM {p}_current_daily_balances sb
+    sb.effective_money - cb.computed_balance AS drift,
+    sb.source
+FROM {p}_effective_balances sb
 JOIN {p}_computed_subledger_balance cb
   ON cb.account_id = sb.account_id
  AND cb.business_day_start = sb.business_day_start
 WHERE sb.account_scope = 'internal'
   AND sb.account_parent_role IS NOT NULL
-  AND sb.money <> cb.computed_balance;
+  AND sb.effective_money IS NOT NULL
+  AND sb.effective_money <> cb.computed_balance;
 -- Dashboard hot-path: per-sheet account dropdown + date filter, plus
 -- the universal-date-range filter from M.2b.1.
 CREATE INDEX idx_{p}_drift_account_day
@@ -2232,6 +2354,8 @@ CREATE INDEX idx_{p}_drift_day_account_role
 -- SPEC: For every CurrentStoredBalance where Account.Scope = Internal
 -- and IsParent(Account), LedgerDrift(Account, BusinessDay) SHOULD equal 0.
 -- Rows in this view are the violations.
+--
+-- CL.5 — reads from effective_balances (same rationale as drift).
 -- ---------------------------------------------------------------------
 {matview_create_kw} {p}_ledger_drift{matview_options} AS
 SELECT
@@ -2240,14 +2364,16 @@ SELECT
     sb.account_role,
     sb.business_day_start,
     sb.business_day_end,
-    sb.money AS stored_balance,
+    sb.effective_money AS stored_balance,
     cb.computed_balance,
-    sb.money - cb.computed_balance AS drift
-FROM {p}_current_daily_balances sb
+    sb.effective_money - cb.computed_balance AS drift,
+    sb.source
+FROM {p}_effective_balances sb
 JOIN {p}_computed_ledger_balance cb
   ON cb.account_id = sb.account_id
  AND cb.business_day_start = sb.business_day_start
-WHERE sb.money <> cb.computed_balance;
+WHERE sb.effective_money IS NOT NULL
+  AND sb.effective_money <> cb.computed_balance;
 CREATE INDEX idx_{p}_ledger_drift_account_day
     ON {p}_ledger_drift (account_id, business_day_start);
 CREATE INDEX idx_{p}_ledger_drift_role
@@ -2262,6 +2388,11 @@ CREATE INDEX idx_{p}_ledger_drift_day_account_role
 -- SPEC: For every CurrentStoredBalance, money SHOULD be ≥ 0.
 -- Rows in this view are accounts × days where the stored balance is
 -- negative (overdraft).
+--
+-- CL.5 — reads from effective_balances so a sparse account whose
+-- last emitted balance was negative fires on EVERY business day until
+-- the next emit, not just the emit days. Matches what a regulator
+-- would see: the institution was in overdraft on all those days.
 -- ---------------------------------------------------------------------
 {matview_create_kw} {p}_overdraft{matview_options} AS
 SELECT
@@ -2271,10 +2402,12 @@ SELECT
     sb.account_parent_role,
     sb.business_day_start,
     sb.business_day_end,
-    sb.money AS stored_balance
-FROM {p}_current_daily_balances sb
+    sb.effective_money AS stored_balance,
+    sb.source
+FROM {p}_effective_balances sb
 WHERE sb.account_scope = 'internal'
-  AND sb.money < 0;
+  AND sb.effective_money IS NOT NULL
+  AND sb.effective_money < 0;
 CREATE INDEX idx_{p}_overdraft_account_day
     ON {p}_overdraft (account_id, business_day_start);
 CREATE INDEX idx_{p}_overdraft_role ON {p}_overdraft (account_role);

@@ -1432,8 +1432,9 @@ def test_multi_xor_violation_filters_fan_in_via_view_predicate() -> None:
 
 
 def test_refresh_matviews_sql_emits_one_per_view() -> None:
-    """All 19 L1+inv matviews each get a REFRESH command + an
-    ANALYZE follow-up: 2 current_* + 2 computed_* + 10 L1 invariants
+    """All 20 L1+inv matviews each get a REFRESH command + an
+    ANALYZE follow-up: 2 current_* + 2 computed_* + 1 CL.5
+    (effective_balances) + 10 L1 invariants
     (drift + ledger_drift + overdraft + expected_eod_balance_breach +
     limit_breach + stuck_pending + stuck_unbundled +
     chain_parent_disagreement [AB.2.3] + xor_group_violation
@@ -1441,14 +1442,14 @@ def test_refresh_matviews_sql_emits_one_per_view() -> None:
     (transfer_parents [AB.4.3]) + 2 dashboard-shape
     (daily_statement_summary + l1_exceptions) + 2 Investigation
     matviews (inv_pair_rolling_anomalies + inv_money_trail_edges,
-    added in N.3.b) + AB.6.5's multi_xor_violation = 20 matviews ×
-    2 statements each = 40 total."""
+    added in N.3.b) + AB.6.5's multi_xor_violation = 21 matviews ×
+    2 statements each = 42 total."""
     sql = refresh_matviews_sql(_baseline_instance(), prefix="re")
     statements = [s.strip() for s in sql.split(";") if s.strip()]
     refreshes = [s for s in statements if s.startswith("REFRESH ")]
     analyzes = [s for s in statements if s.startswith("ANALYZE ")]
-    assert len(refreshes) == 20
-    assert len(analyzes) == 20
+    assert len(refreshes) == 21
+    assert len(analyzes) == 21
     # Every REFRESHed matview gets a matching ANALYZE.
     refresh_names = {s.removeprefix("REFRESH MATERIALIZED VIEW ") for s in refreshes}
     analyze_names = {s.removeprefix("ANALYZE ") for s in analyzes}
