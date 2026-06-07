@@ -2009,10 +2009,17 @@ def test_bb2_create_form_renders_mode_radio_and_create_new_subform(
     # TT minimum: expected_net + completion.
     assert 'name="reconciler_new_expected_net"' in body
     assert 'name="reconciler_new_completion"' in body
-    # Aggregator minimum: subtype + cadence + role/direction.
+    # Aggregator minimum: subtype + cadence + role/direction. BF.2 —
+    # source_role / destination_role / leg_role are multi_select
+    # widgets that emit `name="<n>"` on selected-chip hidden inputs
+    # only; an empty multi_select carries just the `__present`
+    # marker. Either shape proves the field is wired.
     assert 'name="reconciler_new_subtype"' in body
     assert 'name="reconciler_new_cadence"' in body
-    assert 'name="reconciler_new_leg_role"' in body
+    assert (
+        'name="reconciler_new_leg_role"' in body
+        or 'name="reconciler_new_leg_role__present"' in body
+    )
     assert 'name="reconciler_new_leg_direction"' in body
 
 
@@ -2222,3 +2229,109 @@ def test_co3_chip_order_preserved_by_dom_order(
         t for t in reloaded.transfer_templates if str(t.name) == str(tt.name)
     )
     assert [str(r) for r in rebuilt_tt.leg_rails] == reversed_order
+
+
+# ---------------------------------------------------------------------------
+# BF.2 — BB.2 sub-form exposes every TT / aggregating-rail FieldSpec
+# ---------------------------------------------------------------------------
+
+
+def _bb2_reconciler_subform_html(yaml_path: Path) -> str:
+    """Render the rail-create page and extract the BB.2 reconciler
+    fieldset HTML. The page concatenates the rail form + the BB.2
+    reconciler section in one document; the per-FieldSpec assertions
+    below look for ``name="reconciler_new_<X>"`` attributes that are
+    unambiguously inside the BB.2 surface."""
+    app = _build_app(yaml_path)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/rail/new?subtype=single_leg")
+    assert resp.status_code == 200, resp.text
+    return resp.text
+
+
+def test_bf2_subform_exposes_every_transfer_template_fieldspec(
+    writable_l2_yaml: Path,
+) -> None:
+    """BF.2 — the BB.2 create-new TT sub-form renders ONE
+    ``name="reconciler_new_<X>"`` input for every FieldSpec in
+    ``_FIELD_SPECS_BY_KIND["transfer_template"]`` except the
+    auto-handled trio:
+
+    - ``name`` is rendered explicitly above the kind dispatcher.
+    - ``leg_rails`` is auto-appended by
+      ``_create_new_reconciler_with_rail`` (the new rail being
+      authored becomes the TT's first leg_rail).
+    - ``leg_rail_xor_groups`` is ``edit_only`` per AB.3.7 — only
+      meaningful after the TT has ≥2 leg_rails, which can't happen
+      at create-new time. Lands on the TT edit screen, not the
+      BB.2 sub-form.
+
+    Adding a new FieldSpec to ``_FIELD_SPECS_BY_KIND["transfer_template"]``
+    that doesn't appear in the rendered sub-form fires this test —
+    anti-drift gate per Phase BF Lock L1.
+    """
+    from recon_gen.common.html._studio_editor_routes import _FIELD_SPECS_BY_KIND
+    body = _bb2_reconciler_subform_html(writable_l2_yaml)
+    skip = {"name", "leg_rails", "leg_rail_xor_groups"}
+    missing: list[str] = []
+    for spec in _FIELD_SPECS_BY_KIND["transfer_template"]:
+        if spec.name in skip:
+            continue
+        # multi_select widgets only emit `name="<n>"` on selected-chip
+        # hidden inputs; an empty multi_select emits the `__present`
+        # marker. Either shape proves the field is wired into the form.
+        needles = (
+            f'name="reconciler_new_{spec.name}"',
+            f'name="reconciler_new_{spec.name}__present"',
+        )
+        if not any(n in body for n in needles):
+            missing.append(spec.name)
+    assert not missing, (
+        f"BB.2 TT-kind sub-form missing fields: {missing}. "
+        f"Expected one input per FieldSpec (minus {sorted(skip)})."
+    )
+
+
+def test_bf2_subform_exposes_every_aggregating_rail_fieldspec(
+    writable_l2_yaml: Path,
+) -> None:
+    """BF.2 — the BB.2 create-new aggregating-rail sub-form renders ONE
+    ``name="reconciler_new_<X>"`` input for every FieldSpec in
+    ``_FIELD_SPECS_BY_KIND["rail"]`` except the auto-handled trio:
+
+    - ``name`` is rendered explicitly above the kind dispatcher.
+    - ``aggregating`` is forced ``True`` by
+      ``_create_new_reconciler_with_rail`` (the whole code path
+      defines "aggregating rail reconciler").
+    - ``bundles_activity`` is auto-appended by the same helper
+      (the rail being authored becomes the aggregator's first
+      bundled activity).
+
+    The subtype dispatcher (``reconciler_new_subtype``) is rendered
+    explicitly as a select (per the existing AI.13 wire shape) — its
+    presence is asserted separately. All subtype-only fields (Rail's
+    leg_role / leg_direction / source_role / destination_role /
+    source_origin / destination_origin / expected_net) and every
+    subtype-agnostic field must render somewhere in the BB.2 surface.
+    """
+    from recon_gen.common.html._studio_editor_routes import _FIELD_SPECS_BY_KIND
+    body = _bb2_reconciler_subform_html(writable_l2_yaml)
+    skip = {"name", "aggregating", "bundles_activity"}
+    missing: list[str] = []
+    for spec in _FIELD_SPECS_BY_KIND["rail"]:
+        if spec.name in skip:
+            continue
+        # multi_select widgets (source_role / destination_role /
+        # leg_role) only emit `name="<n>"` on selected-chip hidden
+        # inputs; an empty multi_select emits the `__present` marker.
+        # Either shape proves the field is wired into the form.
+        needles = (
+            f'name="reconciler_new_{spec.name}"',
+            f'name="reconciler_new_{spec.name}__present"',
+        )
+        if not any(n in body for n in needles):
+            missing.append(spec.name)
+    assert not missing, (
+        f"BB.2 aggregator-kind sub-form missing fields: {missing}. "
+        f"Expected one input per FieldSpec (minus {sorted(skip)})."
+    )

@@ -32,7 +32,7 @@ factory is called.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import timedelta
 from html import escape
 from typing import Any, Literal, TypeAlias, cast
@@ -176,6 +176,21 @@ class FieldSpec:
     # wire_imad") AND for enabling :placeholder-shown CSS reactivity
     # on textarea fields whose downstream siblings hide when empty.
     placeholder: str | None = None
+
+
+def _prefixed_field_spec(spec: FieldSpec, prefix: str) -> FieldSpec:
+    """BB.2 helper — clone a FieldSpec with the form name prefixed.
+
+    The BB.2 create-new sub-form embeds a second copy of a TT or
+    Rail's FieldSpec list inside the rail-create form, with every
+    name prefixed by ``reconciler_new_`` so the outer rail form's
+    fields and the inner reconciler-being-created fields don't
+    collide on the wire. ``dataclasses.replace`` preserves every
+    other FieldSpec attribute (kind, options, select_from, helper,
+    subtype_only, etc.) so the rendered widget shape matches the
+    edit page.
+    """
+    return dataclasses.replace(spec, name=f"{prefix}{spec.name}")
 
 
 _ACCOUNT_FIELDS: tuple[FieldSpec, ...] = (
@@ -3405,30 +3420,12 @@ def _render_reconciler_section(
     rmode_override = str(overrides.get("reconciler_mode") or "attach")
     rk_override = str(overrides.get("reconciler_kind") or "")
     rn_override = str(overrides.get("reconciler_name") or "")
-    # Create-new sub-form overrides (validation-failure round-trip
-    # preserves these so the operator doesn't retype).
+    # Create-new sub-form: only the discriminators (name + subtype)
+    # are read explicitly here. Every other field is driven from
+    # `_FIELD_SPECS_BY_KIND` via `_render_field` with the
+    # `reconciler_new_` prefix — overrides flow through that loop.
     rnn_name_override = str(overrides.get("reconciler_new_name") or "")
     rnn_subtype_override = str(overrides.get("reconciler_new_subtype") or "")
-    rnn_cadence_override = str(overrides.get("reconciler_new_cadence") or "")
-    rnn_leg_role_override = str(overrides.get("reconciler_new_leg_role") or "")
-    rnn_leg_direction_override = str(
-        overrides.get("reconciler_new_leg_direction") or "",
-    )
-    rnn_source_role_override = str(
-        overrides.get("reconciler_new_source_role") or "",
-    )
-    rnn_destination_role_override = str(
-        overrides.get("reconciler_new_destination_role") or "",
-    )
-    rnn_expected_net_override = str(
-        overrides.get("reconciler_new_expected_net") or "",
-    )
-    rnn_transfer_key_override = str(
-        overrides.get("reconciler_new_transfer_key") or "",
-    )
-    rnn_completion_override = str(
-        overrides.get("reconciler_new_completion") or "",
-    )
 
     tt_names = sorted(str(t.name) for t in instance.transfer_templates)
     agg_names = sorted(
@@ -3457,10 +3454,6 @@ def _render_reconciler_section(
     attach_hidden = ' hidden' if rmode_override == "create_new" else ''
     create_hidden = ' hidden' if rmode_override != "create_new" else ''
 
-    leg_dir_opts = "".join(
-        f'<option value="{v}"{" selected" if rnn_leg_direction_override == v else ""}>{v}</option>'
-        for v in ("Debit", "Credit", "Variable")
-    )
     subtype_opts = "".join(
         f'<option value="{v}"{" selected" if rnn_subtype_override == v else ""}>{v}</option>'
         for v in ("single_leg", "two_leg")
@@ -3468,6 +3461,44 @@ def _render_reconciler_section(
 
     rnn_xor_groups_text_override = str(
         overrides.get("leg_rail_xor_groups_text") or "",
+    )
+
+    # BF.2 — drive the create-new sub-form from `_FIELD_SPECS_BY_KIND`
+    # so every TT / Rail FieldSpec is exposed (anti-drift gate per
+    # BF.0 Lock L1). Skip: discriminators (name) + server-appended
+    # rail-list (leg_rails for TT, bundles_activity for aggregator)
+    # + edit_only fields whose option universe depends on a sibling
+    # the operator must author first (leg_rail_xor_groups). The
+    # `aggregating` flag is forced True server-side, so skip.
+    _PREFIX = "reconciler_new_"
+
+    def _render_specs(specs: Iterable[FieldSpec]) -> str:
+        return "".join(
+            _render_field(
+                _prefixed_field_spec(s, _PREFIX),
+                overrides.get(f"{_PREFIX}{s.name}", ""),
+                instance,
+            )
+            for s in specs
+        )
+
+    _TT_SKIP = {"name", "leg_rails", "leg_rail_xor_groups"}
+    _RAIL_SKIP = {"name", "aggregating", "bundles_activity"}
+    tt_fields_html = _render_specs(
+        s for s in _FIELD_SPECS_BY_KIND["transfer_template"]
+        if s.name not in _TT_SKIP
+    )
+    agg_subtype_agnostic_html = _render_specs(
+        s for s in _FIELD_SPECS_BY_KIND["rail"]
+        if s.subtype_only is None and s.name not in _RAIL_SKIP
+    )
+    agg_single_leg_html = _render_specs(
+        s for s in _FIELD_SPECS_BY_KIND["rail"]
+        if s.subtype_only == "single_leg"
+    )
+    agg_two_leg_html = _render_specs(
+        s for s in _FIELD_SPECS_BY_KIND["rail"]
+        if s.subtype_only == "two_leg"
     )
 
     # AM.1 step 4.5 — reconciler-section migrated. Semantic classes
@@ -3579,25 +3610,16 @@ def _render_reconciler_section(
         '</select>'
         f'<small class="{helper_small_cls}">Server reads `reconciler_kind` from this when mode=create_new.</small>'
         '</div>'
-        # TT-specific minimum fields.
+        # BF.2 — TT-kind fields, FieldSpec-driven (see `tt_fields_html`
+        # build above for the skip-set). Adding a TransferTemplate
+        # FieldSpec auto-surfaces here.
         f'<div class="{sub_block_cls}" data-reconciler-new-kind-fields="transfer_template"{"" if rk_override == "transfer_template" else " hidden"}>'
-        f'<div class="{row_cls}">'
-        f'<label for="field-reconciler_new_expected_net" class="{label_cls}">Expected net{req}</label>'
-        f'<input type="text" id="field-reconciler_new_expected_net" name="reconciler_new_expected_net" value="{escape(rnn_expected_net_override)}" placeholder="0.00" class="{input_cls}">'
-        f'<small class="{helper_small_cls}">Money — must equal the sum of leg amounts at close.</small>'
+        f'{tt_fields_html}'
         '</div>'
-        f'<div class="{row_cls}">'
-        f'<label for="field-reconciler_new_transfer_key" class="{label_cls}">Transfer key</label>'
-        f'<input type="text" id="field-reconciler_new_transfer_key" name="reconciler_new_transfer_key" value="{escape(rnn_transfer_key_override)}" placeholder="metadata_key_1, metadata_key_2" class="{input_cls}">'
-        f'<small class="{helper_small_cls}">Comma-separated metadata keys that scope a transfer instance.</small>'
-        '</div>'
-        f'<div class="{row_cls}">'
-        f'<label for="field-reconciler_new_completion" class="{label_cls}">Completion{req}</label>'
-        f'<input type="text" id="field-reconciler_new_completion" name="reconciler_new_completion" value="{escape(rnn_completion_override)}" placeholder="all_legs_posted" class="{input_cls}">'
-        f'<small class="{helper_small_cls}">CompletionExpression — when this TT is considered done.</small>'
-        '</div>'
-        '</div>'
-        # Aggregating-rail minimum fields.
+        # BF.2 — Aggregating-rail-kind fields. Subtype dispatcher
+        # stays hand-coded (it's a creation-time discriminator, not
+        # a Rail dataclass field). Subtype-agnostic + per-subtype
+        # field blocks are FieldSpec-driven.
         f'<div class="{sub_block_cls}" data-reconciler-new-kind-fields="aggregating_rail"{"" if rk_override == "aggregating_rail" else " hidden"}>'
         f'<div class="{row_cls}">'
         f'<label for="field-reconciler_new_subtype" class="{label_cls}">Subtype{req}</label>'
@@ -3608,57 +3630,18 @@ def _render_reconciler_section(
         f'{subtype_opts}'
         '</select>'
         '</div>'
-        f'<div class="{row_cls}">'
-        f'<label for="field-reconciler_new_cadence" class="{label_cls}">Cadence{req}</label>'
-        f'<input type="text" id="field-reconciler_new_cadence" name="reconciler_new_cadence" value="{escape(rnn_cadence_override)}" placeholder="daily" class="{input_cls}">'
-        '</div>'
-        # AI.13 follow-on (2026-05-25): origin is validator-required
-        # (O1: every leg resolves to an Origin). Single-leg + two-leg
-        # both need it. Same form-pairing principle as expected_net.
-        f'<div class="{row_cls}">'
-        f'<label for="field-reconciler_new_origin_agg" class="{label_cls}">Origin{req}</label>'
-        f'<input type="text" id="field-reconciler_new_origin_agg" name="reconciler_new_origin" placeholder="InternalInitiated" class="{input_cls}">'
-        f'<small class="{helper_small_cls}">InternalInitiated / ExternalForcePosted (rail-level — applies to all legs).</small>'
-        '</div>'
-        # Single-leg aggregator: leg_role + leg_direction
+        # Subtype-agnostic rail fields (description, origin, cadence,
+        # metadata_keys, posted_requirements, aging windows, etc.)
+        f'{agg_subtype_agnostic_html}'
+        # Single-leg sub-block (leg_role + leg_direction).
         f'<div class="{sub_block_cls}" data-reconciler-new-subtype-fields="single_leg"{"" if rnn_subtype_override == "single_leg" else " hidden"}>'
-        f'<div class="{row_cls}">'
-        f'<label for="field-reconciler_new_leg_role" class="{label_cls}">Leg role{req}</label>'
-        f'<input type="text" id="field-reconciler_new_leg_role" name="reconciler_new_leg_role" value="{escape(rnn_leg_role_override)}" class="{input_cls}">'
-        '<input type="hidden" name="reconciler_new_leg_role__present" value="1">'
+        f'{agg_single_leg_html}'
         '</div>'
-        f'<div class="{row_cls}">'
-        f'<label for="field-reconciler_new_leg_direction" class="{label_cls}">Leg direction{req}</label>'
-        f'<select id="field-reconciler_new_leg_direction" name="reconciler_new_leg_direction" '
-        f'aria-label="Leg direction" class="{input_cls}">'
-        f'<option value=""{" selected" if not rnn_leg_direction_override else ""}>— pick —</option>'
-        f'{leg_dir_opts}'
-        '</select>'
-        '</div>'
-        '</div>'
-        # Two-leg aggregator: source_role + destination_role + expected_net.
-        # AI.13 (2026-05-25): expected_net is required for a standalone
-        # two-leg rail (validator: "standalone two-leg rail … MUST
-        # declare expected_net (typically 0)"). The BB.0 form-pairing
-        # principle says the form should expose every validator-required
-        # field — without this, BB.2's aggregator-two-leg create-new
-        # 400s on submit. AI.2.d.2 piece 3 surfaced it.
+        # Two-leg sub-block (source_role + destination_role +
+        # source_origin + destination_origin + expected_net). Per
+        # validator: standalone two-leg rail MUST declare expected_net.
         f'<div class="{sub_block_cls}" data-reconciler-new-subtype-fields="two_leg"{"" if rnn_subtype_override == "two_leg" else " hidden"}>'
-        f'<div class="{row_cls}">'
-        f'<label for="field-reconciler_new_source_role" class="{label_cls}">Source role{req}</label>'
-        f'<input type="text" id="field-reconciler_new_source_role" name="reconciler_new_source_role" value="{escape(rnn_source_role_override)}" class="{input_cls}">'
-        '<input type="hidden" name="reconciler_new_source_role__present" value="1">'
-        '</div>'
-        f'<div class="{row_cls}">'
-        f'<label for="field-reconciler_new_destination_role" class="{label_cls}">Destination role{req}</label>'
-        f'<input type="text" id="field-reconciler_new_destination_role" name="reconciler_new_destination_role" value="{escape(rnn_destination_role_override)}" class="{input_cls}">'
-        '<input type="hidden" name="reconciler_new_destination_role__present" value="1">'
-        '</div>'
-        f'<div class="{row_cls}">'
-        f'<label for="field-reconciler_new_expected_net_agg" class="{label_cls}">Expected net{req}</label>'
-        f'<input type="text" id="field-reconciler_new_expected_net_agg" name="reconciler_new_expected_net" value="{escape(rnn_expected_net_override)}" placeholder="0.00" class="{input_cls}">'
-        f'<small class="{helper_small_cls}">Money — typically 0 for a standalone aggregator (validator: standalone two-leg rail MUST declare expected_net).</small>'
-        '</div>'
+        f'{agg_two_leg_html}'
         '</div>'
         '</div>'
         '</div>'
