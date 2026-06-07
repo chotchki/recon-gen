@@ -123,6 +123,15 @@ accounts:
     # Cash GL is the master settlement balance so the explicit-0 makes
     # the offset Lock visible against the default).
     business_day_offset: 0
+    # CL.7 + CL.11 partial — the FRB Cash GL MUST report a balance
+    # every business day (regulatory submission feeds the daily
+    # cash position). Declaring explicit_daily here both pins the
+    # invariant against the institution's most-important control
+    # account AND gives CL.7's balance_cadence_gap trainer plant a
+    # target to delete-then-restore against. Audit §2.3 lock for
+    # sasquatch_pr — full GL/control/customer-ledger split lands
+    # in CL.11 proper.
+    balance_cadence: explicit_daily
 
   - id: gl-1810-ach-orig-settlement
     name: ACH Origination Settlement

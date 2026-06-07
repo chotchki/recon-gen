@@ -1128,6 +1128,91 @@ def _pick_first_internal_account_role(instance: "L2Instance") -> str | None:
     return sorted(candidates)[0]
 
 
+def _pick_first_explicit_daily_target(
+    instance: "L2Instance",
+) -> tuple[str, str] | None:
+    """First (alphabetical) declared ``explicit_daily`` target on the
+    L2. Returns ``(account_id, account_role)`` for a singleton or
+    ``("", account_role)`` for a template (the role is enough to
+    match any materialized instance under the template; the seed
+    materializes ``cust-NNN`` accounts under each template). Returns
+    None if no entity declares ``explicit_daily``.
+
+    The picker is deterministic — alphabetical first match — so
+    repeated plants land on the same target.
+    """
+    singletons: list[tuple[str, str]] = []
+    templates: list[tuple[str, str]] = []
+    for a in instance.accounts:
+        if a.balance_cadence == "explicit_daily" and str(a.scope) == "internal":
+            singletons.append((str(a.id), str(a.role)))
+    for t in instance.account_templates:
+        if t.balance_cadence == "explicit_daily" and str(t.scope) == "internal":
+            templates.append(("", str(t.role)))
+    candidates = sorted(singletons + templates)
+    return candidates[0] if candidates else None
+
+
+def _invoke_balance_cadence_gap_plant(
+    *,
+    prefix: str,
+    dialect: object,
+    anchor: datetime,
+    days_ago: int,
+    instance: object = None,
+) -> str:
+    """CL.7 — Adapter for the balance_cadence_gap plant.
+
+    Picks the alphabetically-first ``explicit_daily`` account (or
+    template-role) declared in the L2, then DELETEs the
+    daily_balances row at (account_id, anchor − days_ago) so the
+    CL.6 invariant matview surfaces a ``declared_daily_missing``
+    row. For templates the DELETE matches by ``account_role`` so
+    every materialized instance under the template gets the same
+    gap (consistent with the explicit_daily declaration applying
+    to all instances per CL.2 Lock 4).
+
+    Per audit §8 + PLAN.md CL.7: raises ``ValueError`` if no
+    ``explicit_daily`` entity exists on the L2 (the kind has
+    nothing to plant).
+    """
+    from datetime import timedelta as _td  # noqa: PLC0415
+
+    from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
+
+    inst = _require_instance(instance)
+    target = _pick_first_explicit_daily_target(inst)
+    if target is None:
+        raise ValueError(
+            "balance_cadence_gap plant: no internal entity declares "
+            "balance_cadence='explicit_daily' on this L2 — the kind "
+            "has nothing to plant. Set balance_cadence on an Account "
+            "or AccountTemplate to enable this plant."
+        )
+    target_account_id, target_role = target
+    gap_day = (anchor - _td(days=days_ago)).date().isoformat()
+    _ = (dialect, Dialect)  # dialect-agnostic SQL — all 3 accept the WHERE
+    if target_account_id:
+        # Singleton: exact match by account_id + business_day_start.
+        return (
+            f"-- CL.7 plant: DELETE the explicit_daily row at "
+            f"({target_account_id!r}, {gap_day})\n"
+            f"DELETE FROM {prefix}_daily_balances "
+            f"WHERE account_id = '{target_account_id}' "
+            f"AND business_day_start >= '{gap_day}' "
+            f"AND business_day_start < '{gap_day}T23:59:59';\n"
+        )
+    # Template path: any materialized instance whose role matches.
+    return (
+        f"-- CL.7 plant: DELETE the explicit_daily rows for template "
+        f"role {target_role!r} on {gap_day}\n"
+        f"DELETE FROM {prefix}_daily_balances "
+        f"WHERE account_role = '{target_role}' "
+        f"AND business_day_start >= '{gap_day}' "
+        f"AND business_day_start < '{gap_day}T23:59:59';\n"
+    )
+
+
 def _invoke_chain_orphan_plant(
     *,
     prefix: str,
@@ -1513,6 +1598,39 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
         ),
         dashboard_check=DashboardCheck(
             matview_name="limit_breach",
+            min_row_count=1,
+        ),
+    ),
+    # CL.7 — balance_cadence_gap. Sits alongside the cap plants
+    # because both are operator-facing "the institution didn't
+    # report the right thing" surfaces (cap-breach + cadence-miss).
+    PlantKindEntry(
+        kind="balance_cadence_gap",
+        category=PlantCategory.L1_INVARIANT,
+        family="L1 Cap",
+        plant_function=_invoke_balance_cadence_gap_plant,
+        primitives=(
+            PrimitiveIntField(
+                name="days_ago",
+                label="Days ago",
+                help_text=(
+                    "Business-day offset for the missing daily_balances "
+                    "row. The plant picks the alphabetically-first "
+                    "internal entity declaring "
+                    "balance_cadence='explicit_daily' on this L2."
+                ),
+                default=2,
+                min_value=0,
+                max_value=90,
+            ),
+        ),
+        tour_destination=TourDestination(
+            primary_url=(
+                "/dashboards/l1_dashboard/sheets/l1-sheet-exceptions"
+            ),
+        ),
+        dashboard_check=DashboardCheck(
+            matview_name="balance_cadence_gap",
             min_row_count=1,
         ),
     ),

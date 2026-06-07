@@ -446,6 +446,35 @@ alternation across `BulkAccrualSettleACH` / `BulkAccrualSettleWire`):
 missed (count=0, days_ago=6) + overlap (count=2, days_ago=5).
 {% endif %}
 
+### 12. `{{ l2_instance_name }}_balance_cadence_gap` — Cadence-aware missing balance
+
+> For every Account whose `balance_cadence` is `explicit_daily`,
+> every business day in scope SHOULD have an emitted
+> `daily_balances` row. For Accounts on `sparse`, every business
+> day with transaction postings SHOULD have an emitted balance row
+> to reconcile against.
+
+The matview surfaces missing-balance days under two firing modes
+distinguished by the `gap_kind` column:
+
+- `declared_daily_missing` — the account declared `explicit_daily`
+  cadence (every business day must report a balance row) and this
+  business day has none. Fires regardless of activity.
+- `sparse_with_activity` — the account is on the `sparse` default
+  (no-emit on quiet days is fine), but postings happened today
+  and no confirming balance row was emitted. The institution has
+  activity it can't reconcile against a known close.
+
+**Columns:** `account_id`, `account_name`, `account_role`,
+`account_parent_role`, `business_day_start`, `balance_cadence`,
+`gap_day_net_flow`, `gap_day_leg_count`, `gap_kind`.
+
+**What to do:** For `declared_daily_missing`, check why the feed
+skipped the day — typically a stalled batch or a missed cutover.
+For `sparse_with_activity`, ask the source system to emit a
+balance row for the activity day so the close-of-day reconcile can
+land.
+
 ## Diagnostic surface — Supersession Audit
 
 `{{ l2_instance_name }}_supersession_*` is **not** a SHOULD-constraint — it's a
