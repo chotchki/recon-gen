@@ -16,10 +16,11 @@ These are repeated verbatim from PLAN.md so CP.0 has a single source of truth at
 
 ### 2.1 + 2.2 — Units + sign convention
 
-**LOCK: signed integer hours.** Range `int` (no narrowing `PositiveInt` / `NonNegativeInt`). Positive = later EOD, negative = earlier. Closest to timezone-style offsets without committing to real-time zone resolution (no DST, no tz database, no daylight transitions).
+**LOCK: signed integer hours in [-23, 23] inclusive** (chotchki 2026-06-07: "we should cap the range to -23 to 23, otherwise its nonsensical"). Positive = later EOD, negative = earlier. Closest to timezone-style offsets without committing to real-time zone resolution (no DST, no tz database, no daylight transitions). Anything outside [-23, 23] means "shift by more than a day," which has no operator-readable meaning at the EOD layer.
 
 - Field type on dataclasses: `business_day_offset: int | None = None`.
-- Validator range: none enforced at the dataclass layer — the loader accepts any int. Operator-facing helper text spells out "expected ±24h; values outside this are accepted but probably a typo."
+- **Range enforcement at the dataclass layer** via `__post_init__` on `Account` + `AccountTemplate`: reject `business_day_offset is not None and not (-23 <= business_day_offset <= 23)` with a typed `ValueError` naming the rule. Per [[feedback_invariants_in_types]] — fail at construction, not at "and a test happens to walk the output and flag it."
+- Editor form's `<input>` carries `min="-23" max="23"` for client-side hint; server-side `__post_init__` is the truth source.
 - ISO 8601 duration (`PT4H`, `PT-2H30M`) deliberately rejected — sub-hour shifts are exotic enough that the simpler integer wins; if a future customer surfaces a 30-min EOD, we re-spike (and likely fold to minutes).
 
 ### 2.3 — Default
@@ -177,7 +178,7 @@ The new generalized test (Axis 1 / Axis 2 of CP.8) catches both halves of the lo
 
 | Sub-cell | Lock-down impact |
 |---|---|
-| CP.1 | `int | None = None` field. No validator at this layer. |
+| CP.1 | `int | None = None` field on Account + AccountTemplate; `__post_init__` enforces `-23 <= offset <= 23` when not None. |
 | CP.2 | Read offset from `account.business_day_offset` (singletons) or `template.business_day_offset` (template path). |
 | CP.3 | Delete `L2Instance.role_business_day_offsets` + M.4.4.14. **Add `M.4.4.14a`** — reject offset on external_counter. |
 | CP.4 | FieldSpec as above + CSS hide rule on scope=external_counter. |
