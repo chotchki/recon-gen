@@ -334,3 +334,15 @@ CL.1 can fire as soon as this audit lands.
 - **Per-fixture cadence picks** (§2.3) are strawman; chotchki adjusts at CL.11 if a specific demo scenario wants different splits.
 - **CL.5 matview rewrite** touches L1 invariants — extra-careful pass before any merge to main. The carry-forward semantics are mathematically equivalent to the current behavior on sparse-default fixtures (no behavior change when balance reports are dense); the new behavior kicks in only when an account has missing-day rows that need filling.
 - **CL.10 re-lock** will break byte-identity intentionally because the new `<prefix>_daily_balances_calendar` and `<prefix>_effective_balances` views add rows. Commit messages document the expected delta.
+
+## 12. CL.14 sign-off — analysis-error footnotes
+
+Two audit claims turned out to be wrong during implementation. Recording here so the audit doc reflects ground truth at sign-off:
+
+**§3 — PG `LAST_VALUE(...) IGNORE NULLS OVER (...)`** — the audit claimed all three dialects (PG 16+, Oracle 19c, DuckDB) support the SQL-standard `IGNORE NULLS` window-function clause. **Wrong on PG.** PostgreSQL doesn't implement `IGNORE NULLS` in window functions (long-standing TODO, still pending as of PG 17). CL.5 commit hit the runtime error and replaced the window-function form with a correlated-subquery form (`SELECT money FROM daily_balances WHERE ... ORDER BY business_day_start DESC LIMIT 1`) that works on all three dialects per [[feedback_sql_dialect_convergence_preferred]]. Planner cost is bounded by the existing `(account_id, business_day_start)` composite index. See CL.5 commit `c966c301` for the corrected matview body.
+
+**§5 — "byte-identity should hold for sparse-only fixtures"** — the audit anticipated that fixtures choosing `sparse` everywhere would still produce byte-identical locked seeds because "the carry-forward window function reads the same rows the prior matview did." **Wrong.** CL.10 re-lock showed both bundled fixtures' violation sets shift even on sparse-only declarations, because CL.5 changed *what gets emitted* (drift / ledger_drift / overdraft now read effective_balances), not just *how rows get filled*. A sparse account whose last emit was negative now surfaces an overdraft row on every business day in scope until the next positive emit, not just the original emit day. This is the **intended new behavior** — the institution WAS in overdraft every one of those days from a regulatory perspective; the pre-CL dashboard simply hid them. The locks reflect the corrected behavior. See CL.10 commit `1025f93f`.
+
+Both errors caught by the implementation, neither reached operator-visible surface. The cold-read (CL.13) also caught one missing-wiring item — `<prefix>_balance_cadence_gap` matview was emitted but the L1 Exceptions UNION ALL didn't read it — fixed in the same CL.13 commit (`747754b2`) before merge.
+
+**CL.14 verdict: PROCEED with merge.** UI source-icon plumbing (CL.8 followup) remains in `PLAN.md` backlog; data layer + dashboard wiring are complete end-to-end.
