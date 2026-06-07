@@ -2214,6 +2214,27 @@ def _render_read_card_summary(
                 f'data-role="card-display-name">'
                 f"{escape(str(name_attr))}</span>"
             )
+        # CO.3 followup (2026-06-07) — surface Account.role on the
+        # summary too. role became required post-CO.3 + the cards
+        # collapse-by-default on the list view (body lazy-fetched on
+        # first toggle), so without surfacing role here the only way
+        # an operator sees the role from the list view is to expand
+        # every card. Renders as a small badge after the display
+        # name (or directly after the id when name is unset) so the
+        # at-a-glance scan answers both "which account" + "which
+        # role does it play". Same shape as the rail subtype badge
+        # so the visual vocabulary stays consistent.
+        role_attr = getattr(entity, "role", None)
+        if role_attr is not None and str(role_attr).strip():
+            role_badge_cls = (
+                "inline-block ml-2 px-1.5 py-0.5 text-xs font-semibold "
+                "rounded-sm bg-link-tint text-accent border border-accent/25"
+            )
+            display_name_html += (
+                f' <span class="{role_badge_cls}" '
+                f'data-role="card-role-badge">'
+                f"{escape(str(role_attr))}</span>"
+            )
     # CG.12 (2026-06-05) — chain card titles render the parent only;
     # the composite "Parent::ChildA,ChildB,..." is the URL/addressing
     # key (kept on `data-entity-id` for hx-target plumbing) but it's

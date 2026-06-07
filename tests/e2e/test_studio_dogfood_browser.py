@@ -97,10 +97,28 @@ def _build_studio_asgi(cache: L2InstanceCache) -> object:
     is studio-only — no dashboards, no DB pool. Wrap the real
     `make_studio_routes(cache)` directly so the test exercises the
     SAME routes the operator hits, just without the dashboards mount
-    the test doesn't need."""
-    from starlette.applications import Starlette  # noqa: PLC0415 — lazy
+    the test doesn't need.
 
-    return Starlette(routes=make_studio_routes(cache))  # type: ignore[arg-type]: Starlette accepts Route | Mount list; make_studio_routes returns exactly that
+    CO.3 followup (2026-06-07) — pass a top_nav_fn so editor pages
+    render the same Studio top-nav production gets. Without it,
+    `_top_nav_html` returns "" and `<a href="/">L2 Editor</a>`
+    never lands in the DOM; tests that navigate via the chrome
+    `goto_home()` verb time out on the nav locator.
+    """
+    from starlette.applications import Starlette  # noqa: PLC0415 — lazy
+    from recon_gen.common.html.render import (  # noqa: PLC0415 — lazy
+        build_top_nav_entries, emit_top_nav,
+    )
+
+    def _top_nav_fn(active_href: str) -> str:
+        entries = build_top_nav_entries(
+            dashboards=[], studio_enabled=True, docs_url=None,
+        )
+        return emit_top_nav(entries=entries, active_href=active_href)
+
+    return Starlette(  # type: ignore[arg-type]: Starlette accepts Route | Mount list; make_studio_routes returns exactly that
+        routes=make_studio_routes(cache, top_nav_fn=_top_nav_fn),
+    )
 
 
 @pytest.mark.browser

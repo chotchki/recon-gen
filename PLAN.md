@@ -474,9 +474,13 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 
 **Open design questions (lock before any sub-cells fire):**
 - Where does cadence live — on the `Account` primitive (per-account schedule attribute), the L2 yaml's `<prefix>_balance_policy` block (per-customer global), or a new typed `BalancePolicy` entity referenced by account_id?
+  - Comment: Lives on the account/account template blocks.
 - Activity-driven reporting is the default per the operator lock above. Other policies likely needed: (a) **explicit-daily** (a balance row MUST exist every business day; missing = gap-violation), (b) **EOM-only** (balance reported only on month-end business day; activity-day model on intervening days), (c) **per-state-cadence** (multi-state institutions may have different per-state report schedules). Per-account or global?
+  - Comment: Only support sparse and explicit daily for now, eom can be simulated with sparse and per state should be individual accounts
 - Studio Trainer needs a "sparse-load" plant kind so the operator can rehearse the policy in the studio before customer-data lands.
+  - Comment: the test data generator should follow the configured types but yes a violation should plant for daily in the trainer view
 - How do we surface "this account reported today" vs "this account didn't report today, carry-forward in effect" on Daily Statement / Drift visuals? (Cosmetic distinction — the underlying balance is the same — but operator-readable distinction matters.)
+  - Comment: I think a KPI could show, reported vs inherited
 
 - [ ] CL.0 - Replan + design — survey real customer ETL feed shapes; map onto our schema; lock cadence-declaration site + carry-forward policy taxonomy (default = activity-day-implicit, anything else opt-in). SPEC.md update. Output: `docs/audits/cl_0_sparse_balance_design.md`.
 
