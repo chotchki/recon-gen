@@ -832,6 +832,11 @@ def _emit_l1_invariant_views(
             "ct.posting", dialect,
         ),
         posting_to_date=to_date("posting", dialect),
+        # CL.5 — DATE-truncation of business_day_start for the
+        # effective_balances calendar-day spine. Cross-dialect:
+        # ``::date`` on PG/DuckDB, TRUNC(...) on Oracle.
+        to_date_bd_start=to_date("business_day_start", dialect),
+        to_date_db_start=to_date("db.business_day_start", dialect),
         # Typed NULL for the UNION ALL rail_name column. Oracle
         # rejects ``CAST(NULL AS CLOB)`` here (ORA-00932) because the
         # subsequent UNION branches' rail_name values are
@@ -2406,6 +2411,22 @@ CREATE INDEX idx_{p}_clb_account_day
 --   3. JOIN back to current_daily_balances on (account_id,
 --      carried_from_day) to fetch the carried money + business_day
 --      _end values.
+-- CL.5 followup (CI green fix): the original spine cross-joined
+-- all_internal_accounts × DISTINCT business_day_start globally,
+-- which produced duplicate spine rows for any account whose
+-- business_day_start TIMESTAMP differs from peer accounts'
+-- (per-entity offset variance: gl-1810 at offset=0 = midnight,
+-- gl-1830 at offset=9 = 09:00 → gl-1810 ended up paired with the
+-- 09:00 timestamp too, doubling its rows). Symptom: BG.2
+-- daily_statement_summary uniqueness assertion fired in CI.
+--
+-- Fix: cross-join over DATE-truncated calendar days, then look up
+-- each account's per-day actual TIMESTAMP via LEFT JOIN. Each
+-- (account, calendar_day) yields exactly one spine row (an
+-- account has at most one business_day_start per calendar day by
+-- construction). business_day_start is null on carry days; the
+-- COALESCE in the final SELECT fills it from carried_from_day's
+-- JOIN result.
 WITH all_internal_accounts AS (
     SELECT DISTINCT
         account_id, account_name, account_role,
@@ -2413,8 +2434,8 @@ WITH all_internal_accounts AS (
     FROM {p}_current_daily_balances
     WHERE account_scope = 'internal'
 ),
-in_scope_days AS (
-    SELECT DISTINCT business_day_start
+in_scope_calendar_days AS (
+    SELECT DISTINCT {to_date_bd_start} AS calendar_day
     FROM {p}_current_daily_balances
     WHERE account_scope = 'internal'
 ),
@@ -2422,30 +2443,37 @@ spine_joined AS (
     SELECT
         a.account_id, a.account_name, a.account_role,
         a.account_parent_role, a.account_scope,
-        d.business_day_start,
+        d.calendar_day,
+        db.business_day_start AS emitted_business_day_start,
         db.business_day_end AS emitted_day_end,
         db.money AS emitted_money,
         db.expected_eod_balance AS emitted_expected,
+        -- Per-account timestamps: each account has at most ONE
+        -- daily_balances row per calendar_day (no offset can
+        -- straddle two calendar days from the seed's per-day
+        -- emit). Marker carries the timestamp on emit days;
+        -- the MAX-OVER below propagates it through carry days.
         CASE WHEN db.money IS NOT NULL
-             THEN d.business_day_start END
+             THEN db.business_day_start END
             AS emit_day_marker
     FROM all_internal_accounts a
-    CROSS JOIN in_scope_days d
+    CROSS JOIN in_scope_calendar_days d
     LEFT JOIN {p}_current_daily_balances db
       ON db.account_id = a.account_id
-     AND db.business_day_start = d.business_day_start
+     AND {to_date_db_start} = d.calendar_day
 ),
 carried AS (
     SELECT
         sj.account_id, sj.account_name, sj.account_role,
         sj.account_parent_role, sj.account_scope,
-        sj.business_day_start,
+        sj.calendar_day,
+        sj.emitted_business_day_start,
         sj.emitted_day_end,
         sj.emitted_money,
         sj.emitted_expected,
         MAX(sj.emit_day_marker) OVER (
             PARTITION BY sj.account_id
-            ORDER BY sj.business_day_start
+            ORDER BY sj.calendar_day
             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
         ) AS carried_from_day
     FROM spine_joined sj
@@ -2453,10 +2481,16 @@ carried AS (
 SELECT
     c.account_id, c.account_name, c.account_role,
     c.account_parent_role, c.account_scope,
-    c.business_day_start,
+    -- business_day_start: on emit days, the per-account real
+    -- timestamp from the JOIN; on carry days, the carried prior-
+    -- emit's timestamp. Both share the account's own offset
+    -- convention so downstream JOINs comparing against
+    -- daily_balances.business_day_start resolve correctly.
+    COALESCE(c.emitted_business_day_start, db2.business_day_start)
+        AS business_day_start,
     -- Carry-forward business_day_end + money + expected from the
     -- prior-emit JOIN. When the spine day IS the emit day,
-    -- carried_from_day = business_day_start and the JOIN
+    -- carried_from_day = emitted_business_day_start and the JOIN
     -- self-matches; when carried, carried_from_day points at the
     -- prior emit row.
     COALESCE(c.emitted_day_end, db2.business_day_end)
@@ -2467,10 +2501,11 @@ SELECT
         AS expected_eod_balance,
     -- carried_from_day: spine day = the most-recent emit at-or-
     -- before this row. When emit IS on this day, equals
-    -- business_day_start; when carried, points at the prior emit's
-    -- business_day_start. Consumers in daily_statement_summary use
-    -- this to fill closing_carried_from_date for App2's empty-state
-    -- copy without needing their own correlated subquery.
+    -- emitted_business_day_start; when carried, points at the
+    -- prior emit's business_day_start. Consumers in daily_statement
+    -- _summary use this to fill closing_carried_from_date for
+    -- App2's empty-state copy without needing their own correlated
+    -- subquery.
     c.carried_from_day,
     CASE WHEN c.emitted_money IS NOT NULL THEN 'emitted'
          ELSE 'carried' END AS source
