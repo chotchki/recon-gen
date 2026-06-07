@@ -49,6 +49,7 @@ from recon_gen.common.sql import (
     analyze_table,
     bigint_type,
     cast,
+    fetch_first_one_row,
     concat_agg,
     date_minus_days,
     date_trunc_day,
@@ -832,6 +833,10 @@ def _emit_l1_invariant_views(
             "ct.posting", dialect,
         ),
         posting_to_date=to_date("posting", dialect),
+        # CL.5 — Oracle uses FETCH FIRST 1 ROW ONLY; PG / DuckDB use
+        # LIMIT 1. Threaded into the effective_balances correlated
+        # subqueries.
+        fetch_first=fetch_first_one_row(dialect),
         # Typed NULL for the UNION ALL rail_name column. Oracle
         # rejects ``CAST(NULL AS CLOB)`` here (ORA-00932) because the
         # subsequent UNION branches' rail_name values are
@@ -2421,13 +2426,13 @@ SELECT
      WHERE db.account_id = s.account_id
        AND db.business_day_start <= s.business_day_start
      ORDER BY db.business_day_start DESC
-     LIMIT 1) AS business_day_end,
+     {fetch_first}) AS business_day_end,
     -- emitted_money: the on-the-day money column, NULL when no emit.
     (SELECT db.money
      FROM {p}_current_daily_balances db
      WHERE db.account_id = s.account_id
        AND db.business_day_start = s.business_day_start
-     LIMIT 1) AS emitted_money,
+     {fetch_first}) AS emitted_money,
     -- effective_money: carry-forward of the most-recent emit at-or-
     -- before this day. NULL only for an account that has zero emits
     -- at or before this day in scope.
@@ -2436,7 +2441,7 @@ SELECT
      WHERE db.account_id = s.account_id
        AND db.business_day_start <= s.business_day_start
      ORDER BY db.business_day_start DESC
-     LIMIT 1) AS effective_money,
+     {fetch_first}) AS effective_money,
     -- expected_eod_balance carries the on-the-day declaration when
     -- emitted; otherwise the most-recent expected (since L2 declares
     -- per-account, not per-day, it should rarely change).
@@ -2445,7 +2450,7 @@ SELECT
      WHERE db.account_id = s.account_id
        AND db.business_day_start <= s.business_day_start
      ORDER BY db.business_day_start DESC
-     LIMIT 1) AS expected_eod_balance,
+     {fetch_first}) AS expected_eod_balance,
     CASE WHEN EXISTS (
         SELECT 1 FROM {p}_current_daily_balances db
         WHERE db.account_id = s.account_id
