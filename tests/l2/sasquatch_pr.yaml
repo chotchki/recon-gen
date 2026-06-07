@@ -32,6 +32,18 @@
 # Description fields fill prose for the M.7 handbook render pipeline.
 # Keep them concise, plain-English, focused on WHAT this entity is and
 # WHY it exists in SNB's chart of accounts. Markdown OK.
+#
+# CP — exhibits per-entity business_day_offset on role-shared accounts.
+# Sasquatch's internal singletons all carry distinct roles, so the demo
+# of per-entity asymmetry runs on two DIFFERENT-role internal singletons:
+# CashDueFRB (gl-1010) at +0 (midnight UTC, the SNB-default) and
+# InternalTransferSuspense (gl-1830) at +9 (Tokyo-style EOD, e.g., SNB's
+# Asia-Pacific desk's local cutoff). The MerchantDDA template also carries
+# a non-trivial offset (-5, Eastern-US-style) so every materialized
+# merchant DDA instance inherits an EOD cutoff that mirrors its
+# legal-domicile timezone (Lock 4 — template offset fans out to instances).
+# Values are strawman picks per CP.6 — tweak per the demo narrative
+# without rebalancing the offset Lock contract.
 
 description: |
   Sasquatch National Bank's combined treasury + merchant-acquiring
@@ -107,6 +119,10 @@ accounts:
       credits or debits this account. Drift here means SNB's view of
       its FRB balance and the Fed statement disagree — a regulatory
       exposure.
+    # CP — midnight-UTC EOD cutoff (the SNB-canonical pick; the FRB
+    # Cash GL is the master settlement balance so the explicit-0 makes
+    # the offset Lock visible against the default).
+    business_day_offset: 0
 
   - id: gl-1810-ach-orig-settlement
     name: ACH Origination Settlement
@@ -149,6 +165,13 @@ accounts:
       means a credit-half is stuck — the source-DDA owner's money is
       in flight.
     expected_eod_balance: 0
+    # CP — Tokyo-style EOD cutoff (+9h). Demo narrative: SNB's
+    # Asia-Pacific operations desk runs the on-us-transfer suspense
+    # close at local midnight. Combined with CashDueFRB at +0 above,
+    # this exhibits per-entity offset asymmetry — two internal
+    # singletons in the same chart of accounts with DIFFERENT EOD
+    # cutoffs.
+    business_day_offset: 9
 
   - id: gl-1840-merchant-payable-clearing
     name: Merchant Payable Clearing
@@ -302,6 +325,12 @@ account_templates:
       MerchantPayoutACH rail (one of the XOR payout vehicles).
       Merchants banking elsewhere get MerchantPayoutWire / Check to
       an external counterparty instead.
+    # CP — Eastern-US-style EOD cutoff (-5h, NY/EST). Demo narrative:
+    # SNB's merchant book runs the close at local US Eastern midnight
+    # for the bulk of its merchant base. Every materialized merchant
+    # DDA instance inherits this offset (Lock 4 — template-level fans
+    # out to instances).
+    business_day_offset: -5
 
   - role: ZBASubAccount
     scope: internal

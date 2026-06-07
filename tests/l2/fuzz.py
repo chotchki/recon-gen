@@ -240,6 +240,23 @@ def _build_instance(rng: Random, plan: FuzzPlan) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+# CP.7 (2026-06-06) — per-entity business_day_offset emission.
+#
+# Distribution (locked strawman per the CP.7 spec): 60% None / 30% 0 /
+# 10% uniform in [-12, 12]. The triple gives the CP.8 anti-drift gate
+# both halves it needs (some non-None, some None; some zero, some not)
+# at N=100 seeds. EXTERNAL-scope accounts/templates MUST NOT carry the
+# field — validator M.4.4.14a rejects external offsets at load time;
+# call this helper only from the internal-scope code paths.
+def _maybe_business_day_offset(rng: Random) -> int | None:
+    roll = rng.random()
+    if roll < 0.60:
+        return None
+    if roll < 0.90:
+        return 0
+    return rng.randint(-12, 12)
+
+
 def _build_accounts(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
     """Singleton accounts + their roles."""
     accounts: list[dict[str, Any]] = []
@@ -260,6 +277,11 @@ def _build_accounts(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
         d = _maybe_description(rng, state, f"internal account {i}")
         if d is not None:
             a["description"] = d
+        # CP.7 — per-entity offset on internal accounts only (M.4.4.14a
+        # rejects external offsets).
+        bdo = _maybe_business_day_offset(rng)
+        if bdo is not None:
+            a["business_day_offset"] = bdo
         accounts.append(a)
 
     for i in range(state.plan.n_singleton_external):
@@ -275,6 +297,8 @@ def _build_accounts(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
         d = _maybe_description(rng, state, f"external account {i}")
         if d is not None:
             a["description"] = d
+        # CP.7 — explicitly NO offset emission on external accounts;
+        # the validator (M.4.4.14a) rejects them at load.
         accounts.append(a)
 
     return accounts
@@ -306,6 +330,14 @@ def _build_account_templates(
         d = _maybe_description(rng, state, f"template {i}")
         if d is not None:
             t["description"] = d
+        # CP.7 — per-entity offset on internal templates. The fuzz
+        # generator only emits scope=internal templates today; the
+        # guard makes the dependency explicit (if a future widen-up
+        # adds external templates, this branch stays correct).
+        if t["scope"] == "internal":
+            bdo = _maybe_business_day_offset(rng)
+            if bdo is not None:
+                t["business_day_offset"] = bdo
         templates.append(t)
     return templates
 

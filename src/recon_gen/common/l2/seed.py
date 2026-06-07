@@ -66,7 +66,7 @@ from __future__ import annotations
 import random
 import zlib
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from recon_gen.common.as_of_frame import AsOfFrame
@@ -4258,16 +4258,30 @@ def _eod_timestamp(d: date, offset_hours: int = 0) -> str:
     """End-of-day UTC timestamp for `d` shifted by ``offset_hours``
     (i.e. start of next day at the same hour). Default 0 keeps
     midnight-aligned production behavior.
+
+    CP.9 (2026-06-06) — switched from f"…T{offset_hours:02d}:00…"
+    string-format to ``datetime + timedelta`` arithmetic. The string
+    format produced invalid timestamps for NEGATIVE offsets
+    (e.g. `f"{-3:02d}"` → `"-3"`, yielding `T-3:00:00` which DuckDB
+    rejects). datetime arithmetic naturally handles wrap-around: a
+    -3h offset on day D yields D 21:00 UTC (the prior day's last
+    hours), which is what an EOD-at-local-midnight desk in a
+    UTC-3 timezone implies.
     """
-    next_day = d + timedelta(days=1)
-    return f"{next_day.isoformat()}T{offset_hours:02d}:00:00+00:00"
+    base = datetime.combine(d + timedelta(days=1), time(0))
+    shifted = base + timedelta(hours=offset_hours)
+    return f"{shifted.isoformat()}+00:00"
 
 
 def _bod_timestamp(d: date, offset_hours: int = 0) -> str:
     """Beginning-of-day UTC timestamp for `d` shifted by ``offset_hours``.
     Default 0 keeps midnight-aligned production behavior.
+
+    CP.9 — see _eod_timestamp; same fix for negative offsets.
     """
-    return f"{d.isoformat()}T{offset_hours:02d}:00:00+00:00"
+    base = datetime.combine(d, time(0))
+    shifted = base + timedelta(hours=offset_hours)
+    return f"{shifted.isoformat()}+00:00"
 
 
 

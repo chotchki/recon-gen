@@ -184,6 +184,229 @@ def test_fuzzer_exercises_every_primitive_kind_across_seeds(
 
 
 # ---------------------------------------------------------------------------
+# CP.8 — generalized fuzz-coverage anti-drift test
+# ---------------------------------------------------------------------------
+#
+# Sample N=100 fuzz seeds; for every optional + collection field on every
+# L2 primitive walked, assert across the sample:
+#   (a) at least one seed produces a non-None value — anti-drift against
+#       the fuzz generator forgetting an optional field.
+#   (b) at least one seed produces None — anti-regression against
+#       "fuzz always populates everything" (real customer L2s have
+#       mixed coverage; the fuzzer should mirror that).
+#   (c) at least one collection field has len > 0.
+#   (d) at least one collection field has len == 0 — same anti-regression
+#       shape, on the collection axis.
+#
+# CARVE-OUTS (each names the rule that puts the field in "won't ever
+# hit this half" territory). Carve-outs are escape hatches against the
+# gate, not freebies: each one cites the validator rule / SPEC clause
+# / fuzz design choice that makes the half unreachable, so reviewers
+# can challenge a carve-out the same way they'd challenge a `# noqa`.
+# When the underlying constraint relaxes (e.g. SPEC allows empty
+# Chain.children), the carve-out should be deleted, not extended.
+#
+# Each tuple is (cls_name, field_name, axis): axis in {"a","b","c","d"}.
+_CP_8_CARVE_OUTS: frozenset[tuple[str, str, str]] = frozenset({
+    # Chain.children — SPEC requires at least one child (singleton ⇒
+    # required, multi ⇒ XOR; empty has no firing semantic). Validator
+    # rejects empty children.
+    ("Chain", "children", "d"),
+    # TransferTemplate.transfer_key + leg_rails — validator-required
+    # non-empty (S5 / S6: a template with no transfer_key has no
+    # grouping shape; a template with no leg_rails has no legs).
+    ("TransferTemplate", "transfer_key", "d"),
+    ("TransferTemplate", "leg_rails", "d"),
+    # TwoLegRail.source_role / destination_role + SingleLegRail.leg_role
+    # — RoleExpression is always non-empty (the validator's
+    # role-resolution rule walks each element; an empty role-tuple is
+    # an unrenderable rail).
+    ("TwoLegRail", "source_role", "d"),
+    ("TwoLegRail", "destination_role", "d"),
+    ("SingleLegRail", "leg_role", "d"),
+    # FiringsTypicalPerPeriod.count_range — fixed-arity tuple[int, int];
+    # never empty by construction (validator W1a-c: min <= max).
+    ("FiringsTypicalPerPeriod", "count_range", "d"),
+    # --- fuzz-design carve-outs (NOT validator-required; the fuzz
+    # generator just doesn't widen here yet) -----------------------------
+    # Account.name — fuzz always sets a name (`f"Internal Account {i:02d}"`).
+    # Widening fuzz to sometimes omit name is a follow-up; carve out (b)
+    # so this gate stays green until that widen lands.
+    ("Account", "name", "b"),
+    # Account.parent_role — fuzz only sets parent_role on
+    # AccountTemplates, never on root Accounts. (R2 allows account
+    # parent_role to point at any role; fuzz doesn't exercise that.)
+    ("Account", "parent_role", "a"),
+    # AccountTemplate.parent_role — fuzz always sets it (R3 makes the
+    # template's parent_role useful for instance materialization, even
+    # though the loader allows None at the type level). Widening fuzz
+    # to sometimes omit it is a follow-up.
+    ("AccountTemplate", "parent_role", "b"),
+    # AccountTemplate.expected_eod_balance / instance_id_template /
+    # instance_name_template — fuzz doesn't set these today. Widening
+    # is a follow-up.
+    ("AccountTemplate", "expected_eod_balance", "a"),
+    ("AccountTemplate", "instance_id_template", "a"),
+    ("AccountTemplate", "instance_name_template", "a"),
+    # TwoLegRail.posted_requirements / metadata_value_examples — fuzz
+    # never emits non-empty values here.
+    ("TwoLegRail", "posted_requirements", "c"),
+    ("TwoLegRail", "metadata_value_examples", "c"),
+    # SingleLegRail — same shape as TwoLegRail for these.
+    ("SingleLegRail", "origin", "b"),
+    ("SingleLegRail", "posted_requirements", "c"),
+    ("SingleLegRail", "bundles_activity", "c"),
+    ("SingleLegRail", "cadence", "a"),
+    ("SingleLegRail", "metadata_value_examples", "c"),
+    # TransferTemplate.firings_typical_per_period — fuzz never sets it
+    # on TTs (set on rails by _build_rails, not on the TT shape).
+    ("TransferTemplate", "firings_typical_per_period", "a"),
+    # Chain.description — fuzz never sets a chain description.
+    ("Chain", "description", "a"),
+})
+
+
+def _is_collection_origin(origin: object) -> bool:
+    """Per CP.8 spec — origin is a collection if it's tuple / list /
+    set / frozenset / dict. Note: this returns True even for fixed-
+    arity tuple shapes like `tuple[int, int]`; carve-outs on (d)
+    handle the "never empty by construction" cases explicitly.
+    """
+    # origin comes from typing.get_origin which returns object|None per
+    # the stubs; identity-compare against the concrete builtin types.
+    return (
+        origin is tuple
+        or origin is list
+        or origin is set
+        or origin is frozenset
+        or origin is dict
+    )
+
+
+def test_fuzzer_populates_every_optional_field(tmp_path: "Path") -> None:
+    """CP.8 — sample N=100 fuzz seeds; assert (a)/(b)/(c)/(d) holds for
+    every optional + collection field on every L2 primitive walked,
+    modulo the _CP_8_CARVE_OUTS escape hatches.
+
+    Walks the L2Instance dataclass tree recursively — every Rail
+    subtype, every ChainChildSpec, every FiringsTypicalPerPeriod.
+    For each (cls, field) seen across the 100 seeds, records:
+      - saw_non_none: at least one observed value was non-None
+      - saw_none:     at least one observed value was None
+      - saw_nonempty: at least one observed collection had len > 0
+      - saw_empty:    at least one observed collection had len == 0
+
+    The assertion message names the specific field + which half failed
+    so a regression triages without re-reading this comment block.
+    """
+    import dataclasses as _dc  # noqa: PLC0415 — lazy
+    from collections import defaultdict  # noqa: PLC0415 — lazy
+    from typing import (  # noqa: PLC0415 — lazy
+        get_args, get_origin, get_type_hints,
+    )
+
+    saw_non_none: dict[tuple[str, str], bool] = defaultdict(bool)
+    saw_none: dict[tuple[str, str], bool] = defaultdict(bool)
+    saw_nonempty: dict[tuple[str, str], bool] = defaultdict(bool)
+    saw_empty: dict[tuple[str, str], bool] = defaultdict(bool)
+    classes: dict[str, type] = {}
+
+    def _walk(obj: object) -> None:
+        if not _dc.is_dataclass(obj) or isinstance(obj, type):
+            return
+        cls = type(obj)
+        classes[cls.__name__] = cls
+        for f in _dc.fields(cls):  # pyright: ignore[reportArgumentType]: narrowed by is_dataclass + not-isinstance(type) above; pyright's protocol union doesn't preserve the narrowing
+            value: object = getattr(obj, f.name)
+            key = (cls.__name__, f.name)
+            if value is None:
+                saw_none[key] = True
+            else:
+                saw_non_none[key] = True
+            if isinstance(value, (tuple, list, set, frozenset)):
+                items: "list[object]" = list(value)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]: collection element type is `object`; the walk doesn't care
+                if items:
+                    saw_nonempty[key] = True
+                    for item in items:
+                        _walk(item)
+                else:
+                    saw_empty[key] = True
+            elif isinstance(value, dict):
+                vals: "list[object]" = list(value.values())  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]: value type is `object` here
+                if vals:
+                    saw_nonempty[key] = True
+                    for item in vals:
+                        _walk(item)
+                else:
+                    saw_empty[key] = True
+            elif _dc.is_dataclass(value):
+                _walk(value)
+
+    for seed in META_GUARD_SEEDS:
+        yaml_text = random_l2_yaml(seed)
+        p = tmp_path / f"fuzz_{seed}.yaml"
+        p.write_text(yaml_text)
+        inst = load_instance(p)
+        for collection in (
+            inst.accounts, inst.account_templates, inst.rails,
+            inst.transfer_templates, inst.chains, inst.limit_schedules,
+        ):
+            for entity in collection:
+                _walk(entity)
+
+    failures: list[str] = []
+    for cname, cls in classes.items():
+        try:
+            hints = get_type_hints(cls)
+        except Exception:  # noqa: BLE001 — type-hint resolution failure shouldn't crash the gate
+            hints = {}
+        for f in _dc.fields(cls):
+            hint = hints.get(f.name, f.type)
+            args = get_args(hint)
+            origin = get_origin(hint)
+            is_optional = type(None) in args
+            is_collection = _is_collection_origin(origin)
+            key = (cname, f.name)
+            if is_optional:
+                if (cname, f.name, "a") not in _CP_8_CARVE_OUTS and not saw_non_none[key]:
+                    failures.append(
+                        f"{cname}.{f.name}: (a) failed — fuzz generator "
+                        f"never populated this field across N={len(META_GUARD_SEEDS)} "
+                        f"seeds. Either widen the fuzzer to emit this "
+                        f"field, or add an (a)-carve-out citing the rule."
+                    )
+                if (cname, f.name, "b") not in _CP_8_CARVE_OUTS and not saw_none[key]:
+                    failures.append(
+                        f"{cname}.{f.name}: (b) failed — fuzz generator "
+                        f"always emitted a value (None never observed) "
+                        f"across N={len(META_GUARD_SEEDS)} seeds. Real "
+                        f"customer L2s have mixed coverage — widen the "
+                        f"fuzzer to sometimes omit, or add a (b)-carve-out."
+                    )
+            if is_collection:
+                if (cname, f.name, "c") not in _CP_8_CARVE_OUTS and not saw_nonempty[key]:
+                    failures.append(
+                        f"{cname}.{f.name}: (c) failed — collection "
+                        f"field was always empty across N={len(META_GUARD_SEEDS)} "
+                        f"seeds. Widen the fuzzer or add a (c)-carve-out."
+                    )
+                if (cname, f.name, "d") not in _CP_8_CARVE_OUTS and not saw_empty[key]:
+                    failures.append(
+                        f"{cname}.{f.name}: (d) failed — collection "
+                        f"field was never empty across N={len(META_GUARD_SEEDS)} "
+                        f"seeds (always had at least one element). Widen "
+                        f"the fuzzer to sometimes emit empty, or add a "
+                        f"(d)-carve-out citing the constraint."
+                    )
+
+    assert not failures, (
+        f"CP.8 fuzz-coverage gate detected {len(failures)} field(s) "
+        f"with under-exercised optional/collection coverage:\n  - "
+        + "\n  - ".join(failures)
+    )
+
+
+# ---------------------------------------------------------------------------
 # CF.3.spike — public ``random_l2_yaml_from_plan(plan)`` entry
 # ---------------------------------------------------------------------------
 

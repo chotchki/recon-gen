@@ -7,6 +7,15 @@
 # Every singleton + role here uses a generic, persona-neutral name. If
 # the seed accidentally hardcodes a Sasquatch identifier, the
 # persona-clean test catches it.
+#
+# CP — exhibits per-entity business_day_offset on role-shared accounts.
+# The two CustomerSubledger singletons (cust-001 + cust-002) below
+# share the same role but carry DISTINCT offsets (0 = midnight UTC,
+# +5 ≈ Karachi-style EOD). The CustomerSubledger template also carries
+# a non-trivial offset (-3) so its materialized instances exhibit a
+# template-driven offset (Lock 4 — template offset fans out to instances).
+# Values are strawman picks per CP.6 — tweak as the demo narrative
+# needs without rebalancing the offset Lock contract.
 
 description: |
   Generic SPEC-shaped instance for cleanliness testing of the lifted
@@ -46,12 +55,21 @@ accounts:
     role: CustomerSubledger
     scope: internal
     parent_role: CustomerLedger
+    # CP — midnight-UTC EOD cutoff (the default-explicit pick on a
+    # role-shared singleton pair; cust-002 below carries +5).
+    business_day_offset: 0
 
   - id: cust-002
     name: Customer Number Two
     role: CustomerSubledger
     scope: internal
     parent_role: CustomerLedger
+    # CP — Karachi-style EOD (+5h). Distinct from cust-001 above to
+    # exercise the role-shared per-entity asymmetry: two accounts with
+    # the SAME role can carry DIFFERENT offsets (per-entity is the
+    # whole point of CP; the deleted role-level map couldn't express
+    # this shape).
+    business_day_offset: 5
 
 account_templates:
   # CF.0 (2026-06-04) regression fixture — AlphaCustomerStub is
@@ -79,6 +97,11 @@ account_templates:
     # template-generated ids MUST NOT collide with declared singletons.
     instance_id_template: tmpl-cust-{n:03d}
     instance_name_template: Demo Customer {n}
+    # CP — template-level offset (-3h, e.g., Halifax-style EOD). Every
+    # instance materialized from this template inherits this offset
+    # (Lock 4). U2 makes (role) unique across templates so the
+    # template offset naturally fans out without ambiguity.
+    business_day_offset: -3
 
 rails:
   # Two-leg with per-leg origin — used by drift plant background postings

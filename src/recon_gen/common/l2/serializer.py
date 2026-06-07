@@ -115,6 +115,12 @@ def _dump_account(a: Account) -> dict[str, Any]:  # typing-smell: ignore[explici
         out["expected_eod_balance"] = _dump_money(a.expected_eod_balance)
     if a.description is not None:
         out["description"] = a.description
+    # CP — emit business_day_offset (signed int hours; range [-23, 23]).
+    # Only ever set on scope=internal accounts (M.4.4.14a), so no
+    # external-scope guard needed at emit time (load-side validator
+    # would have rejected an external+offset combo upstream).
+    if a.business_day_offset is not None:
+        out["business_day_offset"] = a.business_day_offset
     return out
 
 
@@ -130,6 +136,11 @@ def _dump_account_template(t: AccountTemplate) -> dict[str, Any]:  # typing-smel
         out["instance_id_template"] = t.instance_id_template
     if t.instance_name_template is not None:
         out["instance_name_template"] = t.instance_name_template
+    # CP — emit business_day_offset (Lock 4: template offset fans out
+    # to every materialized instance). Only ever set on scope=internal
+    # templates (M.4.4.14a).
+    if t.business_day_offset is not None:
+        out["business_day_offset"] = t.business_day_offset
     return out
 
 
