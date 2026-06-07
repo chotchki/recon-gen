@@ -128,10 +128,22 @@ jobs:
         # Exported via $GITHUB_ENV so all subsequent steps see
         # PG_PASSWORD / ORACLE_PASSWORD. Replaces the pre-BX.248
         # source-checked `postgres` / `qsgentestpwd2026` literals.
+        #
+        # v13.3.0 followup — `::add-mask::` redacts the generated value
+        # from every subsequent log frame (env blocks, command output,
+        # anywhere GHA prints them). Without it the env-block GHA dumps
+        # before every step shows PG_PASSWORD / ORACLE_PASSWORD in
+        # clear text, since the values aren't secrets (GHA auto-masks
+        # `${{ secrets.* }}` values but has no way to know about
+        # runtime-generated strings unless we tell it).
         run: |
+          PG_PASSWORD=$(openssl rand -hex 14)
+          ORACLE_PASSWORD=$(openssl rand -hex 14)
+          echo "::add-mask::${PG_PASSWORD}"
+          echo "::add-mask::${ORACLE_PASSWORD}"
           {
-            echo "PG_PASSWORD=$(openssl rand -hex 14)"
-            echo "ORACLE_PASSWORD=$(openssl rand -hex 14)"
+            echo "PG_PASSWORD=${PG_PASSWORD}"
+            echo "ORACLE_PASSWORD=${ORACLE_PASSWORD}"
           } >> "$GITHUB_ENV"
 
       - name: Ensure shared PG + Oracle are up (reuse persistent containers when present)
