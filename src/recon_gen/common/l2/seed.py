@@ -4082,17 +4082,19 @@ def _emit_baseline_daily_balances(
     day's EOD, which equals ``SUM(signed_amount)`` through that prior
     day (no legs post Sat/Sun, so the cumulative sum is unchanged).
 
-    Per-role business-day offsets (M.4.4.14): roles in
-    ``instance.role_business_day_offsets`` get their business_day_start
-    / business_day_end shifted by the configured hour offset. Roles
-    without an entry default to midnight-aligned (00:00 → 00:00 next
-    day).
+    Per-entity business-day offsets (CP — replaces M.4.4.14's per-role
+    top-level dict): each `Account.business_day_offset` /
+    `AccountTemplate.business_day_offset` gets that account's
+    business_day_start / business_day_end shifted by the declared hour
+    offset. Entities without a value default to midnight-aligned
+    (00:00 → 00:00 next day). Role-shared accounts CAN declare
+    different offsets (Lock 1 of Phase CP) — the seed reads the
+    per-entity value directly, no dict lookup.
     """
     if not state.account_leg_log:
         return []
 
     account_meta = _build_account_meta_map(state, instance)
-    role_offsets = instance.role_business_day_offsets or {}
 
     # Walk every account's leg log in chronological order to compute
     # correct cumulative EOD balances. Per-leg accumulation; last leg
@@ -4137,7 +4139,7 @@ def _emit_baseline_daily_balances(
         meta = account_meta.get(account_id)
         if meta is None:
             continue
-        offset_hours = role_offsets.get(str(meta.account_role), 0)
+        offset_hours = meta.business_day_offset or 0
         rows.append(_balance_row(
             account_id=meta.account_id,
             account_name=meta.account_name,
@@ -4175,6 +4177,8 @@ def _build_account_meta_map(
             account_role=ti.template_role,
             account_scope=tmpl.scope,
             account_parent_role=tmpl.parent_role,
+            # CP.2 — template offset fans out to every materialized instance.
+            business_day_offset=tmpl.business_day_offset,
         )
     for a in instance.accounts:
         out[a.id] = _ResolvedAccount(
@@ -4183,6 +4187,8 @@ def _build_account_meta_map(
             account_role=a.role or Identifier(str(a.id)),
             account_scope=a.scope,
             account_parent_role=a.parent_role,
+            # CP.2 — per-singleton offset.
+            business_day_offset=a.business_day_offset,
         )
     return out
 
@@ -4331,6 +4337,14 @@ class _ResolvedAccount:
     account_role: Identifier
     account_scope: str
     account_parent_role: Identifier | None
+    # CP — per-entity EOD offset, hours from midnight UTC. None ⇒
+    # midnight-aligned (default). Pulled from the singleton Account
+    # for instance.accounts entries, or from the AccountTemplate for
+    # materialized template-instance entries (Lock 4: per-template
+    # offset applies to all materialized instances). Scope=external
+    # accounts always carry None per CP.0 audit + validator M.4.4.14a
+    # — we don't compute their EOD balances at all.
+    business_day_offset: int | None = None
 
 
 def _resolve_any_account(
