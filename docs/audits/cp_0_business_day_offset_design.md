@@ -29,14 +29,16 @@ These are repeated verbatim from PLAN.md so CP.0 has a single source of truth at
 
 ### 2.4 — Scope gating
 
-**LOCK: gate by `Account.scope`** — the field is meaningful on internal-tracking accounts (`gl_control`, `dda`, `merchant_dda`, `concentration_master`, `funds_pool`) and meaningless on `external_counter` because **we don't track the external counterparty's balance** — there is no EOD balance row for an external_counter account, so an EOD offset has no consumer.
+**LOCK: gate by `Account.scope`** — the field is meaningful on `scope: internal` accounts (we track their EOD balance) and meaningless on `scope: external` accounts because **we don't track the external counterparty's balance**, so an EOD offset has no consumer.
+
+(Note: `Account.scope` is the coarse `internal | external` literal on the primitive. The finer-grained 6-value `account_type` taxonomy named in CLAUDE.md / `docs/Schema_v6.md` lives on the transaction-feed contract — `<prefix>_transactions.account_type` — not the L2 Account dataclass. CP gating happens at the coarse `scope` layer where the field exists.)
 
 Implementation consequence:
 
 - **Dataclass:** field exists on `Account` unconditionally (the dataclass doesn't know the scope semantics). No `__post_init__` rejection — loader accepts the YAML key on any account type.
-- **Editor form:** the FieldSpec is unconditional in the spec list but the rendered HTML hides the field-row when `select[name="scope"]` is `external_counter`. Pure CSS via Tailwind v4 `:has()` — same pattern as CO.3's aggregating-dependent field hiding (`assets/input.css` already has 4 rules of this shape). One additional rule, no JS.
-- **Validator:** new rule `M.4.4.14a` (or wherever the next slot lands) — reject `Account.business_day_offset is not None` when `Account.scope == "external_counter"`. Validator message names the rule + suggests removing the offset field.
-- **AccountTemplate:** templates don't have a scope field directly; templates materialize into accounts whose scope is set per the materialization config. The template-level offset applies to whichever scope the instances land at. If a template materializes into external_counter instances, the template's offset is rejected at validation time the same way as on a singleton account.
+- **Editor form:** the FieldSpec is unconditional in the spec list but the rendered HTML hides the field-row when `select[name="scope"]` is `external`. Pure CSS via Tailwind v4 `:has()` — same pattern as CO.3's aggregating-dependent field hiding (`assets/input.css` already has 4 rules of this shape). One additional rule, no JS.
+- **Validator:** new rule `M.4.4.14a` (or wherever the next slot lands) — reject `Account.business_day_offset is not None` when `Account.scope == "external"`. Validator message names the rule + suggests removing the offset field.
+- **AccountTemplate:** templates don't have a scope field directly; templates materialize into accounts whose scope is set per the materialization config. The template-level offset applies to whichever scope the instances land at. If a template materializes into external instances, the template's offset is rejected at validation time the same way as on a singleton account.
 
 ### 2.5 — Per-fixture offset choices + fuzz distribution
 
@@ -44,7 +46,7 @@ Implementation consequence:
 
 The implementation can proceed without locking the specific offset values — the dogfood / fuzz tests don't care about specific values, just non-trivial coverage. CP.6 ("update bundled fixtures") will:
 
-- spec_example: at minimum one role-shared account pair with distinct offsets. Strawman shape until operator picks: London-style branch at `+0`, Tokyo-style branch at `+9` for some pre-existing ExternalCounterparty role pair... **WAIT** — Lock 2.4 forbids offsets on external_counter accounts. So for spec_example, pick an internal role like `CustomerDDA` and split it across two scope=dda accounts with `+0` and `+9`. Equivalent demonstration of the per-entity-non-uniformity feature.
+- spec_example: at minimum one role-shared account pair with distinct offsets. Strawman shape until operator picks: London-style branch at `+0`, Tokyo-style branch at `+9` for some pre-existing ExternalCounterparty role pair... **WAIT** — Lock 2.4 forbids offsets on external accounts. So for spec_example, pick an internal role like `CustomerDDA` and split it across two scope=dda accounts with `+0` and `+9`. Equivalent demonstration of the per-entity-non-uniformity feature.
 
 - sasquatch_pr: same shape but with role + offset values picked from the persona's existing account inventory. Operator picks.
 
@@ -89,7 +91,7 @@ accounts:
   - id: external-bank-1
     name: External Counterparty
     role: SomeExternalRole
-    scope: external_counter
+    scope: external
     # business_day_offset: 5         # ← REJECTED by validator M.4.4.14a
 
   - id: gl-1010-cash-due-frb
@@ -114,7 +116,7 @@ Post-CP:
 offset_hours = account.business_day_offset or 0
 # Template-materialized instance
 offset_hours = template.business_day_offset or 0
-# external_counter accounts are skipped at a higher level — we don't
+# external accounts are skipped at a higher level — we don't
 # compute EOD balances for them at all, so the offset is never read.
 ```
 
@@ -145,14 +147,14 @@ Position: immediately after `expected_eod_balance` in both `_ACCOUNT_FIELDS` and
 CSS hide rule (`assets/input.css`, alongside the existing 4 CO.3 rules):
 
 ```css
-/* CP — business_day_offset is meaningless on external_counter accounts
+/* CP — business_day_offset is meaningless on external accounts
  * (we don't compute their EOD balances). Hide the field-row when the
- * scope select is set to external_counter so operators don't see a
+ * scope select is set to external so operators don't see a
  * knob that won't have an effect. Validator M.4.4.14a rejects the
- * field-set + scope=external_counter combo as a belt-and-suspenders
+ * field-set + scope=external combo as a belt-and-suspenders
  * gate if the field-row gets populated via a script / non-form path.
  */
-form:has(select[name="scope"] option[value="external_counter"]:checked)
+form:has(select[name="scope"] option[value="external"]:checked)
   div:has(> label[for="field-business_day_offset"]) {
   display: none;
 }
@@ -172,7 +174,7 @@ The new generalized test (Axis 1 / Axis 2 of CP.8) catches both halves of the lo
 
 - **Axis 1** asserts the fuzz generator EVENTUALLY populates `business_day_offset` across the seed pool (CP.7 contract).
 - **Axis 1** also asserts the fuzz generator EVENTUALLY leaves it None (the majority case — anti-regression against "fuzz generator always populates everything").
-- The validator `M.4.4.14a` (no offset on external_counter) is exercised by a unit test of its own; the fuzz coverage gate doesn't need to know about scope-conditional rejection.
+- The validator `M.4.4.14a` (no offset on external) is exercised by a unit test of its own; the fuzz coverage gate doesn't need to know about scope-conditional rejection.
 
 ## 8. Sub-cell impact summary
 
@@ -180,8 +182,8 @@ The new generalized test (Axis 1 / Axis 2 of CP.8) catches both halves of the lo
 |---|---|
 | CP.1 | `int | None = None` field on Account + AccountTemplate; `__post_init__` enforces `-23 <= offset <= 23` when not None. |
 | CP.2 | Read offset from `account.business_day_offset` (singletons) or `template.business_day_offset` (template path). |
-| CP.3 | Delete `L2Instance.role_business_day_offsets` + M.4.4.14. **Add `M.4.4.14a`** — reject offset on external_counter. |
-| CP.4 | FieldSpec as above + CSS hide rule on scope=external_counter. |
+| CP.3 | Delete `L2Instance.role_business_day_offsets` + M.4.4.14. **Add `M.4.4.14a`** — reject offset on external. |
+| CP.4 | FieldSpec as above + CSS hide rule on scope=external. |
 | CP.5 | Drop `role_business_day_offsets_yaml` textarea from `/l2_shape/instance/`. |
 | CP.6 | Bundled fixtures get non-trivial offsets; operator picks specific values. Strawman: split a role across two scope=dda (or similar internal scope) accounts with distinct offsets. |
 | CP.7 | Fuzz emits offsets per `60% None, 30% 0, 10% uniform in [-12, 12]` (strawman; operator confirms). |

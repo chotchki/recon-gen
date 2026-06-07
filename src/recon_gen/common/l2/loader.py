@@ -618,6 +618,25 @@ def _load_role_expression(raw: object, *, path: str) -> RoleExpression:
 # -- Per-primitive loaders ---------------------------------------------------
 
 
+def _load_business_day_offset(raw: object | None, *, path: str) -> int | None:
+    """CP — parse Account.business_day_offset / AccountTemplate.business_day_offset.
+
+    Returns None when the key is absent or YAML-null. Otherwise coerces
+    to int (rejects float / str / bool). Range check happens at the
+    dataclass __post_init__ — this loader stays type-narrow.
+    """
+    if raw is None:
+        return None
+    # bool is a subclass of int; reject explicitly so `business_day_offset: true`
+    # doesn't silently become 1.
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise ValueError(
+            f"{path}: business_day_offset must be a signed integer "
+            f"(hours from midnight UTC); got {type(raw).__name__}={raw!r}"
+        )
+    return raw
+
+
 def _load_account(raw: object, *, path: str) -> Account:
     raw_d = _as_mapping(raw, path=path, what="account")
     eod = raw_d.get("expected_eod_balance")
@@ -633,6 +652,10 @@ def _load_account(raw: object, *, path: str) -> Account:
         if eod is not None else None,
         description=_load_description(
             raw_d.get("description"), path=f"{path}.description",
+        ),
+        business_day_offset=_load_business_day_offset(
+            raw_d.get("business_day_offset"),
+            path=f"{path}.business_day_offset",
         ),
     )
 
@@ -657,6 +680,10 @@ def _load_account_template(raw: object, *, path: str) -> AccountTemplate:
         instance_name_template=_load_instance_template(
             raw_d.get("instance_name_template"),
             path=f"{path}.instance_name_template",
+        ),
+        business_day_offset=_load_business_day_offset(
+            raw_d.get("business_day_offset"),
+            path=f"{path}.business_day_offset",
         ),
     )
 

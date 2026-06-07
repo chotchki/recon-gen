@@ -219,6 +219,30 @@ class Account:
     parent_role: Identifier | None = None
     expected_eod_balance: Money | None = None
     description: str | None = None
+    # CP — signed integer hours from midnight UTC for this account's EOD
+    # cutoff. Positive = later (e.g., +9 for Tokyo-style EOD); negative
+    # = earlier. None ⇒ midnight-aligned (default). Range [-23, 23]:
+    # anything outside means "shift by more than a day," which has no
+    # operator-readable EOD meaning. Validator M.4.4.14a (see
+    # validate.py) additionally rejects offset on scope=external_counter
+    # accounts — we don't compute EOD balances for external counterparties.
+    business_day_offset: int | None = None
+
+    def __post_init__(self) -> None:
+        # CP — range cap per CP.0 audit. __post_init__ raises at
+        # construction so a bad value fails at the load callsite, not
+        # via a test walking generated output (per
+        # [[feedback_invariants_in_types]]).
+        if self.business_day_offset is not None and not (
+            -23 <= self.business_day_offset <= 23
+        ):
+            raise ValueError(
+                f"Account {self.id!r}: business_day_offset must be in "
+                f"[-23, 23] (hours from midnight UTC); got "
+                f"{self.business_day_offset!r}. Anything outside this "
+                f"range means 'shift by more than a day,' which has no "
+                f"EOD semantics."
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,6 +280,21 @@ class AccountTemplate:
     description: str | None = None
     instance_id_template: str | None = None
     instance_name_template: str | None = None
+    # CP — signed integer hours from midnight UTC, [-23, 23]. Applies to
+    # all instances materialized from this template (U2 makes
+    # template.role unique, so the template offset naturally fans out).
+    # See Account.business_day_offset for full semantics.
+    business_day_offset: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.business_day_offset is not None and not (
+            -23 <= self.business_day_offset <= 23
+        ):
+            raise ValueError(
+                f"AccountTemplate {self.role!r}: business_day_offset "
+                f"must be in [-23, 23] (hours from midnight UTC); got "
+                f"{self.business_day_offset!r}."
+            )
 
 
 # -- Rails (discriminated union per F2) --------------------------------------
