@@ -281,6 +281,9 @@ def create_l2_entity(
             ),
             expected_eod_balance=fields.get("expected_eod_balance"),
             description=fields.get("description"),
+            # CP — int | None; _coerce_field has already narrowed
+            # string → int on the form path.
+            business_day_offset=fields.get("business_day_offset"),
         )
         return dataclasses.replace(
             instance, accounts=(*instance.accounts, new_acc),
@@ -306,6 +309,8 @@ def create_l2_entity(
             description=fields.get("description"),
             instance_id_template=fields.get("instance_id_template"),
             instance_name_template=fields.get("instance_name_template"),
+            # CP — int | None per the Account path above.
+            business_day_offset=fields.get("business_day_offset"),
         )
         return dataclasses.replace(
             instance, account_templates=(*instance.account_templates, new_t),

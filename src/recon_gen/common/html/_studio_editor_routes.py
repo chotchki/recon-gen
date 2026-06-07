@@ -237,6 +237,23 @@ _ACCOUNT_FIELDS: tuple[FieldSpec, ...] = (
         helper="Numeric — empty means no EOD invariant on this account.",
         kind="money",
     ),
+    # CP — signed integer hours from midnight UTC for this account's
+    # EOD cutoff. Empty / unset ⇒ midnight-aligned (default). Hidden via
+    # CSS when scope=external (M.4.4.14a — external accounts have no
+    # EOD balance, so the offset has no consumer).
+    FieldSpec(
+        name="business_day_offset",
+        label="Business-day offset (hours)",
+        helper=(
+            "Hours from midnight UTC for this account's EOD cutoff. "
+            "Positive = later (e.g., +9 for a Tokyo-style EOD); "
+            "negative = earlier; range [-23, 23]. Leave blank for "
+            "midnight-aligned. External accounts ignore this — we "
+            "don't track their EOD balance."
+        ),
+        kind="text",
+        placeholder="0",
+    ),
 )
 
 
@@ -276,6 +293,21 @@ _ACCOUNT_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
         label="Expected EOD balance",
         helper="Numeric — empty means no EOD invariant.",
         kind="money",
+    ),
+    # CP — same field as on the singleton Account form. Applies to every
+    # instance the template materializes (Lock 4). Hidden via CSS when
+    # scope=external for the same reason (M.4.4.14a).
+    FieldSpec(
+        name="business_day_offset",
+        label="Business-day offset (hours)",
+        helper=(
+            "Hours from midnight UTC for instances of this template's "
+            "EOD cutoff. Positive = later (e.g., +9 for Tokyo-style "
+            "EOD); negative = earlier; range [-23, 23]. Leave blank "
+            "for midnight-aligned."
+        ),
+        kind="text",
+        placeholder="0",
     ),
     FieldSpec(
         name="instance_id_template",
@@ -822,6 +854,16 @@ def _coerce_field(spec: FieldSpec, raw: str, kind: EntityKind) -> object:
             raise ValueError(
                 f"expected_parent_count must be an integer (got "
                 f"{raw!r})",
+            ) from exc
+    # CP — Account / AccountTemplate.business_day_offset: signed int
+    # in [-23, 23]. Range guard fires at the dataclass __post_init__;
+    # this coercion just narrows string → int and rejects non-numeric.
+    if spec.name == "business_day_offset" and kind in ("account", "account_template"):
+        try:
+            return int(raw)
+        except ValueError as exc:
+            raise ValueError(
+                f"business_day_offset must be an integer (got {raw!r})",
             ) from exc
     # X.4.f.11.6 — Rail.metadata_keys + posted_requirements: textarea
     # one-per-line (or comma-separated). tuple[Identifier, ...].
@@ -1597,8 +1639,21 @@ def _render_field(
             f'type="text" value="{escape(val_str)}" class="{input_cls}">'
         )
 
+    # CP — business_day_offset has no consumer on scope=external
+    # accounts (M.4.4.14a — we don't compute their EOD balances), so
+    # hide the field-row when the operator picks external. Implemented
+    # as a Tailwind arbitrary group-has-* variant against the parent
+    # form's scope <select> — no raw CSS in input.css, no JS. The form
+    # roots (create-form / edit-form) carry the `group` class so this
+    # variant resolves against them.
+    extra_cls = ""
+    if spec.name == "business_day_offset":
+        extra_cls = (
+            " group-has-[select[name=scope]_option[value=external]:checked]:hidden"
+        )
     return (
-        f'<div class="{field_row_classes()}">{label}{input_html}{helper}{err_html}</div>'
+        f'<div class="{field_row_classes()}{extra_cls}">'
+        f'{label}{input_html}{helper}{err_html}</div>'
     )
 
 
@@ -3817,7 +3872,7 @@ def _render_create_page(
     {_render_intro_details(intro_html)}
     {subtype_banner_html}
     <section class="bg-white border border-surface-border rounded-md p-5">
-      <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form">
+      <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form group">
         {global_err_html}
         {subtype_html}
         {_from_hidden_input(from_param)}
@@ -3934,7 +3989,7 @@ def _render_edit_page(
     {_render_intro_details(intro_html)}
     {subtype_banner_html}
     <section class="bg-white border border-surface-border rounded-md p-5">
-      <form method="post" action="/l2_shape/{escape(kind)}/{escape(entity_id)}" class="edit-form">
+      <form method="post" action="/l2_shape/{escape(kind)}/{escape(entity_id)}" class="edit-form group">
         {global_err_html}
         {_from_hidden_input(from_param)}
         {fields_html}
@@ -4575,7 +4630,7 @@ def _render_singleton_page(
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
     {_render_intro_details(intro_html)}
     <section class="bg-white border border-surface-border rounded-md p-5">
-      <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form">
+      <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form group">
         <input type="hidden" name="_method" value="PUT">
         {global_err_html}
         {form_body}
