@@ -695,7 +695,7 @@ def _build_hierarchy_graph(l2_instance: L2Instance) -> graphviz.Digraph:
 
 def _role_to_account(l2_instance: L2Instance) -> dict[str, Account]:
     return {
-        str(acc.role): acc for acc in l2_instance.accounts if acc.role is not None
+        str(acc.role): acc for acc in l2_instance.accounts
     }
 
 

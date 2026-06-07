@@ -141,3 +141,73 @@
   100% { background-position: -200% 0; }
 }
 
+/*
+ * CO.3 polish (2026-06-06) — aggregating-dependent field hiding.
+ *
+ * On the rail edit form, `cadence` and `bundles_activity` are only
+ * meaningful when `aggregating=true` (per Rail.aggregating's docstring
+ * + validator C0 / C1). Pre-CO.3 they rendered unconditionally,
+ * showing two empty fields to operators editing non-aggregating rails.
+ *
+ * Pure CSS via :has() (Tailwind v4 supports the variant; expressing
+ * this rule across element boundaries is cleaner in raw CSS than
+ * inline arbitrary variants):
+ *
+ *   - form-level :has() check: does this form contain a select named
+ *     `aggregating` whose currently-checked option has value="false"?
+ *   - if yes, hide the field-row divs whose immediate-child label
+ *     points at `field-cadence` or `field-bundles_activity`
+ *
+ * No markup changes, no JS. `:checked` is live so toggling the select
+ * shows/hides the dependents instantly.
+ */
+form:has(select[name="aggregating"] option[value="false"]:checked)
+  div:has(> label[for="field-cadence"]),
+form:has(select[name="aggregating"] option[value="false"]:checked)
+  div:has(> label[for="field-bundles_activity"]) {
+  display: none;
+}
+
+/*
+ * CO.3 polish — metadata_value_examples is per-key example values and
+ * has no meaning if metadata_keys is empty. Hide the example field-row
+ * when the keys textarea has no content.
+ *
+ * `:empty` doesn't react to typing on textareas (it inspects initial
+ * child nodes), but `:placeholder-shown` IS live — it tracks the
+ * textarea's current `value` against the `placeholder` attribute.
+ * The metadata_keys spec carries a non-empty `placeholder`, so this
+ * rule reactively hides/shows the example field as the operator types.
+ */
+form:has(textarea[name="metadata_keys"]:placeholder-shown)
+  div:has(> label[for="field-metadata_value_examples"]) {
+  display: none;
+}
+
+/*
+ * CO.3 polish — inverse of the aggregating rule above. Validators V1c
+ * (amount_typical_range) and W1c (firings_typical_per_period) forbid
+ * these two fields when aggregating=true ("aggregator amounts derive
+ * from bundled children" / "cadence already governs aggregator firing
+ * frequency"). Hide them so non-aggregating-only knobs aren't shown
+ * for aggregators.
+ */
+form:has(select[name="aggregating"] option[value="true"]:checked)
+  div:has(> label[for="field-amount_typical_range"]),
+form:has(select[name="aggregating"] option[value="true"]:checked)
+  div:has(> label[for="field-firings_typical_per_period"]) {
+  display: none;
+}
+
+/*
+ * CO.3 polish — chain_children chip carries fan_in checkbox + epc
+ * number input per child. `epc` (expected_parent_count) is only
+ * meaningful when fan_in is true. Hide the epc input when the
+ * sibling fan_in checkbox in the SAME chip is unchecked.
+ */
+[data-multiselect-order-list="children"]
+  li:has(input[name^="fan_in_"]:not(:checked))
+  input[name^="epc_"] {
+  display: none;
+}
+

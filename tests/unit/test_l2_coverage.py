@@ -217,7 +217,7 @@ def test_coverage_includes_every_declared_primitive(
 
     declared_role_ids = {
         _role_id(a.role) for a in spec_example_instance.accounts
-        if a.role is not None
+       
     }
     declared_role_ids.update(
         _role_id(t.role) for t in spec_example_instance.account_templates

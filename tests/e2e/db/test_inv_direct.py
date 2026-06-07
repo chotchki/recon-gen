@@ -126,7 +126,7 @@ def _pick_internal_leaf_role() -> str:
     keeps the matrix green on shapes that can't carry the assertion.
     """
     for a in _INSTANCE.accounts:
-        if a.scope == "internal" and a.parent_role is not None and a.role is not None:
+        if a.scope == "internal" and a.parent_role is not None:
             return str(a.role)
     pytest.skip(
         "L2 instance has no internal-leaf account (no `parent_role IS NOT NULL` "

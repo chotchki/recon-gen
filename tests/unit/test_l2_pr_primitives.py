@@ -174,7 +174,7 @@ class TestVariableClosure:
         inst = _instance()
         singleton_internal_roles = {
             str(a.role) for a in inst.accounts
-            if a.scope == "internal" and a.role is not None
+            if a.scope == "internal"
         }
         for r in inst.rails:
             if not isinstance(r, SingleLegRail):

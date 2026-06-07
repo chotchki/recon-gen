@@ -196,7 +196,7 @@ def test_fuzzer_emits_role_business_day_offsets(
     )
 
     declared_roles = (
-        {str(a.role) for a in inst.accounts if a.role is not None}
+        {str(a.role) for a in inst.accounts}
         | {str(t.role) for t in inst.account_templates}
     )
     assert set(offsets.keys()) == declared_roles, (

@@ -163,18 +163,44 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
                 # Server-rendered hidden marker — already present.
                 continue
             if name.endswith("__order"):
-                # CO.2 — hidden order-override input. Stop skipping;
-                # fill it so the server's multi_select coercer prefers
-                # this canonical order over the checkbox DOM order.
-                # Use evaluate (not fill) because Playwright's fill
-                # rejects hidden inputs on actionability grounds.
-                self._page.evaluate(
-                    "([n, v]) => {"
-                    " const el = document.querySelector(`input[type=hidden][name='${n}']`);"
-                    " if (el) el.value = v;"
-                    "}",
-                    [name, values[0]],
+                # CO.3 — `__order` was dropped from multi_select +
+                # chain_children widgets; chip DOM order is now canonical.
+                # Legacy emit-path may still produce this key; harmless
+                # to skip (chain_children's older shape used it).
+                continue
+            # CO.3 chip-list multi_select detection — if the form has a
+            # typeahead input keyed `data-multiselect-add="<name>"`, the
+            # field is a chip-list widget. Drive it via the typeahead:
+            # clear existing chips, then type+Enter each desired value.
+            # This is operator-fidelity (a real user types in the
+            # typeahead), not a hidden-input injection.
+            add_input = self._page.locator(
+                f'input[data-multiselect-add="{name}"]',
+            )
+            if add_input.count() > 0:
+                chip_list = self._page.locator(
+                    f'[data-multiselect-order-list="{name}"]',
                 )
+                # Remove every existing chip — JS handler removes the
+                # <li> + its hidden input + restores the option to the
+                # datalist. Click × from last to first so each click
+                # has a stable target index.
+                while True:
+                    rm_btns = chip_list.locator(
+                        '[data-multiselect-remove]',
+                    )
+                    n = rm_btns.count()
+                    if n == 0:
+                        break
+                    rm_btns.last.click()
+                # Add each desired value via typeahead + Enter. JS
+                # handler creates the chip from the template (for
+                # chain_children) or builds a simple chip (for plain
+                # multi_select). Order = DOM order = insert order.
+                typeahead = add_input.first
+                for v in values:
+                    typeahead.fill(v)
+                    typeahead.press("Enter")
                 continue
             locator = self._page.locator(f'[name="{name}"]')
             count = locator.count()

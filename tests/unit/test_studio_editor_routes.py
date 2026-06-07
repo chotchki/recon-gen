@@ -659,12 +659,15 @@ def test_put_account_id_rename_does_not_cascade(
     ]
 
 
-def test_transfer_template_edit_form_renders_leg_rails_checkbox_group(
+def test_transfer_template_edit_form_renders_leg_rails_chip_list(
     writable_l2_yaml: Path,
 ) -> None:
-    """X.4.f.10 — TransferTemplate edit form exposes leg_rails as a
-    checkbox group (one <input type=checkbox> per available rail),
-    not a <select multiple> — easier to use than Cmd/Ctrl-click."""
+    """CO.3 polish (2026-06-06) — TransferTemplate edit form exposes
+    leg_rails as a chip-list-as-primary widget: drag-reorderable
+    chips on top, typeahead `<input list>` at the bottom, each chip
+    carries a hidden `<input type=hidden name=leg_rails value=X>` so
+    the form-submission contract (`getlist(name)`) is unchanged.
+    Pre-CO.3 the widget was a checkbox grid showing the full universe."""
     app = _build_app(writable_l2_yaml)
     pre = load_instance(writable_l2_yaml)
     if not pre.transfer_templates:
@@ -675,22 +678,25 @@ def test_transfer_template_edit_form_renders_leg_rails_checkbox_group(
         resp = c.get(f"/l2_shape/transfer_template/{tmpl_name}/edit")
     assert resp.status_code == 200
     body = resp.text
-    # AM.1 step 4 (2026-05-25): `.multi-select-group` semantic class
-    # retired; assert the stable shape — a checkbox per leg_rails value
-    # — instead. The "no <select multiple>" check below already pins
-    # that we didn't regress to the old <select multiple> shape.
-    assert 'type="checkbox"' in body
-    assert 'name="leg_rails"' in body
-    # NO <select multiple> for leg_rails (the old shape we replaced).
-    assert 'name="leg_rails" multiple' not in body
-    # Each currently-attached leg_rail is checked.
+    # NO checkboxes for leg_rails (the old shape we replaced).
+    assert 'type="checkbox" name="leg_rails"' not in body
+    # Chip-list + typeahead markers are present.
+    assert 'data-multiselect-order-list="leg_rails"' in body
+    assert 'data-multiselect-add="leg_rails"' in body
+    # Each currently-attached leg_rail has its own hidden input + chip.
     for rn in tmpl.leg_rails:
         assert (
-            f'value="{escape_html(str(rn))}" checked' in body
+            f'data-multiselect-order-value="{escape_html(str(rn))}"' in body
         )
-    # Hidden marker so the save handler can distinguish "field rendered
-    # with empty selection" from "field absent".
+        assert (
+            f'<input type="hidden" name="leg_rails" '
+            f'value="{escape_html(str(rn))}"' in body
+        )
+    # `__present` distinguishes empty-selection from absent. CO.3 dropped
+    # the `__order` hidden field — chip DOM order IS the canonical order
+    # since the per-chip hidden inputs are submitted in DOM order.
     assert 'name="leg_rails__present"' in body
+    assert 'name="leg_rails__order"' not in body
 
 
 def test_put_transfer_template_updates_leg_rails(
@@ -860,9 +866,9 @@ def test_xor_groups_create_form_omits_field(writable_l2_yaml: Path) -> None:
         resp = c.get("/l2_shape/transfer_template/new")
     assert resp.status_code == 200, resp.text
     body = resp.text
-    # ``leg_rails`` checkbox group present, ``leg_rail_xor_groups``
-    # field-row absent.
-    assert 'name="leg_rails"' in body
+    # ``leg_rails`` chip-list widget present (CO.3); ``leg_rail_xor_groups``
+    # field-row absent (it's `edit_only`).
+    assert 'name="leg_rails__present"' in body
     assert "leg_rail_xor_groups" not in body
     assert "Variable rail XOR groups" not in body
 
@@ -1308,11 +1314,12 @@ def test_two_leg_rail_edit_form_renders_subtype_fields(
         resp = c.get("/l2_shape/rail/ExternalRailInbound/edit")
     assert resp.status_code == 200, resp.text
     body = resp.text
-    # TwoLeg-only fields render.
-    assert 'name="source_role"' in body, "source_role multi-select missing"
-    assert 'name="destination_role"' in body, "destination_role missing"
-    # The currently-set source_role value is checked in the multi-select.
-    assert 'value="ExternalCounterparty" checked' in body
+    # TwoLeg-only fields render via the CO.3 chip-list-as-primary widget.
+    # The presence/order hidden markers carry the field-name prefix.
+    assert 'name="source_role__present"' in body, "source_role widget missing"
+    assert 'name="destination_role__present"' in body, "destination_role missing"
+    # The currently-set source_role value renders as a chip.
+    assert 'data-multiselect-order-value="ExternalCounterparty"' in body
     # aggregating select renders (both subtypes).
     assert '<select id="field-aggregating" name="aggregating"' in body
     # SingleLeg-only fields are filtered out.
@@ -2176,14 +2183,17 @@ def test_bb2_create_new_validation_failure_rolls_back_atomically(
 # CO.2 — multi_select chip-list + order-override
 # ---------------------------------------------------------------------------
 
-def test_co2_multi_select_renders_chip_list_above_checkboxes(
+def test_co3_multi_select_renders_chip_list_with_typeahead(
     writable_l2_yaml: Path,
 ) -> None:
-    """The TT edit form's `leg_rails` field renders a draggable chip
-    list above the checkbox grid. Each selected rail appears as a
-    `<li>` with `data-multiselect-order-value`. The hidden
-    `<name>__order` input is pre-populated with the comma-joined
-    current order so a no-op submit preserves order."""
+    """CO.3 polish — the TT edit form's `leg_rails` field renders a
+    draggable chip-list-as-primary widget. Each chip carries a hidden
+    `<input type=hidden name=leg_rails value=X>`; the typeahead
+    `<input list>` below the list adds new chips. The hidden
+    `<name>__order` input pre-populated with the comma-joined current
+    order so a no-op submit preserves order. The old checkbox grid is
+    gone (CO.3 replaced the universe-grid with the chip+typeahead
+    pattern)."""
     from recon_gen.common.l2.cache import L2InstanceCache
     cache = L2InstanceCache.from_path(writable_l2_yaml)
     inst = cache.get()
@@ -2191,33 +2201,33 @@ def test_co2_multi_select_renders_chip_list_above_checkboxes(
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get(f"/l2_shape/transfer_template/{tt.name}/edit").text
-    # The chip-list container exists with the right data attribute
+    # The chip-list container + typeahead `<input>` markers
     assert 'data-multiselect-order-list="leg_rails"' in body
-    # The hidden order input is pre-populated with the tuple order
-    expected_order = ",".join(str(r) for r in tt.leg_rails)
-    assert (
-        f'data-multiselect-order-input="leg_rails" value="{expected_order}"'
-        in body
-        or f'value="{expected_order}" data-multiselect-order-input="leg_rails"'
-        in body
-    ), body[:5000]
-    # At least one chip carries the value-data attribute
+    assert 'data-multiselect-add="leg_rails"' in body
+    # Datalist with available options
+    assert 'id="field-leg_rails-options"' in body
+    # Each chip carries the value-data attribute AND a hidden input
+    # carrying the value. Chips render in current tuple order.
     for r in tt.leg_rails:
         assert f'data-multiselect-order-value="{r}"' in body
-    # Checkboxes still emitted with name=leg_rails AND the bootstrap-hook attr
-    assert 'data-multiselect-name="leg_rails"' in body
+        assert f'data-multiselect-remove="{r}"' in body
+    # NO checkbox grid for the universe (the old shape).
+    assert 'type="checkbox" name="leg_rails"' not in body
+    # CO.3 — no `__order` field; chip DOM order is canonical.
+    assert 'name="leg_rails__order"' not in body
     # Sortable.js script vendored locally
     assert "sortable.min.js" in body
 
 
-def test_co2_order_override_drives_coercer(
+def test_co3_chip_order_preserved_by_dom_order(
     writable_l2_yaml: Path,
 ) -> None:
-    """When the PUT body carries `<name>__order` with the canonical
-    sequence (set-equal to the checkbox values), the coercer uses
-    that order — not the checkbox DOM submit order. This is the
-    invariant that makes the dogfood gate's structural round-trip
-    work."""
+    """CO.3 — `leg_rails` chip DOM order IS the canonical sequence.
+    PUT the chip values in reversed order (no `__order` field; the
+    CO.2 override is gone) and verify the YAML round-trips with the
+    reversed order. Replaces the CO.2
+    `test_co2_order_override_drives_coercer` since the override is
+    no longer needed."""
     from recon_gen.common.l2.cache import L2InstanceCache
     from recon_gen.common.l2.loader import load_instance
     cache = L2InstanceCache.from_path(writable_l2_yaml)
@@ -2228,7 +2238,6 @@ def test_co2_order_override_drives_coercer(
     )
     if tt is None:
         pytest.skip("fixture has no TT with >=2 leg_rails")
-    # Swap order vs current
     current = [str(r) for r in tt.leg_rails]
     reversed_order = list(reversed(current))
     app = _build_app(writable_l2_yaml)
@@ -2237,8 +2246,8 @@ def test_co2_order_override_drives_coercer(
             f"/l2_shape/transfer_template/{tt.name}",
             data={
                 "leg_rails__present": "1",
-                "leg_rails__order": ",".join(reversed_order),
-                "leg_rails": current,
+                # Note: NO `__order` field — chip DOM order IS the order.
+                "leg_rails": reversed_order,
             },
             follow_redirects=False,
         )
@@ -2248,43 +2257,3 @@ def test_co2_order_override_drives_coercer(
         t for t in reloaded.transfer_templates if str(t.name) == str(tt.name)
     )
     assert [str(r) for r in rebuilt_tt.leg_rails] == reversed_order
-
-
-def test_co2_order_override_ignored_on_set_mismatch(
-    writable_l2_yaml: Path,
-) -> None:
-    """If `__order` lists values not in the checkbox selection (or
-    vice-versa), the override is silently ignored — falls back to
-    checkbox DOM order. Prevents a stale browser state from
-    smuggling missing values."""
-    from recon_gen.common.l2.cache import L2InstanceCache
-    from recon_gen.common.l2.loader import load_instance
-    cache = L2InstanceCache.from_path(writable_l2_yaml)
-    inst = cache.get()
-    tt = next(
-        (t for t in inst.transfer_templates if len(t.leg_rails) >= 2),
-        None,
-    )
-    if tt is None:
-        pytest.skip("fixture has no TT with >=2 leg_rails")
-    current = [str(r) for r in tt.leg_rails]
-    # Order field references a phantom rail not in the checkbox set
-    bogus_order = current + ["__NOT_A_RAIL__"]
-    app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
-        resp = c.put(
-            f"/l2_shape/transfer_template/{tt.name}",
-            data={
-                "leg_rails__present": "1",
-                "leg_rails__order": ",".join(bogus_order),
-                "leg_rails": current,
-            },
-            follow_redirects=False,
-        )
-        assert resp.status_code == 303, resp.text
-    reloaded = load_instance(writable_l2_yaml)
-    rebuilt_tt = next(
-        t for t in reloaded.transfer_templates if str(t.name) == str(tt.name)
-    )
-    # The phantom value is rejected; checkbox order (current) wins.
-    assert [str(r) for r in rebuilt_tt.leg_rails] == current

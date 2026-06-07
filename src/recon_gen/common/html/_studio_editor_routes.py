@@ -43,6 +43,7 @@ from starlette.routing import Route
 
 from recon_gen.common.html._studio_assets.tw_classes import (
     chrome_button_classes,
+    destructive_button_classes,
     entity_card_classes,
     field_input_classes,
     field_row_classes,
@@ -170,15 +171,36 @@ class FieldSpec:
     # fields into "chip_list" so underscored identifiers stop
     # wrapping mid-token in the value column (operator complaint).
     render_as: RenderAs = "text"
+    # CO.3 polish (2026-06-06) — optional placeholder attribute.
+    # Useful for showing example syntax (e.g. "ach_trace_number,
+    # wire_imad") AND for enabling :placeholder-shown CSS reactivity
+    # on textarea fields whose downstream siblings hide when empty.
+    placeholder: str | None = None
 
 
 _ACCOUNT_FIELDS: tuple[FieldSpec, ...] = (
+    # CO.3 polish (2026-06-06) — identity + display name + description
+    # promoted to the top so the operator sees what they're editing
+    # before scrolling into structural fields.
     FieldSpec(
         name="id",
         label="ID",
         helper="Unique identifier within this L2 instance.",
         kind="text",
         required=True,
+    ),
+    FieldSpec(
+        name="name",
+        label="Display name",
+        helper="Human-readable label rendered in dashboards + the audit PDF.",
+        kind="text",
+    ),
+    FieldSpec(
+        name="description",
+        label="Description",
+        helper="Free-form prose; markdown OK. Read by handbook templates.",
+        kind="textarea",
+        preview_markdown=True,
     ),
     FieldSpec(
         name="scope",
@@ -189,19 +211,15 @@ _ACCOUNT_FIELDS: tuple[FieldSpec, ...] = (
         required=True,
     ),
     FieldSpec(
-        name="name",
-        label="Display name",
-        helper="Human-readable label rendered in dashboards + the audit PDF.",
-        kind="text",
-    ),
-    FieldSpec(
         name="role",
         label="Role",
         helper=(
-            "The Role this account plays. Required if any Rail references "
-            "this account by Role (validator F1)."
+            "Classifier this account plays. Rails reference accounts by "
+            "role — without one, this account can't participate in any "
+            "flow. Multiple accounts can share a role (N:1 grouping)."
         ),
         kind="text",
+        required=True,
     ),
     FieldSpec(
         name="parent_role",
@@ -219,23 +237,24 @@ _ACCOUNT_FIELDS: tuple[FieldSpec, ...] = (
         helper="Numeric — empty means no EOD invariant on this account.",
         kind="money",
     ),
-    FieldSpec(
-        name="description",
-        label="Description",
-        helper="Free-form prose; markdown OK. Read by handbook templates.",
-        kind="textarea",
-        preview_markdown=True,
-    ),
 )
 
 
 _ACCOUNT_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
+    # CO.3 polish — role (identity) + description first.
     FieldSpec(
         name="role",
         label="Role",
         helper="Role this template's instances will play (e.g. CustomerSubledger).",
         kind="text",
         required=True,
+    ),
+    FieldSpec(
+        name="description",
+        label="Description",
+        helper="Free-form prose; markdown OK.",
+        kind="textarea",
+        preview_markdown=True,
     ),
     FieldSpec(
         name="scope",
@@ -257,13 +276,6 @@ _ACCOUNT_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
         label="Expected EOD balance",
         helper="Numeric — empty means no EOD invariant.",
         kind="money",
-    ),
-    FieldSpec(
-        name="description",
-        label="Description",
-        helper="Free-form prose; markdown OK.",
-        kind="textarea",
-        preview_markdown=True,
     ),
     FieldSpec(
         name="instance_id_template",
@@ -288,12 +300,20 @@ _ACCOUNT_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
 # gated by FieldSpec.subtype_only — the renderer + read card filter
 # them based on the rail entity's actual subtype at edit time.
 _RAIL_FIELDS: tuple[FieldSpec, ...] = (
+    # CO.3 polish — name (identity) + description first.
     FieldSpec(
         name="name",
         label="Name",
         helper="Unique rail identifier; referenced by chains + templates.",
         kind="text",
         required=True,
+    ),
+    FieldSpec(
+        name="description",
+        label="Description",
+        helper="Free-form prose; markdown OK.",
+        kind="textarea",
+        preview_markdown=True,
     ),
     # X.4.f.11.2 — TwoLegRail per-leg roles. RoleExpression is
     # tuple[Identifier, ...]; multi-select renders the list as a
@@ -303,8 +323,9 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         name="source_role",
         label="Source role",
         helper=(
-            "Role of the account the debit leg posts to. Multi-select "
-            "for unioned roles. Required on TwoLegRail."
+            "Role of the account the debit leg posts to. Add one or "
+            "more roles (union: any matches at posting time). Required "
+            "on TwoLegRail."
         ),
         kind="multi_select",
         select_from="roles",
@@ -315,8 +336,9 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         name="destination_role",
         label="Destination role",
         helper=(
-            "Role of the account the credit leg posts to. Multi-select "
-            "for unioned roles. Required on TwoLegRail."
+            "Role of the account the credit leg posts to. Add one or "
+            "more roles (union: any matches at posting time). Required "
+            "on TwoLegRail."
         ),
         kind="multi_select",
         select_from="roles",
@@ -387,6 +409,9 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         kind="money",
         subtype_only="two_leg",
     ),
+    # CO.3 polish (2026-06-06) — reorder: aggregating + cadence +
+    # bundles_activity grouped (the aggregating trio); metadata_keys +
+    # metadata_value_examples grouped (keys + per-key examples).
     # X.4.f.11.4 — aggregating gate flag. When true, rail sweeps on
     # cadence and bundles_activity matters; when false (default), it
     # fires per-Transfer.
@@ -407,7 +432,22 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         helper="For aggregating rails (e.g. intraday-2h / daily-eod).",
         kind="text",
     ),
-    # X.4.f.11.6 — metadata_keys + posted_requirements (both subtypes).
+    # X.4.f.11.9 — bundles_activity (aggregating rails only).
+    # tuple[BundlesActivityRef = Identifier, ...] — multi-select from
+    # rails + templates; matches by Rail.name or TransferTemplate.name.
+    FieldSpec(
+        name="bundles_activity",
+        label="Bundles activity",
+        helper=(
+            "For aggregating rails only. Names the rails / templates "
+            "whose Transactions this rail bundles. Type below to add; "
+            "drag to reorder; × removes."
+        ),
+        kind="multi_select",
+        select_from="rails_or_templates",
+        render_as="chip_list",  # CF.4.g — list of identifiers
+    ),
+    # X.4.f.11.6 — metadata_keys + metadata_value_examples (paired).
     # tuple[Identifier, ...] — operator types one key per line; coerce
     # splits on \n + comma, strips blanks. Empty textarea ⇒ empty tuple.
     FieldSpec(
@@ -419,6 +459,26 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
             "wire_imad)."
         ),
         kind="textarea",
+        # CO.3 polish — placeholder enables :placeholder-shown CSS
+        # reactivity so metadata_value_examples below hides when this
+        # textarea is empty (input.css has the rule).
+        placeholder="ach_trace_number\nwire_imad",
+    ),
+    # X.4.f.11.6.5 — Tier-3 metadata_value_examples as a YAML block.
+    # tuple[(Identifier, tuple[str, ...]), ...] — operator types/edits
+    # the per-key example map directly in YAML (the same shape the L2
+    # YAML carries). Empty ⇒ demo seed falls back to the synthetic
+    # `<rail>-firing-<seq>` placeholder.
+    FieldSpec(
+        name="metadata_value_examples",
+        label="Metadata value examples",
+        helper=(
+            "Per-key example values the demo seed cycles through. "
+            "YAML map: each metadata key → list of example strings. "
+            "Empty ⇒ uses synthetic per-rail fallback. Example: "
+            "ach_trace_number: [\"12345-001\", \"12345-002\"]"
+        ),
+        kind="yaml_block",
     ),
     FieldSpec(
         name="posted_requirements",
@@ -450,36 +510,6 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
             "Empty ⇒ no watch."
         ),
         kind="text",
-    ),
-    # X.4.f.11.9 — bundles_activity (aggregating rails only).
-    # tuple[BundlesActivityRef = Identifier, ...] — multi-select from
-    # rails + templates; matches by Rail.name or TransferTemplate.name.
-    FieldSpec(
-        name="bundles_activity",
-        label="Bundles activity",
-        helper=(
-            "For aggregating rails only. Names the rails / templates "
-            "whose Transactions this rail bundles. Multi-select."
-        ),
-        kind="multi_select",
-        select_from="rails_or_templates",
-        render_as="chip_list",  # CF.4.g — list of identifiers
-    ),
-    # X.4.f.11.6.5 — Tier-3 metadata_value_examples as a YAML block.
-    # tuple[(Identifier, tuple[str, ...]), ...] — operator types/edits
-    # the per-key example map directly in YAML (the same shape the L2
-    # YAML carries). Empty ⇒ demo seed falls back to the synthetic
-    # `<rail>-firing-<seq>` placeholder.
-    FieldSpec(
-        name="metadata_value_examples",
-        label="Metadata value examples",
-        helper=(
-            "Per-key example values the demo seed cycles through. "
-            "YAML map: each metadata key → list of example strings. "
-            "Empty ⇒ uses synthetic per-rail fallback. Example: "
-            "ach_trace_number: [\"12345-001\", \"12345-002\"]"
-        ),
-        kind="yaml_block",
     ),
     # AB.5 (E7) — soft per-firing magnitude bound. Operator types a
     # ``min, max`` shape (comma-separated decimals); coerce parses to
@@ -517,13 +547,6 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         ),
         kind="text",
     ),
-    FieldSpec(
-        name="description",
-        label="Description",
-        helper="Free-form prose; markdown OK.",
-        kind="textarea",
-        preview_markdown=True,
-    ),
 )
 
 
@@ -532,6 +555,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
 # X.4.f.10 — parent + child are now dropdowns of valid rail/template
 # names (was free text; typo'd values reached the validator only).
 _CHAIN_FIELDS: tuple[FieldSpec, ...] = (
+    # CO.3 polish — parent (identity) + description first.
     FieldSpec(
         name="parent",
         label="Parent",
@@ -543,6 +567,13 @@ _CHAIN_FIELDS: tuple[FieldSpec, ...] = (
         kind="select",
         select_from="rails_or_templates",
         required=True,
+    ),
+    FieldSpec(
+        name="description",
+        label="Description",
+        helper="Free-form prose.",
+        kind="textarea",
+        preview_markdown=True,
     ),
     # AB.6.7 (2026-05-19) — per-child fan_in shape. The chain card
     # renders the children checkbox group with per-child fan_in +
@@ -570,13 +601,6 @@ _CHAIN_FIELDS: tuple[FieldSpec, ...] = (
         select_from="rails_or_templates",
         required=True,
     ),
-    FieldSpec(
-        name="description",
-        label="Description",
-        helper="Free-form prose.",
-        kind="textarea",
-        preview_markdown=True,
-    ),
 )
 
 
@@ -592,6 +616,14 @@ _TRANSFER_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
         helper="Unique template identifier.",
         kind="text",
         required=True,
+    ),
+    # CO.3 polish — description right after name.
+    FieldSpec(
+        name="description",
+        label="Description",
+        helper="Free-form prose.",
+        kind="textarea",
+        preview_markdown=True,
     ),
     FieldSpec(
         name="expected_net",
@@ -611,10 +643,10 @@ _TRANSFER_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
         name="leg_rails",
         label="Leg rails",
         helper=(
-            "The Rails this template owns. Cmd/Ctrl-click to multi-select. "
-            "Empty selection is rejected by the validator (a template must "
-            "have at least one leg rail) — add a replacement before removing "
-            "the last one, or delete the whole template instead."
+            "The Rails this template owns. Type below to add; drag to "
+            "reorder; × removes. At least one rail required — add a "
+            "replacement before removing the last, or delete the whole "
+            "template instead."
         ),
         kind="multi_select",
         select_from="rails",
@@ -687,13 +719,6 @@ _TRANSFER_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
         ),
         kind="text",
     ),
-    FieldSpec(
-        name="description",
-        label="Description",
-        helper="Free-form prose.",
-        kind="textarea",
-        preview_markdown=True,
-    ),
 )
 
 
@@ -706,6 +731,14 @@ _LIMIT_SCHEDULE_FIELDS: tuple[FieldSpec, ...] = (
         kind="select",
         select_from="roles",
         required=True,
+    ),
+    # CO.3 polish — description right after the lead identity field.
+    FieldSpec(
+        name="description",
+        label="Description",
+        helper="Free-form prose.",
+        kind="textarea",
+        preview_markdown=True,
     ),
     FieldSpec(
         name="rail",
@@ -737,13 +770,6 @@ _LIMIT_SCHEDULE_FIELDS: tuple[FieldSpec, ...] = (
         kind="select",
         options=("Outbound", "Inbound"),
         required=True,
-    ),
-    FieldSpec(
-        name="description",
-        label="Description",
-        helper="Free-form prose.",
-        kind="textarea",
-        preview_markdown=True,
     ),
 )
 
@@ -951,21 +977,14 @@ def _coerce_form(
                 ChainChildSpec,
                 Identifier,
             )
+            # CO.3 polish — chain_children is now also chip-list-as-primary.
+            # Each chip carries its hidden `<input name=children value=X>`
+            # along with the fan_in checkbox + epc number input, so chip
+            # DOM order = canonical order and getlist preserves it. No
+            # `__order` override needed.
             selected_names = tuple(
                 str(v) for v in form.getlist("children") if str(v).strip()
             )
-            # CO.3 — order-override via `children__order` hidden field,
-            # same pattern as multi_select. Browser submits checkboxes
-            # in DOM order; chain children order is semantic (yaml
-            # declaration order). When __order is set + set-equal to
-            # the selection, it overrides.
-            order_raw = str(form.get("children__order") or "").strip()
-            if order_raw:
-                candidate = tuple(
-                    s.strip() for s in order_raw.split(",") if s.strip()
-                )
-                if set(candidate) == set(selected_names):
-                    selected_names = candidate
             overrides[spec.name] = selected_names
             child_specs: list[ChainChildSpec] = []
             for name in selected_names:
@@ -995,25 +1014,16 @@ def _coerce_form(
         elif spec.kind == "multi_select":
             if f"{spec.name}__present" not in form and spec.name not in form:
                 continue
+            # CO.3 — chip-list-as-primary widget: hidden chip inputs
+            # are emitted in chip DOM order = user intent order, and
+            # getlist preserves DOM order, so the sequence is canonical
+            # without any `__order` override. The CO.2 `__order` field
+            # is gone; the field-level `__present` marker (above the
+            # multi_select coercer in `_coerce_form`) still
+            # distinguishes empty-from-absent.
             raw_list = tuple(
                 str(v) for v in form.getlist(spec.name) if str(v).strip()
             )
-            # CO.2 — order-override via `<name>__order` hidden field.
-            # Browser submits checkboxes in DOM order (alphabetical for
-            # our universe-rendered fieldsets); leg_rails order is
-            # semantic (xor_groups reference rails by name; the YAML
-            # declaration order IS the canonical form). The hidden
-            # order field carries that canonical sequence; when present
-            # + non-empty + set-equal to raw_list, it overrides. Set
-            # mismatch is silently ignored so stale browser state can't
-            # smuggle missing entries.
-            order_raw = str(form.get(f"{spec.name}__order") or "").strip()
-            if order_raw:
-                candidate = tuple(
-                    s.strip() for s in order_raw.split(",") if s.strip()
-                )
-                if set(candidate) == set(raw_list):
-                    raw_list = candidate
             overrides[spec.name] = raw_list
             # Identifier-typed list per FieldSpec convention; the
             # specific dataclass field decides the inner type but
@@ -1334,13 +1344,18 @@ def _render_field(
         return _render_chain_children_field(spec, value, instance, error)
 
     if spec.kind == "multi_select":
-        # Render a checkbox group — easier than Cmd/Ctrl-clicking a
-        # <select multiple>. Each checkbox submits its own form-data
-        # entry on check; getlist(name) on the server side
-        # reconstructs the tuple. Hidden marker ensures the field is
-        # always present in the form so an empty selection (operator
-        # unchecked everything) is distinguishable from "field absent" —
-        # which lets the validator catch the empty-leg_rails case.
+        # CO.3 polish (2026-06-06) — chip-list-as-primary widget.
+        # Pre-rewrite: a checkbox grid showed the whole universe + a
+        # chip list above showed the selected-in-order set. Operators
+        # had to (a) scroll through the grid to find the rail they
+        # wanted, (b) realize the chip list was the order-of-record,
+        # and (c) un-check below to remove (no signal at the chip).
+        # Post-rewrite: the chip list IS the widget. Each chip carries
+        # its own hidden `<name>=<value>` input so the form submission
+        # contract is unchanged (`getlist(name)` works). Drag-reorder
+        # via Sortable.js. Delete via the × button on each chip. Add
+        # via the typeahead `<input list>` below, which surfaces only
+        # not-yet-selected options from the universe.
         if spec.select_from is None:
             raise ValueError(
                 f"multi_select FieldSpec {spec.name!r} requires select_from",
@@ -1353,55 +1368,75 @@ def _render_field(
         for v in selected:
             if v not in options:
                 options = (*options, v)
-        check_blocks = [
-            f'<label class="flex items-center gap-2 font-normal text-sm cursor-pointer text-primary-fg">'
-            f'<input type="checkbox" name="{escape(spec.name)}" '
-            f'value="{escape(o)}"'
-            f'{" checked" if o in selected else ""}'
-            f' data-multiselect-name="{escape(spec.name)}">'
-            f' {escape(o)}</label>'
-            for o in options
-        ]
-        # CO.2 — Sortable.js-backed "selected (in order)" chip list
-        # rendered above the checkbox grid. Operator drag-reorders to
-        # change canonical order; the hidden `__order` field syncs on
-        # every reorder + on every checkbox toggle. Empty list renders
-        # an empty-state hint so the affordance is discoverable even
-        # before the operator checks anything.
-        order_chips = "".join(
-            f'<li class="inline-flex items-center gap-1 bg-link-tint border border-surface-border rounded-sm px-2 py-1 cursor-grab text-sm" '
-            f'data-multiselect-order-value="{escape(s)}">'
-            f'<span aria-hidden="true" class="text-secondary-fg select-none">⋮⋮</span>'
-            f'<span>{escape(s)}</span>'
+        # Datalist contains only the unselected options — when the
+        # operator adds a chip, the corresponding option is removed
+        # from the datalist by the bootstrap JS. The initial render
+        # pre-filters so the first-time view is correct without JS.
+        datalist_id = f"field-{escape(spec.name)}-options"
+        datalist_html = (
+            f'<datalist id="{datalist_id}">'
+            + "".join(
+                f'<option value="{escape(o)}"></option>'
+                for o in options if o not in selected
+            )
+            + "</datalist>"
+        )
+        chip_li_cls = (
+            "flex items-center gap-2 bg-link-tint border border-surface-border "
+            "rounded-sm px-2 py-1 text-sm"
+        )
+        chip_remove_cls = (
+            "px-2 py-0.5 text-secondary-fg hover:text-danger hover:bg-red-50 "
+            "rounded-sm cursor-pointer text-base leading-none"
+        )
+        chips_html = "".join(
+            f'<li class="{chip_li_cls}" data-multiselect-order-value="{escape(s)}">'
+            f'<span aria-hidden="true" class="cursor-grab text-secondary-fg select-none">⋮</span>'
+            f'<input type="hidden" name="{escape(spec.name)}" value="{escape(s)}">'
+            f'<span class="grow">{escape(s)}</span>'
+            f'<button type="button" class="{chip_remove_cls}" '
+            f'aria-label="Remove {escape(s)}" '
+            f'data-multiselect-remove="{escape(s)}">&times;</button>'
             f'</li>'
             for s in selected
         )
-        empty_hint = (
-            ' <span class="text-xs italic text-secondary-fg" '
-            'data-multiselect-empty-hint="1">'
-            "Check a box below; drag chips here to reorder."
-            "</span>"
+        empty_hint_li = (
+            f'<li class="text-xs italic text-secondary-fg px-2 py-1" '
+            f'data-multiselect-empty-hint="1">'
+            f"No {escape(spec.label.lower())} selected yet — type below to add."
+            f"</li>"
         )
+        list_cls = (
+            "flex flex-col gap-1 px-2 py-2 mb-2 border border-dashed "
+            "border-surface-border rounded-sm bg-surface-bg min-h-12"
+        )
+        input_cls = field_input_classes()
         input_html = (
-            # Hidden marker — see comment above.
+            # Hidden marker — empty selection ("operator cleared every
+            # chip") distinguishable from "field absent". Needed for
+            # optional multi_selects; required ones reject empty in the
+            # validator anyway. Kept for symmetry across kinds.
             f'<input type="hidden" name="{escape(spec.name)}__present" value="1">'
-            # CO.2 — hidden order-override field, pre-populated with the
-            # entity's current tuple order. The chip-list above + the
-            # multiselect.js bootstrap keep it in sync with the visual
-            # state; the server prefers it over checkbox DOM order when
-            # the two sets match.
-            f'<input type="hidden" name="{escape(spec.name)}__order" '
-            f'value="{escape(",".join(selected))}" '
-            f'data-multiselect-order-input="{escape(spec.name)}">'
+            # CO.3 — `<name>__order` was needed in the CO.2 widget
+            # because the checkbox grid submitted in alphabetical DOM
+            # order, divorced from user intent. The chip-list widget
+            # makes chip DOM order == user intent order, and the chip
+            # hidden inputs are emitted in chip order, so getlist already
+            # returns the right sequence. No __order field needed.
+            f"{datalist_html}"
             f'<ul data-multiselect-order-list="{escape(spec.name)}" '
-            f'class="flex flex-wrap gap-2 px-2 py-2 mb-1 border border-dashed border-surface-border rounded-sm bg-surface-bg min-h-10" '
+            f'data-multiselect-options-id="{datalist_id}" '
+            f'class="{list_cls}" '
             f'aria-label="Selected {escape(spec.label)} in order">'
-            f"{order_chips}"
-            f"{empty_hint if not selected else ''}"
+            f"{chips_html}"
+            f"{empty_hint_li if not selected else ''}"
             f"</ul>"
-            f'<div id="field-{spec.name}" class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 px-2 py-2 border border-surface-border rounded-sm bg-white max-h-56 overflow-y-auto" '
-            f'role="group">'
-            f'{"".join(check_blocks)}</div>'
+            f'<input type="text" id="field-{escape(spec.name)}" '
+            f'data-multiselect-add="{escape(spec.name)}" '
+            f'data-multiselect-options-id="{datalist_id}" '
+            f'list="{datalist_id}" '
+            f'placeholder="Type to add a {escape(spec.label.lower())[:-1] if spec.label.lower().endswith("s") else escape(spec.label.lower())}..." '
+            f'class="{input_cls} w-full">'
         )
     elif spec.kind == "select":
         val_str = _value_to_input_str(value)
@@ -1462,9 +1497,21 @@ def _render_field(
         )
     elif spec.kind == "textarea":
         val_str = _value_to_input_str(value)
+        # CO.3 polish (2026-06-06) — bump default rows from 3 → 8 and
+        # add `w-full` so multi-line descriptions get a usable edit
+        # area instead of a ~20-column box. Chotchki spotted on TT
+        # edit page (`/l2_shape/transfer_template/<n>/edit`).
+        # Placeholder (also CO.3) enables :placeholder-shown CSS
+        # reactivity for downstream-hide rules (see input.css for the
+        # metadata_keys → metadata_value_examples pattern).
+        placeholder_attr = (
+            f' placeholder="{escape(spec.placeholder)}"'
+            if spec.placeholder else ""
+        )
         textarea_html = (
-            f'<textarea id="field-{spec.name}" name="{escape(spec.name)}" '
-            f'rows="3" class="{input_cls} resize-y min-h-16">{escape(val_str)}</textarea>'
+            f'<textarea id="field-{spec.name}" name="{escape(spec.name)}"'
+            f'{placeholder_attr} '
+            f'rows="8" class="{input_cls} resize-y min-h-32 w-full">{escape(val_str)}</textarea>'
         )
         if spec.preview_markdown:
             # BF.9 (2026-05-25) — Edit / Preview tabs. Pure HTMX:
@@ -1770,22 +1817,24 @@ def _render_chain_children_field(
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — for select_from resolution
     error: str | None,
 ) -> str:
-    """AB.6.7 — render the chain.children multi-select with per-child
-    fan_in + expected_parent_count sub-inputs.
+    """CO.3 polish (2026-06-06) — chip-list-as-primary widget. Each
+    child is a draggable chip carrying its name + fan_in checkbox + epc
+    number input. Add via the typeahead `<input list>` at the bottom;
+    × button removes; chip DOM order = canonical sequence (no
+    `__order` field needed). The epc input hides via CSS when fan_in
+    is unchecked (`:has(:not(:checked))` — see input.css).
 
-    Layout: one checkbox per available rail/template. Each checkbox
-    sits in a row that also carries a ``fan-in`` checkbox + an
-    ``expected-parent-count`` text input. The sub-inputs are named
-    ``fan_in_<child_name>`` / ``epc_<child_name>`` so the server can
-    associate them with the right child without an index-based dance.
+    Server contract preserved: `getlist("children")` returns names from
+    the chip hidden inputs in DOM order; per-name `fan_in_<name>` and
+    `epc_<name>` come from sibling inputs in the same chip. Pre-CO.3
+    this was a checkbox grid showing the full universe with each
+    checkbox row carrying its own fan_in + epc; awkward for both
+    discovery (which child do I add?) AND ordering (no signal that
+    order matters).
 
-    On save, the server reads `getlist("children")` for selected
-    names, then per name reads the sub-inputs to build a tuple of
-    ``ChainChildSpec(name, fan_in, expected_parent_count)``.
-
-    Per AB.6.0 validator C8a, picking the fan-in checkbox while the
-    matching child is a Rail (not TransferTemplate) is rejected on
-    submit with an inline error.
+    Per AB.6.0 validator C8a, picking fan-in on a Rail child (not a
+    TransferTemplate) returns inline error on submit; the renderer
+    doesn't gate it client-side.
     """
     if spec.select_from is None:
         raise ValueError(
@@ -1808,87 +1857,102 @@ def _render_chain_children_field(
 
     options, _ = _resolve_select_options(spec.select_from, instance, "")
     existing = _chain_children_value_as_specs(value)
-    selected_by_name = {name: (fan_in, epc) for name, fan_in, epc in existing}
-    # Defensive: any selected child not in the option set still shows
-    # (stale reference; validator surfaces the broken ref separately).
-    for name in selected_by_name:
-        if name not in options:
-            options = (*options, name)
+    selected_in_order = [(name, fan_in, epc) for name, fan_in, epc in existing]
+    selected_set = {name for name, _, _ in existing}
+    # Defensive: any selected child not in the option universe still
+    # shows as a chip (stale reference; validator surfaces the broken
+    # ref separately).
 
-    row_cls = (
-        "flex flex-wrap items-center gap-3 py-1 border-b "
-        "border-surface-border last:border-b-0"
+    datalist_id = f"field-{escape(spec.name)}-options"
+    datalist_html = (
+        f'<datalist id="{datalist_id}">'
+        + "".join(
+            f'<option value="{escape(o)}"></option>'
+            for o in options if o not in selected_set
+        )
+        + "</datalist>"
     )
-    item_cls = (
-        "flex items-center gap-2 font-normal text-sm cursor-pointer "
-        "text-primary-fg"
+
+    chip_li_cls = (
+        "flex items-center gap-2 bg-link-tint border border-surface-border "
+        "rounded-sm px-2 py-1 text-sm"
+    )
+    chip_remove_cls = (
+        "px-2 py-0.5 text-secondary-fg hover:text-danger hover:bg-red-50 "
+        "rounded-sm cursor-pointer text-base leading-none"
+    )
+    fan_in_label_cls = (
+        "flex items-center gap-1 font-normal text-xs text-secondary-fg "
+        "cursor-pointer"
     )
     epc_input_cls = (
-        "w-16 px-1 py-0.5 border border-surface-border rounded-sm "
+        "w-14 px-1 py-0.5 border border-surface-border rounded-sm "
         "text-sm bg-white"
     )
-    rows: list[str] = []
-    for opt in options:
-        is_selected = opt in selected_by_name
-        fan_in, epc = selected_by_name.get(opt, (False, None))
+
+    def _chip(name: str, fan_in: bool, epc: int | None) -> str:
         epc_str = str(epc) if epc is not None else ""
-        rows.append(
-            f'<div class="{row_cls}" data-child="{escape(opt)}">'
-            f'<label class="{item_cls}">'
-            f'<input type="checkbox" name="children" '
-            f'value="{escape(opt)}"{" checked" if is_selected else ""}'
-            f' data-multiselect-name="children">'
-            f' {escape(opt)}</label>'
-            f'<label class="{item_cls}">'
-            f'<input type="checkbox" name="fan_in_{escape(opt)}" '
-            f'value="true"{" checked" if fan_in else ""}>'
+        return (
+            f'<li class="{chip_li_cls}" data-multiselect-order-value="{escape(name)}">'
+            f'<span aria-hidden="true" class="cursor-grab text-secondary-fg select-none">⋮</span>'
+            f'<input type="hidden" name="children" value="{escape(name)}">'
+            f'<span class="grow">{escape(name)}</span>'
+            f'<label class="{fan_in_label_cls}" title="N:1 fan-in: expect N parent firings per child Transfer">'
+            f'<input type="checkbox" name="fan_in_{escape(name)}" value="true"{" checked" if fan_in else ""}>'
             f' fan-in</label>'
-            f'<label class="flex items-center gap-1 font-normal text-sm '
-            f'text-secondary-fg">'
-            f' epc:&nbsp;'
-            f'<input type="text" name="epc_{escape(opt)}" '
-            f'value="{escape(epc_str)}" size="3" '
-            f'placeholder="—" inputmode="numeric" '
-            f'class="{epc_input_cls}"></label>'
-            f"</div>"
+            f'<input type="number" name="epc_{escape(name)}" '
+            f'value="{escape(epc_str)}" min="1" placeholder="N" '
+            f'aria-label="Expected parent count for {escape(name)}" '
+            f'title="Expected parent firings per child Transfer (only meaningful with fan-in)" '
+            f'class="{epc_input_cls}">'
+            f'<button type="button" class="{chip_remove_cls}" '
+            f'aria-label="Remove {escape(name)}" '
+            f'data-multiselect-remove="{escape(name)}">&times;</button>'
+            f"</li>"
         )
 
-    # Hidden marker so the server distinguishes "form rendered with
-    # empty selection" from "field absent" (same shape multi_select uses).
-    group_cls = (
-        "flex flex-col gap-0 px-2 py-1 border border-surface-border "
-        "rounded-sm bg-white max-h-72 overflow-y-auto"
+    chips_html = "".join(
+        _chip(name, fan_in, epc) for name, fan_in, epc in selected_in_order
     )
-    # CO.3 — same chip-list/__order pattern as multi_select. Lets the
-    # operator drag-reorder selected children + syncs the hidden field.
-    selected_in_order = [name for name, _, _ in existing]
-    order_chips = "".join(
-        f'<li class="inline-flex items-center gap-1 bg-link-tint border border-surface-border rounded-sm px-2 py-1 cursor-grab text-sm" '
-        f'data-multiselect-order-value="{escape(s)}">'
-        f'<span aria-hidden="true" class="text-secondary-fg select-none">⋮⋮</span>'
-        f'<span>{escape(s)}</span>'
-        f'</li>'
-        for s in selected_in_order
+    empty_hint_li = (
+        f'<li class="text-xs italic text-secondary-fg px-2 py-1" '
+        f'data-multiselect-empty-hint="1">'
+        f"No children selected yet — type below to add."
+        f"</li>"
     )
-    empty_hint = (
-        ' <span class="text-xs italic text-secondary-fg" '
-        'data-multiselect-empty-hint="1">'
-        "Check a child below; drag chips here to reorder."
-        "</span>"
+    list_cls = (
+        "flex flex-col gap-1 px-2 py-2 mb-2 border border-dashed "
+        "border-surface-border rounded-sm bg-surface-bg min-h-12"
     )
+    template_id = f"field-{escape(spec.name)}-chip-template"
+    # Template element cloned by the bootstrap JS on add. Uses literal
+    # `__NAME__` placeholders the JS substitutes with the typeahead
+    # value. <template> contents don't render and aren't form-submitted.
+    template_html = (
+        f'<template id="{template_id}">'
+        f"{_chip('__NAME__', False, None)}"
+        f"</template>"
+    )
+    input_cls = field_input_classes()
     input_html = (
+        # Hidden marker — see comment above.
         f'<input type="hidden" name="children__present" value="1">'
-        f'<input type="hidden" name="children__order" '
-        f'value="{escape(",".join(selected_in_order))}" '
-        f'data-multiselect-order-input="children">'
+        f"{datalist_html}"
+        f"{template_html}"
         f'<ul data-multiselect-order-list="children" '
-        f'class="flex flex-wrap gap-2 px-2 py-2 mb-1 border border-dashed border-surface-border rounded-sm bg-surface-bg min-h-10" '
+        f'data-multiselect-options-id="{datalist_id}" '
+        f'data-chip-template-id="{template_id}" '
+        f'class="{list_cls}" '
         f'aria-label="Selected {escape(spec.label)} in order">'
-        f"{order_chips}"
-        f"{empty_hint if not selected_in_order else ''}"
+        f"{chips_html}"
+        f"{empty_hint_li if not selected_in_order else ''}"
         f"</ul>"
-        f'<div id="field-{spec.name}" class="{group_cls}" '
-        f'role="group">{"".join(rows)}</div>'
+        f'<input type="text" id="field-{escape(spec.name)}" '
+        f'data-multiselect-add="children" '
+        f'data-multiselect-options-id="{datalist_id}" '
+        f'list="{datalist_id}" '
+        f'placeholder="Type to add a child..." '
+        f'class="{input_cls} w-full">'
     )
     return (
         f'<div class="{field_row_classes()}">'
@@ -2528,57 +2592,164 @@ def _htmx_head_block() -> str:
         "        evt.detail.isError = false;\n"
         "      }\n"
         "    });\n"
-        "    // CO.2 — multi-select chip-list bootstrap. For each\n"
+        "    // CO.3 — multi-select chip-list bootstrap. For each\n"
         "    // `[data-multiselect-order-list]` element on the page: wire\n"
-        "    // Sortable.js for drag-reorder, sync the hidden `__order`\n"
-        "    // input on every reorder, and add/remove chips when the\n"
-        "    // sibling checkbox group toggles. Safe to run on pages\n"
-        "    // without multi-selects — the querySelectorAll returns [].\n"
+        "    // Sortable.js for vertical drag-reorder, the × delete\n"
+        "    // buttons inside each chip, and the typeahead `<input list>`\n"
+        "    // below the list (datalist-driven autocomplete; pressing\n"
+        "    // Enter or selecting from the dropdown adds a chip). Safe to\n"
+        "    // run on pages without multi-selects — the querySelectorAll\n"
+        "    // returns [].\n"
         "    function bootstrapMultiSelectOrder() {\n"
         "      document.querySelectorAll('[data-multiselect-order-list]').forEach(function(list) {\n"
         "        var name = list.getAttribute('data-multiselect-order-list');\n"
-        "        var hidden = document.querySelector('input[data-multiselect-order-input=\"' + name + '\"]');\n"
-        "        if (!hidden) return;\n"
-        "        function syncOrder() {\n"
-        "          var vals = Array.prototype.map.call(\n"
-        "            list.querySelectorAll('[data-multiselect-order-value]'),\n"
-        "            function(it) { return it.getAttribute('data-multiselect-order-value'); }\n"
+        "        var datalistId = list.getAttribute('data-multiselect-options-id');\n"
+        "        var datalist = datalistId ? document.getElementById(datalistId) : null;\n"
+        "        var addInput = document.querySelector('input[data-multiselect-add=\"' + name + '\"]');\n"
+        "        function syncHints() {\n"
+        "          // CO.3 — no `__order` field anymore; the per-chip hidden\n"
+        "          // inputs carry both the values AND the order (DOM order).\n"
+        "          // This callback only manages the empty-state hint.\n"
+        "          var chipCount = list.querySelectorAll('[data-multiselect-order-value]').length;\n"
+        "          var hint = list.querySelector('[data-multiselect-empty-hint]');\n"
+        "          if (chipCount === 0 && !hint) {\n"
+        "            var emptyLi = document.createElement('li');\n"
+        "            emptyLi.className = 'text-xs italic text-secondary-fg px-2 py-1';\n"
+        "            emptyLi.setAttribute('data-multiselect-empty-hint', '1');\n"
+        "            emptyLi.textContent = 'No items selected yet — type below to add.';\n"
+        "            list.appendChild(emptyLi);\n"
+        "          } else if (chipCount > 0 && hint) {\n"
+        "            hint.remove();\n"
+        "          }\n"
+        "        }\n"
+        "        function removeFromDatalist(val) {\n"
+        "          if (!datalist) return;\n"
+        "          Array.prototype.forEach.call(\n"
+        "            datalist.querySelectorAll('option'),\n"
+        "            function(opt) { if (opt.value === val) opt.remove(); }\n"
         "          );\n"
-        "          hidden.value = vals.join(',');\n"
+        "        }\n"
+        "        function addToDatalist(val) {\n"
+        "          if (!datalist) return;\n"
+        "          var opt = document.createElement('option');\n"
+        "          opt.value = val;\n"
+        "          datalist.appendChild(opt);\n"
+        "        }\n"
+        "        function datalistHas(val) {\n"
+        "          if (!datalist) return true;\n"
+        "          return Array.prototype.some.call(\n"
+        "            datalist.querySelectorAll('option'),\n"
+        "            function(opt) { return opt.value === val; }\n"
+        "          );\n"
+        "        }\n"
+        "        var templateId = list.getAttribute('data-chip-template-id');\n"
+        "        var template = templateId ? document.getElementById(templateId) : null;\n"
+        "        function buildChipFromTemplate(val) {\n"
+        "          // CO.3 — when the widget ships a <template> element\n"
+        "          // (e.g. chain_children with its fan_in checkbox + epc\n"
+        "          // input embedded per chip), clone it and substitute\n"
+        "          // literal `__NAME__` placeholders. The template-driven\n"
+        "          // path keeps widget-specific markup colocated with\n"
+        "          // the server render rather than encoded in JS.\n"
+        "          if (!template) return null;\n"
+        "          var li = template.content.firstElementChild.cloneNode(true);\n"
+        "          li.setAttribute('data-multiselect-order-value', val);\n"
+        "          // Walk attribute + textContent strings and replace __NAME__.\n"
+        "          var walker = document.createTreeWalker(li, NodeFilter.SHOW_ELEMENT, null);\n"
+        "          do {\n"
+        "            var el = walker.currentNode;\n"
+        "            for (var i = 0; i < el.attributes.length; i++) {\n"
+        "              var a = el.attributes[i];\n"
+        "              if (a.value.indexOf('__NAME__') !== -1) {\n"
+        "                el.setAttribute(a.name, a.value.split('__NAME__').join(val));\n"
+        "              }\n"
+        "            }\n"
+        "            for (var j = 0; j < el.childNodes.length; j++) {\n"
+        "              var n = el.childNodes[j];\n"
+        "              if (n.nodeType === Node.TEXT_NODE && n.nodeValue.indexOf('__NAME__') !== -1) {\n"
+        "                n.nodeValue = n.nodeValue.split('__NAME__').join(val);\n"
+        "              }\n"
+        "            }\n"
+        "          } while (walker.nextNode());\n"
+        "          return li;\n"
+        "        }\n"
+        "        function buildSimpleChip(val) {\n"
+        "          var li = document.createElement('li');\n"
+        "          li.className = 'flex items-center gap-2 bg-link-tint border border-surface-border rounded-sm px-2 py-1 text-sm';\n"
+        "          li.setAttribute('data-multiselect-order-value', val);\n"
+        "          var handle = document.createElement('span');\n"
+        "          handle.setAttribute('aria-hidden', 'true');\n"
+        "          handle.className = 'cursor-grab text-secondary-fg select-none';\n"
+        "          handle.textContent = '\\u22EE';\n"
+        "          var hiddenInput = document.createElement('input');\n"
+        "          hiddenInput.type = 'hidden';\n"
+        "          hiddenInput.name = name;\n"
+        "          hiddenInput.value = val;\n"
+        "          var label = document.createElement('span');\n"
+        "          label.className = 'grow';\n"
+        "          label.textContent = val;\n"
+        "          var rmBtn = document.createElement('button');\n"
+        "          rmBtn.type = 'button';\n"
+        "          rmBtn.className = 'px-2 py-0.5 text-secondary-fg hover:text-danger hover:bg-red-50 rounded-sm cursor-pointer text-base leading-none';\n"
+        "          rmBtn.setAttribute('aria-label', 'Remove ' + val);\n"
+        "          rmBtn.setAttribute('data-multiselect-remove', val);\n"
+        "          rmBtn.innerHTML = '&times;';\n"
+        "          li.appendChild(handle);\n"
+        "          li.appendChild(hiddenInput);\n"
+        "          li.appendChild(label);\n"
+        "          li.appendChild(rmBtn);\n"
+        "          return li;\n"
+        "        }\n"
+        "        function addChip(val) {\n"
+        "          if (!val) return false;\n"
+        "          var sel = '[data-multiselect-order-value=\"' + val.replace(/\"/g, '\\\\\"') + '\"]';\n"
+        "          if (list.querySelector(sel)) return false;  // already present\n"
+        "          if (!datalistHas(val)) return false;        // not a valid option\n"
+        "          var hint = list.querySelector('[data-multiselect-empty-hint]');\n"
+        "          if (hint) hint.remove();\n"
+        "          var li = buildChipFromTemplate(val) || buildSimpleChip(val);\n"
+        "          list.appendChild(li);\n"
+        "          removeFromDatalist(val);\n"
+        "          syncHints();\n"
+        "          return true;\n"
+        "        }\n"
+        "        function removeChip(val) {\n"
+        "          var sel = '[data-multiselect-order-value=\"' + val.replace(/\"/g, '\\\\\"') + '\"]';\n"
+        "          var el = list.querySelector(sel);\n"
+        "          if (!el) return;\n"
+        "          el.remove();\n"
+        "          addToDatalist(val);\n"
+        "          syncHints();\n"
         "        }\n"
         "        if (typeof Sortable !== 'undefined') {\n"
         "          new Sortable(list, {\n"
         "            animation: 150,\n"
+        "            handle: '.cursor-grab',\n"
         "            filter: '[data-multiselect-empty-hint]',\n"
-        "            onEnd: syncOrder,\n"
+        "            onEnd: syncHints,\n"
         "          });\n"
         "        }\n"
-        "        document.querySelectorAll('input[type=\"checkbox\"][data-multiselect-name=\"' + name + '\"]').forEach(function(cb) {\n"
-        "          cb.addEventListener('change', function() {\n"
-        "            var val = cb.value;\n"
-        "            var sel = '[data-multiselect-order-value=\"' + val.replace(/\"/g, '\\\\\"') + '\"]';\n"
-        "            var existing = list.querySelector(sel);\n"
-        "            if (cb.checked && !existing) {\n"
-        "              var hint = list.querySelector('[data-multiselect-empty-hint]');\n"
-        "              if (hint) hint.remove();\n"
-        "              var li = document.createElement('li');\n"
-        "              li.className = 'inline-flex items-center gap-1 bg-link-tint border border-surface-border rounded-sm px-2 py-1 cursor-grab text-sm';\n"
-        "              li.setAttribute('data-multiselect-order-value', val);\n"
-        "              var handle = document.createElement('span');\n"
-        "              handle.setAttribute('aria-hidden', 'true');\n"
-        "              handle.className = 'text-secondary-fg select-none';\n"
-        "              handle.textContent = '\\u22EE\\u22EE';\n"
-        "              var label = document.createElement('span');\n"
-        "              label.textContent = val;\n"
-        "              li.appendChild(handle);\n"
-        "              li.appendChild(label);\n"
-        "              list.appendChild(li);\n"
-        "            } else if (!cb.checked && existing) {\n"
-        "              existing.remove();\n"
-        "            }\n"
-        "            syncOrder();\n"
-        "          });\n"
+        "        // Delegated × button handler.\n"
+        "        list.addEventListener('click', function(evt) {\n"
+        "          var btn = evt.target.closest('[data-multiselect-remove]');\n"
+        "          if (!btn) return;\n"
+        "          removeChip(btn.getAttribute('data-multiselect-remove'));\n"
         "        });\n"
+        "        // Typeahead add: fires when the operator picks a\n"
+        "        // datalist option (input event with a matching value) OR\n"
+        "        // presses Enter with a non-empty input.\n"
+        "        if (addInput) {\n"
+        "          addInput.addEventListener('input', function() {\n"
+        "            var val = addInput.value.trim();\n"
+        "            if (datalistHas(val) && addChip(val)) addInput.value = '';\n"
+        "          });\n"
+        "          addInput.addEventListener('keydown', function(evt) {\n"
+        "            if (evt.key !== 'Enter') return;\n"
+        "            evt.preventDefault();\n"
+        "            var val = addInput.value.trim();\n"
+        "            if (addChip(val)) addInput.value = '';\n"
+        "          });\n"
+        "        }\n"
         "      });\n"
         "    }\n"
         "    if (document.readyState === 'loading') {\n"
@@ -3717,7 +3888,7 @@ def _render_edit_page(
         f'href="{escape(list_url)}">← back to {escape(kind_label_plural(kind))}</a>'
         f'</div>'
     )
-    delete_btn_classes = chrome_button_classes()
+    delete_btn_classes = destructive_button_classes()
     delete_btn_html = (
         f'<a class="{delete_btn_classes} ml-auto" '
         f'data-role="form-delete" '
@@ -5612,7 +5783,11 @@ def _placeholder(kind: EntityKind) -> object:
     original was deleted mid-flight (rare race; defensive fallback).
     """
     if kind == "account":
-        return Account(id=Identifier("(unknown)"), scope="internal")
+        return Account(
+            id=Identifier("(unknown)"),
+            scope="internal",
+            role=Identifier("(unknown)"),
+        )
     # Other kinds: stub similar; for X.4.f.1 only Account is wired.
     raise NotImplementedError(f"placeholder for {kind} not yet defined")
 

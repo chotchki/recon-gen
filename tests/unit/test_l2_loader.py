@@ -194,6 +194,7 @@ def test_money_rejects_non_numeric(tmp_path: Path) -> None:
         accounts:
           - id: a1
             scope: internal
+            role: A
             expected_eod_balance: "not a number"
         rails: []
         """)

@@ -107,11 +107,8 @@ def _encode_spec(spec: object, value: object, data: FormData) -> None:
     if kind == "multi_select":
         items = [str(v) for v in (value or ())]  # type: ignore[union-attr]: multi_select field values are always iterable tuples; `or ()` guards None
         data[f"{name}__present"] = ["1"]
-        # CO.2 — comma-joined canonical order; server prefers this over
-        # checkbox DOM order when set-equal. Empty selection emits the
-        # empty-string sentinel; the server treats absent + empty
-        # identically (falls back to checkbox order which is also empty).
-        data[f"{name}__order"] = [",".join(items)]
+        # CO.3 — chip-list-as-primary widget: hidden chip inputs carry
+        # both values + order (DOM order). The `__order` field is gone.
         if items:
             data[name] = items
     elif kind in ("text", "select", "money", "textarea", "yaml_block"):
@@ -159,8 +156,8 @@ def _append_chain_children(chain: object, data: FormData) -> None:
     data["children__present"] = ["1"]
     names = [str(c.name) for c in children]
     data["children"] = names
-    # CO.3 — canonical order override (same pattern as multi_select).
-    data["children__order"] = [",".join(names)]
+    # CO.3 — chip-list-as-primary widget makes DOM order canonical;
+    # no `__order` field anymore (dropped along with multi_select's).
     for c in children:
         if getattr(c, "fan_in", False):
             data[f"fan_in_{c.name}"] = ["true"]

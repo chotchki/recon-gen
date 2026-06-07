@@ -196,9 +196,16 @@ Period: TypeAlias = Literal["business_day", "pay_period", "week", "month"]
 class Account:
     """A 1-of-1 account that exists exactly once in the institution.
 
-    Per SPEC: singletons that Rails reference by Role; the Role is
-    technically optional but in practice required for any Account a Rail
-    touches (per F1, enforced by the validator at load time).
+    Per SPEC: singletons that Rails reference by Role. CO.3 polish
+    (2026-06-06) — promoted `role` from optional to required. An
+    account without a role can't participate in any Rail / Chain /
+    LimitSchedule (the only ways the L2 references accounts are by
+    role); a role-less account was structurally a no-op declaration.
+    All 4 existing L2 fixtures already pass role on every account, so
+    the tightening is a no-op for real data. Multiple accounts can
+    still share the same role (the N:1 grouping pattern; e.g.
+    `sasquatch_pr`'s 5 ExternalCounterparty accounts) — role is a
+    classifier, not an identifier; `id` is the unique identifier.
 
     ``description`` is free-form prose (markdown OK) read by handbook +
     training render templates per the SPEC's "Description fields" rule.
@@ -207,8 +214,8 @@ class Account:
 
     id: Identifier
     scope: Scope
+    role: Identifier
     name: Name | None = None
-    role: Identifier | None = None
     parent_role: Identifier | None = None
     expected_eod_balance: Money | None = None
     description: str | None = None

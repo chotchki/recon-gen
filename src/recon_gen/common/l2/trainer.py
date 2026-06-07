@@ -227,8 +227,7 @@ def _account_id_to_role(instance: L2Instance) -> dict[Identifier, Identifier]:
     """
     by_id: dict[Identifier, Identifier] = {}
     for acct in instance.accounts:
-        if acct.role is not None:
-            by_id[acct.id] = acct.role
+        by_id[acct.id] = acct.role
     # AccountTemplate's materialized children — if any plant references
     # a TemplateInstance.account_id, fall back to the template's role.
     # We can't know which materialized id maps to which template here

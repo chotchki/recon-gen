@@ -267,11 +267,13 @@ def create_l2_entity(
             raise ValueError("Account.id is required")
         if any(str(a.id) == str(new_id) for a in instance.accounts):
             raise ValueError(f"Account id {new_id!r} already exists")
+        if not fields.get("role"):
+            raise ValueError("Account.role is required")
         new_acc = Account(
             id=Identifier(str(new_id)),
             scope=fields.get("scope") or "internal",
             name=Name(str(fields["name"])) if fields.get("name") else None,
-            role=Identifier(str(fields["role"])) if fields.get("role") else None,
+            role=Identifier(str(fields["role"])),
             parent_role=(
                 Identifier(str(fields["parent_role"]))
                 if fields.get("parent_role") else None

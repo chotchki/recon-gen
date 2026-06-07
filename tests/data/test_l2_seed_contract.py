@@ -347,7 +347,7 @@ def test_seed_account_roles_resolve_to_instance(
     """Every account_role literal in the seed comes from a declared
     Account.role or AccountTemplate.role."""
     declared_roles = {
-        str(a.role) for a in instance.accounts if a.role is not None
+        str(a.role) for a in instance.accounts
     } | {
         str(t.role) for t in instance.account_templates
     }

@@ -94,6 +94,21 @@ def chrome_button_classes() -> str:
     )
 
 
+def destructive_button_classes() -> str:
+    """Destructive-action buttons (entity Delete, etc.). CO.3 polish
+    (2026-06-06) — operators were getting a friendly link-tint on
+    Delete buttons, no danger signal. Two-state pattern: subtle red
+    border + danger-color text at rest (clear "this is dangerous"
+    without being aggressive), filled red background + white text on
+    hover (confirming intent before the operator commits). Pairs with
+    `hx-confirm` for the click-time double-check."""
+    return (
+        "bg-red-50 text-danger border border-danger "
+        "px-3 py-1 rounded-sm cursor-pointer text-sm font-semibold "
+        "hover:bg-danger hover:text-white"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Data panel — trainer mode (AM.2)
 # ---------------------------------------------------------------------------

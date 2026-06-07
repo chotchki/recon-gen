@@ -301,8 +301,7 @@ def _collect_roles(instance: L2Instance) -> tuple[Identifier, ...]:
     """
     seen: set[Identifier] = set()
     for account in instance.accounts:
-        if account.role is not None:
-            seen.add(account.role)
+        seen.add(account.role)
     for template in instance.account_templates:
         seen.add(template.role)
     for rail in instance.rails:
@@ -705,7 +704,7 @@ def topology_graph_for(
         ls.parent_role for ls in instance.limit_schedules
     }
     for account in instance.accounts:
-        if account.parent_role is None or account.role is None:
+        if account.parent_role is None:
             continue
         cp_metadata: dict[str, str] = {"child_kind": "account"}
         if account.parent_role in parents_with_limits:
@@ -1063,7 +1062,7 @@ def build_topology_graph_per_rail(
         else:
             referenced_roles.update(rail.leg_role)
     for account in instance.accounts:
-        if account.parent_role is not None and account.role is not None:
+        if account.parent_role is not None:
             referenced_roles.add(account.role)
             referenced_roles.add(account.parent_role)
     for tmpl_acc in instance.account_templates:
@@ -1123,7 +1122,7 @@ def build_topology_graph_per_rail(
 
         # Control-parent edges (subledger ↔ control role).
         for account in instance.accounts:
-            if account.parent_role is not None and account.role is not None:
+            if account.parent_role is not None:
                 _add_adj(
                     _role_id(account.role),
                     _role_id(account.parent_role),
@@ -1586,7 +1585,7 @@ def build_topology_graph_per_rail(
     for account in instance.accounts:
         if not show_control_parent:
             break
-        if account.parent_role is None or account.role is None:
+        if account.parent_role is None:
             continue
         src = _role_id(account.role)
         dst = _role_id(account.parent_role)
@@ -1725,7 +1724,7 @@ def visible_entities_for(
 
     # Control-parent edges (role ↔ role).
     for account in instance.accounts:
-        if account.parent_role is not None and account.role is not None:
+        if account.parent_role is not None:
             _add(_role_id(account.role), _role_id(account.parent_role))
     for tmpl_acc in instance.account_templates:
         if tmpl_acc.parent_role is not None:
@@ -1752,7 +1751,7 @@ def visible_entities_for(
 
     accounts = frozenset(
         str(a.id) for a in instance.accounts
-        if (a.role is not None and str(a.role) in visible_roles)
+        if str(a.role) in visible_roles
         or (a.parent_role is not None and str(a.parent_role) in visible_roles)
     )
     account_templates = frozenset(

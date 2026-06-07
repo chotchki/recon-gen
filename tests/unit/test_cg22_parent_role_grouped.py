@@ -89,7 +89,7 @@ def test_grouped_roles_splits_singletons_from_templates(
     assert "Template roles (not eligible)" in labels
     # Cross-check the partition against the L2 instance.
     singleton_roles = {
-        a.role for a in inst.accounts if a.role is not None
+        a.role for a in inst.accounts
     }
     # AccountTemplate.role is `Identifier` (not None-able) at the
     # type level — included unconditionally.
@@ -127,7 +127,7 @@ def test_grouped_roles_existing_value_doesnt_create_stale_group(
     cache = L2InstanceCache.from_path(writable_l2_yaml)
     inst = cache.get()
     known_role = next(
-        str(a.role) for a in inst.accounts if a.role is not None
+        str(a.role) for a in inst.accounts
     )
     groups, _ = _resolve_grouped_roles(inst, known_role)
     labels = [g[0] for g in groups]
