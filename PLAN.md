@@ -391,9 +391,13 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 
 **Locks (operator to confirm):**
 - Zebra striping (alternating row backgrounds — use `bg-surface` / `bg-surface-alt` token if it exists; else add)
+  - Comment: Agreed
 - Header row sticky + visually distinguished from body (background fill + bottom border)
+  - Comment: Agreed, would also like a button (add as a new task below) to export to XSLX a given table with the same style / information as the table is showing.
 - Money columns auto-right-aligned + `tabular-nums` when ColumnSpec carries `currency=True`
+  - Comment: Agreed
 - Header-row bg uses a theme token (no hardcoded palette per the existing `no-hardcoded-palette` lint)
+  - Comment: Agreed
 
 **Done when:** Typed `TableSurface` extends or adapts the existing tree `Table` Visual w/ the zebra/sticky/tabular contract; both renderers (QS + App2) honor it; Daily Statement detail + Limit Breach table + ledger tables across L1 / L2FT / Investigation / Exec all read consistently.
 
@@ -466,34 +470,71 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [ ] CK.7 - **Cold-read v3 a11y confirmation.** Manual screen-reader spot-check + axe-core green. **DEFERRED** — gated on CK.2/3/5/6.
 - [x] CF.X - infra - CF.X-infra **SHIPPED** (commit ef19737c): `KPIValueThresholdBanding` typed primitive (3-band amber/red, frozen dataclass with `red_at > amber_at` construction guard, 3-way mutex with the BK.2 zero / BK.9 sign indicators) + `CrossAppDrill` typed primitive (target_dashboard_id + target_sheet_id; QS emit = None per the URL-param-no-control-sync defect). QS emit + App2 shape_kpi + bootstrap.js renderKPI extended with the `warning` semantic color (`text-warning` already compiled into output.css from Studio surfaces). 9 new unit tests pin all three bands + the construction guards + the neutral-on-null contract. EXCLAMATION_CIRCLE icon enum still needs deploy-probe before first QS-side render — fallback list (TRIANGLE → FLAG) inline in the helper. Module-level `common/html/_components.py` deferred until a follow-up needs it; current primitives land cleanly in `common/tree/visuals.py` next to the BK.2/BK.9 siblings.
 
-## Phase CL - Sparse balance loads via ETL (TBD — placeholder)
+## Phase CL - Sparse balance loads via ETL
 
-**Placeholder filed 2026-06-05.** Real customer ETL feeds don't post a daily balance for every account every business day — many systems emit a balance row only on days the account had transaction activity, others only on month-end, others on a per-state cadence. Recon-Gen's L1 invariants (drift, ledger-drift, overdraft) currently assume every `(account, business_day)` pair has a row in `<prefix>_daily_balances`; gaps surface as false-positive drift instead of as legitimately-absent data. Phase CL closes that gap end-to-end: ETL surface declares per-account balance cadence, L1 invariants honor the declaration, dashboards distinguish "missing balance" from "balance drifted."
+**Placeholder filed 2026-06-05; locks landed 2026-06-07 from chotchki's inline comments.** Real customer ETL feeds don't post a daily balance for every account every business day — many systems emit a balance row only on days the account had transaction activity, others only on month-end. Recon-Gen's L1 invariants (drift, ledger-drift, overdraft) currently assume every `(account, business_day)` pair has a row in `<prefix>_daily_balances`; gaps surface as false-positive drift instead of as legitimately-absent data. Phase CL closes that gap end-to-end: ETL surface declares per-account balance cadence, L1 invariants honor the declaration, dashboards distinguish "reported balance" from "inherited (carry-forward) balance."
 
-**Operator lock (2026-06-05) — the default cadence shape:** activity-day-driven reporting is normal and correct. When a transaction-system feed posts a balance row only on days the account had activity, the balance is **implicitly** the same on the intervening no-activity days. "No balance row on 2026-06-04" doesn't mean "balance is missing" — it means "balance was unchanged from the prior reported value." The L1 drift / overdraft checks have to walk forward from the most-recent reported balance over the no-activity gap. This is the default policy; anything else (explicit daily reporting, EOM-only reporting, per-state) is a deliberate non-default declaration.
+**Sequencing.** CL ships **after CP** (which moves `business_day_offset` onto Account / AccountTemplate). CP establishes the per-entity-attribute pattern + FieldSpec emit + seed-loop-reads-entity-field plumbing — CL adds `balance_cadence` to the same Account / AccountTemplate dataclasses using identical shape. CL also blocks **CM** (escheatment, per chotchki's CM comment: "ISO duration of no transactions but a positive balance — which post-CL may be sparse"). Order: CP → CL → CM.
 
-**Open design questions (lock before any sub-cells fire):**
-- Where does cadence live — on the `Account` primitive (per-account schedule attribute), the L2 yaml's `<prefix>_balance_policy` block (per-customer global), or a new typed `BalancePolicy` entity referenced by account_id?
-  - Comment: Lives on the account/account template blocks.
-- Activity-driven reporting is the default per the operator lock above. Other policies likely needed: (a) **explicit-daily** (a balance row MUST exist every business day; missing = gap-violation), (b) **EOM-only** (balance reported only on month-end business day; activity-day model on intervening days), (c) **per-state-cadence** (multi-state institutions may have different per-state report schedules). Per-account or global?
-  - Comment: Only support sparse and explicit daily for now, eom can be simulated with sparse and per state should be individual accounts
-- Studio Trainer needs a "sparse-load" plant kind so the operator can rehearse the policy in the studio before customer-data lands.
-  - Comment: the test data generator should follow the configured types but yes a violation should plant for daily in the trainer view
-- How do we surface "this account reported today" vs "this account didn't report today, carry-forward in effect" on Daily Statement / Drift visuals? (Cosmetic distinction — the underlying balance is the same — but operator-readable distinction matters.)
-  - Comment: I think a KPI could show, reported vs inherited
+**Operator locks (2026-06-05 + 2026-06-07):**
 
-- [ ] CL.0 - Replan + design — survey real customer ETL feed shapes; map onto our schema; lock cadence-declaration site + carry-forward policy taxonomy (default = activity-day-implicit, anything else opt-in). SPEC.md update. Output: `docs/audits/cl_0_sparse_balance_design.md`.
+1. **Cadence lives on Account / AccountTemplate** — not top-level dict, not a separate `BalancePolicy` entity. Same shape as CP. Reuses CP's editor / seed / loader plumbing.
+2. **Two cadence variants for v1: `sparse` + `explicit_daily`.** EOM gets simulated via sparse (the balance only changes on EOM-affecting transactions); per-state policy gets done per-account, not per-state-block.
+3. **Default = `sparse`.** Activity-day-driven reporting is the normal customer feed shape. `explicit_daily` is the opt-in stricter declaration. When the field is unset (`None`), default to `sparse` at read time. Migration of existing bundled fixtures: each one explicitly declares its policy at CL.11; no "implicit-daily-because-historically" compat shim (per [[feedback_no_compat_shims]]).
+4. **Test generator honors the declared cadence.** Sparse accounts emit balance rows only on activity days; explicit-daily accounts emit every business day. The trainer adds a `missing_balance_on_explicit_daily` plant kind so an operator can rehearse "what does a gap-violation look like on this surface" without waiting for a real customer ETL miss.
+5. **KPI: reported vs inherited.** Dashboard surfaces the distinction via a top-line KPI (count or %) on Daily Statement / Drift, plus a per-row R / I badge on the daily-balance row table so operators can see at a glance which rows are explicit vs carry-forward. Underlying balance value is unchanged; the badge is metadata about where the value came from.
+
+**Invariant + matview changes:**
+
+- **Drift, ledger-drift, overdraft**: matview SQL changes from "join `daily_balances` on exact date" to "join the carry-forward effective balance" via `LAST_VALUE(reported_balance) IGNORE NULLS OVER (PARTITION BY account_id ORDER BY business_day)`. DuckDB / PG 17 / Oracle 19c all support this shape. BZ.1's `current_transactions` correlated-subquery-to-window rewrite is the precedent.
+- **New L1 invariant `balance_cadence_gap`** — for `explicit_daily` accounts, every business day in the observable window must have a reported balance row. Missing rows = violation. Matview projects (account_id, business_day, last_reported_balance, days_since_last_report). Dashboard card on L1 Exceptions sheet; subtitle names the cadence-policy rule. No new sheet — fits into existing L1 Exceptions taxonomy.
+
+**Dashboard surface:**
+
+- **Daily Statement sheet**: add `Reported vs Inherited` KPI tile (3-band strawman: ≥90% reported = healthy, 50-90% = check feed, <50% = ETL likely down — bands finalized in CL.0). Per-row table gains a small `R` / `I` badge anchored on whether the row came from a reported source vs the carry-forward.
+- **L1 Exceptions sheet**: add the `balance_cadence_gap` invariant card with the standard count + drill-to-Investigation plumbing.
+- **App Info / Matview Status**: one-line stat — "{n} accounts on sparse, {m} on explicit_daily".
+
+**Dogfood / fuzz interaction:**
+
+- Trainer plant `missing_balance_on_explicit_daily` joins `PLANT_REGISTRY`; honest dogfood (`test_browser_full_create_l2_structural_equality`) round-trips the `balance_cadence` field per the same anti-drift gate that CO.3 enforces for other Account fields.
+- Fuzz L2 generator picks `balance_cadence` from `{None, "sparse", "explicit_daily"}` per account — None biased to the majority case (mirrors real customer feed distribution).
+
+**Done when:** `Account.balance_cadence` + `AccountTemplate.balance_cadence` exist as typed dataclass fields; loader + editor surface them with a structured radio/select; test generator honors them; carry-forward window-function rewrite lands across drift / ledger-drift / overdraft matviews on all 3 dialects; `balance_cadence_gap` invariant + dashboard card surface on L1 Exceptions; `Reported vs Inherited` KPI + per-row R/I badge ship on Daily Statement; trainer plant `missing_balance_on_explicit_daily` registered + dogfood-tested; locked seeds re-locked; bundled L2 fixtures declare their policies explicitly.
+
+- [ ] CL.0 - Replan + design — produce `docs/audits/cl_0_sparse_balance_design.md`: (a) survey real customer feed shapes (informational, ETL-team-readable); (b) carry-forward SQL across the 3 dialects w/ worked examples; (c) cadence-gap invariant SQL; (d) badge / KPI mockups + 3-band threshold finalization; (e) confirm the bundled-fixture per-account policy choices (sparse / explicit_daily) for spec_example, sasquatch_pr, heavy_density_v1.
+- [ ] CL.1 - Typed `BalanceCadence` primitive — `Literal["sparse", "explicit_daily"]` in `common/l2/primitives.py`. Helper `resolve_cadence(account) -> Literal["sparse", "explicit_daily"]` returns `"sparse"` when the attribute is None. Validator rejects unknown values w/ a typed message.
+- [ ] CL.2 - Dataclass + loader — add `balance_cadence: BalanceCadence | None = None` to `Account` + `AccountTemplate`. `_load_account` / `_load_account_template` parse the new YAML key. CP must have landed first so the loader pattern is established.
+- [ ] CL.3 - Editor FieldSpec — radio (kind="select" w/ 2 options + a "Default (sparse)" empty value) on both account + account_template forms; help text spells out the two semantics. Position adjacent to `business_day_offset` (CP-introduced) so the EOD / cadence knobs cluster.
+- [ ] CL.4 - Test generator + seed — `emit_full_seed` walks accounts; for each, emit balance rows per `resolve_cadence(account)`. Sparse: activity-day rows only. Explicit-daily: every business day in the anchor window. Determinism stays via the existing seed.
+- [ ] CL.5 - Carry-forward matview rewrite — drift, ledger-drift, overdraft. Window function `LAST_VALUE(balance) IGNORE NULLS OVER (PARTITION BY account_id ORDER BY business_day)` (or equivalent). **Per [[feedback_sql_dialect_convergence_preferred]]:** if all 3 dialects accept the same SQL, no per-dialect arm.
+- [ ] CL.6 - New invariant `balance_cadence_gap` — matview SQL emit + dashboard card on L1 Exceptions. Walks accounts w/ `balance_cadence = "explicit_daily"`; projects business days in the analysis window where no balance row exists. Subtitle: "Account declared `explicit_daily` cadence — every business day requires a reported balance row. Missing rows in red."
+- [ ] CL.7 - Trainer plant `missing_balance_on_explicit_daily` — registers in `PLANT_REGISTRY` under L1 Cap family. Plant function picks an `explicit_daily` account + a recent business day + DELETEs that account/day row from `<prefix>_daily_balances`. Dashboard check asserts the row surfaces on the `balance_cadence_gap` matview. If no `explicit_daily` accounts exist in the fixture, plant function raises a typed error.
+- [ ] CL.8 - Daily Statement KPI + R/I badge — typed primitive on the visual: `BalanceProvenanceBadge(reported_field: ColumnSpec, default_label="R", inherited_label="I")`. `Reported vs Inherited` KPI bound to a contract-derived ratio column. Both QS + App2 renderers; parity gated by the existing 4-way agreement test.
+- [ ] CL.9 - App Info / Matview Status one-line stat — "{n} accounts on sparse, {m} on explicit_daily". Pulls from the seed-time count over `Account.balance_cadence`.
+- [ ] CL.10 - Re-lock seeded fixtures + semantic-lock files — byte-identity should hold for fixtures that chose `sparse` everywhere (the carry-forward window function reads the same rows the prior matview did). Locks shift when an account flips to `explicit_daily`; expected delta documented in the lock commit.
+- [ ] CL.11 - Update bundled L2 fixtures — declare per-account policies: spec_example (single-account → sparse for the lightweight illustration), sasquatch_pr (chotchki's lock per CL.0 audit), heavy_density_v1 (likely mixed: explicit_daily on GL / control side, sparse on customer DDA). Fuzz generator picks at random per CL spec above.
+- [ ] CL.12 - Extend dogfood gate — `test_browser_full_create_l2_structural_equality` round-trips `balance_cadence` on every account that declares one. `balance_cadence_gap` plant joins the BV.3.3 per-kind trainer dogfood walk.
+- [ ] CL.13 - Cold-read v0 — agent-driven, against the deployed dashboards + editor flow. Confirms: operator can pick a cadence on the form; trainer plant fires; gap row surfaces on L1 Exceptions; KPI + badges read correctly; carry-forward semantics are operator-intuitive ("no row today" doesn't read as "missing data" when sparse is the policy). Output: `docs/audits/cl_cold_read.md`.
+- [ ] CL.14 - Sign-off + sweep CL to PLAN_ARCHIVE.md.
 
 ## Phase CM - Escheatment tracking sheets (TBD — placeholder)
+
+- Comment: even the name should be considered, escheatment is VERY US centric. Maybe inactive / dormant / unclaimed funds? Pick a neutral term.
 
 **Placeholder filed 2026-06-05.** Banks must identify dormant accounts and, after a regulatory window (typically 3-5 years, varies by state and account type), report and remit unclaimed balances to the state's unclaimed property administrator under each state's escheatment statute. Recon-Gen needs: a way to flag candidate accounts (no activity for N years per the relevant state's rules), surface aging by escheatment-clock, prep the per-state remittance lists, and maintain an audit trail showing why each account did or did not escheat.
 
 **Open design questions (lock before any sub-cells fire):**
 - Is escheatment a fifth bundled app (sibling to L1 / L2FT / Investigation / Executives) or a new sheet group inside Investigation?
+  - Comment: I think a sheet in investigation would be a good place.
 - The "dormancy clock" per account depends on (account_type, state, activity-definition). Where does the policy declaration live — L2 yaml as a new `EscheatmentPolicy` entity? Per-state default tables baked in? Customer-supplied via ETL?
+  - Comment: I think we keep it simple to start, defined on account/account template, ISO duration of no transactions but a positive balace (which post CL may be sparse)
 - NAUPA II is the de-facto state filing format. Do we generate NAUPA exports here (regulatory-data-out) or stay informational (flag + age, customer files via their existing tooling)?
+  - Comment: Informational to keep with the investigation intent.
 - Studio Trainer plants needed: "account with no activity for 4 years 11 months" (near-escheatment), "escheated last month" (post-escheatment audit row).
+  - Comment: Agreed
 - Investigation's existing dormant-account surface — does it absorb or fork from CM?
+  - Comment: I don't see that on investigation
 
 - [ ] CM.0 - Replan + design — survey state escheatment rule diversity; lock policy-declaration site + filing-output scope (informational vs NAUPA-emitting). SPEC.md update. Output: `docs/audits/cm_0_escheatment_design.md`.
 
