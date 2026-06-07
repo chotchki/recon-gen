@@ -1810,11 +1810,12 @@
 
   function pushFilterStateToUrl(form) {
     if (!form || typeof URL === "undefined") return;
+    var url;
+    var owned = [];
     try {
-      var url = new URL(window.location.href);
+      url = new URL(window.location.href);
       // Drop existing form-owned keys so values cleared by the user
       // disappear from the URL too (not just stay stale).
-      var owned = [];
       url.searchParams.forEach((_v, k) => {
         if (
           k.indexOf("param_") === 0 ||
@@ -1825,7 +1826,9 @@
           owned.push(k);
         }
       });
-      owned.forEach((k) => url.searchParams.delete(k));
+      owned.forEach((k) => {
+        url.searchParams.delete(k);
+      });
       // Re-add from the current form. Empty values are "no pick" — leave
       // them out so the URL stays readable.
       new FormData(form).forEach((v, k) => {

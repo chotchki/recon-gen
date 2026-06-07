@@ -74,6 +74,7 @@ from recon_gen.common.sql import Dialect
 
 from .primitives import (
     AccountTemplate,
+    BalanceCadence,
     Chain,
     ChainChildSpec,
     Identifier,
@@ -4117,20 +4118,55 @@ def _emit_baseline_daily_balances(
         calendar_days.append(cursor)
         cursor += timedelta(days=1)
 
-    # Per account, fill forward the last-known balance into every
-    # calendar day in the window. An account's first business-day
-    # balance lands on its activity day; days before it get the
-    # account's initial balance; days between business-day legs
-    # carry the most recent EOD; days after the final leg through
-    # the anchor carry that final EOD.
+    # CL.4 — emission strategy is cadence-aware:
+    #
+    # - ``explicit_daily`` (and the historic pre-CL behavior): fill
+    #   forward the last-known balance into every calendar day in the
+    #   window. Days before first activity get the initial balance;
+    #   days between business-day legs carry the most recent EOD;
+    #   days after the final leg through the anchor carry that final
+    #   EOD. The Daily Statement picker on weekend / holiday dates
+    #   always lands on a real row.
+    #
+    # - ``sparse`` (the new post-CL default for ``balance_cadence
+    #   = None``): emit ONLY days the account had a transaction-leg
+    #   touch. Quiet days produce no row at all; CL.5's carry-forward
+    #   matview reads the most-recent emitted row to derive the
+    #   effective balance for any later quiet day. This is the
+    #   activity-driven feed shape that real institutions ship.
+    #
+    # Per-account branching is essential: a mixed fixture can have
+    # explicit_daily control accounts alongside sparse customer DDAs
+    # and both must emit correctly into the SAME baseline. The branch
+    # only sits in the fill-forward step — the eod_balances dict
+    # (post per-leg accumulation) already has the activity-day rows
+    # for both modes.
     accounts_with_activity: set[Identifier] = {a for a, _ in eod_balances}
+    eod_by_account: dict[Identifier, dict[date, Decimal]] = {}
+    for (acct, day), money in eod_balances.items():
+        eod_by_account.setdefault(acct, {})[day] = money
     filled_eod: dict[tuple[Identifier, date], Decimal] = {}
     for account_id in sorted(accounts_with_activity, key=str):
-        running = state.initial_balances.get(account_id, Decimal("0"))
-        for day in calendar_days:
-            if (account_id, day) in eod_balances:
-                running = eod_balances[(account_id, day)]
-            filled_eod[(account_id, day)] = running
+        meta = account_meta.get(account_id)
+        # Inline the resolve_cadence fallback here — the helper takes
+        # the full Account / AccountTemplate entity (for primitives
+        # call sites) and we only carry the cadence string on the
+        # resolved meta. Same default-None-to-sparse semantics.
+        declared = meta.balance_cadence if meta is not None else None
+        cadence: BalanceCadence = declared if declared is not None else "sparse"
+        acct_days = eod_by_account.get(account_id, {})
+        if cadence == "explicit_daily":
+            running = state.initial_balances.get(account_id, Decimal("0"))
+            for day in calendar_days:
+                if day in acct_days:
+                    running = acct_days[day]
+                filled_eod[(account_id, day)] = running
+        else:
+            # sparse: only activity-day rows make it into the emit.
+            # The carry-forward matview (CL.5) handles "what was the
+            # balance on a quiet day" at read time.
+            for day, money in acct_days.items():
+                filled_eod[(account_id, day)] = money
 
     rows: list[str] = []
     for (account_id, day), money in sorted(
@@ -4179,6 +4215,8 @@ def _build_account_meta_map(
             account_parent_role=tmpl.parent_role,
             # CP.2 — template offset fans out to every materialized instance.
             business_day_offset=tmpl.business_day_offset,
+            # CL.4 — template cadence fans out the same way.
+            balance_cadence=tmpl.balance_cadence,
         )
     for a in instance.accounts:
         out[a.id] = _ResolvedAccount(
@@ -4189,6 +4227,8 @@ def _build_account_meta_map(
             account_parent_role=a.parent_role,
             # CP.2 — per-singleton offset.
             business_day_offset=a.business_day_offset,
+            # CL.4 — per-singleton cadence.
+            balance_cadence=a.balance_cadence,
         )
     return out
 
@@ -4359,6 +4399,15 @@ class _ResolvedAccount:
     # accounts always carry None per CP.0 audit + validator M.4.4.14a
     # — we don't compute their EOD balances at all.
     business_day_offset: int | None = None
+    # CL — per-entity balance-emit cadence. ``None`` resolves to
+    # ``"sparse"`` via ``resolve_cadence`` (the read-time default).
+    # ``"sparse"`` accounts only emit daily_balances rows on activity
+    # days; ``"explicit_daily"`` accounts emit every business day in
+    # the window regardless of activity. Scope=external accounts
+    # carry None and don't emit balance rows at all (same as
+    # business_day_offset's external-skip pattern). See CL.0 audit §3
+    # for the carry-forward matview semantics that read these.
+    balance_cadence: BalanceCadence | None = None
 
 
 def _resolve_any_account(
