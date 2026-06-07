@@ -626,8 +626,7 @@ def _load_account(raw: object, *, path: str) -> Account:
         scope=_load_scope(_require(raw_d, "scope", path=path), path=f"{path}.scope"),
         name=Name(_load_string(raw_d["name"], path=f"{path}.name"))
         if "name" in raw_d else None,
-        role=_load_identifier(raw_d["role"], path=f"{path}.role")
-        if "role" in raw_d else None,
+        role=_load_identifier(_require(raw_d, "role", path=path), path=f"{path}.role"),
         parent_role=_load_identifier(raw_d["parent_role"], path=f"{path}.parent_role")
         if "parent_role" in raw_d else None,
         expected_eod_balance=_load_money(eod, path=f"{path}.expected_eod_balance")

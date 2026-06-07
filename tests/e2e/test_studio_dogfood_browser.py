@@ -97,10 +97,28 @@ def _build_studio_asgi(cache: L2InstanceCache) -> object:
     is studio-only — no dashboards, no DB pool. Wrap the real
     `make_studio_routes(cache)` directly so the test exercises the
     SAME routes the operator hits, just without the dashboards mount
-    the test doesn't need."""
-    from starlette.applications import Starlette  # noqa: PLC0415 — lazy
+    the test doesn't need.
 
-    return Starlette(routes=make_studio_routes(cache))  # type: ignore[arg-type]: Starlette accepts Route | Mount list; make_studio_routes returns exactly that
+    CO.3 followup (2026-06-07) — pass a top_nav_fn so editor pages
+    render the same Studio top-nav production gets. Without it,
+    `_top_nav_html` returns "" and `<a href="/">L2 Editor</a>`
+    never lands in the DOM; tests that navigate via the chrome
+    `goto_home()` verb time out on the nav locator.
+    """
+    from starlette.applications import Starlette  # noqa: PLC0415 — lazy
+    from recon_gen.common.html.render import (  # noqa: PLC0415 — lazy
+        build_top_nav_entries, emit_top_nav,
+    )
+
+    def _top_nav_fn(active_href: str) -> str:
+        entries = build_top_nav_entries(
+            dashboards=[], studio_enabled=True, docs_url=None,
+        )
+        return emit_top_nav(entries=entries, active_href=active_href)
+
+    return Starlette(  # type: ignore[arg-type]: Starlette accepts Route | Mount list; make_studio_routes returns exactly that
+        routes=make_studio_routes(cache, top_nav_fn=_top_nav_fn),
+    )
 
 
 @pytest.mark.browser
@@ -200,21 +218,17 @@ def test_browser_operator_creates_rail_with_role_checkbox(
         )
 
 
-@pytest.mark.skip(
-    reason=(
-        "AI.10 (xor_groups textarea) + AI.13 (BB.2 aggregator-two-leg "
-        "expected_net + origin) + piece-4 `_edit` verb shipped. Full "
-        "create_l2 walk runs end-to-end via real browser, but BB.2 "
-        "create-new sub-form misses optional rail / TT fields "
-        "(metadata_keys, amount_typical_range, transfer_key, "
-        "completion, description, posted_requirements). AI.14 + "
-        "AI.15 consolidated as 'BB.2 form completeness + structured "
-        "pickers' work — defer until post-AM per user 2026-05-25."
-    ),
-)
 @pytest.mark.browser
+@pytest.mark.parametrize(
+    "fixture_id",
+    [
+        "fuzz_12345",
+        "spec_example",  # typing-smell: ignore[no-inline-production-constants]: the L2 fixture filename happens to coincide with production's DEFAULT_PREFIX; this literal is a test-side parametrize id used to pick which tests/l2/<id>.yaml file to copy, not a reference to the spine prefix constant
+        "sasquatch_pr",
+    ],
+)
 def test_browser_full_create_l2_structural_equality(
-    tmp_path: Path,
+    tmp_path: Path, fixture_id: str,
 ) -> None:
     """Piece 3 — the AI.2.d.2 acceptance gate.
 
@@ -228,22 +242,14 @@ def test_browser_full_create_l2_structural_equality(
     normalizing tuple order + description whitespace as
     non-structural).
 
-    First-pass fixture is a fuzz seed (12345) rather than
-    `spec_example` because `spec_example` exercises the AI.10 UI
-    gap (xor_groups form-pairing absent on the rail-create form;
-    the HTTP driver sneaks `leg_rail_xor_groups_*` into the POST
-    body but the browser can only submit what the form renders).
-    Per `tests/l2/fuzz.py`'s docstring, the fuzzer declines to
-    generate Variable-direction rails — sidesteps the AI.10 case.
-    spec_example coverage lands once AI.10 ships the form-pairing.
+    CO.3 (2026-06-06) — parametrized across three fixtures so the
+    honest-browser gate covers everything the HTTP transport tests
+    do: a fuzz seed (random topology stress), spec_example (the
+    canonical small L2 with xor_groups exercising multi_select_groups
+    order), and sasquatch_pr (the rich real-shape L2 with many
+    rails / TTs / chains / limit_schedules).
 
-    Per Lock 3 amendment: Playwright pass runs ONCE on a
-    deterministic L2 (HTTP transport covers `spec_example` +
-    sasquatch_pr + 5 fuzz seeds). The browser pass proves the
-    operator-facing form-render + submit fidelity that the HTTP
-    TestClient can't.
-
-    Long-running (~3-5 min): the walk creates ~30 entities
+    Long-running (~3-5 min each): the walk creates ~30+ entities
     sequentially via real browser form-fills, each with a 303
     redirect."""
     from tests.l2.fuzz import random_l2_yaml
@@ -252,10 +258,16 @@ def test_browser_full_create_l2_structural_equality(
     )
     from recon_gen.common.l2.loader import load_instance
 
-    reference_path = tmp_path / "fuzz_12345_reference.yaml"
-    reference_path.write_text(random_l2_yaml(12345))
+    if fixture_id == "fuzz_12345":
+        reference_path = tmp_path / "fuzz_12345_reference.yaml"
+        reference_path.write_text(random_l2_yaml(12345))
+    else:
+        # `spec_example` and `sasquatch_pr` live under tests/l2/
+        source = Path(__file__).parent.parent / "l2" / f"{fixture_id}.yaml"
+        reference_path = tmp_path / f"{fixture_id}_reference.yaml"
+        reference_path.write_text(source.read_text())
     reference = load_instance(reference_path)
-    dogfood_path = tmp_path / "dogfood_fuzz_12345.yaml"
+    dogfood_path = tmp_path / f"dogfood_{fixture_id}.yaml"
 
     cache = L2InstanceCache(dogfood_path, _empty_l2())
     asgi = _build_studio_asgi(cache)

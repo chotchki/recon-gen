@@ -1983,7 +1983,7 @@ def _eligible_accounts_for_role(
                 _TEMPLATE_BY_ROLE_FOR_RESOLVE(instance),
             ))
     for a in instance.accounts:
-        role = str(a.role) if a.role is not None else str(a.id)
+        role = str(a.role)
         if role in role_set:
             out.append(_ResolvedAccount(
                 account_id=a.id,
@@ -4010,7 +4010,7 @@ def _resolve_internal_singleton_for_role(
     for a in sorted(instance.accounts, key=lambda a: str(a.id)):
         if str(a.scope) != "internal":
             continue
-        role = str(a.role) if a.role is not None else str(a.id)
+        role = str(a.role)
         if role in role_set:
             return _ResolvedAccount(
                 account_id=a.id,

@@ -242,7 +242,7 @@ def validate(instance: L2Instance) -> None:
     _check_unique_limit_schedule_combinations(instance)
     _check_no_template_id_collides_with_singleton(instance)
 
-    account_roles = {a.role for a in instance.accounts if a.role is not None}
+    account_roles = {a.role for a in instance.accounts}
     template_roles = {t.role for t in instance.account_templates}
     all_roles = account_roles | template_roles
     rail_names = {r.name for r in instance.rails}

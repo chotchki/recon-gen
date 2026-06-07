@@ -1445,15 +1445,25 @@ def _reset_oracle_password_via_socket(container_name: str, password: str) -> Non
     profile bump to UNLIMITED makes future stale-password retries
     during the password-rotation dance harmless. Both clauses are
     idempotent.
+
+    #254 — fail LOUD on sqlplus failure. Previously this swallowed all
+    subprocess + ORA-* errors silently, which let the rendezvous
+    publish a URL whose embedded password didn't match the live
+    container's password — every xdist worker subsequently hit
+    ORA-01017 at connect. Now both a non-zero exit AND any ORA-* token
+    in stdout raise RuntimeError with the full sqlplus output, so the
+    fixture errors point at the actual problem instead of a generic
+    invalid-credentials downstream.
     """
     import subprocess  # noqa: PLC0415 — lazy
     sql = (
+        f'WHENEVER SQLERROR EXIT SQL.SQLCODE;\n'
         f'ALTER USER system IDENTIFIED BY "{password}" ACCOUNT UNLOCK;\n'
         f'ALTER PROFILE default LIMIT '
         f'FAILED_LOGIN_ATTEMPTS UNLIMITED PASSWORD_LIFE_TIME UNLIMITED;\n'
         f'EXIT;\n'
     )
-    subprocess.run(
+    result = subprocess.run(
         [
             "docker", "exec", "-i", container_name,
             "bash", "-lc", "sqlplus -s / as sysdba",
@@ -1462,6 +1472,63 @@ def _reset_oracle_password_via_socket(container_name: str, password: str) -> Non
         check=False,
         capture_output=True,
     )
+    stdout = result.stdout.decode("utf-8", errors="replace")
+    stderr = result.stderr.decode("utf-8", errors="replace")
+    # sqlplus's WHENEVER SQLERROR EXIT SQL.SQLCODE sets a non-zero rc on
+    # ORA-* errors; the rc-only check would already cover most cases,
+    # but stdout-scan adds belt-and-suspenders for cases where the
+    # heredoc never reaches sqlplus (container not running, bash error,
+    # etc.) — those also surface here.
+    has_ora_error = "ORA-" in stdout or "ORA-" in stderr
+    if result.returncode != 0 or has_ora_error:
+        raise RuntimeError(
+            f"Oracle password reset via sysdba failed for {container_name!r} "
+            f"(rc={result.returncode}). This will cause downstream ORA-01017 "
+            f"errors on every connection attempt. "
+            f"sqlplus stdout:\n{stdout}\n"
+            f"sqlplus stderr:\n{stderr}"
+        )
+
+
+def _verify_oracle_connect(url: str, *, attempts: int = 5, delay: float = 2.0) -> None:
+    """#254 — smoke-connect to the Oracle container before publishing
+    the URL to the xdist rendezvous state_file. If we can't auth here,
+    we won't be able to auth from the test workers either; better to
+    raise inside the first-firing fixture (with a useful message)
+    than to publish a poisoned URL and have N xdist workers all hit
+    ORA-01017 with no signal pointing back at the root cause.
+
+    Retries because Oracle's initial listener-ready window has a brief
+    period where ALTER USER lands but new logins still 1017 for ~1-2s.
+    """
+    import oracledb  # noqa: PLC0415 — lazy
+    import time  # noqa: PLC0415 — lazy
+    from recon_gen.common.db import oracle_dsn  # noqa: PLC0415 — lazy
+    last_exc: Exception | None = None
+    for i in range(attempts):
+        try:
+            conn = oracledb.connect(oracle_dsn(url))
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001 — best-effort close
+                pass
+            return
+        except Exception as exc:  # noqa: BLE001 — retry on any connect failure
+            last_exc = exc
+            if i < attempts - 1:
+                time.sleep(delay)
+    raise RuntimeError(
+        f"Oracle smoke-connect failed after {attempts} attempts against "
+        f"{_redact_password(url)!r}: {last_exc!r}. The rendezvous URL would "
+        f"have been published with a credential the container does not "
+        f"accept — every test worker would have hit ORA-01017."
+    )
+
+
+def _redact_password(url: str) -> str:
+    """Strip the password from an oracle URL for safe error logging."""
+    import re  # noqa: PLC0415 — lazy
+    return re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", url)
 
 # CB.11.b — fixed host port for the local PG container. Matches the
 # operator's hotchkiss.io:5433 forward target, so QS data sources
@@ -1912,10 +1979,28 @@ def _start_fresh_pg_container(
     # default `max_connections=100` was leaving no slack for the
     # admin connection that `capture_top_queries`' pg_stat_statements
     # query needs at teardown time.
+    # #254-followup — beef up Postgres for concurrent xdist load. Under
+    # `-n auto` (16 workers on this dev box), each trainer dogfood test
+    # hits `/training/reset` → drop-and-recreate v overlay tables +
+    # matview rebuild, all against the SAME shared PG container. Stock
+    # alpine defaults (128 MB shared_buffers, 4 MB work_mem) thrash
+    # under that contention and the studio_server's response misses the
+    # Playwright 30 s navigation wait — observed as a click-then-hang.
+    #
+    # Bump shared_buffers to 1 GB (we control the box; memory is cheap
+    # vs. 30 s timeouts) and work_mem to 32 MB (matview sort space).
+    # `synchronous_commit=off` is safe for a throwaway test DB and
+    # eliminates fsync stalls on heavy concurrent COMMITs.
     container = (
         PostgresContainer("postgres:17-alpine", password=password)
         .with_command(
-            "postgres -c max_connections=300 "
+            "postgres "
+            "-c max_connections=300 "
+            "-c shared_buffers=1GB "
+            "-c work_mem=32MB "
+            "-c maintenance_work_mem=256MB "
+            "-c effective_cache_size=4GB "
+            "-c synchronous_commit=off "
             "-c shared_preload_libraries=pg_stat_statements"
         )
         .with_name(name)
@@ -2002,12 +2087,19 @@ def _get_or_start_oracle_container(
     # with that invocation's password (now unknown to us). Force-reset
     # via in-container sysdba so our caller's password becomes the live
     # one. Idempotent; Oracle's ALTER USER accepts the same password
-    # without error.
+    # without error. #254 — raises on sqlplus failure instead of
+    # silently leaving a stale password live.
     _reset_oracle_password_via_socket(name, password)
     url = (
         f"oracle+oracledb://system:{password}@localhost:{host_port}"
         f"/?service_name=FREEPDB1"
     )
+    # #254 — verify the URL actually authenticates before returning it
+    # to the rendezvous. Belt-and-suspenders: the reset above raises on
+    # its own failure mode, but this catches "ALTER USER landed but
+    # listener cached the prior password" timing races and any other
+    # path where the live password drifts from what we expect.
+    _verify_oracle_connect(url)
     return url, _PersistentContainerHandle(name=name)
 
 
@@ -2084,7 +2176,17 @@ def _start_fresh_oracle_container(
         # the default integration unchanged.
         container = OracleDbContainer(image, oracle_password=password).with_name(name)
         container.start()  # type: ignore[no-untyped-call]: testcontainers .start() lacks return-type hint
-        return container.get_connection_url(), _PersistentContainerHandle(name=name)
+        url = container.get_connection_url()
+        # #254 — force-set the SYSTEM password via sysdba. testcontainers'
+        # wait-for-logs signal fires before the image's startup hook
+        # (setPassword.sh / equivalent) has reliably applied
+        # ORACLE_PWD/ORACLE_PASSWORD to SYSTEM. Calling sysdba reset
+        # is idempotent and authoritative.
+        _reset_oracle_password_via_socket(name, password)
+        # Smoke-connect before publishing so the rendezvous URL is
+        # known-good — catches any residual timing race past the reset.
+        _verify_oracle_connect(url)
+        return url, _PersistentContainerHandle(name=name)
 
     # 19c path — Oracle's official image differs from gvenzl on three
     # axes that the default ``OracleDbContainer`` integration can't
@@ -2113,7 +2215,16 @@ def _start_fresh_oracle_container(
         # full adopt path; that worker's container should now show up
         # via `docker.containers.get(name)`.
         return _get_or_start_oracle_container(name, password)
-    return container.get_connection_url(), _PersistentContainerHandle(name=name)
+    url = container.get_connection_url()
+    # #254 — same authoritative reset as the gvenzl path. The 19c image
+    # entry-point ships setPassword.sh, but ALTER USER timing vs.
+    # "DATABASE IS READY TO USE!" log isn't ordered the way
+    # testcontainers' wait expects — observed live: SYSTEM rejected
+    # the ORACLE_PWD value while sysdba showed status OPEN. sysdba
+    # via local socket is the cheapest authoritative path.
+    _reset_oracle_password_via_socket(name, password)
+    _verify_oracle_connect(url)
+    return url, _PersistentContainerHandle(name=name)
 
 
 def _normalize_pg_url(raw_url: str) -> str:

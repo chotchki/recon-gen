@@ -110,8 +110,7 @@ def _dump_account(a: Account) -> dict[str, Any]:  # typing-smell: ignore[explici
     out: dict[str, Any] = {"id": str(a.id), "scope": a.scope}  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
     if a.name is not None:
         out["name"] = str(a.name)
-    if a.role is not None:
-        out["role"] = str(a.role)
+    out["role"] = str(a.role)
     if a.parent_role is not None:
         out["parent_role"] = str(a.parent_role)
     if a.expected_eod_balance is not None:

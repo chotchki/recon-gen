@@ -152,8 +152,7 @@ async def coverage_for(
 
     declared_roles: set[Identifier] = set()
     for acct in instance.accounts:
-        if acct.role is not None:
-            declared_roles.add(acct.role)
+        declared_roles.add(acct.role)
     for tmpl in instance.account_templates:
         declared_roles.add(tmpl.role)
     for role in declared_roles:
