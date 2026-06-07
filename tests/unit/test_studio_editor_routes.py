@@ -2335,3 +2335,39 @@ def test_bf2_subform_exposes_every_aggregating_rail_fieldspec(
         f"BB.2 aggregator-kind sub-form missing fields: {missing}. "
         f"Expected one input per FieldSpec (minus {sorted(skip)})."
     )
+
+
+# ---------------------------------------------------------------------------
+# BF.10 — composite-scalar fields get an "e.g. <example>" chip
+# ---------------------------------------------------------------------------
+
+
+def test_bf10_composite_scalar_fields_render_format_chip(
+    writable_l2_yaml: Path,
+) -> None:
+    """BF.10 — composite-scalar text fields (firings, range, durations)
+    render a placeholder + always-visible `e.g. <example>` chip so the
+    canonical syntax stays visible after the operator starts typing.
+
+    Failure shape: a maintainer drops `placeholder=` from one of the
+    composite-scalar FieldSpecs, the chip vanishes silently. Server
+    validator still catches the bad format on POST, but the UI loses
+    the in-flight format hint — this test pins it.
+    """
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/rail/new?subtype=single_leg")
+    assert resp.status_code == 200, resp.text
+    body = resp.text
+    # Each composite-scalar field renders an `e.g. <placeholder>` chip
+    # via _render_field's text branch.
+    for example in (
+        "PT24H",          # max_pending_age
+        "P3D",            # max_unbundled_age
+        "5.00, 500.00",   # amount_typical_range
+        "50, 500",        # firings_typical_per_period
+    ):
+        assert f"e.g. {example}" in body, (
+            f"Missing format chip `e.g. {example}` — check the "
+            f"corresponding FieldSpec's `placeholder=` attribute."
+        )

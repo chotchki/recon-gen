@@ -575,6 +575,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
             "flags any pending Transaction older than this. Empty ⇒ no watch."
         ),
         kind="text",
+        placeholder="PT24H",
     ),
     FieldSpec(
         name="max_unbundled_age",
@@ -585,6 +586,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
             "Empty ⇒ no watch."
         ),
         kind="text",
+        placeholder="P3D",
     ),
     # AB.5 (E7) — soft per-firing magnitude bound. Operator types a
     # ``min, max`` shape (comma-separated decimals); coerce parses to
@@ -602,6 +604,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
             "falls back to per-kind lognormal heuristic."
         ),
         kind="text",
+        placeholder="5.00, 500.00",
     ),
     # AF (E8) — soft per-period firing-COUNT bound. Single composite
     # text input: `min, max` (period defaults business_day) OR
@@ -621,6 +624,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
             "rails. Empty ⇒ falls back to per-kind heuristic."
         ),
         kind="text",
+        placeholder="50, 500",
     ),
 )
 
@@ -793,6 +797,7 @@ _TRANSFER_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
             "business day when this template is a chain parent."
         ),
         kind="text",
+        placeholder="50, 500",
     ),
 )
 
@@ -1686,11 +1691,31 @@ def _render_field(
     else:
         # text + money both render as <input type="text"> — the loader's
         # _load_money handles numeric strings either way.
+        # BF.10 (2026-06-07) — composite-scalar fields (firings, range,
+        # durations, etc.) pair an in-input `placeholder` with a
+        # sibling always-visible `e.g. <example>` chip so the format
+        # stays visible after the operator starts typing. Server
+        # validator stays the truth source.
         val_str = _value_to_input_str(value)
+        placeholder_attr = (
+            f' placeholder="{escape(spec.placeholder)}"'
+            if spec.placeholder else ""
+        )
         input_html = (
             f'<input id="field-{spec.name}" name="{escape(spec.name)}" '
-            f'type="text" value="{escape(val_str)}" class="{input_cls}">'
+            f'type="text" value="{escape(val_str)}"{placeholder_attr} '
+            f'class="{input_cls}">'
         )
+        if spec.placeholder:
+            chip_cls = (
+                "text-xs text-secondary-fg font-mono whitespace-nowrap "
+                "px-1.5 py-0.5 rounded-sm bg-surface-bg border "
+                "border-surface-border self-start mt-1"
+            )
+            input_html += (
+                f'<span class="{chip_cls}" aria-hidden="true">'
+                f'e.g. {escape(spec.placeholder)}</span>'
+            )
 
     # CP — business_day_offset has no consumer on scope=external
     # accounts (M.4.4.14a — we don't compute their EOD balances), so
