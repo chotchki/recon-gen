@@ -106,3 +106,11 @@ BF.1 (banner) lands first — it's the smallest piece, doesn't touch field-shape
 2. **P1 disposition.** Read `derived.posted_requirements_for` first OR defer the P1 decision to BF.4 implementation time?
 3. **P2 disposition.** Same — prototype both UIs during BF.4, or pick now?
 4. **P3 helper extraction lands in BF.3 (first staged-edit consumer) or BF.0 follow-up?** Punch-list item either way; just a sequencing call.
+
+## Locked answers (2026-06-07)
+
+- **L1-L5:** ratified. L2 reads as "free-form anti-pattern for `kind="textarea"` whose value space IS enumerable from L2 state." `description` stays free-form prose with the BF.9 edit/preview toggle (shipped); composite-scalar text inputs (`amount_typical_range`, `firings_typical_per_period`, `max_pending_age`, `max_unbundled_age`) stay as `kind="text"` with BF.10's inline help + JS regex preview surface.
+- **P1:** `posted_requirements` stays as free-form textarea — operator-confirmed the domain is arbitrary metadata field paths, not enumerable. BF.4 excludes it; it gets the L2 carve-out alongside `description`.
+- **P2:** Inline-edit picker — one row per key (key dropdown drawn from sibling `metadata_keys`) + single text input for comma-separated example values. Compact, fits BB.2 visual density. Expandable per-value sub-list deferred unless a real fixture demonstrates >5 values per key.
+- **P3:** Reuse existing empty-state template — extract `_render_multi_select_groups_field`'s "Save … first; then come back to edit" copy into `_render_staged_edit_banner(prereq_field, prereq_action)` during BF.3. Same shape for all three chicken-egg pickers (`transfer_key`, `leg_rail_xor_groups`, `metadata_value_examples`).
+- **BF.10 scope:** lands inside Phase BF (not punted). Inline help chips + optional JS regex preview wired to the same validator regex used server-side.
