@@ -88,59 +88,13 @@ from .primitives import (
 )
 
 
-def _sql_timestamp_literal(iso_8601_str: str, dialect: Dialect) -> str:
-    """Format an ISO-8601 timestamp string as a SQL literal per dialect.
-
-    P.9a — both dialects' TIMESTAMP columns are now TZ-naive (the
-    ``timestamp_type`` helper returns plain ``TIMESTAMP`` on both),
-    so the trailing ``+HH:MM`` / ``Z`` offset on every seed timestamp
-    string gets stripped here at the literal-formatter boundary
-    (Oracle's plain ``TIMESTAMP`` literal rejects offsets; PG would
-    accept then silently drop). Timezone normalization is the
-    integrator's contract — see Schema_v6.md.
-
-    PG: bare string literal with the ``T`` separator preserved
-    (PG accepts both space + T separators).
-
-    Oracle: typed ``TIMESTAMP 'YYYY-MM-DD HH:MI:SS'`` literal with a
-    space separator (not ``T``).
-
-    SQLite: bare ISO-8601 string literal — SQLite has no native
-    TIMESTAMP type and stores datetimes as TEXT. The ``date()`` /
-    ``datetime()`` / ``julianday()`` functions parse the value at
-    read time. Use a space separator (not ``T``) so SQLite's
-    datetime parser recognizes the value (``T`` is accepted but the
-    space form keeps the seed output visually consistent across
-    dialects when read in a SQLite shell).
-
-    The same helper is used for every timestamp the seed emits —
-    transactions.posting and daily_balances.business_day_start.
-    """
-    naive = _strip_tz_offset(iso_8601_str)
-    if dialect is Dialect.POSTGRES:
-        return "'" + naive.replace("'", "''") + "'"
-    oracle_str = naive.replace("T", " ", 1).replace("'", "''")
-    return f"TIMESTAMP '{oracle_str}'"
-
-
-def _strip_tz_offset(iso_8601_str: str) -> str:
-    """Return the ISO-8601 string with any trailing ``+HH:MM`` / ``Z``
-    offset removed. Idempotent on inputs that already lack an offset.
-    """
-    # Trailing 'Z'.
-    if iso_8601_str.endswith("Z"):
-        return iso_8601_str[:-1]
-    # Trailing offset: scan for the rightmost '+' or '-' that follows
-    # a digit and has the shape ``±HH:MM`` or ``±HHMM`` or ``±HH``.
-    # The date itself doesn't have a sign in that position, so the
-    # rightmost match is unambiguous.
-    for sign_pos in range(len(iso_8601_str) - 1, -1, -1):
-        ch = iso_8601_str[sign_pos]
-        if ch in "+-" and sign_pos > 10:  # past the YYYY-MM-DD prefix
-            return iso_8601_str[:sign_pos]
-        if ch == "T":
-            break
-    return iso_8601_str
+# BF backlog (2026-06-07) — promoted to public surface in
+# `common/sql/literals.py` for ETL-hook authors. Seed keeps a terse
+# local alias for the renderer; sql_timestamp_literal is reached
+# through it (`is_timestamp=True`) so no direct re-export needed.
+from recon_gen.common.sql.literals import (  # noqa: E402 — needs Dialect import above
+    render_sql_literal as _render_seed_value,
+)
 
 
 # -- Public scenario dataclasses ---------------------------------------------
@@ -4602,27 +4556,6 @@ def _balance_row_to_sql(row: tuple[object, ...], dialect: Dialect) -> str:
         _render_seed_value(v, dialect, is_timestamp=(i in _BALANCE_TIMESTAMP_COL_INDEXES))
         for i, v in enumerate(row)
     ) + ")"
-
-
-def _render_seed_value(v: object, dialect: Dialect, *, is_timestamp: bool) -> str:
-    """Render one tuple value as a SQL literal.
-
-    CA.11 — handles the limited type set the seed actually emits:
-    None / str / int. Booleans don't appear (the schema has no BOOLEAN
-    columns); floats don't appear (money is always pre-converted to
-    integer cents). The `is_timestamp` flag tells us to wrap the string
-    in `TIMESTAMP '...'` instead of single-quoting as plain VARCHAR.
-    """
-    if v is None:
-        return "NULL"
-    if is_timestamp:
-        assert isinstance(v, str), f"timestamp value must be ISO string, got {type(v).__name__}"
-        return _sql_timestamp_literal(v, dialect)
-    if isinstance(v, str):
-        return "'" + v.replace("'", "''") + "'"
-    if isinstance(v, int) and not isinstance(v, bool):
-        return str(v)
-    raise TypeError(f"seed value of type {type(v).__name__!r} not renderable: {v!r}")
 
 
 # Legacy text-only wrappers (kept until callers migrate to the tuple

@@ -54,7 +54,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from recon_gen.common.l2 import L2Instance
-from recon_gen.common.l2.seed import _sql_timestamp_literal
+from recon_gen.common.sql.literals import sql_timestamp_literal as _sql_timestamp_literal
 from recon_gen.common.sql.dialect import Dialect
 
 
