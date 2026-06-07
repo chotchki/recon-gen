@@ -804,3 +804,4 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - **BX backlog — Trainer dogfood [pg]/[or] times out under 16-worker xdist on shared containers** — added 2026-06-04.
 - **BX backlog — Trainer Session Start hangs through browser→studio_server on CI's shared PG/Oracle (CE.4 retreat)** — added 2026-06-04.
 - **BX backlog — fetch bare public IP at deploy time for QS data source** — added 2026-06-07.
+- **BX backlog — serializer field-emit anti-drift: test gate (A) + auto-derive refactor (B)** — added 2026-06-07.
