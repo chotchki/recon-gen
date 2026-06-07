@@ -121,6 +121,12 @@ def _dump_account(a: Account) -> dict[str, Any]:  # typing-smell: ignore[explici
     # would have rejected an external+offset combo upstream).
     if a.business_day_offset is not None:
         out["business_day_offset"] = a.business_day_offset
+    # CL — emit balance_cadence (sparse | explicit_daily). None ⇒
+    # default-sparse via resolve_cadence at the seed / matview / KPI
+    # seam; emit only when explicitly set so the round-trip preserves
+    # the operator's intent (declared vs default).
+    if a.balance_cadence is not None:
+        out["balance_cadence"] = a.balance_cadence
     return out
 
 
@@ -141,6 +147,9 @@ def _dump_account_template(t: AccountTemplate) -> dict[str, Any]:  # typing-smel
     # templates (M.4.4.14a).
     if t.business_day_offset is not None:
         out["business_day_offset"] = t.business_day_offset
+    # CL — same shape as the Account.balance_cadence emit above.
+    if t.balance_cadence is not None:
+        out["balance_cadence"] = t.balance_cadence
     return out
 
 
