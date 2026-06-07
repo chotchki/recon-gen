@@ -444,6 +444,8 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 
 **Why:** v13.1.1 design review Accessibility section: app-wide missing `<main>` landmark + missing `<h1>` on several studio pages + `nested-interactive` on training controls + `aria-allowed-role` on entity lists (~140 nodes!) + unlabeled pickers + `empty-table-header` + one `select-name`. Plus 67 bounding-box overlaps documented by the axe-core probe (the Studio Med #2 Apply-bar overlap was one; CF audit followup 3e0c1e1b cleared it). The audit's #7 highest-leverage systemic fix: "Add landmarks + `<h1>`s."
 
+**Status (2026-06-06 retroactive):** CK.0 + CK.1 + CK.4 shipped (commits e009f40f / 53305f93 / 53875f1e; sign-off `docs/audits/ck_signoff.md`; merge 4594d7c8). CK.2 / CK.3 / CK.5 / CK.6 / CK.7 deferred pending the axe-core toolchain landing (CK.6 carries the JS/npm decision; CK.7 is gated on CK.2/3/5/6). Boxes ticked retroactively so plan reflects ship state; deferred cells stay open for future axe-core work.
+
 **Locks (operator to confirm):**
 - Every page ships `<main>` + a single `<h1>`
 - Training controls fix `nested-interactive` (a button-inside-button issue likely)
@@ -454,14 +456,14 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 
 **Done when:** axe-core CI pass on all 31 audited routes; manual screen-reader spot-check on the highest-traffic Studio surfaces (Training landing + L2 editor home + Diagram); no bounding-box overlaps from the probe.
 
-- [ ] CK.0 - **REPLAN.** Pull the audit's full axe-core findings list into a tracking artifact. Decide whether to bring axe-core into CI as a gate or as a report.
-- [ ] CK.1 - **Landmarks + `<h1>` sweep.** `<main>` on every page + single `<h1>`; some studio pages had nothing.
-- [ ] CK.2 - **Training `nested-interactive` fix.** Likely a button-inside-clickable-card issue; pull the inner control out.
-- [ ] CK.3 - **Entity-list `aria-allowed-role` sweep.** ~140 nodes flagged — likely a single role wrong somewhere replicated by the renderer.
-- [ ] CK.4 - **Picker `aria-label` sweep.** Audit every `<select>` / typeahead / dropdown for an explicit label.
-- [ ] CK.5 - **Bounding-box overlap sweep.** Apply-bar overlap already shipped; sweep the remaining 66 (some are likely auto-cleared by CG list primitive + CH table primitive).
-- [ ] CK.6 - **axe-core CI gate.** If operator OKs, fail the build on new axe-core findings.
-- [ ] CK.7 - **Cold-read v3 a11y confirmation.** Manual screen-reader spot-check + axe-core green.
+- [x] CK.0 - **REPLAN.** Pull the audit's full axe-core findings list into a tracking artifact. Decide whether to bring axe-core into CI as a gate or as a report.
+- [x] CK.1 - **Landmarks + `<h1>` sweep.** `<main>` on every page + single `<h1>`; some studio pages had nothing.
+- [ ] CK.2 - **Training `nested-interactive` fix.** Likely a button-inside-clickable-card issue; pull the inner control out. **DEFERRED** pending visual repro.
+- [ ] CK.3 - **Entity-list `aria-allowed-role` sweep.** ~140 nodes flagged — likely a single role wrong somewhere replicated by the renderer. **DEFERRED** pending axe-core toolchain.
+- [x] CK.4 - **Picker `aria-label` sweep.** Audit every `<select>` / typeahead / dropdown for an explicit label.
+- [ ] CK.5 - **Bounding-box overlap sweep.** Apply-bar overlap already shipped; sweep the remaining 66 (some are likely auto-cleared by CG list primitive + CH table primitive). **DEFERRED** pending axe-core toolchain.
+- [ ] CK.6 - **axe-core CI gate.** If operator OKs, fail the build on new axe-core findings. **DEFERRED** — needs JS/npm build dep decision.
+- [ ] CK.7 - **Cold-read v3 a11y confirmation.** Manual screen-reader spot-check + axe-core green. **DEFERRED** — gated on CK.2/3/5/6.
 - [x] CF.X - infra - CF.X-infra **SHIPPED** (commit ef19737c): `KPIValueThresholdBanding` typed primitive (3-band amber/red, frozen dataclass with `red_at > amber_at` construction guard, 3-way mutex with the BK.2 zero / BK.9 sign indicators) + `CrossAppDrill` typed primitive (target_dashboard_id + target_sheet_id; QS emit = None per the URL-param-no-control-sync defect). QS emit + App2 shape_kpi + bootstrap.js renderKPI extended with the `warning` semantic color (`text-warning` already compiled into output.css from Studio surfaces). 9 new unit tests pin all three bands + the construction guards + the neutral-on-null contract. EXCLAMATION_CIRCLE icon enum still needs deploy-probe before first QS-side render — fallback list (TRIANGLE → FLAG) inline in the helper. Module-level `common/html/_components.py` deferred until a follow-up needs it; current primitives land cleanly in `common/tree/visuals.py` next to the BK.2/BK.9 siblings.
 
 ## Phase CL - Sparse balance loads via ETL (TBD — placeholder)
