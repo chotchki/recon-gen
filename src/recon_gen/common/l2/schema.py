@@ -2939,18 +2939,50 @@ CREATE INDEX idx_{p}_mxv_kind ON {p}_multi_xor_violation (disagreement_kind);
 -- (5 KPIs on the Daily Statement sheet = 5 re-evaluations otherwise).
 -- One row per (account_id, business_day_start). Sheet-local filters
 -- narrow to a single (account, day) at render time.
+--
+-- CL.8 — reads from effective_balances (CL.5 carry-forward) instead
+-- of current_daily_balances directly. Sparse-account quiet days
+-- now show the carried-forward close + a source discriminator so
+-- the operator can tell at a glance whether the value came from
+-- the feed or from carry-forward. Three-state source enum per CL.0
+-- audit §2.1 (revised 2026-06-07):
+--   - 'emitted' — real row from the feed; no icon.
+--   - 'carried_no_activity' — carried-forward + no postings today;
+--     ↩ icon, drift = $0 by construction (benign sparse case).
+--   - 'carried_with_activity_gap' — carried-forward + postings
+--     happened; ⚠ icon, drift = -net_flow ≠ 0 (the silent
+--     institutional bug case).
+-- Opening Balance gets a simpler 2-state source (emitted vs
+-- carried) since the gap state only meaningfully fires on the
+-- *close* side (today's activity drives it).
 -- ---------------------------------------------------------------------
 {matview_create_kw} {p}_daily_statement_summary{matview_options} AS
 WITH account_days AS (
-    SELECT db.account_id, db.account_name, db.account_role,
-           db.account_parent_role, db.account_scope,
-           db.business_day_start, db.business_day_end,
-           db.money AS closing_balance_stored,
-           LAG(db.money) OVER (
-             PARTITION BY db.account_id
-             ORDER BY db.business_day_start
-           ) AS opening_balance
-    FROM {p}_current_daily_balances db
+    SELECT eb.account_id, eb.account_name, eb.account_role,
+           eb.account_parent_role, eb.account_scope,
+           eb.business_day_start, eb.business_day_end,
+           -- emitted_money is the on-the-day feed value (NULL when
+           -- no daily_balances row emitted today). effective_money
+           -- is the carry-forward value the carry-forward view
+           -- already computes per CL.5.
+           eb.emitted_money,
+           eb.effective_money AS closing_balance_carried,
+           -- Opening = prior day's effective close. LAG over the
+           -- carry-forward column so the opening reflects what the
+           -- prior day's *closing* was (carried or emitted), not
+           -- just emitted prior rows.
+           LAG(eb.effective_money) OVER (
+             PARTITION BY eb.account_id
+             ORDER BY eb.business_day_start
+           ) AS opening_balance,
+           -- Prior-day source for the opening icon: 'emitted' when
+           -- the prior day had a real emit, else 'carried'. Uses
+           -- LAG over the source column too.
+           LAG(eb.source) OVER (
+             PARTITION BY eb.account_id
+             ORDER BY eb.business_day_start
+           ) AS opening_balance_source_raw
+    FROM {p}_effective_balances eb
 ),
 today_flows AS (
     SELECT tx.account_id,
@@ -2988,16 +3020,56 @@ SELECT ad.account_id, ad.account_name, ad.account_role,
        COALESCE(tf.total_credits, 0) AS total_credits,
        COALESCE(tf.net_flow, 0) AS net_flow,
        COALESCE(tf.leg_count, 0) AS leg_count,
-       ad.closing_balance_stored,
+       -- Closing Stored: when emitted, the feed's value; when
+       -- carried, the prior-emit value carried forward. The
+       -- displayed value never goes NULL on a day that has a
+       -- prior emit somewhere in scope (carry-forward fills it).
+       COALESCE(ad.emitted_money, ad.closing_balance_carried)
+           AS closing_balance_stored,
        COALESCE(ad.opening_balance, 0)
          + COALESCE(tf.net_flow, 0) AS closing_balance_recomputed,
-       ad.closing_balance_stored
+       COALESCE(ad.emitted_money, ad.closing_balance_carried)
          - (COALESCE(ad.opening_balance, 0)
-            + COALESCE(tf.net_flow, 0)) AS drift
+            + COALESCE(tf.net_flow, 0)) AS drift,
+       -- CL.0 audit §2.1 source enum (3-state). The 'gap' branch
+       -- requires postings — that's the discriminator between
+       -- the benign sparse no-activity case and the institutional-
+       -- bug missing-emit-with-activity case.
+       CASE
+           WHEN ad.emitted_money IS NOT NULL THEN 'emitted'
+           WHEN COALESCE(tf.leg_count, 0) = 0 THEN 'carried_no_activity'
+           ELSE 'carried_with_activity_gap'
+       END AS closing_balance_source,
+       -- Prior-emit date for App2's "balance carried from <prior>"
+       -- empty-state copy (CL.0 audit §4.a). NULL when the close
+       -- is emitted (no carry to attribute).
+       CASE
+           WHEN ad.emitted_money IS NOT NULL THEN NULL
+           ELSE (
+               SELECT MAX(db2.business_day_start)
+               FROM {p}_current_daily_balances db2
+               WHERE db2.account_id = ad.account_id
+                 AND db2.business_day_start < ad.business_day_start
+           )
+       END AS closing_carried_from_date,
+       -- Opening 2-state source enum: emitted vs carried.
+       -- 'carried' covers both the no-prior-emit case (LAG returns
+       -- NULL on the very first day in scope, source col is NULL
+       -- too) and the prior-day-was-itself-carried case.
+       COALESCE(ad.opening_balance_source_raw, 'carried')
+           AS opening_balance_source
 FROM account_days ad
 LEFT JOIN today_flows tf
   ON tf.account_id = ad.account_id
-  AND tf.business_day_start = ad.business_day_start;
+  AND tf.business_day_start = ad.business_day_start
+-- Filter pre-emit spine days: an account whose first emit lands on
+-- day 5 has NULL effective_money on days 1-4 (no prior balance to
+-- carry from). The Daily Statement sheet has nothing to show for
+-- those days; the audit walk would also choke on NULL
+-- business_day_end. Once an account has emitted ONCE in scope,
+-- every later day appears (either with the on-the-day emit, or
+-- carry-forward).
+WHERE ad.closing_balance_carried IS NOT NULL;
 -- Daily Statement sheet's per-(account, day) parameter filter — both
 -- columns participate in the WHERE so a composite index covers the
 -- KPIs + detail table at once.
