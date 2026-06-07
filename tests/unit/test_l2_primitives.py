@@ -404,7 +404,7 @@ class TestBalanceCadence:
         from recon_gen.common.l2 import resolve_cadence
         a = Account(
             id=Identifier("a1"), scope="internal", role=Identifier("R1"),
-            balance_cadence=cadence,  # type: ignore[arg-type]
+            balance_cadence=cadence,  # type: ignore[arg-type]: parametrize values are str literals widened by pytest; runtime guard accepts both
         )
         assert a.balance_cadence == cadence
         assert resolve_cadence(a) == cadence

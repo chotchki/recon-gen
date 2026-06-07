@@ -257,6 +257,27 @@ def _maybe_business_day_offset(rng: Random) -> int | None:
     return rng.randint(-12, 12)
 
 
+# CL.7 — per-entity balance_cadence emission. CP.8 generalized fuzz-
+# coverage gate requires both halves (Some seeds populate, some leave
+# None) AND the populated set includes BOTH literal values. Distribution
+# chosen so a 100-seed sample hits all four cells with comfortable
+# margin:
+#   60% None         (default-sparse via resolve_cadence — the majority case)
+#   25% "sparse"     (explicit pin, distinct from default)
+#   15% "explicit_daily"
+# Same internal-only constraint as the offset (the validator doesn't
+# reject external cadence today, but external accounts have no
+# downstream consumer for the field — keep emission to internal so
+# fuzz output stays semantically meaningful).
+def _maybe_balance_cadence(rng: Random) -> str | None:
+    roll = rng.random()
+    if roll < 0.60:
+        return None
+    if roll < 0.85:
+        return "sparse"
+    return "explicit_daily"
+
+
 def _build_accounts(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
     """Singleton accounts + their roles."""
     accounts: list[dict[str, Any]] = []
@@ -282,6 +303,11 @@ def _build_accounts(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
         bdo = _maybe_business_day_offset(rng)
         if bdo is not None:
             a["business_day_offset"] = bdo
+        # CL.7 — per-entity cadence on internal accounts only (external
+        # accounts have no balance row to be sparse/explicit_daily about).
+        bc = _maybe_balance_cadence(rng)
+        if bc is not None:
+            a["balance_cadence"] = bc
         accounts.append(a)
 
     for i in range(state.plan.n_singleton_external):
@@ -338,6 +364,10 @@ def _build_account_templates(
             bdo = _maybe_business_day_offset(rng)
             if bdo is not None:
                 t["business_day_offset"] = bdo
+            # CL.7 — same shape as the account path above.
+            bc = _maybe_balance_cadence(rng)
+            if bc is not None:
+                t["balance_cadence"] = bc
         templates.append(t)
     return templates
 
