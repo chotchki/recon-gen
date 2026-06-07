@@ -169,31 +169,58 @@ jobs:
           # container to the canonical name on the reuse path so every
           # downstream step works regardless of how the container got
           # there.
+          # CL-followup — mirror `runner.py:_start_fresh_pg_container`
+          # tuning so CI's adopted container matches local. Without
+          # this, ci-shared-pg runs stock alpine defaults
+          # (max_connections=100, shared_buffers=128MB), and qs_browser
+          # under xdist `-n 4` saturates with "FATAL: sorry, too many
+          # clients already". Local uses runner.py's _start_fresh_pg_
+          # container path which already has the full tuning; CI takes
+          # the env-URL short-circuit so the runner never gets to apply
+          # it — hence this duplicate.
+          PG_CMD=(postgres
+            -c max_connections=300
+            -c shared_buffers=1GB
+            -c work_mem=32MB
+            -c maintenance_work_mem=256MB
+            -c effective_cache_size=4GB
+            -c synchronous_commit=off
+            -c shared_preload_libraries=pg_stat_statements)
           if nc -z 127.0.0.1 5432 2>/dev/null; then
             EXISTING_PG=$(docker ps --filter "publish=5432" --format '{{.Names}}' | head -1)
-            if [ -n "${EXISTING_PG}" ] && [ "${EXISTING_PG}" != "ci-shared-pg" ]; then
-              echo "Shared PG already listening on :5432 as '${EXISTING_PG}' — renaming to ci-shared-pg."
-              docker rename "${EXISTING_PG}" ci-shared-pg
-            elif [ -z "${EXISTING_PG}" ]; then
+            if [ -z "${EXISTING_PG}" ]; then
               echo "::error::Port 5432 is bound but no Docker container owns it — runner is in an unexpected state." >&2
               exit 1
+            fi
+            if [ "${EXISTING_PG}" != "ci-shared-pg" ]; then
+              echo "Shared PG already listening on :5432 as '${EXISTING_PG}' — renaming to ci-shared-pg."
+              docker rename "${EXISTING_PG}" ci-shared-pg
+            fi
+            # Adoption-path retune: if the running container was started
+            # with stale args (e.g. pre-CL-followup), kill + recreate
+            # with the tuned cmd. Probing `SHOW max_connections;` is the
+            # cheapest definitive check.
+            EFFECTIVE_MAX_CONN=$(docker exec ci-shared-pg psql -U postgres -tAc "SHOW max_connections;" 2>/dev/null | tr -d '[:space:]' || echo "0")
+            if [ "${EFFECTIVE_MAX_CONN}" != "300" ]; then
+              echo "ci-shared-pg has max_connections=${EFFECTIVE_MAX_CONN} (expected 300) — recreating with tuned args."
+              docker rm -f ci-shared-pg
+              docker run -d --name ci-shared-pg \
+                -e POSTGRES_PASSWORD="${PG_PASSWORD}" \
+                -p 5432:5432 \
+                postgres:17-alpine \
+                "${PG_CMD[@]}"
+              STARTED_PG=true
+              echo "Waiting for retuned PG..."
+              timeout 60 bash -c 'until docker exec ci-shared-pg pg_isready -U postgres -q; do sleep 2; done'
             else
-              echo "Shared PG already named ci-shared-pg — reusing in place."
+              echo "ci-shared-pg already has max_connections=300 — reusing in place."
             fi
           else
-            # CB.17.j — `-c shared_preload_libraries=pg_stat_statements`
-            # so the conftest's `capture_top_queries` teardown fixture
-            # actually finds the extension loaded. `CREATE EXTENSION`
-            # alone isn't enough on Postgres — the extension's library
-            # also has to be in shared_preload_libraries at server
-            # startup. Without this the top-queries.md artifact lands
-            # as "Status: skipped — pg_stat_statements must be loaded
-            # via shared_preload_libraries" instead of real perf data.
             docker run -d --name ci-shared-pg \
               -e POSTGRES_PASSWORD="${PG_PASSWORD}" \
               -p 5432:5432 \
               postgres:17-alpine \
-              postgres -c shared_preload_libraries=pg_stat_statements
+              "${PG_CMD[@]}"
             STARTED_PG=true
             echo "Waiting for fresh PG..."
             timeout 60 bash -c 'until docker exec ci-shared-pg pg_isready -U postgres -q; do sleep 2; done'
