@@ -445160,7 +445160,103 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0002-snb",
+          "business_day": "2029-11-30",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-02",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-03",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-04",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-05",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
           "business_day": "2029-12-06",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-07",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-09",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-10",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-11",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-12",
           "stored_balance": -1500.0
         }
       },
@@ -445176,6 +445272,54 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0002-snb",
+          "business_day": "2029-12-14",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-16",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-17",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-18",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-19",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
           "business_day": "2029-12-20",
           "stored_balance": -1500.0
         }
@@ -445184,7 +445328,95 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0002-snb",
+          "business_day": "2029-12-21",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-23",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-24",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-25",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-26",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
           "business_day": "2029-12-27",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-28",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-30",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-31",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2030-01-01",
           "stored_balance": -1500.0
         }
       },
