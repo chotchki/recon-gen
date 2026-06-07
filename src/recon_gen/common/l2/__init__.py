@@ -38,6 +38,7 @@ from .validate import L2ValidationError, validate
 from .primitives import (
     Account,
     AccountTemplate,
+    BalanceCadence,
     BundlesActivityRef,
     CadenceExpression,
     Chain,
@@ -61,11 +62,13 @@ from .primitives import (
     TransferTemplate,
     TransferType,
     TwoLegRail,
+    resolve_cadence,
 )
 
 __all__ = [
     "Account",
     "AccountTemplate",
+    "BalanceCadence",
     "BundlesActivityRef",
     "CadenceExpression",
     "Chain",
@@ -109,5 +112,6 @@ __all__ = [
     "default_l2_instance",
     "default_l2_bytes",
     "posted_requirements_for",
+    "resolve_cadence",
     "validate",
 ]

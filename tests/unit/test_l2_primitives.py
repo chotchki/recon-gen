@@ -380,3 +380,46 @@ class TestBusinessDayOffsetRange:
                 role=Identifier("R1"), scope="internal",
                 business_day_offset=offset,
             )
+
+
+# -- CL: balance_cadence ----------------------------------------------------
+
+
+class TestBalanceCadence:
+    """CL.1 — Account / AccountTemplate carry an optional
+    BalanceCadence (sparse | explicit_daily); resolve_cadence falls
+    back to 'sparse' when the attribute is None per Lock 3.
+    """
+
+    def test_account_accepts_none(self) -> None:
+        from recon_gen.common.l2 import resolve_cadence
+        a = Account(
+            id=Identifier("a1"), scope="internal", role=Identifier("R1"),
+        )
+        assert a.balance_cadence is None
+        assert resolve_cadence(a) == "sparse"
+
+    @pytest.mark.parametrize("cadence", ["sparse", "explicit_daily"])
+    def test_account_accepts_valid_cadence(self, cadence: str) -> None:
+        from recon_gen.common.l2 import resolve_cadence
+        a = Account(
+            id=Identifier("a1"), scope="internal", role=Identifier("R1"),
+            balance_cadence=cadence,  # type: ignore[arg-type]
+        )
+        assert a.balance_cadence == cadence
+        assert resolve_cadence(a) == cadence
+
+    def test_account_template_accepts_none_with_sparse_fallback(self) -> None:
+        from recon_gen.common.l2 import resolve_cadence
+        t = AccountTemplate(role=Identifier("R1"), scope="internal")
+        assert t.balance_cadence is None
+        assert resolve_cadence(t) == "sparse"
+
+    def test_account_template_accepts_explicit_daily(self) -> None:
+        from recon_gen.common.l2 import resolve_cadence
+        t = AccountTemplate(
+            role=Identifier("R1"), scope="internal",
+            balance_cadence="explicit_daily",
+        )
+        assert t.balance_cadence == "explicit_daily"
+        assert resolve_cadence(t) == "explicit_daily"

@@ -48,6 +48,7 @@ from recon_gen.common.env_keys import RECON_GEN_RUN_DIR
 from .primitives import (
     Account,
     AccountTemplate,
+    BalanceCadence,
     BundlesActivityRef,
     CadenceExpression,
     Chain,
@@ -595,6 +596,31 @@ def _load_business_day_offset(raw: object | None, *, path: str) -> int | None:
     return raw
 
 
+def _load_balance_cadence(
+    raw: object | None, *, path: str,
+) -> "BalanceCadence | None":
+    """CL — parse Account.balance_cadence / AccountTemplate.balance_cadence.
+
+    Returns None when the key is absent. Otherwise narrows string →
+    the closed Literal; rejects anything else with a typed message
+    naming the path + the allowed values.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise ValueError(
+            f"{path}: balance_cadence must be a string "
+            f"('sparse' or 'explicit_daily'); got "
+            f"{type(raw).__name__}={raw!r}"
+        )
+    if raw not in ("sparse", "explicit_daily"):
+        raise ValueError(
+            f"{path}: balance_cadence must be 'sparse' or "
+            f"'explicit_daily'; got {raw!r}"
+        )
+    return raw  # type: ignore[return-value]: narrowed to BalanceCadence literal
+
+
 def _load_account(raw: object, *, path: str) -> Account:
     raw_d = _as_mapping(raw, path=path, what="account")
     eod = raw_d.get("expected_eod_balance")
@@ -614,6 +640,10 @@ def _load_account(raw: object, *, path: str) -> Account:
         business_day_offset=_load_business_day_offset(
             raw_d.get("business_day_offset"),
             path=f"{path}.business_day_offset",
+        ),
+        balance_cadence=_load_balance_cadence(
+            raw_d.get("balance_cadence"),
+            path=f"{path}.balance_cadence",
         ),
     )
 
@@ -642,6 +672,10 @@ def _load_account_template(raw: object, *, path: str) -> AccountTemplate:
         business_day_offset=_load_business_day_offset(
             raw_d.get("business_day_offset"),
             path=f"{path}.business_day_offset",
+        ),
+        balance_cadence=_load_balance_cadence(
+            raw_d.get("balance_cadence"),
+            path=f"{path}.balance_cadence",
         ),
     )
 

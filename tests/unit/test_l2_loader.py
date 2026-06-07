@@ -1127,3 +1127,81 @@ def test_loader_rejects_out_of_range_business_day_offset(tmp_path: Path) -> None
     p.write_text(yaml_text)
     with pytest.raises(ValueError, match=r"business_day_offset must be in \[-23, 23\]"):
         load_instance(p, validate=False)
+
+
+# -- CL: balance_cadence loader ---------------------------------------------
+
+
+_MINIMAL_BALANCE_CADENCE_YAML = dedent("""\
+    accounts:
+      - id: a1
+        scope: internal
+        role: R1
+        balance_cadence: explicit_daily
+      - id: a2
+        scope: internal
+        role: R1
+        # balance_cadence absent ⇒ None ⇒ sparse via resolve_cadence
+      - id: a3
+        scope: internal
+        role: R1
+        balance_cadence: sparse
+
+    account_templates:
+      - role: R2
+        scope: internal
+        balance_cadence: explicit_daily
+""")
+
+
+def test_loader_round_trips_account_balance_cadence(tmp_path: Path) -> None:
+    """CL.1 — Account.balance_cadence parses from YAML."""
+    p = tmp_path / "src.yaml"
+    p.write_text(_MINIMAL_BALANCE_CADENCE_YAML)
+    inst = load_instance(p, validate=False)
+
+    by_id = {a.id: a for a in inst.accounts}
+    assert by_id["a1"].balance_cadence == "explicit_daily"
+    assert by_id["a2"].balance_cadence is None
+    assert by_id["a3"].balance_cadence == "sparse"
+
+
+def test_loader_round_trips_account_template_balance_cadence(
+    tmp_path: Path,
+) -> None:
+    """Same field on AccountTemplate."""
+    p = tmp_path / "src.yaml"
+    p.write_text(_MINIMAL_BALANCE_CADENCE_YAML)
+    inst = load_instance(p, validate=False)
+
+    template = inst.account_templates[0]
+    assert template.balance_cadence == "explicit_daily"
+
+
+def test_loader_rejects_unknown_balance_cadence_value(tmp_path: Path) -> None:
+    """A value outside the closed Literal raises a typed error."""
+    yaml_text = dedent("""\
+        accounts:
+          - id: a1
+            scope: internal
+            role: R1
+            balance_cadence: weekly
+    """)
+    p = tmp_path / "src.yaml"
+    p.write_text(yaml_text)
+    with pytest.raises(ValueError, match=r"balance_cadence must be 'sparse' or 'explicit_daily'"):
+        load_instance(p, validate=False)
+
+
+def test_loader_rejects_non_string_balance_cadence(tmp_path: Path) -> None:
+    yaml_text = dedent("""\
+        accounts:
+          - id: a1
+            scope: internal
+            role: R1
+            balance_cadence: 1
+    """)
+    p = tmp_path / "src.yaml"
+    p.write_text(yaml_text)
+    with pytest.raises(ValueError, match=r"balance_cadence must be a string"):
+        load_instance(p, validate=False)

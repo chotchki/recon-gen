@@ -189,6 +189,30 @@ LimitDirection: TypeAlias = Literal["Outbound", "Inbound"]
 Period: TypeAlias = Literal["business_day", "pay_period", "week", "month"]
 
 
+# CL — per-account balance-reporting cadence. ``sparse`` (the default
+# at read time) means the ETL feed emits a balance row only on days
+# the account had transaction activity; the intervening no-activity
+# days carry the prior day's balance forward via the L1 matview's
+# LAST_VALUE IGNORE NULLS window function. ``explicit_daily`` is the
+# strict declaration that every business day MUST have a reported
+# balance row; missing rows surface on the L1 ``balance_cadence_gap``
+# invariant. None ⇒ ``sparse`` per CL.0 audit Lock 3 (operator can
+# opt INTO daily but never opt OUT of the default sparse behavior).
+BalanceCadence: TypeAlias = Literal["sparse", "explicit_daily"]
+
+
+def resolve_cadence(
+    entity: "Account | AccountTemplate",
+) -> BalanceCadence:
+    """CL — resolve the entity's declared balance cadence with the
+    default-sparse fallback. Use everywhere the seed / matview / KPI
+    needs the cadence-as-string instead of branching on None at every
+    call site (per CL.0 audit Lock 3 — None ⇒ sparse)."""
+    if entity.balance_cadence is None:
+        return "sparse"
+    return entity.balance_cadence
+
+
 # -- Account dimension --------------------------------------------------------
 
 
@@ -227,6 +251,13 @@ class Account:
     # validate.py) additionally rejects offset on scope=external_counter
     # accounts — we don't compute EOD balances for external counterparties.
     business_day_offset: int | None = None
+    # CL — per-account balance-reporting cadence. None ⇒ sparse default
+    # (the activity-day reporting shape). ``explicit_daily`` opts INTO
+    # the stricter declaration that every business day MUST have a
+    # reported balance row; missing rows surface on the
+    # ``balance_cadence_gap`` L1 invariant. See ``BalanceCadence`` +
+    # ``resolve_cadence`` helper above for the read-time fallback.
+    balance_cadence: BalanceCadence | None = None
 
     def __post_init__(self) -> None:
         # CP — range cap per CP.0 audit. __post_init__ raises at
@@ -285,6 +316,11 @@ class AccountTemplate:
     # template.role unique, so the template offset naturally fans out).
     # See Account.business_day_offset for full semantics.
     business_day_offset: int | None = None
+    # CL — template-level balance cadence. Applies to every instance
+    # materialized from this template (same Lock 4 fan-out as the
+    # business_day_offset above). See Account.balance_cadence for
+    # full semantics.
+    balance_cadence: BalanceCadence | None = None
 
     def __post_init__(self) -> None:
         if self.business_day_offset is not None and not (
