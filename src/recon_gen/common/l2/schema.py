@@ -49,7 +49,6 @@ from recon_gen.common.sql import (
     analyze_table,
     bigint_type,
     cast,
-    fetch_first_one_row,
     concat_agg,
     date_minus_days,
     date_trunc_day,
@@ -833,10 +832,6 @@ def _emit_l1_invariant_views(
             "ct.posting", dialect,
         ),
         posting_to_date=to_date("posting", dialect),
-        # CL.5 — Oracle uses FETCH FIRST 1 ROW ONLY; PG / DuckDB use
-        # LIMIT 1. Threaded into the effective_balances correlated
-        # subqueries.
-        fetch_first=fetch_first_one_row(dialect),
         # Typed NULL for the UNION ALL rail_name column. Oracle
         # rejects ``CAST(NULL AS CLOB)`` here (ORA-00932) because the
         # subsequent UNION branches' rail_name values are
@@ -2393,6 +2388,24 @@ CREATE INDEX idx_{p}_clb_account_day
 -- had IGNORE NULLS support — corrected here.
 -- ---------------------------------------------------------------------
 {matview_create_kw} {p}_effective_balances{matview_options} AS
+-- Carry-forward shape revised after Oracle ORA-22818 (subquery
+-- expressions not allowed in matview SELECT). The original PG-side
+-- form used 4 correlated scalar subqueries in the SELECT clause;
+-- Oracle's matview engine rejects them outright.
+--
+-- Cross-dialect carry-forward pattern (all 3 dialects accept):
+--   1. spine × emitted_for_day LEFT JOIN — populates emitted_money
+--      on activity days, NULL on carry days.
+--   2. Cumulative MAX over a CASE-when-not-NULL marker gives each
+--      row the date of the most-recent emit at-or-before. PG +
+--      Oracle + DuckDB all support MAX(...) OVER (PARTITION BY ...
+--      ORDER BY ... ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT
+--      ROW) — the cumulative-max form works without IGNORE NULLS
+--      because the inner CASE turns missing emits into NULLs that
+--      MAX naturally skips.
+--   3. JOIN back to current_daily_balances on (account_id,
+--      carried_from_day) to fetch the carried money + business_day
+--      _end values.
 WITH all_internal_accounts AS (
     SELECT DISTINCT
         account_id, account_name, account_role,
@@ -2405,58 +2418,66 @@ in_scope_days AS (
     FROM {p}_current_daily_balances
     WHERE account_scope = 'internal'
 ),
-spine AS (
+spine_joined AS (
     SELECT
         a.account_id, a.account_name, a.account_role,
         a.account_parent_role, a.account_scope,
-        d.business_day_start
+        d.business_day_start,
+        db.business_day_end AS emitted_day_end,
+        db.money AS emitted_money,
+        db.expected_eod_balance AS emitted_expected,
+        CASE WHEN db.money IS NOT NULL
+             THEN d.business_day_start END
+            AS emit_day_marker
     FROM all_internal_accounts a
     CROSS JOIN in_scope_days d
+    LEFT JOIN {p}_current_daily_balances db
+      ON db.account_id = a.account_id
+     AND db.business_day_start = d.business_day_start
+),
+carried AS (
+    SELECT
+        sj.account_id, sj.account_name, sj.account_role,
+        sj.account_parent_role, sj.account_scope,
+        sj.business_day_start,
+        sj.emitted_day_end,
+        sj.emitted_money,
+        sj.emitted_expected,
+        MAX(sj.emit_day_marker) OVER (
+            PARTITION BY sj.account_id
+            ORDER BY sj.business_day_start
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS carried_from_day
+    FROM spine_joined sj
 )
 SELECT
-    s.account_id, s.account_name, s.account_role,
-    s.account_parent_role, s.account_scope,
-    s.business_day_start,
-    -- Carry-forward business_day_end so JOINs that key off
-    -- business_day_end (computed_subledger_balance's `posting <=
-    -- business_day_end` filter) resolve on carried rows. Use the
-    -- most-recent emitted business_day_end at-or-before this day.
-    (SELECT db.business_day_end
-     FROM {p}_current_daily_balances db
-     WHERE db.account_id = s.account_id
-       AND db.business_day_start <= s.business_day_start
-     ORDER BY db.business_day_start DESC
-     {fetch_first}) AS business_day_end,
-    -- emitted_money: the on-the-day money column, NULL when no emit.
-    (SELECT db.money
-     FROM {p}_current_daily_balances db
-     WHERE db.account_id = s.account_id
-       AND db.business_day_start = s.business_day_start
-     {fetch_first}) AS emitted_money,
-    -- effective_money: carry-forward of the most-recent emit at-or-
-    -- before this day. NULL only for an account that has zero emits
-    -- at or before this day in scope.
-    (SELECT db.money
-     FROM {p}_current_daily_balances db
-     WHERE db.account_id = s.account_id
-       AND db.business_day_start <= s.business_day_start
-     ORDER BY db.business_day_start DESC
-     {fetch_first}) AS effective_money,
-    -- expected_eod_balance carries the on-the-day declaration when
-    -- emitted; otherwise the most-recent expected (since L2 declares
-    -- per-account, not per-day, it should rarely change).
-    (SELECT db.expected_eod_balance
-     FROM {p}_current_daily_balances db
-     WHERE db.account_id = s.account_id
-       AND db.business_day_start <= s.business_day_start
-     ORDER BY db.business_day_start DESC
-     {fetch_first}) AS expected_eod_balance,
-    CASE WHEN EXISTS (
-        SELECT 1 FROM {p}_current_daily_balances db
-        WHERE db.account_id = s.account_id
-          AND db.business_day_start = s.business_day_start
-    ) THEN 'emitted' ELSE 'carried' END AS source
-FROM spine s;
+    c.account_id, c.account_name, c.account_role,
+    c.account_parent_role, c.account_scope,
+    c.business_day_start,
+    -- Carry-forward business_day_end + money + expected from the
+    -- prior-emit JOIN. When the spine day IS the emit day,
+    -- carried_from_day = business_day_start and the JOIN
+    -- self-matches; when carried, carried_from_day points at the
+    -- prior emit row.
+    COALESCE(c.emitted_day_end, db2.business_day_end)
+        AS business_day_end,
+    c.emitted_money,
+    COALESCE(c.emitted_money, db2.money) AS effective_money,
+    COALESCE(c.emitted_expected, db2.expected_eod_balance)
+        AS expected_eod_balance,
+    -- carried_from_day: spine day = the most-recent emit at-or-
+    -- before this row. When emit IS on this day, equals
+    -- business_day_start; when carried, points at the prior emit's
+    -- business_day_start. Consumers in daily_statement_summary use
+    -- this to fill closing_carried_from_date for App2's empty-state
+    -- copy without needing their own correlated subquery.
+    c.carried_from_day,
+    CASE WHEN c.emitted_money IS NOT NULL THEN 'emitted'
+         ELSE 'carried' END AS source
+FROM carried c
+LEFT JOIN {p}_current_daily_balances db2
+  ON db2.account_id = c.account_id
+ AND db2.business_day_start = c.carried_from_day;
 -- Composite covers per-(account, day) joins from the L1 invariants;
 -- mirrors the current_daily_balances composite index shape.
 CREATE INDEX idx_{p}_eff_balances_account_day
@@ -2972,6 +2993,13 @@ WITH account_days AS (
            -- already computes per CL.5.
            eb.emitted_money,
            eb.effective_money AS closing_balance_carried,
+           -- carried_from_day: CL.5 effective_balances exposes the
+           -- prior-emit day (= business_day_start when emitted; the
+           -- prior emit's date when carried). daily_statement_summary
+           -- reads it directly instead of running its own correlated
+           -- subquery — Oracle matview rejects scalar subqueries in
+           -- the SELECT clause (ORA-22818).
+           eb.carried_from_day,
            -- Opening = prior day's effective close. LAG over the
            -- carry-forward column so the opening reflects what the
            -- prior day's *closing* was (carried or emitted), not
@@ -3047,15 +3075,13 @@ SELECT ad.account_id, ad.account_name, ad.account_role,
        END AS closing_balance_source,
        -- Prior-emit date for App2's "balance carried from <prior>"
        -- empty-state copy (CL.0 audit §4.a). NULL when the close
-       -- is emitted (no carry to attribute).
+       -- is emitted (no carry to attribute). Sourced from the CL.5
+       -- effective_balances carried_from_day column — Oracle matview
+       -- rejects scalar subqueries in the SELECT clause (ORA-22818),
+       -- so we read the pre-computed column instead.
        CASE
            WHEN ad.emitted_money IS NOT NULL THEN NULL
-           ELSE (
-               SELECT MAX(db2.business_day_start)
-               FROM {p}_current_daily_balances db2
-               WHERE db2.account_id = ad.account_id
-                 AND db2.business_day_start < ad.business_day_start
-           )
+           ELSE ad.carried_from_day
        END AS closing_carried_from_date,
        -- Opening 2-state source enum: emitted vs carried.
        -- 'carried' covers both the no-prior-emit case (LAG returns
