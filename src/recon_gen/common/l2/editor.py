@@ -284,6 +284,9 @@ def create_l2_entity(
             # CP — int | None; _coerce_field has already narrowed
             # string → int on the form path.
             business_day_offset=fields.get("business_day_offset"),
+            # CL — BalanceCadence | None; default-None means sparse
+            # via resolve_cadence at the seed / matview / KPI seam.
+            balance_cadence=fields.get("balance_cadence"),
         )
         return dataclasses.replace(
             instance, accounts=(*instance.accounts, new_acc),
@@ -311,6 +314,8 @@ def create_l2_entity(
             instance_name_template=fields.get("instance_name_template"),
             # CP — int | None per the Account path above.
             business_day_offset=fields.get("business_day_offset"),
+            # CL — see Account.balance_cadence above.
+            balance_cadence=fields.get("balance_cadence"),
         )
         return dataclasses.replace(
             instance, account_templates=(*instance.account_templates, new_t),

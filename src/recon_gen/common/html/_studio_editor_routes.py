@@ -254,6 +254,22 @@ _ACCOUNT_FIELDS: tuple[FieldSpec, ...] = (
         kind="text",
         placeholder="0",
     ),
+    # CL — balance-reporting cadence; sparse (default) means the ETL feed
+    # emits balance rows only on activity days; explicit_daily means
+    # every business day MUST have a row (missing rows surface as L1
+    # balance_cadence_gap violations). See CL.0 audit § 7.
+    FieldSpec(
+        name="balance_cadence",
+        label="Balance cadence",
+        helper=(
+            "Sparse (default): balance rows arrive only on activity "
+            "days; intervening days carry the prior balance forward. "
+            "Explicit-daily: balance rows MUST arrive every business "
+            "day (missing day = gap violation on L1 Exceptions)."
+        ),
+        kind="select",
+        options=("", "sparse", "explicit_daily"),
+    ),
 )
 
 
@@ -308,6 +324,18 @@ _ACCOUNT_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
         ),
         kind="text",
         placeholder="0",
+    ),
+    # CL — template-level cadence applies to every materialized instance.
+    FieldSpec(
+        name="balance_cadence",
+        label="Balance cadence",
+        helper=(
+            "Sparse (default): instances emit balance rows only on "
+            "activity days. Explicit-daily: instances MUST emit a "
+            "row every business day (gaps surface on L1 Exceptions)."
+        ),
+        kind="select",
+        options=("", "sparse", "explicit_daily"),
     ),
     FieldSpec(
         name="instance_id_template",
@@ -865,6 +893,16 @@ def _coerce_field(spec: FieldSpec, raw: str, kind: EntityKind) -> object:
             raise ValueError(
                 f"business_day_offset must be an integer (got {raw!r})",
             ) from exc
+    # CL — Account / AccountTemplate.balance_cadence: closed Literal.
+    # Loader validates the value range; this coercion just rejects
+    # off-Literal strings before they reach the dataclass constructor.
+    if spec.name == "balance_cadence" and kind in ("account", "account_template"):
+        if raw not in ("sparse", "explicit_daily"):
+            raise ValueError(
+                f"balance_cadence must be 'sparse' or 'explicit_daily' "
+                f"(got {raw!r})"
+            )
+        return raw
     # X.4.f.11.6 — Rail.metadata_keys + posted_requirements: textarea
     # one-per-line (or comma-separated). tuple[Identifier, ...].
     if spec.name in ("metadata_keys", "posted_requirements") and kind == "rail":
