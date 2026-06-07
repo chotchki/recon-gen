@@ -27,6 +27,13 @@ accounts:
     role: ClearingSuspense
     scope: internal
     expected_eod_balance: 0
+    # CL.11 — Clearing Suspense is the one demo account flipped to
+    # explicit_daily per CL.0 audit §2.3 lock. Everything else on
+    # spec_example uses the sparse default. Clearing suspense MUST
+    # report daily (regulatory reconciliation against the upstream
+    # rail), so explicit_daily is the natural pick + gives the
+    # balance_cadence_gap trainer plant a target.
+    balance_cadence: explicit_daily
 
   - id: north-pool
     name: North Pool

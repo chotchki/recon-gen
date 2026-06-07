@@ -142,6 +142,9 @@ accounts:
       sweeps to the Fed. Activity nets to zero each cycle; a non-zero
       EOD balance means a batch leg failed to settle as scheduled.
     expected_eod_balance: 0
+    # CL.11 — control-side GL: regulatory daily-position
+    # submission requires a balance row every business day.
+    balance_cadence: explicit_daily
 
   - id: gl-1815-card-acquiring-settlement
     name: Card Acquiring Settlement
@@ -152,6 +155,9 @@ accounts:
       authorizations debit here when the processor force-posts; the
       offsetting credit lands on the customer's DDA when SNB matches
       the auth to a card transaction.
+    # CL.11 — control-side GL: regulatory daily-position
+    # submission requires a balance row every business day.
+    balance_cadence: explicit_daily
 
   - id: gl-1820-wire-settlement-suspense
     name: Wire Settlement Suspense
@@ -162,6 +168,9 @@ accounts:
       and outbound wires awaiting beneficiary bank acknowledgment.
       A wire is fully reconciled when both legs have posted; rows
       stuck here past the same-day cutoff are reconciliation work.
+    # CL.11 — control-side GL: regulatory daily-position
+    # submission requires a balance row every business day.
+    balance_cadence: explicit_daily
 
   - id: gl-1830-internal-transfer-suspense
     name: Internal Transfer Suspense
@@ -181,6 +190,9 @@ accounts:
     # singletons in the same chart of accounts with DIFFERENT EOD
     # cutoffs.
     business_day_offset: 9
+    # CL.11 — control-side GL: regulatory daily-position
+    # submission requires a balance row every business day.
+    balance_cadence: explicit_daily
 
   - id: gl-1840-merchant-payable-clearing
     name: Merchant Payable Clearing
@@ -193,6 +205,9 @@ accounts:
       Wire / Check, per the XOR chain) debit here when SNB releases
       the held balance to the merchant. Per-merchant balance equals
       sales-not-yet-paid-out.
+    # CL.11 — control-side GL: regulatory daily-position
+    # submission requires a balance row every business day.
+    balance_cadence: explicit_daily
 
   - id: gl-1850-cash-concentration-master
     name: Cash Concentration Master
@@ -204,6 +219,9 @@ accounts:
       EOD balance to this master; the master then makes a single
       aggregate transfer to the Fed. Reduces wire and ACH count
       vs. settling per sub-account.
+    # CL.11 — control-side GL: regulatory daily-position
+    # submission requires a balance row every business day.
+    balance_cadence: explicit_daily
 
   - id: gl-1899-internal-suspense-recon
     name: Internal Suspense / Reconciliation
@@ -215,6 +233,9 @@ accounts:
       (research adjustments, stale-suspense reclassifications) flow
       through here. Should be empty or near-empty on any given day.
     expected_eod_balance: 0
+    # CL.11 — control-side GL: regulatory daily-position
+    # submission requires a balance row every business day.
+    balance_cadence: explicit_daily
 
   - id: gl-2010-dda-control
     name: Customer Deposits — DDA Control
@@ -225,6 +246,9 @@ accounts:
       customer DDA template (`CustomerDDA` role) rolls up to this
       control account. SNB's regulatory deposits balance is the sum
       of the children minus float in the suspense GLs.
+    # CL.11 — control-side GL: regulatory daily-position
+    # submission requires a balance row every business day.
+    balance_cadence: explicit_daily
 
   - id: gl-2020-merchant-dda-control
     name: Merchant Deposits — DDA Control
@@ -244,6 +268,9 @@ accounts:
   # which has its own role so card-acquiring rails can target it
   # explicitly. SNB doesn't reconcile any external on its own books;
   # the roles exist so rails have valid source / destination references.
+    # CL.11 — control-side GL: regulatory daily-position
+    # submission requires a balance row every business day.
+    balance_cadence: explicit_daily
 
   - id: ext-frb-snb-master
     name: Federal Reserve Bank — SNB Master
