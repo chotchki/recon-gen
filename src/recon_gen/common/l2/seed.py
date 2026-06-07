@@ -66,7 +66,7 @@ from __future__ import annotations
 import random
 import zlib
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from recon_gen.common.as_of_frame import AsOfFrame
@@ -74,6 +74,7 @@ from recon_gen.common.sql import Dialect
 
 from .primitives import (
     AccountTemplate,
+    BalanceCadence,
     Chain,
     ChainChildSpec,
     Identifier,
@@ -4082,17 +4083,19 @@ def _emit_baseline_daily_balances(
     day's EOD, which equals ``SUM(signed_amount)`` through that prior
     day (no legs post Sat/Sun, so the cumulative sum is unchanged).
 
-    Per-role business-day offsets (M.4.4.14): roles in
-    ``instance.role_business_day_offsets`` get their business_day_start
-    / business_day_end shifted by the configured hour offset. Roles
-    without an entry default to midnight-aligned (00:00 → 00:00 next
-    day).
+    Per-entity business-day offsets (CP — replaces M.4.4.14's per-role
+    top-level dict): each `Account.business_day_offset` /
+    `AccountTemplate.business_day_offset` gets that account's
+    business_day_start / business_day_end shifted by the declared hour
+    offset. Entities without a value default to midnight-aligned
+    (00:00 → 00:00 next day). Role-shared accounts CAN declare
+    different offsets (Lock 1 of Phase CP) — the seed reads the
+    per-entity value directly, no dict lookup.
     """
     if not state.account_leg_log:
         return []
 
     account_meta = _build_account_meta_map(state, instance)
-    role_offsets = instance.role_business_day_offsets or {}
 
     # Walk every account's leg log in chronological order to compute
     # correct cumulative EOD balances. Per-leg accumulation; last leg
@@ -4115,20 +4118,55 @@ def _emit_baseline_daily_balances(
         calendar_days.append(cursor)
         cursor += timedelta(days=1)
 
-    # Per account, fill forward the last-known balance into every
-    # calendar day in the window. An account's first business-day
-    # balance lands on its activity day; days before it get the
-    # account's initial balance; days between business-day legs
-    # carry the most recent EOD; days after the final leg through
-    # the anchor carry that final EOD.
+    # CL.4 — emission strategy is cadence-aware:
+    #
+    # - ``explicit_daily`` (and the historic pre-CL behavior): fill
+    #   forward the last-known balance into every calendar day in the
+    #   window. Days before first activity get the initial balance;
+    #   days between business-day legs carry the most recent EOD;
+    #   days after the final leg through the anchor carry that final
+    #   EOD. The Daily Statement picker on weekend / holiday dates
+    #   always lands on a real row.
+    #
+    # - ``sparse`` (the new post-CL default for ``balance_cadence
+    #   = None``): emit ONLY days the account had a transaction-leg
+    #   touch. Quiet days produce no row at all; CL.5's carry-forward
+    #   matview reads the most-recent emitted row to derive the
+    #   effective balance for any later quiet day. This is the
+    #   activity-driven feed shape that real institutions ship.
+    #
+    # Per-account branching is essential: a mixed fixture can have
+    # explicit_daily control accounts alongside sparse customer DDAs
+    # and both must emit correctly into the SAME baseline. The branch
+    # only sits in the fill-forward step — the eod_balances dict
+    # (post per-leg accumulation) already has the activity-day rows
+    # for both modes.
     accounts_with_activity: set[Identifier] = {a for a, _ in eod_balances}
+    eod_by_account: dict[Identifier, dict[date, Decimal]] = {}
+    for (acct, day), money in eod_balances.items():
+        eod_by_account.setdefault(acct, {})[day] = money
     filled_eod: dict[tuple[Identifier, date], Decimal] = {}
     for account_id in sorted(accounts_with_activity, key=str):
-        running = state.initial_balances.get(account_id, Decimal("0"))
-        for day in calendar_days:
-            if (account_id, day) in eod_balances:
-                running = eod_balances[(account_id, day)]
-            filled_eod[(account_id, day)] = running
+        meta = account_meta.get(account_id)
+        # Inline the resolve_cadence fallback here — the helper takes
+        # the full Account / AccountTemplate entity (for primitives
+        # call sites) and we only carry the cadence string on the
+        # resolved meta. Same default-None-to-sparse semantics.
+        declared = meta.balance_cadence if meta is not None else None
+        cadence: BalanceCadence = declared if declared is not None else "sparse"
+        acct_days = eod_by_account.get(account_id, {})
+        if cadence == "explicit_daily":
+            running = state.initial_balances.get(account_id, Decimal("0"))
+            for day in calendar_days:
+                if day in acct_days:
+                    running = acct_days[day]
+                filled_eod[(account_id, day)] = running
+        else:
+            # sparse: only activity-day rows make it into the emit.
+            # The carry-forward matview (CL.5) handles "what was the
+            # balance on a quiet day" at read time.
+            for day, money in acct_days.items():
+                filled_eod[(account_id, day)] = money
 
     rows: list[str] = []
     for (account_id, day), money in sorted(
@@ -4137,7 +4175,7 @@ def _emit_baseline_daily_balances(
         meta = account_meta.get(account_id)
         if meta is None:
             continue
-        offset_hours = role_offsets.get(str(meta.account_role), 0)
+        offset_hours = meta.business_day_offset or 0
         rows.append(_balance_row(
             account_id=meta.account_id,
             account_name=meta.account_name,
@@ -4175,6 +4213,10 @@ def _build_account_meta_map(
             account_role=ti.template_role,
             account_scope=tmpl.scope,
             account_parent_role=tmpl.parent_role,
+            # CP.2 — template offset fans out to every materialized instance.
+            business_day_offset=tmpl.business_day_offset,
+            # CL.4 — template cadence fans out the same way.
+            balance_cadence=tmpl.balance_cadence,
         )
     for a in instance.accounts:
         out[a.id] = _ResolvedAccount(
@@ -4183,6 +4225,10 @@ def _build_account_meta_map(
             account_role=a.role or Identifier(str(a.id)),
             account_scope=a.scope,
             account_parent_role=a.parent_role,
+            # CP.2 — per-singleton offset.
+            business_day_offset=a.business_day_offset,
+            # CL.4 — per-singleton cadence.
+            balance_cadence=a.balance_cadence,
         )
     return out
 
@@ -4252,16 +4298,30 @@ def _eod_timestamp(d: date, offset_hours: int = 0) -> str:
     """End-of-day UTC timestamp for `d` shifted by ``offset_hours``
     (i.e. start of next day at the same hour). Default 0 keeps
     midnight-aligned production behavior.
+
+    CP.9 (2026-06-06) — switched from f"…T{offset_hours:02d}:00…"
+    string-format to ``datetime + timedelta`` arithmetic. The string
+    format produced invalid timestamps for NEGATIVE offsets
+    (e.g. `f"{-3:02d}"` → `"-3"`, yielding `T-3:00:00` which DuckDB
+    rejects). datetime arithmetic naturally handles wrap-around: a
+    -3h offset on day D yields D 21:00 UTC (the prior day's last
+    hours), which is what an EOD-at-local-midnight desk in a
+    UTC-3 timezone implies.
     """
-    next_day = d + timedelta(days=1)
-    return f"{next_day.isoformat()}T{offset_hours:02d}:00:00+00:00"
+    base = datetime.combine(d + timedelta(days=1), time(0))
+    shifted = base + timedelta(hours=offset_hours)
+    return f"{shifted.isoformat()}+00:00"
 
 
 def _bod_timestamp(d: date, offset_hours: int = 0) -> str:
     """Beginning-of-day UTC timestamp for `d` shifted by ``offset_hours``.
     Default 0 keeps midnight-aligned production behavior.
+
+    CP.9 — see _eod_timestamp; same fix for negative offsets.
     """
-    return f"{d.isoformat()}T{offset_hours:02d}:00:00+00:00"
+    base = datetime.combine(d, time(0))
+    shifted = base + timedelta(hours=offset_hours)
+    return f"{shifted.isoformat()}+00:00"
 
 
 
@@ -4331,6 +4391,23 @@ class _ResolvedAccount:
     account_role: Identifier
     account_scope: str
     account_parent_role: Identifier | None
+    # CP — per-entity EOD offset, hours from midnight UTC. None ⇒
+    # midnight-aligned (default). Pulled from the singleton Account
+    # for instance.accounts entries, or from the AccountTemplate for
+    # materialized template-instance entries (Lock 4: per-template
+    # offset applies to all materialized instances). Scope=external
+    # accounts always carry None per CP.0 audit + validator M.4.4.14a
+    # — we don't compute their EOD balances at all.
+    business_day_offset: int | None = None
+    # CL — per-entity balance-emit cadence. ``None`` resolves to
+    # ``"sparse"`` via ``resolve_cadence`` (the read-time default).
+    # ``"sparse"`` accounts only emit daily_balances rows on activity
+    # days; ``"explicit_daily"`` accounts emit every business day in
+    # the window regardless of activity. Scope=external accounts
+    # carry None and don't emit balance rows at all (same as
+    # business_day_offset's external-skip pattern). See CL.0 audit §3
+    # for the carry-forward matview semantics that read these.
+    balance_cadence: BalanceCadence | None = None
 
 
 def _resolve_any_account(

@@ -77,6 +77,11 @@ _L1_KIND_TO_SHEET_ID: Final[dict[str, str]] = {
     # surfaced row navigates to the Transactions sheet keyed by the
     # parent firing's transfer_id.
     "multi_xor_violation": "l1-sheet-exceptions",
+    # CL.6 — balance_cadence_gap surfaces on L1 Exceptions (rollup
+    # pattern matches expected_eod_balance_breach); analyst's drill
+    # goes to the Daily Statement sheet for the offending
+    # (account, day).
+    "balance_cadence_gap": "l1-sheet-exceptions",
     "supersession_audit": "l1-sheet-supersession-audit",
 }
 
@@ -99,6 +104,7 @@ _DISPLAY_ORDER: Final[tuple[str, ...]] = (
     "xor_group_violation",  # AB.3.3
     "fan_in_disagreement",  # AB.4.7
     "multi_xor_violation",  # AB.6.5
+    "balance_cadence_gap",  # CL.6
     "supersession_audit",
 )
 

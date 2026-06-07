@@ -43,6 +43,11 @@ INVARIANT_KIND_TO_SHEET: dict[str, str] = {
     "ledger_drift": "Drift",
     "overdraft": "Overdraft",
     "expected_eod_balance_breach": "L1 Exceptions",
+    # CL.6 — balance_cadence_gap surfaces on L1 Exceptions (same
+    # rollup pattern as expected_eod_balance_breach); no dedicated
+    # sheet, the analyst's drill goes to Daily Statement for the
+    # offending (account, day) cell.
+    "balance_cadence_gap": "L1 Exceptions",
     "limit_breach": "Limit Breach",
     "stuck_pending": "Pending Aging",
     "stuck_unbundled": "Unbundled Aging",

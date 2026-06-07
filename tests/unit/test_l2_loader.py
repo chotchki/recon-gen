@@ -1045,3 +1045,163 @@ def test_capture_sidecar_failure_doesnt_break_load(
     inst = load_instance(p, validate=False)
     # Smoke: load returned a usable instance despite the sidecar failure.
     assert inst.accounts
+
+
+# -- CP: business_day_offset loader path ------------------------------------
+
+
+_MINIMAL_BUSINESS_DAY_OFFSET_YAML = dedent("""\
+    accounts:
+      - id: a1
+        scope: internal
+        role: R1
+        business_day_offset: 5
+      - id: a2
+        scope: internal
+        role: R1
+        # business_day_offset absent ⇒ None
+      - id: a3
+        scope: internal
+        role: R1
+        business_day_offset: -3
+
+    account_templates:
+      - role: R2
+        scope: internal
+        business_day_offset: 9
+""")
+
+
+def test_loader_round_trips_account_business_day_offset(tmp_path: Path) -> None:
+    """CP.1 — Account.business_day_offset parses from YAML; absent key
+    becomes None; signed integers preserved verbatim."""
+    p = tmp_path / "src.yaml"
+    p.write_text(_MINIMAL_BUSINESS_DAY_OFFSET_YAML)
+    inst = load_instance(p, validate=False)
+
+    by_id = {a.id: a for a in inst.accounts}
+    assert by_id["a1"].business_day_offset == 5
+    assert by_id["a2"].business_day_offset is None
+    assert by_id["a3"].business_day_offset == -3
+
+
+def test_loader_round_trips_account_template_business_day_offset(
+    tmp_path: Path,
+) -> None:
+    """Same field on AccountTemplate."""
+    p = tmp_path / "src.yaml"
+    p.write_text(_MINIMAL_BUSINESS_DAY_OFFSET_YAML)
+    inst = load_instance(p, validate=False)
+
+    template = inst.account_templates[0]
+    assert template.business_day_offset == 9
+
+
+def test_loader_rejects_non_integer_business_day_offset(tmp_path: Path) -> None:
+    """A non-int value (string, float, bool) raises a typed error
+    naming the field path."""
+    yaml_text = dedent("""\
+        accounts:
+          - id: a1
+            scope: internal
+            role: R1
+            business_day_offset: "five"
+    """)
+    p = tmp_path / "src.yaml"
+    p.write_text(yaml_text)
+    with pytest.raises(ValueError, match=r"business_day_offset must be a signed integer"):
+        load_instance(p, validate=False)
+
+
+def test_loader_rejects_out_of_range_business_day_offset(tmp_path: Path) -> None:
+    """Out-of-range (|offset| > 23) surfaces via the dataclass __post_init__,
+    which the loader's Account(...) call triggers."""
+    yaml_text = dedent("""\
+        accounts:
+          - id: a1
+            scope: internal
+            role: R1
+            business_day_offset: 24
+    """)
+    p = tmp_path / "src.yaml"
+    p.write_text(yaml_text)
+    with pytest.raises(ValueError, match=r"business_day_offset must be in \[-23, 23\]"):
+        load_instance(p, validate=False)
+
+
+# -- CL: balance_cadence loader ---------------------------------------------
+
+
+_MINIMAL_BALANCE_CADENCE_YAML = dedent("""\
+    accounts:
+      - id: a1
+        scope: internal
+        role: R1
+        balance_cadence: explicit_daily
+      - id: a2
+        scope: internal
+        role: R1
+        # balance_cadence absent ⇒ None ⇒ sparse via resolve_cadence
+      - id: a3
+        scope: internal
+        role: R1
+        balance_cadence: sparse
+
+    account_templates:
+      - role: R2
+        scope: internal
+        balance_cadence: explicit_daily
+""")
+
+
+def test_loader_round_trips_account_balance_cadence(tmp_path: Path) -> None:
+    """CL.1 — Account.balance_cadence parses from YAML."""
+    p = tmp_path / "src.yaml"
+    p.write_text(_MINIMAL_BALANCE_CADENCE_YAML)
+    inst = load_instance(p, validate=False)
+
+    by_id = {a.id: a for a in inst.accounts}
+    assert by_id["a1"].balance_cadence == "explicit_daily"
+    assert by_id["a2"].balance_cadence is None
+    assert by_id["a3"].balance_cadence == "sparse"
+
+
+def test_loader_round_trips_account_template_balance_cadence(
+    tmp_path: Path,
+) -> None:
+    """Same field on AccountTemplate."""
+    p = tmp_path / "src.yaml"
+    p.write_text(_MINIMAL_BALANCE_CADENCE_YAML)
+    inst = load_instance(p, validate=False)
+
+    template = inst.account_templates[0]
+    assert template.balance_cadence == "explicit_daily"
+
+
+def test_loader_rejects_unknown_balance_cadence_value(tmp_path: Path) -> None:
+    """A value outside the closed Literal raises a typed error."""
+    yaml_text = dedent("""\
+        accounts:
+          - id: a1
+            scope: internal
+            role: R1
+            balance_cadence: weekly
+    """)
+    p = tmp_path / "src.yaml"
+    p.write_text(yaml_text)
+    with pytest.raises(ValueError, match=r"balance_cadence must be 'sparse' or 'explicit_daily'"):
+        load_instance(p, validate=False)
+
+
+def test_loader_rejects_non_string_balance_cadence(tmp_path: Path) -> None:
+    yaml_text = dedent("""\
+        accounts:
+          - id: a1
+            scope: internal
+            role: R1
+            balance_cadence: 1
+    """)
+    p = tmp_path / "src.yaml"
+    p.write_text(yaml_text)
+    with pytest.raises(ValueError, match=r"balance_cadence must be a string"):
+        load_instance(p, validate=False)

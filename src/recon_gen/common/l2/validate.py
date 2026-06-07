@@ -280,7 +280,7 @@ def validate(instance: L2Instance) -> None:
     _check_amount_typical_range_shape(instance)
     _check_firings_typical_per_period_shape(instance)
     _check_non_aggregating_rail_no_cadence_or_bundles(instance)
-    _check_role_business_day_offsets_resolve(instance, all_roles)
+    _check_business_day_offset_not_on_external(instance)
 
     _check_completion_vocabulary(instance)
     _check_cadence_vocabulary(instance)
@@ -1275,18 +1275,34 @@ def _check_per_leg_origin_resolution(inst: L2Instance) -> None:
             )
 
 
-def _check_role_business_day_offsets_resolve(
-    inst: L2Instance, all_roles: set[Identifier],
-) -> None:
-    """role_business_day_offsets keys must reference declared roles
-    (M.4.4.14). Catches typos before they silently no-op at emit time.
+def _check_business_day_offset_not_on_external(inst: L2Instance) -> None:
+    """M.4.4.14a — Account / AccountTemplate with ``scope="external"``
+    MUST NOT carry a ``business_day_offset``. External accounts have no
+    EOD balance row, so the offset has no consumer; declaring one is a
+    configuration mistake (typically a copy-paste from an internal
+    account). M.4.4.14 (top-level ``role_business_day_offsets`` map)
+    was removed under Phase CP — offsets moved per-entity, which is
+    what makes this scope check tractable (the map's role-keys couldn't
+    distinguish internal vs external roles).
     """
-    if not inst.role_business_day_offsets:
-        return
-    declared = {str(r) for r in all_roles}
-    for role in inst.role_business_day_offsets:
-        if role not in declared:
+    for a in inst.accounts:
+        if a.scope == "external" and a.business_day_offset is not None:
             raise L2ValidationError(
-                f"role_business_day_offsets key {role!r} doesn't match any "
-                f"declared role (declared: {sorted(declared)})"
+                f"M.4.4.14a: Account {a.id!r} has scope='external' but "
+                f"declares business_day_offset={a.business_day_offset!r}.\n"
+                f"External accounts have no EOD balance row, so the "
+                f"offset has no consumer.\n"
+                f"Remove business_day_offset from this account or "
+                f"change scope to 'internal'."
+            )
+    for t in inst.account_templates:
+        if t.scope == "external" and t.business_day_offset is not None:
+            raise L2ValidationError(
+                f"M.4.4.14a: AccountTemplate {t.role!r} has "
+                f"scope='external' but declares "
+                f"business_day_offset={t.business_day_offset!r}.\n"
+                f"External accounts have no EOD balance row, so the "
+                f"offset has no consumer.\n"
+                f"Remove business_day_offset from this template or "
+                f"change scope to 'internal'."
             )

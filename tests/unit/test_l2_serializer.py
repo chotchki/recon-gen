@@ -80,7 +80,8 @@ def test_serialize_l2_skips_default_optional_fields() -> None:
     YAML — match the hand-authored fixture style of "only what's set"."""
     instance = load_instance(_FIXTURES_DIR / "spec_example.yaml")
     text = serialize_l2(instance)
-    # spec_example has no role_business_day_offsets — should be absent.
+    # Phase CP removed role_business_day_offsets — the serializer
+    # should never emit the top-level key (loader rejects it on load).
     assert "role_business_day_offsets" not in text
     # spec_example has no persona block — should be absent.
     assert "persona:" not in text

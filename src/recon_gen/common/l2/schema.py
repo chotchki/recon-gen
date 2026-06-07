@@ -307,11 +307,20 @@ def refresh_matviews_sql(
         # Helpers: read from current_*.
         f"{p}_computed_subledger_balance",
         f"{p}_computed_ledger_balance",
+        # CL.5 — carry-forward effective balance: every (account, day)
+        # in scope, with sparse-day gaps filled via LAST_VALUE IGNORE
+        # NULLS window. Drift / ledger_drift / overdraft now read this
+        # so sparse accounts surface the institution's REAL position
+        # (not just emitted rows). Reads from current_daily_balances +
+        # current_transactions; refresh after those two.
+        f"{p}_effective_balances",
         # L1 invariants: read from current_* + helpers.
         f"{p}_drift",
         f"{p}_ledger_drift",
         f"{p}_overdraft",
         f"{p}_expected_eod_balance_breach",
+        # CL.6 — cadence-aware missing-balance invariant.
+        f"{p}_balance_cadence_gap",
         f"{p}_limit_breach",
         f"{p}_stuck_pending",
         f"{p}_stuck_unbundled",
@@ -414,10 +423,13 @@ def _emit_table_based_matview_refresh(
         f"{p}_current_daily_balances",
         f"{p}_computed_subledger_balance",
         f"{p}_computed_ledger_balance",
+        # CL.5 — carry-forward source for drift / ledger_drift / overdraft.
+        f"{p}_effective_balances",
         f"{p}_drift",
         f"{p}_ledger_drift",
         f"{p}_overdraft",
         f"{p}_expected_eod_balance_breach",
+        f"{p}_balance_cadence_gap",
         f"{p}_limit_breach",
         f"{p}_stuck_pending",
         f"{p}_stuck_unbundled",
@@ -564,6 +576,153 @@ def _render_computed_subledger_balance_section(
     )
 
 
+def _render_balance_cadence_gap_section(
+    instance: L2Instance, prefix: str, dialect: Dialect,
+) -> str:
+    """CL.6 — emit the ``<prefix>_balance_cadence_gap`` matview body.
+
+    Two firing modes materialized into one table per CL.0 audit §4:
+
+    - ``declared_daily_missing`` — accounts declared ``explicit_daily``
+      cadence with NO emitted balance row that day. Fires regardless
+      of activity (the institution declared every business day MUST
+      have a row).
+    - ``sparse_with_activity`` — accounts on the ``sparse`` default
+      that had transaction postings today but emitted no balance row.
+      This is the silent-institutional-bug case: activity happened
+      and nothing reconciles against a known close.
+
+    Cadence resolution at schema-emit time: walk
+    ``instance.accounts`` (singleton-account cadences keyed on
+    ``account_id``) + ``instance.account_templates`` (template
+    cadences keyed on ``account_role`` — templates fan out to
+    materialized instances that all share the role per CL.2 Lock 4).
+    Anything not declared falls through to ``'sparse'`` per
+    ``resolve_cadence`` (audit Lock 3).
+
+    The CASE expression is embedded directly in the matview body
+    rather than via a typed config-kv view (BC.12 pattern) — the
+    cadence universe is small (2 values × declared entities) and the
+    declarations are stable across the L2 lifetime; the
+    config-kv-walk overhead isn't justified.
+    """
+    from recon_gen.common.l2.primitives import (  # noqa: PLC0415
+        BalanceCadence,
+    )
+    mv_kw = matview_create_keyword(dialect)
+    mv_opt = matview_options(dialect)
+    p = prefix
+
+    # Build the cadence-resolution CASE expression. The order matters:
+    # singleton account_id rules win over role-based template rules
+    # (a singleton declared on a role-shared account_id keeps its own
+    # cadence; templates fan-out applies to the rest of the role's
+    # population). Inner references use ``s.`` (the spine alias the
+    # CASE sits inside) — CTEs can't self-reference column aliases.
+    case_arms: list[str] = []
+    for a in instance.accounts:
+        if a.balance_cadence is not None:
+            cad: BalanceCadence = a.balance_cadence
+            case_arms.append(
+                f"        WHEN s.account_id = '{a.id}' "
+                f"THEN '{cad}'"
+            )
+    for tmpl in instance.account_templates:
+        if tmpl.balance_cadence is not None:
+            cad_t: BalanceCadence = tmpl.balance_cadence
+            case_arms.append(
+                f"        WHEN s.account_role = '{tmpl.role}' "
+                f"THEN '{cad_t}'"
+            )
+    # SQL requires CASE to have ≥1 WHEN before ELSE; when no entity
+    # declares a cadence (instance defaults across the board) we
+    # emit the literal default instead of a CASE.
+    cadence_default = cast("'sparse'", varchar_type(20, dialect), dialect)
+    cadence_expr = (
+        "(CASE\n" + "\n".join(case_arms) + "\n        ELSE 'sparse'\n        END)"
+        if case_arms else cadence_default
+    )
+
+    return (
+        "-- ---------------------------------------------------------------------\n"
+        "-- CL.6 — L1 invariant: balance_cadence_gap.\n"
+        "-- Cadence-aware: rows fire for EITHER\n"
+        "--   * declared_daily_missing — account on explicit_daily +\n"
+        "--     no emitted row for this business day.\n"
+        "--   * sparse_with_activity — account on sparse + postings\n"
+        "--     happened today + no emitted row.\n"
+        "-- Both modes materialize into the same matview so L1\n"
+        "-- Exceptions is the single triage destination.\n"
+        "-- See CL.0 audit §4 (revised 2026-06-07) for the lock.\n"
+        "-- ---------------------------------------------------------------------\n"
+        f"{mv_kw} {p}_balance_cadence_gap{mv_opt} AS\n"
+        "WITH all_internal AS (\n"
+        "    SELECT DISTINCT\n"
+        "        account_id, account_name, account_role, account_parent_role\n"
+        f"    FROM {p}_current_daily_balances\n"
+        "    WHERE account_scope = 'internal'\n"
+        "),\n"
+        "in_scope_days AS (\n"
+        "    SELECT DISTINCT business_day_start\n"
+        f"    FROM {p}_current_daily_balances\n"
+        "    WHERE account_scope = 'internal'\n"
+        "),\n"
+        "spine AS (\n"
+        "    SELECT a.account_id, a.account_name, a.account_role,\n"
+        "           a.account_parent_role, d.business_day_start\n"
+        "    FROM all_internal a\n"
+        "    CROSS JOIN in_scope_days d\n"
+        "),\n"
+        "today_postings AS (\n"
+        f"    SELECT tx.account_id, {date_trunc_day('tx.posting', dialect)} AS business_day,\n"
+        "           SUM(tx.amount_money) AS net_flow,\n"
+        "           COUNT(*) AS leg_count\n"
+        f"    FROM {p}_current_transactions tx\n"
+        "    WHERE tx.status <> 'Failed'\n"
+        f"    GROUP BY tx.account_id, {date_trunc_day('tx.posting', dialect)}\n"
+        "),\n"
+        "accts AS (\n"
+        "    -- Cadence resolution per L2 declaration at schema-emit\n"
+        "    -- time. Embeds the (account_id / account_role → cadence)\n"
+        "    -- mapping inline; fewer joins than the BC.12 config_kv\n"
+        "    -- walk and the cadence universe is tiny (2 values × N\n"
+        "    -- declared entities).\n"
+        "    SELECT s.account_id, s.account_name, s.account_role,\n"
+        "           s.account_parent_role, s.business_day_start,\n"
+        f"           {cadence_expr} AS balance_cadence\n"
+        "    FROM spine s\n"
+        ")\n"
+        "SELECT\n"
+        "    a.account_id, a.account_name, a.account_role,\n"
+        "    a.account_parent_role, a.business_day_start,\n"
+        "    a.balance_cadence,\n"
+        "    tp.net_flow AS gap_day_net_flow,\n"
+        "    COALESCE(tp.leg_count, 0) AS gap_day_leg_count,\n"
+        "    CASE\n"
+        "        WHEN a.balance_cadence = 'explicit_daily' THEN 'declared_daily_missing'\n"
+        "        WHEN a.balance_cadence = 'sparse' AND COALESCE(tp.leg_count, 0) > 0 THEN 'sparse_with_activity'\n"
+        "        ELSE NULL\n"
+        "    END AS gap_kind\n"
+        "FROM accts a\n"
+        f"LEFT JOIN {p}_current_daily_balances db\n"
+        "  ON db.account_id = a.account_id\n"
+        " AND db.business_day_start = a.business_day_start\n"
+        "LEFT JOIN today_postings tp\n"
+        "  ON tp.account_id = a.account_id\n"
+        " AND tp.business_day = a.business_day_start\n"
+        "WHERE db.business_day_start IS NULL\n"
+        "  AND (\n"
+        "      a.balance_cadence = 'explicit_daily'\n"
+        "      OR (a.balance_cadence = 'sparse' AND COALESCE(tp.leg_count, 0) > 0)\n"
+        "  );\n"
+        "-- Composite covers the dashboard's per-(account, day) drill.\n"
+        f"CREATE INDEX idx_{p}_bcg_account_day\n"
+        f"    ON {p}_balance_cadence_gap (account_id, business_day_start);\n"
+        f"CREATE INDEX idx_{p}_bcg_kind\n"
+        f"    ON {p}_balance_cadence_gap (gap_kind);"
+    )
+
+
 def _emit_l1_invariant_views(
     instance: L2Instance, *, prefix: str, dialect: Dialect = Dialect.POSTGRES,
 ) -> str:
@@ -637,9 +796,11 @@ def _emit_l1_invariant_views(
         instance, p=p, dialect=dialect,
     )
     csb_section = _render_computed_subledger_balance_section(p, dialect)
+    bcg_section = _render_balance_cadence_gap_section(instance, p, dialect)
     return _L1_INVARIANT_VIEWS_TEMPLATE.format(
         p=p,
         computed_subledger_balance_section=csb_section,
+        balance_cadence_gap_section=bcg_section,
         limit_join_outbound=limit_join_outbound,
         limit_join_inbound=limit_join_inbound,
         limit_cap_value=limit_cap_value,
@@ -1792,10 +1953,17 @@ _L1_INVARIANT_DROP_NAMES: tuple[str, ...] = (
     "stuck_unbundled",
     "stuck_pending",
     "limit_breach",
+    # CL.6 — balance_cadence_gap reads current_daily_balances +
+    # current_transactions only; no dependency on the other L1
+    # invariants, but drops cleanly here alongside them.
+    "balance_cadence_gap",
     "expected_eod_balance_breach",
     "overdraft",
     "ledger_drift",
     "drift",
+    # CL.5 — effective_balances is a carry-forward source for the 3
+    # invariants above; drop after them.
+    "effective_balances",
     "computed_ledger_balance",
     "computed_subledger_balance",
 )
@@ -2189,10 +2357,144 @@ CREATE INDEX idx_{p}_clb_account_day
     ON {p}_computed_ledger_balance (account_id, business_day_start);
 
 -- ---------------------------------------------------------------------
+-- CL.5 — Carry-forward effective balance per (account, business_day).
+-- Sparse accounts emit a daily_balances row only on activity days
+-- (CL.4); this view fills the gaps with the prior emitted balance so
+-- the L1 invariants (drift / ledger_drift / overdraft) see the
+-- institution's REAL position every day, not just emitted days.
+--
+-- Spine = every internal account × every business_day_start that
+-- appeared in the daily_balances feed (the union with transactions
+-- feed dates is intentionally left out: matview-internal coupling.
+-- An account with NO emit in scope contributes nothing to the spine,
+-- which is correct — we have no balance to carry forward).
+--
+-- ``source`` discriminator: `'emitted'` when there's a daily_balances
+-- row for this (account, day); `'carried'` when the row came from a
+-- prior business day's emit. The 3-state form (carried_no_activity /
+-- carried_with_activity_gap) lives on daily_statement_summary (CL.8)
+-- — the carry-forward source itself is binary; the gap detection
+-- happens at the Daily Statement aggregation layer where today's
+-- net_flow is known.
+--
+-- Dialect compatibility: PostgreSQL does NOT support ``IGNORE NULLS``
+-- in window functions (long-standing TODO, still pending as of PG
+-- 17). Oracle 19c + DuckDB do. Per
+-- [[feedback_sql_dialect_convergence_preferred]] — pick the SQL
+-- shape that ALL three dialects accept rather than branch. The
+-- correlated subquery form below works everywhere; the planner cost
+-- is bounded by ``(scope_days × accounts)`` lookups against the
+-- daily_balances composite index. CL.0 audit incorrectly claimed PG
+-- had IGNORE NULLS support — corrected here.
+-- ---------------------------------------------------------------------
+{matview_create_kw} {p}_effective_balances{matview_options} AS
+-- Carry-forward shape revised after Oracle ORA-22818 (subquery
+-- expressions not allowed in matview SELECT). The original PG-side
+-- form used 4 correlated scalar subqueries in the SELECT clause;
+-- Oracle's matview engine rejects them outright.
+--
+-- Cross-dialect carry-forward pattern (all 3 dialects accept):
+--   1. spine × emitted_for_day LEFT JOIN — populates emitted_money
+--      on activity days, NULL on carry days.
+--   2. Cumulative MAX over a CASE-when-not-NULL marker gives each
+--      row the date of the most-recent emit at-or-before. PG +
+--      Oracle + DuckDB all support MAX(...) OVER (PARTITION BY ...
+--      ORDER BY ... ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT
+--      ROW) — the cumulative-max form works without IGNORE NULLS
+--      because the inner CASE turns missing emits into NULLs that
+--      MAX naturally skips.
+--   3. JOIN back to current_daily_balances on (account_id,
+--      carried_from_day) to fetch the carried money + business_day
+--      _end values.
+WITH all_internal_accounts AS (
+    SELECT DISTINCT
+        account_id, account_name, account_role,
+        account_parent_role, account_scope
+    FROM {p}_current_daily_balances
+    WHERE account_scope = 'internal'
+),
+in_scope_days AS (
+    SELECT DISTINCT business_day_start
+    FROM {p}_current_daily_balances
+    WHERE account_scope = 'internal'
+),
+spine_joined AS (
+    SELECT
+        a.account_id, a.account_name, a.account_role,
+        a.account_parent_role, a.account_scope,
+        d.business_day_start,
+        db.business_day_end AS emitted_day_end,
+        db.money AS emitted_money,
+        db.expected_eod_balance AS emitted_expected,
+        CASE WHEN db.money IS NOT NULL
+             THEN d.business_day_start END
+            AS emit_day_marker
+    FROM all_internal_accounts a
+    CROSS JOIN in_scope_days d
+    LEFT JOIN {p}_current_daily_balances db
+      ON db.account_id = a.account_id
+     AND db.business_day_start = d.business_day_start
+),
+carried AS (
+    SELECT
+        sj.account_id, sj.account_name, sj.account_role,
+        sj.account_parent_role, sj.account_scope,
+        sj.business_day_start,
+        sj.emitted_day_end,
+        sj.emitted_money,
+        sj.emitted_expected,
+        MAX(sj.emit_day_marker) OVER (
+            PARTITION BY sj.account_id
+            ORDER BY sj.business_day_start
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS carried_from_day
+    FROM spine_joined sj
+)
+SELECT
+    c.account_id, c.account_name, c.account_role,
+    c.account_parent_role, c.account_scope,
+    c.business_day_start,
+    -- Carry-forward business_day_end + money + expected from the
+    -- prior-emit JOIN. When the spine day IS the emit day,
+    -- carried_from_day = business_day_start and the JOIN
+    -- self-matches; when carried, carried_from_day points at the
+    -- prior emit row.
+    COALESCE(c.emitted_day_end, db2.business_day_end)
+        AS business_day_end,
+    c.emitted_money,
+    COALESCE(c.emitted_money, db2.money) AS effective_money,
+    COALESCE(c.emitted_expected, db2.expected_eod_balance)
+        AS expected_eod_balance,
+    -- carried_from_day: spine day = the most-recent emit at-or-
+    -- before this row. When emit IS on this day, equals
+    -- business_day_start; when carried, points at the prior emit's
+    -- business_day_start. Consumers in daily_statement_summary use
+    -- this to fill closing_carried_from_date for App2's empty-state
+    -- copy without needing their own correlated subquery.
+    c.carried_from_day,
+    CASE WHEN c.emitted_money IS NOT NULL THEN 'emitted'
+         ELSE 'carried' END AS source
+FROM carried c
+LEFT JOIN {p}_current_daily_balances db2
+  ON db2.account_id = c.account_id
+ AND db2.business_day_start = c.carried_from_day;
+-- Composite covers per-(account, day) joins from the L1 invariants;
+-- mirrors the current_daily_balances composite index shape.
+CREATE INDEX idx_{p}_eff_balances_account_day
+    ON {p}_effective_balances (account_id, business_day_start);
+
+-- ---------------------------------------------------------------------
 -- L1 invariant: Sub-ledger drift.
 -- SPEC: For every CurrentStoredBalance where Account.Scope = Internal
 -- and ¬IsParent(Account), Drift(Account, BusinessDay) SHOULD equal 0.
 -- Rows in this view are the violations: stored ≠ computed.
+--
+-- CL.5 — reads from effective_balances (carry-forward over sparse-day
+-- gaps), NOT current_daily_balances directly. The carried-forward
+-- "stored" balance is what the institution would report as today's
+-- close if asked — drift is the disagreement between THAT and the
+-- computed sub-ledger. ``effective_money`` is NULL only for accounts
+-- with no emitted row anywhere in scope; the COALESCE excludes those.
 -- ---------------------------------------------------------------------
 {matview_create_kw} {p}_drift{matview_options} AS
 SELECT
@@ -2202,16 +2504,18 @@ SELECT
     sb.account_parent_role,
     sb.business_day_start,
     sb.business_day_end,
-    sb.money AS stored_balance,
+    sb.effective_money AS stored_balance,
     cb.computed_balance,
-    sb.money - cb.computed_balance AS drift
-FROM {p}_current_daily_balances sb
+    sb.effective_money - cb.computed_balance AS drift,
+    sb.source
+FROM {p}_effective_balances sb
 JOIN {p}_computed_subledger_balance cb
   ON cb.account_id = sb.account_id
  AND cb.business_day_start = sb.business_day_start
 WHERE sb.account_scope = 'internal'
   AND sb.account_parent_role IS NOT NULL
-  AND sb.money <> cb.computed_balance;
+  AND sb.effective_money IS NOT NULL
+  AND sb.effective_money <> cb.computed_balance;
 -- Dashboard hot-path: per-sheet account dropdown + date filter, plus
 -- the universal-date-range filter from M.2b.1.
 CREATE INDEX idx_{p}_drift_account_day
@@ -2232,6 +2536,8 @@ CREATE INDEX idx_{p}_drift_day_account_role
 -- SPEC: For every CurrentStoredBalance where Account.Scope = Internal
 -- and IsParent(Account), LedgerDrift(Account, BusinessDay) SHOULD equal 0.
 -- Rows in this view are the violations.
+--
+-- CL.5 — reads from effective_balances (same rationale as drift).
 -- ---------------------------------------------------------------------
 {matview_create_kw} {p}_ledger_drift{matview_options} AS
 SELECT
@@ -2240,14 +2546,16 @@ SELECT
     sb.account_role,
     sb.business_day_start,
     sb.business_day_end,
-    sb.money AS stored_balance,
+    sb.effective_money AS stored_balance,
     cb.computed_balance,
-    sb.money - cb.computed_balance AS drift
-FROM {p}_current_daily_balances sb
+    sb.effective_money - cb.computed_balance AS drift,
+    sb.source
+FROM {p}_effective_balances sb
 JOIN {p}_computed_ledger_balance cb
   ON cb.account_id = sb.account_id
  AND cb.business_day_start = sb.business_day_start
-WHERE sb.money <> cb.computed_balance;
+WHERE sb.effective_money IS NOT NULL
+  AND sb.effective_money <> cb.computed_balance;
 CREATE INDEX idx_{p}_ledger_drift_account_day
     ON {p}_ledger_drift (account_id, business_day_start);
 CREATE INDEX idx_{p}_ledger_drift_role
@@ -2262,6 +2570,11 @@ CREATE INDEX idx_{p}_ledger_drift_day_account_role
 -- SPEC: For every CurrentStoredBalance, money SHOULD be ≥ 0.
 -- Rows in this view are accounts × days where the stored balance is
 -- negative (overdraft).
+--
+-- CL.5 — reads from effective_balances so a sparse account whose
+-- last emitted balance was negative fires on EVERY business day until
+-- the next emit, not just the emit days. Matches what a regulator
+-- would see: the institution was in overdraft on all those days.
 -- ---------------------------------------------------------------------
 {matview_create_kw} {p}_overdraft{matview_options} AS
 SELECT
@@ -2271,13 +2584,17 @@ SELECT
     sb.account_parent_role,
     sb.business_day_start,
     sb.business_day_end,
-    sb.money AS stored_balance
-FROM {p}_current_daily_balances sb
+    sb.effective_money AS stored_balance,
+    sb.source
+FROM {p}_effective_balances sb
 WHERE sb.account_scope = 'internal'
-  AND sb.money < 0;
+  AND sb.effective_money IS NOT NULL
+  AND sb.effective_money < 0;
 CREATE INDEX idx_{p}_overdraft_account_day
     ON {p}_overdraft (account_id, business_day_start);
 CREATE INDEX idx_{p}_overdraft_role ON {p}_overdraft (account_role);
+
+{balance_cadence_gap_section}
 
 -- ---------------------------------------------------------------------
 -- L1 invariant: Expected EOD balance.
@@ -2648,18 +2965,57 @@ CREATE INDEX idx_{p}_mxv_kind ON {p}_multi_xor_violation (disagreement_kind);
 -- (5 KPIs on the Daily Statement sheet = 5 re-evaluations otherwise).
 -- One row per (account_id, business_day_start). Sheet-local filters
 -- narrow to a single (account, day) at render time.
+--
+-- CL.8 — reads from effective_balances (CL.5 carry-forward) instead
+-- of current_daily_balances directly. Sparse-account quiet days
+-- now show the carried-forward close + a source discriminator so
+-- the operator can tell at a glance whether the value came from
+-- the feed or from carry-forward. Three-state source enum per CL.0
+-- audit §2.1 (revised 2026-06-07):
+--   - 'emitted' — real row from the feed; no icon.
+--   - 'carried_no_activity' — carried-forward + no postings today;
+--     ↩ icon, drift = $0 by construction (benign sparse case).
+--   - 'carried_with_activity_gap' — carried-forward + postings
+--     happened; ⚠ icon, drift = -net_flow ≠ 0 (the silent
+--     institutional bug case).
+-- Opening Balance gets a simpler 2-state source (emitted vs
+-- carried) since the gap state only meaningfully fires on the
+-- *close* side (today's activity drives it).
 -- ---------------------------------------------------------------------
 {matview_create_kw} {p}_daily_statement_summary{matview_options} AS
 WITH account_days AS (
-    SELECT db.account_id, db.account_name, db.account_role,
-           db.account_parent_role, db.account_scope,
-           db.business_day_start, db.business_day_end,
-           db.money AS closing_balance_stored,
-           LAG(db.money) OVER (
-             PARTITION BY db.account_id
-             ORDER BY db.business_day_start
-           ) AS opening_balance
-    FROM {p}_current_daily_balances db
+    SELECT eb.account_id, eb.account_name, eb.account_role,
+           eb.account_parent_role, eb.account_scope,
+           eb.business_day_start, eb.business_day_end,
+           -- emitted_money is the on-the-day feed value (NULL when
+           -- no daily_balances row emitted today). effective_money
+           -- is the carry-forward value the carry-forward view
+           -- already computes per CL.5.
+           eb.emitted_money,
+           eb.effective_money AS closing_balance_carried,
+           -- carried_from_day: CL.5 effective_balances exposes the
+           -- prior-emit day (= business_day_start when emitted; the
+           -- prior emit's date when carried). daily_statement_summary
+           -- reads it directly instead of running its own correlated
+           -- subquery — Oracle matview rejects scalar subqueries in
+           -- the SELECT clause (ORA-22818).
+           eb.carried_from_day,
+           -- Opening = prior day's effective close. LAG over the
+           -- carry-forward column so the opening reflects what the
+           -- prior day's *closing* was (carried or emitted), not
+           -- just emitted prior rows.
+           LAG(eb.effective_money) OVER (
+             PARTITION BY eb.account_id
+             ORDER BY eb.business_day_start
+           ) AS opening_balance,
+           -- Prior-day source for the opening icon: 'emitted' when
+           -- the prior day had a real emit, else 'carried'. Uses
+           -- LAG over the source column too.
+           LAG(eb.source) OVER (
+             PARTITION BY eb.account_id
+             ORDER BY eb.business_day_start
+           ) AS opening_balance_source_raw
+    FROM {p}_effective_balances eb
 ),
 today_flows AS (
     SELECT tx.account_id,
@@ -2697,16 +3053,54 @@ SELECT ad.account_id, ad.account_name, ad.account_role,
        COALESCE(tf.total_credits, 0) AS total_credits,
        COALESCE(tf.net_flow, 0) AS net_flow,
        COALESCE(tf.leg_count, 0) AS leg_count,
-       ad.closing_balance_stored,
+       -- Closing Stored: when emitted, the feed's value; when
+       -- carried, the prior-emit value carried forward. The
+       -- displayed value never goes NULL on a day that has a
+       -- prior emit somewhere in scope (carry-forward fills it).
+       COALESCE(ad.emitted_money, ad.closing_balance_carried)
+           AS closing_balance_stored,
        COALESCE(ad.opening_balance, 0)
          + COALESCE(tf.net_flow, 0) AS closing_balance_recomputed,
-       ad.closing_balance_stored
+       COALESCE(ad.emitted_money, ad.closing_balance_carried)
          - (COALESCE(ad.opening_balance, 0)
-            + COALESCE(tf.net_flow, 0)) AS drift
+            + COALESCE(tf.net_flow, 0)) AS drift,
+       -- CL.0 audit §2.1 source enum (3-state). The 'gap' branch
+       -- requires postings — that's the discriminator between
+       -- the benign sparse no-activity case and the institutional-
+       -- bug missing-emit-with-activity case.
+       CASE
+           WHEN ad.emitted_money IS NOT NULL THEN 'emitted'
+           WHEN COALESCE(tf.leg_count, 0) = 0 THEN 'carried_no_activity'
+           ELSE 'carried_with_activity_gap'
+       END AS closing_balance_source,
+       -- Prior-emit date for App2's "balance carried from <prior>"
+       -- empty-state copy (CL.0 audit §4.a). NULL when the close
+       -- is emitted (no carry to attribute). Sourced from the CL.5
+       -- effective_balances carried_from_day column — Oracle matview
+       -- rejects scalar subqueries in the SELECT clause (ORA-22818),
+       -- so we read the pre-computed column instead.
+       CASE
+           WHEN ad.emitted_money IS NOT NULL THEN NULL
+           ELSE ad.carried_from_day
+       END AS closing_carried_from_date,
+       -- Opening 2-state source enum: emitted vs carried.
+       -- 'carried' covers both the no-prior-emit case (LAG returns
+       -- NULL on the very first day in scope, source col is NULL
+       -- too) and the prior-day-was-itself-carried case.
+       COALESCE(ad.opening_balance_source_raw, 'carried')
+           AS opening_balance_source
 FROM account_days ad
 LEFT JOIN today_flows tf
   ON tf.account_id = ad.account_id
-  AND tf.business_day_start = ad.business_day_start;
+  AND tf.business_day_start = ad.business_day_start
+-- Filter pre-emit spine days: an account whose first emit lands on
+-- day 5 has NULL effective_money on days 1-4 (no prior balance to
+-- carry from). The Daily Statement sheet has nothing to show for
+-- those days; the audit walk would also choke on NULL
+-- business_day_end. Once an account has emitted ONCE in scope,
+-- every later day appears (either with the on-the-day emit, or
+-- carry-forward).
+WHERE ad.closing_balance_carried IS NOT NULL;
 -- Daily Statement sheet's per-(account, day) parameter filter — both
 -- columns participate in the WHERE so a composite index covers the
 -- KPIs + detail table at once.
@@ -2768,6 +3162,22 @@ SELECT 'expected_eod_balance_breach', account_id, account_name,
        account_role, NULL, business_day_start, NULL, ABS(variance),
        CAST(NULL AS INTEGER)
 FROM {p}_expected_eod_balance_breach
+-- CL.6 — balance_cadence_gap: keyed on (account, day) like the other
+-- per-day cells. Two gap_kind firing modes (declared_daily_missing /
+-- sparse_with_activity) share the same matview, surfacing here as a
+-- single check_type, gap_kind threads through the rail_name slot so
+-- the L1 Exceptions sheet's drill copy can distinguish the two modes.
+-- magnitude_amount carries the gap day's net_flow (NULL for the
+-- declared_daily_missing benign mode, -net_flow for sparse_with_
+-- activity, which IS the drift the dashboard would otherwise hide).
+-- magnitude_count holds the leg_count for diagnostic context.
+UNION ALL
+SELECT 'balance_cadence_gap', account_id, account_name, account_role,
+       account_parent_role, business_day_start,
+       gap_kind AS rail_name,
+       ABS(COALESCE(gap_day_net_flow, 0)),
+       gap_day_leg_count AS magnitude_count
+FROM {p}_balance_cadence_gap
 -- Currently-open branches (M.4.4.12) — stuck_pending and stuck_unbundled
 -- are matviews of legs whose age has exceeded a per-rail cap measured
 -- against CURRENT_TIMESTAMP. By construction every row is "currently

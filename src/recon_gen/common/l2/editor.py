@@ -65,9 +65,10 @@ EntityKind: TypeAlias = Literal[
     # name + acronym now live on the instance singleton's structured
     # form alongside ``description``.
     # AI.2.c — top-level L2Instance settings (``description`` + new
-    # post-BXa.1 fields ``institution_name`` / ``institution_acronym`` +
-    # ``role_business_day_offsets``) edited via a structured form
-    # (BXa.1 upgraded from raw YAML textarea).
+    # post-BXa.1 fields ``institution_name`` / ``institution_acronym``)
+    # edited via a structured form (BXa.1 upgraded from raw YAML
+    # textarea). Phase CP removed ``role_business_day_offsets`` —
+    # offsets moved onto per-Account / per-AccountTemplate.
     "instance",
 ]
 
@@ -280,6 +281,12 @@ def create_l2_entity(
             ),
             expected_eod_balance=fields.get("expected_eod_balance"),
             description=fields.get("description"),
+            # CP — int | None; _coerce_field has already narrowed
+            # string → int on the form path.
+            business_day_offset=fields.get("business_day_offset"),
+            # CL — BalanceCadence | None; default-None means sparse
+            # via resolve_cadence at the seed / matview / KPI seam.
+            balance_cadence=fields.get("balance_cadence"),
         )
         return dataclasses.replace(
             instance, accounts=(*instance.accounts, new_acc),
@@ -305,6 +312,10 @@ def create_l2_entity(
             description=fields.get("description"),
             instance_id_template=fields.get("instance_id_template"),
             instance_name_template=fields.get("instance_name_template"),
+            # CP — int | None per the Account path above.
+            business_day_offset=fields.get("business_day_offset"),
+            # CL — see Account.balance_cadence above.
+            balance_cadence=fields.get("balance_cadence"),
         )
         return dataclasses.replace(
             instance, account_templates=(*instance.account_templates, new_t),
@@ -635,7 +646,6 @@ def singleton_save_l2(
         L2LoaderError,
         _load_description,
         _load_optional_string,
-        _load_role_business_day_offsets,
         _load_theme,
     )
     raw = yaml_text.strip()
@@ -644,12 +654,12 @@ def singleton_save_l2(
         if kind == "theme":
             return dataclasses.replace(instance, theme=None)
         # AI.2.c + BXa.1 — instance settings: empty block clears the
-        # top-level fields (description + role_business_day_offsets +
-        # institution_name + institution_acronym).
+        # top-level fields (description + institution_name +
+        # institution_acronym). Phase CP removed
+        # role_business_day_offsets from the singleton.
         return dataclasses.replace(
             instance,
             description=None,
-            role_business_day_offsets=None,
             institution_name=None,
             institution_acronym=None,
         )
@@ -673,10 +683,6 @@ def singleton_save_l2(
             instance,
             description=_load_description(
                 parsed_map.get("description"), path="description",
-            ),
-            role_business_day_offsets=_load_role_business_day_offsets(
-                parsed_map.get("role_business_day_offsets"),
-                path="role_business_day_offsets",
             ),
             institution_name=_load_optional_string(
                 parsed_map.get("institution_name"),

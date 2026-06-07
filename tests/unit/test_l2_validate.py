@@ -1466,3 +1466,62 @@ def test_v1_amount_typical_range_default_no_change_to_validator() -> None:
     for r in inst.rails:
         assert r.amount_typical_range is None
     validate(inst)
+
+
+# -- M.4.4.14a — business_day_offset forbidden on external accounts ---------
+# Phase CP (2026-06-06): top-level role_business_day_offsets removed;
+# offset moved per-Account / per-AccountTemplate. External accounts
+# have no EOD balance row, so the offset has no consumer; the
+# validator rejects external-with-offset at load time.
+
+
+def test_business_day_offset_rejected_on_external_account() -> None:
+    """M.4.4.14a — Account(scope='external', business_day_offset=...)
+    rejected. External accounts don't get an EOD balance row, so the
+    offset would silently no-op at seed time."""
+    inst = _baseline_instance()
+    # inst.accounts[1] is the ext-counter (scope='external').
+    assert inst.accounts[1].scope == "external"
+    bad_ext = dataclasses.replace(
+        inst.accounts[1], business_day_offset=5,
+    )
+    bad = _replace(inst, accounts=(inst.accounts[0], bad_ext))
+    with pytest.raises(
+        L2ValidationError,
+        match=r"M\.4\.4\.14a.*'ext-counter'.*scope='external'",
+    ):
+        validate(bad)
+
+
+def test_business_day_offset_rejected_on_external_account_template() -> None:
+    """M.4.4.14a sibling — same rule on AccountTemplate. Templates
+    materialize into accounts whose scope is the template's scope, so
+    an external template with an offset would materialize external
+    accounts that drop the offset on the floor."""
+    inst = _baseline_instance()
+    # Add an external template + flip it to carry an offset.
+    bad_tmpl = AccountTemplate(
+        role=Identifier("ExternalMerchant"),
+        scope="external",
+        business_day_offset=9,
+    )
+    bad = _replace(
+        inst,
+        account_templates=(*inst.account_templates, bad_tmpl),
+    )
+    with pytest.raises(
+        L2ValidationError,
+        match=r"M\.4\.4\.14a.*'ExternalMerchant'.*scope='external'",
+    ):
+        validate(bad)
+
+
+def test_business_day_offset_accepted_on_internal_account() -> None:
+    """M.4.4.14a positive: internal account with an offset is fine."""
+    inst = _baseline_instance()
+    assert inst.accounts[0].scope == "internal"
+    ok_int = dataclasses.replace(
+        inst.accounts[0], business_day_offset=17,
+    )
+    ok = _replace(inst, accounts=(ok_int, inst.accounts[1]))
+    validate(ok)

@@ -280,6 +280,72 @@ def test_browser_full_create_l2_structural_equality(
     rebuilt = load_instance(dogfood_path)
     _assert_l2_structurally_equal(rebuilt, reference)
 
+    # CP.10 — explicit per-account check that round-trips
+    # business_day_offset through the real-browser form fill.
+    # `_assert_l2_structurally_equal` above compares parsed dataclasses
+    # so a missing/wrong offset would already red-wall, but the
+    # explicit assert names the field so a future regression triages
+    # directly to "the editor stopped round-tripping
+    # business_day_offset" rather than a generic "two accounts diverged"
+    # message. spec_example carries non-trivial offsets (cust-001=0,
+    # cust-002=5; CustomerSubledger template=-3) per CP.6.
+    if fixture_id == "spec_example":
+        rebuilt_accounts = {a.id: a for a in rebuilt.accounts}
+        reference_accounts = {a.id: a for a in reference.accounts}
+        for acct_id, ref_acct in reference_accounts.items():
+            if ref_acct.business_day_offset is None:
+                continue
+            got = rebuilt_accounts[acct_id].business_day_offset
+            assert got == ref_acct.business_day_offset, (
+                f"CP.10 — account {acct_id!r} business_day_offset did "
+                f"not round-trip through the browser form: reference "
+                f"declared {ref_acct.business_day_offset!r} but the "
+                f"rebuilt L2 shows {got!r}. The Studio account form "
+                f"likely dropped or mis-coerced the field at the form "
+                f"layer (FieldSpec name='business_day_offset' in "
+                f"_studio_editor_routes.py)."
+            )
+        rebuilt_templates = {t.role: t for t in rebuilt.account_templates}
+        reference_templates = {t.role: t for t in reference.account_templates}
+        for role, ref_t in reference_templates.items():
+            if ref_t.business_day_offset is None:
+                continue
+            got_t = rebuilt_templates[role].business_day_offset
+            assert got_t == ref_t.business_day_offset, (
+                f"CP.10 — account_template role={role!r} "
+                f"business_day_offset did not round-trip through the "
+                f"browser form: reference {ref_t.business_day_offset!r} "
+                f"vs rebuilt {got_t!r}."
+            )
+
+        # CL.12 — same explicit-field check for balance_cadence.
+        # spec_example carries one declared cadence (clearing-suspense
+        # = explicit_daily per CL.11), so the per-account loop
+        # exercises both the declared-non-None and None-skip paths.
+        for acct_id, ref_acct in reference_accounts.items():
+            if ref_acct.balance_cadence is None:
+                continue
+            got_cad = rebuilt_accounts[acct_id].balance_cadence
+            assert got_cad == ref_acct.balance_cadence, (
+                f"CL.12 — account {acct_id!r} balance_cadence did not "
+                f"round-trip through the browser form: reference "
+                f"declared {ref_acct.balance_cadence!r} but the rebuilt "
+                f"L2 shows {got_cad!r}. The Studio account form likely "
+                f"dropped or mis-coerced the field at the form layer "
+                f"(FieldSpec name='balance_cadence' in "
+                f"_studio_editor_routes.py)."
+            )
+        for role, ref_t in reference_templates.items():
+            if ref_t.balance_cadence is None:
+                continue
+            got_t_cad = rebuilt_templates[role].balance_cadence
+            assert got_t_cad == ref_t.balance_cadence, (
+                f"CL.12 — account_template role={role!r} "
+                f"balance_cadence did not round-trip through the "
+                f"browser form: reference {ref_t.balance_cadence!r} "
+                f"vs rebuilt {got_t_cad!r}."
+            )
+
 
 @pytest.mark.browser
 def test_browser_operator_creates_rail_with_bb2_create_new_reconciler(

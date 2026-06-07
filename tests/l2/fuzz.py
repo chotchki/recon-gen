@@ -213,7 +213,6 @@ def _build_instance(rng: Random, plan: FuzzPlan) -> dict[str, Any]:
 
     chains = _build_chains(rng, state)
     limit_schedules = _build_limit_schedules(rng, state)
-    role_business_day_offsets = _build_role_business_day_offsets(rng, state)
 
     out: dict[str, Any] = {
         "description": _maybe_description(rng, state, "fuzz instance"),
@@ -227,48 +226,56 @@ def _build_instance(rng: Random, plan: FuzzPlan) -> dict[str, Any]:
         out["chains"] = chains
     if limit_schedules:
         out["limit_schedules"] = limit_schedules
-    if role_business_day_offsets:
-        out["role_business_day_offsets"] = role_business_day_offsets
+    # Phase CP (2026-06-06) — top-level role_business_day_offsets was
+    # removed; offsets now live per-Account / per-AccountTemplate.
+    # CP.7 will add the per-entity emission to the fuzzer.
     # Drop None descriptions for cleanliness.
     if out["description"] is None:
         del out["description"]
     return out
 
 
-# Hour-of-day choices for per-role business-day offsets (M.4.4.14).
-# Mix of midnight (0), early-morning, midday, evening, near-midnight to
-# guarantee tests that depend on distinct (start, end) tuples per role
-# see meaningful spread.
-_BUSINESS_DAY_OFFSET_CHOICES = (0, 5, 9, 14, 17, 23)
-
-
-def _build_role_business_day_offsets(
-    rng: Random, state: _BuildState,
-) -> dict[str, int]:
-    """Pick a deterministic per-role business-day offset (M.4.4.14).
-
-    Every declared role (singleton + template) gets one hour-offset from
-    ``_BUSINESS_DAY_OFFSET_CHOICES``. Sample with replacement so multiple
-    roles can share an offset, but the L2 instance as a whole carries
-    enough variation to expose any future view that depends on per-role
-    business-day boundaries differing.
-
-    Returns ``{}`` when no roles exist (defensive — production paths
-    always declare at least one). The dict is wrapped under
-    ``role_business_day_offsets`` in the emitted YAML; the loader and
-    seed honor it (M.4.4.14).
-    """
-    if not state.all_role_names:
-        return {}
-    return {
-        role: rng.choice(_BUSINESS_DAY_OFFSET_CHOICES)
-        for role in sorted(state.all_role_names)
-    }
-
-
 # ---------------------------------------------------------------------------
 # Layer 1 — Accounts
 # ---------------------------------------------------------------------------
+
+
+# CP.7 (2026-06-06) — per-entity business_day_offset emission.
+#
+# Distribution (locked strawman per the CP.7 spec): 60% None / 30% 0 /
+# 10% uniform in [-12, 12]. The triple gives the CP.8 anti-drift gate
+# both halves it needs (some non-None, some None; some zero, some not)
+# at N=100 seeds. EXTERNAL-scope accounts/templates MUST NOT carry the
+# field — validator M.4.4.14a rejects external offsets at load time;
+# call this helper only from the internal-scope code paths.
+def _maybe_business_day_offset(rng: Random) -> int | None:
+    roll = rng.random()
+    if roll < 0.60:
+        return None
+    if roll < 0.90:
+        return 0
+    return rng.randint(-12, 12)
+
+
+# CL.7 — per-entity balance_cadence emission. CP.8 generalized fuzz-
+# coverage gate requires both halves (Some seeds populate, some leave
+# None) AND the populated set includes BOTH literal values. Distribution
+# chosen so a 100-seed sample hits all four cells with comfortable
+# margin:
+#   60% None         (default-sparse via resolve_cadence — the majority case)
+#   25% "sparse"     (explicit pin, distinct from default)
+#   15% "explicit_daily"
+# Same internal-only constraint as the offset (the validator doesn't
+# reject external cadence today, but external accounts have no
+# downstream consumer for the field — keep emission to internal so
+# fuzz output stays semantically meaningful).
+def _maybe_balance_cadence(rng: Random) -> str | None:
+    roll = rng.random()
+    if roll < 0.60:
+        return None
+    if roll < 0.85:
+        return "sparse"
+    return "explicit_daily"
 
 
 def _build_accounts(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
@@ -291,6 +298,16 @@ def _build_accounts(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
         d = _maybe_description(rng, state, f"internal account {i}")
         if d is not None:
             a["description"] = d
+        # CP.7 — per-entity offset on internal accounts only (M.4.4.14a
+        # rejects external offsets).
+        bdo = _maybe_business_day_offset(rng)
+        if bdo is not None:
+            a["business_day_offset"] = bdo
+        # CL.7 — per-entity cadence on internal accounts only (external
+        # accounts have no balance row to be sparse/explicit_daily about).
+        bc = _maybe_balance_cadence(rng)
+        if bc is not None:
+            a["balance_cadence"] = bc
         accounts.append(a)
 
     for i in range(state.plan.n_singleton_external):
@@ -306,6 +323,8 @@ def _build_accounts(rng: Random, state: _BuildState) -> list[dict[str, Any]]:
         d = _maybe_description(rng, state, f"external account {i}")
         if d is not None:
             a["description"] = d
+        # CP.7 — explicitly NO offset emission on external accounts;
+        # the validator (M.4.4.14a) rejects them at load.
         accounts.append(a)
 
     return accounts
@@ -337,6 +356,18 @@ def _build_account_templates(
         d = _maybe_description(rng, state, f"template {i}")
         if d is not None:
             t["description"] = d
+        # CP.7 — per-entity offset on internal templates. The fuzz
+        # generator only emits scope=internal templates today; the
+        # guard makes the dependency explicit (if a future widen-up
+        # adds external templates, this branch stays correct).
+        if t["scope"] == "internal":
+            bdo = _maybe_business_day_offset(rng)
+            if bdo is not None:
+                t["business_day_offset"] = bdo
+            # CL.7 — same shape as the account path above.
+            bc = _maybe_balance_cadence(rng)
+            if bc is not None:
+                t["balance_cadence"] = bc
         templates.append(t)
     return templates
 

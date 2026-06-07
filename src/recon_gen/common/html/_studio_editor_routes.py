@@ -237,6 +237,39 @@ _ACCOUNT_FIELDS: tuple[FieldSpec, ...] = (
         helper="Numeric — empty means no EOD invariant on this account.",
         kind="money",
     ),
+    # CP — signed integer hours from midnight UTC for this account's
+    # EOD cutoff. Empty / unset ⇒ midnight-aligned (default). Hidden via
+    # CSS when scope=external (M.4.4.14a — external accounts have no
+    # EOD balance, so the offset has no consumer).
+    FieldSpec(
+        name="business_day_offset",
+        label="Business-day offset (hours)",
+        helper=(
+            "Hours from midnight UTC for this account's EOD cutoff. "
+            "Positive = later (e.g., +9 for a Tokyo-style EOD); "
+            "negative = earlier; range [-23, 23]. Leave blank for "
+            "midnight-aligned. External accounts ignore this — we "
+            "don't track their EOD balance."
+        ),
+        kind="text",
+        placeholder="0",
+    ),
+    # CL — balance-reporting cadence; sparse (default) means the ETL feed
+    # emits balance rows only on activity days; explicit_daily means
+    # every business day MUST have a row (missing rows surface as L1
+    # balance_cadence_gap violations). See CL.0 audit § 7.
+    FieldSpec(
+        name="balance_cadence",
+        label="Balance cadence",
+        helper=(
+            "Sparse (default): balance rows arrive only on activity "
+            "days; intervening days carry the prior balance forward. "
+            "Explicit-daily: balance rows MUST arrive every business "
+            "day (missing day = gap violation on L1 Exceptions)."
+        ),
+        kind="select",
+        options=("", "sparse", "explicit_daily"),
+    ),
 )
 
 
@@ -276,6 +309,33 @@ _ACCOUNT_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
         label="Expected EOD balance",
         helper="Numeric — empty means no EOD invariant.",
         kind="money",
+    ),
+    # CP — same field as on the singleton Account form. Applies to every
+    # instance the template materializes (Lock 4). Hidden via CSS when
+    # scope=external for the same reason (M.4.4.14a).
+    FieldSpec(
+        name="business_day_offset",
+        label="Business-day offset (hours)",
+        helper=(
+            "Hours from midnight UTC for instances of this template's "
+            "EOD cutoff. Positive = later (e.g., +9 for Tokyo-style "
+            "EOD); negative = earlier; range [-23, 23]. Leave blank "
+            "for midnight-aligned."
+        ),
+        kind="text",
+        placeholder="0",
+    ),
+    # CL — template-level cadence applies to every materialized instance.
+    FieldSpec(
+        name="balance_cadence",
+        label="Balance cadence",
+        helper=(
+            "Sparse (default): instances emit balance rows only on "
+            "activity days. Explicit-daily: instances MUST emit a "
+            "row every business day (gaps surface on L1 Exceptions)."
+        ),
+        kind="select",
+        options=("", "sparse", "explicit_daily"),
     ),
     FieldSpec(
         name="instance_id_template",
@@ -823,6 +883,26 @@ def _coerce_field(spec: FieldSpec, raw: str, kind: EntityKind) -> object:
                 f"expected_parent_count must be an integer (got "
                 f"{raw!r})",
             ) from exc
+    # CP — Account / AccountTemplate.business_day_offset: signed int
+    # in [-23, 23]. Range guard fires at the dataclass __post_init__;
+    # this coercion just narrows string → int and rejects non-numeric.
+    if spec.name == "business_day_offset" and kind in ("account", "account_template"):
+        try:
+            return int(raw)
+        except ValueError as exc:
+            raise ValueError(
+                f"business_day_offset must be an integer (got {raw!r})",
+            ) from exc
+    # CL — Account / AccountTemplate.balance_cadence: closed Literal.
+    # Loader validates the value range; this coercion just rejects
+    # off-Literal strings before they reach the dataclass constructor.
+    if spec.name == "balance_cadence" and kind in ("account", "account_template"):
+        if raw not in ("sparse", "explicit_daily"):
+            raise ValueError(
+                f"balance_cadence must be 'sparse' or 'explicit_daily' "
+                f"(got {raw!r})"
+            )
+        return raw
     # X.4.f.11.6 — Rail.metadata_keys + posted_requirements: textarea
     # one-per-line (or comma-separated). tuple[Identifier, ...].
     if spec.name in ("metadata_keys", "posted_requirements") and kind == "rail":
@@ -1597,8 +1677,21 @@ def _render_field(
             f'type="text" value="{escape(val_str)}" class="{input_cls}">'
         )
 
+    # CP — business_day_offset has no consumer on scope=external
+    # accounts (M.4.4.14a — we don't compute their EOD balances), so
+    # hide the field-row when the operator picks external. Implemented
+    # as a Tailwind arbitrary group-has-* variant against the parent
+    # form's scope <select> — no raw CSS in input.css, no JS. The form
+    # roots (create-form / edit-form) carry the `group` class so this
+    # variant resolves against them.
+    extra_cls = ""
+    if spec.name == "business_day_offset":
+        extra_cls = (
+            " group-has-[select[name=scope]_option[value=external]:checked]:hidden"
+        )
     return (
-        f'<div class="{field_row_classes()}">{label}{input_html}{helper}{err_html}</div>'
+        f'<div class="{field_row_classes()}{extra_cls}">'
+        f'{label}{input_html}{helper}{err_html}</div>'
     )
 
 
@@ -3817,7 +3910,7 @@ def _render_create_page(
     {_render_intro_details(intro_html)}
     {subtype_banner_html}
     <section class="bg-white border border-surface-border rounded-md p-5">
-      <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form">
+      <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form group">
         {global_err_html}
         {subtype_html}
         {_from_hidden_input(from_param)}
@@ -3934,7 +4027,7 @@ def _render_edit_page(
     {_render_intro_details(intro_html)}
     {subtype_banner_html}
     <section class="bg-white border border-surface-border rounded-md p-5">
-      <form method="post" action="/l2_shape/{escape(kind)}/{escape(entity_id)}" class="edit-form">
+      <form method="post" action="/l2_shape/{escape(kind)}/{escape(entity_id)}" class="edit-form group">
         {global_err_html}
         {_from_hidden_input(from_param)}
         {fields_html}
@@ -3996,17 +4089,15 @@ def _singleton_yaml_text(instance: object, kind: EntityKind) -> str:
     import yaml  # noqa: PLC0415 — lazy
 
     if kind == "instance":
-        # AI.2.c — two top-level scalars (description +
-        # role_business_day_offsets) dumped as one block. Omit a key when
-        # its field is None; both-None ⇒ blank textarea (the "clear"
-        # state). Round-trips through singleton_save_l2's instance branch.
+        # AI.2.c — top-level scalars dumped as one block. Omit a key
+        # when its field is None; all-None ⇒ blank textarea (the
+        # "clear" state). Round-trips through singleton_save_l2's
+        # instance branch. Phase CP removed role_business_day_offsets
+        # from the instance singleton — offsets now per-entity.
         instance_map: dict[str, object] = {}
         desc = getattr(instance, "description", None)
         if desc is not None:
             instance_map["description"] = desc
-        offsets = getattr(instance, "role_business_day_offsets", None)
-        if offsets is not None:
-            instance_map["role_business_day_offsets"] = offsets
         if not instance_map:
             return ""
         return yaml.safe_dump(
@@ -4034,9 +4125,8 @@ def _singleton_yaml_text(instance: object, kind: EntityKind) -> str:
 # BXa.1 — instance singleton's structured form fields (replaces the
 # raw YAML textarea per BX.0.5b cold-read P1.1). Three top-level
 # L2Instance fields edited per-input; description gets markdown
-# preview per BF.9; role_business_day_offsets stays as YAML for now
-# (rare-use, dev-flavored — operator can grow a structured form
-# later if needed).
+# preview per BF.9. Phase CP removed role_business_day_offsets from
+# the singleton — offsets now per-Account / per-AccountTemplate.
 _INSTANCE_STRUCTURED_FIELDS: tuple[tuple[str, str, str, bool], ...] = (
     # (form-name, label, helper, required)
     ("institution_name", "Institution name",
@@ -4052,17 +4142,10 @@ _INSTANCE_STRUCTURED_FIELDS: tuple[tuple[str, str, str, bool], ...] = (
 
 def _instance_dict_from_instance(instance: Any) -> dict[str, str]:  # typing-smell: ignore[explicit-any]: L2Instance dataclass shape — getattr threads through
     """Pre-populate the instance singleton structured form. BXa.1."""
-    import yaml as _yaml  # noqa: PLC0415 — lazy
-    offsets = getattr(instance, "role_business_day_offsets", None)
-    offsets_yaml = (
-        _yaml.safe_dump(dict(offsets), default_flow_style=False, sort_keys=True)
-        if offsets else ""
-    )
     return {
         "institution_name": str(getattr(instance, "institution_name", None) or ""),
         "institution_acronym": str(getattr(instance, "institution_acronym", None) or ""),
         "description": str(getattr(instance, "description", None) or ""),
-        "role_business_day_offsets_yaml": offsets_yaml,
     }
 
 
@@ -4070,12 +4153,11 @@ def _instance_form_to_dict(form: Mapping[str, str]) -> dict[str, object]:
     """BXa.1 — read the instance singleton structured form into a dict
     `singleton_save_l2`'s yaml.safe_load path consumes.
 
-    Structured fields cover the 3 common ones (institution_name +
-    acronym + description); role_business_day_offsets stays as a YAML
-    escape hatch (rare-use + dev-flavored — no in-UI editor for
-    role → hours).
+    Structured fields cover the 3 top-level scalars
+    (institution_name + acronym + description). Phase CP removed
+    role_business_day_offsets from the singleton — offsets now live
+    per-Account / per-AccountTemplate.
     """
-    import yaml as _yaml  # noqa: PLC0415 — lazy
     out: dict[str, object] = {}
     for fname, _, _, _ in _INSTANCE_STRUCTURED_FIELDS:
         v = str(form.get(fname, "")).strip()
@@ -4091,11 +4173,6 @@ def _instance_form_to_dict(form: Mapping[str, str]) -> dict[str, object]:
     description = description.replace("\r\n", "\n").replace("\r", "\n")
     if description.strip():
         out["description"] = description
-    offsets_yaml = str(form.get("role_business_day_offsets_yaml", "")).strip()
-    if offsets_yaml:
-        parsed = _yaml.safe_load(offsets_yaml)
-        if parsed is not None:
-            out["role_business_day_offsets"] = parsed
     return out
 
 
@@ -4128,21 +4205,6 @@ def _render_instance_form(values: Mapping[str, str]) -> str:
         f'Free-form prose (markdown OK). Handbook templates render this '
         f'as the "what is this institution" intro paragraph; the '
         f'institution_name regex extracts from here when not set above.'
-        f'</small>'
-        f'</div>'
-    )
-    offsets_yaml = values.get("role_business_day_offsets_yaml", "")
-    parts.append(
-        f'<div class="{row_cls}">'
-        f'<label for="field-rbdo" class="{label_cls}">Role business-day offsets (YAML)</label>'
-        f'<textarea id="field-rbdo" name="role_business_day_offsets_yaml" rows="5" '
-        f'class="{input_cls} font-mono whitespace-pre resize-y min-h-16">'
-        f'{escape(offsets_yaml)}</textarea>'
-        f'<small class="{helper_cls}">'
-        f'Optional <code>role → hours</code> map shifting a role\'s '
-        f'emitted business-day window off midnight. Each value must be '
-        f'an int in [0, 24). Empty ⇒ default midnight-aligned. Shape: '
-        f'<code>CustomerSubledger: 17</code>'
         f'</small>'
         f'</div>'
     )
@@ -4561,9 +4623,9 @@ def _render_singleton_page(
     input_cls = field_input_classes()
     row_cls = field_row_classes()
     # BXa.1 — persona singleton removed. theme + instance singletons
-    # render as structured forms (BF.8 + BXa.1 respectively);
-    # role_business_day_offsets falls back to YAML below since
-    # rare-use + dev-flavored.
+    # render as structured forms (BF.8 + BXa.1 respectively). Phase CP
+    # removed role_business_day_offsets from the instance singleton —
+    # offsets now per-Account / per-AccountTemplate.
     if kind == "theme":
         theme_dict = (
             dict(structured_overrides) if structured_overrides is not None
@@ -4606,7 +4668,7 @@ def _render_singleton_page(
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
     {_render_intro_details(intro_html)}
     <section class="bg-white border border-surface-border rounded-md p-5">
-      <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form">
+      <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form group">
         <input type="hidden" name="_method" value="PUT">
         {global_err_html}
         {form_body}
@@ -5306,8 +5368,8 @@ def _make_handlers(
             structured_dict: dict[str, object] | None = None
             # BXa.1 — persona dispatch removed (kind no longer in
             # SINGLETON_KINDS). theme + instance both render as
-            # structured forms; role_business_day_offsets falls back
-            # to the raw `yaml` field on the instance form.
+            # structured forms. Phase CP removed
+            # role_business_day_offsets from the instance form.
             if kind == "theme":
                 structured_dict = _theme_form_to_dict(
                     {k: str(v) for k, v in form.multi_items()},
@@ -5756,7 +5818,7 @@ _VALID_KINDS: frozenset[str] = frozenset(
      # URL path; the route handlers branch on SINGLETON_KINDS to use
      # the singleton form/save flow instead of list/CRUD.
      # AI.2.c — ``instance`` is the third singleton (top-level
-     # description + role_business_day_offsets as one YAML block).
+     # description + institution_name + institution_acronym).
      "theme", "persona", "instance"),
 )
 

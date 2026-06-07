@@ -1107,7 +1107,9 @@ def build_investigation_app(
     _build_volume_anomalies_sheet(cfg, app, analysis)
     _build_money_trail_sheet(cfg, app, analysis)
     _build_account_network_sheet(cfg, app, analysis)
-    _build_app_info_sheet(cfg, app, analysis, theme=theme)
+    _build_app_info_sheet(
+        cfg, app, analysis, theme=theme, l2_instance=l2_instance,
+    )
     app.create_dashboard(
         dashboard_id_suffix="investigation-dashboard",
         name=analysis_name,
@@ -1118,6 +1120,7 @@ def build_investigation_app(
 def _build_app_info_sheet(
     cfg: Config, app: App, analysis: Analysis,
     *, theme: ThemePreset,
+    l2_instance: L2Instance,
 ) -> None:
     """M.4.4.5 — App Info ("i") sheet, ALWAYS LAST. Diagnostic canary;
     see common/sheets/app_info.py.
@@ -1162,7 +1165,7 @@ def _build_app_info_sheet(
     populate_app_info_sheet(
         cfg, sheet,
         liveness_ds=liveness_ds, matview_status_ds=matviews_ds,
-        theme=theme,
+        theme=theme, l2_instance=l2_instance,
     )
 
 

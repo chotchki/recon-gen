@@ -202,6 +202,7 @@ def test_bundled_invariants_yields_expected_kinds() -> None:
         "xor_group_violation",  # AB.3.3
         "fan_in_disagreement",  # AB.4.7
         "multi_xor_violation",  # AB.6.5
+        "balance_cadence_gap",  # CL.6
         "supersession_audit",
     }
 

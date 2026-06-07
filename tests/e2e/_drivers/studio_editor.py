@@ -30,8 +30,6 @@ import dataclasses
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-import yaml
-
 from recon_gen.common.html._studio_editor_routes import (
     _FIELD_SPECS_BY_KIND,
     _entity_id,
@@ -219,7 +217,6 @@ class StudioEditorDriver(Protocol):
         self,
         *,
         description: str | None,
-        role_business_day_offsets: dict[str, int] | None,
         institution_name: str | None,
         institution_acronym: str | None,
     ) -> None: ...
@@ -270,7 +267,6 @@ class _BaseStudioEditorDriver:
         self,
         *,
         description: str | None,
-        role_business_day_offsets: dict[str, int] | None,
         institution_name: str | None,
         institution_acronym: str | None,
     ) -> None:
@@ -443,13 +439,11 @@ class _BaseStudioEditorDriver:
             self.create_limit_schedule(schedule)
         if (
             reference.description is not None
-            or reference.role_business_day_offsets
             or reference.institution_name is not None
             or reference.institution_acronym is not None
         ):
             self.set_instance_settings(
                 description=reference.description,
-                role_business_day_offsets=reference.role_business_day_offsets,
                 institution_name=reference.institution_name,
                 institution_acronym=reference.institution_acronym,
             )
@@ -818,28 +812,20 @@ class StudioHttpEditorDriver(_BaseStudioEditorDriver):
         self,
         *,
         description: str | None,
-        role_business_day_offsets: dict[str, int] | None,
         institution_name: str | None,
         institution_acronym: str | None,
     ) -> None:
         # BXa.1 (2026-05-30): instance singleton is now a structured
-        # form (3 fields + YAML escape-hatch for role offsets). Pre-BXa
-        # the driver POSTed `{"yaml": ...}` to a single textarea; now
-        # we post the structured form fields directly.
-        offsets_yaml = (
-            yaml.safe_dump(
-                dict(role_business_day_offsets),
-                default_flow_style=False, sort_keys=True,
-            )
-            if role_business_day_offsets else ""
-        )
+        # form. Pre-BXa the driver POSTed `{"yaml": ...}` to a single
+        # textarea; now we post the structured form fields directly.
+        # Phase CP (2026-06-06) removed the role_business_day_offsets
+        # YAML escape-hatch — offsets now per-entity.
         resp = self._client.post(
             "/l2_shape/instance/",
             data={
                 "institution_name": [institution_name or ""],
                 "institution_acronym": [institution_acronym or ""],
                 "description": [description or ""],
-                "role_business_day_offsets_yaml": [offsets_yaml],
             },
             follow_redirects=False,
         )

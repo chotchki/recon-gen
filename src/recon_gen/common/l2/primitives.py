@@ -189,6 +189,30 @@ LimitDirection: TypeAlias = Literal["Outbound", "Inbound"]
 Period: TypeAlias = Literal["business_day", "pay_period", "week", "month"]
 
 
+# CL — per-account balance-reporting cadence. ``sparse`` (the default
+# at read time) means the ETL feed emits a balance row only on days
+# the account had transaction activity; the intervening no-activity
+# days carry the prior day's balance forward via the L1 matview's
+# LAST_VALUE IGNORE NULLS window function. ``explicit_daily`` is the
+# strict declaration that every business day MUST have a reported
+# balance row; missing rows surface on the L1 ``balance_cadence_gap``
+# invariant. None ⇒ ``sparse`` per CL.0 audit Lock 3 (operator can
+# opt INTO daily but never opt OUT of the default sparse behavior).
+BalanceCadence: TypeAlias = Literal["sparse", "explicit_daily"]
+
+
+def resolve_cadence(
+    entity: "Account | AccountTemplate",
+) -> BalanceCadence:
+    """CL — resolve the entity's declared balance cadence with the
+    default-sparse fallback. Use everywhere the seed / matview / KPI
+    needs the cadence-as-string instead of branching on None at every
+    call site (per CL.0 audit Lock 3 — None ⇒ sparse)."""
+    if entity.balance_cadence is None:
+        return "sparse"
+    return entity.balance_cadence
+
+
 # -- Account dimension --------------------------------------------------------
 
 
@@ -219,6 +243,37 @@ class Account:
     parent_role: Identifier | None = None
     expected_eod_balance: Money | None = None
     description: str | None = None
+    # CP — signed integer hours from midnight UTC for this account's EOD
+    # cutoff. Positive = later (e.g., +9 for Tokyo-style EOD); negative
+    # = earlier. None ⇒ midnight-aligned (default). Range [-23, 23]:
+    # anything outside means "shift by more than a day," which has no
+    # operator-readable EOD meaning. Validator M.4.4.14a (see
+    # validate.py) additionally rejects offset on scope=external_counter
+    # accounts — we don't compute EOD balances for external counterparties.
+    business_day_offset: int | None = None
+    # CL — per-account balance-reporting cadence. None ⇒ sparse default
+    # (the activity-day reporting shape). ``explicit_daily`` opts INTO
+    # the stricter declaration that every business day MUST have a
+    # reported balance row; missing rows surface on the
+    # ``balance_cadence_gap`` L1 invariant. See ``BalanceCadence`` +
+    # ``resolve_cadence`` helper above for the read-time fallback.
+    balance_cadence: BalanceCadence | None = None
+
+    def __post_init__(self) -> None:
+        # CP — range cap per CP.0 audit. __post_init__ raises at
+        # construction so a bad value fails at the load callsite, not
+        # via a test walking generated output (per
+        # [[feedback_invariants_in_types]]).
+        if self.business_day_offset is not None and not (
+            -23 <= self.business_day_offset <= 23
+        ):
+            raise ValueError(
+                f"Account {self.id!r}: business_day_offset must be in "
+                f"[-23, 23] (hours from midnight UTC); got "
+                f"{self.business_day_offset!r}. Anything outside this "
+                f"range means 'shift by more than a day,' which has no "
+                f"EOD semantics."
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,6 +311,26 @@ class AccountTemplate:
     description: str | None = None
     instance_id_template: str | None = None
     instance_name_template: str | None = None
+    # CP — signed integer hours from midnight UTC, [-23, 23]. Applies to
+    # all instances materialized from this template (U2 makes
+    # template.role unique, so the template offset naturally fans out).
+    # See Account.business_day_offset for full semantics.
+    business_day_offset: int | None = None
+    # CL — template-level balance cadence. Applies to every instance
+    # materialized from this template (same Lock 4 fan-out as the
+    # business_day_offset above). See Account.balance_cadence for
+    # full semantics.
+    balance_cadence: BalanceCadence | None = None
+
+    def __post_init__(self) -> None:
+        if self.business_day_offset is not None and not (
+            -23 <= self.business_day_offset <= 23
+        ):
+            raise ValueError(
+                f"AccountTemplate {self.role!r}: business_day_offset "
+                f"must be in [-23, 23] (hours from midnight UTC); got "
+                f"{self.business_day_offset!r}."
+            )
 
 
 # -- Rails (discriminated union per F2) --------------------------------------
@@ -625,17 +700,6 @@ class L2Instance:
     # / regex-extracted-from-description / "Your Institution" downstream.
     institution_name: str | None = None
     institution_acronym: str | None = None
-    # Optional per-role business-day offset in hours (M.4.4.14). When
-    # set, an account whose role appears in this map gets its emitted
-    # ``daily_balances.business_day_start`` shifted by the offset
-    # (e.g., 17 → "5pm"). ``business_day_end`` shifts the same amount
-    # so the 24-hour window contract holds. Roles not in the map
-    # default to midnight-aligned (00:00 → 00:00 next day) — preserves
-    # the deterministic baseline shape that the locked SQL files
-    # under ``tests/data/_locked_seeds/`` pin (X.1.k). Used by the
-    # fuzz matrix to exercise any future L1 view that depends on
-    # per-role business-day boundaries differing.
-    role_business_day_offsets: dict[str, int] | None = None
     # Optional brand theme for this institution (N.1.b). When set, the
     # apps consume colors from here instead of from the per-CLI
     # ``--theme-preset`` flag — one theme per L2 instance, declared

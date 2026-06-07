@@ -324,3 +324,102 @@ def test_role_expression_coerce_rejects_none() -> None:
             leg_role=None,  # type: ignore[arg-type]: AI.9 — test of the guard rejecting None
             leg_direction="Credit",
         )
+
+
+# -- CP: business_day_offset range guard ------------------------------------
+
+
+class TestBusinessDayOffsetRange:
+    """CP.1 — Account / AccountTemplate carry an optional signed-hour
+    business_day_offset; __post_init__ caps the range to [-23, 23].
+    Per [[feedback_invariants_in_types]] — fail at construction so a
+    bad value surfaces at the load callsite, not by a downstream test
+    walking generated output.
+    """
+
+    def test_account_accepts_none(self) -> None:
+        """The field defaults to None (⇒ midnight-aligned at the seed layer)."""
+        a = Account(
+            id=Identifier("a1"), scope="internal", role=Identifier("R1"),
+        )
+        assert a.business_day_offset is None
+
+    @pytest.mark.parametrize("offset", [-23, -1, 0, 1, 23])
+    def test_account_accepts_in_range(self, offset: int) -> None:
+        """Every value in [-23, 23] inclusive constructs cleanly."""
+        a = Account(
+            id=Identifier("a1"), scope="internal", role=Identifier("R1"),
+            business_day_offset=offset,
+        )
+        assert a.business_day_offset == offset
+
+    @pytest.mark.parametrize("offset", [-24, -100, 24, 25, 1000])
+    def test_account_rejects_out_of_range(self, offset: int) -> None:
+        """Anything outside [-23, 23] raises ValueError naming the rule."""
+        with pytest.raises(ValueError, match=r"business_day_offset must be in \[-23, 23\]"):
+            Account(
+                id=Identifier("a1"), scope="internal", role=Identifier("R1"),
+                business_day_offset=offset,
+            )
+
+    def test_account_template_accepts_none(self) -> None:
+        t = AccountTemplate(role=Identifier("R1"), scope="internal")
+        assert t.business_day_offset is None
+
+    @pytest.mark.parametrize("offset", [-23, 0, 23])
+    def test_account_template_accepts_in_range(self, offset: int) -> None:
+        t = AccountTemplate(
+            role=Identifier("R1"), scope="internal", business_day_offset=offset,
+        )
+        assert t.business_day_offset == offset
+
+    @pytest.mark.parametrize("offset", [-24, 24])
+    def test_account_template_rejects_out_of_range(self, offset: int) -> None:
+        with pytest.raises(ValueError, match=r"business_day_offset must be in \[-23, 23\]"):
+            AccountTemplate(
+                role=Identifier("R1"), scope="internal",
+                business_day_offset=offset,
+            )
+
+
+# -- CL: balance_cadence ----------------------------------------------------
+
+
+class TestBalanceCadence:
+    """CL.1 — Account / AccountTemplate carry an optional
+    BalanceCadence (sparse | explicit_daily); resolve_cadence falls
+    back to 'sparse' when the attribute is None per Lock 3.
+    """
+
+    def test_account_accepts_none(self) -> None:
+        from recon_gen.common.l2 import resolve_cadence
+        a = Account(
+            id=Identifier("a1"), scope="internal", role=Identifier("R1"),
+        )
+        assert a.balance_cadence is None
+        assert resolve_cadence(a) == "sparse"
+
+    @pytest.mark.parametrize("cadence", ["sparse", "explicit_daily"])
+    def test_account_accepts_valid_cadence(self, cadence: str) -> None:
+        from recon_gen.common.l2 import resolve_cadence
+        a = Account(
+            id=Identifier("a1"), scope="internal", role=Identifier("R1"),
+            balance_cadence=cadence,  # type: ignore[arg-type]: parametrize values are str literals widened by pytest; runtime guard accepts both
+        )
+        assert a.balance_cadence == cadence
+        assert resolve_cadence(a) == cadence
+
+    def test_account_template_accepts_none_with_sparse_fallback(self) -> None:
+        from recon_gen.common.l2 import resolve_cadence
+        t = AccountTemplate(role=Identifier("R1"), scope="internal")
+        assert t.balance_cadence is None
+        assert resolve_cadence(t) == "sparse"
+
+    def test_account_template_accepts_explicit_daily(self) -> None:
+        from recon_gen.common.l2 import resolve_cadence
+        t = AccountTemplate(
+            role=Identifier("R1"), scope="internal",
+            balance_cadence="explicit_daily",
+        )
+        assert t.balance_cadence == "explicit_daily"
+        assert resolve_cadence(t) == "explicit_daily"

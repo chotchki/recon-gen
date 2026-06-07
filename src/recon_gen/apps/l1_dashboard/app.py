@@ -1730,46 +1730,6 @@ def _populate_daily_statement_sheet(
     ds_ds_accounts = datasets[DS_L1_DS_ACCOUNTS]
     ds_ds_roles = datasets[DS_L1_DS_ROLES]
 
-    # BR.x — context KPIs (Accounts available / Roles available). Two
-    # purposes: (1) operator-facing — surfaces how many accounts the
-    # current Role pick narrows to; (2) plumbing — registers
-    # ``l1-ds-accounts-ds`` + ``l1-ds-roles-ds`` as configured datasets
-    # on this sheet, which QS REQUIRES for the
-    # ``CascadingControlConfiguration`` re-fetch to fire on Role pick.
-    # Without a visual binding, the Account control's source dataset
-    # is "linked but inactive" — Role pick doesn't trigger a re-fetch
-    # and the Account dropdown shows the initial-load universe forever.
-    # See docs/reference/quicksight-quirks.md — cascade source dataset
-    # must be visual-bound entry.
-    ctx_row = sheet.layout.row(height=_KPI_ROW_SPAN)
-    ctx_row.add_kpi(
-        width=18,
-        title="Accounts available",
-        subtitle=(
-            "Distinct accounts in today's balance feed that match the "
-            "picked Role (Role pick narrows this KPI via SQL pushdown). "
-            "**Renderer divergence:** in App2 the Account dropdown "
-            "narrows to the same set; on QuickSight the dropdown stays "
-            "showing the full universe because QS's unique-values "
-            "endpoint can't execute parameterized datasets — see the "
-            "sheet description note."
-        ),
-        values=[ds_ds_accounts["account_id"].count(
-            field_id="ds-ctx-account-count",
-        )],
-    )
-    ctx_row.add_kpi(
-        width=18,
-        title="Roles available",
-        subtitle=(
-            "Distinct account roles in today's balance feed. The Role "
-            "dropdown above lists exactly these."
-        ),
-        values=[ds_ds_roles["account_role"].count(
-            field_id="ds-ctx-role-count",
-        )],
-    )
-
     # Row 1: 5 KPIs at width 7 each (sums to 35 of 36 grid cols; 1
     # column slack on the right).
     kpi_width = 7
@@ -1866,6 +1826,48 @@ def _populate_daily_statement_sheet(
         conditional_formatting=[
             CellAccentText(on=transfer_col, color=accent),
         ],
+    )
+
+    # BR.x / chotchki feedback 2026-06-07 — context KPIs (Accounts /
+    # Roles available) moved from sheet top to sheet bottom: they're
+    # really for our troubleshooting, not the operator's at-a-glance
+    # scan. Two purposes preserved: (1) operator-facing — surfaces how
+    # many accounts the current Role pick narrows to; (2) plumbing —
+    # registers ``l1-ds-accounts-ds`` + ``l1-ds-roles-ds`` as configured
+    # datasets on this sheet, which QS REQUIRES for the
+    # ``CascadingControlConfiguration`` re-fetch to fire on Role pick.
+    # Without a visual binding, the Account control's source dataset is
+    # "linked but inactive" — Role pick doesn't trigger a re-fetch and
+    # the Account dropdown shows the initial-load universe forever.
+    # See docs/reference/quicksight-quirks.md — cascade source dataset
+    # must be visual-bound entry.
+    ctx_row = sheet.layout.row(height=_KPI_ROW_SPAN)
+    ctx_row.add_kpi(
+        width=18,
+        title="Accounts available",
+        subtitle=(
+            "Distinct accounts in today's balance feed that match the "
+            "picked Role (Role pick narrows this KPI via SQL pushdown). "
+            "**Renderer divergence:** in App2 the Account dropdown "
+            "narrows to the same set; on QuickSight the dropdown stays "
+            "showing the full universe because QS's unique-values "
+            "endpoint can't execute parameterized datasets — see the "
+            "sheet description note."
+        ),
+        values=[ds_ds_accounts["account_id"].count(
+            field_id="ds-ctx-account-count",
+        )],
+    )
+    ctx_row.add_kpi(
+        width=18,
+        title="Roles available",
+        subtitle=(
+            "Distinct account roles in today's balance feed. The Role "
+            "dropdown above lists exactly these."
+        ),
+        values=[ds_ds_roles["account_role"].count(
+            field_id="ds-ctx-role-count",
+        )],
     )
 
 
@@ -2866,6 +2868,7 @@ def build_l1_dashboard_app(
         liveness_ds=datasets[_DS_APP_INFO_LIVENESS],
         matview_status_ds=datasets[_DS_APP_INFO_MATVIEWS],
         theme=theme,
+        l2_instance=l2_instance,
     )
 
     # M.2b.1 — Universal date-range filter wires the sheets together.

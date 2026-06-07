@@ -79,8 +79,6 @@ def serialize_l2(instance: L2Instance) -> str:
         out["limit_schedules"] = [
             _dump_limit_schedule(ls) for ls in instance.limit_schedules
         ]
-    if instance.role_business_day_offsets:
-        out["role_business_day_offsets"] = dict(instance.role_business_day_offsets)
     if instance.theme is not None:
         out["theme"] = _dump_theme(instance.theme)
     if instance.institution_name is not None:
@@ -117,6 +115,18 @@ def _dump_account(a: Account) -> dict[str, Any]:  # typing-smell: ignore[explici
         out["expected_eod_balance"] = _dump_money(a.expected_eod_balance)
     if a.description is not None:
         out["description"] = a.description
+    # CP — emit business_day_offset (signed int hours; range [-23, 23]).
+    # Only ever set on scope=internal accounts (M.4.4.14a), so no
+    # external-scope guard needed at emit time (load-side validator
+    # would have rejected an external+offset combo upstream).
+    if a.business_day_offset is not None:
+        out["business_day_offset"] = a.business_day_offset
+    # CL — emit balance_cadence (sparse | explicit_daily). None ⇒
+    # default-sparse via resolve_cadence at the seed / matview / KPI
+    # seam; emit only when explicitly set so the round-trip preserves
+    # the operator's intent (declared vs default).
+    if a.balance_cadence is not None:
+        out["balance_cadence"] = a.balance_cadence
     return out
 
 
@@ -132,6 +142,14 @@ def _dump_account_template(t: AccountTemplate) -> dict[str, Any]:  # typing-smel
         out["instance_id_template"] = t.instance_id_template
     if t.instance_name_template is not None:
         out["instance_name_template"] = t.instance_name_template
+    # CP — emit business_day_offset (Lock 4: template offset fans out
+    # to every materialized instance). Only ever set on scope=internal
+    # templates (M.4.4.14a).
+    if t.business_day_offset is not None:
+        out["business_day_offset"] = t.business_day_offset
+    # CL — same shape as the Account.balance_cadence emit above.
+    if t.balance_cadence is not None:
+        out["balance_cadence"] = t.balance_cadence
     return out
 
 

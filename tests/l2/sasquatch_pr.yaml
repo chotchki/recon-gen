@@ -32,6 +32,18 @@
 # Description fields fill prose for the M.7 handbook render pipeline.
 # Keep them concise, plain-English, focused on WHAT this entity is and
 # WHY it exists in SNB's chart of accounts. Markdown OK.
+#
+# CP — exhibits per-entity business_day_offset on role-shared accounts.
+# Sasquatch's internal singletons all carry distinct roles, so the demo
+# of per-entity asymmetry runs on two DIFFERENT-role internal singletons:
+# CashDueFRB (gl-1010) at +0 (midnight UTC, the SNB-default) and
+# InternalTransferSuspense (gl-1830) at +9 (Tokyo-style EOD, e.g., SNB's
+# Asia-Pacific desk's local cutoff). The MerchantDDA template also carries
+# a non-trivial offset (-5, Eastern-US-style) so every materialized
+# merchant DDA instance inherits an EOD cutoff that mirrors its
+# legal-domicile timezone (Lock 4 — template offset fans out to instances).
+# Values are strawman picks per CP.6 — tweak per the demo narrative
+# without rebalancing the offset Lock contract.
 
 description: |
   Sasquatch National Bank's combined treasury + merchant-acquiring
@@ -107,6 +119,19 @@ accounts:
       credits or debits this account. Drift here means SNB's view of
       its FRB balance and the Fed statement disagree — a regulatory
       exposure.
+    # CP — midnight-UTC EOD cutoff (the SNB-canonical pick; the FRB
+    # Cash GL is the master settlement balance so the explicit-0 makes
+    # the offset Lock visible against the default).
+    business_day_offset: 0
+    # CL.7 + CL.11 partial — the FRB Cash GL MUST report a balance
+    # every business day (regulatory submission feeds the daily
+    # cash position). Declaring explicit_daily here both pins the
+    # invariant against the institution's most-important control
+    # account AND gives CL.7's balance_cadence_gap trainer plant a
+    # target to delete-then-restore against. Audit §2.3 lock for
+    # sasquatch_pr — full GL/control/customer-ledger split lands
+    # in CL.11 proper.
+    balance_cadence: explicit_daily
 
   - id: gl-1810-ach-orig-settlement
     name: ACH Origination Settlement
@@ -117,6 +142,9 @@ accounts:
       sweeps to the Fed. Activity nets to zero each cycle; a non-zero
       EOD balance means a batch leg failed to settle as scheduled.
     expected_eod_balance: 0
+    # CL.11 — control-side GL: regulatory daily-position
+    # submission requires a balance row every business day.
+    balance_cadence: explicit_daily
 
   - id: gl-1815-card-acquiring-settlement
     name: Card Acquiring Settlement
@@ -127,6 +155,9 @@ accounts:
       authorizations debit here when the processor force-posts; the
       offsetting credit lands on the customer's DDA when SNB matches
       the auth to a card transaction.
+    # CL.11 — control-side GL: regulatory daily-position
+    # submission requires a balance row every business day.
+    balance_cadence: explicit_daily
 
   - id: gl-1820-wire-settlement-suspense
     name: Wire Settlement Suspense
@@ -137,6 +168,9 @@ accounts:
       and outbound wires awaiting beneficiary bank acknowledgment.
       A wire is fully reconciled when both legs have posted; rows
       stuck here past the same-day cutoff are reconciliation work.
+    # CL.11 — control-side GL: regulatory daily-position
+    # submission requires a balance row every business day.
+    balance_cadence: explicit_daily
 
   - id: gl-1830-internal-transfer-suspense
     name: Internal Transfer Suspense
@@ -149,6 +183,16 @@ accounts:
       means a credit-half is stuck — the source-DDA owner's money is
       in flight.
     expected_eod_balance: 0
+    # CP — Tokyo-style EOD cutoff (+9h). Demo narrative: SNB's
+    # Asia-Pacific operations desk runs the on-us-transfer suspense
+    # close at local midnight. Combined with CashDueFRB at +0 above,
+    # this exhibits per-entity offset asymmetry — two internal
+    # singletons in the same chart of accounts with DIFFERENT EOD
+    # cutoffs.
+    business_day_offset: 9
+    # CL.11 — control-side GL: regulatory daily-position
+    # submission requires a balance row every business day.
+    balance_cadence: explicit_daily
 
   - id: gl-1840-merchant-payable-clearing
     name: Merchant Payable Clearing
@@ -161,6 +205,9 @@ accounts:
       Wire / Check, per the XOR chain) debit here when SNB releases
       the held balance to the merchant. Per-merchant balance equals
       sales-not-yet-paid-out.
+    # CL.11 — control-side GL: regulatory daily-position
+    # submission requires a balance row every business day.
+    balance_cadence: explicit_daily
 
   - id: gl-1850-cash-concentration-master
     name: Cash Concentration Master
@@ -172,6 +219,9 @@ accounts:
       EOD balance to this master; the master then makes a single
       aggregate transfer to the Fed. Reduces wire and ACH count
       vs. settling per sub-account.
+    # CL.11 — control-side GL: regulatory daily-position
+    # submission requires a balance row every business day.
+    balance_cadence: explicit_daily
 
   - id: gl-1899-internal-suspense-recon
     name: Internal Suspense / Reconciliation
@@ -183,6 +233,9 @@ accounts:
       (research adjustments, stale-suspense reclassifications) flow
       through here. Should be empty or near-empty on any given day.
     expected_eod_balance: 0
+    # CL.11 — control-side GL: regulatory daily-position
+    # submission requires a balance row every business day.
+    balance_cadence: explicit_daily
 
   - id: gl-2010-dda-control
     name: Customer Deposits — DDA Control
@@ -193,6 +246,9 @@ accounts:
       customer DDA template (`CustomerDDA` role) rolls up to this
       control account. SNB's regulatory deposits balance is the sum
       of the children minus float in the suspense GLs.
+    # CL.11 — control-side GL: regulatory daily-position
+    # submission requires a balance row every business day.
+    balance_cadence: explicit_daily
 
   - id: gl-2020-merchant-dda-control
     name: Merchant Deposits — DDA Control
@@ -212,6 +268,9 @@ accounts:
   # which has its own role so card-acquiring rails can target it
   # explicitly. SNB doesn't reconcile any external on its own books;
   # the roles exist so rails have valid source / destination references.
+    # CL.11 — control-side GL: regulatory daily-position
+    # submission requires a balance row every business day.
+    balance_cadence: explicit_daily
 
   - id: ext-frb-snb-master
     name: Federal Reserve Bank — SNB Master
@@ -302,6 +361,12 @@ account_templates:
       MerchantPayoutACH rail (one of the XOR payout vehicles).
       Merchants banking elsewhere get MerchantPayoutWire / Check to
       an external counterparty instead.
+    # CP — Eastern-US-style EOD cutoff (-5h, NY/EST). Demo narrative:
+    # SNB's merchant book runs the close at local US Eastern midnight
+    # for the bulk of its merchant base. Every materialized merchant
+    # DDA instance inherits this offset (Lock 4 — template-level fans
+    # out to instances).
+    business_day_offset: -5
 
   - role: ZBASubAccount
     scope: internal
