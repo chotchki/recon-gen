@@ -319,6 +319,8 @@ def refresh_matviews_sql(
         f"{p}_ledger_drift",
         f"{p}_overdraft",
         f"{p}_expected_eod_balance_breach",
+        # CL.6 — cadence-aware missing-balance invariant.
+        f"{p}_balance_cadence_gap",
         f"{p}_limit_breach",
         f"{p}_stuck_pending",
         f"{p}_stuck_unbundled",
@@ -427,6 +429,7 @@ def _emit_table_based_matview_refresh(
         f"{p}_ledger_drift",
         f"{p}_overdraft",
         f"{p}_expected_eod_balance_breach",
+        f"{p}_balance_cadence_gap",
         f"{p}_limit_breach",
         f"{p}_stuck_pending",
         f"{p}_stuck_unbundled",
@@ -573,6 +576,153 @@ def _render_computed_subledger_balance_section(
     )
 
 
+def _render_balance_cadence_gap_section(
+    instance: L2Instance, prefix: str, dialect: Dialect,
+) -> str:
+    """CL.6 — emit the ``<prefix>_balance_cadence_gap`` matview body.
+
+    Two firing modes materialized into one table per CL.0 audit §4:
+
+    - ``declared_daily_missing`` — accounts declared ``explicit_daily``
+      cadence with NO emitted balance row that day. Fires regardless
+      of activity (the institution declared every business day MUST
+      have a row).
+    - ``sparse_with_activity`` — accounts on the ``sparse`` default
+      that had transaction postings today but emitted no balance row.
+      This is the silent-institutional-bug case: activity happened
+      and nothing reconciles against a known close.
+
+    Cadence resolution at schema-emit time: walk
+    ``instance.accounts`` (singleton-account cadences keyed on
+    ``account_id``) + ``instance.account_templates`` (template
+    cadences keyed on ``account_role`` — templates fan out to
+    materialized instances that all share the role per CL.2 Lock 4).
+    Anything not declared falls through to ``'sparse'`` per
+    ``resolve_cadence`` (audit Lock 3).
+
+    The CASE expression is embedded directly in the matview body
+    rather than via a typed config-kv view (BC.12 pattern) — the
+    cadence universe is small (2 values × declared entities) and the
+    declarations are stable across the L2 lifetime; the
+    config-kv-walk overhead isn't justified.
+    """
+    from recon_gen.common.l2.primitives import (  # noqa: PLC0415
+        BalanceCadence,
+    )
+    mv_kw = matview_create_keyword(dialect)
+    mv_opt = matview_options(dialect)
+    p = prefix
+
+    # Build the cadence-resolution CASE expression. The order matters:
+    # singleton account_id rules win over role-based template rules
+    # (a singleton declared on a role-shared account_id keeps its own
+    # cadence; templates fan-out applies to the rest of the role's
+    # population). Inner references use ``s.`` (the spine alias the
+    # CASE sits inside) — CTEs can't self-reference column aliases.
+    case_arms: list[str] = []
+    for a in instance.accounts:
+        if a.balance_cadence is not None:
+            cad: BalanceCadence = a.balance_cadence
+            case_arms.append(
+                f"        WHEN s.account_id = '{a.id}' "
+                f"THEN '{cad}'"
+            )
+    for tmpl in instance.account_templates:
+        if tmpl.balance_cadence is not None:
+            cad_t: BalanceCadence = tmpl.balance_cadence
+            case_arms.append(
+                f"        WHEN s.account_role = '{tmpl.role}' "
+                f"THEN '{cad_t}'"
+            )
+    # SQL requires CASE to have ≥1 WHEN before ELSE; when no entity
+    # declares a cadence (instance defaults across the board) we
+    # emit the literal default instead of a CASE.
+    cadence_default = cast("'sparse'", varchar_type(20, dialect), dialect)
+    cadence_expr = (
+        "(CASE\n" + "\n".join(case_arms) + "\n        ELSE 'sparse'\n        END)"
+        if case_arms else cadence_default
+    )
+
+    return (
+        "-- ---------------------------------------------------------------------\n"
+        "-- CL.6 — L1 invariant: balance_cadence_gap.\n"
+        "-- Cadence-aware: rows fire for EITHER\n"
+        "--   * declared_daily_missing — account on explicit_daily +\n"
+        "--     no emitted row for this business day.\n"
+        "--   * sparse_with_activity — account on sparse + postings\n"
+        "--     happened today + no emitted row.\n"
+        "-- Both modes materialize into the same matview so L1\n"
+        "-- Exceptions is the single triage destination.\n"
+        "-- See CL.0 audit §4 (revised 2026-06-07) for the lock.\n"
+        "-- ---------------------------------------------------------------------\n"
+        f"{mv_kw} {p}_balance_cadence_gap{mv_opt} AS\n"
+        "WITH all_internal AS (\n"
+        "    SELECT DISTINCT\n"
+        "        account_id, account_name, account_role, account_parent_role\n"
+        f"    FROM {p}_current_daily_balances\n"
+        "    WHERE account_scope = 'internal'\n"
+        "),\n"
+        "in_scope_days AS (\n"
+        "    SELECT DISTINCT business_day_start\n"
+        f"    FROM {p}_current_daily_balances\n"
+        "    WHERE account_scope = 'internal'\n"
+        "),\n"
+        "spine AS (\n"
+        "    SELECT a.account_id, a.account_name, a.account_role,\n"
+        "           a.account_parent_role, d.business_day_start\n"
+        "    FROM all_internal a\n"
+        "    CROSS JOIN in_scope_days d\n"
+        "),\n"
+        "today_postings AS (\n"
+        f"    SELECT tx.account_id, {date_trunc_day('tx.posting', dialect)} AS business_day,\n"
+        "           SUM(tx.amount_money) AS net_flow,\n"
+        "           COUNT(*) AS leg_count\n"
+        f"    FROM {p}_current_transactions tx\n"
+        "    WHERE tx.status <> 'Failed'\n"
+        f"    GROUP BY tx.account_id, {date_trunc_day('tx.posting', dialect)}\n"
+        "),\n"
+        "accts AS (\n"
+        "    -- Cadence resolution per L2 declaration at schema-emit\n"
+        "    -- time. Embeds the (account_id / account_role → cadence)\n"
+        "    -- mapping inline; fewer joins than the BC.12 config_kv\n"
+        "    -- walk and the cadence universe is tiny (2 values × N\n"
+        "    -- declared entities).\n"
+        "    SELECT s.account_id, s.account_name, s.account_role,\n"
+        "           s.account_parent_role, s.business_day_start,\n"
+        f"           {cadence_expr} AS balance_cadence\n"
+        "    FROM spine s\n"
+        ")\n"
+        "SELECT\n"
+        "    a.account_id, a.account_name, a.account_role,\n"
+        "    a.account_parent_role, a.business_day_start,\n"
+        "    a.balance_cadence,\n"
+        "    tp.net_flow AS gap_day_net_flow,\n"
+        "    COALESCE(tp.leg_count, 0) AS gap_day_leg_count,\n"
+        "    CASE\n"
+        "        WHEN a.balance_cadence = 'explicit_daily' THEN 'declared_daily_missing'\n"
+        "        WHEN a.balance_cadence = 'sparse' AND COALESCE(tp.leg_count, 0) > 0 THEN 'sparse_with_activity'\n"
+        "        ELSE NULL\n"
+        "    END AS gap_kind\n"
+        "FROM accts a\n"
+        f"LEFT JOIN {p}_current_daily_balances db\n"
+        "  ON db.account_id = a.account_id\n"
+        " AND db.business_day_start = a.business_day_start\n"
+        "LEFT JOIN today_postings tp\n"
+        "  ON tp.account_id = a.account_id\n"
+        " AND tp.business_day = a.business_day_start\n"
+        "WHERE db.business_day_start IS NULL\n"
+        "  AND (\n"
+        "      a.balance_cadence = 'explicit_daily'\n"
+        "      OR (a.balance_cadence = 'sparse' AND COALESCE(tp.leg_count, 0) > 0)\n"
+        "  );\n"
+        "-- Composite covers the dashboard's per-(account, day) drill.\n"
+        f"CREATE INDEX idx_{p}_bcg_account_day\n"
+        f"    ON {p}_balance_cadence_gap (account_id, business_day_start);\n"
+        f"CREATE INDEX idx_{p}_bcg_kind\n"
+        f"    ON {p}_balance_cadence_gap (gap_kind);"
+    )
+
+
 def _emit_l1_invariant_views(
     instance: L2Instance, *, prefix: str, dialect: Dialect = Dialect.POSTGRES,
 ) -> str:
@@ -646,9 +796,11 @@ def _emit_l1_invariant_views(
         instance, p=p, dialect=dialect,
     )
     csb_section = _render_computed_subledger_balance_section(p, dialect)
+    bcg_section = _render_balance_cadence_gap_section(instance, p, dialect)
     return _L1_INVARIANT_VIEWS_TEMPLATE.format(
         p=p,
         computed_subledger_balance_section=csb_section,
+        balance_cadence_gap_section=bcg_section,
         limit_join_outbound=limit_join_outbound,
         limit_join_inbound=limit_join_inbound,
         limit_cap_value=limit_cap_value,
@@ -1801,6 +1953,10 @@ _L1_INVARIANT_DROP_NAMES: tuple[str, ...] = (
     "stuck_unbundled",
     "stuck_pending",
     "limit_breach",
+    # CL.6 — balance_cadence_gap reads current_daily_balances +
+    # current_transactions only; no dependency on the other L1
+    # invariants, but drops cleanly here alongside them.
+    "balance_cadence_gap",
     "expected_eod_balance_breach",
     "overdraft",
     "ledger_drift",
@@ -2411,6 +2567,8 @@ WHERE sb.account_scope = 'internal'
 CREATE INDEX idx_{p}_overdraft_account_day
     ON {p}_overdraft (account_id, business_day_start);
 CREATE INDEX idx_{p}_overdraft_role ON {p}_overdraft (account_role);
+
+{balance_cadence_gap_section}
 
 -- ---------------------------------------------------------------------
 -- L1 invariant: Expected EOD balance.
