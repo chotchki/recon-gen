@@ -1979,10 +1979,28 @@ def _start_fresh_pg_container(
     # default `max_connections=100` was leaving no slack for the
     # admin connection that `capture_top_queries`' pg_stat_statements
     # query needs at teardown time.
+    # #254-followup — beef up Postgres for concurrent xdist load. Under
+    # `-n auto` (16 workers on this dev box), each trainer dogfood test
+    # hits `/training/reset` → drop-and-recreate v overlay tables +
+    # matview rebuild, all against the SAME shared PG container. Stock
+    # alpine defaults (128 MB shared_buffers, 4 MB work_mem) thrash
+    # under that contention and the studio_server's response misses the
+    # Playwright 30 s navigation wait — observed as a click-then-hang.
+    #
+    # Bump shared_buffers to 1 GB (we control the box; memory is cheap
+    # vs. 30 s timeouts) and work_mem to 32 MB (matview sort space).
+    # `synchronous_commit=off` is safe for a throwaway test DB and
+    # eliminates fsync stalls on heavy concurrent COMMITs.
     container = (
         PostgresContainer("postgres:17-alpine", password=password)
         .with_command(
-            "postgres -c max_connections=300 "
+            "postgres "
+            "-c max_connections=300 "
+            "-c shared_buffers=1GB "
+            "-c work_mem=32MB "
+            "-c maintenance_work_mem=256MB "
+            "-c effective_cache_size=4GB "
+            "-c synchronous_commit=off "
             "-c shared_preload_libraries=pg_stat_statements"
         )
         .with_name(name)

@@ -979,13 +979,21 @@ class App2Driver:
         must run `trainer_start_session()` first (typically once per
         session via fixture).
         """
-        self._page.click("#training-reclone-btn")
+        # #254-followup — `no_wait_after=True` skips Playwright's default
+        # 30 s post-click navigation wait. We don't need it: this is a
+        # form submit and we IMMEDIATELY poll for the in-progress banner
+        # below, which is the real readiness signal. Under heavy xdist
+        # PG contention the form-handler can respond a touch past 30 s
+        # but well before our explicit 120 s budget — without this flag
+        # Playwright was raising TimeoutError before our own waits got
+        # a chance.
+        self._page.click("#training-reclone-btn", no_wait_after=True)
         # In-progress banner appears (or page already reloaded for
         # very-fast reclones — DuckDB is sub-second).
         self._page.wait_for_selector(
             "[data-test-training-session-start-banner], "
             "[data-test-training-banner]",
-            timeout=15_000,
+            timeout=60_000,
         )
         if self._page.locator("[data-test-training-banner]").count() > 0:
             return
