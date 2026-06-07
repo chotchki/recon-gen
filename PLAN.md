@@ -557,6 +557,37 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [ ] CO.6 - Lint `no-partial-form-PUT-in-tests` — AST/regex flag any test under `tests/` POSTing to `/l2_shape/<kind>/<id>` with fewer than the entity's required-field count. Planted-fixture proof fires.
 - [ ] CO.7 - Sign-off + sweep CO to PLAN_ARCHIVE.md. No CO+1.
 
+## Phase CP - Move `business_day_offset` onto Account / AccountTemplate (TBD — placeholder)
+
+**Placeholder filed 2026-06-06.** Triggered by chotchki's gut-check at the end of CO.3 review: "is `role_business_day_offsets` tied to a particular account / account_template? mentally it feels like it should be an attribute on them." Investigated and yes — the current shape (`L2Instance.role_business_day_offsets: dict[str, int]` validated against declared role set per M.4.4.14, consumed by `seed.py:4095`'s EOD loop via `account.role` lookup) is a leaky abstraction. The data conceptually belongs to the role-bearing entity; the top-level dict just sidetables it. Editor surface today is a YAML textarea on `/l2_shape/instance/` — the last hand-edit shape in the editor and the only reason CO.4 (structured offsets form) was deferred. Moving the field on-entity dissolves both problems.
+
+**Operator locks (2026-06-06):**
+
+1. **Per-entity, not per-role-with-uniformity-check.** Two accounts sharing a role CAN declare different offsets — this IS the feature, not a bug. London + Tokyo branches of the same `ExternalCounterparty` role have different real-world EOD timings; the "per-role" framing was a shortcut that happened to work because no demo fixture exercised role-sharing accounts with different offsets. Per chotchki 2026-06-06: "I see it as a feature, each account/account template could declare a different value." NO new validator rule enforces uniformity across role-sharing accounts.
+2. **Top-level field DELETED, not deprecated.** Per [[feedback_no_compat_shims]]: the codebase is in active pre-stable dev (no integrators pinned to v1 of L2 yaml). `L2Instance.role_business_day_offsets` goes away in this phase along with the M.4.4.14 validator that checks key resolution. Loader rejects the old YAML key with an explicit error message that names the new shape (Account.business_day_offset / AccountTemplate.business_day_offset).
+3. **Editor form: simple integer FieldSpec on each entity form.** `kind="text"` with numeric coercion + a positive-int validator. Lives near `expected_eod_balance` (semantically adjacent — both are EOD-related). Eliminates the `/l2_shape/instance/`'s YAML-textarea problem; the offset becomes just another labeled input on the account form, no JSON / YAML literacy required.
+4. **AccountTemplate offset applies to all materialized instances.** Templates already round-trip per-role uniformity (U2 makes template.role unique), so a template-level offset naturally applies to every instance the template materializes. No per-instance override.
+5. **Migration is structural, not data.** All 4 existing fixtures (`spec_example`, `sasquatch_pr`, `_kitchen`, `heavy_density_v1`) have empty `role_business_day_offsets` per the earlier probe; the move is a no-op for current YAML data. The locked-seed fixtures + semantic-lock golden files re-emit byte-identically.
+
+**Open design questions (resolve in CP.0):**
+
+- Offset units: keep as integer hours (current shape), or switch to ISO 8601 duration ("PT4H", "PT-2H30M") for sub-hour offsets? Probably hours — sub-hour banking-day shifts are exotic enough that the simpler integer wins.
+- Negative offsets: signs already work (positive = later EOD vs UTC midnight). Confirm helper text spells out the sign convention.
+- Default value: `None` ⇒ "midnight-aligned" per existing seed semantics. Same default for the new attribute.
+- Should the field be on Account.scope=external only? Plausible (external counterparties have different business hours; internal accounts always follow the institution clock). But heavy_density_v1 might exercise internal-account offsets later. Default: visible on all accounts; non-required.
+
+**Done when:** `Account.business_day_offset` + `AccountTemplate.business_day_offset` exist as typed dataclass fields; the seed loop reads them directly; `L2Instance.role_business_day_offsets` + the M.4.4.14 validator + the loader path + the `/l2_shape/instance/` form widget for it all GONE; new FieldSpec emits on both forms; locked seeds + semantic-lock files re-lock byte-identically; dogfood gate (`test_browser_full_create_l2_structural_equality`) re-runs green across all 3 fixtures + a fuzz seed that planted a non-trivial offset.
+
+- [ ] CP.0 - Spike-light + lock the offset units + negative-offset semantics + scope-gating decision before any code lands.
+- [ ] CP.1 - Add `business_day_offset: int | None = None` to `Account` + `AccountTemplate` dataclasses; update `_load_account` / `_load_account_template` to read the new YAML key.
+- [ ] CP.2 - Update `seed.py:_compute_eod_balances` to read `account.business_day_offset` directly (singletons) + walk template-materialized accounts via the template's offset. Delete the `role_offsets` dict lookup path.
+- [ ] CP.3 - Delete `L2Instance.role_business_day_offsets` field + `_load_role_business_day_offsets` loader path + `_check_role_business_day_offsets_resolve` validator (M.4.4.14). Loader rejects the old YAML key with an explicit migration-pointer error message.
+- [ ] CP.4 - Add new FieldSpec entries for the offset on `_ACCOUNT_FIELDS` + `_ACCOUNT_TEMPLATE_FIELDS`. Position adjacent to `expected_eod_balance`. Helper text spells out sign convention.
+- [ ] CP.5 - Drop the `role_business_day_offsets_yaml` textarea from `/l2_shape/instance/`'s structured form + the corresponding coercer branch. Singleton form shrinks to institution_name + institution_acronym + description.
+- [ ] CP.6 - Re-lock seeded fixtures + semantic-lock files (byte-identity expected since all 4 fixtures had empty offsets pre-migration). If the byte-identity assert fires, surface the diff before tweaking.
+- [ ] CP.7 - Extend the dogfood gate: add a fuzz seed that plants a non-trivial `business_day_offset` on some account + some template; assert round-trip preserves the value.
+- [ ] CP.8 - Sign-off + sweep CP to PLAN_ARCHIVE.md.
+
 ## Phase PLAN - Phase PLAN
 - [ ] PLAN.md - BS.5 — _v_config_chain_children + 7-path conversion
 
