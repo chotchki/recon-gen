@@ -988,14 +988,35 @@ class App2Driver:
         # Playwright was raising TimeoutError before our own waits got
         # a chance.
         self._page.click("#training-reclone-btn", no_wait_after=True)
-        # In-progress banner appears (or page already reloaded for
-        # very-fast reclones — DuckDB is sub-second).
+        # Three success surfaces, racing:
+        #   1. In-progress banner (streaming reclone — slow PG / Oracle path)
+        #   2. Completion banner (streaming finished + page rerendered)
+        #   3. Reclone button visible again (FAST path: PG-bumped /
+        #      DuckDB sub-second — page already navigated to /training/
+        #      past any banner display before we got to poll)
+        #
+        # Before #254-followup, only (1) and (2) were waited for, and
+        # a fast reclone could finish + repaint before either banner
+        # rendered, causing wait_for_selector to time out at 60 s on a
+        # `/training/` page that was already in its post-reclone steady
+        # state. Adding (3) — the reclone button itself, which is only
+        # rendered when a v overlay exists — covers the fast path
+        # without weakening the slow path's invariants.
         self._page.wait_for_selector(
             "[data-test-training-session-start-banner], "
-            "[data-test-training-banner]",
+            "[data-test-training-banner], "
+            "#training-reclone-btn:visible",
             timeout=60_000,
         )
         if self._page.locator("[data-test-training-banner]").count() > 0:
+            return
+        # If the streaming live-tail mount isn't on the page, we're on
+        # the fast path — reclone already done. Polling
+        # `_trainer_wait_until_finished` here would hang waiting for a
+        # mount that doesn't exist.
+        if self._page.locator(
+            "#training-session-start-live-tail",
+        ).count() == 0:
             return
         # Reclone uses the same _training_start_state slot + live-tail
         # mount as Session Start (see _studio_routes.py::training_reclone).
