@@ -1744,6 +1744,52 @@ def _multi_select_groups_value_as_groups(
     return tuple(groups)
 
 
+_STAGED_EDIT_BANNER_CLS = (
+    "text-sm text-secondary-fg px-2 py-2 border border-dashed "
+    "border-surface-border rounded-sm bg-surface-alt"
+)
+
+
+def _render_staged_edit_banner(
+    label: str,
+    message: str,
+    *,
+    helper: str = "",
+    error: str | None = None,
+    hidden_inputs: str = "",
+) -> str:
+    """BF.3 — render a labeled empty-state banner for fields whose
+    option universe isn't knowable at the current form-render moment
+    (chicken-egg). Caller writes the message in the form
+    "<prereq action>, then <follow-up action>."
+
+    Three callsites today: ``_render_multi_select_groups_field`` for
+    the entity-less create page + the leg_rails-empty edit page; the
+    BB.2 attach-existing block (XOR groups land on the TT edit page
+    after the rail saves). BF.4 plans to add the
+    ``metadata_value_examples`` callsite once that field-kind lands.
+    """
+    label_html = (
+        f'<label class="font-semibold text-xs text-primary-fg">{escape(label)}</label>'
+    )
+    helper_html = (
+        f'<small class="text-xs text-secondary-fg">{escape(helper)}</small>'
+        if helper else ""
+    )
+    err_html = (
+        f'<div role="alert" class="text-xs text-danger bg-red-50 px-2 py-1 rounded-sm">{escape(error)}</div>'
+        if error else ""
+    )
+    body = (
+        f'<div class="{_STAGED_EDIT_BANNER_CLS}">{escape(message)}</div>'
+        f"{hidden_inputs}"
+    )
+    return (
+        f'<div class="{field_row_classes()}">'
+        f'{label_html}{body}{helper_html}{err_html}</div>'
+    )
+
+
 def _render_multi_select_groups_field(
     spec: FieldSpec,
     value: object,
@@ -1775,22 +1821,16 @@ def _render_multi_select_groups_field(
         f'<div role="alert" class="text-xs text-danger bg-red-50 px-2 py-1 rounded-sm">{escape(error)}</div>'
         if error else ""
     )
-    empty_cls = (
-        "text-sm text-secondary-fg px-2 py-2 border border-dashed "
-        "border-surface-border rounded-sm bg-surface-alt"
-    )
     row_cls = field_row_classes()
     # Option universe = the entity's leg_rails (sibling field). On the
     # create page there's no entity; render the empty-state helper.
     if entity is None:
-        empty_msg = (
+        return _render_staged_edit_banner(
+            spec.label,
             "Save the template with at least 2 leg rails first; then "
-            "open it for editing to add XOR groups."
-        )
-        body = f'<div class="{empty_cls}">{escape(empty_msg)}</div>'
-        return (
-            f'<div class="{row_cls}">'
-            f'{label_html}{body}{helper_html}{err_html}</div>'
+            "open it for editing to add XOR groups.",
+            helper=spec.helper,
+            error=error,
         )
     leg_rails_raw = getattr(entity, "leg_rails", ()) or ()
     rails: tuple[str, ...] = tuple(
@@ -1799,18 +1839,17 @@ def _render_multi_select_groups_field(
     )
     groups = _multi_select_groups_value_as_groups(value)
     if not rails:
-        empty_msg = (
-            "Add at least 2 leg rails to this template, save, then "
-            "reopen the edit form to author XOR groups."
-        )
-        body = (
-            f'<div class="{empty_cls}">{escape(empty_msg)}</div>'
+        hidden_markers = (
             f'<input type="hidden" name="{escape(spec.name)}__present" value="1">'
             f'<input type="hidden" name="{escape(spec.name)}__num_groups" value="0">'
         )
-        return (
-            f'<div class="{row_cls}">'
-            f'{label_html}{body}{helper_html}{err_html}</div>'
+        return _render_staged_edit_banner(
+            spec.label,
+            "Add at least 2 leg rails to this template, save, then "
+            "reopen the edit form to author XOR groups.",
+            helper=spec.helper,
+            error=error,
+            hidden_inputs=hidden_markers,
         )
     # Render N existing groups + 1 always-empty trailing slot for
     # adding a new group. Unchecking every box in a row drops that
@@ -3459,10 +3498,6 @@ def _render_reconciler_section(
         for v in ("single_leg", "two_leg")
     )
 
-    rnn_xor_groups_text_override = str(
-        overrides.get("leg_rail_xor_groups_text") or "",
-    )
-
     # BF.2 — drive the create-new sub-form from `_FIELD_SPECS_BY_KIND`
     # so every TT / Rail FieldSpec is exposed (anti-drift gate per
     # BF.0 Lock L1). Skip: discriminators (name) + server-appended
@@ -3573,20 +3608,16 @@ def _render_reconciler_section(
         '</select>'
         f'<small class="{helper_small_cls}">Pick from the optgroup matching the kind above; mismatches return 400.</small>'
         '</div>'
-        # AI.10 (2026-05-25) — leg_rail_xor_groups partitioning for
-        # the TT case. Optional textarea: one group per line, comma-
-        # separated rail names. Required only when attaching a
-        # Variable-direction rail to a TT that already has another
-        # Variable rail (otherwise C1 fires). Operator can leave
-        # blank for the common case. Server (_studio_editor_routes
-        # create handler) parses + rewrites into the BB.3 wire
-        # shape (leg_rail_xor_groups_<i> per group + the present /
-        # num_groups markers).
-        f'<div class="{row_cls}">'
-        f'<label for="field-leg_rail_xor_groups_text" class="{label_cls}">XOR groups (TT only, optional)</label>'
-        f'<textarea id="field-leg_rail_xor_groups_text" name="leg_rail_xor_groups_text" rows="3" placeholder="rail_a, rail_b\\nrail_c, rail_d" class="{input_cls} resize-y min-h-16">{escape(rnn_xor_groups_text_override)}</textarea>'
-        f'<small class="{helper_small_cls}">One group per line, comma-separated rail names. Required when attaching a Variable-direction rail to a TT with existing Variables (SPEC C1 partitioning); leave blank for the common case.</small>'
-        '</div>'
+        # BF.3 — XOR groups land on the TT edit page after the rail
+        # saves. The chicken-egg is real: XOR-group options =
+        # destination TT's leg_rails, which we don't know at
+        # form-render time (operator hasn't picked the TT yet, and
+        # this new rail isn't in any TT's leg_rails until save). The
+        # AI.10 textarea was the MVP shortcut; per the BF.0 spike's
+        # locked answer P3, replace it with the staged-edit banner
+        # for consistency with the TT-edit-page XOR picker's
+        # empty-state copy.
+        f'{_render_staged_edit_banner("XOR groups (TT only, optional)", "Save the rail first, then open the destination TT for editing to add XOR groups. Required only when attaching a Variable-direction rail to a TT that already has another Variable rail (SPEC C1 partitioning).")}'
         '</div>'
         # Create-new sub-form (kind + new-name + per-kind required minima).
         f'<div class="{block_cls}" data-reconciler-block="create_new"{create_hidden}>'
@@ -5469,40 +5500,6 @@ def _make_handlers(
             str(form.get("reconciler_mode") or "attach").strip()
             or "attach"
         )
-        # AI.10 (2026-05-25) — parse the leg_rail_xor_groups_text
-        # textarea (one group per line, comma-separated rail names)
-        # into the BB.3 wire shape that
-        # `_apply_xor_groups_update_to_tt` consumes:
-        # `leg_rail_xor_groups__present` + `leg_rail_xor_groups_<i>`
-        # per group. The text input is a UI affordance; the wire
-        # format is unchanged. Caller-tolerant: empty / whitespace-
-        # only lines drop (1-element groups too — XOR needs >=2).
-        xor_groups_text = str(form.get("leg_rail_xor_groups_text") or "")
-        if xor_groups_text.strip():
-            parsed_xor_groups: list[list[str]] = []
-            for line in xor_groups_text.splitlines():
-                rails = [
-                    r.strip() for r in line.split(",") if r.strip()
-                ]
-                if len(rails) >= 2:
-                    parsed_xor_groups.append(rails)
-            if parsed_xor_groups:
-                # Rebuild form as a mutable dict-of-lists so we can
-                # splice the parsed groups in alongside the original
-                # form payload. Starlette's FormData is immutable.
-                from starlette.datastructures import FormData as _FD  # noqa: PLC0415
-                synth_items = list(form.multi_items())
-                synth_items.append(("leg_rail_xor_groups__present", "1"))
-                synth_items.append((
-                    "leg_rail_xor_groups__num_groups",
-                    str(len(parsed_xor_groups)),
-                ))
-                for i, group in enumerate(parsed_xor_groups):
-                    for rail in group:
-                        synth_items.append(
-                            (f"leg_rail_xor_groups_{i}", rail),
-                        )
-                form = _FD(synth_items)  # type: ignore[assignment]: re-binding form to the synthesized FormData; downstream reads see the BB.3 wire shape
         # BB.2 — capture the reconciler picker values into
         # ``coerced_overrides`` regardless of whether needs_reconciler
         # fires, so a re-render on validation failure preserves the

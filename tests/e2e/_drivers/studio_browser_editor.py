@@ -573,18 +573,35 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
                             target.fill(values[0], force=True)
                     else:
                         target.fill(values[0], force=True)
-        # AI.10 (2026-05-25) — partial_xor_groups via the
-        # `leg_rail_xor_groups_text` textarea (BB-style form-pairing).
-        # Server parses one-group-per-line / comma-separated rails
-        # and rewrites into the BB.3 wire shape. Driver writes the
-        # textarea when partial_xor_groups is supplied.
+        # BF.3 (2026-06-07) — partial_xor_groups via the BB.3 wire
+        # shape directly. The AI.10 textarea was retired; XOR groups
+        # land on the TT edit page (staged-edit pattern). For the
+        # composite-save flow the HTTP driver hits, inject the same
+        # hidden inputs the textarea-parser used to synthesize
+        # (`leg_rail_xor_groups__present` + `__num_groups` +
+        # `_<i>` per group) directly into the form via JS, so the
+        # server's `_apply_xor_groups_update_to_tt` path fires.
         if partial_xor_groups:
-            text_value = "\n".join(
-                ", ".join(rail for rail in group)
-                for group in partial_xor_groups
-            )
-            self._page.fill(
-                'textarea[name="leg_rail_xor_groups_text"]', text_value,
+            payload = [
+                ("leg_rail_xor_groups__present", "1"),
+                ("leg_rail_xor_groups__num_groups", str(len(partial_xor_groups))),
+            ]
+            for i, group in enumerate(partial_xor_groups):
+                for rail in group:
+                    payload.append((f"leg_rail_xor_groups_{i}", rail))
+            self._page.evaluate(
+                """([items]) => {
+                    const form = document.querySelector('form.create-form');
+                    if (!form) throw new Error('create-form not found');
+                    for (const [name, value] of items) {
+                        const input = document.createElement('input');
+                        input.type = 'hidden';
+                        input.name = name;
+                        input.value = value;
+                        form.appendChild(input);
+                    }
+                }""",
+                [payload],
             )
         self._submit_create_form(f"rail {data.get('name', ['?'])[0]!r}")
 
