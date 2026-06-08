@@ -433,6 +433,17 @@ class _BaseStudioEditorDriver:
                 _max_unbundled_age_edit_form_data(rail),
             )
 
+        # BF.4 — metadata_value_examples is edit_only (chicken-egg:
+        # needs metadata_keys saved first). Edit it in for every rail
+        # that declares values; the form-data builder picks up the
+        # rail's current metadata_keys-keyed values verbatim.
+        for rail in reference.rails:
+            if getattr(rail, "metadata_value_examples", ()):
+                self._edit(
+                    "rail", str(rail.name),
+                    edit_metadata_value_examples_form_data(rail),
+                )
+
         for chain in reference.chains:
             self.create_chain(chain)
         for schedule in reference.limit_schedules:
@@ -490,6 +501,33 @@ def _max_unbundled_age_edit_form_data(rail: Rail) -> FormData:
     """
     value_str = _value_to_input_str(rail.max_unbundled_age)
     return {"max_unbundled_age": [value_str]}
+
+
+def edit_metadata_value_examples_form_data(rail: Rail) -> FormData:
+    """BF.4 — PUT body that backfills ``metadata_value_examples`` onto
+    an already-created rail (the field is ``edit_only`` — needs
+    sibling ``metadata_keys`` saved first).
+
+    Wire shape matches the inline-edit picker:
+      metadata_value_examples__present=1
+      metadata_value_examples__num=N
+      metadata_value_examples__key_<i>=<key>
+      metadata_value_examples__vals_<i>=<csv values>
+    """
+    examples: tuple[tuple[object, tuple[object, ...]], ...] = (
+        getattr(rail, "metadata_value_examples", ()) or ()
+    )
+    data: FormData = {
+        "metadata_value_examples__present": ["1"],
+        "metadata_value_examples__num": [str(len(examples))],
+    }
+    for i, pair in enumerate(examples):
+        key, vals = pair
+        data[f"metadata_value_examples__key_{i}"] = [str(key)]
+        data[f"metadata_value_examples__vals_{i}"] = [
+            ", ".join(str(v) for v in vals),
+        ]
+    return data
 
 
 def _partial_xor_groups_for_attach(

@@ -1513,26 +1513,22 @@ def test_put_two_leg_rail_round_trips_subtype_fields(
     assert [str(x) for x in getattr(saved, "destination_role")] == dst_roles
 
 
-def test_rail_metadata_value_examples_yaml_block_round_trip(
+def test_rail_metadata_value_examples_inline_picker_round_trip(
     writable_l2_yaml: Path,
 ) -> None:
-    """X.4.f.11.6.5 — Tier-3 yaml_block FieldKind. Operator types a
-    YAML map; coerce parses + wraps to tuple-of-tuples; PUT persists;
-    re-load round-trips the same shape. ExternalRailInbound is a
-    TwoLeg in spec_example."""
+    """BF.4 (2026-06-07) — metadata_value_examples is now an
+    inline-edit picker (per locked P2): one row per
+    metadata_keys entry, values entered as a comma-separated list.
+    Wire shape: `<name>__present=1`, `<name>__num=N`,
+    `<name>__key_<i>=<key>`, `<name>__vals_<i>=<csv values>`.
+
+    ExternalRailInbound declares metadata_keys=['external_reference'];
+    submit a 3-value example list, assert round-trip.
+    """
     app = _build_app(writable_l2_yaml)
     pre = load_instance(writable_l2_yaml)
     rail = next(
         r for r in pre.rails if str(r.name) == "ExternalRailInbound"
-    )
-    # Use a metadata_key already declared on this rail (validator R13:
-    # metadata_value_examples keys must be a subset of metadata_keys).
-    # ExternalRailInbound declares metadata_keys=['external_reference'].
-    yaml_block = (
-        "external_reference:\n"
-        "  - 'EXT-12345-001'\n"
-        "  - 'EXT-12345-002'\n"
-        "  - 'EXT-12345-003'\n"
     )
     src_roles = [str(x) for x in getattr(rail, "source_role")]
     dst_roles = [str(x) for x in getattr(rail, "destination_role")]
@@ -1543,7 +1539,10 @@ def test_rail_metadata_value_examples_yaml_block_round_trip(
         "destination_role__present": "1",
         "destination_role": dst_roles,
         "aggregating": "true" if getattr(rail, "aggregating") else "false",
-        "metadata_value_examples": yaml_block,
+        "metadata_value_examples__present": "1",
+        "metadata_value_examples__num": "1",
+        "metadata_value_examples__key_0": "external_reference",
+        "metadata_value_examples__vals_0": "EXT-12345-001, EXT-12345-002, EXT-12345-003",
     }
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.put(f"/l2_shape/rail/{rail.name}", data=data)
@@ -1560,18 +1559,18 @@ def test_rail_metadata_value_examples_yaml_block_round_trip(
     }
 
 
-def test_rail_metadata_value_examples_bad_yaml_returns_400(
+def test_rail_metadata_value_examples_empty_values_drops_key(
     writable_l2_yaml: Path,
 ) -> None:
-    """X.4.f.11.6.5 — bad YAML in the yaml_block triggers a 400 +
-    form re-render with the error inline + the typed content
-    preserved (for the operator to fix)."""
+    """BF.4 — blanking a row's value field drops that key on save
+    (the operator clears values without going back to metadata_keys).
+    Same wire shape as the round-trip test, but `__vals_0` is empty.
+    """
     app = _build_app(writable_l2_yaml)
     pre = load_instance(writable_l2_yaml)
     rail = next(
         r for r in pre.rails if str(r.name) == "ExternalRailInbound"
     )
-    bad_yaml = "ach_trace_number:\n  - '12345-001\n   missing-quote"
     src_roles = [str(x) for x in getattr(rail, "source_role")]
     dst_roles = [str(x) for x in getattr(rail, "destination_role")]
     data = {
@@ -1581,12 +1580,20 @@ def test_rail_metadata_value_examples_bad_yaml_returns_400(
         "destination_role__present": "1",
         "destination_role": dst_roles,
         "aggregating": "true" if getattr(rail, "aggregating") else "false",
-        "metadata_value_examples": bad_yaml,
+        "metadata_value_examples__present": "1",
+        "metadata_value_examples__num": "1",
+        "metadata_value_examples__key_0": "external_reference",
+        "metadata_value_examples__vals_0": "",
     }
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.put(f"/l2_shape/rail/{rail.name}", data=data)
-    assert resp.status_code == 400, resp.text
-    assert "Invalid YAML" in resp.text or "Field coercion failed" in resp.text
+    assert resp.status_code == 200, resp.text
+
+    reloaded = load_instance(writable_l2_yaml)
+    saved = next(
+        r for r in reloaded.rails if str(r.name) == str(rail.name)
+    )
+    assert getattr(saved, "metadata_value_examples") == ()
 
 
 def test_singleton_theme_get_renders_structured_form(
@@ -2272,10 +2279,13 @@ def test_bf2_subform_exposes_every_transfer_template_fieldspec(
     """
     from recon_gen.common.html._studio_editor_routes import _FIELD_SPECS_BY_KIND
     body = _bb2_reconciler_subform_html(writable_l2_yaml)
-    skip = {"name", "leg_rails", "leg_rail_xor_groups"}
+    skip = {"name", "leg_rails"}
     missing: list[str] = []
     for spec in _FIELD_SPECS_BY_KIND["transfer_template"]:
-        if spec.name in skip:
+        if spec.name in skip or spec.edit_only:
+            # edit_only fields (e.g. leg_rail_xor_groups) need siblings
+            # saved first — they land on the edit page, not the BB.2
+            # create-new sub-form.
             continue
         # multi_select widgets only emit `name="<n>"` on selected-chip
         # hidden inputs; an empty multi_select emits the `__present`
@@ -2319,7 +2329,10 @@ def test_bf2_subform_exposes_every_aggregating_rail_fieldspec(
     skip = {"name", "aggregating", "bundles_activity"}
     missing: list[str] = []
     for spec in _FIELD_SPECS_BY_KIND["rail"]:
-        if spec.name in skip:
+        if spec.name in skip or spec.edit_only:
+            # edit_only fields (e.g. metadata_value_examples) need
+            # siblings saved first — they land on the rail edit page
+            # via the staged-edit banner, not the BB.2 sub-form.
             continue
         # multi_select widgets (source_role / destination_role /
         # leg_role) only emit `name="<n>"` on selected-chip hidden

@@ -89,6 +89,7 @@ from recon_gen.common.l2.validate import L2ValidationError, validate
 FieldKind: TypeAlias = Literal[
     "text", "select", "money", "textarea", "multi_select", "yaml_block",
     "multi_select_groups", "chain_children",
+    "metadata_value_examples",  # BF.4 — inline-edit picker per locked P2
 ]
 
 # X.4.f.11 — Rail is a discriminated union (TwoLegRail | SingleLegRail).
@@ -523,37 +524,40 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         render_as="chip_list",  # CF.4.g — list of identifiers
     ),
     # X.4.f.11.6 — metadata_keys + metadata_value_examples (paired).
-    # tuple[Identifier, ...] — operator types one key per line; coerce
-    # splits on \n + comma, strips blanks. Empty textarea ⇒ empty tuple.
+    # BF.4 (2026-06-07) — chip-list picker; option universe is the
+    # L2-wide union of declared metadata_keys + a canonical fallback
+    # (ach_trace_number, wire_imad, swift_uetr, ...). Operator picks
+    # from autocomplete or adds free-form text; the typeahead datalist
+    # serves both shapes. tuple[Identifier, ...].
     FieldSpec(
         name="metadata_keys",
         label="Metadata keys",
         helper=(
-            "One per line (or comma-separated). Identifies the metadata "
-            "keys this rail's transactions carry (e.g. ach_trace_number, "
-            "wire_imad)."
+            "Metadata key names this rail's transactions carry. Pick "
+            "from the L2-wide list or type a new one (e.g. "
+            "ach_trace_number, wire_imad)."
         ),
-        kind="textarea",
-        # CO.3 polish — placeholder enables :placeholder-shown CSS
-        # reactivity so metadata_value_examples below hides when this
-        # textarea is empty (input.css has the rule).
-        placeholder="ach_trace_number\nwire_imad",
+        kind="multi_select",
+        select_from="metadata_keys",
+        render_as="chip_list",  # CF.4.g — list of identifiers
     ),
-    # X.4.f.11.6.5 — Tier-3 metadata_value_examples as a YAML block.
-    # tuple[(Identifier, tuple[str, ...]), ...] — operator types/edits
-    # the per-key example map directly in YAML (the same shape the L2
-    # YAML carries). Empty ⇒ demo seed falls back to the synthetic
-    # `<rail>-firing-<seq>` placeholder.
+    # X.4.f.11.6.5 — Tier-3 metadata_value_examples.
+    # BF.4 (2026-06-07, P2 lock) — inline-edit picker: one row per
+    # sibling `metadata_keys` entry; values for that key entered as a
+    # comma-separated list. ``edit_only`` because the picker needs
+    # metadata_keys saved first (chicken-egg — same staged-edit
+    # pattern as leg_rail_xor_groups).
     FieldSpec(
         name="metadata_value_examples",
         label="Metadata value examples",
         helper=(
             "Per-key example values the demo seed cycles through. "
-            "YAML map: each metadata key → list of example strings. "
-            "Empty ⇒ uses synthetic per-rail fallback. Example: "
-            "ach_trace_number: [\"12345-001\", \"12345-002\"]"
+            "One row per metadata key; enter values as a comma-"
+            "separated list. Empty ⇒ uses synthetic per-rail "
+            "fallback (e.g. `<rail>-firing-<seq>`)."
         ),
-        kind="yaml_block",
+        kind="metadata_value_examples",
+        edit_only=True,
     ),
     FieldSpec(
         name="posted_requirements",
@@ -923,9 +927,12 @@ def _coerce_field(spec: FieldSpec, raw: str, kind: EntityKind) -> object:
                 f"(got {raw!r})"
             )
         return raw
-    # X.4.f.11.6 — Rail.metadata_keys + posted_requirements: textarea
-    # one-per-line (or comma-separated). tuple[Identifier, ...].
-    if spec.name in ("metadata_keys", "posted_requirements") and kind == "rail":
+    # X.4.f.11.6 — Rail.posted_requirements: textarea one-per-line
+    # (or comma-separated). tuple[Identifier, ...]. BF.4 narrowed
+    # this from also covering `metadata_keys`, which moved to a
+    # multi_select chip-list; the multi_select branch of
+    # `_coerce_form` handles its coercion directly via `getlist`.
+    if spec.name == "posted_requirements" and kind == "rail":
         parts = [
             p.strip()
             for line in raw.splitlines()
@@ -1133,6 +1140,45 @@ def _coerce_form(
                 Identifier,
             )
             fields[spec.name] = tuple(Identifier(v) for v in raw_list)
+        elif spec.kind == "metadata_value_examples":
+            # BF.4 — inline-edit picker wire shape:
+            #   <name>__present=1
+            #   <name>__num=<n>
+            #   <name>__key_<i>=<metadata key>
+            #   <name>__vals_<i>=<comma-separated values>
+            # Empty per-key value list drops that key (operator can
+            # blank out a row to remove it without going back to
+            # metadata_keys).
+            if f"{spec.name}__present" not in form:
+                continue
+            from recon_gen.common.l2.primitives import (  # noqa: PLC0415
+                Identifier,
+            )
+            num_raw = form.get(f"{spec.name}__num", "0")
+            try:
+                num = int(str(num_raw) or "0")
+            except ValueError:
+                num = 0
+            assembled: list[tuple[Identifier, tuple[str, ...]]] = []
+            override_assembled: list[tuple[str, tuple[str, ...]]] = []
+            for i in range(num):
+                key_raw = str(form.get(f"{spec.name}__key_{i}") or "").strip()
+                vals_raw = str(form.get(f"{spec.name}__vals_{i}") or "")
+                if not key_raw:
+                    continue
+                parts = tuple(
+                    p.strip() for p in vals_raw.split(",") if p.strip()
+                )
+                if not parts:
+                    continue
+                assembled.append((Identifier(key_raw), parts))
+                override_assembled.append((key_raw, parts))
+            fields[spec.name] = tuple(assembled)
+            # Override stored as tuple-of-(key, values) for re-render
+            # via `_metadata_value_examples_as_dict`.
+            overrides[spec.name] = tuple(  # pyright: ignore[reportArgumentType]: overrides dict stores tuple[(str, tuple[str, ...]), ...] for this kind; outer Mapping isn't nested-tuple-aware
+                override_assembled,
+            )
         elif spec.kind == "multi_select_groups":
             # AB.3.7 — repeated keys per group: ``<name>_0``, ``<name>_1``,
             # ... A hidden ``<name>__num_groups`` tells the server how
@@ -1321,6 +1367,30 @@ def _resolve_select_options(
         if current_value and current_value not in opts:
             opts = (*opts, current_value)
         return opts, False
+    if select_from == "metadata_keys":
+        # BF.4 (2026-06-07) — L2-wide union of declared Rail.metadata_keys
+        # + a small canonical fallback so a first-time operator sees common
+        # keys (ach_trace_number, wire_imad, swift_uetr, ...) even when no
+        # rail declares any yet. Multi_select widget — empty option not
+        # needed (zero selection IS the empty state).
+        canonical: tuple[str, ...] = (
+            "ach_trace_number",
+            "wire_imad",
+            "swift_uetr",
+            "card_auth_id",
+            "check_serial",
+            "disbursement_id",
+            "settlement_batch_id",
+        )
+        keys: set[str] = set(canonical)
+        for r in getattr(instance, "rails", ()):
+            for k in (getattr(r, "metadata_keys", ()) or ()):
+                if k is not None and str(k):
+                    keys.add(str(k))
+        opts = tuple(sorted(keys))
+        if current_value and current_value not in opts:
+            opts = (*opts, current_value)
+        return opts, False
     if select_from == "rails_or_templates":
         # Union of Rail.name + TransferTemplate.name — used by
         # Chain.parent / .children entries. A Chain row references
@@ -1443,6 +1513,11 @@ def _render_field(
     if spec.kind == "chain_children":
         return _render_chain_children_field(spec, value, instance, error)
 
+    if spec.kind == "metadata_value_examples":
+        return _render_metadata_value_examples_field(
+            spec, value, entity, error,
+        )
+
     if spec.kind == "multi_select":
         # CO.3 polish (2026-06-06) — chip-list-as-primary widget.
         # Pre-rewrite: a checkbox grid showed the whole universe + a
@@ -1524,8 +1599,13 @@ def _render_field(
             # hidden inputs are emitted in chip order, so getlist already
             # returns the right sequence. No __order field needed.
             f"{datalist_html}"
+            # BF.4 (2026-06-07) — `data-multiselect-allow-freeform` opts
+            # the chip-list into accepting operator-typed values not
+            # already in the datalist (used by `metadata_keys`, where
+            # the datalist is a starter set, not the universe).
             f'<ul data-multiselect-order-list="{escape(spec.name)}" '
             f'data-multiselect-options-id="{datalist_id}" '
+            f'{"data-multiselect-allow-freeform=\"1\" " if spec.select_from == "metadata_keys" else ""}'
             f'class="{list_cls}" '
             f'aria-label="Selected {escape(spec.label)} in order">'
             f"{chips_html}"
@@ -1942,6 +2022,127 @@ def _render_xor_group_row(
         f"{escape(legend)}</legend>"
         f'<div class="{grid_cls}">{items}</div>'
         f'</fieldset>'
+    )
+
+
+def _metadata_value_examples_as_dict(value: object) -> dict[str, tuple[str, ...]]:
+    """BF.4 — normalize a metadata_value_examples value into a
+    ``dict[key, tuple[values, ...]]`` for render-time lookup, accepting
+    every shape the field traverses through: ``None`` (no values),
+    the canonical ``tuple[(Identifier, tuple[str, ...]), ...]`` from
+    the dataclass, and the override-path ``dict[str, list[str]]`` /
+    ``tuple[(str, tuple[str, ...]), ...]`` shapes coerce builds on
+    a re-render.
+    """
+    if value is None or value == "":
+        return {}
+    if isinstance(value, dict):
+        return {  # pyright: ignore[reportUnknownVariableType]: dict comes from form override path with Any-typed entries
+            str(k): tuple(str(v) for v in (vs or ()))  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]: dict elements untyped from yaml/form path
+            for k, vs in value.items()  # pyright: ignore[reportUnknownVariableType]: dict.items() yields Any elements
+        }
+    if not isinstance(value, (list, tuple)):
+        return {}
+    out: dict[str, tuple[str, ...]] = {}
+    for item in value:  # pyright: ignore[reportUnknownVariableType]: outer iterable is unknown-typed (form override OR dataclass shape)
+        if not isinstance(item, (list, tuple)) or len(item) != 2:  # pyright: ignore[reportUnknownArgumentType]: item element type unknown
+            continue
+        key, vals = item  # pyright: ignore[reportUnknownVariableType]: tuple-unpack of Any-typed item
+        if not isinstance(vals, (list, tuple)):
+            continue
+        out[str(key)] = tuple(  # pyright: ignore[reportUnknownArgumentType]: key derived from Any
+            str(v) for v in vals  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]: vals is Any-typed iterable
+        )
+    return out
+
+
+def _render_metadata_value_examples_field(
+    spec: FieldSpec,
+    value: object,
+    entity: object | None,
+    error: str | None,
+) -> str:
+    """BF.4 — inline-edit picker for ``metadata_value_examples``
+    (per locked P2). One row per key in the entity's sibling
+    ``metadata_keys`` field; the value field is a comma-separated
+    list of example strings.
+
+    Chicken-egg: when ``entity`` is None (create page) OR
+    ``metadata_keys`` is empty, render the staged-edit banner.
+    """
+    if entity is None:
+        return _render_staged_edit_banner(
+            spec.label,
+            "Save the rail with at least one metadata key first; "
+            "then open it for editing to add per-key example values.",
+            helper=spec.helper,
+            error=error,
+        )
+    raw_keys = getattr(entity, "metadata_keys", ()) or ()
+    keys: tuple[str, ...] = tuple(
+        str(k)  # pyright: ignore[reportUnknownArgumentType]: metadata_keys element type is Identifier (runtime str) but typed Any here
+        for k in raw_keys  # pyright: ignore[reportUnknownVariableType]: metadata_keys is Any
+    )
+    if not keys:
+        hidden_marker = (
+            f'<input type="hidden" name="{escape(spec.name)}__present" value="1">'
+            f'<input type="hidden" name="{escape(spec.name)}__num" value="0">'
+        )
+        return _render_staged_edit_banner(
+            spec.label,
+            "Add at least one metadata key above, save, then reopen "
+            "the edit form to author per-key example values.",
+            helper=spec.helper,
+            error=error,
+            hidden_inputs=hidden_marker,
+        )
+    label_html = (
+        f'<label class="font-semibold text-xs text-primary-fg">'
+        f'{escape(spec.label)}</label>'
+    )
+    helper_html = (
+        f'<small class="text-xs text-secondary-fg">{escape(spec.helper)}</small>'
+        if spec.helper else ""
+    )
+    err_html = (
+        f'<div role="alert" class="text-xs text-danger bg-red-50 px-2 py-1 rounded-sm">{escape(error)}</div>'
+        if error else ""
+    )
+    values_by_key = _metadata_value_examples_as_dict(value)
+    input_cls = field_input_classes()
+    row_cls = (
+        "grid grid-cols-[minmax(8rem,12rem)_1fr] gap-2 items-center"
+    )
+    rows: list[str] = []
+    for i, key in enumerate(keys):
+        existing = values_by_key.get(key, ())
+        val_str = ", ".join(existing)
+        rows.append(
+            f'<div class="{row_cls}">'
+            f'<label for="field-{escape(spec.name)}__vals_{i}" '
+            f'class="text-xs font-mono text-primary-fg break-keep">'
+            f'{escape(key)}</label>'
+            f'<input type="hidden" name="{escape(spec.name)}__key_{i}" '
+            f'value="{escape(key)}">'
+            f'<input type="text" id="field-{escape(spec.name)}__vals_{i}" '
+            f'name="{escape(spec.name)}__vals_{i}" '
+            f'value="{escape(val_str)}" '
+            f'placeholder="example1, example2, ..." '
+            f'class="{input_cls}">'
+            f'</div>',
+        )
+    rows_html = "".join(rows)
+    body = (
+        f'<div class="flex flex-col gap-2 px-2 py-2 border '
+        f'border-dashed border-surface-border rounded-sm bg-surface-bg">'
+        f'{rows_html}'
+        f'</div>'
+        f'<input type="hidden" name="{escape(spec.name)}__present" value="1">'
+        f'<input type="hidden" name="{escape(spec.name)}__num" value="{len(keys)}">'
+    )
+    return (
+        f'<div class="{field_row_classes()}">'
+        f'{label_html}{body}{helper_html}{err_html}</div>'
     )
 
 
@@ -2893,11 +3094,12 @@ def _htmx_head_block() -> str:
         "          li.appendChild(rmBtn);\n"
         "          return li;\n"
         "        }\n"
+        "        var allowFreeform = list.getAttribute('data-multiselect-allow-freeform') === '1';\n"
         "        function addChip(val) {\n"
         "          if (!val) return false;\n"
         "          var sel = '[data-multiselect-order-value=\"' + val.replace(/\"/g, '\\\\\"') + '\"]';\n"
         "          if (list.querySelector(sel)) return false;  // already present\n"
-        "          if (!datalistHas(val)) return false;        // not a valid option\n"
+        "          if (!allowFreeform && !datalistHas(val)) return false;  // not a valid option\n"
         "          var hint = list.querySelector('[data-multiselect-empty-hint]');\n"
         "          if (hint) hint.remove();\n"
         "          var li = buildChipFromTemplate(val) || buildSimpleChip(val);\n"
@@ -3542,15 +3744,21 @@ def _render_reconciler_section(
             for s in specs
         )
 
-    _TT_SKIP = {"name", "leg_rails", "leg_rail_xor_groups"}
+    _TT_SKIP = {"name", "leg_rails"}
     _RAIL_SKIP = {"name", "aggregating", "bundles_activity"}
+    # BF.4 — `edit_only` fields (leg_rail_xor_groups, metadata_value_examples)
+    # depend on sibling fields that don't exist at create-new time;
+    # same convention as `_render_create_page` (their staged-edit
+    # banners live on the entity edit page once siblings are saved).
     tt_fields_html = _render_specs(
         s for s in _FIELD_SPECS_BY_KIND["transfer_template"]
-        if s.name not in _TT_SKIP
+        if s.name not in _TT_SKIP and not s.edit_only
     )
     agg_subtype_agnostic_html = _render_specs(
         s for s in _FIELD_SPECS_BY_KIND["rail"]
-        if s.subtype_only is None and s.name not in _RAIL_SKIP
+        if s.subtype_only is None
+        and s.name not in _RAIL_SKIP
+        and not s.edit_only
     )
     agg_single_leg_html = _render_specs(
         s for s in _FIELD_SPECS_BY_KIND["rail"]
