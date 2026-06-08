@@ -558,6 +558,30 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
                     ):
                         continue
                     field_name = f"reconciler_new_{key}"
+                    # BF.5-followup (2026-06-08) — multi_select chip-list
+                    # fields (source_role / destination_role / leg_role
+                    # / metadata_keys) have no `<input name=...>` until
+                    # chips land, so a `[name=...]` lookup is 0. Drive
+                    # them through the typeahead first.
+                    add_input = self._page.locator(
+                        f'input[data-multiselect-add="{field_name}"]',
+                    )
+                    if add_input.count() > 0:
+                        chip_list = self._page.locator(
+                            f'[data-multiselect-order-list="{field_name}"]',
+                        )
+                        while True:
+                            rm_btns = chip_list.locator(
+                                '[data-multiselect-remove]',
+                            )
+                            if rm_btns.count() == 0:
+                                break
+                            rm_btns.last.click(force=True)
+                        typeahead = add_input.first
+                        for v in values:
+                            typeahead.fill(v, force=True)
+                            typeahead.press("Enter")
+                        continue
                     loc = self._page.locator(f'[name="{field_name}"]')
                     count = loc.count()
                     if count == 0:
