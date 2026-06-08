@@ -574,3 +574,59 @@ def test_v1b_allowlist_includes_pipeline_keys(tmp_path: Path) -> None:
     })))
     assert cfg.etl_hook == "./etl.sh"
     assert cfg.test_generator.scope == "full"
+
+
+def test_to_yaml_dict_round_trips_through_load_config(tmp_path: Path) -> None:
+    """``Config.to_yaml_dict`` → ``yaml.safe_dump`` → ``load_config`` →
+    same Config. The three traps `asdict()` falls into (dialect enum,
+    init=False ``datasource_arn_was_derived``, nested dataclass shapes)
+    all get handled by the helper."""
+    p = _write_yaml(tmp_path, _required_yaml({
+        "principal_arns": ["arn:aws:iam::111122223333:user/u"],
+        "extra_tags": {"Owner": "team"},
+        "demo_database_url": "postgresql://u:p@h:5432/d",
+        "dialect": "postgres",
+        "auth": {"aws_profile": "recon-gen-local"},
+        "test_generator": {
+            "scope": "full",
+            "seed": 42,
+            "plants": ["drift", "overdraft"],
+            "end_date": "2030-01-01",
+        },
+    }))
+    cfg = load_config(p)
+
+    # Round-trip: write the loaded cfg back out, reload, compare every
+    # operator-visible field.
+    out_path = tmp_path / "round_trip.yaml"
+    cfg.write_yaml(out_path)
+    cfg2 = load_config(out_path)
+    assert cfg2.aws_account_id == cfg.aws_account_id
+    assert cfg2.deployment_name == cfg.deployment_name
+    assert cfg2.dialect == cfg.dialect
+    assert cfg2.principal_arns == cfg.principal_arns
+    assert cfg2.extra_tags == cfg.extra_tags
+    assert cfg2.demo_database_url == cfg.demo_database_url
+    assert cfg2.auth == cfg.auth
+    assert cfg2.test_generator.seed == cfg.test_generator.seed
+    assert cfg2.test_generator.plants == cfg.test_generator.plants
+    assert cfg2.test_generator.end_date == cfg.test_generator.end_date
+
+
+def test_to_yaml_dict_omits_derived_datasource_arn(tmp_path: Path) -> None:
+    """When the loader DERIVED `datasource_arn` from `demo_database_url`,
+    the emitted YAML drops it so the next load re-derives — preserves
+    the operator's intent that the demo DB is the source of truth."""
+    body = _required_yaml({
+        "demo_database_url": "postgresql://u:p@h:5432/d",
+    })
+    body.pop("datasource_arn")  # force the demo_database_url derivation path
+    p = _write_yaml(tmp_path, body)
+    cfg = load_config(p)
+    assert cfg.datasource_arn_was_derived is True
+
+    emitted = cfg.to_yaml_dict()
+    assert "datasource_arn" not in emitted
+    assert "datasource_arn_was_derived" not in emitted
+    assert emitted["demo_database_url"] == "postgresql://u:p@h:5432/d"
+    assert emitted["dialect"] == "postgres"  # enum coerced to string

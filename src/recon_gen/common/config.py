@@ -6,10 +6,10 @@ resources reference the datasource and account specified here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast, get_args
+from typing import IO, TYPE_CHECKING, Any, Literal, cast, get_args
 
 import yaml
 
@@ -461,6 +461,77 @@ class Config:
         namespace, set explicitly in cfg.yaml (no default).
         """
         return f"{self.deployment_name}-{name}"
+
+    def to_yaml_dict(self) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload — every value is something safe_dump can write
+        """Return a dict ``yaml.safe_dump`` can write that ``load_config``
+        round-trips. Inverse of the loader.
+
+        Three traps a naive ``dataclasses.asdict(cfg)`` falls into:
+          1. ``dialect`` is the ``Dialect`` enum — safe_dump refuses
+             to represent it. Coerced to the ``.value`` string here.
+          2. ``datasource_arn_was_derived`` (init=False) leaks in;
+             the loader rejects unknown keys. Stripped.
+          3. Empty / default-valued optionals (``signing=None``,
+             ``auth=None``, empty ``extra_tags``) bloat the YAML —
+             omitted for a compact emit.
+
+        When ``datasource_arn_was_derived`` is True, ``datasource_arn``
+        is omitted too so the re-load re-derives from
+        ``demo_database_url`` instead of pinning the derived ARN as if
+        the operator supplied it.
+        """
+        out: dict[str, Any] = asdict(self)  # typing-smell: ignore[explicit-any]: asdict returns dict[str, Any]
+        derived = bool(out.pop("datasource_arn_was_derived", False))
+        out["dialect"] = self.dialect.value
+        if derived:
+            out.pop("datasource_arn", None)
+
+        # Drop empty / None / default-equivalent optionals so the
+        # emitted YAML stays close to a minimal operator-edited file.
+        if out.get("signing") is None:
+            out.pop("signing", None)
+        if out.get("auth") is None:
+            out.pop("auth", None)
+        if not out.get("principal_arns"):
+            out.pop("principal_arns", None)
+        if not out.get("extra_tags"):
+            out.pop("extra_tags", None)
+        for opt in (
+            "datasource_arn", "demo_database_url", "default_l2_instance",
+            "aws_pg_cluster_id", "aws_oracle_instance_id", "etl_hook",
+        ):
+            if out.get(opt) is None:
+                out.pop(opt, None)
+
+        # test_generator: omit when every field is at its default
+        # (loader resolves a missing key to ``TestGeneratorConfig()``).
+        # Otherwise coerce ``plants`` tuple → list for stable YAML.
+        tgen = out.get("test_generator")
+        default_tgen = asdict(TestGeneratorConfig())
+        if tgen == default_tgen:
+            out.pop("test_generator", None)
+        elif isinstance(tgen, dict):
+            tgen_typed = cast(dict[str, Any], tgen)
+            if "plants" in tgen_typed:
+                tgen_typed["plants"] = list(tgen_typed["plants"])
+            if tgen_typed.get("derive_balances_account_roles") is None:
+                tgen_typed.pop("derive_balances_account_roles", None)
+            for opt in ("end_date", "cutoff_date", "seed", "only_template"):
+                if tgen_typed.get(opt) is None:
+                    tgen_typed.pop(opt, None)
+        return out
+
+    def write_yaml(self, dest: Path | str | IO[str]) -> None:
+        """Serialize via ``to_yaml_dict`` and ``yaml.safe_dump`` to
+        ``dest`` (a path or an already-open text stream). Preserves
+        field order via ``sort_keys=False``.
+        """
+        payload = self.to_yaml_dict()
+        if isinstance(dest, (str, Path)):
+            with Path(dest).open("w") as f:
+                yaml.safe_dump(payload, f, sort_keys=False)
+        else:
+            yaml.safe_dump(payload, dest, sort_keys=False)
 
 
 # V.1.b — Strict config-key allowlist. config.yaml is environment-only:
