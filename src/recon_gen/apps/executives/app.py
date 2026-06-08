@@ -35,7 +35,12 @@ from recon_gen.apps.executives import datasets as _register_contracts  # noqa: F
 from recon_gen.common.l2 import default_l2_instance
 from recon_gen.common import rich_text as rt
 from recon_gen.common.config import Config
-from recon_gen.common.ids import ParameterName, SheetId, VisualId
+from recon_gen.common.ids import (
+    HandbookPath,
+    ParameterName,
+    SheetId,
+    VisualId,
+)
 from recon_gen.common.l2 import L2Instance, ThemePreset
 from recon_gen.common.models import Analysis as ModelAnalysis
 from recon_gen.common.models import Dashboard as ModelDashboard
@@ -906,6 +911,16 @@ def build_executives_app(
     for ds in datasets.values():
         app.add_dataset(ds)
 
+    # CN.5 — sheet_id → handbook page. Keep in sync with
+    # docs/handbook/executives/*.md; CN.6's liveness gate (Phase CN.6)
+    # asserts every Sheet.handbook_path resolves to a real file.
+    _HANDBOOK_PATHS: dict[SheetId, str] = {
+        SHEET_EXEC_GETTING_STARTED: "executives/getting-started",
+        SHEET_EXEC_PROGRAM_HEALTH: "executives/program-health",
+        SHEET_EXEC_ACCOUNT_COVERAGE: "executives/account-coverage",
+        SHEET_EXEC_TRANSACTION_VOLUME: "executives/transaction-volume",
+        SHEET_EXEC_MONEY_MOVED: "executives/money-moved",
+    }
     sheets: dict[str, Sheet] = {}
     for sheet_id, name, title, description in _EXEC_SHEET_SPECS:
         sheets[sheet_id] = analysis.add_sheet(Sheet(
@@ -913,6 +928,7 @@ def build_executives_app(
             name=name,
             title=title,
             description=description,
+            handbook_path=HandbookPath(_HANDBOOK_PATHS[sheet_id]),
         ))
 
     _populate_getting_started(
@@ -960,6 +976,7 @@ def build_executives_app(
         name=APP_INFO_SHEET_NAME,
         title=APP_INFO_SHEET_TITLE,
         description=APP_INFO_SHEET_DESCRIPTION,
+        handbook_path=HandbookPath("_shared/app-info"),
     ))
     populate_app_info_sheet(
         cfg, app_info_sheet,

@@ -65,7 +65,7 @@ from recon_gen.common.handbook.l2ft_exceptions import (
     load_bundled_l2ft_exceptions,
     panel_markdown as l2ft_panel_markdown,
 )
-from recon_gen.common.ids import ParameterName, SheetId
+from recon_gen.common.ids import HandbookPath, ParameterName, SheetId
 from recon_gen.common.l2 import L2Instance
 from recon_gen.common.models import DateTimeDefaultValues
 from recon_gen.common.sheets.app_info import (
@@ -253,30 +253,35 @@ def build_l2_flow_tracing_app(
         name=_GETTING_STARTED_NAME,
         title=_GETTING_STARTED_TITLE,
         description=_GETTING_STARTED_DESCRIPTION,
+        handbook_path=HandbookPath("l2ft/getting-started"),
     ))
     rails_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_RAILS,
         name=_RAILS_NAME,
         title=_RAILS_TITLE,
         description=_RAILS_DESCRIPTION,
+        handbook_path=HandbookPath("l2ft/rails"),
     ))
     chains_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_CHAINS,
         name=_CHAINS_NAME,
         title=_CHAINS_TITLE,
         description=_CHAINS_DESCRIPTION,
+        handbook_path=HandbookPath("l2ft/chains"),
     ))
     transfer_templates_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_TRANSFER_TEMPLATES,
         name=_TRANSFER_TEMPLATES_NAME,
         title=_TRANSFER_TEMPLATES_TITLE,
         description=_TRANSFER_TEMPLATES_DESCRIPTION,
+        handbook_path=HandbookPath("l2ft/transfer-templates"),
     ))
     l2_exceptions_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_L2_EXCEPTIONS,
         name=_L2_EXCEPTIONS_NAME,
         title=_L2_EXCEPTIONS_TITLE,
         description=_L2_EXCEPTIONS_DESCRIPTION,
+        handbook_path=HandbookPath("l2ft/l2-exceptions"),
     ))
 
     _populate_getting_started(
@@ -318,6 +323,7 @@ def build_l2_flow_tracing_app(
         name=APP_INFO_SHEET_NAME,
         title=APP_INFO_SHEET_TITLE,
         description=APP_INFO_SHEET_DESCRIPTION,
+        handbook_path=HandbookPath("_shared/app-info"),
     ))
     populate_app_info_sheet(
         cfg, app_info_sheet,

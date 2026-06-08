@@ -713,6 +713,53 @@ def make_app(
             headers={"Cache-Control": visual_data_cache_header},
         )
 
+    async def handbook_page(request: Request) -> Response:
+        """CN.5 — render a handbook page for the App2 ``?`` side panel.
+
+        Route: ``GET /handbook/{handbook_path:path}``. The path comes
+        from a Sheet's ``handbook_path: HandbookPath`` field (e.g.
+        ``l1/drift``); resolved to ``docs/handbook/<path>.md`` on disk
+        and rendered through the same markdown pipeline the rest of
+        the App2 surface uses. Returns an HTML fragment ready for
+        injection into the side panel container — no full-page chrome.
+
+        404 if the file doesn't exist (e.g. a Sheet declared a path
+        that wasn't authored yet) or if the path tries to escape the
+        handbook directory.
+        """
+        from pathlib import Path as _Path  # noqa: PLC0415 — lazy
+        import markdown as _md  # noqa: PLC0415 — lazy
+
+        # server.py lives at src/recon_gen/common/html/server.py;
+        # parents[0]=html, [1]=common, [2]=recon_gen, [3]=src, [4]=repo
+        repo_root = _Path(__file__).resolve().parents[4]
+        handbook_root = repo_root / "docs" / "handbook"
+        raw_path = request.path_params["handbook_path"]
+        # Resolve + ensure the final path is still inside handbook_root.
+        # Defense against ``../../etc/passwd`` style traversal.
+        candidate = (handbook_root / f"{raw_path}.md").resolve()
+        try:
+            candidate.relative_to(handbook_root.resolve())
+        except ValueError:
+            raise HTTPException(status_code=404)  # noqa: B904
+        if not candidate.is_file():
+            raise HTTPException(status_code=404)
+        text = candidate.read_text(encoding="utf-8")
+        html_body: str = _md.markdown(
+            text,
+            extensions=["fenced_code", "tables", "toc"],
+        )
+        # The side panel injects this as innerHTML; wrap in a
+        # ``<article>`` so its prose-class styles can target the
+        # handbook content specifically.
+        wrapped = (
+            "<article class=\"handbook-page prose prose-sm "
+            "max-w-none\">"
+            f"{html_body}"
+            "</article>"
+        )
+        return HTMLResponse(wrapped)
+
     async def dropdown_options(request: Request) -> Response:
         """BR.1 — App2 cascade refresh endpoint.
 
@@ -889,6 +936,13 @@ def make_app(
             "/dashboards/{dashboard_id}/sheets/{sheet_id}"
             "/dropdown-options/{dataset}/{column}",
             dropdown_options, methods=["GET"],
+        ),
+        # CN.5 — handbook page fetch for the App2 ``?`` side panel.
+        # Path converter ``:path`` lets it match nested slugs like
+        # ``l1/drift`` or ``_shared/app-info``.
+        Route(
+            "/handbook/{handbook_path:path}",
+            handbook_page, methods=["GET"],
         ),
         Mount(
             "/static",

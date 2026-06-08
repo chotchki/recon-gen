@@ -58,6 +58,7 @@ from recon_gen.common.l2 import default_l2_instance
 from recon_gen.common.dataset_contract import ColumnShape
 from recon_gen.common import rich_text as rt
 from recon_gen.common.config import Config
+from recon_gen.common.ids import HandbookPath
 from recon_gen.common.l2 import L2Instance, ThemePreset
 from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_DESCRIPTION,
@@ -221,6 +222,7 @@ def _build_getting_started_sheet(
             "Landing page — summarises each tab in this dashboard. "
             "No filters or visuals."
         ),
+        handbook_path=HandbookPath("investigation/getting-started"),
     ))
 
     sheet.layout.row(height=5).add_text_box(
@@ -316,6 +318,7 @@ def _build_recipient_fanout_sheet(
         name="Recipient Fanout",
         title="Recipient Fanout",
         description=_FANOUT_DESCRIPTION,
+        handbook_path=HandbookPath("investigation/fanout"),
     ))
 
     # Row 1: 3 KPIs each ⅓ width.
@@ -479,6 +482,7 @@ def _build_volume_anomalies_sheet(
         name="Volume Anomalies",
         title="Volume Anomalies",
         description=_ANOMALY_DESCRIPTION,
+        handbook_path=HandbookPath("investigation/anomalies"),
     ))
 
     # Row 1: KPI ⅓ + σ distribution ⅔. Distribution is taller (bucket
@@ -683,6 +687,7 @@ def _build_money_trail_sheet(
         name="Money Trail",
         title="Money Trail",
         description=_MONEY_TRAIL_DESCRIPTION,
+        handbook_path=HandbookPath("investigation/money-trail"),
     ))
 
     # Layout: Sankey ⅔ width on the left, hop-by-hop table ⅓ width on
@@ -903,6 +908,7 @@ def _build_account_network_sheet(
         name="Account Network",
         title="Account Network",
         description=_ACCOUNT_NETWORK_DESCRIPTION,
+        handbook_path=HandbookPath("investigation/account-network"),
     ))
 
     # All three Drills below are walk-the-flow (same-sheet) actions —
@@ -1161,6 +1167,7 @@ def _build_app_info_sheet(
         name=APP_INFO_SHEET_NAME,
         title=APP_INFO_SHEET_TITLE,
         description=APP_INFO_SHEET_DESCRIPTION,
+        handbook_path=HandbookPath("_shared/app-info"),
     ))
     populate_app_info_sheet(
         cfg, sheet,

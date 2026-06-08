@@ -379,6 +379,29 @@ _PAGE_SHELL = """\
 </head>
 <body class="bg-surface-bg text-primary-fg font-sans antialiased">
 {nav}{body}
+  <!-- CN.5 — handbook side panel. Hidden by default; JS reveals
+       it on ? button click + injects the fetched handbook HTML. -->
+  <aside id="handbook-side-panel"
+         class="fixed top-0 right-0 h-full w-[28rem] max-w-full
+                bg-surface-bg border-l border-surface-alt shadow-lg
+                overflow-y-auto z-50 transform translate-x-full
+                transition-transform duration-200"
+         aria-hidden="true">
+    <div class="flex items-center justify-between p-4 border-b
+                border-surface-alt sticky top-0 bg-surface-bg z-10">
+      <h2 class="text-lg font-semibold m-0" id="handbook-side-panel-title">
+        Handbook
+      </h2>
+      <button type="button"
+              id="handbook-side-panel-close"
+              class="text-secondary-fg hover:text-accent text-xl
+                     w-8 h-8 inline-flex items-center justify-center"
+              aria-label="Close handbook panel">×</button>
+    </div>
+    <div id="handbook-side-panel-body" class="p-4 prose prose-sm max-w-none">
+      <!-- Content injected by bootstrap.js on ? click. -->
+    </div>
+  </aside>
   <script>{bootstrap_js}</script>
   <script>{dev_log_js}</script>
 </body>
@@ -1429,11 +1452,37 @@ def emit_html(
     # the other 3 dashboards. Link target is constant whether the
     # server runs standalone (``recon-gen dashboards``) or under
     # studio — both expose the listing at ``/dashboards``.
+    # CN.5 — handbook ? button next to the H1 when the sheet declares
+    # one. The button opens /handbook/<path> in the side panel via
+    # the JS handler in bootstrap.js. Skipped when handbook_path is
+    # None so non-handbook surfaces don't carry the affordance.
+    handbook_path = getattr(sheet, "handbook_path", None)
+    if handbook_path:
+        help_btn = (
+            f'<a href="/handbook/{html.escape(str(handbook_path))}" '
+            f'class="handbook-help-button ml-3 inline-flex items-center '
+            f'justify-center w-7 h-7 rounded-full border border-current '
+            f'text-secondary-fg hover:text-accent hover:border-accent '
+            f'text-sm font-semibold align-middle" '
+            f'title="Open the handbook page for this sheet" '
+            f'data-handbook-path="{html.escape(str(handbook_path))}"'
+            f'>?</a>'
+        )
+        title_html = (
+            f'  <h1 class="{title_class}">'
+            f'{html.escape(sheet.title)}{help_btn}'
+            f'</h1>'
+        )
+    else:
+        title_html = (
+            f'  <h1 class="{title_class}">'
+            f'{html.escape(sheet.title)}</h1>'
+        )
     body_parts: list[str] = [
         f'  <nav class="{nav_class}">'
         f'<a href="/dashboards" class="{nav_link_class}">← Dashboards</a>'
         f'</nav>',
-        f'  <h1 class="{title_class}">{html.escape(sheet.title)}</h1>',
+        title_html,
     ]
     if sheet.description:
         body_parts.append(

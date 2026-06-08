@@ -2065,6 +2065,75 @@
     });
   }
 
+  // CN.5 — handbook ? button wiring.
+  // Every sheet whose tree carries a Sheet.handbook_path renders an
+  // anchor with class `handbook-help-button` next to the H1. Click →
+  // reveal the side panel, fetch /handbook/<path>, inject the HTML
+  // response into #handbook-side-panel-body. Close: × button or Esc.
+  function wireHandbookHelpButton() {
+    var panel = document.getElementById("handbook-side-panel");
+    var body = document.getElementById("handbook-side-panel-body");
+    var title = document.getElementById("handbook-side-panel-title");
+    var closeBtn = document.getElementById("handbook-side-panel-close");
+    if (!panel || !body || !closeBtn) {
+      return;
+    }
+    function openHandbook(path) {
+      panel.classList.remove("translate-x-full");
+      panel.setAttribute("aria-hidden", "false");
+      body.innerHTML =
+        '<p class="text-secondary-fg italic">Loading handbook…</p>';
+      fetch("/handbook/" + path, { headers: { Accept: "text/html" } })
+        .then((res) => {
+          if (!res.ok) {
+            throw new Error("HTTP " + res.status);
+          }
+          return res.text();
+        })
+        .then((html) => {
+          body.innerHTML = html;
+          if (title) {
+            title.textContent = "Handbook: " + path;
+          }
+        })
+        .catch((err) => {
+          body.innerHTML =
+            '<p class="text-secondary-fg">Could not load handbook: ' +
+            String(err.message || err) +
+            "</p>";
+        });
+    }
+    function closeHandbook() {
+      panel.classList.add("translate-x-full");
+      panel.setAttribute("aria-hidden", "true");
+    }
+    document.addEventListener("click", (ev) => {
+      var t = ev.target;
+      var p;
+      while (t && t !== document) {
+        if (t.classList && t.classList.contains("handbook-help-button")) {
+          ev.preventDefault();
+          p = t.getAttribute("data-handbook-path");
+          if (p) {
+            openHandbook(p);
+          }
+          return;
+        }
+        t = t.parentNode;
+      }
+    });
+    closeBtn.addEventListener("click", closeHandbook);
+    document.addEventListener("keydown", (ev) => {
+      if (
+        ev.key === "Escape" &&
+        panel.getAttribute("aria-hidden") === "false"
+      ) {
+        closeHandbook();
+      }
+    });
+  }
+  document.addEventListener("DOMContentLoaded", wireHandbookHelpButton);
+
   // X.2.a.2 — test-mode export. When window.__test_mode__ is set
   // BEFORE this script runs (via Playwright's addInitScript), the
   // IIFE-scoped functions become reachable for unit tests under

@@ -17,7 +17,12 @@ from typing import Protocol, runtime_checkable
 
 from recon_gen.common.config import Config
 from recon_gen.common.dataset_contract import get_contract
-from recon_gen.common.ids import FilterGroupId, SheetId, VisualId
+from recon_gen.common.ids import (
+    FilterGroupId,
+    HandbookPath,
+    SheetId,
+    VisualId,
+)
 from recon_gen.common.models import (
     AnalysisDefinition,
     DashboardPublishOptions,
@@ -211,6 +216,15 @@ class Sheet:
     name: str
     title: str
     description: str
+    # CN.5 — optional pointer at the handbook page that explains what
+    # this sheet teaches. Renderer emits a `?` button in the sheet
+    # chrome when set, opening the linked page in the App2 side panel
+    # via `GET /handbook/<handbook_path>`. None = no `?` button. App2-
+    # only feature; QS embeds carry the sheet description text alone
+    # (registered as `handbook_help_panel` in common/parity/breaks.py).
+    # Convention: ``<app>/<sheet>`` without ``.md`` — the route
+    # appends the extension when resolving.
+    handbook_path: HandbookPath | None = None
     visuals: list[VisualLike] = field(default_factory=list[VisualLike])
     parameter_controls: list[ParameterControlLike] = field(
         default_factory=list[ParameterControlLike],

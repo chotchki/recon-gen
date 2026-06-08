@@ -98,7 +98,12 @@ from recon_gen.common.handbook.invariants import (
     load_bundled_invariants,
     panel_markdown,
 )
-from recon_gen.common.ids import FilterGroupId, ParameterName, SheetId
+from recon_gen.common.ids import (
+    FilterGroupId,
+    HandbookPath,
+    ParameterName,
+    SheetId,
+)
 from recon_gen.common.l2 import L2Instance
 from recon_gen.common.dataset_contract import ColumnShape
 from recon_gen.common.sheets.app_info import (
@@ -2746,66 +2751,77 @@ def build_l1_dashboard_app(
         name=_GETTING_STARTED_NAME,
         title=_GETTING_STARTED_TITLE,
         description=_GETTING_STARTED_DESCRIPTION,
+        handbook_path=HandbookPath("l1/getting-started"),
     ))
     drift_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_DRIFT,
         name=_DRIFT_NAME,
         title=_DRIFT_TITLE,
         description=_DRIFT_DESCRIPTION,
+        handbook_path=HandbookPath("l1/drift"),
     ))
     drift_timelines_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_DRIFT_TIMELINES,
         name=_DRIFT_TIMELINES_NAME,
         title=_DRIFT_TIMELINES_TITLE,
         description=_DRIFT_TIMELINES_DESCRIPTION,
+        handbook_path=HandbookPath("l1/drift-timelines"),
     ))
     overdraft_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_OVERDRAFT,
         name=_OVERDRAFT_NAME,
         title=_OVERDRAFT_TITLE,
         description=_OVERDRAFT_DESCRIPTION,
+        handbook_path=HandbookPath("l1/overdraft"),
     ))
     limit_breach_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_LIMIT_BREACH,
         name=_LIMIT_BREACH_NAME,
         title=_LIMIT_BREACH_TITLE,
         description=_LIMIT_BREACH_DESCRIPTION,
+        handbook_path=HandbookPath("l1/limit-breach"),
     ))
     pending_aging_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_PENDING_AGING,
         name=_PENDING_AGING_NAME,
         title=_PENDING_AGING_TITLE,
         description=_PENDING_AGING_DESCRIPTION,
+        handbook_path=HandbookPath("l1/pending-aging"),
     ))
     unbundled_aging_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_UNBUNDLED_AGING,
         name=_UNBUNDLED_AGING_NAME,
         title=_UNBUNDLED_AGING_TITLE,
         description=_UNBUNDLED_AGING_DESCRIPTION,
+        handbook_path=HandbookPath("l1/unbundled-aging"),
     ))
     supersession_audit_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_SUPERSESSION_AUDIT,
         name=_SUPERSESSION_AUDIT_NAME,
         title=_SUPERSESSION_AUDIT_TITLE,
         description=_SUPERSESSION_AUDIT_DESCRIPTION,
+        handbook_path=HandbookPath("l1/supersession-audit"),
     ))
     l1_exceptions_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_L1_EXCEPTIONS,
         name=_L1_EXCEPTIONS_NAME,
         title=_L1_EXCEPTIONS_TITLE,
         description=_L1_EXCEPTIONS_DESCRIPTION,
+        handbook_path=HandbookPath("l1/exceptions"),
     ))
     daily_statement_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_DAILY_STATEMENT,
         name=_DAILY_STATEMENT_NAME,
         title=_DAILY_STATEMENT_TITLE,
         description=_DAILY_STATEMENT_DESCRIPTION,
+        handbook_path=HandbookPath("l1/daily-statement"),
     ))
     transactions_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_TRANSACTIONS,
         name=_TRANSACTIONS_NAME,
         title=_TRANSACTIONS_TITLE,
         description=_TRANSACTIONS_DESCRIPTION,
+        handbook_path=HandbookPath("l1/transactions"),
     ))
     # M.4.4.5 — App Info ("i") sheet, ALWAYS LAST. Diagnostic canary;
     # see common/sheets/app_info.py.
@@ -2814,6 +2830,7 @@ def build_l1_dashboard_app(
         name=APP_INFO_SHEET_NAME,
         title=APP_INFO_SHEET_TITLE,
         description=APP_INFO_SHEET_DESCRIPTION,
+        handbook_path=HandbookPath("_shared/app-info"),
     ))
 
     # Populators — each receives the sheets it drills into so the drill
