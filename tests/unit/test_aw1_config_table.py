@@ -556,6 +556,11 @@ def test_drop_schema_includes_config_kv_drop_and_typed_view_drops() -> None:
     assert "DROP VIEW IF EXISTS spec_example_v_config_limit_schedules" in sql
     assert "DROP VIEW IF EXISTS spec_example_v_config_chain_children" in sql
     assert "DROP VIEW IF EXISTS spec_example_v_config_transfer_templates" in sql
+    # CQ.3 — the two picker-source views ride the same drop/create chain.
+    assert "DROP VIEW IF EXISTS spec_example_v_config_account_roles" in sql
+    assert (
+        "DROP VIEW IF EXISTS spec_example_v_config_rail_metadata_keys" in sql
+    )
 
 
 def test_v_config_transfer_templates_projects_spec_example_templates() -> None:
@@ -668,3 +673,171 @@ def test_emit_config_populate_sql_starts_with_delete() -> None:
     assert all(
         line.startswith("INSERT INTO spec_example_config_kv") for line in lines[1:]
     ), "every non-DELETE line should be an INSERT INTO config_kv"
+
+
+# ---------------------------------------------------------------------------
+# CQ.3 — picker-source typed views.
+# ---------------------------------------------------------------------------
+
+
+def test_v_config_account_roles_projects_spec_example_distinct_roles() -> None:
+    """CQ.3.a: ``<prefix>_v_config_account_roles`` projects DISTINCT
+    account roles across L2's ``accounts`` + ``account_templates`` arrays.
+    Powers the L1 Account Role dropdown post-CQ.3."""
+    conn = _fresh_db_with_full_schema()
+    try:
+        instance = load_instance(_SPEC_EXAMPLE)
+        from recon_gen.common.l2.serializer import serialize_l2
+        import yaml
+        l2_dict = yaml.safe_load(serialize_l2(instance))
+        replace_config(
+            conn, prefix=_PREFIX,
+            cfg_json="{}",
+            l2_json=json.dumps(l2_dict),
+            as_of=datetime(2030, 1, 1),
+        )
+        rows = conn.execute(
+            f"SELECT account_role FROM {_PREFIX}_v_config_account_roles "
+            "ORDER BY account_role"
+        ).fetchall()
+        roles = [r[0] for r in rows]
+        # DISTINCT — no duplicates even if a role appears on both an
+        # Account and an AccountTemplate.
+        assert len(roles) == len(set(roles)), (
+            f"v_config_account_roles must be DISTINCT, got {roles}"
+        )
+        # spec_example carries the full L2 of account-side declarations.
+        # Roles seen here must be a SUPERSET of the roles declared in the
+        # Python primitives surface (cross-checked via the L2Instance).
+        from recon_gen.common.l2.primitives import L2Instance
+        assert isinstance(instance, L2Instance)
+        python_roles = {a.role for a in instance.accounts}
+        python_roles.update(t.role for t in instance.account_templates)
+        assert set(roles) >= python_roles, (
+            f"view-projected roles {set(roles)} must cover L2-declared "
+            f"roles {python_roles}"
+        )
+        assert len(roles) >= 1, "spec_example declares at least one role"
+    finally:
+        conn.close()
+
+
+def test_v_config_rail_metadata_keys_projects_spec_example_pairs() -> None:
+    """CQ.3.b: ``<prefix>_v_config_rail_metadata_keys`` projects one
+    row per ``(rail_name, metadata_key)`` across all L2 rails. Powers
+    the L2FT Metadata Key dropdowns post-CQ.3."""
+    conn = _fresh_db_with_full_schema()
+    try:
+        instance = load_instance(_SPEC_EXAMPLE)
+        from recon_gen.common.l2.serializer import serialize_l2
+        import yaml
+        l2_dict = yaml.safe_load(serialize_l2(instance))
+        replace_config(
+            conn, prefix=_PREFIX,
+            cfg_json="{}",
+            l2_json=json.dumps(l2_dict),
+            as_of=datetime(2030, 1, 1),
+        )
+        rows = conn.execute(
+            "SELECT rail_name, metadata_key "
+            f"FROM {_PREFIX}_v_config_rail_metadata_keys "
+            "ORDER BY rail_name, metadata_key"
+        ).fetchall()
+        # Cross-check against the Python primitives: every
+        # (rail.name, k) in the L2 instance must appear in the view
+        # output, and vice versa.
+        from recon_gen.common.l2.primitives import L2Instance
+        assert isinstance(instance, L2Instance)
+        python_pairs = {
+            (rail.name, k)
+            for rail in instance.rails
+            for k in rail.metadata_keys
+        }
+        view_pairs = {(r[0], r[1]) for r in rows}
+        assert view_pairs == python_pairs, (
+            f"view pairs {view_pairs} ≠ python pairs {python_pairs}"
+        )
+
+        # DISTINCT-key picker dataset shape — what the L2FT Metadata Key
+        # dropdown will actually query (CQ.3.c).
+        distinct_keys = conn.execute(
+            "SELECT DISTINCT metadata_key "
+            f"FROM {_PREFIX}_v_config_rail_metadata_keys "
+            "ORDER BY metadata_key"
+        ).fetchall()
+        python_keys = {k for _, k in python_pairs}
+        assert {k[0] for k in distinct_keys} == python_keys
+    finally:
+        conn.close()
+
+
+def test_v_config_account_roles_empty_when_no_accounts() -> None:
+    """An L2 with no accounts + no account_templates → zero rows.
+    Defensive: confirms the JOIN tree finds no matches without leaking
+    NULL rows."""
+    from recon_gen.common.l2 import L2Instance
+    conn = duckdb.connect(":memory:")
+    instance = L2Instance(
+        accounts=(),
+        account_templates=(),
+        rails=(),
+        transfer_templates=(),
+        chains=(),
+        limit_schedules=(),
+    )
+    try:
+        cur = conn.cursor()
+        execute_script(
+            cur, emit_schema(instance, prefix="nc", dialect=Dialect.DUCKDB),
+            dialect=Dialect.DUCKDB,
+        )
+        conn.commit()
+        # Minimal L2 yaml with rails but no accounts.
+        replace_config(
+            conn, prefix="nc",
+            cfg_json="{}",
+            l2_json=json.dumps({"rails": [{"name": "ACH"}]}),
+            as_of=datetime(2030, 1, 1),
+        )
+        rows = conn.execute(
+            "SELECT * FROM nc_v_config_account_roles"
+        ).fetchall()
+        assert rows == []
+    finally:
+        conn.close()
+
+
+def test_v_config_rail_metadata_keys_empty_when_no_metadata() -> None:
+    """A rail with no ``metadata_keys`` → no rows for that rail.
+    Inner JOIN to the metadata-keys array container drops the rail
+    entirely; the picker dataset will not surface phantom rails."""
+    from recon_gen.common.l2 import L2Instance
+    conn = duckdb.connect(":memory:")
+    instance = L2Instance(
+        accounts=(),
+        account_templates=(),
+        rails=(),
+        transfer_templates=(),
+        chains=(),
+        limit_schedules=(),
+    )
+    try:
+        cur = conn.cursor()
+        execute_script(
+            cur, emit_schema(instance, prefix="nc", dialect=Dialect.DUCKDB),
+            dialect=Dialect.DUCKDB,
+        )
+        conn.commit()
+        # One rail with NO metadata_keys.
+        replace_config(
+            conn, prefix="nc",
+            cfg_json="{}",
+            l2_json=json.dumps({"rails": [{"name": "ACH"}]}),
+            as_of=datetime(2030, 1, 1),
+        )
+        rows = conn.execute(
+            "SELECT * FROM nc_v_config_rail_metadata_keys"
+        ).fetchall()
+        assert rows == []
+    finally:
+        conn.close()

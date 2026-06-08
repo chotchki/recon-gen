@@ -2057,6 +2057,14 @@ _TYPED_CONFIG_VIEW_NAMES: tuple[str, ...] = (
     "v_config_limit_schedules",
     "v_config_chain_children",
     "v_config_transfer_templates",
+    # CQ.3 — picker-source views. ``_v_config_account_roles`` powers
+    # the L1 Account Role dropdown; ``_v_config_rail_metadata_keys``
+    # powers the L2FT Metadata Key dropdowns. Both replace
+    # ``StaticValues(...)`` callsites that previously embedded L2-
+    # derived universes inline and would have tripped the AWS
+    # 32-element StaticValues ceiling at fleet scale.
+    "v_config_account_roles",
+    "v_config_rail_metadata_keys",
 )
 
 
@@ -2105,6 +2113,10 @@ def _emit_typed_config_view_creates(p: str, dialect: Dialect) -> str:
         + _render_v_config_chain_children(p, dialect)
         + "\n"
         + _render_v_config_transfer_templates(p, dialect)
+        + "\n"
+        + _render_v_config_account_roles(p, dialect)
+        + "\n"
+        + _render_v_config_rail_metadata_keys(p, dialect)
     )
 
 
@@ -2348,6 +2360,90 @@ def _render_v_config_transfer_templates(p: str, dialect: Dialect) -> str:
         f"WHERE root.parent_id IS NULL\n"
         f"  AND root.key = 'l2_yaml'\n"
         f"GROUP BY tt_obj.node_id;\n"
+    )
+
+
+def _render_v_config_account_roles(p: str, dialect: Dialect) -> str:
+    """CQ.3.a — ``<prefix>_v_config_account_roles`` — DISTINCT account
+    roles declared across L2's ``accounts`` + ``account_templates``
+    arrays.
+
+    One column: ``account_role VARCHAR(100)``. Powers the L1 Account
+    Role dropdown (replaces the pre-CQ.3 ``StaticValues([sentinel +
+    l1_account_role_values(l2_instance)])`` which would have tripped
+    the AWS 32-element StaticValues ceiling at fleet scale).
+
+    Walk: anchor at ``l2_yaml`` root → ``accounts`` OR
+    ``account_templates`` array container → each element object → the
+    ``role`` field row. UNION + outer DISTINCT collapses identical
+    role names that appear on both an Account and an AccountTemplate
+    (legal in L2 — a customer-DDA template's role might equal the
+    standalone Cash account's role to make them sweepable to the same
+    parent). Direct field-row JOIN (no pivoting); the role field is
+    the only one we want.
+    """
+    role_expr = lob_substr("role_field.value", 100, dialect)
+    return (
+        f"CREATE VIEW {p}_v_config_account_roles AS\n"
+        f"SELECT DISTINCT {role_expr} AS account_role\n"
+        f"FROM {p}_config_kv root\n"
+        f"JOIN {p}_config_kv accts_arr\n"
+        f"  ON accts_arr.parent_id = root.node_id\n"
+        f" AND accts_arr.key IN ('accounts', 'account_templates')\n"
+        f"JOIN {p}_config_kv acct_obj\n"
+        f"  ON acct_obj.parent_id = accts_arr.node_id\n"
+        f"JOIN {p}_config_kv role_field\n"
+        f"  ON role_field.parent_id = acct_obj.node_id\n"
+        f" AND role_field.key = 'role'\n"
+        f"WHERE root.parent_id IS NULL\n"
+        f"  AND root.key = 'l2_yaml'\n"
+        f"  AND role_field.value IS NOT NULL;\n"
+    )
+
+
+def _render_v_config_rail_metadata_keys(
+    p: str, dialect: Dialect,
+) -> str:
+    """CQ.3.b — ``<prefix>_v_config_rail_metadata_keys`` — one row per
+    ``(rail_name, metadata_key)`` pair across all L2 rails.
+
+    Columns: ``rail_name VARCHAR(100)``, ``metadata_key VARCHAR(100)``.
+    Powers the L2FT Metadata Key dropdowns. Rail-scoped (not flat
+    DISTINCT-key view) per operator preference 2026-06-08 — future
+    rail-narrowing capability stays cheap; the picker queries DISTINCT
+    on its own SELECT.
+
+    Walk: anchor at ``l2_yaml`` root → ``rails`` array → each
+    ``rail_obj`` → join rail's ``name`` field + rail's
+    ``metadata_keys`` array container → each ``meta_elem`` (bare
+    string with ``value = <key>`` and ``key = <index>``). Direct
+    element-row JOIN; ``metadata_keys`` is an array of strings (no
+    mapping form like ``chain.children`` supports).
+    """
+    rail_name_expr = lob_substr("rail_name_field.value", 100, dialect)
+    meta_key_expr = lob_substr("meta_elem.value", 100, dialect)
+    return (
+        f"CREATE VIEW {p}_v_config_rail_metadata_keys AS\n"
+        f"SELECT\n"
+        f"  {rail_name_expr} AS rail_name,\n"
+        f"  {meta_key_expr} AS metadata_key\n"
+        f"FROM {p}_config_kv root\n"
+        f"JOIN {p}_config_kv rails_arr\n"
+        f"  ON rails_arr.parent_id = root.node_id\n"
+        f" AND rails_arr.key = 'rails'\n"
+        f"JOIN {p}_config_kv rail_obj\n"
+        f"  ON rail_obj.parent_id = rails_arr.node_id\n"
+        f"JOIN {p}_config_kv rail_name_field\n"
+        f"  ON rail_name_field.parent_id = rail_obj.node_id\n"
+        f" AND rail_name_field.key = 'name'\n"
+        f"JOIN {p}_config_kv meta_arr\n"
+        f"  ON meta_arr.parent_id = rail_obj.node_id\n"
+        f" AND meta_arr.key = 'metadata_keys'\n"
+        f"JOIN {p}_config_kv meta_elem\n"
+        f"  ON meta_elem.parent_id = meta_arr.node_id\n"
+        f"WHERE root.parent_id IS NULL\n"
+        f"  AND root.key = 'l2_yaml'\n"
+        f"  AND meta_elem.value IS NOT NULL;\n"
     )
 
 
