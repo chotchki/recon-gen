@@ -1141,41 +1141,45 @@ def _coerce_form(
             )
             fields[spec.name] = tuple(Identifier(v) for v in raw_list)
         elif spec.kind == "metadata_value_examples":
-            # BF.4 — inline-edit picker wire shape:
-            #   <name>__present=1
-            #   <name>__num=<n>
-            #   <name>__key_<i>=<metadata key>
-            #   <name>__vals_<i>=<comma-separated values>
-            # Empty per-key value list drops that key (operator can
-            # blank out a row to remove it without going back to
-            # metadata_keys).
+            # BF.4-followup (2026-06-07) — the picker now lives inline
+            # inside each metadata_keys chip. Wire shape:
+            #   <name>__present=1     (from the metadata_keys widget)
+            #   <name>__for_<key>=<comma-separated values>  (one per chip)
+            # The submitted metadata_keys list (same form payload)
+            # drives which keys to look up. Empty per-key value list
+            # drops that key (matches the locked #2 behavior — only
+            # keys with actual values land in the L2 yaml).
             if f"{spec.name}__present" not in form:
                 continue
             from recon_gen.common.l2.primitives import (  # noqa: PLC0415
                 Identifier,
             )
-            num_raw = form.get(f"{spec.name}__num", "0")
-            try:
-                num = int(str(num_raw) or "0")
-            except ValueError:
-                num = 0
+            # The metadata_keys field's name may be prefixed (BB.2's
+            # `reconciler_new_metadata_keys`) — recover by swapping
+            # `metadata_value_examples` → `metadata_keys` in this
+            # spec's name.
+            keys_field_name = spec.name.replace(
+                "metadata_value_examples", "metadata_keys",
+            )
+            keys_submitted: list[str] = [
+                str(v).strip()
+                for v in form.getlist(keys_field_name)
+                if str(v).strip()
+            ]
             assembled: list[tuple[Identifier, tuple[str, ...]]] = []
             override_assembled: list[tuple[str, tuple[str, ...]]] = []
-            for i in range(num):
-                key_raw = str(form.get(f"{spec.name}__key_{i}") or "").strip()
-                vals_raw = str(form.get(f"{spec.name}__vals_{i}") or "")
-                if not key_raw:
-                    continue
+            for key in keys_submitted:
+                vals_raw = str(
+                    form.get(f"{spec.name}__for_{key}") or "",
+                )
                 parts = tuple(
                     p.strip() for p in vals_raw.split(",") if p.strip()
                 )
                 if not parts:
                     continue
-                assembled.append((Identifier(key_raw), parts))
-                override_assembled.append((key_raw, parts))
+                assembled.append((Identifier(key), parts))
+                override_assembled.append((key, parts))
             fields[spec.name] = tuple(assembled)
-            # Override stored as tuple-of-(key, values) for re-render
-            # via `_metadata_value_examples_as_dict`.
             overrides[spec.name] = tuple(  # pyright: ignore[reportArgumentType]: overrides dict stores tuple[(str, tuple[str, ...]), ...] for this kind; outer Mapping isn't nested-tuple-aware
                 override_assembled,
             )
@@ -1564,17 +1568,98 @@ def _render_field(
             "px-2 py-0.5 text-secondary-fg hover:text-danger hover:bg-red-50 "
             "rounded-sm cursor-pointer text-base leading-none"
         )
-        chips_html = "".join(
-            f'<li class="{chip_li_cls}" data-multiselect-order-value="{escape(s)}">'
-            f'<span aria-hidden="true" class="cursor-grab text-secondary-fg select-none">⋮</span>'
-            f'<input type="hidden" name="{escape(spec.name)}" value="{escape(s)}">'
-            f'<span class="grow">{escape(s)}</span>'
-            f'<button type="button" class="{chip_remove_cls}" '
-            f'aria-label="Remove {escape(s)}" '
-            f'data-multiselect-remove="{escape(s)}">&times;</button>'
-            f'</li>'
-            for s in selected
+        # BF.4-followup (2026-06-07) — when this multi_select IS the
+        # metadata_keys picker, each chip also carries an inline text
+        # input for the value-examples (comma-separated). Collapses
+        # the two-field UX (separate metadata_value_examples picker)
+        # into one widget. The inline input's name uses the prefix-
+        # aware swap `metadata_keys` → `metadata_value_examples`, so
+        # BB.2's `reconciler_new_` prefix flows through correctly.
+        is_metadata_keys = spec.select_from == "metadata_keys"
+        examples_field_name = spec.name.replace(
+            "metadata_keys", "metadata_value_examples",
         )
+        values_by_key: dict[str, tuple[str, ...]] = {}
+        if is_metadata_keys and entity is not None:
+            raw_examples = (
+                getattr(entity, "metadata_value_examples", ()) or ()
+            )
+            values_by_key = _metadata_value_examples_as_dict(raw_examples)
+
+        def _chip_html(key: str) -> str:
+            if is_metadata_keys:
+                existing_vals = ", ".join(values_by_key.get(key, ()))
+                inline_input_cls = (
+                    "px-1.5 py-0.5 text-xs border border-surface-border "
+                    "rounded-sm font-mono bg-white grow min-w-0"
+                )
+                return (
+                    f'<li class="{chip_li_cls}" data-multiselect-order-value="{escape(key)}">'
+                    f'<span aria-hidden="true" class="cursor-grab text-secondary-fg select-none">⋮</span>'
+                    f'<input type="hidden" name="{escape(spec.name)}" value="{escape(key)}">'
+                    f'<span class="font-mono text-xs whitespace-nowrap">{escape(key)}</span>'
+                    f'<input type="text" '
+                    f'name="{escape(examples_field_name)}__for_{escape(key)}" '
+                    f'value="{escape(existing_vals)}" '
+                    f'placeholder="example1, example2, ..." '
+                    f'aria-label="Example values for {escape(key)}" '
+                    f'class="{inline_input_cls}">'
+                    f'<button type="button" class="{chip_remove_cls}" '
+                    f'aria-label="Remove {escape(key)}" '
+                    f'data-multiselect-remove="{escape(key)}">&times;</button>'
+                    f'</li>'
+                )
+            return (
+                f'<li class="{chip_li_cls}" data-multiselect-order-value="{escape(key)}">'
+                f'<span aria-hidden="true" class="cursor-grab text-secondary-fg select-none">⋮</span>'
+                f'<input type="hidden" name="{escape(spec.name)}" value="{escape(key)}">'
+                f'<span class="grow">{escape(key)}</span>'
+                f'<button type="button" class="{chip_remove_cls}" '
+                f'aria-label="Remove {escape(key)}" '
+                f'data-multiselect-remove="{escape(key)}">&times;</button>'
+                f'</li>'
+            )
+
+        chips_html = "".join(_chip_html(s) for s in selected)
+        # BF.4-followup — `<template>` element drives JS-built chips
+        # for newly-typed keys. `__NAME__` literals get substituted
+        # by the existing `buildChipFromTemplate` infrastructure
+        # (multi_select bootstrap JS).
+        chip_template_html = ""
+        chip_template_id = ""
+        present_marker_html = ""
+        if is_metadata_keys:
+            inline_input_cls = (
+                "px-1.5 py-0.5 text-xs border border-surface-border "
+                "rounded-sm font-mono bg-white grow min-w-0"
+            )
+            chip_template_id = f"field-{escape(spec.name)}-chip-template"
+            chip_template_html = (
+                f'<template id="{chip_template_id}">'
+                f'<li class="{chip_li_cls}" data-multiselect-order-value="__NAME__">'
+                f'<span aria-hidden="true" class="cursor-grab text-secondary-fg select-none">⋮</span>'
+                f'<input type="hidden" name="{escape(spec.name)}" value="__NAME__">'
+                f'<span class="font-mono text-xs whitespace-nowrap">__NAME__</span>'
+                f'<input type="text" '
+                f'name="{escape(examples_field_name)}__for___NAME__" '
+                f'value="" '
+                f'placeholder="example1, example2, ..." '
+                f'aria-label="Example values for __NAME__" '
+                f'class="{inline_input_cls}">'
+                f'<button type="button" class="{chip_remove_cls}" '
+                f'aria-label="Remove __NAME__" '
+                f'data-multiselect-remove="__NAME__">&times;</button>'
+                f'</li>'
+                f'</template>'
+            )
+            # Present marker for the sibling field's coerce branch.
+            # When this hidden input lands in the form payload, the
+            # server's `_coerce_form` reads `__for_<key>` per key in
+            # the submitted metadata_keys list.
+            present_marker_html = (
+                f'<input type="hidden" '
+                f'name="{escape(examples_field_name)}__present" value="1">'
+            )
         empty_hint_li = (
             f'<li class="text-xs italic text-secondary-fg px-2 py-1" '
             f'data-multiselect-empty-hint="1">'
@@ -1586,12 +1671,19 @@ def _render_field(
             "border-surface-border rounded-sm bg-surface-bg min-h-12"
         )
         input_cls = field_input_classes()
+        chip_template_attr = (
+            f'data-chip-template-id="{chip_template_id}" '
+            if is_metadata_keys else ""
+        )
         input_html = (
             # Hidden marker — empty selection ("operator cleared every
             # chip") distinguishable from "field absent". Needed for
             # optional multi_selects; required ones reject empty in the
             # validator anyway. Kept for symmetry across kinds.
             f'<input type="hidden" name="{escape(spec.name)}__present" value="1">'
+            # BF.4-followup — sibling metadata_value_examples present
+            # marker (empty for non-metadata_keys widgets).
+            f"{present_marker_html}"
             # CO.3 — `<name>__order` was needed in the CO.2 widget
             # because the checkbox grid submitted in alphabetical DOM
             # order, divorced from user intent. The chip-list widget
@@ -1599,12 +1691,17 @@ def _render_field(
             # hidden inputs are emitted in chip order, so getlist already
             # returns the right sequence. No __order field needed.
             f"{datalist_html}"
+            # BF.4-followup — `<template>` for JS-built chips (only
+            # rendered for metadata_keys; carries the inline value-
+            # examples input per chip).
+            f"{chip_template_html}"
             # BF.4 (2026-06-07) — `data-multiselect-allow-freeform` opts
             # the chip-list into accepting operator-typed values not
             # already in the datalist (used by `metadata_keys`, where
             # the datalist is a starter set, not the universe).
             f'<ul data-multiselect-order-list="{escape(spec.name)}" '
             f'data-multiselect-options-id="{datalist_id}" '
+            f"{chip_template_attr}"
             f'{"data-multiselect-allow-freeform=\"1\" " if spec.select_from == "metadata_keys" else ""}'
             f'class="{list_cls}" '
             f'aria-label="Selected {escape(spec.label)} in order">'
@@ -2057,93 +2154,25 @@ def _metadata_value_examples_as_dict(value: object) -> dict[str, tuple[str, ...]
 
 
 def _render_metadata_value_examples_field(
-    spec: FieldSpec,
-    value: object,
-    entity: object | None,
-    error: str | None,
+    spec: FieldSpec,  # noqa: ARG001 — kept for dispatch parity
+    value: object,  # noqa: ARG001 — kept for dispatch parity
+    entity: object | None,  # noqa: ARG001 — kept for dispatch parity
+    error: str | None,  # noqa: ARG001 — kept for dispatch parity
 ) -> str:
-    """BF.4 — inline-edit picker for ``metadata_value_examples``
-    (per locked P2). One row per key in the entity's sibling
-    ``metadata_keys`` field; the value field is a comma-separated
-    list of example strings.
+    """BF.4-followup (2026-06-07) — the metadata_value_examples
+    picker is now embedded inside each ``metadata_keys`` chip
+    (one inline text input per chip). The widget owns BOTH the
+    metadata_keys hidden inputs AND the value-examples text inputs;
+    submission serializes through standard form encoding without
+    needing a separate field-row.
 
-    Chicken-egg: when ``entity`` is None (create page) OR
-    ``metadata_keys`` is empty, render the staged-edit banner.
+    This render returns empty so the FieldSpec's slot in
+    ``_FIELD_SPECS_BY_KIND["rail"]`` is invisible — the inputs
+    live one row above (inside the metadata_keys chip-list).
+    Coerce branch in ``_coerce_form`` still fires (gated by the
+    ``__present`` marker the metadata_keys widget emits).
     """
-    if entity is None:
-        return _render_staged_edit_banner(
-            spec.label,
-            "Save the rail with at least one metadata key first; "
-            "then open it for editing to add per-key example values.",
-            helper=spec.helper,
-            error=error,
-        )
-    raw_keys = getattr(entity, "metadata_keys", ()) or ()
-    keys: tuple[str, ...] = tuple(
-        str(k)  # pyright: ignore[reportUnknownArgumentType]: metadata_keys element type is Identifier (runtime str) but typed Any here
-        for k in raw_keys  # pyright: ignore[reportUnknownVariableType]: metadata_keys is Any
-    )
-    if not keys:
-        hidden_marker = (
-            f'<input type="hidden" name="{escape(spec.name)}__present" value="1">'
-            f'<input type="hidden" name="{escape(spec.name)}__num" value="0">'
-        )
-        return _render_staged_edit_banner(
-            spec.label,
-            "Add at least one metadata key above, save, then reopen "
-            "the edit form to author per-key example values.",
-            helper=spec.helper,
-            error=error,
-            hidden_inputs=hidden_marker,
-        )
-    label_html = (
-        f'<label class="font-semibold text-xs text-primary-fg">'
-        f'{escape(spec.label)}</label>'
-    )
-    helper_html = (
-        f'<small class="text-xs text-secondary-fg">{escape(spec.helper)}</small>'
-        if spec.helper else ""
-    )
-    err_html = (
-        f'<div role="alert" class="text-xs text-danger bg-red-50 px-2 py-1 rounded-sm">{escape(error)}</div>'
-        if error else ""
-    )
-    values_by_key = _metadata_value_examples_as_dict(value)
-    input_cls = field_input_classes()
-    row_cls = (
-        "grid grid-cols-[minmax(8rem,12rem)_1fr] gap-2 items-center"
-    )
-    rows: list[str] = []
-    for i, key in enumerate(keys):
-        existing = values_by_key.get(key, ())
-        val_str = ", ".join(existing)
-        rows.append(
-            f'<div class="{row_cls}">'
-            f'<label for="field-{escape(spec.name)}__vals_{i}" '
-            f'class="text-xs font-mono text-primary-fg break-keep">'
-            f'{escape(key)}</label>'
-            f'<input type="hidden" name="{escape(spec.name)}__key_{i}" '
-            f'value="{escape(key)}">'
-            f'<input type="text" id="field-{escape(spec.name)}__vals_{i}" '
-            f'name="{escape(spec.name)}__vals_{i}" '
-            f'value="{escape(val_str)}" '
-            f'placeholder="example1, example2, ..." '
-            f'class="{input_cls}">'
-            f'</div>',
-        )
-    rows_html = "".join(rows)
-    body = (
-        f'<div class="flex flex-col gap-2 px-2 py-2 border '
-        f'border-dashed border-surface-border rounded-sm bg-surface-bg">'
-        f'{rows_html}'
-        f'</div>'
-        f'<input type="hidden" name="{escape(spec.name)}__present" value="1">'
-        f'<input type="hidden" name="{escape(spec.name)}__num" value="{len(keys)}">'
-    )
-    return (
-        f'<div class="{field_row_classes()}">'
-        f'{label_html}{body}{helper_html}{err_html}</div>'
-    )
+    return ""
 
 
 def _chain_children_value_as_specs(
@@ -4085,10 +4114,15 @@ def _render_create_page(
     constructor. For non-rail kinds, ``subtype`` is ignored.
     """
     specs = _filter_specs_by_subtype(_FIELD_SPECS_BY_KIND[kind], subtype)
-    # AB.3.7 — edit-only fields (e.g. ``leg_rail_xor_groups``) reference
-    # sibling dataclass fields that don't exist yet on the create page;
-    # filter them out so the operator authors the sibling first.
-    specs = tuple(s for s in specs if not s.edit_only)
+    # BF.4-followup (2026-06-07) — `edit_only` fields used to be
+    # filtered out of the create page entirely. Both edit_only
+    # renderers (`_render_multi_select_groups_field` for
+    # leg_rail_xor_groups, `_render_metadata_value_examples_field`
+    # for metadata_value_examples) carry an entity=None branch that
+    # shows a staged-edit banner explaining "Save the <sibling>
+    # first; then come back to author this." Letting them render
+    # surfaces the field's existence so the operator knows about
+    # the post-create-edit workflow.
     overrides = form_overrides or {}
     fields_html = "".join(
         _render_field(s, overrides.get(s.name, ""), instance)

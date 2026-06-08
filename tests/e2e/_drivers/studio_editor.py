@@ -511,27 +511,32 @@ def _max_unbundled_age_edit_form_data(rail: Rail) -> FormData:
 
 
 def edit_metadata_value_examples_form_data(rail: Rail) -> FormData:
-    """BF.4 — PUT body that backfills ``metadata_value_examples`` onto
-    an already-created rail (the field is ``edit_only`` — needs
-    sibling ``metadata_keys`` saved first).
+    """BF.4-followup — PUT body that backfills metadata_value_examples
+    on an already-created rail. The widget lives inside the
+    metadata_keys chip-list, so the wire shape mixes both fields:
 
-    Wire shape matches the inline-edit picker:
+      metadata_keys__present=1
+      metadata_keys=<key>  (one per chip in order)
       metadata_value_examples__present=1
-      metadata_value_examples__num=N
-      metadata_value_examples__key_<i>=<key>
-      metadata_value_examples__vals_<i>=<csv values>
+      metadata_value_examples__for_<key>=<comma-separated values>
+
+    Because the metadata_keys field is also re-sent, this PUT
+    overrides both fields atomically.
     """
     examples: tuple[tuple[object, tuple[object, ...]], ...] = (
         getattr(rail, "metadata_value_examples", ()) or ()
     )
+    metadata_keys: tuple[object, ...] = (
+        getattr(rail, "metadata_keys", ()) or ()
+    )
     data: FormData = {
+        "metadata_keys__present": ["1"],
+        "metadata_keys": [str(k) for k in metadata_keys],
         "metadata_value_examples__present": ["1"],
-        "metadata_value_examples__num": [str(len(examples))],
     }
-    for i, pair in enumerate(examples):
+    for pair in examples:
         key, vals = pair
-        data[f"metadata_value_examples__key_{i}"] = [str(key)]
-        data[f"metadata_value_examples__vals_{i}"] = [
+        data[f"metadata_value_examples__for_{key}"] = [
             ", ".join(str(v) for v in vals),
         ]
     return data

@@ -856,21 +856,29 @@ def test_xor_groups_edit_form_renders_existing_groups_plus_blank_row(
     assert 'name="leg_rail_xor_groups__num_groups"' in body
 
 
-def test_xor_groups_create_form_omits_field(writable_l2_yaml: Path) -> None:
-    """AB.3.7 — the create page filters ``edit_only=True`` fields. The
-    operator authors ``leg_rails`` first, saves, then edits to add
-    XOR groups. Two-step UX is acceptable; the field references
-    sibling state that doesn't exist yet on create."""
+def test_xor_groups_create_form_shows_staged_edit_banner(
+    writable_l2_yaml: Path,
+) -> None:
+    """BF.4-followup (2026-06-07) — the create page now renders
+    `edit_only` fields too; the per-field render helper handles the
+    entity=None case by surfacing a staged-edit banner that explains
+    the post-create-edit workflow. Operator sees the field's
+    existence + understands the two-step UX without trial-and-error.
+    """
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.get("/l2_shape/transfer_template/new")
     assert resp.status_code == 200, resp.text
     body = resp.text
-    # ``leg_rails`` chip-list widget present (CO.3); ``leg_rail_xor_groups``
-    # field-row absent (it's `edit_only`).
+    # `leg_rails` chip-list widget present (CO.3).
     assert 'name="leg_rails__present"' in body
-    assert "leg_rail_xor_groups" not in body
-    assert "Variable rail XOR groups" not in body
+    # `leg_rail_xor_groups` label + staged-edit banner now visible
+    # on create page. The entity-None branch in
+    # `_render_multi_select_groups_field` emits the banner; no
+    # form-input is registered (the field has no value to submit
+    # until the operator saves + reopens for editing).
+    assert "Variable rail XOR groups" in body
+    assert "Save the template with at least 2 leg rails first" in body
 
 
 def test_put_transfer_template_round_trips_existing_xor_groups(
@@ -1513,17 +1521,20 @@ def test_put_two_leg_rail_round_trips_subtype_fields(
     assert [str(x) for x in getattr(saved, "destination_role")] == dst_roles
 
 
-def test_rail_metadata_value_examples_inline_picker_round_trip(
+def test_rail_metadata_value_examples_embedded_in_metadata_keys_chip(
     writable_l2_yaml: Path,
 ) -> None:
-    """BF.4 (2026-06-07) — metadata_value_examples is now an
-    inline-edit picker (per locked P2): one row per
-    metadata_keys entry, values entered as a comma-separated list.
-    Wire shape: `<name>__present=1`, `<name>__num=N`,
-    `<name>__key_<i>=<key>`, `<name>__vals_<i>=<csv values>`.
+    """BF.4-followup (2026-06-07) — metadata_value_examples lives
+    inline inside each metadata_keys chip. Wire shape:
 
-    ExternalRailInbound declares metadata_keys=['external_reference'];
-    submit a 3-value example list, assert round-trip.
+      metadata_keys__present=1
+      metadata_keys=<key>  (one per chip)
+      metadata_value_examples__present=1
+      metadata_value_examples__for_<key>=<comma-separated values>
+
+    The widget owns both fields' wire shapes — the operator never
+    sees a separate metadata_value_examples picker. Submitting
+    metadata_keys + the per-key inline value input round-trips.
     """
     app = _build_app(writable_l2_yaml)
     pre = load_instance(writable_l2_yaml)
@@ -1539,10 +1550,11 @@ def test_rail_metadata_value_examples_inline_picker_round_trip(
         "destination_role__present": "1",
         "destination_role": dst_roles,
         "aggregating": "true" if getattr(rail, "aggregating") else "false",
+        "metadata_keys__present": "1",
+        "metadata_keys": ["external_reference"],
         "metadata_value_examples__present": "1",
-        "metadata_value_examples__num": "1",
-        "metadata_value_examples__key_0": "external_reference",
-        "metadata_value_examples__vals_0": "EXT-12345-001, EXT-12345-002, EXT-12345-003",
+        "metadata_value_examples__for_external_reference":
+            "EXT-12345-001, EXT-12345-002, EXT-12345-003",
     }
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.put(f"/l2_shape/rail/{rail.name}", data=data)
@@ -1562,9 +1574,10 @@ def test_rail_metadata_value_examples_inline_picker_round_trip(
 def test_rail_metadata_value_examples_empty_values_drops_key(
     writable_l2_yaml: Path,
 ) -> None:
-    """BF.4 — blanking a row's value field drops that key on save
-    (the operator clears values without going back to metadata_keys).
-    Same wire shape as the round-trip test, but `__vals_0` is empty.
+    """BF.4-followup — blanking a chip's inline values input drops
+    that key from metadata_value_examples on save (#2 lock — only
+    keys with actual values land in the L2 yaml). The metadata_keys
+    chip itself persists; just its examples vanish.
     """
     app = _build_app(writable_l2_yaml)
     pre = load_instance(writable_l2_yaml)
@@ -1580,10 +1593,10 @@ def test_rail_metadata_value_examples_empty_values_drops_key(
         "destination_role__present": "1",
         "destination_role": dst_roles,
         "aggregating": "true" if getattr(rail, "aggregating") else "false",
+        "metadata_keys__present": "1",
+        "metadata_keys": ["external_reference"],
         "metadata_value_examples__present": "1",
-        "metadata_value_examples__num": "1",
-        "metadata_value_examples__key_0": "external_reference",
-        "metadata_value_examples__vals_0": "",
+        "metadata_value_examples__for_external_reference": "",
     }
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.put(f"/l2_shape/rail/{rail.name}", data=data)
@@ -1594,6 +1607,10 @@ def test_rail_metadata_value_examples_empty_values_drops_key(
         r for r in reloaded.rails if str(r.name) == str(rail.name)
     )
     assert getattr(saved, "metadata_value_examples") == ()
+    # metadata_keys itself persists.
+    assert [str(k) for k in getattr(saved, "metadata_keys")] == [
+        "external_reference",
+    ]
 
 
 def test_singleton_theme_get_renders_structured_form(

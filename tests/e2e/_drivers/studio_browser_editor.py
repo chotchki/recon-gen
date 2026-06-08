@@ -195,12 +195,42 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
                     rm_btns.last.click()
                 # Add each desired value via typeahead + Enter. JS
                 # handler creates the chip from the template (for
-                # chain_children) or builds a simple chip (for plain
-                # multi_select). Order = DOM order = insert order.
+                # chain_children + metadata_keys) or builds a simple
+                # chip (for plain multi_select). Order = DOM order =
+                # insert order.
+                #
+                # BF.4-followup — metadata_keys chips carry an inline
+                # text input `name="metadata_value_examples__for_<key>"`
+                # for per-chip example values. If the form data has
+                # such a key for the value being added, fill the
+                # inline input immediately after the chip lands.
                 typeahead = add_input.first
+                examples_prefix = (
+                    "metadata_value_examples__for_"
+                    if name == "metadata_keys" else None
+                )
                 for v in values:
                     typeahead.fill(v)
                     typeahead.press("Enter")
+                    if examples_prefix is not None:
+                        inline_key = f"{examples_prefix}{v}"
+                        inline_vals = data.get(inline_key)
+                        if inline_vals:
+                            self._page.fill(
+                                f'input[name="{inline_key}"]',
+                                inline_vals[0],
+                            )
+                continue
+            # BF.4-followup — skip the metadata_value_examples__for_<key>
+            # keys; they're filled inline by the metadata_keys chip-list
+            # handler above. Reaching the generic locator path would
+            # 404 because the inline input only exists AFTER the chip
+            # is added (i.e. as a side-effect of the metadata_keys
+            # iteration), which may happen later in this loop.
+            if name.startswith("metadata_value_examples__for_"):
+                continue
+            if name == "metadata_value_examples__present":
+                # Hidden marker — present on the form unconditionally.
                 continue
             locator = self._page.locator(f'[name="{name}"]')
             count = locator.count()
