@@ -207,7 +207,7 @@ PUSHDOWN_NO_MATCH_SENTINEL = "__no_match__"
 # at 32). AA.A.3 flipped to SINGLE_VALUED per the drill-to-one default
 # (operator workflow on these dashboards is pick-one-value 99% of the
 # time; the MULTI shape had no one-click "pick this value and clear the
-# rest" gesture — see ``docs/audits/aa_a_dropdown_audit.md``).
+# rest" gesture — see ``docs/audits/_archive/aa_a_dropdown_audit.md``).
 #
 # The SQL guards ``('__l2ft_all__' = <<$pX>> OR col = <<$pX>>)`` (see
 # ``_match_all_in_clause``): on load (and when the dropdown is cleared,
@@ -230,7 +230,7 @@ def _match_all_in_clause(col: str, param_name: str) -> str:
 
     AA.A.3 collapsed the prior multi-value form (``IN (...)``) into this
     single-value scalar form when drill-to-one became the default
-    operator workflow (audit at ``docs/audits/aa_a_dropdown_audit.md``);
+    operator workflow (audit at ``docs/audits/_archive/aa_a_dropdown_audit.md``);
     the function name carries over from the X.2.t.2 multi shape — at
     call sites it still reads as "match-all guard for this column +
     param", which is the load-time semantic regardless of the predicate

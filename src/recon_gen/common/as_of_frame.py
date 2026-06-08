@@ -5,7 +5,7 @@ place of wall-clock ``now()``. See `docs/audits/date_range_model_audit.md`
 §5 ("step back — time is the unowned coordinate") and the AP.0 spike
 result for the reasoning. Promoted from `tests/unit/test_ap0_as_of_frame.py`
 by Phase AQ; BD ships the three-leg ``(as_of, window, seed)`` shape on
-the same class (no `RunContext` rename — see `docs/audits/bd_0_asofframe_spike.md`).
+the same class (no `RunContext` rename — see `docs/audits/_archive/bd_0_asofframe_spike.md`).
 
 Three fields:
 

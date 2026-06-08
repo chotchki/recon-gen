@@ -4,7 +4,7 @@
 > L2FT Hygiene plants + collapses per-kind mockups around the Lock
 > 7 shared registry). Agent design pass per
 > `[[feedback_agent_driven_design_works]]`. Briefed against
-> `docs/audits/bu_0_replan.md` (locks 0-7 + §0.5 matrix) +
+> `docs/audits/_archive/bu_0_replan.md` (locks 0-7 + §0.5 matrix) +
 > `SPEC.md`'s Phase BU section + the existing `_studio_training.py`
 > pane source + `common/l2/demo_etl_gaps.py` + `common/l2/seed.py`
 > Plant dataclasses + `src/recon_gen/docs/L2FT_Exceptions.md`.
@@ -104,7 +104,7 @@ L2FT Hygiene) via `[ Take the tour → ]` → toggle `Before` /
 
 Full lock rationale + rejected variants + §0.5 coverage matrix
 (with `Violation class source (SoT)` column added round-4):
-`docs/audits/bu_0_replan.md`.
+`docs/audits/_archive/bu_0_replan.md`.
 
 ---
 

@@ -27,7 +27,7 @@ Examples: ``sp_pg_lo``, ``f42_or_lo``, ``us_du_lo``, ``sq_pg_aw``.
 cell-level invalid — operators can opt in via
 ``--scenarios=us:path/foo.yaml`` and the spec is well-formed.)
 
-**Spike source:** ``docs/audits/y_2_gate_m_0_variant_matrix_spike.md``
+**Spike source:** ``docs/audits/_archive/y_2_gate_m_0_variant_matrix_spike.md``
 (LOCKED 2026-05-08).
 """
 

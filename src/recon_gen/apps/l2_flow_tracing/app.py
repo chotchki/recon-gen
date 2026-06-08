@@ -485,7 +485,7 @@ def _populate_pushdown_dropdown(
     reverts each dataset param to the sentinel default (= all rows
     match). AA.A.3 flipped this from MULTI to SINGLE per the
     drill-to-one default (audit at
-    ``docs/audits/aa_a_dropdown_audit.md``).
+    ``docs/audits/_archive/aa_a_dropdown_audit.md``).
     """
     p = analysis.add_parameter(StringParam(
         name=param_name,

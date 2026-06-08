@@ -12,7 +12,7 @@ loader doesn't reconstruct `Violation` objects. The test
 serializes the live emit through `lock_to_json` + compares the
 output string against the on-disk file byte-for-byte.
 
-See `docs/audits/az_0_semantic_lock_schema.md` for the full
+See `docs/audits/_archive/az_0_semantic_lock_schema.md` for the full
 design + the validation table showing the semantic lock catches
 every real violation-set change AY.5 caught + drops every
 byte-only false positive.

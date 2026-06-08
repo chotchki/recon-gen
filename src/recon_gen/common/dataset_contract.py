@@ -391,7 +391,7 @@ def isolated_dataset_registries() -> Generator[None, None, None]:
                 app.emit_analysis()
                 yield app
 
-    See BL.0 in PLAN.md + ``docs/audits/bl_0_shared_state_keying_smell.md``
+    See BL.0 in PLAN.md + ``docs/audits/_archive/bl_0_shared_state_keying_smell.md``
     for the architectural reasoning (rejected: lift state out of
     globals / extend the key with prefix; accepted: scope the band-aid
     at the test boundary since production is unaffected).

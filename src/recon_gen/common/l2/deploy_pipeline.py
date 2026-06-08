@@ -8,7 +8,7 @@ against the new shape:
    so step 2's etl_hook + step 3's generator both write into clean state.
 2. **etl_hook** — run `cfg.etl_hook` as a subprocess. The hook is
    expected to write directly to demo_db (the BS.4 contract — see
-   `docs/audits/bs_4_arch_shift_spike.md`). Non-zero exit halts the
+   `docs/audits/_archive/bs_4_arch_shift_spike.md`). Non-zero exit halts the
    pipeline before steps 3-5 run; demo_db is left in whatever partial
    state the hook produced (operator re-runs after fixing the hook).
 3. **generator** — `emit_full_seed` against the current
@@ -265,7 +265,7 @@ async def step_2_wipe(
 # BS.4 (2026-05-29) removed step_2_pull + EtlDatasourceConfig +
 # the cross-dialect upstream→demo_db copy path. The etl_hook is the
 # only ETL-load contract now — it writes directly to demo_db after
-# step 1's wipe. See docs/audits/bs_4_arch_shift_spike.md.
+# step 1's wipe. See docs/audits/_archive/bs_4_arch_shift_spike.md.
 
 
 # Step 3 generator: synthetic data overlay.

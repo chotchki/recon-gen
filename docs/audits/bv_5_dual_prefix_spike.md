@@ -4,7 +4,7 @@
 > 15 design locks (DL.1-DL.15); ~5-6 day BV.4 implementation
 > estimate + ~1 day BV.6 PG matview refresh modernization
 > (parallel). Triggered by the BU design-review SOFT-MISS finding
-> (`docs/audits/bu_design_review.md` P1.3: the Tour Before/After
+> (`docs/audits/_archive/bu_design_review.md` P1.3: the Tour Before/After
 > toggle has no implementation surface). Operator proposed:
 > pre-populate prefix-scoped DB copies (base + v overlay), let
 > the Tour switch which prefix the dashboards query against. This

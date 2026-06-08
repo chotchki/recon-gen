@@ -67,7 +67,7 @@ description: |
 # BXa.1 (2026-05-30): promoted from the deleted `persona:` block.
 # Read by handbook templates + Investigation app landing + audit PDF
 # header. The stakeholders / merchants / gl_accounts / flavor fields
-# were doubly-dead per `docs/audits/bx_persona_audit.md` (bypassed by
+# were doubly-dead per `docs/audits/_archive/bx_persona_audit.md` (bypassed by
 # the production-code intercept AND not substituted in any docs page)
 # and went with the persona nuke.
 institution_name: "Sasquatch National Bank"

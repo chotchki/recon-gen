@@ -83,7 +83,7 @@ account_templates:
   # ALPHABETICALLY FIRST but has ZERO rails / limit-schedules referencing
   # it. Pre-CF.0 `_pick_template` returned `sorted(...)[0]` →
   # AlphaCustomerStub → drift + limit_breach plants raised ValueError
-  # before any SQL (reviewer-confirmed; see docs/audits/v13_1_1_repro.md).
+  # before any SQL (reviewer-confirmed; see docs/audits/_archive/v13_1_1_repro.md).
   # Post-CF.0 the picker scores each template by materializable-plant
   # count and picks the highest; AlphaCustomerStub scores 0 while
   # CustomerSubledger scores 5/5, so the locked seed bytes stay

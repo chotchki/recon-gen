@@ -73,7 +73,7 @@ class Dialect(str, Enum):
     silently fall through to the Oracle fallback shape in helpers that
     haven't been ported — exercising it without that port will
     misbehave. The CA.0 audit at
-    ``docs/audits/ca_0_duckdb_spike.md`` is the source of truth for
+    ``docs/audits/_archive/ca_0_duckdb_spike.md`` is the source of truth for
     each helper's DuckDB binding.
     """
 
@@ -418,7 +418,7 @@ def json_value(col: str, path_expr: str, dialect: Dialect) -> str:
     return *quoted* JSON form rather than unwrapped scalar text);
     ``json_extract_string`` unwraps the scalar, matching the
     PG/Oracle/SQLite contract. Captured by CA.0 spike audit
-    (``docs/audits/ca_0_duckdb_spike.md`` — JSON portability).
+    (``docs/audits/_archive/ca_0_duckdb_spike.md`` — JSON portability).
     All four return scalar TEXT for the path's leaf; missing paths
     return NULL.
 

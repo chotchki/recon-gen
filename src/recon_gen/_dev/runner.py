@@ -24,7 +24,7 @@ Exit codes:
     3  config / argument error
 
 Substrate: pytest-as-orchestrator + this thin Python wrapper. See
-``docs/audits/y_2_gate_b_0_runner_lang_spike.md`` for the design lock.
+``docs/audits/_archive/y_2_gate_b_0_runner_lang_spike.md`` for the design lock.
 """
 
 from __future__ import annotations

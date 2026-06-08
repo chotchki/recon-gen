@@ -2,7 +2,7 @@
 
 Net-new module that houses the typed contract for Studio's
 search/sort/paginate toolbars. Lives at the address Q10A picked in
-``docs/audits/cf_4_design_review.md``: Phase CG (the originally-
+``docs/audits/_archive/cf_4_design_review.md``: Phase CG (the originally-
 planned home of the primitive) was folded into CF.4 when the design
 review surfaced that CG.2's first consumer IS CF.4 — i.e. the
 primitive had no load-bearing call site outside CF.4. Per

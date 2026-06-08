@@ -1997,7 +1997,7 @@ def _populate_pushdown_enum_dropdown(
     bridged dataset param; clearing the dropdown reverts to the sentinel
     default (= all rows match). AA.A.3 flipped this from MULTI to SINGLE
     per the drill-to-one default (audit at
-    ``docs/audits/aa_a_dropdown_audit.md``).
+    ``docs/audits/_archive/aa_a_dropdown_audit.md``).
 
     Use for bounded enum columns (``rail_name`` / ``account_role`` /
     ``check_type`` / ``supersedes``); for data-value columns use

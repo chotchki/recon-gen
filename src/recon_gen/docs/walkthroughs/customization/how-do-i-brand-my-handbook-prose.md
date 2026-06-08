@@ -60,7 +60,7 @@ loader / serializer, extend `HandbookVocabulary` (`vocabulary.py`)
 to surface it, then `{{ vocab.your_field }}` in your fork of the
 markdown templates. The "drop-in-via-YAML" pre-BXa.1 path is gone;
 new substitution variables require a small PR. The audit
-`docs/audits/bx_persona_audit.md` explains why — substitution
+`docs/audits/_archive/bx_persona_audit.md` explains why — substitution
 variables that no template actually used were silently misleading
 operators into filling out forms whose values went nowhere.
 

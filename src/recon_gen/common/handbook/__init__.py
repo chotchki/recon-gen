@@ -6,7 +6,7 @@ Public surface (BXa.1 trimmed):
   vocabularies post-BXa.1; institution name + acronym +
   investigation_personas come from the L2 YAML directly).
 
-Removed in BXa.1 (doubly-dead per `docs/audits/bx_persona_audit.md`):
+Removed in BXa.1 (doubly-dead per `docs/audits/_archive/bx_persona_audit.md`):
 - ``StakeholderVocabulary`` + ``MerchantVocabulary`` — hardcoded
   tables that were never substituted in any docs page.
 - ``InvestigationPersonaVocabulary`` — replaced by the typed

@@ -1348,7 +1348,7 @@ def _pick_template(instance: L2Instance) -> AccountTemplate | None:
     saw "N plant(s) failed" via Studio Apply with no actionable
     recourse beyond editing the L2.
 
-    Reviewer-confirmed root cause: ``docs/audits/v13_1_1_repro.md``.
+    Reviewer-confirmed root cause: ``docs/audits/_archive/v13_1_1_repro.md``.
 
     Strategy: score each declared AccountTemplate by the count of
     L1-invariant pickers that return non-None against its role. Pick

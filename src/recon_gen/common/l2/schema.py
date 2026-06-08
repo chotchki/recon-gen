@@ -755,7 +755,7 @@ def _emit_l1_invariant_views(
     # emitted alongside the matviews. Each typed view body is a plain
     # relational walk of `<prefix>_config_kv` (parent_id self-join, no
     # JSON_TABLE); matviews JOIN against the views and the engine sees
-    # a fully relational source. See `docs/audits/bc_12_config_kv_spike.md`
+    # a fully relational source. See `docs/audits/_archive/bc_12_config_kv_spike.md`
     # for the architecture + spike results.
     limit_join_outbound = (
         f"{p}_v_config_limit_schedules ls\n"
@@ -2052,7 +2052,7 @@ def _emit_typed_config_view_creates(p: str, dialect: Dialect) -> str:
     PG + SQLite resolve ``lob_substr`` to a plain SUBSTRING / SUBSTR
     so the same view body works on all dialects.
 
-    See ``docs/audits/bc_12_config_kv_spike.md`` for the spike that
+    See ``docs/audits/_archive/bc_12_config_kv_spike.md`` for the spike that
     locked these shapes against Oracle 23 (the local test container)
     and confirmed matview build-time compatibility.
     """

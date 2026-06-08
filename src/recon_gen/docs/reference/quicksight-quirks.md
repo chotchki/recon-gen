@@ -479,7 +479,7 @@ does this via `_QsWsActivityTracker` (hooks `page.on("websocket")` +
 `ws.on("framesent")` at driver construction); `pick_filter` /
 `set_date_range` / `drill_from_first_row` call it so a read after a
 write sees the post-filter state, not the spinner gap. No fixed sleeps.
-(X.2.r — full capture + design at `docs/audits/x_2_r_event_wait_spike.md`.
+(X.2.r — full capture + design at `docs/audits/_archive/x_2_r_event_wait_spike.md`.
 Pre-X.2.r the workaround was a sleep-and-poll content-stability
 heuristic; it worked but was a smell.)
 

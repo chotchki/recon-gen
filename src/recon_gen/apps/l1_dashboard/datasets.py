@@ -89,7 +89,7 @@ def l1_matview_specs(cfg: Config) -> list[tuple[str, str | None]]:
 # per-CI-run dashboards) to dataset-SQL pushdown.
 #
 # AA.A.3 flipped every pushdown dropdown from MULTI to SINGLE (audit at
-# ``docs/audits/aa_a_dropdown_audit.md``): the SQL guards
+# ``docs/audits/_archive/aa_a_dropdown_audit.md``): the SQL guards
 # ``('__l1_all__' = <<$pX>> OR col = <<$pX>>)`` (see ``_data_value_clause``)
 # and the dataset param is SINGLE_VALUED with the bare ``L1_ALL_SENTINEL``
 # default (1-element list per the dataclass shape). On load the sentinel
@@ -278,7 +278,7 @@ def _data_value_clause(col: str, param_name: str) -> str:
     single-value scalar form when drill-to-one became the default
     operator workflow (X.2.t.2's MULTI sentinel-guard pattern lacked a
     one-click value picker; analysts deselected every other value to
-    drill — see ``docs/audits/aa_a_dropdown_audit.md``). The name
+    drill — see ``docs/audits/_archive/aa_a_dropdown_audit.md``). The name
     ``_data_value_clause`` carried over from the dual-purpose helper
     days; the function emits the value-anchored pushdown shape (was
     always a misnomer for "value-anchored pushdown")."""

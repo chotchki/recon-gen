@@ -9,7 +9,7 @@
     "These are pre-built minified dist files (the exact bytes the CDNs",
     "served) — NOT source. No bundler/esbuild: opaque already-minified",
     "UMD, nothing to bundle or tree-shake. See",
-    "docs/audits/x_2_p_offline_bundle_spike.md.",
+    "docs/audits/_archive/x_2_p_offline_bundle_spike.md.",
     "",
     "To bump a version: edit the version + source_url here (and set",
     "sha256 to null), then run `python scripts/vendor_js_deps.py --update`",

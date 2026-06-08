@@ -90,7 +90,7 @@ class SigningConfig:
 # BS.4 (2026-05-29) removed EtlDatasourceConfig + the
 # Config.etl_datasource field. The legacy upstream→demo_db copy path
 # (X.4.g.2's step_2_pull) is gone; etl_hook now writes directly to
-# demo_db. See docs/audits/bs_4_arch_shift_spike.md.
+# demo_db. See docs/audits/_archive/bs_4_arch_shift_spike.md.
 
 
 # X.4.g.3 — Step-3 synthetic-data overlay knobs.
@@ -840,7 +840,7 @@ def load_config(path: str | Path | None = None) -> Config:
 
     # BS.4 (2026-05-29): etl_datasource block removed from cfg — the
     # legacy upstream→demo_db copy is gone (etl_hook writes directly).
-    # See docs/audits/bs_4_arch_shift_spike.md.
+    # See docs/audits/_archive/bs_4_arch_shift_spike.md.
 
     # X.4.g.3 — optional test_generator block. Absent or None resolves
     # to TestGeneratorConfig() (byte-identical-to-locked-seeds output);
