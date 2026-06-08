@@ -6,7 +6,7 @@ the old verb). Same shape, same options, same default behavior — read
 the configured DB, mount the four real apps, optionally embed the
 mkdocs handbook at ``/docs``.
 
-Severability contract (``SPEC_studio.md``): ``dashboards`` runs cleanly
+Severability contract (``docs/specs/SPEC_studio.md``): ``dashboards`` runs cleanly
 without Studio. It calls ``run_html_server(... studio_routes_factory=
 None)`` so no L2 cache is built, no Studio routes are mounted, and the
 ``GET / → /dashboards`` redirect stays in place. ``cli.studio`` is the

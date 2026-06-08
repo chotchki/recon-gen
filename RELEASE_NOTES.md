@@ -3295,7 +3295,7 @@ Feature release. `TwoLegRail` + `SingleLegRail` gain an optional `amount_typical
 
 **Fuzzer.** `_build_rails` extended: per non-aggregating rail, ~30% probability gate emits `amount_typical_range`. Range `min` rolls log-uniformly over $1-$100K; `max = min × (2..50)` uniform so both narrow ($10-$50) and wide ($5-$2500) bands get exercised. Aggregating rails skipped (validator V1c). Meta-guard `rail_with_amount_typical_range` saw entry.
 
-**Docs.** `concepts/l2/rail.md` gains an "Optional: typical amount range (AB.5)" section covering the generator behavior, the deferred runtime SHOULD-constraint hook, and the V1a-c rules. New `walkthroughs/customization/how-do-i-set-typical-amount-ranges.md` worked-example framed around the "demo went sideways with a $1.2M card swipe" story. `Schema_v6.md` gains a "Magnitude as data (AB.5)" sibling section to "Lateness as data". `SPEC_gap_feedback.md` E7 carries a landed-status marker pointing at the concept doc + walkthrough. `mkdocs.yml` nav extended.
+**Docs.** `concepts/l2/rail.md` gains an "Optional: typical amount range (AB.5)" section covering the generator behavior, the deferred runtime SHOULD-constraint hook, and the V1a-c rules. New `walkthroughs/customization/how-do-i-set-typical-amount-ranges.md` worked-example framed around the "demo went sideways with a $1.2M card swipe" story. `Schema_v6.md` gains a "Magnitude as data (AB.5)" sibling section to "Lateness as data". `docs/specs/SPEC_gap_feedback.md` E7 carries a landed-status marker pointing at the concept doc + walkthrough. `mkdocs.yml` nav extended.
 
 **Tests.** 23 new tests across the surface: 5 validator V1a-c tests + 4 loader round-trip tests + 1 serializer round-trip + count assertion = 3 + 6 seed-amount tests (in-range / log-uniform clustering / determinism / cap respect / no-range fall-back / no-rail fall-back) + 5 auto-scenario helper tests (midpoint when range set / default fall-through / cap × 1.5 unbounded / clamp to range.max × 3 / cap × 1.5 below ceiling) + fuzz meta-guard saw entry + 2 Studio editor tests (edit form render + coerce contract). Full unit + data sweep: 1922 + 177 = 2099 passed.
 
@@ -3863,7 +3863,7 @@ Pre-release / alpha tag. **No code change** — the wheel is byte-equivalent to 
 
 What landed in the repo (design artifacts only — Studio code starts after this tag):
 
-- **`SPEC_studio.md`** (333 lines, sibling to the L2-model spec material in `docs/Schema_v6.md`). Goal / non-goals / 3 personas + their loops / architecture (process model, severability, source-of-truth, cascade discipline, allowlist expansion) / the 5-step "Deploy changes" pipeline (etl_hook gate → wipe + optional ETL pull → generator → matview refresh → Dashboards reload) / data-shaping model (`test_generator:` block: `enabled` / `scope` (full|uncovered_rails|exceptions_only) / `end_date` / `seed` / `plants` / `only_template` / `derive_balances`) / plant-timeline view / unified diagram (D3+d3-force vs enhanced graphviz spike — ELK out as a JVM-dep tier) / editor primitives + forms (Account/Rail/Theme/Chain/TransferTemplate, additive build) / CLI surface / testing scope (narrowed vs the X.2-era 13-cell matrix — Studio gets PG→SQLite primary + Oracle→SQLite + SQLite→SQLite secondary, NOT a full fan-out) / open-deferred / reuse inventory / hard invariants.
+- **`docs/specs/SPEC_studio.md`** (333 lines, sibling to the L2-model spec material in `docs/Schema_v6.md`). Goal / non-goals / 3 personas + their loops / architecture (process model, severability, source-of-truth, cascade discipline, allowlist expansion) / the 5-step "Deploy changes" pipeline (etl_hook gate → wipe + optional ETL pull → generator → matview refresh → Dashboards reload) / data-shaping model (`test_generator:` block: `enabled` / `scope` (full|uncovered_rails|exceptions_only) / `end_date` / `seed` / `plants` / `only_template` / `derive_balances`) / plant-timeline view / unified diagram (D3+d3-force vs enhanced graphviz spike — ELK out as a JVM-dep tier) / editor primitives + forms (Account/Rail/Theme/Chain/TransferTemplate, additive build) / CLI surface / testing scope (narrowed vs the X.2-era 13-cell matrix — Studio gets PG→SQLite primary + Oracle→SQLite + SQLite→SQLite secondary, NOT a full fan-out) / open-deferred / reuse inventory / hard invariants.
 - **`docs/x_4_5_design_thoughts.md`** — the iteration log that produced the SPEC. The user's problem statement + persona reframe + the back-and-forth that converged on the 5-step pipeline, the renamed surfaces (Studio + Dashboards), the Generator scopes, the etl_hook ownership boundary, the editor cascade discipline.
 - **`PLAN.md`** re-cut: one Phase X.4 (Studio) replacing the original X.4 + X.5 split. ~70 sub-task checkboxes across X.4.a (foundations) → X.4.b (renderer spike) → X.4.c (diagram) → X.4.d/e/f (editor) → X.4.g (Deploy pipeline, 15 sub-items) → X.4.h (shaping panel UI) → X.4.i (additive knobs) → X.4.j (testing scope) → X.4.k (wrap to v10.0.0). Phase X.1 + X.3 also swept to `PLAN_ARCHIVE.md` (both shipped); the stale "Parallelism map" historical section trimmed.
 
@@ -7433,7 +7433,7 @@ points at the broken Release run.
 
 ## v8.0.0 — CLI redesign: four artifact groups, emit/--execute pattern
 
-Clean-break CLI redesign per `Q3_CLI_REDESIGN.md`. The single
+Clean-break CLI redesign per `docs/audits/_archive/Q3_CLI_REDESIGN.md`. The single
 `main` group now hangs four artifact groups instead of the v7.x
 top-level verbs:
 
@@ -7590,7 +7590,7 @@ set of additive `demo` CLI primitives that let integrators emit or
 apply schema / seed / matview-refresh independently. Cuts cleanly
 off v7.2.0; no breaking schema or CLI changes — old verbs continue
 to work unchanged. The next release (planned v8.0.0) will be a
-clean-break CLI redesign per `Q3_CLI_REDESIGN.md`.
+clean-break CLI redesign per `docs/audits/_archive/Q3_CLI_REDESIGN.md`.
 
 ### What's new since v7.2.0
 
@@ -7698,7 +7698,7 @@ Useful for:
 - Iterating on seed plants without re-running the schema:
   `demo apply-seed && demo apply-refresh`
 
-#### `Q3_CLI_REDESIGN.md` design doc
+#### `docs/audits/_archive/Q3_CLI_REDESIGN.md` design doc
 
 Drafts a broader CLI restructure — four artifacts (schema | data |
 json | docs) × four operations (apply | clean | test, plus
@@ -7717,7 +7717,7 @@ Investigation scenarios. To get the bundled Juniper / Cascadia
 narrative, point docs at `tests/l2/sasquatch_pr.yaml`
 (`QS_DOCS_L2_INSTANCE=...`).
 
-**v8.0.0 will be a breaking CLI change** per `Q3_CLI_REDESIGN.md`.
+**v8.0.0 will be a breaking CLI change** per `docs/audits/_archive/Q3_CLI_REDESIGN.md`.
 Old verbs (`generate`, `deploy`, `cleanup`, `demo apply`,
 `demo emit-*`, `demo apply-*`, `export *`, `probe`) drop in favor
 of `<artifact> <verb>` shape (`schema apply`, `data clean`, etc.).

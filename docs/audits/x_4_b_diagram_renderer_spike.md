@@ -26,7 +26,7 @@ per-knob tuning to make the layered reading appear.
 
 ## Criteria the spike was judged against
 
-From `SPEC_studio.md` X.4.b.4:
+From `docs/specs/SPEC_studio.md` X.4.b.4:
 
 1. Legible on `sasquatch_pr` without manual tuning.
 2. All four entity-type toggles work (Roles / Rails / Chains / Templates).

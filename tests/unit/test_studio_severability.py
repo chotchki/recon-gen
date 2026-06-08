@@ -1,6 +1,6 @@
 """X.4.a.3 — Studio severability test.
 
-The SPEC's severability contract (``SPEC_studio.md`` §"Process model"):
+The SPEC's severability contract (``docs/specs/SPEC_studio.md`` §"Process model"):
 
 > ``dashboards`` MUST keep working with Studio's routes absent. Studio
 > routes never assume Dashboards-side state (no shared in-memory cache
@@ -152,7 +152,7 @@ def test_dashboards_module_does_not_import_studio() -> None:
     for token in forbidden:
         assert token not in source, (
             f"cli.dashboards must not reference {token!r} — it would "
-            f"break the severability contract (SPEC_studio.md §Process model)."
+            f"break the severability contract (docs/specs/SPEC_studio.md §Process model)."
         )
 
 

@@ -562,7 +562,7 @@ class ChainChildSpec:
     """One entry in ``Chain.children`` — name plus optional fan-in flag.
 
     AB.6 (2026-05-19) relocated ``fan_in`` + ``expected_parent_count``
-    from chain-level to per-child. Motivation (per SPEC_gap_feedback §5):
+    from chain-level to per-child. Motivation (per docs/specs/SPEC_gap_feedback.md §5):
     a single chain may carry mixed-cardinality children — some 1:1
     (ACH / wire / check) AND one N:1 (batched payout) — which a single
     chain-level flag can't express.

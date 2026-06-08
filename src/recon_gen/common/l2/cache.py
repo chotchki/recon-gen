@@ -1,6 +1,6 @@
 """In-memory ``L2Instance`` cache + atomic file-write primitive (X.4.a.6).
 
-Studio's source-of-truth contract (per ``SPEC_studio.md``): the L2 YAML on
+Studio's source-of-truth contract (per ``docs/specs/SPEC_studio.md``): the L2 YAML on
 disk is the hard truth; the in-memory ``L2Instance`` is a cache of the
 file, never a parallel source. This module ships the two primitives that
 contract rests on:

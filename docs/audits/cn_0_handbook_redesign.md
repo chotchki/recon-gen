@@ -19,9 +19,9 @@ preamble):
    Working set is unsustainable; content is too referentially-useful
    to delete.
 2. Project root has **11 `.md` files** — load-bearing (PLAN, SPEC,
-   CLAUDE, README) coexisting with sprint-archaeology (`CB_11_C_NOTES.md`,
-   `Q3_CLI_REDESIGN.md`) and ambiguously-load-bearing (`SPEC_studio.md`,
-   `SPEC_gap_feedback.md`).
+   CLAUDE, README) coexisting with sprint-archaeology (`docs/audits/_archive/CB_11_C_NOTES.md`,
+   `docs/audits/_archive/Q3_CLI_REDESIGN.md`) and ambiguously-load-bearing (`docs/specs/SPEC_studio.md`,
+   `docs/specs/SPEC_gap_feedback.md`).
 3. The handbook (`docs/` outside `audits/` + `reference/`) is wildly
    stale — `x_2_design_thoughts.md` / `x_4_5_design_thoughts.md` /
    `bs_design_thoughts.md` are pre-architecture artifacts; no current
@@ -205,7 +205,7 @@ declaration.
 gets folded in as initial population (one `QSParityBreak` per
 existing section).
 
-### Lock CN-6: SPEC_studio.md + SPEC_gap_feedback.md → `docs/specs/`
+### Lock CN-6: docs/specs/SPEC_studio.md + docs/specs/SPEC_gap_feedback.md → `docs/specs/`
 
 Move both to **`docs/specs/`** (new subdir; sibling to `docs/handbook/`
 + `docs/reference/`). Stays grep-able + load-bearing. Mirrors how
@@ -213,7 +213,7 @@ Move both to **`docs/specs/`** (new subdir; sibling to `docs/handbook/`
 discoverable. Updates all in-repo references (PLAN.md, CLAUDE.md
 mentions) in the same commit.
 
-`CB_11_C_NOTES.md` + `Q3_CLI_REDESIGN.md` go to `docs/audits/_archive/`
+`docs/audits/_archive/CB_11_C_NOTES.md` + `docs/audits/_archive/Q3_CLI_REDESIGN.md` go to `docs/audits/_archive/`
 per Lock CN-1 — they're sprint-archaeology, not live SPEC.
 
 **Result:** root `.md` count drops from 11 → 7: PLAN, PLAN_ARCHIVE,
@@ -442,7 +442,7 @@ refinements are scope tightening + parallelism callouts.
 |---|---|---|
 | **CN.1** | Build `common/parity/breaks.py` module + 14-entry initial population (pure registry, no site-comment lint per Lock CN-5). Add typing-smells lint that resolves each entry's `references`. Wire doc-generation emitter into quirks log. | Modest fan-out: one agent sweeps `src/` for additional breaks, one sweeps `docs/audits/`, one sweeps `quicksight-quirks.md` for existing 26 sections to fold in. Synthesize. |
 | **CN.2** | Move ~91 audits to `docs/audits/_archive/`. Decision rubric: "Is this an active replan / shipped-but-still-referenced invariant / current-cycle sign-off?" → keep. Otherwise archive. | **Strong fan-out fit (ultracode).** Bucket by phase prefix (BS/BT/BU/BV/CA/CB/CF/CG/etc.) → one agent per bucket triages keep-vs-archive against rubric. Synthesize. ~12 buckets × ~10 files each. |
-| **CN.3** | Move `SPEC_studio.md` + `SPEC_gap_feedback.md` to `docs/specs/` (with `git mv`). Move `CB_11_C_NOTES.md` + `Q3_CLI_REDESIGN.md` to `docs/audits/_archive/`. Update PLAN.md + CLAUDE.md references. | Solo — small mechanical sweep. |
+| **CN.3** | Move `docs/specs/SPEC_studio.md` + `docs/specs/SPEC_gap_feedback.md` to `docs/specs/` (with `git mv`). Move `docs/audits/_archive/CB_11_C_NOTES.md` + `docs/audits/_archive/Q3_CLI_REDESIGN.md` to `docs/audits/_archive/`. Update PLAN.md + CLAUDE.md references. | Solo — small mechanical sweep. |
 | **CN.4** | Rewrite 30 handbook pages — Getting Started ×4 first, then per-sheet error-class pages, then shared `app-info.md`. Per-page screenshot validation (per §Validation contract). | **Strong fan-out fit (ultracode).** Per-app pipeline (L1/L2FT/Inv/Exec): outline → draft → screenshot-validate → revise. 4 parallel app threads, each ~6-13 pages internally pipelined. |
 | **CN.5** | Add `Sheet.handbook_path: HandbookPath \| None` typed field. App2 renderer: `?` button + side panel + Starlette `GET /handbook/<app>/<sheet>` route. Register `handbook_help_panel` in CN.1's PARITY_BREAKS. | Solo — single tree primitive + single renderer + single route. |
 | **CN.5a** | Extend `?` pattern to `FieldSpec.handbook_path`. Survey ~6 fields that benefit (`epc`, `leg_rail_xor_groups`, `transfer_key`/`completion`, `bundles_activity`, `max_unbundled_age`, `metadata_value_examples`). Register `studio_inline_help`. | Solo — small extension of CN.5. |
@@ -477,7 +477,7 @@ loop-design principle.
 - [x] 7 open design questions locked (3 operator-answered 2026-06-08:
   per-sheet, runtime-fetch, `docs/specs/`; 4 default-and-flagged:
   flat `_archive/`, side panel, mkdocs liveness gate, archive
-  `CB_11_C_NOTES.md` + `Q3_CLI_REDESIGN.md`).
+  `docs/audits/_archive/CB_11_C_NOTES.md` + `docs/audits/_archive/Q3_CLI_REDESIGN.md`).
 - [x] Page-tree mapping enumerated (30 sheets → 30 handbook paths +
   1 shared App Info page).
 - [x] QSParityBreak registry shape designed; 14-entry initial
