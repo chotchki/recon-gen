@@ -35,7 +35,6 @@ from recon_gen.common.models import (
 from recon_gen.common.picker_datasets import (
     build_picker_account_roles_dataset,
     build_picker_chain_parents_dataset,
-    build_picker_metadata_keys_dataset,
     build_picker_rails_dataset,
 )
 from recon_gen.common.sheets.app_info import (
@@ -1866,19 +1865,16 @@ def build_all_l1_dashboard_datasets(
         build_l1_ds_control_accounts_dataset(cfg, l2_instance),
         build_l1_tx_ids_dataset(cfg, l2_instance),
         build_l1_tx_facets_dataset(cfg, l2_instance),
-        # CQ.3.c — shared LinkedValues picker source datasets that
-        # L1 actually uses (rails / account_roles / metadata_keys /
-        # chain_parents). DS_TEMPLATES deliberately NOT emitted —
-        # L1 has no Template picker (L2FT uses it). Pre-CR.x L1 used
-        # the all-5 build_shared_picker_datasets but the unused
-        # Templates dataset never made it into L1's
-        # DataSetIdentifierDeclarations, tripping the structural
-        # test (CI failure on cf032797). Each app now emits the
-        # subset it binds; AWS DataSetId de-dup still consolidates
-        # when both apps emit the same one.
+        # CQ.3.c — shared LinkedValues picker source datasets. L1 emits
+        # only the ones it BINDS to a visual/filter — unbound datasets
+        # never make it into the dashboard's DataSetIdentifierDeclarations
+        # and trip the structural test (CI failure on cf032797 / 70213648).
+        # DS_TEMPLATES + DS_METADATA_KEYS deliberately NOT emitted — L1
+        # has no Template or MetadataKey picker (those are L2FT's).
+        # AWS DataSetId de-dup still consolidates when both apps emit
+        # the same one.
         build_picker_rails_dataset(cfg),
         build_picker_account_roles_dataset(cfg),
-        build_picker_metadata_keys_dataset(cfg),
         build_picker_chain_parents_dataset(cfg),
         # M.4.4.5 — App Info ("i") sheet datasets, ALWAYS LAST.
         # M.4.4.7 — per-app segment so deploy <single-app> doesn't

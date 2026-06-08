@@ -93,7 +93,6 @@ from recon_gen.common.config import Config
 from recon_gen.common.picker_datasets import (
     DS_ACCOUNT_ROLES,
     DS_CHAIN_PARENTS,
-    DS_METADATA_KEYS,
     DS_RAILS,
 )
 from recon_gen.common.handbook.invariants import (
@@ -544,9 +543,9 @@ def _l1_datasets(
         DS_L1_ACCOUNTS, DS_L1_DS_ACCOUNTS,
         DS_L1_DS_CONTROL_ACCOUNTS, DS_L1_TX_IDS, DS_L1_TX_FACETS,
         # CQ.3.c — shared LinkedValues picker source datasets. L1 emits
-        # only the 4 it binds (CR.x — drops Templates, which is L2FT's).
-        # Order matches build_all_l1_dashboard_datasets emit order.
-        DS_RAILS, DS_ACCOUNT_ROLES, DS_METADATA_KEYS, DS_CHAIN_PARENTS,
+        # only the ones it BINDS (CR.x — drops Templates + MetadataKeys,
+        # which are L2FT's). Order matches build_all_l1_dashboard_datasets.
+        DS_RAILS, DS_ACCOUNT_ROLES, DS_CHAIN_PARENTS,
         _DS_APP_INFO_LIVENESS, _DS_APP_INFO_MATVIEWS,
     ]
     return {
