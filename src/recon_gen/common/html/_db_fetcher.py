@@ -42,6 +42,7 @@ from recon_gen.common.l2.primitives import (
     TwoLegRail,
 )
 from recon_gen.common.money import Cents
+from recon_gen.common.sql.display_labels import account_display_expr
 
 
 # URL params arrive as a multi-dict (a key can repeat). This legacy
@@ -247,15 +248,19 @@ def _query_money_trail_edges(
     if where_clauses:
         where_sql = "WHERE " + " AND ".join(where_clauses) + "\n"
 
+    source_disp = account_display_expr(
+        "source_account_name", "source_account_id",
+    )
+    target_disp = account_display_expr(
+        "target_account_name", "target_account_id",
+    )
     sql = (
         f"SELECT source_display, target_display, "
         f"CAST(SUM(hop_amount) AS DOUBLE PRECISION) AS total_amount\n"
         f"FROM (\n"
         f"  SELECT\n"
-        f"    source_account_name || ' (' || source_account_id || ')' "
-        f"AS source_display,\n"
-        f"    target_account_name || ' (' || target_account_id || ')' "
-        f"AS target_display,\n"
+        f"    {source_disp} AS source_display,\n"
+        f"    {target_disp} AS target_display,\n"
         f"    hop_amount,\n"
         f"    posted_at\n"
         f"  FROM {prefix}_inv_money_trail_edges\n"

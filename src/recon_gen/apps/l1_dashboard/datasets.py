@@ -38,6 +38,7 @@ from recon_gen.common.sheets.app_info import (
 )
 from recon_gen.common.sql import (
     Dialect,
+    account_display_expr,
     date_trunc_day,
     day_text,
     universal_date_range_clause,
@@ -238,7 +239,7 @@ def _account_display_clause(param_name: str) -> str:
     every row.
 
     Pattern:
-        ``('__l1_all__' = <<$p>> OR (account_name || ' (' || account_id || ')') = <<$p>>)``
+        ``('__l1_all__' = <<$p>> OR (COALESCE(account_name, account_id) || ' (' || account_id || ')') = <<$p>>)``
 
     QS's ``LinkToDataSetColumn`` carries one column, which drives BOTH
     the dropdown label AND the bound value (no separate label-vs-value
@@ -251,10 +252,15 @@ def _account_display_clause(param_name: str) -> str:
     surfaces ``account_name`` and ``account_id``, so this works
     everywhere AA.E.2 needs it.
 
-    Portable across all three supported dialects (PG / Oracle / SQLite
+    Portable across all three supported dialects (PG / Oracle / DuckDB
     all accept ``||`` for string concat with the same semantics).
+
+    CQ.1 — both this WHERE-side comparator and the SELECT-side projection
+    (``account_display_expr`` in ``common/sql/display_labels.py``) share
+    the same NULL-safe ``COALESCE(name, id)`` shape. A divergence would
+    silently filter rows whose ``account_name`` is NULL.
     """
-    expr = "(account_name || ' (' || account_id || ')')"
+    expr = account_display_expr("account_name", "account_id")
     return (
         f"({_L1_ALL_SENTINEL_SQL} = <<${param_name}>>"
         f" OR {expr} = <<${param_name}>>)"
@@ -1098,7 +1104,7 @@ def build_daily_statement_summary_dataset(
     _param_ref = f"<<${P_L1_DS_BALANCE_DATE_DSP}>>"
     bdate_param = f"CAST({_param_ref} AS DATE)"
     bdate = day_text(bdate_param, cfg.dialect)
-    acct = "(account_name || ' (' || account_id || ')')"
+    acct = account_display_expr("account_name", "account_id")
     # AO.2 / AR.2 — balance-date narrow is a strict day equality. The
     # pre-AR.2 ``OR (bdate ≥ sentinel ...)`` latest-on-empty fallback is
     # gone: the picker default is the view's anchor day, never the
@@ -1189,7 +1195,8 @@ def _daily_statement_transactions_sql(prefix: str, dialect: Dialect) -> str:
         f"       {amount} AS amount_money, tx.amount_direction,"
         f"       tx.status, tx.origin"
         f" FROM {prefix}_current_transactions tx"
-        f" WHERE (tx.account_name || ' (' || tx.account_id || ')') = <<${P_L1_DS_ACCOUNT_DSP}>>"
+        f" WHERE {account_display_expr('tx.account_name', 'tx.account_id')}"
+        f" = <<${P_L1_DS_ACCOUNT_DSP}>>"
         f"   AND {day_txt} = {bdate}"
     )
 
@@ -1599,9 +1606,10 @@ def build_l1_accounts_dataset(
     entry). Dropping the dead substitution dissolves both errors.
     """
     prefix = cfg.db_table_prefix
+    display = account_display_expr("account_name", "account_id")
     sql = (
         f"SELECT DISTINCT account_id, account_role, account_name,"
-        f" (account_name || ' (' || account_id || ')') AS account_display"
+        f" {display} AS account_display"
         # BL.3 perf (2026-05-27, v11.22.7→v11.22.8→v11.22.9 release CI
         # picker timeouts): UNION ALL — not UNION — across the three
         # subqueries. The outer DISTINCT dedupes the merged set; the
@@ -1661,9 +1669,10 @@ def build_l1_ds_accounts_dataset(
     breaking the BL.3-widened source for the 7 other L1 sheets.
     """
     prefix = cfg.db_table_prefix
+    display = account_display_expr("account_name", "account_id")
     sql = (
         f"SELECT DISTINCT account_id, account_role, account_name,"
-        f" (account_name || ' (' || account_id || ')') AS account_display"
+        f" {display} AS account_display"
         f" FROM {prefix}_current_daily_balances"
         f" WHERE {_data_value_clause('account_role', P_L1_DS_ROLE_DSP)}"
     )

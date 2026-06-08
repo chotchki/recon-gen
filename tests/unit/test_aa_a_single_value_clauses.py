@@ -91,11 +91,19 @@ def test_aa_e_2_account_display_clause_shape() -> None:
     """Inline-concat WHERE shape against the source view's ``account_name``
     + ``account_id`` columns. Sentinel-guard same as
     :func:`_data_value_clause`, so a show-all default keeps every row on
-    initial load."""
+    initial load.
+
+    CQ.1 — display projection is NULL-safe via COALESCE so accounts
+    with NULL ``account_name`` are still selectable (``"id (id)"``
+    fallback). Both this WHERE-side comparator and the SELECT-side
+    projection use the same ``account_display_expr`` helper, so the
+    expected shape is the COALESCE form on both sides.
+    """
     clause = _account_display_clause(P_L1_DRIFT_ACCOUNT)
     assert clause == (
         f"('{L1_ALL_SENTINEL}' = <<${P_L1_DRIFT_ACCOUNT}>>"
-        f" OR (account_name || ' (' || account_id || ')') = <<${P_L1_DRIFT_ACCOUNT}>>)"
+        f" OR (COALESCE(account_name, account_id) || ' (' || account_id || ')')"
+        f" = <<${P_L1_DRIFT_ACCOUNT}>>)"
     )
 
 
@@ -111,8 +119,11 @@ def test_aa_e_2_account_display_clause_uses_l1_sentinel() -> None:
 def test_aa_e_2_account_display_clause_concats_name_then_id() -> None:
     """Pin the display *order* — ``name (id)``, not ``id (name)``. The
     dropdown options dataset must produce the same shape (the
-    ``DS_L1_ACCOUNTS`` SQL aliases ``account_name || ' (' || account_id
-    || ')' AS account_display``). If the two ever diverge, every L1
-    account dropdown silently narrows to zero rows."""
+    ``DS_L1_ACCOUNTS`` SQL aliases ``COALESCE(account_name, account_id)
+    || ' (' || account_id || ')' AS account_display``). If the two ever
+    diverge, every L1 account dropdown silently narrows to zero rows."""
     clause = _account_display_clause(P_L1_TX_ACCOUNT)
-    assert "account_name || ' (' || account_id || ')'" in clause
+    assert (
+        "COALESCE(account_name, account_id) || ' (' || account_id || ')'"
+        in clause
+    )

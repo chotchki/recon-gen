@@ -68,12 +68,13 @@ DS_INV_ACCOUNT_NETWORK_INBOUND = "inv-account-network-inbound-ds"    # BO.2
 DS_INV_ACCOUNT_NETWORK_OUTBOUND = "inv-account-network-outbound-ds"  # BO.2
 # Narrow accounts dataset for the anchor dropdown only — K.4.8k. The
 # main DS_INV_ACCOUNT_NETWORK wraps the matview with per-row concat
-# (source_account_name||'('||source_account_id||')'); when QuickSight
-# runs SELECT DISTINCT source_display against that wrapper the planner
-# computes the concat over every matview row before dedupe — fine for a
-# few hundred rows, slow enough to time out the dropdown as the matview
-# grows. This dataset pushes the DISTINCT inside so PG dedupes the
-# (id, name) pairs first and concats once per distinct account.
+# via account_display_expr (post-CQ.1 NULL-safe COALESCE shape); when
+# QuickSight runs SELECT DISTINCT source_display against that wrapper
+# the planner computes the concat over every matview row before dedupe
+# — fine for a few hundred rows, slow enough to time out the dropdown
+# as the matview grows. This dataset pushes the DISTINCT inside so PG
+# dedupes the (id, name) pairs first and concats once per distinct
+# account.
 DS_INV_ANETWORK_ACCOUNTS = "inv-anetwork-accounts-ds"        # K.4.8k
 
 # ---------------------------------------------------------------------------

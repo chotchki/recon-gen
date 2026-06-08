@@ -2408,8 +2408,8 @@ def _wire_daily_statement_filters(
         selectable_values=LinkedValues.from_column(
             # AA.E.2 fix: bind to ``account_display`` so the picker's
             # bound value matches the dataset SQL's display-format
-            # WHERE clause (``(account_name || ' (' || account_id || ')')
-            # = <<$pL1DsAccount>>``).
+            # WHERE clause (CQ.1: ``(COALESCE(account_name, account_id)
+            # || ' (' || account_id || ')') = <<$pL1DsAccount>>``).
             # BO.1 — sourced from ``DS_L1_DS_ACCOUNTS`` (balance-only)
             # so every option has a matching ``daily_balances`` row.
             datasets[DS_L1_DS_ACCOUNTS]["account_display"],

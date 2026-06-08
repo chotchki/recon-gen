@@ -15,6 +15,7 @@ return expression-level SQL).
 from __future__ import annotations
 
 from .app2_filters import universal_date_range_clause
+from .display_labels import account_display_expr
 from .money import cents_to_dollars_sql
 from .dialect import (
     Dialect,
@@ -61,6 +62,7 @@ from .dialect import (
 
 __all__ = [
     "Dialect",
+    "account_display_expr",
     "analyze_table",
     "bigint_type",
     "boolean_type",

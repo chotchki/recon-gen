@@ -58,6 +58,7 @@ from recon_gen.common.sheets.app_info import (
     build_matview_status_dataset,
 )
 from recon_gen.common.sql.dialect import Dialect
+from recon_gen.common.sql.display_labels import account_display_expr
 from recon_gen.common.sql.money import cents_to_dollars_sql
 
 
@@ -245,6 +246,12 @@ def _money_trail_base_sql(prefix: str, dialect: Dialect) -> str:
     # consumers that compare against a dollar-shaped param must lift
     # the param into cents via `* 100`).
     hop = cents_to_dollars_sql("e.hop_amount", dialect=dialect)
+    source_disp = account_display_expr(
+        "e.source_account_name", "e.source_account_id",
+    )
+    target_disp = account_display_expr(
+        "e.target_account_name", "e.target_account_id",
+    )
     return (
         f"SELECT\n"
         f"    e.root_transfer_id, e.transfer_id, e.depth,\n"
@@ -254,10 +261,8 @@ def _money_trail_base_sql(prefix: str, dialect: Dialect) -> str:
         f" e.target_account_type,\n"
         f"    {hop} AS hop_amount,\n"
         f"    e.posted_at, e.rail_name,\n"
-        f"    e.source_account_name || ' (' || e.source_account_id || ')' "
-        f"AS source_display,\n"
-        f"    e.target_account_name || ' (' || e.target_account_id || ')' "
-        f"AS target_display\n"
+        f"    {source_disp} AS source_display,\n"
+        f"    {target_disp} AS target_display\n"
         f"FROM {prefix}_inv_money_trail_edges e\n"
     )
 
@@ -287,15 +292,17 @@ def _anetwork_accounts_sql(prefix: str) -> str:
     #
     # Oracle quirk: ``AS`` on a derived-table alias raises ORA-00907.
     # The bare ``) ranked`` form is portable.
+    source_disp = account_display_expr(
+        "source_account_name", "source_account_id",
+    )
     return (
         f"SELECT source_display\n"
         f"FROM (\n"
         f"    SELECT\n"
-        f"        source_account_name || ' (' || source_account_id || ')' "
-        f"AS source_display,\n"
+        f"        {source_disp} AS source_display,\n"
         f"        SUM(hop_amount) AS network_total\n"
         f"    FROM {prefix}_inv_money_trail_edges\n"
-        f"    GROUP BY source_account_name || ' (' || source_account_id || ')'\n"
+        f"    GROUP BY {source_disp}\n"
         f"    ORDER BY SUM(hop_amount) DESC\n"
         f") ranked\n"
     )
