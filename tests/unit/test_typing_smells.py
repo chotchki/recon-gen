@@ -1892,6 +1892,83 @@ def _read_pyright_include() -> list[Path]:
     return [REPO_ROOT / r for r in rel]
 
 
+class NoL2DerivedStaticValuesCheck(Check):
+    """CQ.3.e — flag ``StaticValues(...)`` callsites in ``src/recon_gen/
+    apps/**`` whose argument is computed from ``l2_instance`` (or any
+    variant: ``l2`` / ``instance``). Such sites are exactly the ones
+    that would tripped the AWS 32-element StaticValues ceiling once an
+    L2 declared more than 32 of the relevant entities (rails /
+    templates / metadata keys / account roles / chain parents). CQ.3.d
+    converted every existing site to ``LinkedValues.from_column(<shared
+    picker dataset>)``; this lint stops the conversion from drifting
+    back.
+
+    Heuristic: walk every ``StaticValues(...)`` Call in the file.
+    Inspect its argument value subtree. If any ``Name`` descendant
+    matches the L2-instance variable convention (``l2_instance`` /
+    ``l2`` / ``instance``), flag it.
+
+    Fixed-code-enum sites (``StaticValues(values=l1_check_type_values())``
+    — no ``l2_instance`` arg in the helper call) are not flagged
+    because their value comes from a no-arg function whose output is
+    bounded at code-time.
+    """
+
+    _L2_NAMES: frozenset[str] = frozenset(
+        {"l2_instance", "l2", "instance"},
+    )
+
+    def find_smells(
+        self, src: str, tree: ast.AST, file: Path,
+    ) -> "Iterable[Smell]":
+        smells: list[Smell] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            # Match `StaticValues(...)` invocations — bare name only
+            # (the apps import `from recon_gen.common.tree import
+            # StaticValues` so the call is `StaticValues(...)`).
+            if not (
+                isinstance(node.func, ast.Name)
+                and node.func.id == "StaticValues"
+            ):
+                continue
+            # Collect all argument subtrees (positional + keyword).
+            arg_subtrees: list[ast.AST] = list(node.args)
+            for kw in node.keywords:
+                arg_subtrees.append(kw.value)
+            # Flag if any Name descendant in any arg subtree is in
+            # the L2-instance vocabulary.
+            for sub in arg_subtrees:
+                for descendant in ast.walk(sub):
+                    if (
+                        isinstance(descendant, ast.Name)
+                        and descendant.id in self._L2_NAMES
+                    ):
+                        smells.append(Smell(
+                            file=file,
+                            lineno=node.lineno,
+                            checker=self.name,
+                            message=(
+                                "StaticValues(...) callsite reads from "
+                                "L2 (variable %r). CQ.3 forbids L2-"
+                                "derived StaticValues in apps/ — flip "
+                                "to LinkedValues.from_column(<shared "
+                                "picker dataset>) per common/"
+                                "picker_datasets.py. Fixed-schema "
+                                "enums (StaticValues(values=l1_check_"
+                                "type_values())) keep StaticValues — "
+                                "they're code-bounded."
+                                % descendant.id
+                            ),
+                        ))
+                        break
+                else:
+                    continue
+                break
+        return smells
+
+
 def _build_checks() -> list[Check]:
     pyright_scope = _read_pyright_include()
     # Tighter scope for explicit-any: the freshest async files where
@@ -2274,6 +2351,26 @@ def _build_checks() -> list[Check]:
         # literal cases + refactored 4 chart-renderer fixtures to
         # neutral strings. Net: 0 unsuppressed hits. The lint now
         # locks the migrated baseline + catches future drift.
+        NoL2DerivedStaticValuesCheck(
+            name="no-l2-derived-static-values",
+            description=(
+                "StaticValues(...) callsite in src/recon_gen/apps/** "
+                "that reads from `l2_instance` (or `l2` / `instance`). "
+                "Pre-CQ.3 these baked L2-declared rail / template / "
+                "role / metadata_key lists into the dropdown spec at "
+                "build time — at fleet scale that trips the AWS 32-"
+                "element ceiling on ParameterDropDownControl. CQ.3.d "
+                "converted every site to LinkedValues.from_column("
+                "<shared picker dataset>) sourced from a _v_config_* "
+                "view (see common/picker_datasets.py). The lint "
+                "catches future regressions that re-introduce the "
+                "ceiling landmine. Fixed-code enums (Check Type / "
+                "Supersedes / TX Status / Bundle Status / TT "
+                "Completion) take no l2_instance arg and are not "
+                "flagged."
+            ),
+            files=_expand_paths([REPO_ROOT / "src/recon_gen/apps"]),
+        ),
         NoInlineProductionConstantsCheck(
             name="no-inline-production-constants",
             description=(
@@ -2369,6 +2466,44 @@ def test_no_typing_smells() -> None:
 # expected hit count. Both directions of the contract — the lint
 # scope excludes fixtures (so a real run is unaffected); the smoke
 # test invokes directly (so a regression flips the smoke red).
+
+
+def test_cq_3_no_l2_derived_static_values_finds_planted() -> None:
+    """CQ.3.e smoke — the lint must flag the planted
+    ``StaticValues(values=some_helper(l2_instance))`` call AND must
+    NOT flag the adjacent ``StaticValues(values=["Posted", ...])``
+    fixed-enum call. If the visitor drift-breaks (the L2_NAMES set
+    diverges from the var convention; the ast.walk loop misses a
+    subtree; the Call.func discriminator stops matching), this smoke
+    catches it even when the real-corpus run reports 0 (which it
+    always should — that's the point of the planted-fixture invariant).
+    """
+    fixtures_dir = REPO_ROOT / "tests/unit/_fixtures"
+    fixture = fixtures_dir / "cq_3_planted_static_values.py"
+    assert fixture.exists(), (
+        f"CQ.3.e smoke fixture missing: {fixture} — re-create per "
+        f"CQ.3.e planted-fixture contract"
+    )
+    check = NoL2DerivedStaticValuesCheck(
+        name="no-l2-derived-static-values",
+        description="smoke-test instance",
+        files=[fixture],
+    )
+    src = fixture.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    smells = list(check.find_smells(src, tree, fixture))
+    assert len(smells) == 1, (
+        f"CQ.3.e smoke expected exactly 1 hit on the planted fixture "
+        f"(the StaticValues(values=some_helper(l2_instance)) call); "
+        f"got {len(smells)}: {smells!r}. Either the AST walker "
+        f"stopped walking, the L2_NAMES set drifted, or the "
+        f"StaticValues Call discriminator broke."
+    )
+    assert smells[0].checker == "no-l2-derived-static-values"
+    # The fixed-form `StaticValues(values=["Posted", ...])` call MUST
+    # NOT have been flagged — code-bounded enums are forever allowed.
+    for smell in smells:
+        assert "Posted" not in smell.message
 
 
 def test_be_1_no_test_src_sql_duplication_finds_planted_dup() -> None:
