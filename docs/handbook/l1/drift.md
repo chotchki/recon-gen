@@ -4,18 +4,20 @@
 > between an account's *stored* end-of-day balance (what the institution
 > reported) and its *computed* balance (the cumulative net of every
 > posted transaction through that day). Every row on this sheet is
-> one violation of a SHOULD-constraint: the ledger does not agree
-> with the postings that produced it.
+> one violation of an L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants))
+> SHOULD-constraint: the ledger does not agree with the postings that
+> produced it.
 
 ## What you're looking at
 
 The sheet opens on a strip of four KPIs across the top — *Open Drift
 Count* (rows in the leaf table), *Open Drift Magnitude (Σ ABS)*, *Worst
 Single Drift*, and *Distinct Accounts*. Below the strip sit two side-
-by-side tables: *Sub-Ledger Drift* (leaf accounts — individual posting
-ledgers like a customer DDA or a vault) and *Ledger Drift* (parent
-accounts — rollups like a customer-ledger control account whose stored
-balance should equal the sum of its children).
+by-side tables: *Sub-Ledger Drift* (leaf [accounts](../_glossary.md#parent--leaf-accounts)
+— individual posting ledgers like a customer DDA or a vault) and
+*Ledger Drift* (parent accounts — rollups like a customer-ledger
+control account whose stored balance should equal the sum of its
+children).
 
 A *Drift Composition* bar chart on the right groups the violation
 volume by `account_role` so you can see which family of accounts is
@@ -25,8 +27,8 @@ role.
 
 ## How to read the numbers
 
-Both tables read from the L1 invariant matviews `<prefix>_drift` (leaf)
-and `<prefix>_ledger_drift` (parent). Each matview joins the carry-
+Both tables read from the L1 invariant [matviews](../_glossary.md#matview--materialized-view)
+`<prefix>_drift` (leaf) and `<prefix>_ledger_drift` (parent). Each matview joins the carry-
 forward stored balance from `effective_balances` (the source of truth
 for "what the account said it was at end-of-day", including carried-
 forward days when no balance was emitted) against a `computed_*`
@@ -49,9 +51,9 @@ The columns are the same on both tables:
   balance or was carried forward from a prior day
 
 Both matviews filter `WHERE stored_balance <> computed_balance` and
-`account_scope = 'internal'`, so external accounts (banks, payment
-networks) never appear here — by L1 invariant rule, banks may
-overdraft us but we MUST NOT misreport our own books.
+[`account_scope = 'internal'`](../_glossary.md#account-scope-internal-vs-external),
+so external accounts (banks, payment networks) never appear here —
+banks may overdraft us but we MUST NOT misreport our own books.
 
 The *Open Drift Count* KPI counts rows in the leaf table within the
 current date filter. The *Σ ABS* magnitude KPI is
@@ -116,10 +118,10 @@ underlying ledgers are right.
 ### Drift on `source='carried'` rows only
 
 The leaf table has rows where `source` is `carried`, not `emitted`.
-The stored balance for that day was carried forward from the prior
-emit because no daily-balance row was reported. The carried value
-disagrees with the computed value of postings that *did* fire that
-day. This is the **sparse-cadence shape** — the institution doesn't
+The stored balance for that day was [carried forward](../_glossary.md#carry-forward--sparse-cadence)
+from the prior emit because no daily-balance row was reported. The
+carried value disagrees with the computed value of postings that
+*did* fire that day. This is the **sparse-cadence shape** — the institution doesn't
 report a balance for that account every day, so a posting on a
 non-emit day creates apparent drift against the carried prior-day
 balance. Cross to *Balance Cadence Gap* (the CL.6 invariant sheet, if
@@ -194,3 +196,8 @@ run. That's an ops alert, not a "clean" signal.
   filter the data correctly but show the *Account* dropdown still at
   *All* — the data is right, the control is lying. App2 doesn't have
   this defect. See [quirks log §dependent-dropdown-no-refresh](../../reference/quicksight-quirks.md).
+
+---
+
+*First time here? See the [Vocabulary](../_glossary.md) for `L1`,
+`matview`, `account_role`, and the other project-specific terms.*

@@ -90,6 +90,29 @@ Otherwise omit this section — the agents should NOT default to
 
 ```
 
+## Vocabulary discipline — L1 / L2 are NOT universal
+
+`L1` and `L2` mean specific things to *us* (the account-integrity
+dashboard and the per-chain flow-tracing dashboard) but are completely
+opaque to anyone outside this project. The first time **any handbook
+page** uses `L1` or `L2`, it MUST expand the term inline and link to
+the glossary:
+
+> ...the L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants))
+> invariant matview...
+
+Subsequent uses on the same page may drop the parenthetical. The
+footer of every page MUST carry a "Vocabulary" link to the glossary.
+
+Same rule for these other project-specific terms when they appear:
+`matview`, `account_role`, `rail`, `chain`, `template`, `carry-forward`,
+`internal` / `external` scope, `parent` / `leaf` account. Each has a
+glossary entry; first-use expansion + link is required.
+
+Banking-standard terms (`debit`, `credit`, `posting`, `settle`, `clear`,
+`ACH`, `wire`, `DDA`) do not need expansion — the operator-reader
+knows them.
+
 ## Voice + style locks
 
 - **CPA-readable.** Standard banking terminology over codebase shorthand.
