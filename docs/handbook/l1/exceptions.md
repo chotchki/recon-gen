@@ -10,25 +10,23 @@ At the bottom is an *Institution Context* text box carrying your L2 instance's d
 
 ## How to read the numbers
 
-The detail table draws from a live UNION ALL across ten L1 invariant matviews, each contributing its own `check_type` discriminator column. The matview `<prefix>_l1_exceptions` branches across:
+The detail table draws from a live UNION ALL across ten L1 invariant matviews, each contributing its own `check_type` discriminator column. The union branches across three categories:
 
-**Balance / numeric checks** (each row is one account-day violation):
+**Balance / numeric checks** (5 types; each row is one account-day violation):
 - `drift` — leaf account's stored balance disagrees with cumulative net of postings; drawn from `<prefix>_drift` (see [Drift](drift.md))
 - `ledger_drift` — parent account's stored balance does not equal the sum of its children's stored balances; from `<prefix>_ledger_drift`
 - `overdraft` — stored balance is negative (`< 0`); from `<prefix>_overdraft`
 - `limit_breach` — the net outbound or inbound flow on a rail exceeded the per-account cap for that direction; from `<prefix>_limit_breach` (see [Limit Breach](limit-breach.md))
 - `expected_eod_balance_breach` — the stored balance disagrees with a declared expected EOD target
-- `balance_cadence_gap` — a posting arrived on a non-emit day for a sparse-cadence account, creating apparent drift against the carried-forward prior balance
 
-**Time-based aging checks** (each row is one leg, keyed by posting timestamp):
+**Time-based aging checks** (2 types; each row is one leg, keyed by posting timestamp):
 - `stuck_pending` — a Pending leg has exceeded its rail's `max_pending_age` cap
 - `stuck_unbundled` — a Posted leg has exceeded its rail's `max_unbundled_age` cap and is not yet bundled
 
-**Transfer-keyed chain / cardinality checks** (each row is one transfer's violation, not an account-day):
+**Transfer-keyed chain / cardinality checks** (3 types; each row is one transfer's violation, not an account-day):
 - `chain_parent_disagreement` — a child Transfer claims multiple parent Transfer IDs; the chain's parent linkage is ambiguous
 - `xor_group_violation` — an XOR group's firing count is not exactly one (0 = missed, ≥2 = overlap)
 - `fan_in_disagreement` — a fan-in child Transfer's parent count disagrees with the expected count
-- `multi_xor_violation` — a parent Transfer's child set violates the declared XOR-sibling contract (missed or overlapped children)
 
 Every row carries `account_id`, `account_name`, `account_role`, and `business_day`. For money-based checks (balance and aging branches), `magnitude_amount` holds the dollar variance; for transfer-keyed checks, `magnitude_count` holds the cardinality disagreement (the count of unexpected parents, or firing/child count mismatch). Exactly one magnitude column is populated per row.
 
@@ -38,11 +36,11 @@ The *Open Exceptions* KPI counts all rows in the dataset within the selected dat
 
 ### Single check type dominating
 
-The bar chart shows one or two check types (e.g., `stuck_unbundled`) as massive bars while the others barely register. This is the **steady-state shape** — one aging rail is perpetually slow on bundling, or one specific invariant has a known endemic issue. Filter the detail table by that `check_type` using the *Check Type* dropdown, then sort by `magnitude_amount` desc to find the worst offenders. Cross to the invariant's dedicated sheet (e.g., *Unbundled Aging* for `stuck_unbundled`) to drill into which rails / accounts are the hotbed.
+The bar chart shows one or two check types (e.g., `stuck_unbundled`) as massive bars while the others barely register. This is the **steady-state shape** — one aging rail is perpetually slow on bundling, or one specific invariant has a known endemic issue. Filter the detail table by that `check_type` using the filter controls, then sort by `magnitude_amount` desc to find the worst offenders. Cross to the invariant's dedicated sheet (e.g., *Unbundled Aging* for `stuck_unbundled`) to drill into which rails / accounts are the hotbed.
 
 ### Transfer-keyed rows alongside account-day rows
 
-The detail table mixes money rows (with `magnitude_amount` ≥ $0.01) and cardinality rows (with `magnitude_count` ≥ 1). The transfer-keyed checks (`chain_parent_disagreement`, `xor_group_violation`, `fan_in_disagreement`, `multi_xor_violation`) have NULL on `account_id` and a count in `magnitude_count`. Account-day checks always have `account_id` and a dollar amount. This is expected — the sheet's design surfaces all ten invariants on one canvas, which means two different key-shapes. When triaging, focus on money checks first (they map to accounts / roles you know), then loop in the chain-analysis team for the transfer-keyed exceptions.
+The detail table mixes money rows (with `magnitude_amount` ≥ $0.01) and cardinality rows (with `magnitude_count` ≥ 1). The transfer-keyed checks (`chain_parent_disagreement`, `xor_group_violation`, `fan_in_disagreement`) have NULL on `account_id` and a count in `magnitude_count`. Account-day checks always have `account_id` and a dollar amount. This is expected — the sheet's design surfaces all ten invariants on one canvas, which means two different key-shapes. When triaging, focus on money checks first (they map to accounts / roles you know), then loop in the chain-analysis team for the transfer-keyed exceptions.
 
 ### Balance spike after a known outage
 
@@ -64,8 +62,8 @@ If *App Info* shows `last_refresh_at` as NULL across the board or the `l1_except
 
 ## Cross-sheet drills
 
-- **Exception Detail table row (left-click on `account_id`) → Drift sheet** (narrowing to that account). For account-day rows only. Use this when you want to see a single problematic account's full drift posture across the selected date range.
-- **Exception Detail table row (right-click → View Daily Statement) → Daily Statement** (filtered to that account-day). Lands you on the per-account-per-day narrative of every posting and balance event. Works only for account-day rows (balance, aging checks); transfer-keyed rows (chain/cardinality) show no account context.
+- **Exception Detail table row (left-click on `account_id`) → Drift sheet** (filtering to that account). For account-day rows only. Use this when you want to see a single problematic account's full drift posture across the selected date range.
+- **Exception Detail table row (right-click → View Daily Statement for this account-day) → Daily Statement** (filtered to that account-day). Lands you on the per-account-per-day narrative of every posting and balance event. Works only for account-day rows (balance, aging checks); transfer-keyed rows (chain/cardinality) show no account context.
 
 ## Related handbook pages
 
@@ -78,4 +76,4 @@ If *App Info* shows `last_refresh_at` as NULL across the board or the `l1_except
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `L1`, `matview`, `account_role`, `chain`, `template`, `carry-forward`, and the other project-specific terms.*
+*First time here? See the [Vocabulary](../_glossary.md) for `L1`, `matview`, `account_role`, `rail`, `chain`, `template`, and the other project-specific terms.*

@@ -4,13 +4,13 @@
 
 ## What you're looking at
 
-Two Sankey diagrams dominate the top half of the sheet — *Inbound — counterparties → anchor* on the left and *Outbound — anchor → counterparties* on the right. Each ribbon's thickness represents the total dollar amount flowing along that edge. Below the Sankeys sits a *Touching Edges* table listing every transfer leg connecting the anchor to a counterparty, ordered by amount descending. An *Anchor account* dropdown at the top left lets you pick which account to examine; a *Min hop amount* slider filters noise edges below a dollar threshold.
+Two Sankey diagrams dominate the top half of the sheet — *Inbound — counterparties → anchor* on the left and *Outbound — anchor → counterparties* on the right. Each ribbon's thickness represents the total dollar amount flowing along that edge. Below the Sankeys sits an *Account Network — Touching Edges* table listing every transfer leg connecting the anchor to a counterparty, ordered by amount descending. An *Anchor account* dropdown at the top left lets you pick which account to examine; a *Min hop amount ($)* slider filters noise edges below a dollar threshold.
 
 The sheet uses the same underlying [matview](../_glossary.md#matview--materialized-view) as the *Money Trail* sheet (`inv_money_trail_edges`) but presents it from the anchor account's point of view rather than from a chain's point of view. Every row on this sheet is one transfer leg; both Sankeys and the table all narrow when you pick an anchor and adjust the slider.
 
 ## How to read the numbers
 
-All three visuals (inbound Sankey, outbound Sankey, *Touching Edges* table) read from the same `inv_money_trail_edges` matview, a recursive walk over the `transfer_parent_id` linkages in the base `transactions` table. Each row is one leg of a multi-leg transfer, capturing:
+All three visuals (inbound Sankey, outbound Sankey, *Account Network — Touching Edges* table) read from the same `inv_money_trail_edges` matview, a recursive walk over the `transfer_parent_id` linkages in the base `transactions` table. Each row is one leg of a multi-leg transfer, capturing:
 
 - `root_transfer_id` — the topmost transfer in the parent chain (the original money movement)
 - `transfer_id` — the transfer this leg belongs to
@@ -28,9 +28,9 @@ The two Sankeys are directionally filtered:
 - **Inbound Sankey** — rows where `target_display = anchor` (the anchor is the receiving end). Ribbon source = counterparty, ribbon target = your anchor.
 - **Outbound Sankey** — rows where `source_display = anchor` (your anchor is the sending end). Ribbon source = your anchor, ribbon target = counterparty.
 
-The *Touching Edges* table reads the bidirectional dataset (no direction filter) and displays every leg touching the anchor, adding a `counterparty_display` column (target when source is the anchor; source when target is the anchor) so the table's walk-the-flow drill can move to the other side.
+The *Account Network — Touching Edges* table reads the bidirectional dataset (no direction filter) and displays every leg touching the anchor, adding a `counterparty_display` column (target when source is the anchor; source when target is the anchor) so the table's walk-the-flow drill can move to the other side.
 
-The *Anchor account* dropdown parameter (`pInvANetworkAnchor`) narrows all three datasets via `(source_display = anchor OR target_display = anchor)` (bidirectional) or directional-specific predicates (inbound/outbound). The *Min hop amount* parameter filters `hop_amount >= <<$pInvANetworkMinAmount>>` at the database.
+The *Anchor account* dropdown parameter (`pInvANetworkAnchor`) narrows all three datasets via `(source_display = anchor OR target_display = anchor)` (bidirectional) or directional-specific predicates (inbound/outbound). The *Min hop amount ($)* parameter filters `hop_amount >= <<$pInvANetworkMinAmount>>` at the database.
 
 ## Common patterns
 
@@ -40,18 +40,18 @@ One Sankey is visually dense; the other is sparse or empty. This is normal — m
 
 ### One dominant counterparty on each side
 
-Most of the Inbound ribbon thickness comes from a single source; most of the Outbound thickness flows to a single target. In most institutions, this is expected — settlement accounts concentrate flow, operational accounts have a few key partners. Use the *Min hop amount* slider to suppress small noise edges and see the bulk movement.
+Most of the Inbound ribbon thickness comes from a single source; most of the Outbound thickness flows to a single target. In most institutions, this is expected — settlement accounts concentrate flow, operational accounts have a few key partners. Use the *Min hop amount ($)* slider to suppress small noise edges and see the bulk movement.
 
 ### Walk-the-flow discovery
 
-Left-click any node in either Sankey (or right-click a row in the table and pick "Walk to other account on this edge") to pivot the anchor to that counterparty. The sheet re-renders in place, showing that counterparty's inbound and outbound network. This is your path-following tool — follow a suspicious money trail through the graph one hop at a time.
+Left-click any node in either Sankey to pivot the anchor to that counterparty. The sheet re-renders in place, showing that counterparty's inbound and outbound network. This is your path-following tool — follow a suspicious money trail through the graph one hop at a time.
 
 ### Empty Sankeys after anchor selection
 
 You picked an anchor and the Sankeys render empty or nearly empty. This usually means:
 
 - The anchor account has very little flow (check the base transactions table volume for that account ID).
-- The anchor's flow is all below the *Min hop amount* threshold (lower the slider to see micro-transfers).
+- The anchor's flow is all below the *Min hop amount ($)* threshold (lower the slider to see micro-transfers).
 - The anchor is a one-way valve (a pure sweeper or pure feeder with no counterflow).
 
 ### Cycles or bidirectional edges
@@ -64,14 +64,15 @@ A clean empty sheet means one of the following:
 
 - **No anchor selected.** On first paint, the dropdown shows no default — you must pick an anchor to populate the Sankeys and table. The sheet is waiting for your choice.
 - **Anchor has no Posted legs.** The `inv_money_trail_edges` matview carries only Posted transactions (Pending legs don't render). If your anchor has only Pending or Failed legs, the sheet stays empty — use the Daily Statement sheet to see the Pending state for that account.
-- **All flow is below the min-amount threshold.** If the anchor's legs are all smaller than the *Min hop amount* slider value, the table renders empty. Lower the slider to see the micro-transfers.
+- **All flow is below the min-amount threshold.** If the anchor's legs are all smaller than the *Min hop amount ($)* slider value, the table renders empty. Lower the slider to see the micro-transfers.
 - **Matview is stale.** Cross to *App Info* and check the *Matview Status* table's `inv_money_trail_edges` row. If `last_refresh_at` is older than the most recent posting and you've moved money through this anchor since, the dashboard is showing yesterday's state.
 
 If the matview row count shows zero on the App Info sheet, the SQL is dry — no transfers in the entire system. That's an ops alert, not an empty-state signal.
 
 ## Cross-sheet drills
 
-- **Inbound Sankey node or Outbound Sankey node** (left-click). Moves the anchor to that counterparty and re-renders the Sankeys and table in place.
+- **Inbound Sankey node** (left-click). Pivots the anchor to that counterparty and re-renders the Sankeys and table in place.
+- **Outbound Sankey node** (left-click). Pivots the anchor to that counterparty and re-renders the Sankeys and table in place.
 - **Touching Edges table row** (right-click → *Walk to other account on this edge*). Pivots the anchor to the non-anchor side of that edge (target when source was the anchor; source when target was) and re-renders the sheet.
 
 ## Related handbook pages

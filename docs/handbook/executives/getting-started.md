@@ -1,10 +1,10 @@
 # Getting Started
 
-> **What this dashboard is for.** Board-cadence summary of the bank's account coverage, transaction throughput, money movement, and ledger integrity. Scan for trends in a 30-day rolling window; click any row or bar to drill into operational details from the Account Reconciliation dashboard.
+> **What this dashboard is for.** Board-cadence summary of the bank's account coverage, transaction throughput, money movement, and ledger integrity. Scan for trends in a 30-day rolling window; click any row or bar to drill into operational details.
 
 ## What you're looking at
 
-The Getting Started sheet is a navigation layer — you won't find KPIs or visuals here, only text boxes that preview each of the four operational sheets below. The dashboard opens with a welcome message explaining the clickability model: accent-coloured cells are interactive. Click a cell in one of the sheet descriptions to jump to that tab and start investigating. The descriptions beneath each sheet name tell you what you're about to see — *Program Health* (a single tripwire count), *Account Coverage* (open vs active account counts and detail tables), *Transaction Volume Over Time* (daily and period tallies by transfer type), and *Money Moved* (net and gross dollars by rail).
+The Getting Started sheet is a navigation layer — you won't find KPIs or visuals here, only text boxes that preview each of the four operational sheets below. The dashboard opens with a welcome message explaining the clickability model: accent-coloured cells are interactive. Each sheet's preview box is clickable — read the heading to jump to that tab. The descriptions beneath each sheet name tell you what you're about to see — *Program Health* (a single tripwire count), *Account Coverage* (open vs active account counts and detail tables), *Transaction Volume Over Time* (daily and period tallies by transfer type), and *Money Moved* (net and gross dollars by rail).
 
 ## How to read the dashboard
 
@@ -26,13 +26,11 @@ Each sheet in this dashboard is built to answer one question at the 30-day execu
 
 **Assess the money composition.** Open *Money Moved* and check the net vs gross. On a balanced institution, net should be near zero (every outbound transfer is offset by an inbound); a large positive net means deposits exceeded payouts in the window, and large negative means payouts exceeded deposits. Use the gross-dollar bar chart and the log-scale period breakdown to see which rails moved the most handle. Compare this against the *Transaction Volume Over Time* count to spot volume-per-rail spikes (volume jumped on a specific rail but dollars didn't, or vice versa — suggests a composition shift in what people are moving).
 
-**Drill from a bar into Account Reconciliation details.** The sheet descriptions are clickable at the top of each sheet (in the accent color). When you've seen the pattern you're looking for (a volume spike on the ACH rail, for example), click it to drill to Account Reconciliation with the rail pre-filtered. That's where you see the actual transaction detail (legs, statuses, timestamps, metadata) for investigation.
-
 ## Where to start
 
-**First time opening the dashboard.** Start at *Program Health* — it's the first sheet after Getting Started and takes 10 seconds to read. If the KPI is green, move down through *Account Coverage* → *Volume* → *Money Moved* in order. If it's amber or red, open the L1 Dashboard link and triage the ledger breaks first; you'll come back to the Executives sheets once that's resolved.
+**First time opening the dashboard.** Start at *Program Health* — it's the second sheet after Getting Started and takes 10 seconds to read. If the KPI is green, move down through *Account Coverage* → *Transaction Volume Over Time* → *Money Moved* in order. If it's amber or red, open the L1 Dashboard link and triage the ledger breaks first; you'll come back to the Executives sheets once that's resolved.
 
-**Month-end check.** Skim all four sheets' KPIs + the top chart (daily or open-count bar) to spot trends — are volumes growing, shrinking, or flat? Has coverage expanded? Is the ledger clean? These four visuals tell the story in under two minutes. If something looks off, drill into the detail table or the Account Reconciliation tab for a closer look.
+**Month-end check.** Skim all four sheets' KPIs + the top chart (daily or open-count bar) to spot trends — are volumes growing, shrinking, or flat? Has coverage expanded? Is the ledger clean? These four visuals tell the story in under two minutes. If something looks off, drill into the detail table or Account Reconciliation for a closer look.
 
 **On-call alert.** The Program Health KPI is your alert surface — if it goes red (≥20 violations), something broke upstream. Click the L1 Dashboard link and find the violation. The account + date it shows are your starting point. Don't close the alert until the KPI is back to green.
 

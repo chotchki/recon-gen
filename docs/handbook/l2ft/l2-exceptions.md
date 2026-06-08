@@ -8,10 +8,10 @@ The sheet opens on a compact header row: a KPI showing *Distinct Exception Types
 
 ## How to read the numbers
 
-All six L2 checks are inlined into a single [matview](../_glossary.md#matview--materialized-view) UNIONing branches via `build_unified_l2_exceptions_dataset` in `datasets.py`. Each branch scans the `<prefix>_current_transactions` table against the L2 instance's declared rails, chains, templates, metadata keys, and limit schedules. The result is one row per violation. The `check_type` column discriminates the six:
+All six L2 checks are inlined into a single [matview](../_glossary.md#matview--materialized-view) UNIONing branches via `build_unified_l2_exceptions_dataset` in `datasets.py`. Each branch scans the `<prefix>_current_transactions` table against the L2 ([layer two](../_glossary.md#l2-flow-tracing--per-chain-transfer-integrity)) instance's declared rails, chains, templates, metadata keys, and limit schedules. The result is one row per violation. The `check_type` column discriminates the six:
 
 - **Chain Orphans** — a declared Required [chain](../_glossary.md#chain) whose parent [rail](../_glossary.md#rail) fired in the window but no matched child firing followed. `entity_a` = parent rail name, `entity_b` = child rail name, `count` = number of orphaned parent firings.
-- **Unmatched Rail Name** — a posted transaction whose `rail_name` doesn't match any declared `Rail.name`. `entity_a` = the undeclared rail name, `entity_b` = NULL, `count` = posting count against that rail.
+- **Unmatched Transfer Type** — a posted transaction whose `rail_name` doesn't match any declared `Rail.name`. `entity_a` = the undeclared rail name, `entity_b` = NULL, `count` = posting count against that rail.
 - **Dead Rails** — a declared rail with zero postings in the window. `entity_a` = rail name, `entity_b` = NULL, `detail` = the rail's `leg_shape` (SingleLeg / TwoLeg), `count` = always 1 (one dead declaration).
 - **Dead Bundles Activity** — an `(aggregating_rail, bundle_target)` pair declared via `Rail.bundles_activity` with no matching postings. `entity_a` = aggregating rail, `entity_b` = bundle target rail, `count` = always 1.
 - **Dead Metadata Declarations** — a `(rail, metadata_key)` pair declared via `Rail.metadata_keys` that no posting carries a non-null value for. `entity_a` = rail name, `entity_b` = metadata key, `count` = always 1.
@@ -27,7 +27,7 @@ Zero rows = every L2 declaration matches the runtime data. This is the healthy s
 
 ### One type dominates; others quiet
 
-The bar chart shows *Unmatched Rail Name* with 50 violations but the others have 0–2 each. A single type spiking usually means a narrow ETL or declaration problem — the integrator added a new rail and forgot to update the L2 YAML, or the casing of a `rail_name` drifted between systems.
+The bar chart shows *Unmatched Transfer Type* with 50 violations but the others have 0–2 each. A single type spiking usually means a narrow ETL or declaration problem — the integrator added a new rail and forgot to update the L2 YAML, or the casing of a `rail_name` drifted between systems.
 
 Drill from the *L2 Violations by Check Type* bar to the relevant sheet (Rails for Dead Metadata / Dead Rails, Chains for Chain Orphans) to see the full firing history.
 
@@ -35,7 +35,7 @@ Drill from the *L2 Violations by Check Type* bar to the relevant sheet (Rails fo
 
 Parent rail fires consistently; child doesn't. The `orphan_count` column (called `count` in the unified table) climbs every day. This is a **causality break** — the L2 declared "child always fires after parent" but the runtime says the child is missing. Check the ETL: is the parent-to-child trigger wired? Does the child rail have a filter that's suppressing some parent-child pairs?
 
-Right-click the *Chain Orphans* row and select *View in Chains* to see all parent firings and which ones lack matching children.
+Right-click the *Chain Orphans* row and select *View in Chains (filter parent_chain_name to entity_a)* to see all parent firings and which ones lack matching children.
 
 ### Dead Rails that persist day after day
 

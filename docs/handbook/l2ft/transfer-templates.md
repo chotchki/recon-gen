@@ -1,6 +1,6 @@
 # Transfer Templates
 
-> **What this sheet teaches.** Multi-leg transfer flow — the degree to which each declared transfer template fires its expected legs and balances to the net declared by the L2 instance ([flow tracing](../_glossary.md#l2-flow-tracing--per-chain-transfer-integrity)) specification. Every row on this sheet is one shared Transfer instance, grouped by which template ([transfer template](../_glossary.md#template)) it matched, and measured against the L1 balance invariant and the L2 chain-completion invariant.
+> **What this sheet teaches.** Multi-leg transfer flow — the degree to which each declared [transfer template](../_glossary.md#template) fires its expected legs and balances to the net declared by the L2 ([flow tracing](../_glossary.md#l2-flow-tracing--per-chain-transfer-integrity)) instance. Every row on this sheet is one shared Transfer, grouped by which template it matched, and measured against the L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants)) balance invariant and the L2 chain-completion invariant.
 
 ## What you're looking at
 
@@ -70,4 +70,4 @@ The Transfer Templates sheet does not define row-level drills. To inspect indivi
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `L2`, `template`, `chain`, `matview`, and the other project-specific terms.*
+*First time here? See the [Vocabulary](../_glossary.md) for `L1`, `L2`, `template`, `chain`, `matview`, and the other project-specific terms.*

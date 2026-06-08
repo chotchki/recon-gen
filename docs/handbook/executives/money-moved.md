@@ -4,7 +4,7 @@
 
 ## What you're looking at
 
-The sheet opens on a strip of two KPIs across the top — *Net Money Moved* (Σ signed amount, with an up/down indicator glyph showing direction) and *Gross Money Moved* (Σ absolute values of all transfers). Below sits a full-width daily stacked bar chart titled *Daily Gross Dollars Moved by Type*, where each bar is one business day and the stack bands show which transfer rail (`rail_name`) contributed to that day's total. A second full-width chart below that, *Period Total Gross Dollars by Type*, rolls up the same data into a single snapshot per rail — the "where does the volume come from" summary for the whole window. Filters across the top (same date picker as the other executive sheets) let you narrow by date range.
+The sheet opens on a strip of two KPIs across the top — *Net Money Moved* (Σ signed amount, with an up/down indicator glyph showing direction) and *Gross Money Moved* (Σ absolute values of all transfers). Below sits a full-width daily stacked bar chart titled *Daily Gross Dollars Moved by Type*, where each bar is one business day and the stack bands show which transfer rail ([`rail_name`](../_glossary.md#rail)) contributed to that day's total. A second full-width chart below that, *Period Total Gross Dollars by Type*, rolls up the same data into a single snapshot per rail — the "where does the volume come from" summary for the whole window. Date-range filters across the top (same picker as the other executive sheets) let you narrow by posting date.
 
 ## How to read the numbers
 
@@ -40,7 +40,7 @@ The *Period Total Gross Dollars by Type* chart shows one rail's bar much taller 
 
 ### Rail composition shifted across the window
 
-The daily stacked bar shows different proportions on different days — one rail dominated early in the window, a different rail later on. This can signal a feed migration, a batch-job cadence change, or a shift in customer behavior (e.g., seasonal move from ACH to wires for larger transfers). Cross-reference against your infrastructure change log. If unplanned, work backward through the drill to Account Reconciliation's Transaction Volume sheet (an operational sibling) to see the transfer-count trend on the same rails.
+The daily stacked bar shows different proportions on different days — one rail dominated early in the window, a different rail later on. This can signal a feed migration, a batch-job cadence change, or a shift in customer behavior (e.g., seasonal move from ACH to wires for larger transfers). Cross-reference against your infrastructure change log. If unplanned, work backward through the daily view to Account Reconciliation's Transaction Volume sheet (an operational sibling) to see the transfer-count trend on the same rails.
 
 ## What "no rows" means
 
@@ -52,8 +52,7 @@ A blank sheet means zero Posted transactions fell within the date window — all
 
 ## Cross-sheet drills
 
-- **Daily Gross Dollars Moved bar (any bar segment) → Transaction Volume Over Time** (left-click on a segment). Narrows the transaction-count peer sheet to the same date, showing you how many transfers that gross-dollar volume comprised on each rail.
-- **Period Total Gross Dollars bar (any rail segment) → Money Moved (re-filtered)** (left-click). Pins the rail filter for a tighter view of just that transfer type across the window.
+No cross-sheet drill actions are wired on this sheet. Use the date-range filters and the visual composition to identify trends, then navigate to Account Reconciliation's Transaction Volume or Account Coverage sheets for detailed investigation.
 
 ## Related handbook pages
 

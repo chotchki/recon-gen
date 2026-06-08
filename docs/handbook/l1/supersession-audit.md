@@ -19,14 +19,14 @@ Reads from `<prefix>_transactions` filtered to logical rows (keyed by `id`, whic
 - `supersedes` — the reason why this entry exists: Inflight (a pending leg was updated during bundling), BundleAssignment (a posted leg was assigned a bundle_id), or TechnicalCorrection (a correction to a prior error). NULL on entry-1 rows (no reason needed for the first entry)
 - `account_id`, `account_name`, `transfer_id`, `rail_name`, `amount_money` (in dollars), `amount_direction`, `status`, `posting`, `bundle_id` — the standard transaction metadata
 
-The `l1_supersession_no_reason` derived column flags each higher-entry row where `supersedes IS NULL`, which the right-hand KPI counts (target = 0 per the L1 SPEC).
+The `l1_supersession_no_reason` derived column flags each higher-entry row where `supersedes IS NULL`, which the right-hand KPI counts (target = 0 per the L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants)) SPEC).
 
 **Daily Balances Audit table:**
 
 Reads from `<prefix>_daily_balances` filtered to logical keys (keyed by `account_id, business_day_start`) where `COUNT(*) OVER (PARTITION BY account_id, business_day_start) > 1`. Each row carries:
 
 - `entry` — append-only version number
-- `account_id`, `account_name`, `account_role` — account identity
+- `account_id`, `account_name`, `account_role` ([account-role](../_glossary.md#account-role) — semantic label grouping accounts by what they do) — account identity
 - `supersedes` — reason for restatement; for daily balances, this is typically TechnicalCorrection only (no bundling lifecycle on balance snapshots)
 - `business_day_start`, `business_day_end` — the calendar day this balance covers (per account timezone)
 - `money` — the stated balance in dollars; the primary thing that changes across entries is this column
@@ -61,7 +61,7 @@ The right KPI, *Supersession Rows with No Reason*, counts higher-entry rows wher
 
 ## What "no rows" means
 
-A clean supersession sheet — zero rows in both audit tables — means every logical transaction and balance revision did NOT happen in the current window, OR the matview is stale. To distinguish:
+A clean supersession sheet — zero rows in both audit tables — means every logical transaction and balance revision did NOT happen in the current window, OR the matview ([materialized-view](../_glossary.md#matview--materialized-view)) is stale. To distinguish:
 
 - **Confirm the matview is fresh.** Cross to *App Info* and check the *Matview Status* table. The `l1-supersession-transactions` and `l1-supersession-daily-balances` row counts and `last_refresh_at` timestamp tell you whether fresh data has been loaded since you opened the dashboard.
 - **Check the date window.** The tables don't have a built-in date filter (they read from the BASE tables, which hold all history). Zero rows across a wide time window is the steady-state expectation for most institutions — supersessions are rare outside of bundling cadences and error-correction windows. Widen to trailing 30 days to verify the signal.
@@ -75,7 +75,7 @@ The Supersession Audit sheet does not expose row-level drills. The sheet's role 
 
 ## Related handbook pages
 
-- [Drift](drift.md) — when you see drift on an account and suspect a botched correction; the Drift handbook names Supersession Audit as the cross-check for carry-forward patterns
+- [Drift](drift.md) — when you see drift on an account and suspect a botched correction; the Drift handbook names Supersession Audit as the cross-check for carry-forward ([carry-forward](../_glossary.md#carry-forward--sparse-cadence)) patterns
 - [Transactions](transactions.md) — the full posting ledger; use when you need to trace a no-reason row further into the system
 - [Daily Statement](daily-statement.md) — per-account-day narrative; useful after you've identified a balance re-statement in the *Daily Balances Audit* table and want to see the postings behind it
 
@@ -85,4 +85,4 @@ No known rendering quirks on this sheet.
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `matview`, `template` ([template](../_glossary.md#template)), `carry-forward` ([carry-forward](../_glossary.md#carry-forward--sparse-cadence)), and other project-specific terms.*
+*First time here? See the [Vocabulary](../_glossary.md) for `L1`, `matview`, `account_role`, `carry-forward`, and other project-specific terms.*

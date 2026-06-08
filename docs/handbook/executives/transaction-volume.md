@@ -54,7 +54,7 @@ A zero-row Daily Transaction Count chart means no transfers posted in the select
 
 - **The date window is too narrow and lands on non-business days.** Widen the filter to at least a 5-business-day span. If you still see zero, check App Info's `<prefix>_transactions` row count — if it's non-zero, the base table has data but no Posted legs exist in the window.
 - **The institution had a genuine processing halt.** All status=Pending legs (operational noise) is one thing; zero Posted legs is a production alert. Check with the settlement team and the transfer rails' operational status pages.
-- **The matview is stale.** Cross to *App Info* and verify `last_refresh_at` is recent. If it predates the most recent ETL load, re-run the refresh and return to this sheet.
+- **The matview is stale.** A materialized view ([matview](../_glossary.md#matview--materialized-view)) is a SQL view whose results are stored in a regular table and refreshed on demand. Cross to *App Info* and verify `last_refresh_at` is recent. If it predates the most recent ETL load, re-run the refresh and return to this sheet.
 
 If all three conditions are met (recent refresh, non-empty base table, zero Posted legs in the window), the window is clean — no settled transfers in that period.
 
@@ -70,4 +70,4 @@ This sheet has no click-through drills defined in the current release. To inspec
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `rail`, `posted`, `transfer`, and the other project-specific terms.*
+*First time here? See the [Vocabulary](../_glossary.md) for `rail`, `matview`, `transfer`, and the other project-specific terms.*

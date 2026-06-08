@@ -17,7 +17,8 @@ window.
 
 ## How to read the numbers
 
-The sheet reads from the L1 invariant [matview](../_glossary.md#matview--materialized-view)
+The sheet reads from the L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants))
+invariant [matview](../_glossary.md#matview--materialized-view)
 `<prefix>_limit_breach`. The matview joins current-state postings against
 the L2 instance's declared [LimitSchedules](../_glossary.md#account-role)
 (per-[rail](../_glossary.md#rail), per-parent-[account_role](../_glossary.md#account-role)
@@ -39,7 +40,8 @@ Both branches carry:
 
 - `outbound_total` — cumulative `SUM(ABS(amount_money))` for all legs on the
   breaching side during that day (in dollars; converted from the matview's
-  integer cents)
+  integer cents). Despite the name, this column holds either outbound or
+  inbound totals depending on the `direction` value.
 - `cap` — the daily limit (in dollars, resolved from L2's LimitSchedules at
   schema-emit time; inlined as CASE branches in the matview so no JSON-path
   lookups happen at query time)

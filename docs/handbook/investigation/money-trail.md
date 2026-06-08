@@ -4,11 +4,11 @@
 
 ## What you're looking at
 
-The sheet opens on a full-width view: a *Money Trail — Chain Sankey* diagram on the left (two-thirds width) showing source account → target account ribbons for the selected chain, and a *Money Trail — Hop-by-Hop* detail table on the right (one-third width) listing every edge ordered by depth from root to leaf. Above both visuals sit four control knobs: a **Chain root transfer** dropdown to select which transfer chain to visualize, a **Max hops** slider (default 5), a **Min hop amount ($)** slider (default $0.00), and a **Date Range** picker. The Sankey ribbon thickness represents the sum of hop amounts; single-leg transfers (raw external arrivals or point-of-sale deposits) appear as chain members in the hop table but don't render as visible ribbons because they have no source or target pair.
+The sheet opens on two side-by-side visuals: a *Money Trail — Chain Sankey* diagram on the left (two-thirds width) showing source account → target account ribbons for the selected chain, and a *Money Trail — Hop-by-Hop* detail table on the right (one-third width) listing every edge ordered by depth from root to leaf. Above both sit four control knobs: a **Chain root transfer** dropdown to select which transfer chain to visualize, a **Max hops** slider (default 5), a **Min hop amount ($)** slider (default $0.00), and a **Date Range** picker. The Sankey ribbon thickness represents the sum of hop amounts; single-leg transfers (raw external arrivals or point-of-sale deposits) appear as chain members in the hop table but don't render as visible ribbons because they have no source or target pair.
 
 ## How to read the numbers
 
-Both the Sankey and the table read from the same underlying matview ([materialized view](../_glossary.md#matview--materialized-view)) — the `<prefix>_inv_money_trail_edges` recursive-CTE walk over the `parent_transfer_id` chain. Each row represents one edge in a chain: a transfer's contribution to the movement of money. The matview columns are:
+Both the Sankey and the table read from the same underlying [matview](../_glossary.md#matview--materialized-view) — the `<prefix>_inv_money_trail_edges` recursive-CTE walk over the `parent_transfer_id` [chain](../_glossary.md#chain). Each row represents one edge in a chain: a transfer's contribution to the movement of money. The matview columns are:
 
 - `root_transfer_id` — the top-most transfer in the chain (the one with no parent; the logical starting point)
 - `transfer_id` — which transfer this edge belongs to
@@ -17,11 +17,11 @@ Both the Sankey and the table read from the same underlying matview ([materializ
 - `target_account_id`, `target_account_name`, `target_account_type` — the account receiving money in this hop
 - `hop_amount` — the signed amount (in dollars) moving in this leg; the Sankey groups by source and target, summing across rows
 - `posted_at` — the timestamp the target leg posted
-- `rail_name` — which rail (ACH, wire, check, on-us internal, etc.) this hop traveled on
+- `rail_name` — which [rail](../_glossary.md#rail) (ACH, wire, check, on-us internal, etc.) this hop traveled on
 
 The matview filters to multi-leg transfers only — edges require both a source (negative-signed) leg and a target (positive-signed) leg with `status='Posted'`. Single-leg transfers are chain members (they appear in the recursive walk and increment depth) but don't project as visible edges because they have only one leg, not a pair.
 
-The *Money Trail — Chain Sankey* title shows the selected chain's visual: ribbons group accounts by name + role and thickness scales with SUM(hop_amount) across all edges between that source and target in the depth range you've selected. The *Money Trail — Hop-by-Hop* table on the right shows detail you can't see in the Sankey: every hop ordered by depth asc, with `depth`, `transfer_id`, `rail_name`, source and target account names, `posted_at`, and the hop amount. Ribbon size dominates the Sankey's visual; the table lets you count hops and check posting timestamps.
+The *Money Trail — Chain Sankey* title shows the selected chain's visual: ribbons group accounts by name and [account_role](../_glossary.md#account-role) and thickness scales with SUM(hop_amount) across all edges between that source and target in the depth range you've selected. The *Money Trail — Hop-by-Hop* table on the right shows detail you can't see in the Sankey: every hop ordered by depth asc, with `depth`, `transfer_id`, `rail_name`, source and target account names, `posted_at`, and the hop amount. Ribbon size dominates the Sankey's visual; the table lets you count hops and check posting timestamps.
 
 ## Common patterns
 
@@ -65,4 +65,4 @@ Related pages may expose drills INTO this sheet from other investigation sheets 
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `matview`, `chain`, `transfer`, and other project-specific terms.*
+*First time here? See the [Vocabulary](../_glossary.md) for `matview`, `chain`, `account_role`, `rail`, `transfer`, and other project-specific terms.*

@@ -23,7 +23,7 @@ The *Deploy Stamp* text box carries metadata baked at dashboard generation time:
 - `dialect` (Postgres, Oracle, or DuckDB; dev builds flag DuckDB explicitly)
 - `prefix` (the deployed database table prefix, e.g., `demo` or `prod`)
 
-Each dashboard's App Info is isolated per-app scope by design — the L1 dashboard reads ~12 matviews; the Executives dashboard reads 2 base tables. To assess total deployment freshness, check every app's App Info sheet.
+Each dashboard's App Info is isolated per-app scope by design — the L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants)) dashboard reads ~12 matviews; the Executives dashboard reads 2 base tables. To assess total deployment freshness, check every app's App Info sheet.
 
 ## Common patterns
 
@@ -67,4 +67,4 @@ This sheet has no drill actions. It is a diagnostic endpoint, not a drill destin
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `matview`, `internal` / `external` scope, and the other project-specific terms.*
+*First time here? See the [Vocabulary](../_glossary.md) for `matview`, `L1`, and the other project-specific terms.*

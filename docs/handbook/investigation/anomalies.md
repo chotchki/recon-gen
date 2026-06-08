@@ -4,11 +4,11 @@
 
 ## What you're looking at
 
-A KPI strip at the top shows *Flagged at current σ* — the count of pair-windows meeting the sigma threshold you've set. Below that, a *Pair-Window σ Distribution* bar chart breaks the entire population into sigma buckets, showing where the full dataset sits relative to your threshold. The chart stays unfiltered as you move the slider, so you can see the population shape before deciding how tight to set the cutoff. Finally, a *Flagged Pair-Windows — Ranked* table shows every (sender, recipient, window) that crossed your threshold, ranked by z-score descending (furthest from the population mean at the top). Filters across the top let you narrow the window by date range and adjust the minimum sigma cutoff with the slider.
+A KPI strip at the top shows *Flagged at current σ* — the count of pair-windows meeting the sigma threshold you've set. Below that, a *Pair-Window σ Distribution* bar chart breaks the entire population into sigma buckets, showing where the full dataset sits relative to your threshold. The chart stays unfiltered as you move the slider, so you can see the population shape before deciding how tight to set the cutoff. Finally, a *Flagged Pair-Windows — Ranked* table shows every (sender, recipient, window) that crossed your threshold, ranked by z-score descending (furthest from the population mean at the top). A *Window End Date* picker lets you narrow by date range; a *Min sigma* slider adjusts the threshold.
 
 ## How to read the numbers
 
-The sheet reads from the `<prefix>_inv_pair_rolling_anomalies` matview ([materialized view](../_glossary.md#matview--materialized-view)), which computes a 2-day rolling window for every (sender, recipient) pair and calculates its z-score against the population.
+The sheet reads from the `<prefix>_inv_pair_rolling_anomalies` [matview](../_glossary.md#matview--materialized-view), which computes a 2-day rolling window for every (sender, recipient) pair and calculates its z-score against the population.
 
 - `recipient_account_id`, `recipient_account_name`, `recipient_account_type` — identifying the receiving account. Only leaf internal [accounts](../_glossary.md#account) whose parent [account role](../_glossary.md#account-role) is set qualify; control accounts and sweeps are excluded so genuine signal dominates the population.
 - `sender_account_id`, `sender_account_name`, `sender_account_type` — identifying the sending account.

@@ -4,7 +4,7 @@
 
 ## What you're looking at
 
-You're looking at a per-account, per-day narrative. Pick an account using the *Account* dropdown and a business day using the *Date* picker; the five KPIs across the top show you the opening balance, debits posted, credits posted, stored closing balance, and posting drift for that day. Below, the *Posted Money Records* table lists every Money record (leg) that posted that day on the picked account. A filter dropdown for role (read-only on QuickSight; functional on App2) narrows the account list, and the *Accounts available* and *Roles available* KPIs at the bottom tell you how many accounts match the current role filter.
+You're looking at a per-account, per-day narrative. Pick an account role using the *Role* dropdown, then an account using the *Account* dropdown, and a business day using the *Business Day* picker; the five KPIs across the top show you the opening balance, debits posted, credits posted, stored closing balance, and posting drift for that day. Below, the *Posted Money Records* table lists every Money record (leg) that posted that day on the picked account. The *Accounts available* and *Roles available* KPIs at the bottom tell you how many accounts and roles match the current filters.
 
 ## How to read the numbers
 
@@ -27,7 +27,7 @@ Each row is one Money record from `<prefix>_current_transactions`, filtered to t
 
 ### Posting Drift = $0.00 (green checkmark)
 
-*Posting Drift* KPI shows $0.00 with a green checkmark. The day reconciles: opening + signed net flow = stored closing. Every posting that left the institution's systems arrived in the ledger with the correct amount on the correct day. This is the healthy steady-state expectation. Verify you're looking at today's date in your timezone (the *Date* picker defaults to the dashboard's frame date, not wall-clock today), then move to another sheet or another account-day to find the discrepancies.
+*Posting Drift* KPI shows $0.00 with a green checkmark. The day reconciles: opening + signed net flow = stored closing. Every posting that left the institution's systems arrived in the ledger with the correct amount on the correct day. This is the healthy steady-state expectation. Verify you're looking at today's date in your timezone (the *Business Day* picker defaults to the dashboard's frame date, not wall-clock today), then move to another sheet or another account-day to find the discrepancies.
 
 ### Posting Drift non-zero (red X)
 
@@ -65,4 +65,4 @@ If the whole sheet shows blank KPIs and an empty table, the picked account or da
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `L1`, `matview`, `account_role`, `internal` / `external` scope, and `carry-forward`.*
+*First time here? See the [Vocabulary](../_glossary.md) for L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants)), [matview](../_glossary.md#matview--materialized-view), [account_role](../_glossary.md#account-role), [carry-forward](../_glossary.md#carry-forward--sparse-cadence), and related terms.*

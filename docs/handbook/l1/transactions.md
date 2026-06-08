@@ -4,11 +4,11 @@
 
 ## What you're looking at
 
-A single table scrolls the entire posting ledger one leg per row. No KPIs headline the sheet — the value is "show me the legs I ask for." At the top sit five filter dropdowns: Account, Transfer ID, Status, Origin, and Rail Type. Pick any combination and the table narrows to rows matching ALL filters (AND logic). The table shows each leg's account, transfer membership, direction (Debit / Credit), amount in dollars, status (Pending / Posted / Failed), origin (internal or external routing), rail name, and posting timestamp. Sorting is by posting time descending, so the most recent activity reads at the top.
+A single table scrolls the entire posting ledger one leg per row. No KPIs headline the sheet — the value is "show me the legs I ask for." At the top sit five filter dropdowns: Account, Transfer, Status, Origin, and Transfer Type. Pick any combination and the table narrows to rows matching ALL filters (AND logic). The table shows each leg's account, transfer membership, direction (Debit / Credit), amount in dollars, status (Pending / Posted / Failed), origin (internal or external routing), rail name, and posting timestamp. Sorting is by posting time descending, so the most recent activity reads at the top.
 
 ## How to read the numbers
 
-The dataset reads directly from the `<prefix>_current_transactions` ([matview](../_glossary.md#matview--materialized-view)) — a view of the `<prefix>_transactions` base table filtered to each Money record's `MAX(entry)` version only. Supersession is baked in: when an append-only entry gets rewritten, the current view skips the prior versions and shows only the latest. This is the truth the institution posted *now*, not an audit trail of corrections.
+The dataset reads directly from the `<prefix>_current_transactions` ([matview](../_glossary.md#matview--materialized-view) — a read-optimized materialized view) — a view of the `<prefix>_transactions` base table filtered to each Money record's `MAX(entry)` version only. Supersession is baked in: when an append-only entry gets rewritten, the current view skips the prior versions and shows only the latest. This is the truth the institution posted *now*, not an audit trail of corrections.
 
 The SQL selects these columns from the matview:
 
@@ -29,7 +29,7 @@ Five dropdown filters push predicates into the SQL WHERE clause via dataset para
 
 ### Pending legs older than the rail's cap
 
-Filter to `Status = Pending`. Look at `posting` timestamps and calculate the days elapsed. Cross-reference the rail (`rail_name` column) against the L2 instance's configuration — each rail carries a `max_pending_age` threshold (visible on the Pending Aging sheet). A leg sitting in Pending past that cap is one symptom of a stuck-transfer pattern. The Daily Statement's detail table for that account-day may show whether other legs of the same transfer posted or failed.
+Filter to `Status = Pending`. Look at `posting` timestamps and calculate the days elapsed. Cross-reference the rail (`rail_name` column) against the L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants)) instance's configuration — each rail carries a `max_pending_age` threshold (visible on the Pending Aging sheet). A leg sitting in Pending past that cap is one symptom of a stuck-transfer pattern. The Daily Statement's detail table for that account-day may show whether other legs of the same transfer posted or failed.
 
 ### Failed legs next to Posted legs in a transfer
 
@@ -37,7 +37,7 @@ Filter to a specific `transfer_id` (visible once you click into one row). If you
 
 ### Unbundled Posted legs on an aggregating rail
 
-Filter to `Rail Type = <aggregator_rail>` and look for rows where `status='Posted'` but `posting` is older than the rail's `max_unbundled_age` cap. These legs made it to the settlement side but the bundler hasn't grouped them yet. The Unbundled Aging sheet surfaces the time-bucketed cohort; here you see the raw timestamps. Compare against the rail's expected cadence (typically a day or two for ACH/wire aggregators).
+Filter to `Transfer Type = <aggregator_rail>` and look for rows where `status='Posted'` but `posting` is older than the rail's `max_unbundled_age` cap. These legs made it to the settlement side but the bundler hasn't grouped them yet. The Unbundled Aging sheet surfaces the time-bucketed cohort; here you see the raw timestamps. Compare against the rail's expected cadence (typically a day or two for ACH/wire aggregators).
 
 ### Money flowing between internal and external counterparties
 
@@ -47,7 +47,7 @@ Look at rows where `account_role` indicates an external account (bank, payment n
 
 A blank Transactions sheet means no Money records match your filter criteria. This usually means:
 
-- **Filter too narrow.** You picked a transfer ID that doesn't exist in the date window, or an account with no postings in the range. Widen the date picker or clear the Account / Transfer ID dropdowns to "All".
+- **Filter too narrow.** You picked a transfer ID that doesn't exist in the date window, or an account with no postings in the range. Widen the date picker or clear the Account / Transfer dropdowns to "All".
 - **Date window misses the activity.** Transactions only shows postings within the universal date-range filter. A leg posted on 2026-05-01 won't appear if the picker is set to 2026-06-01 through 2026-06-07. Widen the range.
 - **Matview is stale.** Cross to *App Info* and check the `<prefix>_current_transactions` row's `last_refresh_at`. If it predates the most recent ETL load, the matview hasn't refreshed since postings arrived. Ad-hoc dashboard hits don't trigger a refresh — the institution's ETL pipeline does on its schedule.
 
@@ -66,8 +66,8 @@ If *App Info* shows `last_refresh_at` as null or the matview row count as zero a
 
 ## QS parity notes
 
-- **URL-driven transfer ID dropdown.** When you arrive at this sheet via a drill from another sheet (e.g., Daily Statement's "View Transactions for this transfer"), QS may filter the data correctly but show the *Transfer ID* dropdown still at *All* — the data is right, the control is lying. App2 doesn't have this defect. See [quirks log §dependent-dropdown-no-refresh](../../reference/quicksight-quirks.md).
+- **URL-driven transfer ID dropdown.** When you arrive at this sheet via a drill from another sheet (e.g., Daily Statement's "View Transactions for this transfer"), QS may filter the data correctly but show the *Transfer* dropdown still at *All* — the data is right, the control is lying. App2 doesn't have this defect. See [quirks log §dependent-dropdown-no-refresh](../../reference/quicksight-quirks.md).
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `matview`, `rail`, `carry-forward`, and the other project-specific terms.*
+*First time here? See the [Vocabulary](../_glossary.md) for `L1`, `matview`, `rail`, `account_role`, and the other project-specific terms.*

@@ -4,7 +4,7 @@
 
 ## What you're looking at
 
-The sheet opens on a pair of KPIs across the top — *Stuck Unbundled* (count of posted legs without a bundle) and *Stuck Unbundled Exposure* (the total dollar amount of those legs). Below sits a bar chart titled *Stuck Unbundled by Age Bucket* that groups the stuck legs across four age bands (<1d, 1–2d, 2–7d, >7d) and stacks them by rail so you can see which payment rail is generating the backlog. A detail table lists every stuck unbundled leg with the account, transfer, rail, amount, posting timestamp, and live age in seconds. Filters across the top let you narrow by account and by rail family.
+The sheet opens on a pair of KPIs across the top — *Stuck Unbundled* (count of posted legs without a bundle) and *Stuck Unbundled Exposure* (the total dollar amount of those legs). Below sits a bar chart titled *Stuck Unbundled by Age Bucket* that groups the stuck legs across four age bands (1: <1d, 2: 1-2d, 3: 2-7d, 4: >7d) and stacks them by rail so you can see which payment rail is generating the backlog. A detail table lists every stuck unbundled leg with the account, transfer, rail, amount, posting timestamp, and live age in seconds. Filters across the top let you narrow by account, transfer type, and rail.
 
 ## How to read the numbers
 
@@ -12,7 +12,8 @@ The table reads from the L1 invariant [matview](../_glossary.md#matview--materia
 
 The columns are:
 
-- `account_id`, `account_name`, `account_role` — the account that received or sent the leg
+- `account_id`, `account_name`, `account_role` — the account that received or sent the leg; the [account_role](../_glossary.md#account-role) classifies what kind of account it is (CustomerSubledger, etc.)
+- `account_parent_role` — the parent account's role, if this account is a child
 - `transfer_id` — the transfer this leg belongs to
 - `rail_name` — the [rail](../_glossary.md#rail) (ACH, wire, check, etc.) that fired this leg
 - `amount_money` — leg amount in dollars (signed: positive in, negative out)
@@ -20,15 +21,15 @@ The columns are:
 - `posting` — the timestamp when the leg was marked Posted
 - `max_unbundled_age_seconds` — the cap the rail declared (inlined at matview-emit time from the L2 instance's per-rail configuration)
 - `age_seconds` — current live age in seconds, recomputed on every query refresh so you can sort by staleness without re-opening the sheet
-- `stuck_unbundled_aging_bucket` — four-band age classification (<1d, 1–2d, 2–7d, >7d) used by the bar chart
+- `stuck_unbundled_aging_bucket` — four-band age classification (1: <1d, 2: 1-2d, 3: 2-7d, 4: >7d) used by the bar chart
 
 The *Stuck Unbundled* KPI counts distinct `transaction_id` values in the filtered set. The *Stuck Unbundled Exposure* KPI sums `amount_money` across all rows — the dollar magnitude that the bundler hasn't yet rolled into a bundle. The bar chart groups by `stuck_unbundled_aging_bucket` and stacks by `rail_name` so you can spot which rail's bundler is lagging behind (rightmost bands = older legs).
 
 ## Common patterns
 
-### All stuck legs in <1d bucket, one rail
+### All stuck legs in 1: <1d bucket, one rail
 
-The bar chart shows most rows clustering in the "1: <1d" band for a single rail. This is typically **normal bundler cadence** — the rail's bundler hasn't yet fired, or just fired a moment ago. If the bars jump to the right edge (>7d) the next time you refresh, the bundler caught up. The *Stuck Unbundled Exposure* KPI will spike briefly then drop as the bundler closes the legs. No action needed unless the same rail's buckets stay >7d on refresh.
+The bar chart shows most rows clustering in the "1: <1d" band for a single rail. This is typically **normal bundler cadence** — the rail's bundler hasn't yet fired, or just fired a moment ago. If the bars jump to the right edge (4: >7d) the next time you refresh, the bundler caught up. The *Stuck Unbundled Exposure* KPI will spike briefly then drop as the bundler closes the legs. No action needed unless the same rail's buckets stay >7d on refresh.
 
 ### Same rail, >7d bucket, persistent across refreshes
 
@@ -61,4 +62,4 @@ If *App Info* shows `last_refresh_at` as null or the matview row count as zero a
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `L1`, `matview`, `rail`, and the other project-specific terms.*
+*First time here? See the [Vocabulary](../_glossary.md) for `L1`, `matview`, `account_role`, `rail`, and the other project-specific terms.*

@@ -15,9 +15,9 @@ business day)*. Below sit two side-by-side line charts: *Leaf Account
 Drift Over Time* (showing Σ |drift| per business day for leaf [accounts](../_glossary.md#parent--leaf-accounts),
 with one line per `account_role`) and *Parent Account Drift Over Time*
 (the same shape for parent accounts). A universal date-range filter
-(shared across the L1 app) and an *Account Role* dropdown let you narrow
-by date window and role. Healthy days sit on the zero baseline; spikes
-mark when a role's feed or parent rollup diverged.
+(shared across the L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants))
+app) and an *Account Role* dropdown let you narrow by date window and role. Healthy days sit
+on the zero baseline; spikes mark when a role's feed or parent rollup diverged.
 
 ## How to read the numbers
 
@@ -36,10 +36,9 @@ buckets in the parent matview.
 Each line chart plots `business_day_end` (x-axis, date grain) against
 `SUM(ABS(drift))` per (day, role), with one line per distinct
 `account_role` value. The Y-axis is currency (`$`). The `account_role`
-dropdown (bound to parameter `pL1DriftTlRole`) narrows both charts
-before aggregation, so selecting a role filters both timelines to that
-role only. A zero line across the window means that role's stored
-balances agreed with postings every day in the window.
+dropdown narrows both charts before aggregation, so selecting a role
+filters both timelines to that role only. A zero line across the window
+means that role's stored balances agreed with postings every day in the window.
 
 Both matviews filter `WHERE stored_balance <> computed_balance` and
 [`account_scope = 'internal'`](../_glossary.md#account-scope-internal-vs-external),
