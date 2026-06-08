@@ -463,30 +463,37 @@ class _BaseStudioEditorDriver:
 def _post_reconciler_backfill_form_data(
     kind: EntityKind, entity: object,
 ) -> FormData:
-    """CO.2 — PUT body that backfills every field on a reconciler that
-    was bulk-created by the wave-3a BB.2 create-new sub-form.
+    """BF.5 — PUT body that re-orders the reconciler's rail list.
 
-    The BB.2 reconciler-new sub-form intentionally surfaces only the
-    structural minimum (name + keys + subtype + roles + cadence).
-    Optional polish fields — ``metadata_keys`` / ``description`` /
-    ``posted_requirements`` / ``amount_typical_range`` / etc. — never
-    appear in the sub-form, so an aggregator or TT created via that
-    path lands with default ``()`` / ``None`` for those fields.
+    Pre-BF.2 the BB.2 create-new sub-form surfaced only a thin
+    minimum, so this helper widened to re-PUT every field via
+    ``create_form_data``. BF.2 made the BB.2 sub-form expose every
+    non-edit_only FieldSpec, so the re-PUT was wasteful: every
+    field's value was already correct on initial create. The one
+    thing BB.2 CAN'T encode is rail-list ORDER — the sub-form
+    auto-appends the new rail being created; subsequent attach-
+    existing rails arrive in driver-walk order, not reference order.
 
-    This helper reuses ``create_form_data`` to build the FULL create
-    body, then sends it through ``_edit`` as a PUT. ``mutate_l2`` uses
-    ``dataclasses.replace(**fields)`` semantics, so every submitted
-    field overwrites the reconciler's thin defaults with the
-    reference's values — including the ``bundles_activity`` /
-    ``leg_rails`` rail-list ORDER that BB.4 originally targeted.
-
-    Pre-CO this helper was two narrower siblings
-    (``_reorder_leg_rails_form_data`` / ``_reorder_bundles_activity_form_data``)
-    that only sent the rail-list field — fine for ORDER but blind to
-    every other missing field. Unified into one form-data builder so
-    the wave-5 edit pass is exhaustive by construction.
+    Narrow form-data: just the rail-list field (``leg_rails`` for
+    TT, ``bundles_activity`` for aggregating Rail). ``mutate_l2``'s
+    ``dataclasses.replace(**fields)`` leaves every other field
+    untouched.
     """
-    return create_form_data(kind, entity)
+    if kind == "transfer_template":
+        rail_names = [str(r) for r in getattr(entity, "leg_rails", ())]
+        return {
+            "leg_rails__present": ["1"],
+            "leg_rails": rail_names,
+        }
+    if kind == "rail":
+        rail_names = [str(r) for r in getattr(entity, "bundles_activity", ())]
+        return {
+            "bundles_activity__present": ["1"],
+            "bundles_activity": rail_names,
+        }
+    raise ValueError(
+        f"_post_reconciler_backfill_form_data: unexpected kind {kind!r}",
+    )
 
 
 def _max_unbundled_age_edit_form_data(rail: Rail) -> FormData:
