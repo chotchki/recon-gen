@@ -95,6 +95,8 @@ meant to count pre-first-emit activity days? If not it may overcount on instance
 `explicit_daily` accounts with heavy sparsity. An all-sparse instance that emits on every activity
 day reports 0 on both (coherent), so this only bites mixed-cadence fixtures.
 
+Comment: I think pre-first emit should not count since otherwise new accounts will get flagged as missing data.
+
 ---
 
 Findings 1–4 reproduce on bundled fixtures / the public editor; no instance-specific context.
