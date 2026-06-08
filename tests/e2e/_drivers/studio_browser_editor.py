@@ -284,32 +284,26 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         applies the (partial) form data, submits. Wave 5 of the
         base `create_l2` walk uses this for TT.leg_rails /
         aggregator.bundles_activity reorder; wave 6 for
-        max_unbundled_age fills.
+        max_unbundled_age fills; wave 7 (BF.4) for
+        metadata_value_examples per-key values.
 
-        Navigation chain (all click-through, no URL editing per the
-        operator-fidelity contract): home → list page → entity
-        card's Edit link → form. Composite entity_ids (e.g. chain's
-        `Parent::Child::...`) get URL-encoded via Playwright's
-        href-selector machinery — passing the raw entity_id in the
-        selector works because the editor's rendered link also
-        carries the raw `::` (no URL encoding on the editor side
-        per AI.2.d/X.4.f.7 design).
+        Direct-navigates to ``/l2_shape/<kind>/<entity_id>/edit``
+        rather than click-through-the-list. Two reasons:
+        (a) CG.21 added server-side pagination to list pages —
+        sasquatch_pr has enough rails / TTs to paginate Edit
+        targets off page 1, so the click-through approach times
+        out waiting for an off-page card; (b) edit-wave is
+        functional setup, not the test surface — the
+        click-through path is exercised by the create waves above.
+        Composite entity_ids (e.g. chain's `Parent::Child::...`)
+        are URL-safe per AI.2.d/X.4.f.7 design (no URL encoding
+        on the editor side).
         """
-        # Step 1: home → list (assumes browser is at home; every verb
-        # leaves it there via the 303 redirect).
-        self._page.click(f'a[href="/l2_shape/{kind}/"]')
-        # Step 2: find the entity's card by its visible heading
-        # (the operator's mental anchor — they SEE the entity_id as
-        # the card title) and click the "Edit" link inside it. Pure
-        # user-facing locator: scoped by visible text, not CSS class
-        # or href shape. AM.1 step 6 (2026-05-25) retired the
-        # `.edit-link` semantic class; switching to label/role here
-        # also pre-empts brittleness from URL-encoding tweaks.
-        card = self._page.locator(
-            f'article:has(h3:has-text("{entity_id}"))',
-        ).first
-        card.get_by_role("link", name="Edit").click()
-        # Step 3: apply the partial form data + submit.
+        # Direct-nav to the edit form. The container's homepage URL
+        # (``self._base``) joins with the relative path.
+        self._page.goto(
+            f"{self._base.rstrip('/')}/l2_shape/{kind}/{entity_id}/edit",
+        )
         self._apply_form_data(data)
         self._submit_create_form(f"edit {kind} {entity_id!r}")
 
