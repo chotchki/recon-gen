@@ -660,15 +660,17 @@ def test_daily_statement_sheet_present_after_m2b4() -> None:
 
 def test_daily_statement_has_five_kpis_and_one_table() -> None:
     """Daily Statement structure: 5 statement KPIs (Opening / Debits /
-    Credits / Closing Stored / Posting Drift) + 1 detail table + 2
-    context KPIs (Accounts available / Roles available — BR.x, bind
-    the cascade-source datasets as configured-on-sheet).
+    Credits / Closing Stored / Posting Drift) + 1 detail table + 1
+    context KPI (Accounts available — binds the picker source dataset).
 
     chotchki Studio drive 2026-06-07: the context KPIs moved from the
-    TOP of the sheet to the BOTTOM. The cascade-binding side-effect
-    is preserved (they're still on the sheet, still visual-bound to
-    their datasets); the at-a-glance scan space at the top now goes
-    to the 5 statement KPIs the operator actually wants to read.
+    TOP of the sheet to the BOTTOM. The binding side-effect is
+    preserved; the at-a-glance scan space at the top goes to the 5
+    statement KPIs the operator actually wants to read.
+
+    CQ.4.a — was 2 ctx KPIs (Accounts available / Roles available);
+    Roles dropped along with the Role cascade. CQ.4.b will replace
+    this row with the Control accounts (1:1 singletons) Table.
 
     BO.6 — the bare "Drift" KPI got the "Posting Drift" rename to
     disambiguate from the Drift sheet's leaf/parent drift (different
@@ -685,7 +687,6 @@ def test_daily_statement_has_five_kpis_and_one_table() -> None:
         "Posting Drift",
         "Posted Money Records",
         "Accounts available",
-        "Roles available",
     ]
 
 
@@ -1991,26 +1992,26 @@ def test_y2g_companion_datasets_registered_and_unparameterized() -> None:
     their options via LinkedValues see the full universe, not a
     narrowed slice.
 
-    AA.B.1 carve-out: ``DS_L1_ACCOUNTS`` is now *cascade*-parameterized
-    by ``pL1DsRole`` (the Daily Statement Role dropdown narrows the
-    account picker's options by role). It's covered by the AA.B.1
-    cascade assertion below, not the legacy unparameterized contract.
-    Other consumers of ``DS_L1_ACCOUNTS`` (every L1 sheet's Account
-    dropdown) leave ``pL1DsRole`` at its show-all sentinel default, so
-    they still see every account."""
+    CQ.4.a carve-out: ``DS_L1_DS_ROLES`` (the Daily Statement Role
+    dropdown companion) is gone; the Role cascade was dropped per
+    operator lock 2026-06-08. The replacement reference dataset
+    ``DS_L1_DS_CONTROL_ACCOUNTS`` (CQ.4.b — singleton/control
+    accounts table source) is asserted alongside the other Y.2.g
+    companions here."""
     from recon_gen.apps.l1_dashboard.datasets import (
-        DS_L1_ACCOUNTS, DS_L1_DS_ROLES, DS_L1_TX_FACETS, DS_L1_TX_IDS,
-        build_l1_ds_roles_dataset, build_l1_tx_facets_dataset,
-        build_l1_tx_ids_dataset,
+        DS_L1_ACCOUNTS, DS_L1_DS_CONTROL_ACCOUNTS, DS_L1_TX_FACETS,
+        DS_L1_TX_IDS, build_l1_ds_control_accounts_dataset,
+        build_l1_tx_facets_dataset, build_l1_tx_ids_dataset,
     )
 
     app = build_l1_dashboard_app(_CFG)
     registered = {ds.identifier for ds in app.datasets}
-    assert {DS_L1_ACCOUNTS, DS_L1_DS_ROLES, DS_L1_TX_IDS, DS_L1_TX_FACETS}.issubset(registered)
+    assert {DS_L1_ACCOUNTS, DS_L1_DS_CONTROL_ACCOUNTS, DS_L1_TX_IDS, DS_L1_TX_FACETS}.issubset(registered)
 
     inst = default_l2_instance()
     for builder, frag in (
-        (build_l1_ds_roles_dataset, "SELECT DISTINCT account_role"),
+        (build_l1_ds_control_accounts_dataset,
+            "SELECT DISTINCT account_id, account_role"),
         (build_l1_tx_ids_dataset, "SELECT DISTINCT transfer_id"),
         (build_l1_tx_facets_dataset, "SELECT DISTINCT status, origin"),
     ):
@@ -2039,7 +2040,7 @@ def test_aa_b_1_l1_accounts_dataset_is_unparameterized() -> None:
     unconditionally.
     """
     from recon_gen.apps.l1_dashboard.datasets import (
-        P_L1_DS_ROLE_DSP, build_l1_accounts_dataset,
+        build_l1_accounts_dataset,
     )
 
     inst = default_l2_instance()
@@ -2053,7 +2054,9 @@ def test_aa_b_1_l1_accounts_dataset_is_unparameterized() -> None:
         f"unexpected dataset param substitution in unparameterized "
         f"l1-accounts-ds SQL: {sql!r}"
     )
-    assert P_L1_DS_ROLE_DSP not in sql
+    # CQ.4.d — pL1DsRole gone everywhere (Role cascade dropped); the
+    # bare-string check covers any future re-introduction by name.
+    assert "pL1DsRole" not in sql
     # No DatasetParameters declared.
     assert not ds.DatasetParameters, (
         f"l1-accounts-ds should be unparameterized post-BR.x, but "
@@ -2131,17 +2134,18 @@ def test_bo_1_daily_statement_account_picker_sources_balance_only() -> None:
     gap was invisible, post-BM the filter strictly narrows so the
     gap surfaces. Triple-convergent in the v11.23.0 cold-read.
 
-    Two contracts on one test (matches the BO.1 fix shape):
+    Three contracts on one test (CQ.4.a-inverted shape):
       1. ``DS_L1_DS_ACCOUNTS`` exists, sources from
-         ``<prefix>_current_daily_balances`` only, and carries the
-         same ``pL1DsRole`` cascade param as ``DS_L1_ACCOUNTS``.
-      2. The Daily Statement Account dropdown's ``LinkedValues``
+         ``<prefix>_current_daily_balances`` only.
+      2. CQ.4.a: dataset is **un**parameterized — no ``pL1DsRole``
+         (the Role cascade is dropped; operator-locked 2026-06-08
+         "ALL internal accounts should be searchable") — AND the
+         picker source narrows to ``WHERE account_scope = 'internal'``.
+      3. The Daily Statement Account dropdown's ``LinkedValues``
          binds to ``DS_L1_DS_ACCOUNTS`` (not ``DS_L1_ACCOUNTS``).
     """
     from recon_gen.apps.l1_dashboard.datasets import (
         DS_L1_DS_ACCOUNTS,
-        L1_ALL_SENTINEL,
-        P_L1_DS_ROLE_DSP,
         build_l1_ds_accounts_dataset,
     )
     from recon_gen.common.tree import ParameterDropdown
@@ -2174,22 +2178,26 @@ def test_bo_1_daily_statement_account_picker_sources_balance_only() -> None:
         f"(BL.3-era widening that the Daily Statement reconciliation "
         f"can't support). SQL is:\n{sql}"
     )
-    # Role cascade preserved.
-    assert f"<<${P_L1_DS_ROLE_DSP}>>" in sql, (
-        "DS_L1_DS_ACCOUNTS must carry the same pL1DsRole cascade as "
-        "DS_L1_ACCOUNTS — the Daily Statement Role dropdown bridges "
-        "into it."
+    # Contract 2: CQ.4.a — unparameterized + scope-internal narrowed.
+    assert "pL1DsRole" not in sql, (
+        "CQ.4.a — Role cascade dropped; DS_L1_DS_ACCOUNTS must NOT "
+        f"reference pL1DsRole. SQL is:\n{sql}"
     )
-    role_params = [
-        p for p in (ds.DatasetParameters or [])
-        if p.StringDatasetParameter
-        and p.StringDatasetParameter.Name == P_L1_DS_ROLE_DSP
-    ]
-    assert len(role_params) == 1
-    rp = role_params[0].StringDatasetParameter
-    assert rp is not None
-    assert rp.DefaultValues is not None
-    assert rp.DefaultValues.StaticValues == [L1_ALL_SENTINEL]
+    assert "<<$" not in sql, (
+        f"CQ.4.a — DS_L1_DS_ACCOUNTS must be fully unparameterized "
+        f"(this is what unblocks QS's GetUniqueAttributeValuesSync"
+        f"ForAnalysis endpoint — the 400-on-parameterized-dataset "
+        f"that the cascade workaround masked). SQL is:\n{sql}"
+    )
+    assert not ds.DatasetParameters, (
+        f"CQ.4.a — DS_L1_DS_ACCOUNTS must declare no DatasetParameters "
+        f"(unparameterized source). Got {ds.DatasetParameters!r}"
+    )
+    assert "scope = 'internal'" in sql, (
+        f"CQ.4.a — DS_L1_DS_ACCOUNTS must narrow to scope = 'internal' "
+        f"so external counterparties stay out of the picker. SQL is:"
+        f"\n{sql}"
+    )
 
     # Contract 2: Daily Statement dropdown points at the new dataset.
     app = build_l1_dashboard_app(_CFG)

@@ -338,7 +338,7 @@ def test_emit_visual_data_fragment_stamps_url_params_as_data_attr() -> None:
         {"rows": []},
         url_params={
             "param_pL1DsAccount": ["Customer 11 (cust-011)"],
-            "param_pL1DsRole": ["CustomerSubledger"],
+            "filter_status": ["Posted"],
             "date_from": [""],
             "date_to": [""],
             "page_size": ["50"],  # NOT param_/filter_/date — should be excluded
@@ -346,7 +346,7 @@ def test_emit_visual_data_fragment_stamps_url_params_as_data_attr() -> None:
     )
     assert 'data-bound-params="' in out
     assert "Customer 11 (cust-011)" in out
-    assert "CustomerSubledger" in out
+    assert "Posted" in out
     assert "page_size" not in out  # excluded
     # Attribute value uses HTML-escaped JSON (quote-safe).
     assert '&quot;param_pL1DsAccount&quot;' in out
@@ -528,38 +528,40 @@ class TestParameterDropdownCascade:
     """
 
     def test_cascade_attrs_emit_when_source_set(self) -> None:
+        # CQ.4.d — was bound to the dropped pL1DsRole → pL1DsAccount
+        # cascade. The renderer's cascade_source_param feature is still
+        # valid (any future cascade pair would use it); test it with
+        # synthesized names to decouple from any specific live cascade.
         from recon_gen.common.html.render import (
             ParameterDropdownSpec, _render_parameter_dropdown,
         )
-        from recon_gen.apps.l1_dashboard.datasets import (
-            DS_L1_DS_ACCOUNTS, P_L1_DS_ACCOUNT_DSP, P_L1_DS_ROLE_DSP,
-        )
+        ds_id = "synthetic-target-ds"
+        target_param = "pSyntheticTarget"
+        source_param = "pSyntheticSource"
         spec = ParameterDropdownSpec(
-            name=P_L1_DS_ACCOUNT_DSP, label="Account",
-            options=("Acct A", "Acct B"),
-            options_dataset=DS_L1_DS_ACCOUNTS,
-            options_column="account_display",
-            cascade_source_param=P_L1_DS_ROLE_DSP,
+            name=target_param, label="Target",
+            options=("Opt A", "Opt B"),
+            options_dataset=ds_id,
+            options_column="display",
+            cascade_source_param=source_param,
         )
         out = _render_parameter_dropdown(spec)
-        assert f'hx-get="dropdown-options/{DS_L1_DS_ACCOUNTS}/account_display"' in out
-        assert f"hx-trigger=\"change from:[name='param_{P_L1_DS_ROLE_DSP}']" in out
+        assert f'hx-get="dropdown-options/{ds_id}/display"' in out
+        assert f"hx-trigger=\"change from:[name='param_{source_param}']" in out
         assert 'hx-target="this"' in out
         assert 'hx-swap="innerHTML"' in out
-        assert f'data-cascade-source-param="{P_L1_DS_ROLE_DSP}"' in out
+        assert f'data-cascade-source-param="{source_param}"' in out
 
     def test_no_cascade_attrs_when_source_unset(self) -> None:
+        # CQ.4.d — synthesized; see the cascade-emit test above for why.
         from recon_gen.common.html.render import (
             ParameterDropdownSpec, _render_parameter_dropdown,
         )
-        from recon_gen.apps.l1_dashboard.datasets import (
-            DS_L1_DS_ROLES, P_L1_DS_ROLE_DSP,
-        )
         spec = ParameterDropdownSpec(
-            name=P_L1_DS_ROLE_DSP, label="Role",
+            name="pSyntheticInert", label="Inert",
             options=("SouthPool", "NorthPool"),
-            options_dataset=DS_L1_DS_ROLES,
-            options_column="account_role",
+            options_dataset="synthetic-inert-ds",
+            options_column="value",
         )
         out = _render_parameter_dropdown(spec)
         assert "hx-get=" not in out

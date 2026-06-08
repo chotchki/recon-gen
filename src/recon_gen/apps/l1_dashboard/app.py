@@ -44,7 +44,7 @@ from recon_gen.apps.l1_dashboard.datasets import (
     DS_DRIFT_TIMELINE,
     DS_L1_ACCOUNTS,
     DS_L1_DS_ACCOUNTS,
-    DS_L1_DS_ROLES,
+    DS_L1_DS_CONTROL_ACCOUNTS,
     DS_L1_TX_FACETS,
     DS_L1_TX_IDS,
     DS_LEDGER_DRIFT,
@@ -65,7 +65,6 @@ from recon_gen.apps.l1_dashboard.datasets import (
     P_L1_DRIFT_TL_ROLE,
     P_L1_DS_ACCOUNT_DSP,
     P_L1_DS_BALANCE_DATE_DSP,
-    P_L1_DS_ROLE_DSP,
     P_L1_LIMIT_BREACH_ACCOUNT,
     P_L1_LIMIT_BREACH_TYPE,
     P_L1_OVERDRAFT_ACCOUNT,
@@ -196,11 +195,15 @@ P_L1_DATE_END = ParameterName(_P_L1_DATE_END)
 # both the summary KPIs and the transactions detail table.
 P_L1_DS_ACCOUNT = ParameterName("pL1DsAccount")
 P_L1_DS_BALANCE_DATE = ParameterName("pL1DsBalanceDate")
-# AA.B.1 — Daily Statement Role cascade. The role dropdown narrows the
-# Account dropdown's options via the ``pL1DsRole`` dataset param on
-# ``DS_L1_ACCOUNTS``. Default = ``L1_ALL_SENTINEL`` (show every account
-# regardless of role on first load).
-P_L1_DS_ROLE = ParameterName("pL1DsRole")
+# CQ.4.a — Role cascade dropped 2026-06-08. Pre-CQ.4 a `pL1DsRole`
+# parameter narrowed the Account dropdown via SQL pushdown into
+# ``DS_L1_DS_ACCOUNTS``; QS's ``GetUniqueAttributeValuesSyncForAnalysis``
+# endpoint can't execute parameterized datasets so the cascade only
+# narrowed App2, with QS divergent. Operator-locked: "ALL internal
+# accounts should be searchable" — the Account picker now sources from
+# the un-parameterized `scope = 'internal'` view (every internal
+# account) and the 10 GL-control singletons get their own reference
+# Table at the bottom of the sheet.
 
 # M.2b.7 — Drill-target parameters (sentinel-pattern, mirror of AR).
 # These never appear as visible sheet controls — they're only written
@@ -540,7 +543,7 @@ def _l1_datasets(
         DS_STUCK_PENDING, DS_STUCK_UNBUNDLED,
         DS_SUPERSESSION_TRANSACTIONS, DS_SUPERSESSION_DAILY_BALANCES,
         DS_L1_ACCOUNTS, DS_L1_DS_ACCOUNTS,
-        DS_L1_DS_ROLES, DS_L1_TX_IDS, DS_L1_TX_FACETS,
+        DS_L1_DS_CONTROL_ACCOUNTS, DS_L1_TX_IDS, DS_L1_TX_FACETS,
         # CQ.3.c — shared LinkedValues picker source datasets. Order
         # matches build_shared_picker_datasets() exactly.
         DS_RAILS, DS_TEMPLATES, DS_ACCOUNT_ROLES, DS_METADATA_KEYS,
@@ -1741,7 +1744,6 @@ def _populate_daily_statement_sheet(
     ds_summary = datasets[DS_DAILY_STATEMENT_SUMMARY]
     ds_txn = datasets[DS_DAILY_STATEMENT_TRANSACTIONS]
     ds_ds_accounts = datasets[DS_L1_DS_ACCOUNTS]
-    ds_ds_roles = datasets[DS_L1_DS_ROLES]
 
     # Row 1: 5 KPIs at width 7 each (sums to 35 of 36 grid cols; 1
     # column slack on the right).
@@ -1852,34 +1854,24 @@ def _populate_daily_statement_sheet(
     # Without a visual binding, the Account control's source dataset is
     # "linked but inactive" — Role pick doesn't trigger a re-fetch and
     # the Account dropdown shows the initial-load universe forever.
-    # See docs/reference/quicksight-quirks.md — cascade source dataset
-    # must be visual-bound entry.
+    # CQ.4.b — was a two-KPI ctx_row (Accounts available / Roles
+    # available); both go away with the Role cascade drop. The next
+    # task (CQ.4.b) replaces this row with a full-width Table of the
+    # singleton/control accounts (account_parent_role IS NULL AND
+    # scope = 'internal') so an operator can name a singleton and
+    # type it into the (wide) Account picker above.
     ctx_row = sheet.layout.row(height=_KPI_ROW_SPAN)
     ctx_row.add_kpi(
-        width=18,
+        width=36,
         title="Accounts available",
         subtitle=(
-            "Distinct accounts in today's balance feed that match the "
-            "picked Role (Role pick narrows this KPI via SQL pushdown). "
-            "**Renderer divergence:** in App2 the Account dropdown "
-            "narrows to the same set; on QuickSight the dropdown stays "
-            "showing the full universe because QS's unique-values "
-            "endpoint can't execute parameterized datasets — see the "
-            "sheet description note."
+            "Distinct accounts in today's balance feed (every "
+            "internal-scope account is pickable in the Account "
+            "dropdown above). CQ.4.b will replace this row with a "
+            "Control accounts (1:1 singletons) reference Table."
         ),
         values=[ds_ds_accounts["account_id"].count(
             field_id="ds-ctx-account-count",
-        )],
-    )
-    ctx_row.add_kpi(
-        width=18,
-        title="Roles available",
-        subtitle=(
-            "Distinct account roles in today's balance feed. The Role "
-            "dropdown above lists exactly these."
-        ),
-        values=[ds_ds_roles["account_role"].count(
-            field_id="ds-ctx-role-count",
         )],
     )
 
@@ -2325,54 +2317,27 @@ def _wire_daily_statement_filters(
         # ``_L1_DS_ACCOUNT_SENTINEL`` ("__l1_no_account_selected__").
         # Without it, the analysis param emits ``DefaultValues: []``
         # which makes QS error with "calculated field has invalid
-        # syntax" on first load (the cascade machinery substitutes the
-        # param into an internal expression).
+        # syntax" on first load.
         default=["__l1_no_account_selected__"],
-        # BR.x — same reasoning as ``ds_role`` below. The Account
-        # dropdown is the cascade TARGET (so QS evaluates
-        # ``account_role = ${pL1DsRole}``) AND uses its own
-        # ``pL1DsAccount`` for the picked-value-write. QS errors on
-        # the dropdown if EITHER param emits a NULL reserved value;
-        # both need explicit ValueWhenUnset.CustomValue matching the
-        # dataset-side default.
+        # BR.x — Account dropdown uses pL1DsAccount for the
+        # picked-value-write. QS errors on the dropdown if the param
+        # emits a NULL reserved value, so the explicit
+        # ValueWhenUnset.CustomValue matches the dataset-side default.
         value_when_unset="__l1_no_account_selected__",
         mapped_dataset_params=[
             (datasets[DS_DAILY_STATEMENT_SUMMARY], P_L1_DS_ACCOUNT_DSP),
             (datasets[DS_DAILY_STATEMENT_TRANSACTIONS], P_L1_DS_ACCOUNT_DSP),
         ],
     ))
-    # AA.B.1 — Role cascade. The role dropdown's value bridges into
-    # the ``DS_L1_DS_ACCOUNTS`` companion's ``pL1DsRole`` dataset
-    # param, narrowing the Account dropdown's options. Sentinel
-    # default (``L1_ALL_SENTINEL``) means "show every account
-    # regardless of role" — preserves the un-picked behaviour
-    # exactly.
-    # BO.1 — switched the cascade target from ``DS_L1_ACCOUNTS`` to
-    # ``DS_L1_DS_ACCOUNTS`` (Daily-Statement-specific, sourced from
-    # ``<prefix>_current_daily_balances`` only). The wider
-    # ``DS_L1_ACCOUNTS`` includes Pending-only + spine-planted
-    # accounts that have no balance row — picking one on Daily
-    # Statement returns blank KPIs (the v11.23.0 cold-read's
-    # triple-convergent NEW top blocker). The 7 other L1 sheets
-    # still bridge through ``DS_L1_ACCOUNTS`` for the wider universe.
-    # BR.x — bridge + cascade together. Cascade-only is invalid because
-    # the ``l1-accounts`` dataset SQL has ``<<$pL1DsRole>>`` placeholders
-    # that REQUIRE ``DataSetParameters`` declaration via the bridge — without
-    # it, fetch-time substitution fails with "calculated field has invalid
-    # syntax". The bridge handles the DB-side WHERE filter; cascade is the
-    # QS-side UI narrowing.
-    ds_role = analysis.add_parameter(StringParam(
-        name=P_L1_DS_ROLE,
-        # BR.x — explicit default + value_when_unset; bridge restored.
-        # SQL-pushdown variant: ``l1-ds-accounts-ds`` declares
-        # ``pL1DsRole`` and filters in SQL via ``<<$pL1DsRole>>``.
-        # User is driving in the QS UI editor to explore further.
-        default=[L1_ALL_SENTINEL],
-        value_when_unset=L1_ALL_SENTINEL,
-        mapped_dataset_params=[
-            (datasets[DS_L1_DS_ACCOUNTS], P_L1_DS_ROLE_DSP),
-        ],
-    ))
+    # CQ.4.a — Role cascade dropped. Pre-CQ.4 a `pL1DsRole` analysis
+    # parameter bridged into DS_L1_DS_ACCOUNTS via `pL1DsRole`
+    # DataSetParameter to SQL-push-narrow the Account picker by role;
+    # QS's GetUniqueAttributeValuesSyncForAnalysis can't execute
+    # parameterized datasets so the cascade only worked on App2.
+    # Operator-locked 2026-06-08: "ALL internal accounts should be
+    # searchable" — picker now sources from un-parameterized
+    # `scope = 'internal'` view; singleton controls land in their
+    # own reference Table at the bottom (CQ.4.b).
     # AO.2 — the balance date pushes DOWN into both datasets' SQL via
     # the ``pL1DsBalanceDate`` dataset param (day-truncated equality).
     # AR.2 (D5 strict-collapse) — the picker default + dataset default
@@ -2396,26 +2361,14 @@ def _wire_daily_statement_filters(
         ],
     ))
 
-    # Sheet controls — Role → Account → Business Day. AA.B.1 added the
-    # Role dropdown above Account so the cascade direction is visually
-    # explicit (left/top narrows the right/bottom). The Account
-    # dropdown's options come from the DS_L1_DS_ACCOUNTS companion
-    # (BO.1 — Daily-Statement-specific balance-only source), which
-    # carries a ``pL1DsRole`` dataset param; picking a role re-fetches
-    # the account options narrowed to that role.
-    #
-    # Role dropdown is SINGLE_SELECT with the show-all sentinel default
-    # (the standard AA.A pattern), so first-load lists every account
-    # exactly like before AA.B.1. ``hidden_select_all=True`` on Account
-    # mirrors pre-AA.B.1 behaviour: SINGLE_SELECT semantically requires
-    # picking exactly one — "All" doesn't apply.
-    daily_statement_sheet.add_parameter_dropdown(
-        parameter=ds_role, title="Role",
-        type="SINGLE_SELECT",
-        selectable_values=LinkedValues.from_column(
-            datasets[DS_L1_DS_ROLES]["account_role"],
-        ),
-    )
+    # CQ.4.a — Sheet controls: Account → Business Day. Role dropdown
+    # dropped per operator lock. Account picker sources from
+    # DS_L1_DS_ACCOUNTS which is now unparameterized
+    # (`scope = 'internal'`); QS's
+    # GetUniqueAttributeValuesSyncForAnalysis now succeeds (the 400-
+    # against-parameterized-dataset blocker is gone), so QS's native
+    # typeahead works without the pL1DsRole bridge. App2's CQ.2
+    # server-side typeahead picks up the same wider universe.
     daily_statement_sheet.add_parameter_dropdown(
         parameter=ds_account, title="Account",
         type="SINGLE_SELECT",
@@ -2424,24 +2377,10 @@ def _wire_daily_statement_filters(
             # bound value matches the dataset SQL's display-format
             # WHERE clause (CQ.1: ``(COALESCE(account_name, account_id)
             # || ' (' || account_id || ')') = <<$pL1DsAccount>>``).
-            # BO.1 — sourced from ``DS_L1_DS_ACCOUNTS`` (balance-only)
-            # so every option has a matching ``daily_balances`` row.
             datasets[DS_L1_DS_ACCOUNTS]["account_display"],
         ),
-        # BR.x — cascade config dropped. QS's
-        # ``GetUniqueAttributeValuesSyncForAnalysis`` endpoint (which
-        # populates LinkedValues dropdowns) refuses to execute against
-        # a parameterized dataset — it returns 400 BEFORE any SQL
-        # reaches the DB (verified by pg_stat_activity capture during
-        # cascade trigger: zero QS-originated queries hit Postgres).
-        # No SQL escape works because we never reach SQL execution.
-        # Without cascade, the bridge re-fetch on ``pL1DsRole`` change
-        # still narrows the Account options via SQL pushdown — the
-        # dropdown rebuilds with role-narrowed accounts. Operator may
-        # need to hit "Refresh this list" if QS's bridge-fire
-        # auto-refresh doesn't trigger. See
-        # docs/reference/quicksight-quirks.md — unique-values endpoint
-        # parameterized-dataset blocker.
+        # SINGLE_SELECT semantically requires picking exactly one —
+        # "All" doesn't apply.
         hidden_select_all=True,
     )
     daily_statement_sheet.add_parameter_datetime_picker(

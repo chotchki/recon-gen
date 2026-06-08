@@ -319,11 +319,13 @@ DS_SUPERSESSION_DAILY_BALANCES = "l1-supersession-daily-balances-ds"
 DS_L1_ACCOUNTS = "l1-accounts-ds"
 DS_L1_TX_IDS = "l1-tx-ids-ds"
 DS_L1_TX_FACETS = "l1-tx-facets-ds"
-# AA.B.1 — Daily Statement Role cascade: distinct ``account_role`` over
-# the daily-balances universe. Feeds the new Role dropdown on Daily
-# Statement, which cascades into ``DS_L1_DS_ACCOUNTS`` via the
-# ``pL1DsRole`` dataset parameter (role-narrowed account picker).
-DS_L1_DS_ROLES = "l1-ds-roles-ds"
+# CQ.4.b — Daily Statement singleton-control reference table source.
+# Same matview as DS_L1_DS_ACCOUNTS but narrowed to parent/1:1
+# accounts via ``account_parent_role IS NULL AND account_scope =
+# 'internal'``. Renders the bottom-of-sheet Table that helps an
+# operator name a singleton account they can then type into the
+# (wide) Account picker above.
+DS_L1_DS_CONTROL_ACCOUNTS = "l1-ds-control-accounts-ds"
 # BO.1 (2026-05-29) — Daily-Statement-specific account picker source.
 # Pre-BO.1 the Daily Statement account dropdown re-used ``DS_L1_ACCOUNTS``
 # which BL.3 widened to UNION (current_daily_balances ∪
@@ -665,11 +667,6 @@ L1_ACCOUNTS_CONTRACT = DatasetContract(columns=[
     # ``_account_display_clause(...)``.
     ColumnSpec("account_name", "STRING"),
     ColumnSpec("account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY),
-])
-
-# AA.B.1 — distinct account_role for the Daily Statement Role dropdown.
-L1_DS_ROLES_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("account_role", "STRING"),
 ])
 
 L1_TX_IDS_CONTRACT = DatasetContract(columns=[
@@ -1062,14 +1059,6 @@ def _date_dataset_param(name: str, view: DateView) -> DatasetParameter:
             DefaultValues=view.emit_qs_dataset_default(),
         ),
     )
-
-# AA.B.1 — Role cascade dataset param. Lives on the DS_L1_ACCOUNTS
-# companion (the account-picker's option source) so picking a role
-# narrows the account dropdown to that role's accounts; the bridged
-# analysis param is ``pL1DsRole`` and reverts to ``L1_ALL_SENTINEL``
-# (the "show all roles" default) on load.
-P_L1_DS_ROLE_DSP = "pL1DsRole"
-
 
 def build_daily_statement_summary_dataset(
     cfg: Config, l2_instance: L2Instance,
@@ -1667,10 +1656,18 @@ def build_l1_ds_accounts_dataset(
     universe and Daily Statement's per-(account, day) reconciliation
     contract).
 
-    Same contract + same ``pL1DsRole`` cascade param as
-    ``DS_L1_ACCOUNTS``; the Daily Statement Role dropdown bridges
-    here so picking a role narrows the account dropdown without
-    breaking the BL.3-widened source for the 7 other L1 sheets.
+    CQ.4.a — Was a parameterized source carrying the ``pL1DsRole``
+    cascade (Role dropdown narrowed the Account dropdown's
+    LinkedValues). The cascade tripped QS's
+    ``GetUniqueAttributeValuesSyncForAnalysis`` 400 (see
+    ``docs/audits/v13_6_1_picker.md`` Leg B); on App2 the same
+    parameterized source ate the per-keystroke typeahead too. The
+    Role drop de-parameterizes the source — QS native typeahead
+    works again + App2's CQ.2 typeahead now searches the full
+    internal-account universe. Operator-locked 2026-06-08: "ALL
+    internal accounts should be searchable" — picker widens to every
+    ``scope = 'internal'`` account (control GLs + customer DDAs +
+    merchant DDAs all surface); external counterparties stay out.
     """
     prefix = cfg.db_table_prefix
     display = account_display_expr("account_name", "account_id")
@@ -1678,16 +1675,13 @@ def build_l1_ds_accounts_dataset(
         f"SELECT DISTINCT account_id, account_role, account_name,"
         f" {display} AS account_display"
         f" FROM {prefix}_current_daily_balances"
-        f" WHERE {_data_value_clause('account_role', P_L1_DS_ROLE_DSP)}"
+        f" WHERE account_scope = 'internal'"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-ds-accounts-dataset"),
         "L1 Daily Statement Accounts", "l1-ds-accounts",
         sql, L1_ACCOUNTS_CONTRACT,
         visual_identifier=DS_L1_DS_ACCOUNTS,
-        dataset_parameters=[
-            _all_sentinel_sv_param(P_L1_DS_ROLE_DSP),
-        ],
         # CQ.2.g — universe is exactly the current_daily_balances
         # matview (no UNION). App2 typeahead skips the CustomSql wrap
         # and queries the matview directly. select_expr MUST match
@@ -1700,26 +1694,51 @@ def build_l1_ds_accounts_dataset(
     )
 
 
-def build_l1_ds_roles_dataset(
+def build_l1_ds_control_accounts_dataset(
     cfg: Config, l2_instance: L2Instance,
 ) -> DataSet:
-    """AA.B.1 — distinct ``account_role`` over the daily-balances
-    universe. Feeds the Daily Statement Role dropdown (the new
-    cascade source) via ``LinkedValues``. Unparameterized — every
-    role the deployed institution actually uses shows up.
+    """CQ.4.b — singleton-control accounts reference table source.
 
-    Same shape as ``build_l1_accounts_dataset``: cheap DISTINCT over
-    ``current_daily_balances``; the matview's per-account-day
-    granularity guarantees every role with at least one tracked
-    account appears.
+    Drives the "Control accounts (1:1 singletons)" Table pinned at
+    the bottom of the Daily Statement sheet (replaces the pre-CQ.4
+    Accounts available + Roles available ctx-row KPIs). Per the
+    operator-recommended redesign (audit
+    ``docs/audits/v13_6_1_picker.md`` finding 2): when an operator
+    can't recall the exact singleton-account name (GL controls,
+    pools, sweep, interest — the audit-named symptom accounts),
+    this table gives them a one-glance list of every internal
+    parent/1:1 account they can then type into the Account picker.
+
+    Singleton filter LOCKED via inventory:
+    ``WHERE account_parent_role IS NULL AND account_scope = 'internal'``
+    — structural, codebase-wide convention (used at
+    schema.py:545/575/2389/2625/2771/2793/3448/3470 to delineate
+    leaf-template vs parent-singleton). Returns the 10 GL controls
+    on sasquatch_pr (CashDueFRB, ACHOrigSettlement,
+    CardAcquiringSettlement, WireSettlementSuspense,
+    InternalTransferSuspense, MerchantPayableClearing,
+    ConcentrationMaster, InternalSuspenseRecon, DDAControl,
+    MerchantDDAControl). Customer-DDA + merchant-DDA templates
+    (parent_role IS NOT NULL) are excluded — they're 1:N
+    template-materialized children, NOT control accounts; operators
+    reach them via the wide picker above, not this reference list.
     """
     prefix = cfg.db_table_prefix
-    sql = f"SELECT DISTINCT account_role FROM {prefix}_current_daily_balances"
+    display = account_display_expr("account_name", "account_id")
+    sql = (
+        f"SELECT DISTINCT account_id, account_role, account_name,"
+        f" {display} AS account_display"
+        f" FROM {prefix}_current_daily_balances"
+        f" WHERE account_parent_role IS NULL"
+        f"   AND account_scope = 'internal'"
+        f" ORDER BY account_role, account_id"
+    )
     return build_dataset(
-        cfg, cfg.prefixed("l1-ds-roles-dataset"),
-        "L1 Daily Statement Roles", "l1-ds-roles",
-        sql, L1_DS_ROLES_CONTRACT,
-        visual_identifier=DS_L1_DS_ROLES,
+        cfg, cfg.prefixed("l1-ds-control-accounts-dataset"),
+        "L1 Daily Statement Control Accounts",
+        "l1-ds-control-accounts",
+        sql, L1_ACCOUNTS_CONTRACT,
+        visual_identifier=DS_L1_DS_CONTROL_ACCOUNTS,
     )
 
 
@@ -1801,7 +1820,8 @@ def build_all_l1_dashboard_datasets(
         build_l1_accounts_dataset(cfg, l2_instance),
         # BO.1 — Daily-Statement-specific picker source (balance-only).
         build_l1_ds_accounts_dataset(cfg, l2_instance),
-        build_l1_ds_roles_dataset(cfg, l2_instance),
+        # CQ.4.b — Daily Statement singleton-control reference table source.
+        build_l1_ds_control_accounts_dataset(cfg, l2_instance),
         build_l1_tx_ids_dataset(cfg, l2_instance),
         build_l1_tx_facets_dataset(cfg, l2_instance),
         # CQ.3.c — shared LinkedValues picker source datasets

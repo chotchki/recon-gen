@@ -76,66 +76,31 @@ def _summary_sql_and_params(
     return sql_str, list(ds.DatasetParameters or [])
 
 
-# AA.B — Daily Statement Role cascade --------------------------------------
+# CQ.4 — Daily Statement Account picker (post-Role-cascade-drop) ----------
 
 
-def test_daily_statement_role_then_account_populates_table(
+def test_daily_statement_account_populates_table(
     l1_dashboard_driver: tuple["DashboardDriver", str], cfg: Config,
 ) -> None:
-    """AA.B.1 workflow — picking a Role THEN an Account renders the
-    Posted Money Records table populated for that account.
+    """CQ.4.a workflow — picking an Account renders the Posted Money
+    Records table populated for that account.
 
-    Pair to ``test_daily_statement_picked_account_narrows_table``: that
-    test covers the direct-pick path (only Account is picked); this
-    one covers the cascade path the operator typically follows ("filter
-    by my team's role, then drill to one account"). Both must end at
-    the same outcome: the per-account-day detail table renders ≥1 row
-    for the picked Account.
-
-    Why this shape (and not "Role narrows the dropdown options"). The
-    cascade-narrows-dropdown claim was originally asserted by
-    ``test_daily_statement_role_narrows_posted_money_records_table``,
-    but the AA.B.4.followon investigation found that's not deliverable
-    on either renderer — QS dropdown option lists are snapshot at
-    dashboard load (snapshot-not-live, standing quirk family
-    ``project_qs_url_parameter_no_control_sync``) and App2's filter
-    widgets render once per sheet GET. So a "Role narrows Account
-    options" assertion fails on both legs regardless of seed shape.
-    What the operator CAN do — and what AA.B.1's wiring genuinely
-    supports — is pick both params in sequence and read the result.
-    This test pins that the picked Account survives the combined
-    Role+Account filter and the table populates. JSON pin
-    ``test_aa_b_1_l1_accounts_dataset_is_role_cascaded`` separately
-    guards the SQL substitution itself as a structural regression.
-
-    AA.B.5.followon — the picked ``(role, account, day)`` triple comes
-    from the deployed DB so we don't depend on QS's "yesterday" date
-    default landing on a day with rows for the first-alphabetical
-    account. Was clock-flaky pre-fix: when the chain crossed UTC
-    midnight, "yesterday" shifted to a thinner day and the test failed
-    on calendar luck (cust-011 had 0 tx on 2026-05-16 even though it
-    had 349 lifetime). Now: query DB for the most-recent (account,
-    day) pair with rows, drive all three pickers to those values.
+    Pre-CQ.4 was ``test_daily_statement_role_then_account_populates_table``
+    (the workflow picked Role THEN Account because the Role dropdown
+    bridged into the Account picker via the pL1DsRole cascade). The
+    Role cascade is dropped per operator lock 2026-06-08 ("ALL internal
+    accounts should be searchable") — the Account picker now sources
+    every ``scope = 'internal'`` account directly. This test pins that
+    the picked Account + Business Day combination still produces a
+    populated detail table on both renderers.
     """
     driver, dashboard_arg = l1_dashboard_driver
     driver.open(dashboard_arg, sheet=_DAILY_STATEMENT_NAME)
     target_visual = "Posted Money Records"
     driver.wait_loaded(target_visual)
 
-    picked_account, picked_role, picked_day = find_account_day_with_data(cfg)
+    picked_account, _picked_role, picked_day = find_account_day_with_data(cfg)
 
-    # Sanity: the Role dropdown should advertise the role we just
-    # picked. If it doesn't, the cascade SQL is out of sync with the
-    # deployed data — surface that as the failure shape rather than
-    # silently moving on.
-    role_options = driver.filter_options("Role")
-    assert picked_role in role_options, (
-        f"Helper picked role {picked_role!r} for account "
-        f"{picked_account!r} but Role dropdown advertises "
-        f"{role_options}. Cascade SQL out of sync with deployed data."
-    )
-
-    driver.pick_filter("Role", [picked_role])
     driver.pick_filter("Account", [picked_account])
     # No-op on App2 (date picker not rendered there; dataset SQL
     # already returns all rows since date narrowing is QS-only).
@@ -144,12 +109,11 @@ def test_daily_statement_role_then_account_populates_table(
     rows = driver.table_rows(target_visual)
     driver.screenshot()
     assert len(rows) > 0, (
-        f"After Role={picked_role!r} + Account={picked_account!r} + "
-        f"Business Day={picked_day!r}, Posted Money Records should "
-        f"render ≥1 row. Got {len(rows)}. AA.B.1 SQL cascade likely "
-        f"broke the combined-filter shape — the Account's row should "
-        f"survive both the role-narrowed accounts dataset AND the "
-        f"per-account-day matview's Account WHERE clause."
+        f"After Account={picked_account!r} + Business Day={picked_day!r}, "
+        f"Posted Money Records should render ≥1 row. Got {len(rows)}. "
+        f"The picked account is one the helper found with ≥1 row in "
+        f"the deployed transactions matview — a zero-row outcome here "
+        f"means the per-(account, day) filter on the matview broke."
     )
 
 
@@ -158,11 +122,10 @@ def test_bo_1_daily_statement_picks_reconcile_per_role(
 ) -> None:
     """BO.1 contract (v11.23.0 cold-read F1, triple-convergent) — for
     every ``account_role`` that has ≥1 row in
-    ``<prefix>_current_daily_balances``: picking that role on Daily
-    Statement narrows the Account dropdown to ≥1 advertised account,
-    AND picking that first account + a transactions-bearing day
-    produces a non-blank KPI row (Opening + Closing both render
-    parseable currency values).
+    ``<prefix>_current_daily_balances``: at least one of its accounts
+    is in the Daily Statement Account dropdown, AND picking that
+    account + a transactions-bearing day produces a non-blank KPI row
+    (Opening + Closing both render parseable currency values).
 
     Pre-BO.1 the picker source (``DS_L1_ACCOUNTS``) UNIONed three
     matviews including ``current_transactions`` + ``l1_exceptions``,
@@ -172,34 +135,19 @@ def test_bo_1_daily_statement_picks_reconcile_per_role(
     picks went blank (five empty KPI cards, 0 rows). The
     triple-convergent cold-read NEW top blocker.
 
-    BO.1 splits the picker source: Daily Statement uses the new
+    BO.1 split the picker source: Daily Statement uses
     ``DS_L1_DS_ACCOUNTS`` (sourced from
     ``<prefix>_current_daily_balances`` only); the 7 other L1 sheets
     keep using ``DS_L1_ACCOUNTS`` for the BL.3-wider universe their
     Pending-only / spine-planted accounts need.
 
-    Per-role coverage: a one-role test would miss the regression
-    mode "role X's accounts in the dropdown still don't have balance
-    rows" — operator-driven, real deployments have many roles
-    (cardholder DDA, GL control, suspense, sweep), each can break
-    independently. ``find_one_account_day_per_role`` enumerates them
-    from the deployed DB and asserts the contract for each.
+    CQ.4.a — the Role cascade is dropped; this test no longer picks
+    Role first. Per-role coverage is still valuable as a *seed-shape*
+    enumeration (every role has at least one pickable account with a
+    balance row) — the BO.1 regression mode is per-role-specific even
+    though there's now no UI-level role filter.
     """
     driver, dashboard_arg = l1_dashboard_driver
-    if driver.dialect == "qs":
-        pytest.xfail(
-            "BR.x renderer divergence — QS's "
-            "GetUniqueAttributeValuesSyncForAnalysis endpoint 400s on "
-            "parameterized datasets (verified via pg_stat_activity: "
-            "zero queries reach Postgres on cascade refetch). The "
-            "Account dropdown shows the full unfiltered universe on "
-            "QS regardless of Role pick; QS's virtualized listbox "
-            "only mounts the first ~20 visible options so "
-            "non-CustomerLedger roles' accounts are off-screen and "
-            "the per-role contract fails. App2 implements the "
-            "cascade correctly via its _sql_executor. See "
-            "docs/reference/quicksight-quirks.md."
-        )
 
     triples = find_one_account_day_per_role(cfg)
     assert triples, (
@@ -212,37 +160,18 @@ def test_bo_1_daily_statement_picks_reconcile_per_role(
         driver.open(dashboard_arg, sheet=_DAILY_STATEMENT_NAME)
         driver.wait_loaded("Opening Balance")
 
-        # Role dropdown must offer this role at all.
-        role_opts = driver.filter_options("Role")
-        if role not in role_opts:
-            failures.append(
-                f"role {role!r}: missing from Role dropdown "
-                f"(advertised: {sorted(role_opts)[:5]}...)"
-            )
-            continue
-        # BO.1 race fix (v11.25.0 CI): the CascadingControlConfiguration
-        # wiring was reverted (v11.26.3 CI — QS rendered the cascade-
-        # configured Account dropdown as permanently empty). Without
-        # cascade, Account shows all options up front; we still need to
-        # poll until the option set narrows to detect the
-        # MappedDataSetParameters bridge firing.
-        before_account = set(driver.filter_options("Account"))
-        driver.pick_filter("Role", [role])
-        import time as _time
-        deadline = _time.monotonic() + 8.0
+        # CQ.4.a — the Account dropdown advertises every internal-scope
+        # account directly; no Role pick step. The contract is still
+        # "this role's accounts are pickable" — that requires the
+        # account to be in the dropdown at all.
         account_opts = driver.filter_options("Account")
-        while (
-            set(account_opts) == before_account
-            and _time.monotonic() < deadline
-        ):
-            account_opts = driver.filter_options("Account")
         if account_display not in account_opts:
             failures.append(
                 f"role {role!r}: account {account_display!r} not in "
-                f"Account dropdown after Role pick. Advertised: "
-                f"{sorted(account_opts)[:5]}... — this is the BO.1 "
-                f"regression mode (picker source not narrowed to "
-                f"daily_balances)."
+                f"Account dropdown. Advertised (first 5): "
+                f"{sorted(account_opts)[:5]}... — picker source "
+                f"narrowed too tightly or this role has no internal-"
+                f"scope account with a balance row."
             )
             continue
         driver.pick_filter("Account", [account_display])

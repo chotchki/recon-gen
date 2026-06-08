@@ -136,36 +136,23 @@ def find_account_day_with_data(cfg: Config) -> tuple[str, str, str]:
 
     ``account_display`` matches the ``"Name (id)"`` shape AA.E.2 wired
     into the Account dropdown's ``LinkedValues.from_column(...
-    account_display)``. ``account_role`` matches the Role dropdown's
-    ``LinkedValues.from_column(... account_role)``. ``business_day_iso``
-    is ``YYYY-MM-DD`` (the protocol's date format).
+    account_display)``. ``account_role`` is returned for callers that
+    still want it (no longer used to narrow). ``business_day_iso`` is
+    ``YYYY-MM-DD`` (the protocol's date format).
 
-    Restricts the candidate (account, day) pairs to accounts whose
-    ``account_role`` is the **alphabetically-first role** in
-    ``<prefix>_current_daily_balances`` — i.e., the role that the
-    Daily Statement Role dropdown auto-selects on initial load (QS's
-    SINGLE_SELECT default picks the first ``LinkedValues`` option).
-    The Account dropdown is narrowed by the Role cascade
-    (``DS_L1_ACCOUNTS WHERE account_role IN (<<$pL1DsRole>>)``), and
-    that narrowing does NOT refresh after a runtime Role pick (the
-    standing QS quirk ``project_qs_url_parameter_no_control_sync`` —
-    explicit in ``test_daily_statement_role_then_account_populates_table``'s
-    docstring). So the helper must pick an account that the
-    initial-load-narrowed dropdown actually advertises. Pre-fix
-    (#991, 2026-05-18): helper picked the globally-most-active account
-    regardless of role — for spec_example that was
-    ``External Counterparty One (ExternalCounterparty)`` but the
-    dropdown was narrowed to ``CustomerSubledger`` accounts, and both
-    daily-statement browser tests failed at the picker click.
+    CQ.4.a — was pre-CQ.4 narrowed to the alphabetically-first role
+    in ``<prefix>_current_daily_balances`` (matching the SINGLE_SELECT
+    Role dropdown's initial-load auto-pick) because the Account picker
+    was cascade-narrowed by the Role dropdown and that narrowing did
+    NOT refresh after a runtime pick. Post-CQ.4 the Role dropdown +
+    cascade are gone — every ``scope = 'internal'`` account is in the
+    picker. The narrowing is dropped; the helper just biases toward
+    low ``account_id`` so the pick lands inside QS's virtualized
+    dropdown window (~14 visible options at a time).
 
     Raises ``RuntimeError`` if the deployed DB has no rows at all
     (deploy step skipped? wrong cfg? wrong prefix?) — refusing to
     silently return a useless tuple.
-
-    Only Postgres + Oracle are wired; SQLite is reachable via the
-    same ``date_trunc_day`` SQL but not connected here (the runner
-    doesn't dispatch browser e2e against SQLite — QS can't reach a
-    sqlite tempfile).
     """
     if cfg.dialect not in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.DUCKDB):
         raise RuntimeError(
@@ -186,21 +173,15 @@ def find_account_day_with_data(cfg: Config) -> tuple[str, str, str]:
     # tiebreaks so within the lowest-id account we still favor the most-
     # recent / most-active day.
     #
-    # WHERE narrows to the alphabetically-first role from
-    # current_daily_balances — same universe the Daily Statement Role
-    # dropdown auto-selects (its SINGLE_SELECT default picks the first
-    # LinkedValues option). Subquery is portable across PG + Oracle. The
-    # Role dropdown's option list doesn't refresh after a runtime pick
-    # (standing quirk project_qs_url_parameter_no_control_sync — explicit
-    # in test_daily_statement_role_then_account_populates_table's
-    # docstring), so the helper must pick from the initial-role universe.
+    # CQ.4.a — restrict to internal-scope accounts (matches the picker's
+    # `WHERE account_scope = 'internal'` source narrowing); previously
+    # this restricted further to the alphabetically-first role, dropped
+    # because the Role cascade is gone.
     sql = (
         f"SELECT account_name, account_id, account_role, "
         f"       {bday_expr} AS bday, COUNT(*) AS n "
         f"FROM {prefix}_transactions "
-        f"WHERE account_role = ("
-        f"  SELECT MIN(account_role) FROM {prefix}_current_daily_balances"
-        f") "
+        f"WHERE account_scope = 'internal' "
         f"GROUP BY account_name, account_id, account_role, {bday_expr} "
         f"HAVING COUNT(*) > 0 "
         f"ORDER BY account_id ASC, bday DESC, n DESC "
