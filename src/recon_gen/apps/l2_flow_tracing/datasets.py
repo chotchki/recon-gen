@@ -54,6 +54,7 @@ from recon_gen.common.models import (
     StringDatasetParameter,
     StringDatasetParameterDefaultValues,
 )
+from recon_gen.common.picker_datasets import build_shared_picker_datasets
 from recon_gen.common.sheets.app_info import (
     build_liveness_dataset,
     build_matview_status_dataset,
@@ -575,6 +576,9 @@ def build_all_l2_flow_tracing_datasets(
         build_tt_instances_dataset(cfg, l2_instance),
         build_tt_legs_dataset(cfg, l2_instance),
         build_unified_l2_exceptions_dataset(cfg, l2_instance),
+        # CQ.3.c — shared LinkedValues picker source datasets. Same
+        # datasets emitted by L1 — AWS deploy de-dups by DataSetId.
+        *build_shared_picker_datasets(cfg),
         # M.4.4.5 — App Info ("i") sheet datasets, ALWAYS LAST.
         # M.4.4.7 — per-app segment so deploy <single-app> doesn't
         # delete-then-create another app's App Info dataset.

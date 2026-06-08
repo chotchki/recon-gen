@@ -32,6 +32,12 @@ from __future__ import annotations
 
 from typing import Literal
 
+from recon_gen.common.picker_datasets import (
+    DS_CHAIN_PARENTS,
+    DS_METADATA_KEYS,
+    DS_RAILS,
+    DS_TEMPLATES,
+)
 from recon_gen.apps.l2_flow_tracing.datasets import (
     DS_CHAIN_INSTANCES,
     DS_META_VALUES,
@@ -51,10 +57,6 @@ from recon_gen.apps.l2_flow_tracing.datasets import (
     build_all_l2_flow_tracing_datasets,
     bundle_status_values,
     chain_completion_status_values,
-    declared_chain_parents,
-    declared_metadata_keys,
-    declared_rail_names,
-    declared_template_names,
     transaction_status_values,
     tt_completion_status_values,
 )
@@ -90,6 +92,7 @@ from recon_gen.common.tree import (
     DateTimeParam,
     Drill,
     DrillParam,
+    LinkedValues,
     Sheet,
     StaticValues,
     StringParam,
@@ -372,6 +375,15 @@ def _l2ft_datasets(
         DS_TT_INSTANCES,
         DS_TT_LEGS,
         DS_UNIFIED_L2_EXCEPTIONS,
+        # CQ.3.c — shared LinkedValues picker source datasets. Order
+        # matches build_shared_picker_datasets() exactly.
+        DS_RAILS, DS_TEMPLATES,
+        # DS_ACCOUNT_ROLES is L1-only (no L2FT picker uses it) but
+        # the dataset still ships from this app to keep deploys
+        # idempotent across deploy --app filters. We bind it as
+        # placeholder so the visual_ids/aws_datasets zip aligns.
+        "v-config-account-roles-ds",
+        DS_METADATA_KEYS, DS_CHAIN_PARENTS,
         _DS_APP_INFO_LIVENESS, _DS_APP_INFO_MATVIEWS,  # M.4.4.5; BO.5 per-app
     ]
     return {
@@ -506,6 +518,45 @@ def _populate_pushdown_dropdown(
     )
 
 
+def _populate_pushdown_linked_dropdown(
+    *,
+    sheet: Sheet,
+    analysis: Analysis,
+    bridges: list[tuple[Dataset, str]],
+    param_name: ParameterName,
+    title: str,
+    options_dataset: Dataset,
+    options_column: str,
+) -> None:
+    """CQ.3.d — sibling of :func:`_populate_pushdown_dropdown` but
+    sources the dropdown's options from a ``LinkedValues`` dataset
+    column instead of an inline ``StaticValues`` list.
+
+    Used for L2-declared universes (rail / template / chain parent /
+    metadata key) — those can grow past the AWS StaticValues 32-element
+    ceiling at fleet scale; the LinkedValues path is unbounded + picks
+    up the CQ.2 server-side typeahead automatically.
+
+    Same wiring otherwise: a single-valued ``StringParam`` defaulting
+    to ``L2FT_ALL_SENTINEL`` (so an unset dropdown matches every row
+    via ``_match_all_in_clause`` in the dataset SQL), bridged to each
+    ``(dataset, dataset_param)`` pair via ``MappedDataSetParameters``.
+    """
+    p = analysis.add_parameter(StringParam(
+        name=param_name,
+        multi_valued=False,
+        default=[L2FT_ALL_SENTINEL],
+        mapped_dataset_params=list(bridges),
+    ))
+    sheet.add_parameter_dropdown(
+        parameter=p,
+        title=title,
+        selectable_values=LinkedValues.from_column(
+            options_dataset[options_column],
+        ),
+    )
+
+
 def _populate_rails_sheet(
     cfg: Config,
     sheet: Sheet,
@@ -587,10 +638,13 @@ def _populate_rails_sheet(
     # values-V2` fetch (the X.1.a cold-CI 404 source). StaticValues
     # options + a default spanning every value keeps "no narrowing" the
     # analyst's starting state without QS querying anything.
-    _populate_pushdown_dropdown(
+    # CQ.3.d — L2-derived rail picker → DS_RAILS (LinkedValues +
+    # server-side typeahead). Was: StaticValues(declared_rail_names).
+    _populate_pushdown_linked_dropdown(
         sheet=sheet, analysis=analysis, bridges=[(ds_postings, "pL2ftRail")],
         param_name=ParameterName("pL2ftRail"),
-        title="Rail", all_values=declared_rail_names(l2_instance),
+        title="Rail",
+        options_dataset=datasets[DS_RAILS], options_column="name",
     )
     _populate_pushdown_dropdown(
         sheet=sheet, analysis=analysis, bridges=[(ds_postings, "pL2ftStatus")],
@@ -639,15 +693,19 @@ def _populate_rails_sheet(
             (ds_postings, "pValues"),
         ],
     ))
-    declared_keys = declared_metadata_keys(l2_instance)
+    # CQ.3.d — Metadata Key picker flips from StaticValues to
+    # LinkedValues against the shared DS_METADATA_KEYS dataset
+    # (`SELECT DISTINCT metadata_key FROM _v_config_rail_metadata_keys`).
+    # Empty-selection-means-all is preserved by the param default
+    # ([META_KEY_ALL_SENTINEL] above) + sentinel-OR SQL pattern in the
+    # postings / chain_instances / tt_* datasets; the sentinel option
+    # no longer needs to appear visibly in the dropdown.
     sheet.add_parameter_dropdown(
         parameter=p_meta_key,
         title="Metadata Key",
         type="SINGLE_SELECT",
-        # Sentinel first so it's the visible default; declared keys
-        # follow in sorted order.
-        selectable_values=StaticValues(
-            values=[META_KEY_ALL_SENTINEL] + declared_keys,
+        selectable_values=LinkedValues.from_column(
+            datasets[DS_METADATA_KEYS]["metadata_key"],
         ),
     )
     # X.1.b — Free-text input (was LinkedValues dropdown). The
@@ -802,11 +860,14 @@ def _populate_chains_sheet(
     # no analysis-level CategoryFilter / FilterGroup. (X.1.g predecessor
     # was a parameter-bound CategoryFilter; before that an empty
     # FilterDropdown that forced QS's lazy dropdown-options fetch.)
-    _populate_pushdown_dropdown(
+    # CQ.3.d — L2-derived chain picker → DS_CHAIN_PARENTS.
+    _populate_pushdown_linked_dropdown(
         sheet=sheet, analysis=analysis,
         bridges=[(ds_chain_instances, "pL2ftChainsChain")],
         param_name=ParameterName("pL2ftChainsChain"),
-        title="Chain", all_values=declared_chain_parents(l2_instance),
+        title="Chain",
+        options_dataset=datasets[DS_CHAIN_PARENTS],
+        options_column="parent_name",
     )
     _populate_pushdown_dropdown(
         sheet=sheet, analysis=analysis,
@@ -838,13 +899,14 @@ def _populate_chains_sheet(
             (ds_chain_instances, "pValues"),
         ],
     ))
-    declared_keys = declared_metadata_keys(l2_instance)
+    # CQ.3.d — see Rails sheet metadata-key picker for the
+    # LinkedValues conversion rationale.
     sheet.add_parameter_dropdown(
         parameter=p_meta_key,
         title="Metadata Key",
         type="SINGLE_SELECT",
-        selectable_values=StaticValues(
-            values=[META_KEY_ALL_SENTINEL] + declared_keys,
+        selectable_values=LinkedValues.from_column(
+            datasets[DS_METADATA_KEYS]["metadata_key"],
         ),
     )
     # X.1.b — Free-text input (see Rails sheet for rationale).
@@ -969,14 +1031,16 @@ def _populate_transfer_templates_sheet(
     # narrow together, and that same denormalization makes the dual SQL
     # pushdown work. (X.1.g had a StaticValues-backed param CategoryFilter;
     # before that an empty FilterDropdown forcing QS's lazy options fetch.)
-    _populate_pushdown_dropdown(
+    # CQ.3.d — L2-derived template picker → DS_TEMPLATES.
+    _populate_pushdown_linked_dropdown(
         sheet=sheet, analysis=analysis,
         bridges=[
             (ds_tt_instances, "pL2ftTtTemplate"),
             (ds_tt_legs, "pL2ftTtTemplate"),
         ],
         param_name=ParameterName("pL2ftTtTemplate"),
-        title="Template", all_values=declared_template_names(l2_instance),
+        title="Template",
+        options_dataset=datasets[DS_TEMPLATES], options_column="name",
     )
     _populate_pushdown_dropdown(
         sheet=sheet, analysis=analysis,
@@ -1011,13 +1075,14 @@ def _populate_transfer_templates_sheet(
             (ds_tt_legs, "pValues"),
         ],
     ))
-    declared_keys = declared_metadata_keys(l2_instance)
+    # CQ.3.d — see Rails sheet metadata-key picker for the
+    # LinkedValues conversion rationale.
     sheet.add_parameter_dropdown(
         parameter=p_meta_key,
         title="Metadata Key",
         type="SINGLE_SELECT",
-        selectable_values=StaticValues(
-            values=[META_KEY_ALL_SENTINEL] + declared_keys,
+        selectable_values=LinkedValues.from_column(
+            datasets[DS_METADATA_KEYS]["metadata_key"],
         ),
     )
     # X.1.b — Free-text input (see Rails sheet for rationale).

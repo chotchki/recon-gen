@@ -47,9 +47,6 @@ from recon_gen.apps.l2_flow_tracing.app import (
     _TRANSFER_TEMPLATES_NAME,
     build_l2_flow_tracing_app,
 )
-from recon_gen.apps.l2_flow_tracing.datasets import (
-    declared_metadata_keys,
-)
 from recon_gen.common.l2 import L2Instance
 from recon_gen.common.sheets.app_info import APP_INFO_SHEET_NAME
 
@@ -122,16 +119,20 @@ def test_l2_exceptions_sheet_visuals_invariant_M3_10l(
 # -- Dataset count + ID prefix invariants -----------------------------------
 
 
-def test_dataset_count_is_eight_per_instance(
+def test_dataset_count_is_thirteen_per_instance(
     l2_instance: L2Instance,
 ) -> None:
-    """6 content datasets (M.3.10l) + 2 App Info datasets (M.4.4.5).
+    """6 content datasets (M.3.10l) + 2 App Info datasets (M.4.4.5)
+    + 5 shared LinkedValues picker source datasets (CQ.3.c).
 
     Content: postings + meta-values (Rails cascade), chain-instances
     (Chains), tt-instances + tt-legs (Transfer Templates), unified-
-    exceptions (L2 Exceptions). App Info: liveness + matview status."""
+    exceptions (L2 Exceptions). App Info: liveness + matview status.
+    CQ.3.c: rails / templates / account_roles / metadata_keys /
+    chain_parents (shared with L1 — same AWS DataSetIds, de-dup at
+    deploy time)."""
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
-    assert len(app.datasets) == 8
+    assert len(app.datasets) == 13
 
 
 def test_every_dataset_id_carries_deployment_prefix(
@@ -198,25 +199,29 @@ def test_metadata_cascade_has_two_params_per_instance(
     }
 
 
-def test_metadata_key_dropdown_options_scale_with_declared_keys(
+def test_metadata_key_dropdown_binds_to_shared_metadata_keys_dataset(
     l2_instance: L2Instance,
 ) -> None:
-    """The Key dropdown's StaticValues includes the sentinel +
-    every declared metadata key — that scales per-instance. An
-    instance with N keys produces N+1 dropdown options."""
-    from recon_gen.apps.l2_flow_tracing.datasets import (
-        META_KEY_ALL_SENTINEL,
-    )
-    from recon_gen.common.tree import StaticValues
+    """CQ.3.d — the Key dropdown is now LinkedValues against the
+    shared DS_METADATA_KEYS dataset (not an inline StaticValues with
+    the sentinel prepended). The declared-keys universe is computed
+    at query time by SELECT DISTINCT metadata_key FROM
+    _v_config_rail_metadata_keys, not baked into the picker spec.
+    Empty selection means "all" via the param default sentinel +
+    sentinel-OR SQL pattern."""
+    from recon_gen.common.picker_datasets import DS_METADATA_KEYS
+    from recon_gen.common.tree import LinkedValues
+    # Force-build the instance's datasets so the test side-effect
+    # registers the L2-derived view + dataset SQL.
+    _ = l2_instance
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
-    n_keys = len(declared_metadata_keys(l2_instance))
     rails = next(s for s in app.analysis.sheets if s.name == _RAILS_NAME)
     key_ctrl = next(
         c for c in rails.parameter_controls if c.title == "Metadata Key"
     )
-    assert isinstance(key_ctrl.selectable_values, StaticValues)
-    assert key_ctrl.selectable_values.values[0] == META_KEY_ALL_SENTINEL
-    assert len(key_ctrl.selectable_values.values) == n_keys + 1
+    assert isinstance(key_ctrl.selectable_values, LinkedValues)
+    assert key_ctrl.selectable_values.dataset.identifier == DS_METADATA_KEYS
+    assert key_ctrl.selectable_values.column_name == "metadata_key"
 
 
 # -- Cross-instance differentiation ------------------------------------------

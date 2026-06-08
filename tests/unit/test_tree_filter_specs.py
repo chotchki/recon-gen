@@ -171,10 +171,19 @@ def test_l2ft_rails_sheet_auto_derives_post_aa_a_3_pushdown_specs() -> None:
     assert "pL2ftMetaKey" in names
     # No MULTI_SELECT specs left on the post-flip sheet.
     assert not [s for s in specs if isinstance(s, ParameterMultiSelectSpec)]
-    # Each dropdown spec carries a non-empty option list.
+    # Each dropdown spec EITHER carries a non-empty inline option list
+    # (StaticValues — fixed-schema enums like Status / Bundle) OR is
+    # a LinkedValues source (options_dataset is not None — server-side
+    # typeahead fetches options on first focus). Post-CQ.3 the
+    # L2-derived universes (Rail / Metadata Key) flipped from
+    # StaticValues to LinkedValues so empty `options` is legitimate
+    # for those.
     for spec in specs:
         if isinstance(spec, ParameterDropdownSpec):
-            assert len(spec.options) >= 1
+            if spec.options_dataset is None:
+                assert len(spec.options) >= 1, (
+                    f"static-options spec {spec.name} has empty options"
+                )
 
 
 def test_date_control_shape_comes_from_the_tree() -> None:

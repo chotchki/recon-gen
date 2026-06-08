@@ -32,6 +32,7 @@ from recon_gen.common.models import (
     StringDatasetParameter,
     StringDatasetParameterDefaultValues,
 )
+from recon_gen.common.picker_datasets import build_shared_picker_datasets
 from recon_gen.common.sheets.app_info import (
     build_liveness_dataset,
     build_matview_status_dataset,
@@ -1803,6 +1804,11 @@ def build_all_l1_dashboard_datasets(
         build_l1_ds_roles_dataset(cfg, l2_instance),
         build_l1_tx_ids_dataset(cfg, l2_instance),
         build_l1_tx_facets_dataset(cfg, l2_instance),
+        # CQ.3.c — shared LinkedValues picker source datasets
+        # (rails / templates / account_roles / metadata_keys /
+        # chain_parents). Same datasets emitted by L2FT — AWS deploy
+        # de-dups by DataSetId; register_sql is idempotent on repeat.
+        *build_shared_picker_datasets(cfg),
         # M.4.4.5 — App Info ("i") sheet datasets, ALWAYS LAST.
         # M.4.4.7 — per-app segment so deploy <single-app> doesn't
         # delete-then-create another app's App Info dataset.

@@ -86,14 +86,18 @@ from recon_gen.apps.l1_dashboard.datasets import (
     P_L1_UNBUNDLED_RAIL,
     P_L1_UNBUNDLED_TYPE,
     build_all_l1_dashboard_datasets,
-    l1_account_role_values,
     l1_check_type_values,
-    l1_rail_values,
     l1_supersede_reason_values,
-    l1_rail_universe_values,
 )
 from recon_gen.common import rich_text as rt
 from recon_gen.common.config import Config
+from recon_gen.common.picker_datasets import (
+    DS_ACCOUNT_ROLES,
+    DS_CHAIN_PARENTS,
+    DS_METADATA_KEYS,
+    DS_RAILS,
+    DS_TEMPLATES,
+)
 from recon_gen.common.handbook.invariants import (
     load_bundled_invariants,
     panel_markdown,
@@ -537,6 +541,10 @@ def _l1_datasets(
         DS_SUPERSESSION_TRANSACTIONS, DS_SUPERSESSION_DAILY_BALANCES,
         DS_L1_ACCOUNTS, DS_L1_DS_ACCOUNTS,
         DS_L1_DS_ROLES, DS_L1_TX_IDS, DS_L1_TX_FACETS,
+        # CQ.3.c — shared LinkedValues picker source datasets. Order
+        # matches build_shared_picker_datasets() exactly.
+        DS_RAILS, DS_TEMPLATES, DS_ACCOUNT_ROLES, DS_METADATA_KEYS,
+        DS_CHAIN_PARENTS,
         _DS_APP_INFO_LIVENESS, _DS_APP_INFO_MATVIEWS,
     ]
     return {
@@ -2112,9 +2120,14 @@ def _wire_per_sheet_dropdowns(
     ds_tx_ids = datasets[DS_L1_TX_IDS]
     ds_tx_facets = datasets[DS_L1_TX_FACETS]
 
-    role_values = l1_account_role_values(l2_instance)
-    type_values = l1_rail_universe_values(l2_instance)
-    rail_values = l1_rail_values(l2_instance)
+    # CQ.3.d — L2-derived picker universes now come from shared
+    # LinkedValues datasets (declared rails / account roles) rather
+    # than the pre-CQ.3 StaticValues-with-l1_*_values() helpers that
+    # would have tripped the AWS 32-element ceiling at fleet scale.
+    # The fixed-enum dropdowns (check_type / supersedes) still pass
+    # all_values=l1_*_values() — those are code-frozen, ≤7 elements.
+    ds_rails = datasets[DS_RAILS]
+    ds_account_roles = datasets[DS_ACCOUNT_ROLES]
 
     # --- Drift sheet — Account (data-value) + Account Role (enum),
     #     both narrowing leaf-drift + ledger-drift together.
@@ -2125,22 +2138,22 @@ def _wire_per_sheet_dropdowns(
         param_name=ParameterName(P_L1_DRIFT_ACCOUNT), title="Account",
         options_dataset=ds_accounts, options_column="account_display",
     )
-    _populate_pushdown_enum_dropdown(
+    _populate_pushdown_value_dropdown(
         sheet=drift_sheet, analysis=analysis,
         bridges=[(ds_drift, P_L1_DRIFT_ROLE),
                  (ds_ledger_drift, P_L1_DRIFT_ROLE)],
         param_name=ParameterName(P_L1_DRIFT_ROLE), title="Account Role",
-        all_values=role_values,
+        options_dataset=ds_account_roles, options_column="account_role",
     )
 
-    # --- Drift Timelines sheet — Account Role (enum), both timeline
-    #     datasets.
-    _populate_pushdown_enum_dropdown(
+    # --- Drift Timelines sheet — Account Role (LinkedValues), both
+    #     timeline datasets.
+    _populate_pushdown_value_dropdown(
         sheet=drift_timelines_sheet, analysis=analysis,
         bridges=[(ds_drift_tl, P_L1_DRIFT_TL_ROLE),
                  (ds_ledger_drift_tl, P_L1_DRIFT_TL_ROLE)],
         param_name=ParameterName(P_L1_DRIFT_TL_ROLE), title="Account Role",
-        all_values=role_values,
+        options_dataset=ds_account_roles, options_column="account_role",
     )
 
     # --- Overdraft sheet — Account (data-value) + Account Role (enum).
@@ -2150,25 +2163,26 @@ def _wire_per_sheet_dropdowns(
         param_name=ParameterName(P_L1_OVERDRAFT_ACCOUNT), title="Account",
         options_dataset=ds_accounts, options_column="account_display",
     )
-    _populate_pushdown_enum_dropdown(
+    _populate_pushdown_value_dropdown(
         sheet=overdraft_sheet, analysis=analysis,
         bridges=[(ds_overdraft, P_L1_OVERDRAFT_ROLE)],
         param_name=ParameterName(P_L1_OVERDRAFT_ROLE), title="Account Role",
-        all_values=role_values,
+        options_dataset=ds_account_roles, options_column="account_role",
     )
 
-    # --- Limit Breach sheet — Account (data-value) + Transfer Type (enum).
+    # --- Limit Breach sheet — Account (data-value) + Transfer Type (LinkedValues).
     _populate_pushdown_value_dropdown(
         sheet=limit_breach_sheet, analysis=analysis,
         bridges=[(ds_lb, P_L1_LIMIT_BREACH_ACCOUNT)],
         param_name=ParameterName(P_L1_LIMIT_BREACH_ACCOUNT), title="Account",
         options_dataset=ds_accounts, options_column="account_display",
     )
-    _populate_pushdown_enum_dropdown(
+    _populate_pushdown_value_dropdown(
         sheet=limit_breach_sheet, analysis=analysis,
         bridges=[(ds_lb, P_L1_LIMIT_BREACH_TYPE)],
         param_name=ParameterName(P_L1_LIMIT_BREACH_TYPE),
-        title="Transfer Type", all_values=type_values,
+        title="Transfer Type",
+        options_dataset=ds_rails, options_column="name",
     )
 
     # --- Pending Aging sheet — Account (data-value) + Transfer Type +
@@ -2179,17 +2193,17 @@ def _wire_per_sheet_dropdowns(
         param_name=ParameterName(P_L1_PENDING_ACCOUNT), title="Account",
         options_dataset=ds_accounts, options_column="account_display",
     )
-    _populate_pushdown_enum_dropdown(
+    _populate_pushdown_value_dropdown(
         sheet=pending_aging_sheet, analysis=analysis,
         bridges=[(ds_sp, P_L1_PENDING_TYPE)],
         param_name=ParameterName(P_L1_PENDING_TYPE), title="Transfer Type",
-        all_values=type_values,
+        options_dataset=ds_rails, options_column="name",
     )
-    _populate_pushdown_enum_dropdown(
+    _populate_pushdown_value_dropdown(
         sheet=pending_aging_sheet, analysis=analysis,
         bridges=[(ds_sp, P_L1_PENDING_RAIL)],
         param_name=ParameterName(P_L1_PENDING_RAIL), title="Rail",
-        all_values=rail_values,
+        options_dataset=ds_rails, options_column="name",
     )
 
     # --- Unbundled Aging sheet — same three over the stuck_unbundled
@@ -2200,17 +2214,17 @@ def _wire_per_sheet_dropdowns(
         param_name=ParameterName(P_L1_UNBUNDLED_ACCOUNT), title="Account",
         options_dataset=ds_accounts, options_column="account_display",
     )
-    _populate_pushdown_enum_dropdown(
+    _populate_pushdown_value_dropdown(
         sheet=unbundled_aging_sheet, analysis=analysis,
         bridges=[(ds_su, P_L1_UNBUNDLED_TYPE)],
         param_name=ParameterName(P_L1_UNBUNDLED_TYPE), title="Transfer Type",
-        all_values=type_values,
+        options_dataset=ds_rails, options_column="name",
     )
-    _populate_pushdown_enum_dropdown(
+    _populate_pushdown_value_dropdown(
         sheet=unbundled_aging_sheet, analysis=analysis,
         bridges=[(ds_su, P_L1_UNBUNDLED_RAIL)],
         param_name=ParameterName(P_L1_UNBUNDLED_RAIL), title="Rail",
-        all_values=rail_values,
+        options_dataset=ds_rails, options_column="name",
     )
 
     # --- Supersession Audit sheet — Supersedes Reason (enum, nullable;
@@ -2236,11 +2250,11 @@ def _wire_per_sheet_dropdowns(
         param_name=ParameterName(P_L1_TODAYS_EXC_ACCOUNT), title="Account",
         options_dataset=ds_accounts, options_column="account_display",
     )
-    _populate_pushdown_enum_dropdown(
+    _populate_pushdown_value_dropdown(
         sheet=l1_exceptions_sheet, analysis=analysis,
         bridges=[(ds_te, P_L1_TODAYS_EXC_TYPE)],
         param_name=ParameterName(P_L1_TODAYS_EXC_TYPE), title="Transfer Type",
-        all_values=type_values,
+        options_dataset=ds_rails, options_column="name",
     )
 
     # --- Transactions sheet — Account / Transfer / Status / Origin
@@ -2270,11 +2284,11 @@ def _wire_per_sheet_dropdowns(
         param_name=ParameterName(P_L1_TX_ORIGIN), title="Origin",
         options_dataset=ds_tx_facets, options_column="origin",
     )
-    _populate_pushdown_enum_dropdown(
+    _populate_pushdown_value_dropdown(
         sheet=transactions_sheet, analysis=analysis,
         bridges=[(ds_tx, P_L1_TX_TYPE)],
         param_name=ParameterName(P_L1_TX_TYPE), title="Transfer Type",
-        all_values=type_values,
+        options_dataset=ds_rails, options_column="name",
     )
 
 

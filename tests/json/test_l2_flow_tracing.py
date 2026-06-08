@@ -265,15 +265,20 @@ def test_every_sheet_has_a_description() -> None:
 
 
 def test_dataset_count_matches_populated_sheets() -> None:
-    """M.3.10l stabilized at 6 fixed datasets per L2 instance:
-    postings + meta-values (Rails), chain-instances (Chains),
-    tt-instances + tt-legs (Transfer Templates), unified-exceptions
-    (L2 Exceptions). M.3.10l replaced the 6 separate L2 exception
-    datasets with one UNION-ALL dataset (mirrors L1's Today's
-    Exceptions pattern: KPI + bar chart + unified detail table)."""
+    """M.3.10l: 6 visual datasets + M.4.4.5: 2 App Info datasets.
+    CQ.3.c added 5 shared LinkedValues picker source datasets
+    (rails / templates / account_roles / metadata_keys /
+    chain_parents) so the L2-derived dropdowns can flip off the
+    AWS 32-element StaticValues ceiling. Total: 13."""
+    from recon_gen.common.picker_datasets import (
+        DS_ACCOUNT_ROLES,
+        DS_CHAIN_PARENTS,
+        DS_METADATA_KEYS,
+        DS_RAILS,
+        DS_TEMPLATES,
+    )
     app = build_l2_flow_tracing_app(_CFG)
-    # M.4.4.5 added 2 App Info datasets to every shipped app.
-    assert len(app.datasets) == 8
+    assert len(app.datasets) == 13
     assert {d.identifier for d in app.datasets} == {
         DS_POSTINGS,
         DS_META_VALUES,
@@ -281,6 +286,11 @@ def test_dataset_count_matches_populated_sheets() -> None:
         DS_TT_INSTANCES,
         DS_TT_LEGS,
         DS_UNIFIED_L2_EXCEPTIONS,
+        DS_RAILS,
+        DS_TEMPLATES,
+        DS_ACCOUNT_ROLES,
+        DS_METADATA_KEYS,
+        DS_CHAIN_PARENTS,
         app_info_liveness_id("l2ft"),
         app_info_matviews_id("l2ft"),
     }
@@ -1518,13 +1528,16 @@ def test_meta_value_param_maps_to_postings_only() -> None:
     assert name == "pValues"
 
 
-def test_meta_key_dropdown_includes_sentinel_plus_declared_keys() -> None:
-    """Key dropdown shows the `__ALL__` sentinel first (default state
-    = no metadata filter) followed by every declared key."""
-    from recon_gen.apps.l2_flow_tracing.datasets import (
-        META_KEY_ALL_SENTINEL, declared_metadata_keys,
-    )
-    from recon_gen.common.tree import ParameterDropdown, StaticValues
+def test_meta_key_dropdown_binds_to_shared_metadata_keys_dataset() -> None:
+    """CQ.3.d: Metadata Key dropdown is now LinkedValues against the
+    shared DS_METADATA_KEYS dataset (SELECT DISTINCT metadata_key FROM
+    _v_config_rail_metadata_keys), not StaticValues with the sentinel
+    prepended. Empty-selection-means-all is preserved via the param
+    default ([META_KEY_ALL_SENTINEL]) + sentinel-OR SQL pattern on
+    the consuming datasets — the sentinel option no longer needs to
+    appear visibly in the picker."""
+    from recon_gen.common.picker_datasets import DS_METADATA_KEYS
+    from recon_gen.common.tree import LinkedValues, ParameterDropdown
     app = build_l2_flow_tracing_app(_CFG)
     rails = _sheet_by_name(app, _RAILS_NAME)
     key_ctrl = next(
@@ -1532,9 +1545,9 @@ def test_meta_key_dropdown_includes_sentinel_plus_declared_keys() -> None:
         if _control_title(c) == "Metadata Key"
     )
     assert isinstance(key_ctrl, ParameterDropdown)
-    assert isinstance(key_ctrl.selectable_values, StaticValues)
-    expected = [META_KEY_ALL_SENTINEL] + declared_metadata_keys(default_l2_instance())
-    assert key_ctrl.selectable_values.values == expected
+    assert isinstance(key_ctrl.selectable_values, LinkedValues)
+    assert key_ctrl.selectable_values.dataset.identifier == DS_METADATA_KEYS
+    assert key_ctrl.selectable_values.column_name == "metadata_key"
 
 
 def test_meta_value_control_is_bound_to_pl2ftmetavalue_param() -> None:
