@@ -106,7 +106,10 @@ from starlette.staticfiles import StaticFiles
 _DEVLOG = logging.getLogger("recon_gen.app2.devlog")
 
 
-from recon_gen.common.html._tree_fetcher import OptionsFetcher
+from recon_gen.common.html._tree_fetcher import (
+    OptionsFetcher,
+    OptionsSearchFetcher,
+)
 from recon_gen.common.html._tree_filter_specs import (
     make_filter_specs_for_sheet,
 )
@@ -192,7 +195,18 @@ class ServedDashboard:
     # routes call it per such spec before rendering a sheet. ``None``
     # (stub-fetcher tests, which don't carry LinkedValues dropdowns) →
     # those dropdowns render as empty ``<select>``s (degraded, not a crash).
+    # PRE-CQ.2 surface; kept while CQ.2.b–g land the typeahead path. The
+    # CQ.2 follow-up commit migrates consumers to
+    # ``options_search_fetcher`` + deletes this field.
     options_fetcher: OptionsFetcher | None = None
+    # CQ.2 — server-side typeahead fetcher. Drives the new JSON
+    # typeahead endpoint (Tom Select's ``load`` callback fires
+    # ``?q=<typed>`` per keystroke). Empty ``query`` returns the
+    # seed page (top-N alphabetical). Wired alongside
+    # ``options_fetcher`` during the CQ.2.b–g migration; the older
+    # field will be removed once render.py / bootstrap.js / cascade
+    # route migrate.
+    options_search_fetcher: OptionsSearchFetcher | None = None
 
 
 def _emit_xlsx_workbook(data: Any, visual_id: VisualId) -> bytes:  # typing-smell: ignore[explicit-any]: visual data is heterogeneous shape_table payload from the route layer

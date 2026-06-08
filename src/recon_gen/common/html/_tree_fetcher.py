@@ -62,7 +62,12 @@ from recon_gen.common.html._sql_executor import execute_visual_sql_async
 from recon_gen.common.html._visual_sql import wrap_for_visual
 from recon_gen.common.ids import VisualId
 from recon_gen.common.money import Cents
-from recon_gen.common.sql.dialect import Dialect, column_name
+from recon_gen.common.sql.dialect import (
+    Dialect,
+    case_insensitive_substring_match,
+    column_name,
+    escape_like_pattern,
+)
 from recon_gen.common.tree.fields import Dim, Measure
 from recon_gen.common.tree.structure import App
 # AO.R.1 — reuse the EXACT label QuickSight stamps on a table header so
@@ -790,20 +795,299 @@ def make_tree_db_fetcher(
     return fetcher
 
 
-# X.2.u.4.b — resolve a dataset-sourced dropdown's option universe.
-# ``(dataset_identifier, column) -> sorted distinct values as strings``.
-# App2's filter bar carries dataset-sourced dropdowns (a tree
-# ``ParameterDropdown`` with a ``LinkedValues`` source) as ``<select>``
-# widgets with an empty ``<option>`` list (``make_filter_specs_for_sheet``);
-# the server calls this before rendering a sheet to fill them.
+# CQ.2 — picker option universe is searched server-side, not
+# materialized client-side. Pre-CQ.2 ``make_options_fetcher`` ran a
+# ``LIMIT 2000`` DISTINCT once at sheet-render time and baked every
+# option into the ``<select>``; Tom Select filtered client-side. Past
+# the 2000th alphabetical option the tail was silently unreachable
+# (typing never re-queried the DB). Per operator direction
+# 2026-06-08 ("truncating at 2000 rows SUCKS in production. That is
+# NOT the right approach and we shouldn't even have it as a fallback.
+# We must do server side querying."), the cap is gone and typeahead
+# IS the option-fetch path. The render-time eager fetch is dissolved
+# too — sheets render with empty ``<option>`` lists (Tom Select's
+# ``preload: 'focus'`` fires one ``load('')`` on first focus to
+# populate the seed page; subsequent keystrokes fire ``load(query)``).
+
+
+# Per-picker page size for the server-side typeahead path. Dropdown-
+# fits-screen, NOT a truncation surrogate — the operator narrows
+# further by typing more characters. Search result sets that hit this
+# cap are the "first page of matches" UX, not a silent truncation.
+PICKER_PAGE_SIZE = 100
+
+
+@dataclass(frozen=True)
+class PickerMatviewHint:
+    """CQ.2.g — bypass the dataset CustomSql wrap and search the
+    underlying matview directly.
+
+    Picker source datasets (e.g. ``DS_L1_DS_ACCOUNTS``) wrap a SELECT
+    over a matview in a CustomSql block (with COALESCE / aliasing /
+    GROUP BY). For the typeahead-search path the wrap is dead weight:
+    ``SELECT DISTINCT col FROM (<wrapped sql>) WHERE col ILIKE ...``
+    runs the wrap before the ILIKE filter, defeating the planner.
+
+    Datasets whose universe IS one single matview (``DS_L1_DS_ACCOUNTS``
+    → ``<prefix>_current_daily_balances``, ``DS_L1_TX_IDS`` →
+    ``<prefix>_current_transactions``, ``DS_INV_ANETWORK_ACCOUNTS`` →
+    ``<prefix>_inv_money_trail_edges``) attach this hint. The search
+    fetcher then queries the matview directly with the same
+    ``select_expr`` the dataset's wrapped SQL projects — same option
+    set, no wrap cost.
+
+    Datasets whose universe is multiple matviews (``DS_L1_ACCOUNTS``
+    UNION ALL over daily_balances + transactions + l1_exceptions per
+    BL.3) do NOT attach a hint and stay on the wrap path; the backlog
+    item is to materialize that universe as a dedicated picker matview.
+
+    Attributes:
+        matview: the matview name (already prefixed via
+            ``cfg.prefixed`` / ``cfg.db_table_prefix``).
+        select_expr: the SAME projection expression the dataset's
+            wrapped SQL uses for the picker column. Both sides MUST
+            match or the hint path returns a different option set
+            than the wrap path. For account_display columns this is
+            typically ``account_display_expr(name_col, id_col)``.
+    """
+    matview: str
+    select_expr: str
+
+
+# Per-visual-identifier registry of matview hints. ``register_picker_matview_hint``
+# called by ``build_dataset(..., picker_matview_hint=...)``;
+# ``get_picker_matview_hint`` looked up by the search endpoint to pick
+# matview-direct vs wrap path.
+_PICKER_MATVIEW_HINT_REGISTRY: dict[str, PickerMatviewHint] = {}
+
+
+def register_picker_matview_hint(
+    visual_identifier: str, hint: PickerMatviewHint,
+) -> None:
+    """Register a matview-direct hint for a picker-source dataset.
+
+    Same overwrite-on-repeat semantics as ``register_sql`` — re-building
+    a dataset under a new dialect overwrites the prior hint with the
+    re-rendered matview name (which may itself be dialect-folded via
+    ``column_name`` for Oracle).
+    """
+    _PICKER_MATVIEW_HINT_REGISTRY[visual_identifier] = hint
+
+
+def get_picker_matview_hint(
+    visual_identifier: str,
+) -> PickerMatviewHint | None:
+    """Look up the matview hint registered under ``visual_identifier``.
+
+    Returns ``None`` when the dataset has no hint registered — the
+    search fetcher falls back to the wrap path.
+    """
+    return _PICKER_MATVIEW_HINT_REGISTRY.get(visual_identifier)
+
+
+# Max user-typed query length. Caps the LIKE planner-DOS attack
+# surface (a 1 MB POST body with a million-char ``q`` would still bind
+# but waste planner time). 100 chars is comfortable for any real
+# account-display search.
+_MAX_QUERY_LEN = 100
+
+
+def _picker_search_sql_wrap(
+    base_sql: str, column: str, *, dialect: Dialect,
+    limit: int = PICKER_PAGE_SIZE,
+) -> str:
+    """Build the WRAP-path search SQL — for pickers whose source dataset
+    is a multi-matview UNION (DS_L1_ACCOUNTS) or has no matview hint.
+
+    Wraps the dataset's CustomSql in an outer ``SELECT DISTINCT col
+    WHERE col ILIKE ...`` so the option universe matches what the
+    dataset declares. Pays the wrap cost (planner can't push the
+    predicate through the wrapped UNION); the matview-direct path
+    (see :func:`_picker_search_sql_matview_direct`) is the perf-fast
+    alternative for single-matview pickers.
+
+    ``:q`` is bound by the caller through the standard ``_sql_executor``
+    pipeline (PG → ``%(q)s``, DuckDB → ``$q``, Oracle → ``:q``). The
+    bound value MUST be pre-escaped via
+    :func:`escape_like_pattern`.
+    """
+    col_ref = column_name(column, dialect)
+    where_clause = case_insensitive_substring_match(col_ref, "q", dialect)
+    limit_clause = (
+        f"FETCH FIRST {limit} ROWS ONLY"
+        if dialect is Dialect.ORACLE
+        else f"LIMIT {limit}"
+    )
+    return (
+        f"SELECT DISTINCT {col_ref} AS opt FROM ({base_sql}) opt_src "
+        f"WHERE {col_ref} IS NOT NULL AND {where_clause} "
+        f"ORDER BY 1 {limit_clause}"
+    )
+
+
+def _picker_search_sql_matview_direct(
+    hint: PickerMatviewHint, *, dialect: Dialect,
+    limit: int = PICKER_PAGE_SIZE,
+) -> str:
+    """CQ.2.g — build the MATVIEW-DIRECT search SQL.
+
+    Queries the matview directly (no wrap). DISTINCT + ILIKE both push
+    to the storage layer; predicate runs ahead of materializing the
+    full universe. Sub-10ms at 50k accounts vs. the wrap path's
+    100-200ms.
+
+    ``hint.select_expr`` is the SAME projection the dataset's wrap
+    uses (e.g. ``COALESCE(account_name, account_id) || ' (' ||
+    account_id || ')'``). Both sides MUST match — see PickerMatviewHint
+    docstring.
+    """
+    where_clause = case_insensitive_substring_match(
+        hint.select_expr, "q", dialect,
+    )
+    limit_clause = (
+        f"FETCH FIRST {limit} ROWS ONLY"
+        if dialect is Dialect.ORACLE
+        else f"LIMIT {limit}"
+    )
+    return (
+        f"SELECT DISTINCT {hint.select_expr} AS opt "
+        f"FROM {hint.matview} "
+        f"WHERE {hint.select_expr} IS NOT NULL AND {where_clause} "
+        f"ORDER BY 1 {limit_clause}"
+    )
+
+
+def _picker_seed_sql_wrap(
+    base_sql: str, column: str, *, dialect: Dialect,
+    limit: int = PICKER_PAGE_SIZE,
+) -> str:
+    """Empty-query seed page on the WRAP path — no ILIKE clause, just
+    the top-N alphabetical universe. Drives the ``preload: 'focus'``
+    initial-load semantics.
+    """
+    col_ref = column_name(column, dialect)
+    limit_clause = (
+        f"FETCH FIRST {limit} ROWS ONLY"
+        if dialect is Dialect.ORACLE
+        else f"LIMIT {limit}"
+    )
+    return (
+        f"SELECT DISTINCT {col_ref} AS opt FROM ({base_sql}) opt_src "
+        f"WHERE {col_ref} IS NOT NULL ORDER BY 1 {limit_clause}"
+    )
+
+
+def _picker_seed_sql_matview_direct(
+    hint: PickerMatviewHint, *, dialect: Dialect,
+    limit: int = PICKER_PAGE_SIZE,
+) -> str:
+    """Empty-query seed page on the MATVIEW-DIRECT path."""
+    limit_clause = (
+        f"FETCH FIRST {limit} ROWS ONLY"
+        if dialect is Dialect.ORACLE
+        else f"LIMIT {limit}"
+    )
+    return (
+        f"SELECT DISTINCT {hint.select_expr} AS opt "
+        f"FROM {hint.matview} "
+        f"WHERE {hint.select_expr} IS NOT NULL "
+        f"ORDER BY 1 {limit_clause}"
+    )
+
+
+# CQ.2 — server-side typeahead fetcher. ``(dataset_id, column, query,
+# url_params) → tuple[str, ...]``. The route layer (server.py) calls
+# this from both the JSON typeahead endpoint (``dropdown-search/...``)
+# and the HTML cascade endpoint (``dropdown-options/...``); the cascade
+# route passes ``query=''`` to get the seed page of the narrowed
+# universe. Tom Select's ``load`` callback fires this on every typed
+# keystroke (debounced 300ms via ``loadThrottle``).
+OptionsSearchFetcher = Callable[
+    [str, str, str, Mapping[str, list[str]]],
+    Awaitable[tuple[str, ...]],
+]
+
+
+def make_options_search_fetcher(
+    cfg: Config,
+    *,
+    pool: AsyncConnectionPool,
+) -> OptionsSearchFetcher:
+    """CQ.2.b/g — server-side typeahead + seed page fetcher.
+
+    Dispatch:
+    - If the dataset has a registered ``PickerMatviewHint`` →
+      matview-direct path (single matview, sub-10ms at 50k accounts).
+    - Otherwise → wrap path (wraps the dataset CustomSql, slower but
+      universe-correct for multi-matview UNION pickers).
+
+    Empty ``query`` → seed page (top-N alphabetical, drives Tom
+    Select's ``preload: 'focus'``).
+
+    Typed ``query`` → case-insensitive substring search. The query is
+    truncated to ``_MAX_QUERY_LEN`` characters + LIKE-escaped via
+    :func:`escape_like_pattern` BEFORE binding (without escape,
+    typing ``5%`` matches every row containing ``5``).
+
+    Routes both the JSON typeahead endpoint
+    (``dropdown-search/{dataset}/{column}?q=...``) and the HTML
+    cascade endpoint (``dropdown-options/{dataset}/{column}``,
+    ``query=''``) through this single fetcher — same option semantics,
+    different response shape.
+    """
+    async def fetch(
+        dataset_identifier: str,
+        column: str,
+        query: str,
+        url_params: Mapping[str, list[str]],
+    ) -> tuple[str, ...]:
+        trimmed_query = query[:_MAX_QUERY_LEN]
+        hint = get_picker_matview_hint(dataset_identifier)
+        if trimmed_query:
+            escaped = escape_like_pattern(trimmed_query)
+            extra_binds: Mapping[str, str] = {"q": escaped}
+            options_sql = (
+                _picker_search_sql_matview_direct(hint, dialect=cfg.dialect)
+                if hint is not None
+                else _picker_search_sql_wrap(
+                    get_sql(dataset_identifier), column, dialect=cfg.dialect,
+                )
+            )
+        else:
+            extra_binds = {}
+            options_sql = (
+                _picker_seed_sql_matview_direct(hint, dialect=cfg.dialect)
+                if hint is not None
+                else _picker_seed_sql_wrap(
+                    get_sql(dataset_identifier), column, dialect=cfg.dialect,
+                )
+            )
+        rows, _columns = await execute_visual_sql_async(
+            pool, options_sql, url_params, dialect=cfg.dialect,
+            dataset_parameters=get_dataset_params(dataset_identifier),
+            extra_binds=extra_binds,
+        )
+        return tuple(str(r[0]) for r in rows if r[0] is not None)
+
+    return fetch
+
+
+# X.2.u.4.b — pre-CQ.2 OptionsFetcher signature: ``(dataset_identifier,
+# column, url_params) -> tuple[str, ...]``. Kept alongside the new
+# ``OptionsSearchFetcher`` while CQ.2.c–g migrate consumers. Once
+# render.py / bootstrap.js / cascade route flip to the search-fetcher
+# path, ``OptionsFetcher`` + ``make_options_fetcher`` + ``_OPTIONS_CAP``
+# delete in CQ.2.e.
 OptionsFetcher = Callable[
     [str, str, Mapping[str, list[str]]], Awaitable[tuple[str, ...]],
 ]
 
 
-# Hard cap on a dataset-sourced dropdown's option count — a ``<select>``
-# with more than this is a UX problem, not a feature (typeahead /
-# server-side search for very large universes is a follow-on).
+# Hard cap on the pre-CQ.2 dropdown option count. Operator-condemned
+# 2026-06-08: "truncating at 2000 rows SUCKS in production... we must
+# do server side querying." Replaced by the typeahead path; this
+# constant + its consumer ``make_options_fetcher`` delete in CQ.2.e
+# once render.py / bootstrap.js have flipped to the search fetcher.
 _OPTIONS_CAP = 2000
 
 
@@ -812,26 +1096,16 @@ def make_options_fetcher(
     *,
     pool: AsyncConnectionPool,
 ) -> OptionsFetcher:
-    """Return an async ``OptionsFetcher`` over ``pool`` (X.2.u.4.b).
+    """PRE-CQ.2 options fetcher — runs ``SELECT DISTINCT col FROM
+    (<dataset SQL>) WHERE col IS NOT NULL ORDER BY 1 LIMIT 2000``
+    once and bakes every option into the ``<select>`` at sheet-render
+    time. Tom Select then filters client-side as the user types.
 
-    Runs ``SELECT DISTINCT <col> FROM (<dataset SQL>) WHERE <col> IS NOT
-    NULL ORDER BY 1 <limit>`` via the same async executor the visual
-    fetches use, so placeholder substitution (with the source dataset's
-    QS-parameter defaults) is included — a parameterized source dataset
-    still resolves. ``<col>`` is the dialect-correct quoted ref
-    (``column_name``); ``<limit>`` is ``LIMIT n`` (PG / SQLite) or
-    ``FETCH FIRST n ROWS ONLY`` (Oracle).
-
-    BN.1 (2026-05-29) — ``url_params`` threads the form's current
-    state through to ``execute_visual_sql_async`` so cascading
-    parameter dropdowns narrow their options when a parent dropdown
-    fires. Pre-BN.1 the fetcher passed ``{}``, so the Daily Statement
-    Account picker always saw every role's accounts regardless of
-    the Role pick (the v11.24.x BO.1 e2e flake on spec_example, where
-    the cascade contract is "after Role=ExternalCounterparty, Account
-    dropdown contains only ExternalCounterparty accounts"). Reproduced
-    on local App2 / spec_example sqlite: pre-fix 30 options after
-    role pick, post-fix the role-matching subset only.
+    Past the alphabetical 2000th option the tail is silently
+    unreachable (typing never re-queries the DB). Replaced by
+    :func:`make_options_search_fetcher`; kept here for the
+    bisect-able CQ.2 checkpoint commit and the cascade route, which
+    still calls this shape until CQ.2.c–g land.
     """
     async def fetch(
         dataset_identifier: str,

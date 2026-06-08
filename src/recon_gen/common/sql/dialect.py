@@ -114,6 +114,61 @@ def column_name(name: str, dialect: Dialect) -> str:
     return name.lower()
 
 
+def escape_like_pattern(s: str) -> str:
+    """Escape LIKE meta-characters in a user-typed search string.
+
+    Order matters — escape the backslash FIRST (we declare it as the
+    escape character via ``ESCAPE '\\\\'`` in every LIKE/ILIKE clause
+    that consumes a bound user-typed value); THEN ``%`` (matches any
+    run of chars) and ``_`` (matches one char). Without this, a user
+    typing ``5%`` matches every row whose column contains ``5``
+    followed by anything, and a user typing ``_`` matches every row
+    with at least one char at that position.
+
+    Dialect-independent — PG / Oracle / DuckDB all use the same LIKE
+    meta-chars + the same ``ESCAPE '<char>'`` clause shape.
+
+    CQ.2 — paired with :func:`case_insensitive_substring_match` for
+    the App2 typeahead path. Bake into the helper layer so callers
+    can't forget the escape.
+    """
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def case_insensitive_substring_match(
+    col: str, bind_name: str, dialect: Dialect,
+) -> str:
+    """Per-dialect case-insensitive substring WHERE-clause fragment.
+
+    Returns an expression suitable for splicing into a WHERE clause:
+
+    - PG / DuckDB: ``<col> ILIKE '%' || :<bind> || '%' ESCAPE '\\\\'``
+      (DuckDB has native ILIKE; collapses with PG into one branch per
+      :feedback:`feedback_sql_dialect_convergence_preferred`.)
+    - Oracle:     ``UPPER(<col>) LIKE '%' || UPPER(:<bind>) || '%' ESCAPE '\\\\'``
+      (no ILIKE; UPPER on both sides normalizes case regardless of
+      which side carries the mixed casing.)
+
+    The bind value MUST be pre-escaped via :func:`escape_like_pattern`
+    before binding — this helper builds the SQL shape, not the value
+    transform. ``col`` should already be dialect-naturalized via
+    :func:`column_name`; callers compose:
+    ``case_insensitive_substring_match(
+        column_name("account_name", dialect), "q", dialect)``.
+
+    Substring (``'%' || :q || '%'``) not prefix — operators search
+    account-name middles more than starts. The wrapped-subquery shape
+    in the picker-search pipeline defeats btree pushdown either way so
+    the perf delta is small (per CQ.2 design doc).
+    """
+    if dialect is Dialect.ORACLE:
+        return (
+            f"UPPER({col}) LIKE '%' || UPPER(:{bind_name})"
+            f" || '%' ESCAPE '\\'"
+        )
+    return f"{col} ILIKE '%' || :{bind_name} || '%' ESCAPE '\\'"
+
+
 # -- Type names (DDL) --------------------------------------------------------
 
 

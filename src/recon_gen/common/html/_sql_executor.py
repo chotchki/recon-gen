@@ -426,6 +426,7 @@ async def execute_visual_sql_async(
     *,
     dialect: Dialect,
     dataset_parameters: Sequence[DatasetParameter] | None = None,
+    extra_binds: Mapping[str, Any] | None = None,  # typing-smell: ignore[explicit-any]: bind values are driver-coerced, same justification as binds dict elsewhere
 ) -> tuple[list[tuple[Any, ...]], list[str]]:  # typing-smell: ignore[explicit-any]: row tuples are heterogeneous; per-call shape lives in the dataset SQL contract
     """Async sibling of ``execute_visual_sql`` — the hot path for the
     App2 ``visual_data`` route.
@@ -464,6 +465,13 @@ async def execute_visual_sql_async(
     rewritten, binds = _prepare_sql_and_binds(
         sql, url_params, dataset_parameters or [], dialect,
     )
+    if extra_binds:
+        # CQ.2 — typeahead `:q` bind is supplied by the picker-search
+        # fetcher outside the URL-params shape (the query string lives
+        # on the search route's `?q=…` slot, not the form-state
+        # `param_<name>` slot). Merge on top so prepared-statement
+        # binding still kicks in.
+        binds.update(extra_binds)
     async with pool.acquire() as conn:
         if dialect is Dialect.ORACLE:
             # oracledb async: must open a cursor explicitly. The
