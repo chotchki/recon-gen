@@ -1743,7 +1743,7 @@ def _populate_daily_statement_sheet(
     """
     ds_summary = datasets[DS_DAILY_STATEMENT_SUMMARY]
     ds_txn = datasets[DS_DAILY_STATEMENT_TRANSACTIONS]
-    ds_ds_accounts = datasets[DS_L1_DS_ACCOUNTS]
+    ds_ds_control_accounts = datasets[DS_L1_DS_CONTROL_ACCOUNTS]
 
     # Row 1: 5 KPIs at width 7 each (sums to 35 of 36 grid cols; 1
     # column slack on the right).
@@ -1843,36 +1843,38 @@ def _populate_daily_statement_sheet(
         ],
     )
 
-    # BR.x / chotchki feedback 2026-06-07 — context KPIs (Accounts /
-    # Roles available) moved from sheet top to sheet bottom: they're
-    # really for our troubleshooting, not the operator's at-a-glance
-    # scan. Two purposes preserved: (1) operator-facing — surfaces how
-    # many accounts the current Role pick narrows to; (2) plumbing —
-    # registers ``l1-ds-accounts-ds`` + ``l1-ds-roles-ds`` as configured
-    # datasets on this sheet, which QS REQUIRES for the
-    # ``CascadingControlConfiguration`` re-fetch to fire on Role pick.
-    # Without a visual binding, the Account control's source dataset is
-    # "linked but inactive" — Role pick doesn't trigger a re-fetch and
-    # the Account dropdown shows the initial-load universe forever.
-    # CQ.4.b — was a two-KPI ctx_row (Accounts available / Roles
-    # available); both go away with the Role cascade drop. The next
-    # task (CQ.4.b) replaces this row with a full-width Table of the
-    # singleton/control accounts (account_parent_role IS NULL AND
-    # scope = 'internal') so an operator can name a singleton and
-    # type it into the (wide) Account picker above.
-    ctx_row = sheet.layout.row(height=_KPI_ROW_SPAN)
-    ctx_row.add_kpi(
-        width=36,
-        title="Accounts available",
+    # CQ.4.b — Control accounts (1:1 singletons) reference Table.
+    # Per audit v13.6.1: the Account picker (above) advertises every
+    # `scope = 'internal'` account — including 1:N children whose
+    # transactions live under a control parent. This reference Table
+    # lists the parent / singleton accounts (account_parent_role IS NULL
+    # AND scope = 'internal') so an operator who needs the GL-control
+    # view can read the account name here and type it back into the
+    # picker. Also keeps DS_L1_DS_CONTROL_ACCOUNTS visual-bound to the
+    # sheet (matches the BR.x configured-on-sheet requirement: a
+    # visual binding is what makes QS register the dataset as
+    # configured-on-sheet rather than "linked but inactive").
+    sheet.layout.row(height=_TABLE_ROW_SPAN).add_table(
+        width=_FULL,
+        title="Control accounts (1:1 singletons)",
         subtitle=(
-            "Distinct accounts in today's balance feed (every "
-            "internal-scope account is pickable in the Account "
-            "dropdown above). CQ.4.b will replace this row with a "
-            "Control accounts (1:1 singletons) reference Table."
+            "Parent / singleton internal accounts — `account_parent_role "
+            "IS NULL` filters to roots of the control hierarchy "
+            "(`account_scope = 'internal'` keeps external counterparties "
+            "out). Type the account name back into the Account picker "
+            "above to drill into one. On sasquatch_pr this is the 10 GL "
+            "controls (CashDueFRB, ACHOrigSettlement, etc.)."
         ),
-        values=[ds_ds_accounts["account_id"].count(
-            field_id="ds-ctx-account-count",
-        )],
+        columns=[
+            # account_display = "Name (id)" — same shape the Account
+            # picker advertises, so an operator can read here + type
+            # there. account_id deliberately not duplicated as a bare
+            # column (it's inside account_display; bare column would
+            # trip the clickable-account-id link-tint anti-drift gate
+            # without a drill target).
+            ds_ds_control_accounts["account_display"].dim(),
+            ds_ds_control_accounts["account_role"].dim(),
+        ],
     )
 
 

@@ -661,16 +661,18 @@ def test_daily_statement_sheet_present_after_m2b4() -> None:
 def test_daily_statement_has_five_kpis_and_one_table() -> None:
     """Daily Statement structure: 5 statement KPIs (Opening / Debits /
     Credits / Closing Stored / Posting Drift) + 1 detail table + 1
-    context KPI (Accounts available — binds the picker source dataset).
+    Control accounts (1:1 singletons) reference Table.
 
-    chotchki Studio drive 2026-06-07: the context KPIs moved from the
-    TOP of the sheet to the BOTTOM. The binding side-effect is
-    preserved; the at-a-glance scan space at the top goes to the 5
-    statement KPIs the operator actually wants to read.
+    chotchki Studio drive 2026-06-07: the context cell moved from
+    sheet top to sheet bottom — the at-a-glance scan space at the top
+    goes to the 5 statement KPIs the operator actually wants to read.
 
-    CQ.4.a — was 2 ctx KPIs (Accounts available / Roles available);
-    Roles dropped along with the Role cascade. CQ.4.b will replace
-    this row with the Control accounts (1:1 singletons) Table.
+    CQ.4.b — was 2 ctx KPIs (Accounts available / Roles available);
+    Roles dropped along with the Role cascade per operator lock
+    2026-06-08. Replaced with the singleton-control reference Table
+    (account_parent_role IS NULL AND scope='internal') so operators
+    can name a GL-control account and type it back into the (wide)
+    Account picker above.
 
     BO.6 — the bare "Drift" KPI got the "Posting Drift" rename to
     disambiguate from the Drift sheet's leaf/parent drift (different
@@ -686,7 +688,7 @@ def test_daily_statement_has_five_kpis_and_one_table() -> None:
         "Closing Stored",
         "Posting Drift",
         "Posted Money Records",
-        "Accounts available",
+        "Control accounts (1:1 singletons)",
     ]
 
 
