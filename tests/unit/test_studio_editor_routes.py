@@ -2368,6 +2368,69 @@ def test_bf2_subform_exposes_every_aggregating_rail_fieldspec(
 
 
 # ---------------------------------------------------------------------------
+# BF.4-followup — XOR group widget prescriptive cross-group disable +
+# remove-group button
+# ---------------------------------------------------------------------------
+
+
+def test_xor_group_row_disables_rails_claimed_by_other_groups() -> None:
+    """BF.4-followup — per validator C1d ("no rail may appear in two
+    groups"), `_render_xor_group_row` renders rails already in
+    sibling groups as `disabled` checkboxes with the
+    `(in another group)` annotation. The operator can't make the
+    mistake then 400 on save.
+    """
+    from recon_gen.common.html._studio_editor_routes import (
+        _render_xor_group_row,
+    )
+    rails = ("RailA", "RailB", "RailC", "RailD")
+    # Render group 0 with RailA + RailB selected; RailC + RailD are
+    # in another (sibling) group so they should be disabled.
+    html = _render_xor_group_row(
+        name="leg_rail_xor_groups",
+        index=0,
+        rails=rails,
+        selected=("RailA", "RailB"),
+        disabled_rails=frozenset({"RailC", "RailD"}),
+    )
+    # In-group checkboxes are active (no `disabled` on them).
+    assert 'value="RailA" checked>' in html
+    assert 'value="RailB" checked>' in html
+    # Cross-group checkboxes are disabled + carry the annotation.
+    assert 'value="RailC" disabled>' in html
+    assert 'value="RailD" disabled>' in html
+    assert html.count("(in another group)") == 2
+
+
+def test_xor_group_row_existing_groups_get_remove_button() -> None:
+    """BF.4-followup — every existing group renders a "× remove
+    group" button in its legend (the trailing "Add new XOR group"
+    slot doesn't). Inline onclick JS-unchecks every box in its
+    fieldset; the server filters empty groups on save.
+    """
+    from recon_gen.common.html._studio_editor_routes import (
+        _render_xor_group_row,
+    )
+    existing = _render_xor_group_row(
+        name="leg_rail_xor_groups",
+        index=0,
+        rails=("RailA", "RailB"),
+        selected=("RailA",),
+    )
+    assert "data-xor-remove-group" in existing
+    assert "× remove group" in existing
+    # Trailing "Add new" slot has no remove button.
+    new_slot = _render_xor_group_row(
+        name="leg_rail_xor_groups",
+        index=1,
+        rails=("RailA", "RailB"),
+        selected=(),
+    )
+    assert "data-xor-remove-group" not in new_slot
+    assert "Add new XOR group" in new_slot
+
+
+# ---------------------------------------------------------------------------
 # BF.10 — composite-scalar fields get an "e.g. <example>" chip
 # ---------------------------------------------------------------------------
 

@@ -2054,12 +2054,29 @@ def _render_multi_select_groups_field(
             hidden_inputs=hidden_markers,
         )
     # Render N existing groups + 1 always-empty trailing slot for
-    # adding a new group. Unchecking every box in a row drops that
-    # group on save (server filters empty groups).
+    # adding a new group. BF.4-followup (2026-06-07) — per validator
+    # C1d ("no rail may appear in two groups"), disable any rail
+    # that's already claimed by a sibling group; surfaces the
+    # constraint in the UI instead of letting the operator make a
+    # mistake then 400 on save. Each existing group's "× remove"
+    # button JS-unchecks every box in its fieldset; server filters
+    # empty groups on save (so unchecking IS the remove primitive).
+    all_in_groups: frozenset[str] = frozenset(
+        r for g in groups for r in g
+    )
     blocks: list[str] = []
     for i, group in enumerate(groups):
-        blocks.append(_render_xor_group_row(spec.name, i, rails, group))
-    blocks.append(_render_xor_group_row(spec.name, len(groups), rails, ()))
+        disabled_rails = all_in_groups - frozenset(group)
+        blocks.append(
+            _render_xor_group_row(
+                spec.name, i, rails, group, disabled_rails,
+            ),
+        )
+    blocks.append(
+        _render_xor_group_row(
+            spec.name, len(groups), rails, (), all_in_groups,
+        ),
+    )
     num_groups = len(groups) + 1
     body = (
         f'<div id="field-{escape(spec.name)}" '
@@ -2081,28 +2098,51 @@ def _render_xor_group_row(
     index: int,
     rails: tuple[str, ...],
     selected: tuple[str, ...],
+    disabled_rails: frozenset[str] = frozenset(),
 ) -> str:
     """One <fieldset> with all template leg_rails as checkboxes; those
     in ``selected`` start checked. Empty selected → "Add new XOR group"
-    trailing slot."""
+    trailing slot.
+
+    BF.4-followup (2026-06-07): ``disabled_rails`` lists rails already
+    claimed by sibling groups — per validator C1d ("no rail may
+    appear in two groups"), they render disabled + visually muted so
+    the operator can't make the mistake. Existing groups also get a
+    "× remove" button in their legend that JS-unchecks every box (the
+    server-side coerce filters empty groups → group drops on save).
+    """
     selected_set = frozenset(selected)
     is_new = not selected_set
-    legend = (
+    legend_text = (
         "Add new XOR group" if is_new
         else f"XOR group {index + 1}"
     )
-    item_cls = (
-        "flex items-center gap-2 font-normal text-sm cursor-pointer "
+    item_cls_base = (
+        "flex items-center gap-2 font-normal text-sm "
         "text-primary-fg"
     )
-    items = "".join(
-        f'<label class="{item_cls}">'
-        f'<input type="checkbox" name="{escape(name)}_{index}" '
-        f'value="{escape(r)}"'
-        f'{" checked" if r in selected_set else ""}>'
-        f' {escape(r)}</label>'
-        for r in rails
-    )
+    item_cls_active = f"{item_cls_base} cursor-pointer"
+    item_cls_disabled = f"{item_cls_base} opacity-50 cursor-not-allowed"
+
+    def _item(rail: str) -> str:
+        is_disabled = rail in disabled_rails
+        cls = item_cls_disabled if is_disabled else item_cls_active
+        suffix = (
+            ' <span class="text-xs italic">(in another group)</span>'
+            if is_disabled else ""
+        )
+        # `disabled` checkboxes don't submit — that's the point;
+        # the rail's value stays with its claiming group's payload.
+        return (
+            f'<label class="{cls}">'
+            f'<input type="checkbox" name="{escape(name)}_{index}" '
+            f'value="{escape(rail)}"'
+            f'{" checked" if rail in selected_set else ""}'
+            f'{" disabled" if is_disabled else ""}>'
+            f' {escape(rail)}{suffix}</label>'
+        )
+
+    items = "".join(_item(r) for r in rails)
     fieldset_base = (
         "border border-surface-border rounded-sm px-3 py-2 bg-white"
     )
@@ -2113,10 +2153,25 @@ def _render_xor_group_row(
     grid_cls = (
         "grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 mt-1"
     )
+    # Remove button — only on existing groups. Inline onclick keeps
+    # the JS dependency-free (matches the BB.2 reconciler section's
+    # minimal-JS posture). Unchecking every box drops the group on
+    # save via the server-side coerce filter.
+    remove_btn_html = "" if is_new else (
+        '<button type="button" '
+        'class="ml-2 px-1.5 py-0.5 text-xs text-danger '
+        'hover:bg-red-50 rounded-sm cursor-pointer font-normal" '
+        'data-xor-remove-group '
+        'aria-label="Remove this XOR group" '
+        'onclick="this.closest(\'fieldset\').querySelectorAll('
+        "'input[type=checkbox]:not(:disabled)'"
+        ').forEach(c=>{c.checked=false});">'
+        '× remove group</button>'
+    )
     return (
         f'<fieldset class="{fieldset_cls}" data-group-index="{index}">'
         f'<legend class="text-xs font-semibold text-secondary-fg px-1">'
-        f"{escape(legend)}</legend>"
+        f"{escape(legend_text)}{remove_btn_html}</legend>"
         f'<div class="{grid_cls}">{items}</div>'
         f'</fieldset>'
     )
