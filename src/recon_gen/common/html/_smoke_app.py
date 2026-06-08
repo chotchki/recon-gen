@@ -308,10 +308,15 @@ _SHOWCASE_TABLE_COLUMNS = ["account_id", "account_name", "balance", "status"]
 _SHOWCASE_TABLE_STATUSES = ("open", "closed", "pending", "failed")
 
 
-def _showcase_table_rows() -> list[list[str]]:
+def _showcase_table_rows() -> list[list[Any]]:
     """25 deterministic rows — enough to demo pagination (10/page) +
-    sortable headers. Persona-blind sample data."""
-    rows: list[list[str]] = []
+    sortable headers. Persona-blind sample data.
+
+    Balance ships as a float so the XLSX export's currency formatting
+    has a numeric cell to attach to (Excel formats numbers, not
+    strings); the HTML renderer prints it as-is.
+    """
+    rows: list[list[Any]] = []
     for i in range(1, 26):
         # Pseudo-random-but-deterministic balance so a sort visibly
         # reorders (not already in account_id order).
@@ -319,7 +324,7 @@ def _showcase_table_rows() -> list[list[str]]:
         rows.append([
             f"acct-{i:03d}",
             f"Account {chr(64 + (i % 26 or 26))}-{i}",
-            f"{bal:.2f}",
+            float(bal),
             _SHOWCASE_TABLE_STATUSES[i % len(_SHOWCASE_TABLE_STATUSES)],
         ])
     return rows
@@ -360,8 +365,12 @@ def _showcase_demo_table(params: dict[str, str]) -> dict[str, Any]:
     return {
         # renderTable wants column *objects* ({name, label?, format?}),
         # matching _data_shape.shape_table — the header label comes from
-        # col.name.
-        "columns": [{"name": c} for c in _SHOWCASE_TABLE_COLUMNS],
+        # col.name. Tag `balance` as currency so the XLSX export emits
+        # Excel's currency number-format on those cells.
+        "columns": [
+            {"name": c, **({"format": "currency"} if c == "balance" else {})}
+            for c in _SHOWCASE_TABLE_COLUMNS
+        ],
         "rows": page,
         "page_offset": page_offset,
         "page_size": page_size,

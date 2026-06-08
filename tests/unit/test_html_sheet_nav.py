@@ -258,6 +258,91 @@ def test_visual_data_fetch_works_for_non_default_sheet() -> None:
     assert "v-drift" in seen
 
 
+def test_visual_data_xlsx_round_trips_columns_and_rows() -> None:
+    """CH.5 (2026-06-08) — `?format=xlsx` returns a binary XLSX
+    with the same columns + rows the HTML fragment would have
+    rendered. Currency columns get Excel currency format applied.
+    """
+    app, sheets = _build_app_with_sheets([("home", "Home")])
+
+    def fetcher(visual_id: str, params: dict[str, str]) -> dict[str, object]:  # typing-smell: ignore[bare-str-id]: visual_id comes from callers as raw analyst string
+        del visual_id, params
+        return {
+            "columns": [
+                {"name": "rail_name", "label": "Rail"},
+                {"name": "amount", "label": "Amount", "format": "currency"},
+                {"name": "txn_count", "label": "Count", "format": "number"},
+            ],
+            "rows": [
+                ["ACH", 1234.56, 7],
+                ["Wire", -98.00, 3],
+            ],
+            "page_offset": 0,
+            "page_size": 2,
+            "total_rows": 2,
+            "sort_column": "",
+        }
+
+    asgi = make_app(dashboards={
+        "L1": ServedDashboard(
+            tree_app=app, sheet=sheets[0],
+            title="L1", data_fetcher=fetcher,  # pyright: ignore[reportArgumentType]: inline fetcher closure; structural DataFetcher contract holds at runtime
+        ),
+    })
+    client = TestClient(asgi)
+    response = client.get(
+        "/dashboards/L1/sheets/home/visuals/v-rails/data?format=xlsx",
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == (
+        "application/vnd.openxmlformats-officedocument."
+        "spreadsheetml.sheet"
+    )
+    assert 'attachment; filename="L1-home-v-rails.xlsx"' in (
+        response.headers["content-disposition"]
+    )
+
+    from io import BytesIO  # noqa: PLC0415
+    from openpyxl import load_workbook  # type: ignore[import-untyped]: openpyxl ships no stubs  # noqa: PLC0415
+    wb = load_workbook(BytesIO(response.content))
+    ws = wb.active
+    assert ws is not None
+    rows = list(ws.iter_rows(values_only=True))
+    assert rows[0] == ("Rail", "Amount", "Count")
+    assert rows[1] == ("ACH", 1234.56, 7)
+    assert rows[2] == ("Wire", -98.00, 3)
+    # Currency column carries the Excel currency format on data rows.
+    amount_cell = ws.cell(row=2, column=2)
+    assert "$" in amount_cell.number_format
+    assert amount_cell.alignment.horizontal == "right"  # pyright: ignore[reportUnknownMemberType]: openpyxl Alignment.horizontal stub typed as Any/Unknown
+    count_cell = ws.cell(row=2, column=3)
+    assert count_cell.number_format == "#,##0"
+
+
+def test_visual_data_xlsx_rejects_non_table_payload() -> None:
+    """CH.5 — `?format=xlsx` requires a `shape_table`-shaped data
+    dict (columns + rows). KPI / Sankey / Bar payloads return 400.
+    """
+    app, sheets = _build_app_with_sheets([("home", "Home")])
+
+    def fetcher(visual_id: str, params: dict[str, str]) -> dict[str, object]:  # typing-smell: ignore[bare-str-id]: visual_id comes from callers as raw analyst string
+        del visual_id, params
+        # KPI-shaped payload — no columns/rows.
+        return {"values": [{"value": 42, "label": "Drift"}]}
+
+    asgi = make_app(dashboards={
+        "L1": ServedDashboard(
+            tree_app=app, sheet=sheets[0],
+            title="L1", data_fetcher=fetcher,  # pyright: ignore[reportArgumentType]: inline fetcher closure; structural DataFetcher contract holds at runtime
+        ),
+    })
+    client = TestClient(asgi)
+    response = client.get(
+        "/dashboards/L1/sheets/home/visuals/v-kpi/data?format=xlsx",
+    )
+    assert response.status_code == 400
+
+
 def test_visual_data_fetch_404s_on_sheet_not_in_analysis() -> None:
     app, sheets = _build_app_with_sheets([("home", "Home")])
     asgi = make_app(dashboards={

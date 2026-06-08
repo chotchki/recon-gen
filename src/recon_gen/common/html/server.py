@@ -195,6 +195,107 @@ class ServedDashboard:
     options_fetcher: OptionsFetcher | None = None
 
 
+def _emit_xlsx_workbook(data: Any, visual_id: VisualId) -> bytes:  # typing-smell: ignore[explicit-any]: visual data is heterogeneous shape_table payload from the route layer
+    """CH.5 (2026-06-08) — render a `shape_table`-shaped data dict
+    as an XLSX file.
+
+    Reads `data["columns"]` + `data["rows"]` per the contract in
+    `_data_shape.py::shape_table` — list of `{"name", "label"?,
+    "format"?}` dicts + list-of-list rows. Header row uses `label
+    || name`; currency-format columns get Excel currency format
+    (right-aligned, $#,##0.00 negatives in red) and feed the rows'
+    raw Decimal/float values directly so Excel sums work.
+
+    Raises HTTPException(400) when `data` isn't table-shaped (e.g.
+    KPI / Bar / Sankey visuals) — XLSX export only makes sense for
+    tables.
+    """
+    if not isinstance(data, Mapping):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Visual {visual_id!r}: ?format=xlsx requires a "
+                f"table-shaped data payload, got "
+                f"{type(data).__name__}"
+            ),
+        )
+    columns = data.get("columns")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]: Mapping[str, Any] returns Any
+    rows = data.get("rows")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]: Mapping[str, Any] returns Any
+    if not isinstance(columns, list) or not isinstance(rows, list):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Visual {visual_id!r}: ?format=xlsx requires "
+                f"`columns` + `rows` keys (got "
+                f"{sorted(data.keys())!r})"  # pyright: ignore[reportUnknownArgumentType]: data is Mapping[str, Any]; .keys() typed
+            ),
+        )
+    from io import BytesIO  # noqa: PLC0415 — lazy
+    from openpyxl import Workbook  # type: ignore[import-untyped]  # noqa: PLC0415 — lazy: only on xlsx click
+    from openpyxl.styles import Alignment, Font  # type: ignore[import-untyped]  # noqa: PLC0415 — lazy
+    wb = Workbook()
+    ws = wb.active
+    if ws is None:  # pragma: no cover — defensive: openpyxl always returns one
+        raise HTTPException(
+            status_code=500,
+            detail="openpyxl Workbook() returned no active sheet",
+        )
+    ws.title = visual_id[:31]  # Excel sheet name limit
+    # Header row.
+    headers: list[str] = []
+    formats: list[str] = []
+    for col in columns:  # pyright: ignore[reportUnknownVariableType]: list element type unknown
+        if not isinstance(col, Mapping):
+            continue
+        name = str(col.get("name") or "")  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]: col is Mapping[str, Any] from shape_table
+        label = str(col.get("label") or name)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]: col is Mapping[str, Any] from shape_table
+        fmt = str(col.get("format") or "")  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]: col is Mapping[str, Any] from shape_table
+        headers.append(label)
+        formats.append(fmt)
+    ws.append(headers)
+    bold = Font(bold=True)
+    for cell in ws[1]:
+        cell.font = bold
+    # Data rows.
+    right_align = Alignment(horizontal="right")
+    for row in rows:  # pyright: ignore[reportUnknownVariableType]: list element type unknown
+        if not isinstance(row, list):
+            continue
+        out_row: list[object] = []
+        for value in row:  # pyright: ignore[reportUnknownVariableType]: heterogeneous DB row values
+            # openpyxl handles str / int / float / Decimal / bool /
+            # None natively. Anything else gets str()-coerced so we
+            # don't crash on dates/UUIDs/etc.
+            if value is None or isinstance(value, (str, int, float, bool)):
+                out_row.append(value)
+            else:
+                # Decimal in particular passes through cleanly —
+                # openpyxl writes it as a numeric cell.
+                from decimal import Decimal  # noqa: PLC0415 — lazy
+                if isinstance(value, Decimal):
+                    out_row.append(value)
+                else:
+                    out_row.append(str(value))  # pyright: ignore[reportUnknownArgumentType]: heterogeneous DB row values are Any-typed; str() coerces any non-numeric value safely
+        ws.append(out_row)
+    # Apply currency format + right-align to currency columns.
+    for col_idx, fmt in enumerate(formats, start=1):
+        if fmt == "currency":
+            for row_idx in range(2, ws.max_row + 1):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                cell.number_format = (
+                    '"$"#,##0.00_);[Red]("$"#,##0.00)'
+                )
+                cell.alignment = right_align
+        elif fmt == "number":
+            for row_idx in range(2, ws.max_row + 1):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                cell.number_format = "#,##0"
+                cell.alignment = right_align
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def _query_params_as_multidict(
     query_params: QueryParams,
 ) -> dict[str, list[str]]:
@@ -549,7 +650,8 @@ def make_app(
         # the served (default landing) sheet. The fetcher resolves
         # the visual_id; the sheet_id check protects against typos
         # in the URL pattern.
-        if str(request.path_params["sheet_id"]) not in all_sheets[dash_id]:
+        sheet_id = str(request.path_params["sheet_id"])
+        if sheet_id not in all_sheets[dash_id]:
             raise HTTPException(status_code=404)
         # X.2.o.3 — wrap path-extracted str into VisualId at the
         # route boundary so the fetcher sees the typed identifier
@@ -578,6 +680,27 @@ def make_app(
         else:
             data = await run_in_threadpool(
                 served.data_fetcher, visual_id, params,
+            )
+        # CH.5 (2026-06-08) — XLSX export branch. When `?format=xlsx`
+        # the rendered table downloads as an Excel file with the
+        # SAME columns + rows currently on screen (paginated/filtered
+        # via the same SQL params). Currency columns format as Excel
+        # currency right-aligned. Only meaningful for table-shaped
+        # data (`shape_table` output); other shapes return 400.
+        if str(request.query_params.get("format") or "") == "xlsx":
+            xlsx_bytes = _emit_xlsx_workbook(data, visual_id)
+            filename = f"{dash_id}-{sheet_id}-{visual_id}.xlsx"
+            return Response(
+                content=xlsx_bytes,
+                media_type=(
+                    "application/vnd.openxmlformats-officedocument"
+                    ".spreadsheetml.sheet"
+                ),
+                headers={
+                    "Content-Disposition": (
+                        f'attachment; filename="{filename}"'
+                    ),
+                },
             )
         return HTMLResponse(
             # AA.B.5.followon.diag — pass URL params through so the

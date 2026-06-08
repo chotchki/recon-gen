@@ -100,6 +100,10 @@ prod = [
     # Lazy-imported in `_studio_editor_routes.py`; inert when
     # studio_enabled=false. (was [serve])
     "markdown>=3.6",
+    # XLSX export for dashboard tables (CH.5 / CH.4 operator addition,
+    # 2026-06-08). Lazy-imported in `server.py::_emit_xlsx_response`;
+    # only fires when an operator clicks a table's "↓ XLSX" button.
+    "openpyxl>=3.1",
     # Audit PDF generation. reportlab is pure Python; pypdf used by
     # the end-to-end smoke test. pyHanko optional at runtime —
     # loaded only when cfg.signing is set; absent block = unsigned

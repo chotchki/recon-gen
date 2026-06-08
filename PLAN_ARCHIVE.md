@@ -4486,4 +4486,31 @@ The phase closes when `test_browser_full_create_l2_structural_equality` flips fr
 - [x] BF.10 - **Composite-scalar fields: field-level validation + inline help** (per BF.0 L2 user comment 2026-05-25). `amount_typical_range` / `firings_typical_per_period` / `max_pending_age` / `max_unbundled_age` (Duration) stay as `kind="text"` (composite scalar with optional discriminator — out of L2's textarea carve-out scope). User signed off on keeping these as text inputs IF we add field-level format validation + a more explicit inline help/example. Today the spec.helper carries a verbose example but the validator only fires on POST. Add: (a) a small example chip next to the input (e.g. `e.g. 50, 500` for amount_typical_range), (b) optional inline JS that runs the same regex the validator uses + surfaces a per-field warning before submit. Server-side validator is the truth source either way.
 - [x] BF.6 - **Verify + close.** Full unit suite (~2800 tests including new picker unit-tests on `_FIELD_SPECS_BY_KIND` shape) + 4/4 studio browser dogfood tests (including the newly-active structural-equality test) + HTTP dogfood 14 variants. Update `feedback_browser_drivers_user_facing_locators` if any new picker surface needs a locator hook. Tick BF.0-5 + BF.7-10, archive Phase BF to PLAN_ARCHIVE.md.
 
+## Phase CH - Table component (Dashboards Med #2)
+
+**Why:** v13.1.1 design review Dashboards Med #2 + the audit's #5 highest-leverage systemic fix: "Dense ledger tables are undifferentiated dumps — no zebra, no header-row background, money columns not right-aligned/tabular-nums. Standardize one table component." Currently every table emits ad-hoc styling; money columns drift visually because numbers aren't tabular-nums and aren't right-aligned. Cross-app.
+
+**Operator additions (2026-06-08):** XLSX export button per rendered table — see CH.4.
+
+**Locks — confirmed 2026-06-08:**
+- Zebra striping — agreed (use `bg-surface` / `bg-surface-alt` token).
+- Header row sticky + visually distinguished — agreed.
+- Money columns auto-right-aligned + `tabular-nums` when ColumnSpec carries `currency=True` — agreed.
+- Header-row bg uses a theme token (no hardcoded palette per `no-hardcoded-palette` lint) — agreed.
+
+**Done when:** Typed `TableSurface` extends or adapts the existing tree `Table` Visual w/ the zebra/sticky/tabular contract; both renderers (QS + App2) honor it; Daily Statement detail + Limit Breach table + ledger tables across L1 / L2FT / Investigation / Exec all read consistently. **CH.4 lands an XLSX export affordance per table.**
+
+- [x] CH.0 - **REPLAN — landed `cg-autonomous-CH` branch (commit 90a86696, 2026-06-07).** Decision: tabular-nums + right-align stay where they live (renderTable per-cell class; CF.7 owns the broader sweep over hand-written Studio tables); CH primitive owns zebra + sticky + header-bg. See `docs/audits/ch_0_replan.md`.
+- [x] CH.1 - **Tabular-nums money rule** — `currency=True` columns get `tabular-nums` + right-align at renderer time. CH-scope: covered by CH.2's `renderTable` swap; CF.7-scope: hand-written `<table>` sweep stays in CF.7.
+- [x] CH.2 - **Zebra + sticky-header + header-bg theme token** (commit 90a86696). `<thead>` swapped from `bg-surface-bg` to `bg-surface-alt` for visual separation against body zebra; `sticky top-0 z-10` keeps header in view; 6 unit tests pin the contract.
+- [x] CH.3 - **Audit-flagged dense tables migrated** — Daily Statement detail / Limit Breach / Drift detail / ledger tables all flow through `renderTable` → inherit the fix automatically. Verified by grep: only hand-written `<table>` left in `common/html/` is `_studio_routes.py::_contract_table` (Studio chrome, out of CH scope).
+- [x] CH.4 - **XLSX export button per rendered table — locked 2026-06-08.** Each table renders a small "↓ XLSX" button in its header strip. Click → downloads the table's current rows + columns as `.xlsx` with the same data shown on-screen (post-filter, post-pagination). Locks:
+  - **Server-side via openpyxl** (new soft dep in `[prod]` extra; only fires on the button click).
+  - **Just data + currency format** (columns + values; currency columns format as Excel currency right-aligned; no zebra/bold-header chrome).
+  - **Scope: every `renderTable` callsite (dashboards only)** — Studio's `_contract_table` stays out of scope per CH.0's lock.
+  - **Trigger: per-table button only** — no sheet-level "export all" (keeps scope tight).
+- [x] CH.5 - **CH.4 implementation.** `?format=xlsx` branch on the App2 visual-data endpoint (`common/html/server.py::_emit_xlsx_workbook`); openpyxl reads the same `shape_table` payload the HTML render uses; "↓ XLSX" link added to `renderTable`'s header strip (`bootstrap.js`). `openpyxl>=3.1` added to the `[prod]` extra (lazy-imported — only fires on the button click). Two unit tests in `tests/unit/test_html_sheet_nav.py` cover round-trip + currency formatting + 400-on-non-table.
+- [x] CH.5.e2e - **XLSX-vs-HTML parity gate** (operator addition, 2026-06-08). `tests/e2e/app2/test_html2_table_xlsx_export.py` drives App2Driver against the bundled smoke Showcase table, intercepts the download, parses the XLSX via openpyxl, asserts header row + per-cell values + currency-formatted money cells match `App2Driver.table_rows()` row-for-row. Smoke `balance` column flipped to `float` + tagged `format=currency` so the test exercises the formatter end-to-end.
+- [x] CH.6 - **Verify + close.** Full unit suite (3415 passed, 79 skipped) + studio browser dogfood (6/6 passed) + app2 e2e layer green. Ticks CH.0-CH.5+CH.5.e2e; sweep to PLAN_ARCHIVE.md. CH.x QS-side TableCellStyle adapter follow-on moved to BX backlog (not blocking).
+
 

@@ -308,6 +308,30 @@
       return;
     }
 
+    // CH.5 — "↓ XLSX" affordance above the table. Operator clicks
+    // → browser downloads the table's current rows + columns as
+    // `.xlsx` (post-filter, post-pagination — same SQL params the
+    // HTML render fired). Skip when no fetchUrl (renderTable runs
+    // outside an HTMX swap during JS unit tests).
+    //
+    // `var` is function-scoped, so declaring inside the `if` trips
+    // biome's `noInnerDeclarations` rule. Hoist via ternary.
+    var xlsxToolbar = fetchUrl
+      ? d3.select(target).append("div").attr("class", "flex justify-end mb-1")
+      : null;
+    if (xlsxToolbar) {
+      xlsxToolbar
+        .append("a")
+        .attr("href", buildTableUrl(fetchUrl, { format: "xlsx" }))
+        .attr(
+          "class",
+          "table-xlsx-download text-xs text-secondary-fg " +
+            "hover:text-accent hover:underline px-2 py-0.5",
+        )
+        .attr("download", "")
+        .attr("title", "Download this table as an Excel file")
+        .text("↓ XLSX");
+    }
     // Outer wrapper — overflow-x-auto so wide tables scroll
     // horizontally rather than overflowing the dashboard layout.
     var wrapper = d3

@@ -74,6 +74,7 @@ Same cold-read → triage → design → implement → re-cold-read pattern that
   - [ ] BX.backlog.sqlite - matview-perf - BX backlog — SQLite matview emulation slow on real-L2-sized data (spike)
   - [ ] BX.backlog.sqlite - resourcewarning-regression - BX backlog — Re-triage sqlite3 ResourceWarning leaks (regression after BL.0 / earlier fix)
   - [ ] BX.backlog.studio - plant-oracle-broken - BX backlog — Studio plant flow broken on Oracle (caught manually 2026-06-01)
+  - [ ] BX.backlog.qs - tablecellstyle-adapter - BX backlog (ex-CH.x) — QS-side TableCellStyle adapter for per-column right-align + tabular-nums on the deployed QuickSight bundle. ~1 day spike. Not blocking — operator runs against App2 locally. Tracked from Phase CH archive 2026-06-08.
 - [ ] BX.release - drift-detection - BX backlog — release.yml drift detection (smoke file list + extras spec)
 ## Phase BU - L2 plant generation + Training mode (provisional)
 
@@ -306,27 +307,6 @@ Three open design items from `docs/audits/v11_22_1_feedback.md` cold-read, locke
 - [ ] CF.6 - CF.6 — Empty-state prompts on picker-driven sheets (MED; v12 U10). **LOCKED:** TextBox always-visible (no auto-hide); Daily Statement gets a SMART DEFAULT — picker auto-selects the first 1:1 Account with a balance instead of just prompting (operator says this recurring pattern wins over "Select an account to begin" copy); enforce invariant via unit test, not `__post_init__`. **CF audit followup 2026-06-05 absorbs:** (a) build an empty-state typed primitive that branches on `selection_required` vs `truly_empty` (audit Dashboards Med #1 — "Pick an account to begin" vs "No data matches"); (b) the empty-state shown twice with mismatched wording (Studio Low). v0 lands the primitive + Daily Statement consumer; other consumers extend in CF.7.
 - [ ] CF.7 - CF.7 — Minor sweep + v12 re-probes. **LOCKED:** U11 drift→leg drill = ADD RUNNING BALANCE COLUMN to Daily Statement detail (operator-clearest; supersedes status-badge cheap option); Net Money tolerance = industry-standard fiat thresholds (1%/5%); App Info `latest_date_basis` renders as operator-friendly labels ("end-of-day" / "start-of-day" / "posting time"), not column-name literals. Other sub-items: ETL copy mismatch fix; matview-staleness + business-day caption; U5 plant magnitude re-probe (blocked-by CF.0 Fix B). **CF audit followup 2026-06-05 absorbs the cross-cutting "small": ** (a) value-first KPI cards — lead with one-line lede + value, not multi-line prose above (Dashboards Med #3); (b) tabular-nums everywhere on currency/numeric cells (Dashboards Low — partial; the table-component fix is CH); (c) inconsistent KPI severity glyphs within a row (Dashboards Low); (d) ragged masonry / equal-height marooning a tiny KPI beside a dense table (Dashboards Low); (e) single-category bar charts read as render errors — add a one-row caption (Dashboards Low); (f) active nav item quieter than group labels (Dashboards Low); (g) slider value shown twice — drop one (Dashboards Low); (h) transient success banners persisting + piling up (Studio Low); (i) "i" failing-card error badge looks like a status label not the hoverable affordance — change shape to make hover discoverable (Studio Low); (j) ETL workflow numbered as "5 steps" AND "3" in two components (Studio Low); (k) drop the "[Select all] / [None]" literal bracketed-text shortcuts — promote to actual buttons (Studio Med — partial; control-vocab full pass is CI).
 - [ ] CF.8 - CF.8 — Cut v13.2.0 + re-cold-read (same 6-persona shape; sweep CF to PLAN_ARCHIVE on clean diff or file the cross-cutting followups CG-CK below for any residual)
-
-## Phase CH - Table component (Dashboards Med #2)
-
-**Why:** v13.1.1 design review Dashboards Med #2 + the audit's #5 highest-leverage systemic fix: "Dense ledger tables are undifferentiated dumps — no zebra, no header-row background, money columns not right-aligned/tabular-nums. Standardize one table component." Currently every table emits ad-hoc styling; money columns drift visually because numbers aren't tabular-nums and aren't right-aligned. Cross-app.
-
-**Locks (operator to confirm):**
-- Zebra striping (alternating row backgrounds — use `bg-surface` / `bg-surface-alt` token if it exists; else add)
-  - Comment: Agreed
-- Header row sticky + visually distinguished from body (background fill + bottom border)
-  - Comment: Agreed, would also like a button (add as a new task below) to export to XSLX a given table with the same style / information as the table is showing.
-- Money columns auto-right-aligned + `tabular-nums` when ColumnSpec carries `currency=True`
-  - Comment: Agreed
-- Header-row bg uses a theme token (no hardcoded palette per the existing `no-hardcoded-palette` lint)
-  - Comment: Agreed
-
-**Done when:** Typed `TableSurface` extends or adapts the existing tree `Table` Visual w/ the zebra/sticky/tabular contract; both renderers (QS + App2) honor it; Daily Statement detail + Limit Breach table + ledger tables across L1 / L2FT / Investigation / Exec all read consistently.
-
-- [ ] CH.0 - **REPLAN.** Re-read CF.7's "tabular-nums everywhere" lock against this phase — they overlap. Decide whether the primitive carries the zebra+sticky+tabular as inseparable, or whether tabular-nums lands in CF.7 and the table primitive bundles only zebra+sticky+right-align. Recommend the latter — tabular-nums is a cheap cross-cutting CSS class, no primitive needed.
-- [ ] CH.1 - **Tabular-nums money rule (probably part of CF.7).** Every column whose ColumnSpec has `currency=True` gets `tabular-nums` + right-align at the renderer layer. Probably 1-2 lines of CSS + 1-2 lines of render-time class injection.
-- [ ] CH.2 - **Zebra + sticky-header + header-bg theme token.** Either extend the existing `Table` Visual or add a `TableSurface` typed adapter; ensure App2 + QS reach the same look.
-- [ ] CH.3 - **Migrate the audit-flagged dense tables.** Daily Statement detail + Limit Breach + Drift detail + the ledger tables across the four apps.
 
 ## Phase CI - Control vocabulary + Badge primitive (Studio Med)
 
