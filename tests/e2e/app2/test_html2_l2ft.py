@@ -171,9 +171,11 @@ def test_l2ft_rail_dropdown_selection_refetches_with_param(
     in the query string — post-AA.A.3 the wire shape is a SINGLE value
     (not the repeated-key list form the multi-valued executor consumed).
 
-    Drives the single-select via ``driver.page.select_option`` (the
-    ``param_X`` attr-name shape isn't reachable via
-    ``driver.pick_filter(label, ...)``); asserts on ``_calls_log`` (the
+    Drives the picker via Tom Select's `load(query) + setValue` API
+    (CQ.3.d converted the rail dropdown from StaticValues to
+    LinkedValues, making the `<select>` a typeahead with NO options
+    in the DOM at render time — raw `page.select_option(..., index=1)`
+    sees zero options and times out). Asserts on ``_calls_log`` (the
     fetcher's recorded URL params) for the wire-shape proof."""
     driver = l2ft_driver
     driver.open(_DASHBOARD_ID, sheet=_RAILS_NAME)
@@ -181,10 +183,26 @@ def test_l2ft_rail_dropdown_selection_refetches_with_param(
     # Wait past the initial auto-load fetch before clearing the log.
     page.wait_for_timeout(400)
     _calls_log.clear()
-    # Select the first non-default option. ``select_option`` fires a
-    # change event that the form's debounced listener broadcasts as
-    # refresh.
-    page.select_option('select[name="param_pL2ftRail"]', index=1)
+    # CQ.3.d — the picker is a Tom Select typeahead. Force the
+    # seed-page load, then setValue to the first non-default option.
+    # `dispatchEvent('change')` fires the form's debounced listener
+    # that broadcasts as refresh (same path Tom Select's own setValue
+    # uses when invoked via the picker UI).
+    page.evaluate(
+        """async () => {
+            const sel = document.querySelector('select[name="param_pL2ftRail"]');
+            if (!sel || !sel.tomselect) throw new Error('Tom Select not initialized');
+            await new Promise((resolve, reject) => {
+                sel.tomselect.load('', resolve);
+                setTimeout(() => reject('typeahead load timeout'), 5000);
+            });
+            const opts = Array.from(sel.options)
+                .map(o => o.value)
+                .filter(v => v && v !== '');
+            if (opts.length === 0) throw new Error('no rail options after load');
+            sel.tomselect.setValue(opts[0]);
+        }"""
+    )
     page.wait_for_timeout(900)  # 300ms debounce + swap settle
     saw_rail_param = [
         params for _vid, params in _calls_log
