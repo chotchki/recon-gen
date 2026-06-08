@@ -183,24 +183,24 @@ def test_l2ft_rail_dropdown_selection_refetches_with_param(
     # Wait past the initial auto-load fetch before clearing the log.
     page.wait_for_timeout(400)
     _calls_log.clear()
-    # CQ.3.d — the picker is a Tom Select typeahead. Force the
-    # seed-page load, then setValue to the first non-default option.
-    # `dispatchEvent('change')` fires the form's debounced listener
-    # that broadcasts as refresh (same path Tom Select's own setValue
-    # uses when invoked via the picker UI).
+    # CQ.3.d — the picker is a Tom Select typeahead. The test's
+    # contract is the WIRE SHAPE on refresh (single value, not list-
+    # repeated), NOT the typeahead UX loading flow. Inject a synthetic
+    # option via Tom Select's addOption + setValue API so we don't
+    # depend on the server-side fetch being timed correctly with the
+    # focus → preload chain (CR.x learnings: instance.load() doesn't
+    # accept a user-callback, the underlying <select>.options stays
+    # empty even after fetch, and the actual options live in
+    # ts.options dict which only populates if the fetch returns
+    # non-empty in time). setValue() fires onChange → 'change' event
+    # → form's debounced refresh listener, which IS what we want.
     page.evaluate(
-        """async () => {
+        """() => {
             const sel = document.querySelector('select[name="param_pL2ftRail"]');
             if (!sel || !sel.tomselect) throw new Error('Tom Select not initialized');
-            await new Promise((resolve, reject) => {
-                sel.tomselect.load('', resolve);
-                setTimeout(() => reject('typeahead load timeout'), 5000);
-            });
-            const opts = Array.from(sel.options)
-                .map(o => o.value)
-                .filter(v => v && v !== '');
-            if (opts.length === 0) throw new Error('no rail options after load');
-            sel.tomselect.setValue(opts[0]);
+            const ts = sel.tomselect;
+            ts.addOption({value: 'SyntheticRail', label: 'SyntheticRail'});
+            ts.setValue('SyntheticRail');
         }"""
     )
     page.wait_for_timeout(900)  # 300ms debounce + swap settle

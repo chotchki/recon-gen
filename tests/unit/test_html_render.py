@@ -567,3 +567,62 @@ class TestParameterDropdownCascade:
         assert "hx-get=" not in out
         assert "hx-trigger=" not in out
         assert "data-cascade-source-param" not in out
+
+    def test_typeahead_url_is_absolute_when_dashboard_sheet_threaded(self) -> None:
+        """Regression gate for the CR.x relative-URL bug surfaced by CI on
+        c65a2e2f: the typeahead picker's ``data-typeahead-url`` was emitted
+        relative (``dropdown-search/...``), and the browser resolved it
+        against the sheet page URL (no trailing slash) — stripping the
+        sheet-id segment and 404ing every typeahead fetch. Fix threads
+        ``dashboard_id`` + ``sheet_id`` through ``_render_filter_form`` →
+        ``_render_parameter_dropdown`` and emits the absolute path that
+        matches the registered route.
+
+        Same shape covers ``dropdown-options`` (cascade HX route — currently
+        unused live since CQ.4 dropped the only live cascade, but the route
+        still exists and the bug would re-surface the moment any new
+        cascade pair lands).
+        """
+        from recon_gen.common.html.render import (
+            ParameterDropdownSpec, _render_parameter_dropdown,
+        )
+        ds_id = "v-config-rails-ds"
+        spec = ParameterDropdownSpec(
+            name="pL2ftRail", label="Rail",
+            options=(),  # LinkedValues — empty at render time
+            options_dataset=ds_id,
+            options_column="name",
+        )
+        out = _render_parameter_dropdown(
+            spec, dashboard_id="l2ft", sheet_id="l2ft-sheet-rails",
+        )
+        # Absolute URL anchored at /dashboards/{did}/sheets/{sid}/ — what
+        # the route is actually registered under in server.py:982-986.
+        assert (
+            'data-typeahead-url='
+            '"/dashboards/l2ft/sheets/l2ft-sheet-rails/'
+            f'dropdown-search/{ds_id}/name"'
+        ) in out, (
+            "typeahead URL must be absolute. Relative URLs resolve "
+            "against the sheet page URL (no trailing slash) → strip "
+            "the sheet-id → 404. See c65a2e2f CI failure."
+        )
+
+    def test_typeahead_url_falls_back_to_relative_without_ids(self) -> None:
+        """Backward compat: legacy callers (unit tests, ad-hoc renders) that
+        don't thread dashboard_id/sheet_id still get the pre-fix relative
+        URL shape. Production callers MUST thread the IDs — the route
+        registration guarantees the absolute form works; the relative
+        form is for synthetic test contexts only."""
+        from recon_gen.common.html.render import (
+            ParameterDropdownSpec, _render_parameter_dropdown,
+        )
+        spec = ParameterDropdownSpec(
+            name="pTest", label="Test",
+            options=(),
+            options_dataset="test-ds",
+            options_column="name",
+        )
+        out = _render_parameter_dropdown(spec)
+        # No ids → relative form (legacy / unit-test shape).
+        assert 'data-typeahead-url="dropdown-search/test-ds/name"' in out

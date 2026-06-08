@@ -55,6 +55,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from recon_gen.common.ids import DashboardId, SheetId
+
 
 def _json_default(obj: Any) -> Any:
     """JSON encoder hook for SQL-row types ``json.dumps`` rejects.
@@ -680,7 +682,12 @@ _TOM_SELECT_ATTR = ' data-widget="tomselect"'
 _TS_SELECT_CLASS = _FORM_INPUT_CLASS + " min-w-48"
 
 
-def _render_parameter_dropdown(spec: ParameterDropdownSpec) -> str:
+def _render_parameter_dropdown(
+    spec: ParameterDropdownSpec,
+    *,
+    dashboard_id: DashboardId | str = "",
+    sheet_id: SheetId | str = "",
+) -> str:
     """Single-select ``<select name="param_<name>">`` enhanced by Tom
     Select (search + clear). The blank leading option round-trips as
     "no selection" (``?param_<name>=``). ``spec.selected`` (set by the
@@ -699,6 +706,23 @@ def _render_parameter_dropdown(spec: ParameterDropdownSpec) -> str:
     list, otherwise clears."""
     name = html.escape(spec.name)
     sel = spec.selected
+    # CR.x — both dropdown-options and dropdown-search routes are
+    # registered under /dashboards/{dashboard_id}/sheets/{sheet_id}/.
+    # The sheet page URL does NOT carry a trailing slash, so a relative
+    # URL like "dropdown-search/ds/col" resolves AGAINST the parent
+    # /dashboards/{d}/sheets/ — drops the sheet_id segment and 404s.
+    # The fix is to emit ABSOLUTE URLs so browser path-resolution is
+    # bypassed entirely. When dashboard_id/sheet_id are empty (legacy
+    # unit-test callers that don't thread the IDs), fall back to the
+    # relative form to keep the old shape working — but in production
+    # both must be set (the lint added in tests/unit/test_typing_smells
+    # walks every emitted dropdown URL).
+    if dashboard_id and sheet_id:
+        d = html.escape(dashboard_id)
+        s = html.escape(sheet_id)
+        _route_prefix = f"/dashboards/{d}/sheets/{s}/"
+    else:
+        _route_prefix = ""
     cascade_attrs = ""
     if (
         spec.cascade_source_param is not None
@@ -709,7 +733,7 @@ def _render_parameter_dropdown(spec: ParameterDropdownSpec) -> str:
         ds = html.escape(spec.options_dataset)
         col = html.escape(spec.options_column)
         cascade_attrs = (
-            f' hx-get="dropdown-options/{ds}/{col}"'
+            f' hx-get="{_route_prefix}dropdown-options/{ds}/{col}"'
             f' hx-trigger="change from:[name=\'param_{cs}\']'
             f' delay:300ms"'
             f' hx-target="this"'
@@ -732,7 +756,7 @@ def _render_parameter_dropdown(spec: ParameterDropdownSpec) -> str:
         col = html.escape(spec.options_column)
         typeahead_attrs = (
             f' data-typeahead="1"'
-            f' data-typeahead-url="dropdown-search/{ds}/{col}"'
+            f' data-typeahead-url="{_route_prefix}dropdown-search/{ds}/{col}"'
         )
     parts = [
         f'    <label class="{_FORM_LABEL_CLASS}">{html.escape(spec.label)} '
@@ -920,6 +944,8 @@ def _render_filter_form(
     filter_specs: Sequence[FilterSpec] = (),
     *,
     prefix_override: str | None = None,
+    dashboard_id: DashboardId | str = "",
+    sheet_id: SheetId | str = "",
 ) -> str:
     """Render the filter form (X.2.g.1.e: no buttons — auto-refresh).
 
@@ -960,7 +986,9 @@ def _render_filter_form(
     # single-date Daily Statement picker.
     for spec in filter_specs:
         if isinstance(spec, ParameterDropdownSpec):
-            parts.append(_render_parameter_dropdown(spec))
+            parts.append(_render_parameter_dropdown(
+                spec, dashboard_id=dashboard_id, sheet_id=sheet_id,
+            ))
         elif isinstance(spec, CategoryFilterSpec):
             parts.append(_render_category_filter(spec))
         elif isinstance(spec, NumericRangeSpec):
@@ -1547,6 +1575,8 @@ def emit_html(
         body_parts.append(_render_filter_form(
             visual_fetch_urls, filter_specs,
             prefix_override=prefix_override,
+            dashboard_id=dashboard_id,
+            sheet_id=sheet_id,
         ))
     # X.2.g.1.d — wrap visuals + text boxes in a CSS grid that
     # respects the tree's GridSlot.col_span. The QS layout is a 36-col
