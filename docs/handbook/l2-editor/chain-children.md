@@ -16,13 +16,15 @@ The Z.A chain grammar reads the selection set:
 
 - **Exactly one chip selected.** The child is *required*: every parent
   firing MUST be followed by an instance of this child within the
-  parent's `completion` window. Missing follow-ups surface as L1
-  ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants))
-  Chains-Required-Total breaches.
+  parent's `completion` window. Missing follow-ups surface on the
+  L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants))
+  Exceptions sheet under the `chain_parent_disagreement` check-type
+  branch.
 - **Two or more chips selected.** The selection is an *XOR alternation*:
   exactly one of the selected children fires per parent firing. Any
   parent firing that matches more than one alternative, or matches
-  zero, surfaces as a Chains-XOR breach.
+  zero, surfaces under the `xor_group_violation` or
+  `multi_xor_violation` check-type branches on L1 Exceptions.
 
 Empty selection is rejected — a chain with no children is meaningless.
 

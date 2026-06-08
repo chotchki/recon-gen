@@ -56,7 +56,7 @@ The Volume Anomalies sheet has no drills defined. The table rows are reference d
 
 - [Money Trail](money-trail.md) — trace a single transfer's chain from source to destination; useful after you've spotted a suspicious pair on this sheet.
 - [Account Network](account-network.md) — visualize the graph of money flows into and out of a single anchor account; complements the pair-centric view here.
-- [Recipient Fanout](recipient-fanout.md) — which recipients are fed by unusually many senders; a different angle on anomalous recipient behavior.
+- [Recipient Fanout](fanout.md) — which recipients are fed by unusually many senders; a different angle on anomalous recipient behavior.
 
 ---
 

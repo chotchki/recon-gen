@@ -13,15 +13,15 @@ Aging matview skips this rail.
 
 ## How L1 uses this
 
-The `<prefix>_unbundled_aging` matview joins this rail's firings
+The `<prefix>_stuck_unbundled` matview joins this rail's firings
 against the matching aggregating rail's firings via the
 `bundles_activity` membership. A firing is "unbundled" when no
 aggregating firing in the cadence window has claimed it; "stuck"
 when the current time minus the unbundled firing's `posted_at`
 exceeds `max_unbundled_age`.
 
-Stuck rows surface on the L1 Unbundled Aging sheet, drill into
-Today's Exceptions, and roll up into the Daily Statement KPI strip.
+Stuck rows surface on the L1 Unbundled Aging sheet and roll up
+into the L1 Exceptions sheet's `stuck_unbundled` check-type branch.
 
 ## Picking a duration
 

@@ -60,8 +60,8 @@ Related pages may expose drills INTO this sheet from other investigation sheets 
 ## Related handbook pages
 
 - [Account Network](account-network.md) — the same matview (`<prefix>_inv_money_trail_edges`), viewed account-centrically rather than chain-rooted. Use it when you've identified an anchor account and want to see all money flowing in and out.
-- [Recipient Fanout](recipient-fanout.md) — the investigation app's entry point for behavior. You may land here from a fanout row drill.
-- [Volume Anomalies](volume-anomalies.md) — the z-score companion. Anomalies can link you here to visualize the chain.
+- [Recipient Fanout](fanout.md) — the investigation app's entry point for behavior. You may land here from a fanout row drill.
+- [Volume Anomalies](anomalies.md) — the z-score companion. Anomalies can link you here to visualize the chain.
 
 ---
 

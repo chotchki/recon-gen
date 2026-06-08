@@ -16,7 +16,7 @@ The *Transactions* table reads from the `<prefix>_current_transactions` matview 
 - `rail_name` — the declared [rail](../_glossary.md#rail) family this leg belongs to (ACH, wire, check, internal transfer, etc.). The *Rail* dropdown defaults to showing all declared rails; pick one to narrow the table.
 - `transfer_id` — the logical event identifier linking all legs of one multi-leg transfer. Non-failed transfers' legs net to zero by construction.
 - `account_name` — the account being debited or credited. Internal/external scope is in the `account_scope` column (not displayed, but filters upstream).
-- `amount_money` — the absolute amount in dollars. Negative amounts still appear in dollars with a negative sign (not in two-sided debit/credit columns). The *Largest Leg* KPI picks the maximum `amount_money` in the current window.
+- `amount_money` — the signed posting amount in dollars (positive = money INTO the account, negative = OUT). Single column, not split debit/credit; the sign convention follows the source `signed_amount` field on the base transactions table. The *Largest Leg* KPI picks the maximum `amount_money` in the current window.
 - `amount_direction` — debit (+, money out of the account) or credit (−, money into the account) from that account's perspective.
 - `status` — the transaction's state: *Pending* (not yet settled), *Posted* (completed), or *Other* (any terminal state like Failed, Rejected, Cancelled). The *Status* dropdown defaults to all three; pick one to narrow.
 - `bundle_status` — derived from whether `bundle_id` is NULL. *Bundled* means the leg was collected into a batch for settlement; *Unbundled* means it's still individual. Calculated as `CASE WHEN bundle_id IS NULL THEN 'Unbundled' ELSE 'Bundled' END`.

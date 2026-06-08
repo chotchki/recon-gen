@@ -1,8 +1,10 @@
 # Limit Breach
 
-> **What this sheet teaches.** Outbound transfer limit violations — the cells
-> where an account's cumulative daily outbound flow exceeded the institution's
-> per-account, per-rail limit cap.
+> **What this sheet teaches.** Transfer limit violations in either
+> direction — the cells where an account's cumulative daily outbound
+> OR inbound flow exceeded the institution's per-account, per-rail
+> limit cap. A `direction` column on each row tells you which side
+> tripped.
 
 ## What you're looking at
 
@@ -129,7 +131,7 @@ not a "clean" signal.
   destination of the drill from this sheet.
 - [Overdraft](overdraft.md) — a related L1 SHOULD-constraint (stored balance
   sign check) orthogonal to limit caps.
-- [L1 Exceptions](l1-exceptions.md) — the unified roll-up of all 10 L1
+- [L1 Exceptions](exceptions.md) — the unified roll-up of all 10 L1
   invariant violations; limit breach is one of the check types surfaced there.
 
 ---

@@ -1,16 +1,16 @@
 # L1 Exceptions
 
-> **What this sheet teaches.** The unified snapshot of every L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants)) SHOULD-constraint violation across all ten invariant checks, scoped to the date window you're examining. This is your morning scan: one sheet that answers "what's broken across balance, chain flow, and aging" without hopping between five separate invariant sheets.
+> **What this sheet teaches.** The unified snapshot of every L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants)) SHOULD-constraint violation across all twelve invariant checks, scoped to the date window you're examining. This is your morning scan: one sheet that answers "what's broken across balance, chain flow, and aging" without hopping between five separate invariant sheets.
 
 ## What you're looking at
 
-The sheet opens with a single KPI: *Open Exceptions* — the total count of violations in the selected date window. Below sits *Exceptions by Check Type* (a horizontal bar chart with log-scale Y axis) that groups the violations into ten categories so you can see which invariant is dominating. The detail table *Exception Detail* lists every single violation, sorted by dollar magnitude (largest first), so the highest-impact items surface at the top.
+The sheet opens with a single KPI: *Open Exceptions* — the total count of violations in the selected date window. Below sits *Exceptions by Check Type* (a horizontal bar chart with log-scale Y axis) that groups the violations into twelve categories so you can see which invariant is dominating. The detail table *Exception Detail* lists every single violation, sorted by dollar magnitude (largest first), so the highest-impact items surface at the top.
 
 At the bottom is an *Institution Context* text box carrying your L2 instance's description — the unified-view landing page's anchor for "what this institution reconciles."
 
 ## How to read the numbers
 
-The detail table draws from a live UNION ALL across ten L1 invariant matviews, each contributing its own `check_type` discriminator column. The union branches across three categories:
+The detail table draws from a live UNION ALL across twelve L1 invariant matview branches, each contributing its own `check_type` discriminator column. The union branches across three categories:
 
 **Balance / numeric checks** (5 types; each row is one account-day violation):
 - `drift` — leaf account's stored balance disagrees with cumulative net of postings; drawn from `<prefix>_drift` (see [Drift](drift.md))
@@ -19,18 +19,20 @@ The detail table draws from a live UNION ALL across ten L1 invariant matviews, e
 - `limit_breach` — the net outbound or inbound flow on a rail exceeded the per-account cap for that direction; from `<prefix>_limit_breach` (see [Limit Breach](limit-breach.md))
 - `expected_eod_balance_breach` — the stored balance disagrees with a declared expected EOD target
 
-**Time-based aging checks** (2 types; each row is one leg, keyed by posting timestamp):
+**Time-based aging checks** (3 types; each row is one leg or account-day, keyed by posting / balance timestamp):
 - `stuck_pending` — a Pending leg has exceeded its rail's `max_pending_age` cap
 - `stuck_unbundled` — a Posted leg has exceeded its rail's `max_unbundled_age` cap and is not yet bundled
+- `balance_cadence_gap` — an account declared `balance_cadence='explicit_daily'` is missing a daily balance row (see [Daily Statement](daily-statement.md))
 
-**Transfer-keyed chain / cardinality checks** (3 types; each row is one transfer's violation, not an account-day):
+**Transfer-keyed chain / cardinality checks** (4 types; each row is one transfer's violation, not an account-day):
 - `chain_parent_disagreement` — a child Transfer claims multiple parent Transfer IDs; the chain's parent linkage is ambiguous
 - `xor_group_violation` — an XOR group's firing count is not exactly one (0 = missed, ≥2 = overlap)
 - `fan_in_disagreement` — a fan-in child Transfer's parent count disagrees with the expected count
+- `multi_xor_violation` — multiple XOR groups on the same chain misfire together (a higher-order overlap)
 
 Every row carries `account_id`, `account_name`, `account_role`, and `business_day`. For money-based checks (balance and aging branches), `magnitude_amount` holds the dollar variance; for transfer-keyed checks, `magnitude_count` holds the cardinality disagreement (the count of unexpected parents, or firing/child count mismatch). Exactly one magnitude column is populated per row.
 
-The *Open Exceptions* KPI counts all rows in the dataset within the selected date window and filter settings. The *Exceptions by Check Type* bar chart groups by `check_type` to show you the volume mix across the ten branches — useful for spotting which invariant is the current bottleneck.
+The *Open Exceptions* KPI counts all rows in the dataset within the selected date window and filter settings. The *Exceptions by Check Type* bar chart groups by `check_type` to show you the volume mix across the twelve branches — useful for spotting which invariant is the current bottleneck.
 
 ## Common patterns
 
@@ -40,7 +42,7 @@ The bar chart shows one or two check types (e.g., `stuck_unbundled`) as massive 
 
 ### Transfer-keyed rows alongside account-day rows
 
-The detail table mixes money rows (with `magnitude_amount` ≥ $0.01) and cardinality rows (with `magnitude_count` ≥ 1). The transfer-keyed checks (`chain_parent_disagreement`, `xor_group_violation`, `fan_in_disagreement`) have NULL on `account_id` and a count in `magnitude_count`. Account-day checks always have `account_id` and a dollar amount. This is expected — the sheet's design surfaces all ten invariants on one canvas, which means two different key-shapes. When triaging, focus on money checks first (they map to accounts / roles you know), then loop in the chain-analysis team for the transfer-keyed exceptions.
+The detail table mixes money rows (with `magnitude_amount` ≥ $0.01) and cardinality rows (with `magnitude_count` ≥ 1). The transfer-keyed checks (`chain_parent_disagreement`, `xor_group_violation`, `fan_in_disagreement`) have NULL on `account_id` and a count in `magnitude_count`. Account-day checks always have `account_id` and a dollar amount. This is expected — the sheet's design surfaces all twelve invariants on one canvas, which means two different key-shapes. When triaging, focus on money checks first (they map to accounts / roles you know), then loop in the chain-analysis team for the transfer-keyed exceptions.
 
 ### Balance spike after a known outage
 
@@ -52,11 +54,11 @@ Several rows with `check_type` in `('chain_parent_disagreement', 'xor_group_viol
 
 ## What "no rows" means
 
-A clean L1 Exceptions sheet means *all ten* SHOULD-constraints held true on every account and every transfer within your date window. This is the steady-state target, not an edge case — exceptions exist to catch violations, not to trend metrics. If you see zero rows:
+A clean L1 Exceptions sheet means *all twelve* SHOULD-constraints held true on every account and every transfer within your date window. This is the steady-state target, not an edge case — exceptions exist to catch violations, not to trend metrics. If you see zero rows:
 
 - **Confirm the matviews are fresh.** Cross to *App Info* and check the *Matview Status* table. If `l1_exceptions` shows `last_refresh_at` older than the most recent ETL load AND new postings landed since, the data may be clean *as of the last refresh* but stale. All L1 matviews refresh on every ETL load; ad-hoc dashboard hits don't trigger one.
 - **Check the date filter.** A very narrow window (e.g., a single hour on a quiet weekend) can legitimately show zero exceptions. Widen to the trailing 7 days; if you still get zero, the system is clean across that span.
-- **Don't assume all-clean.** Each of the ten invariants has a dedicated sheet; a clean Exceptions view does NOT rule out edge cases in one branch. If you're investigating a specific account or rail, cross to its invariant sheet and apply a tighter filter.
+- **Don't assume all-clean.** Each of the twelve invariants has a dedicated sheet or roll-up in this view; a clean Exceptions view does NOT rule out edge cases in one branch. If you're investigating a specific account or rail, cross to its invariant sheet and apply a tighter filter.
 
 If *App Info* shows `last_refresh_at` as NULL across the board or the `l1_exceptions` row count as zero but you posted data recently, the ETL pipeline encountered an error. That's an ops alert, not a "system is clean" signal.
 

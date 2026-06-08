@@ -49,8 +49,8 @@ If you have no specific hypothesis, start with **Recipient Fanout** at the defau
 
 ## Related handbook pages
 
-- [Recipient Fanout](recipient-fanout.md) — deep dive into the sender-concentration question.
-- [Volume Anomalies](volume-anomalies.md) — time-series spikes and baseline drift.
+- [Recipient Fanout](fanout.md) — deep dive into the sender-concentration question.
+- [Volume Anomalies](anomalies.md) — time-series spikes and baseline drift.
 - [Money Trail](money-trail.md) — following a transfer from origin to final posting.
 - [Account Network](account-network.md) — peer-graph analysis and counterparty discovery.
 

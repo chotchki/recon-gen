@@ -21,7 +21,7 @@ The L2 Coverage section displays six inventory measures, all live-populated from
 
 ### "The books don't reconcile — where do I start?"
 
-Click the *L1 Exceptions* tab — it's the roll-up of every open L1 SHOULD-constraint violation across all ten invariant checks (drift, overdraft, limit breach, pending/unbundled aging, chain cardinality, XOR groups), scoped to the most recent business day. If your problem shows up there, the detail row tells you the violation type and the account-day it touches.
+Click the *L1 Exceptions* tab — it's the roll-up of every open L1 SHOULD-constraint violation across all invariant checks (drift, ledger drift, overdraft, limit breach, expected-EOD-balance breach, balance-cadence gap, stuck pending, stuck unbundled, chain-parent disagreement, XOR-group violation, fan-in disagreement, multi-XOR violation), scoped to the date window you select via the picker at the top. If your problem shows up there, the detail row tells you the violation type and the account-day it touches.
 
 ### "Drift spiked last Tuesday. Is it recurring?"
 
@@ -45,10 +45,10 @@ The Getting Started sheet itself contains no drillable rows — it's a landing p
 
 ## Related handbook pages
 
-- [L1 Exceptions](l1-exceptions.md) — the unified roll-up of all ten invariant checks; your starting point when you know something is broken but not which invariant.
+- [L1 Exceptions](exceptions.md) — the unified roll-up of all twelve invariant checks; your starting point when you know something is broken but not which invariant.
 - [Drift](drift.md) — the detailed guide for balance-disagreement violations.
 - [Daily Statement](daily-statement.md) — per-account-day narrative; the destination of row-level drills.
-- [Info](app-info.md) — matview health canary; check here if the dashboard looks empty.
+- [Info](../_shared/app-info.md) — matview health canary; check here if the dashboard looks empty.
 
 ## Vocabulary
 

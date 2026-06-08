@@ -26,17 +26,12 @@ rail's `bundles_activity` is `[CustomerACHDebit]`; its cadence is
 
 ## How L1 uses this
 
-Three matviews consume bundles-activity:
-
-- `<prefix>_unbundled_aging` — flags any bundled-child firing older
-  than `max_unbundled_age` without a matching aggregating-rail
-  firing. Surface on the L1 Unbundled Aging sheet.
-- `<prefix>_bundle_drift` — checks the aggregating firing's
-  `signed_amount` equals the net of its bundled-children firings
-  within the cadence window.
-- `<prefix>_unbundled_orphan` — flags an aggregating firing whose
-  net doesn't match any bundleable set in the cadence window
-  (the inverse of `unbundled_aging`).
+The `<prefix>_stuck_unbundled` matview consumes bundles-activity:
+for every firing on a bundled-child rail older than `max_unbundled_age`
+and without a matching aggregating-rail firing in the cadence window,
+the matview emits a row. The L1 Unbundled Aging sheet renders that
+row set; L1 Exceptions rolls it up under the `stuck_unbundled`
+check-type branch.
 
 ## Constraints
 

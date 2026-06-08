@@ -33,9 +33,10 @@ different EOD cutoffs evaluates the anchor per-account.
 ## How L1 uses this
 
 The L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants))
-Timeliness matview emits one row per Transfer whose last leg posts
-after the `completion` window. The Pending Aging sheet surfaces those
-rows; the Daily Statement KPI strip rolls up the count.
+`<prefix>_stuck_pending` matview emits one row per Transfer leg
+still in pending status after the `completion` window has closed.
+The Pending Aging sheet surfaces those rows; L1 Exceptions rolls
+them up under the `stuck_pending` check-type branch.
 
 `business_day_end+0d` (the trivial same-day shape) is the most common
 choice for intraday rails. Multi-leg templates that span an ACH cycle

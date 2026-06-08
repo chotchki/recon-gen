@@ -49,7 +49,7 @@ This sheet defines no drill actions. Use the account name and sender details to 
 
 ## Related handbook pages
 
-- [Volume Anomalies](volume-anomalies.md) — complementary pattern: which sender → recipient pairs spiked above rolling baseline?
+- [Volume Anomalies](anomalies.md) — complementary pattern: which sender → recipient pairs spiked above rolling baseline?
 - [Money Trail](money-trail.md) — trace a single transfer's full hop-by-hop path.
 - [Account Network](account-network.md) — visualize the bidirectional graph of who pays whom, centered on a single account.
 
