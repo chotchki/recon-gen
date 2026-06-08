@@ -316,8 +316,16 @@ This is a QS-only failure. App2 (the HTMX renderer) implements
 LinkedValues options on bridge param change. So an analysis that
 needs the cascade narrowing CAN have it on App2 — declare the
 divergence in the sheet description + ship the wider universe on
-QS. Affected today: Daily Statement's Role → Account cascade
-(L1.app2 narrows; L1.qs does not).
+QS.
+
+**Currently affected: none.** Daily Statement's Role → Account
+cascade was the only live wiring this quirk affected; CQ.4.a
+(2026-06-08) dropped the cascade entirely per operator lock ("ALL
+internal accounts should be searchable"). The picker source
+(`DS_L1_DS_ACCOUNTS`) is now unparameterized — every internal-scope
+account is in the dropdown universe; no narrowing-by-pick needed.
+The QS-side quirk itself is unchanged (a future cascade attempt
+would re-encounter it); it just has no consumers today.
 
 ### Diagnostic JS — does this dataset's dropdown 400?
 

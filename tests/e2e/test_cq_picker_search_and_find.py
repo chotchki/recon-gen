@@ -167,6 +167,14 @@ class DsAccountClass:
         ))
 
 
+# account_display is computed at the dataset layer (CQ.1 NULL-safe
+# COALESCE), NOT stored as a column on the matview. The helper SQL
+# computes the same expression inline so the value the test reads
+# matches the value the LinkedValues picker advertises.
+_ACCOUNT_DISPLAY_EXPR = (
+    "(COALESCE(account_name, account_id) || ' (' || account_id || ')')"
+)
+
 _DS_ACCOUNT_CLASSES: tuple[DsAccountClass, ...] = (
     DsAccountClass(
         label="1:1 singleton (control)",
@@ -175,7 +183,8 @@ _DS_ACCOUNT_CLASSES: tuple[DsAccountClass, ...] = (
         # Table on Daily Statement). account_display matches the
         # picker's LinkedValues binding.
         value_sql_template=(
-            "SELECT MIN(account_display) FROM {prefix}_current_daily_balances "
+            f"SELECT MIN({_ACCOUNT_DISPLAY_EXPR}) "
+            "FROM {prefix}_current_daily_balances "
             "WHERE account_parent_role IS NULL AND account_scope = 'internal'"
         ),
         description="GL-control singleton (e.g. CashDueFRB)",
@@ -186,7 +195,8 @@ _DS_ACCOUNT_CLASSES: tuple[DsAccountClass, ...] = (
         # children rolled up under a control parent. account_display
         # picks one stable value via MIN for determinism.
         value_sql_template=(
-            "SELECT MIN(account_display) FROM {prefix}_current_daily_balances "
+            f"SELECT MIN({_ACCOUNT_DISPLAY_EXPR}) "
+            "FROM {prefix}_current_daily_balances "
             "WHERE account_parent_role IS NOT NULL "
             "AND account_scope = 'internal'"
         ),
@@ -252,7 +262,8 @@ _L1_PICKER_SEARCH_SPECS: tuple[PickerSearchSpec, ...] = (
         sheet_name=_DRIFT_NAME,
         picker_label="Account",
         value_sql_template=(
-            "SELECT MIN(account_display) FROM {prefix}_current_daily_balances"
+            f"SELECT MIN({_ACCOUNT_DISPLAY_EXPR}) "
+            "FROM {prefix}_current_daily_balances"
         ),
         description=(
             "DS_L1_ACCOUNTS — Drift sheet Account picker (CQ.2 "
@@ -344,20 +355,22 @@ _L2FT_PICKER_SEARCH_SPECS: tuple[PickerSearchSpec, ...] = (
     PickerSearchSpec(
         sheet_name=_TRANSFER_TEMPLATES_NAME,
         picker_label="Template",
+        # DS_TEMPLATES SQL: SELECT name FROM v_config_transfer_templates
+        # (the column is `name`, not `transfer_template_name`).
         value_sql_template=(
-            "SELECT MIN(transfer_template_name) "
-            "FROM {prefix}_v_config_transfer_templates "
-            "WHERE transfer_template_name IS NOT NULL"
+            "SELECT MIN(name) FROM {prefix}_v_config_transfer_templates "
+            "WHERE name IS NOT NULL"
         ),
         description="DS_TEMPLATES — L2FT Transfer Templates sheet Template picker (CQ.3 LinkedValues)",
     ),
     PickerSearchSpec(
         sheet_name=_CHAINS_NAME,
         picker_label="Chain",
+        # DS_CHAIN_PARENTS SQL: SELECT DISTINCT parent_name FROM
+        # v_config_chain_children (BS.5's existing view).
         value_sql_template=(
-            "SELECT MIN(parent_chain_name) "
-            "FROM {prefix}_current_transactions "
-            "WHERE parent_chain_name IS NOT NULL"
+            "SELECT MIN(parent_name) FROM {prefix}_v_config_chain_children "
+            "WHERE parent_name IS NOT NULL"
         ),
         description="DS_CHAIN_PARENTS — L2FT Chains sheet Chain picker (CQ.3 LinkedValues)",
     ),
