@@ -315,6 +315,65 @@ def to_date(timestamp_expr: str, dialect: Dialect) -> str:
     return f"TRUNC({timestamp_expr})"
 
 
+def calendar_day_spine_cte(
+    cte_name: str,
+    column_alias: str,
+    start_expr: str,
+    end_expr: str,
+    dialect: Dialect,
+) -> str:
+    """v13.6.1 fix #2 — emit a `<cte_name> AS (...)` CTE body that
+    yields one row per calendar day from ``start_expr`` through
+    ``end_expr`` (inclusive), aliased as ``column_alias``.
+
+    Replaces the pre-fix `SELECT DISTINCT business_day_start FROM
+    <feed>` spine in ``effective_balances`` (and the sibling
+    ``balance_cadence_gap`` spine) which dropped fleet-quiet days
+    from the carry-forward calendar, blanking dashboards on the
+    anchor day under a sparse-cadence feed.
+
+    ``start_expr`` / ``end_expr`` must already evaluate to dates
+    (use :func:`to_date` if you're starting from a TIMESTAMP). When
+    both bounds are NULL (empty feed) the spine emits zero rows —
+    callers must guarantee at least one balance row exists before
+    refresh, OR wrap in their own COALESCE on the bounds.
+
+    Dialect mapping:
+    - DuckDB / Postgres: ``generate_series(start, stop, INTERVAL 1 DAY)``
+      table function, inclusive on both ends.
+    - Oracle 19c: hierarchical query against ``dual`` via ``CONNECT
+      BY LEVEL <= (end - start + 1)`` — Oracle has no
+      ``generate_series``. The expression evaluates to a DATE.
+
+    The dialect_convergence rule (:doc:`memory/feedback_sql_dialect_convergence_preferred`)
+    means we'd love one form across all dialects. Oracle's lack of
+    ``generate_series`` keeps the per-dialect branch alive; the
+    CONNECT BY shape is the standard Oracle idiom and compiles
+    cleanly inside a matview SELECT.
+    """
+    if dialect in (Dialect.POSTGRES, Dialect.DUCKDB):
+        return (
+            f"{cte_name} AS (\n"
+            f"    SELECT day::date AS {column_alias}\n"
+            f"    FROM generate_series(\n"
+            f"        ({start_expr})::date,\n"
+            f"        ({end_expr})::date,\n"
+            f"        INTERVAL '1 day'\n"
+            f"    ) AS gs(day)\n"
+            f")"
+        )
+    # Oracle: CONNECT BY against dual. TRUNC normalizes any TIMESTAMP
+    # input to a DATE; (end - start + 1) yields the inclusive day
+    # count; LEVEL counts 1..N.
+    return (
+        f"{cte_name} AS (\n"
+        f"    SELECT TRUNC({start_expr}) + (LEVEL - 1) AS {column_alias}\n"
+        f"    FROM dual\n"
+        f"    CONNECT BY LEVEL <= (TRUNC({end_expr}) - TRUNC({start_expr}) + 1)\n"
+        f")"
+    )
+
+
 def date_literal(iso_value: str, dialect: Dialect) -> str:
     """A SQL date literal that compares correctly on every dialect.
 

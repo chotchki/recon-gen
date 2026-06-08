@@ -154,21 +154,36 @@ class TestGeneratorConfig:
     # outside the trainer panel.
     cutoff_date: date | None = None
 
-    def as_of_frame(self, *, window_days: int = 0) -> AsOfFrame:
+    def as_of_frame(
+        self,
+        *,
+        window_days: int = 0,
+        db_anchor: date | None = None,
+    ) -> AsOfFrame:
         """Resolve this config's scenario anchor as the owned `AsOfFrame`
         (D1; see `docs/audits/date_range_model_audit.md` §5 + BD.0 spike).
 
         This is the call-site every `as_of` reader lands on — AQ.3 funnels
         the generator's threaded ``anchor=`` and the four ad-hoc
         ``date.today()`` fallbacks through it, and AR's views take an
-        `AsOfFrame` as their anchor. Three resolution paths, one shape out:
+        `AsOfFrame` as their anchor. Resolution paths, one shape out:
 
           * ``end_date == LOCKED_ANCHOR`` → ``AsOfFrame.locked()`` (the
-            canonical demo anchor; locked-seed determinism).
+            canonical demo anchor; locked-seed determinism — NEVER
+            routed through db_anchor even if one is supplied; locked
+            binding is the gate for byte-identity tests).
           * ``end_date is not None`` → explicit-anchor frame (operator
             override or trainer-pinned).
-          * ``end_date is None`` → ``AsOfFrame.live()`` (production
-            ends-at-now).
+          * ``end_date is None`` + ``db_anchor is not None`` →
+            v13.6.1 fix #3 — pin the live frame at the DB-derived
+            latest balance day (caller queried it via
+            :func:`as_of_frame._query_max_balance_day` or
+            :meth:`AsOfFrame.live_from_db`) so the picker defaults
+            to the latest day with emitted data rather than a
+            wall-clock today that hasn't received its load yet.
+          * ``end_date is None`` + ``db_anchor is None`` →
+            ``AsOfFrame.live()`` (production ends-at-now; the pre-fix
+            shape for paths that don't have a DB connection).
 
         ``window_days`` is an ergonomic shortcut: 0 means a single-day
         frame, N>0 means an N-day window ending at the anchor. BD.1
@@ -189,6 +204,15 @@ class TestGeneratorConfig:
                 )
             )
             return AsOfFrame(as_of=self.end_date, window=window)
+        if db_anchor is not None:
+            window = (
+                DateInterval.single_day(db_anchor)
+                if window_days <= 0
+                else DateInterval.trailing_days_ending_today(
+                    db_anchor, window_days + 1,
+                )
+            )
+            return AsOfFrame(as_of=db_anchor, window=window)
         return AsOfFrame.live(window_days=window_days)
 
 

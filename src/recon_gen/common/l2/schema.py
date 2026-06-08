@@ -48,6 +48,7 @@ from recon_gen.common.sql import (
     Dialect,
     analyze_table,
     bigint_type,
+    calendar_day_spine_cte,
     cast,
     concat_agg,
     date_minus_days,
@@ -643,6 +644,27 @@ def _render_balance_cadence_gap_section(
         if case_arms else cadence_default
     )
 
+    # v13.6.1 fix #2 — same spine widening as effective_balances.
+    # The pre-fix `SELECT DISTINCT business_day_start` made
+    # fleet-quiet days disappear from the balance_cadence_gap surface;
+    # under sparse cadence + an explicit_daily account that missed a
+    # quiet day, the gap silently went undetected.
+    in_scope_spine = calendar_day_spine_cte(
+        cte_name="in_scope_days",
+        column_alias="business_day_start",
+        start_expr=(
+            f"(SELECT MIN({to_date('business_day_start', dialect)}) "
+            f"FROM {p}_current_daily_balances "
+            f"WHERE account_scope = 'internal')"
+        ),
+        end_expr=(
+            f"(SELECT MAX({to_date('business_day_start', dialect)}) "
+            f"FROM {p}_current_daily_balances "
+            f"WHERE account_scope = 'internal')"
+        ),
+        dialect=dialect,
+    )
+
     return (
         "-- ---------------------------------------------------------------------\n"
         "-- CL.6 — L1 invariant: balance_cadence_gap.\n"
@@ -662,11 +684,7 @@ def _render_balance_cadence_gap_section(
         f"    FROM {p}_current_daily_balances\n"
         "    WHERE account_scope = 'internal'\n"
         "),\n"
-        "in_scope_days AS (\n"
-        "    SELECT DISTINCT business_day_start\n"
-        f"    FROM {p}_current_daily_balances\n"
-        "    WHERE account_scope = 'internal'\n"
-        "),\n"
+        f"{in_scope_spine},\n"
         "spine AS (\n"
         "    SELECT a.account_id, a.account_name, a.account_role,\n"
         "           a.account_parent_role, d.business_day_start\n"
@@ -837,6 +855,29 @@ def _emit_l1_invariant_views(
         # ``::date`` on PG/DuckDB, TRUNC(...) on Oracle.
         to_date_bd_start=to_date("business_day_start", dialect),
         to_date_db_start=to_date("db.business_day_start", dialect),
+        # v13.6.1 fix #2 — complete-business-day spine for
+        # effective_balances. Bounds come from MIN/MAX of the emitted
+        # feed; the helper expands to a generate_series (PG/DuckDB) or
+        # CONNECT BY (Oracle) over every date in between. Without this,
+        # a fleet-wide quiet day (anchor day with no emits) silently
+        # drops from the spine → blank Daily Statement under sparse
+        # cadence. The MIN/MAX subqueries are evaluated once per
+        # matview refresh, so the cost is constant.
+        in_scope_calendar_days_cte=calendar_day_spine_cte(
+            cte_name="in_scope_calendar_days",
+            column_alias="calendar_day",
+            start_expr=(
+                f"(SELECT MIN({to_date('business_day_start', dialect)}) "
+                f"FROM {p}_current_daily_balances "
+                f"WHERE account_scope = 'internal')"
+            ),
+            end_expr=(
+                f"(SELECT MAX({to_date('business_day_start', dialect)}) "
+                f"FROM {p}_current_daily_balances "
+                f"WHERE account_scope = 'internal')"
+            ),
+            dialect=dialect,
+        ),
         # Typed NULL for the UNION ALL rail_name column. Oracle
         # rejects ``CAST(NULL AS CLOB)`` here (ORA-00932) because the
         # subsequent UNION branches' rail_name values are
@@ -2434,11 +2475,13 @@ WITH all_internal_accounts AS (
     FROM {p}_current_daily_balances
     WHERE account_scope = 'internal'
 ),
-in_scope_calendar_days AS (
-    SELECT DISTINCT {to_date_bd_start} AS calendar_day
-    FROM {p}_current_daily_balances
-    WHERE account_scope = 'internal'
-),
+-- v13.6.1 fix #2 — complete calendar-day spine (every date from
+-- MIN to MAX of business_day_start over internal accounts) replaces
+-- the pre-fix `SELECT DISTINCT business_day_start` shape. Sparse
+-- cadence + a fleet-wide quiet day no longer drops the day from the
+-- spine; downstream consumers (drift / ledger_drift / overdraft /
+-- daily_statement_summary) see a carried row on every business day.
+{in_scope_calendar_days_cte},
 spine_joined AS (
     SELECT
         a.account_id, a.account_name, a.account_role,

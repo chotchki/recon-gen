@@ -271,3 +271,145 @@ def test_window_days_field_is_gone() -> None:
     needs the int count reads `frame.window.days` (closed-closed count)."""
     frame = AsOfFrame.locked(window_days=7)
     assert not hasattr(frame, "window_days")
+
+
+# ---------------------------------------------------------------------------
+# v13.6.1 fix #3 — data-derived live anchor.
+# ---------------------------------------------------------------------------
+#
+# When the operator opens dashboards before today's ETL load lands,
+# wall-clock `date.today()` may not yet have any emitted balance row.
+# `AsOfFrame.live_from_db(conn, prefix)` queries the latest emitted
+# `business_day_start` and uses it as the anchor (falling back to
+# `date.today()` when the table is empty). Wired through
+# `cfg.as_of_frame(db_anchor=…)`.
+
+
+def test_live_from_db_uses_max_business_day_start() -> None:
+    """When the table has rows, the anchor is MAX(business_day_start)."""
+    from datetime import date as _date
+    from recon_gen.common.as_of_frame import AsOfFrame
+
+    class _StubCursor:
+        def __init__(self, row: tuple[object, ...]) -> None:
+            self._row = row
+        def execute(self, sql: str) -> None:
+            assert "MAX(business_day_start)" in sql
+            assert "demo_current_daily_balances" in sql
+            assert "account_scope = 'internal'" in sql
+        def fetchone(self) -> tuple[object, ...]:
+            return self._row
+        def close(self) -> None: pass
+
+    class _StubConn:
+        def __init__(self, row: tuple[object, ...]) -> None:
+            self._row = row
+        def cursor(self) -> _StubCursor:
+            return _StubCursor(self._row)
+
+    derived = _date(2026, 6, 5)
+    conn = _StubConn((derived,))
+    frame = AsOfFrame.live_from_db(conn, "demo", window_days=7)  # pyright: ignore[reportArgumentType]: structural duck-type matches SyncConnection Protocol
+    assert frame.as_of == derived
+    assert frame.window.days == 8  # window_days+1 closed-closed
+
+
+def test_live_from_db_falls_back_to_today_on_empty_table() -> None:
+    """When the table is empty (row is None), fall back to date.today()."""
+    from recon_gen.common.as_of_frame import AsOfFrame
+
+    class _EmptyCursor:
+        def execute(self, sql: str) -> None: pass
+        def fetchone(self) -> None: return None
+        def close(self) -> None: pass
+
+    class _EmptyConn:
+        def cursor(self) -> _EmptyCursor:
+            return _EmptyCursor()
+
+    frame = AsOfFrame.live_from_db(_EmptyConn(), "demo")  # pyright: ignore[reportArgumentType]: structural duck-type matches SyncConnection Protocol
+    assert frame == AsOfFrame.live()
+
+
+def test_live_from_db_falls_back_to_today_on_query_failure() -> None:
+    """A DB error in the resolver MUST NOT crash the dashboard
+    render path — fall back to wall-clock today."""
+    from recon_gen.common.as_of_frame import AsOfFrame
+
+    class _FailingCursor:
+        def execute(self, sql: str) -> None:
+            raise RuntimeError("simulated DB error")
+        def fetchone(self) -> None: return None
+        def close(self) -> None: pass
+
+    class _FailingConn:
+        def cursor(self) -> _FailingCursor:
+            return _FailingCursor()
+
+    frame = AsOfFrame.live_from_db(_FailingConn(), "demo")  # pyright: ignore[reportArgumentType]: structural duck-type matches SyncConnection Protocol
+    assert frame == AsOfFrame.live()
+
+
+def test_live_from_db_coerces_datetime_to_date() -> None:
+    """PG / DuckDB may return DATE as a datetime when the column is
+    TIMESTAMP-backed; coerce to date."""
+    from datetime import date as _date, datetime as _dt
+    from recon_gen.common.as_of_frame import AsOfFrame
+
+    class _DtCursor:
+        def execute(self, sql: str) -> None: pass
+        def fetchone(self) -> tuple[object, ...]:
+            return (_dt(2026, 6, 5, 14, 30, 0),)
+        def close(self) -> None: pass
+
+    class _DtConn:
+        def cursor(self) -> _DtCursor:
+            return _DtCursor()
+
+    frame = AsOfFrame.live_from_db(_DtConn(), "demo")  # pyright: ignore[reportArgumentType]: structural duck-type matches SyncConnection Protocol
+    assert frame.as_of == _date(2026, 6, 5)
+
+
+def test_config_db_anchor_kwarg_routes_through_data_derive() -> None:
+    """cfg.as_of_frame(db_anchor=...) pins the live frame at the
+    derived anchor — production call sites that have a DB conn
+    resolve the anchor + thread it through this kwarg."""
+    from datetime import date as _date
+    from recon_gen.common.as_of_frame import AsOfFrame
+    from recon_gen.common.config import TestGeneratorConfig
+
+    cfg = TestGeneratorConfig()  # end_date=None → live binding
+    derived = _date(2026, 6, 5)
+    frame = cfg.as_of_frame(window_days=7, db_anchor=derived)
+    assert frame.as_of == derived
+    assert frame.window.days == 8
+    # Same shape as if we'd built the frame explicitly.
+    expected_window = DateInterval.trailing_days_ending_today(derived, 8)
+    assert frame == AsOfFrame(as_of=derived, window=expected_window)
+
+
+def test_config_db_anchor_ignored_when_locked_binding() -> None:
+    """LOCKED_ANCHOR path NEVER routes through db_anchor — locked
+    binding is the determinism gate for byte-identity tests."""
+    from datetime import date as _date
+    from recon_gen.common.config import TestGeneratorConfig
+
+    cfg = TestGeneratorConfig(end_date=LOCKED_ANCHOR)
+    derived = _date(2026, 6, 5)
+    frame_with_anchor = cfg.as_of_frame(db_anchor=derived)
+    frame_without_anchor = cfg.as_of_frame()
+    assert frame_with_anchor == frame_without_anchor
+    assert frame_with_anchor.as_of == LOCKED_ANCHOR
+
+
+def test_config_db_anchor_ignored_when_explicit_end_date() -> None:
+    """Explicit end_date wins over db_anchor — operator override
+    is the strongest signal."""
+    from datetime import date as _date
+    from recon_gen.common.config import TestGeneratorConfig
+
+    pinned = _date(2026, 5, 22)
+    cfg = TestGeneratorConfig(end_date=pinned)
+    derived = _date(2026, 6, 5)
+    frame = cfg.as_of_frame(db_anchor=derived)
+    assert frame.as_of == pinned

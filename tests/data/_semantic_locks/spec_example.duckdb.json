@@ -78959,6 +78959,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-001",
+          "business_day": "2029-11-03",
+          "stored_balance": -7276.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-11-04",
+          "stored_balance": -7276.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
           "business_day": "2029-11-05",
           "stored_balance": -6031.66
         }
@@ -78992,6 +79008,22 @@
         "identity": {
           "account_id": "cust-001",
           "business_day": "2029-11-09",
+          "stored_balance": -16854.14
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-11-10",
+          "stored_balance": -16854.14
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-11-11",
           "stored_balance": -16854.14
         }
       },
@@ -79039,6 +79071,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-001",
+          "business_day": "2029-11-17",
+          "stored_balance": -32652.08
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-11-18",
+          "stored_balance": -32652.08
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
           "business_day": "2029-11-19",
           "stored_balance": -35335.78
         }
@@ -79072,6 +79120,22 @@
         "identity": {
           "account_id": "cust-001",
           "business_day": "2029-11-23",
+          "stored_balance": -40816.81
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-11-24",
+          "stored_balance": -40816.81
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-11-25",
           "stored_balance": -40816.81
         }
       },
@@ -79119,6 +79183,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-001",
+          "business_day": "2029-12-01",
+          "stored_balance": -109965.05
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-12-02",
+          "stored_balance": -109965.05
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
           "business_day": "2029-12-03",
           "stored_balance": -109026.89
         }
@@ -79152,6 +79232,22 @@
         "identity": {
           "account_id": "cust-001",
           "business_day": "2029-12-07",
+          "stored_balance": -110656.48
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-12-08",
+          "stored_balance": -110656.48
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-12-09",
           "stored_balance": -110656.48
         }
       },
@@ -79199,6 +79295,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-001",
+          "business_day": "2029-12-15",
+          "stored_balance": -129208.07
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-12-16",
+          "stored_balance": -129208.07
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
           "business_day": "2029-12-17",
           "stored_balance": -125676.0
         }
@@ -79239,6 +79351,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-001",
+          "business_day": "2029-12-22",
+          "stored_balance": -144582.75
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-12-23",
+          "stored_balance": -144582.75
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
           "business_day": "2029-12-24",
           "stored_balance": -148280.8
         }
@@ -79272,6 +79400,22 @@
         "identity": {
           "account_id": "cust-001",
           "business_day": "2029-12-28",
+          "stored_balance": -191090.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-12-29",
+          "stored_balance": -191090.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-001",
+          "business_day": "2029-12-30",
           "stored_balance": -191090.38
         }
       },
@@ -79335,6 +79479,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-002",
+          "business_day": "2029-11-10",
+          "stored_balance": -25930.24
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-11-11",
+          "stored_balance": -25930.24
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
           "business_day": "2029-11-12",
           "stored_balance": -26362.78
         }
@@ -79368,6 +79528,22 @@
         "identity": {
           "account_id": "cust-002",
           "business_day": "2029-11-16",
+          "stored_balance": -35109.66
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-11-17",
+          "stored_balance": -35109.66
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-11-18",
           "stored_balance": -35109.66
         }
       },
@@ -79415,6 +79591,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-002",
+          "business_day": "2029-11-24",
+          "stored_balance": -48330.51
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-11-25",
+          "stored_balance": -48330.51
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
           "business_day": "2029-11-26",
           "stored_balance": -48071.9
         }
@@ -79448,6 +79640,22 @@
         "identity": {
           "account_id": "cust-002",
           "business_day": "2029-11-30",
+          "stored_balance": -52694.32
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-12-01",
+          "stored_balance": -52694.32
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-12-02",
           "stored_balance": -52694.32
         }
       },
@@ -79495,6 +79703,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-002",
+          "business_day": "2029-12-08",
+          "stored_balance": -63942.13
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-12-09",
+          "stored_balance": -63942.13
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
           "business_day": "2029-12-10",
           "stored_balance": -65856.16
         }
@@ -79528,6 +79752,22 @@
         "identity": {
           "account_id": "cust-002",
           "business_day": "2029-12-14",
+          "stored_balance": -73014.16
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-12-15",
+          "stored_balance": -73014.16
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-12-16",
           "stored_balance": -73014.16
         }
       },
@@ -79575,6 +79815,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-002",
+          "business_day": "2029-12-22",
+          "stored_balance": -84171.86
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-12-23",
+          "stored_balance": -84171.86
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
           "business_day": "2029-12-24",
           "stored_balance": -89169.95
         }
@@ -79608,6 +79864,22 @@
         "identity": {
           "account_id": "cust-002",
           "business_day": "2029-12-28",
+          "stored_balance": -94153.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-12-29",
+          "stored_balance": -94153.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-002",
+          "business_day": "2029-12-30",
           "stored_balance": -94153.38
         }
       },
@@ -79655,6 +79927,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "north-pool",
+          "business_day": "2029-10-06",
+          "stored_balance": -95868.53
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-10-07",
+          "stored_balance": -95868.53
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
           "business_day": "2029-10-08",
           "stored_balance": -103331.95
         }
@@ -79688,6 +79976,22 @@
         "identity": {
           "account_id": "north-pool",
           "business_day": "2029-10-12",
+          "stored_balance": -409220.88
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-10-13",
+          "stored_balance": -409220.88
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-10-14",
           "stored_balance": -409220.88
         }
       },
@@ -79735,6 +80039,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "north-pool",
+          "business_day": "2029-10-20",
+          "stored_balance": -794987.09
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-10-21",
+          "stored_balance": -794987.09
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
           "business_day": "2029-10-22",
           "stored_balance": -840440.75
         }
@@ -79768,6 +80088,22 @@
         "identity": {
           "account_id": "north-pool",
           "business_day": "2029-10-26",
+          "stored_balance": -1136803.49
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-10-27",
+          "stored_balance": -1136803.49
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-10-28",
           "stored_balance": -1136803.49
         }
       },
@@ -79815,6 +80151,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "north-pool",
+          "business_day": "2029-11-03",
+          "stored_balance": -1433742.21
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-11-04",
+          "stored_balance": -1433742.21
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
           "business_day": "2029-11-05",
           "stored_balance": -1507493.49
         }
@@ -79848,6 +80200,22 @@
         "identity": {
           "account_id": "north-pool",
           "business_day": "2029-11-09",
+          "stored_balance": -1821960.56
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-11-10",
+          "stored_balance": -1821960.56
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-11-11",
           "stored_balance": -1821960.56
         }
       },
@@ -79895,6 +80263,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "north-pool",
+          "business_day": "2029-11-17",
+          "stored_balance": -2243443.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-11-18",
+          "stored_balance": -2243443.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
           "business_day": "2029-11-19",
           "stored_balance": -2453289.51
         }
@@ -79928,6 +80312,22 @@
         "identity": {
           "account_id": "north-pool",
           "business_day": "2029-11-23",
+          "stored_balance": -2656191.62
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-11-24",
+          "stored_balance": -2656191.62
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-11-25",
           "stored_balance": -2656191.62
         }
       },
@@ -79975,6 +80375,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "north-pool",
+          "business_day": "2029-12-01",
+          "stored_balance": -2899017.75
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-12-02",
+          "stored_balance": -2899017.75
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
           "business_day": "2029-12-03",
           "stored_balance": -2938050.4
         }
@@ -80008,6 +80424,22 @@
         "identity": {
           "account_id": "north-pool",
           "business_day": "2029-12-07",
+          "stored_balance": -3051577.92
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-12-08",
+          "stored_balance": -3051577.92
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-12-09",
           "stored_balance": -3051577.92
         }
       },
@@ -80055,6 +80487,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "north-pool",
+          "business_day": "2029-12-15",
+          "stored_balance": -3261020.59
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-12-16",
+          "stored_balance": -3261020.59
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
           "business_day": "2029-12-17",
           "stored_balance": -3303878.69
         }
@@ -80088,6 +80536,22 @@
         "identity": {
           "account_id": "north-pool",
           "business_day": "2029-12-21",
+          "stored_balance": -3585118.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-12-22",
+          "stored_balance": -3585118.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-12-23",
           "stored_balance": -3585118.33
         }
       },
@@ -80135,6 +80599,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "north-pool",
+          "business_day": "2029-12-29",
+          "stored_balance": -3933113.36
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
+          "business_day": "2029-12-30",
+          "stored_balance": -3933113.36
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "north-pool",
           "business_day": "2029-12-31",
           "stored_balance": -3944696.08
         }
@@ -80159,7 +80639,103 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-002",
+          "business_day": "2029-11-30",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-01",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-02",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-03",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-04",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-05",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
           "business_day": "2029-12-06",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-07",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-08",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-09",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-10",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-11",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-12",
           "stored_balance": -1500.0
         }
       },
@@ -80175,6 +80751,54 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-14",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-15",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-16",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-17",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-18",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-19",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
           "business_day": "2029-12-20",
           "stored_balance": -1500.0
         }
@@ -80183,7 +80807,95 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-21",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-22",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-23",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-24",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-25",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-26",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
           "business_day": "2029-12-27",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-28",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-29",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-30",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-31",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2030-01-01",
           "stored_balance": -1500.0
         }
       },
@@ -80208,6 +80920,22 @@
         "identity": {
           "account_id": "tmpl-cust-011",
           "business_day": "2029-11-15",
+          "stored_balance": -20299.72
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
+          "business_day": "2029-11-16",
+          "stored_balance": -20299.72
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
+          "business_day": "2029-11-17",
           "stored_balance": -20299.72
         }
       },
@@ -80255,6 +80983,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-011",
+          "business_day": "2029-11-23",
+          "stored_balance": -58688.62
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
+          "business_day": "2029-11-24",
+          "stored_balance": -58688.62
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
           "business_day": "2029-11-25",
           "stored_balance": -62021.1
         }
@@ -80288,6 +81032,22 @@
         "identity": {
           "account_id": "tmpl-cust-011",
           "business_day": "2029-11-29",
+          "stored_balance": -73639.25
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
+          "business_day": "2029-11-30",
+          "stored_balance": -73639.25
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
+          "business_day": "2029-12-01",
           "stored_balance": -73639.25
         }
       },
@@ -80335,6 +81095,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-011",
+          "business_day": "2029-12-07",
+          "stored_balance": -84560.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
+          "business_day": "2029-12-08",
+          "stored_balance": -84560.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
           "business_day": "2029-12-09",
           "stored_balance": -86662.21
         }
@@ -80368,6 +81144,22 @@
         "identity": {
           "account_id": "tmpl-cust-011",
           "business_day": "2029-12-13",
+          "stored_balance": -93777.36
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
+          "business_day": "2029-12-14",
+          "stored_balance": -93777.36
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
+          "business_day": "2029-12-15",
           "stored_balance": -93777.36
         }
       },
@@ -80415,6 +81207,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-011",
+          "business_day": "2029-12-21",
+          "stored_balance": -121579.04
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
+          "business_day": "2029-12-22",
+          "stored_balance": -121579.04
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
           "business_day": "2029-12-23",
           "stored_balance": -124243.44
         }
@@ -80455,6 +81263,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-011",
+          "business_day": "2029-12-28",
+          "stored_balance": -125503.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
+          "business_day": "2029-12-29",
+          "stored_balance": -125503.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
           "business_day": "2029-12-30",
           "stored_balance": -127009.82
         }
@@ -80464,6 +81288,14 @@
         "identity": {
           "account_id": "tmpl-cust-011",
           "business_day": "2029-12-31",
+          "stored_balance": -127475.31
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-011",
+          "business_day": "2030-01-01",
           "stored_balance": -127475.31
         }
       },
@@ -80511,6 +81343,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-012",
+          "business_day": "2029-10-26",
+          "stored_balance": -16464.31
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-10-27",
+          "stored_balance": -16464.31
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
           "business_day": "2029-10-28",
           "stored_balance": -21125.74
         }
@@ -80544,6 +81392,22 @@
         "identity": {
           "account_id": "tmpl-cust-012",
           "business_day": "2029-11-01",
+          "stored_balance": -31780.24
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-11-02",
+          "stored_balance": -31780.24
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-11-03",
           "stored_balance": -31780.24
         }
       },
@@ -80591,6 +81455,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-012",
+          "business_day": "2029-11-09",
+          "stored_balance": -49765.69
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-11-10",
+          "stored_balance": -49765.69
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
           "business_day": "2029-11-11",
           "stored_balance": -54274.81
         }
@@ -80624,6 +81504,22 @@
         "identity": {
           "account_id": "tmpl-cust-012",
           "business_day": "2029-11-15",
+          "stored_balance": -103950.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-11-16",
+          "stored_balance": -103950.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-11-17",
           "stored_balance": -103950.85
         }
       },
@@ -80671,6 +81567,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-012",
+          "business_day": "2029-11-23",
+          "stored_balance": -121463.75
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-11-24",
+          "stored_balance": -121463.75
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
           "business_day": "2029-11-25",
           "stored_balance": -125430.42
         }
@@ -80704,6 +81616,22 @@
         "identity": {
           "account_id": "tmpl-cust-012",
           "business_day": "2029-11-29",
+          "stored_balance": -143595.45
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-11-30",
+          "stored_balance": -143595.45
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-12-01",
           "stored_balance": -143595.45
         }
       },
@@ -80751,6 +81679,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-012",
+          "business_day": "2029-12-07",
+          "stored_balance": -138601.05
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-12-08",
+          "stored_balance": -138601.05
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
           "business_day": "2029-12-09",
           "stored_balance": -227864.14
         }
@@ -80784,6 +81728,22 @@
         "identity": {
           "account_id": "tmpl-cust-012",
           "business_day": "2029-12-13",
+          "stored_balance": -234430.62
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-12-14",
+          "stored_balance": -234430.62
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-12-15",
           "stored_balance": -234430.62
         }
       },
@@ -80831,6 +81791,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-012",
+          "business_day": "2029-12-21",
+          "stored_balance": -246208.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-12-22",
+          "stored_balance": -246208.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
           "business_day": "2029-12-23",
           "stored_balance": -250928.37
         }
@@ -80871,6 +81847,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-012",
+          "business_day": "2029-12-28",
+          "stored_balance": -274051.51
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2029-12-29",
+          "stored_balance": -274051.51
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-012",
           "business_day": "2029-12-30",
           "stored_balance": -279093.98
         }
@@ -80886,8 +81878,32 @@
       {
         "kind": "rule_violation",
         "identity": {
+          "account_id": "tmpl-cust-012",
+          "business_day": "2030-01-01",
+          "stored_balance": -280028.81
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
           "account_id": "tmpl-cust-013",
           "business_day": "2029-11-08",
+          "stored_balance": -11383.2
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-11-09",
+          "stored_balance": -11383.2
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-11-10",
           "stored_balance": -11383.2
         }
       },
@@ -80935,6 +81951,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-013",
+          "business_day": "2029-11-16",
+          "stored_balance": -17789.63
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-11-17",
+          "stored_balance": -17789.63
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
           "business_day": "2029-11-18",
           "stored_balance": -21997.11
         }
@@ -80968,6 +82000,22 @@
         "identity": {
           "account_id": "tmpl-cust-013",
           "business_day": "2029-11-22",
+          "stored_balance": -25028.05
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-11-23",
+          "stored_balance": -25028.05
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-11-24",
           "stored_balance": -25028.05
         }
       },
@@ -81015,6 +82063,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-013",
+          "business_day": "2029-11-30",
+          "stored_balance": -49753.28
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-12-01",
+          "stored_balance": -49753.28
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
           "business_day": "2029-12-02",
           "stored_balance": -53993.16
         }
@@ -81048,6 +82112,22 @@
         "identity": {
           "account_id": "tmpl-cust-013",
           "business_day": "2029-12-06",
+          "stored_balance": -64623.34
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-12-07",
+          "stored_balance": -64623.34
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-12-08",
           "stored_balance": -64623.34
         }
       },
@@ -81095,6 +82175,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-013",
+          "business_day": "2029-12-14",
+          "stored_balance": -67993.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-12-15",
+          "stored_balance": -67993.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
           "business_day": "2029-12-16",
           "stored_balance": -68719.16
         }
@@ -81128,6 +82224,22 @@
         "identity": {
           "account_id": "tmpl-cust-013",
           "business_day": "2029-12-20",
+          "stored_balance": -92976.14
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-12-21",
+          "stored_balance": -92976.14
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-12-22",
           "stored_balance": -92976.14
         }
       },
@@ -81175,6 +82287,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-013",
+          "business_day": "2029-12-28",
+          "stored_balance": -108454.02
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2029-12-29",
+          "stored_balance": -108454.02
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-013",
           "business_day": "2029-12-30",
           "stored_balance": -108322.89
         }
@@ -81190,8 +82318,32 @@
       {
         "kind": "rule_violation",
         "identity": {
+          "account_id": "tmpl-cust-013",
+          "business_day": "2030-01-01",
+          "stored_balance": -116471.77
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
           "account_id": "tmpl-cust-014",
           "business_day": "2029-10-11",
+          "stored_balance": -6002.65
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-10-12",
+          "stored_balance": -6002.65
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-10-13",
           "stored_balance": -6002.65
         }
       },
@@ -81239,6 +82391,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-014",
+          "business_day": "2029-10-19",
+          "stored_balance": -46006.23
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-10-20",
+          "stored_balance": -46006.23
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
           "business_day": "2029-10-21",
           "stored_balance": -43292.22
         }
@@ -81272,6 +82440,22 @@
         "identity": {
           "account_id": "tmpl-cust-014",
           "business_day": "2029-10-25",
+          "stored_balance": -128067.13
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-10-26",
+          "stored_balance": -128067.13
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-10-27",
           "stored_balance": -128067.13
         }
       },
@@ -81319,6 +82503,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-014",
+          "business_day": "2029-11-02",
+          "stored_balance": -144912.44
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-11-03",
+          "stored_balance": -144912.44
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
           "business_day": "2029-11-04",
           "stored_balance": -149171.49
         }
@@ -81352,6 +82552,22 @@
         "identity": {
           "account_id": "tmpl-cust-014",
           "business_day": "2029-11-08",
+          "stored_balance": -155211.24
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-11-09",
+          "stored_balance": -155211.24
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-11-10",
           "stored_balance": -155211.24
         }
       },
@@ -81399,6 +82615,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-014",
+          "business_day": "2029-11-16",
+          "stored_balance": -180963.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-11-17",
+          "stored_balance": -180963.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
           "business_day": "2029-11-18",
           "stored_balance": -226449.98
         }
@@ -81432,6 +82664,22 @@
         "identity": {
           "account_id": "tmpl-cust-014",
           "business_day": "2029-11-22",
+          "stored_balance": -236251.88
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-11-23",
+          "stored_balance": -236251.88
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-11-24",
           "stored_balance": -236251.88
         }
       },
@@ -81479,6 +82727,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-014",
+          "business_day": "2029-11-30",
+          "stored_balance": -234981.75
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-12-01",
+          "stored_balance": -234981.75
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
           "business_day": "2029-12-02",
           "stored_balance": -239141.98
         }
@@ -81512,6 +82776,22 @@
         "identity": {
           "account_id": "tmpl-cust-014",
           "business_day": "2029-12-06",
+          "stored_balance": -243323.26
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-12-07",
+          "stored_balance": -243323.26
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-12-08",
           "stored_balance": -243323.26
         }
       },
@@ -81559,6 +82839,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-014",
+          "business_day": "2029-12-14",
+          "stored_balance": -262431.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-12-15",
+          "stored_balance": -262431.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
           "business_day": "2029-12-16",
           "stored_balance": -265008.47
         }
@@ -81592,6 +82888,22 @@
         "identity": {
           "account_id": "tmpl-cust-014",
           "business_day": "2029-12-20",
+          "stored_balance": -273470.36
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-12-21",
+          "stored_balance": -273470.36
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-12-22",
           "stored_balance": -273470.36
         }
       },
@@ -81639,6 +82951,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-014",
+          "business_day": "2029-12-28",
+          "stored_balance": -289261.51
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2029-12-29",
+          "stored_balance": -289261.51
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
           "business_day": "2029-12-30",
           "stored_balance": -289327.09
         }
@@ -81648,6 +82976,14 @@
         "identity": {
           "account_id": "tmpl-cust-014",
           "business_day": "2029-12-31",
+          "stored_balance": -321189.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-014",
+          "business_day": "2030-01-01",
           "stored_balance": -321189.96
         }
       },
@@ -81680,6 +83016,22 @@
         "identity": {
           "account_id": "tmpl-cust-015",
           "business_day": "2029-11-01",
+          "stored_balance": -18133.39
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-11-02",
+          "stored_balance": -18133.39
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-11-03",
           "stored_balance": -18133.39
         }
       },
@@ -81727,6 +83079,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-015",
+          "business_day": "2029-11-09",
+          "stored_balance": -31510.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-11-10",
+          "stored_balance": -31510.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
           "business_day": "2029-11-11",
           "stored_balance": -35032.11
         }
@@ -81760,6 +83128,22 @@
         "identity": {
           "account_id": "tmpl-cust-015",
           "business_day": "2029-11-15",
+          "stored_balance": -47109.41
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-11-16",
+          "stored_balance": -47109.41
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-11-17",
           "stored_balance": -47109.41
         }
       },
@@ -81807,6 +83191,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-015",
+          "business_day": "2029-11-23",
+          "stored_balance": -57633.35
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-11-24",
+          "stored_balance": -57633.35
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
           "business_day": "2029-11-25",
           "stored_balance": -58174.97
         }
@@ -81840,6 +83240,22 @@
         "identity": {
           "account_id": "tmpl-cust-015",
           "business_day": "2029-11-29",
+          "stored_balance": -68854.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-11-30",
+          "stored_balance": -68854.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-12-01",
           "stored_balance": -68854.38
         }
       },
@@ -81887,6 +83303,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-015",
+          "business_day": "2029-12-07",
+          "stored_balance": -103103.35
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-12-08",
+          "stored_balance": -103103.35
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
           "business_day": "2029-12-09",
           "stored_balance": -108021.63
         }
@@ -81920,6 +83352,22 @@
         "identity": {
           "account_id": "tmpl-cust-015",
           "business_day": "2029-12-13",
+          "stored_balance": -119500.65
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-12-14",
+          "stored_balance": -119500.65
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-12-15",
           "stored_balance": -119500.65
         }
       },
@@ -81967,6 +83415,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-015",
+          "business_day": "2029-12-21",
+          "stored_balance": -145134.95
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-12-22",
+          "stored_balance": -145134.95
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
           "business_day": "2029-12-23",
           "stored_balance": -149050.67
         }
@@ -82007,6 +83471,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-015",
+          "business_day": "2029-12-28",
+          "stored_balance": -167692.17
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2029-12-29",
+          "stored_balance": -167692.17
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
           "business_day": "2029-12-30",
           "stored_balance": -172284.19
         }
@@ -82016,6 +83496,14 @@
         "identity": {
           "account_id": "tmpl-cust-015",
           "business_day": "2029-12-31",
+          "stored_balance": -174428.7
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-015",
+          "business_day": "2030-01-01",
           "stored_balance": -174428.7
         }
       },
@@ -82063,6 +83551,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-016",
+          "business_day": "2029-11-09",
+          "stored_balance": -6478.2
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2029-11-10",
+          "stored_balance": -6478.2
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
           "business_day": "2029-11-11",
           "stored_balance": -5359.72
         }
@@ -82096,6 +83600,22 @@
         "identity": {
           "account_id": "tmpl-cust-016",
           "business_day": "2029-11-15",
+          "stored_balance": -20551.92
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2029-11-16",
+          "stored_balance": -20551.92
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2029-11-17",
           "stored_balance": -20551.92
         }
       },
@@ -82143,6 +83663,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-016",
+          "business_day": "2029-11-23",
+          "stored_balance": -31606.86
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2029-11-24",
+          "stored_balance": -31606.86
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
           "business_day": "2029-11-25",
           "stored_balance": -35535.87
         }
@@ -82176,6 +83712,22 @@
         "identity": {
           "account_id": "tmpl-cust-016",
           "business_day": "2029-11-29",
+          "stored_balance": -50980.08
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2029-11-30",
+          "stored_balance": -50980.08
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2029-12-01",
           "stored_balance": -50980.08
         }
       },
@@ -82223,6 +83775,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-016",
+          "business_day": "2029-12-07",
+          "stored_balance": -52594.3
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2029-12-08",
+          "stored_balance": -52594.3
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
           "business_day": "2029-12-09",
           "stored_balance": -56154.98
         }
@@ -82256,6 +83824,22 @@
         "identity": {
           "account_id": "tmpl-cust-016",
           "business_day": "2029-12-13",
+          "stored_balance": -54347.7
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2029-12-14",
+          "stored_balance": -54347.7
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2029-12-15",
           "stored_balance": -54347.7
         }
       },
@@ -82303,6 +83887,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-016",
+          "business_day": "2029-12-21",
+          "stored_balance": -72021.46
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2029-12-22",
+          "stored_balance": -72021.46
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
           "business_day": "2029-12-23",
           "stored_balance": -76131.87
         }
@@ -82343,6 +83943,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-016",
+          "business_day": "2029-12-28",
+          "stored_balance": -86891.46
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2029-12-29",
+          "stored_balance": -86891.46
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
           "business_day": "2029-12-30",
           "stored_balance": -107128.16
         }
@@ -82352,6 +83968,14 @@
         "identity": {
           "account_id": "tmpl-cust-016",
           "business_day": "2029-12-31",
+          "stored_balance": -107300.25
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-016",
+          "business_day": "2030-01-01",
           "stored_balance": -107300.25
         }
       },
@@ -82368,6 +83992,22 @@
         "identity": {
           "account_id": "tmpl-cust-017",
           "business_day": "2029-11-08",
+          "stored_balance": -7863.11
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-11-09",
+          "stored_balance": -7863.11
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-11-10",
           "stored_balance": -7863.11
         }
       },
@@ -82415,6 +84055,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-017",
+          "business_day": "2029-11-16",
+          "stored_balance": -14130.45
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-11-17",
+          "stored_balance": -14130.45
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
           "business_day": "2029-11-18",
           "stored_balance": -13271.27
         }
@@ -82448,6 +84104,22 @@
         "identity": {
           "account_id": "tmpl-cust-017",
           "business_day": "2029-11-22",
+          "stored_balance": -20720.46
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-11-23",
+          "stored_balance": -20720.46
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-11-24",
           "stored_balance": -20720.46
         }
       },
@@ -82495,6 +84167,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-017",
+          "business_day": "2029-11-30",
+          "stored_balance": -32592.62
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-12-01",
+          "stored_balance": -32592.62
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
           "business_day": "2029-12-02",
           "stored_balance": -37580.51
         }
@@ -82528,6 +84216,22 @@
         "identity": {
           "account_id": "tmpl-cust-017",
           "business_day": "2029-12-06",
+          "stored_balance": -50782.79
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-12-07",
+          "stored_balance": -50782.79
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-12-08",
           "stored_balance": -50782.79
         }
       },
@@ -82575,6 +84279,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-017",
+          "business_day": "2029-12-14",
+          "stored_balance": -61194.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-12-15",
+          "stored_balance": -61194.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
           "business_day": "2029-12-16",
           "stored_balance": -62490.34
         }
@@ -82608,6 +84328,22 @@
         "identity": {
           "account_id": "tmpl-cust-017",
           "business_day": "2029-12-20",
+          "stored_balance": -77880.16
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-12-21",
+          "stored_balance": -77880.16
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-12-22",
           "stored_balance": -77880.16
         }
       },
@@ -82655,6 +84391,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-017",
+          "business_day": "2029-12-28",
+          "stored_balance": -86016.23
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2029-12-29",
+          "stored_balance": -86016.23
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-017",
           "business_day": "2029-12-30",
           "stored_balance": -90799.53
         }
@@ -82670,8 +84422,32 @@
       {
         "kind": "rule_violation",
         "identity": {
+          "account_id": "tmpl-cust-017",
+          "business_day": "2030-01-01",
+          "stored_balance": -91111.94
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
           "account_id": "tmpl-cust-018",
           "business_day": "2029-10-25",
+          "stored_balance": -5956.5
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-10-26",
+          "stored_balance": -5956.5
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-10-27",
           "stored_balance": -5956.5
         }
       },
@@ -82719,6 +84495,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-018",
+          "business_day": "2029-11-02",
+          "stored_balance": -24981.31
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-11-03",
+          "stored_balance": -24981.31
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
           "business_day": "2029-11-04",
           "stored_balance": -24918.95
         }
@@ -82752,6 +84544,22 @@
         "identity": {
           "account_id": "tmpl-cust-018",
           "business_day": "2029-11-08",
+          "stored_balance": -52492.09
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-11-09",
+          "stored_balance": -52492.09
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-11-10",
           "stored_balance": -52492.09
         }
       },
@@ -82799,6 +84607,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-018",
+          "business_day": "2029-11-16",
+          "stored_balance": -60526.65
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-11-17",
+          "stored_balance": -60526.65
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
           "business_day": "2029-11-18",
           "stored_balance": -59116.36
         }
@@ -82832,6 +84656,22 @@
         "identity": {
           "account_id": "tmpl-cust-018",
           "business_day": "2029-11-22",
+          "stored_balance": -69910.65
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-11-23",
+          "stored_balance": -69910.65
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-11-24",
           "stored_balance": -69910.65
         }
       },
@@ -82879,6 +84719,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-018",
+          "business_day": "2029-11-30",
+          "stored_balance": -88888.82
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-12-01",
+          "stored_balance": -88888.82
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
           "business_day": "2029-12-02",
           "stored_balance": -91743.9
         }
@@ -82912,6 +84768,22 @@
         "identity": {
           "account_id": "tmpl-cust-018",
           "business_day": "2029-12-06",
+          "stored_balance": -105973.23
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-12-07",
+          "stored_balance": -105973.23
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-12-08",
           "stored_balance": -105973.23
         }
       },
@@ -82959,6 +84831,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-018",
+          "business_day": "2029-12-14",
+          "stored_balance": -120740.5
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-12-15",
+          "stored_balance": -120740.5
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
           "business_day": "2029-12-16",
           "stored_balance": -114719.91
         }
@@ -82992,6 +84880,22 @@
         "identity": {
           "account_id": "tmpl-cust-018",
           "business_day": "2029-12-20",
+          "stored_balance": -119986.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-12-21",
+          "stored_balance": -119986.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-12-22",
           "stored_balance": -119986.96
         }
       },
@@ -83039,6 +84943,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-018",
+          "business_day": "2029-12-28",
+          "stored_balance": -137202.81
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2029-12-29",
+          "stored_balance": -137202.81
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
           "business_day": "2029-12-30",
           "stored_balance": -138343.39
         }
@@ -83048,6 +84968,14 @@
         "identity": {
           "account_id": "tmpl-cust-018",
           "business_day": "2029-12-31",
+          "stored_balance": -138943.58
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-018",
+          "business_day": "2030-01-01",
           "stored_balance": -138943.58
         }
       },
@@ -83080,6 +85008,22 @@
         "identity": {
           "account_id": "tmpl-cust-019",
           "business_day": "2029-11-22",
+          "stored_balance": -20751.57
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-11-23",
+          "stored_balance": -20751.57
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-11-24",
           "stored_balance": -20751.57
         }
       },
@@ -83127,6 +85071,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-019",
+          "business_day": "2029-11-30",
+          "stored_balance": -47886.61
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-12-01",
+          "stored_balance": -47886.61
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
           "business_day": "2029-12-02",
           "stored_balance": -52030.59
         }
@@ -83160,6 +85120,22 @@
         "identity": {
           "account_id": "tmpl-cust-019",
           "business_day": "2029-12-06",
+          "stored_balance": -61986.08
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-12-07",
+          "stored_balance": -61986.08
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-12-08",
           "stored_balance": -61986.08
         }
       },
@@ -83207,6 +85183,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-019",
+          "business_day": "2029-12-14",
+          "stored_balance": -80196.83
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-12-15",
+          "stored_balance": -80196.83
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
           "business_day": "2029-12-16",
           "stored_balance": -84942.85
         }
@@ -83240,6 +85232,22 @@
         "identity": {
           "account_id": "tmpl-cust-019",
           "business_day": "2029-12-20",
+          "stored_balance": -97190.92
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-12-21",
+          "stored_balance": -97190.92
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-12-22",
           "stored_balance": -97190.92
         }
       },
@@ -83287,6 +85295,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-019",
+          "business_day": "2029-12-28",
+          "stored_balance": -108965.95
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2029-12-29",
+          "stored_balance": -108965.95
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-019",
           "business_day": "2029-12-30",
           "stored_balance": -113433.27
         }
@@ -83302,8 +85326,32 @@
       {
         "kind": "rule_violation",
         "identity": {
+          "account_id": "tmpl-cust-019",
+          "business_day": "2030-01-01",
+          "stored_balance": -113415.24
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
           "account_id": "tmpl-cust-020",
           "business_day": "2029-11-22",
+          "stored_balance": -4468.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-020",
+          "business_day": "2029-11-23",
+          "stored_balance": -4468.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-020",
+          "business_day": "2029-11-24",
           "stored_balance": -4468.96
         }
       },
@@ -83351,6 +85399,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-020",
+          "business_day": "2029-11-30",
+          "stored_balance": -65600.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-020",
+          "business_day": "2029-12-01",
+          "stored_balance": -65600.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-020",
           "business_day": "2029-12-02",
           "stored_balance": -70321.62
         }
@@ -83384,6 +85448,22 @@
         "identity": {
           "account_id": "tmpl-cust-020",
           "business_day": "2029-12-06",
+          "stored_balance": -73001.86
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-020",
+          "business_day": "2029-12-07",
+          "stored_balance": -73001.86
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-020",
+          "business_day": "2029-12-08",
           "stored_balance": -73001.86
         }
       },
@@ -83431,6 +85511,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-020",
+          "business_day": "2029-12-14",
+          "stored_balance": -82994.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-020",
+          "business_day": "2029-12-15",
+          "stored_balance": -82994.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-020",
           "business_day": "2029-12-16",
           "stored_balance": -87964.23
         }
@@ -83464,6 +85560,22 @@
         "identity": {
           "account_id": "tmpl-cust-020",
           "business_day": "2029-12-20",
+          "stored_balance": -113875.93
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-020",
+          "business_day": "2029-12-21",
+          "stored_balance": -113875.93
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-020",
+          "business_day": "2029-12-22",
           "stored_balance": -113875.93
         }
       },
@@ -83511,6 +85623,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-020",
+          "business_day": "2029-12-28",
+          "stored_balance": -123041.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-020",
+          "business_day": "2029-12-29",
+          "stored_balance": -123041.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-020",
           "business_day": "2029-12-30",
           "stored_balance": -129766.15
         }
@@ -83526,8 +85654,32 @@
       {
         "kind": "rule_violation",
         "identity": {
+          "account_id": "tmpl-cust-020",
+          "business_day": "2030-01-01",
+          "stored_balance": -131047.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
           "account_id": "tmpl-cust-021",
           "business_day": "2029-10-18",
+          "stored_balance": -1782.8
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-10-19",
+          "stored_balance": -1782.8
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-10-20",
           "stored_balance": -1782.8
         }
       },
@@ -83575,6 +85727,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-021",
+          "business_day": "2029-10-26",
+          "stored_balance": -13683.67
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-10-27",
+          "stored_balance": -13683.67
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
           "business_day": "2029-10-28",
           "stored_balance": -16954.14
         }
@@ -83608,6 +85776,22 @@
         "identity": {
           "account_id": "tmpl-cust-021",
           "business_day": "2029-11-01",
+          "stored_balance": -20019.91
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-11-02",
+          "stored_balance": -20019.91
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-11-03",
           "stored_balance": -20019.91
         }
       },
@@ -83655,6 +85839,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-021",
+          "business_day": "2029-11-09",
+          "stored_balance": -41373.65
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-11-10",
+          "stored_balance": -41373.65
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
           "business_day": "2029-11-11",
           "stored_balance": -45932.82
         }
@@ -83688,6 +85888,22 @@
         "identity": {
           "account_id": "tmpl-cust-021",
           "business_day": "2029-11-15",
+          "stored_balance": -57185.16
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-11-16",
+          "stored_balance": -57185.16
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-11-17",
           "stored_balance": -57185.16
         }
       },
@@ -83735,6 +85951,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-021",
+          "business_day": "2029-11-23",
+          "stored_balance": -62863.39
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-11-24",
+          "stored_balance": -62863.39
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
           "business_day": "2029-11-25",
           "stored_balance": -61261.77
         }
@@ -83768,6 +86000,22 @@
         "identity": {
           "account_id": "tmpl-cust-021",
           "business_day": "2029-11-29",
+          "stored_balance": -157503.67
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-11-30",
+          "stored_balance": -157503.67
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-12-01",
           "stored_balance": -157503.67
         }
       },
@@ -83815,6 +86063,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-021",
+          "business_day": "2029-12-07",
+          "stored_balance": -176771.26
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-12-08",
+          "stored_balance": -176771.26
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
           "business_day": "2029-12-09",
           "stored_balance": -178536.45
         }
@@ -83848,6 +86112,22 @@
         "identity": {
           "account_id": "tmpl-cust-021",
           "business_day": "2029-12-13",
+          "stored_balance": -185619.58
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-12-14",
+          "stored_balance": -185619.58
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-12-15",
           "stored_balance": -185619.58
         }
       },
@@ -83895,6 +86175,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-021",
+          "business_day": "2029-12-21",
+          "stored_balance": -195689.84
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-12-22",
+          "stored_balance": -195689.84
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
           "business_day": "2029-12-23",
           "stored_balance": -196472.33
         }
@@ -83935,6 +86231,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-021",
+          "business_day": "2029-12-28",
+          "stored_balance": -204769.13
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2029-12-29",
+          "stored_balance": -204769.13
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
           "business_day": "2029-12-30",
           "stored_balance": -206341.48
         }
@@ -83944,6 +86256,14 @@
         "identity": {
           "account_id": "tmpl-cust-021",
           "business_day": "2029-12-31",
+          "stored_balance": -209355.37
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-021",
+          "business_day": "2030-01-01",
           "stored_balance": -209355.37
         }
       },
@@ -83960,6 +86280,22 @@
         "identity": {
           "account_id": "tmpl-cust-022",
           "business_day": "2029-11-01",
+          "stored_balance": -26876.68
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-11-02",
+          "stored_balance": -26876.68
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-11-03",
           "stored_balance": -26876.68
         }
       },
@@ -84007,6 +86343,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-022",
+          "business_day": "2029-11-09",
+          "stored_balance": -42811.04
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-11-10",
+          "stored_balance": -42811.04
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
           "business_day": "2029-11-11",
           "stored_balance": -47806.66
         }
@@ -84040,6 +86392,22 @@
         "identity": {
           "account_id": "tmpl-cust-022",
           "business_day": "2029-11-15",
+          "stored_balance": -58220.2
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-11-16",
+          "stored_balance": -58220.2
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-11-17",
           "stored_balance": -58220.2
         }
       },
@@ -84087,6 +86455,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-022",
+          "business_day": "2029-11-23",
+          "stored_balance": -69403.42
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-11-24",
+          "stored_balance": -69403.42
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
           "business_day": "2029-11-25",
           "stored_balance": -71773.88
         }
@@ -84120,6 +86504,22 @@
         "identity": {
           "account_id": "tmpl-cust-022",
           "business_day": "2029-11-29",
+          "stored_balance": -77224.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-11-30",
+          "stored_balance": -77224.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-12-01",
           "stored_balance": -77224.85
         }
       },
@@ -84167,6 +86567,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-022",
+          "business_day": "2029-12-07",
+          "stored_balance": -96270.13
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-12-08",
+          "stored_balance": -96270.13
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
           "business_day": "2029-12-09",
           "stored_balance": -96133.17
         }
@@ -84200,6 +86616,22 @@
         "identity": {
           "account_id": "tmpl-cust-022",
           "business_day": "2029-12-13",
+          "stored_balance": -104160.13
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-12-14",
+          "stored_balance": -104160.13
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-12-15",
           "stored_balance": -104160.13
         }
       },
@@ -84247,6 +86679,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-022",
+          "business_day": "2029-12-21",
+          "stored_balance": -131730.02
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-12-22",
+          "stored_balance": -131730.02
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
           "business_day": "2029-12-23",
           "stored_balance": -136606.04
         }
@@ -84287,6 +86735,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-022",
+          "business_day": "2029-12-28",
+          "stored_balance": -152210.39
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2029-12-29",
+          "stored_balance": -152210.39
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
           "business_day": "2029-12-30",
           "stored_balance": -172814.98
         }
@@ -84296,6 +86760,14 @@
         "identity": {
           "account_id": "tmpl-cust-022",
           "business_day": "2029-12-31",
+          "stored_balance": -176717.46
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-022",
+          "business_day": "2030-01-01",
           "stored_balance": -176717.46
         }
       },
@@ -84320,6 +86792,22 @@
         "identity": {
           "account_id": "tmpl-cust-023",
           "business_day": "2029-11-29",
+          "stored_balance": -9150.28
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
+          "business_day": "2029-11-30",
+          "stored_balance": -9150.28
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
+          "business_day": "2029-12-01",
           "stored_balance": -9150.28
         }
       },
@@ -84367,6 +86855,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-023",
+          "business_day": "2029-12-07",
+          "stored_balance": -24395.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
+          "business_day": "2029-12-08",
+          "stored_balance": -24395.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
           "business_day": "2029-12-09",
           "stored_balance": -26274.06
         }
@@ -84400,6 +86904,22 @@
         "identity": {
           "account_id": "tmpl-cust-023",
           "business_day": "2029-12-13",
+          "stored_balance": -34670.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
+          "business_day": "2029-12-14",
+          "stored_balance": -34670.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
+          "business_day": "2029-12-15",
           "stored_balance": -34670.85
         }
       },
@@ -84447,6 +86967,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-023",
+          "business_day": "2029-12-21",
+          "stored_balance": -50002.02
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
+          "business_day": "2029-12-22",
+          "stored_balance": -50002.02
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
           "business_day": "2029-12-23",
           "stored_balance": -54318.57
         }
@@ -84487,6 +87023,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-023",
+          "business_day": "2029-12-28",
+          "stored_balance": -65311.58
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
+          "business_day": "2029-12-29",
+          "stored_balance": -65311.58
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
           "business_day": "2029-12-30",
           "stored_balance": -63584.88
         }
@@ -84496,6 +87048,14 @@
         "identity": {
           "account_id": "tmpl-cust-023",
           "business_day": "2029-12-31",
+          "stored_balance": -68004.9
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-023",
+          "business_day": "2030-01-01",
           "stored_balance": -68004.9
         }
       },
@@ -84543,6 +87103,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-024",
+          "business_day": "2029-11-16",
+          "stored_balance": -14542.53
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-11-17",
+          "stored_balance": -14542.53
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
           "business_day": "2029-11-18",
           "stored_balance": -12210.08
         }
@@ -84576,6 +87152,22 @@
         "identity": {
           "account_id": "tmpl-cust-024",
           "business_day": "2029-11-22",
+          "stored_balance": -26724.77
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-11-23",
+          "stored_balance": -26724.77
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-11-24",
           "stored_balance": -26724.77
         }
       },
@@ -84623,6 +87215,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-024",
+          "business_day": "2029-11-30",
+          "stored_balance": -46156.64
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-12-01",
+          "stored_balance": -46156.64
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
           "business_day": "2029-12-02",
           "stored_balance": -50946.16
         }
@@ -84656,6 +87264,22 @@
         "identity": {
           "account_id": "tmpl-cust-024",
           "business_day": "2029-12-06",
+          "stored_balance": -62393.37
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-12-07",
+          "stored_balance": -62393.37
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-12-08",
           "stored_balance": -62393.37
         }
       },
@@ -84703,6 +87327,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-024",
+          "business_day": "2029-12-14",
+          "stored_balance": -87594.04
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-12-15",
+          "stored_balance": -87594.04
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
           "business_day": "2029-12-16",
           "stored_balance": -91167.66
         }
@@ -84736,6 +87376,22 @@
         "identity": {
           "account_id": "tmpl-cust-024",
           "business_day": "2029-12-20",
+          "stored_balance": -90156.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-12-21",
+          "stored_balance": -90156.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-12-22",
           "stored_balance": -90156.38
         }
       },
@@ -84783,6 +87439,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-024",
+          "business_day": "2029-12-28",
+          "stored_balance": -95306.45
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2029-12-29",
+          "stored_balance": -95306.45
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-024",
           "business_day": "2029-12-30",
           "stored_balance": -94461.97
         }
@@ -84798,8 +87470,32 @@
       {
         "kind": "rule_violation",
         "identity": {
+          "account_id": "tmpl-cust-024",
+          "business_day": "2030-01-01",
+          "stored_balance": -97384.83
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
           "account_id": "tmpl-cust-025",
           "business_day": "2029-10-18",
+          "stored_balance": -155.53
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-10-19",
+          "stored_balance": -155.53
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-10-20",
           "stored_balance": -155.53
         }
       },
@@ -84832,6 +87528,22 @@
         "identity": {
           "account_id": "tmpl-cust-025",
           "business_day": "2029-10-25",
+          "stored_balance": -14595.54
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-10-26",
+          "stored_balance": -14595.54
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-10-27",
           "stored_balance": -14595.54
         }
       },
@@ -84879,6 +87591,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-025",
+          "business_day": "2029-11-02",
+          "stored_balance": -35897.54
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-11-03",
+          "stored_balance": -35897.54
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
           "business_day": "2029-11-04",
           "stored_balance": -37769.46
         }
@@ -84912,6 +87640,22 @@
         "identity": {
           "account_id": "tmpl-cust-025",
           "business_day": "2029-11-08",
+          "stored_balance": -61305.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-11-09",
+          "stored_balance": -61305.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-11-10",
           "stored_balance": -61305.33
         }
       },
@@ -84959,6 +87703,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-025",
+          "business_day": "2029-11-16",
+          "stored_balance": -81514.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-11-17",
+          "stored_balance": -81514.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
           "business_day": "2029-11-18",
           "stored_balance": -86372.91
         }
@@ -84992,6 +87752,22 @@
         "identity": {
           "account_id": "tmpl-cust-025",
           "business_day": "2029-11-22",
+          "stored_balance": -88006.57
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-11-23",
+          "stored_balance": -88006.57
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-11-24",
           "stored_balance": -88006.57
         }
       },
@@ -85039,6 +87815,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-025",
+          "business_day": "2029-11-30",
+          "stored_balance": -109091.12
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-12-01",
+          "stored_balance": -109091.12
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
           "business_day": "2029-12-02",
           "stored_balance": -119376.99
         }
@@ -85072,6 +87864,22 @@
         "identity": {
           "account_id": "tmpl-cust-025",
           "business_day": "2029-12-06",
+          "stored_balance": -136119.15
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-12-07",
+          "stored_balance": -136119.15
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-12-08",
           "stored_balance": -136119.15
         }
       },
@@ -85119,6 +87927,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-025",
+          "business_day": "2029-12-14",
+          "stored_balance": -157019.21
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-12-15",
+          "stored_balance": -157019.21
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
           "business_day": "2029-12-16",
           "stored_balance": -161754.24
         }
@@ -85152,6 +87976,22 @@
         "identity": {
           "account_id": "tmpl-cust-025",
           "business_day": "2029-12-20",
+          "stored_balance": -174870.08
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-12-21",
+          "stored_balance": -174870.08
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-12-22",
           "stored_balance": -174870.08
         }
       },
@@ -85199,6 +88039,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-025",
+          "business_day": "2029-12-28",
+          "stored_balance": -185556.41
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2029-12-29",
+          "stored_balance": -185556.41
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
           "business_day": "2029-12-30",
           "stored_balance": -186108.1
         }
@@ -85208,6 +88064,14 @@
         "identity": {
           "account_id": "tmpl-cust-025",
           "business_day": "2029-12-31",
+          "stored_balance": -189227.16
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-025",
+          "business_day": "2030-01-01",
           "stored_balance": -189227.16
         }
       },
@@ -85247,7 +88111,31 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-026",
+          "business_day": "2029-12-05",
+          "stored_balance": -6759.1
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-026",
           "business_day": "2029-12-06",
+          "stored_balance": -8090.19
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-026",
+          "business_day": "2029-12-07",
+          "stored_balance": -8090.19
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-026",
+          "business_day": "2029-12-08",
           "stored_balance": -8090.19
         }
       },
@@ -85295,6 +88183,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-026",
+          "business_day": "2029-12-14",
+          "stored_balance": -30061.36
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-026",
+          "business_day": "2029-12-15",
+          "stored_balance": -30061.36
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-026",
           "business_day": "2029-12-16",
           "stored_balance": -35206.77
         }
@@ -85328,6 +88232,22 @@
         "identity": {
           "account_id": "tmpl-cust-026",
           "business_day": "2029-12-20",
+          "stored_balance": -47112.17
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-026",
+          "business_day": "2029-12-21",
+          "stored_balance": -47112.17
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-026",
+          "business_day": "2029-12-22",
           "stored_balance": -47112.17
         }
       },
@@ -85375,6 +88295,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-026",
+          "business_day": "2029-12-28",
+          "stored_balance": -79503.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-026",
+          "business_day": "2029-12-29",
+          "stored_balance": -79503.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-026",
           "business_day": "2029-12-30",
           "stored_balance": -81076.25
         }
@@ -85384,6 +88320,14 @@
         "identity": {
           "account_id": "tmpl-cust-026",
           "business_day": "2029-12-31",
+          "stored_balance": -83722.84
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-026",
+          "business_day": "2030-01-01",
           "stored_balance": -83722.84
         }
       },
@@ -85408,6 +88352,22 @@
         "identity": {
           "account_id": "tmpl-cust-027",
           "business_day": "2029-10-04",
+          "stored_balance": -12932.51
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-10-05",
+          "stored_balance": -12932.51
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-10-06",
           "stored_balance": -12932.51
         }
       },
@@ -85455,6 +88415,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-027",
+          "business_day": "2029-10-12",
+          "stored_balance": -23330.19
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-10-13",
+          "stored_balance": -23330.19
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
           "business_day": "2029-10-14",
           "stored_balance": -25436.19
         }
@@ -85488,6 +88464,22 @@
         "identity": {
           "account_id": "tmpl-cust-027",
           "business_day": "2029-10-18",
+          "stored_balance": -29445.48
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-10-19",
+          "stored_balance": -29445.48
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-10-20",
           "stored_balance": -29445.48
         }
       },
@@ -85535,6 +88527,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-027",
+          "business_day": "2029-10-26",
+          "stored_balance": -69312.87
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-10-27",
+          "stored_balance": -69312.87
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
           "business_day": "2029-10-28",
           "stored_balance": -68484.1
         }
@@ -85568,6 +88576,22 @@
         "identity": {
           "account_id": "tmpl-cust-027",
           "business_day": "2029-11-01",
+          "stored_balance": -85417.29
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-11-02",
+          "stored_balance": -85417.29
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-11-03",
           "stored_balance": -85417.29
         }
       },
@@ -85615,6 +88639,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-027",
+          "business_day": "2029-11-09",
+          "stored_balance": -100684.62
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-11-10",
+          "stored_balance": -100684.62
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
           "business_day": "2029-11-11",
           "stored_balance": -99399.11
         }
@@ -85648,6 +88688,22 @@
         "identity": {
           "account_id": "tmpl-cust-027",
           "business_day": "2029-11-15",
+          "stored_balance": -107159.71
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-11-16",
+          "stored_balance": -107159.71
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-11-17",
           "stored_balance": -107159.71
         }
       },
@@ -85695,6 +88751,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-027",
+          "business_day": "2029-11-23",
+          "stored_balance": -124206.4
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-11-24",
+          "stored_balance": -124206.4
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
           "business_day": "2029-11-25",
           "stored_balance": -123116.81
         }
@@ -85728,6 +88800,22 @@
         "identity": {
           "account_id": "tmpl-cust-027",
           "business_day": "2029-11-29",
+          "stored_balance": -140383.31
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-11-30",
+          "stored_balance": -140383.31
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-12-01",
           "stored_balance": -140383.31
         }
       },
@@ -85775,6 +88863,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-027",
+          "business_day": "2029-12-07",
+          "stored_balance": -153064.23
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-12-08",
+          "stored_balance": -153064.23
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
           "business_day": "2029-12-09",
           "stored_balance": -154316.05
         }
@@ -85808,6 +88912,22 @@
         "identity": {
           "account_id": "tmpl-cust-027",
           "business_day": "2029-12-13",
+          "stored_balance": -172470.36
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-12-14",
+          "stored_balance": -172470.36
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-12-15",
           "stored_balance": -172470.36
         }
       },
@@ -85855,6 +88975,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-027",
+          "business_day": "2029-12-21",
+          "stored_balance": -184485.44
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-12-22",
+          "stored_balance": -184485.44
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
           "business_day": "2029-12-23",
           "stored_balance": -191617.52
         }
@@ -85895,6 +89031,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-027",
+          "business_day": "2029-12-28",
+          "stored_balance": -239502.11
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2029-12-29",
+          "stored_balance": -239502.11
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
           "business_day": "2029-12-30",
           "stored_balance": -241447.48
         }
@@ -85904,6 +89056,14 @@
         "identity": {
           "account_id": "tmpl-cust-027",
           "business_day": "2029-12-31",
+          "stored_balance": -243843.93
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-027",
+          "business_day": "2030-01-01",
           "stored_balance": -243843.93
         }
       },
@@ -85943,7 +89103,31 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-028",
+          "business_day": "2029-11-23",
+          "stored_balance": -6361.04
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
+          "business_day": "2029-11-24",
+          "stored_balance": -6361.04
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
           "business_day": "2029-11-25",
+          "stored_balance": -5901.25
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
+          "business_day": "2029-11-26",
           "stored_balance": -5901.25
         }
       },
@@ -85968,6 +89152,22 @@
         "identity": {
           "account_id": "tmpl-cust-028",
           "business_day": "2029-11-29",
+          "stored_balance": -34889.27
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
+          "business_day": "2029-11-30",
+          "stored_balance": -34889.27
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
+          "business_day": "2029-12-01",
           "stored_balance": -34889.27
         }
       },
@@ -86015,6 +89215,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-028",
+          "business_day": "2029-12-07",
+          "stored_balance": -98974.04
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
+          "business_day": "2029-12-08",
+          "stored_balance": -98974.04
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
           "business_day": "2029-12-09",
           "stored_balance": -103820.38
         }
@@ -86048,6 +89264,22 @@
         "identity": {
           "account_id": "tmpl-cust-028",
           "business_day": "2029-12-13",
+          "stored_balance": -113950.99
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
+          "business_day": "2029-12-14",
+          "stored_balance": -113950.99
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
+          "business_day": "2029-12-15",
           "stored_balance": -113950.99
         }
       },
@@ -86095,6 +89327,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-028",
+          "business_day": "2029-12-21",
+          "stored_balance": -131796.17
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
+          "business_day": "2029-12-22",
+          "stored_balance": -131796.17
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
           "business_day": "2029-12-23",
           "stored_balance": -132750.55
         }
@@ -86135,6 +89383,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-028",
+          "business_day": "2029-12-28",
+          "stored_balance": -147666.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
+          "business_day": "2029-12-29",
+          "stored_balance": -147666.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
           "business_day": "2029-12-30",
           "stored_balance": -148965.88
         }
@@ -86144,6 +89408,14 @@
         "identity": {
           "account_id": "tmpl-cust-028",
           "business_day": "2029-12-31",
+          "stored_balance": -147350.14
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-028",
+          "business_day": "2030-01-01",
           "stored_balance": -147350.14
         }
       },
@@ -86160,6 +89432,22 @@
         "identity": {
           "account_id": "tmpl-cust-029",
           "business_day": "2029-11-01",
+          "stored_balance": -24286.77
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-11-02",
+          "stored_balance": -24286.77
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-11-03",
           "stored_balance": -24286.77
         }
       },
@@ -86207,6 +89495,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-029",
+          "business_day": "2029-11-09",
+          "stored_balance": -30511.65
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-11-10",
+          "stored_balance": -30511.65
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
           "business_day": "2029-11-11",
           "stored_balance": -33564.66
         }
@@ -86240,6 +89544,22 @@
         "identity": {
           "account_id": "tmpl-cust-029",
           "business_day": "2029-11-15",
+          "stored_balance": -56962.92
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-11-16",
+          "stored_balance": -56962.92
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-11-17",
           "stored_balance": -56962.92
         }
       },
@@ -86287,6 +89607,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-029",
+          "business_day": "2029-11-23",
+          "stored_balance": -65397.6
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-11-24",
+          "stored_balance": -65397.6
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
           "business_day": "2029-11-25",
           "stored_balance": -65467.82
         }
@@ -86320,6 +89656,22 @@
         "identity": {
           "account_id": "tmpl-cust-029",
           "business_day": "2029-11-29",
+          "stored_balance": -57614.66
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-11-30",
+          "stored_balance": -57614.66
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-12-01",
           "stored_balance": -57614.66
         }
       },
@@ -86367,6 +89719,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-029",
+          "business_day": "2029-12-07",
+          "stored_balance": -72467.75
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-12-08",
+          "stored_balance": -72467.75
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
           "business_day": "2029-12-09",
           "stored_balance": -78400.47
         }
@@ -86400,6 +89768,22 @@
         "identity": {
           "account_id": "tmpl-cust-029",
           "business_day": "2029-12-13",
+          "stored_balance": -82758.98
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-12-14",
+          "stored_balance": -82758.98
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-12-15",
           "stored_balance": -82758.98
         }
       },
@@ -86447,6 +89831,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-029",
+          "business_day": "2029-12-21",
+          "stored_balance": -111227.99
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-12-22",
+          "stored_balance": -111227.99
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
           "business_day": "2029-12-23",
           "stored_balance": -117288.79
         }
@@ -86487,6 +89887,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-029",
+          "business_day": "2029-12-28",
+          "stored_balance": -130621.42
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2029-12-29",
+          "stored_balance": -130621.42
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
           "business_day": "2029-12-30",
           "stored_balance": -131999.25
         }
@@ -86496,6 +89912,14 @@
         "identity": {
           "account_id": "tmpl-cust-029",
           "business_day": "2029-12-31",
+          "stored_balance": -127329.55
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-029",
+          "business_day": "2030-01-01",
           "stored_balance": -127329.55
         }
       },
@@ -86528,6 +89952,22 @@
         "identity": {
           "account_id": "tmpl-cust-030",
           "business_day": "2029-11-01",
+          "stored_balance": -14086.91
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-11-02",
+          "stored_balance": -14086.91
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-11-03",
           "stored_balance": -14086.91
         }
       },
@@ -86575,6 +90015,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-030",
+          "business_day": "2029-11-09",
+          "stored_balance": -32269.83
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-11-10",
+          "stored_balance": -32269.83
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
           "business_day": "2029-11-11",
           "stored_balance": -35103.94
         }
@@ -86608,6 +90064,22 @@
         "identity": {
           "account_id": "tmpl-cust-030",
           "business_day": "2029-11-15",
+          "stored_balance": -38454.28
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-11-16",
+          "stored_balance": -38454.28
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-11-17",
           "stored_balance": -38454.28
         }
       },
@@ -86655,6 +90127,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-030",
+          "business_day": "2029-11-23",
+          "stored_balance": -52213.91
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-11-24",
+          "stored_balance": -52213.91
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
           "business_day": "2029-11-25",
           "stored_balance": -51676.31
         }
@@ -86688,6 +90176,22 @@
         "identity": {
           "account_id": "tmpl-cust-030",
           "business_day": "2029-11-29",
+          "stored_balance": -64007.6
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-11-30",
+          "stored_balance": -64007.6
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-12-01",
           "stored_balance": -64007.6
         }
       },
@@ -86735,6 +90239,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-030",
+          "business_day": "2029-12-07",
+          "stored_balance": -66524.22
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-12-08",
+          "stored_balance": -66524.22
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
           "business_day": "2029-12-09",
           "stored_balance": -65511.58
         }
@@ -86775,6 +90295,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-030",
+          "business_day": "2029-12-14",
+          "stored_balance": -77769.21
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-12-15",
+          "stored_balance": -77769.21
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
           "business_day": "2029-12-16",
           "stored_balance": -78080.81
         }
@@ -86800,6 +90336,30 @@
         "identity": {
           "account_id": "tmpl-cust-030",
           "business_day": "2029-12-19",
+          "stored_balance": -92417.14
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-12-20",
+          "stored_balance": -92417.14
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-12-21",
+          "stored_balance": -92417.14
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-12-22",
           "stored_balance": -92417.14
         }
       },
@@ -86847,6 +90407,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-030",
+          "business_day": "2029-12-28",
+          "stored_balance": -99667.14
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2029-12-29",
+          "stored_balance": -99667.14
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
           "business_day": "2029-12-30",
           "stored_balance": -101729.54
         }
@@ -86856,6 +90432,14 @@
         "identity": {
           "account_id": "tmpl-cust-030",
           "business_day": "2029-12-31",
+          "stored_balance": -103037.34
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-030",
+          "business_day": "2030-01-01",
           "stored_balance": -103037.34
         }
       }

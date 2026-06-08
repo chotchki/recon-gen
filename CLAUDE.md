@@ -216,7 +216,7 @@ CI: post-CB.11.c, `e2e.yml` is gone — the e2e legs absorbed into `ci.yml`'s La
 - Every visual should have non-empty data. For each new scenario-dependent visual, add a `TestScenarioCoverage` assertion (≥N rows of that shape) — counts alone don't catch "zero scenario rows slipped through". Write the assertion **before** the visual.
 - Generators stay deterministic. Enforced by `tests/unit/test_typing_smells.py::determinism` — no module-level `random.X()` in seed modules.
 - Seed: `emit_full_seed(l2_instance, scenario)` driven by `default_scenario_for(l2_instance)`. `data apply` wraps as `densify_scenario(factor=5) → add_broken_rail_plants(15) → boost_inv_fanout_plants(5×)` → ~60k baseline rows + plants. `--seed-density=N` scales all three knobs (1.0 = byte-identical to locked SQL; 2.0 doubles plants).
-- Determinism locked at `tests/data/_locked_seeds/<instance>.<dialect>.sql`. `test_locked_seed_matches_fresh_emit` re-emits + asserts byte-equality. Re-lock via `recon-gen data lock -c <config> --l2 <yaml>` (per dialect) when the shift is intentional. Anchor pinned at `date(2030, 1, 1)`. Per-run drift detection in `runs/<run-id>/{timings,hashes}.json` (Y.2.gate.c.2+c.3).
+- Determinism locked at `tests/data/_semantic_locks/<instance>.duckdb.json` (DuckDB-only post-AZ.5 + CB.8; PG/Oracle gated by db-tier integration tests instead). Snapshot is the violation-set per L1 invariant at the canonical anchor (2030-01-01). Re-lock via `recon-gen data semantic-lock --l2 <yaml>` (one invocation per instance) when the shift is intentional. Anchor pinned at `date(2030, 1, 1)`. Per-run drift detection in `runs/<run-id>/{timings,hashes}.json` (Y.2.gate.c.2+c.3).
 
 ## Operational Footguns
 

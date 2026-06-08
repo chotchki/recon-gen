@@ -591,6 +591,7 @@ Three open design items from `docs/audits/_archive/v11_22_1_feedback.md` cold-re
 - **BX backlog — Handbook route wheel-portability** — added 2026-06-08.
 - **BX backlog — L1 Exceptions copy says 10, matview has 12** — added 2026-06-08.
 - **BX backlog — CN.7 v1 iterative-screenshot cold-read** — added 2026-06-08.
-- **CO.x — Fix DuckDB writer lock conflict between Studio pool and ETL hook subprocess** — added 2026-06-08.
 - **BX backlog — Themed 503 page for PoolReleasedDuringRefresh** — added 2026-06-08.
 - **BX backlog — Configurable etl_hook subprocess timeout** — added 2026-06-08.
+- **BX backlog — Extend semantic-lock to PG + Oracle dialects** — added 2026-06-08.
+- **BX backlog — Wire AsOfFrame.live_from_db into App2 + QS deploy paths** — added 2026-06-08.

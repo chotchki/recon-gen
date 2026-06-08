@@ -445160,7 +445160,103 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0002-snb",
+          "business_day": "2029-11-30",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-02",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-03",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-04",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-05",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
           "business_day": "2029-12-06",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-07",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-09",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-10",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-11",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-12",
           "stored_balance": -1500.0
         }
       },
@@ -445176,6 +445272,54 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0002-snb",
+          "business_day": "2029-12-14",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-16",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-17",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-18",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-19",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
           "business_day": "2029-12-20",
           "stored_balance": -1500.0
         }
@@ -445184,7 +445328,95 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0002-snb",
+          "business_day": "2029-12-21",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-23",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-24",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-25",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-26",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
           "business_day": "2029-12-27",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-28",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-30",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-31",
+          "stored_balance": -1500.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2030-01-01",
           "stored_balance": -1500.0
         }
       },
@@ -445209,6 +445441,22 @@
         "identity": {
           "account_id": "cust-0011-snb",
           "business_day": "2029-10-05",
+          "stored_balance": -609210.27
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -609210.27
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-10-07",
           "stored_balance": -609210.27
         }
       },
@@ -445256,6 +445504,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0011-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -1296891.74
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-10-14",
+          "stored_balance": -1296891.74
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
           "business_day": "2029-10-15",
           "stored_balance": -1452215.75
         }
@@ -445289,6 +445553,22 @@
         "identity": {
           "account_id": "cust-0011-snb",
           "business_day": "2029-10-19",
+          "stored_balance": -2040137.8
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -2040137.8
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-10-21",
           "stored_balance": -2040137.8
         }
       },
@@ -445336,6 +445616,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0011-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -2703572.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-10-28",
+          "stored_balance": -2703572.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
           "business_day": "2029-10-29",
           "stored_balance": -2884160.15
         }
@@ -445369,6 +445665,22 @@
         "identity": {
           "account_id": "cust-0011-snb",
           "business_day": "2029-11-02",
+          "stored_balance": -3444475.32
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -3444475.32
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-11-04",
           "stored_balance": -3444475.32
         }
       },
@@ -445416,6 +445728,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0011-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -4215454.89
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-11-11",
+          "stored_balance": -4215454.89
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
           "business_day": "2029-11-12",
           "stored_balance": -4309558.53
         }
@@ -445449,6 +445777,22 @@
         "identity": {
           "account_id": "cust-0011-snb",
           "business_day": "2029-11-16",
+          "stored_balance": -4875213.08
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -4875213.08
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-11-18",
           "stored_balance": -4875213.08
         }
       },
@@ -445496,6 +445840,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0011-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -5698660.5
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-11-25",
+          "stored_balance": -5698660.5
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
           "business_day": "2029-11-26",
           "stored_balance": -5805833.04
         }
@@ -445529,6 +445889,22 @@
         "identity": {
           "account_id": "cust-0011-snb",
           "business_day": "2029-11-30",
+          "stored_balance": -6435256.59
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -6435256.59
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-12-02",
           "stored_balance": -6435256.59
         }
       },
@@ -445576,6 +445952,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0011-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -6945831.63
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-12-09",
+          "stored_balance": -6945831.63
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
           "business_day": "2029-12-10",
           "stored_balance": -7056719.17
         }
@@ -445609,6 +446001,22 @@
         "identity": {
           "account_id": "cust-0011-snb",
           "business_day": "2029-12-14",
+          "stored_balance": -7803979.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -7803979.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-12-16",
           "stored_balance": -7803979.85
         }
       },
@@ -445656,6 +446064,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0011-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -8460483.03
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-12-23",
+          "stored_balance": -8460483.03
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
           "business_day": "2029-12-24",
           "stored_balance": -8553732.33
         }
@@ -445689,6 +446113,22 @@
         "identity": {
           "account_id": "cust-0011-snb",
           "business_day": "2029-12-28",
+          "stored_balance": -9050017.55
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -9050017.55
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0011-snb",
+          "business_day": "2029-12-30",
           "stored_balance": -9050017.55
         }
       },
@@ -445736,6 +446176,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0012-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -491621.9
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-10-07",
+          "stored_balance": -491621.9
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
           "business_day": "2029-10-08",
           "stored_balance": -552170.79
         }
@@ -445769,6 +446225,22 @@
         "identity": {
           "account_id": "cust-0012-snb",
           "business_day": "2029-10-12",
+          "stored_balance": -1000904.67
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -1000904.67
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-10-14",
           "stored_balance": -1000904.67
         }
       },
@@ -445816,6 +446288,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0012-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -1732951.84
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-10-21",
+          "stored_balance": -1732951.84
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
           "business_day": "2029-10-22",
           "stored_balance": -1788310.43
         }
@@ -445849,6 +446337,22 @@
         "identity": {
           "account_id": "cust-0012-snb",
           "business_day": "2029-10-26",
+          "stored_balance": -2201048.22
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -2201048.22
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-10-28",
           "stored_balance": -2201048.22
         }
       },
@@ -445896,6 +446400,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0012-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -3062370.62
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-11-04",
+          "stored_balance": -3062370.62
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
           "business_day": "2029-11-05",
           "stored_balance": -3225655.53
         }
@@ -445929,6 +446449,22 @@
         "identity": {
           "account_id": "cust-0012-snb",
           "business_day": "2029-11-09",
+          "stored_balance": -3842853.21
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -3842853.21
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-11-11",
           "stored_balance": -3842853.21
         }
       },
@@ -445976,6 +446512,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0012-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -4663964.78
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-11-18",
+          "stored_balance": -4663964.78
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
           "business_day": "2029-11-19",
           "stored_balance": -4722273.47
         }
@@ -446009,6 +446561,22 @@
         "identity": {
           "account_id": "cust-0012-snb",
           "business_day": "2029-11-23",
+          "stored_balance": -5328429.8
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -5328429.8
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-11-25",
           "stored_balance": -5328429.8
         }
       },
@@ -446056,6 +446624,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0012-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -6163756.74
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-12-02",
+          "stored_balance": -6163756.74
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
           "business_day": "2029-12-03",
           "stored_balance": -6493086.67
         }
@@ -446089,6 +446673,22 @@
         "identity": {
           "account_id": "cust-0012-snb",
           "business_day": "2029-12-07",
+          "stored_balance": -6958960.66
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -6958960.66
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-12-09",
           "stored_balance": -6958960.66
         }
       },
@@ -446136,6 +446736,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0012-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -7592130.49
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-12-16",
+          "stored_balance": -7592130.49
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
           "business_day": "2029-12-17",
           "stored_balance": -7812743.69
         }
@@ -446169,6 +446785,22 @@
         "identity": {
           "account_id": "cust-0012-snb",
           "business_day": "2029-12-21",
+          "stored_balance": -8272640.54
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -8272640.54
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-12-23",
           "stored_balance": -8272640.54
         }
       },
@@ -446216,6 +446848,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0012-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -8759359.31
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
+          "business_day": "2029-12-30",
+          "stored_balance": -8759359.31
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0012-snb",
           "business_day": "2029-12-31",
           "stored_balance": -8835718.51
         }
@@ -446241,6 +446889,22 @@
         "identity": {
           "account_id": "cust-0013-snb",
           "business_day": "2029-10-05",
+          "stored_balance": -215342.12
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -215342.12
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-10-07",
           "stored_balance": -215342.12
         }
       },
@@ -446288,6 +446952,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0013-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -868965.12
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-10-14",
+          "stored_balance": -868965.12
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
           "business_day": "2029-10-15",
           "stored_balance": -993944.47
         }
@@ -446321,6 +447001,22 @@
         "identity": {
           "account_id": "cust-0013-snb",
           "business_day": "2029-10-19",
+          "stored_balance": -1369596.17
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -1369596.17
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-10-21",
           "stored_balance": -1369596.17
         }
       },
@@ -446368,6 +447064,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0013-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -2047203.63
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-10-28",
+          "stored_balance": -2047203.63
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
           "business_day": "2029-10-29",
           "stored_balance": -2272542.22
         }
@@ -446401,6 +447113,22 @@
         "identity": {
           "account_id": "cust-0013-snb",
           "business_day": "2029-11-02",
+          "stored_balance": -2894154.73
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -2894154.73
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-11-04",
           "stored_balance": -2894154.73
         }
       },
@@ -446448,6 +447176,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0013-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -3788639.53
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-11-11",
+          "stored_balance": -3788639.53
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
           "business_day": "2029-11-12",
           "stored_balance": -4122396.28
         }
@@ -446481,6 +447225,22 @@
         "identity": {
           "account_id": "cust-0013-snb",
           "business_day": "2029-11-16",
+          "stored_balance": -4773024.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -4773024.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-11-18",
           "stored_balance": -4773024.38
         }
       },
@@ -446528,6 +447288,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0013-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -5399098.28
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-11-25",
+          "stored_balance": -5399098.28
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
           "business_day": "2029-11-26",
           "stored_balance": -5568229.14
         }
@@ -446561,6 +447337,22 @@
         "identity": {
           "account_id": "cust-0013-snb",
           "business_day": "2029-11-30",
+          "stored_balance": -6233460.06
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -6233460.06
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-12-02",
           "stored_balance": -6233460.06
         }
       },
@@ -446608,6 +447400,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0013-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -6753470.63
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-12-09",
+          "stored_balance": -6753470.63
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
           "business_day": "2029-12-10",
           "stored_balance": -6922011.88
         }
@@ -446641,6 +447449,22 @@
         "identity": {
           "account_id": "cust-0013-snb",
           "business_day": "2029-12-14",
+          "stored_balance": -7319459.56
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -7319459.56
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-12-16",
           "stored_balance": -7319459.56
         }
       },
@@ -446688,6 +447512,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0013-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -7922134.83
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-12-23",
+          "stored_balance": -7922134.83
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
           "business_day": "2029-12-24",
           "stored_balance": -8076443.45
         }
@@ -446721,6 +447561,22 @@
         "identity": {
           "account_id": "cust-0013-snb",
           "business_day": "2029-12-28",
+          "stored_balance": -8649274.57
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -8649274.57
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0013-snb",
+          "business_day": "2029-12-30",
           "stored_balance": -8649274.57
         }
       },
@@ -446768,6 +447624,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0014-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -436133.34
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-10-07",
+          "stored_balance": -436133.34
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
           "business_day": "2029-10-08",
           "stored_balance": -667737.22
         }
@@ -446801,6 +447673,22 @@
         "identity": {
           "account_id": "cust-0014-snb",
           "business_day": "2029-10-12",
+          "stored_balance": -1384759.9
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -1384759.9
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-10-14",
           "stored_balance": -1384759.9
         }
       },
@@ -446848,6 +447736,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0014-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -2280889.88
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-10-21",
+          "stored_balance": -2280889.88
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
           "business_day": "2029-10-22",
           "stored_balance": -2332559.49
         }
@@ -446881,6 +447785,22 @@
         "identity": {
           "account_id": "cust-0014-snb",
           "business_day": "2029-10-26",
+          "stored_balance": -2836113.01
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -2836113.01
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-10-28",
           "stored_balance": -2836113.01
         }
       },
@@ -446928,6 +447848,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0014-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -3523292.04
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-11-04",
+          "stored_balance": -3523292.04
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
           "business_day": "2029-11-05",
           "stored_balance": -3681427.7
         }
@@ -446961,6 +447897,22 @@
         "identity": {
           "account_id": "cust-0014-snb",
           "business_day": "2029-11-09",
+          "stored_balance": -4213698.64
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -4213698.64
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-11-11",
           "stored_balance": -4213698.64
         }
       },
@@ -447008,6 +447960,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0014-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -5090727.19
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-11-18",
+          "stored_balance": -5090727.19
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
           "business_day": "2029-11-19",
           "stored_balance": -5225499.69
         }
@@ -447041,6 +448009,22 @@
         "identity": {
           "account_id": "cust-0014-snb",
           "business_day": "2029-11-23",
+          "stored_balance": -5913959.5
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -5913959.5
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-11-25",
           "stored_balance": -5913959.5
         }
       },
@@ -447088,6 +448072,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0014-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -6745229.65
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-12-02",
+          "stored_balance": -6745229.65
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
           "business_day": "2029-12-03",
           "stored_balance": -6848957.52
         }
@@ -447121,6 +448121,22 @@
         "identity": {
           "account_id": "cust-0014-snb",
           "business_day": "2029-12-07",
+          "stored_balance": -7494827.92
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -7494827.92
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-12-09",
           "stored_balance": -7494827.92
         }
       },
@@ -447168,6 +448184,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0014-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -8241560.03
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-12-16",
+          "stored_balance": -8241560.03
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
           "business_day": "2029-12-17",
           "stored_balance": -8291180.52
         }
@@ -447201,6 +448233,22 @@
         "identity": {
           "account_id": "cust-0014-snb",
           "business_day": "2029-12-21",
+          "stored_balance": -8930523.5
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -8930523.5
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-12-23",
           "stored_balance": -8930523.5
         }
       },
@@ -447248,6 +448296,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0014-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -9814821.15
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
+          "business_day": "2029-12-30",
+          "stored_balance": -9814821.15
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0014-snb",
           "business_day": "2029-12-31",
           "stored_balance": -10006238.81
         }
@@ -447281,6 +448345,22 @@
         "identity": {
           "account_id": "cust-0015-snb",
           "business_day": "2029-10-05",
+          "stored_balance": -621300.06
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -621300.06
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-10-07",
           "stored_balance": -621300.06
         }
       },
@@ -447328,6 +448408,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0015-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -1135626.43
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-10-14",
+          "stored_balance": -1135626.43
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
           "business_day": "2029-10-15",
           "stored_balance": -1479284.03
         }
@@ -447361,6 +448457,22 @@
         "identity": {
           "account_id": "cust-0015-snb",
           "business_day": "2029-10-19",
+          "stored_balance": -1929179.2
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -1929179.2
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-10-21",
           "stored_balance": -1929179.2
         }
       },
@@ -447408,6 +448520,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0015-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -2572082.02
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-10-28",
+          "stored_balance": -2572082.02
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
           "business_day": "2029-10-29",
           "stored_balance": -2655543.45
         }
@@ -447441,6 +448569,22 @@
         "identity": {
           "account_id": "cust-0015-snb",
           "business_day": "2029-11-02",
+          "stored_balance": -3296821.28
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -3296821.28
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-11-04",
           "stored_balance": -3296821.28
         }
       },
@@ -447488,6 +448632,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0015-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -4013040.49
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-11-11",
+          "stored_balance": -4013040.49
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
           "business_day": "2029-11-12",
           "stored_balance": -4292301.65
         }
@@ -447521,6 +448681,22 @@
         "identity": {
           "account_id": "cust-0015-snb",
           "business_day": "2029-11-16",
+          "stored_balance": -4787412.54
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -4787412.54
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-11-18",
           "stored_balance": -4787412.54
         }
       },
@@ -447568,6 +448744,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0015-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -5175367.25
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-11-25",
+          "stored_balance": -5175367.25
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
           "business_day": "2029-11-26",
           "stored_balance": -5404942.55
         }
@@ -447601,6 +448793,22 @@
         "identity": {
           "account_id": "cust-0015-snb",
           "business_day": "2029-11-30",
+          "stored_balance": -6059845.17
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -6059845.17
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-12-02",
           "stored_balance": -6059845.17
         }
       },
@@ -447648,6 +448856,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0015-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -6716828.74
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-12-09",
+          "stored_balance": -6716828.74
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
           "business_day": "2029-12-10",
           "stored_balance": -6823647.56
         }
@@ -447681,6 +448905,22 @@
         "identity": {
           "account_id": "cust-0015-snb",
           "business_day": "2029-12-14",
+          "stored_balance": -7429834.53
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -7429834.53
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-12-16",
           "stored_balance": -7429834.53
         }
       },
@@ -447728,6 +448968,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0015-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -8177999.17
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-12-23",
+          "stored_balance": -8177999.17
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
           "business_day": "2029-12-24",
           "stored_balance": -8299497.03
         }
@@ -447761,6 +449017,22 @@
         "identity": {
           "account_id": "cust-0015-snb",
           "business_day": "2029-12-28",
+          "stored_balance": -8731971.79
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -8731971.79
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0015-snb",
+          "business_day": "2029-12-30",
           "stored_balance": -8731971.79
         }
       },
@@ -447808,6 +449080,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0016-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -481312.95
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-10-07",
+          "stored_balance": -481312.95
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
           "business_day": "2029-10-08",
           "stored_balance": -697441.48
         }
@@ -447841,6 +449129,22 @@
         "identity": {
           "account_id": "cust-0016-snb",
           "business_day": "2029-10-12",
+          "stored_balance": -1378487.29
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -1378487.29
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-10-14",
           "stored_balance": -1378487.29
         }
       },
@@ -447888,6 +449192,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0016-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -2199781.01
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-10-21",
+          "stored_balance": -2199781.01
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
           "business_day": "2029-10-22",
           "stored_balance": -2349918.6
         }
@@ -447921,6 +449241,22 @@
         "identity": {
           "account_id": "cust-0016-snb",
           "business_day": "2029-10-26",
+          "stored_balance": -2893997.02
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -2893997.02
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-10-28",
           "stored_balance": -2893997.02
         }
       },
@@ -447968,6 +449304,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0016-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -3561505.36
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-11-04",
+          "stored_balance": -3561505.36
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
           "business_day": "2029-11-05",
           "stored_balance": -3623720.61
         }
@@ -448001,6 +449353,22 @@
         "identity": {
           "account_id": "cust-0016-snb",
           "business_day": "2029-11-09",
+          "stored_balance": -4218052.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -4218052.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-11-11",
           "stored_balance": -4218052.96
         }
       },
@@ -448048,6 +449416,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0016-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -4872304.45
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-11-18",
+          "stored_balance": -4872304.45
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
           "business_day": "2029-11-19",
           "stored_balance": -5024115.8
         }
@@ -448081,6 +449465,22 @@
         "identity": {
           "account_id": "cust-0016-snb",
           "business_day": "2029-11-23",
+          "stored_balance": -5623883.55
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -5623883.55
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-11-25",
           "stored_balance": -5623883.55
         }
       },
@@ -448128,6 +449528,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0016-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -6379168.31
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-12-02",
+          "stored_balance": -6379168.31
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
           "business_day": "2029-12-03",
           "stored_balance": -6546547.06
         }
@@ -448161,6 +449577,22 @@
         "identity": {
           "account_id": "cust-0016-snb",
           "business_day": "2029-12-07",
+          "stored_balance": -7248085.3
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -7248085.3
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-12-09",
           "stored_balance": -7248085.3
         }
       },
@@ -448208,6 +449640,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0016-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -7996659.92
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-12-16",
+          "stored_balance": -7996659.92
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
           "business_day": "2029-12-17",
           "stored_balance": -8126348.31
         }
@@ -448241,6 +449689,22 @@
         "identity": {
           "account_id": "cust-0016-snb",
           "business_day": "2029-12-21",
+          "stored_balance": -8719878.14
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -8719878.14
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-12-23",
           "stored_balance": -8719878.14
         }
       },
@@ -448288,6 +449752,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0016-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -9571709.26
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
+          "business_day": "2029-12-30",
+          "stored_balance": -9571709.26
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0016-snb",
           "business_day": "2029-12-31",
           "stored_balance": -9773865.05
         }
@@ -448321,6 +449801,22 @@
         "identity": {
           "account_id": "cust-0017-snb",
           "business_day": "2029-10-05",
+          "stored_balance": -487544.35
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -487544.35
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-10-07",
           "stored_balance": -487544.35
         }
       },
@@ -448368,6 +449864,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0017-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -1422260.48
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-10-14",
+          "stored_balance": -1422260.48
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
           "business_day": "2029-10-15",
           "stored_balance": -1553635.87
         }
@@ -448401,6 +449913,22 @@
         "identity": {
           "account_id": "cust-0017-snb",
           "business_day": "2029-10-19",
+          "stored_balance": -2168184.86
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -2168184.86
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-10-21",
           "stored_balance": -2168184.86
         }
       },
@@ -448448,6 +449976,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0017-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -3027883.11
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-10-28",
+          "stored_balance": -3027883.11
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
           "business_day": "2029-10-29",
           "stored_balance": -3114230.93
         }
@@ -448481,6 +450025,22 @@
         "identity": {
           "account_id": "cust-0017-snb",
           "business_day": "2029-11-02",
+          "stored_balance": -3736917.51
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -3736917.51
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-11-04",
           "stored_balance": -3736917.51
         }
       },
@@ -448528,6 +450088,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0017-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -4630028.39
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-11-11",
+          "stored_balance": -4630028.39
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
           "business_day": "2029-11-12",
           "stored_balance": -4724888.83
         }
@@ -448561,6 +450137,22 @@
         "identity": {
           "account_id": "cust-0017-snb",
           "business_day": "2029-11-16",
+          "stored_balance": -5239226.64
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -5239226.64
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-11-18",
           "stored_balance": -5239226.64
         }
       },
@@ -448608,6 +450200,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0017-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -5944462.05
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-11-25",
+          "stored_balance": -5944462.05
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
           "business_day": "2029-11-26",
           "stored_balance": -6059779.9
         }
@@ -448641,6 +450249,22 @@
         "identity": {
           "account_id": "cust-0017-snb",
           "business_day": "2029-11-30",
+          "stored_balance": -6621083.19
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -6621083.19
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-12-02",
           "stored_balance": -6621083.19
         }
       },
@@ -448688,6 +450312,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0017-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -7307758.72
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-12-09",
+          "stored_balance": -7307758.72
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
           "business_day": "2029-12-10",
           "stored_balance": -7424732.1
         }
@@ -448721,6 +450361,22 @@
         "identity": {
           "account_id": "cust-0017-snb",
           "business_day": "2029-12-14",
+          "stored_balance": -8204566.73
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -8204566.73
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-12-16",
           "stored_balance": -8204566.73
         }
       },
@@ -448768,6 +450424,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0017-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -8716083.42
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-12-23",
+          "stored_balance": -8716083.42
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
           "business_day": "2029-12-24",
           "stored_balance": -8910516.43
         }
@@ -448808,6 +450480,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0017-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -9380438.36
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
+          "business_day": "2029-12-30",
+          "stored_balance": -9380438.36
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0017-snb",
           "business_day": "2029-12-31",
           "stored_balance": -9503137.54
         }
@@ -448833,6 +450521,22 @@
         "identity": {
           "account_id": "cust-0018-snb",
           "business_day": "2029-10-05",
+          "stored_balance": -100299.9
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -100299.9
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-10-07",
           "stored_balance": -100299.9
         }
       },
@@ -448880,6 +450584,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0018-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -709862.47
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-10-14",
+          "stored_balance": -709862.47
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
           "business_day": "2029-10-15",
           "stored_balance": -861214.83
         }
@@ -448913,6 +450633,22 @@
         "identity": {
           "account_id": "cust-0018-snb",
           "business_day": "2029-10-19",
+          "stored_balance": -1547809.39
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -1547809.39
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-10-21",
           "stored_balance": -1547809.39
         }
       },
@@ -448960,6 +450696,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0018-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -2449952.67
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-10-28",
+          "stored_balance": -2449952.67
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
           "business_day": "2029-10-29",
           "stored_balance": -2580478.57
         }
@@ -448993,6 +450745,22 @@
         "identity": {
           "account_id": "cust-0018-snb",
           "business_day": "2029-11-02",
+          "stored_balance": -3020377.28
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -3020377.28
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-11-04",
           "stored_balance": -3020377.28
         }
       },
@@ -449040,6 +450808,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0018-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -3738593.3
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-11-11",
+          "stored_balance": -3738593.3
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
           "business_day": "2029-11-12",
           "stored_balance": -3849897.68
         }
@@ -449073,6 +450857,22 @@
         "identity": {
           "account_id": "cust-0018-snb",
           "business_day": "2029-11-16",
+          "stored_balance": -4304824.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -4304824.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-11-18",
           "stored_balance": -4304824.38
         }
       },
@@ -449120,6 +450920,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0018-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -4932206.81
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-11-25",
+          "stored_balance": -4932206.81
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
           "business_day": "2029-11-26",
           "stored_balance": -5147907.11
         }
@@ -449153,6 +450969,22 @@
         "identity": {
           "account_id": "cust-0018-snb",
           "business_day": "2029-11-30",
+          "stored_balance": -5682186.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -5682186.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-12-02",
           "stored_balance": -5682186.96
         }
       },
@@ -449200,6 +451032,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0018-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -6441211.22
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-12-09",
+          "stored_balance": -6441211.22
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
           "business_day": "2029-12-10",
           "stored_balance": -6590131.17
         }
@@ -449233,6 +451081,22 @@
         "identity": {
           "account_id": "cust-0018-snb",
           "business_day": "2029-12-14",
+          "stored_balance": -7293788.79
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -7293788.79
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-12-16",
           "stored_balance": -7293788.79
         }
       },
@@ -449280,6 +451144,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0018-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -8031168.5
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-12-23",
+          "stored_balance": -8031168.5
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
           "business_day": "2029-12-24",
           "stored_balance": -8188049.5
         }
@@ -449313,6 +451193,22 @@
         "identity": {
           "account_id": "cust-0018-snb",
           "business_day": "2029-12-28",
+          "stored_balance": -8692322.98
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -8692322.98
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0018-snb",
+          "business_day": "2029-12-30",
           "stored_balance": -8692322.98
         }
       },
@@ -449360,6 +451256,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0019-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -536274.67
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-10-07",
+          "stored_balance": -536274.67
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
           "business_day": "2029-10-08",
           "stored_balance": -563709.19
         }
@@ -449393,6 +451305,22 @@
         "identity": {
           "account_id": "cust-0019-snb",
           "business_day": "2029-10-12",
+          "stored_balance": -951692.34
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -951692.34
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-10-14",
           "stored_balance": -951692.34
         }
       },
@@ -449440,6 +451368,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0019-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -1939016.23
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-10-21",
+          "stored_balance": -1939016.23
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
           "business_day": "2029-10-22",
           "stored_balance": -2057873.64
         }
@@ -449473,6 +451417,22 @@
         "identity": {
           "account_id": "cust-0019-snb",
           "business_day": "2029-10-26",
+          "stored_balance": -2714315.27
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -2714315.27
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-10-28",
           "stored_balance": -2714315.27
         }
       },
@@ -449520,6 +451480,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0019-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -3440664.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-11-04",
+          "stored_balance": -3440664.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
           "business_day": "2029-11-05",
           "stored_balance": -3555598.82
         }
@@ -449553,6 +451529,22 @@
         "identity": {
           "account_id": "cust-0019-snb",
           "business_day": "2029-11-09",
+          "stored_balance": -4090316.29
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -4090316.29
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-11-11",
           "stored_balance": -4090316.29
         }
       },
@@ -449600,6 +451592,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0019-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -4948602.86
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-11-18",
+          "stored_balance": -4948602.86
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
           "business_day": "2029-11-19",
           "stored_balance": -5142516.97
         }
@@ -449633,6 +451641,22 @@
         "identity": {
           "account_id": "cust-0019-snb",
           "business_day": "2029-11-23",
+          "stored_balance": -5659068.11
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -5659068.11
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-11-25",
           "stored_balance": -5659068.11
         }
       },
@@ -449680,6 +451704,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0019-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -6468492.46
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-12-02",
+          "stored_balance": -6468492.46
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
           "business_day": "2029-12-03",
           "stored_balance": -6638380.36
         }
@@ -449713,6 +451753,22 @@
         "identity": {
           "account_id": "cust-0019-snb",
           "business_day": "2029-12-07",
+          "stored_balance": -7168323.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -7168323.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-12-09",
           "stored_balance": -7168323.38
         }
       },
@@ -449760,6 +451816,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0019-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -7805637.63
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-12-16",
+          "stored_balance": -7805637.63
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
           "business_day": "2029-12-17",
           "stored_balance": -7882528.33
         }
@@ -449793,6 +451865,22 @@
         "identity": {
           "account_id": "cust-0019-snb",
           "business_day": "2029-12-21",
+          "stored_balance": -8461098.82
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -8461098.82
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-12-23",
           "stored_balance": -8461098.82
         }
       },
@@ -449840,6 +451928,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0019-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -9118130.05
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
+          "business_day": "2029-12-30",
+          "stored_balance": -9118130.05
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0019-snb",
           "business_day": "2029-12-31",
           "stored_balance": -9198162.94
         }
@@ -449873,6 +451977,22 @@
         "identity": {
           "account_id": "cust-0020-snb",
           "business_day": "2029-10-05",
+          "stored_balance": -439301.55
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -439301.55
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-10-07",
           "stored_balance": -439301.55
         }
       },
@@ -449920,6 +452040,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0020-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -1259808.37
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-10-14",
+          "stored_balance": -1259808.37
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
           "business_day": "2029-10-15",
           "stored_balance": -1383070.53
         }
@@ -449953,6 +452089,22 @@
         "identity": {
           "account_id": "cust-0020-snb",
           "business_day": "2029-10-19",
+          "stored_balance": -2033357.68
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -2033357.68
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-10-21",
           "stored_balance": -2033357.68
         }
       },
@@ -450000,6 +452152,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0020-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -2590176.3
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-10-28",
+          "stored_balance": -2590176.3
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
           "business_day": "2029-10-29",
           "stored_balance": -2854670.58
         }
@@ -450033,6 +452201,22 @@
         "identity": {
           "account_id": "cust-0020-snb",
           "business_day": "2029-11-02",
+          "stored_balance": -3365624.18
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -3365624.18
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-11-04",
           "stored_balance": -3365624.18
         }
       },
@@ -450080,6 +452264,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0020-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -3899233.18
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-11-11",
+          "stored_balance": -3899233.18
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
           "business_day": "2029-11-12",
           "stored_balance": -4086865.3
         }
@@ -450113,6 +452313,22 @@
         "identity": {
           "account_id": "cust-0020-snb",
           "business_day": "2029-11-16",
+          "stored_balance": -5061789.87
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -5061789.87
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-11-18",
           "stored_balance": -5061789.87
         }
       },
@@ -450160,6 +452376,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0020-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -5825216.07
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-11-25",
+          "stored_balance": -5825216.07
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
           "business_day": "2029-11-26",
           "stored_balance": -6063724.45
         }
@@ -450193,6 +452425,22 @@
         "identity": {
           "account_id": "cust-0020-snb",
           "business_day": "2029-11-30",
+          "stored_balance": -6558657.78
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -6558657.78
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-12-02",
           "stored_balance": -6558657.78
         }
       },
@@ -450240,6 +452488,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0020-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -7155577.49
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-12-09",
+          "stored_balance": -7155577.49
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
           "business_day": "2029-12-10",
           "stored_balance": -7256879.7
         }
@@ -450273,6 +452537,22 @@
         "identity": {
           "account_id": "cust-0020-snb",
           "business_day": "2029-12-14",
+          "stored_balance": -7723303.97
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -7723303.97
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-12-16",
           "stored_balance": -7723303.97
         }
       },
@@ -450320,6 +452600,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0020-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -8343652.66
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-12-23",
+          "stored_balance": -8343652.66
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
           "business_day": "2029-12-24",
           "stored_balance": -8444175.37
         }
@@ -450360,6 +452656,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0020-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -8932408.07
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
+          "business_day": "2029-12-30",
+          "stored_balance": -8932408.07
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0020-snb",
           "business_day": "2029-12-31",
           "stored_balance": -9051659.91
         }
@@ -450385,6 +452697,22 @@
         "identity": {
           "account_id": "cust-0021-snb",
           "business_day": "2029-10-05",
+          "stored_balance": -289791.86
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -289791.86
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-10-07",
           "stored_balance": -289791.86
         }
       },
@@ -450432,6 +452760,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0021-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -1042020.92
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-10-14",
+          "stored_balance": -1042020.92
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
           "business_day": "2029-10-15",
           "stored_balance": -1138329.32
         }
@@ -450465,6 +452809,22 @@
         "identity": {
           "account_id": "cust-0021-snb",
           "business_day": "2029-10-19",
+          "stored_balance": -1582493.53
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -1582493.53
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-10-21",
           "stored_balance": -1582493.53
         }
       },
@@ -450512,6 +452872,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0021-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -2505542.4
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-10-28",
+          "stored_balance": -2505542.4
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
           "business_day": "2029-10-29",
           "stored_balance": -2676688.84
         }
@@ -450545,6 +452921,22 @@
         "identity": {
           "account_id": "cust-0021-snb",
           "business_day": "2029-11-02",
+          "stored_balance": -3223636.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -3223636.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-11-04",
           "stored_balance": -3223636.96
         }
       },
@@ -450592,6 +452984,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0021-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -4028256.66
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-11-11",
+          "stored_balance": -4028256.66
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
           "business_day": "2029-11-12",
           "stored_balance": -4115559.57
         }
@@ -450625,6 +453033,22 @@
         "identity": {
           "account_id": "cust-0021-snb",
           "business_day": "2029-11-16",
+          "stored_balance": -4676010.48
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -4676010.48
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-11-18",
           "stored_balance": -4676010.48
         }
       },
@@ -450672,6 +453096,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0021-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -5399751.31
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-11-25",
+          "stored_balance": -5399751.31
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
           "business_day": "2029-11-26",
           "stored_balance": -5523551.74
         }
@@ -450705,6 +453145,22 @@
         "identity": {
           "account_id": "cust-0021-snb",
           "business_day": "2029-11-30",
+          "stored_balance": -5938752.98
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -5938752.98
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-12-02",
           "stored_balance": -5938752.98
         }
       },
@@ -450752,6 +453208,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0021-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -6512472.4
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-12-09",
+          "stored_balance": -6512472.4
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
           "business_day": "2029-12-10",
           "stored_balance": -6638038.47
         }
@@ -450785,6 +453257,22 @@
         "identity": {
           "account_id": "cust-0021-snb",
           "business_day": "2029-12-14",
+          "stored_balance": -7034686.1
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -7034686.1
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-12-16",
           "stored_balance": -7034686.1
         }
       },
@@ -450832,6 +453320,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0021-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -7717121.01
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-12-23",
+          "stored_balance": -7717121.01
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
           "business_day": "2029-12-24",
           "stored_balance": -7782353.01
         }
@@ -450865,6 +453369,22 @@
         "identity": {
           "account_id": "cust-0021-snb",
           "business_day": "2029-12-28",
+          "stored_balance": -8684142.17
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -8684142.17
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0021-snb",
+          "business_day": "2029-12-30",
           "stored_balance": -8684142.17
         }
       },
@@ -450912,6 +453432,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0022-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -490603.21
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-10-07",
+          "stored_balance": -490603.21
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
           "business_day": "2029-10-08",
           "stored_balance": -568730.6
         }
@@ -450945,6 +453481,22 @@
         "identity": {
           "account_id": "cust-0022-snb",
           "business_day": "2029-10-12",
+          "stored_balance": -1473939.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -1473939.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-10-14",
           "stored_balance": -1473939.85
         }
       },
@@ -450992,6 +453544,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0022-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -2335147.53
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-10-21",
+          "stored_balance": -2335147.53
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
           "business_day": "2029-10-22",
           "stored_balance": -2481248.95
         }
@@ -451025,6 +453593,22 @@
         "identity": {
           "account_id": "cust-0022-snb",
           "business_day": "2029-10-26",
+          "stored_balance": -3162070.55
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -3162070.55
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-10-28",
           "stored_balance": -3162070.55
         }
       },
@@ -451072,6 +453656,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0022-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -3817578.08
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-11-04",
+          "stored_balance": -3817578.08
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
           "business_day": "2029-11-05",
           "stored_balance": -3990454.45
         }
@@ -451105,6 +453705,22 @@
         "identity": {
           "account_id": "cust-0022-snb",
           "business_day": "2029-11-09",
+          "stored_balance": -4379004.2
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -4379004.2
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-11-11",
           "stored_balance": -4379004.2
         }
       },
@@ -451152,6 +453768,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0022-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -5057051.32
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-11-18",
+          "stored_balance": -5057051.32
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
           "business_day": "2029-11-19",
           "stored_balance": -5209532.64
         }
@@ -451185,6 +453817,22 @@
         "identity": {
           "account_id": "cust-0022-snb",
           "business_day": "2029-11-23",
+          "stored_balance": -5671628.58
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -5671628.58
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-11-25",
           "stored_balance": -5671628.58
         }
       },
@@ -451232,6 +453880,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0022-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -6574797.99
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-12-02",
+          "stored_balance": -6574797.99
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
           "business_day": "2029-12-03",
           "stored_balance": -6830826.93
         }
@@ -451265,6 +453929,22 @@
         "identity": {
           "account_id": "cust-0022-snb",
           "business_day": "2029-12-07",
+          "stored_balance": -7412326.21
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -7412326.21
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-12-09",
           "stored_balance": -7412326.21
         }
       },
@@ -451312,6 +453992,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0022-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -7917594.28
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-12-16",
+          "stored_balance": -7917594.28
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
           "business_day": "2029-12-17",
           "stored_balance": -8064136.07
         }
@@ -451345,6 +454041,22 @@
         "identity": {
           "account_id": "cust-0022-snb",
           "business_day": "2029-12-21",
+          "stored_balance": -8668808.1
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -8668808.1
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-12-23",
           "stored_balance": -8668808.1
         }
       },
@@ -451392,6 +454104,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0022-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -9234752.78
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
+          "business_day": "2029-12-30",
+          "stored_balance": -9234752.78
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0022-snb",
           "business_day": "2029-12-31",
           "stored_balance": -9322607.49
         }
@@ -451417,6 +454145,22 @@
         "identity": {
           "account_id": "cust-0023-snb",
           "business_day": "2029-10-05",
+          "stored_balance": -245606.62
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -245606.62
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-10-07",
           "stored_balance": -245606.62
         }
       },
@@ -451464,6 +454208,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0023-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -1081814.35
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-10-14",
+          "stored_balance": -1081814.35
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
           "business_day": "2029-10-15",
           "stored_balance": -1220536.91
         }
@@ -451497,6 +454257,22 @@
         "identity": {
           "account_id": "cust-0023-snb",
           "business_day": "2029-10-19",
+          "stored_balance": -1811183.42
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -1811183.42
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-10-21",
           "stored_balance": -1811183.42
         }
       },
@@ -451544,6 +454320,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0023-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -2440061.7
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-10-28",
+          "stored_balance": -2440061.7
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
           "business_day": "2029-10-29",
           "stored_balance": -2637893.09
         }
@@ -451577,6 +454369,22 @@
         "identity": {
           "account_id": "cust-0023-snb",
           "business_day": "2029-11-02",
+          "stored_balance": -3166017.2
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -3166017.2
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-11-04",
           "stored_balance": -3166017.2
         }
       },
@@ -451624,6 +454432,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0023-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -3877329.84
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-11-11",
+          "stored_balance": -3877329.84
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
           "business_day": "2029-11-12",
           "stored_balance": -3981568.34
         }
@@ -451657,6 +454481,22 @@
         "identity": {
           "account_id": "cust-0023-snb",
           "business_day": "2029-11-16",
+          "stored_balance": -4453789.92
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -4453789.92
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-11-18",
           "stored_balance": -4453789.92
         }
       },
@@ -451704,6 +454544,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0023-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -5284981.45
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-11-25",
+          "stored_balance": -5284981.45
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
           "business_day": "2029-11-26",
           "stored_balance": -5469260.29
         }
@@ -451737,6 +454593,22 @@
         "identity": {
           "account_id": "cust-0023-snb",
           "business_day": "2029-11-30",
+          "stored_balance": -6143129.63
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -6143129.63
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-12-02",
           "stored_balance": -6143129.63
         }
       },
@@ -451784,6 +454656,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0023-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -7187028.66
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-12-09",
+          "stored_balance": -7187028.66
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
           "business_day": "2029-12-10",
           "stored_balance": -7215388.28
         }
@@ -451817,6 +454705,22 @@
         "identity": {
           "account_id": "cust-0023-snb",
           "business_day": "2029-12-14",
+          "stored_balance": -7806996.42
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -7806996.42
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-12-16",
           "stored_balance": -7806996.42
         }
       },
@@ -451864,6 +454768,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0023-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -8371610.17
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-12-23",
+          "stored_balance": -8371610.17
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
           "business_day": "2029-12-24",
           "stored_balance": -8454475.35
         }
@@ -451897,6 +454817,22 @@
         "identity": {
           "account_id": "cust-0023-snb",
           "business_day": "2029-12-28",
+          "stored_balance": -8862932.23
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -8862932.23
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0023-snb",
+          "business_day": "2029-12-30",
           "stored_balance": -8862932.23
         }
       },
@@ -451944,6 +454880,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0024-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -369825.97
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-10-07",
+          "stored_balance": -369825.97
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
           "business_day": "2029-10-08",
           "stored_balance": -487324.6
         }
@@ -451977,6 +454929,22 @@
         "identity": {
           "account_id": "cust-0024-snb",
           "business_day": "2029-10-12",
+          "stored_balance": -1040133.81
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -1040133.81
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-10-14",
           "stored_balance": -1040133.81
         }
       },
@@ -452024,6 +454992,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0024-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -1706533.14
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-10-21",
+          "stored_balance": -1706533.14
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
           "business_day": "2029-10-22",
           "stored_balance": -1843041.96
         }
@@ -452057,6 +455041,22 @@
         "identity": {
           "account_id": "cust-0024-snb",
           "business_day": "2029-10-26",
+          "stored_balance": -2383133.69
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -2383133.69
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-10-28",
           "stored_balance": -2383133.69
         }
       },
@@ -452104,6 +455104,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0024-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -3254621.03
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-11-04",
+          "stored_balance": -3254621.03
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
           "business_day": "2029-11-05",
           "stored_balance": -3384494.15
         }
@@ -452137,6 +455153,22 @@
         "identity": {
           "account_id": "cust-0024-snb",
           "business_day": "2029-11-09",
+          "stored_balance": -3872505.29
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -3872505.29
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-11-11",
           "stored_balance": -3872505.29
         }
       },
@@ -452184,6 +455216,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0024-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -4466443.51
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-11-18",
+          "stored_balance": -4466443.51
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
           "business_day": "2029-11-19",
           "stored_balance": -4565877.53
         }
@@ -452217,6 +455265,22 @@
         "identity": {
           "account_id": "cust-0024-snb",
           "business_day": "2029-11-23",
+          "stored_balance": -5105896.59
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -5105896.59
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-11-25",
           "stored_balance": -5105896.59
         }
       },
@@ -452264,6 +455328,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0024-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -5804834.52
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-12-02",
+          "stored_balance": -5804834.52
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
           "business_day": "2029-12-03",
           "stored_balance": -5960996.81
         }
@@ -452297,6 +455377,22 @@
         "identity": {
           "account_id": "cust-0024-snb",
           "business_day": "2029-12-07",
+          "stored_balance": -6329231.58
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -6329231.58
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-12-09",
           "stored_balance": -6329231.58
         }
       },
@@ -452344,6 +455440,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0024-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -7101040.14
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-12-16",
+          "stored_balance": -7101040.14
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
           "business_day": "2029-12-17",
           "stored_balance": -7284988.31
         }
@@ -452377,6 +455489,22 @@
         "identity": {
           "account_id": "cust-0024-snb",
           "business_day": "2029-12-21",
+          "stored_balance": -8013086.89
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -8013086.89
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-12-23",
           "stored_balance": -8013086.89
         }
       },
@@ -452424,6 +455552,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0024-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -8689678.2
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
+          "business_day": "2029-12-30",
+          "stored_balance": -8689678.2
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0024-snb",
           "business_day": "2029-12-31",
           "stored_balance": -8802000.43
         }
@@ -452449,6 +455593,22 @@
         "identity": {
           "account_id": "cust-0025-snb",
           "business_day": "2029-10-05",
+          "stored_balance": -173874.05
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -173874.05
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-10-07",
           "stored_balance": -173874.05
         }
       },
@@ -452496,6 +455656,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0025-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -823360.5
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-10-14",
+          "stored_balance": -823360.5
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
           "business_day": "2029-10-15",
           "stored_balance": -938022.31
         }
@@ -452529,6 +455705,22 @@
         "identity": {
           "account_id": "cust-0025-snb",
           "business_day": "2029-10-19",
+          "stored_balance": -1507629.17
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -1507629.17
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-10-21",
           "stored_balance": -1507629.17
         }
       },
@@ -452576,6 +455768,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0025-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -2112001.8
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-10-28",
+          "stored_balance": -2112001.8
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
           "business_day": "2029-10-29",
           "stored_balance": -2176979.72
         }
@@ -452609,6 +455817,22 @@
         "identity": {
           "account_id": "cust-0025-snb",
           "business_day": "2029-11-02",
+          "stored_balance": -2909779.4
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -2909779.4
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-11-04",
           "stored_balance": -2909779.4
         }
       },
@@ -452656,6 +455880,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0025-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -3495017.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-11-11",
+          "stored_balance": -3495017.85
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
           "business_day": "2029-11-12",
           "stored_balance": -3651943.54
         }
@@ -452689,6 +455929,22 @@
         "identity": {
           "account_id": "cust-0025-snb",
           "business_day": "2029-11-16",
+          "stored_balance": -4201482.77
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -4201482.77
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-11-18",
           "stored_balance": -4201482.77
         }
       },
@@ -452736,6 +455992,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0025-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -4860909.67
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-11-25",
+          "stored_balance": -4860909.67
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
           "business_day": "2029-11-26",
           "stored_balance": -4976472.8
         }
@@ -452769,6 +456041,22 @@
         "identity": {
           "account_id": "cust-0025-snb",
           "business_day": "2029-11-30",
+          "stored_balance": -5632834.87
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -5632834.87
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-12-02",
           "stored_balance": -5632834.87
         }
       },
@@ -452816,6 +456104,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0025-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -6447585.03
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-12-09",
+          "stored_balance": -6447585.03
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
           "business_day": "2029-12-10",
           "stored_balance": -6482819.3
         }
@@ -452849,6 +456153,22 @@
         "identity": {
           "account_id": "cust-0025-snb",
           "business_day": "2029-12-14",
+          "stored_balance": -6881129.26
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -6881129.26
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-12-16",
           "stored_balance": -6881129.26
         }
       },
@@ -452896,6 +456216,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0025-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -7426228.9
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-12-23",
+          "stored_balance": -7426228.9
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
           "business_day": "2029-12-24",
           "stored_balance": -7696358.67
         }
@@ -452936,6 +456272,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0025-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -8274776.16
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
+          "business_day": "2029-12-30",
+          "stored_balance": -8274776.16
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0025-snb",
           "business_day": "2029-12-31",
           "stored_balance": -8374333.83
         }
@@ -452961,6 +456313,22 @@
         "identity": {
           "account_id": "cust-0026-snb",
           "business_day": "2029-10-05",
+          "stored_balance": -350802.34
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -350802.34
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-10-07",
           "stored_balance": -350802.34
         }
       },
@@ -453008,6 +456376,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0026-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -973780.24
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-10-14",
+          "stored_balance": -973780.24
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
           "business_day": "2029-10-15",
           "stored_balance": -1130672.33
         }
@@ -453041,6 +456425,22 @@
         "identity": {
           "account_id": "cust-0026-snb",
           "business_day": "2029-10-19",
+          "stored_balance": -1698568.95
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -1698568.95
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-10-21",
           "stored_balance": -1698568.95
         }
       },
@@ -453088,6 +456488,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0026-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -2343296.16
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-10-28",
+          "stored_balance": -2343296.16
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
           "business_day": "2029-10-29",
           "stored_balance": -2492640.35
         }
@@ -453121,6 +456537,22 @@
         "identity": {
           "account_id": "cust-0026-snb",
           "business_day": "2029-11-02",
+          "stored_balance": -3061788.47
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -3061788.47
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-11-04",
           "stored_balance": -3061788.47
         }
       },
@@ -453168,6 +456600,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0026-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -3798673.31
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-11-11",
+          "stored_balance": -3798673.31
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
           "business_day": "2029-11-12",
           "stored_balance": -3930719.4
         }
@@ -453201,6 +456649,22 @@
         "identity": {
           "account_id": "cust-0026-snb",
           "business_day": "2029-11-16",
+          "stored_balance": -4487830.9
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -4487830.9
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-11-18",
           "stored_balance": -4487830.9
         }
       },
@@ -453248,6 +456712,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0026-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -5015769.3
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-11-25",
+          "stored_balance": -5015769.3
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
           "business_day": "2029-11-26",
           "stored_balance": -5082380.44
         }
@@ -453281,6 +456761,22 @@
         "identity": {
           "account_id": "cust-0026-snb",
           "business_day": "2029-11-30",
+          "stored_balance": -5809753.36
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -5809753.36
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-12-02",
           "stored_balance": -5809753.36
         }
       },
@@ -453328,6 +456824,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0026-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -6504015.49
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-12-09",
+          "stored_balance": -6504015.49
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
           "business_day": "2029-12-10",
           "stored_balance": -6587916.6
         }
@@ -453361,6 +456873,22 @@
         "identity": {
           "account_id": "cust-0026-snb",
           "business_day": "2029-12-14",
+          "stored_balance": -7175428.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -7175428.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-12-16",
           "stored_balance": -7175428.33
         }
       },
@@ -453408,6 +456936,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0026-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -7957815.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-12-23",
+          "stored_balance": -7957815.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
           "business_day": "2029-12-24",
           "stored_balance": -8193335.3
         }
@@ -453441,6 +456985,22 @@
         "identity": {
           "account_id": "cust-0026-snb",
           "business_day": "2029-12-28",
+          "stored_balance": -8872629.2
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -8872629.2
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0026-snb",
+          "business_day": "2029-12-30",
           "stored_balance": -8872629.2
         }
       },
@@ -453488,6 +457048,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0027-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -280053.71
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-10-07",
+          "stored_balance": -280053.71
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
           "business_day": "2029-10-08",
           "stored_balance": -441277.36
         }
@@ -453521,6 +457097,22 @@
         "identity": {
           "account_id": "cust-0027-snb",
           "business_day": "2029-10-12",
+          "stored_balance": -909053.76
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -909053.76
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-10-14",
           "stored_balance": -909053.76
         }
       },
@@ -453568,6 +457160,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0027-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -1713029.28
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-10-21",
+          "stored_balance": -1713029.28
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
           "business_day": "2029-10-22",
           "stored_balance": -1877235.11
         }
@@ -453601,6 +457209,22 @@
         "identity": {
           "account_id": "cust-0027-snb",
           "business_day": "2029-10-26",
+          "stored_balance": -2600877.8
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -2600877.8
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-10-28",
           "stored_balance": -2600877.8
         }
       },
@@ -453648,6 +457272,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0027-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -3312206.26
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-11-04",
+          "stored_balance": -3312206.26
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
           "business_day": "2029-11-05",
           "stored_balance": -3465089.08
         }
@@ -453681,6 +457321,22 @@
         "identity": {
           "account_id": "cust-0027-snb",
           "business_day": "2029-11-09",
+          "stored_balance": -3863657.83
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -3863657.83
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-11-11",
           "stored_balance": -3863657.83
         }
       },
@@ -453728,6 +457384,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0027-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -4878937.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-11-18",
+          "stored_balance": -4878937.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
           "business_day": "2029-11-19",
           "stored_balance": -5212217.99
         }
@@ -453761,6 +457433,22 @@
         "identity": {
           "account_id": "cust-0027-snb",
           "business_day": "2029-11-23",
+          "stored_balance": -5582012.75
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -5582012.75
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-11-25",
           "stored_balance": -5582012.75
         }
       },
@@ -453808,6 +457496,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0027-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -6092554.09
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-12-02",
+          "stored_balance": -6092554.09
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
           "business_day": "2029-12-03",
           "stored_balance": -6225580.74
         }
@@ -453841,6 +457545,22 @@
         "identity": {
           "account_id": "cust-0027-snb",
           "business_day": "2029-12-07",
+          "stored_balance": -6732286.01
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -6732286.01
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-12-09",
           "stored_balance": -6732286.01
         }
       },
@@ -453888,6 +457608,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0027-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -7410615.35
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-12-16",
+          "stored_balance": -7410615.35
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
           "business_day": "2029-12-17",
           "stored_balance": -7451837.97
         }
@@ -453921,6 +457657,22 @@
         "identity": {
           "account_id": "cust-0027-snb",
           "business_day": "2029-12-21",
+          "stored_balance": -8031623.46
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -8031623.46
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-12-23",
           "stored_balance": -8031623.46
         }
       },
@@ -453968,6 +457720,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0027-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -8654842.55
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
+          "business_day": "2029-12-30",
+          "stored_balance": -8654842.55
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0027-snb",
           "business_day": "2029-12-31",
           "stored_balance": -8772235.91
         }
@@ -453993,6 +457761,22 @@
         "identity": {
           "account_id": "cust-0028-snb",
           "business_day": "2029-10-05",
+          "stored_balance": -188166.67
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -188166.67
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-10-07",
           "stored_balance": -188166.67
         }
       },
@@ -454040,6 +457824,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0028-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -698279.02
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-10-14",
+          "stored_balance": -698279.02
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
           "business_day": "2029-10-15",
           "stored_balance": -845466.71
         }
@@ -454073,6 +457873,22 @@
         "identity": {
           "account_id": "cust-0028-snb",
           "business_day": "2029-10-19",
+          "stored_balance": -1501089.22
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -1501089.22
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-10-21",
           "stored_balance": -1501089.22
         }
       },
@@ -454120,6 +457936,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0028-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -2134476.77
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-10-28",
+          "stored_balance": -2134476.77
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
           "business_day": "2029-10-29",
           "stored_balance": -2266750.71
         }
@@ -454153,6 +457985,22 @@
         "identity": {
           "account_id": "cust-0028-snb",
           "business_day": "2029-11-02",
+          "stored_balance": -2774190.91
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -2774190.91
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-11-04",
           "stored_balance": -2774190.91
         }
       },
@@ -454200,6 +458048,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0028-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -3368958.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-11-11",
+          "stored_balance": -3368958.96
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
           "business_day": "2029-11-12",
           "stored_balance": -3516658.26
         }
@@ -454233,6 +458097,22 @@
         "identity": {
           "account_id": "cust-0028-snb",
           "business_day": "2029-11-16",
+          "stored_balance": -4099677.08
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -4099677.08
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-11-18",
           "stored_balance": -4099677.08
         }
       },
@@ -454280,6 +458160,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0028-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -4885141.1
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-11-25",
+          "stored_balance": -4885141.1
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
           "business_day": "2029-11-26",
           "stored_balance": -5059217.62
         }
@@ -454313,6 +458209,22 @@
         "identity": {
           "account_id": "cust-0028-snb",
           "business_day": "2029-11-30",
+          "stored_balance": -5945167.42
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -5945167.42
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-12-02",
           "stored_balance": -5945167.42
         }
       },
@@ -454360,6 +458272,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0028-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -6673978.07
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-12-09",
+          "stored_balance": -6673978.07
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
           "business_day": "2029-12-10",
           "stored_balance": -6765697.5
         }
@@ -454393,6 +458321,22 @@
         "identity": {
           "account_id": "cust-0028-snb",
           "business_day": "2029-12-14",
+          "stored_balance": -7381031.26
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -7381031.26
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-12-16",
           "stored_balance": -7381031.26
         }
       },
@@ -454440,6 +458384,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0028-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -7955925.07
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-12-23",
+          "stored_balance": -7955925.07
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
           "business_day": "2029-12-24",
           "stored_balance": -8072612.5
         }
@@ -454473,6 +458433,22 @@
         "identity": {
           "account_id": "cust-0028-snb",
           "business_day": "2029-12-28",
+          "stored_balance": -8617571.09
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -8617571.09
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0028-snb",
+          "business_day": "2029-12-30",
           "stored_balance": -8617571.09
         }
       },
@@ -454520,6 +458496,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0029-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -518503.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-10-07",
+          "stored_balance": -518503.38
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
           "business_day": "2029-10-08",
           "stored_balance": -690738.53
         }
@@ -454553,6 +458545,22 @@
         "identity": {
           "account_id": "cust-0029-snb",
           "business_day": "2029-10-12",
+          "stored_balance": -1187868.6
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -1187868.6
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-10-14",
           "stored_balance": -1187868.6
         }
       },
@@ -454600,6 +458608,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0029-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -1891997.79
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-10-21",
+          "stored_balance": -1891997.79
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
           "business_day": "2029-10-22",
           "stored_balance": -2082123.26
         }
@@ -454633,6 +458657,22 @@
         "identity": {
           "account_id": "cust-0029-snb",
           "business_day": "2029-10-26",
+          "stored_balance": -2615146.67
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -2615146.67
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-10-28",
           "stored_balance": -2615146.67
         }
       },
@@ -454680,6 +458720,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0029-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -3429619.43
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-11-04",
+          "stored_balance": -3429619.43
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
           "business_day": "2029-11-05",
           "stored_balance": -3553654.5
         }
@@ -454713,6 +458769,22 @@
         "identity": {
           "account_id": "cust-0029-snb",
           "business_day": "2029-11-09",
+          "stored_balance": -4185114.82
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -4185114.82
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-11-11",
           "stored_balance": -4185114.82
         }
       },
@@ -454760,6 +458832,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0029-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -4826805.77
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-11-18",
+          "stored_balance": -4826805.77
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
           "business_day": "2029-11-19",
           "stored_balance": -4989626.8
         }
@@ -454793,6 +458881,22 @@
         "identity": {
           "account_id": "cust-0029-snb",
           "business_day": "2029-11-23",
+          "stored_balance": -5546351.76
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -5546351.76
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-11-25",
           "stored_balance": -5546351.76
         }
       },
@@ -454840,6 +458944,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0029-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -6270576.45
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-12-02",
+          "stored_balance": -6270576.45
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
           "business_day": "2029-12-03",
           "stored_balance": -6480430.44
         }
@@ -454873,6 +458993,22 @@
         "identity": {
           "account_id": "cust-0029-snb",
           "business_day": "2029-12-07",
+          "stored_balance": -7096651.23
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -7096651.23
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-12-09",
           "stored_balance": -7096651.23
         }
       },
@@ -454920,6 +459056,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0029-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -7673830.43
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-12-16",
+          "stored_balance": -7673830.43
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
           "business_day": "2029-12-17",
           "stored_balance": -7839182.22
         }
@@ -454953,6 +459105,22 @@
         "identity": {
           "account_id": "cust-0029-snb",
           "business_day": "2029-12-21",
+          "stored_balance": -8425222.26
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -8425222.26
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-12-23",
           "stored_balance": -8425222.26
         }
       },
@@ -455000,6 +459168,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0029-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -9239890.12
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
+          "business_day": "2029-12-30",
+          "stored_balance": -9239890.12
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0029-snb",
           "business_day": "2029-12-31",
           "stored_balance": -9363237.47
         }
@@ -455033,6 +459217,22 @@
         "identity": {
           "account_id": "cust-0030-snb",
           "business_day": "2029-10-05",
+          "stored_balance": -302126.07
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-10-06",
+          "stored_balance": -302126.07
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-10-07",
           "stored_balance": -302126.07
         }
       },
@@ -455080,6 +459280,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0030-snb",
+          "business_day": "2029-10-13",
+          "stored_balance": -825363.7
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-10-14",
+          "stored_balance": -825363.7
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
           "business_day": "2029-10-15",
           "stored_balance": -937932.53
         }
@@ -455113,6 +459329,22 @@
         "identity": {
           "account_id": "cust-0030-snb",
           "business_day": "2029-10-19",
+          "stored_balance": -1606542.72
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-10-20",
+          "stored_balance": -1606542.72
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-10-21",
           "stored_balance": -1606542.72
         }
       },
@@ -455160,6 +459392,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0030-snb",
+          "business_day": "2029-10-27",
+          "stored_balance": -2298971.93
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-10-28",
+          "stored_balance": -2298971.93
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
           "business_day": "2029-10-29",
           "stored_balance": -2384730.5
         }
@@ -455193,6 +459441,22 @@
         "identity": {
           "account_id": "cust-0030-snb",
           "business_day": "2029-11-02",
+          "stored_balance": -2807440.99
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-11-03",
+          "stored_balance": -2807440.99
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-11-04",
           "stored_balance": -2807440.99
         }
       },
@@ -455240,6 +459504,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0030-snb",
+          "business_day": "2029-11-10",
+          "stored_balance": -3498640.19
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-11-11",
+          "stored_balance": -3498640.19
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
           "business_day": "2029-11-12",
           "stored_balance": -3716978.06
         }
@@ -455273,6 +459553,22 @@
         "identity": {
           "account_id": "cust-0030-snb",
           "business_day": "2029-11-16",
+          "stored_balance": -4408923.63
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-11-17",
+          "stored_balance": -4408923.63
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-11-18",
           "stored_balance": -4408923.63
         }
       },
@@ -455320,6 +459616,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0030-snb",
+          "business_day": "2029-11-24",
+          "stored_balance": -5156648.47
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-11-25",
+          "stored_balance": -5156648.47
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
           "business_day": "2029-11-26",
           "stored_balance": -5365748.45
         }
@@ -455353,6 +459665,22 @@
         "identity": {
           "account_id": "cust-0030-snb",
           "business_day": "2029-11-30",
+          "stored_balance": -5865252.78
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-12-01",
+          "stored_balance": -5865252.78
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-12-02",
           "stored_balance": -5865252.78
         }
       },
@@ -455400,6 +459728,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0030-snb",
+          "business_day": "2029-12-08",
+          "stored_balance": -6423275.88
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-12-09",
+          "stored_balance": -6423275.88
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
           "business_day": "2029-12-10",
           "stored_balance": -6483099.91
         }
@@ -455433,6 +459777,22 @@
         "identity": {
           "account_id": "cust-0030-snb",
           "business_day": "2029-12-14",
+          "stored_balance": -6942457.23
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-12-15",
+          "stored_balance": -6942457.23
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-12-16",
           "stored_balance": -6942457.23
         }
       },
@@ -455480,6 +459840,22 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0030-snb",
+          "business_day": "2029-12-22",
+          "stored_balance": -7636281.76
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-12-23",
+          "stored_balance": -7636281.76
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
           "business_day": "2029-12-24",
           "stored_balance": -7814398.5
         }
@@ -455513,6 +459889,22 @@
         "identity": {
           "account_id": "cust-0030-snb",
           "business_day": "2029-12-28",
+          "stored_balance": -8497922.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-12-29",
+          "stored_balance": -8497922.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0030-snb",
+          "business_day": "2029-12-30",
           "stored_balance": -8497922.0
         }
       },

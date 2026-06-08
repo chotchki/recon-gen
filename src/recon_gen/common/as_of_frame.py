@@ -60,9 +60,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from recon_gen.common.intervals import DateInterval
+
+if TYPE_CHECKING:
+    from recon_gen.common.db import SyncConnection
 
 #: The canonical demo anchor — every locked seed + every locked-binding
 #: frame anchors here. Single source of truth post-BD.6
@@ -130,6 +133,50 @@ class AsOfFrame:
         return cls(as_of=today, window=window, seed=seed)
 
     @classmethod
+    def live_from_db(
+        cls,
+        conn: "SyncConnection",
+        prefix: str,
+        *,
+        window_days: int = 0,
+        seed: int | None = None,
+    ) -> "AsOfFrame":
+        """v13.6.1 fix #3 — data-derived production binding.
+
+        Anchor = ``MAX(business_day_start)`` over
+        ``<prefix>_current_daily_balances`` (the most recent emitted
+        day in the demo DB), falling back to ``date.today()`` when
+        the table is empty OR the query fails. Solves the
+        "operator opens dashboards before today's ETL load lands +
+        picker defaults to today + nothing emitted yet + dashboard
+        renders blank" UX. With the fix #2 spine widening, the
+        carried row would already exist; this gets the picker on
+        the latest-with-data day so the operator sees the most
+        useful default.
+
+        ``conn`` is the demo-DB connection (SyncConnection — any
+        of psycopg / oracledb / duckdb). ``prefix`` is the L2
+        instance's ``db_table_prefix``. Both required because
+        ``current_daily_balances`` is per-instance prefixed.
+
+        The locked-binding path is untouched: ``locked()`` /
+        ``live()`` keep their current shapes. This sibling is the
+        DB-aware variant; ``cfg.test_generator.as_of_frame()``
+        accepts a ``db_anchor`` override that funnels through here.
+        """
+        anchor = _query_max_balance_day(conn, prefix)
+        if anchor is None:
+            return cls.live(window_days=window_days, seed=seed)
+        window = (
+            DateInterval.single_day(anchor)
+            if window_days <= 0
+            else DateInterval.trailing_days_ending_today(
+                anchor, window_days + 1,
+            )
+        )
+        return cls(as_of=anchor, window=window, seed=seed)
+
+    @classmethod
     def for_audit(
         cls, today: date, *, lookback_days: int, seed: int | None = None,
     ) -> "AsOfFrame":
@@ -186,3 +233,46 @@ class AsOfFrame:
         epoch.
         """
         return self.window.contains(day)
+
+
+def _query_max_balance_day(
+    conn: "SyncConnection", prefix: str,
+) -> date | None:
+    """v13.6.1 fix #3 helper — query
+    ``SELECT MAX(business_day_start)::date FROM <prefix>_current_daily_balances``.
+
+    Returns the most recent emitted business day as a ``date``, or
+    ``None`` when the table is empty / the query fails. Best-effort
+    by design: a hung / closed DB connection should NOT crash the
+    dashboards' render path — falling back to wall-clock today is
+    the right safety net, surfaced by the caller via the
+    ``AsOfFrame.live()`` shape.
+    """
+    sql = (
+        f"SELECT MAX(business_day_start) "
+        f"FROM {prefix}_current_daily_balances "
+        f"WHERE account_scope = 'internal'"
+    )
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(sql)
+            row = cur.fetchone()
+        finally:
+            cur.close()
+    except Exception:  # noqa: BLE001 — defensive: a DB error here MUST NOT crash the dashboard render
+        return None
+    if row is None or row[0] is None:
+        return None
+    candidate = row[0]
+    # Drivers return either a date (PG / DuckDB native DATE) or a
+    # datetime (PG / DuckDB on TIMESTAMP columns, Oracle's DATE).
+    # Coerce to date — the field is conceptually a calendar day.
+    from datetime import datetime as _dt  # noqa: PLC0415
+    if isinstance(candidate, _dt):
+        return candidate.date()
+    if isinstance(candidate, date):
+        return candidate
+    # Defensive: an unexpected type means we shouldn't trust the
+    # data-derive result. Fall back to wall-clock via None.
+    return None
