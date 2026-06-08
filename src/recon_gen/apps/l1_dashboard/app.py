@@ -92,7 +92,6 @@ from recon_gen.common import rich_text as rt
 from recon_gen.common.config import Config
 from recon_gen.common.picker_datasets import (
     DS_ACCOUNT_ROLES,
-    DS_CHAIN_PARENTS,
     DS_RAILS,
 )
 from recon_gen.common.handbook.invariants import (
@@ -542,10 +541,10 @@ def _l1_datasets(
         DS_SUPERSESSION_TRANSACTIONS, DS_SUPERSESSION_DAILY_BALANCES,
         DS_L1_ACCOUNTS, DS_L1_DS_ACCOUNTS,
         DS_L1_DS_CONTROL_ACCOUNTS, DS_L1_TX_IDS, DS_L1_TX_FACETS,
-        # CQ.3.c — shared LinkedValues picker source datasets. L1 emits
-        # only the ones it BINDS (CR.x — drops Templates + MetadataKeys,
-        # which are L2FT's). Order matches build_all_l1_dashboard_datasets.
-        DS_RAILS, DS_ACCOUNT_ROLES, DS_CHAIN_PARENTS,
+        # CQ.3.c — shared LinkedValues picker source datasets. L1 binds
+        # only Rails + AccountRoles (Templates / MetadataKeys / ChainParents
+        # are L2FT-only). Order matches build_all_l1_dashboard_datasets.
+        DS_RAILS, DS_ACCOUNT_ROLES,
         _DS_APP_INFO_LIVENESS, _DS_APP_INFO_MATVIEWS,
     ]
     return {

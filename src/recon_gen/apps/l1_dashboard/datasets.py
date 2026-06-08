@@ -34,7 +34,6 @@ from recon_gen.common.models import (
 )
 from recon_gen.common.picker_datasets import (
     build_picker_account_roles_dataset,
-    build_picker_chain_parents_dataset,
     build_picker_rails_dataset,
 )
 from recon_gen.common.sheets.app_info import (
@@ -1868,14 +1867,12 @@ def build_all_l1_dashboard_datasets(
         # CQ.3.c — shared LinkedValues picker source datasets. L1 emits
         # only the ones it BINDS to a visual/filter — unbound datasets
         # never make it into the dashboard's DataSetIdentifierDeclarations
-        # and trip the structural test (CI failure on cf032797 / 70213648).
-        # DS_TEMPLATES + DS_METADATA_KEYS deliberately NOT emitted — L1
-        # has no Template or MetadataKey picker (those are L2FT's).
-        # AWS DataSetId de-dup still consolidates when both apps emit
-        # the same one.
+        # and trip the structural test (CI failure on cf032797 / 70213648
+        # / 3bad0844). L1 binds only Rails + AccountRoles pickers; Templates,
+        # MetadataKeys, and ChainParents are L2FT-only. AWS DataSetId de-dup
+        # still consolidates when both apps emit the same one.
         build_picker_rails_dataset(cfg),
         build_picker_account_roles_dataset(cfg),
-        build_picker_chain_parents_dataset(cfg),
         # M.4.4.5 — App Info ("i") sheet datasets, ALWAYS LAST.
         # M.4.4.7 — per-app segment so deploy <single-app> doesn't
         # delete-then-create another app's App Info dataset.

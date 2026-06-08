@@ -2278,3 +2278,36 @@ def test_y2g_drift_dropdowns_bridge_to_both_drift_datasets() -> None:
             DS_DRIFT, DS_LEDGER_DRIFT,
         )
         assert {DS_DRIFT, DS_LEDGER_DRIFT}.issubset(bridged_ds_ids)
+
+
+def test_l1_dataset_emit_matches_dashboard_declarations() -> None:
+    """Every dataset L1 emits (`App.datasets`) must appear in the dashboard's
+    `DataSetIdentifierDeclarations`. The qs_api structural test
+    (`tests/e2e/qs_api/test_l1_dashboard_structure.py::test_all_datasets_declared`)
+    enforces the same shape against a live deploy, but the unit-tier gate
+    catches it in ~3s instead of ~25min of CI burn.
+
+    Same bug shape has bitten three CI cycles in a row (CQ.5: Templates,
+    70213648: MetadataKeys, 3bad0844: ChainParents) — L1 imports a shared
+    picker dataset, registers it in `_l1_datasets`, but no visual binds
+    `datasets[KEY]`, so the dashboard's `DataSetIdentifierDeclarations`
+    never includes it. The fix is always the same: drop the unused import
+    + emit-list entry. This gate keeps the iteration loop cheap."""
+    app = build_l1_dashboard_app(_CFG)
+    declared = {ds.identifier for ds in app.datasets}
+    dash = app.emit_dashboard()
+    dash_json = dash.to_aws_json()
+    decls = {
+        d["Identifier"]
+        for d in dash_json["Definition"]["DataSetIdentifierDeclarations"]
+    }
+    extra = declared - decls
+    missing = decls - declared
+    assert not extra, (
+        f"L1 datasets emitted but never bound to a visual/filter: {sorted(extra)}. "
+        f"Drop them from build_all_l1_dashboard_datasets + _l1_datasets, "
+        f"or wire a visual that references datasets[KEY]."
+    )
+    assert not missing, (
+        f"L1 dashboard references datasets not in App.datasets: {sorted(missing)}"
+    )
