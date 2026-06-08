@@ -104,8 +104,74 @@ These were flagged as "open operator questions" in the synthesis output. Taking 
 | Cascade vs typeahead URL merge | Keep separate (cascade HTML route + typeahead JSON route) | Different consumers (HTMX vs Tom Select), different LIMIT semantics, different transports. Revisit after CQ.2.f if duplication shows. |
 | Multi-select picker UX | Merge-semantic re-pick (default Tom Select behavior) | Cheap re-pick of recently-seen values matches the existing UX; no `closeAfterSelect` flip. |
 | Seed-page ordering | Top-100 alphabetical | Default; revisit if operator wants "recently used" / "most active". |
-| Matview-direct fetcher variant | Defer until measured | Ship the wrap; only escalate if P95 > 150ms. |
+| Matview-direct fetcher variant | **In scope (CQ.2.g, operator-locked 2026-06-08)** | Ship matview-direct + wrap together so the 3 single-matview pickers (Daily Statement, Transfer, Account Network) get sub-10ms search from day one. DS_L1_ACCOUNTS's 3-way UNION stays on wrap until/unless we materialize its universe (backlog). |
 | Min-length gate | 2 chars (or empty for seed) | Single-letter against 50k accounts returns the LIMIT cap on the first letter, wasting the round-trip. |
+
+## Matview-direct path (CQ.2.g)
+
+Operator decision 2026-06-08: ship matview-direct in scope, don't defer to measurement. Per-picker the universe is one of:
+
+| Picker | Source dataset | Wrapped CustomSql | Matview-direct candidate |
+|---|---|---|---|
+| 7 wide L1 account pickers | `DS_L1_ACCOUNTS` | 3-way UNION ALL over `current_daily_balances + current_transactions + l1_exceptions` | **No** — universe is the UNION; needs a materialized union matview to go direct. Stays on wrap; backlog item to materialize. |
+| Daily Statement Account | `DS_L1_DS_ACCOUNTS` | DISTINCT over `<prefix>_current_daily_balances` | **Yes** — direct against `current_daily_balances`. |
+| Transfer (Transactions) | `DS_L1_TX_IDS` | DISTINCT `transfer_id` over `<prefix>_current_transactions` | **Yes** — direct against `current_transactions`. Audit names this the *worst* victim of the cap (`transfer_id` ≫ accounts at any scale). |
+| Account Network Anchor | `DS_INV_ANETWORK_ACCOUNTS` | DISTINCT over `<prefix>_inv_money_trail_edges` (GROUP BY) | **Yes** — direct against `inv_money_trail_edges`. |
+
+Shape: a typed `PickerMatviewHint` declared at `build_dataset` time. The 3 single-matview pickers get the hint; the search endpoint dispatches on hint presence and routes to the direct path. DS_L1_ACCOUNTS has no hint → wrap path.
+
+```python
+@dataclass(frozen=True)
+class PickerMatviewHint:
+    """Search the matview directly instead of wrapping the dataset's
+    CustomSql. Skips the planner's wrapped-subquery cost and lets
+    DISTINCT/ILIKE push to the storage layer."""
+    matview: str          # "<prefix>_current_daily_balances" — template-substituted at build time
+    select_expr: str      # the SAME expression the dataset's SELECT projects (e.g. account_display_expr(...))
+
+build_dataset(
+    ...,
+    picker_matview_hint=PickerMatviewHint(
+        matview=f"{prefix}_current_daily_balances",
+        select_expr=account_display_expr("account_name", "account_id"),
+    ),
+)
+```
+
+New SQL builder sibling:
+
+```python
+def account_picker_search_sql_matview(
+    matview: str, select_expr: str, *, dialect: Dialect, limit: int = 100,
+) -> tuple[str, tuple[str, ...]]:
+    """Direct against the matview — no wrap. Same WHERE/ESCAPE shape
+    as account_picker_search_sql; just bypasses the dataset CustomSql
+    so the planner can push DISTINCT + ILIKE all the way down."""
+    where = case_insensitive_substring_match(select_expr, "q", dialect)
+    limit_clause = (
+        "FETCH FIRST {n} ROWS ONLY".format(n=limit)
+        if dialect is Dialect.ORACLE else "LIMIT {n}".format(n=limit)
+    )
+    return (
+        f"SELECT DISTINCT {select_expr} AS opt FROM {matview} "
+        f"WHERE {select_expr} IS NOT NULL AND {where} "
+        f"ORDER BY 1 {limit_clause}",
+        ("q",),
+    )
+```
+
+Endpoint dispatch (server.py):
+
+```python
+hint = registry.picker_matview_hint(dataset_id)
+sql, binds = (
+    account_picker_search_sql_matview(hint.matview, hint.select_expr, dialect=cfg.dialect)
+    if hint is not None
+    else account_picker_search_sql(base_sql, column, dialect=cfg.dialect)
+)
+```
+
+Tests pin both paths: matview-direct vs wrap return identical option sets at every density. Perf gate: matview-direct P95 expected < 10ms; wrap P95 budget 150ms (PG/Oracle) / 50ms (DuckDB).
 
 ## Risks + mitigations
 
@@ -117,5 +183,5 @@ These were flagged as "open operator questions" in the synthesis output. Taking 
 
 ## Backlog spawned
 
-- **Matview-direct picker fetcher** (`account_picker_search_sql_matview(matview_name, col)` — skip the dataset-wrap subquery) — only escalate if measured P95 > 150ms.
+- **DS_L1_ACCOUNTS universe matview** — materialize the 3-way UNION ALL (`current_daily_balances + current_transactions + l1_exceptions`) as a dedicated picker-universe matview so the 7 wide L1 account pickers can use the matview-direct path. Currently they stay on the wrap path (since no single matview captures the UNION). Escalate if measured wrap P95 > 150ms on PG/Oracle at fleet scale.
 - **QS cardinality-threshold pinning** — post-CQ.4, verify whether sasquatch_pr's account count crosses the (undocumented) MUI Autocomplete threshold. Not a blocker; flag for CQ.5 verify.
