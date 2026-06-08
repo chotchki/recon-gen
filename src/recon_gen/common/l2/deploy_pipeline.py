@@ -36,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import shlex
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import AbstractAsyncContextManager, nullcontext
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import TYPE_CHECKING
@@ -158,11 +159,43 @@ async def step_1_etl_hook(
                 "line": line,
             })
 
-    await asyncio.gather(
-        _stream(proc.stdout, "stdout"),
-        _stream(proc.stderr, "stderr"),
-    )
-    rc = await proc.wait()
+    try:
+        await asyncio.gather(
+            _stream(proc.stdout, "stdout"),
+            _stream(proc.stderr, "stderr"),
+        )
+        rc = await proc.wait()
+    except asyncio.CancelledError:
+        # CO.x — operator cancelled (POST /etl/run/cancel) mid-
+        # subprocess. WITHOUT terminating the orphan subprocess
+        # explicitly, it keeps the DuckDB file lock; the surrounding
+        # released_for_subprocess bracket would then fail on reopen
+        # with `IO Error: Could not set lock on file`, leaving the
+        # pool closed indefinitely — every dashboard 500s until
+        # Studio restart. Terminate gently first (SIGTERM gives the
+        # ETL hook a chance to flush / close); fall back to a hard
+        # kill if it doesn't exit within a small grace window.
+        await _emit(dev_log, {
+            "event": "deploy:step1:cancelled_terminating_subprocess",
+            "pid": proc.pid,
+        })
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            pass  # already exited
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            await _emit(dev_log, {
+                "event": "deploy:step1:cancelled_killing_subprocess",
+                "pid": proc.pid,
+            })
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            await proc.wait()
+        raise
     await _emit(dev_log, {
         "event": "deploy:step1:done",
         "exit_code": rc,
@@ -820,6 +853,9 @@ async def run_deploy_pipeline(
     *,
     dev_log: DevLogWriter | None = None,
     overlays: "PipelineOverlays | None" = None,
+    subprocess_lock_bracket: (
+        Callable[[], AbstractAsyncContextManager[None]] | None
+    ) = None,
 ) -> DeploySummary:
     """Orchestrate the BS.4 4-step deploy pipeline (with the 3.5 derive
     sub-step). Order: wipe → etl_hook → generator → overlays → matviews → reload.
@@ -909,7 +945,32 @@ async def run_deploy_pipeline(
     # BS.4: wipe FIRST so etl_hook + generator write into clean state.
     tx_del, bal_del = await step_2_wipe(pipeline_cfg, instance, dev_log=_tee)
 
-    rc = await step_1_etl_hook(pipeline_cfg, dev_log=_tee)
+    # CO.x — release the dashboards' pool lock around step_1_etl_hook so
+    # the operator's cfg.etl_hook subprocess can acquire the DuckDB
+    # write lock. PG / Oracle pools don't need this (concurrent writers
+    # are fine on those engines); the caller passes None and the bracket
+    # no-ops via nullcontext. The pool's released_for_subprocess context
+    # manager holds its lifecycle lock across the whole window so
+    # concurrent /deploy + /training/reset handlers serialize through
+    # this bracket; the close drains in-flight cursors first; the reopen
+    # ALWAYS fires (even on subprocess failure or CancelledError) so the
+    # pool comes back online for the pipeline's remaining same-process
+    # steps (generator / matview refresh) and subsequent dashboards
+    # queries. Same-process connect_demo_db inside this process doesn't
+    # need the bracket — only the cross-process subprocess does.
+    bracketed = subprocess_lock_bracket is not None
+    try:
+        bracket: AbstractAsyncContextManager[None] = (
+            subprocess_lock_bracket() if subprocess_lock_bracket is not None
+            else nullcontext()
+        )
+        if bracketed:
+            await _emit(_tee, {"event": "deploy:step1:locks_bracket_enter"})
+        async with bracket:
+            rc = await step_1_etl_hook(pipeline_cfg, dev_log=_tee)
+    finally:
+        if bracketed:
+            await _emit(_tee, {"event": "deploy:step1:locks_bracket_exit"})
     if rc != 0:
         await _emit(_tee, {
             "event": "deploy:halt",

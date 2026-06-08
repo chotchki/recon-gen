@@ -41,6 +41,7 @@ import json
 import secrets
 from collections import OrderedDict
 from collections.abc import Callable, Mapping
+from contextlib import AbstractAsyncContextManager
 from dataclasses import replace as dataclass_replace
 from html import escape
 from pathlib import Path
@@ -187,6 +188,39 @@ _WASM_GRAPHVIZ_DIR = (
     Path(__file__).parent.parent.parent / "docs" / "stylesheets"
     / "wasm-graphviz"
 )
+
+
+def _duckdb_pool_subprocess_bracket(
+    db_pool: AsyncConnectionPool | None,
+) -> Callable[[], AbstractAsyncContextManager[None]] | None:
+    """CO.x — bind ``run_deploy_pipeline``'s
+    ``subprocess_lock_bracket`` callback to the pool's
+    ``released_for_subprocess`` async context manager IFF this is a
+    DuckDB pool.
+
+    PG / Oracle pools support concurrent writers, so the bracket
+    around ``step_1_etl_hook``'s subprocess is unnecessary on those
+    dialects — we return ``None`` and the pipeline no-ops the bracket
+    via ``nullcontext``. DuckDB's process-level write lock would
+    otherwise block the operator's ``cfg.etl_hook`` subprocess from
+    acquiring a write handle on the same ``.duckdb`` file, per the
+    ``etl_duckdb_studio_concurrency`` audit.
+
+    Duck-typed on ``released_for_subprocess`` rather than
+    ``isinstance(_AsyncDuckdbPool)`` so this stays in the public
+    ``common/html/`` layer without importing the private
+    ``common/db.py`` pool class — only ``_AsyncDuckdbPool`` defines
+    the method.
+    """
+    if db_pool is None or not hasattr(db_pool, "released_for_subprocess"):
+        return None
+    # Duck-typed across AsyncConnectionPool implementations — only
+    # _AsyncDuckdbPool defines released_for_subprocess; the cast
+    # collapses pyright's unknown-member fan-out at the boundary.
+    return cast(
+        "Callable[[], AbstractAsyncContextManager[None]]",
+        db_pool.released_for_subprocess,  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]: duck-typed, gated by hasattr check above
+    )
 
 
 def _editor_url_for_focus_node(node_id: str | None) -> str | None:
@@ -4321,10 +4355,12 @@ def make_studio_routes(
         # (baseline + L1 plants only) so the L1 dashboards still
         # have demo content but the L2 overlay stays off.
         overlays = ETL_DEBUG if patched_cfg.etl_hook is None else LOCKED_SEED
+        subprocess_lock_bracket = _duckdb_pool_subprocess_bracket(db_pool)
         try:
             summary = await run_deploy_pipeline(
                 patched_cfg, cache.get(), dev_log=_tee,
                 overlays=overlays,
+                subprocess_lock_bracket=subprocess_lock_bracket,
             )
         except asyncio.CancelledError:
             # BTa.9 — operator cancel. Don't roll back partial state
@@ -4843,8 +4879,10 @@ def make_studio_routes(
         from recon_gen.common.l2.pipeline_overlays import (  # noqa: PLC0415
             TRAINER_CLEAN,
         )
+        subprocess_lock_bracket = _duckdb_pool_subprocess_bracket(db_pool)
         await run_deploy_pipeline(
             cfg, cache.get(), dev_log=None, overlays=TRAINER_CLEAN,
+            subprocess_lock_bracket=subprocess_lock_bracket,
         )
         return RedirectResponse(
             url="/training/?reset=1", status_code=303,
@@ -4905,11 +4943,13 @@ def make_studio_routes(
         _cfg = cfg
 
         async def _run_session_start() -> None:
+            subprocess_lock_bracket = _duckdb_pool_subprocess_bracket(db_pool)
             try:
                 await session_start(
                     _cfg, cache.get(),
                     refresh_base=True, l2_yaml_path=cache.path,
                     dev_log=_tee,
+                    subprocess_lock_bracket=subprocess_lock_bracket,
                 )
             finally:
                 _training_start_state["task"] = None
@@ -4954,11 +4994,20 @@ def make_studio_routes(
         _cfg = cfg
 
         async def _run_reclone() -> None:
+            # CO.x — wire the lock bracket defensively. With
+            # refresh_base=False, session_start short-circuits the
+            # entire run_deploy_pipeline branch and the bracket is
+            # never entered, but plumbing it keeps the call shape
+            # consistent with training_session_start so a future edit
+            # that changes when run_deploy_pipeline fires doesn't
+            # silently regress to the lock-conflict bug.
+            subprocess_lock_bracket = _duckdb_pool_subprocess_bracket(db_pool)
             try:
                 await session_start(
                     _cfg, cache.get(),
                     refresh_base=False, l2_yaml_path=cache.path,
                     dev_log=_tee,
+                    subprocess_lock_bracket=subprocess_lock_bracket,
                 )
             finally:
                 _training_start_state["task"] = None
@@ -5651,8 +5700,10 @@ def make_studio_routes(
                 if bound_tg_for_deploy is not None
                 else bound_cfg
             )
+            subprocess_lock_bracket = _duckdb_pool_subprocess_bracket(db_pool)
             summary = await run_deploy_pipeline(
                 effective_cfg, instance, dev_log=None,
+                subprocess_lock_bracket=subprocess_lock_bracket,
             )
             status = 503 if summary.halted else 200
             return JSONResponse(summary.to_json(), status_code=status)

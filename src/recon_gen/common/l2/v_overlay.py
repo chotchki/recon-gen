@@ -21,7 +21,8 @@ derived at runtime, not configured.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import TYPE_CHECKING
@@ -118,6 +119,9 @@ async def session_start(
     refresh_base: bool = True,
     l2_yaml_path: object = None,
     dev_log: object = None,
+    subprocess_lock_bracket: (
+        Callable[[], AbstractAsyncContextManager[None]] | None
+    ) = None,
 ) -> None:
     """Orchestrates Session Start (DL.10):
 
@@ -158,6 +162,7 @@ async def session_start(
         await _emit("session_start:etl_begin")
         await run_deploy_pipeline(
             cfg, instance, dev_log=dev_log, overlays=TRAINER_CLEAN,  # type: ignore[arg-type]: opaque DevLogWriter shape passed through to deploy pipeline
+            subprocess_lock_bracket=subprocess_lock_bracket,
         )
         await _emit("session_start:etl_done")
 

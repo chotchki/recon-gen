@@ -1668,19 +1668,36 @@ class _AsyncDuckdbConnection:
         return _AsyncDuckdbCursor(rows, desc)
 
 
+class PoolReleasedDuringRefresh(RuntimeError):
+    """CO.x — raised when ``_AsyncDuckdbPool.acquire()`` is called
+    while the pool's root is released (e.g. the deploy pipeline is
+    bracketing ``step_1_etl_hook``'s subprocess).
+
+    Typed subclass of ``RuntimeError`` so the dashboards' 500 handler
+    can key off the class for a themed "data refresh in progress"
+    page (followup) and tests can assert on the type rather than
+    string-matching the message.
+    """
+
+
 class _AsyncDuckdbPool:
     """CA.4 — one-root-connection + cursor-per-acquire pool for the
     App2 async DuckDB path.
 
-    DuckDB has no aiosqlite-equivalent async driver. Two empirical
-    constraints settled the pool shape (probed against duckdb 1.5.3):
+    The constraint that ACTUALLY holds across duckdb 1.x (verified
+    by the CO.x probe in ``docs/audits/etl_duckdb_studio_concurrency.md``):
 
-    1. **Only one process may open a given ``.duckdb`` file at a time
-       AND only one ``duckdb.connect(path)`` per process per file** —
-       a second ``connect()`` call against the same path from the same
-       process raises ``BinderException: Unique file handle conflict``.
-       This rules out the "fresh-connect-per-acquire" pattern that
-       ``_AsyncSqlitePool`` uses (aiosqlite has no such constraint).
+    1. **Only one process may open a ``.duckdb`` file for write at a
+       time.** A second process's ``duckdb.connect(path)`` against the
+       same file raises ``IOException: Could not set lock on file …
+       Conflicting lock is held in <other_pid>``. Even a parent
+       ``read_only=True`` handle blocks subprocess WRITE (subprocess
+       READ succeeds). This is the constraint that makes
+       ``cfg.etl_hook`` (a subprocess) collide with the Studio
+       process's long-lived pool — and the reason this class exposes
+       :meth:`released_for_subprocess` so the deploy pipeline can
+       surrender the lock around the subprocess and reacquire it
+       afterwards in one atomic, drain-then-reopen window.
 
     2. **``connection.cursor()`` returns a fresh thread-safe
        ``DuckDBPyConnection``** — a separate object that shares the
@@ -1691,11 +1708,30 @@ class _AsyncDuckdbPool:
        it's just another handle, but a probe of 8 parallel threads
        each running queries via ``root.cursor()`` succeeds cleanly.)
 
+    (An older docstring on this class claimed same-process double-
+    ``duckdb.connect()`` raises ``BinderException: Unique file handle
+    conflict``. The CO.x probe shows that's not the case on duckdb
+    1.x: two ``duckdb.connect(path)`` calls in one process work fine.
+    The cross-process write-lock above IS the only hard constraint;
+    the one-root-per-pool shape stays defensible for resource
+    discipline + the deploy-pipeline release/reacquire pattern, just
+    not load-bearing on a hard DuckDB constraint.)
+
     Pool shape: open ONE root ``duckdb.connect(path)`` at construction;
     each ``acquire()`` calls ``root.cursor()`` to fork a fresh
     sub-connection. Cursor close is cheap (no file I/O). Pool close
-    tears down the root. ``max_size`` semaphore bounds in-flight
-    cursors so a spike of parallel requests doesn't pile up handles.
+    tears down the root. :meth:`released_for_subprocess` is the
+    async context manager the deploy pipeline brackets
+    ``step_1_etl_hook`` with — it serializes via ``_lifecycle_lock``
+    (so concurrent /deploy + /training/reset don't re-trigger the
+    very bug this fix addresses), drains in-flight cursors before
+    closing (so dashboards mid-fetch get a clean
+    :class:`PoolReleasedDuringRefresh` instead of a rug-pull
+    ``IOException``), and ALWAYS reopens in its ``finally``.
+    Preserves pool identity: closure-captured references (e.g. in
+    ``make_studio_routes`` handlers) stay valid across the window.
+    ``max_size`` semaphore bounds in-flight cursors so a spike of
+    parallel requests doesn't pile up handles.
     """
 
     def __init__(self, path: str, *, max_size: int = 10) -> None:
@@ -1704,14 +1740,32 @@ class _AsyncDuckdbPool:
 
         self._path = path
         self._sem = asyncio.Semaphore(max_size)
+        # CO.x — serializes the release/reacquire bracket across
+        # concurrent Studio handlers. Without this, two overlapping
+        # /deploy invocations would each spawn their own etl_hook
+        # subprocess; whichever one's reopen() lands first would
+        # reacquire the lock and crash the OTHER's still-running
+        # subprocess with the same IO error this fix exists to
+        # prevent.
+        self._lifecycle_lock = asyncio.Lock()
+        # CO.x — drain coordination. `_in_flight` counts active
+        # cursors; `_drained` flips set whenever the count is zero so
+        # `close()` can wait for outstanding queries to finish before
+        # tearing down the root. Without this, a dashboard fetch in
+        # the middle of `cur.fetchall()` would see DuckDB raise
+        # `InvalidInputException: No open result set` when the root
+        # closes under it.
+        self._in_flight = 0
+        self._drained = asyncio.Event()
+        self._drained.set()
         # CA.8 — honor RECON_GEN_DB_READ_ONLY=1 for the same multi-
         # process safety reason `connect_demo_db` does. The runner sets
         # this for the App2 pytest tier's DuckDB cells so xdist workers
         # share read access against the seeded .duckdb file.
-        read_only = bool(RECON_GEN_DB_READ_ONLY.get_or_none())
+        self._read_only = bool(RECON_GEN_DB_READ_ONLY.get_or_none())
         # Open the root eagerly so a bad path / corrupt file surfaces
         # at construction (server startup) rather than first request.
-        self._root: Any = duckdb.connect(path, read_only=read_only)  # typing-smell: ignore[explicit-any]: duckdb.DuckDBPyConnection has no PEP 561 stubs at strict
+        self._root: Any = duckdb.connect(path, read_only=self._read_only)  # typing-smell: ignore[explicit-any]: duckdb.DuckDBPyConnection has no PEP 561 stubs at strict
 
     def acquire(self) -> AbstractAsyncContextManager[AsyncConnection]:
         return self._acquire()
@@ -1719,16 +1773,135 @@ class _AsyncDuckdbPool:
     @asynccontextmanager
     async def _acquire(self) -> AsyncGenerator[AsyncConnection, None]:
         async with self._sem:
-            cursor_conn = await asyncio.to_thread(self._root.cursor)
+            if self._root is None:
+                # CO.x — the pool's root has been released (likely by
+                # the deploy pipeline bracketing step_1_etl_hook).
+                # Typed exception lets the dashboards' 500 handler
+                # render a clean themed page (followup) and tests
+                # assert on the class instead of message-matching.
+                raise PoolReleasedDuringRefresh(
+                    "DuckDB pool released — a data refresh is in "
+                    "progress; the dashboard will reload when it "
+                    "completes.",
+                )
+            # CO.x — bump the in-flight counter BEFORE the cursor()
+            # await so a concurrent close() sees the count and blocks
+            # on its drain wait. Without this, the close-during-
+            # cursor() window leaks: close sees `_drained` as set,
+            # tears down the root, and the cursor we get back
+            # references a now-closed handle. The check + increment
+            # pair runs synchronously between two awaits (semaphore
+            # entry + the to_thread below), so asyncio gives us
+            # atomicity for free.
+            self._in_flight += 1
+            self._drained.clear()
+            try:
+                cursor_conn = await asyncio.to_thread(self._root.cursor)
+            except BaseException:
+                # cursor() raised — release the slot we just claimed
+                # so close()'s drain doesn't wait forever for a
+                # cursor that never materialized.
+                self._in_flight -= 1
+                if self._in_flight == 0:
+                    self._drained.set()
+                raise
             try:
                 yield _AsyncDuckdbConnection(cursor_conn)
             finally:
                 await asyncio.to_thread(cursor_conn.close)
+                self._in_flight -= 1
+                if self._in_flight == 0:
+                    self._drained.set()
 
     async def close(self) -> None:
-        if self._root is not None:
-            await asyncio.to_thread(self._root.close)
-            self._root = None
+        """Tear down the root connection.
+
+        CO.x — drains in-flight cursors first (waits up to forever
+        for outstanding queries to finish) so a concurrent
+        ``acquire()`` doesn't see the root yanked mid-fetch. The
+        ``_lifecycle_lock`` blocks reopen calls from racing the
+        close. ``self._root = None`` lives inside try/finally so a
+        ``duckdb.close()`` exception still clears the field — the
+        next ``reopen()`` will then rebuild a fresh handle instead
+        of incorrectly assuming an open one.
+        """
+        async with self._lifecycle_lock:
+            if self._root is None:
+                return
+            # Wait for any in-flight cursors to release before
+            # closing the root. Without this drain, a dashboard
+            # query mid-`cur.fetchall()` raises
+            # `InvalidInputException: No open result set` when the
+            # underlying root closes.
+            await self._drained.wait()
+            try:
+                await asyncio.to_thread(self._root.close)
+            finally:
+                self._root = None
+
+    async def reopen(self) -> None:
+        """CO.x — reopen the root connection after a ``close()``.
+
+        Idempotent. Held under the same ``_lifecycle_lock`` as
+        :meth:`close` so concurrent close/reopen calls serialize.
+        Preserves pool identity: callers that closure-captured the
+        ``_AsyncDuckdbPool`` instance (e.g. ``make_studio_routes``'s
+        nested route handlers) see the new root through their
+        existing reference; no rewiring required.
+        """
+        async with self._lifecycle_lock:
+            if self._root is not None:
+                return
+            import duckdb  # noqa: PLC0415
+            self._root = await asyncio.to_thread(
+                duckdb.connect, self._path, read_only=self._read_only,
+            )
+
+    @asynccontextmanager
+    async def released_for_subprocess(self) -> AsyncGenerator[None, None]:
+        """CO.x — atomic release/reacquire bracket for a subprocess
+        that needs the DuckDB process-level write lock.
+
+        Used by ``run_deploy_pipeline`` to wrap ``step_1_etl_hook``'s
+        subprocess invocation. Combines :meth:`close` (with its
+        drain) and :meth:`reopen` into one context-managed unit
+        whose lifecycle is held under a SINGLE lock acquisition —
+        so concurrent ``/deploy`` + ``/training/reset`` handlers
+        SERIALIZE through this bracket rather than racing their
+        independent close/reopen calls and reintroducing the very
+        bug this fix addresses.
+
+        Always reopens in ``finally`` — even on subprocess failure,
+        CancelledError, or exception inside the yield body.
+        Exception priority follows the standard ``try: yield finally:
+        reopen()`` shape: if reopen ALSO raises after the yield body
+        raised, the reopen exception wins (Python's standard
+        try/finally semantics) and the original is set on its
+        ``__context__``. Operators reading the dashboards-side log
+        would see the reopen failure first; the deploy-pipeline's
+        own log captures the original subprocess error separately
+        via the live-tail events.
+        """
+        async with self._lifecycle_lock:
+            # Re-implement close() inline so the lock stays held
+            # across the close → yield → reopen window.
+            already_released = self._root is None
+            if not already_released:
+                await self._drained.wait()
+                try:
+                    await asyncio.to_thread(self._root.close)
+                finally:
+                    self._root = None
+            try:
+                yield
+            finally:
+                if self._root is None:
+                    import duckdb  # noqa: PLC0415
+                    self._root = await asyncio.to_thread(
+                        duckdb.connect,
+                        self._path,
+                        read_only=self._read_only,
+                    )
 
 
 async def make_connection_pool(

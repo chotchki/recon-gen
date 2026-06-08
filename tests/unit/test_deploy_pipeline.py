@@ -14,15 +14,19 @@ from __future__ import annotations
 
 
 import asyncio
-from collections.abc import Mapping
+import shlex
+import sys as _sys
+from collections.abc import AsyncGenerator, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from recon_gen.common.config import Config
-from recon_gen.common.db import connect_demo_db, execute_script, fetch_one_required, make_demo_database_url
+from recon_gen.common.db import connect_demo_db, duckdb_path, execute_script, fetch_one_required, make_demo_database_url
 from recon_gen.common.config import (
     TestGeneratorConfig,
 )
@@ -1605,4 +1609,608 @@ def test_orchestration_no_etl_hook_path(
     assert summary.step3_generator_daily_balances_after > 0
     assert summary.step4_matviews_done is True
     assert summary.step5_data_generation_id > 0
+
+
+
+# ===== CO.x — Lock release/reacquire around etl_hook subprocess (DuckDB) =====
+#
+# The `_AsyncDuckdbPool` (run by Studio's `recon-gen studio` process)
+# holds DuckDB's process-level write lock for the lifetime of the
+# Studio process. When the operator triggers Refresh Data → POST
+# /deploy → `step_1_etl_hook`, the customer's `cfg.etl_hook` script
+# runs as a SUBPROCESS via `asyncio.create_subprocess_exec`. That
+# subprocess tries `duckdb.connect(path)` and gets
+# `IO Error: Could not set lock on file`. Direct repro probe is in
+# `docs/audits/etl_duckdb_studio_concurrency.md`.
+#
+# The fix: `run_deploy_pipeline` accepts an optional
+# `subprocess_lock_bracket: Callable[[], AbstractAsyncContextManager[None]]`
+# that brackets `step_1_etl_hook` (not the whole pipeline — same-
+# process `connect_demo_db` works alongside the pool). The pool's
+# `released_for_subprocess` async context manager combines close +
+# yield + reopen under one lifecycle-lock acquisition so concurrent
+# Studio handlers serialize through the bracket. Studio binds the
+# callback to `db_pool.released_for_subprocess` for DuckDB; PG /
+# Oracle pass None and the bracket no-ops via `nullcontext`.
+
+from recon_gen.common.db import _AsyncDuckdbPool
+
+
+def _etl_hook_writes_one_row(cfg: Config, scratch_dir: Path) -> str:
+    """Build a `cfg.etl_hook` shell-command that opens DuckDB,
+    inserts a tagged row into <prefix>_transactions, and exits 0.
+
+    Writes the Python script to a tempfile + invokes ``sys.executable
+    <path>`` rather than ``-c "..."``. The nested-quotation
+    interpolation in the inline form runs afoul of shlex.split (the
+    SQL literal has both single + double quotes); the script-on-disk
+    form sidesteps that entirely + matches what a real customer's
+    cfg.etl_hook would look like.
+
+    Uses sys.executable so the subprocess is the same interpreter
+    (no PATH skew across local dev / CI). The inserted row carries
+    the marker `etl_hook_marker` in `transfer_type` so the test can
+    assert it survived the pipeline.
+    """
+    import shlex  # noqa: PLC0415
+    assert cfg.demo_database_url is not None
+    path = duckdb_path(cfg.demo_database_url)
+    prefix = cfg.db_table_prefix
+    script = scratch_dir / "etl_hook_writer.py"
+    script.write_text(
+        "import duckdb\n"
+        f"c = duckdb.connect({path!r})\n"
+        "c.execute('''\n"
+        f"INSERT INTO {prefix}_transactions\n"
+        "(id, account_id, account_name, account_role, account_scope, "
+        "amount_money, amount_direction, status, posting, transfer_id, "
+        "rail_name, origin, metadata)\n"
+        "VALUES ('etl-hook-row-1', "
+        "'acct-1', 'Account 1', 'CustomerDDA', 'internal', "
+        # The marker is on `origin` — `transfer_type` doesn't exist on
+        # the v6 schema; `origin` is the closest free-text field the
+        # ETL hook can stamp without breaking the L1 Amount invariant
+        # CHECK (Credit + money >= 0).
+        "100, 'Credit', 'Posted', '2026-01-01 00:00:00', "
+        "'etl-hook-xfer', 'ach', 'etl_hook_marker', '{}')\n"
+        "''')\n"
+        "c.commit()\n"
+        "c.close()\n",
+        encoding="utf-8",
+    )
+    return f"{shlex.quote(_sys.executable)} {shlex.quote(str(script))}"
+
+
+def test_run_deploy_pipeline_releases_pool_lock_for_etl_hook_subprocess(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """The lock-release/reacquire bracket lets a subprocess etl_hook
+    acquire the DuckDB write lock even when the parent process holds
+    an open `_AsyncDuckdbPool` root.
+
+    Without the bracket, the subprocess fails with
+    `IO Error: Could not set lock on file` → step1 exit_code=1
+    → pipeline halts.
+
+    With the bracket, pool.close() runs before the subprocess (frees
+    the lock), subprocess writes its row, pool.reopen() runs after
+    (reacquires for the remaining pipeline steps + subsequent
+    dashboards queries).
+    """
+    cfg = _duckdb_cfg(tmp_path)
+    cfg = replace(cfg, etl_hook=_etl_hook_writes_one_row(cfg, tmp_path))
+    _apply_demo_schema_only(cfg, spec_example_instance)
+
+    # Mirror Studio's runtime: the pool is constructed AFTER schema
+    # apply (Studio's `_html_serve.py::_serve` opens the pool before
+    # serving but the demo DB schema is established beforehand by
+    # `recon-gen schema apply`). Lifetime spans the pipeline so the
+    # released_for_subprocess bracket has something to surrender +
+    # restore.
+    assert cfg.demo_database_url is not None
+    pool = _AsyncDuckdbPool(duckdb_path(cfg.demo_database_url))
+    sink = _EventCollector()
+    try:
+        summary = asyncio.run(
+            run_deploy_pipeline(
+                cfg, spec_example_instance, dev_log=sink,
+                subprocess_lock_bracket=pool.released_for_subprocess,
+            ),
+        )
+
+        assert summary.halted is False
+        assert summary.step1_etl_hook_exit_code == 0
+        kinds = sink.kinds()
+        assert "deploy:step1:locks_bracket_enter" in kinds
+        assert "deploy:step1:locks_bracket_exit" in kinds
+        assert "deploy:step1:done" in kinds
+        # Prove the ORIGINAL pool was reacquired by acquiring through
+        # it AFTER the pipeline returned — without a successful
+        # reopen, this would raise PoolReleasedDuringRefresh.
+        async def _verify_via_original_pool() -> int:
+            async with pool.acquire() as conn:
+                cur = await conn.execute(
+                    f"SELECT COUNT(*) FROM {cfg.db_table_prefix}"
+                    f"_transactions WHERE origin = ?",
+                    ("etl_hook_marker",),
+                )
+                rows: list[Any] = await cur.fetchall()
+                return int(rows[0][0])
+        assert asyncio.run(_verify_via_original_pool()) == 1
+    finally:
+        asyncio.run(pool.close())
+
+
+def test_run_deploy_pipeline_skips_bracket_when_unset(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """Default-None path stays backward-compatible: no bracket,
+    no bracket events in the log, pipeline runs through. Covers
+    the CLI / unit-test invocations that don't own a pool.
+    """
+    cfg = _duckdb_cfg(tmp_path)
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    sink = _EventCollector()
+    summary = asyncio.run(
+        run_deploy_pipeline(cfg, spec_example_instance, dev_log=sink),
+    )
+    assert summary.halted is False
+    kinds = sink.kinds()
+    assert "deploy:step1:locks_bracket_enter" not in kinds
+    assert "deploy:step1:locks_bracket_exit" not in kinds
+
+
+def test_run_deploy_pipeline_reopens_pool_on_etl_hook_failure(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """The released_for_subprocess bracket ALWAYS reopens — even
+    when the etl_hook subprocess exits non-zero. Without this, the
+    pool would stay closed after a failed deploy and the operator's
+    dashboards would 500 until the Studio process restarted.
+    """
+    cfg = _duckdb_cfg(tmp_path)
+    cfg = replace(cfg, etl_hook="false")  # exit 1
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    assert cfg.demo_database_url is not None
+    pool = _AsyncDuckdbPool(duckdb_path(cfg.demo_database_url))
+    sink = _EventCollector()
+    try:
+        summary = asyncio.run(
+            run_deploy_pipeline(
+                cfg, spec_example_instance, dev_log=sink,
+                subprocess_lock_bracket=pool.released_for_subprocess,
+            ),
+        )
+        assert summary.halted is True
+        assert summary.step1_etl_hook_exit_code == 1
+        kinds = sink.kinds()
+        # Bracket entered + exited cleanly despite the subprocess failure.
+        assert "deploy:step1:locks_bracket_enter" in kinds
+        assert "deploy:step1:locks_bracket_exit" in kinds
+        # Pool is healthy post-reopen — acquire should succeed.
+        async def _ping() -> int:
+            async with pool.acquire() as conn:
+                cur = await conn.execute("SELECT 1")
+                rows: list[Any] = await cur.fetchall()
+                return int(rows[0][0])
+        assert asyncio.run(_ping()) == 1
+    finally:
+        asyncio.run(pool.close())
+
+
+def test_async_duckdb_pool_reopen_is_idempotent(tmp_path: Path) -> None:
+    """Pool.reopen() called twice in a row is a no-op on the second
+    call (the root is already open). Mirrors close()'s idempotency.
+    """
+    db_path = str(tmp_path / "smoke.duckdb")
+    import duckdb  # noqa: PLC0415
+    seed = duckdb.connect(db_path)
+    seed.execute("CREATE TABLE smoke (x INTEGER)")
+    seed.close()
+
+    pool = _AsyncDuckdbPool(db_path)
+    try:
+        # Already open at construction — reopen is no-op.
+        asyncio.run(pool.reopen())
+        # Close + reopen + reopen-again — second reopen is no-op.
+        asyncio.run(pool.close())
+        asyncio.run(pool.reopen())
+        asyncio.run(pool.reopen())
+        async def _ping() -> int:
+            async with pool.acquire() as conn:
+                cur = await conn.execute("SELECT COUNT(*) FROM smoke")
+                rows: list[Any] = await cur.fetchall()
+                return int(rows[0][0])
+        assert asyncio.run(_ping()) == 0
+    finally:
+        asyncio.run(pool.close())
+
+
+def test_async_duckdb_pool_released_for_subprocess_reopens_on_exception(
+    tmp_path: Path,
+) -> None:
+    """The released_for_subprocess context manager ALWAYS reopens —
+    even when the bracket body raises. Mirrors the deploy pipeline's
+    "operator should never have to restart Studio after a failed
+    etl_hook" guarantee.
+    """
+    db_path = str(tmp_path / "smoke.duckdb")
+    import duckdb  # noqa: PLC0415
+    seed = duckdb.connect(db_path)
+    seed.execute("CREATE TABLE smoke (x INTEGER)")
+    seed.close()
+
+    pool = _AsyncDuckdbPool(db_path)
+    try:
+        class _Boom(Exception):
+            pass
+
+        async def _bracket_raises() -> None:
+            async with pool.released_for_subprocess():
+                raise _Boom("subprocess equivalent failed mid-bracket")
+
+        with pytest.raises(_Boom):
+            asyncio.run(_bracket_raises())
+
+        # After the exception the pool is healthy.
+        async def _ping() -> int:
+            async with pool.acquire() as conn:
+                cur = await conn.execute("SELECT 1")
+                rows: list[Any] = await cur.fetchall()
+                return int(rows[0][0])
+        assert asyncio.run(_ping()) == 1
+    finally:
+        asyncio.run(pool.close())
+
+
+def test_duckdb_pool_subprocess_bracket_helper_duck_types_correctly() -> None:
+    """CO.x — `_duckdb_pool_subprocess_bracket` returns the bound
+    bracket method for DuckDB pools and None for PG / Oracle. Covers
+    the audit's "second test for the PG/Oracle dialect path that
+    asserts the callbacks are *not* invoked when dialect ≠ DUCKDB."
+    """
+    from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
+        _duckdb_pool_subprocess_bracket,
+    )
+
+    # None input → None output (no pool, no bracket).
+    assert _duckdb_pool_subprocess_bracket(None) is None
+
+    # Fake PG/Oracle pool: has acquire + close but no
+    # released_for_subprocess attribute. Duck-typed check returns None.
+    class _FakePgPool:
+        def acquire(self) -> object: ...
+        async def close(self) -> None: ...
+    assert _duckdb_pool_subprocess_bracket(_FakePgPool()) is None  # pyright: ignore[reportArgumentType]: structural Protocol; intentional duck-type
+
+    # Fake DuckDB pool: has released_for_subprocess. Returns the method.
+    class _FakeDuckPool:
+        def acquire(self) -> object: ...
+        async def close(self) -> None: ...
+        def released_for_subprocess(self) -> object: ...
+    fake = _FakeDuckPool()
+    bracket = _duckdb_pool_subprocess_bracket(fake)  # pyright: ignore[reportArgumentType]: structural Protocol; intentional duck-type
+    # `is` comparison fails on bound-method dance (new bound-method
+    # object per access) — compare via `==` which Python defines as
+    # same-function-same-receiver for bound methods.
+    assert bracket == fake.released_for_subprocess
+
+
+def test_session_start_passes_bracket_to_run_deploy_pipeline(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """CO.x — v_overlay.session_start MUST forward
+    subprocess_lock_bracket to its inner run_deploy_pipeline call.
+    If a future refactor drops the kwarg, training_session_start
+    silently regresses to the lock-conflict bug.
+
+    Uses a real DuckDB pool but a no-op etl_hook so the bracket
+    fires without spawning a subprocess (the test isn't probing the
+    subprocess path — only the parameter-forwarding contract).
+    """
+    from recon_gen.common.l2.v_overlay import session_start  # noqa: PLC0415
+
+    cfg = _duckdb_cfg(tmp_path)
+    cfg = replace(cfg, etl_hook=None)  # step_1 skip path
+    _apply_demo_schema_only(cfg, spec_example_instance)
+    assert cfg.demo_database_url is not None
+    pool = _AsyncDuckdbPool(duckdb_path(cfg.demo_database_url))
+    bracket_uses = 0
+
+    @asynccontextmanager
+    async def _counting_bracket() -> AsyncGenerator[None, None]:
+        nonlocal bracket_uses
+        bracket_uses += 1
+        async with pool.released_for_subprocess():
+            yield
+
+    try:
+        asyncio.run(
+            session_start(
+                cfg, spec_example_instance,
+                refresh_base=True,
+                subprocess_lock_bracket=_counting_bracket,
+            ),
+        )
+    finally:
+        asyncio.run(pool.close())
+
+    # Bracket fired exactly once — for step_1_etl_hook inside the
+    # inner run_deploy_pipeline call.
+    assert bracket_uses == 1
+
+
+def test_async_duckdb_pool_drains_in_flight_cursor_before_close(
+    tmp_path: Path,
+) -> None:
+    """CO.x — pool.close() must wait for outstanding cursors to
+    release before tearing down the root. Without this drain, an
+    in-flight `cur.fetchall()` would see DuckDB raise
+    `InvalidInputException: No open result set` mid-query, and the
+    dashboards' 500 handler would render a useless stack instead of
+    the clean PoolReleasedDuringRefresh page.
+    """
+    db_path = str(tmp_path / "drain.duckdb")
+    import duckdb  # noqa: PLC0415
+    seed = duckdb.connect(db_path)
+    seed.execute("CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (1)")
+    seed.close()
+
+    pool = _AsyncDuckdbPool(db_path)
+
+    held_event = asyncio.Event()
+    release_event = asyncio.Event()
+    close_completed = asyncio.Event()
+
+    async def _holder() -> int:
+        async with pool.acquire() as conn:
+            cur = await conn.execute("SELECT 1")
+            held_event.set()
+            await release_event.wait()
+            rows: list[Any] = await cur.fetchall()
+            return int(rows[0][0])
+
+    async def _closer() -> None:
+        await held_event.wait()
+        # Kick the close — it must wait for the holder to release.
+        close_task = asyncio.create_task(pool.close())
+        # Brief yield so close_task gets to its drain-wait.
+        await asyncio.sleep(0.05)
+        assert not close_task.done(), (
+            "pool.close() should be waiting for in-flight cursor "
+            "to drain, but completed immediately"
+        )
+        # Let the holder finish.
+        release_event.set()
+        await close_task
+        close_completed.set()
+
+    async def _orchestrate() -> int:
+        holder_task = asyncio.create_task(_holder())
+        closer_task = asyncio.create_task(_closer())
+        holder_result = await holder_task
+        await closer_task
+        return holder_result
+
+    try:
+        assert asyncio.run(_orchestrate()) == 1
+        assert close_completed.is_set()
+    finally:
+        # If the orchestration didn't complete, ensure the pool gets
+        # closed; otherwise this is a no-op (already closed).
+        asyncio.run(pool.close())
+
+
+def test_async_duckdb_pool_serializes_concurrent_subprocess_brackets(
+    tmp_path: Path,
+) -> None:
+    """CO.x — concurrent /deploy + /training/reset must serialize
+    through the lifecycle lock. Without it, pipeline B's reopen
+    would reacquire the parent's DuckDB lock WHILE pipeline A's
+    subprocess (in our test, the bracket body) is still running,
+    causing A's `etl_hook` to fail with `IOException: Could not set
+    lock on file` — the EXACT bug CO.x was meant to fix.
+
+    Probes the lifecycle lock by spawning two concurrent bracket
+    tasks; the second must wait for the first to release.
+    """
+    db_path = str(tmp_path / "serialize.duckdb")
+    import duckdb  # noqa: PLC0415
+    duckdb.connect(db_path).close()
+
+    pool = _AsyncDuckdbPool(db_path)
+    order: list[str] = []
+    a_entered = asyncio.Event()
+    a_release = asyncio.Event()
+
+    async def _bracket_a() -> None:
+        async with pool.released_for_subprocess():
+            order.append("a_enter")
+            a_entered.set()
+            await a_release.wait()
+            order.append("a_exit")
+
+    async def _bracket_b() -> None:
+        # Wait for A to enter, then try to enter — must block until A
+        # exits the bracket.
+        await a_entered.wait()
+        async with pool.released_for_subprocess():
+            order.append("b_enter")
+            order.append("b_exit")
+
+    async def _orchestrate() -> None:
+        task_a = asyncio.create_task(_bracket_a())
+        task_b = asyncio.create_task(_bracket_b())
+        # Give both a chance to schedule + B to await the lock.
+        await asyncio.sleep(0.05)
+        assert order == ["a_enter"], (
+            f"B should be blocked on the lifecycle lock, got order={order}"
+        )
+        a_release.set()
+        await task_a
+        await task_b
+
+    try:
+        asyncio.run(_orchestrate())
+    finally:
+        asyncio.run(pool.close())
+
+    assert order == ["a_enter", "a_exit", "b_enter", "b_exit"]
+
+
+def test_async_duckdb_pool_acquire_after_close_raises_typed(
+    tmp_path: Path,
+) -> None:
+    """A pool acquire while the root is released raises the typed
+    PoolReleasedDuringRefresh — dashboards' 500 handler keys off the
+    class for a themed error page (followup), not a string match.
+    """
+    from recon_gen.common.db import PoolReleasedDuringRefresh  # noqa: PLC0415
+    db_path = str(tmp_path / "smoke.duckdb")
+    import duckdb  # noqa: PLC0415
+    duckdb.connect(db_path).close()
+    pool = _AsyncDuckdbPool(db_path)
+    asyncio.run(pool.close())
+    async def _attempt() -> None:
+        async with pool.acquire() as conn:
+            await conn.execute("SELECT 1")
+    with pytest.raises(PoolReleasedDuringRefresh):
+        asyncio.run(_attempt())
+
+
+# (Superseded by test_async_duckdb_pool_acquire_after_close_raises_typed
+# above — kept the symbol name in case of import-by-test-name patterns
+# in pytest plugins; both assert the same shape.)
+
+
+def test_async_duckdb_pool_acquire_during_cursor_creation_doesnt_get_rugpulled(
+    tmp_path: Path,
+) -> None:
+    """Round-2 review reproduced 3/30: when close() races a concurrent
+    acquire() whose `to_thread(root.cursor)` is in flight, the old
+    code (which incremented in_flight AFTER the cursor await) saw
+    `_drained` as set, tore down the root, and the returned cursor
+    referenced a closed handle → opaque `ConnectionException: Connection
+    already closed`. Fix: bump in_flight BEFORE the to_thread await.
+
+    Re-tests the race shape under load. With the pre-fix code this
+    would fail intermittently; with the fix it's deterministic.
+    """
+    db_path = str(tmp_path / "race.duckdb")
+    import duckdb  # noqa: PLC0415
+    seed = duckdb.connect(db_path)
+    seed.execute("CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (1)")
+    seed.close()
+
+    pool = _AsyncDuckdbPool(db_path)
+    failures: list[str] = []
+
+    async def _one_iteration() -> None:
+        # Many parallel acquires racing one close. Without the
+        # bump-before-await fix, some acquires would see a closed
+        # root mid-fetchall and raise the opaque IO shape.
+        async def _query(idx: int) -> None:
+            try:
+                async with pool.acquire() as conn:
+                    cur = await conn.execute("SELECT x FROM t")
+                    rows: list[Any] = await cur.fetchall()
+                    assert rows[0][0] == 1
+            except Exception as exc:  # noqa: BLE001 — capture all error shapes
+                failures.append(f"query {idx}: {type(exc).__name__}: {exc}")
+
+        async def _bracket() -> None:
+            # Use the proper bracket so the in-flight drain fires +
+            # the lifecycle lock serializes against concurrent acquires.
+            async with pool.released_for_subprocess():
+                # Yield once so any in-flight cursor() to_thread can
+                # land — without the fix, this is where the race
+                # would expose the closed root.
+                await asyncio.sleep(0.001)
+
+        # Spawn a burst of queries + one bracket. The bracket should
+        # drain in-flight queries before closing; new queries during
+        # the bracket should get PoolReleasedDuringRefresh; queries
+        # after the bracket should succeed.
+        tasks = [asyncio.create_task(_query(i)) for i in range(16)]
+        await asyncio.sleep(0)
+        bracket_task = asyncio.create_task(_bracket())
+        await asyncio.gather(*tasks, bracket_task)
+
+    async def _all_iterations_and_close() -> None:
+        # All iterations + pool close live inside a SINGLE
+        # asyncio.run() because _AsyncDuckdbPool's asyncio.Event +
+        # asyncio.Lock bind to the loop they're first awaited from
+        # (event-loop affinity, X.2.g.2.d). Spreading iterations
+        # across asyncio.run() calls would crash with
+        # "bound to a different event loop".
+        try:
+            for _ in range(10):
+                await _one_iteration()
+        finally:
+            await pool.close()
+
+    # 10 iterations — round-2 saw 3/30 failures on the buggy path.
+    # 10 iters at 16 queries each = 160 attempts; the buggy path
+    # would surface ≥1 failure with very high probability.
+    asyncio.run(_all_iterations_and_close())
+
+    # Allowed failure shape: PoolReleasedDuringRefresh (the queries
+    # that landed DURING the bracket window). NOT allowed: opaque
+    # IOException / ConnectionException / "already closed" — those
+    # are the rug-pull failures the fix exists to eliminate.
+    forbidden = [
+        f for f in failures
+        if (
+            "Connection already closed" in f
+            or "IOException" in f
+            or "ConnectionException" in f
+            or "No open result set" in f
+        )
+    ]
+    assert not forbidden, (
+        "rug-pull failures during cursor creation:\n"
+        + "\n".join(forbidden)
+    )
+
+
+def test_step_1_etl_hook_terminates_subprocess_on_cancel(
+    tmp_path: Path,
+) -> None:
+    """Round-2: the CancelledError handler in step_1_etl_hook (which
+    terminates the orphan subprocess) had no test. This test creates
+    a long-running subprocess, cancels the awaiting task, and asserts
+    the subprocess was reaped within the 5s grace window — without
+    the terminate+kill logic the subprocess would outlive the task
+    and continue holding the DuckDB file lock.
+    """
+    cfg = _duckdb_cfg(tmp_path)
+    # 60-second sleep — outlives any reasonable test wall-clock and
+    # ensures the terminate path (not a clean exit) is the only way
+    # the subprocess goes down.
+    sleep_cmd = f"{shlex.quote(_sys.executable)} -c 'import time; time.sleep(60)'"
+    cfg = replace(cfg, etl_hook=sleep_cmd)
+    sink = _EventCollector()
+
+    async def _orchestrate() -> None:
+        task = asyncio.create_task(step_1_etl_hook(cfg, dev_log=sink))
+        # Give step_1 time to spawn the subprocess.
+        await asyncio.sleep(0.5)
+        task.cancel()
+        # CancelledError should propagate out within ~5s grace.
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    import time
+    start = time.time()
+    asyncio.run(_orchestrate())
+    elapsed = time.time() - start
+    # Generous bound: should complete in ~0.5s setup + 0.x cancel.
+    # The 5s grace is the max wait for SIGTERM before SIGKILL; in
+    # practice Python responds to SIGTERM nearly instantly.
+    assert elapsed < 10.0, (
+        f"step_1_etl_hook cancel took {elapsed:.1f}s — subprocess "
+        "didn't terminate cleanly"
+    )
+    kinds = sink.kinds()
+    assert "deploy:step1:cancelled_terminating_subprocess" in kinds
 
