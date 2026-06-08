@@ -717,13 +717,35 @@ def _render_parameter_dropdown(spec: ParameterDropdownSpec) -> str:
             f' hx-include="#filter-form"'
             f' data-cascade-source-param="{cs}"'
         )
+    # CQ.2.c — LinkedValues (dataset-backed) pickers get the
+    # data-typeahead markers so bootstrap.js wires Tom Select's load
+    # callback to the JSON search endpoint. Static-options pickers
+    # (StaticValues — enum dropdowns) keep the pre-CQ.2 client-side
+    # filter behavior; their universes are tiny by construction
+    # (capped by CQ.3 at 32 elements).
+    typeahead_attrs = ""
+    if (
+        spec.options_dataset is not None
+        and spec.options_column is not None
+    ):
+        ds = html.escape(spec.options_dataset)
+        col = html.escape(spec.options_column)
+        typeahead_attrs = (
+            f' data-typeahead="1"'
+            f' data-typeahead-url="dropdown-search/{ds}/{col}"'
+        )
     parts = [
         f'    <label class="{_FORM_LABEL_CLASS}">{html.escape(spec.label)} '
         f'<select name="param_{name}" class="{_TS_SELECT_CLASS}"'
-        f'{_TOM_SELECT_ATTR}{cascade_attrs}>'
+        f'{_TOM_SELECT_ATTR}{cascade_attrs}{typeahead_attrs}>'
         f'<option value=""></option>'
     ]
     rendered_sel = False
+    # CQ.2.c — for LinkedValues pickers, ``spec.options`` is empty
+    # (server-side typeahead does the fetch). Only the currently-
+    # selected value (if any) needs to be in the DOM so the form
+    # serializes the sticky pick. For static-options pickers, the
+    # full options list still renders.
     for opt in spec.options:
         esc = html.escape(opt)
         if opt == sel:
@@ -783,11 +805,27 @@ def _render_parameter_multiselect(spec: ParameterMultiSelectSpec) -> str:
     """
     name = html.escape(spec.name)
     sel = set(spec.selected)
+    # CQ.2.c — LinkedValues multi-select pickers get the same
+    # typeahead markers as the single-select variant. Tom Select's
+    # load callback merges new options into this.options + the
+    # selected set survives across keystroke fetches (sticky
+    # selection is free per the design doc).
+    typeahead_attrs = ""
+    if (
+        spec.options_dataset is not None
+        and spec.options_column is not None
+    ):
+        ds = html.escape(spec.options_dataset)
+        col = html.escape(spec.options_column)
+        typeahead_attrs = (
+            f' data-typeahead="1"'
+            f' data-typeahead-url="dropdown-search/{ds}/{col}"'
+        )
     parts = [
         f'    <label class="{_FORM_LABEL_CLASS}">'
         f'{html.escape(spec.label)} '
         f'<select name="param_{name}" multiple class="{_TS_SELECT_CLASS}"'
-        f'{_TOM_SELECT_ATTR}>'
+        f'{_TOM_SELECT_ATTR}{typeahead_attrs}>'
     ]
     rendered: set[str] = set()
     for opt in spec.options:

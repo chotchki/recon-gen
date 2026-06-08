@@ -324,40 +324,23 @@ def _query_params_as_multidict(
     return by_name
 
 
-async def _resolve_linked_options(
+def _resolve_linked_options(
     specs: tuple[FilterSpec, ...],
-    options_fetcher: OptionsFetcher,
-    url_params: Mapping[str, list[str]],
 ) -> tuple[FilterSpec, ...]:
-    """Fill in the ``<option>`` list for any dataset-sourced dropdown
-    spec (X.2.u.4.b).
+    """CQ.2.c — pre-CQ.2 this ran one ``SELECT DISTINCT`` per
+    LinkedValues spec at sheet render to bake the option universe
+    into the ``<select>`` (capped at the silent ``_OPTIONS_CAP = 2000``
+    that operator condemned 2026-06-08). Post-CQ.2 the render emits
+    LinkedValues pickers with empty ``<option>`` lists + the sticky
+    selected value; bootstrap.js wires Tom Select's ``load`` callback
+    to the new JSON typeahead endpoint, which serves the seed page
+    on first focus and per-keystroke searches after that.
 
-    A ``ParameterDropdownSpec`` / ``ParameterMultiSelectSpec`` whose
-    ``options_dataset`` is set carries an empty ``options`` until the
-    server queries the source dataset — one small ``SELECT DISTINCT``
-    per such spec. Specs without ``options_dataset`` (static enums,
-    category filters, numeric ranges) pass through unchanged.
-
-    BN.1 (2026-05-29) — ``url_params`` threads the form's current
-    state into the picker source SQL so cascading dropdowns narrow
-    (Role pick → Account narrows to that role's accounts). Pre-BN.1
-    fetcher saw ``{}``, so the picker source always ran with
-    dataset-parameter defaults and the cascade silently no-op'd.
+    Kept as an identity passthrough so call sites stay legible during
+    the CQ.2 transition; it deletes once tests / cascade path migrate
+    in CQ.2.e.
     """
-    resolved: list[FilterSpec] = []
-    for spec in specs:
-        if (
-            isinstance(spec, (ParameterDropdownSpec, ParameterMultiSelectSpec))
-            and spec.options_dataset is not None
-            and spec.options_column is not None
-        ):
-            opts = await options_fetcher(
-                spec.options_dataset, spec.options_column, url_params,
-            )
-            resolved.append(replace(spec, options=opts))
-        else:
-            resolved.append(spec)
-    return tuple(resolved)
+    return tuple(specs)
 
 
 def _apply_url_param_overrides(
@@ -570,13 +553,11 @@ def make_app(
         filter_specs = served.filter_specs or tuple(
             make_filter_specs_for_sheet(served.sheet),
         )
-        # X.2.u.4.b — dataset-sourced dropdowns carry no <option>s until
-        # the server queries the source dataset.
-        if served.options_fetcher is not None:
-            filter_specs = await _resolve_linked_options(
-                filter_specs, served.options_fetcher,
-                _query_params_as_multidict(request.query_params),
-            )
+        # CQ.2.c — LinkedValues dropdowns now carry empty <option>
+        # lists by design; Tom Select's load callback fetches the
+        # seed page on first focus. Identity passthrough kept until
+        # CQ.2.e deletes the function entirely.
+        filter_specs = _resolve_linked_options(filter_specs)
         # u.4.e.4 — ?param_<name>=<v> in the page URL (a drill that walked
         # an anchor, or a bookmark) pre-selects the matching widget so the
         # visuals' hx-include="#filter-form" load fetch is already narrowed.
@@ -625,11 +606,8 @@ def make_app(
         filter_specs = served.filter_specs or tuple(
             make_filter_specs_for_sheet(sheet_for_dash),
         )
-        if served.options_fetcher is not None:  # X.2.u.4.b — see dashboard_view
-            filter_specs = await _resolve_linked_options(
-                filter_specs, served.options_fetcher,
-                _query_params_as_multidict(request.query_params),
-            )
+        # CQ.2.c — see dashboard_view; identity passthrough.
+        filter_specs = _resolve_linked_options(filter_specs)
         # u.4.e.4 — see dashboard_view; a ?param_<name>=<v> in the URL
         # pre-selects the matching widget so the load fetch is narrowed.
         filter_specs = _apply_url_param_overrides(

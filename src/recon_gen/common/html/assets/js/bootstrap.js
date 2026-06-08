@@ -1942,7 +1942,17 @@
   function wireTomSelect(el) {
     if (typeof TomSelect === "undefined") return;
     el.dataset.widgetWired = "1";
-    new TomSelect(el, {
+    // CQ.2.d — server-side typeahead branch. When the renderer marked
+    // the <select> with data-typeahead="1" + data-typeahead-url, Tom
+    // Select fetches options from the App2 search endpoint instead of
+    // filtering an already-materialized <option> set client-side.
+    // Operator-locked 2026-06-08: this is the only acceptable shape
+    // for unbounded picker universes — the pre-CQ.2 client-side
+    // filter dropped the alphabetical tail past _OPTIONS_CAP=2000
+    // silently.
+    var typeaheadUrl =
+      el.dataset.typeahead === "1" ? el.dataset.typeaheadUrl : null;
+    var settings = {
       plugins: el.multiple ? ["remove_button"] : [],
       // Tom Select syncs the underlying <select>'s selected options but
       // doesn't always re-fire a native `change` on it — do it
@@ -1957,7 +1967,64 @@
         );
         el.dispatchEvent(new Event("change", { bubbles: true }));
       },
-    });
+    };
+    if (typeaheadUrl) {
+      // Built-in 300ms debounce via loadThrottle (matches the cascade
+      // hx-trigger debounce). HTMX is NOT in the typeahead path —
+      // Tom Select owns the per-keystroke fetch + the option merge
+      // (`addOption` doc: "If it already exists, nothing will
+      // happen.") so the currently-selected <option> stays sticky
+      // across every load call.
+      settings.preload = "focus";
+      settings.loadThrottle = 300;
+      settings.maxOptions = 100;
+      // Server narrows; don't client-filter the returned set.
+      settings.searchField = [];
+      // Suppress single-letter fetches against high-cardinality
+      // universes (returns LIMIT-cap on first letter, wastes a
+      // round-trip). Empty query fires once for the focus-preload
+      // seed page.
+      settings.shouldLoad = (q) => q.length === 0 || q.length >= 2;
+      settings.valueField = "value";
+      settings.labelField = "label";
+      settings.load = (query, callback) => {
+        // Thread the form's current state (cascade params) onto the
+        // search URL so e.g. a Role pick still narrows the candidate
+        // Account universe.
+        var form = el.closest("form");
+        var qs = "?q=" + encodeURIComponent(query);
+        var fd = form ? new FormData(form) : null;
+        if (fd) {
+          fd.forEach((val, key) => {
+            // Skip our own param_X so we don't double-narrow on the
+            // picker's own sticky value.
+            if (key === "param_" + (el.name || "").replace(/^param_/, "")) {
+              return;
+            }
+            qs += "&" + encodeURIComponent(key) + "=" + encodeURIComponent(val);
+          });
+        }
+        // close the if-form-then-FormData block above
+        fetch(typeaheadUrl + qs, {
+          headers: { Accept: "application/json" },
+        })
+          .then((r) => {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return r.json();
+          })
+          .then((payload) => {
+            callback(payload.options || []);
+          })
+          .catch((err) => {
+            console.warn("[typeahead] load failed", err);
+            // No-arg callback marks the load as failed without
+            // merging anything; Tom Select renders the not_loading
+            // template.
+            callback();
+          });
+      };
+    }
+    new TomSelect(el, settings);
   }
 
   function wireFlatpickrRange(el, scope) {
