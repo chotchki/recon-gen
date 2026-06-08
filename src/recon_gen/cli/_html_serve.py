@@ -136,13 +136,18 @@ def build_real_dashboards(
     guarded the parity between the two serve paths.
     """
     from recon_gen.common.html._tree_fetcher import (  # noqa: PLC0415
-        make_options_fetcher,
+        make_options_search_fetcher,
         make_tree_db_fetcher,
     )
     from recon_gen.common.html.server import (  # noqa: PLC0415
         ServedDashboard,
     )
-    opts_fetcher = make_options_fetcher(cfg, pool=pool)
+    # CQ.2.e — single search fetcher serves both the JSON typeahead
+    # endpoint (per-keystroke load) AND the HTML cascade endpoint
+    # (sibling-change re-fetch). Both pass query='' for the seed
+    # page; typeahead passes the user-typed string. The pre-CQ.2
+    # make_options_fetcher with its silent LIMIT 2000 is gone.
+    opts_search_fetcher = make_options_search_fetcher(cfg, pool=pool)
     return {
         name: ServedDashboard(
             tree_app=tree_app,
@@ -151,7 +156,7 @@ def build_real_dashboards(
             data_fetcher=make_tree_db_fetcher(tree_app, cfg, pool=pool),
             theme=theme,
             filter_specs=(),
-            options_fetcher=opts_fetcher,
+            options_search_fetcher=opts_search_fetcher,
         )
         for name, tree_app, sheet in real_apps
     }

@@ -39,7 +39,7 @@ from typing import Any
 import uvicorn
 
 from recon_gen.common.env_keys import EnvVarInvalid, RECON_GEN_RUN_DIR
-from recon_gen.common.html._tree_fetcher import OptionsFetcher
+from recon_gen.common.html._tree_fetcher import OptionsSearchFetcher
 from recon_gen.common.html.render import FilterSpec
 from recon_gen.common.html.server import (
     DataFetcher, ServedDashboard, make_app,
@@ -133,7 +133,7 @@ def html2_server(
     dashboard_id: str = "harness",  # typing-smell: ignore[bare-str-id]: dashboard_id comes from callers as raw analyst string
     dashboard_title: str = "Harness",
     filter_specs: Sequence[FilterSpec] = (),
-    options_fetcher: OptionsFetcher | None = None,
+    options_search_fetcher: OptionsSearchFetcher | None = None,
     dev_log: bool = False,
     startup_timeout_s: float = 5.0,
 ) -> Iterator[str]:
@@ -174,7 +174,7 @@ def html2_server(
                 tree_app=tree_app, sheet=sheet,
                 title=dashboard_title, data_fetcher=data_fetcher,
                 filter_specs=tuple(filter_specs),
-                options_fetcher=options_fetcher,
+                options_search_fetcher=options_search_fetcher,
             ),
         },
         dev_log=dev_log,
@@ -308,28 +308,35 @@ def make_live_db_fetchers_for_app(
     *,
     tree_app: App,
     cfg: Any,
-) -> tuple[DataFetcher, OptionsFetcher]:
-    """Construct the live-DB ``(visual_fetcher, options_fetcher)`` pair
-    from a built tree, sharing one lazily-created connection pool.
+) -> tuple[DataFetcher, OptionsSearchFetcher]:
+    """Construct the live-DB ``(visual_fetcher, options_search_fetcher)``
+    pair from a built tree, sharing one lazily-created connection pool.
 
     The visual fetcher resolves any visual to its dataset SQL → executes
-    → shapes (``make_tree_db_fetcher``); the options fetcher resolves a
-    dataset-sourced dropdown's option universe (``make_options_fetcher``,
-    X.2.u.4.b). Both go through ``execute_visual_sql_async`` so dialect /
+    → shapes (``make_tree_db_fetcher``); the options-search fetcher
+    serves both the JSON typeahead endpoint (per-keystroke ``q``) and
+    the HTML cascade endpoint (sibling-change ``q=''`` seed-page
+    refresh) — see ``make_options_search_fetcher`` for the dispatch.
+    Both go through ``execute_visual_sql_async`` so dialect /
     placeholder handling is identical.
 
-    Pool lifecycle: an ``AsyncConnectionPool`` (psycopg / aiosqlite) is
-    bound to the asyncio event loop it was opened in. The harness spins
-    uvicorn in a thread with its own loop, so a pool created outside it
-    hangs forever on acquire. The pool is lazy-created on the first
-    fetcher call (which runs inside uvicorn's loop) and shared by both;
-    leaked at process exit (fine for a test process about to die).
+    CQ.2.e — pre-CQ.2 this returned ``options_fetcher`` (one shot,
+    LIMIT 2000 silent cap). That fetcher is gone; the live-DB harness
+    now exclusively wires the search fetcher so every browser-tier
+    test exercises the production typeahead path.
+
+    Pool lifecycle: an ``AsyncConnectionPool`` is bound to the asyncio
+    event loop it was opened in. The harness spins uvicorn in a thread
+    with its own loop, so a pool created outside it hangs forever on
+    acquire. The pool is lazy-created on the first fetcher call (which
+    runs inside uvicorn's loop) and shared by both; leaked at process
+    exit (fine for a test process about to die).
     """
     from recon_gen.common.db import (  # noqa: PLC0415
         make_connection_pool,
     )
     from recon_gen.common.html._tree_fetcher import (  # noqa: PLC0415
-        make_options_fetcher,
+        make_options_search_fetcher,
         make_tree_db_fetcher,
     )
 
@@ -351,17 +358,17 @@ def make_live_db_fetchers_for_app(
             cached["vf"] = fn
         return await fn(visual_id, params)
 
-    async def options_fetcher(
-        dataset_id: str, column: str,
+    async def options_search_fetcher(
+        dataset_id: str, column: str, query: str,
         url_params: Mapping[str, list[str]],
-    ) -> tuple[str, ...]:
+    ) -> Any:
         fn = cached.get("of")
         if fn is None:
-            fn = make_options_fetcher(cfg, pool=await _pool())
+            fn = make_options_search_fetcher(cfg, pool=await _pool())
             cached["of"] = fn
-        return await fn(dataset_id, column, url_params)
+        return await fn(dataset_id, column, query, url_params)
 
-    return visual_fetcher, options_fetcher
+    return visual_fetcher, options_search_fetcher
 
 
 def make_live_db_fetcher_for_app(

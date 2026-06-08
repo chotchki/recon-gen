@@ -876,13 +876,13 @@ def _parametrized_dashboard_driver(
         from tests.e2e._harness_html2 import make_live_db_fetchers_for_app
 
         assert app.analysis is not None
-        data_fetcher, options_fetcher = make_live_db_fetchers_for_app(
+        data_fetcher, options_search_fetcher = make_live_db_fetchers_for_app(
             tree_app=app, cfg=cfg,
         )
         with App2Driver.serving(
             cfg=cfg,
             tree_app=app, sheet=app.analysis.sheets[0],
-            data_fetcher=data_fetcher, options_fetcher=options_fetcher,
+            data_fetcher=data_fetcher, options_search_fetcher=options_search_fetcher,
             dashboard_id=short, dashboard_title=f"{short} (live)",
         ) as driver:
             yield driver, short

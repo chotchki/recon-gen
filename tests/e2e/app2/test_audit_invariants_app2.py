@@ -172,7 +172,7 @@ def app2_results(
     tree_app = build_l1_dashboard_app(cfg, l2_instance=instance)
     if tree_app.analysis is None:
         tree_app.emit_analysis()
-    visual_fetcher, options_fetcher = make_live_db_fetchers_for_app(
+    visual_fetcher, options_search_fetcher = make_live_db_fetchers_for_app(
         tree_app=tree_app, cfg=cfg,
     )
     results: dict[str, dict[str, object]] = {}
@@ -180,7 +180,7 @@ def app2_results(
     with App2Driver.serving(
         cfg=cfg,
         tree_app=tree_app, sheet=tree_app.analysis.sheets[0],
-        data_fetcher=visual_fetcher, options_fetcher=options_fetcher,
+        data_fetcher=visual_fetcher, options_search_fetcher=options_search_fetcher,
         dashboard_id="l1", dashboard_title="L1 Dashboard",
     ) as driver:
         driver.open("l1")

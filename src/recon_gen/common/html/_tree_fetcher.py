@@ -1072,61 +1072,12 @@ def make_options_search_fetcher(
     return fetch
 
 
-# X.2.u.4.b — pre-CQ.2 OptionsFetcher signature: ``(dataset_identifier,
-# column, url_params) -> tuple[str, ...]``. Kept alongside the new
-# ``OptionsSearchFetcher`` while CQ.2.c–g migrate consumers. Once
-# render.py / bootstrap.js / cascade route flip to the search-fetcher
-# path, ``OptionsFetcher`` + ``make_options_fetcher`` + ``_OPTIONS_CAP``
-# delete in CQ.2.e.
-OptionsFetcher = Callable[
-    [str, str, Mapping[str, list[str]]], Awaitable[tuple[str, ...]],
-]
-
-
-# Hard cap on the pre-CQ.2 dropdown option count. Operator-condemned
-# 2026-06-08: "truncating at 2000 rows SUCKS in production... we must
-# do server side querying." Replaced by the typeahead path; this
-# constant + its consumer ``make_options_fetcher`` delete in CQ.2.e
-# once render.py / bootstrap.js have flipped to the search fetcher.
-_OPTIONS_CAP = 2000
-
-
-def make_options_fetcher(
-    cfg: Config,
-    *,
-    pool: AsyncConnectionPool,
-) -> OptionsFetcher:
-    """PRE-CQ.2 options fetcher — runs ``SELECT DISTINCT col FROM
-    (<dataset SQL>) WHERE col IS NOT NULL ORDER BY 1 LIMIT 2000``
-    once and bakes every option into the ``<select>`` at sheet-render
-    time. Tom Select then filters client-side as the user types.
-
-    Past the alphabetical 2000th option the tail is silently
-    unreachable (typing never re-queries the DB). Replaced by
-    :func:`make_options_search_fetcher`; kept here for the
-    bisect-able CQ.2 checkpoint commit and the cascade route, which
-    still calls this shape until CQ.2.c–g land.
-    """
-    async def fetch(
-        dataset_identifier: str,
-        column: str,
-        url_params: Mapping[str, list[str]],
-    ) -> tuple[str, ...]:
-        base_sql = get_sql(dataset_identifier)
-        col_ref = column_name(column, cfg.dialect)
-        limit_clause = (
-            f" FETCH FIRST {_OPTIONS_CAP} ROWS ONLY"
-            if cfg.dialect == Dialect.ORACLE
-            else f" LIMIT {_OPTIONS_CAP}"
-        )
-        options_sql = (
-            f"SELECT DISTINCT {col_ref} AS opt FROM ({base_sql}) opt_src "
-            f"WHERE {col_ref} IS NOT NULL ORDER BY 1{limit_clause}"
-        )
-        rows, _columns = await execute_visual_sql_async(
-            pool, options_sql, url_params, dialect=cfg.dialect,
-            dataset_parameters=get_dataset_params(dataset_identifier),
-        )
-        return tuple(str(r[0]) for r in rows if r[0] is not None)
-
-    return fetch
+# CQ.2.e — pre-CQ.2 ``OptionsFetcher`` + ``make_options_fetcher`` +
+# ``_OPTIONS_CAP = 2000`` deleted 2026-06-08 per the operator-locked
+# direction "truncating at 2000 rows SUCKS in production... we must
+# do server side querying." Both the JSON typeahead endpoint
+# (per-keystroke search) and the HTML cascade endpoint (sibling-
+# change seed-page refresh) now route through
+# ``make_options_search_fetcher`` — cascade passes ``query=''`` to
+# get the seed page, typeahead passes the user-typed ``q``. No
+# silent truncation; no two parallel code paths.

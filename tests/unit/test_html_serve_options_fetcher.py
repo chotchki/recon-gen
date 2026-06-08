@@ -31,11 +31,13 @@ from recon_gen.common.l2 import default_l2_instance
 from tests._test_helpers import make_test_config
 
 
-def test_build_real_dashboards_wires_options_fetcher_for_every_app() -> None:
+def test_build_real_dashboards_wires_options_search_fetcher_for_every_app() -> None:
     """Every real app's ServedDashboard must carry both a data fetcher
-    AND an options fetcher — the latter is what populates dataset-backed
-    parameter-control dropdowns from their companion option-source
-    datasets."""
+    AND a server-side typeahead options-search fetcher (post-CQ.2.e —
+    the pre-CQ.2 options_fetcher with its silent LIMIT 2000 is gone).
+    Without the search fetcher dataset-backed LinkedValues pickers
+    render empty + Tom Select's preload no-ops + the parameterized
+    query never narrows (permanently blank sheet)."""
     cfg = make_test_config()
     instance = default_l2_instance()
     real_apps = [
@@ -51,10 +53,11 @@ def test_build_real_dashboards_wires_options_fetcher_for_every_app() -> None:
 
     assert set(dashboards) == set(REAL_APPS)
     for name, served in dashboards.items():
-        assert served.options_fetcher is not None, (
-            f"{name}: ServedDashboard has no options_fetcher — "
+        assert served.options_search_fetcher is not None, (
+            f"{name}: ServedDashboard has no options_search_fetcher — "
             f"dataset-backed (LinkedValues) parameter controls will "
-            f"render with empty option lists and the parameterized query "
-            f"will never narrow (permanently blank sheet)."
+            f"render empty + Tom Select's preload + per-keystroke "
+            f"search will no-op + the parameterized query will never "
+            f"narrow (permanently blank sheet)."
         )
         assert served.data_fetcher is not None, f"{name}: no data_fetcher"

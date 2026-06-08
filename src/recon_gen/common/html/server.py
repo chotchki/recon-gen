@@ -106,10 +106,7 @@ from starlette.staticfiles import StaticFiles
 _DEVLOG = logging.getLogger("recon_gen.app2.devlog")
 
 
-from recon_gen.common.html._tree_fetcher import (
-    OptionsFetcher,
-    OptionsSearchFetcher,
-)
+from recon_gen.common.html._tree_fetcher import OptionsSearchFetcher
 from recon_gen.common.html._tree_filter_specs import (
     make_filter_specs_for_sheet,
 )
@@ -190,22 +187,18 @@ class ServedDashboard:
     # non-empty tuple to override (the smoke app does this for its
     # hand-crafted demo filters).
     filter_specs: tuple[FilterSpec, ...] = ()
-    # X.2.u.4.b — resolves a dataset-sourced dropdown's option universe
-    # (a tree ``ParameterDropdown`` with a ``LinkedValues`` source). The
-    # routes call it per such spec before rendering a sheet. ``None``
-    # (stub-fetcher tests, which don't carry LinkedValues dropdowns) →
-    # those dropdowns render as empty ``<select>``s (degraded, not a crash).
-    # PRE-CQ.2 surface; kept while CQ.2.b–g land the typeahead path. The
-    # CQ.2 follow-up commit migrates consumers to
-    # ``options_search_fetcher`` + deletes this field.
-    options_fetcher: OptionsFetcher | None = None
-    # CQ.2 — server-side typeahead fetcher. Drives the new JSON
-    # typeahead endpoint (Tom Select's ``load`` callback fires
-    # ``?q=<typed>`` per keystroke). Empty ``query`` returns the
-    # seed page (top-N alphabetical). Wired alongside
-    # ``options_fetcher`` during the CQ.2.b–g migration; the older
-    # field will be removed once render.py / bootstrap.js / cascade
-    # route migrate.
+    # CQ.2 — server-side typeahead fetcher. Drives:
+    # - The JSON typeahead endpoint (``dropdown-search/...``) —
+    #   Tom Select's ``load`` callback fires ``?q=<typed>`` per
+    #   keystroke (debounced 300ms via loadThrottle).
+    # - The HTML cascade endpoint (``dropdown-options/...``) —
+    #   sibling-control change triggers ``hx-get`` against the
+    #   narrowed seed page (query=''); HTMX swaps the inner
+    #   <option> set; Tom Select re-wires with empty
+    #   loadedSearches → next focus re-runs preload.
+    # ``None`` (stub-fetcher tests, which don't carry LinkedValues
+    # dropdowns) → those dropdowns render empty + Tom Select
+    # preload no-ops (degraded, not a crash).
     options_search_fetcher: OptionsSearchFetcher | None = None
 
 
@@ -553,10 +546,10 @@ def make_app(
         filter_specs = served.filter_specs or tuple(
             make_filter_specs_for_sheet(served.sheet),
         )
-        # CQ.2.c — LinkedValues dropdowns now carry empty <option>
-        # lists by design; Tom Select's load callback fetches the
-        # seed page on first focus. Identity passthrough kept until
-        # CQ.2.e deletes the function entirely.
+        # CQ.2.c — LinkedValues dropdowns carry empty <option> lists
+        # by design; Tom Select's load callback fetches the seed page
+        # on first focus. Identity passthrough kept until call sites
+        # drop the call.
         filter_specs = _resolve_linked_options(filter_specs)
         # u.4.e.4 — ?param_<name>=<v> in the page URL (a drill that walked
         # an anchor, or a bookmark) pre-selects the matching widget so the
@@ -779,12 +772,18 @@ def make_app(
         sheet_id = str(request.path_params["sheet_id"])
         if sheet_id not in all_sheets[dash_id]:
             raise HTTPException(status_code=404)
-        if served.options_fetcher is None:
+        if served.options_search_fetcher is None:
             return HTMLResponse('<option value=""></option>')
         dataset_id = str(request.path_params["dataset"])
         column = str(request.path_params["column"])
         url_params = _query_params_as_multidict(request.query_params)
-        opts = await served.options_fetcher(dataset_id, column, url_params)
+        # CQ.2.e — cascade route now calls the search fetcher with
+        # query='' (seed page of the narrowed universe). Pre-CQ.2 it
+        # called the silent LIMIT 2000 options_fetcher; same option
+        # universe, narrower page, no truncation surprise.
+        opts = await served.options_search_fetcher(
+            dataset_id, column, "", url_params,
+        )
         # Preserve user's current pick if it survives the narrow. The
         # form's `param_<self>` key lives in the same query_params we
         # already parsed; look it up by walking the spec's URL key.

@@ -177,7 +177,7 @@ def test_anomaly_app2_extract(
     from tests.e2e._harness_html2 import make_live_db_fetchers_for_app
 
     assert isolated_inv_app.analysis is not None
-    visual_fetcher, options_fetcher = make_live_db_fetchers_for_app(
+    visual_fetcher, options_search_fetcher = make_live_db_fetchers_for_app(
         tree_app=isolated_inv_app, cfg=isolated_cfg,
     )
 
@@ -185,7 +185,7 @@ def test_anomaly_app2_extract(
         cfg=isolated_cfg,
         tree_app=isolated_inv_app,
         sheet=isolated_inv_app.analysis.sheets[0],
-        data_fetcher=visual_fetcher, options_fetcher=options_fetcher,
+        data_fetcher=visual_fetcher, options_search_fetcher=options_search_fetcher,
         dashboard_id="inv", dashboard_title="Investigation (live)",
     ) as driver:
         driver.open("inv")

@@ -56,7 +56,7 @@ from recon_gen.common.html._smoke_app import (
     build_smoke_app,
     stub_money_trail_fetcher,
 )
-from recon_gen.common.html._tree_fetcher import OptionsFetcher
+from recon_gen.common.html._tree_fetcher import OptionsSearchFetcher
 from recon_gen.common.html.render import FilterSpec
 from recon_gen.common.html.server import DataFetcher
 from recon_gen.common.models import DatasetParameter
@@ -153,7 +153,7 @@ class App2Driver:
         dashboard_id: str = "harness",  # typing-smell: ignore[bare-str-id]: dashboard_id comes from callers as raw analyst string
         dashboard_title: str = "Harness",
         filter_specs: Sequence[FilterSpec] = (),
-        options_fetcher: OptionsFetcher | None = None,
+        options_search_fetcher: OptionsSearchFetcher | None = None,
         dev_log: bool = False,
     ) -> Generator["App2Driver", None, None]:
         """Spin a local App 2 server serving any tree + fetcher and yield
@@ -186,7 +186,7 @@ class App2Driver:
             dashboard_id=dashboard_id,
             dashboard_title=dashboard_title,
             filter_specs=filter_specs,
-            options_fetcher=options_fetcher,
+            options_search_fetcher=options_search_fetcher,
             dev_log=dev_log,
         ) as url, webkit_page() as page:
             yield cls(
