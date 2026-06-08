@@ -274,8 +274,21 @@ def rewrite_placeholders_for_dialect(sql: str, dialect: Dialect) -> str:
     bind-dict shape under ``$name``). The rewrite is purely
     string-level — caller still passes the same dict of bind values
     regardless of dialect. ``::`` (PG cast) is preserved.
+
+    CR.x — for POSTGRES, every literal ``%`` in the source SQL must be
+    doubled to ``%%`` before substituting the ``%(name)s`` placeholders,
+    otherwise psycopg's pyformat parser treats it as a malformed
+    placeholder ("only '%s', '%b', '%t' are allowed as placeholders").
+    Hit by ILIKE patterns of the shape ``'%' || :q || '%'`` (produced by
+    ``case_insensitive_substring_match`` for the matview-direct picker
+    path) — the leading apostrophe-percent-apostrophe is read as
+    placeholder ``%'``. Doubling happens BEFORE the ``:name`` →
+    ``%(name)s`` substitution, so our own placeholder ``%`` aren't
+    doubled by accident. DuckDB / Oracle / SQLite paramstyles don't
+    have this collision, so their branches stay verbatim.
     """
     if dialect is Dialect.POSTGRES:
+        sql = sql.replace("%", "%%")
         return _NAMED_PLACEHOLDER_RE.sub(r"%(\1)s", sql)
     if dialect is Dialect.DUCKDB:
         return _NAMED_PLACEHOLDER_RE.sub(r"$\1", sql)

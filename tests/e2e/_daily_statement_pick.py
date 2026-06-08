@@ -177,14 +177,27 @@ def find_account_day_with_data(cfg: Config) -> tuple[str, str, str]:
     # `WHERE account_scope = 'internal'` source narrowing); previously
     # this restricted further to the alphabetically-first role, dropped
     # because the Role cascade is gone.
+    #
+    # CR.x — join through `<prefix>_current_daily_balances` so picks are
+    # constrained to accounts the picker SOURCES from (not just the
+    # transactions table). Pre-fix, plants like `acct-cpd-...` with
+    # transactions but no daily-balance row leaked through and made the
+    # test assert "picked X but dropdown doesn't list it". The matview
+    # is exactly the picker's source via `PickerMatviewHint`.
     sql = (
-        f"SELECT account_name, account_id, account_role, "
+        f"SELECT t.account_name, t.account_id, t.account_role, "
         f"       {bday_expr} AS bday, COUNT(*) AS n "
-        f"FROM {prefix}_transactions "
-        f"WHERE account_scope = 'internal' "
-        f"GROUP BY account_name, account_id, account_role, {bday_expr} "
+        f"FROM {prefix}_transactions t "
+        f"WHERE t.account_scope = 'internal' "
+        f"  AND EXISTS ("
+        f"    SELECT 1 FROM {prefix}_current_daily_balances cdb "
+        f"    WHERE cdb.account_id = t.account_id "
+        f"      AND cdb.account_scope = 'internal'"
+        f"  ) "
+        f"GROUP BY t.account_name, t.account_id, t.account_role, "
+        f"         {bday_expr} "
         f"HAVING COUNT(*) > 0 "
-        f"ORDER BY account_id ASC, bday DESC, n DESC "
+        f"ORDER BY t.account_id ASC, bday DESC, n DESC "
     )
     if cfg.dialect is Dialect.ORACLE:
         sql += "FETCH FIRST 1 ROWS ONLY"

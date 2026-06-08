@@ -111,7 +111,10 @@ P_L2FT_TT_DATE_END = "pL2ftTtDateEnd"
 # full window is the right default. The ``T00:00:00`` form is the
 # canonical ISO-8601 shape ``universal_date_range_clause`` expects on
 # both renderers (QS substitutes the literal; App2 binds the string).
-_L2FT_DATE_START_STATIC = "1900-01-01T00:00:00"
+# CR.x — bumped 1900→1990 to dodge botocore/dateutil response-parser
+# crash on macOS (pre-1970 epochs explode in tzlocal). Mirrors
+# l2_flow_tracing/app.py::_DATE_START_STATIC; see that file's comment.
+_L2FT_DATE_START_STATIC = "1990-01-01T00:00:00"
 _L2FT_DATE_END_STATIC = "2099-12-31T00:00:00"
 
 

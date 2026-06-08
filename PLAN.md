@@ -474,7 +474,6 @@ path other than editing Python. CR cleans up the four confirmed footguns plus
 extends to the meta-pattern sweeps the audit flagged. A second audit
 (claims-vs-code drift) is still in flight; CR will be extended with its
 findings when it lands.
-
 - [ ] CR.1 - **Excel XLSX sheet-name truncation at 31 chars.** `src/recon_gen/common/html/server.py:250` does `ws.title = visual_id[:31]` with no validation, no warning, no error. Two visuals diverging after char 31 silently collide in the workbook; the second export overwrites the first; operator discovers the missing report only at file-open time (openpyxl accepts >31-char names without error; Excel enforces at file-open). Fix: at export time detect `len(visual_id) > 31` and either (a) hard-fail with rename guidance, or (b) deterministic hash-suffix + warning log. Add a deploy-time lint (e.g. in `tests/unit/test_typing_smells.py`) that flags Sheet/Visual names >31 chars on visuals destined for XLSX export.
   - Comment: b
 - [ ] CR.2 - **Picker search query silently truncated at 100 chars.** `src/recon_gen/common/html/_tree_fetcher.py:892` defines `_MAX_QUERY_LEN = 100`; line 1044 applies `query[:_MAX_QUERY_LEN]` server-side with no signal back. Customer with long semantic account identifiers (>100 chars — realistic at large FIs) types the full name, gets zero matches, has no way to discover why. No env / Config / L2 knob exists to raise the cap. Fix: either raise to a value exceeding any realistic identifier (~500), surface a response-field hint when truncation occurred so the UI banners it, OR add a `RECON_GEN_PICKER_MAX_QUERY_LEN` env override. If DOS protection is the goal, rate-limit instead of truncate.
@@ -505,6 +504,7 @@ findings when it lands.
   - Comment: Agreed, lints save us from drift!
 - [ ] CR.16 - **Sign-off + sweep CR to PLAN_ARCHIVE.md.** All CR sub-tasks landed on main; full pytest tree green; release notes drafted for any operator-visible fix (CR.1-CR.4, CR.9-CR.10, CR.11).
 
+- [ ] CR.17 - CR.17 - Public write_transaction ETL helper (sibling of write_daily_balance)
 ## Phase PLAN - Phase PLAN
 - [ ] PLAN.md - BS.5 — _v_config_chain_children + 7-path conversion
 

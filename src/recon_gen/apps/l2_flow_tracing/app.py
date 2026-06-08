@@ -468,7 +468,16 @@ def _populate_getting_started(
 # ``YYYY-MM-DDT00:00:00`` shape (Oracle SUBSTR(1, 10) handles either
 # but PG / SQLite are cleaner without the suffix). Both renderers
 # match-all from these literal bounds.
-_DATE_START_STATIC = "1900-01-01T00:00:00"
+# CR.x — bumped 1900→1990 to dodge a botocore/dateutil response-parsing
+# crash on macOS: QS round-trips the StaticValues default as a numeric
+# epoch (1900-01-01 UTC = -2208988800.0), and `dateutil.tz.tzlocal`
+# can't compute a pre-1970 TZ offset on Darwin — surfaces as
+# "unable to calculate correct timezone offset for '-2208988800.0'"
+# blowing up `recon-gen json apply --execute`. Mirrors L1's
+# `_WIDE_DATE_START_VALUE = "1990-01-01..."` choice (l1_dashboard/app.py)
+# for the same reason: post-epoch, predates any realistic banking
+# dataset, doesn't look like a typo to analysts.
+_DATE_START_STATIC = "1990-01-01T00:00:00"
 _DATE_END_STATIC = "2099-12-31T00:00:00"
 
 

@@ -705,15 +705,41 @@ class App2Driver:
             """(s) => s.dataset.typeahead === '1'"""
         )
         if is_typeahead:
+            # CR.x (2026-06-08) — switched from the Promise-around-
+            # `tomselect.load(q, resolve)` pattern to the DOM-poll
+            # pattern (mirrors ``typeahead_filter`` at line 305+).
+            # Tom Select v2's ``load(query)`` is 1-arg — the second
+            # ``resolve`` arg was silently dropped, so the Promise
+            # only resolved via the 5s setTimeout(reject), which
+            # surfaced as ``Locator.evaluate: timeout``. Compounded
+            # by CQ.5's ``clearOptions()`` in bootstrap.js
+            # settings.load, which wipes the seed-page options on
+            # every fetch — so the value never landed in s.options
+            # before setValue ran. DOM-polling avoids relying on
+            # the callback contract: bust loadedSearches, fire
+            # load(q), poll ts.options for count > 0.
+            import time as _time
             for v in vals:
                 sel.evaluate(
-                    """(s, q) => new Promise((resolve, reject) => {
-                        if (!s.tomselect) { resolve(); return; }
-                        s.tomselect.load(q, resolve);
-                        setTimeout(() => reject('timeout'), 5000);
-                    })""",
+                    """(s, q) => {
+                        if (!s.tomselect) return;
+                        if (s.tomselect.loadedSearches) {
+                            delete s.tomselect.loadedSearches[q];
+                        }
+                        s.tomselect.load(q);
+                    }""",
                     v,
                 )
+                deadline = _time.monotonic() + 5.0
+                while _time.monotonic() < deadline:
+                    count = sel.evaluate(
+                        """(s) => s.tomselect
+                            ? Object.keys(s.tomselect.options || {}).length
+                            : 0"""
+                    )
+                    if count > 0:
+                        break
+                    self._page.wait_for_timeout(100)
         self._wait_for_refetch(lambda: sel.evaluate(
             """(s, vals) => {
                 if (s.tomselect) {

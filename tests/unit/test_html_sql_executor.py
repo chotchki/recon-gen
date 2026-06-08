@@ -137,6 +137,41 @@ def test_translate_then_rewrite_pg_yields_pyformat_binds() -> None:
     assert ":param_" not in out
 
 
+def test_pg_rewrite_doubles_literal_percent_in_like_pattern() -> None:
+    """CR.x — psycopg pyformat reads every unescaped ``%`` as a
+    placeholder. The matview-direct picker SQL emits
+    ``... ILIKE '%' || :q || '%' ESCAPE '\\'`` (via
+    ``case_insensitive_substring_match``); without doubling, psycopg
+    raises ``ProgrammingError: only '%s', '%b', '%t' are allowed as
+    placeholders, got '%''`` on the leading ``'%'`` literal.
+
+    The PG branch must double every literal ``%`` BEFORE substituting
+    ``:name`` → ``%(name)s`` so our own placeholder ``%`` aren't
+    doubled. Other dialects (DuckDB ``$name``, Oracle/SQLite ``:name``)
+    don't carry this collision and stay verbatim."""
+    sql = "SELECT col FROM t WHERE col ILIKE '%' || :q || '%' ESCAPE '\\'"
+    out = rewrite_placeholders_for_dialect(sql, Dialect.POSTGRES)
+    # Literal % doubled, ours preserved.
+    assert "'%%'" in out, f"literal '%' must be doubled to '%%': {out}"
+    assert "%(q)s" in out, f"placeholder must be %(q)s: {out}"
+    # The bug shape — the smoking gun the old code emitted — must be gone.
+    assert "'%' || %(q)s" not in out, (
+        f"un-doubled literal '%' still present: {out}"
+    )
+
+
+def test_duckdb_rewrite_does_not_double_literal_percent() -> None:
+    """DuckDB uses ``$name`` paramstyle and accepts literal ``%`` in
+    LIKE patterns verbatim. The PG-specific doubling must NOT bleed
+    into the DuckDB branch (would emit ``LIKE '%%foo%%'`` matching
+    literal-double-percent instead of substring)."""
+    sql = "SELECT col FROM t WHERE col ILIKE '%' || :q || '%'"
+    out = rewrite_placeholders_for_dialect(sql, Dialect.DUCKDB)
+    assert "'%'" in out, f"DuckDB must keep literal '%' verbatim: {out}"
+    assert "'%%'" not in out, f"DuckDB must NOT double '%': {out}"
+    assert "$q" in out
+
+
 # ---------------------------------------------------------------------------
 # Y.2.app2.cde — dataset-parameter static-default substitution
 # ---------------------------------------------------------------------------
