@@ -178,26 +178,35 @@ def find_account_day_with_data(cfg: Config) -> tuple[str, str, str]:
     # this restricted further to the alphabetically-first role, dropped
     # because the Role cascade is gone.
     #
-    # CR.x — join through `<prefix>_current_daily_balances` so picks are
-    # constrained to accounts the picker SOURCES from (not just the
-    # transactions table). Pre-fix, plants like `acct-cpd-...` with
-    # transactions but no daily-balance row leaked through and made the
-    # test assert "picked X but dropdown doesn't list it". The matview
-    # is exactly the picker's source via `PickerMatviewHint`.
+    # CR.x — mirror the picker's seed-page SELECT exactly:
+    # `SELECT DISTINCT (COALESCE(name, id) || ' (' || id || ')')
+    #  FROM _current_daily_balances WHERE account_scope = 'internal'
+    #  ORDER BY 1`
+    # This guarantees the helper's first (name, id) pair = the picker's
+    # alphabetically-first option. Pre-fix, the helper joined to
+    # _transactions and picked by `account_id ASC` — for an account_id
+    # with multiple `account_name` values in the matview (e.g.
+    # cust-0001-snb has both 'Drift Child' and 'Stuck Pending'
+    # planted), the helper picked one display string while the picker
+    # showed the other, tripping AA.E.2.
     sql = (
-        f"SELECT t.account_name, t.account_id, t.account_role, "
+        f"WITH picker AS ("
+        f"  SELECT DISTINCT account_name, account_id, account_role"
+        f"  FROM {prefix}_current_daily_balances"
+        f"  WHERE account_scope = 'internal'"
+        f") "
+        f"SELECT p.account_name, p.account_id, p.account_role, "
         f"       {bday_expr} AS bday, COUNT(*) AS n "
         f"FROM {prefix}_transactions t "
+        f"INNER JOIN picker p"
+        f"  ON p.account_name = t.account_name"
+        f" AND p.account_id   = t.account_id "
         f"WHERE t.account_scope = 'internal' "
-        f"  AND EXISTS ("
-        f"    SELECT 1 FROM {prefix}_current_daily_balances cdb "
-        f"    WHERE cdb.account_id = t.account_id "
-        f"      AND cdb.account_scope = 'internal'"
-        f"  ) "
-        f"GROUP BY t.account_name, t.account_id, t.account_role, "
+        f"GROUP BY p.account_name, p.account_id, p.account_role, "
         f"         {bday_expr} "
         f"HAVING COUNT(*) > 0 "
-        f"ORDER BY t.account_id ASC, bday DESC, n DESC "
+        f"ORDER BY (COALESCE(p.account_name, p.account_id) || ' ('"
+        f"          || p.account_id || ')') ASC, bday DESC, n DESC "
     )
     if cfg.dialect is Dialect.ORACLE:
         sql += "FETCH FIRST 1 ROWS ONLY"

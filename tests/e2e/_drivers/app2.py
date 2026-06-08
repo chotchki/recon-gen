@@ -69,7 +69,10 @@ from tests.e2e._harness_html2 import html2_server
 # Matches the per-visual data endpoint, e.g.
 # /dashboards/smoke/sheets/showcase/visuals/showcase-kpi/data?...
 _VISUAL_DATA_URL_RE = re.compile(r"/visuals/[^/]+/data")
-_REFETCH_TIMEOUT_MS = 15_000
+_REFETCH_TIMEOUT_MS = 30_000  # CR.x — bumped 15s→30s; CI's xdist=4 server load on the
+# Studio server can starve individual visual fetches beyond 15s, especially after
+# CQ.5's `clearOptions()` triggers an extra fetch cycle. Local single-worker runs
+# typically settle in 1-3s, so the bump only matters under high parallelism.
 
 
 class App2Driver:
