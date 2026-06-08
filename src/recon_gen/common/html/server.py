@@ -833,6 +833,53 @@ def make_app(
                 parts.append(f'<option value="{esc}">{esc}</option>')
         return HTMLResponse("".join(parts))
 
+    async def dropdown_search(request: Request) -> Response:
+        """CQ.2.b — server-side typeahead JSON endpoint.
+
+        Tom Select's ``load`` callback fires this on each typed
+        keystroke (debounced via the built-in 300ms ``loadThrottle``).
+        Empty ``q`` → seed page (top-N alphabetical, used by
+        ``preload: 'focus'``); typed ``q`` → case-insensitive
+        substring match.
+
+        Response shape: ``{"options": [{"value": "...", "label": "..."}]}``
+        — Tom Select's ``valueField: 'value'`` + ``labelField: 'label'``
+        consume it. Capped at ``PICKER_PAGE_SIZE`` (100) server-side;
+        the operator narrows further by typing more chars.
+
+        Form-state passthrough: ``param_<name>`` query params thread
+        through to ``execute_visual_sql_async`` so cascading source
+        narrowing (e.g. Role narrows the candidate Account universe)
+        still applies — same behavior as the HTML cascade endpoint,
+        different transport.
+        """
+        dash_id = str(request.path_params["dashboard_id"])
+        served = dashboards.get(dash_id)
+        if served is None:
+            raise HTTPException(status_code=404)
+        sheet_id = str(request.path_params["sheet_id"])
+        if sheet_id not in all_sheets[dash_id]:
+            raise HTTPException(status_code=404)
+        if served.options_search_fetcher is None:
+            return JSONResponse({"options": []})
+        dataset_id = str(request.path_params["dataset"])
+        column = str(request.path_params["column"])
+        query = str(request.query_params.get("q", ""))
+        url_params = _query_params_as_multidict(request.query_params)
+        # Drop the search ``q`` from the form-state multi-dict — it
+        # rides the URL but isn't a ``param_<name>`` form field, and
+        # ``collect_bind_params`` walks the SQL for ``:q`` separately
+        # (the fetcher binds it via ``extra_binds``).
+        url_params = {
+            k: v for k, v in url_params.items() if k != "q"
+        }
+        opts = await served.options_search_fetcher(
+            dataset_id, column, query, url_params,
+        )
+        return JSONResponse({
+            "options": [{"value": v, "label": v} for v in opts],
+        })
+
     async def log_event(request: Request) -> Response:
         try:
             payload = await request.json()
@@ -950,6 +997,15 @@ def make_app(
             "/dashboards/{dashboard_id}/sheets/{sheet_id}"
             "/dropdown-options/{dataset}/{column}",
             dropdown_options, methods=["GET"],
+        ),
+        # CQ.2.b — server-side typeahead JSON endpoint. Parallel to
+        # the HTML cascade route above; different consumer (Tom
+        # Select's ``load`` callback fetches JSON, vs. the cascade
+        # route's HTMX HTML swap on sibling-control change).
+        Route(
+            "/dashboards/{dashboard_id}/sheets/{sheet_id}"
+            "/dropdown-search/{dataset}/{column}",
+            dropdown_search, methods=["GET"],
         ),
         # CN.5 — handbook page fetch for the App2 ``?`` side panel.
         # Path converter ``:path`` lets it match nested slugs like

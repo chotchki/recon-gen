@@ -1649,6 +1649,9 @@ def build_l1_accounts_dataset(
     )
 
 
+from recon_gen.common.html._tree_fetcher import PickerMatviewHint
+
+
 def build_l1_ds_accounts_dataset(
     cfg: Config, l2_instance: L2Instance,
 ) -> DataSet:
@@ -1684,6 +1687,15 @@ def build_l1_ds_accounts_dataset(
         dataset_parameters=[
             _all_sentinel_sv_param(P_L1_DS_ROLE_DSP),
         ],
+        # CQ.2.g — universe is exactly the current_daily_balances
+        # matview (no UNION). App2 typeahead skips the CustomSql wrap
+        # and queries the matview directly. select_expr MUST match
+        # the SELECT-side display projection above; both use
+        # account_display_expr(name, id).
+        picker_matview_hint=PickerMatviewHint(
+            matview=f"{prefix}_current_daily_balances",
+            select_expr=display,
+        ),
     )
 
 
@@ -1727,6 +1739,15 @@ def build_l1_tx_ids_dataset(
         "L1 Transfer IDs", "l1-tx-ids",
         sql, L1_TX_IDS_CONTRACT,
         visual_identifier=DS_L1_TX_IDS,
+        # CQ.2.g — universe is exactly the current_transactions
+        # matview. The audit (docs/audits/v13_6_1_picker.md) names
+        # this picker the WORST victim of the pre-CQ.2 silent 2000
+        # cap because transfer_id always exceeds 2000 at fleet scale.
+        # Matview-direct sub-10ms search is the unblock.
+        picker_matview_hint=PickerMatviewHint(
+            matview=f"{prefix}_current_transactions",
+            select_expr="transfer_id",
+        ),
     )
 
 

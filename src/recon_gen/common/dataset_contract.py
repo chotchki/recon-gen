@@ -12,6 +12,10 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from recon_gen.common.html._tree_fetcher import PickerMatviewHint
 
 from recon_gen.common.config import Config
 from recon_gen.common.models import (
@@ -514,6 +518,7 @@ def build_dataset(
     contract: DatasetContract,
     visual_identifier: str,
     dataset_parameters: list[DatasetParameter] | None = None,
+    picker_matview_hint: "PickerMatviewHint | None" = None,
 ) -> DataSet:
     """Build an AWS-shape DataSet.
 
@@ -528,6 +533,17 @@ def build_dataset(
     same ``dataset_parameters`` mechanism (see
     ``common/sql/app2_filters.py::universal_date_range_clause``).
     One SQL form across QS + App2; the day-edge quirk dissolves.
+
+    ``picker_matview_hint`` (CQ.2.g, 2026-06-08): for datasets used
+    as a picker source whose universe IS one single matview (e.g.
+    ``DS_L1_DS_ACCOUNTS`` → ``<prefix>_current_daily_balances``), the
+    App2 typeahead fetcher bypasses the CustomSql wrap and queries
+    the matview directly — sub-10ms at 50k accounts vs the wrap
+    path's 100-200ms. Both sides of the hint MUST match the dataset's
+    own wrap (matview + select_expr identical); see
+    ``PickerMatviewHint`` docstring. Pickers whose universe is a
+    multi-matview UNION (``DS_L1_ACCOUNTS``) omit the hint and stay
+    on the wrap path.
     """
     sql = _oracle_lowercase_alias_wrapper(sql, contract, cfg)
     # X.2.g.0 — register the dialect-correct SQL so the App2 tree
@@ -544,6 +560,16 @@ def build_dataset(
         if dataset_parameters else None
     )
     register_dataset_params(visual_identifier, params or [])
+    if picker_matview_hint is not None:
+        # CQ.2.g — Local import to avoid circular at module-import
+        # time: ``_tree_fetcher`` imports from ``dataset_contract``
+        # (get_sql / get_dataset_params), so importing the hint
+        # symbol at module top would invert the dep. Only the
+        # register call needs the hint module — defer to call time.
+        from recon_gen.common.html._tree_fetcher import (  # noqa: PLC0415
+            register_picker_matview_hint,
+        )
+        register_picker_matview_hint(visual_identifier, picker_matview_hint)
     columns = contract.to_input_columns()
     # Config.__post_init__ guarantees datasource_arn is non-None
     # post-construction (raises if neither it nor demo_database_url

@@ -57,6 +57,7 @@ from recon_gen.common.sheets.app_info import (
     build_liveness_dataset,
     build_matview_status_dataset,
 )
+from recon_gen.common.html._tree_fetcher import PickerMatviewHint
 from recon_gen.common.sql.dialect import Dialect
 from recon_gen.common.sql.display_labels import account_display_expr
 from recon_gen.common.sql.money import cents_to_dollars_sql
@@ -934,6 +935,15 @@ def build_account_network_accounts_dataset(cfg: Config) -> DataSet:
         _anetwork_accounts_sql(cfg.db_table_prefix),
         ANETWORK_ACCOUNTS_CONTRACT,
         visual_identifier=DS_INV_ANETWORK_ACCOUNTS,
+        # CQ.2.g — universe is exactly the inv_money_trail_edges
+        # matview. select_expr must match the SELECT-side projection
+        # in _anetwork_accounts_sql; both use account_display_expr.
+        picker_matview_hint=PickerMatviewHint(
+            matview=f"{cfg.db_table_prefix}_inv_money_trail_edges",
+            select_expr=account_display_expr(
+                "source_account_name", "source_account_id",
+            ),
+        ),
     )
 
 
