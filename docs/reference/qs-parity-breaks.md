@@ -139,9 +139,13 @@ Each entry below records a deliberate divergence between App2 (the self-hosted H
 
 **Discovered:** 2026-06-08
 
-**Surface (App2):** Studio L2 editor field labels can mount the same ? button as the dashboard sheets via FieldSpec.handbook_path; opens the linked handbook anchor in the side panel.
+**Surface (App2):** Studio L2 editor field labels mount the same ? button as the dashboard sheets via FieldSpec.handbook_path; opens the linked handbook anchor in the same side panel. Wired (CN.5a) on chain.children, transfer_template.{transfer_key, completion, leg_rail_xor_groups}, rail.{bundles_activity, max_unbundled_age, metadata_keys}.
 
 **QS limitation:** QS has no edit-form surface — HARD-divergent adjacent. The field-level ? is the ENHANCEMENT extension; the Studio L2 editor itself is HARD-divergent (see studio_l2_editor).
+
+**References:**
+- `src/recon_gen/common/html/_studio_editor_routes.py`
+- `docs/handbook/l2-editor/`
 
 ### `xlsx_export_button`
 

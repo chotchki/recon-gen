@@ -168,9 +168,12 @@ PARITY_BREAKS: Final[tuple[QSParityBreak, ...]] = (
         name="studio_inline_help",
         severity=ParitySeverity.ENHANCEMENT,
         surface=(
-            "Studio L2 editor field labels can mount the same ? button "
-            "as the dashboard sheets via FieldSpec.handbook_path; opens "
-            "the linked handbook anchor in the side panel."
+            "Studio L2 editor field labels mount the same ? button as "
+            "the dashboard sheets via FieldSpec.handbook_path; opens "
+            "the linked handbook anchor in the same side panel. Wired "
+            "(CN.5a) on chain.children, transfer_template.{transfer_key, "
+            "completion, leg_rail_xor_groups}, rail.{bundles_activity, "
+            "max_unbundled_age, metadata_keys}."
         ),
         qs_limitation=(
             "QS has no edit-form surface — HARD-divergent adjacent. "
@@ -178,6 +181,10 @@ PARITY_BREAKS: Final[tuple[QSParityBreak, ...]] = (
             "L2 editor itself is HARD-divergent (see studio_l2_editor)."
         ),
         discovered="2026-06-08",
+        references=(
+            "src/recon_gen/common/html/_studio_editor_routes.py",
+            "docs/handbook/l2-editor/",
+        ),
     ),
     QSParityBreak(
         name="xlsx_export_button",

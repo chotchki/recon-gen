@@ -58,6 +58,7 @@ from recon_gen.common.html._components import (
     render_list_search,
 )
 from recon_gen.common.html._studio_routes import asset_url, studio_theme_head
+from recon_gen.common.ids import HandbookPath
 from recon_gen.common.l2.cache import L2InstanceCache
 from recon_gen.common.l2.editor import (
     SINGLETON_KINDS,
@@ -177,6 +178,35 @@ class FieldSpec:
     # wire_imad") AND for enabling :placeholder-shown CSS reactivity
     # on textarea fields whose downstream siblings hide when empty.
     placeholder: str | None = None
+    # CN.5a — optional pointer to a handbook page under
+    # ``docs/handbook/`` (same shape as ``Sheet.handbook_path``;
+    # `<area>/<topic>` without `.md`). When set, the renderer emits
+    # a small `?` button next to the field label that opens the
+    # handbook side panel via the same JS hook the dashboard `?`
+    # buttons use. Reach for it when the field's helper line can't
+    # carry the context the operator needs (validator semantics,
+    # cross-entity dependencies, L1 invariant the field drives).
+    handbook_path: HandbookPath | None = None
+
+
+def _handbook_chip_html(spec: FieldSpec) -> str:
+    """CN.5a — inline `?` chip emitted next to a field's label when
+    its FieldSpec carries a ``handbook_path``. Reuses the dashboard
+    `?` JS hook (matches by ``.handbook-help-button`` +
+    ``data-handbook-path=...``) so one event-delegated handler in
+    ``bootstrap.js`` services both surfaces."""
+    if not spec.handbook_path:
+        return ""
+    href = escape(str(spec.handbook_path))
+    return (
+        f' <a href="/handbook/{href}" '
+        f'class="handbook-help-button ml-1 inline-flex items-center '
+        f'justify-center w-4 h-4 rounded-full border border-current '
+        f'text-secondary-fg hover:text-accent hover:border-accent '
+        f'text-[10px] font-semibold align-middle no-underline" '
+        f'title="Open handbook for this field" '
+        f'data-handbook-path="{href}">?</a>'
+    )
 
 
 def _prefixed_field_spec(spec: FieldSpec, prefix: str) -> FieldSpec:
@@ -522,6 +552,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         kind="multi_select",
         select_from="rails_or_templates",
         render_as="chip_list",  # CF.4.g — list of identifiers
+        handbook_path=HandbookPath("l2-editor/bundles-activity"),
     ),
     # X.4.f.11.6 — metadata_keys + metadata_value_examples (paired).
     # BF.4 (2026-06-07) — chip-list picker; option universe is the
@@ -540,6 +571,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         kind="multi_select",
         select_from="metadata_keys",
         render_as="chip_list",  # CF.4.g — list of identifiers
+        handbook_path=HandbookPath("l2-editor/metadata-keys"),
     ),
     # X.4.f.11.6.5 — Tier-3 metadata_value_examples.
     # BF.4 (2026-06-07, P2 lock) — inline-edit picker: one row per
@@ -591,6 +623,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         ),
         kind="text",
         placeholder="P3D",
+        handbook_path=HandbookPath("l2-editor/max-unbundled-age"),
     ),
     # AB.5 (E7) — soft per-firing magnitude bound. Operator types a
     # ``min, max`` shape (comma-separated decimals); coerce parses to
@@ -683,6 +716,7 @@ _CHAIN_FIELDS: tuple[FieldSpec, ...] = (
         kind="chain_children",
         select_from="rails_or_templates",
         required=True,
+        handbook_path=HandbookPath("l2-editor/chain-children"),
     ),
 )
 
@@ -721,6 +755,7 @@ _TRANSFER_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
         helper="e.g. business_day_end+1d. Drives L1 Timeliness.",
         kind="text",
         required=True,
+        handbook_path=HandbookPath("l2-editor/completion-expression"),
     ),
     FieldSpec(
         name="leg_rails",
@@ -758,6 +793,7 @@ _TRANSFER_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
             "of the leg rails join one Transfer."
         ),
         kind="textarea",
+        handbook_path=HandbookPath("l2-editor/transfer-key"),
     ),
     # AB.3.7 — Variable-rail XOR groups. Each group is a multi-select
     # whose option universe is this template's own ``leg_rails``. The
@@ -782,6 +818,7 @@ _TRANSFER_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
         kind="multi_select_groups",
         select_from="self_leg_rails",
         edit_only=True,
+        handbook_path=HandbookPath("l2-editor/leg-rail-xor-groups"),
     ),
     # AF (E8) — soft per-period firing-COUNT bound for the template's
     # shared Transfer (honored when the template is a chain parent —
@@ -1498,6 +1535,7 @@ def _render_field(
     label = (
         f'<label for="field-{spec.name}" class="font-semibold text-xs text-primary-fg">{escape(spec.label)}'
         f'{"<span class=\"text-danger\"> *</span>" if spec.required else ""}'
+        f"{_handbook_chip_html(spec)}"
         f"</label>"
     )
     helper = (
@@ -2013,7 +2051,8 @@ def _render_multi_select_groups_field(
     create page accidentally let it through (defense-in-depth).
     """
     label_html = (
-        f'<label class="font-semibold text-xs text-primary-fg">{escape(spec.label)}</label>'
+        f'<label class="font-semibold text-xs text-primary-fg">'
+        f'{escape(spec.label)}{_handbook_chip_html(spec)}</label>'
     )
     helper_html = (
         f'<small class="text-xs text-secondary-fg">{escape(spec.helper)}</small>'
@@ -2301,6 +2340,7 @@ def _render_chain_children_field(
         f'<label for="field-{spec.name}" class="font-semibold text-xs text-primary-fg">'
         f'{escape(spec.label)}'
         f'{"<span class=\"text-danger\"> *</span>" if spec.required else ""}'
+        f"{_handbook_chip_html(spec)}"
         f"</label>"
     )
     helper = (
