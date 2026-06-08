@@ -118,36 +118,48 @@ def bullets(items: Iterable[str]) -> str:
     """Bulleted list at indent level 0.
 
     Each item is processed through :func:`markdown` (so inline
-    ``[text](url)`` links render as clickable anchors) and then
-    defensively stripped of any ``<br/>`` tags — QS's XML parser
-    rejects ``<br/>`` as a child of ``<li>`` with
-    ``Element 'li' cannot have 'br' elements as children``. A
-    ``\\n\\n`` paragraph break still reflows to ``<br/><br/>`` via
-    :func:`markdown` and would break ``CreateAnalysis`` inside an
-    ``<li>`` (the v8.5.4 → v8.5.8 regression on the L1 Drift sheet),
-    so it is stripped here. (A lone ``\\n`` is a soft break that
-    :func:`markdown` collapses to a space upstream, so it never
-    reaches this strip.)
+    ``[text](url)`` links render as clickable anchors). QS's XML
+    parser rejects ``<br/>`` as a child of ``<li>`` with ``Element
+    'li' cannot have 'br' elements as children`` — historically this
+    function silently stripped the ``<br/>`` and warned. v13.6.1
+    finding 3 reshaped that: an item whose source contains ``\\n\\n``
+    paragraph breaks splits into ONE ``<li>`` per paragraph, so the
+    paragraph structure survives. Items without paragraph breaks
+    still render as a single ``<li>``.
 
-    Any stripped ``<br/>`` raises a ``UserWarning`` showing the
-    original item so authors can clean the source string when the
-    line break was actually intended (e.g. break the item into two).
+    A residual ``<br/>`` after the paragraph split (e.g. an explicit
+    in-source ``<br/>`` tag) still trips the defensive strip + emits
+    a ``UserWarning`` — that's the actual misuse pattern (a soft
+    line break inside a single bullet, which QS can't render).
     """
     lis_parts: list[str] = []
     for item in items:
-        rendered = markdown(item)
-        if _BR_TAG.search(rendered):
-            stripped = _BR_TAG.sub(" ", rendered)
-            warnings.warn(
-                f"bullets(): stripped <br/> from list item — QS "
-                f"rejects <br/> as a child of <li>. Original item: "
-                f"{item!r}. Consider splitting into two bullets or "
-                f"removing the embedded line break in the source.",
-                UserWarning,
-                stacklevel=2,
-            )
-            rendered = stripped
-        lis_parts.append(f'<li class="ql-indent-0">{rendered}</li>')
+        # v13.6.1 finding 3 — split blank-line-separated paragraphs
+        # into separate <li>s. Preserves the operator's paragraph
+        # structure in entity descriptions that bullets() ingests.
+        paragraphs = [p.strip() for p in item.split("\n\n") if p.strip()]
+        if not paragraphs:
+            # Empty / whitespace-only item — emit one empty bullet
+            # so the bullet count matches the input count (callers
+            # may rely on positional alignment with their data).
+            paragraphs = [item]
+        for paragraph in paragraphs:
+            rendered = markdown(paragraph)
+            if _BR_TAG.search(rendered):
+                stripped = _BR_TAG.sub(" ", rendered)
+                warnings.warn(
+                    f"bullets(): stripped <br/> from list item — QS "
+                    f"rejects <br/> as a child of <li>. Original "
+                    f"paragraph: {paragraph!r}. Soft line breaks "
+                    f"inside a single paragraph have no XML-legal "
+                    f"in-<li> shape; remove the embedded newline or "
+                    f"separate with a blank line to split into "
+                    f"another bullet.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                rendered = stripped
+            lis_parts.append(f'<li class="ql-indent-0">{rendered}</li>')
     return f"<ul>{''.join(lis_parts)}</ul>"
 
 

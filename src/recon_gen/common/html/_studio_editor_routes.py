@@ -178,6 +178,14 @@ class FieldSpec:
     # wire_imad") AND for enabling :placeholder-shown CSS reactivity
     # on textarea fields whose downstream siblings hide when empty.
     placeholder: str | None = None
+    # v13.6.1 finding 2 — when an option's display label should
+    # differ from its raw value (e.g. the empty option labeled
+    # "Sparse (default)" for `balance_cadence`'s unset state), the
+    # spec carries a value→label mapping consulted by the select
+    # renderer. Keys not present in the dict fall back to escaping
+    # the raw value, preserving the pre-fix shape for FieldSpecs
+    # that don't need relabeling.
+    option_labels: Mapping[str, str] | None = None
     # CN.5a — optional pointer to a handbook page under
     # ``docs/handbook/`` (same shape as ``Sheet.handbook_path``;
     # `<area>/<topic>` without `.md`). When set, the renderer emits
@@ -315,6 +323,12 @@ _ACCOUNT_FIELDS: tuple[FieldSpec, ...] = (
         ),
         kind="select",
         options=("", "sparse", "explicit_daily"),
+        # v13.6.1 finding 2 — relabel the empty option so the
+        # form makes the default explicit. Pre-fix the empty
+        # `<option value="">` rendered with no display text +
+        # the help line said "Sparse (default)" — the operator
+        # had no way to tell the empty state resolved to sparse.
+        option_labels={"": "Sparse (default)"},
     ),
 )
 
@@ -382,6 +396,12 @@ _ACCOUNT_TEMPLATE_FIELDS: tuple[FieldSpec, ...] = (
         ),
         kind="select",
         options=("", "sparse", "explicit_daily"),
+        # v13.6.1 finding 2 — relabel the empty option so the
+        # form makes the default explicit. Pre-fix the empty
+        # `<option value="">` rendered with no display text +
+        # the help line said "Sparse (default)" — the operator
+        # had no way to tell the empty state resolved to sparse.
+        option_labels={"": "Sparse (default)"},
     ),
     FieldSpec(
         name="instance_id_template",
@@ -1794,9 +1814,13 @@ def _render_field(
                     f'<option value=""{" selected" if val_str == "" else ""}>'
                     f"— none —</option>"
                 )
+            # v13.6.1 finding 2 — value→label override (e.g.
+            # ``balance_cadence`` empty option labeled
+            # "Sparse (default)" instead of rendering blank).
+            labels = spec.option_labels or {}
             opt_blocks.extend(
                 f'<option value="{escape(o)}"{" selected" if o == val_str else ""}>'
-                f"{escape(o)}</option>"
+                f"{escape(labels.get(o, o))}</option>"
                 for o in options
             )
         # CK.4 (2026-06-05) — every dynamic-form <select> ships an

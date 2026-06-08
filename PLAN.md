@@ -595,3 +595,4 @@ Three open design items from `docs/audits/_archive/v11_22_1_feedback.md` cold-re
 - **BX backlog — Configurable etl_hook subprocess timeout** — added 2026-06-08.
 - **BX backlog — Extend semantic-lock to PG + Oracle dialects** — added 2026-06-08.
 - **BX backlog — Wire AsOfFrame.live_from_db into App2 + QS deploy paths** — added 2026-06-08.
+- **BX backlog — v13.6.1 finding 4: balance_cadence_gap vs carried_with_activity_gap divergence** — added 2026-06-08.

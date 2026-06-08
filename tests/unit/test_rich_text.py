@@ -187,9 +187,11 @@ class TestBullets:
         assert "line one line two" in out
         assert caught == []
 
-    def test_bullets_strip_br_from_paragraph_break_and_warn(self) -> None:
-        # ``\n\n`` produces ``<br/><br/>`` via markdown(); both get
-        # stripped, one warning per item.
+    def test_bullets_splits_paragraph_break_into_separate_bullets(self) -> None:
+        # v13.6.1 finding 3 — ``\n\n`` paragraph breaks now split
+        # into separate ``<li>``s instead of being silently stripped
+        # and collapsed. Preserves the operator's paragraph structure
+        # in entity descriptions that bullets() ingests.
         import warnings as _w
 
         with _w.catch_warnings(record=True) as caught:
@@ -197,7 +199,11 @@ class TestBullets:
             out = rt.bullets(["para one\n\npara two"])
         assert BR not in out
         assert "para one" in out and "para two" in out
-        assert len(caught) == 1
+        # Two paragraphs → two <li>s, no warning (the new contract
+        # is "split, don't strip"; warning only fires for a
+        # residual <br/> inside a single paragraph).
+        assert out.count('<li class="ql-indent-0">') == 2
+        assert caught == []
 
     def test_bullets_no_warning_when_no_br_emitted(self) -> None:
         # Plain bullets — no newlines, no warning, exact pre-v8.5.8
@@ -225,17 +231,20 @@ class TestBullets:
         assert '<a href="https://x.com" target="_self">docs</a>' in out
         assert BR not in out
 
-    def test_bullets_one_warning_per_offending_item(self) -> None:
-        # If multiple items contain a \n\n paragraph break (which
-        # markdown() turns into <br/><br/>), each one gets its own
-        # warning so the author can fix every offender in one pass.
-        # (A lone \n is a soft break → space → no warning; see above.)
+    def test_bullets_multiple_paragraph_items_no_warning(self) -> None:
+        # v13.6.1 finding 3 — multiple items each containing \n\n
+        # paragraph breaks all split cleanly into their own bullets.
+        # The new contract is "split, don't strip"; no warning fires
+        # for paragraph splits (only for residual <br/> inside a
+        # single paragraph, which is a different misuse pattern).
         import warnings as _w
 
         with _w.catch_warnings(record=True) as caught:
             _w.simplefilter("always")
-            rt.bullets(["a\n\nb", "clean", "c\n\nd"])
-        assert len(caught) == 2
+            out = rt.bullets(["a\n\nb", "clean", "c\n\nd"])
+        # 2 + 1 + 2 = 5 bullets expected.
+        assert out.count('<li class="ql-indent-0">') == 5
+        assert caught == []
 
 
 class TestMarkdownInline:
