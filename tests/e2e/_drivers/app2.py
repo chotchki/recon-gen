@@ -288,32 +288,103 @@ class App2Driver:
         ))
 
     def filter_options(self, label: str) -> list[str]:
-        # CQ.2.c — LinkedValues pickers render with empty <option>
-        # lists; Tom Select fetches the seed page on first focus
-        # (preload: 'focus'). For typeahead-marked pickers we focus
-        # the control to trigger the load, wait for the merge to
-        # populate `s.options`, then read. Static-options pickers
-        # (data-typeahead absent) still have all options in the DOM
-        # at render time.
+        # For typeahead pickers this returns the SEED PAGE (empty query).
+        # For per-query searches use `typeahead_filter(label, query)` —
+        # the seed-only shape was insufficient (CR.x followup 2026-06-08:
+        # didn't catch the matview-direct WHERE-clause leak that surfaced
+        # in Studio, since seed-page never typed anything).
+        return self.typeahead_filter(label, query="")
+
+    def typeahead_filter(self, label: str, query: str) -> list[str]:
+        """Drive the typeahead picker's per-keystroke load with ``query``
+        and return the SERVER-MATCHED options.
+
+        For static-options pickers (no data-typeahead) this just returns
+        the rendered options (query is ignored — they don't have a
+        typeahead path).
+
+        For typeahead-marked pickers: triggers Tom Select's `load(query)`
+        which fires settings.load → fetch
+        `dropdown-search/<ds>/<col>?q=<query>` → server returns matched
+        options → settings.load's callback adds them to ts.options. We
+        poll ts.options until populated OR timeout, then return the
+        option labels.
+
+        CR.x (2026-06-08) — added because the prior pattern called
+        `s.tomselect.load('', userCallback)` assuming Tom Select would
+        forward the callback to settings.load's callback. It doesn't —
+        ``tomselect.load(query)`` ignores extra args. The DOM-poll
+        replacement matches Tom Select's actual contract. Driving the
+        REAL per-query path (not just seed) is what catches:
+          (a) URL-resolution bugs (relative vs absolute — the original
+              CR.x trigger).
+          (b) WHERE-clause leaks (matview-direct path bypassing the
+              dataset's narrowing).
+          (c) Option-accumulation bugs (Tom Select's addOption merges,
+              caller must clearOptions to get fresh per-query results).
+        """
+        import time as _time
         sel = self._filter_control(label).locator("select").first
         sel.wait_for(state="attached")
         is_typeahead = sel.evaluate(
             """(s) => s.dataset.typeahead === '1'"""
         )
         if is_typeahead:
-            # Force the seed-page load via Tom Select's API and wait
-            # for the merge. Bypasses the focus/blur dance Playwright
-            # has trouble racing with HTMX swaps.
+            # Trigger Tom Select's per-query load. Tom Select fetches
+            # via settings.load (bootstrap.js) which clearOptions +
+            # fetch + addOption. We poll ts.options for the populated
+            # state.
             sel.evaluate(
-                """(s) => new Promise((resolve, reject) => {
-                    if (!s.tomselect) { resolve(); return; }
-                    s.tomselect.load('', resolve);
-                    setTimeout(() => reject('timeout'), 5000);
-                })"""
+                """(s, q) => {
+                    if (!s.tomselect) return;
+                    s.tomselect.load(q);
+                }""",
+                query,
             )
-        opts = sel.evaluate(
-            """(s) => Array.from(s.options).map((o) => (o.text || '').trim())"""
-        )
+            # Poll for the load to complete + options to populate. Tom
+            # Select sets `loading` counter on settings.load entry +
+            # decrements on callback. Wait for loading === 0 AND
+            # ts.options to have entries (or definitively-empty after
+            # the fetch landed).
+            deadline = _time.monotonic() + 5.0
+            while _time.monotonic() < deadline:
+                state = sel.evaluate(
+                    """(s) => {
+                        if (!s.tomselect) return {loading: 0, count: 0};
+                        return {
+                            loading: s.tomselect.loading || 0,
+                            count: Object.keys(s.tomselect.options || {}).length,
+                        };
+                    }"""
+                )
+                if state["loading"] == 0 and state["count"] >= 0:
+                    # Loading completed (may be empty if no matches).
+                    # Brief settle so the addOption callback finishes.
+                    self._page.wait_for_timeout(50)
+                    break
+                self._page.wait_for_timeout(100)
+            opts = sel.evaluate(
+                """(s) => {
+                    if (!s.tomselect) {
+                        return Array.from(s.options).map(
+                            (o) => (o.text || '').trim()
+                        );
+                    }
+                    // ts.options is keyed by valueField; the label
+                    // field is what the user sees in the dropdown.
+                    return Object.values(s.tomselect.options || {}).map(
+                        (o) => (o.label || o.text || '').toString().trim()
+                    );
+                }"""
+            )
+        else:
+            # Static-options picker: query is meaningless, return
+            # rendered <option> labels.
+            opts = sel.evaluate(
+                """(s) => Array.from(s.options).map(
+                    (o) => (o.text || '').trim()
+                )"""
+            )
         return [
             o for o in opts
             if o and o not in ("All", "Select all")

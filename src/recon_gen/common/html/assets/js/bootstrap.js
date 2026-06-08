@@ -1987,7 +1987,22 @@
       settings.shouldLoad = (q) => q.length === 0 || q.length >= 2;
       settings.valueField = "value";
       settings.labelField = "label";
-      settings.load = (query, callback) => {
+      settings.load = function (query, callback) {
+        // CR.x — clear accumulated options BEFORE the fetch so each
+        // keystroke's dropdown shows only the server-matched set, not
+        // the union of every prior load. Without this, the seed-page
+        // (focus-preload) options stay visible alongside per-keystroke
+        // results since we set searchField=[] (server-side filtering)
+        // — surfaced live in Studio 2026-06-08 (user typed "gl-1850"
+        // but saw the alphabetical seed-page accounts). `clearOptions()`
+        // default keeps the currently-selected option so the chip
+        // survives; only the unselected accumulated cruft is wiped.
+        //
+        // `function` (not arrow) so `this` is the TomSelect instance
+        // — needed for clearOptions which is an instance method.
+        if (typeof this.clearOptions === "function") {
+          this.clearOptions();
+        }
         // Thread the form's current state (cascade params) onto the
         // search URL so e.g. a Role pick still narrows the candidate
         // Account universe.

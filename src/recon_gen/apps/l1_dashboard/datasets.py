@@ -32,7 +32,12 @@ from recon_gen.common.models import (
     StringDatasetParameter,
     StringDatasetParameterDefaultValues,
 )
-from recon_gen.common.picker_datasets import build_shared_picker_datasets
+from recon_gen.common.picker_datasets import (
+    build_picker_account_roles_dataset,
+    build_picker_chain_parents_dataset,
+    build_picker_metadata_keys_dataset,
+    build_picker_rails_dataset,
+)
 from recon_gen.common.sheets.app_info import (
     build_liveness_dataset,
     build_matview_status_dataset,
@@ -667,6 +672,21 @@ L1_ACCOUNTS_CONTRACT = DatasetContract(columns=[
     # ``_account_display_clause(...)``.
     ColumnSpec("account_name", "STRING"),
     ColumnSpec("account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY),
+])
+
+# CR.x — Control accounts reference table (CQ.4.b) extends the basic
+# account contract with two "last activity" date columns. Two surfaces
+# (last balance vs last transaction) because they answer different
+# operator questions: "is the balance feed flowing for this control?"
+# vs "is anything actually posting against it?" Same-day-stale vs
+# multi-week-stale vs balance-but-no-tx is the diagnostic shape.
+L1_CONTROL_ACCOUNTS_CONTRACT = DatasetContract(columns=[
+    ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
+    ColumnSpec("account_role", "STRING"),
+    ColumnSpec("account_name", "STRING"),
+    ColumnSpec("account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY),
+    ColumnSpec("last_balance_date", "DATETIME"),
+    ColumnSpec("last_txn_date", "DATETIME"),
 ])
 
 L1_TX_IDS_CONTRACT = DatasetContract(columns=[
@@ -1687,9 +1707,16 @@ def build_l1_ds_accounts_dataset(
         # and queries the matview directly. select_expr MUST match
         # the SELECT-side display projection above; both use
         # account_display_expr(name, id).
+        # CR.x followup (2026-06-08) — where_clause MUST mirror the
+        # dataset SQL's WHERE so the matview-direct path narrows
+        # identically. Pre-fix, external counterparties leaked into
+        # the typeahead because the matview-direct shape skipped the
+        # scope filter — surfaced live in Studio with
+        # ext-card-network-acquirer appearing in the Account picker.
         picker_matview_hint=PickerMatviewHint(
             matview=f"{prefix}_current_daily_balances",
             select_expr=display,
+            where_clause="account_scope = 'internal'",
         ),
     )
 
@@ -1725,10 +1752,23 @@ def build_l1_ds_control_accounts_dataset(
     """
     prefix = cfg.db_table_prefix
     display = account_display_expr("account_name", "account_id")
+    # CR.x — two "last activity" date columns surface staleness at a
+    # glance. ``last_balance_date`` = ``business_day_start`` from
+    # current_daily_balances (the LATEST balance per account by the
+    # matview's contract — one row per account already). ``last_txn_date``
+    # = MAX(posting) from current_transactions filtered to this account
+    # via a correlated subquery — portable across PG/Oracle/DuckDB
+    # (LEFT JOIN + GROUP BY would also work but the subquery keeps the
+    # outer query's row identity clean). DATE-cast at the projection
+    # boundary so the rendered table shows YYYY-MM-DD instead of full
+    # timestamp.
     sql = (
         f"SELECT DISTINCT account_id, account_role, account_name,"
-        f" {display} AS account_display"
-        f" FROM {prefix}_current_daily_balances"
+        f" {display} AS account_display,"
+        f" business_day_start AS last_balance_date,"
+        f" (SELECT MAX(posting) FROM {prefix}_current_transactions ct"
+        f"  WHERE ct.account_id = cdb.account_id) AS last_txn_date"
+        f" FROM {prefix}_current_daily_balances cdb"
         f" WHERE account_parent_role IS NULL"
         f"   AND account_scope = 'internal'"
         f" ORDER BY account_role, account_id"
@@ -1737,7 +1777,7 @@ def build_l1_ds_control_accounts_dataset(
         cfg, cfg.prefixed("l1-ds-control-accounts-dataset"),
         "L1 Daily Statement Control Accounts",
         "l1-ds-control-accounts",
-        sql, L1_ACCOUNTS_CONTRACT,
+        sql, L1_CONTROL_ACCOUNTS_CONTRACT,
         visual_identifier=DS_L1_DS_CONTROL_ACCOUNTS,
     )
 
@@ -1824,11 +1864,20 @@ def build_all_l1_dashboard_datasets(
         build_l1_ds_control_accounts_dataset(cfg, l2_instance),
         build_l1_tx_ids_dataset(cfg, l2_instance),
         build_l1_tx_facets_dataset(cfg, l2_instance),
-        # CQ.3.c — shared LinkedValues picker source datasets
-        # (rails / templates / account_roles / metadata_keys /
-        # chain_parents). Same datasets emitted by L2FT — AWS deploy
-        # de-dups by DataSetId; register_sql is idempotent on repeat.
-        *build_shared_picker_datasets(cfg),
+        # CQ.3.c — shared LinkedValues picker source datasets that
+        # L1 actually uses (rails / account_roles / metadata_keys /
+        # chain_parents). DS_TEMPLATES deliberately NOT emitted —
+        # L1 has no Template picker (L2FT uses it). Pre-CR.x L1 used
+        # the all-5 build_shared_picker_datasets but the unused
+        # Templates dataset never made it into L1's
+        # DataSetIdentifierDeclarations, tripping the structural
+        # test (CI failure on cf032797). Each app now emits the
+        # subset it binds; AWS DataSetId de-dup still consolidates
+        # when both apps emit the same one.
+        build_picker_rails_dataset(cfg),
+        build_picker_account_roles_dataset(cfg),
+        build_picker_metadata_keys_dataset(cfg),
+        build_picker_chain_parents_dataset(cfg),
         # M.4.4.5 — App Info ("i") sheet datasets, ALWAYS LAST.
         # M.4.4.7 — per-app segment so deploy <single-app> doesn't
         # delete-then-create another app's App Info dataset.

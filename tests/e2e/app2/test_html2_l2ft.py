@@ -183,25 +183,25 @@ def test_l2ft_rail_dropdown_selection_refetches_with_param(
     # Wait past the initial auto-load fetch before clearing the log.
     page.wait_for_timeout(400)
     _calls_log.clear()
-    # CQ.3.d — the picker is a Tom Select typeahead. The test's
-    # contract is the WIRE SHAPE on refresh (single value, not list-
-    # repeated), NOT the typeahead UX loading flow. Inject a synthetic
-    # option via Tom Select's addOption + setValue API so we don't
-    # depend on the server-side fetch being timed correctly with the
-    # focus → preload chain (CR.x learnings: instance.load() doesn't
-    # accept a user-callback, the underlying <select>.options stays
-    # empty even after fetch, and the actual options live in
-    # ts.options dict which only populates if the fetch returns
-    # non-empty in time). setValue() fires onChange → 'change' event
-    # → form's debounced refresh listener, which IS what we want.
+    # CR.x — use the real typeahead path (not the synthetic-option
+    # shortcut that masked the matview-direct WHERE-clause leak +
+    # dropdown-accumulation bugs surfaced in Studio 2026-06-08). Call
+    # typeahead_filter to drive the focus → preload → settings.load
+    # → fetch → addOption chain end-to-end, then setValue to fire the
+    # broadcast refresh. Per feedback_build_verbs_not_skip: build
+    # verbs not skip — the verb exists, use it.
+    opts = driver.typeahead_filter("Rail", query="")
+    assert opts, "expected at least one rail option from seed page"
     page.evaluate(
-        """() => {
+        """(val) => {
             const sel = document.querySelector('select[name="param_pL2ftRail"]');
             if (!sel || !sel.tomselect) throw new Error('Tom Select not initialized');
-            const ts = sel.tomselect;
-            ts.addOption({value: 'SyntheticRail', label: 'SyntheticRail'});
-            ts.setValue('SyntheticRail');
-        }"""
+            // typeahead_filter returns labels (Tom Select label field).
+            // For DS_RAILS the label IS the value (single-column
+            // dataset projecting "name").
+            sel.tomselect.setValue(val);
+        }""",
+        opts[0],
     )
     page.wait_for_timeout(900)  # 300ms debounce + swap settle
     saw_rail_param = [

@@ -197,12 +197,43 @@ def _build_chain_parents_dataset(cfg: Config) -> DataSet:
     )
 
 
-def build_shared_picker_datasets(cfg: Config) -> list[DataSet]:
-    """Build all 4 shared picker-source datasets.
+# CR.x — per-dataset public builders. CI failure on cf032797 surfaced
+# the "L1 emits templates but no L1 visual binds it → DataSetIdentifier-
+# Declarations missing → structural test fails" shape: L1 was using
+# the all-5 ``build_shared_picker_datasets`` even though it doesn't
+# bind Templates. Each app now imports + emits the specific shared
+# datasets it actually uses; AWS DataSetId de-dup still applies when
+# two apps emit the same dataset.
+def build_picker_rails_dataset(cfg: Config) -> DataSet:
+    return _build_rails_dataset(cfg)
 
-    Both L1 and L2FT call this from their respective
-    ``build_all_datasets`` and extend the returned list. AWS deploy
-    de-dups by ``DataSetId``; the registry-side
+
+def build_picker_templates_dataset(cfg: Config) -> DataSet:
+    return _build_templates_dataset(cfg)
+
+
+def build_picker_account_roles_dataset(cfg: Config) -> DataSet:
+    return _build_account_roles_dataset(cfg)
+
+
+def build_picker_metadata_keys_dataset(cfg: Config) -> DataSet:
+    return _build_metadata_keys_dataset(cfg)
+
+
+def build_picker_chain_parents_dataset(cfg: Config) -> DataSet:
+    return _build_chain_parents_dataset(cfg)
+
+
+def build_shared_picker_datasets(cfg: Config) -> list[DataSet]:
+    """Build all 5 shared picker-source datasets.
+
+    Apps that use ALL shared pickers (currently L2FT — uses every one)
+    can call this for convenience. Apps that use a subset (currently
+    L1 — doesn't bind Templates) should call the specific
+    ``build_picker_*`` builders directly so the dashboard's
+    DataSetIdentifierDeclarations matches what gets emitted.
+
+    AWS deploy de-dups by ``DataSetId``; the registry-side
     (``register_sql`` / ``register_picker_matview_hint``) is
     idempotent on repeat (overwrite-with-identical-content).
     """

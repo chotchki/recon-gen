@@ -849,9 +849,19 @@ class PickerMatviewHint:
             match or the hint path returns a different option set
             than the wrap path. For account_display columns this is
             typically ``account_display_expr(name_col, id_col)``.
+        where_clause: optional WHERE-clause fragment the dataset's
+            wrapped SQL applies to narrow the source (e.g.
+            ``"account_scope = 'internal'"`` from CQ.4.a). The
+            matview-direct path MUST apply the same narrowing or
+            it leaks rows the dataset filtered out — surfaced
+            2026-06-08 when external counterparties appeared in
+            the Daily Statement Account picker post-CQ.4.a deploy
+            even though the dataset SQL filtered them out. None
+            means no extra narrowing.
     """
     matview: str
     select_expr: str
+    where_clause: str | None = None
 
 
 # Per-visual-identifier registry of matview hints. ``register_picker_matview_hint``
@@ -941,9 +951,10 @@ def _picker_search_sql_matview_direct(
     account_id || ')'``). Both sides MUST match — see PickerMatviewHint
     docstring.
     """
-    where_clause = case_insensitive_substring_match(
+    ilike_clause = case_insensitive_substring_match(
         hint.select_expr, "q", dialect,
     )
+    extra = f" AND ({hint.where_clause})" if hint.where_clause else ""
     limit_clause = (
         f"FETCH FIRST {limit} ROWS ONLY"
         if dialect is Dialect.ORACLE
@@ -952,7 +963,7 @@ def _picker_search_sql_matview_direct(
     return (
         f"SELECT DISTINCT {hint.select_expr} AS opt "
         f"FROM {hint.matview} "
-        f"WHERE {hint.select_expr} IS NOT NULL AND {where_clause} "
+        f"WHERE {hint.select_expr} IS NOT NULL AND {ilike_clause}{extra} "
         f"ORDER BY 1 {limit_clause}"
     )
 
@@ -982,6 +993,7 @@ def _picker_seed_sql_matview_direct(
     limit: int = PICKER_PAGE_SIZE,
 ) -> str:
     """Empty-query seed page on the MATVIEW-DIRECT path."""
+    extra = f" AND ({hint.where_clause})" if hint.where_clause else ""
     limit_clause = (
         f"FETCH FIRST {limit} ROWS ONLY"
         if dialect is Dialect.ORACLE
@@ -990,7 +1002,7 @@ def _picker_seed_sql_matview_direct(
     return (
         f"SELECT DISTINCT {hint.select_expr} AS opt "
         f"FROM {hint.matview} "
-        f"WHERE {hint.select_expr} IS NOT NULL "
+        f"WHERE {hint.select_expr} IS NOT NULL{extra} "
         f"ORDER BY 1 {limit_clause}"
     )
 

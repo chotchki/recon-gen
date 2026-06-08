@@ -177,7 +177,27 @@ class DashboardDriver(Protocol):
         data-agnostic test picks from without hardcoding values. (QS
         opens the ``ParameterDropDownControl`` popover and reads the
         ``[role="option"]`` labels; App2 reads the ``<select>``'s
-        ``<option>`` text.)"""
+        ``<option>`` text.)
+
+        For typeahead-backed pickers (LinkedValues sourced server-side)
+        this returns the SEED PAGE only (empty query). Use
+        ``typeahead_filter(label, query)`` to drive the per-keystroke
+        load and verify a specific query's server-matched results."""
+        ...
+
+    def typeahead_filter(self, label: str, query: str) -> list[str]:
+        """Drive a typeahead picker's per-keystroke load with ``query``
+        and return the server-matched options.
+
+        Catches WHERE-clause leaks, URL-resolution bugs, and option-
+        accumulation bugs that the empty-query ``filter_options`` shape
+        can't see — the picker only typed gets a different SQL path
+        (ILIKE %q% vs seed-page) and only typed values exercise the
+        clear-then-fetch dropdown logic.
+
+        For static-options (non-typeahead) pickers, ``query`` is
+        meaningless and this returns the same rendered options as
+        ``filter_options``."""
         ...
 
     def wait_loaded(self, visual_title: str, *, timeout_ms: int = 15_000) -> None:

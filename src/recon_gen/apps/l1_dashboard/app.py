@@ -95,7 +95,6 @@ from recon_gen.common.picker_datasets import (
     DS_CHAIN_PARENTS,
     DS_METADATA_KEYS,
     DS_RAILS,
-    DS_TEMPLATES,
 )
 from recon_gen.common.handbook.invariants import (
     load_bundled_invariants,
@@ -544,10 +543,10 @@ def _l1_datasets(
         DS_SUPERSESSION_TRANSACTIONS, DS_SUPERSESSION_DAILY_BALANCES,
         DS_L1_ACCOUNTS, DS_L1_DS_ACCOUNTS,
         DS_L1_DS_CONTROL_ACCOUNTS, DS_L1_TX_IDS, DS_L1_TX_FACETS,
-        # CQ.3.c — shared LinkedValues picker source datasets. Order
-        # matches build_shared_picker_datasets() exactly.
-        DS_RAILS, DS_TEMPLATES, DS_ACCOUNT_ROLES, DS_METADATA_KEYS,
-        DS_CHAIN_PARENTS,
+        # CQ.3.c — shared LinkedValues picker source datasets. L1 emits
+        # only the 4 it binds (CR.x — drops Templates, which is L2FT's).
+        # Order matches build_all_l1_dashboard_datasets emit order.
+        DS_RAILS, DS_ACCOUNT_ROLES, DS_METADATA_KEYS, DS_CHAIN_PARENTS,
         _DS_APP_INFO_LIVENESS, _DS_APP_INFO_MATVIEWS,
     ]
     return {
@@ -1862,8 +1861,12 @@ def _populate_daily_statement_sheet(
             "IS NULL` filters to roots of the control hierarchy "
             "(`account_scope = 'internal'` keeps external counterparties "
             "out). Type the account name back into the Account picker "
-            "above to drill into one. On sasquatch_pr this is the 10 GL "
-            "controls (CashDueFRB, ACHOrigSettlement, etc.)."
+            "above to drill into one. **Last Balance** + **Last "
+            "Transaction** columns surface staleness — same-day vs "
+            "balance-but-no-recent-tx tells you whether the feed is "
+            "flowing AND whether anything is actually posting against "
+            "this control. On sasquatch_pr this is the 10 GL controls "
+            "(CashDueFRB, ACHOrigSettlement, etc.)."
         ),
         columns=[
             # account_display = "Name (id)" — same shape the Account
@@ -1874,6 +1877,15 @@ def _populate_daily_statement_sheet(
             # without a drill target).
             ds_ds_control_accounts["account_display"].dim(),
             ds_ds_control_accounts["account_role"].dim(),
+            # CR.x — staleness columns. DAY granularity drops the time
+            # component; operator wants "is this account live?" not
+            # forensic timestamps.
+            ds_ds_control_accounts["last_balance_date"].date(
+                date_granularity="DAY",
+            ),
+            ds_ds_control_accounts["last_txn_date"].date(
+                date_granularity="DAY",
+            ),
         ],
     )
 

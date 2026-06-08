@@ -437,6 +437,28 @@ class QsEmbedDriver:
             self._page, label, timeout_ms=self._visual_timeout,
         )
 
+    def typeahead_filter(self, label: str, query: str) -> list[str]:
+        # QS LinkedValues dropdowns have a native search box; typing
+        # there narrows the displayed options. The current QS helper
+        # (wait_for_dropdown_options_present) only reads the open
+        # popover — for a query-narrowed read we'd need to type into
+        # the popover's search input + re-read. Defer until the first
+        # browser test actually needs the QS leg of typeahead_filter
+        # (CR.x scope flagged: build verbs not skip — so when a test
+        # adds a typeahead_filter call on QS, implement here rather
+        # than skipping). Empty query just returns the seed-page set
+        # via filter_options.
+        if not query:
+            return self.filter_options(label)
+        raise NotImplementedError(
+            "QsEmbedDriver.typeahead_filter for non-empty query not "
+            "yet implemented — first test to need it should add the "
+            "type-into-popover-search wiring here (see App2Driver."
+            "typeahead_filter for the pattern). Per memory "
+            "feedback_build_verbs_not_skip: do NOT skip the QS leg; "
+            "implement when first needed."
+        )
+
     def wait_loaded(
         self, visual_title: str, *, timeout_ms: int = _DEFAULT_VISUAL_TIMEOUT_MS,
     ) -> None:
