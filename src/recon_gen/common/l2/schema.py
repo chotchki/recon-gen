@@ -2455,7 +2455,19 @@ spine_joined AS (
         -- the MAX-OVER below propagates it through carry days.
         CASE WHEN db.money IS NOT NULL
              THEN db.business_day_start END
-            AS emit_day_marker
+            AS emit_day_marker,
+        -- emit_tod_marker: the per-account time-of-day offset, as
+        -- an interval (timestamp − its own truncated date). On a
+        -- carry day, ``calendar_day + carried_tod`` is the
+        -- canonical business_day_start for THIS day at the
+        -- account's own offset — sidestepping the old bug where
+        -- carry days inherited the prior emit's DATE (collapsing
+        -- N carry days onto one (account, business_day_start)
+        -- key and breaking effective_balances uniqueness).
+        CASE WHEN db.money IS NOT NULL
+             THEN db.business_day_start
+                  - CAST({to_date_db_start} AS TIMESTAMP) END
+            AS emit_tod_marker
     FROM all_internal_accounts a
     CROSS JOIN in_scope_calendar_days d
     LEFT JOIN {p}_current_daily_balances db
@@ -2475,18 +2487,29 @@ carried AS (
             PARTITION BY sj.account_id
             ORDER BY sj.calendar_day
             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-        ) AS carried_from_day
+        ) AS carried_from_day,
+        MAX(sj.emit_tod_marker) OVER (
+            PARTITION BY sj.account_id
+            ORDER BY sj.calendar_day
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS carried_tod
     FROM spine_joined sj
 )
 SELECT
     c.account_id, c.account_name, c.account_role,
     c.account_parent_role, c.account_scope,
-    -- business_day_start: on emit days, the per-account real
-    -- timestamp from the JOIN; on carry days, the carried prior-
-    -- emit's timestamp. Both share the account's own offset
-    -- convention so downstream JOINs comparing against
-    -- daily_balances.business_day_start resolve correctly.
-    COALESCE(c.emitted_business_day_start, db2.business_day_start)
+    -- business_day_start: this day's calendar_day shifted by the
+    -- per-account time-of-day offset. On emit days that equals the
+    -- emit row's own business_day_start by construction (calendar_day
+    -- IS the truncated emit BDS, carried_tod IS the emit's offset);
+    -- on carry days carried_tod is propagated from the prior emit so
+    -- the timestamp lands on THIS day, NOT the prior emit's date.
+    -- Old shape (``COALESCE(c.emitted_business_day_start,
+    -- db2.business_day_start)``) collapsed every carry day after an
+    -- emit onto that emit's date, breaking uniqueness on
+    -- (account_id, business_day_start) and inflating drift /
+    -- overdraft / daily_statement_summary downstream.
+    CAST(c.calendar_day AS TIMESTAMP) + c.carried_tod
         AS business_day_start,
     -- Carry-forward business_day_end + money + expected from the
     -- prior-emit JOIN. When the spine day IS the emit day,
@@ -2512,7 +2535,15 @@ SELECT
 FROM carried c
 LEFT JOIN {p}_current_daily_balances db2
   ON db2.account_id = c.account_id
- AND db2.business_day_start = c.carried_from_day;
+ AND db2.business_day_start = c.carried_from_day
+-- Drop leading-spine-day rows for accounts whose first emit lands
+-- AFTER the global spine start (carried_tod IS NULL ⇒ no prior emit
+-- yet ⇒ no signal to carry forward). The pre-fix shape emitted these
+-- as NULL-business_day_start rows that downstream consumers always
+-- had to filter out via ``effective_money IS NOT NULL`` anyway —
+-- moving the filter here lets the uniqueness invariant on
+-- (account_id, business_day_start) hold without exceptions.
+WHERE c.carried_tod IS NOT NULL;
 -- Composite covers per-(account, day) joins from the L1 invariants;
 -- mirrors the current_daily_balances composite index shape.
 CREATE INDEX idx_{p}_eff_balances_account_day
