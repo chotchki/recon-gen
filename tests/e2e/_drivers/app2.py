@@ -334,33 +334,36 @@ class App2Driver:
             # via settings.load (bootstrap.js) which clearOptions +
             # fetch + addOption. We poll ts.options for the populated
             # state.
+            # CR.x — bust Tom Select's loadedSearches cache so the
+            # load() call always re-fetches (we want a clean per-query
+            # exercise of the server path). Without this, the focus-
+            # preload's load('') leaves loadedSearches['']=true and
+            # subsequent load('') no-ops, leaving driver to read
+            # whatever ts.options happens to have at that instant
+            # (possibly empty if the preload-fetch's addOption hasn't
+            # landed yet).
             sel.evaluate(
                 """(s, q) => {
                     if (!s.tomselect) return;
+                    if (s.tomselect.loadedSearches) {
+                        delete s.tomselect.loadedSearches[q];
+                    }
                     s.tomselect.load(q);
                 }""",
                 query,
             )
-            # Poll for the load to complete + options to populate. Tom
-            # Select sets `loading` counter on settings.load entry +
-            # decrements on callback. Wait for loading === 0 AND
-            # ts.options to have entries (or definitively-empty after
-            # the fetch landed).
+            # Poll for ts.options to populate. Wait for count > 0 OR
+            # timeout — don't early-exit on loading === 0 because the
+            # poll could land between load-completion and the
+            # addOption callback firing (false-negative empty result).
             deadline = _time.monotonic() + 5.0
             while _time.monotonic() < deadline:
-                state = sel.evaluate(
-                    """(s) => {
-                        if (!s.tomselect) return {loading: 0, count: 0};
-                        return {
-                            loading: s.tomselect.loading || 0,
-                            count: Object.keys(s.tomselect.options || {}).length,
-                        };
-                    }"""
+                count = sel.evaluate(
+                    """(s) => s.tomselect
+                        ? Object.keys(s.tomselect.options || {}).length
+                        : 0"""
                 )
-                if state["loading"] == 0 and state["count"] >= 0:
-                    # Loading completed (may be empty if no matches).
-                    # Brief settle so the addOption callback finishes.
-                    self._page.wait_for_timeout(50)
+                if count > 0:
                     break
                 self._page.wait_for_timeout(100)
             opts = sel.evaluate(

@@ -1753,25 +1753,27 @@ def build_l1_ds_control_accounts_dataset(
     prefix = cfg.db_table_prefix
     display = account_display_expr("account_name", "account_id")
     # CR.x — two "last activity" date columns surface staleness at a
-    # glance. ``last_balance_date`` = ``business_day_start`` from
-    # current_daily_balances (the LATEST balance per account by the
-    # matview's contract — one row per account already). ``last_txn_date``
-    # = MAX(posting) from current_transactions filtered to this account
-    # via a correlated subquery — portable across PG/Oracle/DuckDB
-    # (LEFT JOIN + GROUP BY would also work but the subquery keeps the
-    # outer query's row identity clean). DATE-cast at the projection
-    # boundary so the rendered table shows YYYY-MM-DD instead of full
-    # timestamp.
+    # glance. The pre-CR.x SELECT DISTINCT worked because every
+    # projected column (id/role/name/display) was constant per account
+    # — DISTINCT collapsed the many-rows-per-account-day in
+    # current_daily_balances to one. Adding ``business_day_start`` (a
+    # per-day column) broke that collapse: pre-fix produced ~470 rows
+    # (rows-per-day × 7 controls). Surfaced live in Studio 2026-06-08.
+    # Fix: GROUP BY id/role/name + MAX(business_day_start). Same outer
+    # row identity, last_balance_date is the latest-per-account.
+    # last_txn_date stays as a correlated subquery on
+    # current_transactions, scoped to the outer account_id.
     sql = (
-        f"SELECT DISTINCT account_id, account_role, account_name,"
+        f"SELECT cdb.account_id, cdb.account_role, cdb.account_name,"
         f" {display} AS account_display,"
-        f" business_day_start AS last_balance_date,"
+        f" MAX(cdb.business_day_start) AS last_balance_date,"
         f" (SELECT MAX(posting) FROM {prefix}_current_transactions ct"
         f"  WHERE ct.account_id = cdb.account_id) AS last_txn_date"
         f" FROM {prefix}_current_daily_balances cdb"
-        f" WHERE account_parent_role IS NULL"
-        f"   AND account_scope = 'internal'"
-        f" ORDER BY account_role, account_id"
+        f" WHERE cdb.account_parent_role IS NULL"
+        f"   AND cdb.account_scope = 'internal'"
+        f" GROUP BY cdb.account_id, cdb.account_role, cdb.account_name"
+        f" ORDER BY cdb.account_role, cdb.account_id"
     )
     return build_dataset(
         cfg, cfg.prefixed("l1-ds-control-accounts-dataset"),

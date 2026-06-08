@@ -2012,8 +2012,13 @@ def test_y2g_companion_datasets_registered_and_unparameterized() -> None:
 
     inst = default_l2_instance()
     for builder, frag in (
+        # CR.x — control accounts dataset switched DISTINCT → GROUP BY
+        # when the staleness columns (last_balance_date, last_txn_date)
+        # landed; DISTINCT broke because business_day_start varies
+        # per (account, day), expanding the row count instead of
+        # collapsing to per-account.
         (build_l1_ds_control_accounts_dataset,
-            "SELECT DISTINCT account_id, account_role"),
+            "SELECT cdb.account_id, cdb.account_role"),
         (build_l1_tx_ids_dataset, "SELECT DISTINCT transfer_id"),
         (build_l1_tx_facets_dataset, "SELECT DISTINCT status, origin"),
     ):
