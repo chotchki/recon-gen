@@ -288,12 +288,29 @@ class App2Driver:
         ))
 
     def filter_options(self, label: str) -> list[str]:
-        # Read the underlying ``<select>``'s option text directly (Tom
-        # Select decorates it but the real <option>s stay in the DOM).
-        # Filter the same sentinels QS's reader drops so the two
-        # renderers' option universes line up.
+        # CQ.2.c — LinkedValues pickers render with empty <option>
+        # lists; Tom Select fetches the seed page on first focus
+        # (preload: 'focus'). For typeahead-marked pickers we focus
+        # the control to trigger the load, wait for the merge to
+        # populate `s.options`, then read. Static-options pickers
+        # (data-typeahead absent) still have all options in the DOM
+        # at render time.
         sel = self._filter_control(label).locator("select").first
         sel.wait_for(state="attached")
+        is_typeahead = sel.evaluate(
+            """(s) => s.dataset.typeahead === '1'"""
+        )
+        if is_typeahead:
+            # Force the seed-page load via Tom Select's API and wait
+            # for the merge. Bypasses the focus/blur dance Playwright
+            # has trouble racing with HTMX swaps.
+            sel.evaluate(
+                """(s) => new Promise((resolve, reject) => {
+                    if (!s.tomselect) { resolve(); return; }
+                    s.tomselect.load('', resolve);
+                    setTimeout(() => reject('timeout'), 5000);
+                })"""
+            )
         opts = sel.evaluate(
             """(s) => Array.from(s.options).map((o) => (o.text || '').trim())"""
         )
@@ -606,6 +623,23 @@ class App2Driver:
         # "undefined" in wireTomSelect).
         sel = self._filter_control(label).locator("select").first
         vals = list(values)
+        # CQ.2.c — for typeahead pickers the option list starts empty;
+        # ``setValue`` would silently no-op. Force a server fetch with
+        # each target as the query so the option lands in s.options
+        # BEFORE setValue runs.
+        is_typeahead = sel.evaluate(
+            """(s) => s.dataset.typeahead === '1'"""
+        )
+        if is_typeahead:
+            for v in vals:
+                sel.evaluate(
+                    """(s, q) => new Promise((resolve, reject) => {
+                        if (!s.tomselect) { resolve(); return; }
+                        s.tomselect.load(q, resolve);
+                        setTimeout(() => reject('timeout'), 5000);
+                    })""",
+                    v,
+                )
         self._wait_for_refetch(lambda: sel.evaluate(
             """(s, vals) => {
                 if (s.tomselect) {
