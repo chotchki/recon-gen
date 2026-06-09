@@ -51,12 +51,20 @@ echo "==> $(date -Iseconds) nightly refresh start"
 
 # Step 1: upgrade the wheel. Honor RECON_GEN_PIN_VERSION if set
 # (operator escape hatch to hold a release).
+#
+# CU.4-followup (2026-06-09): BS.6 (2026-05-29) collapsed the
+# `[deploy,demo,audit,serve]` extras into one `[prod]`. Pre-followup
+# the script targeted dead extras; pip emitted 4 "does not provide the
+# extra" warnings and silently skipped installing every runtime dep
+# (starlette / psycopg / oracledb / pyarrow / openpyxl / markdown /
+# reportlab / pyHanko / boto3). That broke after a venv recreate
+# until this swap landed.
 if [ -n "${RECON_GEN_PIN_VERSION:-}" ]; then
     echo "==> pinning recon-gen==$RECON_GEN_PIN_VERSION"
-    "$PIP" install --upgrade "recon-gen[deploy,demo,audit,serve]==$RECON_GEN_PIN_VERSION"
+    "$PIP" install --upgrade "recon-gen[prod]==$RECON_GEN_PIN_VERSION"
 else
     echo "==> upgrading recon-gen from PyPI"
-    "$PIP" install --upgrade "recon-gen[deploy,demo,audit,serve]"
+    "$PIP" install --upgrade "recon-gen[prod]"
 fi
 
 # Step 2-4 per instance. Define the loop body as a function so a
