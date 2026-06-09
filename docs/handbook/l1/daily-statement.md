@@ -4,7 +4,7 @@
 
 ## What you're looking at
 
-You're looking at a per-account, per-day narrative. Pick an account role using the *Role* dropdown, then an account using the *Account* dropdown, and a business day using the *Business Day* picker; the five KPIs across the top show you the opening balance, debits posted, credits posted, stored closing balance, and posting drift for that day. Below, the *Posted Money Records* table lists every Money record (leg) that posted that day on the picked account. The *Accounts available* and *Roles available* KPIs at the bottom tell you how many accounts and roles match the current filters.
+You're looking at a per-account, per-day narrative. Pick an account using the *Account* dropdown (the full internal-account universe) and a business day using the *Business Day* picker; the five KPIs across the top show you the opening balance, debits posted, credits posted, stored closing balance, and posting drift for that day. Below, the *Posted Money Records* table lists every Money record (leg) that posted that day on the picked account. The *Control Accounts* reference table at the bottom lists the L2-declared singleton control accounts (one row per `account_role` whose template materializes to exactly one account) — use it to cross-check that your picked account is the canonical control for its role, not one of many DDA-like rows in the same role.
 
 ## How to read the numbers
 
@@ -47,7 +47,7 @@ A blank *Posted Money Records* table on a day when *Posting Drift* is $0.00 mean
 
 A blank table with non-zero *Posting Drift* means the day has no postings but the balance changed, which is unusual and warrants investigation (see "Posting drift on a day with no legs" above).
 
-If the whole sheet shows blank KPIs and an empty table, the picked account or date may not exist in the feed. Check the *Accounts available* KPI at the bottom: if it's zero, the current Role filter has no matching accounts. Widen the filter or re-pick the account. If *Accounts available* shows accounts but the KPIs stay blank, the account-day pair exists in the balance feed but had no balance row on that day and no postings — a pure carry-forward day with no activity. This is healthy; adjust your date picker to a day with postings or balance activity.
+If the whole sheet shows blank KPIs and an empty table, the picked account or date may not exist in the feed. Check the *Control Accounts* reference table at the bottom: it lists every L2-declared 1:1 singleton account, so you can confirm the account name spelled in the picker matches what the L2 declares. If the account is multi-instance (DDA-like, one row per customer), the picker's account universe is the full set of internal-scope accounts from the matview; if your account doesn't appear in the typeahead, it's not in the current matview snapshot — re-run the matview refresh or widen the date range. If the KPIs stay blank for an account that DOES appear in the picker, the account-day pair exists in the balance feed but had no balance row on that day and no postings — a pure carry-forward day with no activity. This is healthy; adjust your date picker to a day with postings or balance activity.
 
 ## Cross-sheet drills
 
@@ -61,7 +61,7 @@ If the whole sheet shows blank KPIs and an empty table, the picked account or da
 
 ## QS parity notes
 
-- **Role dropdown narrowing.** On App2, the *Account* dropdown narrows to accounts in the picked role; on QuickSight, the dropdown shows the full account universe regardless of the role selection. The data filters correctly (KPIs and table reflect the role's accounts), but the dropdown UI doesn't match the data scope. The *Accounts available* KPI at the bottom tells you the truth: it shows the count of accounts that match your current role pick (via SQL pushdown), so use that to calibrate your Account selection. See [quirks log §cascade-source-dataset-must-be-unparameterized](../../reference/quicksight-quirks.md).
+CQ.4 dropped the Role → Account cascade entirely on both renderers. The *Account* picker now serves the full internal-account universe (scope=internal) on QS and App2 alike, so picker behavior matches across renderers. The pre-CQ.4 QS-vs-App2 cascade differential (App2 narrowed; QS didn't) is closed by removing the cascade rather than fixing the QS side.
 
 ---
 

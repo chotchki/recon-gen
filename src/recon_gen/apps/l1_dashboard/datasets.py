@@ -657,10 +657,14 @@ SUPERSESSION_DAILY_BALANCES_CONTRACT = DatasetContract(columns=[
 # the selected id(s) into the consuming dataset's ``col IN (...)``.
 L1_ACCOUNTS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    # AA.B.1 — account_role threads through so the Daily Statement Role
-    # cascade can narrow the account picker via the ``pL1DsRole`` dataset
-    # param. The column isn't surfaced in the dropdown; it just enables
-    # the WHERE-clause filter.
+    # AA.B.1 / CQ.4.a — account_role survives in the matview UNION so
+    # downstream consumers (Today's Exceptions, Drift, Overdraft) can
+    # still narrow by role. The pre-CQ.4 Daily Statement Role cascade
+    # (``pL1DsRole``) was dropped 2026-06-08 because the Role dropdown's
+    # QS-side cascade was permanently broken; the Account picker now
+    # serves the full internal-account universe directly. This column
+    # is retained from the matview UNION but no longer wired into Daily
+    # Statement filters.
     ColumnSpec("account_role", "STRING"),
     # AA.E.2 — account_name + account_display drive the searchable
     # ``Sasquatch Cash Master (external-001)`` dropdown labels. The
