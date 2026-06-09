@@ -2241,3 +2241,46 @@ def test_step_1_etl_hook_terminates_subprocess_on_cancel(
     kinds = sink.kinds()
     assert "deploy:step1:cancelled_terminating_subprocess" in kinds
 
+
+def test_build_generator_sql_cutoff_uses_date_literal_across_dialects(
+    tmp_path: Path, spec_example_instance: L2Instance,
+) -> None:
+    """CT.0 sibling — the X.4.h trainer cutoff DELETEs must use typed
+    ``DATE 'YYYY-MM-DD'`` literals, not bare ISO strings. Oracle 19c
+    rejects the latter with ORA-01843 ("not a valid month") because
+    its NLS_TIMESTAMP_FORMAT doesn't auto-coerce the ISO-8601 shape;
+    PG + DuckDB happen to accept it. Pin the typed-literal shape
+    across every dialect so the regression can't reappear in the
+    trainer's scrub-head codepath."""
+    from datetime import date
+    from dataclasses import replace as _replace
+    from recon_gen.common.l2.deploy_pipeline import _build_generator_sql
+    from recon_gen.common.sql.dialect import Dialect
+
+    base = _duckdb_cfg(tmp_path)
+    for dialect in (Dialect.ORACLE, Dialect.POSTGRES, Dialect.DUCKDB):
+        cfg = _replace(
+            base,
+            dialect=dialect,
+            test_generator=TestGeneratorConfig(
+                end_date=date(2030, 1, 31),
+                cutoff_date=date(2030, 1, 15),
+            ),
+        )
+        sql = _build_generator_sql(cfg, spec_example_instance)
+        # cutoff_date + 1 = 2030-01-16 — the half-open upper bound.
+        assert "DATE '2030-01-16'" in sql, (
+            f"{dialect.value}: expected typed DATE '2030-01-16' for the "
+            f"cutoff upper bound; got SQL tail:\n{sql[-500:]}"
+        )
+        # Pre-CT.0 footgun shape must be gone (the exact string Oracle
+        # was hitting with ORA-01843).
+        assert "posting >= '2030-01-16'" not in sql, (
+            f"{dialect.value}: bare ISO string in posting predicate "
+            f"would crash Oracle. SQL tail:\n{sql[-500:]}"
+        )
+        assert "business_day_start >= '2030-01-16'" not in sql, (
+            f"{dialect.value}: bare ISO string in business_day_start "
+            f"predicate would crash Oracle. SQL tail:\n{sql[-500:]}"
+        )
+
