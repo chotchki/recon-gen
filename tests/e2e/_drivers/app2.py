@@ -720,7 +720,19 @@ class App2Driver:
             # every fetch — so the value never landed in s.options
             # before setValue ran. DOM-polling avoids relying on
             # the callback contract: bust loadedSearches, fire
-            # load(q), poll ts.options for count > 0.
+            # load(q), poll until the target value v is actually
+            # present in ts.options.
+            #
+            # Why poll for v specifically (not just `count > 0`):
+            # _render_parameter_dropdown emits a leading
+            # `<option value=""></option>` placeholder on every
+            # single-select picker, so ts.options has 1 entry
+            # before any fetch lands. `count > 0` passes
+            # immediately, setValue runs against a byText map of
+            # `{"": ""}`, falls through to raw `v` as the value,
+            # Tom Select silently no-ops on an unknown value, no
+            # change fires, _wait_for_refetch times out at 30s.
+            # This is the shape of the 3 CI failures on 2b9dee26.
             import time as _time
             for v in vals:
                 sel.evaluate(
@@ -735,12 +747,21 @@ class App2Driver:
                 )
                 deadline = _time.monotonic() + 5.0
                 while _time.monotonic() < deadline:
-                    count = sel.evaluate(
-                        """(s) => s.tomselect
-                            ? Object.keys(s.tomselect.options || {}).length
-                            : 0"""
+                    has_v = sel.evaluate(
+                        """(s, q) => {
+                            if (!s.tomselect) return false;
+                            const opts = s.tomselect.options || {};
+                            if (Object.prototype.hasOwnProperty.call(opts, q)) {
+                                return true;
+                            }
+                            for (const k of Object.keys(opts)) {
+                                if (opts[k] && opts[k].text === q) return true;
+                            }
+                            return false;
+                        }""",
+                        v,
                     )
-                    if count > 0:
+                    if has_v:
                         break
                     self._page.wait_for_timeout(100)
         self._wait_for_refetch(lambda: sel.evaluate(
