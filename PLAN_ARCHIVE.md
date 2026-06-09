@@ -4586,3 +4586,112 @@ findings when it lands.
 
 - [x] CR.17 - CR.17 - Public write_transaction ETL helper (sibling of write_daily_balance)
 
+---
+
+## 2026-06-09
+
+## Phase CS - Backlog grab-bag: CR follow-throughs + operator polish + Oracle/Studio bug bash
+
+**Filed 2026-06-09** post-v13.8.0. User-curated grab-bag of three themed
+clusters: (a) drain the 5 CR follow-up tickets while the context is
+fresh, (b) operator-visible polish items that ship trust improvements
+in small diffs, (c) the Oracle / App2 / Studio bugs that surfaced via
+dogfood + cold-read since v13.x. No new spike; every entry has a
+code-grounded acceptance criterion already filed in its source ticket.
+
+- [x] CS.1 - **#323 / CR.15.followup — Remove dead SQLite plumbing.**
+  Delete `src/recon_gen/common/db.py::sqlite_path()` + its `__all__`
+  export, drop `RECON_GEN_SQLITE_LEAK_GATE` from `common/env_keys.py`
+  + the test-side detector it gates, delete `_DryRunCaptureSqlite`
+  from `common/spine/scenario_context.py`, drop the
+  `tests/e2e/_studio_deploy_helpers.py` `sqlite_path` fixture. After
+  removal, drop the per-line `# typing-smell: ignore[no-sqlite-prose]`
+  comments + run the lint at full strength.
+- [x] CS.2 - **#321 / CR.6.a — Re-light test_inv_drilldown.** Two
+  blockers per the skip-reason: (1) Anchor non-determinism (the
+  dropdown auto-picks when no value is set so the row-count-changed
+  baseline races); seed a deterministic anchor before the test fires.
+  (2) Verb/trigger mismatch (drill is DATA_POINT_MENU but the test
+  calls left-click `drill_from_first_row`); switch to
+  `drill_from_first_row_via_menu`. Drop the `@pytest.mark.skip`
+  decorator once both fixes land.
+- [x] CS.3 - **#322 / CR.6.b — Resolve test_l2ft_metadata_cascade
+  decision.** X.1.b refactor made the Metadata Value dropdown a text
+  field; the regression class is structurally unreachable on the
+  text-field shape. Decide: (a) delete the test if the regression
+  class is no longer reachable AND no equivalent regression test
+  exists elsewhere, or (b) schedule X.1.g.11 rewrite (typing helper +
+  matview-derived known-good metadata value) and convert the skip to
+  an `xfail(reason="X.1.g.11 rewrite queued")` so visibility surfaces.
+- [x] CS.4 - **#324 / CR.7.a — Sankey node-cap operator visibility (partial — static subtitle + cap align; dynamic banner deferred to CS.4.followup #326).**
+  Two Sankey caps silently truncate node sets: `_SANKEY_NODE_CAP=50`
+  in Investigation (Account Network + Money Trail) and
+  `items_limit=30` in L2FT Multi-Leg Flow. Add a threshold-exceeded
+  KPI / banner: "Showing 50 of 247 accounts" so operator sees the
+  truncation. Align the two caps to one rule (suggested: bump L2FT to
+  50, banner above-cap cases). Browser e2e gate: seed N+1 nodes,
+  confirm banner appears + names the actual count.
+- [x] CS.6 - **#160 — Reorder sheets: L1/L2 Exceptions right after
+  Getting Started.** Phase L sheets are App-tree-ordered as they
+  shipped; the Exceptions sheets carry the operator's daily triage
+  flow + belong above lower-volume secondary surfaces. Reorder the
+  tree-build in `apps/l1_dashboard/app.py` +
+  `apps/l2_flow_tracing/app.py` so the Exceptions sheet appears
+  immediately after Getting Started. The sheet IDs (`SheetId`) must
+  stay stable so existing URLs don't 404 — only the App tree's
+  visible sequence changes.
+- [x] CS.7 - **#287 — L1 Exceptions copy says 10, matview has 12.**
+  The L1 Exceptions sheet description or header text claims "10
+  L1 invariants" but the underlying matview UNIONs 12 branches (after
+  CL.6's balance_cadence_gap + AB-era chain-coherence). Sweep the
+  sheet copy to match the matview's actual branch count; pin via a
+  unit test asserting the description count matches the matview's
+  `check_type` count (or use a typed counter primitive so the prose
+  derives from the implementation).
+- [x] CS.8 - **#292 — Themed 503 page for PoolReleasedDuringRefresh.**
+  CO.x landed a DuckDB writer-lock fix that raises
+  `PoolReleasedDuringRefresh` when the studio pool is released
+  mid-refresh by an ETL hook subprocess. Today the operator sees an
+  untemplated 500. Wire a Starlette exception handler that emits a
+  themed 503 page explaining the transient state + offering a
+  "Reload" button. Use the existing app-theme palette + `?` help
+  surface conventions from Phase CN.
+- [x] CS.9 - **#293 — Configurable etl_hook subprocess timeout.**
+  The Studio etl_hook subprocess invocation has a hardcoded timeout.
+  Surface it as an env var (`RECON_GEN_STUDIO_ETL_HOOK_TIMEOUT_SECS`,
+  default to current value) with a `positive_int` validator. Lets
+  operators with slow upstream ETLs raise the cap without forking.
+- [x] CS.10 - **#197 — Studio plant flow broken on Oracle (partial — comprehensive investigation backlog filed as CS.10.followup #328 with code-grounded recipe + 3 root-cause hypotheses; reproduction needs Oracle container fit a separate session).** User-surfaced bug; specific failure mode
+  needs reproduction first. Investigate: spin up the in-repo Oracle
+  19c container, run the Studio plant Apply flow against a
+  sasquatch_pr instance, capture the failure shape. Likely either
+  (a) DDL ordering, (b) Oracle case-folding on a new column ref, or
+  (c) IDENTITY column same-batch collision. File CS.10.x sub-tasks
+  for each root cause.
+- [x] CS.11 - **#241 — App2 Distinct Senders + per-account KPI cards (partial — binding-shape pin landed; root-cause needs live env → CS.11.followup #327).** Surfaced 2026-06-08. App2's KPI value binding
+  drops to None for these surfaces while QS shows the number.
+  Diagnostic ladder: (1) curl the `/visual-data/...` endpoint for
+  the affected visual, (2) confirm SQL returns a value, (3) trace
+  through `_data_shape.shape_kpi` to find where the binding drops.
+  Likely a column-name or scalar-vs-row shape mismatch between the
+  KPI's `Measure` field and the SQL projection.
+- [x] CS.12 - **#239 — anomaly/money_trail app2 tests fail on
+  sasquatch_pr L2 (no CustomerSubledger sender).** Test fixture
+  expects a `CustomerSubledger` rail-sender on sasquatch_pr but the
+  L2 yaml doesn't declare one. Either (a) update sasquatch_pr.yaml
+  to include the expected sender (preferred — keeps the test
+  realistic), or (b) update the test to derive its expected sender
+  from the L2 instance instead of hardcoding `CustomerSubledger`.
+- [x] CS.13 - **#173 — Studio /training/session-start silent no-op
+  when base schema missing.** Operator clicks Session Start with no
+  base schema applied; the UI shows a success state but nothing
+  happened. Detect the missing-base-schema case + surface an
+  explicit error: "Run `recon-gen schema apply --execute` first."
+  Add a probe at session-start entry that hits `<prefix>_l1_accounts`
+  (or any always-present matview) and short-circuits if it doesn't
+  exist.
+- [x] CS.14 - **Sign-off + sweep CS to PLAN_ARCHIVE.md.** Unit + db
+  tier green; up_to=qs_browser green; release notes drafted for any
+  operator-visible fix.
+
+
