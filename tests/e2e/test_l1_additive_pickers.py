@@ -335,18 +335,13 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
     # AA.A.993 — the Transfer dropdown is omitted from the picker spec
     # for now. Its universe is ``SELECT DISTINCT transfer_id FROM
     # <p>_current_transactions`` — 8k+ rows on a default-density
-    # ``spec_example`` deploy. App2 caps dataset-sourced dropdown
-    # options at ``_OPTIONS_CAP = 2000`` (see
-    # ``common/html/_tree_fetcher.py:367``) — a placeholder until
-    # typeahead / server-side search lands ("typeahead / server-side
-    # search for very large universes is a follow-on" — same module's
-    # comment). The anchor's ``transfer_id`` lands past the cap on most
-    # seeds (deterministic transfer_id sort orders the cap to the
-    # alphabetically-first bundle/inbound prefixes). Rather than game
-    # the anchor to land inside the cap — which would mask the same
-    # UX problem the cap signals — the spec drops the Transfer picker
-    # until the underlying typeahead lands. Re-include with the rest
-    # of the pickers once App2 grows typeahead support.
+    # ``spec_example`` deploy. CQ.2 (v13.7.0) replaced the pre-CQ.2
+    # silent ``_OPTIONS_CAP = 2000`` truncation with server-side
+    # typeahead, so the dropdown universe is no longer capped in
+    # production. The anchor selection logic in this spec still
+    # predates that change; re-including the Transfer picker is gated
+    # on porting the spec to drive the typeahead path (search-by-
+    # substring) rather than the static-options page.
     SheetAnchorSpec(
         sheet_name=_TRANSACTIONS_NAME,
         target_visual=_TRANSACTIONS_TITLE,

@@ -2812,8 +2812,8 @@ def _render_read_card_summary(
     # ghost-outline buttons; Delete uses danger-solid so destructive
     # actions are visually distinct. Local Tailwind utility classes
     # for now; Phase CI.3 will replace these with the typed `Button`
-    # primitive when it lands. CI.3 followup: search for
-    # `# CI.3 followup` in this codebase to find both call sites.
+    # primitive when it lands. (Only one literal `CI.3 followup`
+    # marker exists in the codebase; this is it.)
     edit_btn_cls = (
         # ghost-outline: accent border + accent text, fills on hover
         "inline-flex items-center px-2 py-0.5 text-xs font-semibold "

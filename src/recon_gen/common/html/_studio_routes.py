@@ -4616,8 +4616,10 @@ def make_studio_routes(
     async def training_landing(request: Request) -> HTMLResponse:
         # BV.4.0 vertical slice — new landing surface from v3.
         # BU's /training/plant/<kind> + /training/tour/<kind> routes
-        # stay alive for now (orphaned — not linked from v3 landing);
-        # BV.4.4 commits the v3 → primary migration + removes v2.
+        # stay registered today (orphaned — not linked from v3 landing).
+        # BV.4.4 made v3 the primary surface but didn't yet remove the
+        # v2 routes; tracked as a backlog cleanup separate from the
+        # primary-surface migration.
         import os as _os  # noqa: PLC0415
 
         from recon_gen.common.html._studio_training_v3 import (  # noqa: PLC0415

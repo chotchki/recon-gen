@@ -2670,12 +2670,17 @@ def _baseline_metadata(
 
 
 def _poisson_sample(rng: random.Random, mean: float) -> int:
-    """Sample from Poisson(mean) using Knuth's algorithm.
+    """Sample from Poisson(mean) using Knuth's algorithm + a normal
+    approximation for large means.
 
     Python's ``random`` doesn't expose Poisson; Knuth's iterative
-    algorithm is fine for the small means we use (≤ 50). For larger
-    means we'd switch to a normal approximation, but the per-day
-    targets in R.1.f §1 stay well below that.
+    algorithm is fine for small means but its expected step count
+    scales linearly with the mean, so for ``mean > 50`` the function
+    switches to a Gaussian approximation (``N(mean, sqrt(mean))``
+    rounded + clamped to ≥ 0). Default-density customer instances
+    (20 accounts × ``daily_target_per_unit=4.0`` = mean 80) reach
+    that branch — it's an actively-exercised path, not the "dead
+    defensive" framing the pre-CR.14 docstring suggested.
     """
     if mean <= 0:
         return 0

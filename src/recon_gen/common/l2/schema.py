@@ -766,15 +766,17 @@ def _emit_l1_invariant_views(
     p = prefix
     # Phase BC.12 (2026-05-24): per-rail max_*_age caps + per-(parent_role,
     # rail, direction) limit-schedule caps no longer JSON_TABLE-iterate
-    # `<prefix>_config.l2_yaml` inside the matview body. Oracle 19c+
-    # rejects matviews built on JSON_TABLE-of-CLOB with ORA-32368; the
-    # workaround is the typed projection views
+    # `<prefix>_config.l2_yaml` inside the matview body. The trigger for
+    # the refactor was Oracle 19c+ rejecting matviews built on
+    # JSON_TABLE-of-CLOB with ORA-32368 — but the rewrite is universal,
+    # not Oracle-only: PG and DuckDB both consume the same typed-view
+    # path. Each typed view body
     # (`<prefix>_v_config_limit_schedules` + `<prefix>_v_config_rails`)
-    # emitted alongside the matviews. Each typed view body is a plain
-    # relational walk of `<prefix>_config_kv` (parent_id self-join, no
-    # JSON_TABLE); matviews JOIN against the views and the engine sees
-    # a fully relational source. See `docs/audits/_archive/bc_12_config_kv_spike.md`
-    # for the architecture + spike results.
+    # is a plain relational walk of `<prefix>_config_kv` (parent_id
+    # self-join, no JSON_TABLE); matviews JOIN against the views and
+    # the engine sees a fully relational source on every dialect.
+    # See `docs/audits/_archive/bc_12_config_kv_spike.md` for the
+    # architecture + spike results.
     limit_join_outbound = (
         f"{p}_v_config_limit_schedules ls\n"
         f"      ON ls.parent_role = tx.account_parent_role\n"
