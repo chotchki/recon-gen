@@ -73,7 +73,7 @@ jobs:
               https://recon-gen-spec.hotchkiss.io/dashboards/l1_dashboard/ \
               https://recon-gen-sasquatch.hotchkiss.io/dashboards/l1_dashboard/; do
             echo "==> probing $url"
-            code=$(curl --silent --output /dev/null --write-out "%{http_code}" --max-time 30 "$url")
+            code=$(curl --silent --location --output /dev/null --write-out "%{http_code}" --max-time 30 "$url")
             if [ "$code" != "200" ]; then
               echo "::error::$url returned HTTP $code (expected 200)"
               exit 1
