@@ -643,3 +643,4 @@ Three open design items from `docs/audits/_archive/v11_22_1_feedback.md` cold-re
 - **CS.4.followup — Dynamic Sankey banner with actual node count** — added 2026-06-09.
 - **CS.11.followup — Investigate App2 Distinct Senders KPI = None root cause** — added 2026-06-09.
 - CS.5 - descoped from phase `CS` on 2026-06-09
+- **BX backlog — App2 Anchor parameter pick doesn't trigger /visuals/*/data refetch on CI** — added 2026-06-09.
