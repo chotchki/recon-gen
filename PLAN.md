@@ -497,7 +497,7 @@ code-grounded acceptance criterion already filed in its source ticket.
   exists elsewhere, or (b) schedule X.1.g.11 rewrite (typing helper +
   matview-derived known-good metadata value) and convert the skip to
   an `xfail(reason="X.1.g.11 rewrite queued")` so visibility surfaces.
-- [ ] CS.4 - **#324 / CR.7.a — Sankey node-cap operator visibility.**
+- [x] CS.4 - **#324 / CR.7.a — Sankey node-cap operator visibility (partial — static subtitle + cap align; dynamic banner deferred to CS.4.followup #326).**
   Two Sankey caps silently truncate node sets: `_SANKEY_NODE_CAP=50`
   in Investigation (Account Network + Money Trail) and
   `items_limit=30` in L2FT Multi-Leg Flow. Add a threshold-exceeded
@@ -757,3 +757,4 @@ code-grounded acceptance criterion already filed in its source ticket.
 - **CR.15.followup — Remove dead SQLite plumbing surfaced by no-sqlite-prose lint** — added 2026-06-09.
 - **CR.7.a — Sankey node cap operator-visibility (Investigation + L2FT)** — added 2026-06-09.
 - **CR.7.b — L1 aging buckets vs rail max_pending_age mismatch** — added 2026-06-09.
+- **CS.4.followup — Dynamic Sankey banner with actual node count** — added 2026-06-09.
