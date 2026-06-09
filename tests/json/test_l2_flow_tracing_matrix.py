@@ -73,8 +73,11 @@ def test_six_sheets_in_display_order(l2_instance: L2Instance) -> None:
     ("i") canary as the always-last sheet."""
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
     assert [s.name for s in app.analysis.sheets] == [
-        _GETTING_STARTED_NAME, _RAILS_NAME, _CHAINS_NAME,
-        _TRANSFER_TEMPLATES_NAME, _L2_EXCEPTIONS_NAME, APP_INFO_SHEET_NAME,
+        # CS.6: L2 Exceptions promoted to position 2 (operator's daily
+        # triage surface above the lower-volume detail sheets).
+        _GETTING_STARTED_NAME, _L2_EXCEPTIONS_NAME,
+        _RAILS_NAME, _CHAINS_NAME, _TRANSFER_TEMPLATES_NAME,
+        APP_INFO_SHEET_NAME,
     ]
 
 

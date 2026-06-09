@@ -166,10 +166,13 @@ def test_twelve_sheets_after_m445() -> None:
     assert app.analysis is not None
     sheet_names = [s.name for s in app.analysis.sheets]
     assert sheet_names == [
-        _GETTING_STARTED_NAME, _DRIFT_NAME, _DRIFT_TIMELINES_NAME,
+        # CS.6: L1 Exceptions promoted to position 2 (operator's daily
+        # triage surface — sits above lower-volume secondary sheets).
+        _GETTING_STARTED_NAME, _L1_EXCEPTIONS_NAME,
+        _DRIFT_NAME, _DRIFT_TIMELINES_NAME,
         _OVERDRAFT_NAME, _LIMIT_BREACH_NAME,
         _PENDING_AGING_NAME, _UNBUNDLED_AGING_NAME, _SUPERSESSION_AUDIT_NAME,
-        _L1_EXCEPTIONS_NAME, _DAILY_STATEMENT_NAME, _TRANSACTIONS_NAME,
+        _DAILY_STATEMENT_NAME, _TRANSACTIONS_NAME,
         APP_INFO_SHEET_NAME,  # M.4.4.5 — App Info canary, always last
     ]
 
@@ -223,10 +226,13 @@ def test_getting_started_title_is_constant_ui_vocabulary() -> None:
 
 
 def test_drift_sheet_present_after_m2a3() -> None:
-    """M.2a.3 lands the Drift sheet — second tab in display order."""
+    """M.2a.3 lands the Drift sheet. CS.6 promoted L1 Exceptions to
+    position 1 so Drift now lives at position 2 — guarding via
+    ``_sheet_by_name`` instead of positional indexing keeps future
+    reorders from silently breaking this test."""
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
-    drift = app.analysis.sheets[1]
+    drift = _sheet_by_name(app, _DRIFT_NAME)
     assert drift.name == _DRIFT_NAME
     assert drift.title == _DRIFT_TITLE
 
@@ -236,10 +242,11 @@ def test_drift_sheet_has_four_kpis_and_two_tables() -> None:
     leaf table + parent table. BH.4 follow-up 2026-05-26 added the
     Largest Leaf Drift + Largest Parent Drift sibling KPIs so a count
     of zero next to non-zero adjacent magnitude doesn't read as
-    "all clear" (the v11.22.1 cold-read failure mode)."""
+    "all clear" (the v11.22.1 cold-read failure mode). CS.6 reordered
+    sheets — look up Drift by name, not by index."""
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
-    drift = app.analysis.sheets[1]
+    drift = _sheet_by_name(app, _DRIFT_NAME)
     titles = [_visual_title(v) for v in drift.visuals]
     # BO.4 added "(anywhere in window)" scope qualifier so operators can
     # tell these row-grain peak KPIs apart from Drift Timelines' day-
@@ -917,10 +924,11 @@ def _text_box_by_id(sheet: Sheet, text_box_id: str) -> TextBox:
 def test_drift_sheet_lists_internal_accounts_from_l2() -> None:
     """M.2a.7: Drift sheet's top TextBox enumerates internal accounts
     + roles from the L2 instance — analysts see the universe drift can
-    surface against without leaving the sheet."""
+    surface against without leaving the sheet. CS.6 reordered sheets —
+    look up Drift by name, not by index."""
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
-    drift = app.analysis.sheets[1]
+    drift = _sheet_by_name(app, _DRIFT_NAME)
     accounts_xml = _text_box_by_id(drift, "l1-drift-accounts").content
     assert "Internal Accounts in Scope" in accounts_xml
     # Sasquatch fixture has at least one GL control + one DDA template;

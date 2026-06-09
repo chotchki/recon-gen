@@ -250,8 +250,11 @@ def test_six_sheets_in_display_order() -> None:
     app = build_l2_flow_tracing_app(_CFG)
     assert app.analysis is not None
     assert [s.name for s in app.analysis.sheets] == [
-        _GETTING_STARTED_NAME, _RAILS_NAME, _CHAINS_NAME,
-        _TRANSFER_TEMPLATES_NAME, _L2_EXCEPTIONS_NAME, APP_INFO_SHEET_NAME,
+        # CS.6: L2 Exceptions promoted to position 2 — same rationale as
+        # L1 (operator's daily triage surface above secondary detail).
+        _GETTING_STARTED_NAME, _L2_EXCEPTIONS_NAME,
+        _RAILS_NAME, _CHAINS_NAME, _TRANSFER_TEMPLATES_NAME,
+        APP_INFO_SHEET_NAME,
     ]
 
 
