@@ -46,6 +46,50 @@ def v_overlay_prefix(base_prefix: str) -> str:
     return f"{base_prefix}_v"
 
 
+class BaseSchemaMissingError(RuntimeError):
+    """CS.13 — raised by ``session_start`` when the base schema isn't
+    applied yet. Includes the operator-actionable remedy in the
+    message so the studio's error rendering can name the fix without
+    extra wrapping."""
+
+    def __init__(self, base_prefix: str) -> None:
+        super().__init__(
+            f"Base schema not applied (missing `{base_prefix}_transactions` "
+            f"table). Run `recon-gen schema apply --execute` against your "
+            f"demo DB first, then click Session Start again."
+        )
+        self.base_prefix = base_prefix
+
+
+def _base_schema_exists(cfg: "Config") -> bool:
+    """CS.13 — probe for `<base>_transactions` to short-circuit
+    Session Start when the operator hasn't applied the base schema.
+
+    Uses a tolerant SELECT-with-LIMIT-0 instead of an information-
+    schema query so the probe works the same across PG / Oracle /
+    DuckDB. Any exception (table missing, connection refused, etc.)
+    is treated as "schema not applied" — the explicit
+    BaseSchemaMissingError that follows surfaces the actionable
+    remedy regardless of which dialect's error shape fired.
+    """
+    base_prefix = cfg.db_table_prefix
+    try:
+        conn = connect_demo_db(cfg)
+    except Exception:  # noqa: BLE001 — connection failures are operator-actionable as "schema not applied"
+        return False
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(f"SELECT 1 FROM {base_prefix}_transactions WHERE 1 = 0")  # type: ignore[attr-defined]: structural DBAPI cursor
+            return True
+        except Exception:  # noqa: BLE001 — table-missing errors are dialect-specific shapes
+            return False
+        finally:
+            cur.close()  # type: ignore[attr-defined]: structural DBAPI cursor
+    finally:
+        conn.close()  # type: ignore[attr-defined]: structural DBAPI connection
+
+
 def create_v_overlay_sql(
     instance: "L2Instance", *, base_prefix: str,
     dialect: object,
@@ -152,6 +196,23 @@ async def session_start(
         await dev_log(payload)  # type: ignore[misc]: dev_log is DevLogWriter | None; None-guarded above
 
     await _emit("session_start:begin", refresh_base=refresh_base)
+    # CS.13 — probe for base schema BEFORE any work. Without this guard,
+    # missing base manifested as a silent no-op (the drop_v_overlay swallows
+    # "doesn't exist", the create_v emits empty tables, the clone fails
+    # opaquely on PG/Oracle or succeeds with zero rows on DuckDB — the
+    # operator clicks Session Start and the page renders fine but no plants
+    # ever apply). Now we short-circuit with an actionable message.
+    if not await asyncio.to_thread(_base_schema_exists, cfg):
+        await _emit(
+            "session_start:error",
+            error_kind="base_schema_missing",
+            base_prefix=cfg.db_table_prefix,
+            remedy=(
+                "Run `recon-gen schema apply --execute` against your demo DB, "
+                "then click Session Start again."
+            ),
+        )
+        raise BaseSchemaMissingError(cfg.db_table_prefix)
     if refresh_base:
         from recon_gen.common.l2.deploy_pipeline import (  # noqa: PLC0415
             run_deploy_pipeline,

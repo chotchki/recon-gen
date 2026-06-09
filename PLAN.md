@@ -568,7 +568,7 @@ code-grounded acceptance criterion already filed in its source ticket.
   to include the expected sender (preferred — keeps the test
   realistic), or (b) update the test to derive its expected sender
   from the L2 instance instead of hardcoding `CustomerSubledger`.
-- [ ] CS.13 - **#173 — Studio /training/session-start silent no-op
+- [x] CS.13 - **#173 — Studio /training/session-start silent no-op
   when base schema missing.** Operator clicks Session Start with no
   base schema applied; the UI shows a success state but nothing
   happened. Detect the missing-base-schema case + surface an
