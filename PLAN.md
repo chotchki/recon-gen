@@ -489,7 +489,7 @@ code-grounded acceptance criterion already filed in its source ticket.
   calls left-click `drill_from_first_row`); switch to
   `drill_from_first_row_via_menu`. Drop the `@pytest.mark.skip`
   decorator once both fixes land.
-- [ ] CS.3 - **#322 / CR.6.b — Resolve test_l2ft_metadata_cascade
+- [x] CS.3 - **#322 / CR.6.b — Resolve test_l2ft_metadata_cascade
   decision.** X.1.b refactor made the Metadata Value dropdown a text
   field; the regression class is structurally unreachable on the
   text-field shape. Decide: (a) delete the test if the regression
