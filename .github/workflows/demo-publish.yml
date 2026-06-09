@@ -22,8 +22,17 @@
 name: Demo publish
 
 on:
-  release:
-    types: [published]
+  # CU.4-followup (2026-06-09): chain off the Release workflow
+  # completion. The prior `release: published` trigger was a no-op —
+  # GitHub silently suppresses workflow triggers from events created
+  # via GITHUB_TOKEN (anti-loop safety), and release.yml's
+  # softprops/action-gh-release uses GITHUB_TOKEN. The workflow_run
+  # event has no such restriction. The job-level conclusion gate
+  # below skips on Release failure so a busted publish doesn't kick
+  # off a broken refresh.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
   # Allow manual trigger from the Actions UI — useful for "I just
   # changed cfg.yaml; force a refresh without cutting a release".
   workflow_dispatch:
@@ -40,6 +49,13 @@ jobs:
     # label is automatic. Both labels required so this job never
     # falls back to a GitHub-hosted runner.
     runs-on: [self-hosted, mac-mini-demo]
+    # Skip when the triggering Release workflow didn't succeed (we
+    # only want to refresh on a known-good publish). workflow_dispatch
+    # has no workflow_run context, so the second clause keeps manual
+    # fires working.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     # Belt-and-suspenders: bail if the runner accidentally runs as
     # the wrong user. The refresh script is mode 0500 owned by
     # recon-demo; a wrong-user execution would fail anyway, but a
@@ -54,7 +70,7 @@ jobs:
           fi
           echo "runner user: $(id -un)"
           echo "hostname:    $(hostname)"
-          echo "release tag: ${{ github.event.release.tag_name || 'manual' }}"
+          echo "release tag: ${{ github.event.workflow_run.head_branch || 'manual' }}"
 
       - name: Fire the refresh wrapper
         # The wrapper handles pip install --upgrade + per-instance
