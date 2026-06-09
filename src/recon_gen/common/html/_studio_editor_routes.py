@@ -71,7 +71,6 @@ from recon_gen.common.l2.editor import (
     singleton_save_l2,
 )
 from recon_gen.common.l2.primitives import (
-    Account,
     FiringsTypicalPerPeriod,
     Identifier,
     Money,
@@ -5593,14 +5592,19 @@ def _make_handlers(
         except (ValueError, TypeError) as exc:
             inst = cache.get()
             entity = _find_entity_or_none(inst, kind, entity_id)
+            if entity is None:
+                # CR.11 — entity deleted mid-flight. Clean 410 instead
+                # of the pre-CR.11 NotImplementedError for non-account
+                # kinds (the placeholder fallback only implemented
+                # ``"account"``).
+                return _entity_gone_response(kind, entity_id)
             # Best-effort overrides — coerce_form raised before producing
             # them; capture the raw scalar fields from .items() so the
             # operator's typed values aren't lost.
             best_effort = {str(k): str(v) for k, v in form.items()}
             return HTMLResponse(
                 _render_edit_page_local(
-                    kind, entity if entity is not None else _placeholder(kind),
-                    inst,
+                    kind, entity, inst,
                     form_overrides=best_effort,
                     global_error=f"Field coercion failed: {exc}",
                     from_param=from_param,
@@ -5653,10 +5657,13 @@ def _make_handlers(
         except L2ValidationError as exc:
             inst = cache.get()
             entity = _find_entity_or_none(inst, kind, entity_id)
+            if entity is None:
+                # CR.11 — entity deleted mid-flight; same shape as the
+                # form-coercion branch above.
+                return _entity_gone_response(kind, entity_id)
             return HTMLResponse(
                 _render_edit_page_local(
-                    kind, entity if entity is not None else _placeholder(kind),
-                    inst,
+                    kind, entity, inst,
                     form_overrides=coerced_overrides,
                     global_error=str(exc),
                     from_param=from_param,
@@ -6227,18 +6234,35 @@ def _find_entity_or_none(
     return None
 
 
-def _placeholder(kind: EntityKind) -> object:
-    """Return a blank entity for the form re-render path when the
-    original was deleted mid-flight (rare race; defensive fallback).
+def _entity_gone_response(kind: EntityKind, entity_id: str) -> HTMLResponse:
+    """CR.11 (2026-06-08) — clean 410 Gone response for the mid-flight
+    delete race.
+
+    Replaces the pre-CR.11 ``_placeholder`` defensive fallback that
+    only implemented ``"account"`` (the 5 other ``EntityKind`` values
+    raised ``NotImplementedError`` from the same call sites, turning a
+    "rare race" into a 500 page for anyone deleting a non-account
+    entity mid-edit).
+
+    The race shape: operator opens an edit form, the entity gets
+    deleted from another tab / a colliding write, operator submits the
+    form. The pre-CR.11 path tried to re-render the edit form with a
+    placeholder entity; the new path tells the operator clearly that
+    the entity is gone + offers a link back to the list view. No data
+    is lost (the form values are gone but they were targeting a
+    deleted entity anyway).
     """
-    if kind == "account":
-        return Account(
-            id=Identifier("(unknown)"),
-            scope="internal",
-            role=Identifier("(unknown)"),
-        )
-    # Other kinds: stub similar; for X.4.f.1 only Account is wired.
-    raise NotImplementedError(f"placeholder for {kind} not yet defined")
+    safe_id = escape(entity_id)
+    safe_kind = escape(kind)
+    body = (
+        f"<!doctype html><html><head><title>Entity gone</title></head>"
+        f"<body><h1>{safe_kind} {safe_id!s} no longer exists</h1>"
+        f"<p>The entity was deleted while you were editing — likely "
+        f"in another tab or by a collaborator. Your form values "
+        f"targeted the deleted entity and cannot be saved.</p>"
+        f"<p><a href=\"/\">Back to Studio</a></p></body></html>"
+    )
+    return HTMLResponse(body, status_code=410)
 
 
 # ---------------------------------------------------------------------------
