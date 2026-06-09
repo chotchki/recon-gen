@@ -408,7 +408,7 @@ def _emit_table_based_matview_refresh(
     Z.C — ``prefix`` is the cfg.db_table_prefix.
     """
     assert dialect in (Dialect.DUCKDB), (
-        f"_emit_table_based_matview_refresh expects SQLite or DuckDB, "
+        f"_emit_table_based_matview_refresh expects DuckDB, "
         f"got {dialect!r} — PG / Oracle use REFRESH MATERIALIZED VIEW."
     )
     p = prefix
@@ -554,8 +554,7 @@ def _render_computed_subledger_balance_section(
     return (
         f"{header}"
         f"-- Native MATERIALIZED VIEW + correlated SUM — PG/Oracle/DuckDB\n"
-        f"-- planners all rewrite this to a hash-grouped scan; SQLite (slated\n"
-        f"-- for removal in CA.8) accepts the same shape but pays a planner cost.\n"
+        f"-- planners all rewrite this to a hash-grouped scan.\n"
         f"-- ---------------------------------------------------------------------\n"
         f"{mv_kw} {p}_computed_subledger_balance{mv_opt} AS\n"
         f"SELECT\n"
@@ -1729,8 +1728,8 @@ _SCHEMA_TEMPLATE = """\
 {drop_sequences}
 
 -- CA.3 — Per-table sequences feeding the ``entry`` column DEFAULT.
--- Empty on PG (BIGSERIAL) / Oracle (IDENTITY) / SQLite
--- (AUTOINCREMENT) — only DuckDB needs externally-emitted sequences.
+-- Empty on PG (BIGSERIAL) / Oracle (IDENTITY) — only DuckDB needs
+-- externally-emitted sequences.
 {create_sequences}
 
 -- ---------------------------------------------------------------------
@@ -1745,8 +1744,8 @@ _SCHEMA_TEMPLATE = """\
 --                 with direction" invariant. Positive ⇔ Credit; negative
 --                 ⇔ Debit. The CHECK enforces sign-direction agreement.
 --                 AO.1: storage moved from DECIMAL(20,2) to BIGINT cents
---                 (SQLite stored DECIMAL as REAL → float dust). Dollars
---                 projection happens at read time via cents_to_dollars_sql.
+--                 to avoid storage-layer float dust. Dollars projection
+--                 happens at read time via cents_to_dollars_sql.
 -- transfer_parent_id — L1 Transfer.Parent recursive chain (the PR
 --                 pipeline support added in Phase L's L1 spec work).
 -- rail_name     — L2 Rail name that produced this leg. Required on every
@@ -1784,8 +1783,8 @@ _SCHEMA_TEMPLATE = """\
     -- tx-chainfill-xfer-limit-breach-... pattern hits 101 chars and
     -- Oracle rejects with ORA-12899). The original BC.11 fix was
     -- reverted at some point; this re-applies it. vc255 is the
-    -- standard practical ceiling; widening is free (PG/Oracle/SQLite
-    -- all handle it).
+    -- standard practical ceiling; widening is free (PG / Oracle /
+    -- DuckDB all handle it).
 CREATE TABLE {p}_transactions (
     entry                {tx_entry_decl},
     id                   {vc255}   NOT NULL,
@@ -1882,7 +1881,7 @@ CREATE INDEX idx_{p}_transactions_parent          ON {p}_transactions (transfer_
 -- idx_{p}_transactions_rail_status above (pre-Z.B the rail_status index
 -- keyed on `transfer_type`, so the bundler-specific `(rail_name, status)`
 -- was distinct). On dialects without partial-index support (Oracle,
--- SQLite < 3.8) the bundler index is degenerate — emit it ONLY when the
+-- DuckDB) the bundler index is degenerate — emit it ONLY when the
 -- partial WHERE is non-empty (PG), otherwise the rail_status index above
 -- covers the lookup (without the small-index optimization).
 {bundler_index_decl}

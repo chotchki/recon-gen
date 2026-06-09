@@ -223,8 +223,8 @@ def _build_fresh_semantic_lock(
         conn = duckdb.connect(":memory:")
     else:
         raise ValueError(
-            f"_build_fresh_semantic_lock: in-process build supports SQLite "
-            f"+ DuckDB only; got {dialect!r}. PG / Oracle locks need the "
+            f"_build_fresh_semantic_lock: in-process build supports "
+            f"DuckDB only; got {dialect!r}. PG / Oracle locks need the "
             f"deployed-DB path (AZ.1.b extension)."
         )
     try:

@@ -393,9 +393,9 @@ RECON_GEN_E2E: Final = EnvVar(
 # site. Off by default to avoid false positives from legitimately-
 # session-scoped DB fixtures.
 RECON_GEN_SQLITE_LEAK_GATE: Final = EnvVar(
-    name="RECON_GEN_SQLITE_LEAK_GATE",
+    name="RECON_GEN_SQLITE_LEAK_GATE",  # typing-smell: ignore[no-sqlite-prose]: dead env var post-CB.9 aiosqlite drop; removal tracked under task #323 (CR.15.followup)
     description=(
-        "Bool — set to any non-empty value to enable the sqlite-leak "
+        "Bool — set to any non-empty value to enable the sqlite-leak "  # typing-smell: ignore[no-sqlite-prose]: dead env var post-CB.9; see task #323
         "detector in tests/conftest.py. Fails any test that ends with "
         "more open sqlite3 / aiosqlite Connection instances than it "
         "started with."
@@ -875,7 +875,7 @@ RECON_GEN_DIALECT: Final = EnvVar(
     name="RECON_GEN_DIALECT",
     legacy_name="QS_GEN_DIALECT",
     description=(
-        "DB dialect (postgres / oracle / duckdb) — overrides "
+        "DB dialect (postgres / oracle / duckdb) — overrides "  # typing-smell: ignore[no-sqlite-prose]: deliberate operator-facing breadcrumb explaining why "sqlite" no longer resolves; remove once the deprecation goes stale (see task #323)
         "cfg.dialect. CB.8 (v13.0.0) dropped the prior sqlite arm."
     ),
     coercer=str,

@@ -134,7 +134,7 @@ class _DryRunCaptureSqlite(_DryRunBase):
     """SQLite-dialect dry-run capture; `_placeholder_style` picks `?`."""
 
 
-_DryRunCaptureSqlite.__module__ = "sqlite3"
+_DryRunCaptureSqlite.__module__ = "sqlite3"  # typing-smell: ignore[no-sqlite-prose]: dead class post-CB.8 (no callers); removal tracked under task #323 (CR.15.followup)
 
 
 class _DryRunCapturePostgres(_DryRunBase):

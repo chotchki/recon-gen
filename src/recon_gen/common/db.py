@@ -21,6 +21,8 @@ local-iteration default; CB.8 dropped the prior SQLite arm.
 
 from __future__ import annotations
 
+# typing-smell: ignore-file[no-sqlite-prose]: sqlite_path() URL helper is dead post-CB.8 but still defined + exported; removal tracked under task #323 (CR.15.followup). Until then file-suppress so the lint stays useful on the rest of the file.
+
 import asyncio
 import sys
 import time

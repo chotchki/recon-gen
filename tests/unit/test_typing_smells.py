@@ -1872,6 +1872,136 @@ def _is_suppressed(smell: Smell, lines: list[str], file_supp: set[str]) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Check: no-sqlite-prose (CR.15.a)
+# ---------------------------------------------------------------------------
+
+
+# CR.9 (v13.6.x) deleted the SQLite dialect; CR.9 prose sweep removed the
+# user-facing references but several historical-context comments remain
+# in docstrings (intentional: explain why a workaround was lifted). The
+# lint walks non-docstring string Constants only — comments and
+# docstrings are out of scope, so historical references in those forms
+# stay legal. New user-facing prose claiming SQLite-as-a-dialect option
+# is what this catches.
+_SQLITE_RE = re.compile(r"sqlite", re.IGNORECASE)
+
+
+class _NoSqliteProseVisitor(ast.NodeVisitor):
+    """Walk non-docstring Constant strings; flag any case-insensitive
+    ``sqlite`` substring. CR.15.a — anti-drift gate against the CR.9
+    regression class (code dropped Dialect.SQLITE, prose lagged)."""
+
+    def __init__(self, file: Path, docstring_ids: set[int]) -> None:
+        self.file = file
+        self.docstring_ids = docstring_ids
+        self.smells: list[Smell] = []
+
+    def visit_Constant(self, node: ast.Constant) -> None:
+        if not isinstance(node.value, str):
+            return
+        if id(node) in self.docstring_ids:
+            return
+        if _SQLITE_RE.search(node.value):
+            self.smells.append(Smell(
+                file=self.file,
+                lineno=node.lineno,
+                checker="no-sqlite-prose",
+                message=(
+                    "literal ``sqlite`` in a non-docstring string "
+                    "(operator-facing prose / error message / log line). "
+                    "Dialect.SQLITE was removed at CB.8 / v13.0.0; "
+                    "user-facing references should not list SQLite as "
+                    "an option. Allowed dialects today: ``postgres`` / "
+                    "``oracle`` / ``duckdb``. Move historical context "
+                    "into docstrings or comments (both invisible to "
+                    "this lint), or suppress with ``# typing-smell: "
+                    "ignore[no-sqlite-prose]: <reason>`` if the literal "
+                    "is genuinely intentional."
+                ),
+            ))
+
+
+class NoSqliteProseCheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        docstring_ids = _docstring_node_ids(tree)
+        v = _NoSqliteProseVisitor(file, docstring_ids)
+        v.visit(tree)
+        return v.smells
+
+
+# ---------------------------------------------------------------------------
+# Check: no-in-progress-narrative (CR.15.c)
+# ---------------------------------------------------------------------------
+
+
+# CR.13 finding: ``common/sql/dialect.py`` docstring said
+# "Phase CA in progress" for a phase that shipped in v13.0.0. Walk
+# docstrings + comments — both rot the same way. AST sees docstrings
+# but not comments, so this lint focuses on docstring Constants. The
+# regex captures the recurring shape ("Phase X in progress", "TBD", "in
+# progress") rather than literal phase names (which keep being added).
+_IN_PROGRESS_RES = (
+    re.compile(r"\bphase\s+[a-z][a-z0-9.]*\s+in\s+progress\b", re.IGNORECASE),
+    re.compile(r"\bphase\s+[a-z][a-z0-9.]*\s+is\s+in\s+progress\b", re.IGNORECASE),
+    # Standalone "TBD" / "in progress" without a phase tag also rots —
+    # but only flag when it's substantive (preceded by a context word
+    # like "decision" / "design" / "implementation"). Bare "TBD" inside
+    # a code-template string is too noisy.
+    re.compile(r"\b(decision|design|implementation|wiring|migration)\s+TBD\b", re.IGNORECASE),
+    re.compile(r"\b(decision|design|implementation|wiring|migration)\s+in\s+progress\b", re.IGNORECASE),
+)
+
+
+class _NoInProgressNarrativeVisitor(ast.NodeVisitor):
+    """Walk docstring Constants; flag ``Phase X in progress`` / ``TBD``
+    / ``in progress`` phrasings. CR.15.c — anti-drift gate against the
+    CR.13 regression class (phase landed, narrative didn't follow)."""
+
+    def __init__(self, file: Path, docstring_ids: set[int]) -> None:
+        self.file = file
+        self.docstring_ids = docstring_ids
+        self.smells: list[Smell] = []
+
+    def visit_Constant(self, node: ast.Constant) -> None:
+        if not isinstance(node.value, str):
+            return
+        if id(node) not in self.docstring_ids:
+            return
+        for pattern in _IN_PROGRESS_RES:
+            m = pattern.search(node.value)
+            if m:
+                # Use the docstring's start line + the match's relative
+                # line so the operator can land on the actual phrase
+                # (multi-line docstrings hide the hit behind the open
+                # quote line otherwise).
+                offset = node.value[: m.start()].count("\n")
+                self.smells.append(Smell(
+                    file=self.file,
+                    lineno=node.lineno + offset,
+                    checker="no-in-progress-narrative",
+                    message=(
+                        f"docstring narrative {m.group(0)!r} — phase / "
+                        f"design / decision narratives in docstrings "
+                        f"rot when the phase ships. Move to the audit "
+                        f"doc or commit message, or update the "
+                        f"docstring once the phase lands. Suppress with "
+                        f"``# typing-smell: ignore[no-in-progress-"
+                        f"narrative]: <reason>`` on the docstring's "
+                        f"opening line if the phrasing is genuinely "
+                        f"durable."
+                    ),
+                ))
+
+
+class NoInProgressNarrativeCheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        docstring_ids = _docstring_node_ids(tree)
+        v = _NoInProgressNarrativeVisitor(file, docstring_ids)
+        v.visit(tree)
+        return v.smells
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
@@ -2413,6 +2543,33 @@ def _build_checks() -> list[Check]:
             src_root=REPO_ROOT / "tests/e2e/_drivers",
             checker_name="no-test-e2e-driver-internals",
             src_label="tests/e2e/_drivers/",
+        ),
+        NoSqliteProseCheck(
+            name="no-sqlite-prose",
+            description=(
+                "literal ``sqlite`` in a non-docstring string in "
+                "src/recon_gen/** — operator-facing prose / error "
+                "messages / log lines should not list SQLite as a "
+                "dialect option (dropped at CB.8 / v13.0.0). CR.15.a "
+                "anti-drift gate against CR.9 regressions. Historical "
+                "context lives in docstrings + code comments (both "
+                "invisible to this lint)."
+            ),
+            files=_expand_paths([REPO_ROOT / "src/recon_gen"]),
+        ),
+        NoInProgressNarrativeCheck(
+            name="no-in-progress-narrative",
+            description=(
+                "``Phase X in progress`` / context-prefixed ``TBD`` / "
+                "``in progress`` phrasing inside a docstring in "
+                "src/recon_gen/** — phase-narrative drift class "
+                "(CR.13 finding: Dialect docstring said \"Phase CA in "
+                "progress\" months after CA shipped). Move phase "
+                "narratives to audit docs or commit messages; "
+                "docstrings should describe steady-state behavior. "
+                "CR.15.c anti-drift gate."
+            ),
+            files=_expand_paths([REPO_ROOT / "src/recon_gen"]),
         ),
     ]
 

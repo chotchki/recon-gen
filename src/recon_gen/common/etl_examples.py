@@ -47,7 +47,7 @@ _HEADER = """\
 -- MONEY IS STORED AS INTEGER CENTS (Phase AO.1). Three columns —
 -- ``transactions.amount_money``, ``daily_balances.money``, and
 -- ``daily_balances.expected_eod_balance`` — are BIGINT integer cents
--- on every dialect (PG / Oracle / SQLite). The customer ETL feed
+-- on every dialect (PG / Oracle / DuckDB). The customer ETL feed
 -- contract is dollars-in / cents-stored: your upstream emits dollar
 -- amounts, the ``etl_hook`` (or wrapping Python ETL) converts to
 -- integer cents via ``int(round(amount_dollars * 100))`` BEFORE the
@@ -470,7 +470,7 @@ _PATTERN_PYTHON_CENTS_HELPER = """\
 -- Consumed by: no SQL surface — this is a Python-side reference for
 --   ETL authors. Paste the wrapper into your ETL module verbatim.
 --
--- Example Python ETL (psycopg2 / oracledb / sqlite3 — same shape):
+-- Example Python ETL (psycopg2 / oracledb / duckdb — same shape):
 --
 --     from decimal import Decimal
 --     from recon_gen.common.money import Cents
@@ -502,8 +502,8 @@ _PATTERN_PYTHON_CENTS_HELPER = """\
 --
 -- For batch loads, build the row tuple once + bind via ``executemany``;
 -- the ``.value`` access stays the same. NEVER mix a bare ``Decimal``
--- or ``float`` into the amount_money bind — the BIGINT column will
--- reject (PG / Oracle) or silently truncate (SQLite) the non-integer.
+-- or ``float`` into the amount_money bind — the BIGINT column rejects
+-- the non-integer on every supported dialect (PG / Oracle / DuckDB).
 """
 
 

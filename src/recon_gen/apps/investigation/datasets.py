@@ -416,8 +416,7 @@ SELECT
     -- per-(recipient, transfer) row count restores the
     -- inflation-free amount: SUM over the M rows for one transfer
     -- = (inflow/M) × M = inflow. Window expression works on
-    -- PG/Oracle/SQLite (SQLite gained window functions in 3.25,
-    -- 2018; AO.1.impl already targets ≥3.38). Verified by
+    -- PG / Oracle / DuckDB. Verified by
     -- BG.4's ``test_bg4_recipient_fanout_kpis_match_inflows_only_truth``
     -- which compares the SUM to a deduped-by-(recipient,transfer)
     -- ground truth.
