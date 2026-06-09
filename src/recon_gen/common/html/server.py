@@ -107,6 +107,7 @@ from starlette.staticfiles import StaticFiles
 _DEVLOG = logging.getLogger("recon_gen.app2.devlog")
 
 
+from recon_gen.common.db import PoolReleasedDuringRefresh
 from recon_gen.common.html._tree_fetcher import OptionsSearchFetcher
 from recon_gen.common.html._tree_filter_specs import (
     make_filter_specs_for_sheet,
@@ -978,6 +979,34 @@ def make_app(
             status_code=404,
         )
 
+    # CS.8 — themed 503 for the CO.x PoolReleasedDuringRefresh window.
+    # The studio's deploy pipeline brackets step_1_etl_hook by
+    # releasing the dashboards' DuckDB pool root (so the subprocess
+    # can hold the writer lock); any dashboard request that lands
+    # during that bracket raises PoolReleasedDuringRefresh. Operators
+    # used to see the framework default 500 + a stack trace; now they
+    # see a calm "data refresh in progress, page will reload" with an
+    # auto-refresh meta tag.
+    async def pool_released_handler(
+        _request: Request, exc: Exception,
+    ) -> Response:
+        del exc
+        return HTMLResponse(
+            emit_error_page(
+                status_code=503,
+                headline="Data refresh in progress",
+                subtitle=(
+                    "A Studio data refresh is in flight; the demo "
+                    "DB is briefly unavailable. The page reloads "
+                    "automatically in 5 seconds, or click below to "
+                    "go to the dashboards listing now."
+                ),
+                theme=listing_theme,
+                auto_reload_secs=5,
+            ),
+            status_code=503,
+        )
+
     async def server_error_handler(
         _request: Request, exc: Exception,
     ) -> Response:
@@ -1102,6 +1131,10 @@ def make_app(
         routes=routes,
         exception_handlers={
             404: not_found_handler,
+            # CS.8 — explicit handler for the CO.x typed exception so
+            # the page renders as 503 + auto-reload instead of the
+            # generic 500 + traceback served by server_error_handler.
+            PoolReleasedDuringRefresh: pool_released_handler,
             Exception: server_error_handler,
         },
     )

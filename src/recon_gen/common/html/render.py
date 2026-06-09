@@ -1161,6 +1161,7 @@ def emit_error_page(
     subtitle: str,
     traceback_text: str | None = None,
     theme: ThemePreset | None = None,
+    auto_reload_secs: int | None = None,
 ) -> str:
     """Render a themed error page for 4xx / 5xx responses (X.2.m).
 
@@ -1186,6 +1187,12 @@ def emit_error_page(
             pass ``None`` so internals don't leak.
         theme: same ``ThemePreset`` contract as ``emit_html`` —
             ``None`` falls back to ``DEFAULT_PRESET``.
+        auto_reload_secs: when set, emits a
+            ``<meta http-equiv="refresh" content="N">`` so the page
+            auto-reloads after N seconds. Used by the CS.8 503
+            handler for ``PoolReleasedDuringRefresh`` — the operator
+            doesn't have to click "Reload" themselves while the
+            studio deploy is in flight.
 
     Returns:
         A complete HTML document as a string.
@@ -1219,6 +1226,10 @@ def emit_error_page(
             f'<pre class="{pre_class}">{html.escape(traceback_text)}</pre>'
             f'</details>'
         )
+    reload_meta = (
+        f'<meta http-equiv="refresh" content="{int(auto_reload_secs)}">'
+        if auto_reload_secs is not None else ""
+    )
     return _PAGE_SHELL.format(
         title=html.escape(headline),
         body="\n".join(body_parts),
@@ -1227,7 +1238,7 @@ def emit_error_page(
         bootstrap_js=_BOOTSTRAP_JS,
         dev_log_js=_DEV_LOG_JS,
         dev_log_meta="",
-        data_generation_meta="",
+        data_generation_meta=reload_meta,
         theme_style=_emit_theme_style(theme),
         nav="",
     )

@@ -532,7 +532,7 @@ code-grounded acceptance criterion already filed in its source ticket.
   unit test asserting the description count matches the matview's
   `check_type` count (or use a typed counter primitive so the prose
   derives from the implementation).
-- [ ] CS.8 - **#292 — Themed 503 page for PoolReleasedDuringRefresh.**
+- [x] CS.8 - **#292 — Themed 503 page for PoolReleasedDuringRefresh.**
   CO.x landed a DuckDB writer-lock fix that raises
   `PoolReleasedDuringRefresh` when the studio pool is released
   mid-refresh by an ETL hook subprocess. Today the operator sees an
