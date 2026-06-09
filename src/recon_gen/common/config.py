@@ -22,6 +22,7 @@ from recon_gen.common.env_keys import (
     RECON_GEN_AWS_REGION,
     RECON_GEN_DATASOURCE_ARN,
     RECON_GEN_DB_TABLE_PREFIX,
+    validate_db_table_prefix,
     RECON_GEN_DEMO_DATABASE_URL,
     RECON_GEN_DEPLOYMENT_NAME,
     RECON_GEN_DIALECT,
@@ -629,6 +630,20 @@ def _require_str(
     return raw
 
 
+def _validate_and_return_db_prefix(value: str) -> str:
+    """CR.4 — snake_case + ≤ 30-char cap on ``cfg.db_table_prefix``.
+
+    The pre-CR.4 ``primitives.py`` comment claimed this loader did
+    enforcement; in fact nothing did, so a long prefix only surfaced
+    deep in DDL as ``ORA-00972: identifier is too long``. CR.4 wires
+    ``validate_db_table_prefix`` here so the rename surfaces at cfg-
+    load with field name + budget calculation. Same validator runs
+    on the ``RECON_GEN_DB_TABLE_PREFIX`` env override.
+    """
+    validate_db_table_prefix(value)
+    return value
+
+
 def _opt_str(values: dict[str, object], key: str) -> str | None:
     """``_require_str`` but None when missing."""
     raw = values.get(key)
@@ -1031,7 +1046,9 @@ def load_config(path: str | Path | None = None) -> Config:
         aws_account_id=_require_str(values, "aws_account_id"),
         aws_region=_require_str(values, "aws_region"),
         deployment_name=_require_str(values, "deployment_name"),
-        db_table_prefix=_require_str(values, "db_table_prefix"),
+        db_table_prefix=_validate_and_return_db_prefix(
+            _require_str(values, "db_table_prefix")
+        ),
         datasource_arn=_opt_str(values, "datasource_arn"),
         principal_arns=principal_arns,
         extra_tags=extra_tags,

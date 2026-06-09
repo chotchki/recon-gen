@@ -23,6 +23,7 @@ from recon_gen.common.html.server import (
     XLSX_SHEET_NAME_MAX,
     sheet_title_from_visual_id,
 )
+from recon_gen.common.ids import VisualId
 from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from tests._test_helpers import make_test_config
 
@@ -38,7 +39,7 @@ _TEST_CFG = make_test_config(db_table_prefix=DEFAULT_PREFIX)
 
 
 def test_human_readable_below_limit_passes_through() -> None:
-    assert sheet_title_from_visual_id("l1-drift-kpi") == "l1-drift-kpi"
+    assert sheet_title_from_visual_id(VisualId("l1-drift-kpi")) == "l1-drift-kpi"
 
 
 def test_human_readable_at_limit_passes_through() -> None:
@@ -47,7 +48,7 @@ def test_human_readable_at_limit_passes_through() -> None:
     sitting at exactly the limit. A regression on the boundary
     would silently break that visual's XLSX export."""
     title = "x" * XLSX_SHEET_NAME_MAX
-    assert sheet_title_from_visual_id(title) == title
+    assert sheet_title_from_visual_id(VisualId(title)) == title
 
 
 def test_human_readable_above_limit_raises() -> None:
@@ -55,7 +56,7 @@ def test_human_readable_above_limit_raises() -> None:
     rename surfaces at request time (defense-in-depth — the unit
     lint below catches this pre-deploy)."""
     with pytest.raises(ValueError, match="exceeds Excel's 31-char"):
-        sheet_title_from_visual_id("x" * (XLSX_SHEET_NAME_MAX + 1))
+        sheet_title_from_visual_id(VisualId("x" * (XLSX_SHEET_NAME_MAX + 1)))
 
 
 def test_uuid_visual_id_collapses_to_stable_shortform() -> None:
@@ -63,7 +64,7 @@ def test_uuid_visual_id_collapses_to_stable_shortform() -> None:
     ``common/tree/structure.py`` for visuals authored without an
     explicit ``visual_id=``) collapse to ``<first8>-<last4>``
     (13 chars). 48 bits of entropy = ~281T collision pairs."""
-    uid = "40487b0e-5911-58a3-9e65-166f6c556711"
+    uid = VisualId("40487b0e-5911-58a3-9e65-166f6c556711")
     result = sheet_title_from_visual_id(uid)
     assert result == "40487b0e-6711"
     assert len(result) == 13
@@ -71,7 +72,7 @@ def test_uuid_visual_id_collapses_to_stable_shortform() -> None:
 
 
 def test_uuid_collapse_is_deterministic() -> None:
-    uid = "abcdef01-2345-6789-abcd-ef0123456789"
+    uid = VisualId("abcdef01-2345-6789-abcd-ef0123456789")
     assert sheet_title_from_visual_id(uid) == sheet_title_from_visual_id(uid)
 
 
@@ -81,9 +82,9 @@ def test_forbidden_excel_chars_sanitized() -> None:
     file at openpyxl's save step. (Unit lint should still catch
     these at deploy time so a real visual never reaches this
     branch.)"""
-    assert sheet_title_from_visual_id("kpi:total") == "kpi_total"
-    assert sheet_title_from_visual_id("rail[1]") == "rail_1_"
-    assert sheet_title_from_visual_id("a/b\\c?d*e") == "a_b_c_d_e"
+    assert sheet_title_from_visual_id(VisualId("kpi:total")) == "kpi_total"
+    assert sheet_title_from_visual_id(VisualId("rail[1]")) == "rail_1_"
+    assert sheet_title_from_visual_id(VisualId("a/b\\c?d*e")) == "a_b_c_d_e"
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +167,7 @@ def test_every_app_visual_id_satisfies_xlsx_sheet_title_contract() -> None:
     failures: list[str] = []
     for app_label, vid in _walk_visual_ids():
         try:
-            sheet_title_from_visual_id(vid)
+            sheet_title_from_visual_id(VisualId(vid))
         except ValueError as exc:
             failures.append(f"{app_label}: {vid!r} — {exc}")
     assert not failures, (

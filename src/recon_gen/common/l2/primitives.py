@@ -24,7 +24,10 @@ Z.C (2026-05-15) — the legacy ``L2Instance.instance`` field has been
 dropped. The DB-table prefix (formerly enforced via SPEC F5's
 ``^[a-z][a-z0-9_]*$``/30-char cap on the ``instance:`` YAML key) now
 lives on the cfg as ``cfg.db_table_prefix``; the same regex/cap is
-enforced by ``common/config.py``'s loader at cfg-load time. The
+enforced by ``common/env_keys.py::validate_db_table_prefix`` (wired
+through both the ``RECON_GEN_DB_TABLE_PREFIX`` env-var validator and
+``common/config.py``'s yaml loader). CR.4 added the actual validator
+— pre-CR.4 this comment claimed enforcement existed, but it didn't. The
 QS-resource-ID prefix lives as ``cfg.deployment_name`` (replaces the
 former ``cfg.resource_prefix`` + ``cfg.l2_instance_prefix`` pair).
 

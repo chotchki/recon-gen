@@ -38,7 +38,7 @@ def test_default_cap_is_500_not_100() -> None:
 def test_picker_query_cap_returns_default_when_env_unset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("RECON_GEN_PICKER_MAX_QUERY_LEN", raising=False)
+    monkeypatch.delenv("RECON_GEN_PICKER_MAX_QUERY_LEN", raising=False)  # typing-smell: ignore[envvar-bypass]: testing the registry's response — needs raw env access
     assert _picker_query_cap() == _MAX_QUERY_LEN_DEFAULT
 
 
@@ -47,7 +47,7 @@ def test_picker_query_cap_honors_env_override(
 ) -> None:
     """Operator with weirdly-long identifiers can crank the cap
     without a code change."""
-    monkeypatch.setenv("RECON_GEN_PICKER_MAX_QUERY_LEN", "1500")
+    monkeypatch.setenv("RECON_GEN_PICKER_MAX_QUERY_LEN", "1500")  # typing-smell: ignore[envvar-bypass]: testing the env override — needs raw set
     assert _picker_query_cap() == 1500
 
 
@@ -56,7 +56,7 @@ def test_picker_query_cap_can_lower_default(
 ) -> None:
     """Symmetric: env can also lower the cap (e.g., tighter DOS
     bounds in a memory-constrained deployment)."""
-    monkeypatch.setenv("RECON_GEN_PICKER_MAX_QUERY_LEN", "50")
+    monkeypatch.setenv("RECON_GEN_PICKER_MAX_QUERY_LEN", "50")  # typing-smell: ignore[envvar-bypass]: testing the env override — needs raw set
     assert _picker_query_cap() == 50
 
 
@@ -67,21 +67,21 @@ def test_picker_query_cap_falls_back_on_invalid_env(
     fall back to the default. (The env-var validator's loud error
     has already fired at process boot for the operator's eyes; the
     runtime path is defense-in-depth.)"""
-    monkeypatch.setenv("RECON_GEN_PICKER_MAX_QUERY_LEN", "not-a-number")
+    monkeypatch.setenv("RECON_GEN_PICKER_MAX_QUERY_LEN", "not-a-number")  # typing-smell: ignore[envvar-bypass]: testing invalid-env fallback — needs raw set
     assert _picker_query_cap() == _MAX_QUERY_LEN_DEFAULT
 
 
 def test_picker_query_cap_falls_back_on_zero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("RECON_GEN_PICKER_MAX_QUERY_LEN", "0")
+    monkeypatch.setenv("RECON_GEN_PICKER_MAX_QUERY_LEN", "0")  # typing-smell: ignore[envvar-bypass]: testing invalid-env fallback — needs raw set
     assert _picker_query_cap() == _MAX_QUERY_LEN_DEFAULT
 
 
 def test_picker_query_cap_falls_back_on_negative(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("RECON_GEN_PICKER_MAX_QUERY_LEN", "-1")
+    monkeypatch.setenv("RECON_GEN_PICKER_MAX_QUERY_LEN", "-1")  # typing-smell: ignore[envvar-bypass]: testing invalid-env fallback — needs raw set
     assert _picker_query_cap() == _MAX_QUERY_LEN_DEFAULT
 
 

@@ -219,7 +219,7 @@ _VISUAL_ID_UUID_RE = re.compile(
 XLSX_SHEET_NAME_MAX = 31
 
 
-def sheet_title_from_visual_id(visual_id: str) -> str:
+def sheet_title_from_visual_id(visual_id: VisualId) -> str:
     """Derive an Excel-safe worksheet title from a ``visual_id``.
 
     Excel caps sheet names at ``XLSX_SHEET_NAME_MAX`` (31) characters

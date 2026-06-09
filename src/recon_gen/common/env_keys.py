@@ -806,6 +806,54 @@ RECON_GEN_DEPLOYMENT_NAME: Final = EnvVar(
     optional=True,
 )
 
+# CR.2 / CR.4 — DB-table prefix constraints. The codebase emits tables
+# whose names are ``<prefix>_<suffix>``; the LONGEST_KNOWN_SUFFIX (28
+# chars, ``_v_config_transfer_templates``) sets the budget on the
+# prefix per dialect identifier-length limit:
+#   - PostgreSQL: NAMEDATALEN = 63 → prefix ≤ 63 - 28 = 35
+#   - Oracle 19c+ default: 128 → prefix ≤ 128 - 28 = 100
+#   - Oracle ≤11g / compat=11.2 mode: 30 → NOT supported (28-char
+#     suffixes already require ≥ Oracle 12.2 with default 128-char ids)
+# The 30-char cap chosen here is the strictest dialect-portable bound
+# that leaves PG headroom for the longest suffix (30 + 28 = 58 ≤ 63).
+# Pre-CR.4 the env_keys description claimed "snake_case, ≤30 chars" +
+# the primitives.py comment claimed config.py enforced it — neither
+# actually did. CR.4 wires the validator at both surfaces (env var +
+# yaml loader) so the operator gets a loud, actionable error at
+# config-load instead of a cryptic ORA-00972 deep in DDL.
+_DB_TABLE_PREFIX_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+DB_TABLE_PREFIX_MAX = 30
+_LONGEST_KNOWN_SUFFIX = "_v_config_transfer_templates"
+
+
+def validate_db_table_prefix(value: str) -> None:
+    """CR.4 — snake_case + ≤ 30 chars on ``cfg.db_table_prefix``.
+
+    Loud-fails with the field length, budget calculation, and the
+    longest-suffix that drives the budget so the operator can either
+    shorten the prefix or accept a different dialect's headroom. Used
+    by both ``RECON_GEN_DB_TABLE_PREFIX`` env-var spec and
+    ``config.py::load_config``'s yaml loader.
+    """
+    if not _DB_TABLE_PREFIX_RE.fullmatch(value):
+        raise ValueError(
+            f"db_table_prefix must be snake_case "
+            f"(matches {_DB_TABLE_PREFIX_RE.pattern!r}); got {value!r}"
+        )
+    if len(value) > DB_TABLE_PREFIX_MAX:
+        suffix_len = len(_LONGEST_KNOWN_SUFFIX)
+        full_len = len(value) + suffix_len
+        raise ValueError(
+            f"db_table_prefix length {len(value)} exceeds the "
+            f"{DB_TABLE_PREFIX_MAX}-char cap. Codebase's longest table "
+            f"suffix is {suffix_len} chars ({_LONGEST_KNOWN_SUFFIX!r}); "
+            f"the resulting identifier would be {full_len} chars. "
+            f"PostgreSQL caps identifiers at 63 (NAMEDATALEN); Oracle "
+            f"19c+ default is 128. Shorten the prefix to fit your "
+            f"deployment's dialect."
+        )
+
+
 RECON_GEN_DB_TABLE_PREFIX: Final = EnvVar(
     name="RECON_GEN_DB_TABLE_PREFIX",
     legacy_name="QS_GEN_DB_TABLE_PREFIX",
@@ -814,10 +862,13 @@ RECON_GEN_DB_TABLE_PREFIX: Final = EnvVar(
         "overrides cfg.db_table_prefix. Z.C: replaces direct reads of "
         "L2Instance.instance in schema/seed/datasets emit paths. "
         "Used by the Y.2.gate.m runner to namespace per-cell aw-target "
-        "deploys so sister cells don't collide on shared-DB tables."
+        "deploys so sister cells don't collide on shared-DB tables. "
+        "CR.4: snake_case + ≤30-char cap now enforced at env-var "
+        "validation time."
     ),
     coercer=str,
     optional=True,
+    validator=validate_db_table_prefix,
 )
 
 RECON_GEN_DIALECT: Final = EnvVar(
