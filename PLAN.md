@@ -540,7 +540,7 @@ code-grounded acceptance criterion already filed in its source ticket.
   themed 503 page explaining the transient state + offering a
   "Reload" button. Use the existing app-theme palette + `?` help
   surface conventions from Phase CN.
-- [ ] CS.9 - **#293 — Configurable etl_hook subprocess timeout.**
+- [x] CS.9 - **#293 — Configurable etl_hook subprocess timeout.**
   The Studio etl_hook subprocess invocation has a hardcoded timeout.
   Surface it as an env var (`RECON_GEN_STUDIO_ETL_HOOK_TIMEOUT_SECS`,
   default to current value) with a `positive_int` validator. Lets

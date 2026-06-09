@@ -293,6 +293,33 @@ def test_etl_hook_missing_binary_propagates() -> None:
     assert sink.kinds()[0] == "deploy:step1:start"
 
 
+# ---------- CS.9 — timeout path ----------
+
+def test_etl_hook_timeout_terminates_and_returns_124(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CS.9 — a runaway etl_hook must NOT hang the studio session.
+    The env override forces a tiny timeout; the hook sleeps longer
+    than the cap; the helper terminates the process and returns
+    124 (GNU timeout(1) convention) so callers can distinguish
+    "hook never finished" from "hook exited with error"."""
+    # 1-second cap; `sleep 60` is well past it but small enough that
+    # a wedged test doesn't hang CI.
+    monkeypatch.setenv("RECON_GEN_STUDIO_ETL_HOOK_TIMEOUT_SECS", "1")  # typing-smell: ignore[envvar-bypass]: testing the env override — needs raw set
+    cfg = replace(_base_cfg(), etl_hook="sh -c 'sleep 60'")
+    sink = _EventCollector()
+    rc = _run_step_1(cfg, sink)
+    assert rc == 124, (
+        f"timeout path should return 124 (GNU timeout convention); "
+        f"got {rc}. Subprocess events: {sink.kinds()}"
+    )
+    assert "deploy:step1:timeout_terminating_subprocess" in sink.kinds()
+    # Final `done` event still fires with the timeout rc.
+    done_events = sink.by_kind("deploy:step1:done")
+    assert len(done_events) == 1
+    assert done_events[0]["exit_code"] == 124
+
+
 # ============================================================
 # step_2_wipe (X.4.g.5)
 # ============================================================

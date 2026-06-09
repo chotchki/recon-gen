@@ -405,6 +405,23 @@ RECON_GEN_DB_CONN_LEAK_GATE: Final = EnvVar(
     optional=True,
 )
 
+# CS.9 — Studio etl_hook subprocess timeout (in seconds). Default is
+# 600s (10 minutes). When the operator's ETL legitimately needs
+# longer (large historical backfills, slow upstream APIs), raise the
+# cap via env. Timeout fires asyncio.wait_for around the etl_hook's
+# proc.wait() so a runaway subprocess doesn't lock the studio session
+# forever.
+RECON_GEN_STUDIO_ETL_HOOK_TIMEOUT_SECS: Final = EnvVar(
+    name="RECON_GEN_STUDIO_ETL_HOOK_TIMEOUT_SECS",
+    description=(
+        "Int — timeout (seconds) for the Studio etl_hook subprocess. "
+        "Default 600 (10 min). Raise for slow upstream ETLs."
+    ),
+    coercer=int,
+    optional=True,
+    validator=positive_int,
+)
+
 # Y.2.gate.b.2.impl — variant DB connection URL threaded by the
 # runner to subprocess pytest. ``connect_demo_db`` reads via
 # ``load_config`` env-override path so the variant container URL

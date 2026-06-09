@@ -159,12 +159,55 @@ async def step_1_etl_hook(
                 "line": line,
             })
 
+    # CS.9 — wrap the subprocess + stream-gather in asyncio.wait_for
+    # so a runaway etl_hook can't hang the studio session forever.
+    # Default 600s (10 min); operator override via env. Timeout fires
+    # a clean terminate→kill ladder just like the cancellation path
+    # below, and returns a distinctive non-zero rc (124, matching
+    # GNU `timeout(1)` convention) so callers can distinguish
+    # "hook exited with error" from "hook never finished".
+    from recon_gen.common.env_keys import (  # noqa: PLC0415
+        RECON_GEN_STUDIO_ETL_HOOK_TIMEOUT_SECS,
+    )
+    _ETL_HOOK_TIMEOUT_SECS_DEFAULT = 600
+    timeout_override = RECON_GEN_STUDIO_ETL_HOOK_TIMEOUT_SECS.get_or_none()
+    timeout_secs = (
+        int(timeout_override) if timeout_override is not None
+        else _ETL_HOOK_TIMEOUT_SECS_DEFAULT
+    )
+
     try:
-        await asyncio.gather(
-            _stream(proc.stdout, "stdout"),
-            _stream(proc.stderr, "stderr"),
-        )
-        rc = await proc.wait()
+        async def _run() -> int:
+            await asyncio.gather(
+                _stream(proc.stdout, "stdout"),
+                _stream(proc.stderr, "stderr"),
+            )
+            return await proc.wait()
+        try:
+            rc = await asyncio.wait_for(_run(), timeout=timeout_secs)
+        except asyncio.TimeoutError:
+            await _emit(dev_log, {
+                "event": "deploy:step1:timeout_terminating_subprocess",
+                "pid": proc.pid,
+                "timeout_secs": timeout_secs,
+            })
+            try:
+                proc.terminate()
+            except ProcessLookupError:
+                pass  # already exited
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                await _emit(dev_log, {
+                    "event": "deploy:step1:timeout_killing_subprocess",
+                    "pid": proc.pid,
+                })
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                await proc.wait()
+            rc = 124  # GNU timeout(1) convention — distinguishable from any normal exit
     except asyncio.CancelledError:
         # CO.x — operator cancelled (POST /etl/run/cancel) mid-
         # subprocess. WITHOUT terminating the orphan subprocess
