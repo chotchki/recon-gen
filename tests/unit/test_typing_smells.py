@@ -2099,6 +2099,119 @@ class NoL2DerivedStaticValuesCheck(Check):
         return smells
 
 
+# ---------------------------------------------------------------------------
+# Check: no-partial-form-PUT-in-tests (CO.6)
+# ---------------------------------------------------------------------------
+#
+# Flag any test under ``tests/`` that POSTs / PUTs to
+# ``/l2_shape/<kind>/<entity_id>`` with fewer fields in the body than the
+# entity's required-field count. The original smell (test 591) sent a
+# single field to a save endpoint and tested only that field's path — but
+# the editor's save handler treats the form body as a FULL replacement, so
+# any field NOT in the body became NULL on disk, masking real save
+# behavior. CO.5 converted the test to a full-body PUT; this lint prevents
+# regression. The escape hatch (CO.5): if a single-field probe is
+# genuinely worth keeping, add ``# field-isolation-probe`` on the same
+# line as the call.
+#
+# The required-field count is loaded from ``_FIELD_SPECS_BY_KIND`` at lint
+# time — so adding a new required field to a kind automatically tightens
+# the rule without code changes here.
+_PARTIAL_PUT_URL_RE = re.compile(
+    r"^/l2_shape/(?P<kind>[a-z_]+)/(?P<entity_id>(?!new$)[^/]+)$",
+)
+_FIELD_ISOLATION_PROBE_RE = re.compile(r"#\s*field-isolation-probe\b")
+
+
+class _NoPartialFormPutVisitor(ast.NodeVisitor):
+    """Walk Call nodes; flag ``.post(URL, ...)`` / ``.put(URL, ...)``
+    where URL matches the L2 edit endpoint and the body dict has fewer
+    keys than the required-field count for that kind.
+    """
+
+    def __init__(self, src: str, file: Path) -> None:
+        self.src_lines = src.splitlines()
+        self.file = file
+        self.smells: list[Smell] = []
+        # Lazy-import (and cache) the required-field count per kind. The
+        # _FIELD_SPECS_BY_KIND import pulls in the editor routes module —
+        # heavier than most checks need, but the lint runs once per pytest
+        # session so the cost is amortized.
+        from recon_gen.common.html._studio_editor_routes import (
+            _FIELD_SPECS_BY_KIND,
+        )
+        self._required_count = {
+            kind: sum(1 for s in specs if s.required)
+            for kind, specs in _FIELD_SPECS_BY_KIND.items()
+        }
+
+    def visit_Call(self, node: ast.Call) -> None:
+        m = self._url_match(node)
+        if m is None:
+            self.generic_visit(node)
+            return
+        kind = m.group("kind")
+        required = self._required_count.get(kind)
+        if required is None or required <= 1:
+            # Unknown kind (e.g. singleton like `theme`) or trivially
+            # under the threshold. Don't flag.
+            self.generic_visit(node)
+            return
+        body_count = self._body_field_count(node)
+        if body_count is None or body_count >= required:
+            self.generic_visit(node)
+            return
+        # Escape hatch — a one-line `# field-isolation-probe` marker.
+        line_idx = node.lineno - 1
+        if 0 <= line_idx < len(self.src_lines) and _FIELD_ISOLATION_PROBE_RE.search(
+            self.src_lines[line_idx],
+        ):
+            self.generic_visit(node)
+            return
+        method = node.func.attr if isinstance(node.func, ast.Attribute) else "?"
+        url_node = node.args[0]
+        url = url_node.value if isinstance(url_node, ast.Constant) else "?"
+        self.smells.append(Smell(
+            file=self.file,
+            lineno=node.lineno,
+            checker="no-partial-form-PUT-in-tests",
+            message=(
+                f".{method}({url!r}, ...) sends {body_count} field(s); "
+                f"{kind} requires {required}. The editor save handler treats "
+                f"the body as a full replacement — partial bodies NULL out "
+                f"the missing fields. Send a full body, or add "
+                f"`# field-isolation-probe` on the same line if probing the "
+                f"single-field shape is intentional."
+            ),
+        ))
+        self.generic_visit(node)
+
+    def _url_match(self, node: ast.Call) -> re.Match[str] | None:
+        if not isinstance(node.func, ast.Attribute):
+            return None
+        if node.func.attr not in {"post", "put"}:
+            return None
+        if not node.args or not isinstance(node.args[0], ast.Constant):
+            return None
+        url = node.args[0].value
+        if not isinstance(url, str):
+            return None
+        return _PARTIAL_PUT_URL_RE.match(url)
+
+    def _body_field_count(self, node: ast.Call) -> int | None:
+        for kw in node.keywords:
+            if kw.arg in {"data", "json"} and isinstance(kw.value, ast.Dict):
+                return len(kw.value.keys)
+        return None
+
+
+class NoPartialFormPutInTestsCheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        v = _NoPartialFormPutVisitor(src, file)
+        v.visit(tree)
+        return v.smells
+
+
 def _build_checks() -> list[Check]:
     pyright_scope = _read_pyright_include()
     # Tighter scope for explicit-any: the freshest async files where
@@ -2571,6 +2684,24 @@ def _build_checks() -> list[Check]:
             ),
             files=_expand_paths([REPO_ROOT / "src/recon_gen"]),
         ),
+        NoPartialFormPutInTestsCheck(
+            name="no-partial-form-PUT-in-tests",
+            description=(
+                "``.post('/l2_shape/<kind>/<id>', data={...})`` or "
+                "``.put(...)`` in tests/ sending fewer fields than the "
+                "entity's required-field count. The editor save handler "
+                "treats the body as a full replacement; partial bodies "
+                "NULL out the missing fields and mask real save "
+                "behavior. CO.5 surfaced this on test 591. Add "
+                "``# field-isolation-probe`` on the same line to "
+                "opt out when a single-field probe is genuinely "
+                "intentional."
+            ),
+            files=[
+                p for p in _expand_paths([REPO_ROOT / "tests"])
+                if fixtures_dir not in p.parents
+            ],
+        ),
     ]
 
 
@@ -2661,6 +2792,43 @@ def test_cq_3_no_l2_derived_static_values_finds_planted() -> None:
     # NOT have been flagged — code-bounded enums are forever allowed.
     for smell in smells:
         assert "Posted" not in smell.message
+
+
+def test_co_6_no_partial_form_put_in_tests_finds_planted() -> None:
+    """CO.6 smoke — the lint must flag the planted partial PUT AND must
+    NOT flag the adjacent full-body PUT or the `/new` form post.
+
+    If the lint regresses (visitor stops walking, URL regex drifts,
+    required-field count import breaks), this smoke goes red even when
+    the real-corpus run reports 0 — which it always should post-CO.5.
+    """
+    fixtures_dir = REPO_ROOT / "tests/unit/_fixtures"
+    fixture = fixtures_dir / "co_6_planted_partial_put.py"
+    assert fixture.exists(), (
+        f"CO.6 smoke fixture missing: {fixture} — re-create per the "
+        f"planted-fixture contract"
+    )
+    check = NoPartialFormPutInTestsCheck(
+        name="no-partial-form-PUT-in-tests",
+        description="smoke-test instance",
+        files=[fixture],
+    )
+    src = fixture.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    smells = list(check.find_smells(src, tree, fixture))
+    assert len(smells) == 1, (
+        f"CO.6 smoke expected exactly 1 hit on the planted fixture "
+        f"(the partial-body PUT against /l2_shape/account/some-id); "
+        f"got {len(smells)}: {smells!r}. Either the AST walker stopped "
+        f"walking, the URL regex drifted, or _FIELD_SPECS_BY_KIND's "
+        f"required-field count broke."
+    )
+    assert smells[0].checker == "no-partial-form-PUT-in-tests"
+    assert "account" in smells[0].message
+    # The full-body PUT and the /new POST MUST NOT have been flagged.
+    for smell in smells:
+        assert "rail" not in smell.message
+        assert "/new" not in smell.message
 
 
 def test_be_1_no_test_src_sql_duplication_finds_planted_dup() -> None:
