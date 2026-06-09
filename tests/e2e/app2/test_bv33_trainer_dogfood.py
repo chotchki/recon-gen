@@ -670,27 +670,13 @@ def test_trainer_dogfood_per_kind(
 
     cfg, base_url = trainer_ready_session
 
-    # CL.13 followup — balance_cadence_gap on Oracle: the matview's
-    # cadence-resolution CASE expression + cross-join × LEFT JOIN
-    # shape works on PG / DuckDB but currently returns 0 rows after
-    # the plant's DELETE on Oracle 19c. Symptom: plant applies (the
-    # daily_balances row is gone), but querying _v_balance_cadence_gap
-    # post-refresh shows no row for the targeted (account, day).
-    # Likely root cause: Oracle matview refresh ordering interaction
-    # with the new CL.5 effective_balances dependency. PG + DuckDB
-    # pass cleanly. Filed as a CL backlog entry; this is the only
-    # known Oracle-specific failure left from the CL phase.
-    if (
-        entry.kind == "balance_cadence_gap"
-        and cfg.dialect.value == "oracle"
-    ):
-        pytest.skip(
-            "CL.13 followup — balance_cadence_gap matview returns 0 "
-            "rows after plant on Oracle 19c only (PG / DuckDB pass). "
-            "Likely matview-refresh ordering interaction with the "
-            "CL.5 effective_balances dependency. Filed as PLAN.md "
-            "backlog 'CL Oracle balance_cadence_gap dogfood'."
-        )
+    # CT.0 — CL.13 Oracle-skip removed. Root cause was the plant's
+    # DELETE using bare ISO-8601 strings ('2026-05-31') as TIMESTAMP
+    # comparands, which Oracle rejected with ORA-01843 ("not a valid
+    # month") — the whole DELETE error'd out silently before reaching
+    # the matview. Fix: use `date_literal()` from common.sql.dialect
+    # to emit `DATE 'YYYY-MM-DD'` (portable on PG + DuckDB + Oracle).
+    # See _invoke_balance_cadence_gap_plant in plant_registry.py.
 
     matview = entry.dashboard_check.matview_name
     assert matview is not None  # _browser_walkable_kinds() guarantees this

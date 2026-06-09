@@ -642,5 +642,4 @@ Three open design items from `docs/audits/_archive/v11_22_1_feedback.md` cold-re
 - **CR.7.b — L1 aging buckets vs rail max_pending_age mismatch** — added 2026-06-09.
 - **CS.4.followup — Dynamic Sankey banner with actual node count** — added 2026-06-09.
 - **CS.11.followup — Investigate App2 Distinct Senders KPI = None root cause** — added 2026-06-09.
-- **CS.10.followup — Reproduce + root-cause Studio plant flow on Oracle** — added 2026-06-09.
 - CS.5 - descoped from phase `CS` on 2026-06-09

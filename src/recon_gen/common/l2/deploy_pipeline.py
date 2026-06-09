@@ -431,18 +431,21 @@ def _build_generator_sql(cfg: Config, instance: L2Instance) -> str:
     cutoff = cfg.test_generator.cutoff_date
     if cutoff is not None:
         # Trim to date <= cutoff. transactions.posting is TIMESTAMP,
-        # daily_balances.business_day_start is DATE — same `>= next_day`
-        # predicate works for both via the midnight-of-next-day bound
-        # (avoids dialect-specific DATE() / TRUNC() function calls; ISO
-        # strings sort lexicographically the way we want).
+        # daily_balances.business_day_start is TIMESTAMP — both compared
+        # against the midnight-of-next-day bound. CT.0 — use
+        # `date_literal()` so Oracle accepts the comparand (bare ISO
+        # strings hit ORA-01843 on TIMESTAMP columns; PG + DuckDB
+        # accept the same typed literal).
+        from recon_gen.common.sql.dialect import date_literal  # noqa: PLC0415
         prefix = cfg.db_table_prefix
         next_day = (cutoff + timedelta(days=1)).isoformat()
+        next_day_lit = date_literal(next_day, cfg.dialect)
         sql += (
             f"\n-- X.4.h trainer cutoff: prune rows past {cutoff.isoformat()}\n"
             f"DELETE FROM {prefix}_transactions "
-            f"WHERE posting >= '{next_day}';\n"
+            f"WHERE posting >= {next_day_lit};\n"
             f"DELETE FROM {prefix}_daily_balances "
-            f"WHERE business_day_start >= '{next_day}';\n"
+            f"WHERE business_day_start >= {next_day_lit};\n"
         )
     return sql
 

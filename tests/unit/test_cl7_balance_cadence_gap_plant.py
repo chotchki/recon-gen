@@ -185,3 +185,50 @@ def test_adapter_raises_on_missing_declaration() -> None:
             days_ago=1,
             instance=inst,
         )
+
+
+def test_adapter_uses_date_literal_for_oracle_portability() -> None:
+    """CT.0 — the plant's DELETE must use typed ``DATE 'YYYY-MM-DD'``
+    literals on every dialect. The previous shape used bare ISO
+    strings (``business_day_start >= '2030-01-07'``) which Oracle 19c
+    rejected with ORA-01843 ("not a valid month") — the entire DELETE
+    error'd out silently before reaching the matview, leaving the
+    plant a no-op on Oracle. Pin the typed-literal shape across every
+    dialect so the regression can't reappear."""
+    inst = _minimal_l2(accounts=(
+        Account(
+            id=Identifier("acct-1"), role=Identifier("RoleA"),
+            scope="internal", name=Name("A1"),
+            balance_cadence="explicit_daily",
+        ),
+    ))
+    for dialect in (Dialect.ORACLE, Dialect.POSTGRES, Dialect.DUCKDB):
+        sql = _invoke_balance_cadence_gap_plant(
+            prefix="t",
+            dialect=dialect,
+            anchor=datetime(2030, 1, 10),
+            days_ago=3,
+            instance=inst,
+        )
+        # Lower-bound: typed DATE literal at gap_day.
+        assert "DATE '2030-01-07'" in sql, (
+            f"{dialect.value}: expected typed lower-bound "
+            f"DATE '2030-01-07' (gap_day); got:\n{sql}"
+        )
+        # Upper-bound: typed DATE literal at gap_day + 1 (half-open
+        # window covers a full TIMESTAMP day without missing-by-a-
+        # microsecond edge cases).
+        assert "DATE '2030-01-08'" in sql, (
+            f"{dialect.value}: expected typed upper-bound "
+            f"DATE '2030-01-08' (gap_day + 1); got:\n{sql}"
+        )
+        # The pre-CT.0 footgun shapes must NOT appear — they're the
+        # exact strings Oracle rejected.
+        assert "'2030-01-07'" not in sql.replace("DATE '2030-01-07'", ""), (
+            f"{dialect.value}: bare ISO string '2030-01-07' leaked "
+            f"into the SQL — Oracle would emit ORA-01843. SQL:\n{sql}"
+        )
+        assert "T23:59:59" not in sql, (
+            f"{dialect.value}: leftover 'gap_day T23:59:59' upper "
+            f"bound — should be replaced by DATE 'gap_day+1'. SQL:\n{sql}"
+        )
