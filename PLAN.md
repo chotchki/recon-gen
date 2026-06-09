@@ -515,7 +515,7 @@ code-grounded acceptance criterion already filed in its source ticket.
   bucket window. Build a fixture that demonstrates the squash on a
   rail with 2h max-age + 30d max-age, validate the chosen fix
   recovers detail.
-- [ ] CS.6 - **#160 — Reorder sheets: L1/L2 Exceptions right after
+- [x] CS.6 - **#160 — Reorder sheets: L1/L2 Exceptions right after
   Getting Started.** Phase L sheets are App-tree-ordered as they
   shipped; the Exceptions sheets carry the operator's daily triage
   flow + belong above lower-volume secondary surfaces. Reorder the

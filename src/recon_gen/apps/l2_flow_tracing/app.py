@@ -258,6 +258,18 @@ def build_l2_flow_tracing_app(
         description=_GETTING_STARTED_DESCRIPTION,
         handbook_path=HandbookPath("l2ft/getting-started"),
     ))
+    # CS.6 — L2 Exceptions is the daily-triage entry point; show it
+    # right after Getting Started so the operator's first click after
+    # landing is the unified hygiene roll-up rather than a per-kind
+    # sheet. SheetId stays stable; only the App tree's render order
+    # changes — deep-link drill targets keep working.
+    l2_exceptions_sheet = analysis.add_sheet(Sheet(
+        sheet_id=SHEET_L2_EXCEPTIONS,
+        name=_L2_EXCEPTIONS_NAME,
+        title=_L2_EXCEPTIONS_TITLE,
+        description=_L2_EXCEPTIONS_DESCRIPTION,
+        handbook_path=HandbookPath("l2ft/l2-exceptions"),
+    ))
     rails_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_RAILS,
         name=_RAILS_NAME,
@@ -278,13 +290,6 @@ def build_l2_flow_tracing_app(
         title=_TRANSFER_TEMPLATES_TITLE,
         description=_TRANSFER_TEMPLATES_DESCRIPTION,
         handbook_path=HandbookPath("l2ft/transfer-templates"),
-    ))
-    l2_exceptions_sheet = analysis.add_sheet(Sheet(
-        sheet_id=SHEET_L2_EXCEPTIONS,
-        name=_L2_EXCEPTIONS_NAME,
-        title=_L2_EXCEPTIONS_TITLE,
-        description=_L2_EXCEPTIONS_DESCRIPTION,
-        handbook_path=HandbookPath("l2ft/l2-exceptions"),
     ))
 
     _populate_getting_started(

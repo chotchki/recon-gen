@@ -2746,6 +2746,19 @@ def build_l1_dashboard_app(
         description=_GETTING_STARTED_DESCRIPTION,
         handbook_path=HandbookPath("l1/getting-started"),
     ))
+    # CS.6 — L1 Exceptions is the daily-triage entry point; show it
+    # right after Getting Started so the operator's first click after
+    # landing is the unified exception roll-up rather than a per-kind
+    # subset. SheetId stays stable; only the App tree's render order
+    # changes. The per-kind detail sheets still ship below in the
+    # original sequence so deep-link drill targets keep working.
+    l1_exceptions_sheet = analysis.add_sheet(Sheet(
+        sheet_id=SHEET_L1_EXCEPTIONS,
+        name=_L1_EXCEPTIONS_NAME,
+        title=_L1_EXCEPTIONS_TITLE,
+        description=_L1_EXCEPTIONS_DESCRIPTION,
+        handbook_path=HandbookPath("l1/exceptions"),
+    ))
     drift_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_DRIFT,
         name=_DRIFT_NAME,
@@ -2794,13 +2807,6 @@ def build_l1_dashboard_app(
         title=_SUPERSESSION_AUDIT_TITLE,
         description=_SUPERSESSION_AUDIT_DESCRIPTION,
         handbook_path=HandbookPath("l1/supersession-audit"),
-    ))
-    l1_exceptions_sheet = analysis.add_sheet(Sheet(
-        sheet_id=SHEET_L1_EXCEPTIONS,
-        name=_L1_EXCEPTIONS_NAME,
-        title=_L1_EXCEPTIONS_TITLE,
-        description=_L1_EXCEPTIONS_DESCRIPTION,
-        handbook_path=HandbookPath("l1/exceptions"),
     ))
     daily_statement_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_DAILY_STATEMENT,
