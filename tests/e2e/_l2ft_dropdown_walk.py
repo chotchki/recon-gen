@@ -95,6 +95,24 @@ def walk_dropdown(
         if len(driver.table_rows(table_title)) <= 0:
             failures.append(option)
 
+    diagnostic = ""
+    if failures:
+        # Duck-type the App2 picker-endpoint probe so the failure
+        # message carries WHAT the server returned for the empty-q
+        # seed page AND the first failing option — distinguishes
+        # "no rows in matview" from "endpoint never reached / fetcher
+        # returning empty" without a separate curl + URL guess. QS
+        # drivers don't expose this verb so the diagnostic is App2-
+        # only (the QS embed's typeahead endpoint isn't on our origin).
+        probe = getattr(driver, "picker_endpoint_probe", None)
+        if callable(probe):
+            seed = probe(dropdown_title, query="")
+            first = probe(dropdown_title, query=failures[0])
+            diagnostic = (
+                f"\n  picker_endpoint_probe(seed q=''): {seed}"
+                f"\n  picker_endpoint_probe(q={failures[0]!r}): {first}"
+            )
+
     if require_all_advertised:
         assert not failures, (
             f"{table_title!r} went empty after picking these "
@@ -102,6 +120,7 @@ def walk_dropdown(
             f"advertises an option with no matching seed data (stale enum / "
             f"new YAML value missing plants / data seeding bug) or the X.1.g "
             f"param-bound narrowing regressed."
+            f"{diagnostic}"
         )
     else:
         assert len(failures) < len(options), (
@@ -110,4 +129,5 @@ def walk_dropdown(
             f"entirely dead. (This is a universal-outcome enum so a given "
             f"demo may not exercise all values, but it must exercise at "
             f"least one — and the X.1.g param-bound narrowing must work.)"
+            f"{diagnostic}"
         )

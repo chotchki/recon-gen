@@ -396,6 +396,72 @@ class App2Driver:
             if o and o not in ("All", "Select all")
         ]
 
+    def picker_endpoint_probe(
+        self, label: str, *, query: str = "",
+    ) -> dict[str, object]:
+        """Diagnostic helper: hit the dropdown-search endpoint that
+        powers the typeahead picker labeled ``label``, in-browser
+        (so cookies / session / origin / form-state ``param_*`` all
+        match what a live keystroke would send), and return a dict
+        with ``url``, ``status``, ``body``, ``options_count``.
+
+        Use this from a test's failure path to surface what the
+        server is actually returning when a picker shows up empty
+        — distinguishes "no rows in matview" from "endpoint never
+        reached / params wrong / fetcher returning empty" without
+        a separate curl + URL-reconstruction dance.
+
+        Returns ``{"error": "<reason>"}`` for static (non-typeahead)
+        pickers + when the control / select / typeahead URL can't
+        be located — the caller pastes the dict into the failure
+        message and the reason explains the no-probe outcome.
+        """
+        try:
+            sel = self._filter_control(label).locator("select").first
+            url = sel.evaluate(
+                """(s) => s.dataset.typeaheadUrl || null"""
+            )
+            if not url:
+                return {"error": "no data-typeahead-url (static picker?)"}
+            # Build absolute URL + carry the live form state through
+            # so cascading picker WHERE clauses (the matview-direct
+            # path's optional `where_clause`) match the real request.
+            probe = self._page.evaluate(
+                """async ({ url, q }) => {
+                    const form = document.querySelector('#filter-form');
+                    const fd = form ? new FormData(form) : new FormData();
+                    const usp = new URLSearchParams();
+                    usp.set('q', q);
+                    for (const [k, v] of fd.entries()) {
+                        if (k.startsWith('param_')) usp.append(k, v);
+                    }
+                    const full = url + (url.includes('?') ? '&' : '?') + usp.toString();
+                    const resp = await fetch(full, { credentials: 'same-origin' });
+                    const text = await resp.text();
+                    return { url: full, status: resp.status, body: text };
+                }""",
+                {"url": url, "q": query},
+            )
+            body = str(probe.get("body", ""))
+            options_count = -1
+            try:
+                import json as _json
+                parsed: object = _json.loads(body)
+                if isinstance(parsed, dict):
+                    opts: object = parsed.get("options")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]: untrusted JSON shape probed for diagnostics only
+                    if isinstance(opts, list):
+                        options_count = len(opts)  # pyright: ignore[reportUnknownArgumentType]: untrusted JSON shape probed for diagnostics only
+            except (ValueError, TypeError):
+                pass
+            return {
+                "url": probe.get("url"),
+                "status": probe.get("status"),
+                "body": body[:1000],
+                "options_count": options_count,
+            }
+        except Exception as exc:  # pragma: no cover — diagnostic helper
+            return {"error": f"{type(exc).__name__}: {exc}"}
+
     def visual_titles(self) -> list[str]:
         return [
             t.strip()
