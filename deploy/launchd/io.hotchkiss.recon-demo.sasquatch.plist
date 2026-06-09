@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  AE.4 — LaunchDaemon plist for the recon-gen-sasquatch.hotchkiss.io
-  demo (recon-gen studio --demo-mode against sasquatch_pr L2,
-  sandboxed with mutation perimeter cut).
+  AE.4 / CU.3 — LaunchDaemon plist for the recon-gen-sasquatch.hotchkiss.io
+  demo (recon-gen studio against sasquatch_pr L2, sandboxed).
 
   LaunchDaemon (not Agent) for the same Tahoe reason as the spec
   daemon — hidden user, no GUI session, system-domain load is what
@@ -19,11 +18,14 @@
         /Library/LaunchDaemons/io.hotchkiss.recon-demo.sasquatch.plist
 
   The plist execs launch-sasquatch.sh (in /Users/recon-demo/bin/).
-  That wrapper computes STUDIO_STATE_DIR via mktemp -d (since
-  launchd's ProgramArguments doesn't expand $(...)) before
-  exec-ing sandbox-exec + `recon-gen studio --demo-mode`.
+  That wrapper (CU.2) computes STUDIO_STATE_DIR via mktemp -d, copies
+  the canonical l2.yaml into the tmpdir as a writable overlay, sets
+  a `ulimit -f 51200` disk-fill guard, then exec-s sandbox-exec +
+  `recon-gen studio` (no special flag). Visitor edits land in the
+  overlay; KeepAlive respawn re-runs the wrapper and re-copies
+  canonical → tmpdir, so edits auto-reset.
 
-  Requires recon-gen >=11.6.5 on PyPI (--demo-mode shipped there).
+  Requires recon-gen >=13.10.0 on PyPI (CU.3 dropped --demo-mode).
 -->
 <plist version="1.0">
 <dict>
