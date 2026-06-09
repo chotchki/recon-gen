@@ -4695,3 +4695,10 @@ code-grounded acceptance criterion already filed in its source ticket.
   operator-visible fix.
 
 
+---
+
+## 2026-06-09
+
+## Phase CT - Phase CT
+- [x] CT.0 - CT.0 - Oracle plant flow reproduction (#197 / CS.10.followup #328)
+
