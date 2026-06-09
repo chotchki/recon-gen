@@ -1,5 +1,90 @@
 # Release Notes
 
+## v13.9.0 — Phase CS + Phase CT: backlog drain + Oracle 19c plant flow fix
+
+Two clusters land together:
+
+**Phase CT — Oracle 19c plant flow fix (user-reported #197 /
+CS.10.followup #328).** Two date-literal footguns where bare ISO-8601
+strings were used as TIMESTAMP comparands. Oracle 19c rejects with
+ORA-01843 ("not a valid month") — its NLS_TIMESTAMP_FORMAT default
+doesn't auto-coerce that shape. PG + DuckDB happened to accept it via
+implicit coercion, so the bug was Oracle-only and silently swallowed
+inside the trainer Apply flow (the DELETE error'd out before reaching
+the matview, leaving the plant a no-op).
+
+Fix: use `date_literal(iso, dialect)` from `common/sql/dialect.py`
+→ `DATE 'YYYY-MM-DD'` (portable across PG / DuckDB / Oracle).
+
+Affected callsites:
+- `common/l2/plant_registry.py::_invoke_balance_cadence_gap_plant`
+  — the user-reported trigger
+- `common/l2/deploy_pipeline.py::_build_generator_sql` (X.4.h trainer
+  cutoff / scrub-head feature) — sibling bug, same shape
+
+Verification: Oracle 19c trainer plant matrix went from 7/16 passed
+to **8/16 passed** (the formerly Oracle-only skip on
+`balance_cadence_gap` is gone). Other 8 remain universally skipped
+under BV.3.3.c.bug4-followup (chain-coherence dashboard rendering,
+not Oracle-specific). Two new unit gates pin the typed `DATE
+'YYYY-MM-DD'` shape across all three dialects so the regression
+can't reappear.
+
+Two CI-stabilization companions landed alongside CT.0:
+
+- **CT.1** — `App2Driver.pick_filter` now peeks `cur` vs the resolved
+  target BEFORE running the action; when equal, skip the 30s
+  `_wait_for_refetch` (setValue is a no-op, no `change` fires, no
+  refetch comes). Defensive against any picker test that hits the
+  already-at-target case.
+- **CT.2** — Narrow `pytest.skip` on the `[app2]` parametrize of
+  `test_inv_drilldown.py::test_account_network_table_walk_rerenders_table`
+  pending backlog #331 (App2 Anchor parameter pick fires change but
+  no `/visuals/*/data` refetch on CI; `[qs]` variant continues to
+  gate the same K.4.8 invariant on the production renderer).
+
+**Phase CS — 14 backlog items** (CR follow-throughs + operator-visible
+polish + Oracle/Studio bug bash). Highlights:
+
+- **CS.1** — Removed dead SQLite plumbing surfaced by no-sqlite-prose
+  lint (CB.8 cleanup). DB connection-leak gate renamed to
+  `RECON_GEN_DB_CONN_LEAK_GATE`.
+- **CS.2** — Re-lit `test_inv_drilldown` after CR.6.a; now uses
+  `drill_from_first_row_via_menu` to match the production
+  `DATA_POINT_MENU` trigger + row-content assertion (catches the
+  K.4.8f-3 no-op shape that a count-based assertion would miss).
+- **CS.4** — Sankey node-cap operator visibility: subtitles name the
+  cap on Investigation + L2FT Sankeys; caps aligned at 50.
+  Dynamic banner deferred to CS.4.followup #326.
+- **CS.6** — Reordered L1 + L2 dashboards: Exceptions sheet promoted
+  to position 2 (right after Getting Started) so operator's daily
+  triage flow lives above lower-volume secondary surfaces. SheetIds
+  unchanged so deep-link URLs still resolve.
+- **CS.7** — L1 Exceptions copy: prose said 10 invariants; matview
+  has 12 (post-CL.6 + AB-era chain-coherence). New
+  `L1_EXCEPTIONS_BRANCH_NAMES` typed tuple is now the single source
+  of truth; unit gate parses the matview SQL and asserts the
+  bidirectional match so the count can't drift again.
+- **CS.8** — Themed 503 page for `PoolReleasedDuringRefresh` (the
+  CO.x DuckDB writer-lock fix's transient-state surface). Operator
+  sees a calm "Data refresh in progress" with auto-reload meta
+  refresh instead of an untemplated 500.
+- **CS.9** — `RECON_GEN_STUDIO_ETL_HOOK_TIMEOUT_SECS` env knob with
+  `positive_int` validator. Operators with slow upstream ETLs can
+  raise the timeout cap without forking; subprocess termination
+  returns rc=124 (GNU timeout convention) on timeout.
+- **CS.11** — Pinned the Distinct Senders KPI binding shape; root-
+  cause for the App2-side "renders as None" regression needs live
+  env reproduction → deferred to CS.11.followup #327.
+- **CS.12** — `anomaly/money_trail` app2 tests now derive the
+  expected sender role from the L2 instance instead of hardcoding
+  `CustomerSubledger` (which doesn't exist on sasquatch_pr).
+- **CS.13** — Session Start probes for base schema before refresh;
+  emits actionable remedy instead of silent no-op when missing.
+
+Three CS items filed as backlog follow-ups (#326, #327, #328) for
+the parts that couldn't be completed in-session.
+
 ## v13.8.0 — Phase CR: picker / export silent-truncation hardening + ETL helper + anti-drift lints
 
 Post-CQ.3 follow-up audit phase landing 14 sub-tasks across operator-
