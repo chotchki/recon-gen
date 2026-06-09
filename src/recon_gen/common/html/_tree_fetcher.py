@@ -38,7 +38,7 @@ from __future__ import annotations
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 # X.2.b URL contract: query params come back as a multi-dict (a key
 # can repeat — ``?param_pRail=A&param_pRail=B``). The fetcher carries
@@ -57,6 +57,10 @@ from recon_gen.common.dataset_contract import (
     get_sql,
 )
 from recon_gen.common.db import AsyncConnectionPool
+from recon_gen.common.env_keys import (
+    RECON_GEN_PICKER_MAX_QUERY_LEN,
+    EnvVarInvalid,
+)
 from recon_gen.common.html._data_shape import shape_for_kind
 from recon_gen.common.html._sql_executor import execute_visual_sql_async
 from recon_gen.common.html._visual_sql import wrap_for_visual
@@ -899,7 +903,42 @@ def get_picker_matview_hint(
 # surface (a 1 MB POST body with a million-char ``q`` would still bind
 # but waste planner time). 100 chars is comfortable for any real
 # account-display search.
-_MAX_QUERY_LEN = 100
+_MAX_QUERY_LEN_DEFAULT = 500
+
+
+def _picker_query_cap() -> int:
+    """Return the active per-keystroke query length cap.
+
+    CR.2 — operator-tunable via ``RECON_GEN_PICKER_MAX_QUERY_LEN``;
+    falls back to ``_MAX_QUERY_LEN_DEFAULT`` (500). Pre-CR.2 the cap
+    was a hardcoded 100 chars + silently truncated on overflow with
+    no signal back; the JSON typeahead response now carries a
+    ``"truncated"`` flag so the UI can banner when a customer-typed
+    query hit the cap. Resolved per-call (not cached) so a test or
+    operator that flips the env mid-process gets the new value.
+    """
+    try:
+        override = RECON_GEN_PICKER_MAX_QUERY_LEN.get_or_none()
+    except EnvVarInvalid:
+        # Invalid override → fall back to default. The env-var
+        # validator already raised the operator-facing error; we don't
+        # want a malformed env to crash every dropdown click.
+        return _MAX_QUERY_LEN_DEFAULT
+    return override if override is not None else _MAX_QUERY_LEN_DEFAULT
+
+
+class OptionsSearchResult(NamedTuple):
+    """CR.2 — picker-search fetcher return shape.
+
+    ``options`` is the matched option labels (same tuple the pre-CR.2
+    fetcher returned). ``truncated`` is True if the caller's ``query``
+    was longer than the active cap and the fetcher trimmed it. The
+    JSON typeahead route surfaces ``truncated`` to the client as a
+    response field so the UI can banner the silent-match-failure
+    that pre-CR.2 customers had no way to detect.
+    """
+    options: tuple[str, ...]
+    truncated: bool
 
 
 def _picker_search_sql_wrap(
@@ -1016,7 +1055,7 @@ def _picker_seed_sql_matview_direct(
 # keystroke (debounced 300ms via ``loadThrottle``).
 OptionsSearchFetcher = Callable[
     [str, str, str, Mapping[str, list[str]]],
-    Awaitable[tuple[str, ...]],
+    Awaitable[OptionsSearchResult],
 ]
 
 
@@ -1037,9 +1076,15 @@ def make_options_search_fetcher(
     Select's ``preload: 'focus'``).
 
     Typed ``query`` → case-insensitive substring search. The query is
-    truncated to ``_MAX_QUERY_LEN`` characters + LIKE-escaped via
-    :func:`escape_like_pattern` BEFORE binding (without escape,
-    typing ``5%`` matches every row containing ``5``).
+    truncated to ``_picker_query_cap()`` characters (default 500,
+    overridable via ``RECON_GEN_PICKER_MAX_QUERY_LEN``) + LIKE-escaped
+    via :func:`escape_like_pattern` BEFORE binding (without escape,
+    typing ``5%`` matches every row containing ``5``). ``OptionsSearchResult.truncated``
+    surfaces the overflow signal to the route layer so the JSON
+    typeahead response can banner the UI on silent-match-failure
+    (CR.2 — pre-CR.2 the cap was 100 + silently truncated with no
+    signal back, so a customer with > 100-char identifiers got
+    zero matches and no way to discover why).
 
     Routes both the JSON typeahead endpoint
     (``dropdown-search/{dataset}/{column}?q=...``) and the HTML
@@ -1052,8 +1097,10 @@ def make_options_search_fetcher(
         column: str,
         query: str,
         url_params: Mapping[str, list[str]],
-    ) -> tuple[str, ...]:
-        trimmed_query = query[:_MAX_QUERY_LEN]
+    ) -> OptionsSearchResult:
+        cap = _picker_query_cap()
+        trimmed_query = query[:cap]
+        truncated = len(query) > cap
         hint = get_picker_matview_hint(dataset_identifier)
         if trimmed_query:
             escaped = escape_like_pattern(trimmed_query)
@@ -1079,7 +1126,10 @@ def make_options_search_fetcher(
             dataset_parameters=get_dataset_params(dataset_identifier),
             extra_binds=extra_binds,
         )
-        return tuple(str(r[0]) for r in rows if r[0] is not None)
+        return OptionsSearchResult(
+            options=tuple(str(r[0]) for r in rows if r[0] is not None),
+            truncated=truncated,
+        )
 
     return fetch
 

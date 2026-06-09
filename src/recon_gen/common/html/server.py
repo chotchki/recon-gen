@@ -845,9 +845,14 @@ def make_app(
         # query='' (seed page of the narrowed universe). Pre-CQ.2 it
         # called the silent LIMIT 2000 options_fetcher; same option
         # universe, narrower page, no truncation surprise.
-        opts = await served.options_search_fetcher(
+        # CR.2 — cascade always passes ``query=""`` so the result's
+        # ``truncated`` flag is structurally False; we ignore it
+        # here (the HTML cascade has no banner surface — the JSON
+        # typeahead does and surfaces it in the response payload).
+        result = await served.options_search_fetcher(
             dataset_id, column, "", url_params,
         )
+        opts = result.options
         # Preserve user's current pick if it survives the narrow. The
         # form's `param_<self>` key lives in the same query_params we
         # already parsed; look it up by walking the spec's URL key.
@@ -914,11 +919,19 @@ def make_app(
         url_params = {
             k: v for k, v in url_params.items() if k != "q"
         }
-        opts = await served.options_search_fetcher(
+        # CR.2 — typeahead response now surfaces ``truncated`` so the
+        # client UI can banner the silent-match-failure case (customer
+        # typed > cap chars, fetcher trimmed). Pre-CR.2 the cap was a
+        # hardcoded 100; CR.2 raises the default to 500 (operator-
+        # tunable via ``RECON_GEN_PICKER_MAX_QUERY_LEN``) AND surfaces
+        # the truncation event so a customer with realistic identifiers
+        # gets a visible signal instead of an empty result with no clue.
+        result = await served.options_search_fetcher(
             dataset_id, column, query, url_params,
         )
         return JSONResponse({
-            "options": [{"value": v, "label": v} for v in opts],
+            "options": [{"value": v, "label": v} for v in result.options],
+            "truncated": result.truncated,
         })
 
     async def log_event(request: Request) -> Response:

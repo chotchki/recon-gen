@@ -892,3 +892,26 @@ RECON_GEN_AWS_ORACLE_INSTANCE_ID: Final = EnvVar(
     optional=True,
     validator=matches(_RDS_IDENT_RE),
 )
+
+
+# CR.2 — operator-tunable picker search-query length cap. Pre-CR.2 the
+# fetcher silently truncated at 100 chars with no signal back; customers
+# with long semantic account identifiers (>100 chars — realistic at
+# large FIs) got zero matches + no way to discover why. CR.2 raises
+# the default to 500 (covers every realistic FI identifier we've seen)
+# AND lets the operator tune higher when the data calls for it. The
+# JSON typeahead response now also carries a ``"truncated": bool``
+# flag so the UI can banner when a customer-typed query hit the cap.
+RECON_GEN_PICKER_MAX_QUERY_LEN: Final = EnvVar(
+    name="RECON_GEN_PICKER_MAX_QUERY_LEN",
+    description=(
+        "Maximum length (in characters) of the user-typed ``q`` "
+        "parameter on the picker dropdown-search endpoint. Default "
+        "500. Raise when customer account identifiers can exceed "
+        "this; lower only if the planner DOS surface needs tighter "
+        "bounds. Validated as a positive integer."
+    ),
+    coercer=int,
+    optional=True,
+    validator=positive_int,
+)
