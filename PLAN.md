@@ -637,8 +637,10 @@ Three open design items from `docs/audits/_archive/v11_22_1_feedback.md` cold-re
 - **BX backlog — Extend semantic-lock to PG + Oracle dialects** — added 2026-06-08.
 - **BX backlog — Wire AsOfFrame.live_from_db into App2 + QS deploy paths** — added 2026-06-08.
 - **BX backlog — v13.6.1 finding 4: balance_cadence_gap vs carried_with_activity_gap divergence** — added 2026-06-08.
-- **CR.6.a — Re-light test_inv_drilldown (anchor seed + menu verb)** — added 2026-06-09.
-- **CR.6.b — Resolve test_l2ft_metadata_cascade dead/rewrite decision** — added 2026-06-09.
 - **CR.15.followup — Remove dead SQLite plumbing surfaced by no-sqlite-prose lint** — added 2026-06-09.
 - **CR.7.a — Sankey node cap operator-visibility (Investigation + L2FT)** — added 2026-06-09.
 - **CR.7.b — L1 aging buckets vs rail max_pending_age mismatch** — added 2026-06-09.
+- **CS.4.followup — Dynamic Sankey banner with actual node count** — added 2026-06-09.
+- **CS.11.followup — Investigate App2 Distinct Senders KPI = None root cause** — added 2026-06-09.
+- **CS.10.followup — Reproduce + root-cause Studio plant flow on Oracle** — added 2026-06-09.
+- CS.5 - descoped from phase `CS` on 2026-06-09

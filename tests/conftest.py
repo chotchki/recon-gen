@@ -28,7 +28,7 @@ from recon_gen.common.env_keys import (
     RECON_GEN_FUZZ_SEED,
     RECON_GEN_LAYER,
     RECON_GEN_RUN_DIR,
-    RECON_GEN_SQLITE_LEAK_GATE,
+    RECON_GEN_DB_CONN_LEAK_GATE,
     RECON_GEN_TEST_L2_INSTANCE,
     dump_env_access,
 )
@@ -215,46 +215,38 @@ def pytest_sessionfinish(session: Any, exitstatus: int) -> None:  # typing-smell
 
 
 # ---------------------------------------------------------------------------
-# SQLite connection-leak detector (opt-in via RECON_GEN_SQLITE_LEAK_GATE=1)
+# DB connection-leak detector (opt-in via RECON_GEN_DB_CONN_LEAK_GATE=1)
 # ---------------------------------------------------------------------------
 #
-# Surfaced 2026-05-27 — aiosqlite#258 (still open) leaks thread locks on
-# per-request connect+close, and `with duckdb.connect(...)` (Python's
-# sqlite3 context manager handles transactions, NOT close) is a common
-# foot-gun. Both shapes accumulate live Connection objects until OOM —
-# explains the local browser-tier OOM during the 13-variant sweep.
+# Surfaced 2026-05-27 (originally named sqlite-leak-gate when aiosqlite was
+# still in the dependency graph). `with duckdb.connect(...)` commits the
+# transaction but DOES NOT close the connection — a common foot-gun that
+# accumulates live Connection objects until OOM. Explains the local
+# browser-tier OOM during the 13-variant sweep.
 #
-# This fixture snapshots the live sqlite3 / aiosqlite Connection count
-# before each test + asserts no net growth after. Defaults OFF because
-# (a) a few legitimately-session-scoped DB fixtures hold connections
-# across tests, (b) third-party libs may also leak; user opts in per
-# branch / per release-gate run when the leak surface needs sweeping.
+# This fixture snapshots the live DuckDBPyConnection count before each
+# test + asserts no net growth after. Defaults OFF because (a) some
+# legitimately-session-scoped DB fixtures hold connections across tests,
+# (b) third-party libs may also leak; user opts in per branch / per
+# release-gate run when the leak surface needs sweeping.
 #
-# Usage:  `RECON_GEN_SQLITE_LEAK_GATE=1 pytest tests/...`
+# Usage:  `RECON_GEN_DB_CONN_LEAK_GATE=1 pytest tests/...`
 
 
-def _count_live_sqlite_connections() -> int:
-    """Sweep ``gc.get_objects()`` for live sqlite3 / DuckDB Connections.
+def _count_live_db_connections() -> int:
+    """Sweep ``gc.get_objects()`` for live DuckDB Connections.
 
     Forces a ``gc.collect()`` first so legitimately-out-of-scope
     connections are reaped before the count.
-
-    CB.9 dropped aiosqlite (the dialect went away with Dialect.SQLITE
-    in CB.8); the soft-import branch was kept around through CB.14 but
-    pyright on a clean install (no aiosqlite in any extras) flagged
-    the import as unresolved. Removed the branch entirely — there's no
-    code path that still needs it.
     """
     import duckdb as _duckdb  # noqa: PLC0415
     import gc as _gc  # noqa: PLC0415
-    import sqlite3 as _sqlite3  # noqa: PLC0415
 
-    # Count only OPEN sqlite3 / DuckDB connections — a closed
-    # Connection object can linger in pytest's traceback / fixture-result
-    # caches even after the test's own `conn.close()` ran, which would
-    # false-positive the gate. We probe each candidate by calling
-    # `execute("SELECT 1")` and only count it if it doesn't raise
-    # `ProgrammingError("Cannot operate on a closed database.")`.
+    # Count only OPEN DuckDB connections — a closed Connection object
+    # can linger in pytest's traceback / fixture-result caches even
+    # after the test's own `conn.close()` ran, which would false-
+    # positive the gate. We probe each candidate by calling
+    # `execute("SELECT 1")` and only count it if it doesn't raise.
     for _ in range(3):
         _gc.collect()
     live = 0
@@ -263,57 +255,55 @@ def _count_live_sqlite_connections() -> int:
             try:
                 o.execute("SELECT 1")
                 live += 1
-            except _sqlite3.ProgrammingError:
+            except Exception:  # noqa: BLE001 — DuckDB raises different exception classes for closed conns across versions; any failure means "closed, don't count"
                 pass
     return live
 
 
-_SQLITE_LEAK_BASELINE: dict[str, int] = {}
+_DB_CONN_LEAK_BASELINE: dict[str, int] = {}
 
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_setup(item: Any) -> Generator[None, None, None]:  # typing-smell: ignore[explicit-any]: pytest Item from late import
-    """Stash the pre-setup sqlite-conn count when the leak gate is enabled.
+    """Stash the pre-setup DB-conn count when the leak gate is enabled.
 
     Pair with ``pytest_runtest_teardown`` (below) which compares after
     ALL fixture finalizers have run — fixes the autouse-fixture timing
     bug where the gate fires before per-test fixtures close their conns.
     """
-    if RECON_GEN_SQLITE_LEAK_GATE.get_or_none():
-        _SQLITE_LEAK_BASELINE[item.nodeid] = _count_live_sqlite_connections()
+    if RECON_GEN_DB_CONN_LEAK_GATE.get_or_none():
+        _DB_CONN_LEAK_BASELINE[item.nodeid] = _count_live_db_connections()
     yield
 
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_teardown(item: Any) -> Generator[None, None, None]:  # typing-smell: ignore[explicit-any]: pytest Item from late import
-    """Fail if the test left more sqlite conns than it found (gate opt-in).
+    """Fail if the test left more DB conns than it found (gate opt-in).
 
-    Surfaced 2026-05-27 — aiosqlite#258 leaks thread locks on per-request
-    connect+close, and `with duckdb.connect(...)` (Python's sqlite3
-    context manager handles transactions, NOT close) is a common
-    foot-gun. Both accumulate live Connection objects until OOM.
+    `with duckdb.connect(...)` commits the transaction but DOES NOT
+    close the connection — a foot-gun that accumulates live Connection
+    objects until OOM.
 
-    Opt in via ``RECON_GEN_SQLITE_LEAK_GATE=1`` — default OFF because
+    Opt in via ``RECON_GEN_DB_CONN_LEAK_GATE=1`` — default OFF because
     legitimate session-scoped DB fixtures hold connections across tests
     and would false-positive without explicit baseline-shift tracking.
     """
     yield  # let all other teardown hooks + finalizers run first
-    if not RECON_GEN_SQLITE_LEAK_GATE.get_or_none():
+    if not RECON_GEN_DB_CONN_LEAK_GATE.get_or_none():
         return
-    before = _SQLITE_LEAK_BASELINE.pop(item.nodeid, None)
+    before = _DB_CONN_LEAK_BASELINE.pop(item.nodeid, None)
     if before is None:
         return
-    after = _count_live_sqlite_connections()
+    after = _count_live_db_connections()
     leaked = after - before
     if leaked > 0:
         raise AssertionError(
-            f"sqlite-leak-gate: test {item.nodeid!r} leaked {leaked} "
+            f"db-conn-leak-gate: test {item.nodeid!r} leaked {leaked} "
             f"Connection instance(s) (before={before} → after={after}). "
-            f"Likely culprits: `with duckdb.connect(...) as c:` "
-            f"(commits transaction, DOES NOT close) or "
-            f"`async with aiosqlite.connect(...)` (aiosqlite#258 leaks "
-            f"thread locks). Use the `aiosqlitepool`-backed pool from "
-            f"common/db.py or close connections explicitly in a try/finally."
+            f"Likely culprit: `with duckdb.connect(...) as c:` commits "
+            f"the transaction but DOES NOT close. Use the pool from "
+            f"common/db.py or close connections explicitly in a "
+            f"try/finally."
         )
 
 

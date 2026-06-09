@@ -129,7 +129,7 @@ def test_deploy_button_drives_pipeline_and_dashboards_render(
     # BS.4 (2026-05-29): etl_datasource_url is gone — the etl_hook
     # writes directly to demo_db now (no upstream pull).
     del pg_container_url
-    cfg, _sqlite_path = make_studio_cfg(
+    cfg, _db_path = make_studio_cfg(
         tmp_path,
         etl_hook=etl_hook_script,
     )
@@ -222,7 +222,7 @@ def test_dashboard_auto_reloads_when_data_generation_id_bumps(
     noop_hook.write_text("#!/bin/bash\nexit 0\n")
     noop_hook.chmod(noop_hook.stat().st_mode | stat.S_IEXEC)
 
-    cfg, _sqlite_path = make_studio_cfg(
+    cfg, _db_path = make_studio_cfg(
         tmp_path, etl_hook=noop_hook,
     )
     apply_schema_to(cfg)

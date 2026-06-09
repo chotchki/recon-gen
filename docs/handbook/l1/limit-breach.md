@@ -131,7 +131,7 @@ not a "clean" signal.
   destination of the drill from this sheet.
 - [Overdraft](overdraft.md) — a related L1 SHOULD-constraint (stored balance
   sign check) orthogonal to limit caps.
-- [L1 Exceptions](exceptions.md) — the unified roll-up of all 10 L1
+- [L1 Exceptions](exceptions.md) — the unified roll-up of all 12 L1
   invariant violations; limit breach is one of the check types surfaced there.
 
 ---

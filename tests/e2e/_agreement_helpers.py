@@ -31,6 +31,43 @@ from recon_gen.common.sql import Dialect
 
 if TYPE_CHECKING:
     from recon_gen.common.config import Config
+    from recon_gen.common.l2 import L2Instance
+
+
+def anomaly_pair_for_l2(instance: "L2Instance") -> tuple[str, str]:
+    """CS.12 — pick a (sender_role, recipient_role) pair that exists in
+    the L2 instance's accounts catalog. Returns the role names that the
+    anomaly + money_trail tests pass into ``scenario_for``.
+
+    Pre-CS.12 the tests hardcoded ``("CustomerSubledger",
+    "CustomerSubledger")`` — fine on spec_example (which declares that
+    role) but broke on sasquatch_pr (whose closest leaf-money role is
+    ``CustomerDDA``). Now the helper walks the instance once + returns
+    the first match from a preference order:
+
+    1. ``CustomerSubledger`` — spec_example default
+    2. ``CustomerDDA`` — sasquatch_pr equivalent
+
+    If neither role exists on the instance the helper skips the test
+    with a clear message naming the candidates, so an integrator with
+    a custom L2 sees the right next step (add ``CustomerSubledger`` or
+    ``CustomerDDA`` to the schema, OR extend this helper's preference
+    list to match their topology).
+    """
+    candidates = ("CustomerSubledger", "CustomerDDA")
+    declared_roles = {
+        getattr(a, "role", None) for a in instance.accounts
+    }
+    for role in candidates:
+        if role in declared_roles:
+            return role, role
+    pytest.skip(
+        f"L2 instance declares no compatible anomaly sender role "
+        f"(checked: {candidates}); add one of those role names to the "
+        f"L2 yaml's accounts list, or extend "
+        f"tests/e2e/_agreement_helpers.py::anomaly_pair_for_l2's "
+        f"preference order to match this L2's topology."
+    )
 
 
 # Bundled persona-neutral L2 — the same yaml every other e2e test

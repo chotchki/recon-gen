@@ -21,8 +21,6 @@ local-iteration default; CB.8 dropped the prior SQLite arm.
 
 from __future__ import annotations
 
-# typing-smell: ignore-file[no-sqlite-prose]: sqlite_path() URL helper is dead post-CB.8 but still defined + exported; removal tracked under task #323 (CR.15.followup). Until then file-suppress so the lint stays useful on the rest of the file.
-
 import asyncio
 import sys
 import time
@@ -52,7 +50,6 @@ __all__ = [
     "oracle_dsn",
     "split_oracle_script",
     "duckdb_path",
-    "sqlite_path",
 ]
 
 
@@ -83,8 +80,8 @@ def oracle_dsn(url: str) -> str:
 def make_demo_database_url(dialect: Dialect, path: str | Path) -> str:
     """Build the canonical ``demo_database_url`` for a dialect + path.
 
-    Inverse of ``duckdb_path`` / ``sqlite_path``. Used by test fixtures
-    and config-building helpers so the URL-scheme literal lives in one
+    Inverse of ``duckdb_path``. Used by test fixtures and
+    config-building helpers so the URL-scheme literal lives in one
     place instead of being copy-pasted as ``f"duckdb:///{path}"`` at
     every callsite.
 
@@ -110,7 +107,7 @@ def duckdb_path(url: str) -> str:
     ``duckdb://:memory:`` in-memory form. Also accepts a bare path
     string for ergonomics — if the value isn't a recognized URL
     scheme, it's returned unchanged so the caller can pass the raw
-    DuckDB file path directly. Mirrors the ``sqlite_path`` contract.
+    DuckDB file path directly.
 
     Examples:
       - ``duckdb:///tmp/demo.duckdb`` → ``/tmp/demo.duckdb``
@@ -127,46 +124,17 @@ def duckdb_path(url: str) -> str:
     return url
 
 
-def sqlite_path(url: str) -> str:
-    """Translate a ``sqlite:///path/to/db.sqlite`` URL to a path string.
-
-    Accepts the SQLAlchemy-style ``sqlite:///`` triple-slash form (the
-    fourth slash starts the absolute path component) and the
-    ``sqlite://:memory:`` in-memory form. Also accepts a bare path
-    string for ergonomics — if the value isn't a recognized URL
-    scheme, it's returned unchanged so the caller can pass the raw
-    sqlite file path directly.
-
-    Examples:
-      - ``sqlite:///tmp/demo.sqlite`` → ``/tmp/demo.sqlite``
-      - ``sqlite:///./relative.sqlite`` → ``./relative.sqlite``
-      - ``sqlite://:memory:`` → ``:memory:``
-      - ``/tmp/demo.sqlite`` → ``/tmp/demo.sqlite``
-    """
-    if url == "sqlite://:memory:" or url.endswith(":memory:"):
-        return ":memory:"
-    if url.startswith("sqlite:///"):
-        # Triple-slash: the fourth ``/`` introduces the absolute path
-        # (so ``sqlite:////tmp/demo.sqlite`` keeps the leading slash).
-        return url[len("sqlite:///"):]
-    if url.startswith("sqlite://"):
-        # Edge case: ``sqlite://path`` (two slashes) — strip the
-        # scheme + double slash; relative paths stay relative.
-        return url[len("sqlite://"):]
-    return url
-
-
 def connect_demo_db(cfg: Config) -> "SyncConnection":  # CB.16 — replaces the `-> Any` escape hatch with the structural Protocol defined below. Per-driver concrete types (psycopg.Connection / oracledb.Connection / duckdb.DuckDBPyConnection) all match SyncConnection structurally, so callers downcast at the boundary if they need driver-specific features.
     """Open a DB-API 2.0 connection to ``cfg.demo_database_url``.
 
     Branches on ``cfg.dialect``:
       - Postgres: psycopg (v3, from the ``[prod]`` extra).
       - Oracle: oracledb thin client (from the ``[prod]`` extra).
-      - SQLite: stdlib ``sqlite3`` (no extra required).
+      - DuckDB: in-process ``duckdb`` wheel (core dependency, no extra).
 
     Raises:
       ImportError: if the matching driver isn't installed (PG / Oracle
-        only — SQLite ships with stdlib). The error message names the
+        only — DuckDB is a core dependency). The error message names the
         extras-install command.
       ValueError: if ``cfg.demo_database_url`` is unset or
         ``cfg.dialect`` isn't recognized.

@@ -258,6 +258,18 @@ def build_l2_flow_tracing_app(
         description=_GETTING_STARTED_DESCRIPTION,
         handbook_path=HandbookPath("l2ft/getting-started"),
     ))
+    # CS.6 — L2 Exceptions is the daily-triage entry point; show it
+    # right after Getting Started so the operator's first click after
+    # landing is the unified hygiene roll-up rather than a per-kind
+    # sheet. SheetId stays stable; only the App tree's render order
+    # changes — deep-link drill targets keep working.
+    l2_exceptions_sheet = analysis.add_sheet(Sheet(
+        sheet_id=SHEET_L2_EXCEPTIONS,
+        name=_L2_EXCEPTIONS_NAME,
+        title=_L2_EXCEPTIONS_TITLE,
+        description=_L2_EXCEPTIONS_DESCRIPTION,
+        handbook_path=HandbookPath("l2ft/l2-exceptions"),
+    ))
     rails_sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_RAILS,
         name=_RAILS_NAME,
@@ -278,13 +290,6 @@ def build_l2_flow_tracing_app(
         title=_TRANSFER_TEMPLATES_TITLE,
         description=_TRANSFER_TEMPLATES_DESCRIPTION,
         handbook_path=HandbookPath("l2ft/transfer-templates"),
-    ))
-    l2_exceptions_sheet = analysis.add_sheet(Sheet(
-        sheet_id=SHEET_L2_EXCEPTIONS,
-        name=_L2_EXCEPTIONS_NAME,
-        title=_L2_EXCEPTIONS_TITLE,
-        description=_L2_EXCEPTIONS_DESCRIPTION,
-        handbook_path=HandbookPath("l2ft/l2-exceptions"),
     ))
 
     _populate_getting_started(
@@ -1132,29 +1137,33 @@ def _populate_transfer_templates_sheet(
     # Sankey — multi-leg flow. flow_source / flow_target derive from
     # amount_direction (debit account → template → credit account).
     # Width = SUM(amount_abs).
-    # CF.5 + audit Dashboards Med #4 (2026-06-05) — items_limit=30 so
-    # the hairball-by-default L2 (90+ accounts × any-template) collapses
-    # to top-N-by-magnitude + an "Other" bucket QS renders automatically
-    # (`OtherCategories=INCLUDE` is the QS default once ItemsLimit
-    # is set). Matches Investigation's `_SANKEY_NODE_CAP=50` convention
-    # but tuned to 30 per the operator lock — the reviewer flagged
-    # this surface specifically as a legibility crisis.
+    # CS.4 (2026-06-09) — items_limit raised from 30 to 50 to align
+    # with Investigation's _SANKEY_NODE_CAP convention. Operator
+    # audit found the per-surface cap divergence (Inv at 50, L2FT at
+    # 30) confusing; one rule across both Sankey surfaces is cleaner.
+    # The hairball-by-default risk that landed 30 at CF.5 is still
+    # mitigated: top-N-by-magnitude with the rest rolled into "Other"
+    # (`OtherCategories=INCLUDE` is the QS default once ItemsLimit is
+    # set). If your L2 has >50 templates × accounts, drill from the
+    # Template Instances table below for the full set.
     sheet.layout.row(height=12).add_sankey(
         width=36,
         title="Multi-Leg Flow — Account → Template → Account",
         subtitle=(
             "Width = total absolute amount through the edge in the "
             "filtered window. Pick a single Template to see just that "
-            "template's flow shape. Capped to the top 30 source/target "
-            "nodes by magnitude; the rest roll up into an \"Other\" "
-            "bucket. Ribbon colors are QuickSight's auto-assignment "
-            "per source node — the matched-vs-orphan distinction is "
-            "in the node names (see legend above)."
+            "template's flow shape. **Capped to the top 50 source/target "
+            "nodes by magnitude; if an \"Other\" bucket appears in the "
+            "Sankey, your filtered universe exceeded the cap — use the "
+            "Template Instances table below for the full set.** Ribbon "
+            "colors are QuickSight's auto-assignment per source node — "
+            "the matched-vs-orphan distinction is in the node names "
+            "(see legend above)."
         ),
         source=ds_tt_legs["flow_source"].dim(),
         target=ds_tt_legs["flow_target"].dim(),
         weight=ds_tt_legs["amount_abs"].sum(currency=True),
-        items_limit=30,
+        items_limit=50,
     )
 
     sheet.layout.row(height=12).add_table(

@@ -704,7 +704,10 @@ def _build_money_trail_sheet(
             "Source account → target account ribbons for the selected "
             "chain. Ribbon thickness = SUM(hop_amount). Single-leg "
             "transfers don't render here — see the detail table for "
-            "every chain member."
+            "every chain member. **Capped to the top 50 source/target "
+            "nodes by magnitude; an \"Other\" bucket appearing in the "
+            "Sankey means your chain exceeds the cap — use the Hop-by-Hop "
+            "table on the right for the full sequence.**"
         ),
         source=ds_money_trail["source_account_name"].dim(),
         target=ds_money_trail["target_account_name"].dim(),
@@ -940,7 +943,10 @@ def _build_account_network_sheet(
             "Counterparties sending money INTO the anchor account. "
             "Ribbon thickness = SUM(hop_amount). Left-click any source "
             "node (or its ribbon) to walk the anchor over to that "
-            "counterparty."
+            "counterparty. **Capped to the top 50 counterparties by "
+            "magnitude; an \"Other\" bucket means your anchor has more "
+            "than 50 inbound sources — use the touching-edges table "
+            "below to drill into the full set.**"
         ),
         source=inbound_source_dim,
         target=ds_anet_inbound["target_display"].dim(),
@@ -961,7 +967,10 @@ def _build_account_network_sheet(
             "Counterparties receiving money FROM the anchor account. "
             "Ribbon thickness = SUM(hop_amount). Left-click any target "
             "node (or its ribbon) to walk the anchor over to that "
-            "counterparty."
+            "counterparty. **Capped to the top 50 counterparties by "
+            "magnitude; an \"Other\" bucket means your anchor has more "
+            "than 50 outbound destinations — use the touching-edges "
+            "table below to drill into the full set.**"
         ),
         source=ds_anet_outbound["source_display"].dim(),
         target=outbound_target_dim,

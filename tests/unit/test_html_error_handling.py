@@ -316,3 +316,50 @@ def test_500_carries_per_dashboard_theme() -> None:
         f"/visuals/{_VISUAL_ID}/data",
     )
     assert "--color-accent: #cafe00" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# CS.8 — themed 503 handler for PoolReleasedDuringRefresh
+# ---------------------------------------------------------------------------
+
+
+def _pool_released_fetcher(_visual_id: object, _params: object) -> object:
+    """A fetcher that raises the CO.x typed exception every time —
+    simulates a Studio deploy bracketing step_1_etl_hook."""
+    from recon_gen.common.db import PoolReleasedDuringRefresh
+    raise PoolReleasedDuringRefresh(
+        "DuckDB pool released — simulated for CS.8 503 handler test."
+    )
+
+
+def test_pool_released_returns_themed_503() -> None:
+    """Pool-released raises CO.x's typed exception → handler returns
+    503 with the calm refresh message, NOT the generic 500 + traceback.
+    Operators in the middle of a Studio deploy see "data refresh in
+    progress" instead of a stack trace."""
+    client = _make_client(_pool_released_fetcher)
+    resp = client.get(
+        f"/dashboards/{_DASHBOARD_ID}/sheets/{_SHEET_ID}"
+        f"/visuals/{_VISUAL_ID}/data",
+    )
+    assert resp.status_code == 503
+    body = resp.text
+    assert "Data refresh in progress" in body
+    assert "HTTP 503" in body
+    # Generic 500 framing must NOT leak through.
+    assert "Something went wrong" not in body
+    assert "Traceback" not in body
+
+
+def test_pool_released_503_emits_auto_refresh_meta() -> None:
+    """The 503 page auto-reloads after 5s via a meta-refresh tag so
+    the operator doesn't have to click anything while waiting for
+    the Studio refresh to complete."""
+    client = _make_client(_pool_released_fetcher)
+    resp = client.get(
+        f"/dashboards/{_DASHBOARD_ID}/sheets/{_SHEET_ID}"
+        f"/visuals/{_VISUAL_ID}/data",
+    )
+    body = resp.text
+    assert 'http-equiv="refresh"' in body
+    assert 'content="5"' in body

@@ -104,7 +104,7 @@ intermediate states meant to be temporary. If you see zero rows:
 - **Check the filter windows.** A very narrow account, transfer type, or [rail](../_glossary.md#rail)
   filter can show zero on a day with stuck legs outside your filter. Widen to
   "All Accounts", "All Transfer Types", and "All Rails" to see the full picture.
-- **Don't assume all-clear.** Pending Aging is one of ten L1 invariants. A
+- **Don't assume all-clear.** Pending Aging is one of twelve L1 invariants. A
   clean Pending Aging sheet next to a populated *Unbundled Aging* or *Drift*
   sheet means the *other* invariants have open violations — `?` those sheets
   next.

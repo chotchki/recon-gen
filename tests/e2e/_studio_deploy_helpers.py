@@ -159,13 +159,13 @@ def make_studio_cfg(
     *,
     etl_hook: Path | None = None,
 ) -> tuple[Config, Path]:
-    """Studio cfg: demo_database_url=sqlite tempfile under ``tmp_path``,
-    optional etl_hook. Returns ``(cfg, sqlite_path)``.
+    """Studio cfg: demo_database_url=duckdb tempfile under ``tmp_path``,
+    optional etl_hook. Returns ``(cfg, db_path)``.
 
     BS.4 (2026-05-29): the legacy ``etl_datasource_url`` kwarg was
     dropped — the cross-dialect upstream-pull path is gone, so the
     helper no longer needs to wire one."""
-    sqlite_path = tmp_path / "demo.sqlite"
+    db_path = tmp_path / "demo.duckdb"
     # Z.C — deployment_name + db_table_prefix are required cfg fields.
     db_prefix = "sasquatch_pr"
     cfg_kwargs: dict[str, Any] = {  # noqa: ANN401
@@ -176,20 +176,20 @@ def make_studio_cfg(
         "datasource_arn": (
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
         ),
-        "demo_database_url": f"sqlite:///{sqlite_path}",
+        "demo_database_url": f"duckdb:///{db_path}",
         "dialect": Dialect.DUCKDB,
         "test_generator": TestGeneratorConfig(scope="full"),
     }
     if etl_hook is not None:
         cfg_kwargs["etl_hook"] = str(etl_hook)
-    return Config(**cfg_kwargs), sqlite_path
+    return Config(**cfg_kwargs), db_path
 
 
 def build_studio_app(
     cfg: Config, pool: AsyncConnectionPool,
 ) -> Any:  # noqa: ANN401  — Starlette ASGI app
-    """Build the studio ASGI app pointing at ``cfg`` (sqlite demo DB)
-    + ``pool`` (async sqlite pool against same DB). Mirrors the
+    """Build the studio ASGI app pointing at ``cfg`` (DuckDB demo DB)
+    + ``pool`` (async DuckDB pool against same DB). Mirrors the
     ``cli/_html_serve.py::_serve`` composition but in-process."""
     instance = load_instance(SASQUATCH_YAML)
     cache = L2InstanceCache(SASQUATCH_YAML, instance)

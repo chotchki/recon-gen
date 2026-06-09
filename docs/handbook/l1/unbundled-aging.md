@@ -45,7 +45,7 @@ An empty unbundled sheet means every posted leg has either been bundled (assigne
 
 - **Confirm the matview is fresh.** Cross to *App Info* and check the *Matview Status* table's `stuck_unbundled` row. If `last_refresh_at` is more than a few minutes old AND new postings landed since, the matview may be stale. The institution refreshes matviews on every ETL load; ad-hoc dashboard hits don't trigger a refresh.
 - **Check the date filter and drill state.** If you drilled here from another sheet, the account or rail filter may be too narrow. Widen to "All Accounts" and "All Rails" to see the universe.
-- **Don't celebrate yet.** Unbundled aging is one of ten L1 invariants. A clean Unbundled Aging sheet next to a populated *Pending Aging* or *Overdraft* sheet means *that* invariant has work — `?` those sheets next.
+- **Don't celebrate yet.** Unbundled aging is one of twelve L1 invariants. A clean Unbundled Aging sheet next to a populated *Pending Aging* or *Overdraft* sheet means *that* invariant has work — `?` those sheets next.
 
 If *App Info* shows `last_refresh_at` as null or the matview row count as zero across the board, the L1 invariant pipeline didn't run. That's an ops alert, not a "clean" signal.
 
