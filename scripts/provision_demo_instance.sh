@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
-# AE.3 — provision one SQLite demo instance for the Phase AE Mac mini host.
+# AE.3 / CU.1 — provision one DuckDB demo instance for the Mac mini host.
 #
 # Bootstraps a per-instance state directory under the operator-chosen
 # RECON_DEMO_HOME (default /Users/recon-demo). The instance directory
-# carries: config.yaml (SQLite-mode, per-instance deployment_name +
+# carries: config.yaml (DuckDB-mode, per-instance deployment_name +
 # db_table_prefix), l2.yaml (copied from the wheel's bundled fixture),
-# current.sqlite3 (built via schema apply + data apply + data refresh),
+# current.duckdb (built via schema apply + data apply + data refresh),
 # and an empty logs/ subdir for launchd's stdout/stderr destinations.
+#
+# CU.1 (2026-06-09): swapped from SQLite to DuckDB. CB.8 (v13.0.0)
+# dropped the SQLite dialect; this script was emitting cfgs that no
+# longer parse against the current `recon-gen` binary.
 #
 # Run this once per instance after AE.1 (user + venv setup); re-run as
 # needed when starting fresh. Idempotent in the sense that it
-# delete-then-creates the SQLite file — operator state in the db file
+# delete-then-creates the DuckDB file — operator state in the db file
 # is lost (intended: every run is a clean rebuild).
 #
 # Usage:
@@ -78,7 +82,7 @@ if [[ ! -f "$L2_FIXTURE_SRC" ]]; then
 fi
 
 INSTANCE_DIR="$RECON_DEMO_HOME/$INSTANCE"
-DB_FILE="$INSTANCE_DIR/current.sqlite3"
+DB_FILE="$INSTANCE_DIR/current.duckdb"
 CFG_FILE="$INSTANCE_DIR/config.yaml"
 L2_FILE="$INSTANCE_DIR/l2.yaml"
 
@@ -89,7 +93,7 @@ mkdir -p "$INSTANCE_DIR/logs"
 cp "$L2_FIXTURE_SRC" "$L2_FILE"
 
 # Write config.yaml. The values mirror src/recon_gen/_dev/runner.py's
-# synth-cfg shape for the SQLite dialect. ``aws_account_id`` /
+# synth-cfg shape for the DuckDB dialect. ``aws_account_id`` /
 # ``aws_region`` are pinned to harmless placeholders — the dashboards
 # server never talks to AWS, but the Config dataclass requires them.
 cat > "$CFG_FILE" <<EOF
@@ -98,18 +102,18 @@ cat > "$CFG_FILE" <<EOF
 # Bound port: $PORT (launchd plist handles the actual bind).
 aws_account_id: "111122223333"
 aws_region: "us-east-1"
-dialect: sqlite
-demo_database_url: "sqlite:///$DB_FILE"
+dialect: duckdb
+demo_database_url: "duckdb:///$DB_FILE"
 deployment_name: "recon-demo-$INSTANCE"
 db_table_prefix: "demo_${INSTANCE//[^a-z0-9_]/_}"
 EOF
 
-# Build the SQLite db fresh. delete-then-create so this script is
+# Build the DuckDB db fresh. delete-then-create so this script is
 # idempotent (re-running rebuilds rather than appending). Schema +
 # seed + matview refresh + audit verify in sequence; any step's
 # non-zero exit aborts the script (set -e).
 echo "==> provisioning $INSTANCE on port $PORT"
-rm -f "$DB_FILE" "$DB_FILE-journal" "$DB_FILE-wal" "$DB_FILE-shm"
+rm -f "$DB_FILE" "$DB_FILE.wal"
 
 echo "==> schema apply"
 "$RECON_GEN_BIN" schema apply -c "$CFG_FILE" --l2 "$L2_FILE" --execute

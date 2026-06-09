@@ -37,6 +37,10 @@
 ;;       /usr/bin/touch /Users/recon-demo/sasquatch_pr/l2.yaml
 ;; The touch MUST FAIL. Same touch on $TEST_STATE_DIR/.studio-state.yaml
 ;; MUST SUCCEED. Profile is correct when both outcomes match.
+;;
+;; CU.1 (2026-06-09): swapped from SQLite to DuckDB. The prior allow-list
+;; (current.sqlite3 + journal/wal/shm) was post-CB.8 dead — `recon-gen`
+;; can no longer open SQLite at all.
 
 (version 1)
 (deny default)
@@ -51,14 +55,13 @@
 (allow iokit-open)
 (allow system-socket)
 
-;; --- Write perimeter: per-instance SQLite db files + log dir + the
-;; --- per-process studio state tmpdir + system tmpdirs. L2 yaml +
-;; --- cfg.yaml in INSTANCE_DIR are read-only by absence from this list.
+;; --- Write perimeter: per-instance DuckDB file + .wal sidecar + log
+;; --- dir + per-process studio state tmpdir + system tmpdirs. L2 yaml
+;; --- + cfg.yaml in INSTANCE_DIR are read-only by absence from this
+;; --- list.
 (allow file-write*
-    (literal (string-append (param "INSTANCE_DIR") "/current.sqlite3"))
-    (literal (string-append (param "INSTANCE_DIR") "/current.sqlite3-journal"))
-    (literal (string-append (param "INSTANCE_DIR") "/current.sqlite3-wal"))
-    (literal (string-append (param "INSTANCE_DIR") "/current.sqlite3-shm"))
+    (literal (string-append (param "INSTANCE_DIR") "/current.duckdb"))
+    (literal (string-append (param "INSTANCE_DIR") "/current.duckdb.wal"))
     (subpath (string-append (param "INSTANCE_DIR") "/logs"))
     (subpath (param "STUDIO_STATE_DIR"))
     (subpath "/tmp")
