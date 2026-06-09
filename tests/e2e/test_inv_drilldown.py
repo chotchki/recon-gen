@@ -1,32 +1,28 @@
 """Browser tests: Investigation drill-downs re-render the underlying visuals.
 
 Parametrized over ``[qs, app2]`` (u.4.e.3) via ``inv_dashboard_driver``;
-the row drill fires through the renderer-agnostic ``drill_from_first_row``
-verb. The K.4.8 invariant is that activating a row in the Account Network
-touching-edges table writes the row's counterparty into
-``pInvANetworkAnchor`` and the table + Sankeys re-render around the new
-anchor — a same-sheet walk, so the verifiable signal is "the table
-contents changed", not "we navigated to a new sheet".
+the row drill fires through ``drill_from_first_row_via_menu`` — the
+touching-edges drill is a ``DATA_POINT_MENU`` trigger, so left-click
+verbs (e.g. ``drill_from_first_row``) don't fire it on QS. The K.4.8
+invariant is that activating a row in the Account Network touching-edges
+table writes the row's counterparty into ``pInvANetworkAnchor`` and the
+table + Sankeys re-render around the new anchor — a same-sheet walk, so
+the verifiable signal is "the table content changed", not "we navigated
+to a new sheet".
 
-Stays ``@pytest.mark.skip`` — two reasons (the third, the App 2
-URL-param threading gap, was the original blocker for the app2 leg and
-is now closed by u.4.e.4#1 — ``server.py::_apply_url_param_overrides``
-threads ``?param_pInvANetworkAnchor=<row>`` into the destination sheet's
-filter form, so the App 2 walk drill *does* re-render around the new
-anchor; re-light the app2 leg once the remaining two are addressed):
+CS.2 (2026-06-09) — re-light after CR.6.a. Two prior blockers closed:
 
-1. **Anchor non-determinism (both renderers).** The test needs the
-   Account Network's *initial* anchor to be deterministic so the "row
-   count changes" assertion has a known baseline; the dropdown auto-picks
-   when no anchor is set, racing the test. Needs a deterministic
-   anchor seed (re-light once that lands).
-2. **Verb / trigger mismatch.** The touching-edges drill is a
-   ``DATA_POINT_MENU`` trigger but the test calls ``drill_from_first_row``
-   — a left-click verb — which on QS doesn't fire a menu action. Switch to
+1. **Anchor non-determinism (both renderers).** Handled by an explicit
+   ``pick_filter("Anchor", [Juniper Ridge])`` BEFORE the baseline read,
+   then an additional readback of the first row's source/target cells
+   so the assertion compares row CONTENT (anchor identifier present)
+   rather than row COUNT (which could coincidentally match the
+   post-walk count and false-positive the K.4.8f-3 no-op shape).
+2. **Verb / trigger mismatch.** Now uses
    ``drill_from_first_row_via_menu("Account Network — Touching Edges",
-   "Walk to other account on this edge")`` when re-lighting (the App 2
-   renderer also makes the row left-clickable regardless of trigger, so
-   either verb does something there).
+   "Walk to other account on this edge")`` — matches the production
+   ``Drill(trigger="DATA_POINT_MENU", name="Walk to other account on
+   this edge")`` wiring in ``apps/investigation/app.py``.
 """
 
 from __future__ import annotations
@@ -50,47 +46,78 @@ pytestmark = [
 ]
 
 
-@pytest.mark.skip(
-    reason=(
-        "Tracked: CR.6.a backlog ticket. Initial-anchor non-determinism "
-        "(the Anchor dropdown auto-picks when no value is set, so the "
-        "'row count changed' baseline races) + verb/trigger mismatch "
-        "(the touching-edges drill is DATA_POINT_MENU but the test uses "
-        "the left-click drill_from_first_row verb — fire it via "
-        "drill_from_first_row_via_menu instead). The App 2 URL-param "
-        "threading gap that was the third blocker is now closed by "
-        "u.4.e.4#1. Re-light once the remaining two are fixed; see "
-        "module docstring."
-    )
-)
+_ANCHOR_LABEL = "Juniper Ridge LLC — DDA (cust-900-0007-juniper-ridge-llc)"
+_ANCHOR_ID_FRAGMENT = "cust-900-0007-juniper-ridge-llc"
+_TOUCHING_EDGES_TITLE = "Account Network — Touching Edges"
+_WALK_MENU_LABEL = "Walk to other account on this edge"
+
+
+def _rows_contain_anchor(
+    driver: "DashboardDriver", anchor_fragment: str,
+) -> bool:
+    """The touching-edges table's source/target columns carry the anchor
+    display name on every row (the table is "edges touching the anchor"
+    by construction). When `anchor_fragment` appears anywhere in any
+    row, the table is showing data for that anchor."""
+    for row in driver.table_rows(_TOUCHING_EDGES_TITLE):
+        for cell in row:
+            if anchor_fragment in str(cell):
+                return True
+    return False
+
+
 def test_account_network_table_walk_rerenders_table(inv_dashboard_driver: tuple["DashboardDriver", str]) -> None:
     """Activating a row in the Account Network touching-edges table walks
     the anchor over to that row's counterparty; the table is filtered to
-    "edges touching anchor", so the new anchor narrows it to a different
-    set of rows — the row count changes (could be larger or smaller,
-    since different anchors have different fanout). The K.4.8 invariant
-    the test guards: the activation DOES propagate to the parameter and
-    the table DOES re-render. A regression that wired the action to a
-    no-op counterparty field (the K.4.8f-3 bug) would leave it unchanged.
+    "edges touching anchor", so after the walk the new anchor's
+    identifier appears in the rows and the original anchor's identifier
+    no longer does (modulo edges between the old anchor and the new
+    anchor — which the K.4.8 walk specifically picks).
+
+    The K.4.8 invariant the test guards: the activation DOES propagate
+    to the parameter and the table DOES re-render. The K.4.8f-3 bug
+    wired the action to a no-op counterparty field — the post-walk
+    table would still show only Juniper Ridge edges. This test fails
+    loudly in that shape because every row would still carry the
+    Juniper Ridge identifier.
     """
     driver, dashboard_arg = inv_dashboard_driver
     driver.open(dashboard_arg, sheet="Account Network")
-    driver.pick_filter(
-        "Anchor",
-        ["Juniper Ridge LLC — DDA (cust-900-0007-juniper-ridge-llc)"],
-    )
-    driver.wait_loaded("Account Network — Touching Edges")
-    before = len(driver.table_rows("Account Network — Touching Edges"))
-    assert before > 1, (
-        f"Account Network table should have multiple rows pre-walk, got {before}"
+    driver.pick_filter("Anchor", [_ANCHOR_LABEL])
+    driver.wait_loaded(_TOUCHING_EDGES_TITLE)
+
+    # Baseline: Juniper Ridge is the anchor, so EVERY row's source or
+    # target carries Juniper Ridge's account_id.
+    assert _rows_contain_anchor(driver, _ANCHOR_ID_FRAGMENT), (
+        f"Pre-walk: Touching Edges table should show {_ANCHOR_ID_FRAGMENT} "
+        f"in some cell of every row (the anchor IS Juniper Ridge); the "
+        f"baseline anchor pick didn't take. Rows: "
+        f"{driver.table_rows(_TOUCHING_EDGES_TITLE)[:3]}"
     )
 
-    driver.drill_from_first_row("Account Network — Touching Edges")
-    driver.wait_loaded("Account Network — Touching Edges")
-    after = len(driver.table_rows("Account Network — Touching Edges"))
+    # Drill: right-click → "Walk to other account on this edge".
+    # Matches the production Drill(trigger="DATA_POINT_MENU").
+    driver.drill_from_first_row_via_menu(
+        _TOUCHING_EDGES_TITLE, _WALK_MENU_LABEL,
+    )
+    driver.wait_loaded(_TOUCHING_EDGES_TITLE)
 
+    # Post-walk: the anchor parameter wrote to a DIFFERENT account, so
+    # rows now carry edges around the NEW anchor — Juniper Ridge may
+    # still appear (the row that triggered the walk had Juniper Ridge
+    # as source or target by construction), but the table content has
+    # shifted to the new anchor's neighborhood. We assert the simplest
+    # signal: at least one row carries a non-Juniper identifier (the
+    # new anchor) — the K.4.8f-3 no-op shape would have left every
+    # row still pinned to Juniper Ridge.
     driver.screenshot()
-    assert after != before, (
-        f"Account Network table should re-render with a different row "
-        f"count after walking the anchor; before={before}, after={after}"
+    rows_after = driver.table_rows(_TOUCHING_EDGES_TITLE)
+    saw_non_juniper_row = any(
+        all(_ANCHOR_ID_FRAGMENT not in str(cell) for cell in row)
+        for row in rows_after
+    )
+    assert saw_non_juniper_row, (
+        f"Post-walk: Touching Edges table still shows {_ANCHOR_ID_FRAGMENT} "
+        f"in every cell of every row — the walk didn't propagate. "
+        f"K.4.8f-3 no-op shape regression. Rows: {rows_after[:3]}"
     )

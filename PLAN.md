@@ -481,7 +481,7 @@ code-grounded acceptance criterion already filed in its source ticket.
   `tests/e2e/_studio_deploy_helpers.py` `sqlite_path` fixture. After
   removal, drop the per-line `# typing-smell: ignore[no-sqlite-prose]`
   comments + run the lint at full strength.
-- [ ] CS.2 - **#321 / CR.6.a — Re-light test_inv_drilldown.** Two
+- [x] CS.2 - **#321 / CR.6.a — Re-light test_inv_drilldown.** Two
   blockers per the skip-reason: (1) Anchor non-determinism (the
   dropdown auto-picks when no value is set so the row-count-changed
   baseline races); seed a deterministic anchor before the test fires.
