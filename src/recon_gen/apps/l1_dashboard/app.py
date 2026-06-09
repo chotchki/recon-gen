@@ -1136,6 +1136,12 @@ def _populate_l1_exceptions_sheet(
             ds["account_parent_role"].dim(),
             business_day_col,
             ds["rail_name"].dim(),
+            # CR.3 — transfer_id surfaces for chain-coherence /
+            # stuck-* branches so the operator can name the offending
+            # row without shelling into the DB. NULL on money branches
+            # (drift/ledger_drift/overdraft/limit_breach/eod/
+            # balance_cadence_gap) displays as blank.
+            ds["transfer_id"].dim(),
             amount_col,
             count_col,
         ],

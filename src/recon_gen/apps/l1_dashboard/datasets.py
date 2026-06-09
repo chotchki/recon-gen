@@ -480,6 +480,14 @@ L1_EXCEPTIONS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("account_parent_role", "STRING"),
     ColumnSpec("business_day", "DATETIME", shape=ColumnShape.DATETIME_DAY),
     ColumnSpec("rail_name", "STRING", shape=ColumnShape.RAIL_NAME),
+    # CR.3 (2026-06-08) — transfer_id surfaces for transfer-keyed
+    # violations (chain_parent_disagreement, xor_group_violation,
+    # fan_in_disagreement, multi_xor_violation, stuck_pending,
+    # stuck_unbundled), NULL for per-(account, day) money branches.
+    # Pre-CR.3 the offending row could only be identified by shelling
+    # into the DB; the matview's `transfer_id` was dropped at the
+    # UNION boundary.
+    ColumnSpec("transfer_id", "STRING", shape=ColumnShape.TRANSFER_ID),
     # AO.4 — split: amount populated for money branches (drift, ledger_drift,
     # overdraft, expected_eod_balance_breach, limit_breach, stuck_pending,
     # stuck_unbundled); count populated for transfer-keyed cardinality

@@ -3340,33 +3340,46 @@ CREATE INDEX idx_{p}_dss_account_day
 -- expected_eod_balance_breach) — each is a per-(account, day) cell.
 -- No matview-level day filter. The sheet's date picker pushes
 -- pL1DateStart / pL1DateEnd over business_day at query time.
+-- CR.3 (2026-06-08) — every branch projects ``transfer_id`` in column
+-- position 8 so the L1 Exceptions table can name the offending row.
+-- Money branches (drift / ledger_drift / overdraft / limit_breach /
+-- expected_eod_balance_breach / balance_cadence_gap) are keyed on
+-- (account, day), not transfer — they emit NULL for transfer_id.
+-- Transfer-keyed branches (stuck_pending / stuck_unbundled /
+-- chain_parent_disagreement / xor_group_violation /
+-- fan_in_disagreement / multi_xor_violation) surface the source
+-- matview's ``transfer_id`` column.
 SELECT 'drift' AS check_type, account_id, account_name,
        account_role, account_parent_role,
        business_day_start AS business_day,
        {null_text} AS rail_name,
+       {null_text} AS transfer_id,
        ABS(drift) AS magnitude_amount,
        CAST(NULL AS INTEGER) AS magnitude_count
 FROM {p}_drift
 UNION ALL
 SELECT 'ledger_drift', account_id, account_name, account_role,
-       NULL, business_day_start, NULL, ABS(drift),
+       NULL, business_day_start, NULL, {null_text}, ABS(drift),
        CAST(NULL AS INTEGER)
 FROM {p}_ledger_drift
 UNION ALL
 SELECT 'overdraft', account_id, account_name, account_role,
        account_parent_role, business_day_start, NULL,
+       {null_text},
        ABS(stored_balance),
        CAST(NULL AS INTEGER)
 FROM {p}_overdraft
 UNION ALL
 SELECT 'limit_breach', account_id, account_name, account_role,
        account_parent_role, business_day, rail_name,
+       {null_text},
        (outbound_total - cap),
        CAST(NULL AS INTEGER)
 FROM {p}_limit_breach
 UNION ALL
 SELECT 'expected_eod_balance_breach', account_id, account_name,
-       account_role, NULL, business_day_start, NULL, ABS(variance),
+       account_role, NULL, business_day_start, NULL,
+       {null_text}, ABS(variance),
        CAST(NULL AS INTEGER)
 FROM {p}_expected_eod_balance_breach
 -- CL.6 — balance_cadence_gap: keyed on (account, day) like the other
@@ -3382,6 +3395,7 @@ UNION ALL
 SELECT 'balance_cadence_gap', account_id, account_name, account_role,
        account_parent_role, business_day_start,
        gap_kind AS rail_name,
+       {null_text} AS transfer_id,
        ABS(COALESCE(gap_day_net_flow, 0)),
        gap_day_leg_count AS magnitude_count
 FROM {p}_balance_cadence_gap
@@ -3392,13 +3406,13 @@ FROM {p}_balance_cadence_gap
 UNION ALL
 SELECT 'stuck_pending', account_id, account_name, account_role,
        account_parent_role, {posting_to_date} AS business_day,
-       rail_name, amount_money AS magnitude_amount,
+       rail_name, transfer_id, amount_money AS magnitude_amount,
        CAST(NULL AS INTEGER)
 FROM {p}_stuck_pending
 UNION ALL
 SELECT 'stuck_unbundled', account_id, account_name, account_role,
        account_parent_role, {posting_to_date} AS business_day,
-       rail_name, amount_money AS magnitude_amount,
+       rail_name, transfer_id, amount_money AS magnitude_amount,
        CAST(NULL AS INTEGER)
 FROM {p}_stuck_unbundled
 -- AB.2.3 — Chain Parent Disagreement: surfaces per child Transfer (not
@@ -3415,6 +3429,7 @@ SELECT 'chain_parent_disagreement',
        NULL AS account_parent_role,
        business_day,
        child_template_name AS rail_name,
+       transfer_id,
        {null_bigint} AS magnitude_amount,
        distinct_parent_count AS magnitude_count
 FROM {p}_chain_parent_disagreement
@@ -3430,6 +3445,7 @@ SELECT 'xor_group_violation',
        NULL AS account_parent_role,
        business_day,
        template_name AS rail_name,
+       transfer_id,
        {null_bigint} AS magnitude_amount,
        firing_count AS magnitude_count
 FROM {p}_xor_group_violation
@@ -3446,6 +3462,7 @@ SELECT 'fan_in_disagreement',
        NULL AS account_parent_role,
        business_day,
        child_template_name AS rail_name,
+       child_transfer_id AS transfer_id,
        {null_bigint} AS magnitude_amount,
        parent_count AS magnitude_count
 FROM {p}_fan_in_disagreement
@@ -3462,6 +3479,7 @@ SELECT 'multi_xor_violation',
        NULL AS account_parent_role,
        business_day,
        parent_rail_or_template_name AS rail_name,
+       parent_transfer_id AS transfer_id,
        {null_bigint} AS magnitude_amount,
        child_count AS magnitude_count
 FROM {p}_multi_xor_violation;
