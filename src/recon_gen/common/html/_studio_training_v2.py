@@ -275,7 +275,7 @@ def _render_reset_button() -> str:
         'class="px-3 py-1.5 bg-warning text-white rounded-sm border border-warning text-sm font-semibold hover:opacity-85" '
         'title="Wipes the demo DB and reseeds it to a clean baseline. '
         'Run this before planting a scenario so the dashboard tour '
-        'shows only your plant, not the demo-mode noise.">'
+        'shows only your plant, not the seed noise.">'
         "↻ Reset to clean baseline"
         "</button>"
         '<span class="text-xs text-secondary-fg max-w-md">'

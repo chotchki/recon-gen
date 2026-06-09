@@ -2675,14 +2675,10 @@ def _render_read_card_summary(
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — retained for callsite parity with body helper
     entity_id: str,
     html_id: str,
-    *, demo_mode: bool = False,
 ) -> str:
     """CF.4.c split — the always-visible part of a read card (title +
     Edit/Delete actions). Renders without the heavy `<dl>` body so
     `<details>`-wrapped cards stay cheap when collapsed.
-
-    AH.4: ``demo_mode`` drops the Edit / Delete actions (their routes
-    are 404'd in demo-mode anyway).
     """
     del instance  # parity with `_render_read_card_body` — kept for the API
     # X.4.f.11 — surface rail subtype as a small badge on the read
@@ -2807,7 +2803,7 @@ def _render_read_card_summary(
     # 400 + the error fragment which swaps in place. CF.4.c —
     # `event.stopPropagation()` so clicking Edit/Delete inside a
     # `<summary>` fires the action without expanding the parent
-    # `<details>`. AH.4: omitted in demo-mode (routes 404'd there).
+    # `<details>`.
     # CF.4.f (followup a) — promoted from bare text links to
     # ghost-outline buttons; Delete uses danger-solid so destructive
     # actions are visually distinct. Local Tailwind utility classes
@@ -2828,7 +2824,7 @@ def _render_read_card_summary(
         "no-underline cursor-pointer "
         "hover:bg-danger hover:text-white"
     )
-    actions_html = "" if demo_mode else (
+    actions_html = (
         f'<div class="flex items-center gap-2 shrink-0">'
         f'<a class="{edit_btn_cls}" '
         f'href="/l2_shape/{kind}/{escape(entity_id)}/edit" '
@@ -2883,8 +2879,7 @@ COLLAPSE_THRESHOLD = 10
 def _render_read_card(
     kind: EntityKind, entity: object,
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — passed through to body / summary helpers
-    *, demo_mode: bool = False,
-    collapsed: bool = False,
+    *, collapsed: bool = False,
 ) -> str:
     """Read-only card — the post-PUT response + the click-to-expand
     target for the list view.
@@ -2896,8 +2891,6 @@ def _render_read_card(
     threshold is ``COLLAPSE_THRESHOLD`` — `_render_list_page` decides
     based on total_count. Sasquatch_pr (7 rails) stays eager;
     heavy_density_v1 (100+ rails) collapses.
-
-    AH.4: ``demo_mode`` drops the Edit / Delete actions.
     """
     entity_id = _entity_id(kind, entity)
     # CSS-safe id slug — composite-keyed kinds use ``::`` in their
@@ -2905,7 +2898,7 @@ def _render_read_card(
     # the URL-side path stays ``::``, only the HTML id swaps.
     html_id = f"entity-{kind}-{escape(_html_id_slug(entity_id))}"
     summary_html = _render_read_card_summary(
-        kind, entity, instance, entity_id, html_id, demo_mode=demo_mode,
+        kind, entity, instance, entity_id, html_id,
     )
     card_cls = entity_card_classes()
     if collapsed:
@@ -5093,7 +5086,6 @@ def _render_list_page(
     total_count: int | None = None,
     q: str = "",
     embed: bool = False,
-    demo_mode: bool = False,
     base_url: str = "",
 ) -> str:
     """Full HTML page — every entity of the kind rendered as a read card.
@@ -5132,7 +5124,7 @@ def _render_list_page(
     collapsed = total_count is not None
     cards = "\n".join(
         _render_read_card(
-            kind, e, instance, demo_mode=demo_mode, collapsed=collapsed,
+            kind, e, instance, collapsed=collapsed,
         )
         for e in entities
     )
@@ -5406,7 +5398,6 @@ def _entities_for_kind(
 def _make_handlers(
     cache: L2InstanceCache,
     *,
-    demo_mode: bool = False,
     top_nav_fn: Callable[[str], str] | None = None,
 ) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-handler ASGI callables; uniform shape but per-route closure
     """Build closures over the cache for each route handler.
@@ -5533,7 +5524,7 @@ def _make_handlers(
                 total_count=state.total_count,
                 q=state.q,
                 base_url=submit_url,
-                embed=embed, demo_mode=demo_mode,
+                embed=embed,
             ),
         )
 
@@ -5553,7 +5544,7 @@ def _make_handlers(
         if request.query_params.get("body_only") == "1":
             return HTMLResponse(_render_read_card_body(kind, entity, inst))
         return HTMLResponse(
-            _render_read_card(kind, entity, inst, demo_mode=demo_mode),
+            _render_read_card(kind, entity, inst),
         )
 
     async def edit_form(request: Request) -> HTMLResponse:
@@ -6273,7 +6264,6 @@ def _entity_gone_response(kind: EntityKind, entity_id: str) -> HTMLResponse:
 def make_editor_routes(
     cache: L2InstanceCache,
     *,
-    demo_mode: bool = False,
     top_nav_fn: Callable[[str], str] | None = None,
 ) -> list[Route]:
     """Build the editor route list bound to ``cache``.
@@ -6281,61 +6271,49 @@ def make_editor_routes(
     Spliced into ``make_studio_routes`` (X.4.e.7) so the cache + the
     diagram routes share one in-memory instance per server.
 
-    When ``demo_mode=True`` (AE.2.b lockdown for public-demo hosting),
-    the mutating routes (POST create / PUT save / DELETE delete) AND
-    the new-entity form GET + edit-form GET are stripped — those forms
-    submit to routes that don't exist, so showing them would just lead
-    visitors to clicks that 404. The read-only list + read-card GETs
-    are preserved so the demo still surfaces "here are the accounts /
-    rails / templates / chains in this L2".
+    CU.3: all editor routes are always mounted. The security perimeter
+    moved entirely to the sandbox-exec writable-allowlist + the
+    wrapper-driven L2 yaml overlay (writes land in a per-launch tmpdir
+    that wipes on restart). Demo installs point ``--l2`` at the
+    overlay; mutation writes succeed against the overlay but never
+    touch canonical.
     """
-    h = _make_handlers(cache, demo_mode=demo_mode, top_nav_fn=top_nav_fn)
+    h = _make_handlers(cache, top_nav_fn=top_nav_fn)
     # ``/new`` MUST be declared before ``/{entity_id}`` so Starlette's
     # path matcher doesn't treat the literal "new" as an entity_id.
-    # In demo-mode the /new GET is stripped — list + read-card are the
-    # only routes that mount.
     routes: list[Route] = [
         Route(
             "/l2_shape/{kind}/", h["list_view"], methods=["GET"],
         ),
-    ]
-    if not demo_mode:
-        routes.extend([
-            Route(
-                "/l2_shape/{kind}/", h["create"], methods=["POST"],
-                name="l2_shape_create",
-            ),
-            Route(
-                "/l2_shape/{kind}/new", h["new_form"], methods=["GET"],
-                name="l2_shape_new_form",
-            ),
-        ])
-    routes.append(
+        Route(
+            "/l2_shape/{kind}/", h["create"], methods=["POST"],
+            name="l2_shape_create",
+        ),
+        Route(
+            "/l2_shape/{kind}/new", h["new_form"], methods=["GET"],
+            name="l2_shape_new_form",
+        ),
         Route(
             "/l2_shape/{kind}/{entity_id}", h["read_card"],
             methods=["GET"], name="l2_shape_read",
         ),
-    )
-    if not demo_mode:
-        routes.extend([
-            Route(
-                "/l2_shape/{kind}/{entity_id}/edit", h["edit_form"],
-                methods=["GET"], name="l2_shape_edit",
-            ),
-            Route(
-                "/l2_shape/{kind}/{entity_id}", h["save"],
-                methods=["POST", "PUT"], name="l2_shape_save",
-            ),
-            Route(
-                "/l2_shape/{kind}/{entity_id}", h["delete"],
-                methods=["DELETE"], name="l2_shape_delete",
-            ),
-            # BF.9 (2026-05-25) — markdown preview endpoint for the
-            # description-field Edit/Preview tabs. Demo-mode strips
-            # it (the form doesn't render either).
-            Route(
-                "/preview/markdown", h["preview_markdown"],
-                methods=["POST"], name="preview_markdown",
-            ),
-        ])
+        Route(
+            "/l2_shape/{kind}/{entity_id}/edit", h["edit_form"],
+            methods=["GET"], name="l2_shape_edit",
+        ),
+        Route(
+            "/l2_shape/{kind}/{entity_id}", h["save"],
+            methods=["POST", "PUT"], name="l2_shape_save",
+        ),
+        Route(
+            "/l2_shape/{kind}/{entity_id}", h["delete"],
+            methods=["DELETE"], name="l2_shape_delete",
+        ),
+        # BF.9 (2026-05-25) — markdown preview endpoint for the
+        # description-field Edit/Preview tabs.
+        Route(
+            "/preview/markdown", h["preview_markdown"],
+            methods=["POST"], name="preview_markdown",
+        ),
+    ]
     return routes

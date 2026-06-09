@@ -174,7 +174,7 @@ def test_etl_triage_with_pool_renders_gap_cards(
             cache, dev_log=False,
             db_pool=pool, dialect=Dialect.DUCKDB,
             prefix_override=None, cfg=None,
-            demo_mode=False, top_nav_html="",
+            top_nav_html="",
         ))
     finally:
         asyncio.run(pool.close())
@@ -221,7 +221,7 @@ def test_etl_triage_empty_state_when_no_gaps(
             cache, dev_log=False,
             db_pool=pool, dialect=Dialect.DUCKDB,
             prefix_override=None, cfg=None,
-            demo_mode=False, top_nav_html="",
+            top_nav_html="",
         ))
     finally:
         asyncio.run(pool.close())

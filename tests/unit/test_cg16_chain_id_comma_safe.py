@@ -131,7 +131,7 @@ def test_chain_card_id_matches_delete_hx_target(
         # Render the card (not collapsed — we want the action buttons
         # in the summary visible).
         card = _render_read_card(
-            "chain", chain, inst, demo_mode=False, collapsed=True,
+            "chain", chain, inst, collapsed=True,
         )
         # The card's id and the Delete hx-target must reference the
         # same slug. The slug must NOT contain a comma (that's the
@@ -162,7 +162,7 @@ def test_chain_card_data_entity_id_keeps_raw_composite(
     for chain in inst.chains:
         composite = _entity_id("chain", chain)
         card = _render_read_card(
-            "chain", chain, inst, demo_mode=False, collapsed=True,
+            "chain", chain, inst, collapsed=True,
         )
         assert f'data-entity-id="{composite}"' in card
 

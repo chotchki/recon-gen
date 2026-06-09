@@ -380,6 +380,16 @@ class Config:
     # contract and ``recon-gen data etl-example`` for canonical
     # per-table INSERT patterns.
     etl_hook: str | None = None
+    # CU.3 — optional top-of-page banner text. When set, every Studio /
+    # Dashboards page renders a sticky banner above the content with
+    # this text + a "Learn more" link. Demo installs set it to e.g.
+    # ``"Edits reset on next restart"``; production cfgs leave it None
+    # (no banner). Operators can also use it for legalese / disclaimer
+    # text on production deployments — the field is intentionally
+    # framed as general server-banner, not demo-specific. Replaces the
+    # hardcoded ``_demo_mode_banner`` block that pre-CU.3 rendered an
+    # incorrect "Read-only demo" message even when CU.3+ enables edits.
+    banner_text: str | None = None
     # X.4.g.3 — Step 3 (synthetic data overlay) knobs. Non-Optional
     # default-factory so the pipeline never None-checks; an absent
     # block in the cfg yaml resolves to `TestGeneratorConfig()`
@@ -524,6 +534,7 @@ class Config:
         for opt in (
             "datasource_arn", "demo_database_url", "default_l2_instance",
             "aws_pg_cluster_id", "aws_oracle_instance_id", "etl_hook",
+            "banner_text",
         ):
             if out.get(opt) is None:
                 out.pop(opt, None)
@@ -576,6 +587,8 @@ _CONFIG_ALLOWED_KEYS: frozenset[str] = frozenset({
     "etl_hook", "test_generator",
     # CB.11.a — flip DisableSsl on the QS PG data source for Docker PG endpoints.
     "qs_disable_pg_ssl",
+    # CU.3 — optional top-of-page banner text.
+    "banner_text",
 })
 
 # Z.C — `instance` removed: the L2 yaml no longer has an `instance:` field
@@ -1064,5 +1077,6 @@ def load_config(path: str | Path | None = None) -> Config:
         aws_oracle_instance_id=_opt_str(values, "aws_oracle_instance_id"),
         qs_disable_pg_ssl=bool(values.get("qs_disable_pg_ssl", False)),
         etl_hook=_opt_str(values, "etl_hook"),
+        banner_text=_opt_str(values, "banner_text"),
         test_generator=test_generator,
     )

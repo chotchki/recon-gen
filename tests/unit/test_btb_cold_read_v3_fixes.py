@@ -188,7 +188,7 @@ def test_triage_page_shows_demo_plant_banner_when_no_etl_hook(
         cache, dev_log=False,
         db_pool=None, dialect=None,
         prefix_override=None, cfg=cfg,
-        demo_mode=False, top_nav_html="",
+        top_nav_html="",
     ))
     from recon_gen.common.l2.demo_etl_gaps import DEMO_GAP_ID_PREFIX
 
@@ -218,7 +218,7 @@ def test_triage_page_omits_demo_plant_banner_when_hook_configured(
         cache, dev_log=False,
         db_pool=None, dialect=None,
         prefix_override=None, cfg=cfg_with_hook,
-        demo_mode=False, top_nav_html="",
+        top_nav_html="",
     ))
     assert "data-test-triage-demo-plant-banner" not in body
 
@@ -242,7 +242,7 @@ def test_etl_run_cancel_button_carries_help_copy_when_running(
         last_summary=None, last_run_at=None,
         db_pool=None, dialect=None,
         prefix_override=None, cfg=make_test_config(),
-        demo_mode=False, top_nav_html="",
+        top_nav_html="",
         is_running=True,
     ))
     assert 'id="etl-run-cancel-btn"' in html

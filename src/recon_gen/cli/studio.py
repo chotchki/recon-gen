@@ -90,25 +90,6 @@ from recon_gen.cli._html_serve import run_html_server
         "when mkdocs isn't installed (`pip install recon-gen[docs]`)."
     ),
 )
-@click.option(
-    "--demo-mode/--no-demo-mode",
-    default=False,
-    show_default=True,
-    help=(
-        "AE.2.b lockdown for public-demo hosting (Phase AE Mac mini). "
-        "When set: (1) L2 yaml mutation endpoints (POST/PUT/DELETE on "
-        "/l2_shape/*) are not mounted; (2) `POST /deploy` (AWS deploy) "
-        "is not mounted; (3) `PUT /data/knobs/etl_hook` (shell exec) "
-        "is not mounted; (4) trainer knob state (`.studio-state.yaml`) "
-        "writes to a per-process tmpdir wiped on restart instead of "
-        "persisting next to cfg.yaml. Diagram + L2 read views + "
-        "data-shaping knobs (plants/window/seed/scope/etc.) continue "
-        "to work — this is a mutation-perimeter cut, not a feature "
-        "blackout. Defense in depth: sandbox-exec profile under "
-        "`deploy/sandbox/` also denies file-write on L2 yaml + cfg.yaml "
-        "regardless of this flag."
-    ),
-)
 def studio(
     config: str,
     l2_instance_path: str | None,
@@ -117,7 +98,6 @@ def studio(
     dev_log: bool,
     app_name: str,
     embed_docs: bool,
-    demo_mode: bool,
 ) -> None:
     """Start Studio — the implementation-tools surface for the integrator,
     trainer, and ETL engineer.
@@ -164,28 +144,13 @@ def studio(
     # script's mktemp) re-routes the sidefile to a per-process tmpdir
     # wiped on every launchd restart. Honored unconditionally — dev
     # invocations leave the env var unset and fall back to the
-    # `<cfg.parent>` path. Replaces the prior `--demo-mode`-gated
-    # tempfile.mkdtemp() branch (which CU.3 removes outright); the
-    # wrapper script is the only state-dir provider that matters now.
+    # `<cfg.parent>` path.
     from pathlib import Path as _Path  # noqa: PLC0415
     studio_state_dir_env = os.environ.get("STUDIO_STATE_DIR")
     if studio_state_dir_env:
         tg_cache = TestGeneratorCache(
             cfg.test_generator,
             state_path=_Path(studio_state_dir_env) / ".studio-state.yaml",
-        )
-    elif demo_mode:
-        # Legacy `--demo-mode` path. Kept until CU.3 deletes the flag;
-        # exercised only when the wrapper isn't providing
-        # STUDIO_STATE_DIR (i.e. ad-hoc `recon-gen studio --demo-mode`
-        # outside the launchd setup).
-        import tempfile  # noqa: PLC0415
-        _demo_state_dir = _Path(
-            tempfile.mkdtemp(prefix="recon-demo-studio-state-"),  # typing-smell: ignore[recon-prefix]: tmpdir name, not a deployment prefix — never reaches cfg.prefixed() flow
-        )
-        tg_cache = TestGeneratorCache(
-            cfg.test_generator,
-            state_path=_demo_state_dir / ".studio-state.yaml",
         )
     else:
         tg_cache = TestGeneratorCache.from_cfg_with_state(cfg, _Path(config))
@@ -198,7 +163,6 @@ def studio(
         prefix_override=cfg.db_table_prefix,
         cfg=cfg,
         tg_cache=tg_cache,
-        demo_mode=demo_mode,
     )
     l2_path = Path(l2_instance_path) if l2_instance_path is not None else None
     run_html_server(

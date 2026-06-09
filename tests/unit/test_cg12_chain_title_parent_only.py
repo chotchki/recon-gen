@@ -95,7 +95,7 @@ def test_chain_card_title_renders_parent_only(
     inst = cache.get()
     chain = inst.chains[0]
     card = _render_read_card(
-        "chain", chain, inst, demo_mode=False, collapsed=True,
+        "chain", chain, inst, collapsed=True,
     )
     composite_id = _entity_id("chain", chain)
     assert "::" in composite_id, "fixture chain should have composite id"
@@ -119,7 +119,7 @@ def test_chain_card_data_entity_id_keeps_composite(
     inst = cache.get()
     chain = inst.chains[0]
     card = _render_read_card(
-        "chain", chain, inst, demo_mode=False, collapsed=True,
+        "chain", chain, inst, collapsed=True,
     )
     composite = _entity_id("chain", chain)
     assert f'data-entity-id="{composite}"' in card
@@ -136,7 +136,7 @@ def test_non_chain_cards_still_render_full_entity_id(
     inst = cache.get()
     rail = inst.rails[0]
     card = _render_read_card(
-        "rail", rail, inst, demo_mode=False, collapsed=True,
+        "rail", rail, inst, collapsed=True,
     )
     title = _h3_text(card)
     assert title == _entity_id("rail", rail)

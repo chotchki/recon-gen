@@ -96,7 +96,7 @@ def test_limit_schedule_title_renders_role_then_rail(
     inst = cache.get()
     ls = inst.limit_schedules[0]
     card = _render_read_card(
-        "limit_schedule", ls, inst, demo_mode=False, collapsed=True,
+        "limit_schedule", ls, inst, collapsed=True,
     )
     title = _h3_text_only(card)
     assert title == f"{ls.parent_role} → {ls.rail}"
@@ -113,7 +113,7 @@ def test_limit_schedule_title_carries_direction_badge(
     inst = cache.get()
     ls = inst.limit_schedules[0]
     card = _render_read_card(
-        "limit_schedule", ls, inst, demo_mode=False, collapsed=True,
+        "limit_schedule", ls, inst, collapsed=True,
     )
     assert 'data-role="card-direction-badge"' in card
     assert str(ls.direction) in card
@@ -129,7 +129,7 @@ def test_limit_schedule_data_entity_id_keeps_composite(
     inst = cache.get()
     ls = inst.limit_schedules[0]
     card = _render_read_card(
-        "limit_schedule", ls, inst, demo_mode=False, collapsed=True,
+        "limit_schedule", ls, inst, collapsed=True,
     )
     composite = _entity_id("limit_schedule", ls)
     assert "::" in composite, "fixture entry should carry composite shape"
@@ -147,7 +147,7 @@ def test_other_kinds_titles_not_affected(
     inst = cache.get()
     rail = inst.rails[0]
     card = _render_read_card(
-        "rail", rail, inst, demo_mode=False, collapsed=True,
+        "rail", rail, inst, collapsed=True,
     )
     assert 'data-role="card-direction-badge"' not in card
 

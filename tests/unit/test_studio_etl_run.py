@@ -595,7 +595,7 @@ def test_etl_run_page_renders_cancel_button_when_is_running(
         last_summary=None, last_run_at=None,
         db_pool=None, dialect=None,
         prefix_override=None, cfg=make_test_config(),
-        demo_mode=False, top_nav_html="",
+        top_nav_html="",
         is_running=True,
     ))
     assert 'id="etl-run-cancel-btn"' in html

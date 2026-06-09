@@ -76,7 +76,7 @@ def test_account_card_title_renders_display_name(
     # cust-001 has a `name` field in spec_example.
     account = next(a for a in inst.accounts if a.id == "cust-001" and a.name)
     card = _render_read_card(
-        "account", account, inst, demo_mode=False, collapsed=True,
+        "account", account, inst, collapsed=True,
     )
     assert 'data-role="card-display-name"' in card
     assert escape_str(str(account.name)) in card
@@ -100,7 +100,7 @@ def test_account_template_card_title_omits_display_name_span(
     template = inst.account_templates[0]
     card = _render_read_card(
         "account_template", template, inst,
-        demo_mode=False, collapsed=True,
+        collapsed=True,
     )
     assert 'data-role="card-display-name"' not in card
 
@@ -118,7 +118,7 @@ def test_rail_card_title_omits_display_name_span(
     inst = cache.get()
     rail = inst.rails[0]
     card = _render_read_card(
-        "rail", rail, inst, demo_mode=False, collapsed=True,
+        "rail", rail, inst, collapsed=True,
     )
     assert 'data-role="card-display-name"' not in card
 
@@ -138,7 +138,7 @@ def test_account_with_no_name_omits_the_span(
     base = next(a for a in inst.accounts if a.name is not None)
     nameless = dataclasses.replace(base, name=None)
     card = _render_read_card(
-        "account", nameless, inst, demo_mode=False, collapsed=True,
+        "account", nameless, inst, collapsed=True,
     )
     assert 'data-role="card-display-name"' not in card
 
@@ -154,7 +154,7 @@ def test_display_name_is_html_escaped(writable_l2_yaml: Path) -> None:
     base = next(a for a in inst.accounts if a.name is not None)
     xss = dataclasses.replace(base, name="<script>alert(1)</script>")  # type: ignore[arg-type]: Name is a NewType[str]
     card = _render_read_card(
-        "account", xss, inst, demo_mode=False, collapsed=True,
+        "account", xss, inst, collapsed=True,
     )
     assert "<script>alert(1)</script>" not in card
     assert "&lt;script&gt;" in card

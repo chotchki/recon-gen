@@ -303,23 +303,23 @@ _HOME_SINGLETONS: tuple[tuple[str, str, str], ...] = (
 )
 
 
-def _demo_mode_banner(demo_mode: bool) -> str:
-    """AH.4 — top-of-page read-only banner for ``studio --demo-mode``.
+def _banner(cfg: Config | None, *, embed: bool = False) -> str:
+    """CU.3 — top-of-page banner driven by ``cfg.banner_text``.
 
-    Cosmetic only. The load-bearing lockdown is the route-level skip of
-    every mutation route (+ the sandbox-exec deny-write on the L2 yaml);
-    this just tells a visitor the surface is read-only and pairs with
-    the suppressed Deploy / editor-mutation affordances. Empty string
-    when not in demo-mode. Inline-styled so it needs no stylesheet /
-    Tailwind-utility rebuild.
+    Replaces the AH.4 demo-mode banner. Returns empty string when
+    ``cfg`` is None, when ``cfg.banner_text`` is None / empty, or when
+    ``embed=True`` (embedded iframe surfaces suppress chrome). Demo
+    installs set ``banner_text`` to a short disclaimer (e.g. "Edits
+    reset on next restart"); production cfgs leave it None. Inline-
+    styled so it needs no stylesheet / Tailwind-utility rebuild.
     """
-    if not demo_mode:
+    if embed or cfg is None or not cfg.banner_text:
         return ""
     return (
-        '<div class="demo-banner" role="status" '
+        '<div class="server-banner" role="status" '
         'style="background:#fff3cd;border-bottom:1px solid #ffe69c;'
         'color:#664d03;padding:0.6rem 1rem;font-size:0.9rem;text-align:center">'
-        "<strong>Read-only demo</strong> — editing and deploy are disabled. "
+        f"{escape(cfg.banner_text)} "
         '<a href="https://chotchki.github.io/recon-gen/" target="_blank" '
         'rel="noopener" style="color:#664d03;text-decoration:underline">'
         "Learn more</a>."
@@ -329,7 +329,7 @@ def _demo_mode_banner(demo_mode: bool) -> str:
 
 def _render_home_page(
     cache: L2InstanceCache, dev_log: bool, *, cfg: Config | None = None,
-    demo_mode: bool = False, top_nav_html: str = "",
+    top_nav_html: str = "",
     query_params: Mapping[str, str] | None = None,
 ) -> str:
     """X.4.f.7 — unified Studio home page (diagram + every entity kind).
@@ -407,14 +407,12 @@ def _render_home_page(
         else:
             open_attr = " open" if idx == 0 else ""
         body_id = f"home-section-body-{kind}"
-        # AH.4 — hide the create affordance in demo-mode (the /new route
-        # is 404'd there anyway; the button shouldn't tease it).
         # AM.2 step 2: section chrome migrated. `.home-section` /
         # `.home-section-add` / `.home-section-link` / `.home-section-body`
         # / `.home-section-loading` semantic classes retired in favor
         # of raw Tailwind utilities. `data-kind` stays as the JS hook
         # the home-page focus-filter listener uses.
-        add_link = "" if demo_mode else (
+        add_link = (
             f'<a class="ml-2 text-accent no-underline font-semibold text-sm hover:underline" '
             f'href="/l2_shape/{kind}/new" '
             # Stop the click from triggering the surrounding <details>
@@ -495,8 +493,6 @@ def _render_home_page(
         else:
             is_set = getattr(instance, attr, None) is not None
         status = "set" if is_set else "not set"
-        # AH.4 — demo-mode hides the singleton Edit affordance (its form
-        # route is 404'd) and drops the "click Edit" prompt.
         # BF.7+BF.8 (2026-05-25): theme + persona are structured forms
         # now (per-field controls, not yaml blocks). Only `instance`
         # is still a single YAML block (two top-level scalars don't
@@ -506,15 +502,13 @@ def _render_home_page(
             "structured form" if kind in ("theme", "persona")
             else "single YAML block"
         )
-        singleton_link = "" if demo_mode else (
+        singleton_link = (
             f'<a class="ml-2 text-accent no-underline font-semibold text-sm hover:underline" '
             f'href="/l2_shape/{kind}/" '
             f'onclick="event.stopPropagation()" '
             f'title="Edit {escape(label)} ({singleton_form_kind})">Edit</a>'
         )
         singleton_body = (
-            f"{escape(label)} is a {singleton_form_kind}."
-            if demo_mode else
             f"{escape(label)} is a {singleton_form_kind} — "
             f"click <strong>Edit</strong> to view / change it."
         )
@@ -543,7 +537,7 @@ def _render_home_page(
             f"</details>"
         )
     sections_html = "\n    ".join(section_blocks)
-    demo_banner = _demo_mode_banner(demo_mode)
+    demo_banner = _banner(cfg)
     # CF.4 followup (2026-06-05): the "Studio · qsgen-duckdb" +
     # `Deploy changes` strip was removed. Operator dogfood: it
     # duplicated info the top-nav already carries (which surface
@@ -817,7 +811,6 @@ def _render_etl_landing_page(
     dev_log: bool,
     *,
     cfg: Config | None = None,
-    demo_mode: bool = False,
     top_nav_html: str = "",
 ) -> str:
     """BT.1 — ``/studio/etl`` landing page.
@@ -830,11 +823,6 @@ def _render_etl_landing_page(
     Each card links to its target sub-route. BT.2/3/4 land those
     routes — until then, a click 404s; the "coming in BT.N" hint on
     the card primes the operator that the destination isn't ready.
-
-    Demo-mode keeps the same surface (operators reading a deployed
-    dashboards-only instance see the same landing if Studio is
-    enabled; no destructive affordance on this page to gate). The
-    sub-pages will make their own demo-mode decisions when they land.
     """
     instance = cache.get()
     # CG.21 (2026-06-05) — deployment name lives only on the home page
@@ -842,7 +830,7 @@ def _render_etl_landing_page(
     # the data page, the editor list / form / singleton pages) drop it
     # so the canonical `Recon-Gen · Studio · <surface>` shape stays tight.
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
-    demo_banner = _demo_mode_banner(demo_mode)
+    demo_banner = _banner(cfg)
 
     # BTa.3 — numbered cards with arrows between them. The tuple
     # order IS the loop order (Refresh Data → Triage → Probe), and
@@ -935,7 +923,6 @@ async def _render_etl_probe_page(
     dialect: Dialect | None,
     prefix_override: str | None,
     cfg: Config | None = None,
-    demo_mode: bool = False,
     top_nav_html: str = "",
 ) -> str:
     """BT.2 — ``/etl/probe`` L2-slice probe page.
@@ -959,7 +946,7 @@ async def _render_etl_probe_page(
     """
     instance = cache.get()
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
-    demo_banner = _demo_mode_banner(demo_mode)
+    demo_banner = _banner(cfg)
     prefix = (
         prefix_override
         if prefix_override is not None
@@ -1553,7 +1540,6 @@ async def _render_etl_run_page(
     dialect: Dialect | None,
     prefix_override: str | None,
     cfg: Config | None = None,
-    demo_mode: bool = False,
     top_nav_html: str = "",
     just_ran: bool = False,
     is_running: bool = False,
@@ -1578,7 +1564,7 @@ async def _render_etl_run_page(
     """
     instance = cache.get()
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
-    demo_banner = _demo_mode_banner(demo_mode)
+    demo_banner = _banner(cfg)
     prefix = (
         prefix_override
         if prefix_override is not None
@@ -2308,7 +2294,6 @@ async def _render_etl_triage_page(
     dialect: Dialect | None,
     prefix_override: str | None,
     cfg: Config | None = None,
-    demo_mode: bool = False,
     top_nav_html: str = "",
 ) -> str:
     """BT.4 — ``/etl/triage`` exception triage page.
@@ -2320,7 +2305,7 @@ async def _render_etl_triage_page(
     """
     instance = cache.get()
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
-    demo_banner = _demo_mode_banner(demo_mode)
+    demo_banner = _banner(cfg)
     prefix = (
         prefix_override
         if prefix_override is not None
@@ -2698,7 +2683,6 @@ def _render_diagram_page(
     coverage_available: bool = False,
     embed: bool = False,
     cfg: Config | None = None,
-    demo_mode: bool = False,
     top_nav_html: str = "",
     hide_singleleg: bool = False,
     show: frozenset[str] | None = None,
@@ -3167,7 +3151,7 @@ def _render_diagram_page(
   {devlog_script}</head>
 <body class="{"flex flex-col m-0 p-0 font-sans bg-surface-bg text-primary-fg h-screen" if embed else "flex flex-col font-sans bg-surface-bg text-primary-fg h-screen"}">
   {top_nav_html}
-  {_demo_mode_banner(demo_mode and not embed)}
+  {_banner(cfg, embed=embed)}
 
   <!--
     CG.10 (2026-06-05) — the diagram page is the only nav-chrome
@@ -4035,7 +4019,6 @@ def _render_data_page(
     tg_cache: TestGeneratorCache | None = None,
     etl_hook_command: str | None = None,
     cfg: Config | None = None,
-    demo_mode: bool = False,
     top_nav_html: str = "",
 ) -> str:
     """X.4.h.1 — Studio "trainer mode" data-shaping panel shell.
@@ -4108,8 +4091,11 @@ def _render_data_page(
     )
     timeline_section = _render_timeline_section(instance, tg_cache)
     training_pane = render_training_pane()
-    demo_banner = _demo_mode_banner(demo_mode)
-    deploy_controls = "" if demo_mode else (
+    demo_banner = _banner(cfg)
+    # CU.3 — Deploy button is always rendered. Demo installs configure
+    # dummy AWS creds so /deploy fails noisily at the AWS-push step;
+    # the visible visitor effect is the local DB rebuild.
+    deploy_controls = (
         '<button id="deploy-btn" class="ml-auto bg-accent text-accent-fg border '
         'border-accent px-3 py-1 rounded-sm cursor-pointer text-sm '
         'hover:opacity-85 disabled:opacity-60 disabled:cursor-not-allowed" '
@@ -4213,7 +4199,6 @@ def make_studio_routes(
     prefix_override: str | None = None,
     cfg: Config | None = None,
     tg_cache: TestGeneratorCache | None = None,
-    demo_mode: bool = False,
     top_nav_fn: Callable[[str], str] | None = None,
 ) -> list[Route | Mount]:
     """Build the Studio route list bound to ``cache``.
@@ -4272,7 +4257,7 @@ def make_studio_routes(
     async def landing(request: Request) -> HTMLResponse:
         return HTMLResponse(
             _render_home_page(
-                cache, dev_log, cfg=cfg, demo_mode=demo_mode,
+                cache, dev_log, cfg=cfg,
                 top_nav_html=_top_nav_html("/"),
                 # CF.4.d — pass through kind-namespaced toolbar state
                 # so each section's hx-get URL carries it (Q1B).
@@ -4284,7 +4269,7 @@ def make_studio_routes(
         # BT.1 — /etl/ landing index. 3-card pointer to BT.2/3/4 sub-pages.
         return HTMLResponse(
             _render_etl_landing_page(
-                cache, dev_log, cfg=cfg, demo_mode=demo_mode,
+                cache, dev_log, cfg=cfg,
                 top_nav_html=_top_nav_html("/etl/"),
             ),
         )
@@ -4451,7 +4436,7 @@ def make_studio_routes(
             last_summary=last_summary, last_run_at=last_run_at,
             db_pool=db_pool, dialect=dialect,
             prefix_override=prefix_override,
-            cfg=cfg, demo_mode=demo_mode,
+            cfg=cfg,
             top_nav_html=_top_nav_html("/etl/run"),
             just_ran=just_ran,
             is_running=is_running,
@@ -4515,7 +4500,7 @@ def make_studio_routes(
             cache, dev_log,
             db_pool=db_pool, dialect=dialect,
             prefix_override=effective_prefix,
-            cfg=cfg, demo_mode=demo_mode,
+            cfg=cfg,
             top_nav_html=_top_nav_html("/etl/triage"),
         )
         return HTMLResponse(html)
@@ -4533,7 +4518,6 @@ def make_studio_routes(
             dialect=dialect,
             prefix_override=prefix_override,
             cfg=cfg,
-            demo_mode=demo_mode,
             top_nav_html=_top_nav_html("/etl/probe"),
         )
         return HTMLResponse(html)
@@ -4551,7 +4535,6 @@ def make_studio_routes(
             tg_cache=tg_cache,
             etl_hook_command=etl_hook_command,
             cfg=cfg,
-            demo_mode=demo_mode,
             top_nav_html=_top_nav_html("/data"),
         ))
 
@@ -4604,7 +4587,6 @@ def make_studio_routes(
                 coverage_available=db_pool is not None,
                 embed=embed,
                 cfg=cfg,
-                demo_mode=demo_mode,
                 top_nav_html=nav_html,
                 hide_singleleg=hide_singleleg,
                 show=show_param,
@@ -5259,16 +5241,15 @@ def make_studio_routes(
     # for every entity kind). Pure scenario over the cached L2 — no
     # pool needed, always mounted alongside the diagram.
     #
-    # AE.2.b: in `--demo-mode`, ``make_editor_routes(cache, demo_mode=True)``
-    # keeps only the read-only GETs (list + read card) and strips the
-    # new/edit-form GETs + POST create + PUT save + DELETE delete.
-    # Visitors can browse the L2 yaml's accounts / rails / templates /
-    # chains but can't mutate.
+    # CU.3 — editor routes always mounted (mutation safety is the
+    # sandbox-exec writable allowlist, not the route table). Demo
+    # installs point ``--l2`` at a tmpdir overlay so visitor writes
+    # land there and vanish on the next launchd restart.
     from recon_gen.common.html._studio_editor_routes import (  # noqa: PLC0415
         make_editor_routes,
     )
     routes.extend(make_editor_routes(
-        cache, demo_mode=demo_mode, top_nav_fn=top_nav_fn,
+        cache, top_nav_fn=top_nav_fn,
     ))
 
     # X.4.c.6 — trainer JSON route. Always mounted (no DB needed —
@@ -5566,10 +5547,12 @@ def make_studio_routes(
                 },
             )
 
-        # AE.2.b: etl_hook PUT triggers the operator's shell command
-        # (cfg.etl_hook) — that's an arbitrary shell-exec surface no
-        # public-demo should expose. Skip mounting in demo-mode.
-        if not demo_mode:
+        # CU.3 — etl_hook PUT triggers the operator's shell command
+        # (cfg.etl_hook). Gating on cfg presence (rather than the old
+        # `--demo-mode` flag) matches the natural semantics: a PUT to
+        # invoke etl_hook is meaningless without a configured hook.
+        # Demo cfgs omit `etl_hook:` → route auto-skips.
+        if cfg is not None and cfg.etl_hook is not None:
             routes.append(
                 Route("/data/knobs/etl_hook", put_etl_hook, methods=["PUT"]),
             )
@@ -5710,15 +5693,13 @@ def make_studio_routes(
             status = 503 if summary.halted else 200
             return JSONResponse(summary.to_json(), status_code=status)
 
-        # AE.2.b: /deploy orchestrates the AWS QuickSight deploy pipeline
-        # — schema apply + data apply + matview refresh + json apply
-        # against the operator-supplied AWS account. No public-demo
-        # should ever execute that. Skip mounting in demo-mode (the
-        # sandbox-exec profile also denies the outbound network the
-        # boto3 calls would need, but route-level skip is the cleaner
-        # cut so the Deploy button never appears to do anything).
-        if not demo_mode:
-            routes.append(Route("/deploy", deploy, methods=["POST"]))
+        # CU.3 — /deploy always mounted. Demo installs configure dummy
+        # AWS creds so the pipeline fails noisily at the
+        # boto3-orchestration step; the local DB rebuild step succeeds
+        # before that and is the visible visitor effect. The
+        # sandbox-exec profile's network restrictions are the actual
+        # safety layer.
+        routes.append(Route("/deploy", deploy, methods=["POST"]))
 
     return routes
 
