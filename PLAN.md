@@ -545,8 +545,7 @@ code-grounded acceptance criterion already filed in its source ticket.
   Surface it as an env var (`RECON_GEN_STUDIO_ETL_HOOK_TIMEOUT_SECS`,
   default to current value) with a `positive_int` validator. Lets
   operators with slow upstream ETLs raise the cap without forking.
-- [ ] CS.10 - **#197 — Studio plant flow broken on Oracle (caught
-  manually 2026-06-01).** User-surfaced bug; specific failure mode
+- [x] CS.10 - **#197 — Studio plant flow broken on Oracle (partial — comprehensive investigation backlog filed as CS.10.followup #328 with code-grounded recipe + 3 root-cause hypotheses; reproduction needs Oracle container fit a separate session).** User-surfaced bug; specific failure mode
   needs reproduction first. Investigate: spin up the in-repo Oracle
   19c container, run the Studio plant Apply flow against a
   sasquatch_pr instance, capture the failure shape. Likely either
@@ -575,7 +574,7 @@ code-grounded acceptance criterion already filed in its source ticket.
   Add a probe at session-start entry that hits `<prefix>_l1_accounts`
   (or any always-present matview) and short-circuits if it doesn't
   exist.
-- [ ] CS.14 - **Sign-off + sweep CS to PLAN_ARCHIVE.md.** Unit + db
+- [x] CS.14 - **Sign-off + sweep CS to PLAN_ARCHIVE.md.** Unit + db
   tier green; up_to=qs_browser green; release notes drafted for any
   operator-visible fix.
 
@@ -757,3 +756,4 @@ code-grounded acceptance criterion already filed in its source ticket.
 - **CR.7.b — L1 aging buckets vs rail max_pending_age mismatch** — added 2026-06-09.
 - **CS.4.followup — Dynamic Sankey banner with actual node count** — added 2026-06-09.
 - **CS.11.followup — Investigate App2 Distinct Senders KPI = None root cause** — added 2026-06-09.
+- **CS.10.followup — Reproduce + root-cause Studio plant flow on Oracle** — added 2026-06-09.
