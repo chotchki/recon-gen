@@ -165,15 +165,19 @@ _ACCOUNT_NETWORK_DESCRIPTION = (
     "amount. Right-click any row and pick \"Walk to other account on "
     "this edge\" — the anchor moves to the counterparty and the chart "
     "re-renders. "
-    # C17 (cold-read v11.26.1) — dropped the "trust the chart, not the
-    # control text" caveat. BR.1 (App2 cascade refresh) + the QS
-    # CascadingControlConfiguration support (currently reverted, but
-    # the prior wiring path covers anchor-dropdown narrowing) should
-    # mean the dropdown widget tracks the picked anchor reliably
-    # post-walk. Removing the caveat per cold-read finding ("telling
-    # the user to distrust an on-screen control erodes confidence
-    # during a walk").
-    "Same matview as "
+    # CR.12 (2026-06-08) — restored the "trust the chart, not the
+    # control text" caveat that was prematurely dropped at C17
+    # (v11.26.1). The C17 removal assumed CascadingControlConfiguration
+    # would wire the anchor dropdown to track post-walk picks; that
+    # feature was reverted (per lines 170-175 of the pre-CR.12
+    # comment block, "wire shape was correct but QS rendered the
+    # target dropdown permanently empty") and never re-landed. Today's
+    # anchor dropdown carries zero cascade wiring, so the rendered
+    # control text DOES NOT match the post-walk anchor. The chart is
+    # the source of truth.
+    "After a walk, the anchor dropdown's displayed value may not "
+    "match the new anchor — trust the chart's center node, not the "
+    "control's text. Same matview as "
     "Money Trail, viewed account-centrically rather than chain-"
     "centrically."
 )
