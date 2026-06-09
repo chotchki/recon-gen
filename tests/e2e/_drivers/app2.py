@@ -830,11 +830,40 @@ class App2Driver:
                     if has_v:
                         break
                     self._page.wait_for_timeout(100)
-        self._wait_for_refetch(lambda: sel.evaluate(
+        # CT.1 — peek BEFORE the action: if cur === target, setValue() is
+        # a no-op and no `change` event fires → no visual-data request →
+        # `_wait_for_refetch` hangs for the full 30s timeout. This is
+        # what bit the CS.2 re-light test on CI (the WSL2 seed happened
+        # to put Juniper Ridge as the initial Anchor; the test's
+        # explicit `pick_filter("Anchor", [Juniper Ridge])` was a no-op).
+        # Local seeds put a different default so the test passed there.
+        # Skip the wait when the action provably won't refetch.
+        will_change = sel.evaluate(
+            """(s, vals) => {
+                if (!s.tomselect) {
+                    // Direct-mutation fallback path always dispatches
+                    // change, so a "refetch will happen" verdict here
+                    // is correct even when the new state matches the
+                    // current state — the change event still fires.
+                    return true;
+                }
+                const byText = new Map();
+                for (const o of s.options) {
+                    byText.set(o.text, o.value);
+                }
+                const resolved = vals.map((v) => byText.has(v)
+                    ? byText.get(v) : v);
+                const target = s.multiple
+                    ? resolved
+                    : (resolved[0] !== undefined ? resolved[0] : '');
+                const cur = s.tomselect.getValue();
+                return JSON.stringify(cur) !== JSON.stringify(target);
+            }""",
+            vals,
+        )
+        action = lambda: sel.evaluate(  # noqa: E731 — single-use lambda for the action
             """(s, vals) => {
                 if (s.tomselect) {
-                    // Resolve text → value (filter_options returns
-                    // option.text; setValue keys on option.value).
                     const byText = new Map();
                     for (const o of s.options) {
                         byText.set(o.text, o.value);
@@ -844,14 +873,6 @@ class App2Driver:
                     const target = s.multiple
                         ? resolved
                         : (resolved[0] !== undefined ? resolved[0] : '');
-                    // AA.A.race.1 — tracer
-                    const cur = s.tomselect.getValue();
-                    console.debug(
-                      '[trace] pick_filter.setValue name=' + (s.name || '?') +
-                      ' target=' + JSON.stringify(target) +
-                      ' current=' + JSON.stringify(cur) +
-                      ' noop=' + (JSON.stringify(cur) === JSON.stringify(target)),
-                    );
                     s.tomselect.setValue(target);
                     return;
                 }
@@ -861,7 +882,13 @@ class App2Driver:
                 s.dispatchEvent(new Event('change', { bubbles: true }));
             }""",
             vals,
-        ))
+        )
+        if will_change:
+            self._wait_for_refetch(action)
+        else:
+            # Already at target — fire the (no-op) setValue for
+            # idempotency, but don't wait for a refetch that won't come.
+            action()
 
     def set_date_range(self, from_: str | None, to: str | None) -> None:
         """Phase BM — the pre-BM universal date-RANGE Flatpickr widget
