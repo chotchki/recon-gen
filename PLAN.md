@@ -553,8 +553,7 @@ code-grounded acceptance criterion already filed in its source ticket.
   (a) DDL ordering, (b) Oracle case-folding on a new column ref, or
   (c) IDENTITY column same-batch collision. File CS.10.x sub-tasks
   for each root cause.
-- [ ] CS.11 - **#241 — App2 Distinct Senders + per-account KPI cards
-  render as None.** Surfaced 2026-06-08. App2's KPI value binding
+- [x] CS.11 - **#241 — App2 Distinct Senders + per-account KPI cards (partial — binding-shape pin landed; root-cause needs live env → CS.11.followup #327).** Surfaced 2026-06-08. App2's KPI value binding
   drops to None for these surfaces while QS shows the number.
   Diagnostic ladder: (1) curl the `/visual-data/...` endpoint for
   the affected visual, (2) confirm SQL returns a value, (3) trace
@@ -753,8 +752,8 @@ code-grounded acceptance criterion already filed in its source ticket.
 - **BX backlog — Extend semantic-lock to PG + Oracle dialects** — added 2026-06-08.
 - **BX backlog — Wire AsOfFrame.live_from_db into App2 + QS deploy paths** — added 2026-06-08.
 - **BX backlog — v13.6.1 finding 4: balance_cadence_gap vs carried_with_activity_gap divergence** — added 2026-06-08.
-- **CR.6.a — Re-light test_inv_drilldown (anchor seed + menu verb)** — added 2026-06-09.
 - **CR.15.followup — Remove dead SQLite plumbing surfaced by no-sqlite-prose lint** — added 2026-06-09.
 - **CR.7.a — Sankey node cap operator-visibility (Investigation + L2FT)** — added 2026-06-09.
 - **CR.7.b — L1 aging buckets vs rail max_pending_age mismatch** — added 2026-06-09.
 - **CS.4.followup — Dynamic Sankey banner with actual node count** — added 2026-06-09.
+- **CS.11.followup — Investigate App2 Distinct Senders KPI = None root cause** — added 2026-06-09.
