@@ -19,7 +19,7 @@ import duckdb  # type: ignore[import-untyped]  # WHY: duckdb ships partial type 
 import pytest
 
 from recon_gen.common.db import open_demo_db
-from recon_gen.common.etl import write_daily_balance
+from recon_gen.common.etl import write_daily_balance, write_transaction
 from recon_gen.common.sql.dialect import Dialect
 from recon_gen.common.sql.literals import (
     render_sql_literal,
@@ -226,6 +226,238 @@ def test_write_daily_balance_money_precision() -> None:
         assert row[0] == 1  # $0.01 = 1 cent
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# write_transaction — roundtrip via DuckDB :memory:
+# ---------------------------------------------------------------------------
+
+
+_TX_DDL = """
+CREATE TABLE test_transactions (
+    id VARCHAR, account_id VARCHAR, account_name VARCHAR,
+    account_role VARCHAR, account_scope VARCHAR,
+    account_parent_role VARCHAR,
+    amount_money BIGINT, amount_direction VARCHAR,
+    status VARCHAR, posting TIMESTAMP,
+    transfer_id VARCHAR, rail_name VARCHAR, origin VARCHAR,
+    metadata VARCHAR
+)
+"""
+
+
+def test_write_transaction_debit_leg_derives_direction_and_signed_cents() -> None:
+    """Negative dollars ⇒ amount_money negative cents + direction=Debit.
+
+    CR.17 lock — entry derivation is AUTOMATIC. The helper consumes a
+    signed-dollars input and writes ``amount_money`` (signed cents) +
+    ``amount_direction`` consistently so the L1 Conservation invariant
+    (paired-leg sum to zero) is unfooled.
+    """
+    conn = duckdb.connect(":memory:")
+    try:
+        conn.execute(_TX_DDL)
+        write_transaction(
+            conn, Dialect.DUCKDB,
+            prefix="test",
+            transaction_id="tx-debit-001",
+            account=_fixture_account(),
+            amount_dollars="-25.00",
+            transfer_id="tr-001",
+            rail_name="CustomerFeeAccrual",
+            posting="2026-06-07T10:30:00",
+            origin="InternalInitiated",
+        )
+        row = conn.execute(
+            "SELECT id, account_id, amount_money, amount_direction, "
+            "status, posting, transfer_id, rail_name, origin, metadata "
+            "FROM test_transactions",
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "tx-debit-001"
+        assert row[1] == "acct-cust-0001"
+        assert row[2] == -2500  # -$25.00 = -2500 cents
+        assert row[3] == "Debit"
+        assert row[4] == "Posted"  # default
+        assert str(row[5]) == "2026-06-07 10:30:00"
+        assert row[6] == "tr-001"
+        assert row[7] == "CustomerFeeAccrual"
+        assert row[8] == "InternalInitiated"
+        assert row[9] is None
+    finally:
+        conn.close()
+
+
+def test_write_transaction_credit_leg() -> None:
+    """Positive dollars ⇒ Credit + positive cents (money IN)."""
+    conn = duckdb.connect(":memory:")
+    try:
+        conn.execute(_TX_DDL)
+        write_transaction(
+            conn, Dialect.DUCKDB,
+            prefix="test",
+            transaction_id="tx-credit-001",
+            account=_fixture_account(),
+            amount_dollars=Decimal("100.00"),
+            transfer_id="tr-002",
+            rail_name="InternalTransferCredit",
+            posting="2026-06-07T11:00:00",
+            origin="InternalInitiated",
+        )
+        row = conn.execute(
+            "SELECT amount_money, amount_direction FROM test_transactions",
+        ).fetchone()
+        assert row is not None
+        assert row[0] == 10000  # +$100.00 = +10000 cents
+        assert row[1] == "Credit"
+    finally:
+        conn.close()
+
+
+def test_write_transaction_paired_legs_sum_to_zero() -> None:
+    """The acid test for the entry-derivation lock — two legs of one
+    transfer (same transfer_id, opposite signs) sum to zero in cents.
+    This is the L1 Conservation invariant the helper protects.
+    """
+    conn = duckdb.connect(":memory:")
+    try:
+        conn.execute(_TX_DDL)
+        for txid, dollars in [
+            ("tx-debit-leg",  "-50.00"),
+            ("tx-credit-leg", "50.00"),
+        ]:
+            write_transaction(
+                conn, Dialect.DUCKDB,
+                prefix="test",
+                transaction_id=txid,
+                account=_fixture_account(),
+                amount_dollars=dollars,
+                transfer_id="tr-paired",
+                rail_name="InternalTransfer",
+                posting="2026-06-07T12:00:00",
+                origin="InternalInitiated",
+            )
+        row = conn.execute(
+            "SELECT SUM(amount_money) FROM test_transactions "
+            "WHERE transfer_id = 'tr-paired'",
+        ).fetchone()
+        assert row is not None
+        assert row[0] == 0
+    finally:
+        conn.close()
+
+
+def test_write_transaction_metadata_serialized() -> None:
+    """Optional metadata dict is JSON-encoded (sort_keys=True for
+    determinism — matches write_daily_balance's convention)."""
+    conn = duckdb.connect(":memory:")
+    try:
+        conn.execute(_TX_DDL)
+        write_transaction(
+            conn, Dialect.DUCKDB,
+            prefix="test",
+            transaction_id="tx-meta-001",
+            account=_fixture_account(),
+            amount_dollars="-1.00",
+            transfer_id="tr-meta",
+            rail_name="CustomerFeeAccrual",
+            posting="2026-06-07T09:00:00",
+            origin="InternalInitiated",
+            metadata={
+                "counterparty_id": "acct-cust-0002",
+                "z_last_key": "z",
+                "a_first_key": "a",
+            },
+        )
+        row = conn.execute(
+            "SELECT metadata FROM test_transactions",
+        ).fetchone()
+        assert row is not None
+        # sort_keys=True ⇒ a_first_key, counterparty_id, z_last_key
+        assert row[0] == (
+            '{"a_first_key": "a", '
+            '"counterparty_id": "acct-cust-0002", '
+            '"z_last_key": "z"}'
+        )
+    finally:
+        conn.close()
+
+
+def test_write_transaction_status_override() -> None:
+    """Default ``status='Posted'`` is overridable for Pending / Failed legs."""
+    conn = duckdb.connect(":memory:")
+    try:
+        conn.execute(_TX_DDL)
+        write_transaction(
+            conn, Dialect.DUCKDB,
+            prefix="test",
+            transaction_id="tx-pending-001",
+            account=_fixture_account(),
+            amount_dollars="-5.00",
+            transfer_id="tr-pend",
+            rail_name="ACHOrigSettlement",
+            posting="2026-06-07T08:00:00",
+            origin="InternalInitiated",
+            status="Pending",
+        )
+        row = conn.execute(
+            "SELECT status FROM test_transactions",
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "Pending"
+    finally:
+        conn.close()
+
+
+def test_write_transaction_zero_amount_rejected() -> None:
+    """A zero-magnitude leg can't have a Debit/Credit direction —
+    helper rejects it loudly instead of silently picking one."""
+    conn = duckdb.connect(":memory:")
+    try:
+        conn.execute(_TX_DDL)
+        with pytest.raises(ValueError, match="zero"):
+            write_transaction(
+                conn, Dialect.DUCKDB,
+                prefix="test",
+                transaction_id="tx-zero",
+                account=_fixture_account(),
+                amount_dollars="0.00",
+                transfer_id="tr-zero",
+                rail_name="CustomerFeeAccrual",
+                posting="2026-06-07T07:00:00",
+                origin="InternalInitiated",
+            )
+    finally:
+        conn.close()
+
+
+def test_write_transaction_oracle_timestamp_literal() -> None:
+    """Oracle dialect emits ``TIMESTAMP '...'`` for the posting column.
+
+    Mirrors test_render_sql_literal_timestamp_pg_vs_oracle but at the
+    helper-construction level — pins that write_transaction marks the
+    correct column index as timestamp-shaped.
+    """
+    import re as _re
+    captured: list[str] = []
+
+    class _CaptureCursor:
+        def execute(self, sql: str) -> None:
+            captured.append(sql)
+
+    write_transaction(
+        _CaptureCursor(), Dialect.ORACLE,
+        prefix="test",
+        transaction_id="tx-ora-001",
+        account=_fixture_account(),
+        amount_dollars="-1.00",
+        transfer_id="tr-ora",
+        rail_name="CustomerFeeAccrual",
+        posting="2026-06-07T10:30:00",
+        origin="InternalInitiated",
+    )
+    assert len(captured) == 1
+    assert _re.search(r"TIMESTAMP '2026-06-07 10:30:00'", captured[0])
 
 
 # ---------------------------------------------------------------------------
