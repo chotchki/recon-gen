@@ -875,12 +875,12 @@ RECON_GEN_DIALECT: Final = EnvVar(
     name="RECON_GEN_DIALECT",
     legacy_name="QS_GEN_DIALECT",
     description=(
-        "DB dialect (postgres / oracle / sqlite) — overrides "
-        "cfg.dialect."
+        "DB dialect (postgres / oracle / duckdb) — overrides "
+        "cfg.dialect. CB.8 (v13.0.0) dropped the prior sqlite arm."
     ),
     coercer=str,
     optional=True,
-    validator=matches(re.compile(r"postgres|oracle|sqlite")),
+    validator=matches(re.compile(r"postgres|oracle|duckdb")),
 )
 
 RECON_GEN_TRAINER_DIALECTS: Final = EnvVar(

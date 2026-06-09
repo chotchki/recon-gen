@@ -39,7 +39,7 @@ Two ways we close the loop:
 
 ## Runs where you run
 
-Database backends — **PostgreSQL 17+** and **Oracle 19c+** for the on-prem / cloud-managed production targets, plus **DuckDB** as the zero-install integrator-laptop iteration backend (pure-Python wheel, no server, in-process vectorized executor, ~55× faster bundled refresh than the legacy SQLite path at ~1M rows). SQLite 3.38+ still works as a manual opt-in for back-compat triage; Phase CB will remove it.
+Database backends — **PostgreSQL 17+** and **Oracle 19c+** for the on-prem / cloud-managed production targets, plus **DuckDB** as the zero-install integrator-laptop iteration backend (pure-Python wheel, no server, in-process vectorized executor). The prior SQLite backend was dropped in v13.0.0 (Phase CB.8).
 
 Three runtime environments — pick what your auditors and analysts already trust:
 
@@ -160,7 +160,7 @@ For demo mode against Oracle 19c+ (requires `oracledb` thin mode — no Oracle I
 pip install "recon-gen[demo,demo-oracle]"
 ```
 
-For demo mode against SQLite 3.38+ (no extra install — uses stdlib `sqlite3` + the JSON1 functions that ship built-in since 3.38):
+For demo mode against DuckDB (no extra install — DuckDB ships as a pure-Python wheel in the base install):
 
 ```bash
 pip install recon-gen
@@ -229,15 +229,15 @@ extra_tags:
   Team: finance
 
 # Optional: which database family for `data apply --execute` (default: postgres)
-# dialect: "postgres"   # or "oracle" or "sqlite"
+# dialect: "postgres"   # or "oracle" or "duckdb"
 
 # Optional: database URL for `data apply --execute` and friends
 # Postgres:
 # demo_database_url: "postgresql://user:pass@localhost:5432/quicksight_demo"
 # Oracle (Easy Connect form, no scheme prefix):
 # demo_database_url: "system/pass@localhost:1521/FREEPDB1"
-# SQLite (file or in-memory; integrator-local iteration loop, no server):
-# demo_database_url: "sqlite:///./demo.sqlite"
+# DuckDB (file or in-memory; integrator-local iteration loop, no server):
+# demo_database_url: "duckdb:///./demo.duckdb"
 ```
 
 > Theme is declared inline on the L2 institution YAML's `theme:` block, not on the deploy config. When the L2 instance carries no `theme:` block, AWS QuickSight CLASSIC takes over at deploy.
@@ -306,7 +306,7 @@ recon-gen audit apply  -c config.yaml --execute -o report.pdf  # regulator-ready
 
 `schema apply --execute` creates the per-prefix base tables + matviews via `common/l2/schema.py::emit_schema(l2_instance, prefix=cfg.db_table_prefix)`. `data apply --execute` inserts the L2-shape seed data (90-day baseline + every L1 SHOULD-violation plant + the Investigation fanout / volume / chain plants). `data refresh --execute` refreshes every dependent matview in dependency order. `json apply --execute` writes a `datasource.json` derived from the database URL (Type=`POSTGRESQL` or `ORACLE`, dispatched off `dialect`), generates all QuickSight JSON to `out/`, and deploys to AWS. `audit apply --execute` queries the per-prefix L1 invariant matviews and writes a regulator-ready PDF reconciliation report (cover, executive summary, per-invariant violation tables, per-account-day Daily Statement walks, sign-off block, cryptographic provenance fingerprint) — see the [Audit Reconciliation Report handbook](https://chotchki.github.io/recon-gen/handbook/audit/) for the full reference. The `account_type` and `transfer_type` columns discriminate which app a row belongs to. See [`Schema_v6.md`](src/recon_gen/docs/Schema_v6.md) for the full feed contract, canonical type values, metadata key catalog, and ETL examples.
 
-**PostgreSQL 17+, Oracle 19c+, or SQLite 3.38+ required** for `schema apply --execute`. PG + Oracle support the SQL/JSON path syntax (`JSON_VALUE`, `JSON_QUERY`, `JSON_EXISTS`) the schema uses for `metadata` JSON columns; SQLite uses the equivalent JSON1 functions (`json_extract`, `json_valid`) routed through the dialect helpers in `common/sql/dialect.py`. The portable subset forbids the Postgres-only `->>` / `->` / `@>` / `?` operators and JSONB; on Oracle, also no named `WINDOW` clause and no `TIMESTAMP WITH TIME ZONE` in PK columns; on SQLite, matviews emit as `CREATE TABLE … AS SELECT` (refreshed by re-CREATE). See `Schema_v6.md` → Forbidden SQL patterns for the full constraint matrix.
+**PostgreSQL 17+, Oracle 19c+, or DuckDB required** for `schema apply --execute`. PG + Oracle support the SQL/JSON path syntax (`JSON_VALUE`, `JSON_QUERY`, `JSON_EXISTS`) the schema uses for `metadata` JSON columns; DuckDB uses `json_extract_string` for the equivalent reads (DuckDB's `JSON_VALUE` returns a quoted JSON form). The portable subset forbids the Postgres-only `->>` / `->` / `@>` / `?` operators and JSONB; on Oracle, also no named `WINDOW` clause and no `TIMESTAMP WITH TIME ZONE` in PK columns; on DuckDB, matviews emit as `CREATE TABLE … AS SELECT` (refreshed by re-CREATE). See `Schema_v6.md` → Forbidden SQL patterns for the full constraint matrix.
 
 Datasets are all Direct Query (no SPICE), so seed changes show up immediately after a fresh `data apply --execute` + `data refresh --execute` — no QuickSight-side refresh needed.
 

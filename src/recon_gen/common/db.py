@@ -4,18 +4,19 @@ Used by the CLI (``demo apply``) and the e2e harness fixtures. Both
 need to:
 
   - Open a DB-API 2.0 connection against Postgres (psycopg2), Oracle
-    (oracledb), or SQLite (stdlib ``sqlite3``), keyed off ``cfg.dialect``.
+    (oracledb), or DuckDB (in-process ``duckdb`` wheel), keyed off
+    ``cfg.dialect``.
   - Run multi-statement DDL/DML scripts. psycopg2 accepts the whole
     script in one ``cursor.execute`` call; oracledb requires per-
     statement execution and treats PL/SQL blocks (``BEGIN…END;``) as
-    one unit; sqlite3 accepts whole scripts via ``executescript``.
+    one unit; DuckDB accepts whole scripts via ``connection.execute``.
 
 Both PG + Oracle surfaces existed inline in ``cli.py`` before P.9d.
 Lifting them here lets ``tests/e2e/test_harness_end_to_end.py`` consume
 the same helpers instead of hardcoding psycopg2 (which raised
 ``ProgrammingError`` at setup when the harness ran against an Oracle
-config — see PLAN.md P.9d). X.3 added the SQLite arm using the stdlib
-``sqlite3`` module — no extra dependency required.
+config — see PLAN_ARCHIVE.md P.9d). CA swapped DuckDB in as the
+local-iteration default; CB.8 dropped the prior SQLite arm.
 """
 
 from __future__ import annotations
@@ -231,8 +232,8 @@ def connect_demo_db(cfg: Config) -> "SyncConnection":  # CB.16 — replaces the 
         return cast("SyncConnection", duckdb.connect(path, read_only=read_only))  # DuckDBPyConnection.commit returns self for chaining; SyncConnection.commit returns None per PEP 249. The two-arg `cur.execute(sql, params)` shape callers use works on both
     raise ValueError(
         f"Unknown dialect {cfg.dialect!r}. "
-        "Set 'dialect: postgres', 'dialect: oracle', 'dialect: duckdb', "
-        "or 'dialect: sqlite' in your config."
+        "Set 'dialect: postgres', 'dialect: oracle', or 'dialect: duckdb' "
+        "in your config."
     )
 
 
@@ -1984,6 +1985,6 @@ async def make_connection_pool(
         )
     raise ValueError(
         f"Unknown dialect {cfg.dialect!r}. "
-        "Set 'dialect: postgres', 'dialect: oracle', 'dialect: duckdb', "
-        "or 'dialect: sqlite' in your config."
+        "Set 'dialect: postgres', 'dialect: oracle', or 'dialect: duckdb' "
+        "in your config."
     )
