@@ -52,14 +52,15 @@ pytestmark = [
 
 @pytest.mark.skip(
     reason=(
-        "Initial-anchor non-determinism (the Anchor dropdown auto-picks "
-        "when no value is set, so the 'row count changed' baseline races) "
-        "+ verb/trigger mismatch (the touching-edges drill is "
-        "DATA_POINT_MENU but the test uses the left-click drill_from_first_row "
-        "verb — fire it via drill_from_first_row_via_menu instead). The App 2 "
-        "URL-param threading gap that was the third blocker is now closed by "
-        "u.4.e.4#1. Re-light once the remaining two are fixed; see module "
-        "docstring."
+        "Tracked: CR.6.a backlog ticket. Initial-anchor non-determinism "
+        "(the Anchor dropdown auto-picks when no value is set, so the "
+        "'row count changed' baseline races) + verb/trigger mismatch "
+        "(the touching-edges drill is DATA_POINT_MENU but the test uses "
+        "the left-click drill_from_first_row verb — fire it via "
+        "drill_from_first_row_via_menu instead). The App 2 URL-param "
+        "threading gap that was the third blocker is now closed by "
+        "u.4.e.4#1. Re-light once the remaining two are fixed; see "
+        "module docstring."
     )
 )
 def test_account_network_table_walk_rerenders_table(inv_dashboard_driver: tuple["DashboardDriver", str]) -> None:

@@ -29,10 +29,11 @@ pytestmark = [pytest.mark.e2e, pytest.mark.browser]
 
 @pytest.mark.skip(
     reason=(
-        "Test drives Metadata Value as a dropdown, but X.1.b replaced "
-        "it with a text field. The cascade-source regression class is "
-        "structurally unreachable on the text-field shape; rewrite (or "
-        "delete) is queued as X.1.g.11."
+        "Tracked: CR.6.b backlog ticket. Test drives Metadata Value as "
+        "a dropdown, but X.1.b replaced it with a text field. The "
+        "cascade-source regression class is structurally unreachable on "
+        "the text-field shape; rewrite (or delete) is queued as "
+        "X.1.g.11 — CR.6.b is the delete-vs-rewrite decision."
     ),
 )
 def test_metadata_value_pick_does_not_empty_transactions_table(
