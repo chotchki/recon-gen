@@ -1,5 +1,87 @@
 # Release Notes
 
+## v13.8.0 — Phase CR: picker / export silent-truncation hardening + ETL helper + anti-drift lints
+
+Post-CQ.3 follow-up audit phase landing 14 sub-tasks across operator-
+visible footgun fixes, dead-prose sweeps, an additive ETL helper,
+two anti-drift lints, and a regression-prevention contract gate.
+
+**Headline impact:**
+
+- **CR.1 — XLSX sheet-name silent truncation guard.** Pre-CR
+  `_emit_xlsx_workbook` did `ws.title = visual_id[:31]` with no
+  validation. Two visuals diverging after char 31 silently collided in
+  the workbook; the second export overwrote the first. The new
+  `sheet_title_from_visual_id` helper hashes UUID-shaped visual IDs
+  deterministically (8-char prefix + 4-char suffix) and raises on
+  non-UUID overflow with operator-actionable rename guidance. Tree-walk
+  unit test exercises every visual across all 4 apps.
+- **CR.2 — Picker query 100 → 500 cap + truncation surface.** Pre-CR
+  `_MAX_QUERY_LEN = 100` silently truncated at the picker endpoint with
+  no signal back to the UI. Customers with long semantic identifiers
+  saw zero matches with no remediation path. Now raised to 500 by
+  default, configurable via `RECON_GEN_PICKER_MAX_QUERY_LEN`, and the
+  JSON response carries a `truncated: bool` flag the App2 bootstrap
+  surfaces in the typeahead UI.
+- **CR.3 — L1 Exceptions chain-coherence visibility.** 8 transfer-keyed
+  violation kinds (chain_parent_disagreement, xor_group_*, fan_in_*,
+  multi_xor_*, stuck_unbundled) write `transfer_id`-bearing rows but
+  the L1 Exceptions matview UNION omitted it. Operators saw the
+  violation count tick up but couldn't identify the offending row
+  without shelling into the DB. Now every UNION branch projects
+  `transfer_id` in column position 8 (per-branch alias for
+  child/parent transfer kinds); money branches emit `null_text` so
+  the column type stays consistent.
+- **CR.4 — Oracle 30-char prefix validator.** `RECON_GEN_DB_TABLE_PREFIX`
+  now snake-case-validated AND length-capped against Oracle 19c's
+  30-char identifier ceiling at config-load time. Loud-fails with the
+  field name + budget calculation in the message; replaces the
+  cryptic `ORA-00972: identifier is too long` that fired deep in
+  CREATE TABLE.
+- **CR.9–CR.14 — Prose / docstring / dead-code resync.** SQLite-removal
+  prose sweep across `CLAUDE.md`, `README.md`, source docstrings, +
+  ValueError messages (CR.9). Daily Statement handbook + dataset
+  comment resync post-CQ.4 cascade removal (CR.10). `_placeholder`
+  6-of-6 EntityKind coverage replaced by a clean 410 Gone response
+  (CR.11). Investigation Account Network "trust the chart, not the
+  control text" caveat restored after the cascade rollback (CR.12).
+  Phase-narrative cleanup across 5 stale "in progress" docstrings +
+  comment markers (CR.13). BC.12 matview workaround + Poisson sampler
+  docstring reword (CR.14).
+- **CR.15 — Two new anti-drift Checks land in
+  `tests/unit/test_typing_smells.py`.** (a) `no-sqlite-prose` —
+  literal `sqlite` in any non-docstring Constant string in
+  `src/recon_gen/**` (operator-facing prose / error messages / log
+  lines). Catches future CR.9-class regressions; locked at 0 hits
+  after the sweep. (b) `no-in-progress-narrative` — `Phase X in
+  progress` / context-prefixed `TBD` / `in progress` phrasings in
+  docstrings. Catches CR.13-class phase-narrative drift; locked at
+  0 hits. Dead-code residue (`sqlite_path()`, `RECON_GEN_SQLITE_LEAK_GATE`,
+  `_DryRunCaptureSqlite`) tracked for one-sweep removal under task
+  CR.15.followup; per-line ignores reference the ticket.
+- **CR.17 — Public `write_transaction` ETL helper.** Sibling of
+  `write_daily_balance`; one-row INSERT into `<prefix>_transactions`
+  with dialect-aware SQL literal rendering, signed-dollars input,
+  automatic Debit/Credit entry derivation, zero-magnitude rejection,
+  paired-leg sum-to-zero conservation invariant pinned by tests.
+  Caller always supplies `transaction_id`; helper handles the rest.
+- **Hotfix — Dataset SQL projection contract gate.** CR.3 added
+  `transfer_id` to the contract + matview but missed the dataset SQL
+  projection in between. Oracle surfaced it as ORA-00904; PG/DuckDB
+  silently rendered empty tables. New
+  `tests/unit/test_dataset_sql_contract_projection.py` walks every
+  dataset returned by the 4 app builders (55 cases) and asserts every
+  `CustomSql.Columns[i].Name` appears as a word identifier in the
+  `CustomSql.SqlQuery`. Catches projection-vs-contract drift at unit
+  tier — the layer the codebase had been missing.
+
+**Follow-ups filed as backlog tickets** (CR.6.a — re-light
+`test_inv_drilldown`; CR.6.b — `test_l2ft_metadata_cascade`
+delete/rewrite decision; CR.7.a — Sankey node-cap operator visibility;
+CR.7.b — L1 aging buckets vs rail max_pending_age; CR.15.followup —
+dead SQLite plumbing removal). Each backlog entry has a code-grounded
+reason and a clear next step.
+
 ## v13.2.0 — Phase CF foundations + Python 3.14 + release-pipeline rescue + heavy-density fuzz API
 
 CF-phase typed primitives + sheet land, with infrastructure carries:
