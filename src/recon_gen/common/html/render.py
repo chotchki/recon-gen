@@ -366,6 +366,28 @@ _BOOTSTRAP_JS = _load_inline_js("bootstrap.js")
 _DEV_LOG_JS = _load_inline_js("dev_log.js")
 
 
+def _banner_html(banner_text: str | None) -> str:
+    """CU.3 — top-of-page banner for the dashboards page shell.
+
+    Mirrors ``_studio_routes._banner`` (CU.3) so both renderer surfaces
+    show the operator's configured banner. Returns empty string when
+    ``banner_text`` is None / empty. Inline-styled so it needs no
+    stylesheet rebuild.
+    """
+    if not banner_text:
+        return ""
+    return (
+        '<div class="server-banner" role="status" '
+        'style="background:#fff3cd;border-bottom:1px solid #ffe69c;'
+        'color:#664d03;padding:0.6rem 1rem;font-size:0.9rem;text-align:center">'
+        f"{html.escape(banner_text)} "
+        '<a href="https://chotchki.github.io/recon-gen/" target="_blank" '
+        'rel="noopener" style="color:#664d03;text-decoration:underline">'
+        "Learn more</a>."
+        "</div>"
+    )
+
+
 _PAGE_SHELL = """\
 <!DOCTYPE html>
 <html lang="en">
@@ -380,7 +402,7 @@ _PAGE_SHELL = """\
 {vendor_js}
 </head>
 <body class="bg-surface-bg text-primary-fg font-sans antialiased">
-{nav}{body}
+{nav}{banner}{body}
   <!-- CN.5 — handbook side panel. Hidden by default; JS reveals
        it on ? button click + injects the fetched handbook HTML. -->
   <aside id="handbook-side-panel"
@@ -1086,6 +1108,7 @@ def emit_dashboards_list(
     theme: ThemePreset | None = None,
     docs_url: str | None = None,
     studio_enabled: bool = False,
+    banner_text: str | None = None,
 ) -> str:
     """Render the ``/dashboards`` landing page.
 
@@ -1151,6 +1174,7 @@ def emit_dashboards_list(
         data_generation_meta="",
         theme_style=_emit_theme_style(theme),
         nav=top_nav,
+        banner=_banner_html(banner_text),
     )
 
 
@@ -1162,6 +1186,7 @@ def emit_error_page(
     traceback_text: str | None = None,
     theme: ThemePreset | None = None,
     auto_reload_secs: int | None = None,
+    banner_text: str | None = None,
 ) -> str:
     """Render a themed error page for 4xx / 5xx responses (X.2.m).
 
@@ -1241,6 +1266,7 @@ def emit_error_page(
         data_generation_meta=reload_meta,
         theme_style=_emit_theme_style(theme),
         nav="",
+        banner=_banner_html(banner_text),
     )
 
 
@@ -1472,6 +1498,7 @@ def emit_html(
     data_generation_id: int | None = None,
     top_nav: str = "",
     prefix_override: str | None = None,
+    banner_text: str | None = None,
 ) -> str:
     """Render a tree ``Sheet`` as a standalone HTML page.
 
@@ -1647,6 +1674,7 @@ def emit_html(
         data_generation_meta=data_generation_meta,
         theme_style=_emit_theme_style(theme),
         nav=top_nav,
+        banner=_banner_html(banner_text),
     )
 
 

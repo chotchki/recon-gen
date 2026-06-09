@@ -372,6 +372,7 @@ def run_html_server(
             asgi_app = make_app(
                 dashboards=dashboards, dev_log=dev_log, docs_dir=docs_dir,
                 studio_routes=studio_routes,
+                banner_text=getattr(cfg, "banner_text", None),
             )
             click.echo(f"server: http://{host}:{port}/")
             if studio_routes is not None:

@@ -468,6 +468,7 @@ def make_app(
     visual_data_cache_max_age_s: int = 60,
     docs_dir: Path | None = None,
     studio_routes: Sequence[Route | Mount] | None = None,
+    banner_text: str | None = None,
 ) -> Starlette:
     """Build a Starlette ASGI app serving multiple dashboards.
 
@@ -592,6 +593,7 @@ def make_app(
             emit_dashboards_list(
                 listing, theme=listing_theme, docs_url=docs_url,
                 studio_enabled=studio_enabled,
+                banner_text=banner_text,
             ),
         )
 
@@ -641,6 +643,7 @@ def make_app(
             data_generation_id=get_data_generation_id(),
             top_nav=_render_top_nav(active_href=f"/dashboards/{dash_id}"),
             prefix_override=url_prefix,
+            banner_text=banner_text,
         ))
 
     async def sheet_view(request: Request) -> Response:
@@ -686,6 +689,7 @@ def make_app(
             data_generation_id=get_data_generation_id(),
             top_nav=_render_top_nav(active_href=f"/dashboards/{dash_id}"),
             prefix_override=url_prefix,
+            banner_text=banner_text,
         ))
 
     async def visual_data(request: Request) -> Response:
@@ -975,6 +979,7 @@ def make_app(
                     "back to the dashboards list."
                 ),
                 theme=listing_theme,
+                banner_text=banner_text,
             ),
             status_code=404,
         )
@@ -1003,6 +1008,7 @@ def make_app(
                 ),
                 theme=listing_theme,
                 auto_reload_secs=5,
+                banner_text=banner_text,
             ),
             status_code=503,
         )
@@ -1031,6 +1037,7 @@ def make_app(
                 ),
                 traceback_text=tb_text,
                 theme=listing_theme,
+                banner_text=banner_text,
             ),
             status_code=500,
         )
