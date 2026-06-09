@@ -1178,7 +1178,7 @@ def _invoke_balance_cadence_gap_plant(
     """
     from datetime import timedelta as _td  # noqa: PLC0415
 
-    from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
+    from recon_gen.common.sql.dialect import Dialect, date_literal  # noqa: PLC0415
 
     inst = _require_instance(instance)
     target = _pick_first_explicit_daily_target(inst)
@@ -1190,8 +1190,18 @@ def _invoke_balance_cadence_gap_plant(
             "or AccountTemplate to enable this plant."
         )
     target_account_id, target_role = target
-    gap_day = (anchor - _td(days=days_ago)).date().isoformat()
-    _ = (dialect, Dialect)  # dialect-agnostic SQL — all 3 accept the WHERE
+    gap_date = (anchor - _td(days=days_ago)).date()
+    gap_day = gap_date.isoformat()
+    next_day = (gap_date + _td(days=1)).isoformat()
+    # CT.0 — Oracle rejects bare ISO strings as TIMESTAMP comparands
+    # (ORA-01843 "not a valid month"); use the dialect's date literal
+    # form. PG + DuckDB also accept `DATE 'YYYY-MM-DD'`. Bounds form
+    # a half-open day window [gap_day, gap_day+1) — cleaner than the
+    # prior `< 'gap_dayT23:59:59'` shape and avoids the missed-by-a-
+    # microsecond edge case.
+    dialect_obj = dialect if isinstance(dialect, Dialect) else Dialect.DUCKDB
+    lo = date_literal(gap_day, dialect_obj)
+    hi = date_literal(next_day, dialect_obj)
     if target_account_id:
         # Singleton: exact match by account_id + business_day_start.
         return (
@@ -1199,8 +1209,8 @@ def _invoke_balance_cadence_gap_plant(
             f"({target_account_id!r}, {gap_day})\n"
             f"DELETE FROM {prefix}_daily_balances "
             f"WHERE account_id = '{target_account_id}' "
-            f"AND business_day_start >= '{gap_day}' "
-            f"AND business_day_start < '{gap_day}T23:59:59';\n"
+            f"AND business_day_start >= {lo} "
+            f"AND business_day_start < {hi};\n"
         )
     # Template path: any materialized instance whose role matches.
     return (
@@ -1208,8 +1218,8 @@ def _invoke_balance_cadence_gap_plant(
         f"role {target_role!r} on {gap_day}\n"
         f"DELETE FROM {prefix}_daily_balances "
         f"WHERE account_role = '{target_role}' "
-        f"AND business_day_start >= '{gap_day}' "
-        f"AND business_day_start < '{gap_day}T23:59:59';\n"
+        f"AND business_day_start >= {lo} "
+        f"AND business_day_start < {hi};\n"
     )
 
 
