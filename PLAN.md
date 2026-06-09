@@ -473,7 +473,7 @@ in small diffs, (c) the Oracle / App2 / Studio bugs that surfaced via
 dogfood + cold-read since v13.x. No new spike; every entry has a
 code-grounded acceptance criterion already filed in its source ticket.
 
-- [ ] CS.1 - **#323 / CR.15.followup — Remove dead SQLite plumbing.**
+- [x] CS.1 - **#323 / CR.15.followup — Remove dead SQLite plumbing.**
   Delete `src/recon_gen/common/db.py::sqlite_path()` + its `__all__`
   export, drop `RECON_GEN_SQLITE_LEAK_GATE` from `common/env_keys.py`
   + the test-side detector it gates, delete `_DryRunCaptureSqlite`

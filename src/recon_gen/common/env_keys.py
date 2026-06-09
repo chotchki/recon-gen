@@ -387,18 +387,19 @@ RECON_GEN_E2E: Final = EnvVar(
     optional=True,
 )
 
-# Opt-in gate for the per-test sqlite-leak detector wired in
+# Opt-in gate for the per-test DB connection-leak detector wired in
 # tests/conftest.py::pytest_runtest_teardown. Detects unclosed
-# sqlite3 + aiosqlite Connection instances; documented at the use
-# site. Off by default to avoid false positives from legitimately-
-# session-scoped DB fixtures.
-RECON_GEN_SQLITE_LEAK_GATE: Final = EnvVar(
-    name="RECON_GEN_SQLITE_LEAK_GATE",  # typing-smell: ignore[no-sqlite-prose]: dead env var post-CB.9 aiosqlite drop; removal tracked under task #323 (CR.15.followup)
+# DuckDBPyConnection instances (the post-CB.8 leak surface — `with
+# duckdb.connect(...) as c:` commits but does NOT close, which is the
+# common foot-gun). Off by default to avoid false positives from
+# legitimately-session-scoped DB fixtures.
+RECON_GEN_DB_CONN_LEAK_GATE: Final = EnvVar(
+    name="RECON_GEN_DB_CONN_LEAK_GATE",
     description=(
-        "Bool — set to any non-empty value to enable the sqlite-leak "  # typing-smell: ignore[no-sqlite-prose]: dead env var post-CB.9; see task #323
-        "detector in tests/conftest.py. Fails any test that ends with "
-        "more open sqlite3 / aiosqlite Connection instances than it "
-        "started with."
+        "Bool — set to any non-empty value to enable the DB connection-"
+        "leak detector in tests/conftest.py. Fails any test that ends "
+        "with more open DuckDBPyConnection instances than it started "
+        "with."
     ),
     coercer=_bool_coercer,
     optional=True,
@@ -875,8 +876,8 @@ RECON_GEN_DIALECT: Final = EnvVar(
     name="RECON_GEN_DIALECT",
     legacy_name="QS_GEN_DIALECT",
     description=(
-        "DB dialect (postgres / oracle / duckdb) — overrides "  # typing-smell: ignore[no-sqlite-prose]: deliberate operator-facing breadcrumb explaining why "sqlite" no longer resolves; remove once the deprecation goes stale (see task #323)
-        "cfg.dialect. CB.8 (v13.0.0) dropped the prior sqlite arm."
+        "DB dialect (postgres / oracle / duckdb) — overrides "
+        "cfg.dialect."
     ),
     coercer=str,
     optional=True,
