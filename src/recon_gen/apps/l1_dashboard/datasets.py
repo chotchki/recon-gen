@@ -1024,7 +1024,7 @@ def build_l1_exceptions_dataset(
     # magnitude column is non-NULL AND > 0.
     sql = (
         f"SELECT check_type, account_id, account_name, account_role,"
-        f" account_parent_role, business_day, rail_name,"
+        f" account_parent_role, business_day, rail_name, transfer_id,"
         f" {magnitude_amount} AS magnitude_amount,"
         f" magnitude_count\n"
         f"FROM {prefix}_l1_exceptions\n"
