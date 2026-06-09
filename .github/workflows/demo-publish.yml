@@ -28,6 +28,11 @@ on:
   # changed cfg.yaml; force a refresh without cutting a release".
   workflow_dispatch:
 
+# No GITHUB_TOKEN scopes needed — the runner pulls from PyPI directly
+# and writes nothing back to the repo (per header). Empty block = drop
+# every default scope.
+permissions: {}
+
 jobs:
   refresh:
     # The self-hosted Mac mini runner. The label `mac-mini-demo` is
