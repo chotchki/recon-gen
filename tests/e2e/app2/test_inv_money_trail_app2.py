@@ -67,8 +67,15 @@ def _plant_anchor_day() -> date:
 def _build_money_trail_generator(
     cfg: "Config", anchor_day: date,
 ) -> "MoneyTrailGenerator":
+    # CS.12 — derive the chain-account role from the L2 instance
+    # instead of hardcoding "CustomerSubledger" (spec_example's). For
+    # money_trail the chain runs end-to-end on one role; reuse the
+    # anomaly helper's sender slot since both want a leaf-money role
+    # that exists on the L2.
+    from tests.e2e._agreement_helpers import anomaly_pair_for_l2  # noqa: PLC0415
+    chain_role, _ = anomaly_pair_for_l2(_INSTANCE)
     gen = MoneyTrailInvariant().scenario_for(
-        "CustomerSubledger",
+        chain_role,
         chain_length=_MONEY_TRAIL_CHAIN_LENGTH,
         amount=_MONEY_TRAIL_AMOUNT,
         anchor_day=anchor_day,

@@ -69,8 +69,15 @@ def _plant_anchor_day() -> date:
 def _build_anomaly_generator(
     cfg: "Config", anchor_day: date,
 ) -> "AnomalyGenerator":
+    # CS.12 — pick a (sender_role, recipient_role) pair the L2 actually
+    # declares. Pre-CS.12 the test hardcoded "CustomerSubledger" which
+    # spec_example has but sasquatch_pr doesn't — the helper returns
+    # "CustomerDDA" for sasquatch and skips loudly for L2s that declare
+    # neither candidate role.
+    from tests.e2e._agreement_helpers import anomaly_pair_for_l2  # noqa: PLC0415
+    sender_role, recipient_role = anomaly_pair_for_l2(_INSTANCE)
     gen = AnomalyInvariant().scenario_for(
-        "CustomerSubledger", "CustomerSubledger",
+        sender_role, recipient_role,
         baseline_pair_count=_ANOMALY_BASELINE_PAIRS,
         baseline_amount=_ANOMALY_BASELINE_AMOUNT,
         spike_magnitude=_ANOMALY_SPIKE_MAGNITUDE,

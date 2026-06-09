@@ -561,7 +561,7 @@ code-grounded acceptance criterion already filed in its source ticket.
   through `_data_shape.shape_kpi` to find where the binding drops.
   Likely a column-name or scalar-vs-row shape mismatch between the
   KPI's `Measure` field and the SQL projection.
-- [ ] CS.12 - **#239 — anomaly/money_trail app2 tests fail on
+- [x] CS.12 - **#239 — anomaly/money_trail app2 tests fail on
   sasquatch_pr L2 (no CustomerSubledger sender).** Test fixture
   expects a `CustomerSubledger` rail-sender on sasquatch_pr but the
   L2 yaml doesn't declare one. Either (a) update sasquatch_pr.yaml
@@ -754,7 +754,6 @@ code-grounded acceptance criterion already filed in its source ticket.
 - **BX backlog — Wire AsOfFrame.live_from_db into App2 + QS deploy paths** — added 2026-06-08.
 - **BX backlog — v13.6.1 finding 4: balance_cadence_gap vs carried_with_activity_gap divergence** — added 2026-06-08.
 - **CR.6.a — Re-light test_inv_drilldown (anchor seed + menu verb)** — added 2026-06-09.
-- **CR.6.b — Resolve test_l2ft_metadata_cascade dead/rewrite decision** — added 2026-06-09.
 - **CR.15.followup — Remove dead SQLite plumbing surfaced by no-sqlite-prose lint** — added 2026-06-09.
 - **CR.7.a — Sankey node cap operator-visibility (Investigation + L2FT)** — added 2026-06-09.
 - **CR.7.b — L1 aging buckets vs rail max_pending_age mismatch** — added 2026-06-09.
