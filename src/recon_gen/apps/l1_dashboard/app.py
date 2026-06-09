@@ -383,24 +383,46 @@ _SUPERSESSION_AUDIT_DESCRIPTION = (
 _L1_EXCEPTIONS_NAME = "L1 Exceptions"
 _L1_EXCEPTIONS_TITLE = "L1 Exceptions"
 _L1_EXCEPTIONS_DESCRIPTION = (
-    # C6 (cold-read v11.26.1) — copy used to claim "5 L1 invariants" but
-    # the matview UNIONs across 10 check kinds: 5 balance/numeric checks
-    # (drift / ledger_drift / overdraft / limit_breach /
-    # expected_eod_balance_breach), 3 chain/cardinality checks
-    # (chain_parent_disagreement / fan_in_disagreement /
-    # multi_xor_violation), and 2 time-based stuck checks (stuck_pending
-    # / stuck_unbundled). Updated to the full taxonomy so the chart's
-    # bars match the prose.
+    # CS.7 (2026-06-09) — sync prose to matview (was 10, drifted to 12
+    # after CL.6 added balance_cadence_gap + the xor_group_violation
+    # branch was always there but went unnamed in C6's count). The 12
+    # branches: 6 balance/numeric (drift, ledger_drift, overdraft,
+    # limit_breach, expected_eod_balance_breach, balance_cadence_gap),
+    # 4 chain/cardinality (chain_parent_disagreement, xor_group_violation,
+    # fan_in_disagreement, multi_xor_violation), and 2 time-based stuck
+    # (stuck_pending, stuck_unbundled). The L1_EXCEPTIONS_BRANCH_NAMES
+    # tuple below is the source of truth — bump together when adding a
+    # new branch.
     "The 9am scan — every L1 SHOULD-constraint violation across all "
-    "10 invariant views: **balance** (drift, ledger drift, overdraft, "
-    "limit breach, expected EOD balance), **chain/cardinality** (chain "
-    "parent disagreement, fan-in disagreement, multi-XOR violation), "
-    "and **time** (stuck pending, stuck unbundled), scoped to the most "
+    "12 invariant views: **balance** (drift, ledger drift, overdraft, "
+    "limit breach, expected EOD balance, balance cadence gap), "
+    "**chain/cardinality** (chain parent disagreement, XOR group "
+    "violation, fan-in disagreement, multi-XOR violation), and "
+    "**time** (stuck pending, stuck unbundled), scoped to the most "
     "recent business day in the data. Replaces v5's "
     "ar_unified_exceptions matview with a live UNION; no REFRESH "
     "contract. KPI tracks total open count; bar chart breaks down by "
     "check_type; detail table sorts by magnitude so the biggest "
     "variances surface first."
+)
+
+
+# CS.7 (2026-06-09) — Authoritative list of L1 Exceptions matview
+# UNION branches. The schema-side UNION in `common/l2/schema.py::
+# _L1_EXCEPTIONS_TEMPLATE` MUST emit exactly these check_type values.
+# Add a new branch ⇒ extend this tuple AND the description copy above
+# AND the matview UNION. The unit test
+# `tests/unit/test_l1_exceptions_branch_count.py` walks the schema
+# template + asserts the count matches.
+L1_EXCEPTIONS_BRANCH_NAMES: tuple[str, ...] = (
+    # 6 balance / numeric
+    "drift", "ledger_drift", "overdraft", "limit_breach",
+    "expected_eod_balance_breach", "balance_cadence_gap",
+    # 4 chain / cardinality
+    "chain_parent_disagreement", "xor_group_violation",
+    "fan_in_disagreement", "multi_xor_violation",
+    # 2 time-based stuck
+    "stuck_pending", "stuck_unbundled",
 )
 
 
@@ -1055,11 +1077,11 @@ def _populate_l1_exceptions_sheet(
         width=_FULL,
         title="Open Exceptions",
         subtitle=(
-            # C6 (cold-read v11.26.1) — was "5 invariant checks" but
-            # the matview UNIONs 10; updated for accuracy. See the
-            # sheet description for the full taxonomy.
+            # CS.7 (2026-06-09) — keep the count in sync with
+            # L1_EXCEPTIONS_BRANCH_NAMES; see the sheet description for
+            # the full taxonomy.
             "Total count of L1 SHOULD-constraint violations in the "
-            "picker's date window across all 10 invariant checks. "
+            "picker's date window across all 12 invariant checks. "
             # BV.3.3.c.bug3 (2026-05-31) — the matview is no longer
             # pre-filtered to latest_day; date narrowing happens at
             # the dataset SQL via pL1DateStart / pL1DateEnd pushdown.
@@ -1079,16 +1101,16 @@ def _populate_l1_exceptions_sheet(
         width=_FULL,
         title="Exceptions by Check Type",
         subtitle=(
-            # C6 (cold-read v11.26.1) — same "5 → 10" copy fix as KPI
-            # above. The bar chart's GROUP BY check_type covers every
-            # branch of the l1_exceptions UNION ALL, so a check
-            # type with rows in the detail table always renders a bar
-            # (the cold-read flagged fan_in_disagreement showing in
-            # the table but not on the chart — addressed by the
-            # ``COALESCE(SUM(1), 0)`` count semantics fix in C2,
+            # CS.7 (2026-06-09) — keep the count in sync with
+            # L1_EXCEPTIONS_BRANCH_NAMES. The bar chart's GROUP BY
+            # check_type covers every branch of the l1_exceptions UNION
+            # ALL, so a check type with rows in the detail table always
+            # renders a bar (the cold-read flagged fan_in_disagreement
+            # showing in the table but not on the chart — addressed by
+            # the ``COALESCE(SUM(1), 0)`` count semantics fix in C2,
             # which also makes the GROUP BY emit zero-bar entries
             # for ANY check_type present in the day's matview slice).
-            "How open exceptions in the date window distribute across the 10 L1 "
+            "How open exceptions in the date window distribute across the 12 L1 "
             "invariants. Spikes in one check kind point at a recurring "
             "error class to investigate first. **Log-scale Y axis:** "
             "the dominant check kind would otherwise swamp the rarer "

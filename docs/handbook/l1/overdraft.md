@@ -103,7 +103,7 @@ catcher, not a metric to be trended. If you see zero rows:
 - **Check the date filter.** A very narrow date window can show zero on a day
   with no postings. Widen to the trailing 7 days; if you still get zero, no
   internal account was overdrafted in that window.
-- **Don't celebrate yet.** Overdraft is one of ten L1 invariants. A clean
+- **Don't celebrate yet.** Overdraft is one of twelve L1 invariants. A clean
   Overdraft sheet next to a populated *Drift* or *Limit Breach* sheet means
   *that* invariant has work — `?` those sheets next.
 

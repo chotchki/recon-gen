@@ -131,7 +131,7 @@ not a metric to be trended. If you see zero rows:
 - **Check the date filter.** A very narrow date window can show zero on a day with no
   postings. Widen to the trailing 7 days; if you still get zero, the system is
   genuinely clean.
-- **Don't celebrate yet.** Drift is one of ten L1 invariants. A clean Drift sheet
+- **Don't celebrate yet.** Drift is one of twelve L1 invariants. A clean Drift sheet
   next to a populated *Overdraft* or *Limit Breach* sheet means *that* invariant
   has work — check those sheets next.
 

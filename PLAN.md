@@ -524,7 +524,7 @@ code-grounded acceptance criterion already filed in its source ticket.
   immediately after Getting Started. The sheet IDs (`SheetId`) must
   stay stable so existing URLs don't 404 — only the App tree's
   visible sequence changes.
-- [ ] CS.7 - **#287 — L1 Exceptions copy says 10, matview has 12.**
+- [x] CS.7 - **#287 — L1 Exceptions copy says 10, matview has 12.**
   The L1 Exceptions sheet description or header text claims "10
   L1 invariants" but the underlying matview UNIONs 12 branches (after
   CL.6's balance_cadence_gap + AB-era chain-coherence). Sweep the

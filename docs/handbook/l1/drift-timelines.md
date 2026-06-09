@@ -107,7 +107,7 @@ steady-state expectation. If you see zero baseline across the window:
   single-role selection can show zero on days when that role had no
   violations. Widen the window and select *All* roles to confirm the
   system is genuinely clean.
-- **Don't stop here.** Drift is one of ten L1 invariants. A clean
+- **Don't stop here.** Drift is one of twelve L1 invariants. A clean
   Drift Timelines sheet next to a populated *Overdraft* or *Limit
   Breach* sheet means *that* invariant has work — `?` those sheets
   next.
