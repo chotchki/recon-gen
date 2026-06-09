@@ -77,6 +77,7 @@ import html as _html_module
 import inspect
 import json
 import logging
+import re
 import traceback
 
 html_escape = _html_module.escape
@@ -202,6 +203,57 @@ class ServedDashboard:
     options_search_fetcher: OptionsSearchFetcher | None = None
 
 
+# CR.1 (2026-06-08) — Excel sheet name limit: ≤ 31 chars + no `: \ / ? * [ ]`.
+# Pre-CR.1 the export silently truncated `visual_id[:31]`; auto-derived
+# UUIDs (36 chars) lost their last 5 hex — vanishing into ~16M collision
+# space when several visuals share a workbook. Human-readable visual_ids
+# ≤31 (including the 31-char exec-* ones sitting at the wall) pass
+# through unchanged; UUIDs collapse to a stable `<first8>-<last4>`
+# shortform; >31-char human strings raise so the rename surfaces at
+# request time. Unit-tier lint at tests/unit/test_xlsx_sheet_title.py
+# walks every app's emitted tree and asserts the contract pre-deploy.
+_XLSX_FORBIDDEN_RE = re.compile(r"[:\\/?*\[\]]")
+_VISUAL_ID_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+XLSX_SHEET_NAME_MAX = 31
+
+
+def sheet_title_from_visual_id(visual_id: str) -> str:
+    """Derive an Excel-safe worksheet title from a ``visual_id``.
+
+    Excel caps sheet names at ``XLSX_SHEET_NAME_MAX`` (31) characters
+    and rejects ``: \\ / ? * [ ]``. ``openpyxl`` will silently
+    accept >31-char names + write them to the .xlsx; Excel enforces
+    at file-open, so two visuals diverging after char 31 silently
+    collide. CR.1 closes the silent-truncation hole at the export
+    boundary:
+
+    - **UUIDv5 visual_ids** (auto-derived in
+      ``common/tree/structure.py::auto_id``, always 36 chars) →
+      collapse to a stable 13-char ``<first8>-<last4>`` shortform.
+      Deterministic, 48-bit collision space (281T pairs).
+    - **Human-readable ≤ 31 chars** → pass through, forbidden chars
+      replaced with ``_``.
+    - **Human-readable > 31 chars** → raise ``ValueError`` so the
+      caller surfaces the rename requirement. The unit-tier lint
+      catches this pre-deploy; this raise is the defense-in-depth
+      that prevents a silently-truncated worksheet from ever
+      reaching disk.
+    """
+    if _VISUAL_ID_UUID_RE.match(visual_id):
+        return f"{visual_id[:8]}-{visual_id[-4:]}"
+    sanitized = _XLSX_FORBIDDEN_RE.sub("_", visual_id)
+    if len(sanitized) > XLSX_SHEET_NAME_MAX:
+        raise ValueError(
+            f"visual_id {visual_id!r} ({len(visual_id)} chars) "
+            f"exceeds Excel's {XLSX_SHEET_NAME_MAX}-char sheet "
+            f"name limit. Rename the visual to ≤ "
+            f"{XLSX_SHEET_NAME_MAX} chars."
+        )
+    return sanitized
+
+
 def _emit_xlsx_workbook(data: Any, visual_id: VisualId) -> bytes:  # typing-smell: ignore[explicit-any]: visual data is heterogeneous shape_table payload from the route layer
     """CH.5 (2026-06-08) — render a `shape_table`-shaped data dict
     as an XLSX file.
@@ -247,7 +299,19 @@ def _emit_xlsx_workbook(data: Any, visual_id: VisualId) -> bytes:  # typing-smel
             status_code=500,
             detail="openpyxl Workbook() returned no active sheet",
         )
-    ws.title = visual_id[:31]  # Excel sheet name limit
+    # CR.1 — Excel sheet name ≤ 31 chars + forbidden-char set. The
+    # pre-CR.1 ``visual_id[:31]`` silently truncated 36-char UUIDv5
+    # auto-derived ids + any human-readable id authored >31 chars,
+    # leaving the operator to discover collisions at file-open time.
+    # ``sheet_title_from_visual_id`` (a) collapses UUIDs to a stable
+    # 13-char shortform and (b) raises ``ValueError`` on long human
+    # strings so the rename surfaces at request time instead of
+    # silently colliding. See the helper's docstring for the full
+    # contract.
+    try:
+        ws.title = sheet_title_from_visual_id(visual_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     # Header row.
     headers: list[str] = []
     formats: list[str] = []
