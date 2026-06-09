@@ -67,16 +67,31 @@ jobs:
         # After the refresh, hit each public URL via cloudflared and
         # confirm 200. ``curl --max-time`` so a hanging request
         # doesn't block CI for 5+ min on the runner.
+        #
+        # Retry-with-backoff: refresh-demos.sh ends with
+        # SIGTERM-the-server + KeepAlive respawn; for sasquatch (which
+        # runs Studio + full editor + diagram + every dashboard) the
+        # cold-start can take 20-40s before uvicorn binds the port.
+        # Up to 6 attempts × 10s = ~1 min ceiling per URL — plenty for
+        # the cold start without blocking CI indefinitely.
         run: |
           set -eu
           for url in \
               https://recon-gen-spec.hotchkiss.io/dashboards/l1_dashboard/ \
               https://recon-gen-sasquatch.hotchkiss.io/dashboards/l1_dashboard/; do
             echo "==> probing $url"
-            code=$(curl --silent --location --output /dev/null --write-out "%{http_code}" --max-time 30 "$url")
+            code=""
+            for attempt in 1 2 3 4 5 6; do
+              code=$(curl --silent --location --output /dev/null --write-out "%{http_code}" --max-time 30 "$url" || echo "000")
+              if [ "$code" = "200" ]; then
+                echo "    200 OK (attempt $attempt)"
+                break
+              fi
+              echo "    attempt $attempt: HTTP $code; retrying in 10s..."
+              sleep 10
+            done
             if [ "$code" != "200" ]; then
-              echo "::error::$url returned HTTP $code (expected 200)"
+              echo "::error::$url returned HTTP $code after 6 attempts (expected 200)"
               exit 1
             fi
-            echo "    200 OK"
           done
