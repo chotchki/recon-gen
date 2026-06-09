@@ -20,6 +20,7 @@ those iteration loops.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import click
@@ -159,12 +160,25 @@ def studio(
     # (X.4.h.7 — `<cfg.parent>/.studio-state.yaml` survives Studio
     # restarts without polluting the operator-authored cfg.yaml).
     #
-    # AE.2.b — in `--demo-mode`, redirect the sidefile to a per-process
-    # tmpdir so trainer-knob mutations don't persist next to cfg.yaml
-    # (which is read-only under the sandbox-exec profile anyway). The
-    # tmpdir is wiped on restart, matching the nightly-refresh contract.
+    # CU.2 — `STUDIO_STATE_DIR` env var (set by the demo wrapper
+    # script's mktemp) re-routes the sidefile to a per-process tmpdir
+    # wiped on every launchd restart. Honored unconditionally — dev
+    # invocations leave the env var unset and fall back to the
+    # `<cfg.parent>` path. Replaces the prior `--demo-mode`-gated
+    # tempfile.mkdtemp() branch (which CU.3 removes outright); the
+    # wrapper script is the only state-dir provider that matters now.
     from pathlib import Path as _Path  # noqa: PLC0415
-    if demo_mode:
+    studio_state_dir_env = os.environ.get("STUDIO_STATE_DIR")
+    if studio_state_dir_env:
+        tg_cache = TestGeneratorCache(
+            cfg.test_generator,
+            state_path=_Path(studio_state_dir_env) / ".studio-state.yaml",
+        )
+    elif demo_mode:
+        # Legacy `--demo-mode` path. Kept until CU.3 deletes the flag;
+        # exercised only when the wrapper isn't providing
+        # STUDIO_STATE_DIR (i.e. ad-hoc `recon-gen studio --demo-mode`
+        # outside the launchd setup).
         import tempfile  # noqa: PLC0415
         _demo_state_dir = _Path(
             tempfile.mkdtemp(prefix="recon-demo-studio-state-"),  # typing-smell: ignore[recon-prefix]: tmpdir name, not a deployment prefix — never reaches cfg.prefixed() flow

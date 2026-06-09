@@ -1,6 +1,8 @@
 #!/bin/sh
-# AE.4 — sasquatch demo launcher wrapper. Computes a fresh per-process
-# tmpdir for STUDIO_STATE_DIR before exec-ing into sandbox-exec.
+# AE.4 / CU.2 — sasquatch demo launcher wrapper. Per-launch tmpdir for
+# (1) the L2 yaml overlay — visitor edits land here and are wiped on
+# every KeepAlive restart — and (2) `.studio-state.yaml` (trainer
+# knobs, same lifecycle).
 #
 # Install:
 #   cp deploy/launchd/launch-sasquatch.sh /Users/recon-demo/bin/
@@ -11,12 +13,16 @@
 # this script. Why a wrapper: launchd's ProgramArguments doesn't expand
 # $(...) — to compute mktemp at start time, we shell out. Each launchd
 # start (RunAtLoad, or a KeepAlive respawn after the nightly refresh
-# SIGTERMs the server) creates a fresh tmpdir; the previous tmpdir is
-# left behind in /var/folders for the OS to eventually reap.
+# SIGTERMs the server) creates a fresh tmpdir + re-copies the canonical
+# L2 yaml; the previous tmpdir is left behind in /var/folders for the
+# OS to eventually reap.
 #
-# The sandbox-exec profile (recon-demo-sasquatch.sb) read+writes only
-# the tmpdir passed via STUDIO_STATE_DIR — so even if old tmpdirs
-# linger, the sandboxed process can't see them.
+# CU.2 swap (2026-06-09): the L2 overlay copy moved from
+# `recon-gen studio --demo-mode` (which CU.3 deletes) to this wrapper
+# — `recon-gen` now sees a writable `--l2` path and never needs a
+# demo-aware code path. The sandbox-exec profile is the security
+# layer: writes to the canonical L2 inside INSTANCE_DIR remain denied,
+# writes to the tmpdir overlay are allowed.
 
 set -eu
 
@@ -32,23 +38,44 @@ set -eu
 # on Tahoe; setting it directly in the wrapper is load-bearing.
 export PYTHONDONTWRITEBYTECODE=1
 
+INSTANCE_DIR=/Users/recon-demo/sasquatch_pr
+CANONICAL_L2="$INSTANCE_DIR/l2.yaml"
+
 STUDIO_STATE_DIR="$(mktemp -d -t recon-demo-studio-state)"
 export STUDIO_STATE_DIR
 
-# Pass --demo-mode -c -- l2 -- port -- host via positional CLI args.
+# CU.2 — canonical → overlay copy. Visitor POST/PUT/DELETE on
+# /l2_shape/* will write back to this overlay file (sandbox allows it,
+# the canonical stays read-only). KeepAlive respawn re-runs this
+# script → fresh tmpdir → canonical re-copied. Any accumulated visitor
+# edits in the prior tmpdir are intentionally discarded.
+cp "$CANONICAL_L2" "$STUDIO_STATE_DIR/l2.yaml"
+
+# CU.2 — per-file disk cap. 50MB is way more than the L2 yaml + state
+# file ever need (canonical sasquatch_pr l2.yaml is ~35KB); a hostile
+# visitor scripting POSTs into accounts/rails/templates would have to
+# add roughly a million entries to hit this cap. The sandbox-exec
+# writable allowlist is STUDIO_STATE_DIR (for L2 overlay +
+# .studio-state.yaml) + current.duckdb + .wal + INSTANCE_DIR/logs, so
+# per-file cap is effectively the total cap for visitor-controlled
+# disk usage.
+ulimit -f 51200
+
+# Pass `-c` / `--l2` / `--port` / `--host` via positional CLI args.
 # `--no-docs` keeps the mkdocs build off the critical path on launch
-# (the demo doesn't ship the handbook).
+# (the demo doesn't ship the handbook). The `--l2` flag now points at
+# the tmpdir overlay (CU.2) — `recon-gen` sees a writable path with no
+# awareness it's a demo install.
 exec /usr/bin/sandbox-exec \
     -D HOME=/Users/recon-demo \
-    -D INSTANCE_DIR=/Users/recon-demo/sasquatch_pr \
+    -D INSTANCE_DIR="$INSTANCE_DIR" \
     -D PORT=8402 \
     -D PYTHON=/Users/recon-demo/venv/bin/python3.13 \
     -D STUDIO_STATE_DIR="$STUDIO_STATE_DIR" \
     -f /Users/recon-demo/sandbox/recon-demo-sasquatch.sb \
     -- /Users/recon-demo/venv/bin/recon-gen studio \
-        --demo-mode \
         -c /Users/recon-demo/sasquatch_pr/config.yaml \
-        --l2 /Users/recon-demo/sasquatch_pr/l2.yaml \
+        --l2 "$STUDIO_STATE_DIR/l2.yaml" \
         --port 8402 \
         --host 127.0.0.1 \
         --no-docs
