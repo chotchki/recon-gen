@@ -45,7 +45,14 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import replace as dataclass_replace
 from html import escape
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    # BV.3.3 snapshot — string-quoted return type on
+    # `_get_or_make_snapshotter` references this; the implementation
+    # imports lazily inside the closure so the module-level boot graph
+    # stays lean.
+    from recon_gen.common.snapshotter import Snapshotter
 from urllib.parse import quote
 
 
@@ -74,7 +81,13 @@ def asset_url(path: str) -> str:
 from datetime import date, datetime, timedelta
 
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    Response,
+)
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -5332,6 +5345,151 @@ def make_studio_routes(
             theme_head=studio_theme_head(instance),
         ))
 
+    # ---- BV.3.3 snapshot — POST /training/snapshot/{take,restore,drop} ----
+    #
+    # Drives the per-dialect Snapshotter (recon_gen.common.snapshotter)
+    # from the test harness via HTTP, preserving the X.2.q "everything
+    # through driver" invariant. App2Driver gains matching verbs that
+    # POST to these routes; the trainer dogfood test calls take() once
+    # after Session Start, then restore() between each plant — cutting
+    # the cumulative 15× Session Start walk (~30 min on Oracle) down to
+    # one take + 14× restore (DuckDB ~50ms, PG ~150ms, Oracle ~2500ms).
+    #
+    # Snapshotter is process-local but shared across requests — same pool +
+    # same v-overlay state. Lazily constructed on first hit; cached on a
+    # closure-scope dict so repeated requests reuse the golden-mirror DDL
+    # the factory put in place.
+    _snapshotter_state: dict[str, object] = {"instance": None}
+
+    async def _get_or_make_snapshotter() -> "Snapshotter | None":
+        """Lazy-construct the per-process Snapshotter.
+
+        Returns None when the Studio surface lacks the deps needed to
+        build one (cfg / db_pool omitted, as on the bare unit-test
+        L2InstanceCache surface). Callers translate None to 503.
+        """
+        existing = _snapshotter_state.get("instance")
+        if existing is not None:
+            return cast("Snapshotter", existing)
+        if cfg is None or db_pool is None:
+            return None
+        # Import inside the closure so the module-level import graph
+        # stays lean — the Studio routes file is hot at server boot,
+        # the Snapshotter only matters at first /training/snapshot hit.
+        from recon_gen.common.snapshotter import (  # noqa: PLC0415
+            make_snapshotter,
+        )
+        snap = await make_snapshotter(
+            cfg,
+            db_pool,
+            base_prefix=prefix_override or cfg.db_table_prefix,
+            l2_instance=cache.get(),
+        )
+        _snapshotter_state["instance"] = snap
+        return snap
+
+    def _name_from(request: Request) -> str | None:
+        """Read + validate the ``?name=<...>`` query param.
+
+        Returns the trimmed name or None when missing / empty. Callers
+        translate None to 400 so the operator gets an actionable error
+        instead of a generic 500 deep in the Snapshotter impl.
+        """
+        raw = request.query_params.get("name")
+        if not raw:
+            return None
+        trimmed = raw.strip()
+        return trimmed or None
+
+    async def training_snapshot_take(request: Request) -> Response:
+        """POST /training/snapshot/take?name=<name> — capture v-overlay state.
+
+        Returns 204 on success, 400 when ?name= missing, 503 when the
+        Studio surface can't construct a Snapshotter (cfg/db_pool
+        absent — bare unit-test surface), 500 when the impl raises.
+        """
+        name = _name_from(request)
+        if name is None:
+            return PlainTextResponse(
+                "missing required query parameter: name",
+                status_code=400,
+            )
+        snap = await _get_or_make_snapshotter()
+        if snap is None:
+            return PlainTextResponse(
+                "snapshotter unavailable — cfg or db_pool missing",
+                status_code=503,
+            )
+        try:
+            await snap.take(name)
+        except NotImplementedError as exc:
+            # Foundation stub path — surfaces the BV.3.3 phase message
+            # so the test harness gets an actionable failure rather
+            # than an opaque 500. NotImplementedError stays a 501 to
+            # distinguish from "unexpected impl bug".
+            return PlainTextResponse(str(exc), status_code=501)
+        except Exception as exc:  # noqa: BLE001 — surface as 500 with msg
+            return PlainTextResponse(
+                f"snapshot take failed: {exc}", status_code=500,
+            )
+        return Response(status_code=204)
+
+    async def training_snapshot_restore(request: Request) -> Response:
+        """POST /training/snapshot/restore?name=<name> — restore captured state.
+
+        Returns 204 on success, 400 / 503 / 501 / 500 with the same
+        semantics as ``training_snapshot_take``.
+        """
+        name = _name_from(request)
+        if name is None:
+            return PlainTextResponse(
+                "missing required query parameter: name",
+                status_code=400,
+            )
+        snap = await _get_or_make_snapshotter()
+        if snap is None:
+            return PlainTextResponse(
+                "snapshotter unavailable — cfg or db_pool missing",
+                status_code=503,
+            )
+        try:
+            await snap.restore(name)
+        except NotImplementedError as exc:
+            return PlainTextResponse(str(exc), status_code=501)
+        except Exception as exc:  # noqa: BLE001 — surface as 500 with msg
+            return PlainTextResponse(
+                f"snapshot restore failed: {exc}", status_code=500,
+            )
+        return Response(status_code=204)
+
+    async def training_snapshot_drop(request: Request) -> Response:
+        """POST /training/snapshot/drop?name=<name> — drop captured state.
+
+        Returns 204 on success, 400 / 503 / 501 / 500 with the same
+        semantics as ``training_snapshot_take``.
+        """
+        name = _name_from(request)
+        if name is None:
+            return PlainTextResponse(
+                "missing required query parameter: name",
+                status_code=400,
+            )
+        snap = await _get_or_make_snapshotter()
+        if snap is None:
+            return PlainTextResponse(
+                "snapshotter unavailable — cfg or db_pool missing",
+                status_code=503,
+            )
+        try:
+            await snap.drop(name)
+        except NotImplementedError as exc:
+            return PlainTextResponse(str(exc), status_code=501)
+        except Exception as exc:  # noqa: BLE001 — surface as 500 with msg
+            return PlainTextResponse(
+                f"snapshot drop failed: {exc}", status_code=500,
+            )
+        return Response(status_code=204)
+
     routes: list[Route | Mount] = [
         Route("/", landing, methods=["GET"]),
         Route("/data", data, methods=["GET"]),
@@ -5368,6 +5526,22 @@ def make_studio_routes(
         ),
         Route(
             "/training/tour/{kind}", training_tour, methods=["GET"],
+        ),
+        # BV.3.3 snapshot — Snapshotter HTTP surface; preserves the
+        # "everything through driver" invariant (X.2.q). App2Driver
+        # POSTs to these from the trainer dogfood test's per-plant
+        # restore loop.
+        Route(
+            "/training/snapshot/take", training_snapshot_take,
+            methods=["POST"],
+        ),
+        Route(
+            "/training/snapshot/restore", training_snapshot_restore,
+            methods=["POST"],
+        ),
+        Route(
+            "/training/snapshot/drop", training_snapshot_drop,
+            methods=["POST"],
         ),
         Route("/etl/", etl_landing, methods=["GET"]),
         Route("/etl/probe", etl_probe, methods=["GET"]),
