@@ -4784,6 +4784,14 @@ def make_studio_routes(
             if isinstance(pending_kinds_obj, frozenset)
             else ()
         )
+        # CZ.5.fix1 (2026-06-09) — operator cold-read of /training/ found
+        # the standalone-mode banner missing. CZ.5 added the banner-emit
+        # path to render_training_v3_landing (gated on `standalone_mode`)
+        # AND wired it into 3 other Studio surfaces (lines 620/914/1031),
+        # but missed the v3 training landing call site here. Computing +
+        # passing the flag now. Same gate-signal everywhere else: ETL-mode
+        # → no banner; standalone-mode → banner with protection signal.
+        standalone_mode = cfg is not None and cfg.etl_hook is None
         return HTMLResponse(render_training_v3_landing(
             top_nav_html=_top_nav_html("/training/"),
             theme_head=studio_theme_head(instance),
@@ -4800,6 +4808,7 @@ def make_studio_routes(
             session_start_running=session_start_running,
             apply_running=apply_running,
             apply_pending_count=apply_pending_count,
+            standalone_mode=standalone_mode,
         ))
 
     async def training_apply_stream(
