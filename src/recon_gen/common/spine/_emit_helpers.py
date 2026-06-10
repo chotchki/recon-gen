@@ -39,6 +39,7 @@ What does NOT live here:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -246,6 +247,160 @@ def insert_balance(
         cur.execute(sql, params)
     finally:
         cur.close()
+
+
+# Bulk-load chunk size — bounds the SQL string size for the DuckDB
+# multi-row VALUES path and caps per-call payload for psycopg
+# executemany / oracledb executemany. Matches the 1000-row batch the
+# CA.10 `_flush_duckdb_multivalues` coalescer uses.
+_BULK_CHUNK = 1000
+
+
+def _coerce_tuple_money(
+    row: tuple[object, ...],
+    cols: tuple[str, ...],
+    money_cols: frozenset[str],
+) -> tuple[object, ...]:
+    """Return ``row`` with every money-column slot routed through
+    ``_coerce_to_cents_int``. Pure (returns a new tuple); positional
+    over the canonical ``cols`` ordering.
+    """
+    return tuple(
+        _coerce_to_cents_int(v) if cols[i] in money_cols else v
+        for i, v in enumerate(row)
+    )
+
+
+def _bulk_insert(
+    conn: SyncConnection,
+    table: str,
+    cols: tuple[str, ...],
+    rows: Sequence[tuple[object, ...]],
+    money_cols: frozenset[str],
+) -> None:
+    """Shared dispatch: chunk the rows + delegate to the dialect's fast
+    path.
+
+    Per-dialect strategy:
+
+    - **DuckDB** (qmark default — `_placeholder_style` returns "qmark"
+      for duckdb because the connection module name doesn't match
+      psycopg/oracledb): use the CA.10 multi-row ``VALUES (…),(…),…``
+      coalescer (`_flush_duckdb_multivalues`). Measured 54× faster
+      than DuckDB's executemany at 50k rows.
+    - **PG / psycopg** ("format"): ``cursor.executemany`` is the real
+      bulk path (psycopg pipelines the binds).
+    - **Oracle / oracledb** ("numeric"): ``cursor.executemany`` —
+      oracledb's executemany is also the real fast path and unlike
+      `batch_oracle_inserts`'s `INSERT ALL` shape, each iteration
+      gets its own IDENTITY value so composite (id, entry) PKs
+      don't collide.
+
+    Empty ``rows`` is a no-op — no cursor open, no SQL parse.
+    """
+    if not rows:
+        return
+    coerced: list[tuple[object, ...]] = [
+        _coerce_tuple_money(r, cols, money_cols) for r in rows
+    ]
+    style = _placeholder_style(conn)
+    cols_str = ", ".join(cols)
+    if style == "qmark":
+        # DuckDB — reuse the existing multi-row VALUES coalescer. It
+        # batches internally at 1000 rows, so we hand it the full list.
+        # Local import avoids re-routing the top-level module graph;
+        # `_flush_duckdb_multivalues` is module-private under db.py but
+        # the bulk helpers are the canonical low-level surface that
+        # depends on it.
+        from recon_gen.common.db import (  # noqa: PLC0415
+            _flush_duckdb_multivalues,
+        )
+        cur = conn.cursor()
+        try:
+            _flush_duckdb_multivalues(cur, table, cols_str, coerced)
+        finally:
+            cur.close()
+        return
+    # PG / Oracle — executemany is the fast path on both. Placeholder
+    # style differs (``%s`` vs ``:1, :2, …``) but the API call shape is
+    # identical at PEP 249 level.
+    placeholders = _build_placeholders(style, len(cols))
+    sql = f"INSERT INTO {table} ({cols_str}) VALUES ({placeholders})"
+    cur = conn.cursor()
+    try:
+        for start in range(0, len(coerced), _BULK_CHUNK):
+            chunk = coerced[start:start + _BULK_CHUNK]
+            cur.executemany(sql, chunk)
+    finally:
+        cur.close()
+
+
+def bulk_insert_tx(
+    conn: SyncConnection,
+    rows: Sequence[tuple[object, ...]],
+    *,
+    prefix: str = DEFAULT_PREFIX,
+) -> None:
+    """Bulk-load rows into ``<prefix>_transactions`` via the dialect's
+    fast path.
+
+    Public surface for `etl_hook` integrators: a single call takes a
+    sequence of tuples (positional in ``TX_COLS`` order) and lands them
+    using ``_flush_duckdb_multivalues`` (DuckDB) / ``executemany``
+    (PG / Oracle). Avoids the per-row ``cur.execute`` cost of
+    `insert_tx` — sized for 10k+ row loads.
+
+    Each tuple must be positional over ``TX_COLS``. If you want
+    column-by-name input, call `insert_tx` instead — bulk is positional
+    by design (matches the dialect-fast-path contracts where named
+    bindings would cost a per-row Python dict build).
+
+    Money columns (``amount_money``) auto-coerce dollar shapes to
+    BIGINT cents via `_coerce_to_cents_int` — same contract as
+    `insert_tx`, so integrators can pass floats / Decimals / Cents
+    without precomputing.
+
+    Empty ``rows`` is a no-op (no cursor open, no SQL parsed).
+
+    **Bulk helpers do not stamp ``metadata.source``** — integrators
+    control the metadata column explicitly. For training / plant rows
+    that need the `source='training'` stamp, build the metadata JSON
+    via `recon_gen.common.spine.scenario_context.scenario_metadata(...)`
+    and put the resulting string in the tuple's metadata slot. The
+    low-level surface stays low-level on purpose: stamping at the bulk
+    boundary would silently overwrite intentional `source='real'`
+    rows that an integrator is loading.
+    """
+    _bulk_insert(
+        conn,
+        f"{prefix}_transactions",
+        TX_COLS,
+        rows,
+        _TX_MONEY_COLS,
+    )
+
+
+def bulk_insert_balance(
+    conn: SyncConnection,
+    rows: Sequence[tuple[object, ...]],
+    *,
+    prefix: str = DEFAULT_PREFIX,
+) -> None:
+    """Bulk-load rows into ``<prefix>_daily_balances`` via the dialect's
+    fast path.
+
+    Mirrors `bulk_insert_tx` for the balance table — same positional
+    tuple contract (in ``DB_COLS`` order), same money coercion
+    (``money`` + ``expected_eod_balance`` are BIGINT cents), same
+    metadata-not-stamped contract (see `bulk_insert_tx` docstring).
+    """
+    _bulk_insert(
+        conn,
+        f"{prefix}_daily_balances",
+        DB_COLS,
+        rows,
+        _DB_MONEY_COLS,
+    )
 
 
 def day_bounds(day: date) -> tuple[str, str]:

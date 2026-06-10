@@ -1423,6 +1423,9 @@ class SyncCursor(Protocol):
     def execute(
         self, sql: str, params: Any = ..., /,  # typing-smell: ignore[explicit-any]: bind params are per-driver-coerced sequences; no shared shape covers tuple / list / dict across psycopg / oracledb / sqlite3 / duckdb
     ) -> object: ...
+    def executemany(
+        self, sql: str, seq_of_params: Any, /,  # typing-smell: ignore[explicit-any]: per-driver bulk-bind shape — psycopg takes a Sequence[Sequence], oracledb takes a list[tuple], duckdb takes a list[tuple]; the structural intersection is "an iterable of param-sequences" but each driver's element shape diverges. Used by the bulk_insert_tx / bulk_insert_balance public helpers
+    ) -> object: ...
     def fetchall(self) -> list[Any]: ...  # typing-smell: ignore[explicit-any]: rows are heterogeneous by query — per-call shape lives in the SQL contract, not the DBAPI surface (same posture as AsyncCursor below)
     def fetchone(self) -> Any | None: ...  # typing-smell: ignore[explicit-any]: same — heterogeneous per query
     def fetchmany(self, size: int = ..., /) -> list[Any]: ...  # typing-smell: ignore[explicit-any]: same — heterogeneous per query; default size is driver-specific (sqlite3 / duckdb default to `arraysize`)
