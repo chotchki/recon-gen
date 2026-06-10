@@ -158,31 +158,46 @@ def make_studio_cfg(
     tmp_path: Path,
     *,
     etl_hook: Path | None = None,
+    dialect: Dialect = Dialect.DUCKDB,
+    demo_database_url: str | None = None,
 ) -> tuple[Config, Path]:
-    """Studio cfg: demo_database_url=duckdb tempfile under ``tmp_path``,
-    optional etl_hook. Returns ``(cfg, db_path)``.
+    """Studio cfg: optional etl_hook + per-dialect demo DB. Returns
+    ``(cfg, db_path)``.
+
+    Defaults: ``dialect=DUCKDB`` + ``demo_database_url=None`` →
+    a DuckDB tempfile under ``tmp_path`` (the historic shape). Callers
+    targeting a containerized PG/Oracle pass both kwargs so the cfg
+    leaves this helper fully wired (no post-construction mutation at
+    the test site — BV.3.3 hygiene).
+
+    ``db_path`` is the DuckDB tempfile path even when overriden by
+    ``demo_database_url`` — callers ignore it in the PG/Oracle case
+    (the underlying file is never created).
 
     BS.4 (2026-05-29): the legacy ``etl_datasource_url`` kwarg was
     dropped — the cross-dialect upstream-pull path is gone, so the
     helper no longer needs to wire one."""
     db_path = tmp_path / "demo.duckdb"
+    resolved_url = (
+        demo_database_url
+        if demo_database_url is not None
+        else f"duckdb:///{db_path}"
+    )
     # Z.C — deployment_name + db_table_prefix are required cfg fields.
-    db_prefix = "sasquatch_pr"
-    cfg_kwargs: dict[str, Any] = {  # noqa: ANN401
-        "aws_account_id": "111122223333",
-        "aws_region": "us-east-1",
-        "deployment_name": "recon-studio",
-        "db_table_prefix": db_prefix,
-        "datasource_arn": (
+    cfg = Config(
+        aws_account_id="111122223333",
+        aws_region="us-east-1",
+        deployment_name="recon-studio",
+        db_table_prefix="sasquatch_pr",
+        datasource_arn=(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
         ),
-        "demo_database_url": f"duckdb:///{db_path}",
-        "dialect": Dialect.DUCKDB,
-        "test_generator": TestGeneratorConfig(scope="full"),
-    }
-    if etl_hook is not None:
-        cfg_kwargs["etl_hook"] = str(etl_hook)
-    return Config(**cfg_kwargs), db_path
+        demo_database_url=resolved_url,
+        dialect=dialect,
+        test_generator=TestGeneratorConfig(scope="full"),
+        etl_hook=str(etl_hook) if etl_hook is not None else None,
+    )
+    return cfg, db_path
 
 
 def build_studio_app(

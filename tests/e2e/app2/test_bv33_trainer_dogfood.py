@@ -201,17 +201,18 @@ def trainer_ready_session(
 
     dialect: Dialect = request.param
     base_dir = tmp_path_factory.mktemp(f"trainer-{dialect.value}-{worker_id}")
-    base_cfg, _ = make_studio_cfg(base_dir)
-    base_cfg.dialect = dialect
-
+    demo_url: str | None = None
     if dialect is Dialect.POSTGRES:
-        base_cfg.demo_database_url = cast(
+        demo_url = cast(
             str, request.getfixturevalue("pg_container_url"),
         )
     elif dialect is Dialect.ORACLE:
-        base_cfg.demo_database_url = cast(
+        demo_url = cast(
             str, request.getfixturevalue("oracle_container_url"),
         )
+    base_cfg, _ = make_studio_cfg(
+        base_dir, dialect=dialect, demo_database_url=demo_url,
+    )
 
     base_cfg.test_generator = dataclasses.replace(
         base_cfg.test_generator, end_date=_TRAINER_ANCHOR,
