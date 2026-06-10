@@ -497,7 +497,10 @@ def docs_test(pytest_args: str) -> None:
 )
 @click.option(
     "--surface",
-    type=click.Choice(["tree", "matrix", "trainer-cards", "violations"]),
+    type=click.Choice([
+        "tree", "matrix", "trainer-cards", "violations",
+        "plant-banner-snippets",
+    ]),
     default="tree",
     show_default=True,
     help=(
@@ -512,7 +515,13 @@ def docs_test(pytest_args: str) -> None:
         "verifier for the Trainer's ``/training/`` v3 cards. "
         "``violations`` emits a single-bundle Markdown handbook with "
         "deep-linkable slug anchors per kind — BV.7 Surface 2, "
-        "consumed by the BTa.1 / BX.12 side-panel system."
+        "consumed by the BTa.1 / BX.12 side-panel system. "
+        "``plant-banner-snippets`` emits a Markdown reference table "
+        "of the per-kind copy strings the ``/etl/triage`` dynamic "
+        "plant banner renders — BV.7 Surface 4 (BU.0 Lock 11.4); "
+        "the runtime banner reads ``<v>_config_kv`` so this CLI "
+        "export is L2-independent reference material, not a "
+        "deployable artifact."
     ),
 )
 def docs_export(
@@ -618,6 +627,31 @@ def docs_export(
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(markdown, encoding="utf-8")
         click.echo(f"Wrote violations handbook to {out_path}")
+        return
+
+    if surface == "plant-banner-snippets":
+        from recon_gen.common.html._plant_banner import (
+            render_plant_banner_snippets,
+        )
+
+        if l2_instance_path is not None:
+            raise click.UsageError(
+                "--l2 has no effect with --surface=plant-banner-snippets; "
+                "the snippet table is L2-independent (it walks the global "
+                "PLANT_REGISTRY filtered to the L2-side categories per "
+                "BU.0 Lock 8)."
+            )
+
+        markdown = render_plant_banner_snippets()
+        if output is None:
+            # render_plant_banner_snippets() already ends in "\n", so
+            # suppress click's extra newline.
+            click.echo(markdown, nl=False)
+            return
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(markdown, encoding="utf-8")
+        click.echo(f"Wrote plant-banner snippets to {out_path}")
         return
 
     if output is None:

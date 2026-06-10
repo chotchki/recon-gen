@@ -2437,6 +2437,30 @@ async def _render_etl_triage_page(
   </aside>
 """
 
+    # BV.7 Surface 4 (BU.0 Lock 11.4) — dynamic plant banner. Reads
+    # the trainer KV (``<v>_config_kv['trainer_applied_plants']``)
+    # at request time + intersects against the L2-side registry
+    # categories so the operator sees which L2 kinds are currently
+    # planted. ``read_applied_state`` returns ``{}`` on any failure
+    # (no v overlay yet, DB down, parse fail) — the renderer's
+    # empty-state branch covers all of those cleanly. Plumbed below
+    # the demo-plant disclosure so the order is:
+    #   1. "bundled-demo data" disclaimer (static, cfg-driven)
+    #   2. "currently planted" summary (dynamic, KV-driven)
+    # → demo disclaimer answers "why are there ANY rows?", plant
+    # banner answers "which of MY plants is firing right now?".
+    from recon_gen.common.html._plant_banner import (  # noqa: PLC0415
+        render_plant_banner,
+    )
+    from recon_gen.common.l2.v_overlay import (  # noqa: PLC0415
+        read_applied_state,
+    )
+
+    plant_banner_html = ""
+    if cfg is not None:
+        applied_state = await read_applied_state(cfg)
+        plant_banner_html = render_plant_banner(applied_state)
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -2459,6 +2483,7 @@ async def _render_etl_triage_page(
     </p>
   </header>
   {demo_plant_banner}
+  {plant_banner_html}
   <main>
   {body_html}
   </main>
