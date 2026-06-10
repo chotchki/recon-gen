@@ -135,17 +135,19 @@ class TestMakeSnapshotter:
     dispatched, raises on unknown dialect. Every dialect arm currently
     returns the stub; phase 2 swaps in real impls cell-by-cell."""
 
-    @pytest.mark.parametrize(
-        "dialect",
-        # BV.3.3 (Oracle cell) — Oracle arm now returns a real impl, so
-        # the stub-dispatch parametrize narrows to PG only. PG flips off
-        # the stub list once its phase-2 cell lands.
-        [Dialect.POSTGRES],
-    )
-    def test_pg_arm_still_returns_stub(
-        self, dialect: Dialect,
-    ) -> None:
-        cfg = make_test_config(dialect=dialect)
+    def test_pg_arm_returns_real_impl(self) -> None:
+        """BV.3.3 — PG arm dispatches to ``PostgresSchemaSnapshotter``.
+
+        The factory holds the pool ref but never invokes ``acquire()``
+        during construction (the impl's ``__init__`` only reads
+        ``base_prefix`` + ``l2_instance``), so a ``_DummyPool`` is
+        sufficient for the dispatch contract. The PG round-trip
+        contract is covered by ``test_snapshotter_pg.py`` against the
+        shared PG container fixture.
+        """
+        from tests.e2e._snapshotter import PostgresSchemaSnapshotter
+
+        cfg = make_test_config(dialect=Dialect.POSTGRES)
         snap = asyncio.run(
             make_snapshotter(
                 cfg,
@@ -154,7 +156,7 @@ class TestMakeSnapshotter:
                 l2_instance=_empty_l2(),
             ),
         )
-        assert isinstance(snap, NotImplementedSnapshotter)
+        assert isinstance(snap, PostgresSchemaSnapshotter)
 
     def test_oracle_arm_returns_real_impl(self) -> None:
         """BV.3.3 — Oracle arm dispatches to

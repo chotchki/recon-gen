@@ -47,6 +47,7 @@ __all__ = [
     "DuckDBFileSnapshotter",
     "NotImplementedSnapshotter",
     "OracleGoldenMirrorSnapshotter",
+    "PostgresSchemaSnapshotter",
     "Snapshotter",
     "make_snapshotter",
 ]
@@ -715,6 +716,168 @@ class OracleGoldenMirrorSnapshotter:
         self._taken.clear()
 
 
+class PostgresSchemaSnapshotter:
+    """BV.3.3 — PG-dialect Snapshotter via golden-schema CTAS + restore.
+
+    Pattern:
+
+    1. ``take(name)`` — ``CREATE SCHEMA <prefix>_v_snap_<name>`` then
+       ``CREATE TABLE <snap>.<tbl> AS SELECT * FROM <prefix>_v_<tbl>``
+       for each base table (``transactions`` / ``daily_balances`` /
+       ``config_kv``). Matviews regenerate from base tables via
+       ``refresh_v_overlay_matviews_sql`` during restore.
+    2. ``restore(name)`` — TRUNCATE+INSERT for all base tables under
+       one txn, then ``refresh_v_overlay_matviews_sql`` under autocommit
+       (PG ``REFRESH MATERIALIZED VIEW CONCURRENTLY`` can't run in a
+       txn block — BV.6 / DL.15; mirrors
+       ``deploy_pipeline.py::step_4_matviews``).
+    3. ``drop(name)`` — ``DROP SCHEMA <prefix>_v_snap_<name> CASCADE``
+       (idempotent via ``IF EXISTS``).
+    4. ``aclose()`` — best-effort sweep of every snap schema matching
+       the ``<prefix>_v_snap_%`` pattern.
+
+    Why a PG schema namespace (not another table-prefix tier):
+    ``DROP SCHEMA ... CASCADE`` drops every snap table in one DDL.
+    """
+
+    def __init__(
+        self,
+        *,
+        pool: AsyncConnectionPool,
+        base_prefix: str,
+        l2_instance: "L2Instance",
+    ) -> None:
+        self._pool = pool
+        self._base_prefix = base_prefix
+        self._l2_instance = l2_instance
+        from recon_gen.common.l2.v_overlay import v_overlay_prefix  # noqa: PLC0415
+        self._v_prefix = v_overlay_prefix(base_prefix)
+        self._closed = False
+
+    def _snap_schema(self, name: str) -> str:
+        """Pattern: ``<base_prefix>_v_snap_<name>``."""
+        return f"{self._base_prefix}_v_snap_{name}"
+
+    async def _exec(self, conn: Any, sql: str) -> None:  # typing-smell: ignore[explicit-any]: psycopg AsyncConnection — cross-dialect Protocol doesn't surface commit/cursor
+        """Driver-uniform ``await conn.execute(sql)`` shim."""
+        await conn.execute(sql)
+
+    async def take(self, name: str) -> None:
+        """CREATE SCHEMA + three CTAS inside one psycopg txn.
+
+        Mid-CTAS error rolls back atomic — no half-built snap schema.
+        """
+        _validate_snapshot_name(name)
+        snap = self._snap_schema(name)
+        async with self._pool.acquire() as conn:
+            await self._exec(conn, f"CREATE SCHEMA {snap}")
+            for tbl in _V_OVERLAY_BASE_TABLES:
+                await self._exec(
+                    conn,
+                    f"CREATE TABLE {snap}.{tbl} AS "
+                    f"SELECT * FROM {self._v_prefix}_{tbl}",
+                )
+            # Explicit commit so CTAS tables are visible to the next
+            # ``acquire()``.
+            await cast(Any, conn).commit()
+
+    async def restore(self, name: str) -> None:
+        """TRUNCATE+INSERT under one txn, then matview refresh under
+        autocommit (CONCURRENTLY can't run in a txn block).
+
+        TRUNCATE … RESTART IDENTITY CASCADE: defensive against a future
+        FK addition (none today per Schema_v6); RESTART IDENTITY is a
+        no-op on tables without identity columns.
+        """
+        _validate_snapshot_name(name)
+        snap = self._snap_schema(name)
+
+        # Phase 1: TRUNCATE+INSERT under default (non-autocommit) txn.
+        async with self._pool.acquire() as conn:
+            for tbl in _V_OVERLAY_BASE_TABLES:
+                await self._exec(
+                    conn,
+                    f"TRUNCATE {self._v_prefix}_{tbl} "
+                    f"RESTART IDENTITY CASCADE",
+                )
+                await self._exec(
+                    conn,
+                    f"INSERT INTO {self._v_prefix}_{tbl} "
+                    f"SELECT * FROM {snap}.{tbl}",
+                )
+            await cast(Any, conn).commit()
+
+        # Phase 2: matview refresh under autocommit. Late-import to
+        # keep the heavy ``common/l2`` cone out of the import graph
+        # (this module loads at session start).
+        from recon_gen.common.l2.v_overlay import (  # noqa: PLC0415
+            refresh_v_overlay_matviews_sql,
+        )
+        refresh_sql = refresh_v_overlay_matviews_sql(
+            self._l2_instance,
+            base_prefix=self._base_prefix,
+            dialect=Dialect.POSTGRES,
+        )
+        async with self._pool.acquire() as conn:
+            # psycopg-specific autocommit flip — mirror of the
+            # ``deploy_pipeline.py::step_4_matviews`` dance.
+            raw = cast(Any, conn)
+            prior = bool(raw.autocommit)
+            await raw.set_autocommit(True)
+            try:
+                # refresh_v_overlay_matviews_sql emits multiple
+                # statements separated by ``;\n``. Split + run each
+                # individually so a parse error surfaces the offending
+                # statement, not the whole script.
+                for stmt in refresh_sql.split(";\n"):
+                    s = stmt.strip().rstrip(";")
+                    if not s:
+                        continue
+                    await self._exec(conn, s)
+            finally:
+                await raw.set_autocommit(prior)
+
+    async def drop(self, name: str) -> None:
+        """Drop snapshot ``name``'s schema. Idempotent via IF EXISTS."""
+        _validate_snapshot_name(name)
+        snap = self._snap_schema(name)
+        async with self._pool.acquire() as conn:
+            await self._exec(conn, f"DROP SCHEMA IF EXISTS {snap} CASCADE")
+            await cast(Any, conn).commit()
+
+    async def aclose(self) -> None:
+        """Best-effort sweep of every leftover snap schema for this prefix.
+
+        Catches a ``take()`` whose paired ``drop()`` never ran (test
+        crash between them). Pool-already-closed errors are swallowed
+        so we don't mask the original failure.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        # LIKE pattern with backslash-escaped underscores so the
+        # literal ``_v_snap_`` infix doesn't match arbitrary single
+        # chars. PG defaults to ``\`` as the LIKE escape.
+        like_pattern = f"{self._base_prefix}\\_v\\_snap\\_%"
+        try:
+            async with self._pool.acquire() as conn:
+                cur = await cast(Any, conn).execute(
+                    "SELECT schema_name FROM information_schema.schemata "
+                    "WHERE schema_name LIKE %s",
+                    (like_pattern,),
+                )
+                rows: list[Any] = await cur.fetchall()  # typing-smell: ignore[explicit-any]: psycopg row tuples are heterogeneous
+                for row in rows:
+                    schema_name = str(row[0])
+                    await self._exec(
+                        conn,
+                        f"DROP SCHEMA IF EXISTS {schema_name} CASCADE",
+                    )
+                await cast(Any, conn).commit()
+        except Exception:  # noqa: BLE001 — best-effort cleanup; pool may already be closed
+            return
+
+
 async def make_snapshotter(
     cfg: Config,
     pool: AsyncConnectionPool,
@@ -790,10 +953,9 @@ async def make_snapshotter(
             pool=pool,
             base_prefix=base_prefix,
         )
-    # PG arm — stub until its phase-2 cell lands.
-    # Hold the wiring deps on a stub instance variable so per-dialect
-    # impls have somewhere obvious to read them. The stub itself
-    # discards them — that's fine; the test harness only inspects the
-    # Protocol surface.
-    del pool, base_prefix, l2_instance
-    return NotImplementedSnapshotter()
+    # BV.3.3 — PG arm via schema-namespace CTAS.
+    return PostgresSchemaSnapshotter(
+        pool=pool,
+        base_prefix=base_prefix,
+        l2_instance=l2_instance,
+    )
