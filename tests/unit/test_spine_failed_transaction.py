@@ -122,16 +122,26 @@ def test_emit_writes_one_row_with_status_failed() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_untagged_emit_writes_null_metadata() -> None:
+def test_untagged_emit_writes_source_training_metadata() -> None:
+    """CZ.2 — every spine emit carries ``metadata.source = 'training'``
+    even when ``scenario_id`` is not threaded. Pre-CZ.2 this asserted
+    NULL; the standalone-mode cleanup gate needs the stamp on every
+    synthetic row to safely DELETE-only synthetic without nuking real
+    ETL-loaded data.
+    """
     gen = _build_gen()
     conn = _fresh_db()
     try:
         gen.emit(conn)
         conn.commit()
-        metadata = fetch_scalar(conn, f"SELECT metadata FROM {_PREFIX}_transactions",)
+        source = fetch_scalar(
+            conn,
+            f"SELECT json_extract_string(metadata, '$.source') "
+            f"FROM {_PREFIX}_transactions",
+        )
     finally:
         conn.close()
-    assert metadata is None
+    assert source == "training"
 
 
 def test_tagged_emit_writes_scenario_id() -> None:

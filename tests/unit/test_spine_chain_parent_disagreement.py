@@ -210,22 +210,26 @@ def test_emit_does_not_trip_drift_single_edge_property() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_untagged_emit_writes_null_metadata() -> None:
-    """`emit(conn)` without scenario_id leaves metadata=NULL —
-    byte-identical to pre-AV.5 behavior. Critical for any existing
-    test that calls gen.emit(conn) directly."""
+def test_untagged_emit_writes_source_training_metadata() -> None:
+    """CZ.2 — `emit(conn)` without scenario_id now stamps
+    ``metadata.source='training'`` (was NULL pre-CZ.2). Phase CZ's
+    standalone-mode cleanup gate needs every spine-emitted row to
+    carry the synthetic-row predicate.
+    """
     gen = ChainParentDisagreementInvariant().scenario_for()
     conn = _fresh_db()
     try:
         gen.emit(conn)
         conn.commit()
-        metadata_values = conn.execute(
-            f"SELECT DISTINCT metadata FROM {_PREFIX}_transactions",
+        sources = conn.execute(
+            f"SELECT DISTINCT "
+            f"json_extract_string(metadata, '$.source') "
+            f"FROM {_PREFIX}_transactions",
         ).fetchall()
     finally:
         conn.close()
-    assert metadata_values == [(None,)], (
-        f"Untagged emit must write metadata=NULL; got {metadata_values}"
+    assert sources == [("training",)], (
+        f"Untagged emit must stamp $.source='training'; got {sources}"
     )
 
 

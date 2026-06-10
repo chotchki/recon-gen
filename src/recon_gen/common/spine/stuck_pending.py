@@ -196,9 +196,9 @@ class StuckPendingGenerator:
         scenario_id: str | None = None,
     ) -> None:
         from recon_gen.common.spine.scenario_context import scenario_metadata
-        metadata = (
-            scenario_metadata(scenario_id, generator="StuckPendingGenerator")
-            if scenario_id is not None else None
+        # CZ.2: unconditional source='training' stamp.
+        metadata = scenario_metadata(
+            scenario_id, generator="StuckPendingGenerator",
         )
         # Plant `posting` far enough in the past of `as_of` that the
         # matview's `age_seconds > max_pending_age_seconds` filter fires.

@@ -490,7 +490,7 @@ def _insert_chain_orphan_parent_row(
         f"'{tx_id}', '{_DEMO_ACCOUNT_ID}', 'DemoGap', 'external', "
         f"100, 'Credit', 'Posted', {ts_lit}, "
         f"'{xfer_id}', '{_sql_escape(parent_name)}', 'DemoOverlay', "
-        "'{}');"
+        "'{\"source\":\"training\"}');"
     )
 
 
@@ -518,7 +518,7 @@ def _insert_phantom_rail_row(
         f"'{tx_id}', '{_DEMO_ACCOUNT_ID}', 'DemoGap', 'external', "
         f"100, 'Credit', 'Posted', {ts_lit}, "
         f"'{xfer_id}', '{_sql_escape(rail_name)}', 'DemoOverlay', "
-        "'{}');"
+        "'{\"source\":\"training\"}');"
     )
 
 
@@ -541,7 +541,7 @@ def _insert_phantom_template_row(
         f"50, 'Credit', 'Posted', {ts_lit}, "
         f"'{xfer_id}', '__demo_rail_for_tmpl_gap', "
         f"'{PHANTOM_TEMPLATE_NAME}', 'DemoOverlay', "
-        "'{}');"
+        "'{\"source\":\"training\"}');"
     )
 
 
@@ -578,7 +578,7 @@ def _insert_missing_metadata_row(
         f"'{xfer_id}', '__demo_rail_for_md_gap', "
         f"'{target_template}', 'DemoOverlay', "
         # Empty JSON object — every required metadata key is absent.
-        "'{}');"
+        "'{\"source\":\"training\"}');"
     )
 
 

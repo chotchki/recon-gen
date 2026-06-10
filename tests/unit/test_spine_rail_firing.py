@@ -224,7 +224,11 @@ def test_single_leg_credit_emit_writes_one_positive_leg() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_untagged_emit_writes_null_metadata() -> None:
+def test_untagged_emit_writes_source_training_metadata() -> None:
+    """CZ.2 — untagged emit now stamps ``metadata.source='training'``;
+    pre-CZ.2 wrote SQL NULL. Phase CZ's standalone-mode cleanup gates
+    on this predicate.
+    """
     gen = RailFiringFactory().scenario_for_rail(
         _TWO_LEG_RAIL, anchor_day=date(2030, 1, 1),
     )
@@ -233,11 +237,12 @@ def test_untagged_emit_writes_null_metadata() -> None:
         gen.emit(conn)
         conn.commit()
         rows = conn.execute(
-            f"SELECT metadata FROM {_PREFIX}_transactions",
+            f"SELECT json_extract_string(metadata, '$.source') "
+            f"FROM {_PREFIX}_transactions",
         ).fetchall()
     finally:
         conn.close()
-    assert all(r[0] is None for r in rows)
+    assert all(r[0] == "training" for r in rows)
 
 
 def test_tagged_emit_tags_every_leg() -> None:

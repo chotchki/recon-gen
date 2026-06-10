@@ -362,11 +362,14 @@ def test_cleanup_by_scenario_id_is_surgical() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_untagged_emit_writes_null_metadata() -> None:
-    """Generators called without ScenarioContext (scenario_id=None
-    default on emit) write metadata=NULL — byte-identical to pre-AV.5.
-    Every existing AS/AT/AU test that calls gen.emit(conn) directly
-    keeps working without modification."""
+def test_untagged_emit_writes_source_training_metadata() -> None:
+    """CZ.2 — generators called without ScenarioContext stamp
+    ``metadata.source='training'`` (pre-CZ.2 wrote SQL NULL).
+
+    The Phase CZ standalone-mode cleanup gate keys on this predicate;
+    every spine writer — tagged or untagged — must mark its row
+    synthetic so DELETE-only-synthetic doesn't wipe real ETL data.
+    """
     gen = OverdraftInvariant().scenario_for(
         "CustomerSubledger", magnitude=10.0,
     )
@@ -374,10 +377,11 @@ def test_untagged_emit_writes_null_metadata() -> None:
     try:
         gen.emit(conn)  # no scenario_id — untagged path
         rows = conn.execute(
-            f"SELECT metadata FROM {_PREFIX}_daily_balances",
+            f"SELECT json_extract_string(metadata, '$.source') "
+            f"FROM {_PREFIX}_daily_balances",
         ).fetchall()
-        assert rows == [(None,)], (
-            f"Untagged emit must write metadata=NULL; got {rows}"
+        assert rows == [("training",)], (
+            f"Untagged emit must stamp $.source='training'; got {rows}"
         )
     finally:
         conn.close()

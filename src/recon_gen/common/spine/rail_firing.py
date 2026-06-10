@@ -213,22 +213,21 @@ class RailFiringGenerator:
         # AY.6.b — build the metadata JSON as the union of
         # `metadata_extras` (per-firing field values from the rail's
         # `metadata_value_examples`) + the AV.5 scenario_id stamp.
-        # Untagged callers (scenario_id is None) AND no extras → metadata
-        # is None → SQL NULL (byte-stable with pre-AY.6.b).
+        # CZ.2: every emitted row now carries ``source='training'`` via
+        # ``scenario_metadata`` regardless of scenario_id — synthetic-
+        # row signal for standalone-mode cleanup gating. Pre-CZ.2 the
+        # untagged + no-extras branch emitted SQL NULL; that path is
+        # gone now (every row has at least the source stamp).
         extras_dict: dict[str, str] = dict(self.metadata_extras)
-        if scenario_id is not None:
-            tagged = scenario_metadata(
-                scenario_id, generator="RailFiringGenerator",
-            )
-            tagged_dict = json.loads(tagged)
-            extras_dict = {**tagged_dict, **extras_dict}  # extras win on overlap (matches OLD path)
-        if extras_dict:
-            metadata: str | None = json.dumps(
-                extras_dict, sort_keys=True,
-                separators=(",", ":"),  # typing-smell: ignore[json-indent]: compact deterministic per-row DB metadata, not a human-diffable file
-            )
-        else:
-            metadata = None
+        tagged = scenario_metadata(
+            scenario_id, generator="RailFiringGenerator",
+        )
+        tagged_dict = json.loads(tagged)
+        extras_dict = {**tagged_dict, **extras_dict}  # extras win on overlap (matches OLD path)
+        metadata: str = json.dumps(
+            extras_dict, sort_keys=True,
+            separators=(",", ":"),  # typing-smell: ignore[json-indent]: compact deterministic per-row DB metadata, not a human-diffable file
+        )
         posting = ts(self.anchor_day, hour=11)
 
         if self.is_two_leg:

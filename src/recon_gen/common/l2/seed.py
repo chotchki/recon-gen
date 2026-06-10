@@ -2658,6 +2658,13 @@ def _baseline_metadata(
     distinct values. Rails declaring ``metadata_value_examples`` use
     those values cycling through; the broader-mode plant (R.3) can
     override per-firing.
+
+    CZ.2: every baseline row carries ``source='training'`` so Phase
+    CZ's standalone-mode cleanup (``cfg.etl_hook is None`` ⇒ DELETE
+    WHERE ``JSON_VALUE(metadata, '$.source') = 'training'``) catches
+    the 90-day baseline noise. The stamp is added last so a rail that
+    declares ``source`` as a metadata_key would NOT shadow it — but
+    no L2 declares ``source`` (it's not a banking-domain field).
     """
     out: dict[str, str] = {}
     for key in rail.metadata_keys:
@@ -2666,6 +2673,9 @@ def _baseline_metadata(
     for key, values in rail.metadata_value_examples:
         if values:
             out[str(key)] = values[firing_seq % len(values)]
+    # CZ.2: synthetic-row predicate stamp. Placed last so it's authoritative
+    # over any rail-declared key collision.
+    out["source"] = "training"
     return out
 
 
@@ -3911,9 +3921,12 @@ def _emit_cascade_pair(
     second = rng.randrange(60)
     posting = f"{day.isoformat()}T08:{minute:02d}:{second:02d}+00:00"
 
+    # CZ.2: stamp source='training' on cascade-pair rows; standalone-
+    # mode cleanup matches via $.source = 'training'.
     metadata: dict[str, str] = {
         "cascade_label": str(cascade_label),
         "source_transfer_id": source_transfer_id,
+        "source": "training",
     }
 
     rows: list[str] = [
@@ -4516,6 +4529,12 @@ def _balance_row_tuple(
     next day. Default 0 keeps production midnight-aligned. Timestamps
     stay as ISO-8601 strings; the same boundary convention as
     `_txn_row_tuple`.
+
+    CZ.2: ``metadata`` is now ``{"source":"training"}`` so the 90-day
+    baseline balance rows carry the synthetic-row predicate Phase CZ's
+    standalone-mode cleanup gates on. Pre-CZ.2 emitted SQL NULL here;
+    the compact JSON form matches ``scenario_metadata``'s output for
+    byte-identity across paths.
     """
     money_cents = _to_cents(money)
     return (
@@ -4525,7 +4544,7 @@ def _balance_row_tuple(
         _bod_timestamp(day, offset_hours),
         _eod_timestamp(day, offset_hours),
         money_cents,
-        None, None,
+        '{"source":"training"}', None,
     )
 
 

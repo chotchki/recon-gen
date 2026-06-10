@@ -209,7 +209,8 @@ def test_emit_does_not_trip_chain_parent_disagreement_matview() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_untagged_emit_writes_null_metadata() -> None:
+def test_untagged_emit_writes_source_training_metadata() -> None:
+    """CZ.2 — untagged emit stamps ``metadata.source='training'``."""
     gen = TwoTemplateChainFactory().scenario_for_healthy(
         anchor_day=date(2030, 1, 1),
     )
@@ -218,11 +219,12 @@ def test_untagged_emit_writes_null_metadata() -> None:
         gen.emit(conn)
         conn.commit()
         rows = conn.execute(
-            f"SELECT metadata FROM {_PREFIX}_transactions",
+            f"SELECT json_extract_string(metadata, '$.source') "
+            f"FROM {_PREFIX}_transactions",
         ).fetchall()
     finally:
         conn.close()
-    assert all(r[0] is None for r in rows)
+    assert all(r[0] == "training" for r in rows)
 
 
 def test_tagged_emit_tags_every_row() -> None:

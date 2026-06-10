@@ -181,9 +181,14 @@ class LedgerSimulation:
         # AS.1-era spine modules layered cleanly; the helper is a
         # one-line JSON dump.
         from recon_gen.common.spine.scenario_context import scenario_metadata
-        metadata = (
-            scenario_metadata(scenario_id, generator="LedgerSimulation")
-            if scenario_id is not None else None
+        # CZ.2: unconditional stamp — every emitted row carries
+        # ``metadata.source = 'training'`` (gated cleanup signal) plus
+        # ``scenario_id`` when provided. Pre-CZ.2 this was guarded by
+        # ``if scenario_id is not None else None``; dropping the guard
+        # lets the AnomalyGenerator's untagged 20-row historical window
+        # + spike + baseline pairs all carry the stamp.
+        metadata = scenario_metadata(
+            scenario_id, generator="LedgerSimulation",
         )
         posting = ts(transfer.day, hour=transfer.hour)
         for i, leg in enumerate(transfer.legs):

@@ -189,9 +189,9 @@ class LimitBreachGenerator:
         scenario_id: str | None = None,
     ) -> None:
         from recon_gen.common.spine.scenario_context import scenario_metadata
-        metadata = (
-            scenario_metadata(scenario_id, generator="LimitBreachGenerator")
-            if scenario_id is not None else None
+        # CZ.2: unconditional source='training' stamp.
+        metadata = scenario_metadata(
+            scenario_id, generator="LimitBreachGenerator",
         )
         amount_magnitude = self.cap + self.overshoot
         if self.direction == "Outbound":

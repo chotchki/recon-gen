@@ -88,11 +88,9 @@ class ChainCompletionGenerator:
         scenario_id: str | None = None,
     ) -> None:
         from recon_gen.common.spine.scenario_context import scenario_metadata
-        metadata = (
-            scenario_metadata(
-                scenario_id, generator="ChainCompletionGenerator",
-            )
-            if scenario_id is not None else None
+        # CZ.2: unconditional source='training' stamp.
+        metadata = scenario_metadata(
+            scenario_id, generator="ChainCompletionGenerator",
         )
         posting = ts(self.anchor_day, hour=12)
         rail_names = {str(r.name) for r in self.instance.rails}

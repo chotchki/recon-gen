@@ -95,11 +95,9 @@ class SupersessionGenerator:
         scenario_id: str | None = None,
     ) -> None:
         from recon_gen.common.spine.scenario_context import scenario_metadata
-        metadata = (
-            scenario_metadata(
-                scenario_id, generator="SupersessionGenerator",
-            )
-            if scenario_id is not None else None
+        # CZ.2: unconditional source='training' stamp.
+        metadata = scenario_metadata(
+            scenario_id, generator="SupersessionGenerator",
         )
         # Original posting at the anchor day @ 09:00.
         insert_tx(

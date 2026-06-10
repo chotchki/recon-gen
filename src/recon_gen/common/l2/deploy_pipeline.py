@@ -717,7 +717,13 @@ async def step_3_5_derive_balances(
                 f"  {bday_start}, "
                 f"  {bday_end}, "
                 f"  SUM(amount_money), "
-                f"  NULL, "
+                # CZ.2: synthetic-row predicate stamp — this derivation
+                # only runs in the deploy pipeline (Studio / Trainer-
+                # driven); ETL integrators populate _daily_balances
+                # themselves via etl.write_daily_balance and never hit
+                # this branch. The derived rows are synthetic by
+                # construction.
+                f"  '{{\"source\":\"training\"}}', "
                 f"  NULL "
                 f"FROM {p}_transactions "
                 f"WHERE account_role IN ({roles_clause}) "

@@ -327,20 +327,23 @@ def test_missing_emit_does_not_trip_drift() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_untagged_emit_writes_null_metadata() -> None:
+def test_untagged_emit_writes_source_training_metadata() -> None:
+    """CZ.2 — untagged emit stamps ``metadata.source='training'``."""
     gen = FanInDisagreementInvariant().scenario_for_missing_parent()
     conn = _fresh_db()
     try:
         gen.emit(conn)
         conn.commit()
         values = conn.execute(
-            f"SELECT DISTINCT metadata FROM {_PREFIX}_transactions "
+            f"SELECT DISTINCT "
+            f"json_extract_string(metadata, '$.source') "
+            f"FROM {_PREFIX}_transactions "
             f"WHERE transfer_id = ? OR account_id = ?",
             (gen.child_transfer_id, gen.account_id),
         ).fetchall()
     finally:
         conn.close()
-    assert values == [(None,)]
+    assert values == [("training",)]
 
 
 def test_tagged_emit_writes_scenario_id_on_every_row() -> None:

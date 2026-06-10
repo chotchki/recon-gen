@@ -203,11 +203,9 @@ class XorGroupMissedFiringGenerator:
         scenario_id: str | None = None,
     ) -> None:
         from recon_gen.common.spine.scenario_context import scenario_metadata
-        metadata = (
-            scenario_metadata(
-                scenario_id, generator="XorGroupMissedFiringGenerator",
-            )
-            if scenario_id is not None else None
+        # CZ.2: unconditional source='training' stamp.
+        metadata = scenario_metadata(
+            scenario_id, generator="XorGroupMissedFiringGenerator",
         )
         insert_tx(
             conn,
@@ -285,11 +283,9 @@ class XorGroupOverlapGenerator:
         scenario_id: str | None = None,
     ) -> None:
         from recon_gen.common.spine.scenario_context import scenario_metadata
-        metadata = (
-            scenario_metadata(
-                scenario_id, generator="XorGroupOverlapGenerator",
-            )
-            if scenario_id is not None else None
+        # CZ.2: unconditional source='training' stamp.
+        metadata = scenario_metadata(
+            scenario_id, generator="XorGroupOverlapGenerator",
         )
         posting = ts(self.anchor_day)
         for i, variant in enumerate((

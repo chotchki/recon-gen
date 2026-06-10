@@ -207,9 +207,9 @@ class OverdraftGenerator:
         scenario_id: str | None = None,
     ) -> None:
         from recon_gen.common.spine.scenario_context import scenario_metadata
-        metadata = (
-            scenario_metadata(scenario_id, generator="OverdraftGenerator")
-            if scenario_id is not None else None
+        # CZ.2: unconditional source='training' stamp.
+        metadata = scenario_metadata(
+            scenario_id, generator="OverdraftGenerator",
         )
         start, end = day_bounds(self.anchor_day)
         insert_balance(

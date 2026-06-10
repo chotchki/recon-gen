@@ -234,9 +234,9 @@ class DriftGenerator:
         scenario_id: str | None = None,
     ) -> None:
         from recon_gen.common.spine.scenario_context import scenario_metadata
-        metadata = (
-            scenario_metadata(scenario_id, generator="DriftGenerator")
-            if scenario_id is not None else None
+        # CZ.2: unconditional source='training' stamp.
+        metadata = scenario_metadata(
+            scenario_id, generator="DriftGenerator",
         )
         start, end = day_bounds(self.anchor_day)
         # Child: clean balance == leg total. Stored is shifted by
@@ -341,9 +341,9 @@ class LedgerDriftGenerator:
         scenario_id: str | None = None,
     ) -> None:
         from recon_gen.common.spine.scenario_context import scenario_metadata
-        metadata = (
-            scenario_metadata(scenario_id, generator="LedgerDriftGenerator")
-            if scenario_id is not None else None
+        # CZ.2: unconditional source='training' stamp.
+        metadata = scenario_metadata(
+            scenario_id, generator="LedgerDriftGenerator",
         )
         start, end = day_bounds(self.anchor_day)
         # Child: stored money == leg_amount, with one matching credit

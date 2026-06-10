@@ -199,16 +199,35 @@ class ClaimedAccountsGenerator(Protocol):
     ) -> None: ...
 
 
-def scenario_metadata(scenario_id: str, **extra: object) -> str:
+def scenario_metadata(
+    scenario_id: str | None = None, **extra: object,
+) -> str:
     """Build the JSON metadata blob a tagged plant row carries.
 
     Centralized so the cleanup query can extract via a portable
     ``JSON_VALUE(metadata, '$.scenario_id')`` and every tagging caller
     writes the same shape. Extra kwargs round-trip — useful for
     per-generator attribution (e.g. ``generator='DriftGenerator'``).
+
+    CZ.2: every emitted row carries ``source='training'`` by default —
+    this is the synthetic-row predicate Phase CZ's standalone-mode
+    cleanup gates on (``cfg.etl_hook is None`` ⇒ DELETE WHERE
+    ``JSON_VALUE(metadata, '$.source') = 'training'``). Callers can
+    override via ``source=...`` in ``**extra`` (none currently do; the
+    ETL-hook public API in ``common/etl.py`` deliberately does NOT
+    call this helper — real-row absence of the tag IS the signal).
+
+    ``scenario_id`` defaults to ``None`` so untagged emit paths
+    (90-day baseline noise, hand-rolled demo overlays) still go
+    through this helper to inherit the source stamp. When ``None``,
+    the ``scenario_id`` key is omitted from the JSON.
     """
+    payload: dict[str, object] = {"source": "training"}
+    if scenario_id is not None:
+        payload["scenario_id"] = scenario_id
+    payload.update(extra)
     return json.dumps(
-        {"scenario_id": scenario_id, **extra},
+        payload,
         sort_keys=True,
         separators=(",", ":"),  # typing-smell: ignore[json-indent]: compact deterministic — this is a per-row DB metadata payload, not a human-diffable file
     )

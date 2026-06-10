@@ -175,7 +175,8 @@ class InvFanoutGenerator:
         # AY.2.b twist on metadata: AV.5's scenario_metadata gives us the
         # `scenario_id` payload; we union in the sender/recipient pair
         # values (the OLD path emits these for downstream investigation
-        # filters). When untagged, just emit the pair values.
+        # filters). CZ.2: stamp source='training' unconditionally so the
+        # untagged branch carries the synthetic-row signal too.
         for idx, sender_id in enumerate(sorted(self.sender_account_ids)):
             # Stratify posting time across the day; wraps at 12 like
             # the OLD path to keep a multi-sender plant inside the day.
@@ -191,23 +192,17 @@ class InvFanoutGenerator:
                 "sender_id": sender_id,
                 "recipient_id": self.recipient_account_id,
             }
-            if scenario_id is not None:
-                tagged = scenario_metadata(
-                    scenario_id, generator="InvFanoutGenerator",
-                )
-                # scenario_metadata returns a JSON string; merge by
-                # deserializing + adding pair keys + reserializing so
-                # the row's JSON column carries everything.
-                merged = {**json.loads(tagged), **base_metadata}
-                metadata: str | None = json.dumps(
-                    merged, sort_keys=True,
-                    separators=(",", ":"),  # typing-smell: ignore[json-indent]: compact deterministic per-row DB metadata, not a human-diffable file
-                )
-            else:
-                metadata = json.dumps(
-                    base_metadata, sort_keys=True,
-                    separators=(",", ":"),  # typing-smell: ignore[json-indent]: compact deterministic per-row DB metadata, not a human-diffable file
-                )
+            tagged = scenario_metadata(
+                scenario_id, generator="InvFanoutGenerator",
+            )
+            # scenario_metadata returns a JSON string; merge by
+            # deserializing + adding pair keys + reserializing so
+            # the row's JSON column carries everything.
+            merged = {**json.loads(tagged), **base_metadata}
+            metadata: str = json.dumps(
+                merged, sort_keys=True,
+                separators=(",", ":"),  # typing-smell: ignore[json-indent]: compact deterministic per-row DB metadata, not a human-diffable file
+            )
             # Sender debit leg.
             insert_tx(
                 conn,

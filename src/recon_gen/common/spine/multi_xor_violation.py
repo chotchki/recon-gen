@@ -227,11 +227,9 @@ class MultiXorMissedGenerator:
         scenario_id: str | None = None,
     ) -> None:
         from recon_gen.common.spine.scenario_context import scenario_metadata
-        metadata = (
-            scenario_metadata(
-                scenario_id, generator="MultiXorMissedGenerator",
-            )
-            if scenario_id is not None else None
+        # CZ.2: unconditional source='training' stamp.
+        metadata = scenario_metadata(
+            scenario_id, generator="MultiXorMissedGenerator",
         )
         inst = self.instance if self.instance is not None else load_spec_example()
         rail_name, template_name = _resolve_chain_parent(
@@ -312,11 +310,9 @@ class MultiXorOverlapGenerator:
         scenario_id: str | None = None,
     ) -> None:
         from recon_gen.common.spine.scenario_context import scenario_metadata
-        metadata = (
-            scenario_metadata(
-                scenario_id, generator="MultiXorOverlapGenerator",
-            )
-            if scenario_id is not None else None
+        # CZ.2: unconditional source='training' stamp.
+        metadata = scenario_metadata(
+            scenario_id, generator="MultiXorOverlapGenerator",
         )
         inst = self.instance if self.instance is not None else load_spec_example()
         parent_rail, parent_template = _resolve_chain_parent(

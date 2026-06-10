@@ -228,12 +228,12 @@ class AccountSimulation:
         scenario_id: str | None = None,
     ) -> None:
         # AV.5: tag each row's metadata column for ScenarioContext
-        # cleanup attribution. ``None`` skips the tag (untagged emit
-        # is byte-identical to pre-AV.5).
+        # cleanup attribution. CZ.2: stamp unconditionally so the
+        # ``source='training'`` signal is on every emitted row;
+        # scenario_id is included when set.
         from recon_gen.common.spine.scenario_context import scenario_metadata
-        metadata = (
-            scenario_metadata(scenario_id, generator="AccountSimulation")
-            if scenario_id is not None else None
+        metadata = scenario_metadata(
+            scenario_id, generator="AccountSimulation",
         )
         if self.emit_legs:
             for tag, amount in em.legs:

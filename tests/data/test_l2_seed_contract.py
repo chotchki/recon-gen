@@ -513,6 +513,11 @@ _INFRA_METADATA_KEYS = {
     # which spine generator wrote the row. Both flow into every row the
     # AY.4 spine pipeline emits + are legitimate infra, not L2 schema.
     "scenario_id", "generator",
+    # CZ.2 — synthetic-row predicate. Every seed-pipeline writer stamps
+    # ``source='training'`` so Phase CZ's standalone-mode cleanup gate
+    # (``cfg.etl_hook is None`` ⇒ DELETE WHERE
+    # ``JSON_VALUE(metadata, '$.source') = 'training'``) catches them.
+    "source",
 }
 
 
