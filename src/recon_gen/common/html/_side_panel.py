@@ -9,6 +9,10 @@ The right-edge slide-out drawer that hosts:
   cells via the same drawer chrome)
 - chain arrow diagrams for the Probe page (BTa.5)
 - entity edit-page help (consumed by BX.13 cells)
+- per-row metadata trees for ``Table.metadata_popup=True`` tables
+  (CY.5) — the row's metadata JSON travels as a query param sourced
+  from the already-rendered row payload (stateless; no per-click
+  DB round-trip).
 
 Single chrome, multiple content fragments. Triggers are
 ``<button>`` / ``<a>`` elements that ``hx-get`` an HTML fragment
@@ -32,15 +36,19 @@ as the cold-read v3 surfaces specific pain points.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Awaitable, Callable, Mapping
 from html import escape
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
+from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.responses import HTMLResponse
+from starlette.responses import HTMLResponse, Response
 from starlette.routing import Route
 
 if TYPE_CHECKING:
     from recon_gen.common.l2.cache import L2InstanceCache
+    from recon_gen.common.tree.structure import Sheet
 
 
 # -- Glossary content (single source of truth) --------------------------------
@@ -426,3 +434,269 @@ def _chain_arrow_route_factory(cache: L2InstanceCache):  # noqa: ANN202
         )
 
     return _chain_arrow
+
+
+# -- CY.5 metadata-popup side-panel renderer + route -------------------------
+
+
+# Exact copy operator-locked at PLAN.md CY.5: the empty-state fragment
+# carries NO toolbar (no Copy, no expand-all, no collapse-all) — the
+# panel body is just the one italic paragraph. Re-used by both the
+# top-level "metadata is empty" branch (missing / null / {} / [])
+# and the route handler's null-coalesce.
+_EMPTY_METADATA_FRAGMENT = (
+    '<p class="text-secondary-fg italic">No metadata for this row.</p>'
+)
+
+
+def _render_json_node(
+    key: str | int, value: Any, *, depth: int,
+) -> str:
+    """Recursive worker for the metadata tree renderer.
+
+    Object + array values render as ``<details data-json-node>`` with a
+    summary line ("key: { N fields }" / "key: [ N items ]") and a
+    nested column for the children. Primitive leaves render as
+    ``<span data-json-leaf>{json.dumps(value)}</span>`` — JSON-literal
+    notation so strings carry quotes, ``true`` / ``null`` / ``42`` stay
+    bare. Per PLAN.md CY.5 operator lock 10: raw keys (no friendlier
+    labels).
+
+    ``<details open>`` for depth ≤ 2; closed for deeper levels. The
+    operator flagged "awful nested JSON" — keep the top of the tree
+    visible by default, fold the deep branches.
+    """
+    # The "key" rendering shape — top-level dict keys come in as ``str``
+    # (already a JSON key), list indices as ``int``. Wrap the str in
+    # JSON quotes (matches the user's mental model of "this is a JSON
+    # key"); render the int as bare ``[N]`` style.
+    if isinstance(key, int):
+        key_label = f"[{key}]"
+    else:
+        key_label = json.dumps(key)
+    open_attr = " open" if depth <= 2 else ""
+
+    if isinstance(value, dict):
+        # Narrow Any → dict[Any, Any] for pyright strict; ``Any`` values
+        # are by-design (JSON is heterogeneous), so we cast explicitly
+        # to silence ``reportUnknown*``.
+        dict_value = cast(dict[Any, Any], value)
+        n = len(dict_value)
+        summary = (
+            f'<summary class="cursor-pointer">'
+            f'<span class="text-secondary-fg">{escape(key_label)}</span>'
+            f'<span class="text-secondary-fg">: '
+            f'{{ {n} field{"s" if n != 1 else ""} }}</span>'
+            f'</summary>'
+        )
+        children = "".join(
+            _render_json_node(str(k), v, depth=depth + 1)
+            for k, v in dict_value.items()
+        )
+        return (
+            f'<details data-json-node{open_attr}>'
+            f'{summary}'
+            f'<div class="pl-4 border-l border-surface-border">'
+            f'{children}'
+            f'</div>'
+            f'</details>'
+        )
+    if isinstance(value, list):
+        list_value = cast(list[Any], value)
+        n = len(list_value)
+        summary = (
+            f'<summary class="cursor-pointer">'
+            f'<span class="text-secondary-fg">{escape(key_label)}</span>'
+            f'<span class="text-secondary-fg">: '
+            f'[ {n} item{"s" if n != 1 else ""} ]</span>'
+            f'</summary>'
+        )
+        children = "".join(
+            _render_json_node(idx, v, depth=depth + 1)
+            for idx, v in enumerate(list_value)
+        )
+        return (
+            f'<details data-json-node{open_attr}>'
+            f'{summary}'
+            f'<div class="pl-4 border-l border-surface-border">'
+            f'{children}'
+            f'</div>'
+            f'</details>'
+        )
+    # Primitive leaf — JSON literal notation. ``default=str`` so any
+    # exotic type the loader smuggled through (e.g. ``Decimal``) still
+    # serializes; the IS-JSON DB constraint upstream limits the
+    # value universe to plain JSON, but defense-in-depth.
+    literal = json.dumps(value, default=str)
+    return (
+        f'<div class="py-0.5">'
+        f'<span class="text-secondary-fg">{escape(key_label)}</span>'
+        f'<span class="text-secondary-fg">: </span>'
+        f'<span data-json-leaf>{escape(literal)}</span>'
+        f'</div>'
+    )
+
+
+def render_metadata_panel(
+    metadata: Any, *, transaction_id: str,
+) -> str:
+    """Render the CY.5 row-metadata side-panel body.
+
+    The structure (per PLAN.md CY.5 operator lock):
+
+    - header with the transaction id + Copy / Expand all / Collapse all
+      buttons (the JS hooks behind ``[data-metadata-copy]`` /
+      ``[data-metadata-expand-all]`` / ``[data-metadata-collapse-all]``);
+    - a hidden ``<textarea data-metadata-raw>`` carrying pretty-printed
+      JSON the Copy button reads;
+    - a ``<div class="metadata-tree">`` holding the recursive
+      ``<details data-json-node>`` + ``<span data-json-leaf>`` tree.
+
+    Empty / null / ``{}`` / ``[]`` metadata short-circuits to the
+    operator-locked empty-state fragment (no toolbar — see
+    ``_EMPTY_METADATA_FRAGMENT``).
+    """
+    # Empty-state branch — matches None, empty dict, empty list. An
+    # empty *string* doesn't show up here (the route layer's
+    # ``json.loads`` would have failed first); guard anyway.
+    if metadata is None or metadata == {} or metadata == [] or metadata == "":
+        return _EMPTY_METADATA_FRAGMENT
+
+    # Toolbar buttons — small, accent-colored, keyboard-focusable.
+    # Tailwind utility soup mirrors the rest of the side panel's
+    # button vocabulary.
+    btn_class = (
+        "text-xs px-2 py-0.5 rounded-sm border border-surface-border "
+        "text-secondary-fg hover:text-primary-fg hover:bg-surface-bg "
+        "cursor-pointer"
+    )
+    copy_btn = (
+        f'<button type="button" data-metadata-copy '
+        f'class="{btn_class}" aria-label="Copy JSON">Copy</button>'
+    )
+    expand_btn = (
+        f'<button type="button" data-metadata-expand-all '
+        f'class="{btn_class}" aria-label="Expand all">Expand all</button>'
+    )
+    collapse_btn = (
+        f'<button type="button" data-metadata-collapse-all '
+        f'class="{btn_class}" aria-label="Collapse all">Collapse all</button>'
+    )
+
+    raw = json.dumps(metadata, indent=2, default=str)
+
+    # Top-level rendering — wrap a non-dict / non-list primitive in a
+    # synthetic "value" key so the tree always has a root. Dicts /
+    # lists iterate at depth 0 (their entries render at depth 1, so
+    # depth ≤ 2 = top two levels open by default).
+    if isinstance(metadata, dict):
+        # Same Any-narrowing pattern as ``_render_json_node`` —
+        # heterogeneous JSON, ``Any`` is the right value type, but
+        # cast explicitly for pyright strict.
+        top_dict = cast(dict[Any, Any], metadata)
+        body = "".join(
+            _render_json_node(str(k), v, depth=1)
+            for k, v in top_dict.items()
+        )
+    elif isinstance(metadata, list):
+        top_list = cast(list[Any], metadata)
+        body = "".join(
+            _render_json_node(idx, v, depth=1)
+            for idx, v in enumerate(top_list)
+        )
+    else:
+        body = _render_json_node("value", metadata, depth=1)
+
+    return (
+        '<div class="metadata-panel" role="complementary">'
+        '<header class="flex items-center justify-between mb-2">'
+        f'<h3 class="text-sm font-semibold m-0">'
+        f'Row metadata · {escape(str(transaction_id))}'
+        f'</h3>'
+        '<div class="flex gap-1">'
+        f'{copy_btn}{expand_btn}{collapse_btn}'
+        '</div>'
+        '</header>'
+        f'<textarea data-metadata-raw hidden aria-hidden="true">'
+        f'{escape(raw)}'
+        f'</textarea>'
+        '<div class="metadata-tree font-mono text-sm">'
+        f'{body}'
+        '</div>'
+        '</div>'
+    )
+
+
+def _sheet_has_metadata_popup_table(sheet: "Sheet") -> bool:
+    """Return True iff ``sheet`` carries a ``Table`` visual with
+    ``metadata_popup=True``. The route uses this as the 404 gate per
+    PLAN.md CY.5 — accidental wiring elsewhere (a metadata=... URL
+    aimed at a non-metadata-popup sheet) surfaces as a 404, not a
+    silent 200.
+    """
+    for v in sheet.visuals:
+        if type(v).__name__ != "Table":
+            continue
+        if getattr(v, "metadata_popup", False):
+            return True
+    return False
+
+
+def metadata_panel_route_factory(
+    dashboards: Mapping[str, Any],
+    all_sheets: Mapping[str, Mapping[str, "Sheet"]],
+) -> Callable[[Request], Awaitable[Response]]:
+    """Build the CY.5 ``GET /dashboards/.../rows/metadata`` handler with
+    the ``dashboards`` + ``all_sheets`` mappings in closure scope.
+
+    Stateless by design: the metadata JSON travels as a query param
+    sourced from the already-rendered row payload (CY.4). No per-click
+    DB round-trip; the handler validates routing + parses the JSON +
+    delegates to ``render_metadata_panel``.
+
+    404 cases (match the dropdown_options shape used elsewhere):
+
+    - unknown ``dashboard_id``
+    - unknown ``sheet_id`` for that dashboard
+    - known sheet whose resolved ``Table`` visual has
+      ``metadata_popup=False`` (or no ``Table`` visual at all)
+
+    500 case (per PLAN.md CY.5 operator lock 8):
+
+    - the metadata query param fails ``json.loads`` — defense in depth
+      behind the DB-side IS JSON constraint; no silent fallback.
+    """
+    async def metadata_panel_route(request: Request) -> Response:
+        dash_id = str(request.path_params["dashboard_id"])
+        if dash_id not in dashboards:
+            raise HTTPException(status_code=404)
+        sheet_id = str(request.path_params["sheet_id"])
+        sheets_for_dash = all_sheets.get(dash_id, {})
+        sheet = sheets_for_dash.get(sheet_id)
+        if sheet is None:
+            raise HTTPException(status_code=404)
+        if not _sheet_has_metadata_popup_table(sheet):
+            raise HTTPException(status_code=404)
+        raw_metadata = request.query_params.get("metadata")
+        transaction_id = str(request.query_params.get("transaction_id") or "")
+        # Missing / empty → empty-state fragment.
+        if not raw_metadata:
+            return HTMLResponse(_EMPTY_METADATA_FRAGMENT)
+        try:
+            parsed = json.loads(raw_metadata)
+        except json.JSONDecodeError as exc:
+            # Per operator lock 8 — defense in depth behind the DB IS
+            # JSON constraint. No silent fallback. Surface the
+            # decoder's message so the operator sees WHY the upstream
+            # row payload is malformed (e.g. unbalanced bracket from
+            # a stealth column rename).
+            return HTMLResponse(
+                f'<p class="text-warning">metadata JSON parse failed: '
+                f'{escape(str(exc))}</p>',
+                status_code=500,
+            )
+        return HTMLResponse(
+            render_metadata_panel(parsed, transaction_id=transaction_id),
+        )
+
+    return metadata_panel_route

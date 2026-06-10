@@ -108,6 +108,7 @@ _DEVLOG = logging.getLogger("recon_gen.app2.devlog")
 
 
 from recon_gen.common.db import PoolReleasedDuringRefresh
+from recon_gen.common.html._side_panel import metadata_panel_route_factory
 from recon_gen.common.html._tree_fetcher import OptionsSearchFetcher
 from recon_gen.common.html._tree_filter_specs import (
     make_filter_specs_for_sheet,
@@ -1107,6 +1108,18 @@ def make_app(
             "/dashboards/{dashboard_id}/sheets/{sheet_id}"
             "/dropdown-search/{dataset}/{column}",
             dropdown_search, methods=["GET"],
+        ),
+        # CY.5 — row-metadata side-panel fragment for tables wired
+        # with ``Table.metadata_popup=True``. Stateless: the metadata
+        # JSON travels as a query param sourced from the row payload
+        # (CY.4 projects ``metadata`` on every row). Validates
+        # dashboard / sheet / table-has-metadata-popup, parses the
+        # JSON, renders the collapsible ``<details>`` tree.
+        Route(
+            "/dashboards/{dashboard_id}/sheets/{sheet_id}"
+            "/rows/metadata",
+            metadata_panel_route_factory(dashboards, all_sheets),
+            methods=["GET"],
         ),
         # CN.5 — handbook page fetch for the App2 ``?`` side panel.
         # Path converter ``:path`` lets it match nested slugs like
