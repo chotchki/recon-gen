@@ -1381,7 +1381,7 @@ ORACLE_REUSE_CONTAINER_PREFIX: Final = "quicksight-test-oracle-"
 # fixture does adopt-or-create against this name. Mirrored from
 # `tests/conftest.py::_SHARED_PG_CONTAINER_NAME`; kept as a separate
 # constant here so `_cmd_down_local` doesn't reach into the test tree.
-PG_SHARED_CONTAINER_NAME: Final = "recon-gen-test-pg"
+PG_SHARED_CONTAINER_NAME: Final = "recon-gen-test-pg"  # typing-smell: ignore[recon-prefix]: Docker container name for the CB.17.k xdist-shared PG test fixture (not a cfg-prefixed AWS / DB resource ID) — stable across `pytest -n auto` workers so conftest's `pg_container_url` fixture can adopt-or-create against a single shared container; not multi-tenant and intentionally does not flow through `cfg.prefixed()`
 # Pinned password matches the testcontainers `OracleDbContainer`
 # behavior when `oracle_password` is explicitly set. Without pinning,
 # testcontainers randomizes per invocation (`hex(randbits(24))`) and
