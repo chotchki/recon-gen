@@ -1963,7 +1963,7 @@ def _build_verify_recipe_script(
 
     The recipe ships dialect-blind: it includes the canonical SQL
     canon shape (per-row sha256 over coalesce + CAST + chr(31) +
-    chr(0)) and asks the verifier to wire the per-dialect hash
+    chr(1)) and asks the verifier to wire the per-dialect hash
     function — DuckDB ``sha256()``, PG ``encode(digest(...,
     'sha256'), 'hex')`` (requires ``pgcrypto``), Oracle
     ``LOWER(RAWTOHEX(STANDARD_HASH(..., 'SHA256')))``.
@@ -1997,11 +1997,11 @@ def _build_verify_recipe_script(
         "    if DIALECT == 'oracle':\n"
         "        sep = \" || chr(31) || \"\n"
         "        canon = sep.join(\n"
-        "            f\"coalesce(CAST({c} AS VARCHAR2(4000)), chr(0))\"\n"
+        "            f\"coalesce(CAST({c} AS VARCHAR2(4000)), chr(1))\"\n"
         "            for c in quoted_columns)\n"
         "        return f\"LOWER(RAWTOHEX(STANDARD_HASH({canon}, 'SHA256')))\"\n"
         "    canon_args = ', '.join(\n"
-        '        f"coalesce(CAST({c} AS VARCHAR), chr(0))"\n'
+        '        f"coalesce(CAST({c} AS VARCHAR), chr(1))"\n'
         "        for c in quoted_columns)\n"
         "    canon = f\"concat_ws(chr(31), {canon_args})\"\n"
         "    if DIALECT == 'duckdb':\n"

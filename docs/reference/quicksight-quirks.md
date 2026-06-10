@@ -466,6 +466,52 @@ loud; ``audit apply --execute`` won't reach the fingerprint
 computation without the schema. No silent degrade to MD5
 (rejected per Lock 3).
 
+## psycopg rejects `chr(0)` (NUL) in text — switched audit canon to `chr(1)` (SOH) — CW.2, 2026-06-09
+
+### Symptom
+
+The Phase CW.2 streamed-fingerprint canonical SQL initially used
+`chr(0)` (ASCII NUL) as the NULL → text disambiguation sentinel:
+`coalesce(CAST(col AS VARCHAR), chr(0))`. DuckDB + Oracle accept
+NUL inside text columns natively; PG-the-server accepts it too;
+but **psycopg's driver layer rejects** NUL in any returned text
+value with:
+
+```
+psycopg.errors.ProgramLimitExceeded: null character not permitted
+```
+
+The streamed-fold reads per-row hex digests back from PG and
+psycopg refuses to surface text rows that include the NUL byte
+that PG's `chr(0)` would have produced if it appeared in the
+concat output before the SHA-256 wrap. (The hash output itself
+is hex-clean, but psycopg's check fires on the constructed
+canonical text before hashing in some code paths.)
+
+### Confirmed-via
+
+Cross-dialect verify run on `e4a5fa07` (Phase CW.2 streamed
+fingerprint) — `RECON_GEN_CONFIG=run/config.postgres.yaml
+./run_tests.sh up_to=qs_api` hit the error in
+`tests/e2e/db/test_audit_pdf_render_verify.py`. DuckDB +
+Oracle were green.
+
+### Workaround
+
+`common/provenance.py::_row_hash_sql_expr` switched all three
+dialects from `chr(0)` to `chr(1)` (ASCII SOH — Start-of-Heading)
+as the NULL sentinel. SOH is non-printing, can't appear in any
+of our schema's text/numeric/date/timestamp/boolean column CASTs,
+and is psycopg-safe across all dialects. Cross-dialect parity is
+preserved (same byte chosen on every dialect = same canonical
+text = same SHA-256 fingerprint).
+
+Lock doc updated:
+`docs/audits/cw_0_audit_pdf_perf_locks.md` Lock 2/3 notes the
+change-of-mind. No `provenance_format_version` bump required
+(v2 had no published PDFs in the wild yet — the change happens
+on the merge that landed CW).
+
 ## Optional `pyhanko` dep: audit signing graceful-degrades — CW.5, 2026-06-09
 
 ### Symptom

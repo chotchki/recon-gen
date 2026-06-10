@@ -50,8 +50,8 @@ every renderer signature (it's not optional — it's deleted).
 SHA-256** approach from the design doc:
 
 1. **In the engine:** per-row SHA-256 over canonicalized columns,
-   sorted by `lower(name)` with NULL → `chr(0)` sentinel + per-column
-   `coalesce(CAST(col AS VARCHAR), chr(0))`. Result is a stream of
+   sorted by `lower(name)` with NULL → `chr(1)` sentinel + per-column
+   `coalesce(CAST(col AS VARCHAR), chr(1))`. Result is a stream of
    64-character hex digests.
 2. **In Python:** `cur.fetchmany(50_000)` loop +
    `h.update(rh.encode("ascii"))` fold into a single `hashlib.sha256`.
@@ -121,8 +121,8 @@ entry.
 ```sql
 -- DuckDB: native sha256() over concat_ws-ed canon
 SELECT sha256(concat_ws(chr(31),
-    coalesce(CAST("col_a" AS VARCHAR), chr(0)),
-    coalesce(CAST("col_b" AS VARCHAR), chr(0)),
+    coalesce(CAST("col_a" AS VARCHAR), chr(1)),
+    coalesce(CAST("col_b" AS VARCHAR), chr(1)),
     /* … all columns, sorted by lower(name) … */
 )) AS rh
 FROM <prefixed_table>
@@ -131,8 +131,8 @@ ORDER BY entry;
 
 -- PostgreSQL 17+ (requires pgcrypto):
 SELECT encode(digest(concat_ws(chr(31),
-    coalesce(CAST("col_a" AS VARCHAR), chr(0)),
-    coalesce(CAST("col_b" AS VARCHAR), chr(0)),
+    coalesce(CAST("col_a" AS VARCHAR), chr(1)),
+    coalesce(CAST("col_b" AS VARCHAR), chr(1)),
     /* … */
 ), 'sha256'), 'hex') AS rh
 FROM <prefixed_table>
@@ -152,10 +152,15 @@ ORDER BY entry;
 **Per-dialect notes:**
 
 - **NULL sentinel.** Every column is wrapped
-  `coalesce(CAST(col AS VARCHAR), chr(0))` so a NULL in any cell
-  hashes the same on every dialect. `chr(0)` is the ASCII NUL byte
-  — can't appear in our schema's data types (no binary columns
-  reach the audit fingerprint).
+  `coalesce(CAST(col AS VARCHAR), chr(1))` so a NULL in any cell
+  hashes the same on every dialect. `chr(1)` is the ASCII SOH
+  (Start-of-Heading) control byte — can't appear in our schema's
+  data types (no binary columns reach the audit fingerprint).
+  Originally specced as `chr(0)` (ASCII NUL), changed post-CW.2
+  because PG's psycopg driver rejects NUL in text with
+  `ProgramLimitExceeded: null character not permitted`. SOH is
+  PG/DuckDB/Oracle-safe and serves the same disambiguation
+  purpose (NULL vs empty string).
 - **Column separator.** `chr(31)` is the ASCII UNIT SEPARATOR
   control code (same one the legacy Python ladder used).
 - **Column ordering.** Sorted by `lower(name)` at SQL-emit time so
@@ -167,7 +172,7 @@ ORDER BY entry;
   `coalesce(...)` shape. Use `||` chained per-column, not a
   `concat_ws` builtin that doesn't exist on 19c.
 - **DuckDB `concat_ws` semantics.** Skips NULL args by default; we
-  wrap in `coalesce(..., chr(0))` *before* concat_ws so the NULL
+  wrap in `coalesce(..., chr(1))` *before* concat_ws so the NULL
   sentinel survives explicitly. Same shape as the PG path —
   symmetry by construction.
 

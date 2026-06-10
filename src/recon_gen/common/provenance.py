@@ -197,14 +197,17 @@ def _row_hash_sql_expr(
     sorted by ``lower(name)``. The canonical form is
 
         SHA256(concat_ws(chr(31),
-            coalesce(CAST("col_a" AS VARCHAR), chr(0)),
-            coalesce(CAST("col_b" AS VARCHAR), chr(0)),
+            coalesce(CAST("col_a" AS VARCHAR), chr(1)),
+            coalesce(CAST("col_b" AS VARCHAR), chr(1)),
             …
         ))
 
     rendered with the per-dialect hash function. The wrapping
     ``coalesce + CAST`` ensures NULL columns hash distinctly (as
-    the ASCII NUL byte) and that every per-dialect ``CAST AS
+    the ASCII SOH byte; ``chr(0)`` was the original choice but PG's
+    psycopg layer rejects NUL in text — ``ProgramLimitExceeded:
+    null character not permitted``) and that every per-dialect
+    ``CAST AS
     VARCHAR`` produces the same string the legacy Python
     ``canonical_value()`` would have written, for the column types
     we actually use (text, numeric, date, timestamp, boolean,
@@ -229,7 +232,7 @@ def _row_hash_sql_expr(
         # so the digest matches PG/DuckDB's lowercase-hex convention.
         sep = " || chr(31) || "
         canon_parts = [
-            f"coalesce(CAST({c} AS VARCHAR2(4000)), chr(0))"
+            f"coalesce(CAST({c} AS VARCHAR2(4000)), chr(1))"
             for c in quoted_columns
         ]
         canon = sep.join(canon_parts)
@@ -238,7 +241,7 @@ def _row_hash_sql_expr(
     # PG + DuckDB use the same concat_ws shape. coalesce + CAST so
     # NULLs are explicit and concat_ws doesn't skip them.
     canon_args = ", ".join(
-        f"coalesce(CAST({c} AS VARCHAR), chr(0))"
+        f"coalesce(CAST({c} AS VARCHAR), chr(1))"
         for c in quoted_columns
     )
     canon = f"concat_ws(chr(31), {canon_args})"

@@ -72,7 +72,7 @@ def _make_fixture_table(conn: duckdb.DuckDBPyConnection, n_rows: int) -> None:
         )
         """
     )
-    # Single-statement bulk load; mix some NULLs so the chr(0)
+    # Single-statement bulk load; mix some NULLs so the chr(1)
     # sentinel path is exercised.
     conn.execute(
         f"""
@@ -148,14 +148,14 @@ def test_streamed_fold_equals_listagg_string_agg_form_duckdb() -> None:
 
     # Path B: all-SQL string_agg. Manually construct the per-row
     # hash with the same canonicalization the helper builds.
-    # Columns sorted by lower(name); chr(0) NULL sentinel; chr(31)
+    # Columns sorted by lower(name); chr(1) NULL sentinel; chr(31)
     # column separator.
     columns_sorted = [
         '"account_id"', '"balance_date"', '"entry"', '"metadata"',
         '"signed_amount"', '"status"', '"transfer_type"',
     ]
     canon_args = ", ".join(
-        f"coalesce(CAST({c} AS VARCHAR), chr(0))"
+        f"coalesce(CAST({c} AS VARCHAR), chr(1))"
         for c in columns_sorted
     )
     cur.execute(
