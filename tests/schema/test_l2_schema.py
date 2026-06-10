@@ -1397,6 +1397,56 @@ def test_l1_exceptions_includes_multi_xor_violation_branch() -> None:
     assert "child_count AS magnitude_count" in body
 
 
+def test_l1_exceptions_has_synthetic_seq_disambiguator_in_unique_index() -> None:
+    """BV.3.3.e regression — l1_exceptions's UNIQUE index must include
+    a synthetic ROW_NUMBER() disambiguator column (``seq``) so the
+    natural-key 5-tuple stays unique across all dialects.
+
+    Two upstream branches project the SAME 5-tuple
+    (check_type, account_id, business_day, rail_name, transfer_id)
+    for distinct rows: xor_group_violation drops its ``xor_group_index``
+    and fan_in_disagreement drops its ``chain_parent_name``. Both
+    branches set account_id=NULL.
+
+    The original BV.6 design picked a 5-tuple under the wrong
+    assumption that "Oracle's composite-NULL-trivially-unique converges
+    on PG NULLS DISTINCT semantics." Oracle's actual rule is the
+    OPPOSITE: partial-NULL composite UNIQUE treats NULL=NULL. Only
+    ALL-NULL rows are skipped from the index. So on Oracle, two rows
+    differing only in (account_id=NULL, dropped-disambiguator-column)
+    collide and DBMS_MVIEW.REFRESH raises ORA-00001 at refresh time.
+
+    The synthetic ``seq`` column closes the divergence on every
+    dialect; dashboards SELECT named columns, not ``*``, so it's
+    invisible at the user-facing layer."""
+    sql = emit_schema(
+        L2Instance(
+            accounts=(),
+            account_templates=(),
+            rails=(),
+            transfer_templates=(),
+            chains=(),
+            limit_schedules=(),
+        ),
+        prefix="lx",
+    )
+    # Synthetic seq column is computed via ROW_NUMBER() OVER the
+    # 5-tuple partition.
+    assert "ROW_NUMBER() OVER (" in sql
+    assert (
+        "PARTITION BY check_type, account_id, business_day,\n"
+        "                        rail_name, transfer_id"
+    ) in sql
+    assert "AS seq" in sql
+    # UNIQUE index covers the 6-tuple including seq (NOT the legacy
+    # 5-tuple); regression for the BV.6 → BV.3.3.e fix.
+    assert (
+        "CREATE UNIQUE INDEX idx_lx_l1ex_unique\n"
+        "    ON lx_l1_exceptions (check_type, account_id, business_day, "
+        "rail_name, transfer_id, seq);"
+    ) in sql
+
+
 def test_multi_xor_violation_filters_fan_in_via_view_predicate() -> None:
     """AB.6.5 + AB.5 coupling preserved post-BS.5: chains where ≥2
     children are declared but one is fan_in get filtered to the

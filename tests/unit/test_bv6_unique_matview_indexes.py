@@ -12,10 +12,16 @@ matviews per operator-locked design choices:
 
 - ``fan_in_disagreement`` — composite UNIQUE on
   ``(child_transfer_id, chain_parent_name)`` (BV.6-1).
-- ``l1_exceptions`` — 5-tuple UNIQUE on
-  ``(check_type, account_id, business_day, rail_name, transfer_id)``;
-  PG NULLs-distinct + Oracle composite-NULL-trivially-unique converge
-  on the same shape (BV.6-2).
+- ``l1_exceptions`` — 6-tuple UNIQUE on
+  ``(check_type, account_id, business_day, rail_name, transfer_id, seq)``.
+  The original BV.6-2 design was a 5-tuple under the wrong assumption
+  that Oracle's composite-NULL semantics converged on PG's NULLS
+  DISTINCT. Oracle's actual rule is the opposite — partial-NULL
+  composite UNIQUE treats NULL=NULL, so the transfer-keyed branches
+  (xor_group_violation / fan_in_disagreement) collided at REFRESH
+  time. BV.3.3.e (2026-06-10) added a synthetic ``seq`` ROW_NUMBER()
+  disambiguator column so the 6-tuple is unique by construction on
+  every dialect.
 - ``inv_money_trail_edges`` — synthetic ``edge_seq`` column added via
   ``row_number() OVER (PARTITION BY root_transfer_id, source_account_id,
   target_account_id ORDER BY tgt.id, src.id)``, with UNIQUE on the
@@ -91,9 +97,12 @@ _BV6_UNIQUE_MATVIEWS: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("daily_statement_summary", ("account_id", "business_day_start"), "dss_account_day"),
     # BV.6 finish (2026-06-10) — last three from batch 1's carve-out:
     ("fan_in_disagreement", ("child_transfer_id", "chain_parent_name"), "fid_unique"),
+    # BV.3.3.e (2026-06-10) — 6-tuple including the synthetic ``seq``
+    # ROW_NUMBER() disambiguator. The original 5-tuple collided on Oracle
+    # under partial-NULL composite UNIQUE semantics; see module docstring.
     (
         "l1_exceptions",
-        ("check_type", "account_id", "business_day", "rail_name", "transfer_id"),
+        ("check_type", "account_id", "business_day", "rail_name", "transfer_id", "seq"),
         "l1ex_unique",
     ),
     (

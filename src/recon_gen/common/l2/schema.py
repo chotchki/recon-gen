@@ -3574,6 +3574,28 @@ CREATE UNIQUE INDEX idx_{p}_dss_account_day
 -- chain_parent_disagreement / xor_group_violation /
 -- fan_in_disagreement / multi_xor_violation) surface the source
 -- matview's ``transfer_id`` column.
+--
+-- BV.3.3.e (2026-06-10) — outer SELECT adds a synthetic ``seq``
+-- ROW_NUMBER() disambiguator so the (check_type, account_id,
+-- business_day, rail_name, transfer_id, seq) 6-tuple is unique by
+-- construction on every dialect. Two upstream branches project
+-- the SAME 5-tuple for distinct rows: xor_group_violation drops
+-- its ``xor_group_index`` disambiguator (a single (transfer, template)
+-- can have multiple XOR groups), and fan_in_disagreement drops its
+-- ``chain_parent_name`` (a single child can appear in multiple
+-- fan_in chains). On PG those rows were tolerated because
+-- account_id IS NULL and PG's default NULLS DISTINCT lets the rows
+-- through. On Oracle the partial-NULL composite UNIQUE treats
+-- NULL=NULL and raises ORA-00001 at REFRESH time. The synthetic
+-- seq column closes the divergence — dashboards SELECT named
+-- columns, not ``*``, so it's invisible at the user-facing layer.
+SELECT inner_union.*,
+       ROW_NUMBER() OVER (
+           PARTITION BY check_type, account_id, business_day,
+                        rail_name, transfer_id
+           ORDER BY magnitude_amount, magnitude_count
+       ) AS seq
+FROM (
 SELECT 'drift' AS check_type, account_id, account_name,
        account_role, account_parent_role,
        business_day_start AS business_day,
@@ -3707,49 +3729,31 @@ SELECT 'multi_xor_violation',
        parent_transfer_id AS transfer_id,
        {null_bigint} AS magnitude_amount,
        child_count AS magnitude_count
-FROM {p}_multi_xor_violation;
+FROM {p}_multi_xor_violation
+) inner_union;
 -- L1 Exceptions sheet has 3 dropdowns (check_type, account,
 -- rail_name); each WHERE filter benefits from its own index.
 CREATE INDEX idx_{p}_l1e_check_type
     ON {p}_l1_exceptions (check_type);
 CREATE INDEX idx_{p}_l1e_account ON {p}_l1_exceptions (account_id);
 CREATE INDEX idx_{p}_l1e_rail ON {p}_l1_exceptions (rail_name);
--- BV.6 finish (2026-06-10) — UNIQUE on the 5-tuple (check_type,
--- account_id, business_day, rail_name, transfer_id). Each UNION ALL
--- branch already shows itself unique on a subset:
---   - drift / ledger_drift / overdraft / expected_eod_balance_breach —
---     keyed on (account_id, business_day); (check_type, account_id,
---     business_day) suffices, NULL rail_name + NULL transfer_id slots fill in.
---   - limit_breach — keyed on (account_id, business_day, rail_name,
---     direction); since direction isn't projected here, but each
---     (account, day, rail) pair fires at most once per check_type within
---     the limit_breach matview's own UNIQUE shape (UNION ALL across
---     Outbound/Inbound branches collapses to one rail_name × day cell
---     per UNION row anyway since the branches' direction slot lives
---     inside limit_breach itself, not l1_exceptions).
---   - stuck_pending / stuck_unbundled — keyed on (transaction_id) at
---     source; l1_exceptions projects transfer_id (the parent of the
---     leg). A multi-leg stuck transfer gets one row per leg, so
---     transfer_id alone isn't enough — BUT rail_name + business_day
---     also rotate per leg, AND the source matview's UNIQUE on
---     transaction_id guarantees the 5-tuple stays distinct
---     (transfer_id same, rail_name potentially same, business_day same,
---     account_id rotating). Conservative key: (check_type, account_id,
---     business_day, rail_name, transfer_id) accounts for all the
---     rotating-axis combinations.
---   - chain_parent_disagreement / xor_group_violation / fan_in_disagreement /
---     multi_xor_violation — transfer-keyed branches with NULL account_id;
---     PG NULLs-distinct (default) treats each NULL-stuffed row as distinct
---     from every other, and Oracle's composite-NULL-trivially-unique
---     converges on the same semantics. The branch's source-matview UNIQUE
---     (e.g. cpd's (transfer_id, child_template_name)) projects through:
---     rail_name carries the template_name, transfer_id is unique, so
---     (transfer_id, rail_name) within the NULL-account branch suffices.
--- The 5-tuple is the operator-locked design choice (BV.6-2): both
--- dialects converge on the same semantics. UNIQUE unlocks PG REFRESH …
--- CONCURRENTLY.
+-- BV.3.3.e (2026-06-10) — UNIQUE on the 6-tuple (check_type,
+-- account_id, business_day, rail_name, transfer_id, seq) where
+-- ``seq`` is a synthetic ROW_NUMBER() disambiguator (see the outer
+-- SELECT above). The original BV.6 design picked a 5-tuple under
+-- the wrong assumption that "Oracle's composite-NULL-trivially-unique
+-- converges on PG NULLS DISTINCT semantics" — Oracle's actual rule
+-- is the OPPOSITE: partial-NULL composite keys treat NULL=NULL (only
+-- ALL-NULL rows are skipped from the index). Two upstream branches
+-- project the SAME 5-tuple for distinct rows: xor_group_violation
+-- drops its ``xor_group_index`` and fan_in_disagreement drops its
+-- ``chain_parent_name``; both produce NULL account_id so the rows
+-- collide on Oracle's composite UNIQUE despite differing in the
+-- dropped disambiguator. The synthetic seq column closes that gap
+-- on every dialect while keeping the 5-tuple intent intact for
+-- dashboard SELECTs (which name columns, not ``*``).
 CREATE UNIQUE INDEX idx_{p}_l1ex_unique
-    ON {p}_l1_exceptions (check_type, account_id, business_day, rail_name, transfer_id);
+    ON {p}_l1_exceptions (check_type, account_id, business_day, rail_name, transfer_id, seq);
 """
 
 
