@@ -473,7 +473,7 @@ def _render_json_node(
     if isinstance(key, int):
         key_label = f"[{key}]"
     else:
-        key_label = json.dumps(key)
+        key_label = json.dumps(key, separators=(",", ":"))
     open_attr = " open" if depth <= 2 else ""
 
     if isinstance(value, dict):
@@ -527,7 +527,7 @@ def _render_json_node(
     # exotic type the loader smuggled through (e.g. ``Decimal``) still
     # serializes; the IS-JSON DB constraint upstream limits the
     # value universe to plain JSON, but defense-in-depth.
-    literal = json.dumps(value, default=str)
+    literal = json.dumps(value, default=str, separators=(",", ":"))
     return (
         f'<div class="py-0.5">'
         f'<span class="text-secondary-fg">{escape(key_label)}</span>'

@@ -261,7 +261,7 @@ _REGISTRY_PARAMS: list[object] = [
 ]
 
 
-@pytest.mark.parametrize("entry", _REGISTRY_PARAMS)
+@pytest.mark.parametrize("entry", _REGISTRY_PARAMS)  # typing-smell: ignore[no-inline-production-constants]: 'entry' is the pytest parametrize fixture name, not the `_ROW_ID_COLUMN` value
 def test_plant_surfaces_on_dashboard(
     entry: PlantKindEntry,
     sasquatch_l2_path: Path,

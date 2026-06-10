@@ -237,7 +237,7 @@ def _render_with_metadata_popup(
     fetch_url: str = (
         "/dashboards/d-meta/sheets/s-meta/visuals/v-meta/data"
     ),
-    visual_id: str = "v-meta",
+    visual_id: str = "v-meta",  # typing-smell: ignore[bare-str-id]: matches sibling _render fixture's analyst-string convention at line 48
 ) -> None:
     """Variant of `_render` that lets the test toggle the
     ``data-metadata-popup`` section attribute + a non-default fetch

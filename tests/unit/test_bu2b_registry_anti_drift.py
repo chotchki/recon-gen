@@ -36,7 +36,7 @@ _REGISTRY_PARAMS: list[object] = [
 ]
 
 
-@pytest.mark.parametrize("entry", _REGISTRY_PARAMS)
+@pytest.mark.parametrize("entry", _REGISTRY_PARAMS)  # typing-smell: ignore[no-inline-production-constants]: 'entry' is the pytest parametrize fixture name, not the `_ROW_ID_COLUMN` value
 def test_section_resolves(entry: PlantKindEntry) -> None:
     """Lock 9 #1 — every registry entry must resolve to a typed section.
     KeyError here means the entry references a section_kind the handbook
@@ -48,7 +48,7 @@ def test_section_resolves(entry: PlantKindEntry) -> None:
     )
 
 
-@pytest.mark.parametrize("entry", _REGISTRY_PARAMS)
+@pytest.mark.parametrize("entry", _REGISTRY_PARAMS)  # typing-smell: ignore[no-inline-production-constants]: 'entry' is the pytest parametrize fixture name, not the `_ROW_ID_COLUMN` value
 def test_tour_url_well_formed(entry: PlantKindEntry) -> None:
     """Lock 9 #2 — every entry's tour URL must be a server-relative
     path. Absolute URLs (http://...) leak the deployment shape;
@@ -63,7 +63,7 @@ def test_tour_url_well_formed(entry: PlantKindEntry) -> None:
     )
 
 
-@pytest.mark.parametrize("entry", _REGISTRY_PARAMS)
+@pytest.mark.parametrize("entry", _REGISTRY_PARAMS)  # typing-smell: ignore[no-inline-production-constants]: 'entry' is the pytest parametrize fixture name, not the `_ROW_ID_COLUMN` value
 def test_primitive_kwargs_match_plant_function_signature(
     entry: PlantKindEntry,
 ) -> None:

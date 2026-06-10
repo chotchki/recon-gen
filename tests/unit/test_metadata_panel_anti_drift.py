@@ -277,7 +277,7 @@ def test_route_malformed_metadata_fails_loud_not_silent(
     lock 8 prohibits.
     """
     app, dash_id, sheet_id = anti_drift_app
-    with TestClient(app) as c:  # type: ignore[arg-type]
+    with TestClient(app) as c:  # type: ignore[arg-type]: Starlette TestClient signature accepts ASGI3Application but pyright's stub expects narrower type
         resp = c.get(
             f"/dashboards/{dash_id}/sheets/{sheet_id}/rows/metadata",
             params={
@@ -313,7 +313,7 @@ def test_route_legitimate_empty_metadata_still_renders_empty_state(
     detector that fires on every empty payload.
     """
     app, dash_id, sheet_id = anti_drift_app
-    with TestClient(app) as c:  # type: ignore[arg-type]
+    with TestClient(app) as c:  # type: ignore[arg-type]: Starlette TestClient signature accepts ASGI3Application but pyright's stub expects narrower type
         resp = c.get(
             f"/dashboards/{dash_id}/sheets/{sheet_id}/rows/metadata",
             params={

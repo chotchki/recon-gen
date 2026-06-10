@@ -62,7 +62,7 @@ def test_render_metadata_panel_empty_dict_returns_empty_state() -> None:
     fragment — no toolbar."""
     html = render_metadata_panel({}, transaction_id="txn-1")
     assert html == (
-        '<p class="text-secondary-fg italic">No metadata for this row.</p>'
+        '<p class="text-secondary-fg italic">No metadata for this row.</p>'  # typing-smell: ignore[no-inline-production-constants]: this IS the anti-drift contract test for the empty-state fragment — pinning the literal is the point, importing _EMPTY_METADATA_FRAGMENT would tautologize
     )
     # No toolbar surface bleeds through.
     assert "data-metadata-copy" not in html
@@ -396,7 +396,7 @@ def test_route_returns_200_and_details_tree_for_typical_metadata(
     metadata_json = json.dumps(
         {"trace_id": "abc-123", "amount": 42, "details": {"nested": True}},
     )
-    with TestClient(app) as c:  # type: ignore[arg-type]
+    with TestClient(app) as c:  # type: ignore[arg-type]: Starlette TestClient signature accepts ASGI3Application but pyright's stub expects narrower type
         resp = c.get(
             f"/dashboards/{dash_id}/sheets/{sheet_id}/rows/metadata",
             params={
@@ -426,7 +426,7 @@ def test_route_empty_metadata_renders_empty_state_no_toolbar(
     expected_empty = (
         '<p class="text-secondary-fg italic">No metadata for this row.</p>'
     )
-    with TestClient(app) as c:  # type: ignore[arg-type]
+    with TestClient(app) as c:  # type: ignore[arg-type]: Starlette TestClient signature accepts ASGI3Application but pyright's stub expects narrower type
         # 1. metadata param missing entirely.
         resp = c.get(
             f"/dashboards/{dash_id}/sheets/{sheet_id}/rows/metadata",
@@ -468,7 +468,7 @@ def test_route_404_for_unknown_dashboard(
 ) -> None:
     """Unknown dashboard_id → 404."""
     app, _, sheet_id, _, _ = metadata_dashboard_fixture
-    with TestClient(app) as c:  # type: ignore[arg-type]
+    with TestClient(app) as c:  # type: ignore[arg-type]: Starlette TestClient signature accepts ASGI3Application but pyright's stub expects narrower type
         resp = c.get(
             f"/dashboards/no-such-dash/sheets/{sheet_id}/rows/metadata",
             params={"metadata": "{}"},
@@ -481,7 +481,7 @@ def test_route_404_for_unknown_sheet(
 ) -> None:
     """Unknown sheet_id (for an existing dashboard) → 404."""
     app, dash_id, _, _, _ = metadata_dashboard_fixture
-    with TestClient(app) as c:  # type: ignore[arg-type]
+    with TestClient(app) as c:  # type: ignore[arg-type]: Starlette TestClient signature accepts ASGI3Application but pyright's stub expects narrower type
         resp = c.get(
             f"/dashboards/{dash_id}/sheets/no-such-sheet/rows/metadata",
             params={"metadata": "{}"},
@@ -495,7 +495,7 @@ def test_route_404_when_sheet_table_lacks_metadata_popup(
     """Known sheet whose Table visual has ``metadata_popup=False`` → 404.
     Surfaces accidental wiring elsewhere as 404, not a silent 200."""
     app, _, _, dash_no, sheet_no = metadata_dashboard_fixture
-    with TestClient(app) as c:  # type: ignore[arg-type]
+    with TestClient(app) as c:  # type: ignore[arg-type]: Starlette TestClient signature accepts ASGI3Application but pyright's stub expects narrower type
         resp = c.get(
             f"/dashboards/{dash_no}/sheets/{sheet_no}/rows/metadata",
             params={"metadata": "{}"},
@@ -510,7 +510,7 @@ def test_route_500_on_malformed_metadata_json(
     failed' message. Defense in depth behind the DB IS-JSON constraint
     (per PLAN.md CY.5 operator lock 8 — no silent fallback)."""
     app, dash_id, sheet_id, _, _ = metadata_dashboard_fixture
-    with TestClient(app) as c:  # type: ignore[arg-type]
+    with TestClient(app) as c:  # type: ignore[arg-type]: Starlette TestClient signature accepts ASGI3Application but pyright's stub expects narrower type
         resp = c.get(
             f"/dashboards/{dash_id}/sheets/{sheet_id}/rows/metadata",
             params={"metadata": "{not valid json"},
@@ -533,7 +533,7 @@ def test_route_typical_payload_carries_leaves_and_data_attrs(
         "nullable": None,
     }
     metadata_json = json.dumps(payload)
-    with TestClient(app) as c:  # type: ignore[arg-type]
+    with TestClient(app) as c:  # type: ignore[arg-type]: Starlette TestClient signature accepts ASGI3Application but pyright's stub expects narrower type
         resp = c.get(
             f"/dashboards/{dash_id}/sheets/{sheet_id}/rows/metadata",
             params={
@@ -687,7 +687,7 @@ def test_route_medium_payload_round_trip_under_budget(
     payload = _build_large_flat_dict(400)
     metadata_json = json.dumps(payload)
 
-    with TestClient(app) as c:  # type: ignore[arg-type]
+    with TestClient(app) as c:  # type: ignore[arg-type]: Starlette TestClient signature accepts ASGI3Application but pyright's stub expects narrower type
         start = time.perf_counter()
         resp = c.get(
             f"/dashboards/{dash_id}/sheets/{sheet_id}/rows/metadata",

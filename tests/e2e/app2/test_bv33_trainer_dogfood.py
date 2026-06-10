@@ -652,7 +652,7 @@ def _walkable_params() -> list[Any]:  # noqa: ANN401  — ParameterSet has no pu
     return params
 
 
-@pytest.mark.parametrize("entry", _walkable_params())
+@pytest.mark.parametrize("entry", _walkable_params())  # typing-smell: ignore[no-inline-production-constants]: 'entry' is the pytest parametrize fixture name, not the `_ROW_ID_COLUMN` value
 def test_trainer_dogfood_per_kind(
     entry: PlantKindEntry,
     trainer_ready_session: tuple[Config, str],

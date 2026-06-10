@@ -187,7 +187,7 @@ def test_training_v3_landing_renders_standalone_banner() -> None:
     )
 
     html = render_training_v3_landing(
-        base_prefix="spec_example",
+        base_prefix="spec_example",  # typing-smell: ignore[no-inline-production-constants]: bare string passed as fixture param; coincidental match with DEFAULT_PREFIX is incidental
         v_overlay_exists=False,
         standalone_mode=True,
         standalone_banner_html=standalone_banner_html,
@@ -211,7 +211,7 @@ def test_training_v3_landing_renders_standalone_banner() -> None:
 def test_training_v3_landing_omits_standalone_banner_when_hook_configured() -> None:
     """Real-hook deployments don't get the banner."""
     html = render_training_v3_landing(
-        base_prefix="spec_example",
+        base_prefix="spec_example",  # typing-smell: ignore[no-inline-production-constants]: bare string passed as fixture param; coincidental match with DEFAULT_PREFIX is incidental
         v_overlay_exists=False,
         standalone_mode=False,
     )
