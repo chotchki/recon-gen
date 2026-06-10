@@ -425,6 +425,62 @@ def test_audit_apply_pdf_notes_field_is_fillable_acroform(
     )
 
 
+def test_audit_apply_signing_pyhanko_missing_degrades_gracefully(
+    signed_config: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """CW.5 — pyhanko-missing must NOT crash audit apply.
+
+    Operator-flagged side issue: ``audit apply --execute`` was hard-
+    crashing at the signing step when the optional ``pyhanko`` dep
+    wasn't installed. Lock 5 in
+    ``docs/audits/cw_0_audit_pdf_perf_locks.md`` says: emit an
+    unsigned PDF + warning event, don't crash.
+
+    We can't actually uninstall pyhanko inside the test, so we
+    inject an ImportError by stubbing ``sign_pdf_in_place`` to raise.
+    The CLI must:
+    1. Still exit 0.
+    2. Still leave the PDF on disk (it was written BEFORE the
+       signing attempt).
+    3. Emit the "signing skipped" warning to stderr.
+    """
+    out = tmp_path / "report.pdf"
+
+    # Stub sign_pdf_in_place to raise ImportError, simulating the
+    # `from pyhanko... import` line inside it failing at call time.
+    def fake_sign(*args: object, **kwargs: object) -> None:  # noqa: ARG001
+        raise ImportError(
+            "No module named 'pyhanko' (synthetic for CW.5 test)"
+        )
+    monkeypatch.setattr(
+        "recon_gen.common.pdf.signing.sign_pdf_in_place",
+        fake_sign,
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "audit", "apply",
+            "-c", str(signed_config),
+            "--l2", str(_SPEC_EXAMPLE),
+            "-o", str(out),
+            "--execute",
+        ],
+    )
+    # Exit 0 — the PDF wrote successfully, signing is post-hoc.
+    assert result.exit_code == 0, result.output
+    # PDF on disk, valid bytes.
+    assert out.is_file()
+    assert out.stat().st_size > 0
+    assert out.read_bytes().startswith(b"%PDF-")
+    # Warning surfaced via stderr (click runner merges into .output).
+    assert "signing skipped" in result.output
+    assert "pyhanko" in result.output
+    assert "recon-gen[prod]" in result.output
+
+
 def test_audit_apply_execute_signs_pdf(
     signed_config: Path, tmp_path: Path,
 ):

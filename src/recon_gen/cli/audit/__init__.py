@@ -1478,14 +1478,32 @@ def audit_apply(
             l2_instance_path=l2_instance_path,
         )
         # U.7.b — auto-sign the PDF if config.yaml carries signing material.
+        # CW.5 — graceful degrade when pyhanko isn't installed. The PDF
+        # write already happened; failing the whole command on a missing
+        # optional dep would discard a perfectly valid unsigned report.
+        # The pyhanko imports live inside ``sign_pdf_in_place`` itself
+        # (the wrapper module loads cleanly without the extra), so the
+        # ImportError surfaces when we CALL the signer — wrap both the
+        # import + call, not just the import. See
+        # ``docs/audits/cw_0_audit_pdf_perf_locks.md`` Lock 5.
         if _cfg.signing is not None:
             from recon_gen.common.pdf.signing import sign_pdf_in_place
-            sign_pdf_in_place(out_path, _cfg.signing)
-            click.echo(
-                f"Applied digital signature "
-                f"({_cfg.signing.signer_name or 'cert CN'}) to {out_path}.",
-                err=True,
-            )
+            try:
+                sign_pdf_in_place(out_path, _cfg.signing)
+            except ImportError as exc:
+                click.echo(
+                    f"audit: signing skipped — pyhanko not installed "
+                    f"(install `recon-gen[prod]` to enable PDF signing). "
+                    f"Wrote unsigned PDF to {out_path}. "
+                    f"[ImportError: {exc}]",
+                    err=True,
+                )
+            else:
+                click.echo(
+                    f"Applied digital signature "
+                    f"({_cfg.signing.signer_name or 'cert CN'}) to {out_path}.",
+                    err=True,
+                )
         click.echo(
             f"Wrote audit report to {out_path} "
             f"(institution={institution}, "
