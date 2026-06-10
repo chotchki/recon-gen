@@ -204,3 +204,217 @@ def test_row_drill_url_column_match_is_case_insensitive() -> None:
         }"""))
         browser.close()
     assert url == "/d/s/t?param_pTx=xfr-9"
+
+
+# -- CY.6 — metadata-popup ctxmenu entry ---------------------------------
+
+
+_METADATA_DATA: dict[str, Any] = {
+    # Columns include hidden `metadata` and `transaction_id` per CY.4.
+    "columns": [
+        {"name": "transfer_id", "label": "Transfer"},
+        {"name": "transaction_id", "label": "Txn", "hidden": True},
+        {"name": "amount", "label": "Amount", "format": "currency"},
+        {"name": "metadata", "label": "Metadata", "hidden": True},
+    ],
+    "rows": [
+        ["xfr-1", "txn-aaa", 1234.5, '{"k": "v"}'],
+        ["xfr-2", "txn-bbb", 5678.0, ""],  # empty metadata → entry suppressed
+    ],
+    "total_rows": 2,
+    "page_offset": 0,
+    "page_size": 50,
+    "sort_column": "",
+}
+
+
+def _render_with_metadata_popup(
+    page: Any,
+    data: dict[str, Any],
+    row_drills: list[dict[str, Any]] | None,
+    *,
+    metadata_popup: bool,
+    fetch_url: str = (
+        "/dashboards/d-meta/sheets/s-meta/visuals/v-meta/data"
+    ),
+    visual_id: str = "v-meta",
+) -> None:
+    """Variant of `_render` that lets the test toggle the
+    ``data-metadata-popup`` section attribute + a non-default fetch
+    URL so the dashboard / sheet IDs landing in the htmx.ajax call
+    can be asserted."""
+    import json
+
+    page.evaluate(
+        """({ data, rowDrillsJson, metadataPopup, fetchUrl, visualId }) => {
+            var prev = document.getElementById('drill-host');
+            if (prev) prev.remove();
+            var section = document.createElement('section');
+            section.id = 'drill-host';
+            section.setAttribute('data-visual-kind', 'Table');
+            section.setAttribute('data-visual-id', visualId);
+            section.setAttribute('data-fetch-url', fetchUrl);
+            if (rowDrillsJson !== null) {
+                section.setAttribute('data-row-drills', rowDrillsJson);
+            }
+            if (metadataPopup) {
+                section.setAttribute('data-metadata-popup', '1');
+            }
+            var target = document.createElement('div');
+            target.id = 'visual-data-' + visualId;
+            target.classList.add('visual-data');
+            section.appendChild(target);
+            document.body.appendChild(section);
+            window.__bootstrap_internals__.renderTable(target, data, visualId);
+            window.__bootstrap_internals__.wireRowDrills(section, target, data);
+        }""",
+        {
+            "data": data,
+            "rowDrillsJson": (
+                json.dumps(row_drills) if row_drills is not None else None
+            ),
+            "metadataPopup": metadata_popup,
+            "fetchUrl": fetch_url,
+            "visualId": visual_id,
+        },
+    )
+
+
+def test_metadata_popup_alone_wires_ellipsis_column() -> None:
+    """A Table with no `data-row-drills` but `data-metadata-popup="1"`
+    still gets the ⋯ menu column — the synthetic "{} View metadata"
+    entry is the only menu item; rows are NOT left-click drillable."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_with_metadata_popup(
+            page, _METADATA_DATA, None, metadata_popup=True,
+        )
+        n_btns = page.locator(
+            "#drill-host tbody tr .row-drill-menu-btn",
+        ).count()
+        n_drillable = page.locator(
+            "#drill-host tbody tr[data-row-drill]",
+        ).count()
+        n_head_extra = page.locator(
+            "#drill-host thead th.row-drill-col",
+        ).count()
+        browser.close()
+    assert n_btns == 2
+    # metadata-popup-only: rows are NOT left-click navigable.
+    assert n_drillable == 0
+    assert n_head_extra == 1
+
+
+def test_metadata_popup_menu_entry_prepended_when_row_has_metadata() -> None:
+    """Capture the items `openRowMenu` passes to `ctxmenu.show` and
+    verify (1) the synthetic "{} View metadata" entry is prepended,
+    (2) the entry carries the row's metadata + transaction_id, and
+    (3) action() fires `htmx.ajax` with the per-route URL shape from
+    the spec."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_with_metadata_popup(
+            page, _METADATA_DATA, _MENU_DRILL, metadata_popup=True,
+        )
+        # Stub ctxmenu.show + htmx.ajax to capture invocations.
+        page.evaluate("""() => {
+            window.__ctx_items__ = null;
+            window.ctxmenu = { show: (items, _el) => {
+                window.__ctx_items__ = items;
+            }};
+            window.__ajax_calls__ = [];
+            window.htmx = window.htmx || {};
+            window.htmx.ajax = (verb, url, opts) => {
+                window.__ajax_calls__.push({ verb: verb, url: url, opts: opts });
+                return Promise.resolve();
+            };
+            // Fire the ⋯ button for the first row (metadata present).
+            var btn = document.querySelector(
+                '#drill-host tbody tr:nth-child(1) .row-drill-menu-btn',
+            );
+            btn.click();
+        }""")
+        items = cast(
+            list[dict[str, Any]],
+            page.evaluate("() => window.__ctx_items__"),
+        )
+        assert items is not None
+        # First item is the metadata entry; second is the original drill.
+        assert items[0]["text"] == "{} View metadata"
+        assert items[0]["kind"] == "metadata_popup"
+        assert items[0]["metadata"] == '{"k": "v"}'
+        assert items[0]["transaction_id"] == "txn-aaa"
+        assert items[1]["text"] == "View Transactions for this transfer"
+        # Fire the action — captures the htmx call.
+        page.evaluate("() => window.__ctx_items__[0].action()")
+        calls = cast(
+            list[dict[str, Any]],
+            page.evaluate("() => window.__ajax_calls__"),
+        )
+        browser.close()
+    assert len(calls) == 1
+    assert calls[0]["verb"] == "GET"
+    assert calls[0]["url"] == (
+        "/dashboards/d-meta/sheets/s-meta/rows/metadata"
+        "?metadata=%7B%22k%22%3A%20%22v%22%7D"
+        "&transaction_id=txn-aaa"
+    )
+    assert calls[0]["opts"]["target"] == "#side-panel-body"
+    assert calls[0]["opts"]["swap"] == "innerHTML"
+
+
+def test_metadata_popup_entry_suppressed_when_row_metadata_empty() -> None:
+    """Row 2 of `_METADATA_DATA` has metadata == ""; the synthetic
+    entry should NOT appear in the menu — only the original drill."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_with_metadata_popup(
+            page, _METADATA_DATA, _MENU_DRILL, metadata_popup=True,
+        )
+        page.evaluate("""() => {
+            window.__ctx_items__ = null;
+            window.ctxmenu = { show: (items) => {
+                window.__ctx_items__ = items;
+            }};
+            var btn = document.querySelector(
+                '#drill-host tbody tr:nth-child(2) .row-drill-menu-btn',
+            );
+            btn.click();
+        }""")
+        items = cast(
+            list[dict[str, Any]],
+            page.evaluate("() => window.__ctx_items__"),
+        )
+        browser.close()
+    assert items is not None
+    assert len(items) == 1
+    assert items[0]["text"] == "View Transactions for this transfer"
+
+
+def test_dash_sheet_from_fetch_url_parses_typical_url() -> None:
+    """Unit-test the URL-segment parser used by openRowMenu to lift
+    the dash + sheet ids out of `data-fetch-url`."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        result = cast(dict[str, Any], page.evaluate("""() => {
+            var f = window.__bootstrap_internals__.dashSheetFromFetchUrl;
+            return {
+                good: f('/dashboards/d-1/sheets/s-1/visuals/v-1/data'),
+                empty: f(''),
+                wrong: f('/something/else'),
+                null_arg: f(null),
+            };
+        }"""))
+        browser.close()
+    assert result["good"] == {"dash": "d-1", "sheet": "s-1"}
+    assert result["empty"] is None
+    assert result["wrong"] is None
+    assert result["null_arg"] is None

@@ -337,3 +337,22 @@ form:has(select[name="aggregating"] option[value="true"]:checked)
 }
 .handbook-page strong { font-weight: 600; }
 .handbook-page em { font-style: italic; }
+
+/*
+ * CY.6 — ctxmenu item padding.
+ *
+ * The row-drill / ⋯-button popup gained a synthetic "{} View metadata"
+ * entry prepended by ``openRowMenu`` when the visual's section carries
+ * ``data-metadata-popup="1"``. The extra entry crowds the existing
+ * drill labels at ctxmenu's default tight padding; widen each li so
+ * the menu reads cleanly with three or four items stacked.
+ *
+ * ctxmenu injects its own ``<style id="ctxmenu">`` at runtime, after
+ * this sheet loads — palette overrides in widgets-theme.css need
+ * ``!important`` to win the cascade for that reason. Padding is a
+ * layout property (not in ctxmenu's injected sheet), so the rule
+ * below applies cleanly without the !important escape hatch.
+ */
+.ctxmenu li {
+  padding: 0.5rem 0.75rem;
+}

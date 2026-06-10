@@ -363,9 +363,7 @@
     // positionally (so wireRowDrills + the metadata-popup wiring can
     // read it); only the visible chrome is filtered. `columns` stays
     // intact for positional cell→col lookups below.
-    var visibleColumns = columns.filter(function (c) {
-      return !c.hidden;
-    });
+    var visibleColumns = columns.filter((c) => !c.hidden);
     headerRow
       .selectAll("th")
       .data(visibleColumns)
@@ -568,9 +566,31 @@
     return drill.target_path + (qs.length ? "?" + qs.join("&") : "");
   }
 
-  function openRowMenu(eventOrEl, drills, row, colIndex) {
+  // CY.6 — extract dashboard + sheet ids from a section's
+  // ``data-fetch-url``. The server-side route shape is
+  // ``/dashboards/{dash}/sheets/{sheet}/visuals/{visual}/data``; we
+  // peel the first four segments. Returns {dash, sheet} or null
+  // when the URL doesn't match (defensive — caller skips the
+  // metadata entry rather than building a broken URL).
+  function dashSheetFromFetchUrl(fetchUrl) {
+    if (!fetchUrl) return null;
+    var m = fetchUrl.match(
+      /^\/dashboards\/([^/]+)\/sheets\/([^/]+)\/visuals\//,
+    );
+    if (!m) return null;
+    return { dash: m[1], sheet: m[2] };
+  }
+
+  function openRowMenu(eventOrEl, drills, row, colIndex, section) {
+    var items;
+    var metaIdx;
+    var transactionIdx;
+    var metadataVal;
+    var fetchUrl;
+    var ds;
+    var transactionId;
     if (typeof ctxmenu === "undefined" || !ctxmenu || !ctxmenu.show) return;
-    var items = drills.map((d) => {
+    items = drills.map((d) => {
       var url = rowDrillUrl(d, row, colIndex);
       return {
         text: d.label,
@@ -579,6 +599,70 @@
         },
       };
     });
+    // CY.6 — when the visual carries ``data-metadata-popup="1"`` AND the
+    // row's payload includes a non-empty ``metadata`` cell, prepend a
+    // synthetic "{} View metadata" entry that opens the side panel
+    // via htmx.ajax instead of navigating. ``window.__sidePanelOpen``
+    // is the CY.3 programmatic hook exposed by _side_panel.py's
+    // panel JS. The ``{}`` glyph is literal — operator lock.
+    if (
+      section &&
+      section.getAttribute &&
+      section.getAttribute("data-metadata-popup") === "1"
+    ) {
+      metaIdx = colIndex.metadata;
+      transactionIdx = colIndex.transaction_id;
+      if (metaIdx !== undefined && metaIdx !== null) {
+        metadataVal = row[metaIdx];
+        if (
+          metadataVal !== undefined &&
+          metadataVal !== null &&
+          metadataVal !== ""
+        ) {
+          fetchUrl = section.getAttribute("data-fetch-url");
+          ds = dashSheetFromFetchUrl(fetchUrl);
+          if (ds) {
+            transactionId =
+              transactionIdx !== undefined && transactionIdx !== null
+                ? row[transactionIdx]
+                : "";
+            if (transactionId === undefined || transactionId === null) {
+              transactionId = "";
+            }
+            ((metadataStr, txnStr, dashId, sheetId) => {
+              items.unshift({
+                text: "{} View metadata",
+                kind: "metadata_popup",
+                metadata: metadataStr,
+                transaction_id: txnStr,
+                action: () => {
+                  var url =
+                    "/dashboards/" +
+                    dashId +
+                    "/sheets/" +
+                    sheetId +
+                    "/rows/metadata" +
+                    "?metadata=" +
+                    encodeURIComponent(metadataStr) +
+                    "&transaction_id=" +
+                    encodeURIComponent(txnStr);
+                  htmx
+                    .ajax("GET", url, {
+                      target: "#side-panel-body",
+                      swap: "innerHTML",
+                    })
+                    .then(() => {
+                      if (typeof window.__sidePanelOpen === "function") {
+                        window.__sidePanelOpen();
+                      }
+                    });
+                },
+              });
+            })(String(metadataVal), String(transactionId), ds.dash, ds.sheet);
+          }
+        }
+      }
+    }
     // ctxmenu.show stops propagation / prevents the browser menu itself;
     // passing the originating event anchors the popover at the cursor,
     // passing the button element anchors it to the button.
@@ -587,7 +671,16 @@
 
   function wireRowDrills(section, target, data) {
     var raw = section?.getAttribute("data-row-drills");
-    if (!raw) return;
+    // CY.6 — the metadata-popup ctxmenu entry is a parallel mechanism
+    // to row drills: a Table can carry ``data-metadata-popup="1"`` with
+    // NO drills and still need the ⋯ ctxmenu wired so the operator can
+    // peek per-row metadata. Treat metadata_popup as a synthetic
+    // DATA_POINT_MENU source — same affordance, same code path.
+    var hasMetadataPopup =
+      !!section &&
+      section.getAttribute &&
+      section.getAttribute("data-metadata-popup") === "1";
+    if (!raw && !hasMetadataPopup) return;
     var drills;
     var columns;
     var rows;
@@ -597,13 +690,18 @@
     var clickDrill;
     var headTr;
     var th;
-    try {
-      drills = JSON.parse(raw);
-    } catch (e) {
-      console.error("bad data-row-drills", e);
-      return;
+    if (raw) {
+      try {
+        drills = JSON.parse(raw);
+      } catch (e) {
+        console.error("bad data-row-drills", e);
+        drills = [];
+      }
+      if (!Array.isArray(drills)) drills = [];
+    } else {
+      drills = [];
     }
-    if (!Array.isArray(drills) || drills.length === 0) return;
+    if (drills.length === 0 && !hasMetadataPopup) return;
     columns = data?.columns || [];
     rows = data?.rows || [];
     tbody = target.querySelector("tbody");
@@ -618,7 +716,11 @@
       if (d.trigger === "DATA_POINT_MENU") hasMenu = true;
       if (!clickDrill && d.trigger === "DATA_POINT_CLICK") clickDrill = d;
     });
-    if (!clickDrill) clickDrill = drills[0];
+    if (!clickDrill) clickDrill = drills[0] || null;
+    // CY.6 — metadata popup forces the ⋯ menu column even when no
+    // DATA_POINT_MENU drill exists; the menu's sole entry is the
+    // synthetic "{} View metadata" item ``openRowMenu`` prepends.
+    if (hasMetadataPopup) hasMenu = true;
     if (hasMenu) {
       headTr = target.querySelector("thead tr");
       if (headTr && !headTr.querySelector("th.row-drill-col")) {
@@ -635,23 +737,28 @@
       var td;
       var btn;
       if (!row) return;
-      url = rowDrillUrl(clickDrill, row, colIndex);
-      tr.classList.add("row-drillable");
-      tr.style.cursor = "pointer";
-      tr.setAttribute("data-row-drill", "1");
-      tr.setAttribute("tabindex", "0");
-      tr.addEventListener("click", () => {
-        window.location.href = url;
-      });
-      tr.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
+      // CY.6 — metadata-popup-only Tables have no clickDrill (no
+      // ``data-row-drills`` attr at all). Leave left-click / Enter
+      // inert in that case; the per-row affordance is the ⋯ menu.
+      if (clickDrill) {
+        url = rowDrillUrl(clickDrill, row, colIndex);
+        tr.classList.add("row-drillable");
+        tr.style.cursor = "pointer";
+        tr.setAttribute("data-row-drill", "1");
+        tr.setAttribute("tabindex", "0");
+        tr.addEventListener("click", () => {
           window.location.href = url;
-        }
-      });
+        });
+        tr.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            window.location.href = url;
+          }
+        });
+      }
       if (hasMenu) {
         tr.addEventListener("contextmenu", (e) => {
-          openRowMenu(e, drills, row, colIndex);
+          openRowMenu(e, drills, row, colIndex, section);
         });
         td = document.createElement("td");
         td.className =
@@ -664,7 +771,7 @@
         btn.setAttribute("aria-label", "Row actions");
         btn.setAttribute("aria-haspopup", "menu");
         btn.addEventListener("click", (e) => {
-          openRowMenu(e, drills, row, colIndex);
+          openRowMenu(e, drills, row, colIndex, section);
         });
         td.appendChild(btn);
         tr.appendChild(td);
@@ -2231,6 +2338,157 @@
   }
   document.addEventListener("DOMContentLoaded", wireHandbookHelpButton);
 
+  // CY.6 — metadata panel UX hooks: Copy / Expand all / Collapse all
+  // + keyboard shortcuts. The fragment lives under #side-panel-body
+  // (swapped in by openRowMenu's metadata entry); wire delegated
+  // listeners so the handlers survive each htmx innerHTML swap.
+  //
+  // Copy semantics:
+  //   - read [data-metadata-raw]'s textarea value (pretty JSON)
+  //   - navigator.clipboard.writeText → flash button label "Copied!"
+  //     for 1.5s on success
+  //   - fallback: focus + select the textarea + document.execCommand
+  //     when the clipboard API rejects (offline / non-https origins).
+  //   - aria-live="polite" wrapper announces the flashed label.
+  //
+  // Bulk toggle semantics:
+  //   - find every [data-json-node] inside #side-panel-body
+  //   - batch the open/close mutation in a requestAnimationFrame so a
+  //     1000-node tree doesn't lag the main thread.
+  //   - Ctrl+E = expand-all, Ctrl+Shift+E = collapse-all, scoped to
+  //     when document.activeElement lives inside #side-panel-body so
+  //     the shortcut never hijacks editor / form input.
+  function wireMetadataPanel() {
+    function findPanel() {
+      return document.getElementById("side-panel-body");
+    }
+
+    function expandAll(panel) {
+      var nodes = panel.querySelectorAll("[data-json-node]");
+      window.requestAnimationFrame(() => {
+        nodes.forEach((n) => {
+          n.setAttribute("open", "");
+        });
+      });
+    }
+
+    function collapseAll(panel) {
+      var nodes = panel.querySelectorAll("[data-json-node]");
+      window.requestAnimationFrame(() => {
+        nodes.forEach((n) => {
+          n.removeAttribute("open");
+        });
+      });
+    }
+
+    function flashCopied(btn) {
+      var original = btn.getAttribute("data-original-label");
+      if (original === null) {
+        original = btn.textContent;
+        btn.setAttribute("data-original-label", original);
+      }
+      btn.textContent = "Copied!";
+      // aria-live wrapper — assistive tech reads the flashed label.
+      var live = btn.parentNode
+        ? btn.parentNode.querySelector("[data-metadata-copy-live]")
+        : null;
+      if (live) {
+        live.textContent = "Copied!";
+      }
+      window.setTimeout(() => {
+        btn.textContent = original;
+        if (live) live.textContent = "";
+      }, 1500);
+    }
+
+    function fallbackCopy(textarea, btn) {
+      var ok;
+      try {
+        textarea.removeAttribute("hidden");
+        textarea.focus();
+        textarea.select();
+        ok = document.execCommand("copy");
+        textarea.setAttribute("hidden", "");
+        if (ok) {
+          flashCopied(btn);
+        } else {
+          console.warn("metadata copy fallback execCommand returned false");
+        }
+      } catch (e) {
+        console.error("metadata copy fallback failed", e);
+      }
+    }
+
+    function doCopy(btn) {
+      var panel = findPanel();
+      if (!panel) return;
+      var textarea = panel.querySelector("[data-metadata-raw]");
+      if (!textarea) return;
+      var text = textarea.value;
+      if (
+        navigator.clipboard &&
+        typeof navigator.clipboard.writeText === "function"
+      ) {
+        navigator.clipboard.writeText(text).then(
+          () => flashCopied(btn),
+          () => fallbackCopy(textarea, btn),
+        );
+      } else {
+        fallbackCopy(textarea, btn);
+      }
+    }
+
+    // Delegated click handler — survives every htmx innerHTML swap of
+    // #side-panel-body without re-binding.
+    document.addEventListener("click", (ev) => {
+      var t = ev.target;
+      var copyBtn;
+      var expBtn;
+      var colBtn;
+      var panel;
+      if (!t || !t.closest) return;
+      copyBtn = t.closest("[data-metadata-copy]");
+      if (copyBtn) {
+        ev.preventDefault();
+        doCopy(copyBtn);
+        return;
+      }
+      expBtn = t.closest("[data-metadata-expand-all]");
+      if (expBtn) {
+        ev.preventDefault();
+        panel = findPanel();
+        if (panel) expandAll(panel);
+        return;
+      }
+      colBtn = t.closest("[data-metadata-collapse-all]");
+      if (colBtn) {
+        ev.preventDefault();
+        panel = findPanel();
+        if (panel) collapseAll(panel);
+        return;
+      }
+    });
+
+    // Keyboard shortcuts — Ctrl+E / Ctrl+Shift+E. Scoped to
+    // "focus is inside the side panel" so we don't hijack editor /
+    // form inputs elsewhere on the page.
+    document.addEventListener("keydown", (ev) => {
+      if (!ev.ctrlKey) return;
+      if (ev.key !== "E" && ev.key !== "e") return;
+      var panel = findPanel();
+      if (!panel) return;
+      var active = document.activeElement;
+      if (!active || !panel.contains(active)) return;
+      ev.preventDefault();
+      if (ev.shiftKey) {
+        collapseAll(panel);
+      } else {
+        expandAll(panel);
+      }
+    });
+  }
+  document.addEventListener("DOMContentLoaded", wireMetadataPanel);
+
   // X.2.a.2 — test-mode export. When window.__test_mode__ is set
   // BEFORE this script runs (via Playwright's addInitScript), the
   // IIFE-scoped functions become reachable for unit tests under
@@ -2259,6 +2517,7 @@
       wireRowDrills: wireRowDrills,
       rowDrillUrl: rowDrillUrl,
       openRowMenu: openRowMenu,
+      dashSheetFromFetchUrl: dashSheetFromFetchUrl,
     };
   }
 })();

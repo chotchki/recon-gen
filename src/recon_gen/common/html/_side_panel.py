@@ -570,9 +570,14 @@ def render_metadata_panel(
         "text-secondary-fg hover:text-primary-fg hover:bg-surface-bg "
         "cursor-pointer"
     )
+    # CY.6 — aria-live wrapper announces the Copy button's flashed
+    # "Copied!" label to assistive tech. The polite live region sits
+    # next to the button so the SR reads it after the focus action.
     copy_btn = (
         f'<button type="button" data-metadata-copy '
         f'class="{btn_class}" aria-label="Copy JSON">Copy</button>'
+        f'<span data-metadata-copy-live class="sr-only" '
+        f'aria-live="polite"></span>'
     )
     expand_btn = (
         f'<button type="button" data-metadata-expand-all '
