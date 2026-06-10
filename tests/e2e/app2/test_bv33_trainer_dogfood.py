@@ -344,6 +344,21 @@ def _browser_walkable_kinds() -> list[PlantKindEntry]:
 # minimum surface the registry-walk currently can't prove healthy.
 # Failures absent from the set hard-fail the test.
 _BUG4_FOLLOWUP_KNOWN_FAIL_KINDS: frozenset[str] = frozenset({
+    # BV.3.3.c.bug4-followup: chain-coherence kinds whose v_<matview>
+    # rows surface correctly (the bv31 db-tier round-trip is green) but
+    # whose rendered L1 Exceptions dashboard HTML doesn't reliably
+    # expose their transfer_id. Root cause (debugged 2026-06-10): the
+    # dashboard's `sort_by=(amount DESC)` + `page_size` aren't plumbed
+    # through to the htmx data-fetch URL — the fetch hits server default
+    # `ORDER BY 1` (check_type ASC) + page_size=50. NULL-magnitude
+    # chain-coherence rows that sort BELOW "chain_" alphabetically fall
+    # off page 1. Tracked at BV.3.3.c.bug4-followup. Promote out of this
+    # set once the dashboard plumbing lands.
+    # 3 fail reliably: xor_group_missed/overlap, multi_xor_missed.
+    # 4 happen to pass under default ORDER BY 1 (chain_parent_disagreement,
+    #   fan_in_missing_parent, fan_in_extra_parent, multi_xor_overlap)
+    # but the pass is incidental — they're kept here so the set
+    # documents the full chain-coherence rendering risk.
     "chain_parent_disagreement",
     "xor_group_missed",
     "xor_group_overlap",
@@ -381,50 +396,80 @@ def _column_names(cur: Any, table: str) -> list[str]:  # noqa: ANN401  — DB-AP
     return [str(col[0]).lower() for col in description]
 
 
+_SIGNATURE_ID_COLUMNS: tuple[str, ...] = (
+    # Strong identity columns — the value-set the diff actually narrows
+    # on. Order = picker priority (transfer_id beats child_transfer_id
+    # beats account_id). Every chain-coherence matview must intersect
+    # with at least one of these or `_v_matview_signatures` raises.
+    "transfer_id", "child_transfer_id", "parent_transfer_id",
+    "account_id", "rail_name", "direction",
+)
+_SIGNATURE_DATE_COLUMNS: tuple[str, ...] = (
+    # Date columns — useful for surface-rendering assertions because
+    # the dashboard typically shows the planted row's business day, but
+    # they are NOT identity columns and must never be the sole component
+    # of a signature. BV.3.3.c.bug4 (false-positive fix): a signature
+    # that collapsed to ``(business_day,)`` matched every row on that
+    # day, including unrelated plants/baseline data.
+    "business_day", "business_day_start",
+)
+
+
 def _v_matview_signatures(
     cfg: Config, v_matview_name: str, matview_name: str,
 ) -> set[tuple[str, ...]]:
     """Snapshot a matview's planted-row signatures: pick the columns
-    that exist (from a known priority list — account_id beats
-    transfer_id beats child_transfer_id) and read them as tuples.
+    that exist (from known ID + date priority lists) and read them
+    as tuples.
 
     Different matviews have different shapes (account-oriented for
     L1 conservation/cap; transfer-oriented for chain coherence).
-    Reading the actual column set via ``cursor.description`` + intersecting
-    with a priority list keeps the signature column-selection robust
+    Reading the actual column set via ``cursor.description`` +
+    intersecting with the priority lists keeps the picker robust
     without a per-matview hardcoded map (which kept drifting from the
     actual schema during BV.3.3.c iteration).
+
+    BV.3.3.c.bug4 (false-positive fix): the picker now SPLITS its
+    priority list into ID columns (``transfer_id`` /
+    ``child_transfer_id`` / ``parent_transfer_id`` / ``account_id`` /
+    ``rail_name`` / ``direction``) and date columns
+    (``business_day`` / ``business_day_start``). At least one ID
+    column MUST intersect with the matview's actual columns — a
+    signature that collapses to date-only is a false-positive vector
+    (every row on that day matches). The caller's
+    ``_is_date_like`` guard at the surface-assertion layer is a
+    second line of defense; the structural guard here makes the
+    failure mode unrepresentable at the picker.
 
     Signature elements are concatenated to produce a "look for this
     in the rendered HTML" haystack for the surface assertion.
     """
     del matview_name  # kept on signature for future per-matview override
-    # Priority order: prefer the most-uniquely-identifying columns
-    # first so the diff against the BEFORE snapshot doesn't collapse
-    # plants that share an account_id with a baseline row.
-    priority = (
-        "transfer_id", "child_transfer_id", "parent_transfer_id",
-        "account_id", "business_day", "business_day_start",
-        "rail_name", "direction",
-    )
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
         try:
             cols = set(_column_names(cur, v_matview_name))
-            picked = [c for c in priority if c in cols]
-            if not picked:
-                # No recognizable id columns — fall back to a
-                # row-shaped tuple covering whatever columns the
-                # matview did expose so callers get a meaningful diff.
-                fallback = ", ".join(sorted(cols)) or "1"
-                cur.execute(
-                    f"SELECT DISTINCT {fallback} FROM {v_matview_name}"
+            picked_ids = [c for c in _SIGNATURE_ID_COLUMNS if c in cols]
+            picked_dates = [c for c in _SIGNATURE_DATE_COLUMNS if c in cols]
+            if not picked_ids:
+                # No identifying column intersects — the matview's
+                # priority footprint is too thin to produce a
+                # non-degenerate signature. Surface the gap loudly
+                # rather than silently degrade to a date-only
+                # signature (the BV.3.3.c.bug4 false-positive shape)
+                # or to a row-shaped fallback (which masks a real
+                # picker drift). When a new chain-coherence matview
+                # lands with an exotic key, extend
+                # ``_SIGNATURE_ID_COLUMNS`` rather than relax this guard.
+                raise AssertionError(
+                    f"_v_matview_signatures: no ID column intersects "
+                    f"with {v_matview_name}'s columns "
+                    f"({sorted(cols)!r}). Extend "
+                    f"_SIGNATURE_ID_COLUMNS so the signature carries "
+                    f"a non-date identifier."
                 )
-                return {
-                    tuple("" if v is None else str(v) for v in row)
-                    for row in cur.fetchall()
-                }
+            picked = picked_ids + picked_dates
             cols_sql = ", ".join(picked)
             cur.execute(
                 f"SELECT DISTINCT {cols_sql} FROM {v_matview_name}"
