@@ -33,6 +33,7 @@ from recon_gen.common.db import AsyncConnectionPool, make_connection_pool
 from recon_gen.common.html._tree_fetcher import (
     _apply_cents_to_dollars,
     _find_visual_dataset_identifier,
+    _paginate_table_sql,
     make_tree_db_fetcher,
 )
 from recon_gen.common.ids import SheetId, VisualId
@@ -741,3 +742,152 @@ def test_apply_cents_to_dollars_pre_converted_values_pass_through() -> None:
     # int(75.0) succeeds → reconverts (treats 75 as 75 cents = $0.75).
     # This is a known limitation: callers must not double-convert.
     assert out[1] == ("b", 0.75)
+
+
+# BV.3.3.e — Oracle ORA-00904 MAGNITUDE_AMOUNT regression gate.
+#
+# ``_paginate_table_sql`` wraps the per-visual base SQL with
+# ``ORDER BY <sort_col> ... FROM (<base>) qs_page``. On Oracle, ``<base>``
+# flows through ``_oracle_lowercase_alias_wrapper`` (in
+# ``common/dataset_contract.py``), which projects
+# ``qs_inner."MAGNITUDE_AMOUNT" AS "magnitude_amount"`` — case-preserved
+# lowercase quoted aliases. Pre-BV.3.3.e the helper used
+# ``column_name(sort_col, Dialect.ORACLE)`` which returned the unquoted
+# UPPERCASE form ``MAGNITUDE_AMOUNT``; Oracle case-folded the bare ref to
+# UPPERCASE at parse and looked for a column whose case-preserved
+# identifier matched. The wrapper output has ``"magnitude_amount"``,
+# not ``"MAGNITUDE_AMOUNT"`` → ORA-00904. The fix references
+# ``"magnitude_amount"`` (quoted-lowercase), which is the alias the
+# wrapper emits on Oracle AND the case-folded-lowercase column on
+# PG/DuckDB (both fold unquoted identifiers to lowercase). Same string
+# works on every dialect.
+
+
+def test_paginate_table_sql_oracle_sort_col_uses_quoted_lowercase() -> None:
+    """BV.3.3.e — On Oracle, the outer ``ORDER BY`` must reference the
+    sort column as quoted-lowercase, matching the lowercase aliases
+    that ``_oracle_lowercase_alias_wrapper`` emits in ``base_sql``.
+
+    Pre-BV.3.3.e this used ``column_name(sort_col, Dialect.ORACLE)`` →
+    unquoted ``MAGNITUDE_AMOUNT`` → ORA-00904 against the wrapper's
+    case-preserved ``"magnitude_amount"`` alias.
+    """
+    sql = _paginate_table_sql(
+        "SELECT magnitude_amount FROM pfx_l1_exceptions",
+        offset=0, limit=50,
+        sort_col="magnitude_amount", sort_desc=True,
+        dialect=Dialect.ORACLE,
+    )
+    assert 'ORDER BY "magnitude_amount" DESC, 1' in sql, sql
+    # The unquoted UPPERCASE form is what the pre-fix code emitted — must
+    # NOT appear (Oracle would case-fold the bare ref to UPPERCASE and
+    # fail to match the wrapper's quoted-lowercase alias).
+    assert "ORDER BY MAGNITUDE_AMOUNT" not in sql, sql
+    # The Oracle pagination shape is FETCH/OFFSET, not LIMIT/OFFSET.
+    assert "FETCH NEXT 50 ROWS ONLY" in sql
+    assert "OFFSET 0 ROWS" in sql
+
+
+def test_paginate_table_sql_postgres_sort_col_uses_quoted_lowercase() -> None:
+    """BV.3.3.e — quoted-lowercase ``ORDER BY`` ref also works on
+    Postgres (PG folds unquoted identifiers to lowercase by default,
+    so ``"magnitude_amount"`` matches the lowercase column). One shape
+    across every dialect — the fix is symmetric, not Oracle-only.
+    """
+    sql = _paginate_table_sql(
+        "SELECT magnitude_amount FROM pfx_l1_exceptions",
+        offset=0, limit=50,
+        sort_col="magnitude_amount", sort_desc=True,
+        dialect=Dialect.POSTGRES,
+    )
+    assert 'ORDER BY "magnitude_amount" DESC, 1' in sql, sql
+    # PG pagination: LIMIT/OFFSET.
+    assert "LIMIT 50 OFFSET 0" in sql
+
+
+def test_paginate_table_sql_duckdb_sort_col_uses_quoted_lowercase() -> None:
+    """BV.3.3.e — DuckDB matches PG: quoted-lowercase ref + LIMIT/OFFSET."""
+    sql = _paginate_table_sql(
+        "SELECT magnitude_amount FROM pfx_l1_exceptions",
+        offset=10, limit=25,
+        sort_col="magnitude_amount", sort_desc=False,
+        dialect=Dialect.DUCKDB,
+    )
+    # No DESC — ascending sort omits the keyword.
+    assert 'ORDER BY "magnitude_amount", 1' in sql, sql
+    assert "LIMIT 25 OFFSET 10" in sql
+
+
+def test_paginate_table_sql_no_sort_col_uses_positional_order_by() -> None:
+    """Without a parsed sort column, fall back to ``ORDER BY 1`` —
+    positional, stable, dialect-portable, no column-ref case-folding
+    concerns at all.
+    """
+    sql = _paginate_table_sql(
+        "SELECT a, b FROM t",
+        offset=0, limit=50,
+        sort_col="", sort_desc=False,
+        dialect=Dialect.ORACLE,
+    )
+    assert "ORDER BY 1" in sql
+    # No quoted-anything in the ORDER BY when there's no sort_col.
+    assert '"' not in sql.split("ORDER BY")[1].split(",")[0]
+
+
+def test_paginate_table_sql_oracle_executes_through_lowercase_wrapper() -> None:
+    """BV.3.3.e end-to-end — the paginated SQL emitted for an Oracle
+    dataset that flows through ``_oracle_lowercase_alias_wrapper`` must
+    successfully resolve the sort column.
+
+    We can't easily run Oracle in unit-tier tests (no oracledb client +
+    no Oracle process), so we exercise the wrapper-shape directly
+    against DuckDB: build the wrapper-aliased base SQL the way Oracle
+    sees it post-``_oracle_lowercase_alias_wrapper``
+    (``qs_inner."MAGNITUDE_AMOUNT" AS "magnitude_amount"``), wrap it
+    with ``_paginate_table_sql``, and assert it executes without an
+    "invalid identifier"-class error.
+
+    The shape under test is exactly what Oracle saw and rejected pre-
+    BV.3.3.e: outer-SELECT ``ORDER BY <sort_col>`` over a derived
+    table that exposes a quoted-lowercase alias.
+    """
+    con = duckdb.connect(":memory:")
+    con.execute(
+        'CREATE TABLE pfx_l1_exceptions ('
+        '"MAGNITUDE_AMOUNT" BIGINT, "ACCOUNT_ID" VARCHAR'
+        ")"
+    )
+    con.execute(
+        'INSERT INTO pfx_l1_exceptions VALUES '
+        "(100, 'a'), (200, 'b'), (300, 'c')"
+    )
+    # Build the Oracle wrapper-aliased base SQL (mirrors
+    # ``_oracle_lowercase_alias_wrapper``'s output: each base column
+    # re-aliased to its quoted-lowercase form).
+    base_sql = (
+        'SELECT qs_inner."MAGNITUDE_AMOUNT" AS "magnitude_amount", '
+        'qs_inner."ACCOUNT_ID" AS "account_id" '
+        'FROM (SELECT * FROM pfx_l1_exceptions) qs_inner'
+    )
+    # Pre-fix this would emit ``ORDER BY MAGNITUDE_AMOUNT`` and DuckDB
+    # (case-insensitive identifier-lookup like Oracle's folding rules)
+    # would resolve it — but on the actual Oracle path it failed with
+    # ORA-00904 because the wrapper output's case-preserved aliases are
+    # lowercase. Post-fix the ORDER BY is ``"magnitude_amount"`` which
+    # matches the alias verbatim on every dialect.
+    paged = _paginate_table_sql(
+        base_sql, offset=0, limit=10,
+        sort_col="magnitude_amount", sort_desc=True,
+        dialect=Dialect.DUCKDB,  # the executable substitute for ORACLE
+    )
+    # The emitted SQL string itself must carry the quoted-lowercase ref —
+    # this is the case that broke on Oracle.
+    assert 'ORDER BY "magnitude_amount" DESC, 1' in paged, paged
+    rows = con.execute(paged).fetchall()
+    # COUNT(*) OVER () appended as last column — strip it.
+    sorted_amounts = [r[0] for r in rows]
+    assert sorted_amounts == [300, 200, 100], (
+        "sort_col=magnitude_amount DESC must resolve through the "
+        "lowercase-aliased derived table and order rows by descending "
+        "magnitude."
+    )

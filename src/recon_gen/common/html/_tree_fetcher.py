@@ -63,7 +63,7 @@ from recon_gen.common.env_keys import (
 )
 from recon_gen.common.html._data_shape import shape_for_kind
 from recon_gen.common.html._sql_executor import execute_visual_sql_async
-from recon_gen.common.html._visual_sql import wrap_for_visual
+from recon_gen.common.html._visual_sql import _quote_col, wrap_for_visual
 from recon_gen.common.ids import VisualId
 from recon_gen.common.money import Cents
 from recon_gen.common.sql.dialect import (
@@ -167,7 +167,20 @@ def _paginate_table_sql(
     leading-underscore identifier unquoted.
     """
     if sort_col:
-        ref = column_name(sort_col, dialect)
+        # BV.3.3.e — quoted-lowercase, NOT ``column_name(sort_col, dialect)``.
+        # The ``ORDER BY`` here applies to the OUTER ``FROM ({base_sql}) qs_page``
+        # derived table. On Oracle, ``base_sql`` flows through
+        # ``_oracle_lowercase_alias_wrapper`` (``common/dataset_contract.py``),
+        # which projects ``qs_inner."MAGNITUDE_AMOUNT" AS "magnitude_amount"``
+        # — case-preserved lowercase quoted aliases. An unquoted
+        # ``MAGNITUDE_AMOUNT`` reference here case-folds to UPPERCASE at parse
+        # and Oracle can't find a column whose case-preserved identifier
+        # matches (ORA-00904 ``"MAGNITUDE_AMOUNT"`` from BV.3.3.e). Quoting
+        # the bare-identifier sort_col to its lowercase form matches the
+        # wrapper's surface on Oracle and matches PG/DuckDB's case-folded
+        # lowercase column on those dialects — symmetric with what
+        # ``_quote_col`` already does for ``wrap_for_visual``'s wrapper SELECT.
+        ref = _quote_col(sort_col)
         order_by = f"ORDER BY {ref}{' DESC' if sort_desc else ''}, 1"
     else:
         order_by = "ORDER BY 1"
