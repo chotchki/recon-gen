@@ -5,11 +5,9 @@ to UNIQUE (or added fresh UNIQUE indexes) on 18 matviews whose natural
 keys were well-defined so PG can emit ``REFRESH MATERIALIZED VIEW
 CONCURRENTLY``. The 19th candidate from the inventory
 (``inv_pair_rolling_anomalies``) was disqualified mid-implementation
-when the spec_example seed surfaced real duplicates on its claimed key
-— see ``schema.py``'s ``refresh_matviews_sql._NON_UNIQUE_MATVIEWS`` for
-the carve-out reasoning.
+when the spec_example seed surfaced real duplicates on its claimed key.
 
-BV.6 finish (2026-06-10) added UNIQUE indexes to the last three
+BV.6 finish (2026-06-10) added UNIQUE indexes to the next three
 matviews per operator-locked design choices:
 
 - ``fan_in_disagreement`` — composite UNIQUE on
@@ -23,11 +21,19 @@ matviews per operator-locked design choices:
   target_account_id ORDER BY tgt.id, src.id)``, with UNIQUE on the
   4-tuple ``(root, src_account, tgt_account, edge_seq)`` (BV.6-3).
 
+BV.6 followup (2026-06-10) — closes the last carve-out:
+
+- ``inv_pair_rolling_anomalies`` — tightened ``pair_daily`` CTE's
+  GROUP BY to the (sender_account_id, recipient_account_id, posted_day)
+  natural-key triple. The denormalized account_name + account_role
+  columns are functionally determined by account_id and ride ``MAX()``
+  in the SELECT. UNIQUE on (sender_account_id, recipient_account_id,
+  window_end) — note window_end is the CAST(posted_day) output column.
+
 These tests walk the emitted schema SQL (no DB round-trip) and assert
 the per-matview UNIQUE INDEX exists with the expected column tuple.
 The matching ``refresh_matviews_sql`` emits ``CONCURRENTLY`` for every
-matview NOT in ``_NON_UNIQUE_MATVIEWS`` (which is now just
-``inv_pair_rolling_anomalies``).
+matview; the ``_NON_UNIQUE_MATVIEWS`` carve-out set is now empty.
 """
 from __future__ import annotations
 
@@ -95,17 +101,24 @@ _BV6_UNIQUE_MATVIEWS: tuple[tuple[str, tuple[str, ...], str], ...] = (
         ("root_transfer_id", "source_account_id", "target_account_id", "edge_seq"),
         "mte_unique",
     ),
+    # BV.6 followup (2026-06-10) — pair_daily's GROUP BY tightened to
+    # the natural-key triple; UNIQUE on (sender, recipient, window_end)
+    # (window_end is the CAST(posted_day) output column).
+    (
+        "inv_pair_rolling_anomalies",
+        ("sender_account_id", "recipient_account_id", "window_end"),
+        "inv_pair_unique",
+    ),
 )
 
 # Out-of-scope matviews (no UNIQUE INDEX yet — operator owns the key
 # decision). The runtime contract is that refresh_matviews_sql must
 # NOT emit ``REFRESH MATERIALIZED VIEW CONCURRENTLY`` for these; the
 # plain ``REFRESH MATERIALIZED VIEW`` form survives without a UNIQUE.
-# Only inv_pair_rolling_anomalies remains after BV.6 finish.
-_BV6_NON_UNIQUE_MATVIEWS: tuple[str, ...] = (
-    # Disqualified mid-implementation — see module docstring.
-    "inv_pair_rolling_anomalies",
-)
+# After the BV.6 followup, this set is empty — every matview ships a
+# UNIQUE index. Kept as an empty tuple so a future regression has a
+# typed home to land in.
+_BV6_NON_UNIQUE_MATVIEWS: tuple[str, ...] = ()
 
 
 def test_bv6_every_matview_in_scope_emits_create_unique_index() -> None:
@@ -327,6 +340,146 @@ def test_bv6_inv_money_trail_edges_edge_seq_increments_per_partition() -> None:
         assert len(mid_to_end_seqs) >= 2, (
             f"expected ≥2 edges for the (root, Mid, End) cross-product; "
             f"got {mid_to_end_seqs}"
+        )
+    finally:
+        conn.close()
+
+
+# =====================================================================
+# BV.6 followup — inv_pair_rolling_anomalies dedup round-trip.
+#
+# The followup tightened ``pair_daily``'s GROUP BY to the natural-key
+# triple (sender_account_id, recipient_account_id, posted_day). The
+# denormalized account_name + account_role columns are functionally
+# determined by account_id and now ride MAX() in the SELECT. This test
+# plants two legs sharing the same (sender_account_id, recipient_account_id)
+# pair on the same day with DRIFTED ``account_name`` values — the pre-fix
+# shape split these into 2 rows; the post-fix shape collapses to 1 row
+# (with MAX() picking the lexicographic-max of the two names).
+# =====================================================================
+
+
+def test_bv6_inv_pair_rolling_anomalies_denormalized_churn_collapses_to_one_row() -> None:
+    """A pair sharing (sender_account_id, recipient_account_id, posted_day)
+    with drifted ``account_name`` values across legs must collapse to ONE
+    row in the matview (the BV.6 followup contract). The pre-fix shape
+    split such rows because pair_daily's GROUP BY included account_name +
+    account_role; the post-fix shape MAXes them in the SELECT.
+
+    Seeds two transfers between the same (sender_account_id,
+    recipient_account_id) pair on 2030-01-01 — one leg carries
+    account_name="North Pool A", the other "North Pool B" (same
+    account_id, drifted denormalized metadata). Post-fix: 1 row with
+    account_name = "North Pool B" (MAX). Plus a UNIQUE-index guarantee
+    via index check on the emitted schema.
+    """
+    p = "bv6pa"
+    instance = load_instance(_SPEC_EXAMPLE)
+    conn = duckdb.connect(":memory:")
+    try:
+        cur = conn.cursor()
+        execute_script(
+            cur, emit_schema(instance, prefix=p, dialect=Dialect.DUCKDB),
+            dialect=Dialect.DUCKDB,
+        )
+        conn.commit()
+        replace_config(
+            conn, prefix=p,
+            cfg_json="{}", l2_json=json.dumps({"rails": []}),
+            as_of=datetime(2030, 1, 1, 12, 0, 0),
+        )
+
+        # Transfer 1 — sender "North Pool A" → recipient "South Pool A".
+        insert_tx(
+            conn, id="t1-src", account_id="acct-sender",
+            account_name="North Pool A",
+            account_role="ExternalCounterparty", account_scope="external",
+            account_parent_role=None,
+            amount_money=-100.0, amount_direction="Debit",
+            status="Posted", posting=ts(datetime(2030, 1, 1).date()),
+            transfer_id="xfer-1", rail_name="ach", origin="etl",
+            prefix=p,
+        )
+        insert_tx(
+            conn, id="t1-tgt", account_id="acct-recipient",
+            account_name="South Pool A",
+            account_role="CustomerSubledger", account_scope="internal",
+            account_parent_role="CustomerLedger",
+            amount_money=100.0, amount_direction="Credit",
+            status="Posted", posting=ts(datetime(2030, 1, 1).date()),
+            transfer_id="xfer-1", rail_name="ach", origin="etl",
+            prefix=p,
+        )
+        # Transfer 2 — SAME ids but drifted denormalized name on each leg.
+        insert_tx(
+            conn, id="t2-src", account_id="acct-sender",
+            account_name="North Pool B",   # drifted
+            account_role="ExternalCounterparty", account_scope="external",
+            account_parent_role=None,
+            amount_money=-50.0, amount_direction="Debit",
+            status="Posted", posting=ts(datetime(2030, 1, 1).date()),
+            transfer_id="xfer-2", rail_name="ach", origin="etl",
+            prefix=p,
+        )
+        insert_tx(
+            conn, id="t2-tgt", account_id="acct-recipient",
+            account_name="South Pool B",   # drifted
+            account_role="CustomerSubledger", account_scope="internal",
+            account_parent_role="CustomerLedger",
+            amount_money=50.0, amount_direction="Credit",
+            status="Posted", posting=ts(datetime(2030, 1, 1).date()),
+            transfer_id="xfer-2", rail_name="ach", origin="etl",
+            prefix=p,
+        )
+        conn.commit()
+
+        # Refresh — DuckDB does DROP + CREATE TABLE AS.
+        execute_script(
+            cur, refresh_matviews_sql(instance, prefix=p, dialect=Dialect.DUCKDB),
+            dialect=Dialect.DUCKDB,
+        )
+        conn.commit()
+
+        # Post-fix contract: 1 row per (sender_account_id,
+        # recipient_account_id, window_end). Pre-fix shape would have
+        # produced 2 rows for the drifted-name case.
+        cur.execute(
+            f"SELECT sender_account_id, recipient_account_id, window_end, "
+            f"       sender_account_name, recipient_account_name, "
+            f"       window_sum, transfer_count "
+            f"FROM {p}_inv_pair_rolling_anomalies "
+            f"WHERE sender_account_id = 'acct-sender' "
+            f"  AND recipient_account_id = 'acct-recipient' "
+            f"ORDER BY window_end"
+        )
+        rows = cur.fetchall()
+        assert len(rows) == 1, (
+            f"expected exactly 1 row for the (sender, recipient, window_end) "
+            f"triple (drifted denormalized account_name collapsed); got {len(rows)} "
+            f"rows: {rows}"
+        )
+        sender_id, recipient_id, _window_end, sender_name, recipient_name, window_sum, txc = rows[0]
+        assert sender_id == "acct-sender"
+        assert recipient_id == "acct-recipient"
+        # MAX() over {"North Pool A", "North Pool B"} = "North Pool B".
+        assert sender_name == "North Pool B", (
+            f"MAX(sender_account_name) over the drifted pair should pick "
+            f"'North Pool B'; got {sender_name!r}"
+        )
+        assert recipient_name == "South Pool B", (
+            f"MAX(recipient_account_name) over the drifted pair should pick "
+            f"'South Pool B'; got {recipient_name!r}"
+        )
+        # window_sum aggregates both transfers' recipient legs: $100 + $50.
+        # AO.1: amount_money stores BIGINT cents — the matview carries
+        # the same cents unit (raw SUM in cents): 10000 + 5000 = 15000.
+        assert int(window_sum) == 15000, (
+            f"window_sum should aggregate both legs ($100 + $50 = $150 "
+            f"= 15000 cents); got {window_sum}"
+        )
+        # transfer_count: 2 distinct transfer_ids contribute.
+        assert int(txc) == 2, (
+            f"transfer_count should reflect 2 distinct transfers; got {txc}"
         )
     finally:
         conn.close()

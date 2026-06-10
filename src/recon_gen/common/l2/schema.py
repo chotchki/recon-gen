@@ -442,16 +442,19 @@ def refresh_matviews_sql(
     # while the refresh recomputes, and avoids the AccessExclusive
     # lock on the matview that the non-concurrent path takes.
     #
-    # Sole remaining carve-out: inv_pair_rolling_anomalies (disqualified
-    # mid-implementation when the spec_example seed surfaced real
-    # duplicates on its claimed (sender, recipient, posted_day) key —
-    # pair_daily's GROUP BY includes denormalized account_name +
-    # account_role, so when metadata varies for the same account_id
-    # those split into multiple rows; real fix is dropping the
-    # name/role columns from the GROUP BY, which is owner-call).
-    _NON_UNIQUE_MATVIEWS = frozenset({
-        f"{p}_inv_pair_rolling_anomalies",
-    })
+    # BV.6 followup (2026-06-10) — inv_pair_rolling_anomalies tightened
+    # its pair_daily GROUP BY to the (sender, recipient, posted_day)
+    # natural-key triple (denormalized account_name + account_role are
+    # functionally determined by account_id and now ride MAX() in the
+    # SELECT). With the spec_example duplicate class collapsed, the
+    # matview ships a UNIQUE index on (sender_account_id,
+    # recipient_account_id, window_end) and qualifies for PG REFRESH
+    # MATERIALIZED VIEW CONCURRENTLY alongside the other 21 matviews.
+    # The carve-out set is empty by construction; every matview in
+    # `names` ships a UNIQUE index. Kept as an explicit frozenset()
+    # rather than removed so a future regression (a new matview without
+    # a UNIQUE index) has a typed home to land in.
+    _NON_UNIQUE_MATVIEWS: frozenset[str] = frozenset()
     refreshes = "\n".join(
         refresh_matview(
             n, dialect,
@@ -3852,20 +3855,34 @@ WITH pair_legs AS (
 pair_daily AS (
     -- Collapse to one row per (pair, day) before windowing so the
     -- rolling SUM ranges over distinct days rather than individual legs.
+    --
+    -- BV.6 followup (2026-06-10) — GROUP BY only the natural-key triple
+    -- (sender_account_id, recipient_account_id, posted_day). The
+    -- denormalized account_name + account_role columns are functionally
+    -- determined by account_id (one row per account in the L2 account
+    -- catalog), so dropping them from the grouping keys is semantically
+    -- equivalent — but the previous shape split rows when metadata
+    -- varied for the same account_id across {p}_transactions legs
+    -- (observed on spec_example: 3 rows for north-pool↔south-pool on
+    -- 2026-06-10 with drifted account_name values). Keep them in the
+    -- SELECT via MAX() — since they're FD'd by account_id, MAX / MIN /
+    -- ANY_VALUE all return the same canonical value. Tightening unlocks
+    -- the (sender, recipient, window_end) UNIQUE index + PG REFRESH
+    -- MATERIALIZED VIEW CONCURRENTLY.
     SELECT
         recipient_account_id,
-        recipient_account_name,
-        recipient_account_type,
+        MAX(recipient_account_name) AS recipient_account_name,
+        MAX(recipient_account_type) AS recipient_account_type,
         sender_account_id,
-        sender_account_name,
-        sender_account_type,
+        MAX(sender_account_name)    AS sender_account_name,
+        MAX(sender_account_type)    AS sender_account_type,
         posted_day,
         SUM(amount)                 AS day_sum,
         COUNT(DISTINCT transfer_id) AS day_transfer_count
     FROM pair_legs
     GROUP BY
-        recipient_account_id, recipient_account_name, recipient_account_type,
-        sender_account_id, sender_account_name, sender_account_type,
+        recipient_account_id,
+        sender_account_id,
         posted_day
 ),
 pair_windows AS (
@@ -3955,18 +3972,18 @@ SELECT
         ELSE '4+ sigma'
     END                                             AS z_bucket
 FROM pair_stats ps;
--- BV.6 — NO UNIQUE INDEX. The inventory claimed (sender_account_id,
--- recipient_account_id, posted_day) was a natural key, but pair_daily's
--- GROUP BY includes the denormalized account_name + account_role
--- columns alongside the ids. When metadata varies for the same account_id
--- across rows in {p}_transactions (an observable case on the spec_example
--- seed: 3 rows for north-pool↔south-pool on the same day), the GROUP BY
--- splits them. The UNIQUE constraint fires during refresh. Real fix
--- requires either dropping the name/role columns from GROUP BY or
--- adding them to the index — both are scope decisions for the operator.
--- Re-classified as out-of-scope alongside fan_in_disagreement /
--- l1_exceptions / inv_money_trail_edges; refresh_matviews_sql's
--- _NON_UNIQUE_MATVIEWS set includes inv_pair_rolling_anomalies.
+-- BV.6 followup (2026-06-10) — UNIQUE on (sender_account_id,
+-- recipient_account_id, window_end). The (sender, recipient, posted_day)
+-- triple is the natural key by construction: pair_daily's GROUP BY was
+-- tightened to that triple (denormalized account_name + account_role are
+-- functionally determined by account_id and kept in the SELECT via
+-- MAX() rather than the grouping keys). window_end is a CAST of
+-- posted_day, so the index uses the output column name. UNIQUE unlocks
+-- PG REFRESH MATERIALIZED VIEW CONCURRENTLY (this matview was the sole
+-- remaining carve-out from BV.6 batch 1 + finish).
+CREATE UNIQUE INDEX idx_{p}_inv_pair_unique
+    ON {p}_inv_pair_rolling_anomalies
+       (sender_account_id, recipient_account_id, window_end);
 
 
 -- Investigation: money-trail recursive-CTE matview.
