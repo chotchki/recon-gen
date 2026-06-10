@@ -10,7 +10,6 @@ data-class shapes — the renderers walk the same dataclass instances
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from recon_gen.common.as_of_frame import AsOfFrame
 from recon_gen.common.intervals import DateInterval as DateInterval  # noqa: F401 — kept for tests that import via this module; BD.2 hides direct period reads
@@ -40,9 +39,6 @@ from recon_gen.cli.audit import (
     _split_stuck_unbundled_by_account_class,
 )
 
-if TYPE_CHECKING:
-    from recon_gen.cli.audit import MatviewEvidence
-
 
 __all__ = [
     "_render_audit_markdown",
@@ -66,8 +62,7 @@ def _render_audit_markdown(
     version: str,
     l2_label: str,
     provenance: ProvenanceFingerprint | None,
-    matview_evidence: list[MatviewEvidence] | None,
-    l2_instance_path: str | None,
+    l2_instance_path: str | None,  # noqa: ARG001 — preserved for renderer-symmetry with the PDF path; not surfaced in markdown
 ) -> str:
     """Markdown rendering of the audit report.
 
@@ -126,7 +121,6 @@ def _render_audit_markdown(
             version=version,
             l2_label=l2_label,
             provenance=provenance,
-            matview_evidence=matview_evidence,
         )
     )
     return cover + body
@@ -770,13 +764,13 @@ def _render_appendix_markdown(
     version: str,
     l2_label: str,
     provenance: ProvenanceFingerprint | None,
-    matview_evidence: list[MatviewEvidence] | None,
 ) -> str:
-    """Provenance Appendix in Markdown (U.7.c).
+    """Provenance Appendix in Markdown (CW.1 — matview sidecar removed).
 
-    Mirrors the PDF appendix: matview SHA256 sidecar table +
-    verify-command instructions + per-source recompute formulas
-    + a copyable Python recipe.
+    Mirrors the PDF appendix: verify-command instructions +
+    per-source recompute formulas + a copyable Python recipe.
+    CW.1 dropped the matview SHA sidecar outright
+    (see ``docs/audits/cw_0_audit_pdf_perf_locks.md`` Lock 1).
     """
     placeholder = "<pending>"
     if provenance is not None:
@@ -787,21 +781,12 @@ def _render_appendix_markdown(
         l2_sha = provenance.l2_yaml_sha
         code_id = provenance.code_identity
         composite = provenance.composite_sha
+        fmt_version = str(provenance.provenance_format_version)
     else:
         tx_hwm = bal_hwm = tx_sha = bal_sha = l2_sha = placeholder
         code_id = f"v{version}"
         composite = placeholder
-
-    # Matview evidence table
-    if matview_evidence:
-        mv_rows = "".join(
-            f"| `{ev.matview}` | {ev.row_count:,} | `{ev.sha256}` |\n"
-            for ev in matview_evidence
-        )
-    else:
-        mv_rows = (
-            "| _Database not configured at audit time_ | — | — |\n"
-        )
+        fmt_version = "—"
 
     return (
         "\n"
@@ -812,16 +797,10 @@ def _render_appendix_markdown(
         "_Everything an independent verifier needs to reproduce this "
         "report's bindings without recon-gen installed._\n"
         "\n"
-        "### Matview Evidence\n"
-        "\n"
-        "_Per-matview SHA256 + row count. NOT part of the authoritative "
-        "composite — matviews are derived data; a divergence between "
-        "these and a recompute is a technical signal (matview needs "
-        "refresh, schema drift), not a data-binding problem._\n"
-        "\n"
-        "| Matview | Rows | SHA256 |\n"
-        "| --- | ---: | --- |\n"
-        f"{mv_rows}"
+        f"**Provenance format version:** `{fmt_version}`  \n"
+        "_(v1 = legacy Python canonical_value ladder; v2 = streamed "
+        "per-dialect SQL SHA-256 + Python fold, per CW.2 + "
+        "`docs/audits/cw_0_audit_pdf_perf_locks.md`.)_\n"
         "\n"
         "### Reproduce With recon-gen\n"
         "\n"
@@ -848,29 +827,45 @@ def _render_appendix_markdown(
         f"| **Composite fingerprint** | SHA256 of labeled lines | "
         f"**`{composite}`** |\n"
         "\n"
-        "Recipe (no recon-gen install needed):\n"
+        "Recipe (no recon-gen install needed — CW.2 streamed SQL form):\n"
         "\n"
         "```python\n"
         "import hashlib\n"
         "\n"
-        "def canonical(v):\n"
-        "    if v is None: return b''\n"
-        "    if isinstance(v, bool): return b'1' if v else b'0'\n"
-        "    if hasattr(v, 'isoformat'): "
-        "return v.isoformat().encode()\n"
-        "    return str(v).encode()\n"
+        "DIALECT = 'duckdb'  # 'duckdb' | 'postgres' | 'oracle'\n"
+        "\n"
+        "def row_hash_sql(quoted_columns):\n"
+        "    if DIALECT == 'oracle':\n"
+        "        sep = ' || chr(31) || '\n"
+        "        canon = sep.join(\n"
+        "            f'coalesce(CAST({c} AS VARCHAR2(4000)), chr(0))'\n"
+        "            for c in quoted_columns)\n"
+        "        return f\"LOWER(RAWTOHEX(STANDARD_HASH({canon}, 'SHA256')))\"\n"
+        "    canon_args = ', '.join(\n"
+        "        f'coalesce(CAST({c} AS VARCHAR), chr(0))'\n"
+        "        for c in quoted_columns)\n"
+        "    canon = f'concat_ws(chr(31), {canon_args})'\n"
+        "    if DIALECT == 'duckdb':\n"
+        "        return f'sha256({canon})'\n"
+        "    return f\"encode(digest({canon}, 'sha256'), 'hex')\"\n"
         "\n"
         "def hash_table(cur, table, hwm):\n"
-        "    cur.execute(f'SELECT * FROM {table} '\n"
-        "                f'WHERE entry <= {hwm} ORDER BY entry')\n"
-        "    cols = sorted(\n"
-        "        enumerate(cur.description),\n"
-        "        key=lambda i_d: i_d[1][0].lower())\n"
+        "    cur.execute(f'SELECT * FROM {table} WHERE 1=0')\n"
+        "    names = sorted((d[0] for d in cur.description),\n"
+        "                   key=lambda n: n.lower())\n"
+        "    fold = str.upper if DIALECT == 'oracle' else str.lower\n"
+        "    quoted = [f'\"{fold(n)}\"' for n in names]\n"
+        "    entry_col = '\"ENTRY\"' if DIALECT == 'oracle' else '\"entry\"'\n"
+        "    cur.execute(\n"
+        "        f'SELECT {row_hash_sql(quoted)} AS rh '\n"
+        "        f'FROM {table} WHERE {entry_col} <= {hwm} '\n"
+        "        f'ORDER BY {entry_col}')\n"
         "    h = hashlib.sha256()\n"
-        "    for row in cur:\n"
-        "        h.update(b'\\x1f'.join(\n"
-        "            canonical(row[i]) for i, _ in cols))\n"
-        "        h.update(b'\\x1e')\n"
+        "    while True:\n"
+        "        rows = cur.fetchmany(50_000)\n"
+        "        if not rows: break\n"
+        "        for (rh,) in rows:\n"
+        "            h.update(rh.lower().encode('ascii'))\n"
         "    return h.hexdigest()\n"
         "\n"
         f"tx_sha  = hash_table(cur, '<prefix>_transactions', {tx_hwm})\n"

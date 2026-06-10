@@ -78,6 +78,8 @@ from recon_gen.cli._helpers import (
 )
 from recon_gen.common.money import Cents
 from recon_gen.common.provenance import (
+    PROVENANCE_FORMAT_VERSION_CW,
+    PROVENANCE_FORMAT_VERSION_LEGACY,
     ProvenanceFingerprint,
     compute_provenance,
     hash_table_rows,
@@ -1377,75 +1379,14 @@ def _query_daily_statement_walks(
         conn.close()
 
 
-# -- Provenance appendix matview evidence (U.7.c) ------------------------------
-
-
-@dataclass(frozen=True)
-class MatviewEvidence:
-    """One matview's row count + SHA256 for the provenance appendix.
-
-    Distinct from the authoritative composite fingerprint (which
-    covers the base tables, NOT matviews — matviews are derived
-    data and their hash drifting from a recompute is a *technical*
-    signal, not a data-binding problem). Listed in the appendix as
-    sidecar evidence so a regulator can independently verify
-    matview consistency with the base tables.
-    """
-    matview: str       # un-prefixed name shown to the auditor
-    row_count: int
-    sha256: str
-
-
-# Matviews surfaced in the provenance appendix. Listed unprefixed
-# (the per-instance prefix is added at query time). Order is the
-# same order they're rendered in the appendix table.
-_APPENDIX_MATVIEWS: tuple[str, ...] = (
-    "current_transactions",
-    "current_daily_balances",
-    "drift",
-    "ledger_drift",
-    "overdraft",
-    "limit_breach",
-    "stuck_pending",
-    "stuck_unbundled",
-    "daily_statement_summary",
-)
-
-
-def _query_matview_evidence(
-    cfg: Config, instance: L2Instance,
-) -> list[MatviewEvidence] | None:
-    """Hash every matview the appendix advertises (U.7.c).
-
-    Returns ``None`` when ``demo_database_url`` is absent (skeleton
-    mode — no DB queries, no matviews to hash). Otherwise returns
-    one entry per matview in ``_APPENDIX_MATVIEWS``, in order. Uses
-    ``hash_matview_rows`` for canonical-byte hashing identical to
-    the base-table fingerprint — same recipe a verifier would
-    follow if recomputing manually.
-    """
-    if cfg.demo_database_url is None:
-        return None
-
-    from recon_gen.common.db import connect_demo_db
-    from recon_gen.common.provenance import hash_matview_rows
-
-    prefix = cfg.db_table_prefix
-    out: list[MatviewEvidence] = []
-    conn = connect_demo_db(cfg)
-    try:
-        cur = conn.cursor()
-        for matview in _APPENDIX_MATVIEWS:
-            qualified = f"{prefix}_{matview}"
-            row_count, sha = hash_matview_rows(cur, matview=qualified)
-            out.append(MatviewEvidence(
-                matview=matview,
-                row_count=row_count,
-                sha256=sha,
-            ))
-    finally:
-        conn.close()
-    return out
+# -- Provenance appendix (CW.1 — matview-evidence dropped) ----------------------
+#
+# Phase CW.1 (2026-06-09): the per-matview SHA256 sidecar was deleted
+# outright. It was an informational appendix table, NOT part of the
+# verifiable ``ProvenanceFingerprint``, and burned ~31.5s of the ~52s
+# audit-apply wall-clock for zero authoritative gain. See
+# ``docs/audits/cw_0_audit_pdf_perf_locks.md`` (Lock 1) for the full
+# rationale.
 
 
 @audit.command("apply")
@@ -1509,7 +1450,6 @@ def audit_apply(
         l2_instance_path=l2_instance_path,
         version=_qsg_version,
     )
-    matview_evidence = _query_matview_evidence(_cfg, instance)
     # Resolve once + thread through so the audit PDF picks up the L2's
     # branded palette (or DEFAULT_PRESET when no theme override). Per
     # CLAUDE.md: never hardcode hex colors in render code.
@@ -1537,18 +1477,35 @@ def audit_apply(
             version=_qsg_version,
             l2_label=l2_label,
             provenance=provenance,
-            matview_evidence=matview_evidence,
             l2_instance_path=l2_instance_path,
         )
         # U.7.b — auto-sign the PDF if config.yaml carries signing material.
+        # CW.5 — graceful degrade when pyhanko isn't installed. The PDF
+        # write already happened; failing the whole command on a missing
+        # optional dep would discard a perfectly valid unsigned report.
+        # The pyhanko imports live inside ``sign_pdf_in_place`` itself
+        # (the wrapper module loads cleanly without the extra), so the
+        # ImportError surfaces when we CALL the signer — wrap both the
+        # import + call, not just the import. See
+        # ``docs/audits/cw_0_audit_pdf_perf_locks.md`` Lock 5.
         if _cfg.signing is not None:
             from recon_gen.common.pdf.signing import sign_pdf_in_place
-            sign_pdf_in_place(out_path, _cfg.signing)
-            click.echo(
-                f"Applied digital signature "
-                f"({_cfg.signing.signer_name or 'cert CN'}) to {out_path}.",
-                err=True,
-            )
+            try:
+                sign_pdf_in_place(out_path, _cfg.signing)
+            except ImportError as exc:
+                click.echo(
+                    f"audit: signing skipped — pyhanko not installed "
+                    f"(install `recon-gen[prod]` to enable PDF signing). "
+                    f"Wrote unsigned PDF to {out_path}. "
+                    f"[ImportError: {exc}]",
+                    err=True,
+                )
+            else:
+                click.echo(
+                    f"Applied digital signature "
+                    f"({_cfg.signing.signer_name or 'cert CN'}) to {out_path}.",
+                    err=True,
+                )
         click.echo(
             f"Wrote audit report to {out_path} "
             f"(institution={institution}, "
@@ -1572,7 +1529,6 @@ def audit_apply(
         version=_qsg_version,
         l2_label=l2_label,
         provenance=provenance,
-        matview_evidence=matview_evidence,
         l2_instance_path=l2_instance_path,
     )
     if output is None:
@@ -1730,14 +1686,51 @@ def audit_verify(
                 f"embedded high-water-mark {embedded.balances_hwm}; "
                 f"rows the report bound to are gone."
             )
-        tx_sha_now = hash_table_rows(
-            cur, table=f"{prefix}_transactions",
-            hwm=embedded.transactions_hwm,
-        )
-        bal_sha_now = hash_table_rows(
-            cur, table=f"{prefix}_daily_balances",
-            hwm=embedded.balances_hwm,
-        )
+        # CW.4 — version-dispatch on the embedded
+        # `provenance_format_version`. Pre-CW PDFs (v1) used the
+        # legacy Python ``canonical_value`` ladder; CW PDFs (v2) use
+        # the streamed per-dialect SQL fingerprint (CW.2). The
+        # dispatch is the seam that lets old PDFs keep verifying
+        # without manual operator intervention. Lock 4 in
+        # ``docs/audits/cw_0_audit_pdf_perf_locks.md``.
+        if embedded.provenance_format_version == (
+            PROVENANCE_FORMAT_VERSION_LEGACY
+        ):
+            # v1 — frozen Python ladder. Only reached for PDFs
+            # emitted before CW.2 landed.
+            from recon_gen.common.provenance import legacy_hash_table_rows_v1
+            tx_sha_now = legacy_hash_table_rows_v1(
+                cur, table=f"{prefix}_transactions",
+                hwm=embedded.transactions_hwm,
+            )
+            bal_sha_now = legacy_hash_table_rows_v1(
+                cur, table=f"{prefix}_daily_balances",
+                hwm=embedded.balances_hwm,
+            )
+        elif embedded.provenance_format_version == (
+            PROVENANCE_FORMAT_VERSION_CW
+        ):
+            # v2 — streamed per-dialect SQL fingerprint.
+            tx_sha_now = hash_table_rows(
+                cur, table=f"{prefix}_transactions",
+                hwm=embedded.transactions_hwm,
+                dialect=cfg.dialect,
+            )
+            bal_sha_now = hash_table_rows(
+                cur, table=f"{prefix}_daily_balances",
+                hwm=embedded.balances_hwm,
+                dialect=cfg.dialect,
+            )
+        else:
+            raise click.ClickException(
+                f"Unsupported provenance_format_version="
+                f"{embedded.provenance_format_version!r} in "
+                f"{pdf_path}. Known versions: "
+                f"{PROVENANCE_FORMAT_VERSION_LEGACY} (legacy Python "
+                f"ladder), {PROVENANCE_FORMAT_VERSION_CW} (streamed "
+                f"per-dialect SQL). Upgrade recon-gen or re-render "
+                f"the report with a current install."
+            )
     finally:
         conn.close()
 

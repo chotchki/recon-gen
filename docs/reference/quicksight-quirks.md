@@ -382,3 +382,117 @@ Confirmed-via: AWS run 26991328435 on commit `bb36bf94`
 (CF.X-infra ship). `EXCLAMATION_CIRCLE` was the original
 `_KPI_AMBER_ICON_QS` value; CF.X-infra hotfix swapped to
 `TRIANGLE`.
+
+## Oracle `LISTAGG` has a ~32KB result cap — CW.2, 2026-06-09
+
+### Symptom
+
+Computing the audit-PDF provenance fingerprint via
+`sha256(LISTAGG(per_row_sha256 …))` would have been the simplest
+all-SQL form for the row-set hash. On Oracle 19c it raises
+**ORA-01489** ("result of string concatenation is too long") once
+the concatenated payload exceeds ~32 KB (the VARCHAR2 maximum at
+default `MAX_STRING_SIZE`). At ~64 bytes per row hash, that
+ceiling hits at ~500 rows — well below the ~3.27M rows the
+production base table carries.
+
+### Confirmed-via
+
+Phase CW.2 (2026-06-09) per
+`docs/audits/audit_pdf_perf.md` — the all-SQL form was the first
+shape considered for the streamed fingerprint; Oracle's `LISTAGG`
+cap is what forced the design to the streamed-fold approach
+(per-row SHA-256 in SQL + ``cur.fetchmany(50_000)`` digests +
+``hashlib.sha256().update()`` fold via Merkle-Damgård).
+
+### Workaround
+
+Don't concatenate per-row hashes in SQL. Compute the per-row
+SHA-256 in the engine, ``ORDER BY entry`` (or ``ORDER BY rh`` for
+keyless tables), stream digests as fixed-size hex strings through
+Python via ``cur.fetchmany(batch_size)``, fold via
+``hashlib.sha256().update(rh.encode("ascii"))``. The result is
+byte-identical to ``sha256(string_agg(rh ORDER BY entry))`` —
+proven empirically on DuckDB in
+``tests/unit/test_audit_pdf_perf.py``. Avoids `LISTAGG` entirely,
+bounded-memory regardless of row count, dialect-portable across
+DuckDB / Postgres / Oracle.
+
+Not strictly a *QuickSight* quirk but documented here per the
+project convention of keeping all dialect-portability landmines in
+one place. The fix lives in ``common/provenance.py::hash_table_rows``.
+
+## PostgreSQL `pgcrypto` extension required for audit provenance — CW.2/CW.3, 2026-06-09
+
+### Symptom
+
+The audit provenance fingerprint on the Postgres path needs
+SHA-256 of per-row canonicalized text. PG has no built-in SHA-256
+function; the canonical SQL form is
+``encode(digest(<text>, 'sha256'), 'hex')`` via the ``pgcrypto``
+extension. Without the extension installed:
+
+```
+ERROR:  function digest(text, unknown) does not exist
+```
+
+### Confirmed-via
+
+Phase CW.2 (2026-06-09) per Lock 3 in
+``docs/audits/cw_0_audit_pdf_perf_locks.md``. The project's
+"no PG extensions" portability stance was operator-locked to
+allow this single exception scoped to provenance — MD5 was
+considered but rejected on regulator-defensibility grounds
+(MD5 collision attacks public since 2004).
+
+### Workaround
+
+``recon-gen schema apply`` emits
+``CREATE EXTENSION IF NOT EXISTS pgcrypto;`` at the top of the
+schema script on the Postgres path. DuckDB has native ``sha256()``
+and Oracle has native ``STANDARD_HASH(…, 'SHA256')``; neither
+needs an extension.
+
+**Operator install prerequisite.** The role doing schema-apply
+needs ``CREATE`` permission on the database to create extensions.
+This is the default for owner / superuser roles; hardened deploys
+with a DDL-only role may need to grant explicitly or pre-create
+the extension via a DBA. On RDS PG: enable in the parameter group.
+On Aurora PG: built-in, no operator action needed. On
+self-hosted PG: install ``postgresql-contrib`` package.
+
+A schema-apply failure with `CREATE EXTENSION` denied surfaces
+loud; ``audit apply --execute`` won't reach the fingerprint
+computation without the schema. No silent degrade to MD5
+(rejected per Lock 3).
+
+## Optional `pyhanko` dep: audit signing graceful-degrades — CW.5, 2026-06-09
+
+### Symptom
+
+``audit apply --execute`` against a ``config.yaml`` that declares
+a ``signing:`` block but where the optional ``pyhanko`` extra
+isn't installed used to hard-crash at the signing step. The PDF
+had already been written to disk before the crash — making the
+operator either think the whole command failed (the exit code
+said so) or hunt for the PDF anyway.
+
+### Confirmed-via
+
+Operator-flagged side issue surfaced during the Phase CW perf
+spike (2026-06-09). The hard-crash predates CW; Lock 5 in
+``docs/audits/cw_0_audit_pdf_perf_locks.md`` covers the fix
+decision.
+
+### Workaround
+
+``cli/audit/__init__.py::audit_apply`` wraps the
+``sign_pdf_in_place(...)`` call in ``try/except ImportError``.
+On ImportError, emit an unsigned PDF + a stderr warning pointing
+at the fix (``pip install recon-gen[prod]``). Exit code stays 0
+so the unsigned PDF is treated as a successful (degraded)
+output. Genuine signing failures (bad key, expired cert) still
+raise — only ``ImportError`` on the optional dep is caught.
+
+Unit test: ``tests/audit/test_cli_smoke.py
+::test_audit_apply_signing_pyhanko_missing_degrades_gracefully``.

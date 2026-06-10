@@ -153,8 +153,22 @@ def emit_schema(
     base = _emit_base_schema(p, dialect, instance)
     invariants = _emit_l1_invariant_views(instance, prefix=p, dialect=dialect)
     inv_views = _emit_inv_views(instance, prefix=p, dialect=dialect)
+    # Phase CW.2 — pgcrypto needed on PG for the audit provenance
+    # streamed SHA-256 (encode(digest(canon, 'sha256'), 'hex')). Built-in
+    # MD5 was on the table per the perf-audit but operator-locked the
+    # crypto strength (MD5 collision-broken since 2004, regulator-
+    # rejectable). See ``docs/audits/cw_0_audit_pdf_perf_locks.md``
+    # Lock 3. DuckDB has built-in sha256(); Oracle has built-in
+    # STANDARD_HASH(... 'SHA256') — no per-dialect equivalent stmt
+    # needed there.
+    pg_extensions = (
+        "CREATE EXTENSION IF NOT EXISTS pgcrypto;\n"
+        if dialect is Dialect.POSTGRES
+        else ""
+    )
     return (
-        l1_drops + "\n" + inv_drops + "\n"
+        pg_extensions
+        + l1_drops + "\n" + inv_drops + "\n"
         + typed_view_drops + "\n"
         + config_drop + "\n" + base
         + "\n\n" + config_create + "\n\n"
