@@ -446,32 +446,33 @@ Open design questions to lock at CY.0:
 
 **Row-level distinction is the load-bearing primitive.** Plant + training rows already carry `metadata.plant_kind` / `metadata.scenario`-style markers (precedent: `phantom_rail`, `expected_eod_balance_breach`, AnomalyGenerator's emission). The seed pipeline marks everything it writes; the real ETL doesn't. So a "synthetic row" predicate already exists — Trainer reset on a real-data DB can `DELETE WHERE metadata->>'plant_kind' IS NOT NULL OR metadata->>'scenario' = 'training'` instead of TRUNCATE. Real rows survive; synthetic rows go.
 
-**Destructive surfaces — what each must do on a real-data DB:**
+**Destructive surfaces — narrowed by operator 2026-06-09 to the "easy-to-click button" surface only.** CLI surfaces (`recon-gen data apply --execute`, `schema apply --execute`) stay unprotected — operator-stated: "The cli doesn't need this protection, this is an easy to read button problem" (operators using the CLI know what they're doing; the `--execute` flag already requires explicit intent). Demo install (`deploy/launchd/refresh-demos.sh`) is out of scope — "The demo install never had real data in it, it should be unaffected" (the Mac mini's recon-demo user can't reach a real-data DB).
 
-| Surface | Current behavior | Target on real-data DB |
+| In-scope surface | Current behavior | Target on real-data DB |
 | --- | --- | --- |
 | App2 Trainer `POST /training/reset` (BU.1.6) | full truncate+reseed via deploy_pipeline | DELETE-synthetic-only — real rows survive |
 | App2 Trainer `POST /training/plant/<kind>` | INSERT plant rows | Safe as-is — INSERT-only, marked rows |
-| `recon-gen data apply --execute` | truncate + reseed | Refuse without `--force-prod-wipe`; offer `--clean-synthetic-only` mode |
-| `recon-gen schema apply --execute` | DROP + CREATE TABLES | Refuse without `--force-prod-wipe`; schema migrations need a proper ALTER path |
-| `recon-gen data refresh --execute` | matview refresh | Safe — doesn't touch base rows |
-| Studio's Deploy-changes button | calls schema+data apply | Refuse on real-data DB without explicit operator override |
-| `deploy/launchd/refresh-demos.sh` | full wipe + reseed nightly | Opt-out via plist env (`RECON_GEN_FORCE_PROD_WIPE=1`) — demo install path is consciously chosen |
+| Studio's Deploy-changes button | calls schema+data apply under the hood | Server-side row-source check BEFORE invoking the CLI subroutine; refuse + show banner if real-data rows present |
+
+(`recon-gen data refresh --execute` is non-destructive of base rows — out of scope anywhere.)
 
 **Design directions to evaluate at CZ.0:**
 
-1. **Row-level marker on every write** (data-source-of-truth — preferred). Canonicalize a `metadata.source` field across the seed/plant/training paths (one of `"training" | "plant" | "real"` — others as needed). Trainer reset becomes `DELETE WHERE source IN ('training', 'plant')` instead of TRUNCATE. `data apply` / `schema apply --execute` check for any `source='real'` rows and refuse if present without `--force-prod-wipe`. The `etl_hook` documentation tells real-data integrators to set `metadata.source='real'` on every row they insert. Strongest because (a) it lives in the DB the destructive op is about to touch, (b) it supports surgical removal of synthetic rows on real-data DBs, (c) it reuses an existing convention (plant rows already carry metadata).
-2. **DB-level sentinel** (single-row "this is a prod DB" marker, fallback). New `_recon_provenance` table; `recon-gen schema mark-production` writes a row; destructive ops refuse if marked. Weaker than #1 because it can't support DELETE-synthetic-only — it's a binary all-or-nothing gate. Useful if row-level migration is too invasive for some customers.
+1. **Row-level marker on every write** (data-source-of-truth — preferred). Canonicalize a `metadata.source` field across the seed/plant/training paths (one of `"training" | "plant" | "real"` — others as needed). Trainer reset becomes `DELETE WHERE source IN ('training', 'plant')` instead of TRUNCATE. The `etl_hook` documentation tells real-data integrators to set `metadata.source='real'` on every row they insert. Strongest because (a) it lives in the DB the destructive op is about to touch, (b) it supports surgical removal of synthetic rows on real-data DBs, (c) it reuses an existing convention (plant rows already carry metadata).
+2. **DB-level sentinel** (single-row "this is a prod DB" marker, fallback). New `_recon_provenance` table; an `etl_hook` runner writes a row when real data flows; the button handlers refuse if marked. Weaker than #1 because it can't support DELETE-synthetic-only — it's a binary all-or-nothing gate. Useful if row-level migration is too invasive for some customers.
 3. **cfg-level lock** (belt-and-suspenders). Optional cfg field `production_safe: bool = false` alongside #1; can be circumvented if cfg is edited; useful as a development-time guardrail. Not the primary gate.
 
 **Open design questions to lock at CZ.0:**
-- Pre-CZ DBs in the wild: do existing rows auto-tag as `source=training` on first `data apply` post-CZ (cheap default), or does the operator run an explicit `recon-gen schema migrate-mark --source=<value>` verb (loud)?
+- Pre-CZ DBs in the wild: do existing rows auto-tag as `source=training` on first synthetic write post-CZ (cheap default), or does the operator run an explicit `recon-gen schema migrate-mark --source=<value>` verb (loud)?
 - Trainer reset's "delete synthetic only" path needs matview-refresh aware semantics — the matview shapes assume a fully-seeded DB, so removing synthetic rows from a real+synthetic mix might leave a partial state. Solution: parameterize the deploy_pipeline's truncate step to a "synthetic-only delete" path on real-data DBs and re-refresh matviews after.
 - App2 UX on a real-data DB: surface "this DB has real data — Trainer reset will only remove synthetic" loud (banner color, button label change to "Clear synthetic rows", explainer) — UX must make the narrowed scope visible, not just behave differently silently.
-- Does `audit verify` care about the marker? (Probably yes — a verify that succeeds against a DB with `source=real` rows is meaningful production evidence; the fingerprint covering a pure-synthetic reset is just demo paperwork.)
-- `refresh-demos.sh` opts out via env (`RECON_GEN_FORCE_PROD_WIPE=1`) — confirms the gate doesn't break the nightly Mac mini cadence by design.
-- What's the audit trail of an override-wipe? An op who passes `--force-prod-wipe` should leave a stderr line + ideally an artifact (a pre-wipe `audit apply` PDF) so the wipe is recoverable in evidence even if not in data.
-- Schema apply's `DROP TABLE` is the most destructive — can it ever be safe on a real-data DB, or does a real schema migration need an entirely separate verb (`recon-gen schema migrate` that ALTERs in place)?
+
+**Explicitly out of scope (per operator comments 2026-06-09):**
+- CLI gating (`recon-gen data apply --execute` / `schema apply --execute`). The `--execute` flag already requires intent; operators are in CLI context by choice.
+- `audit verify` integration with the source marker — "Audit doesn't care."
+- `refresh-demos.sh` opt-out env (`RECON_GEN_FORCE_PROD_WIPE=1`) — "Shouldn't be needed" since the demo install can't reach real data.
+- `--force-prod-wipe` CLI flag — moot once CLI is out of scope.
+- Schema-apply `DROP TABLE` migration story — moot once CLI is out of scope.
 
 **Related prior art:**
 - BU.1.6 Trainer reset implementation (`truncate+reseed via deploy_pipeline`) — the surface most directly affected by the DELETE-synthetic-only path.
@@ -480,7 +481,7 @@ Open design questions to lock at CY.0:
 - Provenance fingerprint (CW): proves what's in the DB, doesn't prevent wiping.
 - Plant primitives' existing `metadata.plant_kind` convention — the row-level marker precedent that #1 generalizes.
 
-- [ ] CZ.0 - **REPLAN.** Operator + agent design pass on the row-level marker design (preferred direction #1). Lock: (a) `metadata.source` field schema + canonical value set, (b) `etl_hook` documentation contract for real-data integrators, (c) auto-mark-on-first-write behavior of the seed/plant pipeline, (d) Trainer reset's DELETE-synthetic-only path through deploy_pipeline + matview-refresh semantics, (e) `--force-prod-wipe` UX (env var, CLI flag, both), (f) App2 UI shape on real-data DBs (banner / button label / explainer), (g) audit-trail-of-override artifact, (h) schema-apply migration story, (i) pre-CZ DB migration story (auto-mark vs explicit verb). Output: `docs/audits/cz_0_production_safe_mode_design.md`. Estimated 60-90 min.
+- [ ] CZ.0 - **REPLAN.** Operator + agent design pass on the row-level marker design (preferred direction #1), narrowed to button surfaces (App2 Trainer reset + Studio Deploy-changes). Lock: (a) `metadata.source` field schema + canonical value set, (b) `etl_hook` documentation contract for real-data integrators, (c) auto-mark-on-first-write behavior of the seed/plant pipeline, (d) Trainer reset's DELETE-synthetic-only path through deploy_pipeline + matview-refresh semantics, (e) Studio Deploy-changes button-side gate (server-side row-source check before invoking the CLI subroutine), (f) App2 UI shape on real-data DBs (banner / button label / explainer), (g) pre-CZ DB migration story (auto-mark vs explicit verb). Output: `docs/audits/cz_0_production_safe_mode_design.md`. Estimated 45-60 min (down from 60-90 min after operator scope-narrowing).
 - [ ] CZ.1 - **Polish: demo-publish.yml — poll PyPI for the tagged version before invoking refresh-demos.sh.** Surfaced 2026-06-09 on the v13.11.0 cut: `demo-publish.yml` triggers via `workflow_run` on Release-success, but pip ran ~3s after Release completion — before PyPI's CDN propagated the new version index. `pip install --upgrade recon-gen[prod]` saw 13.10.2 as already-latest and skipped the upgrade silently. Demos stayed at v13.10.2 until a manual re-fire. Same race will bite every future release unless fixed. **Fix:** add a "Wait for PyPI index propagation" step to `.github/workflows/demo-publish.yml` after "Identify runner user" — poll `https://pypi.org/pypi/recon-gen/json`'s `info.version` against the release tag (strip the `v`) with 20s × 6 retries (2 min max wait). Exit 1 with a clear message if PyPI never shows the version. Then proceed to "Fire the refresh wrapper" with confidence. Alternative considered: pass `RECON_GEN_PIN_VERSION=<tag>` from the workflow env so `refresh-demos.sh` pins via `recon-gen[prod]==<version>` (would fail loud if PyPI hasn't propagated) — works but the operator-facing PyPI-poll loop reads cleaner in the run log. Topically a release-pipeline polish item, bundled under CZ at operator request (2026-06-09). Sized as 30-45 min including the polling script + a one-cycle live-fire test on the next release.
 
 ## Phase PLAN - Phase PLAN
