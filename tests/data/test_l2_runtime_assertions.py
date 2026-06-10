@@ -148,27 +148,80 @@ class TestVolumeAnomaliesSignal:
             f"should produce thousands of pair-windows."
         )
 
-    def test_at_least_5_anomalies_clear_3sigma(
+    def test_planted_anomaly_clears_4sigma(
         self, demo_db_conn: Any, sasquatch_instance: L2Instance,
         sasquatch_db_prefix: str,
     ) -> None:
-        # R.5.c bar: with 90 days of baseline, the rolling-2-day-stddev
-        # signal must produce at least 5 anomalies in the dashboard's
-        # "high" coloring band (z >= 3). Without baseline, the matview
-        # produces near-zero rows because every pair has 1-2 windows
-        # only — stddev computation is meaningless.
+        """CV.3 rewrite — pre-CV asserted ≥5 z≥3σ rows from BASELINE
+        NOISE. Post-CV.2 (per-pair PARTITION BY z + min-n floor)
+        that's exactly the false-positive class BU.1.11 was about: the
+        baseline shouldn't surface anomalies.
+
+        New contract: plant `AnomalyInvariant().scenario_for(...)` on
+        top of the already-seeded baseline, refresh matviews, and
+        assert the planted (sender, recipient) pair surfaces at z≥4.
+        Stronger semantic — "matview surfaces plants" rather than
+        "matview has variance from baseline noise."
+        """
+        from datetime import date as _date
+        from recon_gen.common.spine import AnomalyInvariant
+        from recon_gen.common.l2.schema import refresh_matviews_sql
+        from recon_gen.common.sql import Dialect
+
         prefix = sasquatch_db_prefix
         view = f"{prefix}_inv_pair_rolling_anomalies"
         if not _matview_has_rows(demo_db_conn, view):
             pytest.skip(f"{view} empty — apply the demo seed first.")
+
+        # Plant a fresh anomaly scenario against sasquatch_instance.
+        # `AnomalyInvariant.scenario_for` resolves roles to leaf
+        # internal accounts; the L2 instance owns role discovery.
+        # Use a far-future anchor day so we don't collide with
+        # baseline-day plants from the seed.
+        gen = AnomalyInvariant(prefix=prefix).scenario_for(
+            "CustomerSubledger", "CustomerSubledger",
+            instance=sasquatch_instance,
+            anchor_day=_date(2030, 12, 31),
+            # Distinct synthetic IDs so the plant doesn't collide with
+            # seed rows (which use real customer IDs).
+            sender_account_id="acct-test-r5c-plant-sender",
+            recipient_account_id="acct-test-r5c-plant-recipient",
+        )
+        gen.emit(demo_db_conn)
+        demo_db_conn.commit()
+
+        # Re-refresh matviews so the planted rows are picked up. The
+        # refresh script is dialect-aware; we're on Postgres here per
+        # the fixture's URL.
+        refresh_sql = refresh_matviews_sql(
+            sasquatch_instance, prefix=prefix, dialect=Dialect.POSTGRES,
+        )
         with demo_db_conn.cursor() as cur:
-            cur.execute(f"SELECT COUNT(*) FROM {view} WHERE z_score >= 3")
-            n_high = cur.fetchone()[0]
-        assert n_high >= 5, (
-            f"R.5.c — Volume Anomalies should produce ≥5 z>=3σ rows "
-            f"after Phase R baseline; got {n_high}. Either the baseline "
-            f"isn't generating enough variance, or the matview SQL is "
-            f"broken. Check the inv_pair_rolling_anomalies matview shape."
+            cur.execute(refresh_sql)
+        demo_db_conn.commit()
+
+        with demo_db_conn.cursor() as cur:
+            cur.execute(
+                f"SELECT z_score, z_bucket FROM {view} "
+                f"WHERE sender_account_id = %s "
+                f"AND recipient_account_id = %s "
+                f"AND window_end = %s",
+                (
+                    gen.sender_account_id,
+                    gen.recipient_account_id,
+                    gen.anchor_day,
+                ),
+            )
+            row = cur.fetchone()
+        assert row is not None, (
+            f"planted anomaly (sender={gen.sender_account_id}, "
+            f"recipient={gen.recipient_account_id}, "
+            f"window_end={gen.anchor_day}) missing from {view} entirely"
+        )
+        z_score, z_bucket = float(row[0]), row[1]
+        assert abs(z_score) >= 4.0, (
+            f"planted anomaly should clear 4σ on per-pair z (CV.2); "
+            f"got z_score={z_score}, z_bucket={z_bucket!r}"
         )
 
     def test_planted_recipient_appears_in_matview(
