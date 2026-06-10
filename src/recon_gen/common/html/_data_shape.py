@@ -146,6 +146,7 @@ def shape_table(
     sort_column: str = "",
     column_labels: Mapping[str, str] | None = None,
     column_formats: Mapping[str, str] | None = None,
+    column_hidden: Mapping[str, bool] | None = None,
 ) -> dict[str, Any]:
     """Shape SQL rows as a paginated table.
 
@@ -155,24 +156,30 @@ def shape_table(
     when not supplied (no separate count query) — the renderer's
     pagination UI will hide page-N-of-M when total == page size.
 
-    ``columns`` go out as ``[{"name", "label"?, "format"?}]`` objects —
-    the shape ``bootstrap.js::renderTable`` reads. ``name`` is the raw
-    SQL column; ``label`` is the plain-English header (``col.label ||
-    col.name`` in the renderer); ``format`` (``"currency"`` / ``"number"``)
-    drives ``formatTableCell`` + right-alignment.
+    ``columns`` go out as ``[{"name", "label"?, "format"?, "hidden"?}]``
+    objects — the shape ``bootstrap.js::renderTable`` reads. ``name`` is
+    the raw SQL column; ``label`` is the plain-English header
+    (``col.label || col.name`` in the renderer); ``format`` (``"currency"``
+    / ``"number"``) drives ``formatTableCell`` + right-alignment;
+    ``hidden`` (CY.4.1) tells the renderer to skip emitting the ``<th>``
+    + per-row ``<td>`` for this column — but the row payload still carries
+    the cell value positionally, so row-level wiring (popup, drills) can
+    still read it.
 
-    ``column_labels`` / ``column_formats`` are keyed by raw SQL column
-    name (AO.R.1). They carry the SAME per-column presentation QuickSight
-    derives from the contract + the visual's field leaves (``human_name``
-    header, ``currency`` measure format) — the App2 tree fetcher resolves
-    them and passes them here. When BOTH are omitted, columns emit as the
-    bare ``[{"name"}]`` shape (renderer falls back to the raw name) so
-    callers that don't have the tree (test stubs) are unaffected. A
-    per-column key is omitted (not None) when there's no mapping for it,
+    ``column_labels`` / ``column_formats`` / ``column_hidden`` are keyed
+    by raw SQL column name (AO.R.1). They carry the SAME per-column
+    presentation QuickSight derives from the contract + the visual's field
+    leaves (``human_name`` header, ``currency`` measure format, ``hidden``
+    contract flag) — the App2 tree fetcher resolves them and passes them
+    here. When ALL are omitted, columns emit as the bare ``[{"name"}]``
+    shape (renderer falls back to the raw name) so callers that don't
+    have the tree (test stubs) are unaffected. A per-column key is
+    omitted (not None / not False) when there's no mapping for it,
     keeping the JSON clean.
     """
     labels = column_labels or {}
     formats = column_formats or {}
+    hidden = column_hidden or {}
 
     def _col(name: str) -> dict[str, Any]:
         out: dict[str, Any] = {"name": name}
@@ -182,6 +189,8 @@ def shape_table(
         fmt = formats.get(name)
         if fmt is not None:
             out["format"] = fmt
+        if hidden.get(name):
+            out["hidden"] = True
         return out
 
     return {

@@ -180,6 +180,15 @@ class ColumnSpec:
     display_name: str | None = None
     currency: bool = False
     storage: Storage = Storage.DOLLARS
+    hidden: bool = False
+    """When True, App2 table renderer skips this column when emitting
+    headers + cells, but the row JSON payload still carries the value
+    (so popups / drill actions / hidden-column-driven UI can read it).
+    QS path is unaffected: QS only declares fields in ``self.columns``
+    on the visual, so a hidden contract column never reaches QS unless
+    it was put in that list explicitly. Used for ``metadata`` columns
+    that ship through the SELECT for popup payload but shouldn't show
+    up as a raw ``{}`` column in the table."""
 
     @property
     def human_name(self) -> str:

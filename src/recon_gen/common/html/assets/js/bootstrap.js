@@ -358,9 +358,17 @@
         "sticky top-0 z-10 bg-surface-alt text-secondary-fg font-semibold",
       );
     var headerRow = thead.append("tr");
+    // CY.4.1 — column-spec `hidden: true` suppresses the column header
+    // + per-row cell. The row data array still carries the value
+    // positionally (so wireRowDrills + the metadata-popup wiring can
+    // read it); only the visible chrome is filtered. `columns` stays
+    // intact for positional cell→col lookups below.
+    var visibleColumns = columns.filter(function (c) {
+      return !c.hidden;
+    });
     headerRow
       .selectAll("th")
-      .data(columns)
+      .data(visibleColumns)
       .enter()
       .append("th")
       .attr(
@@ -424,7 +432,14 @@
       );
     trs
       .selectAll("td")
-      .data((row) => row.map((v, ci) => ({ value: v, col: columns[ci] || {} })))
+      .data((row) =>
+        row
+          .map((v, ci) => ({ value: v, col: columns[ci] || {} }))
+          // CY.4.1 — drop hidden cells from the rendered row. The full
+          // row tuple still lives in `data.rows` (see the `data-chart-data`
+          // script tag) for popup / drill consumers.
+          .filter((cell) => !cell.col.hidden),
+      )
       .enter()
       .append("td")
       .attr(

@@ -272,6 +272,13 @@ class _VisualPlan:
     ds_id: str | None
     column_labels: Mapping[str, str]
     column_formats: Mapping[str, str]
+    #: CY.4.1 — set of SQL column names the App2 table renderer should
+    #: hide (no ``<th>`` header, no per-row ``<td>`` cell) while still
+    #: shipping the value through the row payload positionally so popups
+    #: / drills can read it. Derived from the dataset contract's
+    #: ``ColumnSpec.hidden`` flag (minus any column the visual EXPLICITLY
+    #: lands on a field well — author intent overrides contract default).
+    column_hidden: Mapping[str, bool]
     chart: _ChartMeta | None
     money_columns: frozenset[str]
     #: KPI's value format (``"currency"`` / ``"number"``), derived
@@ -366,9 +373,10 @@ def _leaf_column_name(leaf: Any) -> str | None:  # typing-smell: ignore[explicit
 def _table_column_meta(
     visual: Any,  # typing-smell: ignore[explicit-any]: dynamic visual subtype walked via getattr
     ds_id: str | None,
-) -> tuple[dict[str, str], dict[str, str]]:
-    """AO.R.1 — per-column ``(label, format)`` for a visual, derived from the
-    SAME sources QuickSight uses so App2 renders identical headers + money.
+) -> tuple[dict[str, str], dict[str, str], dict[str, bool]]:
+    """AO.R.1 — per-column ``(label, format, hidden)`` for a visual,
+    derived from the SAME sources QuickSight uses so App2 renders
+    identical headers + money.
 
     - ``label`` ← the dataset contract's ``ColumnSpec.human_name`` (the
       ``display_name`` override or smart-titled snake_case) for every
@@ -378,12 +386,20 @@ def _table_column_meta(
       formats as ``"currency"`` only when it carries ``currency=True``.
       Dimension ids stay unformatted (no thousands-separator on an id) —
       mirrors QS's measure-vs-dimension number formatting.
+    - ``hidden`` ← the dataset contract's ``ColumnSpec.hidden`` flag
+      (CY.4.1). Set when the column ships through the SELECT for popup /
+      row-level wiring payload but should NOT render as a column header
+      / cell on the App2 table. QS-side parity is implicit: QS only
+      declares columns that appear on the visual's field wells, so a
+      hidden contract column never lands in QS's visual unless it was
+      put there explicitly.
 
     Empty maps when the visual has no resolvable contract (text boxes etc.):
     the renderer then falls back to the raw column name, unformatted.
     """
     labels: dict[str, str] = {}
     formats: dict[str, str] = {}
+    hidden: dict[str, bool] = {}
     if ds_id is not None:
         try:
             contract = get_contract(ds_id)
@@ -392,6 +408,8 @@ def _table_column_meta(
         if contract is not None:
             for spec in contract.columns:
                 labels[spec.name] = spec.human_name
+                if getattr(spec, "hidden", False):
+                    hidden[spec.name] = True
     for field_name in _FIELDS_WITH_DATASET_REFS:
         field_val: Any = getattr(visual, field_name, None)  # typing-smell: ignore[explicit-any]: getattr returns Any; collapsed to a known shape below
         if field_val is None:
@@ -414,7 +432,12 @@ def _table_column_meta(
                 formats[name] = "currency" if getattr(item, "currency", False) else "number"
             elif getattr(item, "currency", False):
                 formats[name] = "currency"
-    return labels, formats
+            # CY.4.1 — a column that the visual EXPLICITLY puts on a field
+            # well is by definition not hidden (the author asked for it).
+            # The contract-derived hidden flag is the default; the visual's
+            # field-wells list is the override.
+            hidden.pop(name, None)
+    return labels, formats, hidden
 
 
 def _chart_meta(visual: Any) -> _ChartMeta | None:  # typing-smell: ignore[explicit-any]: dynamic visual subtype walked via getattr
@@ -643,11 +666,12 @@ def make_tree_db_fetcher(
                 # signal vs the silent-misbehavior fallback shape.
                 contract = get_contract(ds_id)
                 sql = wrap_for_visual(base_sql, visual, contract=contract)
-            col_labels, col_formats = _table_column_meta(visual, ds_id)
+            col_labels, col_formats, col_hidden = _table_column_meta(visual, ds_id)
             money_cols = _resolve_money_columns(ds_id, col_formats)
             visual_index[vid] = _VisualPlan(
                 kind=kind, sql=sql, ds_id=ds_id,
                 column_labels=col_labels, column_formats=col_formats,
+                column_hidden=col_hidden,
                 chart=_chart_meta(visual),
                 money_columns=money_cols,
                 kpi_format=_kpi_format(visual),
@@ -742,6 +766,7 @@ def make_tree_db_fetcher(
                 sort_column=echo_sort,
                 column_labels=plan.column_labels,
                 column_formats=plan.column_formats,
+                column_hidden=plan.column_hidden,
             )
         rows, columns = await execute_visual_sql_async(
             pool, sql, params, dialect=cfg.dialect,

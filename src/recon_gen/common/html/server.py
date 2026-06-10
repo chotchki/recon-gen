@@ -313,17 +313,25 @@ def _emit_xlsx_workbook(data: Any, visual_id: VisualId) -> bytes:  # typing-smel
         ws.title = sheet_title_from_visual_id(visual_id)
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    # Header row.
+    # Header row. CY.4.1 — track which positional column indices are
+    # hidden from the rendered table; XLSX export drops the same set
+    # so the spreadsheet matches what the operator sees on-screen.
+    # The row tuple is still positional, so we filter cells by index
+    # in lockstep with the column filter.
     headers: list[str] = []
     formats: list[str] = []
-    for col in columns:  # pyright: ignore[reportUnknownVariableType]: list element type unknown
+    visible_idx: list[int] = []
+    for col_idx, col in enumerate(columns):  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]: list element type unknown
         if not isinstance(col, Mapping):
+            continue
+        if col.get("hidden"):  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]: col is Mapping[str, Any] from shape_table
             continue
         name = str(col.get("name") or "")  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]: col is Mapping[str, Any] from shape_table
         label = str(col.get("label") or name)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]: col is Mapping[str, Any] from shape_table
         fmt = str(col.get("format") or "")  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]: col is Mapping[str, Any] from shape_table
         headers.append(label)
         formats.append(fmt)
+        visible_idx.append(col_idx)
     ws.append(headers)
     bold = Font(bold=True)
     for cell in ws[1]:
@@ -334,7 +342,10 @@ def _emit_xlsx_workbook(data: Any, visual_id: VisualId) -> bytes:  # typing-smel
         if not isinstance(row, list):
             continue
         out_row: list[object] = []
-        for value in row:  # pyright: ignore[reportUnknownVariableType]: heterogeneous DB row values
+        for src_idx in visible_idx:
+            if src_idx >= len(row):  # pyright: ignore[reportUnknownArgumentType]: row is list[Unknown] (heterogeneous DB row values)
+                continue
+            value = row[src_idx]  # pyright: ignore[reportUnknownVariableType]: heterogeneous DB row values
             # openpyxl handles str / int / float / Decimal / bool /
             # None natively. Anything else gets str()-coerced so we
             # don't crash on dates/UUIDs/etc.

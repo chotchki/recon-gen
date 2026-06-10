@@ -369,3 +369,135 @@ def test_table_empty_rows_renders_empty_state_banner() -> None:
     assert empty_count == 1
     assert table_count == 0
     assert "No rows match" in message
+
+
+# ---------------------------------------------------------------------------
+# CY.4.1 — hidden column rendering
+# ---------------------------------------------------------------------------
+
+
+_HIDDEN_FIXTURE_DATA: dict[str, Any] = {
+    "columns": [
+        {"name": "id", "label": "ID"},
+        {"name": "amount", "label": "Amount", "format": "currency"},
+        {"name": "metadata", "label": "Metadata", "hidden": True},
+    ],
+    "rows": [
+        ["acct-1", 1234.50, '{"foo": "bar"}'],
+        ["acct-2", 5678.00, '{"baz": "qux"}'],
+    ],
+    "total_rows": 2,
+    "page_offset": 0,
+    "page_size": 50,
+    "sort_column": "",
+}
+
+
+def test_table_hidden_column_omits_th_header() -> None:
+    """CY.4.1 — ``column.hidden === true`` suppresses the ``<th>`` for
+    that column. With 3 columns + 1 hidden, only 2 headers render."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_into_target(page, _HIDDEN_FIXTURE_DATA)
+        thead_count = page.locator(
+            "#table-host table.table-data thead th",
+        ).count()
+        header_texts = cast(list[str], page.evaluate(
+            """() => Array.from(document.querySelectorAll(
+                '#table-host table.table-data thead th',
+            )).map(th => th.textContent.trim())""",
+        ))
+        browser.close()
+    assert thead_count == 2, (
+        f"hidden column must not render a <th>; got {thead_count} "
+        f"headers from a 3-column / 1-hidden contract"
+    )
+    # And the hidden column's label is not on any rendered header.
+    for txt in header_texts:
+        assert "Metadata" not in txt, (
+            f"hidden column label leaked into rendered header: "
+            f"{header_texts!r}"
+        )
+
+
+def test_table_hidden_column_omits_td_cells() -> None:
+    """CY.4.1 — hidden cells are dropped from each ``<tr>``. 2 rows ×
+    (3-1) visible cells = 4 ``<td>`` elements."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_into_target(page, _HIDDEN_FIXTURE_DATA)
+        td_count = page.locator(
+            "#table-host table.table-data tbody td",
+        ).count()
+        # Walk every cell's text — the raw JSON `{...}` must not appear.
+        all_cell_text = cast(str, page.evaluate(
+            """() => Array.from(document.querySelectorAll(
+                '#table-host table.table-data tbody td',
+            )).map(td => td.textContent).join('|')""",
+        ))
+        browser.close()
+    assert td_count == 4, (
+        f"hidden cells must be dropped from each row; expected 4 "
+        f"<td>s (2 rows × 2 visible cols), got {td_count}"
+    )
+    assert "{" not in all_cell_text and "}" not in all_cell_text, (
+        f"hidden metadata cell content leaked into rendered cells: "
+        f"{all_cell_text!r}"
+    )
+
+
+def test_table_hidden_column_payload_unchanged_in_chart_data() -> None:
+    """CY.4.1 — the row payload (``data.rows``) MUST still carry the
+    hidden column's value, so the popup wiring (reading from
+    ``data-chart-data``) can access it. The filtering happens only at
+    paint time; the chart-data script tag is untouched."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        # Inject a <section> + child chart-data script (mirrors the
+        # server-side render.py emit) so we can read back what the
+        # script tag carries.
+        page.evaluate(
+            """({ data }) => {
+                var prev = document.getElementById('chart-data-host');
+                if (prev) prev.remove();
+                var section = document.createElement('section');
+                section.id = 'chart-data-host';
+                section.setAttribute('data-visual-kind', 'Table');
+                var script = document.createElement('script');
+                script.setAttribute('type', 'application/json');
+                script.setAttribute('class', 'chart-data');
+                script.textContent = JSON.stringify(data);
+                section.appendChild(script);
+                document.body.appendChild(section);
+            }""",
+            {"data": _HIDDEN_FIXTURE_DATA},
+        )
+        payload = cast(dict[str, Any], page.evaluate(
+            """() => {
+                var script = document.querySelector(
+                    '#chart-data-host script.chart-data',
+                );
+                return JSON.parse(script.textContent);
+            }""",
+        ))
+        browser.close()
+    # Rows still carry 3 cells each — the 3rd is the hidden metadata.
+    assert payload["rows"] == [
+        ["acct-1", 1234.50, '{"foo": "bar"}'],
+        ["acct-2", 5678.00, '{"baz": "qux"}'],
+    ], (
+        f"hidden cells must remain in the chart-data row payload so "
+        f"popup wiring can read them; got {payload['rows']!r}"
+    )
+    # Columns list also retains the hidden entry (for positional
+    # cell→col lookup in row-level wiring).
+    names = [c["name"] for c in payload["columns"]]
+    assert names == ["id", "amount", "metadata"], (
+        f"hidden column must stay in the columns array; got {names!r}"
+    )

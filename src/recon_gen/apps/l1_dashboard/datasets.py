@@ -546,8 +546,11 @@ DAILY_STATEMENT_TRANSACTIONS_CONTRACT = DatasetContract(columns=[
     # CY.4 — surfaced for the Table visual's metadata_popup feature.
     # Carried on every row so the App2 renderer can show a per-row
     # popup; not rendered as a column header (see render.py's
-    # `data-metadata-popup` attribute).
-    ColumnSpec("metadata", "STRING"),
+    # `data-metadata-popup` attribute). CY.4.1: hidden=True suppresses
+    # the column header + cell on App2's table renderer (QS path is
+    # unaffected since QS only declares fields on the visual's columns
+    # list).
+    ColumnSpec("metadata", "STRING", hidden=True),
 ])
 
 
@@ -576,8 +579,11 @@ TRANSACTIONS_CONTRACT = DatasetContract(columns=[
     # CY.4 — surfaced for the Table visual's metadata_popup feature.
     # Carried on every row so the App2 renderer can show a per-row
     # popup; not rendered as a column header (see render.py's
-    # `data-metadata-popup` attribute).
-    ColumnSpec("metadata", "STRING"),
+    # `data-metadata-popup` attribute). CY.4.1: hidden=True suppresses
+    # the column header + cell on App2's table renderer (QS path is
+    # unaffected since QS only declares fields on the visual's columns
+    # list).
+    ColumnSpec("metadata", "STRING", hidden=True),
 ])
 
 
