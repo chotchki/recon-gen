@@ -157,6 +157,7 @@ nav:
       - Install: reference/install.md
       - Self-hosting the dashboards (App 2): reference/self-host.md
       - ETL — Data Integration: handbook/etl.md
+      - ETL Hook — Bulk Helpers Reference: handbook/etl-hook.md
       - Customization: handbook/customization.md
       - CLI reference: reference/cli.md
       - Disabling AWS resource tagging: reference/disable-tagging.md

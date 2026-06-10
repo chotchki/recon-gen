@@ -143,6 +143,22 @@ full refresh contract.
   </a>
 </div>
 
+## The Python bulk-helper surface
+
+If your ETL writes Python — pulling from a source system, projecting
+in memory, then INSERTing — reach for `bulk_insert_tx` /
+`bulk_insert_balance` at
+`src/recon_gen/common/spine/_emit_helpers.py`. They take
+`Sequence[tuple[object, ...]]` in canonical `TX_COLS` / `DB_COLS`
+order, auto-coerce dollar shapes in the money columns to BIGINT
+cents, and dispatch to the per-dialect fast path (DuckDB's
+multi-row VALUES coalescer; psycopg / oracledb `executemany`).
+
+See [ETL Hook — Bulk Helpers Reference](etl-hook.md) for the column
+tuples, code examples, the `metadata.source` contract, the
+`cfg.etl_hook` ⇄ standalone-mode boundary, and a ~40-line
+`my_etl.py` skeleton.
+
 ## The exemplary helper
 
 `recon-gen data etl-example` emits canonical INSERT patterns
