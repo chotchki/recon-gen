@@ -788,6 +788,85 @@ class TestTableVisual:
         assert sort["RowSort"][0]["FieldSort"]["FieldId"] == "f-amt"
         assert sort["RowSort"][0]["FieldSort"]["Direction"] == "DESC"
 
+    def test_metadata_popup_defaults_false(self):
+        """CY.4 — ``metadata_popup`` defaults to False so the existing
+        Tables don't suddenly demand a ``metadata`` contract column."""
+        table = Table(
+            visual_id=VisualId("v-tbl"),
+            title="Detail",
+            subtitle="t",
+            columns=[Dim(dataset=_DS, field_id="f-id", column="id")],
+        )
+        assert table.metadata_popup is False
+
+    def test_metadata_popup_requires_metadata_in_contract(self):
+        """CY.4 — wiring ``metadata_popup=True`` on a Table whose bound
+        dataset contract lacks ``"metadata"`` must fail at construction
+        (Rust-style invariant — see the memory note).
+
+        Uses a fresh isolated dataset + contract registration so the
+        check finds the bound contract but reads no ``metadata`` column.
+        """
+        from recon_gen.common.dataset_contract import (
+            ColumnSpec,
+            DatasetContract,
+            isolated_dataset_registries,
+            register_contract,
+        )
+
+        with isolated_dataset_registries():
+            ds = Dataset(
+                identifier="cy4-no-meta-ds",
+                arn="arn:aws:quicksight:::dataset/cy4-no-meta-ds",
+            )
+            register_contract(
+                ds.identifier,
+                DatasetContract(columns=[
+                    ColumnSpec("id", "STRING"),
+                    ColumnSpec("amount", "DECIMAL"),
+                ]),
+            )
+            with pytest.raises(ValueError, match="metadata_popup=True"):
+                Table(
+                    visual_id=VisualId("v-tbl"),
+                    title="Detail",
+                    subtitle="t",
+                    columns=[Dim(dataset=ds, field_id="f-id", column="id")],
+                    metadata_popup=True,
+                )
+
+    def test_metadata_popup_accepts_contract_with_metadata(self):
+        """CY.4 — when the contract DOES declare ``metadata``,
+        construction succeeds. The renderer is then licensed to stamp
+        ``data-metadata-popup="1"`` on the visual section."""
+        from recon_gen.common.dataset_contract import (
+            ColumnSpec,
+            DatasetContract,
+            isolated_dataset_registries,
+            register_contract,
+        )
+
+        with isolated_dataset_registries():
+            ds = Dataset(
+                identifier="cy4-with-meta-ds",
+                arn="arn:aws:quicksight:::dataset/cy4-with-meta-ds",
+            )
+            register_contract(
+                ds.identifier,
+                DatasetContract(columns=[
+                    ColumnSpec("id", "STRING"),
+                    ColumnSpec("metadata", "STRING"),
+                ]),
+            )
+            table = Table(
+                visual_id=VisualId("v-tbl"),
+                title="Detail",
+                subtitle="t",
+                columns=[Dim(dataset=ds, field_id="f-id", column="id")],
+                metadata_popup=True,
+            )
+            assert table.metadata_popup is True
+
 
 class TestBarChartVisual:
     def test_emits_bar_with_category_and_values(self):

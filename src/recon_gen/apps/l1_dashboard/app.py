@@ -1747,6 +1747,10 @@ def _populate_transactions_sheet(
             CellAccentText(on=account_col, color=accent),
             CellAccentText(on=transfer_col, color=accent),
         ],
+        # CY.4 — App2 renderer surfaces the per-row ``metadata`` JSON
+        # as a popup; the column is carried on every row payload but
+        # not rendered as a header.
+        metadata_popup=True,
     )
 
 
@@ -1866,6 +1870,10 @@ def _populate_daily_statement_sheet(
         conditional_formatting=[
             CellAccentText(on=transfer_col, color=accent),
         ],
+        # CY.4 — App2 renderer surfaces the per-row ``metadata`` JSON
+        # as a popup; the column is carried on every row payload but
+        # not rendered as a header.
+        metadata_popup=True,
     )
 
     # CQ.4.b — Control accounts (1:1 singletons) reference Table.

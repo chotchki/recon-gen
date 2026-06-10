@@ -699,6 +699,14 @@ class Table:
     ) = None
     actions: list[Action] = field(default_factory=list[Action])
     conditional_formatting: list[CellFormat] | None = None
+    #: CY.4 — when True, every row of this table carries a per-row
+    #: ``metadata`` column that the App2 renderer surfaces as a popup
+    #: (and the renderer stamps ``data-metadata-popup="1"`` on the
+    #: ``<section>``). The bound dataset's contract MUST include a
+    #: ``"metadata"`` column — enforced by ``__post_init__`` at the
+    #: wiring site so the mistake fails at construction, not at fetch
+    #: time. Default False = no popup, no extra column expectation.
+    metadata_popup: bool = False
     visual_id: VisualId | AutoResolved = AUTO
 
     _AUTO_KIND: ClassVar[str] = "table"
@@ -715,6 +723,44 @@ class Table:
                 "Table: `columns` (unaggregated mode) cannot be combined "
                 "with `group_by` / `values` (aggregated mode). Pick one."
             )
+        # CY.4 — fail at the wiring site when ``metadata_popup=True`` is
+        # set on a Table whose bound dataset's contract doesn't declare
+        # a ``metadata`` column. Without this, the renderer would emit
+        # ``data-metadata-popup="1"`` and the row payload would silently
+        # lack the column the JS popup expects — a fetch-time empty-
+        # popup bug class. The check resolves the contract via the
+        # module-level registry (populated by ``build_dataset()`` for
+        # every visual-bound dataset); when no contract is registered
+        # (early test fixtures, ad-hoc Datasets), the check is skipped
+        # for the same reason ``Dataset.__getitem__`` skips column
+        # validation in that case.
+        if self.metadata_popup:
+            from recon_gen.common.dataset_contract import get_contract
+
+            datasets = self.datasets()
+            if not datasets:
+                raise ValueError(
+                    f"Table {self.title!r}: metadata_popup=True requires "
+                    f"the Table to be bound to a dataset (via columns / "
+                    f"group_by / values), but found none."
+                )
+            for ds in datasets:
+                try:
+                    contract = get_contract(ds.identifier)
+                except KeyError:
+                    # No contract registered (test fixture / kitchen-sink) —
+                    # same skip pattern as Dataset.__getitem__.
+                    continue
+                contract_columns = {c.name for c in contract.columns}
+                if "metadata" not in contract_columns:
+                    raise ValueError(
+                        f"Table {self.title!r}: metadata_popup=True "
+                        f"requires the bound dataset contract to "
+                        f"include a 'metadata' column. Got columns: "
+                        f"{sorted(contract_columns)}. Either drop "
+                        f"metadata_popup or add metadata to the "
+                        f"contract."
+                    )
         # AA.A.8.bug — duplicate ``(dataset, column)`` entries in a Table's
         # field-well list make QuickSight reject the visual at render
         # time with: "your tabular report contains duplicate columns. To

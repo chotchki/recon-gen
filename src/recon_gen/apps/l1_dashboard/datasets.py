@@ -543,6 +543,11 @@ DAILY_STATEMENT_TRANSACTIONS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("amount_direction", "STRING"),
     ColumnSpec("status", "STRING"),
     ColumnSpec("origin", "STRING"),
+    # CY.4 — surfaced for the Table visual's metadata_popup feature.
+    # Carried on every row so the App2 renderer can show a per-row
+    # popup; not rendered as a column header (see render.py's
+    # `data-metadata-popup` attribute).
+    ColumnSpec("metadata", "STRING"),
 ])
 
 
@@ -568,6 +573,11 @@ TRANSACTIONS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("origin", "STRING"),
     ColumnSpec("posting", "DATETIME"),
     ColumnSpec("transfer_completion", "DATETIME"),
+    # CY.4 — surfaced for the Table visual's metadata_popup feature.
+    # Carried on every row so the App2 renderer can show a per-row
+    # popup; not rendered as a column header (see render.py's
+    # `data-metadata-popup` attribute).
+    ColumnSpec("metadata", "STRING"),
 ])
 
 
@@ -1206,6 +1216,9 @@ def _daily_statement_transactions_sql(prefix: str, dialect: Dialect) -> str:
     # view-primitive strict-collapse decision).
     # AO.1.impl — tx.amount_money is BIGINT cents; project as dollars.
     amount = cents_to_dollars_sql("tx.amount_money", dialect=dialect)
+    # CY.4 — surface `metadata` on every row for the Table visual's
+    # metadata_popup feature. Stays in the projection but is hidden
+    # from rendered column headers (see render.py).
     return (
         f"SELECT tx.id AS transaction_id,"
         f"       tx.account_id, tx.account_name,"
@@ -1213,7 +1226,8 @@ def _daily_statement_transactions_sql(prefix: str, dialect: Dialect) -> str:
         f"       tx.posting,"
         f"       tx.transfer_id, tx.rail_name,"
         f"       {amount} AS amount_money, tx.amount_direction,"
-        f"       tx.status, tx.origin"
+        f"       tx.status, tx.origin,"
+        f"       tx.metadata"
         f" FROM {prefix}_current_transactions tx"
         f" WHERE {account_display_expr('tx.account_name', 'tx.account_id')}"
         f" = <<${P_L1_DS_ACCOUNT_DSP}>>"
@@ -1261,8 +1275,11 @@ def build_transactions_dataset(
     + indexed) so per-account / per-transfer / per-status / per-origin /
     per-rail_name filter dropdowns hit indexed lookups. Projects
     only the analyst-visible columns; internal columns (entry,
-    account_scope, supersedes, bundle_id, template_name, metadata) stay
-    in the matview but aren't surfaced.
+    account_scope, supersedes, bundle_id, template_name) stay
+    in the matview but aren't surfaced. CY.4 — ``metadata`` IS
+    surfaced now so the Table visual can show a per-row popup; the
+    column is carried on every row but hidden from rendered headers
+    (see ``Table.metadata_popup`` + ``render.py``).
 
     Y.2.g — all five dropdowns push into this SQL: account_id /
     transfer_id / status / origin via the sentinel-OR data-value guard,
@@ -1281,7 +1298,8 @@ def build_transactions_dataset(
         f" account_role, account_parent_role,"
         f" transfer_id, transfer_parent_id, rail_name,"
         f" {amount} AS amount_money, amount_direction, status, origin,"
-        f" posting, transfer_completion"
+        f" posting, transfer_completion,"
+        f" metadata"
         f" FROM {prefix}_current_transactions\n"
         f"WHERE {_account_display_clause(P_L1_TX_ACCOUNT)}\n"
         f"  AND {_data_value_clause('transfer_id', P_L1_TX_TRANSFER_ID)}\n"

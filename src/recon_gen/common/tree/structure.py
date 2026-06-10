@@ -623,13 +623,19 @@ class Row:
         ) = None,
         actions: list[Action] | None = None,
         conditional_formatting: list[CellFormat] | None = None,
+        metadata_popup: bool = False,
         visual_id: VisualId | AutoResolved = AUTO,
     ) -> Table:
         """Construct + register + place a Table in this row.
 
         Aggregated mode: pass ``group_by`` + ``values``. Unaggregated
         mode (raw column display): pass ``columns``. The two modes are
-        mutually exclusive (Table.__post_init__ enforces this)."""
+        mutually exclusive (Table.__post_init__ enforces this).
+
+        ``metadata_popup`` (CY.4): when True, the App2 renderer surfaces
+        a per-row popup driven by the dataset's ``metadata`` column;
+        the bound contract must declare ``metadata`` (enforced at
+        construction)."""
         col_index = self._consume(width)
         table = Table(
             title=title, subtitle=subtitle,
@@ -637,6 +643,7 @@ class Row:
             columns=columns or [],
             sort_by=sort_by, actions=actions or [],
             conditional_formatting=conditional_formatting,
+            metadata_popup=metadata_popup,
             visual_id=visual_id,
         )
         self.sheet.visuals.append(table)
@@ -834,6 +841,7 @@ class AbsoluteSlot:
         ) = None,
         actions: list[Action] | None = None,
         conditional_formatting: list[CellFormat] | None = None,
+        metadata_popup: bool = False,
         visual_id: VisualId | AutoResolved = AUTO,
     ) -> Table:
         table = Table(
@@ -842,6 +850,7 @@ class AbsoluteSlot:
             columns=columns or [],
             sort_by=sort_by, actions=actions or [],
             conditional_formatting=conditional_formatting,
+            metadata_popup=metadata_popup,
             visual_id=visual_id,
         )
         self.sheet.visuals.append(table)

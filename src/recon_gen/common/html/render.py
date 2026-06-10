@@ -1881,12 +1881,20 @@ def _render_visual(
     # paints (left-click for ``DATA_POINT_CLICK`` drills, a "⋯" ctxmenu
     # button for ``DATA_POINT_MENU`` drills).
     row_drills_attr = ""
+    metadata_popup_attr = ""
     if kind == "Table":
         row_drills = _serialize_table_row_drills(visual, dashboard_id)
         if row_drills:
             row_drills_attr = (
                 f' data-row-drills="{html.escape(row_drills, quote=True)}"'
             )
+        # CY.4 — flag the Table's row-level metadata popup so the
+        # bootstrap.js renderer can wire a per-row affordance from
+        # the row payload's ``metadata`` column (carried on every row
+        # via the dataset's CY.4 projection). The header for that
+        # column stays hidden; the popup is the only UI surface.
+        if getattr(visual, "metadata_popup", False):
+            metadata_popup_attr = ' data-metadata-popup="1"'
 
     parts: list[str] = []
     parts.append(
@@ -1894,6 +1902,7 @@ def _render_visual(
         f' data-visual-id="{esc_id}"'
         f' data-fetch-url="{esc_url}"'
         f'{row_drills_attr}'
+        f'{metadata_popup_attr}'
         f' class="{section_class}"{grid_style}>'
     )
     parts.append(f'    <h2 class="{h2_class}">{html.escape(title)}</h2>')
