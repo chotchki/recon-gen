@@ -49,6 +49,8 @@ from collections.abc import Callable, Generator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from recon_gen.common.browser.helpers import webkit_page
 from recon_gen.common.config import Config
 from recon_gen.common.html._smoke_app import (
@@ -1179,6 +1181,73 @@ class App2Driver:
         return int(self._page.locator(
             "details[open][data-json-node]",
         ).count())
+
+    # -- Snapshot (BV.3.3 trainer dogfood per-plant restore) -------------
+
+    def snapshot_take(self, name: str) -> None:
+        """POST ``/training/snapshot/take?name=<name>``. Captures the
+        current v-overlay state under the given name.
+
+        Drives the Snapshotter (``tests/e2e/_snapshotter.py``) through
+        the Studio test server's HTTP surface so the "everything through
+        the driver" invariant (X.2.q) holds even for test-harness state
+        mutations. Uses httpx (not raw Playwright) — per the
+        no-playwright-leak convention, the browser layer is for
+        user-facing flows; snapshot/restore is server-side state and
+        belongs over httpx. The driver layer itself is exempt from the
+        lint, so an httpx import here is fine.
+
+        BV.3.3 design: ``snapshot_take`` is called ONCE per worker after
+        the session-scope ``trainer_start_session`` fixture lands;
+        ``snapshot_restore`` then runs between plant tests (~50ms on
+        DuckDB, ~150ms on PG, ~2500ms on Oracle) — vs the cumulative-
+        walk pattern's full Session Start per plant (~2min Oracle ×15).
+
+        Raises ``httpx.HTTPStatusError`` on non-204 — surfaces the
+        snapshotter's actionable message in the response body rather
+        than letting the test continue against an indeterminate state.
+        """
+        self._snapshot_post("take", name)
+
+    def snapshot_restore(self, name: str) -> None:
+        """POST ``/training/snapshot/restore?name=<name>``. Restores the
+        v-overlay to the state captured by a prior ``snapshot_take(name)``.
+
+        See ``snapshot_take`` for the full design rationale + httpx-over-
+        Playwright justification.
+        """
+        self._snapshot_post("restore", name)
+
+    def snapshot_drop(self, name: str) -> None:
+        """POST ``/training/snapshot/drop?name=<name>``. Drops the named
+        snapshot — releases the dialect-specific resources (golden-mirror
+        schemas / temp files / metadata cursors) held by the Snapshotter
+        for that name.
+
+        See ``snapshot_take`` for the full design rationale + httpx-over-
+        Playwright justification.
+        """
+        self._snapshot_post("drop", name)
+
+    def _snapshot_post(self, verb: str, name: str) -> None:
+        """Shared httpx POST for the three snapshot verbs.
+
+        One-shot ``httpx.Client`` per call: the snapshot verbs fire at
+        most a few times per test (take-once + N restores), so the
+        ~1ms per-call client construction cost is dwarfed by the
+        snapshotter's actual work (50ms-2.5s by dialect). Avoids
+        threading a persistent client through the driver's __init__
+        and the factory context-managers — cleaner ownership story.
+
+        ``raise_for_status`` converts non-2xx to ``httpx.HTTPStatusError``
+        so the test surfaces the snapshotter's actionable message
+        (carried in the response body) rather than continuing against
+        an indeterminate v-overlay state.
+        """
+        url = f"{self._base}/training/snapshot/{verb}"
+        with httpx.Client() as client:
+            response = client.post(url, params={"name": name})
+        response.raise_for_status()
 
     # -- Trainer (BV.4 dual-prefix flow) ---------------------------------
 
