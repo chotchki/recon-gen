@@ -966,6 +966,7 @@ def _render_filter_form(
     filter_specs: Sequence[FilterSpec] = (),
     *,
     prefix_override: str | None = None,
+    page_size_override: str | None = None,
     dashboard_id: DashboardId | str = "",
     sheet_id: SheetId | str = "",
 ) -> str:
@@ -999,6 +1000,29 @@ def _render_filter_form(
         parts.append(
             f'    <input type="hidden" name="prefix" value="{esc_prefix}">'
         )
+    # BV.3.3.c bug4-followup — when the page URL carries ``?page_size=<N>``,
+    # embed it as a hidden form field so every visual's
+    # ``hx-include="#filter-form"`` fetch serializes it. The Table
+    # fetcher reads ``params["page_size"]`` (clamped to
+    # ``_TABLE_PAGE_SIZE_MAX``) so a test or operator can demand "all
+    # rows on page 1" without column-header-clicking through pagination.
+    # Without this thread, ``?page_size=10000`` on the page URL stopped
+    # at the server's page render — the htmx data fetch defaulted to
+    # 50 and NULL-magnitude chain-coherence rows fell off page 1 when
+    # the tree's ``amount DESC`` sort baked in (see Part B above) didn't
+    # win the tie-break against alphabetical column-1 fallback.
+    # Validated as a positive integer; anything else is dropped silently
+    # (consistent with the server-side fetcher's _page_int contract).
+    if page_size_override:
+        try:
+            page_size_int = int(page_size_override)
+        except ValueError:
+            page_size_int = 0
+        if page_size_int > 0:
+            parts.append(
+                f'    <input type="hidden" name="page_size" '
+                f'value="{page_size_int}">'
+            )
     # Phase BM — the pre-BM hidden ``date_from`` / ``date_to`` block
     # for the universal date-RANGE dissolved. Each
     # ParameterDateTimePicker is now its own ParameterDateSpec entry
@@ -1050,6 +1074,8 @@ def _render_parameter_date(spec: ParameterDateSpec) -> str:
 
 def _visual_fetch_url(
     dashboard_id: str, sheet_id: str, visual_id: str,  # typing-smell: ignore[bare-str-id,bare-str-id,bare-str-id]: dashboard_id comes from callers as raw analyst string / sheet_id comes from callers as raw analyst string / visual_id comes from callers as raw analyst string
+    *,
+    default_sort: tuple[str, str] | None = None,
 ) -> str:
     """Build the GET data URL for one visual.
 
@@ -1058,12 +1084,87 @@ def _visual_fetch_url(
     deep-link generators) calls this. Mirrors the route template
     in ``server.py::make_app`` exactly; if either drifts, the path
     constraint check on the server returns 404.
+
+    ``default_sort`` — BV.3.3.c bug4-followup: when the visual is a
+    Table with a tree-level ``sort_by=(col, "ASC"|"DESC")``, bake the
+    column + direction into the URL as ``?sort_column=<col>:<asc|desc>``.
+    Without this, the initial-load fetch defaulted server-side to
+    ``ORDER BY 1`` (alphabetical first column) — NULL-magnitude rows
+    sorted after meaningful rows on a tab whose tree author asked for
+    ``amount DESC``, dropping them past page 1. The page-URL override
+    ``?page_size=N`` threads through the filter form's hidden input
+    (see ``_render_filter_form``) and gets serialized via
+    ``hx-include="#filter-form"`` — both layers honored together.
     """
-    return (
+    base = (
         f"/dashboards/{dashboard_id}"
         f"/sheets/{sheet_id}"
         f"/visuals/{visual_id}/data"
     )
+    if default_sort is None:
+        return base
+    col, direction = default_sort
+    # Defensive bare-identifier check mirrors ``_tree_fetcher._BARE_IDENT_RE``;
+    # the server discards anything else and falls back to ``ORDER BY 1``,
+    # so a non-identifier column ref baked here would be silently dropped.
+    # Skip the bake instead — the URL stays clean.
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", col):
+        return base
+    dir_token = "desc" if direction.upper() == "DESC" else "asc"
+    return f"{base}?sort_column={col}:{dir_token}"
+
+
+def _extract_table_sort_default(visual: Any) -> tuple[str, str] | None:  # typing-smell: ignore[explicit-any]: Visual is a wide union (Table | KPI | BarChart | ...); annotating the precise type would duplicate the tree's structural-vs-nominal walk
+    """BV.3.3.c bug4-followup — pull a Table visual's tree-level
+    ``sort_by`` down to ``(sql_column_name, "ASC"|"DESC")`` for the
+    htmx initial-load URL bake.
+
+    Returns ``None`` for:
+    - non-Table visuals (sort is not a Table concept here)
+    - Tables with no ``sort_by``
+    - ``sort_by`` shapes that don't reduce to a single primary sort
+      cleanly (we take the first tuple as primary; secondary sorts
+      fall through to the server's ``, 1`` tiebreak)
+    - ``sort_by`` referencing a bare string ``field_id`` (no
+      column-name back-mapping from a synthesized field_id; emitting
+      a non-identifier would be discarded server-side anyway)
+    - ``sort_by`` referencing a column ref that doesn't resolve to a
+      bare identifier (rare: a calc field whose name has been escaped)
+
+    All filter-out cases keep the existing default-sort behavior
+    (``ORDER BY 1``), so the change is strictly additive.
+    """
+    if type(visual).__name__ != "Table":
+        return None
+    sort_by: Any = getattr(visual, "sort_by", None)  # typing-smell: ignore[explicit-any]: dynamic getattr against a union of visual types; the type narrowing happens below
+    if sort_by is None:
+        return None
+    # The Table.sort_by union is ``tuple | list[tuple] | None``. Take
+    # the FIRST tuple as the primary sort — the URL param shape is
+    # single-column only (the server's `, 1` tiebreak picks up the rest).
+    if isinstance(sort_by, list):
+        sort_list: list[Any] = sort_by  # pyright: ignore[reportUnknownVariableType]  # typing-smell: ignore[explicit-any]: same dynamic-attr narrowing pattern
+        if not sort_list:
+            return None
+        first: Any = sort_list[0]
+    else:
+        first = sort_by
+    if not isinstance(first, tuple):  # pyright: ignore[reportUnnecessaryIsInstance]: defensive at the dynamic-getattr boundary — sort_by's declared shape is enforced at Table.__post_init__ but a fixture / mock visual could carry any payload, and silently returning None beats a TypeError inside an HTML renderer
+        return None
+    first_tuple: tuple[Any, ...] = first  # pyright: ignore[reportUnknownVariableType]  # typing-smell: ignore[explicit-any]: dynamic getattr fall-through
+    if len(first_tuple) != 2:
+        return None
+    ref, direction = first_tuple
+    if not isinstance(direction, str) or direction.upper() not in ("ASC", "DESC"):
+        return None
+    # ref can be Dim / Measure / str (a bare field_id). For Dim/Measure
+    # we read .column → resolve_column. Bare-string field_ids don't
+    # carry a column-name back-mapping, so skip.
+    if isinstance(ref, (Dim, Measure)):
+        col = resolve_column(ref.column)
+    else:
+        return None
+    return col, direction.upper()
 
 
 def build_top_nav_entries(
@@ -1498,6 +1599,7 @@ def emit_html(
     data_generation_id: int | None = None,
     top_nav: str = "",
     prefix_override: str | None = None,
+    page_size_override: str | None = None,
     banner_text: str | None = None,
 ) -> str:
     """Render a tree ``Sheet`` as a standalone HTML page.
@@ -1613,6 +1715,7 @@ def emit_html(
         body_parts.append(_render_filter_form(
             visual_fetch_urls, filter_specs,
             prefix_override=prefix_override,
+            page_size_override=page_size_override,
             dashboard_id=dashboard_id,
             sheet_id=sheet_id,
         ))
@@ -1855,7 +1958,16 @@ def _render_visual(
     )
     visual_id = str(raw_visual_id)
     esc_id = html.escape(visual_id)
-    fetch_url = _visual_fetch_url(dashboard_id, sheet_id, visual_id)
+    # BV.3.3.c bug4-followup — bake the visual's tree-level Table.sort_by
+    # into the initial-load fetch URL so the FIRST request carries it.
+    # Without this, the server's ``ORDER BY 1`` default fired and the
+    # tree author's ``amount DESC`` intent only kicked in after a user
+    # column-header click. Returns ``None`` for non-Table visuals and
+    # Tables with no sort_by — URL stays unchanged in those cases.
+    table_sort = _extract_table_sort_default(visual)
+    fetch_url = _visual_fetch_url(
+        dashboard_id, sheet_id, visual_id, default_sort=table_sort,
+    )
     esc_url = html.escape(fetch_url)
     # X.2.g.1.d — section sits inside a 36-col CSS grid. The grid
     # container handles the outer margin; per-section margin is just

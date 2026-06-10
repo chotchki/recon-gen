@@ -646,6 +646,12 @@ def make_app(
         # Threaded into the filter form as a hidden input so every
         # visual's hx-include="#filter-form" fetch carries it.
         url_prefix = request.query_params.get("prefix") or None
+        # BV.3.3.c bug4-followup — ``?page_size=N`` on the page URL
+        # threads into every Table visual's hx-get via the form's
+        # hidden input (same pattern as ``prefix``). Tests + the rare
+        # operator hit set ``?page_size=10000`` to drop pagination on
+        # the initial fetch; default unset = server-side default of 50.
+        url_page_size = request.query_params.get("page_size") or None
         return HTMLResponse(emit_html(
             served.tree_app, served.sheet,
             dashboard_id=dash_id, dev_log=dev_log,
@@ -655,6 +661,7 @@ def make_app(
             data_generation_id=get_data_generation_id(),
             top_nav=_render_top_nav(active_href=f"/dashboards/{dash_id}"),
             prefix_override=url_prefix,
+            page_size_override=url_page_size,
             banner_text=banner_text,
         ))
 
@@ -692,6 +699,8 @@ def make_app(
         )
         # BV.4.8.P1.1 — see dashboard_view.
         url_prefix = request.query_params.get("prefix") or None
+        # BV.3.3.c bug4-followup — see dashboard_view.
+        url_page_size = request.query_params.get("page_size") or None
         return HTMLResponse(emit_html(
             served.tree_app, sheet_for_dash,
             dashboard_id=dash_id, dev_log=dev_log,
@@ -701,6 +710,7 @@ def make_app(
             data_generation_id=get_data_generation_id(),
             top_nav=_render_top_nav(active_href=f"/dashboards/{dash_id}"),
             prefix_override=url_prefix,
+            page_size_override=url_page_size,
             banner_text=banner_text,
         ))
 

@@ -626,3 +626,152 @@ class TestParameterDropdownCascade:
         out = _render_parameter_dropdown(spec)
         # No ids → relative form (legacy / unit-test shape).
         assert 'data-typeahead-url="dropdown-search/test-ds/name"' in out
+
+
+# BV.3.3.c bug4-followup — server-side default-sort + page_size baked
+# into the htmx data-fetch URL. The implementer's root-cause was that
+# Dashboard tree-level ``sort_by=(amount, DESC)`` + page-URL
+# ``?page_size=10000`` didn't propagate to the htmx hx-get data-fetch URL.
+# Server defaults fired (page_size=50, ORDER BY 1 alphabetical), and
+# NULL-magnitude chain-coherence rows sorted after ``chain_*`` fell off
+# page 1. These two tests pin the plumbing so a regression fails here,
+# not in a 5-min e2e chain.
+
+
+def test_emit_html_bakes_table_sort_by_into_hx_get_url() -> None:
+    """A Table with tree-level ``sort_by=(col, "DESC")`` must bake
+    ``?sort_column=<col>:desc`` into the initial-load hx-get URL.
+
+    Without this bake, the server's stable ``ORDER BY 1`` default
+    (``_paginate_table_sql`` in ``_tree_fetcher.py``) fires on the
+    FIRST request — meaningless on a sort that the tree author
+    explicitly set. Subsequent column-header clicks would correct it,
+    but the first-paint render is wrong. bug4 root-cause: NULL-
+    magnitude chain-coherence rows in the test sweep sorted before
+    populated rows alphabetically, dropping the planted violations
+    past page 1.
+    """
+    from recon_gen.common.html.render import emit_html
+    from recon_gen.common.tree.datasets import Dataset
+    from recon_gen.common.tree.visuals import Table
+    from recon_gen.common.dataset_contract import (
+        ColumnSpec, DatasetContract, register_contract,
+    )
+
+    # Register a contract under a unique identifier (register_contract
+    # raises on a same-id re-register with a different contract; pick
+    # a unique name to avoid colliding with other module-level
+    # registrations).
+    ds_id = "bv33c-bug4-followup-sortby-ds"
+    try:
+        register_contract(ds_id, DatasetContract(columns=[
+            ColumnSpec(name="rail_name", type="STRING"),
+            ColumnSpec(name="amount", type="INTEGER"),
+        ]))
+    except Exception:
+        pass  # already registered (test re-run in same process)
+
+    ds = Dataset(identifier=ds_id, arn=f"arn::{ds_id}")
+    sheet = Sheet(
+        sheet_id=SheetId("sort-sheet"),
+        name="Sort",
+        title="Sort Sheet",
+        description="x",
+    )
+    rail_col = ds["rail_name"].dim()
+    amount_col = ds["amount"].dim()
+    sheet.visuals.append(
+        Table(
+            title="Violations",
+            subtitle="Sorted by magnitude DESC at the tree level.",
+            visual_id=VisualId("v-violations"),
+            columns=[rail_col, amount_col],
+            sort_by=(amount_col, "DESC"),
+        ),
+    )
+    out = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+    )
+    # The hx-get URL on the visual-data div carries the bake.
+    assert "?sort_column=amount:desc" in out, (
+        "Table tree-level sort_by=(amount, DESC) must bake into the "
+        "initial-load hx-get URL so the first request honors the "
+        "author's intent rather than ORDER BY 1 alphabetical default."
+    )
+    # Section's data-fetch-url (read by bootstrap.js for in-chart click
+    # swaps) carries the same URL so downstream pager / header clicks
+    # don't lose the baked default.
+    assert (
+        'data-fetch-url="/dashboards/test-dashboard/sheets/sort-sheet'
+        '/visuals/v-violations/data?sort_column=amount:desc"'
+    ) in out
+
+
+def test_emit_html_threads_page_size_url_param_into_filter_form() -> None:
+    """``?page_size=10000`` on the page URL must thread to a hidden
+    form input named ``page_size``. The filter-form's
+    ``hx-include="#filter-form"`` then serializes it onto every Table
+    visual's hx-get, overriding the server's 50-default.
+
+    Operator-facing default stays unset → server uses 50; test-side
+    set via the URL or future "Show All" affordance.
+    """
+    from recon_gen.common.html.render import emit_html
+    from recon_gen.common.tree.datasets import Dataset
+    from recon_gen.common.tree.visuals import Table
+    from recon_gen.common.dataset_contract import (
+        ColumnSpec, DatasetContract, register_contract,
+    )
+
+    ds_id = "bv33c-bug4-followup-pagesize-ds"
+    try:
+        register_contract(ds_id, DatasetContract(columns=[
+            ColumnSpec(name="rail_name", type="STRING"),
+        ]))
+    except Exception:
+        pass
+
+    ds = Dataset(identifier=ds_id, arn=f"arn::{ds_id}")
+    sheet = Sheet(
+        sheet_id=SheetId("ps-sheet"),
+        name="PS",
+        title="Page Size Sheet",
+        description="x",
+    )
+    sheet.visuals.append(
+        Table(
+            title="Big Table",
+            subtitle="Page-size override applies here.",
+            visual_id=VisualId("v-big-table"),
+            columns=[ds["rail_name"].dim()],
+        ),
+    )
+    # Override threaded → hidden input emitted with the override value.
+    out_override = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+        page_size_override="10000",
+    )
+    assert (
+        '<input type="hidden" name="page_size" value="10000">'
+    ) in out_override, (
+        "Page URL ?page_size=10000 must mint a hidden form input "
+        "so every Table visual's hx-include='#filter-form' "
+        "serializes it on initial load."
+    )
+    # Default (no override) → no page_size hidden input → server falls
+    # back to 50 per ``_tree_fetcher._TABLE_PAGE_SIZE``.
+    out_default = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+    )
+    assert 'name="page_size"' not in out_default, (
+        "Operator-facing default must stay 50: absent override means "
+        "no hidden input, so the server's 50-row default fires."
+    )
+    # Defensive: non-integer override is silently dropped, not echoed
+    # raw (would let an attacker craft an ORDER BY-injection-adjacent
+    # payload into the form, even though _page_int sanitizes it).
+    out_garbage = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+        page_size_override="not-an-int",
+    )
+    assert 'name="page_size"' not in out_garbage
