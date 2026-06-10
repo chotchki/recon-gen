@@ -58,6 +58,7 @@ If the whole sheet shows blank KPIs and an empty table, the picked account or da
 - [Drift](drift.md) — the cumulative stored-vs-computed balance disagreement across the entire history of an account; use this when you've spotted drift on one day and want to see the pattern over time.
 - [Drift Timelines](drift-timelines.md) — drift by account role over time; use this to see whether a role is chronically drifting or spiking once.
 - [Transactions](transactions.md) — the raw posting ledger; drill here to see every leg across all accounts and transfer IDs.
+- [Metadata Popup](metadata-popup.md) — the `{} View metadata` entry on the row-drill `⋯` menu; opens a side panel with the row's pretty-printed JSON metadata (App2-only).
 
 ## QS parity notes
 

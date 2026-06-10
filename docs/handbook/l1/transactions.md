@@ -63,6 +63,7 @@ If *App Info* shows `last_refresh_at` as null or the matview row count as zero a
 - [Pending Aging](pending-aging.md) — when you want to find stuck-Pending legs and their age bucket.
 - [Unbundled Aging](unbundled-aging.md) — when you want to find Posted legs waiting for the aggregator and their age bucket.
 - [Drift](drift.md) — the L1 integrity invariant that catches when postings disagree with stored balance; Transactions is the source-of-truth leg list for reconciling drift findings.
+- [Metadata Popup](metadata-popup.md) — the `{} View metadata` entry on the row-drill `⋯` menu; opens a side panel with the row's pretty-printed JSON metadata (App2-only).
 
 ## QS parity notes
 
