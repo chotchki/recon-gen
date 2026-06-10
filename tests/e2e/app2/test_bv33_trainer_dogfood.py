@@ -113,6 +113,16 @@ pytestmark = [needs(Need.PLAYWRIGHT)]
 _TRAINER_ANCHOR = date(2026, 5, 30)
 
 
+# BV.3.3 snapshot — name used for the post-Session-Start snapshot the
+# session-scope fixture captures + each test body restores. One name
+# per (worker × dialect) shared session, taken once after Session Start
+# and restored at the top of every plant test. Drops at session
+# teardown via the test-driver-orchestrated cleanup pattern (the
+# Snapshotter's per-process registry also clears on Studio shutdown,
+# but explicit drop is the documented contract).
+_TRAINER_SNAPSHOT_NAME = "post_session_start"
+
+
 def _trainer_dialect_params() -> list[Any]:  # noqa: ANN401 — ParameterSet has no public pyright stub
     """Build the dialect parametrize set for the trainer fixture.
 
@@ -172,7 +182,7 @@ def _trainer_dialect_params() -> list[Any]:  # noqa: ANN401 — ParameterSet has
         # mark of "trainer-<dialect>" funnels all of one dialect's
         # trainer tests onto a single worker. 3 workers total (one
         # per dialect) instead of 16; each does its own Session Start
-        # once + N cheap reclones.
+        # once + N cheap snapshot restores.
         marks: list[Any] = [  # noqa: ANN401
             pytest.mark.xdist_group(f"trainer-{short}"),
             *dialect_extra_marks[short],
@@ -187,37 +197,48 @@ def trainer_ready_session(
     tmp_path_factory: pytest.TempPathFactory,
     worker_id: str,
 ) -> Generator[tuple[Config, str], None, None]:
-    """CE.2 — session-scope Session Start fixture, shared across all
-    trainer dogfood tests on the same xdist worker × dialect cell.
+    """BV.3.3-snapshot — session-scope Session Start + snapshot fixture,
+    shared across all trainer dogfood tests on the same xdist worker ×
+    dialect cell.
 
-    Backlog #249 root cause: each test was running `_seed_demo_db` +
-    Session Start (`/etl/run`) afresh against its own per-test
-    isolated prefix. On 16-xdist-worker CI with one shared PG /
-    Oracle container per dialect, that's N × 10-min Oracle ETL +
-    seed-apply contention — easily blew the 600s
-    `_trainer_wait_until_finished` wire for [pg] / [or] parametrize
-    cells.
+    Lineage:
 
-    New shape (CE.0 spike confirmed PG: 2.4× per-test speedup):
+    - CE.2 (backlog #249): each test ran `_seed_demo_db` + Session
+      Start (`/etl/run`) afresh; ~10min Oracle ETL × N tests blew the
+      600s wait wire under 16-xdist contention. Fix: session-scope
+      Session Start once + cheap per-test `/training/reclone` reset.
+    - BV.3.3 (current): the reclone reset was still ~13s on PG and
+      ~1-2min on Oracle — enough that the Oracle dialect's per-test
+      cost stayed measured in minutes. Swap to the per-dialect
+      Snapshotter (DuckDBFileSnapshotter / PostgresSchemaSnapshotter
+      / OracleGoldenMirrorSnapshotter): ~50ms DuckDB, ~150ms PG,
+      ~2500ms Oracle. The `/training/reclone` route stays in Studio
+      as the operator-facing "Force rebuild from base" escape hatch
+      (BV.4.9), but the test driver no longer touches it — the
+      snapshot path is faster + has no UI-button dependency.
+
+    Shape:
 
     - Per-(worker × dialect) STABLE prefix (`trainer_<dialect>_<worker>`)
       — no nodeid in the key, so all tests on the same worker share
       the same base.
     - `_seed_demo_db` once.
     - `studio_server` once (uvicorn instance shared across tests).
-    - One-shot driver opens, clicks Session Start, closes — base + v
-      overlay are now both populated.
+    - One-shot driver opens, clicks Session Start, then calls
+      `snapshot_take(_TRAINER_SNAPSHOT_NAME)` to capture the post-
+      Session-Start state to the Snapshotter's per-process registry.
     - Yield `(cfg, base_url)` for tests to attach their own drivers
       against the same server.
 
-    Tests then call `driver.trainer_reset_overlay()` (CE.1 — clicks
-    Re-clone) at the start of each test body — wipes + reclones the
-    v overlay from base, refreshes v matviews, skips `/etl/run`.
-    Cheap (PG ~13s, Oracle ~1-2min, DuckDB sub-second).
+    Tests then call `driver.snapshot_restore(_TRAINER_SNAPSHOT_NAME)`
+    at the top of each body — restores v-overlay tables + v matviews
+    from the snapshot. Per-dialect cost dominates: DuckDB shutil.copy2
+    ~50ms, PG TRUNCATE+INSERT+matview-refresh ~150ms, Oracle CTAS-
+    TRUNCATE+INSERT/*+APPEND*/+DBMS_MVIEW.REFRESH ~2500ms.
 
-    Cross-test contamination guard: each test reclones at the start
-    of its body. Plants from prior tests on the same worker are
-    cleared by the reclone before the new test plants.
+    Cross-test contamination guard: each test restores at the top of
+    its body. Plants from prior tests on the same worker are wiped by
+    the restore before the new test plants.
     """
     from tests.e2e._drivers.app2 import App2Driver  # noqa: PLC0415
 
@@ -251,14 +272,28 @@ def trainer_ready_session(
     _seed_demo_db(cfg)
 
     with studio_server(cfg) as base_url:
-        # One-shot driver to drive the initial full Session Start.
-        # Subsequent tests open their own drivers + call
-        # `trainer_reset_overlay()` (cheap reclone) against the same
-        # server.
+        # One-shot driver to drive the initial full Session Start +
+        # take the post-Session-Start snapshot. Subsequent tests open
+        # their own drivers + call `snapshot_restore()` against the
+        # same server.
         with App2Driver.attached_to(base_url=base_url, cfg=cfg) as driver:
             driver.open_training()
             driver.trainer_start_session()
-        yield (cfg, base_url)
+            driver.snapshot_take(_TRAINER_SNAPSHOT_NAME)
+        try:
+            yield (cfg, base_url)
+        finally:
+            # Drop the snapshot at session teardown — releases the
+            # dialect-specific resources (PG/Oracle golden-mirror
+            # schemas, DuckDB tempfile) held by the Snapshotter. The
+            # Studio shutdown also clears its per-process registry,
+            # so this is the documented-contract belt to the implicit-
+            # cleanup suspenders.
+            with App2Driver.attached_to(base_url=base_url, cfg=cfg) as drop_driver:
+                try:
+                    drop_driver.snapshot_drop(_TRAINER_SNAPSHOT_NAME)
+                except Exception:  # noqa: BLE001 — teardown best-effort, never mask the original failure
+                    pass
 
 
 def _seed_demo_db(cfg: Config) -> None:
@@ -610,8 +645,10 @@ def test_bv33a_limit_breach_outbound_trainer_dogfood(
     breakage shape (one specific plant, one specific matview).
 
     CE.3 — consumes the session-scope `trainer_ready_session`
-    fixture: base + initial v overlay already populated. This test
-    just reclones the v overlay (cheap), plants, applies, verifies.
+    fixture: base + initial v overlay already populated + post-
+    Session-Start snapshot taken. This test restores the snapshot
+    (~50ms DuckDB / ~150ms PG / ~2500ms Oracle), plants, applies,
+    verifies.
     """
     from tests.e2e._drivers.app2 import App2Driver  # noqa: PLC0415
 
@@ -623,8 +660,8 @@ def test_bv33a_limit_breach_outbound_trainer_dogfood(
     with App2Driver.attached_to(
         base_url=base_url, cfg=cfg,
     ) as driver:
+        driver.snapshot_restore(_TRAINER_SNAPSHOT_NAME)
         driver.open_training()
-        driver.trainer_reset_overlay()
 
         before = _v_matview_account_ids(cfg, v_matview)
         driver.trainer_enable_plant(entry.kind, entry.family)
@@ -711,11 +748,13 @@ def test_trainer_dogfood_per_kind(
     entry: PlantKindEntry,
     trainer_ready_session: tuple[Config, str],
 ) -> None:
-    """Per-kind trainer dogfood — each plant runs against a cleanly-
-    recloned v overlay sharing one base + Session Start per worker ×
-    dialect. CE.3 — consumes the session-scope `trainer_ready_session`
-    fixture; the per-test reclone wipes plants from prior tests on
-    the same worker so each test starts from a clean overlay.
+    """Per-kind trainer dogfood — each plant runs against a snapshot-
+    restored v overlay sharing one base + Session Start per worker ×
+    dialect. BV.3.3-snapshot — consumes the session-scope
+    `trainer_ready_session` fixture; the per-test snapshot restore
+    (~50ms DuckDB / ~150ms PG / ~2500ms Oracle) wipes plants from
+    prior tests on the same worker so each test starts from a clean
+    overlay matching the post-Session-Start state.
 
     Dialect parametrization comes from the session fixture's `params`
     list (RECON_GEN_TRAINER_DIALECTS env-overridable).
@@ -739,8 +778,8 @@ def test_trainer_dogfood_per_kind(
     with App2Driver.attached_to(
         base_url=base_url, cfg=cfg,
     ) as driver:
+        driver.snapshot_restore(_TRAINER_SNAPSHOT_NAME)
         driver.open_training()
-        driver.trainer_reset_overlay()
 
         before = _v_matview_signatures(cfg, v_matview, matview)
         driver.trainer_enable_plant(entry.kind, entry.family)
