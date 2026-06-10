@@ -109,6 +109,108 @@ def schema_clean(
         emit_to_target(sql, output, label="schema DROP")
 
 
+@schema.command("migrate-mark")
+@l2_instance_option()
+@config_option()
+@click.option(
+    "--source", "source_value", type=str, default="training",
+    show_default=True,
+    help=(
+        "Value to write into metadata.source on every unstamped row. "
+        "Default 'training' assumes pre-CZ rows came from the seed/"
+        "training path (the common case — production-integrator etl_hook "
+        "is brand-new in BS.4 and ships alongside CZ). Set "
+        "--source=real on the rare DB that loaded real ETL data before "
+        "CZ landed so those rows survive standalone-mode resets."
+    ),
+)
+@execute_option()
+def schema_migrate_mark(
+    l2_instance_path: str | None, config: str,
+    source_value: str, execute: bool,
+) -> None:
+    """CZ.6 — stamp ``metadata.source`` on every pre-CZ row.
+
+    Phase CZ's standalone-mode cleanup gate (`cfg.etl_hook is None` ⇒
+    DELETE-only-synthetic on Trainer reset / Studio Deploy-changes)
+    keys on ``JSON_VALUE(metadata, '$.source') = 'training'`` as the
+    synthetic-row predicate. CZ.2 stamps new writes; CZ.6 fills in pre-
+    CZ rows already sitting in the DB at upgrade time.
+
+    Default-emit shape: prints what would be done (row counts per base
+    table). Pass ``--execute`` to actually run the UPDATE and commit.
+
+    Same auto-mark logic fires from ``data apply --execute``'s pre-
+    flight check — this verb is the explicit form, primarily used when
+    the operator wants ``--source=real`` (real ETL data loaded before
+    CZ landed) or wants to re-run after seeding more pre-CZ rows.
+    """
+    from recon_gen.common.l2.migrate_mark import (
+        count_unstamped_rows, stamp_unstamped_rows,
+    )
+
+    cfg, _instance = resolve_l2_for_demo(config, l2_instance_path)
+    if not cfg.demo_database_url:
+        raise click.ClickException(
+            "demo_database_url is required. "
+            "Set it in your config YAML or via RECON_GEN_DEMO_DATABASE_URL."
+        )
+
+    from recon_gen.common.db import connect_demo_db
+
+    click.echo(
+        f"Connecting to {cfg.demo_database_url.split('@')[-1]}...",
+        err=True,
+    )
+    try:
+        conn = connect_demo_db(cfg)
+    except ImportError as e:
+        raise click.ClickException(str(e)) from e
+    try:
+        tx_unstamped, bal_unstamped = count_unstamped_rows(
+            conn, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+        )
+        click.echo(
+            f"  found {tx_unstamped:,} unstamped {cfg.db_table_prefix}"
+            f"_transactions rows, {bal_unstamped:,} unstamped "
+            f"{cfg.db_table_prefix}_daily_balances rows",
+            err=True,
+        )
+        if tx_unstamped == 0 and bal_unstamped == 0:
+            click.echo(
+                "  nothing to do — every row already carries "
+                "metadata.source. Idempotent no-op.",
+                err=True,
+            )
+            return
+        if not execute:
+            click.echo(
+                f"  [dry-run] would stamp metadata.source="
+                f"{source_value!r} on the rows above. "
+                f"Pass --execute to actually run.",
+                err=True,
+            )
+            return
+        tx_updated, bal_updated = stamp_unstamped_rows(
+            conn,
+            prefix=cfg.db_table_prefix,
+            dialect=cfg.dialect,
+            source=source_value,
+        )
+        conn.commit()
+        click.echo(
+            f"  stamped metadata.source={source_value!r} on "
+            f"{tx_updated:,} transactions + {bal_updated:,} "
+            f"daily_balances rows.",
+            err=True,
+        )
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 @schema.command("test")
 @click.option(
     "--pytest-args", default="",

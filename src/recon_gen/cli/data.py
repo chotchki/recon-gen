@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 import click
 
 if TYPE_CHECKING:
+    from recon_gen.common.config import Config
     from recon_gen.common.l2.primitives import L2Instance
     from recon_gen.common.sql import Dialect as _DialectT
 
@@ -103,9 +104,97 @@ def data_apply(
     sql = build_full_seed_sql(cfg, instance, density=seed_density)
 
     if execute:
+        _cz6_pre_flight_migrate_mark(cfg)
         connect_and_apply(cfg, sql, label="seed data")
     else:
         emit_to_target(sql, output, label="seed SQL")
+
+
+def _cz6_pre_flight_migrate_mark(cfg: "Config") -> None:
+    """CZ.6 — pre-flight check on ``data apply --execute``.
+
+    Counts rows in both base tables where ``metadata.source`` is unset
+    (pre-CZ rows). Three outcomes:
+
+      * No unstamped rows → silent no-op (the common steady-state path).
+      * Unstamped rows + ``cfg.etl_hook is None`` (standalone mode) →
+        auto-mark with ``source='training'`` and continue. Locked-
+        decision rationale: pre-CZ DBs in standalone mode were
+        demonstrably running through the training/seed path (etl_hook
+        is new in BS.4 + CZ; absent ⇒ no real-data integrator existed).
+      * Unstamped rows + ``cfg.etl_hook is not None`` (ETL mode) → log
+        a one-line hint and continue without auto-marking. The
+        integrator may have loaded real rows before CZ landed; the
+        explicit ``recon-gen schema migrate-mark`` verb lets them
+        choose ``--source=real`` for real rows or
+        ``--source=training`` for synthetic ones.
+
+    Idempotent: re-running against an already-stamped DB is a no-op
+    (counts return 0). Catalog errors (base tables missing on a virgin
+    DB) silently swallow — the seed apply will create the rows
+    correctly stamped by CZ.2.
+    """
+    # The base tables may not exist yet (operator running ``schema
+    # apply`` + ``data apply`` for the first time on a fresh DB).
+    # Probe defensively: any error from the count path means there's
+    # nothing to migrate.
+    from recon_gen.common.db import connect_demo_db
+    from recon_gen.common.l2.migrate_mark import (
+        count_unstamped_rows, stamp_unstamped_rows,
+    )
+    if not cfg.demo_database_url:
+        return
+    try:
+        conn = connect_demo_db(cfg)
+    except ImportError:
+        # Driver not installed — let the main apply path surface the
+        # error consistently.
+        return
+    try:
+        try:
+            tx_unstamped, bal_unstamped = count_unstamped_rows(
+                conn, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+            )
+        except Exception:  # noqa: BLE001 — dialect-specific catalog errors are not a shared exception base
+            # Base tables likely don't exist on this DB yet; nothing
+            # to migrate.
+            return
+        total = tx_unstamped + bal_unstamped
+        if total == 0:
+            return
+        if cfg.etl_hook is not None:
+            click.echo(
+                f"  [cz6] found {total:,} pre-CZ row(s) "
+                f"({tx_unstamped:,} transactions, "
+                f"{bal_unstamped:,} daily_balances) lacking "
+                f"metadata.source; NOT auto-marking because etl_hook "
+                f"is configured. If those rows are real, leave them. "
+                f"If synthetic, run `recon-gen schema migrate-mark "
+                f"--execute` to stamp them.",
+                err=True,
+            )
+            return
+        click.echo(
+            f"  [cz6] migrating {total:,} pre-CZ row(s) "
+            f"({tx_unstamped:,} transactions, "
+            f"{bal_unstamped:,} daily_balances): "
+            f"stamping metadata.source='training' "
+            f"(cfg.etl_hook is None ⇒ standalone-mode default).",
+            err=True,
+        )
+        try:
+            stamp_unstamped_rows(
+                conn,
+                prefix=cfg.db_table_prefix,
+                dialect=cfg.dialect,
+                source="training",
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    finally:
+        conn.close()
 
 
 @data.command("refresh")
