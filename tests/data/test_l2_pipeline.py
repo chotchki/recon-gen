@@ -401,8 +401,10 @@ def test_drift_matview_carries_v840_perf_indexes() -> None:
     p = "kitchen"
 
     # Drift matview indexes — pre-v8.4.0 indexes still present.
+    # BV.6 — the account_day index was promoted to UNIQUE to unlock PG
+    # REFRESH MATERIALIZED VIEW CONCURRENTLY.
     assert (
-        f"CREATE INDEX idx_{p}_drift_account_day\n"
+        f"CREATE UNIQUE INDEX idx_{p}_drift_account_day\n"
         f"    ON {p}_drift (account_id, business_day_start);"
     ) in sql
     assert (
@@ -415,8 +417,9 @@ def test_drift_matview_carries_v840_perf_indexes() -> None:
     ) in sql
 
     # Ledger drift matview — same pre-v8.4.0 + new index parity.
+    # BV.6 — same UNIQUE promotion as _drift.
     assert (
-        f"CREATE INDEX idx_{p}_ledger_drift_account_day\n"
+        f"CREATE UNIQUE INDEX idx_{p}_ledger_drift_account_day\n"
         f"    ON {p}_ledger_drift (account_id, business_day_start);"
     ) in sql
     assert (
@@ -463,8 +466,10 @@ def test_current_transactions_matview_carries_v856_perf_index() -> None:
         f"CREATE INDEX idx_{p}_curr_tx_transfer "
         f"ON {p}_current_transactions (transfer_id);"
     ) in sql
+    # BV.6 — curr_tx_id promoted to UNIQUE (current_transactions picks
+    # one row per `id` via MAX(entry); UNIQUE unlocks PG CONCURRENTLY).
     assert (
-        f"CREATE INDEX idx_{p}_curr_tx_id "
+        f"CREATE UNIQUE INDEX idx_{p}_curr_tx_id "
         f"ON {p}_current_transactions (id);"
     ) in sql
     assert (

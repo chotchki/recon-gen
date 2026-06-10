@@ -429,7 +429,36 @@ def refresh_matviews_sql(
     # subsequent SELECTs use the indexes we ship on each matview
     # (without ANALYZE the planner doesn't know the post-REFRESH row
     # count + value distribution and may pick a sequential scan).
-    refreshes = "\n".join(refresh_matview(n, dialect) for n in names)
+    #
+    # BV.6 / DL.15 — PG REFRESH CONCURRENTLY for every matview that
+    # ships a UNIQUE index. BV.6 finish (2026-06-10) added UNIQUE
+    # indexes to the last three from batch 1's carve-out
+    # (fan_in_disagreement, l1_exceptions, inv_money_trail_edges) per
+    # the operator-locked design choices (BV.6-1: composite
+    # (child_transfer_id, chain_parent_name); BV.6-2: 5-tuple
+    # (check_type, account_id, business_day, rail_name, transfer_id);
+    # BV.6-3: row_number() disambiguator on the natural-key triple).
+    # CONCURRENTLY lets dashboards keep reading the prior snapshot
+    # while the refresh recomputes, and avoids the AccessExclusive
+    # lock on the matview that the non-concurrent path takes.
+    #
+    # Sole remaining carve-out: inv_pair_rolling_anomalies (disqualified
+    # mid-implementation when the spec_example seed surfaced real
+    # duplicates on its claimed (sender, recipient, posted_day) key —
+    # pair_daily's GROUP BY includes denormalized account_name +
+    # account_role, so when metadata varies for the same account_id
+    # those split into multiple rows; real fix is dropping the
+    # name/role columns from the GROUP BY, which is owner-call).
+    _NON_UNIQUE_MATVIEWS = frozenset({
+        f"{p}_inv_pair_rolling_anomalies",
+    })
+    refreshes = "\n".join(
+        refresh_matview(
+            n, dialect,
+            concurrently=(dialect is Dialect.POSTGRES and n not in _NON_UNIQUE_MATVIEWS),
+        )
+        for n in names
+    )
     analyzes = "\n".join(analyze_table(n, dialect) for n in names)
     return f"{refreshes}\n{analyzes}"
 
@@ -536,7 +565,10 @@ def _emit_table_based_current_matview_creates(p: str, dialect: Dialect) -> str:
         f"CREATE INDEX idx_{p}_curr_tx_account_posting\n"
         f"    ON {p}_current_transactions (account_id, posting);\n"
         f"CREATE INDEX idx_{p}_curr_tx_transfer ON {p}_current_transactions (transfer_id);\n"
-        f"CREATE INDEX idx_{p}_curr_tx_id ON {p}_current_transactions (id);\n"
+        # BV.6 — UNIQUE on (id) required for PG REFRESH MATERIALIZED VIEW
+        # CONCURRENTLY. current_transactions is keyed by `id` (the v6
+        # transactions PK; current_* picks one row per id via MAX(entry)).
+        f"CREATE UNIQUE INDEX idx_{p}_curr_tx_id ON {p}_current_transactions (id);\n"
         f"CREATE INDEX idx_{p}_curr_tx_status ON {p}_current_transactions (status);\n"
         f"CREATE INDEX idx_{p}_curr_tx_posting_rail_name\n"
         f"    ON {p}_current_transactions (posting, rail_name);\n"
@@ -553,7 +585,10 @@ def _emit_table_based_current_matview_creates(p: str, dialect: Dialect) -> str:
         f"    WHERE account_id = sb.account_id\n"
         f"      AND business_day_start = sb.business_day_start\n"
         f");\n"
-        f"CREATE INDEX idx_{p}_curr_db_account_day\n"
+        # BV.6 — UNIQUE on (account_id, business_day_start) for PG
+        # CONCURRENTLY refresh. current_daily_balances picks one row per
+        # (account_id, business_day_start) via MAX(entry).
+        f"CREATE UNIQUE INDEX idx_{p}_curr_db_account_day\n"
         f"    ON {p}_current_daily_balances (account_id, business_day_start);\n"
         f"CREATE INDEX idx_{p}_curr_db_scope_day\n"
         f"    ON {p}_current_daily_balances (account_scope, business_day_start);\n"
@@ -601,7 +636,12 @@ def _render_computed_subledger_balance_section(
     )
     matview_index = (
         f"-- JOIN key with current_daily_balances + drift's WHERE filter.\n"
-        f"CREATE INDEX idx_{p}_csb_account_day\n"
+        f"-- BV.6 — promoted to UNIQUE: computed_subledger_balance has one\n"
+        f"-- row per leaf (account, business_day_start) by construction\n"
+        f"-- (the FROM clause's GROUP-equivalent SUM over current_daily_balances\n"
+        f"-- joined on account_id + business_day_start). UNIQUE unlocks PG\n"
+        f"-- REFRESH … CONCURRENTLY.\n"
+        f"CREATE UNIQUE INDEX idx_{p}_csb_account_day\n"
         f"    ON {p}_computed_subledger_balance (account_id, business_day_start);"
     )
 
@@ -787,7 +827,10 @@ def _render_balance_cadence_gap_section(
         "      OR (a.balance_cadence = 'sparse' AND COALESCE(tp.leg_count, 0) > 0)\n"
         "  );\n"
         "-- Composite covers the dashboard's per-(account, day) drill.\n"
-        f"CREATE INDEX idx_{p}_bcg_account_day\n"
+        "-- BV.6 — promoted to UNIQUE: balance_cadence_gap rows are\n"
+        "-- per (account, expected business_day_start) by construction\n"
+        "-- (CL.6 cadence spine). UNIQUE unlocks PG REFRESH … CONCURRENTLY.\n"
+        f"CREATE UNIQUE INDEX idx_{p}_bcg_account_day\n"
         f"    ON {p}_balance_cadence_gap (account_id, business_day_start);\n"
         f"CREATE INDEX idx_{p}_bcg_kind\n"
         f"    ON {p}_balance_cadence_gap (gap_kind);"
@@ -2015,7 +2058,10 @@ WHERE tx.entry = (
 CREATE INDEX idx_{p}_curr_tx_account_posting
     ON {p}_current_transactions (account_id, posting);
 CREATE INDEX idx_{p}_curr_tx_transfer ON {p}_current_transactions (transfer_id);
-CREATE INDEX idx_{p}_curr_tx_id ON {p}_current_transactions (id);
+-- BV.6 — UNIQUE on (id) required for PG REFRESH MATERIALIZED VIEW
+-- CONCURRENTLY. current_transactions is keyed by `id` (the v6
+-- transactions PK; current_* picks one row per id via MAX(entry)).
+CREATE UNIQUE INDEX idx_{p}_curr_tx_id ON {p}_current_transactions (id);
 CREATE INDEX idx_{p}_curr_tx_status ON {p}_current_transactions (status);
 -- v8.5.6: date-leading composite for the Transactions sheet's filter
 -- dropdown. Z.B (2026-05-15) renamed transfer_type → rail_name under the
@@ -2052,7 +2098,10 @@ WHERE sb.entry = (
 -- Composite index covers (account_id, business_day_start) which every
 -- downstream view JOINs / filters on. Scope index covers the WHERE
 -- account_scope = 'internal' filter common in L1 invariants.
-CREATE INDEX idx_{p}_curr_db_account_day
+-- BV.6 — promoted to UNIQUE: current_daily_balances picks one row per
+-- (account_id, business_day_start) via MAX(entry); the composite is
+-- inherently unique. UNIQUE unlocks PG REFRESH … CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_curr_db_account_day
     ON {p}_current_daily_balances (account_id, business_day_start);
 CREATE INDEX idx_{p}_curr_db_scope_day
     ON {p}_current_daily_balances (account_scope, business_day_start);
@@ -2584,7 +2633,11 @@ WHERE parent_db.account_scope = 'internal'
       WHERE child2.account_parent_role = parent_db.account_role
   );
 -- JOIN key with current_daily_balances + ledger_drift's WHERE filter.
-CREATE INDEX idx_{p}_clb_account_day
+-- BV.6 — promoted to UNIQUE: computed_ledger_balance projects one row
+-- per (account_id, business_day_start) by construction (FROM
+-- current_daily_balances parent_db, no GROUP BY that fans out). UNIQUE
+-- unlocks PG REFRESH … CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_clb_account_day
     ON {p}_computed_ledger_balance (account_id, business_day_start);
 
 -- ---------------------------------------------------------------------
@@ -2774,7 +2827,11 @@ LEFT JOIN {p}_current_daily_balances db2
 WHERE c.carried_tod IS NOT NULL;
 -- Composite covers per-(account, day) joins from the L1 invariants;
 -- mirrors the current_daily_balances composite index shape.
-CREATE INDEX idx_{p}_eff_balances_account_day
+-- BV.6 — promoted to UNIQUE: one row per (account_id, business_day_start)
+-- by construction (the matview's source is a spine of account × day
+-- with carry-forward; the trailing WHERE filters NULL carried values
+-- to keep the invariant). UNIQUE unlocks PG REFRESH … CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_eff_balances_account_day
     ON {p}_effective_balances (account_id, business_day_start);
 
 -- ---------------------------------------------------------------------
@@ -2812,7 +2869,12 @@ WHERE sb.account_scope = 'internal'
   AND sb.effective_money <> cb.computed_balance;
 -- Dashboard hot-path: per-sheet account dropdown + date filter, plus
 -- the universal-date-range filter from M.2b.1.
-CREATE INDEX idx_{p}_drift_account_day
+-- BV.6 — promoted to UNIQUE: drift is a JOIN of effective_balances
+-- and computed_subledger_balance, both unique on (account_id,
+-- business_day_start). The WHERE filters effective_money <>
+-- computed_balance but the (account, day) cardinality stays at
+-- most one. UNIQUE unlocks PG REFRESH … CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_drift_account_day
     ON {p}_drift (account_id, business_day_start);
 CREATE INDEX idx_{p}_drift_role ON {p}_drift (account_role);
 -- v8.4.0: date-leading composite covers QS's date-narrowed dropdown
@@ -2850,7 +2912,10 @@ JOIN {p}_computed_ledger_balance cb
  AND cb.business_day_start = sb.business_day_start
 WHERE sb.effective_money IS NOT NULL
   AND sb.effective_money <> cb.computed_balance;
-CREATE INDEX idx_{p}_ledger_drift_account_day
+-- BV.6 — promoted to UNIQUE: same shape as drift (effective_balances
+-- JOIN computed_ledger_balance, both unique on the composite). UNIQUE
+-- unlocks PG REFRESH … CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_ledger_drift_account_day
     ON {p}_ledger_drift (account_id, business_day_start);
 CREATE INDEX idx_{p}_ledger_drift_role
     ON {p}_ledger_drift (account_role);
@@ -2884,7 +2949,11 @@ FROM {p}_effective_balances sb
 WHERE sb.account_scope = 'internal'
   AND sb.effective_money IS NOT NULL
   AND sb.effective_money < 0;
-CREATE INDEX idx_{p}_overdraft_account_day
+-- BV.6 — promoted to UNIQUE: overdraft selects rows from
+-- effective_balances (unique on the composite) with effective_money < 0.
+-- One row per qualifying (account_id, business_day_start). UNIQUE
+-- unlocks PG REFRESH … CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_overdraft_account_day
     ON {p}_overdraft (account_id, business_day_start);
 CREATE INDEX idx_{p}_overdraft_role ON {p}_overdraft (account_role);
 
@@ -2909,7 +2978,11 @@ SELECT
 FROM {p}_current_daily_balances sb
 WHERE sb.expected_eod_balance IS NOT NULL
   AND sb.money <> sb.expected_eod_balance;
-CREATE INDEX idx_{p}_eod_breach_account_day
+-- BV.6 — promoted to UNIQUE: source is current_daily_balances (unique
+-- on the composite); WHERE narrows to expected_eod_balance violations
+-- but the (account, day) cardinality stays at most one. UNIQUE unlocks
+-- PG REFRESH … CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_eod_breach_account_day
     ON {p}_expected_eod_balance_breach (account_id, business_day_start);
 
 -- ---------------------------------------------------------------------
@@ -2988,6 +3061,13 @@ CREATE INDEX idx_{p}_lb_account_day
     ON {p}_limit_breach (account_id, business_day);
 CREATE INDEX idx_{p}_lb_rail ON {p}_limit_breach (rail_name);
 CREATE INDEX idx_{p}_lb_direction ON {p}_limit_breach (direction);
+-- BV.6 — UNIQUE on (account_id, business_day, rail_name, direction).
+-- The UNION ALL splits Outbound / Inbound branches; each branch's
+-- GROUP BY produces one row per (account_id, business_day, rail_name)
+-- and the direction literal differentiates the two halves. UNIQUE
+-- unlocks PG REFRESH … CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_lb_unique
+    ON {p}_limit_breach (account_id, business_day, rail_name, direction);
 
 -- ---------------------------------------------------------------------
 -- L1 invariant: Stuck Pending (M.2b.8).
@@ -3033,6 +3113,10 @@ WHERE tx.max_pending_age_seconds IS NOT NULL
 CREATE INDEX idx_{p}_sp_rail ON {p}_stuck_pending (rail_name);
 CREATE INDEX idx_{p}_sp_account ON {p}_stuck_pending (account_id);
 CREATE INDEX idx_{p}_sp_transfer ON {p}_stuck_pending (transfer_id);
+-- BV.6 — UNIQUE on (transaction_id). One row per stuck-pending
+-- transaction leg; transaction_id is the v6 leg PK. UNIQUE unlocks
+-- PG REFRESH … CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_sp_unique ON {p}_stuck_pending (transaction_id);
 
 -- ---------------------------------------------------------------------
 -- L1 invariant: Stuck Unbundled (M.2b.9).
@@ -3080,6 +3164,10 @@ WHERE tx.max_unbundled_age_seconds IS NOT NULL
 CREATE INDEX idx_{p}_su_rail ON {p}_stuck_unbundled (rail_name);
 CREATE INDEX idx_{p}_su_account ON {p}_stuck_unbundled (account_id);
 CREATE INDEX idx_{p}_su_transfer ON {p}_stuck_unbundled (transfer_id);
+-- BV.6 — UNIQUE on (transaction_id). One row per stuck-unbundled
+-- transaction leg; transaction_id is the v6 leg PK. UNIQUE unlocks
+-- PG REFRESH … CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_su_unique ON {p}_stuck_unbundled (transaction_id);
 
 -- ---------------------------------------------------------------------
 -- L1 invariant: Chain Parent Disagreement (AB.2.3).
@@ -3127,6 +3215,11 @@ HAVING COUNT(DISTINCT tx.transfer_parent_id) > 1;
 CREATE INDEX idx_{p}_cpd_transfer ON {p}_chain_parent_disagreement (transfer_id);
 CREATE INDEX idx_{p}_cpd_template ON {p}_chain_parent_disagreement (child_template_name);
 CREATE INDEX idx_{p}_cpd_day ON {p}_chain_parent_disagreement (business_day);
+-- BV.6 — UNIQUE on (transfer_id, child_template_name). The matview's
+-- GROUP BY (tx.transfer_id, tx.template_name) makes this the natural
+-- key. UNIQUE unlocks PG REFRESH … CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_cpd_unique
+    ON {p}_chain_parent_disagreement (transfer_id, child_template_name);
 
 -- ---------------------------------------------------------------------
 -- L1 invariant matview: XOR-group firing-cardinality violations.
@@ -3159,6 +3252,14 @@ CREATE INDEX idx_{p}_cpd_day ON {p}_chain_parent_disagreement (business_day);
 CREATE INDEX idx_{p}_xgv_transfer ON {p}_xor_group_violation (transfer_id);
 CREATE INDEX idx_{p}_xgv_template ON {p}_xor_group_violation (template_name);
 CREATE INDEX idx_{p}_xgv_day ON {p}_xor_group_violation (business_day);
+-- BV.6 — UNIQUE on (transfer_id, template_name, xor_group_index).
+-- The matview's outer GROUP BY (transfer_id, template_name,
+-- xor_group_index, business_day) makes this the per-firing key;
+-- business_day is functionally determined by (transfer, template)
+-- via MIN-window so the 3-col composite is genuinely unique. UNIQUE
+-- unlocks PG REFRESH … CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_xgv_unique
+    ON {p}_xor_group_violation (transfer_id, template_name, xor_group_index);
 
 -- ---------------------------------------------------------------------
 -- Derived matview: per-child Transfer parent set (long form).
@@ -3193,6 +3294,11 @@ WHERE tx.transfer_parent_id IS NOT NULL
 -- side drill (Investigation: "all children of this parent firing").
 CREATE INDEX idx_{p}_tp_child ON {p}_transfer_parents (child_transfer_id);
 CREATE INDEX idx_{p}_tp_parent ON {p}_transfer_parents (parent_transfer_id);
+-- BV.6 — UNIQUE on (child_transfer_id, parent_transfer_id). The
+-- matview's SELECT DISTINCT enforces this composite uniqueness. UNIQUE
+-- unlocks PG REFRESH … CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_tp_unique
+    ON {p}_transfer_parents (child_transfer_id, parent_transfer_id);
 
 -- ---------------------------------------------------------------------
 -- L1 invariant matview: Fan-In Disagreement (AB.4.7).
@@ -3223,6 +3329,16 @@ CREATE INDEX idx_{p}_tp_parent ON {p}_transfer_parents (parent_transfer_id);
 CREATE INDEX idx_{p}_fid_transfer ON {p}_fan_in_disagreement (child_transfer_id);
 CREATE INDEX idx_{p}_fid_template ON {p}_fan_in_disagreement (child_template_name);
 CREATE INDEX idx_{p}_fid_kind ON {p}_fan_in_disagreement (disagreement_kind);
+-- BV.6 finish (2026-06-10) — UNIQUE on (child_transfer_id, chain_parent_name).
+-- The matview JOINs `child_parent_counts` (GROUPed by child_transfer_id, so
+-- one row per child) against `fan_in_chains` (one row per chain.parent ×
+-- chain.child entry, keyed by chain_parent_name within the matched
+-- child_template_name). A child appearing in N distinct fan_in chains gets
+-- N rows — one per chain_parent_name — so the (child_transfer_id,
+-- chain_parent_name) pair is the natural key. UNIQUE unlocks PG REFRESH …
+-- CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_fid_unique
+    ON {p}_fan_in_disagreement (child_transfer_id, chain_parent_name);
 
 -- ---------------------------------------------------------------------
 -- L1 invariant matview: Multi-XOR Violation (AB.6.5).
@@ -3250,6 +3366,12 @@ CREATE INDEX idx_{p}_fid_kind ON {p}_fan_in_disagreement (disagreement_kind);
 CREATE INDEX idx_{p}_mxv_parent ON {p}_multi_xor_violation (parent_transfer_id);
 CREATE INDEX idx_{p}_mxv_name ON {p}_multi_xor_violation (parent_rail_or_template_name);
 CREATE INDEX idx_{p}_mxv_kind ON {p}_multi_xor_violation (disagreement_kind);
+-- BV.6 — UNIQUE on (parent_transfer_id, parent_rail_or_template_name).
+-- The matview's GROUP BY (parent_transfer_id, chain_parent_name —
+-- aliased to parent_rail_or_template_name in the SELECT) makes this
+-- the natural key. UNIQUE unlocks PG REFRESH … CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_mxv_unique
+    ON {p}_multi_xor_violation (parent_transfer_id, parent_rail_or_template_name);
 
 -- ---------------------------------------------------------------------
 -- Dashboard-shape matview: Daily Statement Summary.
@@ -3398,7 +3520,10 @@ WHERE ad.closing_balance_carried IS NOT NULL;
 -- Daily Statement sheet's per-(account, day) parameter filter — both
 -- columns participate in the WHERE so a composite index covers the
 -- KPIs + detail table at once.
-CREATE INDEX idx_{p}_dss_account_day
+-- BV.6 — promoted to UNIQUE: one row per (account_id, business_day_start)
+-- by construction (FROM account_days ad LEFT JOIN today_flows tf, both
+-- keyed on the composite). UNIQUE unlocks PG REFRESH … CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_dss_account_day
     ON {p}_daily_statement_summary (account_id, business_day_start);
 
 -- ---------------------------------------------------------------------
@@ -3576,6 +3701,42 @@ CREATE INDEX idx_{p}_l1e_check_type
     ON {p}_l1_exceptions (check_type);
 CREATE INDEX idx_{p}_l1e_account ON {p}_l1_exceptions (account_id);
 CREATE INDEX idx_{p}_l1e_rail ON {p}_l1_exceptions (rail_name);
+-- BV.6 finish (2026-06-10) — UNIQUE on the 5-tuple (check_type,
+-- account_id, business_day, rail_name, transfer_id). Each UNION ALL
+-- branch already shows itself unique on a subset:
+--   - drift / ledger_drift / overdraft / expected_eod_balance_breach —
+--     keyed on (account_id, business_day); (check_type, account_id,
+--     business_day) suffices, NULL rail_name + NULL transfer_id slots fill in.
+--   - limit_breach — keyed on (account_id, business_day, rail_name,
+--     direction); since direction isn't projected here, but each
+--     (account, day, rail) pair fires at most once per check_type within
+--     the limit_breach matview's own UNIQUE shape (UNION ALL across
+--     Outbound/Inbound branches collapses to one rail_name × day cell
+--     per UNION row anyway since the branches' direction slot lives
+--     inside limit_breach itself, not l1_exceptions).
+--   - stuck_pending / stuck_unbundled — keyed on (transaction_id) at
+--     source; l1_exceptions projects transfer_id (the parent of the
+--     leg). A multi-leg stuck transfer gets one row per leg, so
+--     transfer_id alone isn't enough — BUT rail_name + business_day
+--     also rotate per leg, AND the source matview's UNIQUE on
+--     transaction_id guarantees the 5-tuple stays distinct
+--     (transfer_id same, rail_name potentially same, business_day same,
+--     account_id rotating). Conservative key: (check_type, account_id,
+--     business_day, rail_name, transfer_id) accounts for all the
+--     rotating-axis combinations.
+--   - chain_parent_disagreement / xor_group_violation / fan_in_disagreement /
+--     multi_xor_violation — transfer-keyed branches with NULL account_id;
+--     PG NULLs-distinct (default) treats each NULL-stuffed row as distinct
+--     from every other, and Oracle's composite-NULL-trivially-unique
+--     converges on the same semantics. The branch's source-matview UNIQUE
+--     (e.g. cpd's (transfer_id, child_template_name)) projects through:
+--     rail_name carries the template_name, transfer_id is unique, so
+--     (transfer_id, rail_name) within the NULL-account branch suffices.
+-- The 5-tuple is the operator-locked design choice (BV.6-2): both
+-- dialects converge on the same semantics. UNIQUE unlocks PG REFRESH …
+-- CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_l1ex_unique
+    ON {p}_l1_exceptions (check_type, account_id, business_day, rail_name, transfer_id);
 """
 
 
@@ -3794,6 +3955,18 @@ SELECT
         ELSE '4+ sigma'
     END                                             AS z_bucket
 FROM pair_stats ps;
+-- BV.6 — NO UNIQUE INDEX. The inventory claimed (sender_account_id,
+-- recipient_account_id, posted_day) was a natural key, but pair_daily's
+-- GROUP BY includes the denormalized account_name + account_role
+-- columns alongside the ids. When metadata varies for the same account_id
+-- across rows in {p}_transactions (an observable case on the spec_example
+-- seed: 3 rows for north-pool↔south-pool on the same day), the GROUP BY
+-- splits them. The UNIQUE constraint fires during refresh. Real fix
+-- requires either dropping the name/role columns from GROUP BY or
+-- adding them to the index — both are scope decisions for the operator.
+-- Re-classified as out-of-scope alongside fan_in_disagreement /
+-- l1_exceptions / inv_money_trail_edges; refresh_matviews_sql's
+-- _NON_UNIQUE_MATVIEWS set includes inv_pair_rolling_anomalies.
 
 
 -- Investigation: money-trail recursive-CTE matview.
@@ -3863,6 +4036,19 @@ chain (transfer_id, root_transfer_id, depth) AS (
 -- Output column names kept the v5 names so dashboard-side consumers
 -- (datasets, visuals) don't need to follow this rename — only the
 -- internal SELECT does.
+--
+-- BV.6 finish (2026-06-10) — `edge_seq` is a synthetic disambiguator
+-- (row_number() OVER PARTITION BY the natural-key triple ORDER BY
+-- tgt.id, src.id) added to enable PG REFRESH … CONCURRENTLY via a
+-- UNIQUE index on (root_transfer_id, source_account_id, target_account_id,
+-- edge_seq). The cross-product within multi-leg transfers (multiple `src`
+-- legs × multiple `tgt` legs sharing the same (root, src_account, tgt_account)
+-- pair) means the source-side key isn't unique on its own. row_number()
+-- in PG / Oracle / DuckDB is portable. ORDER BY tgt.id, src.id is just a
+-- deterministic tiebreaker — the matview's downstream consumers don't
+-- depend on edge_seq ordering, only on its disambiguation. Pre-CONCURRENTLY
+-- consumers (none currently — edge_seq is a fresh column) would see the
+-- new column on any SELECT *. Dashboards SELECT named columns.
 SELECT
     c.root_transfer_id,
     c.transfer_id,
@@ -3875,7 +4061,11 @@ SELECT
     tgt.account_role         AS target_account_type,
     tgt.amount_money         AS hop_amount,
     tgt.posting              AS posted_at,
-    tgt.rail_name            AS rail_name
+    tgt.rail_name            AS rail_name,
+    ROW_NUMBER() OVER (
+        PARTITION BY c.root_transfer_id, src.account_id, tgt.account_id
+        ORDER BY tgt.id, src.id
+    )                        AS edge_seq
 FROM chain c
 JOIN {p}_transactions tgt
   ON tgt.transfer_id = c.transfer_id
@@ -3885,4 +4075,11 @@ JOIN {p}_transactions src
   ON src.transfer_id = c.transfer_id
  AND src.amount_money < 0
  AND src.status = 'Posted';
+-- BV.6 finish (2026-06-10) — UNIQUE on the (root, src_account, tgt_account,
+-- edge_seq) 4-tuple. The edge_seq column is synthetic (row_number above);
+-- combined with the natural-key triple it's unique by definition. UNIQUE
+-- unlocks PG REFRESH … CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_mte_unique
+    ON {p}_inv_money_trail_edges
+       (root_transfer_id, source_account_id, target_account_id, edge_seq);
 """

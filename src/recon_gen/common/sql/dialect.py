@@ -1011,22 +1011,34 @@ def matview_create_keyword(dialect: Dialect) -> str:
     return "CREATE MATERIALIZED VIEW"
 
 
-def refresh_matview(name: str, dialect: Dialect) -> str:
+def refresh_matview(
+    name: str, dialect: Dialect, *, concurrently: bool = False,
+) -> str:
     """``REFRESH MATERIALIZED VIEW`` per dialect.
 
-    Postgres: ``REFRESH MATERIALIZED VIEW name;``. Oracle: a PL/SQL
-    block invoking ``DBMS_MVIEW.REFRESH('name', method => 'C')`` —
-    ``C`` = complete refresh, matching Postgres semantics. SQLite:
-    NOT a single statement — refresh on a matview-as-table is a
-    DELETE + INSERT pair, but the body SELECT lives in the schema
-    template, not here. The SQLite branch returns a sentinel that
+    Postgres: ``REFRESH MATERIALIZED VIEW name;`` — or
+    ``REFRESH MATERIALIZED VIEW CONCURRENTLY name;`` when
+    ``concurrently=True`` (BV.6 / DL.15). CONCURRENTLY requires a
+    UNIQUE index on the matview (PG enforces; without it the refresh
+    raises ``feature_not_supported``); ``common.l2.schema`` ships
+    UNIQUE indexes on every matview that supports it. CONCURRENTLY
+    also CANNOT run inside a transaction block — callers must drive
+    autocommit (per-call, see ``deploy_pipeline.step_4_matviews``).
+    Oracle: a PL/SQL block invoking
+    ``DBMS_MVIEW.REFRESH('name', method => 'C')`` — ``C`` = complete
+    refresh, matching Postgres semantics. ``concurrently`` is a no-op
+    on Oracle (DBMS_MVIEW.REFRESH has no equivalent flag at this layer).
+    DuckDB: NOT a single statement — refresh on a matview-as-table is
+    a DELETE + INSERT pair, but the body SELECT lives in the schema
+    template, not here. The DuckDB branch raises a sentinel that
     callers in ``common.l2.schema.refresh_matviews_sql`` route
-    through ``_emit_sqlite_refresh_block`` (which knows the SELECT
-    body for each matview). Returned string is
+    through ``_emit_table_based_matview_refresh`` (which knows the
+    SELECT body for each matview). Returned string is
     **fully terminated** for PG / Oracle.
     """
     if dialect is Dialect.POSTGRES:
-        return f"REFRESH MATERIALIZED VIEW {name};"
+        kw = "REFRESH MATERIALIZED VIEW CONCURRENTLY" if concurrently else "REFRESH MATERIALIZED VIEW"
+        return f"{kw} {name};"
     if dialect in (Dialect.DUCKDB):
         # Sentinel — the per-matview SELECT body is needed to refresh,
         # which the helper here doesn't know. ``refresh_matviews_sql``

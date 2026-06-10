@@ -1451,7 +1451,14 @@ def test_refresh_matviews_sql_emits_one_per_view() -> None:
     assert len(refreshes) == 22
     assert len(analyzes) == 22
     # Every REFRESHed matview gets a matching ANALYZE.
-    refresh_names = {s.removeprefix("REFRESH MATERIALIZED VIEW ") for s in refreshes}
+    # BV.6 — PG emits REFRESH MATERIALIZED VIEW CONCURRENTLY <name>; for
+    # every matview that ships a UNIQUE index. Post-BV.6-finish (2026-06-10)
+    # the only carve-out is inv_pair_rolling_anomalies. Strip both prefixes
+    # so the name-equivalence assertion stays clean.
+    def _refresh_name(s: str) -> str:
+        s = s.removeprefix("REFRESH MATERIALIZED VIEW CONCURRENTLY ")
+        return s.removeprefix("REFRESH MATERIALIZED VIEW ")
+    refresh_names = {_refresh_name(s) for s in refreshes}
     analyze_names = {s.removeprefix("ANALYZE ") for s in analyzes}
     assert refresh_names == analyze_names
 
@@ -1463,6 +1470,12 @@ def test_refresh_matviews_sql_dependency_order() -> None:
     sql = refresh_matviews_sql(_baseline_instance(), prefix="re")
 
     def _idx(name: str) -> int:
+        # BV.6 — most matviews emit REFRESH MATERIALIZED VIEW CONCURRENTLY;
+        # post-BV.6-finish (2026-06-10) only inv_pair_rolling_anomalies
+        # stays on the plain form (carve-out for GROUP BY shape mismatch).
+        concurrent_marker = f"REFRESH MATERIALIZED VIEW CONCURRENTLY re_{name};"
+        if concurrent_marker in sql:
+            return sql.index(concurrent_marker)
         return sql.index(f"REFRESH MATERIALIZED VIEW re_{name};")
 
     # current_* are leaves (read base tables only).

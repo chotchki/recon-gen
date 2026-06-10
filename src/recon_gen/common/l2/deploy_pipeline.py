@@ -857,12 +857,33 @@ async def step_4_matviews(
     def _run_refresh() -> None:
         conn = connect_demo_db(cfg)
         try:
+            # BV.6 — PG REFRESH MATERIALIZED VIEW CONCURRENTLY (DL.15)
+            # cannot run inside a transaction block; psycopg's default
+            # opens an implicit txn on the first cursor.execute(). Flip
+            # the connection to autocommit BEFORE the refresh so each
+            # statement is its own txn, then restore after. Per-call
+            # (BV.6-6) rather than connection-pool-wide so non-refresh
+            # callers (schema apply, seed) keep their transactional
+            # semantics. Oracle + DuckDB don't need this: Oracle's
+            # DBMS_MVIEW.REFRESH is fine inside a txn, and DuckDB is
+            # autocommit-per-cursor by default (see open_demo_db's
+            # transaction-semantics caveat).
+            prior_autocommit: bool | None = None
+            if cfg.dialect is Dialect.POSTGRES:
+                # psycopg attribute; for non-psycopg PG drivers this
+                # raises AttributeError loudly rather than silently
+                # leaving the txn-wrapped path that breaks CONCURRENTLY.
+                prior_autocommit = bool(conn.autocommit)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]: psycopg-specific attribute, SyncConnection Protocol does not declare it (driver-specific extension for PG REFRESH CONCURRENTLY support per BV.6)
+                conn.autocommit = True  # pyright: ignore[reportAttributeAccessIssue]: same psycopg-specific attribute, write side
             cur = conn.cursor()
             try:
                 execute_script(cur, sql, dialect=cfg.dialect)
-                conn.commit()
+                if cfg.dialect is not Dialect.POSTGRES:
+                    conn.commit()
             finally:
                 cur.close()
+                if cfg.dialect is Dialect.POSTGRES and prior_autocommit is not None:
+                    conn.autocommit = prior_autocommit  # pyright: ignore[reportAttributeAccessIssue]: psycopg-specific attribute restore (per-call autocommit per BV.6-6)
         finally:
             conn.close()
 
