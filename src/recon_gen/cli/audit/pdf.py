@@ -1940,7 +1940,7 @@ def _build_verify_recipe_script(
     bal_hwm: str,
     code_id: str,
 ) -> str:
-    """Manual-recompute Python recipe with this report's per-source values.
+    """Manual-recompute Python recipe — Phase CW.4 streamed-SQL version.
 
     Single source of truth for both the appendix's Preformatted
     code block AND the ``verify-provenance.py`` PDF attachment, so
@@ -1950,30 +1950,97 @@ def _build_verify_recipe_script(
     prefix is left as ``<prefix>`` because it lives in the L2 yaml
     (also attached) — the verifier substitutes per the spec they
     audited against.
+
+    Phase CW.4 (2026-06-09) rewrote the recipe from "re-implement
+    ``canonical_value`` in pure Python" to "connect to the DB, run
+    this SQL, fold the digests". The new shape matches what
+    ``recon-gen audit verify`` actually does, and dodges the
+    legacy ladder's per-cell Python loop. The recipe targets
+    ``provenance_format_version=2`` PDFs. Pre-CW PDFs need the
+    pre-CW recipe (recoverable from git history if a verifier
+    insists on the manual path) OR running ``recon-gen audit
+    verify`` which dispatches on the embedded version.
+
+    The recipe ships dialect-blind: it includes the canonical SQL
+    canon shape (per-row sha256 over coalesce + CAST + chr(31) +
+    chr(0)) and asks the verifier to wire the per-dialect hash
+    function — DuckDB ``sha256()``, PG ``encode(digest(...,
+    'sha256'), 'hex')`` (requires ``pgcrypto``), Oracle
+    ``LOWER(RAWTOHEX(STANDARD_HASH(..., 'SHA256')))``.
     """
     return (
+        "#!/usr/bin/env python3\n"
+        '"""Provenance-fingerprint manual recompute (CW.2 streamed SQL).\n'
+        "\n"
+        "Run against the same database the audit report was generated\n"
+        "against; the printed composite_sha should match the report\n"
+        "footer + sign-off page + appendix table.\n"
+        "\n"
+        "Pre-substituted with this report's per-source identifiers:\n"
+        f"  - tx_hwm = {tx_hwm}\n"
+        f"  - bal_hwm = {bal_hwm}\n"
+        f"  - code_identity = {code_id}\n"
+        "\n"
+        "Open `<L2 attachment>` for the prefix the L2 spec emitted at,\n"
+        "and wire `connect_db()` to your DB driver (psycopg, oracledb,\n"
+        "duckdb, etc.).\n"
+        '"""\n'
         "import hashlib\n"
         "\n"
-        "def canonical(v):\n"
-        "    if v is None: return b''\n"
-        "    if isinstance(v, bool): return b'1' if v else b'0'\n"
-        "    if hasattr(v, 'isoformat'): "
-        "return v.isoformat().encode()\n"
-        "    return str(v).encode()\n"
+        "# Per-row SHA-256 SQL canon (CW.2 streamed fingerprint shape).\n"
+        "# Wire DIALECT to your DB; canon body is identical across\n"
+        "# dialects modulo the hash function + identifier-quoting case.\n"
+        "DIALECT = 'duckdb'  # 'duckdb' | 'postgres' | 'oracle'\n"
+        "\n"
+        "def row_hash_sql(quoted_columns):\n"
+        '    """Return the per-row SHA-256 SQL expression for DIALECT."""\n'
+        "    if DIALECT == 'oracle':\n"
+        "        sep = \" || chr(31) || \"\n"
+        "        canon = sep.join(\n"
+        "            f\"coalesce(CAST({c} AS VARCHAR2(4000)), chr(0))\"\n"
+        "            for c in quoted_columns)\n"
+        "        return f\"LOWER(RAWTOHEX(STANDARD_HASH({canon}, 'SHA256')))\"\n"
+        "    canon_args = ', '.join(\n"
+        '        f"coalesce(CAST({c} AS VARCHAR), chr(0))"\n'
+        "        for c in quoted_columns)\n"
+        "    canon = f\"concat_ws(chr(31), {canon_args})\"\n"
+        "    if DIALECT == 'duckdb':\n"
+        "        return f\"sha256({canon})\"\n"
+        "    # postgres: requires `CREATE EXTENSION pgcrypto`\n"
+        "    return f\"encode(digest({canon}, 'sha256'), 'hex')\"\n"
         "\n"
         "def hash_table(cur, table, hwm):\n"
-        "    cur.execute(f'SELECT * FROM {table} '\n"
-        "                f'WHERE entry <= {hwm} ORDER BY entry')\n"
-        "    cols = sorted(\n"
-        "        enumerate(cur.description),\n"
-        "        key=lambda i_d: i_d[1][0].lower())\n"
+        '    """Stream per-row SHA-256 digests + fold via hashlib."""\n'
+        "    # Discover columns + sort by lower(name) (cross-dialect-portable).\n"
+        "    cur.execute(f'SELECT * FROM {table} WHERE 1=0')\n"
+        "    names = sorted(\n"
+        "        (d[0] for d in cur.description),\n"
+        "        key=lambda n: n.lower())\n"
+        "    fold_case = (\n"
+        "        str.upper if DIALECT == 'oracle' else str.lower)\n"
+        "    quoted = [f'\"{fold_case(n)}\"' for n in names]\n"
+        "    entry_col = '\"ENTRY\"' if DIALECT == 'oracle' else '\"entry\"'\n"
+        "    cur.execute(\n"
+        "        f'SELECT {row_hash_sql(quoted)} AS rh '\n"
+        "        f'FROM {table} '\n"
+        "        f'WHERE {entry_col} <= {hwm} '\n"
+        "        f'ORDER BY {entry_col}')\n"
         "    h = hashlib.sha256()\n"
-        "    for row in cur:\n"
-        "        h.update(b'\\x1f'.join(\n"
-        "            canonical(row[i]) for i, _ in cols))\n"
-        "        h.update(b'\\x1e')\n"
+        "    while True:\n"
+        "        rows = cur.fetchmany(50_000)\n"
+        "        if not rows: break\n"
+        "        for (rh,) in rows:\n"
+        "            h.update(rh.lower().encode('ascii'))\n"
         "    return h.hexdigest()\n"
         "\n"
+        "def connect_db():\n"
+        "    # Replace with your DB driver of choice. Example:\n"
+        "    #   import duckdb; return duckdb.connect('your.duckdb')\n"
+        "    #   import psycopg; return psycopg.connect('dsn=...').cursor()\n"
+        "    #   import oracledb; return oracledb.connect(...).cursor()\n"
+        "    raise NotImplementedError('wire your DB driver here')\n"
+        "\n"
+        "cur = connect_db()\n"
         f"tx_sha  = hash_table(cur, '<prefix>_transactions', {tx_hwm})\n"
         f"bal_sha = hash_table(cur, '<prefix>_daily_balances', {bal_hwm})\n"
         "l2_sha  = hashlib.sha256(\n"

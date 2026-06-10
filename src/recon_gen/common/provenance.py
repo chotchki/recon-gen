@@ -39,7 +39,7 @@ entry))`` by Merkle-Damgård. Per-dialect canonicalization templates
 ``docs/audits/cw_0_audit_pdf_perf_locks.md``.
 
 Legacy v1 callsites (PDFs emitted before CW.2) verify against the
-frozen ``_legacy_hash_table_rows`` Python ladder kept below as a
+frozen ``legacy_hash_table_rows_v1`` Python ladder kept below as a
 deprecated-for-new-code routine — ``audit verify`` dispatches on
 the embedded ``provenance_format_version``.
 """
@@ -304,7 +304,7 @@ def hash_table_rows(
 
     .. note::
        Pre-CW.2 PDFs were fingerprinted via the legacy Python ladder
-       (``_legacy_hash_table_rows`` below). ``audit verify`` dispatches
+       (``legacy_hash_table_rows_v1`` below). ``audit verify`` dispatches
        on the embedded ``provenance_format_version`` — version 1 uses
        the legacy path; version 2 (new emissions) uses this function.
     """
@@ -387,7 +387,7 @@ def canonical_value(v: object) -> bytes:
     return str(v).encode("utf-8")
 
 
-def _legacy_hash_table_rows(  # pyright: ignore[reportUnusedFunction]: CW.4 wires this into `audit verify` v1 dispatch; the leading-underscore-named callsite is in cli/audit/__init__.py
+def legacy_hash_table_rows_v1(
     # WHY Any: psycopg + oracledb sync cursors share the DB-API 2.0
     # surface but neither ships PEP 561 stubs.
     cur: Any,

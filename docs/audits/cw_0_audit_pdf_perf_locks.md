@@ -196,7 +196,7 @@ Rejected alternatives:
   SHA-256 from Lock 2/3.
 - **`audit verify` dispatch.** Reads the embedded version, branches
   on it:
-  - **Version 1 (legacy):** use the frozen `_legacy_hash_table_rows`
+  - **Version 1 (legacy):** use the frozen `legacy_hash_table_rows_v1`
     Python ladder (kept as a deprecated function in
     `common/provenance.py` for verify-only use; not exported via
     `__all__`; no new callsites permitted).

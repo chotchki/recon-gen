@@ -78,6 +78,8 @@ from recon_gen.cli._helpers import (
 )
 from recon_gen.common.money import Cents
 from recon_gen.common.provenance import (
+    PROVENANCE_FORMAT_VERSION_CW,
+    PROVENANCE_FORMAT_VERSION_LEGACY,
     ProvenanceFingerprint,
     compute_provenance,
     hash_table_rows,
@@ -1684,16 +1686,51 @@ def audit_verify(
                 f"embedded high-water-mark {embedded.balances_hwm}; "
                 f"rows the report bound to are gone."
             )
-        tx_sha_now = hash_table_rows(
-            cur, table=f"{prefix}_transactions",
-            hwm=embedded.transactions_hwm,
-            dialect=cfg.dialect,
-        )
-        bal_sha_now = hash_table_rows(
-            cur, table=f"{prefix}_daily_balances",
-            hwm=embedded.balances_hwm,
-            dialect=cfg.dialect,
-        )
+        # CW.4 — version-dispatch on the embedded
+        # `provenance_format_version`. Pre-CW PDFs (v1) used the
+        # legacy Python ``canonical_value`` ladder; CW PDFs (v2) use
+        # the streamed per-dialect SQL fingerprint (CW.2). The
+        # dispatch is the seam that lets old PDFs keep verifying
+        # without manual operator intervention. Lock 4 in
+        # ``docs/audits/cw_0_audit_pdf_perf_locks.md``.
+        if embedded.provenance_format_version == (
+            PROVENANCE_FORMAT_VERSION_LEGACY
+        ):
+            # v1 — frozen Python ladder. Only reached for PDFs
+            # emitted before CW.2 landed.
+            from recon_gen.common.provenance import legacy_hash_table_rows_v1
+            tx_sha_now = legacy_hash_table_rows_v1(
+                cur, table=f"{prefix}_transactions",
+                hwm=embedded.transactions_hwm,
+            )
+            bal_sha_now = legacy_hash_table_rows_v1(
+                cur, table=f"{prefix}_daily_balances",
+                hwm=embedded.balances_hwm,
+            )
+        elif embedded.provenance_format_version == (
+            PROVENANCE_FORMAT_VERSION_CW
+        ):
+            # v2 — streamed per-dialect SQL fingerprint.
+            tx_sha_now = hash_table_rows(
+                cur, table=f"{prefix}_transactions",
+                hwm=embedded.transactions_hwm,
+                dialect=cfg.dialect,
+            )
+            bal_sha_now = hash_table_rows(
+                cur, table=f"{prefix}_daily_balances",
+                hwm=embedded.balances_hwm,
+                dialect=cfg.dialect,
+            )
+        else:
+            raise click.ClickException(
+                f"Unsupported provenance_format_version="
+                f"{embedded.provenance_format_version!r} in "
+                f"{pdf_path}. Known versions: "
+                f"{PROVENANCE_FORMAT_VERSION_LEGACY} (legacy Python "
+                f"ladder), {PROVENANCE_FORMAT_VERSION_CW} (streamed "
+                f"per-dialect SQL). Upgrade recon-gen or re-render "
+                f"the report with a current install."
+            )
     finally:
         conn.close()
 
