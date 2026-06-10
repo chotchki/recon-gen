@@ -414,8 +414,8 @@ def test_broad_mode_uses_metadata_examples_when_set(tmp_path: Path) -> None:
     assert "yeti-002" in sql
     assert "sasquatch-003" in sql
     # The synthetic fallback pattern should NOT appear for this rail
-    # (cycle uses examples; no `<rail>-firing-<seq>` for merchant_id).
-    assert "ExternalRail-firing-0001" not in sql
+    # (cycle uses examples; no `<rail>-<key>-firing-<seq>` for merchant_id).
+    assert "ExternalRail-merchant_id-firing-0001" not in sql
 
 
 def test_broad_mode_falls_back_when_examples_not_set(tmp_path: Path) -> None:
@@ -451,4 +451,7 @@ def test_broad_mode_falls_back_when_examples_not_set(tmp_path: Path) -> None:
     )
     sql = emit_seed(inst, report.scenario, prefix="test")
     assert "bigfoot-001" in sql
-    assert "ExternalRail-firing-0001" in sql  # batch_id fallback
+    # batch_id has no examples → synthesized fallback now includes
+    # the key name segment so distinct keys on the same rail/firing
+    # don't collapse to the same value.
+    assert "ExternalRail-batch_id-firing-0001" in sql

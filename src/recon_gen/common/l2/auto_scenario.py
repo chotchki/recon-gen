@@ -1231,6 +1231,7 @@ def _build_broad_rail_firings(
                     _pick_metadata_value(
                         examples=examples_by_key.get(k),
                         rail_name=rail.name,
+                        key_name=k,
                         firing_seq=firing_seq,
                     ),
                 )
@@ -1464,19 +1465,27 @@ def _pick_metadata_value(
     *,
     examples: tuple[str, ...] | None,
     rail_name: Identifier,
+    key_name: Identifier,
     firing_seq: int,
 ) -> str:
     """Pick a metadata value for a (rail, key, firing) triple (M.4.2b).
 
     When ``examples`` is set, cycle through them by ``firing_seq``
     (modular indexing so per_rail_firings can exceed list length
-    without IndexError). When unset, fall back to the original
-    synthetic ``<rail>-firing-<seq>`` pattern so existing fixtures
-    don't drift unless they opt into example values.
+    without IndexError); ``key_name`` is ignored in this mode so an
+    operator-declared examples list is treated as the source of truth
+    (backward-compat).
+
+    When unset, fall back to a synthetic
+    ``<rail>-<key>-firing-<seq>`` pattern. The key segment is what
+    keeps distinct metadata_keys on the same rail/firing from collapsing
+    to the same value (the bug surfaced in cold-read: a rail with
+    ``metadata_keys=[sweep_date, settlement_batch_id]`` was emitting
+    the same synthesized string for both keys).
     """
     if examples:
         return examples[(firing_seq - 1) % len(examples)]
-    return f"{rail_name}-firing-{firing_seq:04d}"
+    return f"{rail_name}-{key_name}-firing-{firing_seq:04d}"
 
 
 def _pick_inbound_2leg_rail(
