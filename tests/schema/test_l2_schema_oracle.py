@@ -175,10 +175,13 @@ class TestOracleConstructsPresent:
         "TRUNC(recipient.posting)",
         # Interval arithmetic
         "INTERVAL '1' DAY",        # interval_days(1, Oracle)
-        # Casts
-        "CAST(AVG(window_sum) AS NUMBER)",
-        "CAST((pw.posted_day - 1) AS TIMESTAMP)",
-        "CAST(pw.posted_day AS TIMESTAMP)",
+        # Casts. CV.2 moved the AVG / STDDEV_SAMP from a scalar
+        # population-CTE aggregate to a per-pair PARTITION BY window
+        # aggregate; the cast wraps the OVER (...) expression.
+        "CAST(AVG(window_sum) OVER (PARTITION BY recipient_account_id, sender_account_id) AS NUMBER)",
+        # CV.2 renamed pair_windows alias (pw) → pair_stats alias (ps).
+        "CAST((ps.posted_day - 1) AS TIMESTAMP)",
+        "CAST(ps.posted_day AS TIMESTAMP)",
     ])
     def test_oracle_pattern_present(
         self, oracle_sql: str, pattern: str,
