@@ -132,11 +132,17 @@ Properties of both:
 - **Positional tuple input.** Build rows in `TX_COLS` / `DB_COLS`
   order. The named-kwarg `insert_tx` / `insert_balance` helpers
   exist for one-row inserts; bulk is positional by design.
-- **Money auto-coercion.** Pass dollars (float / Decimal / `Cents`);
-  the helpers route through `_coerce_to_cents_int` at the insert
-  boundary. If you're already in cents, pass an int — `Cents.from_dollars(int)`
-  is idempotent on integer cents shapes that have already been
-  cents-ified by your own code.
+- **Money auto-coercion.** Money columns route through
+  `_coerce_to_cents_int` at the insert boundary, which interprets
+  values as follows:
+  - `float`, `Decimal`, `int` → DOLLARS. `100.50` becomes `10050` cents;
+    `100` becomes `10000` cents (a hundred dollars, NOT a hundred cents).
+  - `Cents(N)` instance → already cents, passed through unchanged
+    (use this when your source system already gives you integer cents).
+  - `None` → SQL NULL (use for the optional money cols).
+  - To pass a literal integer-cents value, wrap it: `Cents(15432)`
+    means 15432 cents = $154.32. **Passing `15432` directly means
+    $15,432.00** — easy footgun, see Pitfalls below.
 - **Empty rows = no-op.** `bulk_insert_tx(conn, [])` does not open
   a cursor and does not fire SQL.
 - **Dialect dispatch.** DuckDB connections route through the CA.10
@@ -368,11 +374,14 @@ Add the `etl_hook` line to whichever cfg matches your dialect.
 - **Forgetting `metadata.source='real'`** — your rows present as
   synthetic to standalone-mode Trainer reset, which means a future
   reset could DELETE them. Always stamp the metadata.
-- **Mixing dollars and cents in the money columns** — the bulk
-  helpers auto-coerce DOLLARS. If you're already in cents, pass
-  ints; `_coerce_to_cents_int` is idempotent on integer cents shapes
-  that have come from `Cents.from_dollars`. Don't pass `15432.75` if
-  you meant `15432.75 cents` — that's `$154.3275` after coercion.
+- **Mixing dollars and cents in the money columns** — `int`,
+  `float`, `Decimal` are ALL treated as DOLLARS. If your source
+  system gives you integer cents (`15432` = $154.32), you MUST
+  wrap as `Cents(15432)` — passing the bare `15432` makes it
+  $15,432.00 silently. `Cents(N)` is the only path that means
+  "this is already cents." Don't pass `15432.75` if you meant
+  "15432.75 cents" — that's `$15,432.75` after coercion (the
+  fractional part is a floor-to-cents thing).
 - **Skipping matview refresh after the load** — the L1 invariant
   matviews and Investigation matviews do not auto-refresh on PG or
   Oracle. Dashboards lag the source data until
