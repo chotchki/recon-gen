@@ -68,6 +68,7 @@ from recon_gen.common.sql import (
     order_by_day_expr,
     range_interval_days,
     refresh_matview,
+    safe_identifier,
     serial_type,
     json_text_type,
     text_type,
@@ -1557,14 +1558,23 @@ def _metadata_index_name(p: str, key: str) -> str:
     Keys can carry characters Postgres / Oracle don't accept in
     identifiers (``:``, ``-``, etc.); replace anything outside
     ``[A-Za-z0-9_]`` with ``_`` so the resulting identifier is always
-    legal in both dialects. Oracle 19c+ supports 128-byte
-    identifiers and PG 63 — long-prefix instances stay safely inside
-    both limits even with a long key (e.g. ``sasquatch_pr`` (12) +
-    ``_tx_meta_`` (9) + ``customer_id`` (11) = 32 chars).
+    legal in both dialects.
+
+    Length math: the composite is ``idx_`` (4) + ``p`` + ``_tx_meta_``
+    (9) + sanitized-key. For long L2 prefixes — e.g. the v-overlay
+    used by the trainer (``sasquatch_pr_trainer_postgres_master_v`` =
+    38 chars) — the composite can exceed Postgres's 63-byte identifier
+    limit, at which point PG silently truncates to the first 63 bytes.
+    Two distinct keys that share a common head (``beneficiary_bank``
+    vs ``beneficiary_id``) then collide and the second ``CREATE
+    INDEX`` fails. :func:`safe_identifier` guards against this: short
+    names pass through unchanged (keeping the readable form), and
+    over-limit names get a deterministic ``blake2s`` hash suffix that
+    keeps the result distinct and within 63 chars on every dialect.
     """
     import re
     sanitized = re.sub(r"[^A-Za-z0-9_]", "_", key)
-    return f"idx_{p}_tx_meta_{sanitized}"
+    return safe_identifier(f"idx_{p}_tx_meta_{sanitized}")
 
 
 def _emit_metadata_index_creates(

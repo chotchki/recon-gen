@@ -51,7 +51,48 @@ Phase notes:
 
 from __future__ import annotations
 
+import hashlib
 from enum import Enum
+
+
+# PG's lowest-common-denominator identifier length cap. Oracle 19c
+# accepts 128 bytes and DuckDB has no practical limit, so 63 is the
+# safe convergence point — any identifier ≤63 chars is portable across
+# every dialect we target. Apply via :func:`safe_identifier` at every
+# site that builds an identifier from a variable-length prefix + body
+# (matview/index/sequence names where a long base prefix can push the
+# composite past the limit). PG silently truncates over-limit names,
+# which causes deploy-time collisions when two distinct logical names
+# share a 63-byte head — see ``_metadata_index_name`` for the bug
+# that motivated this helper (BV.3.3.d-fix).
+PG_IDENTIFIER_LIMIT = 63
+
+
+def safe_identifier(name: str, *, limit: int = PG_IDENTIFIER_LIMIT) -> str:
+    """Return ``name`` unchanged when ≤ ``limit``; otherwise truncate
+    with a deterministic hash suffix so the result fits while staying
+    distinct across distinct inputs.
+
+    The over-limit form is ``f"{name[:limit-9]}_{hash8}"`` where
+    ``hash8`` is the first 8 hex chars of ``blake2s(name)`` (a 4-byte
+    digest). That's ``limit - 9 + 1 + 8 = limit`` chars total — exact
+    fit. The readable prefix is preserved so DBAs eyeballing the
+    schema can still identify the object; the hash suffix guarantees
+    distinct inputs map to distinct outputs (collision probability
+    ~2^-32 per pair, safe at any realistic identifier count).
+
+    Default ``limit`` is :data:`PG_IDENTIFIER_LIMIT` (63 — the PG
+    lowest-common-denominator). Oracle 128 and DuckDB unlimited both
+    safely accept names sized for the PG limit, so a single threshold
+    keeps every dialect emit identical (per the cross-dialect
+    convergence stance — see commits BV.3.3.* and the
+    ``feedback_sql_dialect_convergence_preferred`` design note).
+    """
+    if len(name) <= limit:
+        return name
+    head = name[: limit - 9]
+    hash8 = hashlib.blake2s(name.encode("utf-8"), digest_size=4).hexdigest()
+    return f"{head}_{hash8}"
 
 
 class Dialect(str, Enum):

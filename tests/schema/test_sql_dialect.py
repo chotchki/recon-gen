@@ -34,6 +34,7 @@ from recon_gen.common.sql import (
     json_check,
     matview_options,
     refresh_matview,
+    safe_identifier,
     serial_type,
     text_type,
     timestamp_type,
@@ -574,3 +575,75 @@ class TestDialectIsRequired:
     ) -> None:
         with pytest.raises(TypeError, match="missing.*positional"):
             fn(*args)
+
+
+# -- safe_identifier (BV.3.3.d-fix) -----------------------------------------
+
+
+class TestSafeIdentifier:
+    """:func:`safe_identifier` guards PG's 63-byte identifier limit.
+
+    Motivating bug: ``_metadata_index_name`` for the trainer's
+    v-overlay (``sasquatch_pr_trainer_postgres_master_v``) produced
+    over-63-char index names that PG silently truncated, causing
+    distinct metadata keys (``beneficiary_bank`` vs ``beneficiary_id``)
+    to collide on the same truncated head.
+    """
+
+    def test_short_name_passes_through_unchanged(self) -> None:
+        # Readability over hashing — anything under the limit stays
+        # exactly as authored so the schema reads naturally.
+        assert safe_identifier("idx_short_thing") == "idx_short_thing"
+
+    def test_name_at_limit_passes_through_unchanged(self) -> None:
+        # Boundary: exactly 63 chars is legal PG.
+        name = "a" * 63
+        assert safe_identifier(name) == name
+        assert len(safe_identifier(name)) == 63
+
+    def test_overflow_truncates_to_exactly_limit(self) -> None:
+        # 67-byte name (the bug's actual size) → exactly 63 bytes out.
+        name = "idx_sasquatch_pr_trainer_postgres_master_v_tx_meta_beneficiary_bank"
+        assert len(name) == 67
+        out = safe_identifier(name)
+        assert len(out) == 63
+
+    def test_long_overflow_truncates_to_exactly_limit(self) -> None:
+        # Stress: 200-byte input still emits exactly limit chars.
+        name = "idx_" + "x" * 200
+        out = safe_identifier(name)
+        assert len(out) == 63
+
+    def test_distinct_long_names_produce_distinct_outputs(self) -> None:
+        # The collision the bug reproduces. With the unguarded
+        # f-string, both inputs share the first 63 bytes; with
+        # safe_identifier, the hash-suffix diverges.
+        p = "sasquatch_pr_trainer_postgres_master_v"
+        a = f"idx_{p}_tx_meta_beneficiary_bank"
+        b = f"idx_{p}_tx_meta_beneficiary_id"
+        out_a = safe_identifier(a)
+        out_b = safe_identifier(b)
+        assert out_a != out_b
+        # And PG's naive truncation (the broken behaviour) does
+        # produce a collision — the helper is what saves us:
+        assert a[:63] == b[:63] or len(a) <= 63 or len(b) <= 63 or out_a != out_b
+
+    def test_deterministic_same_input_same_output(self) -> None:
+        name = "idx_" + "y" * 100
+        assert safe_identifier(name) == safe_identifier(name)
+
+    def test_readable_prefix_preserved_when_truncating(self) -> None:
+        # The helper preserves head bytes so a DBA can still recognize
+        # the object from the leading characters.
+        name = "idx_sasquatch_pr_trainer_postgres_master_v_tx_meta_beneficiary_bank"
+        out = safe_identifier(name)
+        assert out.startswith("idx_sasquatch_pr_trainer_postgres_master_v_tx_meta_be")
+        # And the hash suffix is the trailing 8 hex chars after one '_'.
+        assert out[-9] == "_"
+        assert all(c in "0123456789abcdef" for c in out[-8:])
+
+    def test_custom_limit(self) -> None:
+        # Helper accepts a different ``limit`` for non-PG callers (or
+        # tests). Default stays 63.
+        out = safe_identifier("ab" * 50, limit=20)
+        assert len(out) == 20

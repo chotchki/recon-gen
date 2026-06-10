@@ -1741,3 +1741,67 @@ def test_inv_matview_drops_oracle_plsql_block() -> None:
         assert f"DROP TABLE orcl_{name} CASCADE CONSTRAINTS" in out
     # Two PL/SQL blocks per matview: the MV drop + the orphan-table fallback.
     assert out.count("BEGIN EXECUTE IMMEDIATE") == 2 * len(_INV_MATVIEW_DROP_NAMES)
+
+
+# -- BV.3.3.d-fix — _metadata_index_name PG-63-byte collision regression -----
+
+
+def test_metadata_index_name_short_prefix_unchanged() -> None:
+    """Short prefixes pass through unmodified — readability preserved.
+
+    Default sasquatch-shaped prefix + metadata key fits well under
+    the 63-byte PG limit (e.g. ``idx_sasquatch_pr_tx_meta_customer_id``
+    = 36 chars), so the helper is a no-op for the common case.
+    """
+    from recon_gen.common.l2.schema import _metadata_index_name
+
+    out = _metadata_index_name("sasquatch_pr", "customer_id")
+    assert out == "idx_sasquatch_pr_tx_meta_customer_id"
+    assert len(out) <= 63
+
+
+def test_metadata_index_name_long_prefix_stays_within_pg_limit() -> None:
+    """Long prefix + key still emits ≤63 bytes (PG identifier limit).
+
+    The trainer's v-overlay uses
+    ``sasquatch_pr_trainer_postgres_master_v`` (38 chars). Combined
+    with ``idx_`` (4) + ``_tx_meta_`` (9) + a 16-char key, the naive
+    f-string overflows to 67 chars and PG silently truncates. The
+    helper applies a hash suffix so the emitted name fits.
+    """
+    from recon_gen.common.l2.schema import _metadata_index_name
+
+    p = "sasquatch_pr_trainer_postgres_master_v"
+    out = _metadata_index_name(p, "beneficiary_bank")
+    assert len(out) <= 63
+
+
+def test_metadata_index_name_long_prefix_no_collision_on_shared_head() -> None:
+    """Two metadata keys that share a long common head must NOT collide.
+
+    Pre-fix: PG truncates both ``idx_<long_p>_tx_meta_beneficiary_bank``
+    and ``idx_<long_p>_tx_meta_beneficiary_id`` to identical 63-byte
+    heads → second CREATE INDEX fails with a duplicate-name error.
+    Post-fix: the helper applies a deterministic hash suffix when
+    over the limit, so distinct inputs map to distinct outputs.
+    """
+    from recon_gen.common.l2.schema import _metadata_index_name
+
+    p = "sasquatch_pr_trainer_postgres_master_v"
+    a = _metadata_index_name(p, "beneficiary_bank")
+    b = _metadata_index_name(p, "beneficiary_id")
+    assert a != b
+    assert len(a) <= 63
+    assert len(b) <= 63
+
+
+def test_metadata_index_name_deterministic() -> None:
+    """Same (prefix, key) → same identifier across calls (idempotent
+    schema emit + DROP/CREATE pairing requires this)."""
+    from recon_gen.common.l2.schema import _metadata_index_name
+
+    p = "sasquatch_pr_trainer_postgres_master_v"
+    assert (
+        _metadata_index_name(p, "beneficiary_bank")
+        == _metadata_index_name(p, "beneficiary_bank")
+    )
