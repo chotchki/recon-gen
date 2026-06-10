@@ -16,12 +16,17 @@ Pins (per PLAN.md CY.5 operator-locked spec):
 - ``<details>`` open-by-default for depth ≤ 2; closed for deeper levels.
 - Primitive leaves render as JSON literals with ``data-json-leaf``
   attribute (``"value"`` / ``true`` / ``null`` / ``42``).
+- CY.8 edge cases (deep nesting, large payload) guard against the two
+  remaining footguns the recursive renderer could leak: stack-blowing
+  ``RecursionError`` on a pathologically deep tree and a quadratic /
+  blowup-prone ``json.dumps(indent=2)`` on a wide payload.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import time
 from collections.abc import Iterator
 from typing import Any, cast
 
@@ -545,3 +550,162 @@ def test_route_typical_payload_carries_leaves_and_data_attrs(
     assert ">true<" in body
     assert ">null<" in body
     assert ">12<" in body
+
+
+# -- CY.8 edge-case fixtures ------------------------------------------------
+
+
+def _build_deeply_nested_dict(
+    depth: int, *, leaf_key: str, leaf_value: str,
+) -> dict[str, Any]:
+    """Programmatically build a ``depth``-level deep dict where every
+    level uses key ``'k'`` and the innermost leaf is
+    ``{leaf_key: leaf_value}``.
+
+    Deterministic + synthetic; no live DB. Used by the
+    deep-nesting test (g) to verify the recursive renderer doesn't
+    blow up on a stack-depth-pathological input.
+    """
+    # Build bottom-up so we don't run a 10-deep recursion at build
+    # time either.
+    current: dict[str, Any] = {leaf_key: leaf_value}
+    for _ in range(depth):
+        current = {"k": current}
+    return current
+
+
+def test_render_metadata_panel_deep_nesting_10_levels_renders_innermost_leaf() -> None:
+    """(CY.8.g) — 10 levels of nested dicts renders without
+    ``RecursionError`` and the innermost leaf is reachable via the
+    rendered DOM.
+
+    The renderer recurses through ``_render_json_node``; Python's
+    default recursion limit (1000) leaves plenty of headroom for 10
+    levels, but the assertion here pins the invariant against a future
+    "let's make every value a class wrapper" rewrite that could double
+    the per-level frame count silently.
+    """
+    payload = _build_deeply_nested_dict(
+        10, leaf_key="bottom", leaf_value="reached",
+    )
+    html = render_metadata_panel(payload, transaction_id="txn-deep")
+
+    # No HTTP error path here — render_metadata_panel returns a string;
+    # a RecursionError would have raised. Verify the structural shape.
+    # Recursion math: the outermost dict iterates its entries at depth
+    # 0 (no wrapper <details>); each subsequent "k" key whose value is
+    # a dict produces one <details>. After 10 wraps around the
+    # innermost ``{"bottom": "reached"}`` dict, the structure has 11
+    # total dict layers but only 10 dict-valued "k" entries (the
+    # innermost dict's "bottom" entry holds a primitive, so it renders
+    # as a <span data-json-leaf>, not a <details>).
+    assert html.count("<details data-json-node") == 10
+
+    # The innermost leaf surfaces as a data-json-leaf span carrying the
+    # JSON-literal form of the string "reached".
+    assert '<span data-json-leaf>&quot;reached&quot;</span>' in html
+
+    # The leaf's key label ("bottom") survives the recursion all the
+    # way to the bottom of the rendered tree.
+    assert '&quot;bottom&quot;' in html
+
+
+def _build_large_flat_dict(n_keys: int) -> dict[str, str]:
+    """Build a flat dict with ``n_keys`` string-valued entries.
+
+    Each value is a short fixed string so total payload size sits in
+    the ~100KB range when ``n_keys ≈ 2000``. Deterministic — no random
+    state.
+    """
+    return {f"key_{i:05d}": f"value_{i:05d}_padding_xxxxxxxxxxxxxxxxxx"
+            for i in range(n_keys)}
+
+
+def test_render_metadata_panel_large_payload_under_budget() -> None:
+    """(CY.8.h) — ~100KB flat dict (2000 keys) renders within a soft
+    500ms wall-clock budget and the response body stays bounded under
+    2MB.
+
+    The wall-clock budget is generous to absorb CI flake but tight
+    enough to catch an O(n²) regression (a 2000-key payload that took
+    250ms each iteration would land ~6s, way over budget). The 2MB
+    body cap guards against an unbounded ``json.dumps(indent=2)``
+    blowup — the pretty-printed hidden raw textarea is the largest
+    fixed contributor and scales linearly with payload size.
+    """
+    payload = _build_large_flat_dict(2000)
+    # Sanity check the synthetic payload is in the right size class
+    # (~100KB of JSON when serialized).
+    raw_size = len(json.dumps(payload))
+    assert 80_000 < raw_size < 200_000, (
+        f"large-payload fixture out of expected ~100KB range: {raw_size}"
+    )
+
+    start = time.perf_counter()
+    html = render_metadata_panel(payload, transaction_id="txn-large")
+    elapsed = time.perf_counter() - start
+
+    # Soft wall-clock budget — flag O(n²) regressions without flaking
+    # on a busy CI runner.
+    assert elapsed < 0.5, (
+        f"render_metadata_panel(2000-key dict) took {elapsed:.3f}s "
+        f"(budget 500ms)"
+    )
+
+    # Response body stays bounded — guards a json.dumps(indent=2) blowup
+    # or per-leaf HTML growth that would push the payload past sanity.
+    body_size = len(html)
+    assert body_size < 2_000_000, (
+        f"render_metadata_panel body size {body_size} exceeds 2MB cap"
+    )
+
+    # Spot-check structural integrity: every key surfaces as a leaf.
+    # Sample a few; cheap to verify the renderer didn't truncate.
+    assert '&quot;key_00000&quot;' in html
+    assert '&quot;key_01999&quot;' in html
+
+
+def test_route_medium_payload_round_trip_under_budget(
+    metadata_dashboard_fixture: tuple[Any, str, str, str, str],
+) -> None:
+    """(CY.8.h, route layer) — end-to-end through the TestClient with a
+    payload sized to fit under httpx's 64KB URL cap also lands under
+    the soft budget + body cap. The pure-renderer test above isolates
+    the renderer at the full ~100KB; this one bakes in the route's
+    ``json.loads`` + ``HTMLResponse`` wrap at the largest size GET
+    queries can carry, so a regression that lands in the route layer
+    (e.g. an O(n²) header rewrite) also fails the gate.
+
+    In production the metadata query param travels from an
+    already-rendered row payload (CY.4) — DB-side IS-JSON keeps it
+    bounded too — so the under-64KB ceiling matches the real shape.
+    """
+    app, dash_id, sheet_id, _, _ = metadata_dashboard_fixture
+    # 400 keys lands the URL-encoded query string under httpx's 64KB
+    # URL cap while still exercising the linear-renderer path through
+    # the route layer.
+    payload = _build_large_flat_dict(400)
+    metadata_json = json.dumps(payload)
+
+    with TestClient(app) as c:  # type: ignore[arg-type]
+        start = time.perf_counter()
+        resp = c.get(
+            f"/dashboards/{dash_id}/sheets/{sheet_id}/rows/metadata",
+            params={
+                "metadata": metadata_json,
+                "transaction_id": "txn-large-route",
+            },
+        )
+        elapsed = time.perf_counter() - start
+
+    assert resp.status_code == 200
+    # Same 500ms soft budget through the route layer — generous but
+    # catches gross regressions.
+    assert elapsed < 0.5, (
+        f"route round-trip for 400-key dict took {elapsed:.3f}s "
+        f"(budget 500ms)"
+    )
+    body_size = len(resp.text)
+    assert body_size < 2_000_000, (
+        f"route response body size {body_size} exceeds 2MB cap"
+    )
