@@ -194,6 +194,7 @@ def render_training_landing(
     theme_head: str = "",
     asset_url: str = "/static/output.css",
     reset_done: bool = False,
+    standalone_mode: bool = False,
 ) -> str:
     """The ``/training/`` landing page. Accordion grouped by family
     per BU.0 Lock 1. Iterates the registry; adding a kind just adds
@@ -251,7 +252,7 @@ def render_training_landing(
       below; each plant page lets you tune the scenario then jump to
       the dashboard sheet that should light up.
     </p>
-    {_render_reset_button()}
+    {_render_reset_button(standalone_mode=standalone_mode)}
   </header>
   <main class="px-8 py-6 flex flex-col gap-3">
     {reset_banner}
@@ -262,25 +263,56 @@ def render_training_landing(
 """
 
 
-def _render_reset_button() -> str:
+def _render_reset_button(*, standalone_mode: bool = False) -> str:
     """The clean-baseline Reset form. Posts to /training/reset which
     runs the wipe + regenerate pipeline + 303s back to
     /training/?reset=1 for the success banner.
 
     BU.4 polish — copy uses operator vocabulary, no internal phase
-    references (was "BTa.8 demo-gap overlay")."""
+    references (was "BTa.8 demo-gap overlay").
+
+    CZ.5 — when ``standalone_mode=True`` (cfg.etl_hook is None) the
+    button label switches to the REPLAN-locked
+    "Clear synthetic rows and re-seed" copy so the operator sees what
+    the gate will actually do (DELETE only rows tagged
+    metadata.source='training', NOT a blind TRUNCATE).
+    """
+    from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
+        STANDALONE_RESET_BUTTON_LABEL,
+    )
+    if standalone_mode:
+        button_label = f"↻ {STANDALONE_RESET_BUTTON_LABEL}"
+        button_title = (
+            "Standalone mode (cfg.etl_hook is None) — only rows tagged "
+            "metadata.source='training' will be removed. Any unmarked "
+            "rows are presumed real customer data and survive."
+        )
+        hint_text = (
+            "Removes only rows tagged metadata.source='training'. "
+            "Unmarked rows are presumed real customer data and survive."
+        )
+        test_attr = " data-test-training-reset-standalone"
+    else:
+        button_label = "↻ Reset to clean baseline"
+        button_title = (
+            "Wipes the demo DB and reseeds it to a clean baseline. "
+            "Run this before planting a scenario so the dashboard tour "
+            "shows only your plant, not the seed noise."
+        )
+        hint_text = (
+            "Wipes the demo DB and reseeds it clean. Plant after reset "
+            "so the dashboard tour shows ONLY your scenario."
+        )
+        test_attr = ""
     return (
         '<form method="post" action="/training/reset" class="mt-3 inline-flex items-center gap-3">'
-        '<button type="submit" id="training-reset-btn" '
+        f'<button type="submit" id="training-reset-btn"{test_attr} '
         'class="px-3 py-1.5 bg-warning text-white rounded-sm border border-warning text-sm font-semibold hover:opacity-85" '
-        'title="Wipes the demo DB and reseeds it to a clean baseline. '
-        'Run this before planting a scenario so the dashboard tour '
-        'shows only your plant, not the seed noise.">'
-        "↻ Reset to clean baseline"
+        f'title="{escape(button_title)}">'
+        f"{escape(button_label)}"
         "</button>"
         '<span class="text-xs text-secondary-fg max-w-md">'
-        "Wipes the demo DB and reseeds it clean. Plant after reset "
-        "so the dashboard tour shows ONLY your scenario."
+        f"{escape(hint_text)}"
         "</span>"
         "</form>"
     )
@@ -387,6 +419,7 @@ def render_training_plant_page(
     asset_url: str = "/static/output.css",
     plant_status: str | None = None,
     form_values: Mapping[str, str] | None = None,
+    standalone_mode: bool = False,
 ) -> str:
     """The ``/training/plant/<kind>`` per-kind plant page.
 
@@ -479,7 +512,7 @@ def render_training_plant_page(
         a clean baseline first so the tour shows only your new
         plant, not the previous one stacked on top.
       </p>
-      {_render_reset_button()}
+      {_render_reset_button(standalone_mode=standalone_mode)}
     </section>
   </main>
 </body>

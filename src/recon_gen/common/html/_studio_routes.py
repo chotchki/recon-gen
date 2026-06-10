@@ -352,6 +352,60 @@ def _banner(cfg: Config | None, *, embed: bool = False) -> str:
     )
 
 
+# CZ.5 — locked operator copy (REPLAN, 2026-06-09). Standalone-mode
+# kicks in when ``cfg.etl_hook is None``: Trainer reset + Studio
+# Deploy-changes will only DELETE rows tagged
+# ``metadata.source = 'training'``; unmarked rows are presumed real
+# customer data and survive. The banner makes the protection visible
+# BEFORE the operator clicks anything.
+STANDALONE_MODE_BANNER_TEXT = (
+    "Standalone mode — your ETL hook is not configured. "
+    "Reset and Deploy-changes will only remove rows tagged "
+    "metadata.source='training'. Any unmarked rows are presumed to be "
+    "real customer data and will be preserved. To configure an ETL "
+    "hook, edit cfg.etl_hook in your config.yaml."
+)
+
+# REPLAN-locked Trainer reset button label on standalone-mode.
+STANDALONE_RESET_BUTTON_LABEL = "Clear synthetic rows and re-seed"
+
+# Tooltip for the Studio Deploy-changes button when standalone-mode
+# disables it. Mirrors the banner-copy framing so the hover hint and
+# the page banner stay aligned.
+STANDALONE_DEPLOY_DISABLED_TOOLTIP = (
+    "Standalone mode (cfg.etl_hook is None) — Deploy-changes is "
+    "disabled because it would TRUNCATE + reseed the demo DB. "
+    "Configure cfg.etl_hook in your config.yaml to re-enable."
+)
+
+
+def _standalone_mode_banner(cfg: Config | None, *, embed: bool = False) -> str:
+    """CZ.5 — standalone-mode banner driven by ``cfg.etl_hook``.
+
+    Renders when ``cfg.etl_hook is None`` (the gate signal — no ETL
+    integrator wired, so Trainer-reset / Deploy-changes default to
+    DELETE-only-synthetic to protect any real rows in the DB). Returns
+    empty string when ``cfg`` is None, when ``cfg.etl_hook`` is
+    configured, or when ``embed=True``.
+
+    Inline-styled with a distinct color from the CU.3 demo banner
+    (amber there → muted-blue here) so the two signals don't
+    visually blur. The amber demo-only banner means "edits won't
+    survive restart"; this banner means "automated deletes will be
+    cautious".
+    """
+    if embed or cfg is None or cfg.etl_hook is not None:
+        return ""
+    return (
+        '<div class="server-banner" role="status" '
+        'data-test-standalone-mode-banner '
+        'style="background:#dbeafe;border-bottom:1px solid #93c5fd;'
+        'color:#1e3a8a;padding:0.6rem 1rem;font-size:0.9rem;text-align:center">'
+        f"{escape(STANDALONE_MODE_BANNER_TEXT)}"
+        "</div>"
+    )
+
+
 def _render_home_page(
     cache: L2InstanceCache, dev_log: bool, *, cfg: Config | None = None,
     top_nav_html: str = "",
@@ -563,6 +617,7 @@ def _render_home_page(
         )
     sections_html = "\n    ".join(section_blocks)
     demo_banner = _banner(cfg)
+    standalone_banner = _standalone_mode_banner(cfg)
     # CF.4 followup (2026-06-05): the "Studio · qsgen-duckdb" +
     # `Deploy changes` strip was removed. Operator dogfood: it
     # duplicated info the top-nav already carries (which surface
@@ -604,7 +659,7 @@ def _render_home_page(
   {devlog_script}</head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
-  {demo_banner}
+  {demo_banner}{standalone_banner}
   <header class="px-8 py-4 border-b border-surface-border bg-white" id="home-intro">
     <h1 class="text-xl font-semibold m-0">L2 Editor</h1>
     <p class="text-sm text-secondary-fg max-w-3xl m-0 mt-1">
@@ -856,6 +911,7 @@ def _render_etl_landing_page(
     # so the canonical `Recon-Gen · Studio · <surface>` shape stays tight.
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
     demo_banner = _banner(cfg)
+    standalone_banner = _standalone_mode_banner(cfg)
 
     # BTa.3 — numbered cards with arrows between them. The tuple
     # order IS the loop order (Refresh Data → Triage → Probe), and
@@ -907,7 +963,7 @@ def _render_etl_landing_page(
   {devlog_script}</head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
-  {demo_banner}
+  {demo_banner}{standalone_banner}
   <header class="px-8 py-4 border-b border-surface-border bg-white">
     <h1 class="text-xl font-semibold m-0">ETL Support</h1>
     <p class="text-sm text-secondary-fg max-w-3xl m-0 mt-1">
@@ -972,6 +1028,7 @@ async def _render_etl_probe_page(
     instance = cache.get()
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
     demo_banner = _banner(cfg)
+    standalone_banner = _standalone_mode_banner(cfg)
     prefix = (
         prefix_override
         if prefix_override is not None
@@ -1014,7 +1071,7 @@ async def _render_etl_probe_page(
   {devlog_script}</head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
-  {demo_banner}
+  {demo_banner}{standalone_banner}
   {_render_etl_sub_nav("/etl/probe")}
   <header class="px-8 py-4 border-b border-surface-border bg-white">
     <h1 class="text-xl font-semibold m-0">Probe</h1>
@@ -1590,6 +1647,7 @@ async def _render_etl_run_page(
     instance = cache.get()
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
     demo_banner = _banner(cfg)
+    standalone_banner = _standalone_mode_banner(cfg)
     prefix = (
         prefix_override
         if prefix_override is not None
@@ -1648,7 +1706,7 @@ async def _render_etl_run_page(
   {devlog_script}</head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
-  {demo_banner}
+  {demo_banner}{standalone_banner}
   {_render_etl_sub_nav("/etl/run")}
   <header class="px-8 py-4 border-b border-surface-border bg-white">
     <h1 class="text-xl font-semibold m-0">Refresh Data</h1>
@@ -2331,6 +2389,7 @@ async def _render_etl_triage_page(
     instance = cache.get()
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
     demo_banner = _banner(cfg)
+    standalone_banner = _standalone_mode_banner(cfg)
     prefix = (
         prefix_override
         if prefix_override is not None
@@ -2389,7 +2448,7 @@ async def _render_etl_triage_page(
   {devlog_script}</head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
-  {demo_banner}
+  {demo_banner}{standalone_banner}
   {_render_etl_sub_nav("/etl/triage")}
   <header class="px-8 py-4 border-b border-surface-border bg-white">
     <h1 class="text-xl font-semibold m-0">Triage</h1>
@@ -3176,7 +3235,7 @@ def _render_diagram_page(
   {devlog_script}</head>
 <body class="{"flex flex-col m-0 p-0 font-sans bg-surface-bg text-primary-fg h-screen" if embed else "flex flex-col font-sans bg-surface-bg text-primary-fg h-screen"}">
   {top_nav_html}
-  {_banner(cfg, embed=embed)}
+  {_banner(cfg, embed=embed)}{_standalone_mode_banner(cfg, embed=embed)}
 
   <!--
     CG.10 (2026-06-05) — the diagram page is the only nav-chrome
@@ -4117,18 +4176,40 @@ def _render_data_page(
     timeline_section = _render_timeline_section(instance, tg_cache)
     training_pane = render_training_pane()
     demo_banner = _banner(cfg)
+    standalone_banner = _standalone_mode_banner(cfg)
     # CU.3 — Deploy button is always rendered. Demo installs configure
     # dummy AWS creds so /deploy fails noisily at the AWS-push step;
     # the visible visitor effect is the local DB rebuild.
-    deploy_controls = (
-        '<button id="deploy-btn" class="ml-auto bg-accent text-accent-fg border '
-        'border-accent px-3 py-1 rounded-sm cursor-pointer text-sm '
-        'hover:opacity-85 disabled:opacity-60 disabled:cursor-not-allowed" '
-        'type="button"\n'
-        '            onclick="quicksightDeploy()">Deploy changes</button>\n'
-        '    <span id="deploy-status" class="text-xs text-secondary-fg" '
-        'aria-live="polite"></span>'
-    )
+    #
+    # CZ.5 — standalone-mode (cfg.etl_hook is None) visually disables
+    # the button + carries a tooltip explaining the protection so the
+    # operator sees the gate BEFORE the click instead of bouncing off
+    # CZ.4's server-side refuse. Couples with the standalone banner +
+    # the Trainer reset label change for a single coherent signal.
+    standalone_mode = cfg is not None and cfg.etl_hook is None
+    if standalone_mode:
+        deploy_controls = (
+            '<button id="deploy-btn" '
+            'data-test-deploy-standalone-disabled '
+            'class="ml-auto bg-accent/40 text-accent-fg border '
+            'border-accent/40 px-3 py-1 rounded-sm cursor-not-allowed '
+            'text-sm opacity-60" '
+            'type="button" disabled '
+            f'title="{escape(STANDALONE_DEPLOY_DISABLED_TOOLTIP)}">'
+            'Deploy changes</button>\n'
+            '    <span id="deploy-status" class="text-xs text-secondary-fg" '
+            'aria-live="polite"></span>'
+        )
+    else:
+        deploy_controls = (
+            '<button id="deploy-btn" class="ml-auto bg-accent text-accent-fg border '
+            'border-accent px-3 py-1 rounded-sm cursor-pointer text-sm '
+            'hover:opacity-85 disabled:opacity-60 disabled:cursor-not-allowed" '
+            'type="button"\n'
+            '            onclick="quicksightDeploy()">Deploy changes</button>\n'
+            '    <span id="deploy-status" class="text-xs text-secondary-fg" '
+            'aria-live="polite"></span>'
+        )
 
     return f"""<!doctype html>
 <html lang="en">
@@ -4139,7 +4220,7 @@ def _render_data_page(
   {devlog_script}</head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
-  {demo_banner}
+  {demo_banner}{standalone_banner}
   <header class="flex items-center gap-4 px-4 py-2 border-b border-surface-border bg-white shrink-0">
     <h1>Studio · data shaping</h1>
     <span class="text-sm text-secondary-fg font-mono">{prefix}</span>

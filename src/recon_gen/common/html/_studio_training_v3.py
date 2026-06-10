@@ -62,6 +62,7 @@ def render_training_v3_landing(
     session_start_running: bool = False,
     apply_running: bool = False,
     apply_pending_count: int = 0,
+    standalone_mode: bool = False,
 ) -> str:
     """The /training/ landing.
 
@@ -127,6 +128,22 @@ def render_training_v3_landing(
         ))
 
     banner_html = ""
+    # CZ.5 — standalone-mode persistent banner. Renders ABOVE every
+    # transient ribbon so the operator sees the protection signal even
+    # when a Session-Start / Apply banner is stacked on top.
+    if standalone_mode:
+        from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
+            STANDALONE_MODE_BANNER_TEXT,
+        )
+        banner_html += (
+            '<div class="bg-info/10 border border-info rounded-md '
+            'px-3 py-2 mb-3 text-sm" data-test-standalone-mode-banner '
+            'role="status" '
+            'style="background:#dbeafe;border:1px solid #93c5fd;'
+            'color:#1e3a8a">'
+            f'<strong>ⓘ</strong> {escape(STANDALONE_MODE_BANNER_TEXT)}'
+            "</div>"
+        )
     # CF.1 — Session-Start success ribbon (transient, ?status= driven).
     # The Apply path no longer feeds session_status; only the
     # Session-Start 303-redirect does.
@@ -356,7 +373,7 @@ def render_training_v3_landing(
           re-clone.</li>
       </ol>
     </details>
-    {_render_session_controls(v_overlay_exists, any_op_running=(session_start_running or apply_running))}
+    {_render_session_controls(v_overlay_exists, any_op_running=(session_start_running or apply_running), standalone_mode=standalone_mode)}
   </header>
   <main class="px-8 py-6 flex flex-col gap-4">
     {banner_html}
@@ -569,6 +586,7 @@ def render_training_session_start_live_tail(
 def _render_session_controls(
     v_overlay_exists: bool, *,
     any_op_running: bool = False,
+    standalone_mode: bool = False,
 ) -> str:
     """Top-of-page Session Start / Force rebuild / Cleanup buttons (DL.10).
 
@@ -597,16 +615,39 @@ def _render_session_controls(
     disabled_cls = (
         " opacity-50 cursor-not-allowed" if any_op_running else ""
     )
+    # CZ.5 — in standalone-mode the rebuild label switches to the
+    # REPLAN-locked "Clear synthetic rows and re-seed" copy. The
+    # rebuild path is the closest v3-era analogue to BU.1.6's v2
+    # Reset-to-clean-baseline button (both drop + reseed the active
+    # surface from base); v3's Apply/Session-Start only touch the v
+    # overlay and stay generic.
+    if standalone_mode:
+        from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
+            STANDALONE_RESET_BUTTON_LABEL,
+        )
+        rebuild_label = f"↻ {STANDALONE_RESET_BUTTON_LABEL}"
+        rebuild_title = (
+            "Standalone mode (cfg.etl_hook is None) — only rows tagged "
+            "metadata.source='training' will be removed. Any unmarked "
+            "rows are presumed real customer data and survive."
+        )
+        rebuild_test_attr = " data-test-training-rebuild-standalone"
+    else:
+        rebuild_label = "↻ Force rebuild from base"
+        rebuild_title = (
+            "Drops + reclones the v overlay from current base + "
+            "wipes Apply state. Skips /etl/run (base stays as-is). For "
+            "when you want to throw out whatever is in v overlay and "
+            "start fresh from base — DL.9 Apply is incremental and "
+            "won't do that on its own."
+        )
+        rebuild_test_attr = ""
     rebuild_btn = (
         '<form method="post" action="/training/reclone" class="inline-block">'
-        f'<button type="submit" id="training-reclone-btn"{disabled_attr} '
+        f'<button type="submit" id="training-reclone-btn"{rebuild_test_attr}{disabled_attr} '
         f'class="px-3 py-1.5 bg-white text-accent rounded-sm border border-accent text-xs font-semibold hover:bg-accent/10{disabled_cls}" '
-        'title="Drops + reclones the v overlay from current base + '
-        'wipes Apply state. Skips /etl/run (base stays as-is). For '
-        'when you want to throw out whatever is in v overlay and '
-        'start fresh from base — DL.9 Apply is incremental and '
-        'won\'t do that on its own.">'
-        "↻ Force rebuild from base"
+        f'title="{escape(rebuild_title)}">'
+        f"{escape(rebuild_label)}"
         "</button>"
         "</form>"
         if v_overlay_exists else ""
