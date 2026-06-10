@@ -1,3 +1,24 @@
+# PLAN — Phase BU (archived 2026-06-09)
+
+**Phase summary:** Rebuilt the `/training/` Trainer surface as a registry-driven Studio page covering ALL 21 violation kinds across 8 families through ONE shared pattern. Pre-BU, `/training/` 404'd and the existing trainer pane only covered L1 invariants. Phase BU shipped the `PlantKindEntry` typed registry, three typed catalogues (`InvariantSection` / `L2FTExceptionSection` / `L2TriageGapSection`), 5 needs-build plant primitives, the vertical-slice (`phantom_rail`) end-to-end, and the BU.1.6 clean-baseline reset. 11 Lock-N's from BU.0's 4-round design pass either honored in-phase or carried forward.
+
+**What landed:**
+- **BU.0** — 4-round agent-driven REPLAN. Output: `docs/audits/_archive/bu_0_replan.md` (1252 lines). 11 locks span data shape (registry, thin index over typed violation classes), test contract (5 parameterized anti-drift tests over PLANT_REGISTRY), docs generation (registry-walk → 5 consuming surfaces).
+- **BU.0.5** — Design mockups. Output: `docs/audits/bu_design_mockups.md` (2323 lines).
+- **BU.1** — Vertical slice `phantom_rail` end-to-end. Shipped `common/l2/plant_registry.py` + `common/html/_studio_training_v2.py` + routes. 17 BU.1 unit tests pin registry shape + render shells + form coercion + routes + Lock-9 plant→matview round-trip.
+  - BU.1.5 cold-read; BU.1.6 `/training/reset` bypass; BU.1.7 compact progress; BU.1.8 typed pipeline overlays; BU.1.10 form-reset bug fix.
+  - **BU.1.11 — Closed 2026-06-09 via Phase CV.** Root cause was `emit_baseline_seed` producing structurally bursty traffic the global-z matview formula couldn't smooth. CV pivoted to AnomalyGenerator restructure + per-pair PARTITION BY z. Top |z| collapsed 8.62→6.249 on spec; 25.84→6.051 on sasq.
+- **BU.2a** — `L2TriageGapSection` typed catalogue. Anti-drift test pins bijectivity.
+- **BU.2b** — Registry module + shared render shells. Populated with 16 existing-primitive kinds.
+- **BU.3.1-3.5** — 5 needs-build plants: `chain_orphan`, `dead_bundles_activity`, `dead_limit_schedule`, `dead_metadata` (with `section_kind` slug-override), `expected_eod_balance_breach` (new `ExpectedEodBalanceBreachPlant` dataclass).
+
+**Deferred-out (carry forward to BV):**
+- **BU.4 → SUBSUMED by BV.4.** Dual-prefix Trainer redesign collapses per-kind plant pages into a single landing with checkbox+inline-form cards.
+- **BU.5 → MOVED to BV.7** (2026-06-09). Registry-walk `recon-gen docs export` capstone.
+- **BU.6 → SUBSUMED by BV.4.8.** Final cold-read of the dual-prefix Trainer surface lands there.
+
+**SUPERSEDED scaffold block (original SPEC-level scaffold):** removed in sweep — was a duplicate that existed only to keep the bridge's drift sync from re-creating leaves.
+
 # PLAN — Phase CY (archived 2026-06-09)
 
 **Phase summary:** Per-row metadata popup on the App2 L1 Dashboard's Posting Ledger (Transactions sheet) and Posted Money Records (Daily Statement) tables. Operator request from the v13.11.0 Mac mini cold-read: "show me the JSON metadata column without making me query the DB." The `⋯` row-drill menu gained a `{} View metadata` entry that opens a side panel rendering the row's metadata JSON as a collapsible `<details data-json-node>` tree with Copy + Expand-all / Collapse-all bulk-toggle controls. Stateless URL-param wiring — no per-click DB round-trip. App2-only by operator decision (lock 7); QS deploys keep the metadata column hidden as before. Two CY.1/CY.2 quick-follows piggybacked on the phase: bake `git_sha` into `_build_info.py` at wheel build time (the demo path's site-packages cwd was rendering "unknown") + drop the misleading `(dev build)` suffix on the DuckDB deploy stamp (DuckDB is the legit post-CA local-prod path, not dev-only). Ten implementation leaves (CY.0 absorbed into the operator-locked design block; CY.1-CY.9 shipped; CY.4.1 + CY.6.fix1 mid-flight cold-read fixes) + this CY.10 sweep.
