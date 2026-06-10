@@ -379,6 +379,58 @@ class DashboardDriver(Protocol):
         destination's expected visual to lock in the new sheet."""
         ...
 
+    # -- metadata popup (CY.9 — App2-only per operator lock 7) -----------
+
+    def open_metadata_panel(
+        self, visual_title: str, row_index: int = 0,
+    ) -> None:
+        """Open the per-row metadata side-panel for the named Table
+        visual's row at ``row_index`` (zero-based).
+
+        Locates the visual section, clicks the ``⋯`` row-drill button
+        on the indicated row, waits for the synthetic ``{} View metadata``
+        ctxmenu entry, clicks it, and blocks until ``#side-panel``
+        slides in (loses ``translate-x-full``).
+
+        App2-only — ``QsEmbedDriver`` raises ``NotImplementedError`` per
+        CY.5 operator lock 7 (metadata popup is an App2 affordance; QS
+        path is unaffected because its dataset never projects the
+        ``metadata`` column).
+        """
+        ...
+
+    def close_metadata_panel(self) -> None:
+        """Dismiss the metadata side-panel via Escape and block until
+        the drawer re-acquires ``translate-x-full``. App2-only."""
+        ...
+
+    def metadata_panel_expand_all(self) -> None:
+        """Click the ``[data-metadata-expand-all]`` toolbar button —
+        opens every ``<details data-json-node>`` in the rendered tree.
+        App2-only."""
+        ...
+
+    def metadata_panel_collapse_all(self) -> None:
+        """Click the ``[data-metadata-collapse-all]`` toolbar button —
+        closes every ``<details data-json-node>`` in the rendered tree.
+        App2-only."""
+        ...
+
+    def metadata_panel_text(self) -> str:
+        """Return the ``[data-metadata-raw]`` ``<textarea>`` value — the
+        pretty-printed canonical JSON the Copy button reads. Tests
+        assert on substrings of this for content-presence checks
+        (cheaper than walking the rendered ``<details>`` tree). App2-only.
+        """
+        ...
+
+    def metadata_panel_open_details_count(self) -> int:
+        """Count ``details[open][data-json-node]`` nodes in the rendered
+        tree — the default-open depth verifier (``depth ≤ 2`` per CY.5
+        operator lock; deeper levels collapsed by default). App2-only.
+        """
+        ...
+
     # -- artifacts -------------------------------------------------------
 
     def screenshot(self, path: str | Path | None = None) -> bytes:

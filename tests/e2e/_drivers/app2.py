@@ -1073,6 +1073,113 @@ class App2Driver:
         self._page.wait_for_load_state("networkidle")
         self._sync_nav_from_url()
 
+    # -- metadata popup (CY.9 — App2-only per operator lock 7) ----------
+
+    def open_metadata_panel(
+        self, visual_title: str, row_index: int = 0,
+    ) -> None:
+        """Drive the row's ``⋯`` button → ``{} View metadata`` ctxmenu
+        item → side-panel slide-in (drawer loses ``translate-x-full``).
+
+        Wire shape (see ``bootstrap.js::openRowMenu`` line 584+): each
+        ``<tr>`` inside a ``data-metadata-popup="1"`` Table gets a
+        ``.row-drill-menu-btn`` button (the ``⋯`` glyph). Clicking it
+        opens ``ctxmenu`` with the synthetic ``{} View metadata`` entry
+        prepended; clicking that entry calls ``htmx.ajax`` against the
+        ``/rows/metadata`` route (swaps into ``#side-panel-body``), then
+        ``window.__sidePanelOpen()`` flips the drawer visible.
+        """
+        section = self._section(visual_title)
+        rows = section.locator("table.table-data tbody tr")
+        rows.nth(row_index).wait_for(state="visible")
+        btn = rows.nth(row_index).locator(".row-drill-menu-btn").first
+        if btn.count() == 0:
+            raise NotImplementedError(
+                f"App2Driver.open_metadata_panel — table "
+                f"{visual_title!r} row {row_index} has no ⋯ button "
+                f"(metadata_popup not wired?)"
+            )
+        btn.click()
+        # The synthetic entry is always prepended at index 0; matching
+        # by visible text lets the test signal which item it expects
+        # without coupling to position.
+        item = self._page.locator(
+            "ul.ctxmenu li", has_text="{} View metadata",
+        ).first
+        item.wait_for(state="visible", timeout=5_000)
+        item.click()
+        # ``__sidePanelOpen`` removes ``translate-x-full`` synchronously
+        # after the ``htmx.ajax`` promise resolves. Poll the class
+        # attribute rather than waiting on a specific selector — the
+        # body fragment varies (empty-state, tree) but the drawer's
+        # transform flip is the single readiness signal.
+        self._page.wait_for_function(
+            "() => {"
+            " const p = document.getElementById('side-panel');"
+            " return p && !p.classList.contains('translate-x-full');"
+            "}",
+            timeout=5_000,
+        )
+
+    def close_metadata_panel(self) -> None:
+        """Press Escape; block until the drawer re-acquires
+        ``translate-x-full`` (the closed-state class)."""
+        self._page.keyboard.press("Escape")
+        self._page.wait_for_function(
+            "() => {"
+            " const p = document.getElementById('side-panel');"
+            " return p && p.classList.contains('translate-x-full');"
+            "}",
+            timeout=5_000,
+        )
+
+    def metadata_panel_expand_all(self) -> None:
+        """Click ``[data-metadata-expand-all]``. Empty-state fragments
+        carry no toolbar (operator lock — see ``_EMPTY_METADATA_FRAGMENT``
+        in ``_side_panel.py``); callers should only invoke this when
+        the panel rendered a real payload.
+
+        bootstrap.js's ``expandAll`` defers the open mutation into a
+        ``requestAnimationFrame`` to keep the main thread responsive
+        for large trees — so the DOM state isn't visible synchronously
+        after the click returns. We wait one ``rAF`` tick before
+        returning so the caller's subsequent ``metadata_panel_open_details_count``
+        sees the post-batch state.
+        """
+        self._page.locator("[data-metadata-expand-all]").first.click()
+        self._page.evaluate(
+            "() => new Promise((r) => requestAnimationFrame(() => r()))"
+        )
+
+    def metadata_panel_collapse_all(self) -> None:
+        """Click ``[data-metadata-collapse-all]``. Same empty-state +
+        ``requestAnimationFrame`` caveats as ``metadata_panel_expand_all``."""
+        self._page.locator("[data-metadata-collapse-all]").first.click()
+        self._page.evaluate(
+            "() => new Promise((r) => requestAnimationFrame(() => r()))"
+        )
+
+    def metadata_panel_text(self) -> str:
+        """Return the ``[data-metadata-raw]`` ``<textarea>``'s value —
+        the pretty-printed JSON the Copy button reads. Returns the empty
+        string when the panel is in its empty-state branch (no textarea
+        rendered)."""
+        loc = self._page.locator("[data-metadata-raw]").first
+        if loc.count() == 0:
+            return ""
+        # ``<textarea>`` content lives on ``.value``; ``inner_text``
+        # would return the *DOM* text (empty for a hidden textarea).
+        result = loc.evaluate("(el) => el.value")
+        return str(result) if result is not None else ""
+
+    def metadata_panel_open_details_count(self) -> int:
+        """Count ``details[open][data-json-node]`` nodes — the
+        default-state cardinality assertion. Returns 0 for empty-state
+        panels (no tree rendered)."""
+        return int(self._page.locator(
+            "details[open][data-json-node]",
+        ).count())
+
     # -- Trainer (BV.4 dual-prefix flow) ---------------------------------
 
     def open_training(self) -> None:

@@ -894,6 +894,40 @@ class QsEmbedDriver:
             self._page, menu_item, self._page_timeout,
         )
 
+    # -- metadata popup (CY.9 — App2-only per operator lock 7) ----------
+
+    def open_metadata_panel(
+        self, visual_title: str, row_index: int = 0,
+    ) -> None:
+        raise NotImplementedError(
+            "metadata popup is App2-only per operator lock 7"
+        )
+
+    def close_metadata_panel(self) -> None:
+        raise NotImplementedError(
+            "metadata popup is App2-only per operator lock 7"
+        )
+
+    def metadata_panel_expand_all(self) -> None:
+        raise NotImplementedError(
+            "metadata popup is App2-only per operator lock 7"
+        )
+
+    def metadata_panel_collapse_all(self) -> None:
+        raise NotImplementedError(
+            "metadata popup is App2-only per operator lock 7"
+        )
+
+    def metadata_panel_text(self) -> str:
+        raise NotImplementedError(
+            "metadata popup is App2-only per operator lock 7"
+        )
+
+    def metadata_panel_open_details_count(self) -> int:
+        raise NotImplementedError(
+            "metadata popup is App2-only per operator lock 7"
+        )
+
     # -- artifacts -------------------------------------------------------
 
     def screenshot(self, path: str | Path | None = None) -> bytes:
