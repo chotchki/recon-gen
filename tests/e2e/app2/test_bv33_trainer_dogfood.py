@@ -355,49 +355,28 @@ def _browser_walkable_kinds() -> list[PlantKindEntry]:
     return out
 
 
-# BV.3.3.c.bug4-followup — chain-coherence kinds whose matview rows
-# land correctly (the v_<matview> sigs are present in the DB) but
-# whose rendered dashboard HTML doesn't surface their id-like columns
-# (``transfer_id`` etc). Strict signature assertion catches it as a
-# real bug: matview correct, dashboard rendering broken. Tracked as a
-# known-failing set so BV.3.3.c can ship while the underlying chain-
-# coherence dashboard rendering gets debugged separately. Adding to
-# this set requires an explicit memory entry — the
-# ``[feedback_no_xfail_to_sweep_under_rug]`` rule — so this is the
-# minimum surface the registry-walk currently can't prove healthy.
-# Failures absent from the set hard-fail the test.
+# BV.3.3.c.bug4-followup — MOSTLY RESOLVED 2026-06-10. The 8 known-fail
+# kinds flipped to 6 green + 2 remaining once the server-side page_size
+# + sort_by URL bake landed in render.py + server.py (commit ffe39e09).
+# With ``?page_size=10000`` on the page URL now threading through the
+# hidden filter-form input → htmx data-fetch URL, NULL-magnitude
+# chain-coherence rows surface regardless of where they sort.
+#
+# Two kinds remain skipped — separate root cause (NOT the URL plumbing).
+# Tracked at BV.3.3.c.bug5-l1exc-missed-zero-magnitude-filter:
+# the L1 Exceptions dataset SQL carries a C7 cold-read guard
+# (``(magnitude_amount > 0) OR (magnitude_count > 0)``) that suppresses
+# "degenerate" rows where both magnitudes are NULL/0. But the *_missed
+# variants of xor_group_violation + multi_xor_violation emit
+# magnitude_count = 0 BY DESIGN — firing_count=0 / child_count=0 IS
+# the violation signal ("0 of the XOR siblings fired"). The C7 filter
+# wrongly drops them. Fix is at the dataset SQL layer (relax the guard
+# for transfer-keyed branches so count-keyed violations with count=0
+# survive), not the test. Re-enable once the L1 Exceptions SQL is
+# updated.
 _BUG4_FOLLOWUP_KNOWN_FAIL_KINDS: frozenset[str] = frozenset({
-    # BV.3.3.c.bug4-followup: chain-coherence kinds whose v_<matview>
-    # rows surface correctly (the bv31 db-tier round-trip is green) but
-    # whose rendered L1 Exceptions dashboard HTML doesn't reliably
-    # expose their transfer_id. Root cause (debugged 2026-06-10): the
-    # dashboard's `sort_by=(amount DESC)` + `page_size` aren't plumbed
-    # through to the htmx data-fetch URL — the fetch hits server default
-    # `ORDER BY 1` (check_type ASC) + page_size=50. NULL-magnitude
-    # chain-coherence rows that sort BELOW "chain_" alphabetically fall
-    # off page 1. Tracked at BV.3.3.c.bug4-followup. Promote out of this
-    # set once the dashboard plumbing lands.
-    # 3 fail reliably: xor_group_missed/overlap, multi_xor_missed.
-    # 4 happen to pass under default ORDER BY 1 (chain_parent_disagreement,
-    #   fan_in_missing_parent, fan_in_extra_parent, multi_xor_overlap)
-    # but the pass is incidental — they're kept here so the set
-    # documents the full chain-coherence rendering risk.
-    "chain_parent_disagreement",
     "xor_group_missed",
-    "xor_group_overlap",
-    "fan_in_missing_parent",
-    "fan_in_extra_parent",
     "multi_xor_missed",
-    "multi_xor_overlap",
-    # stuck_unbundled: bv33a vertical slice PASSES with the bug2
-    # driver page_size=10000 fix; bv33c cumulative walk used to fail
-    # ("planted signatures absent from rendered dashboard table").
-    # Cumulative-state interaction needed separate investigation —
-    # tracked at BV.3.3.c.bug2-cumulative-followup. In the per-kind
-    # decomposition the cumulative-state shape is gone (every kind
-    # gets a fresh Session Start); promote out of this set once the
-    # per-kind run shows green for a sustained window.
-    "stuck_unbundled",
 })
 
 
@@ -686,20 +665,26 @@ def _walkable_param_id(entry: PlantKindEntry) -> str:
 
 def _walkable_params() -> list[Any]:  # noqa: ANN401  — ParameterSet has no public pyright stub
     """Build ``pytest.param`` entries from the walkable registry,
-    applying ``pytest.mark.skip`` to BV.3.3.c.bug4-followup entries so
-    a known-fail kind doesn't red the run while the underlying
-    dashboard-rendering bug gets debugged separately.
+    applying ``pytest.mark.skip`` to entries in
+    ``_BUG4_FOLLOWUP_KNOWN_FAIL_KINDS`` so a known-fail kind doesn't
+    red the run while the underlying dashboard-rendering bug gets
+    debugged separately.
 
     CB.17.j — was ``xfail(strict=False)``. xfail RUNS the test (it
     just inverts the expected outcome), which on the trainer dogfood
     flow means ~130s of Session Start + studio_server + Apply
-    timeout per kind × 8 kinds × both app2 + qs_browser layers — ~30
-    min of cumulative work and ~5 min of wall time we were burning
-    to verify "yes, the broken kinds are still broken." `skip`
-    short-circuits at collection time. When BV.3.3.c.bug4-followup
-    actually fixes the dashboard rendering, demote the entries out
-    of `_BUG4_FOLLOWUP_KNOWN_FAIL_KINDS` and they re-enter the
+    timeout per kind × N kinds × both app2 + qs_browser layers —
+    multi-min of cumulative work we were burning to verify "yes, the
+    broken kinds are still broken." `skip` short-circuits at
+    collection time. When a tracked bug fixes the underlying
+    rendering, demote the entries out of
+    ``_BUG4_FOLLOWUP_KNOWN_FAIL_KINDS`` and they re-enter the
     parametrize set.
+
+    Post-2026-06-10 the remaining 2 entries are the *_missed XOR
+    variants whose magnitude_count=0 gets dropped by the C7
+    "degenerate row" guard in the L1 Exceptions dataset SQL — see the
+    docstring on ``_BUG4_FOLLOWUP_KNOWN_FAIL_KINDS`` above.
     """
     params: list[Any] = []  # noqa: ANN401
     for entry in _browser_walkable_kinds():
@@ -708,9 +693,12 @@ def _walkable_params() -> list[Any]:  # noqa: ANN401  — ParameterSet has no pu
             marks.append(
                 pytest.mark.skip(
                     reason=(
-                        f"BV.3.3.c.bug4-followup: {entry.kind}'s "
-                        f"matview row lands but its id-like columns "
-                        f"don't surface in the rendered dashboard HTML"
+                        f"BV.3.3.c.bug5-l1exc-missed-zero-magnitude-"
+                        f"filter: {entry.kind} emits magnitude_count=0 "
+                        f"(0 firings IS the violation), but the L1 "
+                        f"Exceptions dataset SQL's C7 guard "
+                        f"``(magnitude_count > 0)`` drops it. Fix at "
+                        f"the dataset SQL layer."
                     ),
                 ),
             )
