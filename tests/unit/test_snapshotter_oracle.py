@@ -11,11 +11,15 @@ it through the runner's DB tier (the same ordering chain the trainer
 dogfood walk uses), and the ``@dialects(Dialect.OR)`` mark scopes it
 to the Oracle cell so DuckDB / PG cells skip it cleanly.
 
-Setup cost is one-shot per session — the ``oracle_container_url``
-session-scoped fixture adopts the shared container; this test
-builds a minimal v-overlay schema (full ``emit_schema`` so matview
-DBMS_MVIEW.REFRESH targets resolve), inserts a handful of rows, then
-exercises the snapshotter verbs.
+Setup cost is one-shot per session — the
+``snapshotter_oracle_container_url`` session-scoped fixture adopts the
+BV.3.3-dedicated ``recon-gen-snap-test-oracle`` container (separate
+from the shared db-tier ``recon-gen-test-oracle`` so heavy CTAS +
+DBMS_MVIEW.REFRESH ops here don't fight the layered db-tier matrix
+or the bv33 trainer dogfood walk); this test builds a minimal
+v-overlay schema (full ``emit_schema`` so matview DBMS_MVIEW.REFRESH
+targets resolve), inserts a handful of rows, then exercises the
+snapshotter verbs.
 """
 from __future__ import annotations
 
@@ -70,10 +74,11 @@ def spec_instance() -> L2Instance:
 
 @pytest.fixture(scope="module")
 def oracle_cfg(
-    oracle_container_url: str,
+    snapshotter_oracle_container_url: str,
     spec_instance: L2Instance,
 ) -> Any:
-    """Build a ``Config`` pointed at the live Oracle container.
+    """Build a ``Config`` pointed at the snapshotter-dedicated Oracle
+    container.
 
     The ``db_table_prefix`` is per-module-suffixed (``snap_or``) so
     other Oracle-tier tests running in parallel don't collide on the
@@ -81,7 +86,7 @@ def oracle_cfg(
     """
     return make_test_config(
         dialect=Dialect.ORACLE,
-        demo_database_url=oracle_container_url,
+        demo_database_url=snapshotter_oracle_container_url,
         db_table_prefix="snap_or",
     )
 

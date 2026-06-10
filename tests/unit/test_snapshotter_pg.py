@@ -1,11 +1,17 @@
 """BV.3.3 — PG-dialect Snapshotter integration tests.
 
 Exercises ``PostgresSchemaSnapshotter`` against the session-scoped
-shared PG container (``pg_container_url`` fixture from
-``tests/conftest.py``). When the env-URL escape hatch
+dedicated PG container (``snapshotter_pg_container_url`` fixture
+from ``tests/conftest.py`` — adopt-or-create against
+``recon-gen-snap-test-pg``). When the env-URL escape hatch
 (``RECON_GEN_DEMO_DATABASE_URL_PG``) is unset AND Docker isn't
 available, the container fixture either skips or fails the fixture
 setup — same gate as ``tests/unit/test_cb17a_container_fixtures.py``.
+
+The dedicated container is separate from ``pg_container_url``'s
+``recon-gen-test-pg`` so schema-create / drop / TRUNCATE ops here
+don't fight the shared db-tier matrix or the bv33 trainer dogfood
+walk for the same container (per BV.3.3 isolation split).
 
 Why under tests/unit/ rather than tests/e2e/db/: this exercises the
 snapshotter primitive in isolation (no Studio server, no Playwright,
@@ -72,8 +78,9 @@ _BASE_PREFIX = "snap_pg_test"
 
 
 @pytest.fixture(scope="module")
-def pg_cfg(pg_container_url: str) -> Config:
-    """Pin a module-scoped ``Config`` against the shared PG container.
+def pg_cfg(snapshotter_pg_container_url: str) -> Config:
+    """Pin a module-scoped ``Config`` against the snapshotter-dedicated
+    PG container.
 
     Module scope so the schema apply + v-overlay setup runs once per
     test file rather than per test. Each test ``take``s a fresh
@@ -87,7 +94,7 @@ def pg_cfg(pg_container_url: str) -> Config:
         dialect=Dialect.POSTGRES,
         db_table_prefix=_BASE_PREFIX,
     )
-    return replace(base, demo_database_url=pg_container_url)
+    return replace(base, demo_database_url=snapshotter_pg_container_url)
 
 
 @pytest.fixture(scope="module")

@@ -1382,6 +1382,14 @@ ORACLE_REUSE_CONTAINER_PREFIX: Final = "quicksight-test-oracle-"
 # `tests/conftest.py::_SHARED_PG_CONTAINER_NAME`; kept as a separate
 # constant here so `_cmd_down_local` doesn't reach into the test tree.
 PG_SHARED_CONTAINER_NAME: Final = "recon-gen-test-pg"  # typing-smell: ignore[recon-prefix]: Docker container name for the CB.17.k xdist-shared PG test fixture (not a cfg-prefixed AWS / DB resource ID) — stable across `pytest -n auto` workers so conftest's `pg_container_url` fixture can adopt-or-create against a single shared container; not multi-tenant and intentionally does not flow through `cfg.prefixed()`
+# BV.3.3 — dedicated Snapshotter-unit-test containers. Same shape as
+# the shared CB.17.k pair above but a separate name family so the
+# snapshotter tests (heavy schema-create / drop / CTAS+REFRESH ops)
+# don't fight the shared db-tier matrix or the bv33 trainer dogfood
+# walk. Mirrored from `tests/conftest.py::_SHARED_SNAP_*_CONTAINER_NAME`
+# so `_cmd_down_local` doesn't reach into the test tree.
+SNAP_PG_SHARED_CONTAINER_NAME: Final = "recon-gen-snap-test-pg"  # typing-smell: ignore[recon-prefix]: Docker container name for the BV.3.3 snapshotter-unit-test PG fixture (not a cfg-prefixed AWS / DB resource ID) — stable across `pytest -n auto` workers so conftest's `snapshotter_pg_container_url` fixture can adopt-or-create against a single shared container; not multi-tenant and intentionally does not flow through `cfg.prefixed()`
+SNAP_ORACLE_SHARED_CONTAINER_NAME: Final = "recon-gen-snap-test-oracle"  # typing-smell: ignore[recon-prefix]: Docker container name for the BV.3.3 snapshotter-unit-test Oracle fixture (not a cfg-prefixed AWS / DB resource ID) — stable across `pytest -n auto` workers so conftest's `snapshotter_oracle_container_url` fixture can adopt-or-create against a single shared container; not multi-tenant and intentionally does not flow through `cfg.prefixed()`
 # Pinned password matches the testcontainers `OracleDbContainer`
 # behavior when `oracle_password` is explicitly set. Without pinning,
 # testcontainers randomizes per invocation (`hex(randbits(24))`) and
@@ -3014,19 +3022,62 @@ def cmd_down(args: argparse.Namespace) -> int:
     return EXIT_NEEDS_OPERATOR
 
 
+def _probe_named_container(name: str) -> tuple[list[str], int]:
+    """Anchored-regex probe for an exact-name container.
+
+    ``docker ps --filter name=<X>`` is a substring match, which means a
+    bare `recon-gen-test-pg` filter would also catch e.g.
+    `recon-gen-test-pg-staging`. Anchoring with ``^X$`` keeps each
+    teardown-target concern decoupled and avoids accidentally killing
+    operator side-projects whose names happen to share a substring.
+
+    Returns ``(names, exit_code)``. ``exit_code`` is ``EXIT_NEEDS_OPERATOR``
+    if the probe itself failed (Docker daemon unreachable); ``EXIT_SUCCESS``
+    otherwise. ``names`` is the matched-name list (zero or one entry for
+    an anchored probe, but kept as a list so the caller folds it into a
+    single iteration).
+    """
+    result = subprocess.run(
+        ["docker", "ps", "--filter",
+         f"name=^{name}$",
+         "--format", "{{.Names}}"],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        print(
+            f"runner: docker ps ({name}) failed "
+            f"(rc={result.returncode}): {result.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return [], EXIT_NEEDS_OPERATOR
+    return [n for n in result.stdout.strip().splitlines() if n], EXIT_SUCCESS
+
+
 def _cmd_down_local() -> int:
     """Stop persistent local containers.
 
     Two families today:
       * Oracle reuse-prefix containers (j.5 pattern, per-cell names
         under `quicksight-test-oracle-*`).
-      * The CB.17.k shared PG container `recon-gen-test-pg` (a stable
-        single name; adopted-or-created by the `pg_container_url`
-        session fixture and persists across `pytest` invocations).
+      * Named single-instance shared containers (each adopted-or-created
+        by a session-scoped conftest fixture, each persists across
+        `pytest` invocations):
+        - `recon-gen-test-pg` (CB.17.k, db-tier matrix + bv33 trainer
+          dogfood walk; `pg_container_url`).
+        - `recon-gen-snap-test-pg` (BV.3.3, snapshotter unit tests;
+          `snapshotter_pg_container_url`).
+        - `recon-gen-snap-test-oracle` (BV.3.3, snapshotter unit tests;
+          `snapshotter_oracle_container_url`).
+        The CB.17.k shared Oracle (`recon-gen-test-oracle`) is NOT
+        currently torn down here — that's a pre-existing gap from when
+        the down-local hygiene pass (`9736877d`) only covered PG; in
+        scope to fix later but separate from BV.3.3 snap isolation.
 
     Pre-CB.17.k PG was genuinely ephemeral (testcontainers tore it down
     per session); the docstring claim has been stale since the shared
-    fixture landed. Symmetric teardown closes that gap.
+    fixture landed. Symmetric teardown closes that gap. Each anchored-
+    regex probe stays a separate `docker ps` call so a single
+    misbehaving container doesn't take down the rest of the sweep.
     """
     result = subprocess.run(
         ["docker", "ps", "--filter",
@@ -3042,26 +3093,18 @@ def _cmd_down_local() -> int:
         return EXIT_NEEDS_OPERATOR
     names = [n for n in result.stdout.strip().splitlines() if n]
 
-    # CB.17.k shared PG container — stable single name, not a prefix
-    # family. `docker ps --filter name=<X>` is a substring match, so a
-    # separate exact-name probe keeps the two concerns decoupled (and
-    # avoids matching unrelated containers that happen to share the
-    # `recon-gen-test-pg` substring).
-    pg_result = subprocess.run(
-        ["docker", "ps", "--filter",
-         f"name=^{PG_SHARED_CONTAINER_NAME}$",
-         "--format", "{{.Names}}"],
-        capture_output=True, text=True, check=False,
-    )
-    if pg_result.returncode != 0:
-        print(
-            f"runner: docker ps (pg) failed (rc={pg_result.returncode}): "
-            f"{pg_result.stderr.strip()}",
-            file=sys.stderr,
-        )
-        return EXIT_NEEDS_OPERATOR
-    pg_names = [n for n in pg_result.stdout.strip().splitlines() if n]
-    names = [*names, *pg_names]
+    # Anchored-name probes for the single-instance shared containers.
+    # Each call is independent so the probe-set extends cleanly when
+    # a new shared container is introduced (just add another name).
+    for shared_name in (
+        PG_SHARED_CONTAINER_NAME,
+        SNAP_PG_SHARED_CONTAINER_NAME,
+        SNAP_ORACLE_SHARED_CONTAINER_NAME,
+    ):
+        matched, probe_rc = _probe_named_container(shared_name)
+        if probe_rc != EXIT_SUCCESS:
+            return probe_rc
+        names = [*names, *matched]
 
     if not names:
         print("runner: down local — no persistent local containers running")

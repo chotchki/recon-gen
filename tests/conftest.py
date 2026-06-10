@@ -945,6 +945,101 @@ def _shared_container_url(
 # `./run_tests.sh down`.
 _SHARED_PG_CONTAINER_NAME: Final = "recon-gen-test-pg"
 _SHARED_ORACLE_CONTAINER_NAME: Final = "recon-gen-test-oracle"
+# BV.3.3 — dedicated containers for the Snapshotter unit-test files
+# (``tests/unit/test_snapshotter_pg.py`` + ``test_snapshotter_oracle.py``).
+# Separate from the shared db-tier containers above so schema-create /
+# drop ops in the snapshotter tests don't fight the bv33 trainer
+# dogfood walk or the layered db-tier matrix for the same container.
+# Mid-flight Ctrl-C of an Oracle pytest re-run while the shared Oracle
+# was busy was the smell that drove the split. Per
+# project_local_dev_env_unconstrained — extra containers are fine.
+_SHARED_SNAP_PG_CONTAINER_NAME: Final = "recon-gen-snap-test-pg"
+_SHARED_SNAP_ORACLE_CONTAINER_NAME: Final = "recon-gen-snap-test-oracle"
+
+
+def _resolve_pg_container_url(
+    *,
+    tmp_path_factory: pytest.TempPathFactory,
+    worker_id: str,
+    container_name: str,
+    state_filename: str,
+) -> str:
+    """Adopt-or-create the named PG container and return its URL.
+
+    Extracted from ``pg_container_url`` (CB.17.k) so the BV.3.3
+    snapshot tests can share the same xdist rendezvous machinery
+    against a SEPARATE container name. The env-URL escape hatch
+    (``RECON_GEN_DEMO_DATABASE_URL_PG``) is honored regardless of
+    which named container the caller asks for — CI workflows pin a
+    single pre-spun URL, the schema/prefix isolation is what keeps
+    the two test families from colliding inside that one container.
+    """
+    env_url = RECON_GEN_DEMO_DATABASE_URL_PG.get_or_none()
+    if env_url is not None:
+        return env_url
+
+    from recon_gen._dev.runner import (  # noqa: PLC0415 — lazy
+        _get_or_start_pg_container,
+        generate_db_password,
+    )
+
+    # BX.248 — fresh per-pytest-invocation password. If the container
+    # already exists, the adopt path force-resets via unix-socket
+    # trust-auth so the credential survives the rendezvous round-trip.
+    password = generate_db_password()
+
+    def _spinup_pg(name: str) -> tuple[str, object]:
+        return _get_or_start_pg_container(name, password)
+
+    return _shared_container_url(
+        tmp_path_factory=tmp_path_factory,
+        worker_id=worker_id,
+        state_filename=state_filename,
+        container_name=container_name,
+        spinup_fn=_spinup_pg,
+    )
+
+
+def _resolve_oracle_container_url(
+    *,
+    tmp_path_factory: pytest.TempPathFactory,
+    worker_id: str,
+    container_name: str,
+    state_filename: str,
+) -> str:
+    """Adopt-or-create the named Oracle container and return its URL.
+
+    BV.3.3 — same parameterization shape as ``_resolve_pg_container_url``.
+    Honors the ``RECON_GEN_DEMO_DATABASE_URL_OR`` env override; otherwise
+    runs through ``_shared_container_url`` (xdist FileLock rendezvous +
+    on-disk state file) and the runner's adopt-or-create helper.
+    """
+    env_url = RECON_GEN_DEMO_DATABASE_URL_OR.get_or_none()
+    if env_url is not None:
+        return env_url
+
+    pytest.importorskip("testcontainers.oracle")
+    from recon_gen._dev.runner import (  # noqa: PLC0415 — lazy
+        _get_or_start_oracle_container,
+        generate_db_password,
+    )
+
+    # BX.248 — fresh per-pytest-invocation password (token_hex satisfies
+    # Oracle 19c's letter+digit+8chars rule). Adopt path force-resets
+    # via in-container sysdba.
+    password = generate_db_password()
+
+    def _spinup(name: str) -> tuple[str, object]:
+        raw_url, handle = _get_or_start_oracle_container(name, password)
+        return _strip_sa_url_prefix(raw_url), handle
+
+    return _shared_container_url(
+        tmp_path_factory=tmp_path_factory,
+        worker_id=worker_id,
+        state_filename=state_filename,
+        container_name=container_name,
+        spinup_fn=_spinup,
+    )
 
 
 @pytest.fixture(scope="session")
@@ -969,30 +1064,11 @@ def pg_container_url(
     creation and rendezvous (CI workflows set it to point at a
     pre-spun container).
     """
-    env_url = RECON_GEN_DEMO_DATABASE_URL_PG.get_or_none()
-    if env_url is not None:
-        yield env_url
-        return
-
-    from recon_gen._dev.runner import (  # noqa: PLC0415 — lazy
-        _get_or_start_pg_container,
-        generate_db_password,
-    )
-
-    # BX.248 — fresh per-pytest-invocation password. If the container
-    # already exists, the adopt path force-resets via unix-socket
-    # trust-auth so the credential survives the rendezvous round-trip.
-    password = generate_db_password()
-
-    def _spinup_pg(name: str) -> tuple[str, object]:
-        return _get_or_start_pg_container(name, password)
-
-    url = _shared_container_url(
+    url = _resolve_pg_container_url(
         tmp_path_factory=tmp_path_factory,
         worker_id=worker_id,
-        state_filename="pg-container-url.txt",
         container_name=_SHARED_PG_CONTAINER_NAME,
-        spinup_fn=_spinup_pg,
+        state_filename="pg-container-url.txt",
     )
     os.environ[RECON_GEN_DEMO_DATABASE_URL_PG.name] = url
     yield url
@@ -1014,32 +1090,69 @@ def oracle_container_url(
     per pytest invocation; persists across runs (adopt-or-create
     against `recon-gen-test-oracle`).
     """
-    env_url = RECON_GEN_DEMO_DATABASE_URL_OR.get_or_none()
-    if env_url is not None:
-        yield env_url
-        return
-
-    pytest.importorskip("testcontainers.oracle")
-    from recon_gen._dev.runner import (  # noqa: PLC0415 — lazy
-        _get_or_start_oracle_container,
-        generate_db_password,
-    )
-
-    # BX.248 — fresh per-pytest-invocation password (token_hex satisfies
-    # Oracle 19c's letter+digit+8chars rule). Adopt path force-resets
-    # via in-container sysdba.
-    password = generate_db_password()
-
-    def _spinup(name: str) -> tuple[str, object]:
-        raw_url, handle = _get_or_start_oracle_container(name, password)
-        return _strip_sa_url_prefix(raw_url), handle
-
-    url = _shared_container_url(
+    url = _resolve_oracle_container_url(
         tmp_path_factory=tmp_path_factory,
         worker_id=worker_id,
-        state_filename="oracle-container-url.txt",
         container_name=_SHARED_ORACLE_CONTAINER_NAME,
-        spinup_fn=_spinup,
+        state_filename="oracle-container-url.txt",
+    )
+    os.environ[RECON_GEN_DEMO_DATABASE_URL_OR.name] = url
+    yield url
+
+
+@pytest.fixture(scope="session")
+def snapshotter_pg_container_url(
+    tmp_path_factory: pytest.TempPathFactory,
+    worker_id: str,
+) -> Generator[str, None, None]:
+    """URL for the BV.3.3-dedicated Snapshotter-test PG container.
+
+    Distinct from ``pg_container_url`` so the snapshotter unit tests
+    (``tests/unit/test_snapshotter_pg.py``) own their own schema-
+    create / drop / TRUNCATE namespace without fighting the shared
+    db-tier matrix or the bv33 trainer dogfood walk. Same adopt-or-
+    create + FileLock + on-disk-rendezvous shape — just a different
+    container name (``recon-gen-snap-test-pg``) and rendezvous file.
+
+    Lifecycle is operator-owned (``./run_tests.sh down`` tears down
+    both the shared and the snap variants).
+
+    The ``RECON_GEN_DEMO_DATABASE_URL_PG`` env override still wins —
+    callers pinning a pre-spun container point both fixtures at the
+    same URL; schema isolation (the snap-test's ``snap_pg_test``
+    base-prefix vs. the shared-PG tests' prefixes) keeps the two
+    families apart inside that one container.
+    """
+    url = _resolve_pg_container_url(
+        tmp_path_factory=tmp_path_factory,
+        worker_id=worker_id,
+        container_name=_SHARED_SNAP_PG_CONTAINER_NAME,
+        state_filename="snap-pg-container-url.txt",
+    )
+    os.environ[RECON_GEN_DEMO_DATABASE_URL_PG.name] = url
+    yield url
+
+
+@pytest.fixture(scope="session")
+def snapshotter_oracle_container_url(
+    tmp_path_factory: pytest.TempPathFactory,
+    worker_id: str,
+) -> Generator[str, None, None]:
+    """URL for the BV.3.3-dedicated Snapshotter-test Oracle container.
+
+    Mirror of ``snapshotter_pg_container_url`` for the Oracle dialect.
+    Adopt-or-create against ``recon-gen-snap-test-oracle`` so the
+    snapshotter unit tests (``tests/unit/test_snapshotter_oracle.py``)
+    can take / restore / drop golden-mirror schemas without colliding
+    with the shared db-tier Oracle container — the golden-mirror's
+    cold-start dance + DBMS_MVIEW.REFRESH calls are heavy enough that
+    sharing led to mid-flight Ctrl-C abandonment of one or the other.
+    """
+    url = _resolve_oracle_container_url(
+        tmp_path_factory=tmp_path_factory,
+        worker_id=worker_id,
+        container_name=_SHARED_SNAP_ORACLE_CONTAINER_NAME,
+        state_filename="snap-oracle-container-url.txt",
     )
     os.environ[RECON_GEN_DEMO_DATABASE_URL_OR.name] = url
     yield url
