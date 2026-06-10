@@ -84,6 +84,16 @@ def short_fingerprint_placeholder() -> str:
     return "pending"
 
 
+# CW.3 — provenance_format_version sentinels. Bumping the version
+# means the per-field SHA values are computed by a different algorithm
+# (the per-dialect SQL streamed fingerprint vs the legacy Python ladder).
+# Pre-CW PDFs have no version field in their embedded JSON blob, so
+# `from_dict` treats `missing → 1`. CW emissions stamp version 2.
+PROVENANCE_FORMAT_VERSION_LEGACY = 1
+PROVENANCE_FORMAT_VERSION_CW = 2
+_CURRENT_PROVENANCE_FORMAT_VERSION = PROVENANCE_FORMAT_VERSION_CW
+
+
 @dataclass(frozen=True)
 class ProvenanceFingerprint:
     """The four base inputs that fully determine a generated artifact.
@@ -100,6 +110,14 @@ class ProvenanceFingerprint:
     concatenated in a fixed order; ``short`` is the first 8 hex
     chars (footer). The dict-form serializes to JSON for embedding
     in PDF metadata so ``audit verify`` can recompute and compare.
+
+    Phase CW.3 (2026-06-09) added ``provenance_format_version`` (=2
+    for CW emissions, =1 for pre-CW PDFs). The version identifies
+    which SHA-computation algorithm produced the per-field SHA
+    values: v1 = the legacy Python ``canonical_value`` ladder; v2 =
+    the streamed per-dialect SQL fingerprint introduced in CW.2.
+    ``audit verify`` dispatches on the embedded version so old PDFs
+    keep verifying without manual operator intervention.
     """
     transactions_hwm: int
     transactions_sha: str
@@ -107,6 +125,10 @@ class ProvenanceFingerprint:
     balances_sha: str
     l2_yaml_sha: str
     code_identity: str
+    # CW.3 — defaults to the current emission version. Pre-CW PDFs
+    # embedded no such field; ``from_dict`` substitutes
+    # PROVENANCE_FORMAT_VERSION_LEGACY when the key is missing.
+    provenance_format_version: int = _CURRENT_PROVENANCE_FORMAT_VERSION
 
     @property
     def composite_sha(self) -> str:
@@ -133,6 +155,7 @@ class ProvenanceFingerprint:
             "balances_sha": self.balances_sha,
             "l2_yaml_sha": self.l2_yaml_sha,
             "code_identity": self.code_identity,
+            "provenance_format_version": self.provenance_format_version,
         }
 
     @classmethod
@@ -141,6 +164,15 @@ class ProvenanceFingerprint:
             raise ValueError(
                 f"Unrecognized provenance schema: {d.get('schema')!r}"
             )
+        # Pre-CW PDFs have no provenance_format_version key — treat
+        # them as legacy (v1). CW emissions ship the field explicitly.
+        # Distinct from the outer `schema` field (which describes the
+        # JSON-blob layout); the layout is unchanged in CW, only the
+        # algorithm that produced the per-field SHA values is new.
+        format_version = int(
+            d.get("provenance_format_version",
+                  PROVENANCE_FORMAT_VERSION_LEGACY)
+        )
         return cls(
             transactions_hwm=int(d["transactions_hwm"]),
             transactions_sha=str(d["transactions_sha"]),
@@ -148,6 +180,7 @@ class ProvenanceFingerprint:
             balances_sha=str(d["balances_sha"]),
             l2_yaml_sha=str(d["l2_yaml_sha"]),
             code_identity=str(d["code_identity"]),
+            provenance_format_version=format_version,
         )
 
 

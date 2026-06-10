@@ -147,6 +147,51 @@ def test_provenance_fingerprint_rejects_unknown_schema():
         ProvenanceFingerprint.from_dict({"schema": "qsg-audit-provenance-v999"})
 
 
+def test_provenance_fingerprint_defaults_format_version_to_legacy():
+    """CW.3 — Pre-CW PDFs have no `provenance_format_version` field.
+
+    `from_dict` must default missing-field → 1 (legacy). CW emissions
+    explicitly carry 2 (streamed SQL fingerprint from CW.2). Lock 4
+    in ``docs/audits/cw_0_audit_pdf_perf_locks.md``.
+    """
+    from recon_gen.cli.audit import ProvenanceFingerprint
+    # Legacy shape — no provenance_format_version key.
+    legacy_blob = {
+        "schema": "qsg-audit-provenance-v1",
+        "composite_sha": "x" * 64,
+        "transactions_hwm": 100,
+        "transactions_sha": "a" * 64,
+        "balances_hwm": 50,
+        "balances_sha": "b" * 64,
+        "l2_yaml_sha": "c" * 64,
+        "code_identity": "v8.0.0",
+    }
+    legacy = ProvenanceFingerprint.from_dict(legacy_blob)
+    assert legacy.provenance_format_version == 1, (
+        "Legacy PDFs (no field) must hydrate as version=1 for "
+        "audit verify dispatch to land on the legacy code path."
+    )
+    # New CW emissions carry the field explicitly.
+    cw_blob = {**legacy_blob, "provenance_format_version": 2}
+    cw = ProvenanceFingerprint.from_dict(cw_blob)
+    assert cw.provenance_format_version == 2
+
+
+def test_provenance_fingerprint_default_constructor_emits_cw_version():
+    """A fresh ProvenanceFingerprint() carries the current CW version,
+    so audit-apply emissions stamp v2 without explicit operator wiring."""
+    from recon_gen.cli.audit import ProvenanceFingerprint
+    fp = ProvenanceFingerprint(
+        transactions_hwm=1, transactions_sha="a" * 64,
+        balances_hwm=2, balances_sha="b" * 64,
+        l2_yaml_sha="c" * 64, code_identity="v0",
+    )
+    assert fp.provenance_format_version == 2
+    # to_dict serializes the field.
+    payload = fp.to_dict()
+    assert payload["provenance_format_version"] == 2
+
+
 _SIGNING_FIXTURE_KEY = (
     Path(__file__).parent / "fixtures" / "test-signing-key.pem"
 )

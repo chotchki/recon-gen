@@ -2065,16 +2065,30 @@ def _appendix_story(
         l2_sha = provenance.l2_yaml_sha
         code_id = provenance.code_identity
         composite = provenance.composite_sha
+        fmt_version = str(provenance.provenance_format_version)
     else:
         tx_hwm = bal_hwm = tx_sha = bal_sha = l2_sha = placeholder
         code_id = f"v{version}"
         composite = placeholder
+        fmt_version = "—"
 
     sources_rows = [
         [
             Paragraph("Source", header_style),
             Paragraph("Identifier", header_style),
             Paragraph("SHA256", header_style),
+        ],
+        # CW.3 — surfaced provenance_format_version as the first
+        # source-row so a verifier sees immediately which canonicaliz-
+        # ation algorithm produced the per-field SHA values (v1 =
+        # legacy Python ladder; v2 = streamed per-dialect SQL).
+        [
+            Paragraph("Provenance format version", cell_style),
+            Paragraph(fmt_version, code_style),
+            Paragraph(
+                "(v1=legacy Python ladder; v2=streamed per-dialect SQL)",
+                cell_style,
+            ),
         ],
         [
             Paragraph("Transactions table", cell_style),

@@ -781,10 +781,12 @@ def _render_appendix_markdown(
         l2_sha = provenance.l2_yaml_sha
         code_id = provenance.code_identity
         composite = provenance.composite_sha
+        fmt_version = str(provenance.provenance_format_version)
     else:
         tx_hwm = bal_hwm = tx_sha = bal_sha = l2_sha = placeholder
         code_id = f"v{version}"
         composite = placeholder
+        fmt_version = "—"
 
     return (
         "\n"
@@ -794,6 +796,11 @@ def _render_appendix_markdown(
         "\n"
         "_Everything an independent verifier needs to reproduce this "
         "report's bindings without recon-gen installed._\n"
+        "\n"
+        f"**Provenance format version:** `{fmt_version}`  \n"
+        "_(v1 = legacy Python canonical_value ladder; v2 = streamed "
+        "per-dialect SQL SHA-256 + Python fold, per CW.2 + "
+        "`docs/audits/cw_0_audit_pdf_perf_locks.md`.)_\n"
         "\n"
         "### Reproduce With recon-gen\n"
         "\n"
