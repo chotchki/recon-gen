@@ -22,7 +22,7 @@ it vanishes. The fix: each `AnomalyGenerator` instance emits a
 business days preceding `anchor_day`, at `historical_window_amount_cents`
 each. The matview's per-pair `STDDEV_SAMP` then has N historical
 observations to anchor against; the spike on anchor_day fires at a
-meaningful z-score (e.g. for default N=10 historical @ $250 + spike
+meaningful z-score (e.g. for default N=20 historical @ $250 + spike
 $100K, z >> 4 trivially because the spike is ~400× the per-pair mean).
 
 The 100 unrelated background pairs still exist — they exercise the
@@ -35,7 +35,7 @@ under per-pair (their "spike" IS their normal traffic).
 
 The min-n floor is enforced in the matview (CV.2): pairs with
 < _INV_MIN_HISTORICAL_WINDOWS observations get z=0 regardless. Default
-floor is 3; AnomalyGenerator's default N=10 sits comfortably above it.
+floor is 3; AnomalyGenerator's default N=20 sits comfortably above it.
 
 AT.3 refactored `emit()` onto the `Transfer` / `LedgerSimulation`
 primitive — every leg pair goes through the same `_emit_transfer` path
@@ -83,33 +83,37 @@ from recon_gen.common.spine.violation import RuleViolation, Violation
 # `_DEFAULT_SPIKE_MAGNITUDE = 100_000.0` is the spike amount on
 # anchor_day for the (sender_role, recipient_role) pair. Under per-pair
 # z this is z-scored against the spike pair's OWN historical baseline
-# (default $250 × N=10 windows), so 100K → z ≈ 400 against a baseline
+# (default $250 × N=20 windows), so 100K → z ≈ 400 against a baseline
 # stddev of ~0 — clearly fires '4+ sigma'. The magnitude no longer
 # fights a global population mean it pollutes.
 #
-# `_DEFAULT_HISTORICAL_WINDOW_COUNT = 10` is the number of small-amount
+# `_DEFAULT_HISTORICAL_WINDOW_COUNT = 20` is the number of small-amount
 # historical windows the generator emits on the spike pair BEFORE
-# anchor_day. Per-pair `STDDEV_SAMP` needs n≥2 to compute at all; n=10
-# gives a stable estimate AND sits 3× above the matview's
-# `_INV_MIN_HISTORICAL_WINDOWS=3` floor (safety margin).
+# anchor_day. The matview's per-pair PARTITION BY z (CV.2) includes
+# the current row in its own divisor (inclusive frame); for a single
+# outlier among N+1 values, z caps at N/sqrt(N+1). For N=20 the
+# ceiling is ≈ 4.36 — clears the 4σ band with margin. For N=10 the
+# ceiling would be ≈ 3.02 — below 4σ. Sits 6× above the matview's
+# `_INV_MIN_HISTORICAL_WINDOWS=3` floor.
 #
 # `_DEFAULT_HISTORICAL_WINDOW_AMOUNT = 250.0` (~$250) is the CENTER per-
 # window baseline amount on the spike pair. Picked small so the spike
-# stands out at a high z; the 1/400 ratio of magnitude vs baseline
-# means z ≈ (100K − 250) / pair_stddev under per-pair PARTITION BY.
+# stands out at a high z; under per-pair PARTITION BY z with the
+# inclusive (current-row-included) frame, the spike z asymptotes at
+# `N / sqrt(N+1)` regardless of magnitude — what matters is that
+# magnitude >> baseline so the asymptote is reached. With center=$250
+# and spike=$100K the magnitude ratio is ~400×, well into the
+# asymptotic regime.
 #
 # CV.1 deterministic variance: historical windows are emitted with
 # amounts `center ± k * VARIANCE_STEP` walking the window index — see
-# `_historical_amount_for_index` below. This guarantees a non-zero
-# per-pair `STDDEV_SAMP` so the matview's "pair_stddev = 0 ⇒ z=0" guard
-# (CV.2) doesn't collapse the spike. With center=$250 and
-# VARIANCE_STEP=$25 (10% of center), the historical windows span
-# $250 ± up to $112.50 → stddev ≈ $80 → spike z ≈ (100K − 250) / 80
-# ≈ 1250 σ. Vastly above 4σ.
+# `_historical_amount_for_index` below. This keeps `pair_n` from
+# falling below the matview's min-n floor by sitting above 0; the
+# absolute stddev value matters less than the magnitude ratio.
 _DEFAULT_BASELINE_PAIR_COUNT = 100
 _DEFAULT_BASELINE_AMOUNT = 100.0
 _DEFAULT_SPIKE_MAGNITUDE = 100_000.0
-_DEFAULT_HISTORICAL_WINDOW_COUNT = 10
+_DEFAULT_HISTORICAL_WINDOW_COUNT = 20
 _DEFAULT_HISTORICAL_WINDOW_AMOUNT = 250.0
 
 # 10% of default historical-window amount; the variance step the
@@ -197,7 +201,7 @@ class AnomalyInvariant:
             historical_window_count: Number of pair-windows the spike
                 pair gets BEFORE `anchor_day` (one per business day,
                 walking backwards). Default 10. Per-pair `STDDEV_SAMP`
-                needs n≥2; the matview's min-n floor (CV.2) is 3; n=10
+                needs n≥2; the matview's min-n floor (CV.2) is 3; n=20
                 sits 3× above the floor (safety margin) and gives a
                 stable estimate.
             historical_window_amount: Amount per historical window on
@@ -228,7 +232,7 @@ class AnomalyInvariant:
                 f"AnomalyGenerator: historical_window_count must be ≥ 2 "
                 f"(per-pair STDDEV_SAMP requires n ≥ 2 samples); got "
                 f"{historical_window_count}. The matview's min-n floor "
-                f"is 3 — recommended N=10 for a safe stable estimate."
+                f"is 3 — recommended N=20 for a safe stable estimate."
             )
         inst = instance if instance is not None else load_spec_example()
         sender = find_internal_with_role(
@@ -258,6 +262,10 @@ class AnomalyInvariant:
             baseline_amount=baseline_amount,
             historical_window_count=historical_window_count,
             historical_window_amount=historical_window_amount,
+            # CV.4: thread invariant's prefix through so callers that
+            # construct AnomalyInvariant(prefix=...) get the generator
+            # writing to the same prefix's `_transactions` table.
+            prefix=self.prefix,
         )
 
 
@@ -282,7 +290,7 @@ class AnomalyGenerator:
        is NULL and the spike collapses to z=0.
     3. **The spike** at `spike_magnitude` on `anchor_day`. Z-scored
        against strata-2's history; for default 100K spike vs 250 ×
-       N=10 baseline, z ≈ (100_000 − 250) / pair_stddev. The matview's
+       N=20 baseline, z ≈ (100_000 − 250) / pair_stddev. The matview's
        `pair_stddev = 0 ⇒ z=0` guard fires only if the historical
        windows have IDENTICAL amounts (stddev = 0); the CV.4 regression
        test owns empirical verification.
@@ -415,7 +423,7 @@ class AnomalyGenerator:
         ``[-step, +step]`` so the mean across all windows is exactly
         the center amount and the stddev is non-degenerate.
 
-        With center=$250, N=10, fraction=0.10:
+        With center=$250, N=20, fraction=0.10:
             step = $25, amounts range ~ $222 .. $278, stddev ≈ $17.
             Spike at $100K → z ≈ (100_000 - 250) / 17 ≈ 5870 σ.
         Far above any practical 4σ threshold.

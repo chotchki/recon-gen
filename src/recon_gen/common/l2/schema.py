@@ -1374,23 +1374,22 @@ def _emit_inv_views(
     )
     # CV.2 — per-pair PARTITION BY z + min-n floor.
     #
-    # `pair_partition` is the bare OVER (...) shape for partition-only
-    # aggregates (COUNT of pair history). `pair_history_window` adds an
-    # ORDER BY + ROWS UNBOUNDED PRECEDING AND 1 PRECEDING frame so the
-    # AVG / STDDEV_SAMP are computed over the pair's PRIOR rows only —
-    # the spike row never pollutes its own divisor. This is the
-    # standard "z-score vs running history" formulation and dodges the
-    # AT.0 outlier-shifts-mean trap that bit the global-z shape.
+    # `pair_partition` is the bare OVER (...) shape every per-pair
+    # aggregate inlines (same reason `rolling_window` does — Oracle
+    # 19c has no named WINDOW clause). The frame is unbounded —
+    # every window in the pair is in every other window's divisor.
+    # Including the current row in its own mean+stddev is deliberate:
+    # recurring high-traffic days (payday clusters) inflate their own
+    # divisor, so they sit AT the pair's mean rather than as a fresh
+    # outlier each time. This kills the BU.1.11 false-positive class.
     #
-    # Same reason `rolling_window` inlines: Oracle 19c has no named
-    # WINDOW clause.
+    # The mathematical consequence: a SINGLE outlier among N+1 values
+    # caps at z ≤ N/sqrt(N+1) — the AT.0 outlier-shifts-mean ceiling
+    # AnomalyGenerator's default N=20 historical windows + 1 spike
+    # produces z ≤ 20/sqrt(21) ≈ 4.36, comfortably above 4σ but not
+    # so high that natural cluster patterns ALSO clear it.
     pair_partition = (
         "PARTITION BY recipient_account_id, sender_account_id"
-    )
-    pair_history_window = (
-        f"{pair_partition} "
-        f"ORDER BY {order_by_day_expr('posted_day', dialect)} "
-        f"ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING"
     )
     return _INV_MATVIEWS_TEMPLATE.format(
         p=p,
@@ -1399,14 +1398,13 @@ def _emit_inv_views(
         recipient_posting_to_date=to_date("recipient.posting", dialect),
         rolling_window=rolling_window,
         pair_partition=pair_partition,
-        pair_history_window=pair_history_window,
         cast_pair_mean_numeric=cast(
-            f"AVG(window_sum) OVER ({pair_history_window})",
+            f"AVG(window_sum) OVER ({pair_partition})",
             "NUMERIC", dialect,
         ),
         cast_pair_stddev_numeric=cast(
             f"COALESCE(STDDEV_SAMP(window_sum) "
-            f"OVER ({pair_history_window}), 0)",
+            f"OVER ({pair_partition}), 0)",
             "NUMERIC", dialect,
         ),
         min_n_floor=str(_INV_MIN_HISTORICAL_WINDOWS),
@@ -3703,10 +3701,12 @@ pair_stats AS (
         transfer_count,
         {cast_pair_mean_numeric}      AS pair_mean,
         {cast_pair_stddev_numeric}    AS pair_stddev,
-        -- pair_n counts the same FRAME as mean / stddev so the
-        -- min-n floor compares apples to apples: "how many PRIOR
-        -- windows does this row have to z-score against?"
-        COUNT(*) OVER ({pair_history_window}) AS pair_n
+        -- pair_n counts ALL windows for the pair (matches the AVG /
+        -- STDDEV_SAMP partition). The min-n floor (CV.2 default 3)
+        -- collapses z to 0 when the pair has fewer than this many
+        -- total windows — covers both "one-shot pair" (no signal)
+        -- and "shallow pair history" (estimate unreliable) cases.
+        COUNT(*) OVER ({pair_partition}) AS pair_n
     FROM pair_windows
 )
 SELECT
