@@ -33,6 +33,10 @@ from click.testing import CliRunner
 from recon_gen.cli.docs import docs
 from recon_gen.common.handbook.coverage_matrix import render_coverage_matrix
 from recon_gen.common.handbook.trainer_cards import render_trainer_cards
+from recon_gen.common.handbook.violations import (
+    _slug_for,
+    render_violations_handbook,
+)
 from recon_gen.common.html._studio_training_v2 import resolve_section
 from recon_gen.common.l2.plant_registry import PLANT_REGISTRY
 
@@ -48,6 +52,12 @@ _TRAINER_REFERENCE = (
     / "data"
     / "_handbook_artifacts"
     / "trainer_cards.md"
+)
+_VIOLATIONS_REFERENCE = (
+    Path(__file__).resolve().parents[1]
+    / "data"
+    / "_handbook_artifacts"
+    / "violations.md"
 )
 
 
@@ -224,3 +234,94 @@ def test_trainer_cards_every_kind_has_what_to_do() -> None:
             f"{entry.section_kind or entry.kind!r} is missing the "
             f"``Action.`` / remediation line the parser extracts"
         )
+
+
+# -- Violations handbook surface (BV.7 Surface 2) -------------------------
+
+
+def test_violations_handbook_byte_identity() -> None:
+    """Lock 9 #5 — committed artifact == fresh generator output.
+
+    Drift here = a PLANT_REGISTRY edit OR a typed-section catalogue
+    edit (title / short_statement / what_to_do prose touched) landed
+    without a refresh of the reference artifact. Run:
+
+        .venv/bin/recon-gen docs export --surface=violations \\
+            --output tests/data/_handbook_artifacts/violations.md
+
+    then re-commit the artifact.
+    """
+    expected = _VIOLATIONS_REFERENCE.read_text(encoding="utf-8")
+    actual = render_violations_handbook()
+    assert actual == expected, (
+        "violations.md drift — registry or section prose changed but "
+        "the reference artifact wasn't refreshed. Run:\n"
+        "  .venv/bin/recon-gen docs export --surface=violations "
+        "--output tests/data/_handbook_artifacts/violations.md\n"
+        "then re-commit the artifact."
+    )
+
+
+def test_violations_handbook_one_section_per_registry_entry() -> None:
+    """Sanity belt — one ``## {title} {#slug}`` block per
+    PLANT_REGISTRY entry.
+
+    Counts ``## `` headers that carry an ``{#...}`` anchor attr — the
+    Contents H2 doesn't, so it doesn't inflate the count. Catches a
+    bug where the generator silently filters / dedupes / re-orders.
+    """
+    output = render_violations_handbook()
+    section_headers = [
+        line for line in output.splitlines()
+        if line.startswith("## ") and "{#" in line
+    ]
+    assert len(section_headers) == len(PLANT_REGISTRY), (
+        f"expected {len(PLANT_REGISTRY)} ``## {{title}} {{#slug}}`` "
+        f"blocks (one per registry entry); got {len(section_headers)}"
+    )
+
+
+def test_violations_handbook_every_anchor_reachable() -> None:
+    """Every TOC bullet must resolve to a section anchor declared in
+    the same document.
+
+    Reads the TOC bullets' ``(#slug)`` fragments and the section
+    headers' ``{#slug}`` attrs, then asserts the two sets agree. A
+    drift here = a slug derivation bug (TOC and section headers fell
+    out of sync) — same shape the BTa.1 side-panel would hit at
+    runtime as a dead deep-link.
+    """
+    import re
+
+    output = render_violations_handbook()
+    toc_slugs = set(re.findall(r"\]\(#([\w-]+)\)", output))
+    anchor_slugs = set(re.findall(r"\{#([\w-]+)\}", output))
+    assert toc_slugs == anchor_slugs, (
+        f"TOC slugs vs section anchors diverge — "
+        f"TOC only: {sorted(toc_slugs - anchor_slugs)!r}; "
+        f"anchors only: {sorted(anchor_slugs - toc_slugs)!r}"
+    )
+    expected_slugs = {_slug_for(entry) for entry in PLANT_REGISTRY}
+    assert anchor_slugs == expected_slugs, (
+        f"section anchors don't match the slug-derivation rule — "
+        f"missing: {sorted(expected_slugs - anchor_slugs)!r}; "
+        f"extra: {sorted(anchor_slugs - expected_slugs)!r}"
+    )
+
+
+def test_cli_surface_violations_to_stdout() -> None:
+    """``recon-gen docs export --surface=violations`` (no --output)
+    emits the handbook to stdout byte-identical to
+    render_violations_handbook(). Guards the CLI wiring — a Click
+    option rename or stdout-vs-file branch bug surfaces here, not in
+    a downstream docs-freshness gate.
+    """
+    runner = CliRunner()
+    result = runner.invoke(docs, ["export", "--surface=violations"])
+    assert result.exit_code == 0, (
+        f"CLI exit {result.exit_code} (output: {result.output!r})"
+    )
+    assert result.output == render_violations_handbook(), (
+        "CLI stdout output diverges from render_violations_handbook() "
+        "— the docs.py wiring corrupted the bytes."
+    )

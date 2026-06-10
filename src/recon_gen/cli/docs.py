@@ -497,7 +497,7 @@ def docs_test(pytest_args: str) -> None:
 )
 @click.option(
     "--surface",
-    type=click.Choice(["tree", "matrix", "trainer-cards"]),
+    type=click.Choice(["tree", "matrix", "trainer-cards", "violations"]),
     default="tree",
     show_default=True,
     help=(
@@ -509,7 +509,10 @@ def docs_test(pytest_args: str) -> None:
         "``trainer-cards`` emits one ``##`` block per registry kind "
         "carrying the canonical ``short_statement`` + ``what_to_do`` "
         "strings (resolve_section dispatch) — BV.7 byte-identity "
-        "verifier for the Trainer's ``/training/`` v3 cards."
+        "verifier for the Trainer's ``/training/`` v3 cards. "
+        "``violations`` emits a single-bundle Markdown handbook with "
+        "deep-linkable slug anchors per kind — BV.7 Surface 2, "
+        "consumed by the BTa.1 / BX.12 side-panel system."
     ),
 )
 def docs_export(
@@ -537,6 +540,14 @@ def docs_export(
     the Trainer's ``/training/`` v3 cards render. Default to stdout;
     ``--output PATH`` writes to a file. Reference artifact at
     ``tests/data/_handbook_artifacts/trainer_cards.md``.
+
+    ``--surface=violations`` (BV.7 Surface 2): walk ``PLANT_REGISTRY``
+    through ``resolve_section`` and emit a single-bundle Markdown
+    handbook — one ``## {title} {#slug}`` block per kind with
+    deep-linkable anchors derived from the canonical machine ``kind``
+    (lowercased, underscores → hyphens). Default to stdout; ``--output
+    PATH`` writes to a file. Reference artifact at
+    ``tests/data/_handbook_artifacts/violations.md``.
     """
     if surface == "matrix":
         from recon_gen.common.handbook.coverage_matrix import (
@@ -583,6 +594,30 @@ def docs_export(
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(markdown, encoding="utf-8")
         click.echo(f"Wrote trainer cards to {out_path}")
+        return
+
+    if surface == "violations":
+        from recon_gen.common.handbook.violations import (
+            render_violations_handbook,
+        )
+
+        if l2_instance_path is not None:
+            raise click.UsageError(
+                "--l2 has no effect with --surface=violations; the "
+                "handbook is L2-independent (it walks the global "
+                "PLANT_REGISTRY through resolve_section)."
+            )
+
+        markdown = render_violations_handbook()
+        if output is None:
+            # render_violations_handbook() already ends in "\n", so
+            # suppress click's extra newline.
+            click.echo(markdown, nl=False)
+            return
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(markdown, encoding="utf-8")
+        click.echo(f"Wrote violations handbook to {out_path}")
         return
 
     if output is None:
