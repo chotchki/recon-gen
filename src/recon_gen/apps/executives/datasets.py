@@ -508,7 +508,20 @@ def build_program_health_dataset(cfg: Config) -> DataSet:
     magnitude filter that excludes zero-magnitude rows (account
     branches use ``magnitude_amount``, transfer-keyed branches use
     ``magnitude_count`` — never both; the OR-IS-NOT-NULL shape
-    handles both).
+    handles both). BV.3.3.c.bug5 (2026-06-10) extended the guard
+    with a ``transfer_id IS NOT NULL`` OR clause so transfer-keyed
+    ``*_missed`` variants (``xor_group_missed`` /
+    ``multi_xor_missed`` / ``fan_in_missing_parent``) count toward
+    the Program Health KPI — for those branches
+    ``magnitude_count = 0`` IS the violation signal (firing_count=0
+    means zero XOR siblings fired when one should have); the source
+    matview's own predicate already gates on the cardinality anomaly
+    so trusting ``transfer_id IS NOT NULL`` is sound. Without this
+    extension the Exec KPI quietly under-counts open exceptions vs
+    the L1 Exceptions sheet, which would re-introduce the C9-class
+    cross-app discrepancy. Keeps the original C7 cold-read intent
+    (money-keyed degenerate row with both magnitudes zero/NULL stays
+    suppressed) intact.
 
     L2FT hygiene checks and Investigation σ-anomalies are
     NOT-YET-INCLUDED in v0; the per-pillar counts are not cleanly
@@ -527,7 +540,8 @@ SELECT
     COUNT(*) AS total_open_count
 FROM {p}_l1_exceptions
 WHERE {date_clause}
-  AND ((magnitude_amount IS NOT NULL AND magnitude_amount > 0)
+  AND (transfer_id IS NOT NULL
+    OR (magnitude_amount IS NOT NULL AND magnitude_amount > 0)
     OR (magnitude_count IS NOT NULL AND magnitude_count > 0))"""
     return build_dataset(
         cfg,

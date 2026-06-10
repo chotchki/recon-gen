@@ -1034,10 +1034,25 @@ def build_l1_exceptions_dataset(
     # C7 (cold-read v11.26.1) — suppress degenerate rows where neither
     # magnitude_amount nor magnitude_count carries a real value. The
     # matview emits one row per detected violation, but on some seeds
-    # branches surface rows with magnitude_amount = 0 AND magnitude_count
-    # = 0 (or NULL on both). Those rows pad the headline count without
-    # naming an actionable violation. Keep rows where at least one
-    # magnitude column is non-NULL AND > 0.
+    # money-keyed branches surface rows with magnitude_amount = 0 AND
+    # magnitude_count = 0 (or NULL on both). Those rows pad the
+    # headline count without naming an actionable violation. Keep rows
+    # where at least one magnitude column is non-NULL AND > 0.
+    #
+    # BV.3.3.c bug5 (2026-06-10) — the guard is RELAXED for
+    # transfer-keyed branches (xor_group_violation / multi_xor_violation
+    # / fan_in_disagreement / chain_parent_disagreement /
+    # stuck_pending / stuck_unbundled). Their *_missed variants emit
+    # magnitude_count = 0 BY DESIGN — firing_count = 0 / child_count =
+    # 0 / parent_count = 0 IS the violation signal ("zero XOR siblings
+    # fired when one should have"). The matview's own SELECT predicate
+    # already gates these branches on the firing-set anomaly (the
+    # source matview only surfaces rows where the cardinality check
+    # tripped), so trusting `transfer_id IS NOT NULL` here is sound —
+    # no degenerate transfer-keyed rows reach this layer to begin with.
+    # The discriminator is `transfer_id IS NOT NULL`: every money-keyed
+    # branch projects {null_text} into the transfer_id slot; every
+    # transfer-keyed branch projects an actual transfer_id literal.
     sql = (
         f"SELECT check_type, account_id, account_name, account_role,"
         f" account_parent_role, business_day, rail_name, transfer_id,"
@@ -1050,7 +1065,8 @@ def build_l1_exceptions_dataset(
         f" OR rail_name IS NULL)\n"
         f"  AND {_l1_date_range_clause('business_day', cfg)}\n"
         f"  AND ("
-        f"     (magnitude_amount IS NOT NULL AND magnitude_amount > 0)"
+        f"     transfer_id IS NOT NULL"
+        f"  OR (magnitude_amount IS NOT NULL AND magnitude_amount > 0)"
         f"  OR (magnitude_count IS NOT NULL AND magnitude_count > 0)"
         f")"
     )

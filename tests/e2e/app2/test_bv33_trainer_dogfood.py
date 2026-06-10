@@ -355,29 +355,26 @@ def _browser_walkable_kinds() -> list[PlantKindEntry]:
     return out
 
 
-# BV.3.3.c.bug4-followup — MOSTLY RESOLVED 2026-06-10. The 8 known-fail
-# kinds flipped to 6 green + 2 remaining once the server-side page_size
-# + sort_by URL bake landed in render.py + server.py (commit ffe39e09).
-# With ``?page_size=10000`` on the page URL now threading through the
-# hidden filter-form input → htmx data-fetch URL, NULL-magnitude
-# chain-coherence rows surface regardless of where they sort.
-#
-# Two kinds remain skipped — separate root cause (NOT the URL plumbing).
-# Tracked at BV.3.3.c.bug5-l1exc-missed-zero-magnitude-filter:
-# the L1 Exceptions dataset SQL carries a C7 cold-read guard
-# (``(magnitude_amount > 0) OR (magnitude_count > 0)``) that suppresses
-# "degenerate" rows where both magnitudes are NULL/0. But the *_missed
-# variants of xor_group_violation + multi_xor_violation emit
-# magnitude_count = 0 BY DESIGN — firing_count=0 / child_count=0 IS
-# the violation signal ("0 of the XOR siblings fired"). The C7 filter
-# wrongly drops them. Fix is at the dataset SQL layer (relax the guard
-# for transfer-keyed branches so count-keyed violations with count=0
-# survive), not the test. Re-enable once the L1 Exceptions SQL is
-# updated.
-_BUG4_FOLLOWUP_KNOWN_FAIL_KINDS: frozenset[str] = frozenset({
-    "xor_group_missed",
-    "multi_xor_missed",
-})
+# BV.3.3.c.bug4-followup — RESOLVED 2026-06-10. The 8 known-fail kinds
+# flipped to all green in two passes:
+#   * 6 kinds unblocked when the server-side page_size + sort_by URL
+#     bake landed in render.py + server.py (commit ffe39e09). With
+#     ``?page_size=10000`` on the page URL threading through the
+#     hidden filter-form input → htmx data-fetch URL, NULL-magnitude
+#     chain-coherence rows surface regardless of where they sort.
+#   * 2 remaining kinds (``xor_group_missed`` + ``multi_xor_missed``)
+#     unblocked when the L1 Exceptions dataset SQL's C7 cold-read
+#     guard was relaxed for transfer-keyed branches
+#     (BV.3.3.c.bug5-l1exc-missed-zero-magnitude-filter). The *_missed
+#     variants emit ``magnitude_count = 0`` BY DESIGN — firing_count=0
+#     IS the violation signal. The pre-bug5 guard
+#     ``(magnitude_amount > 0) OR (magnitude_count > 0)`` dropped them;
+#     the post-bug5 guard adds ``transfer_id IS NOT NULL`` as an OR
+#     clause so transfer-keyed rows trust the source matview's own
+#     firing-set predicate. See
+#     ``apps/l1_dashboard/datasets.py::build_l1_exceptions_dataset``
+#     for the guard shape + commentary.
+_BUG4_FOLLOWUP_KNOWN_FAIL_KINDS: frozenset[str] = frozenset()
 
 
 def _column_names(cur: Any, table: str) -> list[str]:  # noqa: ANN401  — DB-API cursor has no shared Protocol across drivers
@@ -681,10 +678,11 @@ def _walkable_params() -> list[Any]:  # noqa: ANN401  — ParameterSet has no pu
     ``_BUG4_FOLLOWUP_KNOWN_FAIL_KINDS`` and they re-enter the
     parametrize set.
 
-    Post-2026-06-10 the remaining 2 entries are the *_missed XOR
-    variants whose magnitude_count=0 gets dropped by the C7
-    "degenerate row" guard in the L1 Exceptions dataset SQL — see the
-    docstring on ``_BUG4_FOLLOWUP_KNOWN_FAIL_KINDS`` above.
+    Post-2026-06-10 the set is empty — both the bug4-followup
+    URL-plumbing fix (commit ffe39e09) and the bug5 C7-guard relaxation
+    for transfer-keyed branches have landed, so all browser-walkable
+    kinds run unskipped. See ``_BUG4_FOLLOWUP_KNOWN_FAIL_KINDS`` above
+    for the resolution history.
     """
     params: list[Any] = []  # noqa: ANN401
     for entry in _browser_walkable_kinds():
