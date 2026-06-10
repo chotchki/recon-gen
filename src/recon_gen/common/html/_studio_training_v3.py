@@ -63,6 +63,8 @@ def render_training_v3_landing(
     apply_running: bool = False,
     apply_pending_count: int = 0,
     standalone_mode: bool = False,
+    demo_banner_html: str = "",
+    standalone_banner_html: str = "",
 ) -> str:
     """The /training/ landing.
 
@@ -128,22 +130,15 @@ def render_training_v3_landing(
         ))
 
     banner_html = ""
-    # CZ.5 — standalone-mode persistent banner. Renders ABOVE every
-    # transient ribbon so the operator sees the protection signal even
-    # when a Session-Start / Apply banner is stacked on top.
-    if standalone_mode:
-        from recon_gen.common.html._studio_routes import (  # noqa: PLC0415
-            STANDALONE_MODE_BANNER_TEXT,
-        )
-        banner_html += (
-            '<div class="bg-info/10 border border-info rounded-md '
-            'px-3 py-2 mb-3 text-sm" data-test-standalone-mode-banner '
-            'role="status" '
-            'style="background:#dbeafe;border:1px solid #93c5fd;'
-            'color:#1e3a8a">'
-            f'<strong>ⓘ</strong> {escape(STANDALONE_MODE_BANNER_TEXT)}'
-            "</div>"
-        )
+    # CZ.5.fix2 (2026-06-09) — standalone-mode banner now flows in
+    # at the chrome level (above the top-nav-following position) via
+    # `standalone_banner_html` kwarg, matching every other Studio page's
+    # convention (see lines 620/914/1031 in _studio_routes.py — same
+    # `{demo_banner}{standalone_banner}` pattern). The prior v3-inline
+    # rounded-box variant looked alien against the rest of Studio per
+    # operator cold-read; replaced with the shared `_standalone_mode_banner`
+    # output the route handler now plumbs through. Transient ribbons
+    # (session_status / l2_stale / last_apply) still stack inline below.
     # CF.1 — Session-Start success ribbon (transient, ?status= driven).
     # The Apply path no longer feeds session_status; only the
     # Session-Start 303-redirect does.
@@ -336,6 +331,7 @@ def render_training_v3_landing(
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
+  {demo_banner_html}{standalone_banner_html}
   <header class="px-8 py-4 border-b border-surface-border bg-white">
     <h1 class="text-xl font-semibold m-0">Training</h1>
     <p class="text-sm text-secondary-fg max-w-3xl m-0 mt-1">

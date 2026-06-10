@@ -171,19 +171,41 @@ def test_trainer_reset_button_label_default_mode() -> None:
 
 def test_training_v3_landing_renders_standalone_banner() -> None:
     """The Trainer landing page surfaces the standalone-mode banner so
-    the protection signal is visible the moment the operator lands."""
+    the protection signal is visible the moment the operator lands.
+
+    CZ.5.fix2 (2026-06-09) — the banner now flows through the
+    ``standalone_banner_html`` kwarg at chrome level (matches every
+    other Studio page's ``{demo_banner}{standalone_banner}`` pattern),
+    not the v3-inline rounded-box style the operator cold-read flagged
+    as stylistically off. The route handler builds it via the shared
+    ``_standalone_mode_banner`` helper and passes it through.
+    """
     from html import escape
+
+    standalone_banner_html = _standalone_mode_banner(
+        make_test_config(etl_hook=None),
+    )
 
     html = render_training_v3_landing(
         base_prefix="spec_example",
         v_overlay_exists=False,
         standalone_mode=True,
+        standalone_banner_html=standalone_banner_html,
     )
 
     assert "data-test-standalone-mode-banner" in html
     # Apostrophes inside the locked copy ship escaped — pin against
     # the escaped form to assert the literal text reached the page.
     assert escape(STANDALONE_MODE_BANNER_TEXT) in html
+    # CZ.5.fix2 — assert chrome-level position: banner renders BEFORE
+    # the page's "Training" h1 (sits right after top_nav_html, not
+    # inline below the page header).
+    banner_idx = html.index("data-test-standalone-mode-banner")
+    heading_idx = html.index(">Training</h1>")
+    assert banner_idx < heading_idx, (
+        "Standalone-mode banner must render BEFORE the page heading "
+        "(chrome-level, not inline below)"
+    )
 
 
 def test_training_v3_landing_omits_standalone_banner_when_hook_configured() -> None:
