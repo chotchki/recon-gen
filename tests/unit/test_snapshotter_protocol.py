@@ -137,12 +137,12 @@ class TestMakeSnapshotter:
 
     @pytest.mark.parametrize(
         "dialect",
-        # BV.3.3 (this cell) — DuckDB arm now returns a real impl, so it
-        # leaves the stub-dispatch list. PG / Oracle still stub until
-        # their phase-2 cells land.
-        [Dialect.POSTGRES, Dialect.ORACLE],
+        # BV.3.3 (Oracle cell) — Oracle arm now returns a real impl, so
+        # the stub-dispatch parametrize narrows to PG only. PG flips off
+        # the stub list once its phase-2 cell lands.
+        [Dialect.POSTGRES],
     )
-    def test_pg_oracle_arms_still_return_stub(
+    def test_pg_arm_still_returns_stub(
         self, dialect: Dialect,
     ) -> None:
         cfg = make_test_config(dialect=dialect)
@@ -155,6 +155,30 @@ class TestMakeSnapshotter:
             ),
         )
         assert isinstance(snap, NotImplementedSnapshotter)
+
+    def test_oracle_arm_returns_real_impl(self) -> None:
+        """BV.3.3 — Oracle arm dispatches to
+        ``OracleGoldenMirrorSnapshotter``.
+
+        The factory holds the pool ref but never invokes ``acquire()``
+        during construction (the impl's ``__init__`` only computes the
+        v-prefix), so a ``_DummyPool`` is sufficient for the dispatch
+        contract. The Oracle round-trip contract is covered by
+        ``test_snapshotter_oracle.py`` against the shared Oracle
+        container fixture.
+        """
+        from tests.e2e._snapshotter import OracleGoldenMirrorSnapshotter
+
+        cfg = make_test_config(dialect=Dialect.ORACLE)
+        snap = asyncio.run(
+            make_snapshotter(
+                cfg,
+                _DummyPool(),  # type: ignore[arg-type]: dummy structural pool — factory holds ref only
+                base_prefix=cfg.db_table_prefix,
+                l2_instance=_empty_l2(),
+            ),
+        )
+        assert isinstance(snap, OracleGoldenMirrorSnapshotter)
 
     def test_duckdb_arm_returns_real_impl(self, tmp_path: Path) -> None:
         """BV.3.3 (this cell) — DuckDB arm wired to DuckDBFileSnapshotter.
