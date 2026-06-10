@@ -1414,26 +1414,104 @@ def generate_db_password() -> str:
     return secrets.token_hex(14)
 
 
-def _reset_pg_password_via_socket(container_name: str, password: str) -> None:
-    """BX.248 — force-reset Postgres `postgres` user password via unix
-    socket inside the container.
+def _read_pg_container_user_db(container_name: str) -> tuple[str, str]:
+    """BV.3.3.d — read the live container's POSTGRES_USER + POSTGRES_DB
+    out of its environment so the adopt path targets the role that
+    actually exists.
 
-    `psql -U postgres` over the container's local socket uses `trust`
+    testcontainers-python's `PostgresContainer` defaults user/db/password
+    all to ``test`` (see ``testcontainers/postgres/__init__.py`` —
+    ``username = self.dbname = self.password = "test"`` unless overridden
+    by env). The pre-BV.3.3.d adopt path hardcoded ``postgres``, which
+    silently failed because no ``postgres`` role exists in the live
+    container — every downstream connect attempt then hit "role
+    does not exist" or "password authentication failed" with no signal
+    pointing back at the rendezvous URL.
+
+    Returns ``(user, db)``. Raises on docker-exec failure or missing
+    env vars — caller is responsible for surfacing as an actionable
+    error.
+    """
+    import subprocess  # noqa: PLC0415 — lazy
+    result = subprocess.run(
+        ["docker", "exec", container_name, "env"],
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"docker exec {container_name!r} env failed "
+            f"(rc={result.returncode}); container is unreachable. "
+            f"stderr:\n{result.stderr.decode('utf-8', errors='replace')}\n"
+            f"Recovery: `docker rm -f {container_name}` and rerun."
+        )
+    env_lines = result.stdout.decode("utf-8", errors="replace").splitlines()
+    env = dict(
+        line.split("=", 1) for line in env_lines if "=" in line
+    )
+    user = env.get("POSTGRES_USER")
+    db = env.get("POSTGRES_DB")
+    if not user or not db:
+        raise RuntimeError(
+            f"Container {container_name!r} env missing POSTGRES_USER "
+            f"({user!r}) and/or POSTGRES_DB ({db!r}); container is in a "
+            f"poison state. Recovery: `docker rm -f {container_name}` "
+            f"and rerun to recreate from scratch."
+        )
+    return user, db
+
+
+def _reset_pg_password_via_socket(container_name: str, password: str) -> None:
+    """BX.248 — force-reset the container's Postgres superuser password
+    via unix socket inside the container. BV.3.3.d — discover the actual
+    superuser name from POSTGRES_USER (testcontainers default is ``test``,
+    not ``postgres``) and fail LOUD on subprocess errors instead of
+    swallowing them.
+
+    `psql -U <user>` over the container's local socket uses `trust`
     auth (default in pg_hba.conf for local connections), so we don't
     need to know the current password to set a new one. Used on the
     adopt path when a container exists from a prior run with an
     unknown password.
+
+    Pre-BV.3.3.d this hardcoded ``postgres`` for both the psql `-U`
+    flag and the ALTER USER target. testcontainers-python ships
+    ``POSTGRES_USER=test`` by default, so the docker-exec exited
+    non-zero ("role 'postgres' does not exist"); ``check=False`` +
+    ``capture_output=True`` ate the error. Every subsequent connect via
+    the rendezvous URL then either authn-failed (wrong user) or
+    authz-failed (missing db). Mirror of the Oracle #254 fix.
     """
     import subprocess  # noqa: PLC0415 — lazy
-    subprocess.run(
+    user, _db = _read_pg_container_user_db(container_name)
+    result = subprocess.run(
         [
             "docker", "exec", container_name,
-            "psql", "-U", "postgres",
-            "-c", f"ALTER USER postgres WITH PASSWORD '{password}';",
+            "psql", "-U", user,
+            "-c", f"ALTER USER {user} WITH PASSWORD '{password}';",
         ],
         check=False,
         capture_output=True,
     )
+    stdout = result.stdout.decode("utf-8", errors="replace")
+    stderr = result.stderr.decode("utf-8", errors="replace")
+    # libpq prints "role does not exist" to stderr; psql's `\set ON_ERROR_STOP`
+    # is off by default, so a non-zero rc is the primary signal. The stderr
+    # scan adds belt-and-suspenders for cases where the docker exec layer
+    # itself fails (container not running, etc.).
+    has_pg_error = "does not exist" in stderr or "FATAL" in stderr
+    if result.returncode != 0 or has_pg_error:
+        raise RuntimeError(
+            f"Postgres password reset via unix socket failed for "
+            f"{container_name!r} (rc={result.returncode}, user={user!r}). "
+            f"This would publish a rendezvous URL whose credential does "
+            f"not match the live container, breaking every downstream "
+            f"connect. "
+            f"psql stdout:\n{stdout}\n"
+            f"psql stderr:\n{stderr}\n"
+            f"Recovery: `docker rm -f {container_name}` and rerun to "
+            f"recreate from scratch."
+        )
 
 
 def _reset_oracle_password_via_socket(container_name: str, password: str) -> None:
@@ -1961,9 +2039,17 @@ def _get_or_start_pg_container(
     # BX.248 — existing container was started by an earlier invocation
     # with that invocation's password (now unknown to us). Force-reset
     # via unix-socket trust auth so our caller's password becomes the
-    # live one. Cheap (~50ms) and idempotent.
+    # live one. Cheap (~50ms) and idempotent. BV.3.3.d — raises LOUD
+    # on subprocess failure instead of silently leaving a stale
+    # password live (mirrors the Oracle #254 fix).
     _reset_pg_password_via_socket(name, password)
-    url = f"postgresql://postgres:{password}@localhost:{host_port}/postgres"
+    # BV.3.3.d — adopt path URL must match the live container's actual
+    # user + db (testcontainers default = "test", not "postgres"). The
+    # fresh path's _normalize_pg_url derives this from
+    # `container.get_connection_url()`; adopt path reads container env
+    # to converge on the same shape.
+    user, db = _read_pg_container_user_db(name)
+    url = f"postgresql://{user}:{password}@localhost:{host_port}/{db}"
     return url, _PersistentContainerHandle(name=name)
 
 
