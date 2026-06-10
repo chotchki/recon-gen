@@ -71,12 +71,23 @@ from recon_gen.common.l2.plant_registry import PLANT_REGISTRY, PlantKindEntry
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.l2.seed import emit_full_seed
 from recon_gen.common.sql import Dialect
+from tests._marks import Need, needs
 from tests.e2e._isolation import _isolate_cfg
 from tests.e2e._studio_deploy_helpers import (
     SASQUATCH_YAML,
     make_studio_cfg,
     studio_server,
 )
+
+
+# Auto-tiered APP2 by `tests/e2e/app2/conftest.py`; only the per-test
+# `needs` lands here. The trainer dogfood test drives a real WebKit
+# browser against a live Studio uvicorn server — `Need.PLAYWRIGHT` at
+# module scope makes the pre-dispatch probe fast-skip on hosts without
+# the browser tier installed. Per-param `Need.DOCKER` for PG/Oracle
+# cells lives in `_trainer_dialect_params()` below (DuckDB stays bare
+# — tempfile-backed, no container needed).
+pytestmark = [needs(Need.PLAYWRIGHT)]
 
 
 # CB.17.j — no `pytest.mark.browser`. Pre-CB.17.d the runner used a
@@ -132,6 +143,18 @@ def _trainer_dialect_params() -> list[Any]:  # noqa: ANN401 — ParameterSet has
     else:
         picks = ["du", "pg", "or"]
     name_to_dialect = {"du": Dialect.DUCKDB, "pg": Dialect.POSTGRES, "or": Dialect.ORACLE}
+    # PG + Oracle dialects pull `pg_container_url` / `oracle_container_url`
+    # session fixtures (tests/conftest.py:~950-1045) which import
+    # `testcontainers` + try to talk to the Docker daemon. On a no-Docker
+    # host that's a hard import-time failure; `Need.DOCKER` makes the
+    # runner pre-dispatch probe fast-skip those params with a clear
+    # reason instead of burning ~30s on container-spin-up-then-crash.
+    # DuckDB is tempfile-backed and stays bare.
+    dialect_extra_marks: dict[str, list[Any]] = {  # noqa: ANN401
+        "du": [],
+        "pg": [needs(Need.DOCKER)],
+        "or": [needs(Need.DOCKER)],
+    }
     out: list[Any] = []  # noqa: ANN401
     for short in picks:
         dialect = name_to_dialect.get(short)
@@ -150,12 +173,11 @@ def _trainer_dialect_params() -> list[Any]:  # noqa: ANN401 — ParameterSet has
         # trainer tests onto a single worker. 3 workers total (one
         # per dialect) instead of 16; each does its own Session Start
         # once + N cheap reclones.
-        out.append(
-            pytest.param(
-                dialect, id=short,
-                marks=[pytest.mark.xdist_group(f"trainer-{short}")],
-            ),
-        )
+        marks: list[Any] = [  # noqa: ANN401
+            pytest.mark.xdist_group(f"trainer-{short}"),
+            *dialect_extra_marks[short],
+        ]
+        out.append(pytest.param(dialect, id=short, marks=marks))
     return out
 
 
