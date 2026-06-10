@@ -136,26 +136,29 @@ class AnomalyInvariant:
         spike_magnitude: float = 100_000.0,
         baseline_pair_count: int = 100,
         baseline_amount: float = 100.0,
+        historical_window_count: int = 10,
+        historical_window_amount: float = 250.0,
         instance: L2Instance | None = None,
     ) -> "AnomalyGenerator":
         """Resolve sender + recipient roles against the L2; return a
-        generator that plants `baseline_pair_count` background pairs
-        (small `baseline_amount` per pair per day, day=anchor) PLUS one
-        SPIKE between the first sender + recipient with `spike_
-        magnitude`.
+        generator that plants `baseline_pair_count` background pairs +
+        `historical_window_count` historical windows on the spike pair
+        + one SPIKE on anchor day.
 
-        **AT.0 finding (caught mid-spike).** The spike magnitude alone
-        doesn't determine z-score — the OUTLIER ITSELF SHIFTS THE MEAN
-        toward itself, reducing its own z-score. With 8 baseline pairs +
-        spike=100_000, z ≈ 2.67 (only '2-3 sigma'). With 100 baseline
-        pairs + same spike, the spike contributes ~1% to the mean, so
-        z ≈ 9.95 — well into '4+ sigma'. Default baseline_pair_count is
-        100 to ensure clear separation; smaller values risk the
-        outlier-effect masking the anomaly.
+        **AT.0 finding (caught mid-spike).** Pre-CV the spike magnitude
+        alone didn't determine z-score — under GLOBAL z, the outlier
+        shifted the population mean toward itself. **CV.2 switched the
+        matview to per-pair PARTITION BY z with a PRIOR-ROWS-ONLY frame**
+        (ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) so the
+        spike's row is excluded from its own divisor. The new
+        load-bearing param is `historical_window_count` — the spike
+        pair needs ≥`_INV_MIN_HISTORICAL_WINDOWS=3` prior windows or
+        the matview's min-n floor collapses z to 0. Default 10 sits
+        3× the floor (safety margin).
 
-        baseline_pair_count > 1 is REQUIRED — a single baseline pair
-        gives pop_stddev=0 → matview defaults bucket to '0-1 sigma'.
-        Spike sits in the same bucket; nothing fires.
+        baseline_pair_count > 0 keeps the population-of-pairs shape;
+        post-CV.2 it no longer affects the spike's z (per-pair, not
+        global).
         """
         inst = instance if instance is not None else _spec_example()
         sender = _find_internal_with_role(inst, sender_role)
@@ -177,6 +180,8 @@ class AnomalyInvariant:
             spike_magnitude=spike_magnitude,
             baseline_pair_count=baseline_pair_count,
             baseline_amount=baseline_amount,
+            historical_window_count=historical_window_count,
+            historical_window_amount=historical_window_amount,
         )
 
 
@@ -207,6 +212,8 @@ class AnomalyGenerator:
     spike_magnitude: float
     baseline_pair_count: int
     baseline_amount: float
+    historical_window_count: int = 10
+    historical_window_amount: float = 250.0
 
     @property
     def intended(self) -> Violation:
@@ -222,10 +229,7 @@ class AnomalyGenerator:
         )
 
     def emit(self, conn: duckdb.DuckDBPyConnection) -> None:
-        # Background pairs — populate the distribution so pop_stddev > 0.
-        # Each is a 2-leg transfer (sender_leg with amount < 0; recipient
-        # leg with amount > 0). The matview's pair_legs CTE joins on
-        # transfer_id where amount signs differ.
+        # Stratum 1 — unrelated background pairs (anchor day, one each).
         for i in range(self.baseline_pair_count):
             bg_sender_id = f"acct-anomaly-bg-sender-{i}"
             bg_recipient_id = f"acct-anomaly-bg-recipient-{i}"
@@ -244,7 +248,32 @@ class AnomalyGenerator:
                 slot=f"bg-{i}",
             )
 
-        # The spike — between sender + recipient with spike_magnitude.
+        # Stratum 2 (CV.1) — historical windows on the spike pair so the
+        # matview's per-pair PARTITION BY z has a divisor.
+        from datetime import timedelta as _td  # local; no top-level dep
+        N = self.historical_window_count
+        for k in range(N, 0, -1):
+            history_day = self.anchor_day - _td(days=k)
+            # Vary amounts deterministically around the center so per-pair
+            # STDDEV_SAMP > 0. Same shape as spine/anomaly.py.
+            offset_index = (k - 1) - (N - 1) / 2.0
+            step = self.historical_window_amount * 0.10
+            amount = self.historical_window_amount + offset_index * step
+            self._emit_pair(
+                conn,
+                sender_account_id=self.sender_account_id,
+                sender_account_role=self.sender_account_role,
+                sender_account_parent_role=self.sender_account_parent_role,
+                recipient_account_id=self.recipient_account_id,
+                recipient_account_role=self.recipient_account_role,
+                recipient_account_parent_role=self.recipient_account_parent_role,
+                transfer_id=f"xfer-anomaly-history-{k}",
+                amount=amount,
+                day=history_day,
+                slot=f"history-{k}",
+            )
+
+        # Stratum 3 — the spike on anchor day.
         self._emit_pair(
             conn,
             sender_account_id=self.sender_account_id,
@@ -457,34 +486,25 @@ def test_anomaly_threads_the_full_spine() -> None:
         conn.close()
 
 
-def test_single_baseline_pair_does_not_fire_anomaly() -> None:
-    """The AP.3 finding #2 pinned: statistical invariants need a
-    POPULATION, not just two points. With baseline_pair_count=1 + spike,
-    the matview's population has only 2 values; the spike's z-score is
-    ~0.71 ('0-1 sigma' bucket) because the spike itself shifts the
-    mean toward itself enough that its "distance from mean" in
-    stddev-units stays small. The spike DOES exist, but isn't anomalous
-    by the statistical measure.
+def test_below_min_n_floor_does_not_fire_anomaly() -> None:
+    """CV.2 rewrite — pre-CV asserted the "AP.3 finding #2 / one-pair
+    population" path. Under per-pair PARTITION BY z (CV.2) the
+    governing parameter is the spike pair's PRIOR-WINDOW count, not
+    the unrelated-baseline-pair count. The matview's min-n floor
+    (default 3) collapses the spike to '0-1 sigma' when the spike
+    pair has < 3 prior windows.
 
-    AT.0 finding: the bar for "anomaly fires" is NOT just
-    "spike-to-baseline ratio is large." It's "spike sits enough sigma
-    above the population mean that the outlier-effect-on-mean doesn't
-    swallow it." Needs ~100 baseline points for a 1000:1 spike-ratio
-    to clear 3σ."""
+    With `historical_window_count=2`, the spike pair has only 2 prior
+    windows → `pair_n < min_n_floor` → z forced to 0 → no high-bucket
+    row → empty detected set.
+    """
     inv = AnomalyInvariant()
-    # baseline_pair_count=1 → only 2 population values (1 baseline +
-    # spike). The pair-of-points spread inflates pop_stddev relative to
-    # the (mean-shifted-by-spike) ⇒ spike's z ≈ 0.71 ⇒ '0-1 sigma'.
-    # AP.3 finding #2 manifests slightly differently than my first-write
-    # docstring claimed (which said pop_stddev=0 — that's only true with
-    # ZERO baseline pairs, which would have no rows for the matview at
-    # all). The actual mechanism: with a near-empty population, the
-    # spike's outlier-effect-on-mean dominates the z calculation.
     gen = inv.scenario_for(
         "CustomerSubledger", "CustomerSubledger",
         spike_magnitude=100_000.0,
-        baseline_pair_count=1,
+        baseline_pair_count=10,
         baseline_amount=100.0,
+        historical_window_count=2,  # below matview's min_n=3 floor
     )
 
     conn = _fresh_db()
@@ -496,25 +516,31 @@ def test_single_baseline_pair_does_not_fire_anomaly() -> None:
     finally:
         conn.close()
 
-    # No anomalies should fire — pop_stddev = 0 means matview defaults
-    # bucket to '0-1 sigma' for every row, including the spike.
+    # No anomalies should fire — pair_n < min_n_floor means matview
+    # forces z=0 (bucket '0-1 sigma') for every row, including the spike.
     assert detected == set(), (
-        f"with degenerate population (1 baseline pair), no anomaly "
-        f"should fire; got {detected}"
+        f"with spike-pair history below the min-n floor (2 < 3), no "
+        f"anomaly should fire; got {detected}"
     )
 
 
 def test_no_spike_no_anomaly() -> None:
-    """The non-violating shape: baseline ONLY (spike_magnitude == baseline_
-    amount) → no pair stands out → no anomaly in high-sigma bucket. AP.2
-    convention adapted: 'no perturbation' is the same generator with the
-    spike normalized to baseline."""
+    """The non-violating shape: spike == historical-window center → the
+    spike day's window_sum sits inside the historical distribution → no
+    anomaly fires.
+
+    CV.2 update — under per-pair z, "no perturbation" means
+    `spike_magnitude` matches the `historical_window_amount`. The
+    pre-CV form (spike == baseline_amount) was about the global
+    population; that path is gone.
+    """
     inv = AnomalyInvariant()
     gen = inv.scenario_for(
         "CustomerSubledger", "CustomerSubledger",
-        spike_magnitude=100.0,  # ← spike == baseline ⇒ no spike
+        spike_magnitude=250.0,  # ← matches historical center
         baseline_pair_count=8,
         baseline_amount=100.0,
+        historical_window_amount=250.0,
     )
 
     conn = _fresh_db()
@@ -582,13 +608,16 @@ def test_detect_does_not_cross_a_sql_pushdown_surface() -> None:
 
 def test_anomaly_plant_is_multi_row_by_construction() -> None:
     """AP.3 finding #2 made structural: a statistical invariant CANNOT
-    fire from a single emission. The generator's emit() writes
-    baseline_pair_count*2 + 2 transactions (each pair = sender + recipient
-    legs). Pinning this so AT.1's promotion can't accidentally optimize
-    to a single-row plant."""
+    fire from a single emission. CV.1 expands the multi-row requirement
+    to include the spike-pair history stratum.
+
+    Emit count: (baseline_pair_count + historical_window_count + 1) * 2
+    legs per pair.
+    """
     gen = AnomalyInvariant().scenario_for(
         "CustomerSubledger", "CustomerSubledger",
         baseline_pair_count=8,
+        historical_window_count=4,
     )
     conn = _fresh_db()
     try:
@@ -597,10 +626,10 @@ def test_anomaly_plant_is_multi_row_by_construction() -> None:
         tx_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions",)
     finally:
         conn.close()
-    # 8 baseline pairs * 2 legs/pair + 1 spike pair * 2 legs = 18 rows
-    assert tx_count == 18, (
-        f"expected 18 transactions (8 baseline pairs + 1 spike, 2 legs "
-        f"each); got {tx_count}"
+    # (8 baseline + 4 history + 1 spike) * 2 legs = 26 rows
+    assert tx_count == 26, (
+        f"expected 26 transactions (8 baseline + 4 history + 1 spike, "
+        f"2 legs each); got {tx_count}"
     )
 
 

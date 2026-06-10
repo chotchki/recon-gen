@@ -402,6 +402,12 @@ class AnomalyGenerator:
     n_baseline: int = 20
     quiet_amount: float = 10.0
     spike_amount: float = 5000.0  # clean ⇒ quiet_amount
+    # CV.1 — historical windows on the spike pair so the matview's
+    # per-pair PARTITION BY z (CV.2) has prior observations to
+    # z-score against. Without these, the matview's min-n floor
+    # (default 3) collapses the spike to z=0.
+    historical_window_count: int = 10
+    historical_window_amount: float = 25.0
 
     @property
     def intended(self) -> Violation:
@@ -433,12 +439,29 @@ class AnomalyGenerator:
         ))
 
     def emit(self, conn: duckdb.DuckDBPyConnection) -> None:
+        # Stratum 1 — unrelated baseline pairs.
         for i in range(self.n_baseline):
             self._emit_pair(
                 conn, idx=i, sender=f"acct-quiet-src-{i}",
                 recipient=f"acct-quiet-dst-{i}", amount=self.quiet_amount,
                 day=_DAY,
             )
+        # Stratum 2 (CV.1) — historical windows on the spike pair so
+        # the matview's per-pair PARTITION BY z (CV.2) has prior
+        # observations to z-score against.
+        from datetime import timedelta as _td
+        N = self.historical_window_count
+        for k in range(N, 0, -1):
+            history_day = _DAY - _td(days=k)
+            offset_index = (k - 1) - (N - 1) / 2.0
+            step = self.historical_window_amount * 0.10
+            amount = self.historical_window_amount + offset_index * step
+            self._emit_pair(
+                conn, idx=1000 + k, sender=self.spike_sender,
+                recipient=self.spike_recipient, amount=amount,
+                day=history_day,
+            )
+        # Stratum 3 — the spike on anchor day.
         self._emit_pair(
             conn, idx=999, sender=self.spike_sender,
             recipient=self.spike_recipient, amount=self.spike_amount, day=_DAY,
