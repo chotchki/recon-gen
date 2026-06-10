@@ -433,6 +433,26 @@ Two independent fixes, by priority:
 - [ ] CW.6 - **Performance regression test + per-dialect verify-recipe e2e.** New test: `audit apply --execute` on a ≥1M-row dataset completes in <5s wall (or <2s pure-hash). Verify-recipe contract test (DuckDB): streamed-fingerprint result matches the legacy `sha256(string_agg(rh ORDER BY rh))` form on a known fixture — proves Merkle-Damgård equivalence empirically. Update existing e2e tests that pin fingerprint values: they consume `format_version=2` post-CW.3; `format_version=1` legacy path stays for old-PDF verification. ~2h.
 - [ ] CW.7 - **Sweep.** Update `docs/reference/quicksight-quirks.md` if anything novel surfaced (Oracle LISTAGG cap entry probably; pyhanko-missing degrade behavior). Archive Phase CW. Update CLAUDE.md project block if the "DB must exist for verification" stance needs codifying.
 
+## Phase CY - Metadata-column popup on L1 Transactions sheet (placeholder)
+
+**Filed 2026-06-09 as a placeholder.** Operator request: on the App2 / L1 dashboard's Transactions sheet, add a per-row icon affordance that triggers a popup rendering the row's `metadata` JSON column. Intended primarily as a troubleshooting tool — operator may shove arbitrary JSON into the `metadata` field (precedent: the plant primitives already use `metadata` to mark planted rows like `{"plant_kind": "phantom_rail", ...}`) and the popup lets you eyeball the JSON without digging into the DB directly.
+
+Scope sketch (refine at CY.0):
+- **Where:** L1 Transactions sheet's row-level affordance. Possibly extend to other sheets that surface transaction rows (Daily Statement, Today's Exceptions, Investigation transfers).
+- **UI shape:** icon (`{}` or `info`) at the end of each row, sibling to the existing `⋯` row-drill menu button (u.4.e.3). Click → HTMX fetch → swap into a popover/modal with pretty-printed JSON. Side panel reuse possible (BX.12's glossary side panel already exists).
+- **Server side:** new endpoint, e.g. `GET /dashboards/l1_dashboard/transactions/<transfer_id>/metadata` returning prettified JSON in a fragment. Reuses `execute_visual_sql_async` against `<prefix>_transactions.metadata`. Read-only (no editing — the troubleshooting use case wants to OBSERVE not mutate).
+- **Render:** monospace block, pretty-printed via `json.dumps(..., indent=2)`. Copy-to-clipboard button. Empty/NULL metadata gets a "no metadata for this row" message.
+- **QS parity:** likely NO — this is an operator/internal troubleshooting affordance. App2-only acceptable.
+- **Anti-drift:** if metadata column gets renamed or its IS-JSON constraint changes, the popup-fetcher should fail loud not silent.
+
+Open design questions to lock at CY.0:
+- Modal vs side-panel vs inline-expand? (operator preference)
+- Icon placement: end-of-row vs in the `⋯` menu as another entry?
+- Should we surface metadata on the audit PDF too? (probably no — audit is regulator-facing)
+- Plant-emitted metadata uses a known shape (`plant_kind`, `plant_anchor_day`, etc); should the popup auto-detect and render those keys with friendlier labels?
+
+- [ ] CY.0 - **REPLAN.** Operator + agent design pass on the design questions above. Lock UI shape (modal / side-panel / inline), icon placement, scope (L1 Transactions only vs broader transaction surfaces), QS parity stance, and whether plant-metadata gets friendlier rendering. Output: `docs/audits/cy_0_metadata_popup_design.md`. Estimated 30-60 min.
+
 ## Phase PLAN - Phase PLAN
 - [ ] PLAN.md - BS.5 — _v_config_chain_children + 7-path conversion
 
