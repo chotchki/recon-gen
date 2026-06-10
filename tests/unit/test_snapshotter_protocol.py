@@ -20,7 +20,7 @@ import pytest
 from recon_gen.common.l2 import L2Instance
 from recon_gen.common.sql import Dialect
 from tests._test_helpers import make_test_config
-from tests.e2e._snapshotter import (
+from recon_gen.common.snapshotter import (
     DuckDBFileSnapshotter,
     NotImplementedSnapshotter,
     Snapshotter,
@@ -145,7 +145,7 @@ class TestMakeSnapshotter:
         contract is covered by ``test_snapshotter_pg.py`` against the
         shared PG container fixture.
         """
-        from tests.e2e._snapshotter import PostgresSchemaSnapshotter
+        from recon_gen.common.snapshotter import PostgresSchemaSnapshotter
 
         cfg = make_test_config(dialect=Dialect.POSTGRES)
         snap = asyncio.run(
@@ -169,7 +169,7 @@ class TestMakeSnapshotter:
         ``test_snapshotter_oracle.py`` against the shared Oracle
         container fixture.
         """
-        from tests.e2e._snapshotter import OracleGoldenMirrorSnapshotter
+        from recon_gen.common.snapshotter import OracleGoldenMirrorSnapshotter
 
         cfg = make_test_config(dialect=Dialect.ORACLE)
         snap = asyncio.run(

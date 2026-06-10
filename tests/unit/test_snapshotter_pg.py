@@ -57,7 +57,7 @@ from recon_gen.common.l2.v_overlay import (
 )
 from recon_gen.common.sql import Dialect
 from tests._marks import Tier, tier
-from tests.e2e._snapshotter import PostgresSchemaSnapshotter
+from recon_gen.common.snapshotter import PostgresSchemaSnapshotter
 
 
 pytestmark = tier(Tier.UNIT)

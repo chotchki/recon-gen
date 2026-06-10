@@ -43,7 +43,7 @@ from recon_gen.common.l2.v_overlay import (
 from recon_gen.common.sql.dialect import Dialect
 from tests._marks import Dialect as MarkDialect, Need, Tier, dialects, needs, tier
 from tests._test_helpers import make_test_config
-from tests.e2e._snapshotter import (
+from recon_gen.common.snapshotter import (
     OracleGoldenMirrorSnapshotter,
     _V_OVERLAY_BASE_TABLES,
 )
@@ -523,23 +523,23 @@ class TestSnapshotNameValidation:
     ORA-00911."""
 
     def test_empty_name_rejected(self) -> None:
-        from tests.e2e._snapshotter import _validate_snapshot_name
+        from recon_gen.common.snapshotter import _validate_snapshot_name
         with pytest.raises(ValueError, match="non-empty"):
             _validate_snapshot_name("")
 
     def test_too_long_rejected(self) -> None:
-        from tests.e2e._snapshotter import _validate_snapshot_name
+        from recon_gen.common.snapshotter import _validate_snapshot_name
         with pytest.raises(ValueError, match="too long"):
             _validate_snapshot_name("x" * 33)
 
     @pytest.mark.parametrize("bad", ["a-b", "a b", "a;DROP", "a$b", "a#b"])
     def test_non_identifier_chars_rejected(self, bad: str) -> None:
-        from tests.e2e._snapshotter import _validate_snapshot_name
+        from recon_gen.common.snapshotter import _validate_snapshot_name
         with pytest.raises(ValueError, match=r"\[A-Za-z0-9_\]\+"):
             _validate_snapshot_name(bad)
 
     @pytest.mark.parametrize("ok", ["a", "snap_1", "MyName", "a_b_c_123"])
     def test_valid_names_accepted(self, ok: str) -> None:
-        from tests.e2e._snapshotter import _validate_snapshot_name
+        from recon_gen.common.snapshotter import _validate_snapshot_name
         # Must not raise.
         _validate_snapshot_name(ok)

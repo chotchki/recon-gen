@@ -40,7 +40,7 @@ from recon_gen.common.db import (
 )
 from recon_gen.common.sql import Dialect
 from tests._test_helpers import make_test_config
-from tests.e2e._snapshotter import DuckDBFileSnapshotter
+from recon_gen.common.snapshotter import DuckDBFileSnapshotter
 
 
 # -- shared fixtures + helpers --------------------------------------------

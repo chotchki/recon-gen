@@ -1188,7 +1188,7 @@ class App2Driver:
         """POST ``/training/snapshot/take?name=<name>``. Captures the
         current v-overlay state under the given name.
 
-        Drives the Snapshotter (``tests/e2e/_snapshotter.py``) through
+        Drives the Snapshotter (``recon_gen.common.snapshotter``) through
         the Studio test server's HTTP surface so the "everything through
         the driver" invariant (X.2.q) holds even for test-harness state
         mutations. Uses httpx (not raw Playwright) — per the
