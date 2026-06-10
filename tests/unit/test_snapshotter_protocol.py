@@ -13,6 +13,7 @@ test against live containers in tests/e2e/db/.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -20,6 +21,7 @@ from recon_gen.common.l2 import L2Instance
 from recon_gen.common.sql import Dialect
 from tests._test_helpers import make_test_config
 from tests.e2e._snapshotter import (
+    DuckDBFileSnapshotter,
     NotImplementedSnapshotter,
     Snapshotter,
     make_snapshotter,
@@ -135,9 +137,12 @@ class TestMakeSnapshotter:
 
     @pytest.mark.parametrize(
         "dialect",
-        [Dialect.DUCKDB, Dialect.POSTGRES, Dialect.ORACLE],
+        # BV.3.3 (this cell) — DuckDB arm now returns a real impl, so it
+        # leaves the stub-dispatch list. PG / Oracle still stub until
+        # their phase-2 cells land.
+        [Dialect.POSTGRES, Dialect.ORACLE],
     )
-    def test_every_supported_dialect_returns_stub(
+    def test_pg_oracle_arms_still_return_stub(
         self, dialect: Dialect,
     ) -> None:
         cfg = make_test_config(dialect=dialect)
@@ -150,6 +155,42 @@ class TestMakeSnapshotter:
             ),
         )
         assert isinstance(snap, NotImplementedSnapshotter)
+
+    def test_duckdb_arm_returns_real_impl(self, tmp_path: Path) -> None:
+        """BV.3.3 (this cell) — DuckDB arm wired to DuckDBFileSnapshotter.
+
+        Uses a real ``_AsyncDuckdbPool`` against a tmp_path-backed file
+        so the factory's ``duckdb_path`` parse + path construction
+        round-trip end-to-end. We don't ``take()``/``restore()`` here —
+        that's covered in test_snapshotter_duckdb.py; this is just the
+        dispatch contract.
+        """
+        # Async lifecycle bundled into one helper so the test stays
+        # synchronous-looking and matches the file's pattern.
+        import asyncio as _asyncio
+        from recon_gen.common.db import make_connection_pool, make_demo_database_url
+
+        db_file = tmp_path / "dispatch.duckdb"
+        cfg = make_test_config(
+            dialect=Dialect.DUCKDB,
+            demo_database_url=make_demo_database_url(Dialect.DUCKDB, db_file),
+        )
+
+        async def _run() -> None:
+            pool = await make_connection_pool(cfg)
+            try:
+                snap = await make_snapshotter(
+                    cfg,
+                    pool,
+                    base_prefix=cfg.db_table_prefix,
+                    l2_instance=_empty_l2(),
+                )
+                assert isinstance(snap, DuckDBFileSnapshotter)
+                await snap.aclose()
+            finally:
+                await pool.close()
+
+        _asyncio.run(_run())
 
     def test_unknown_dialect_raises(self) -> None:
         # Construct a Config then mutate dialect to a non-enum value
