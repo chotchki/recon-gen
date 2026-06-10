@@ -161,6 +161,28 @@ jobs:
         run: |
           STARTED_PG=false
           STARTED_OR=false
+          # CI-followup.1 — serialize concurrent CI runs through the
+          # docker setup. Without this, two runs landing back-to-back
+          # both enter the adoption-path retune branch
+          # (docker rm -f ci-shared-pg; docker run -d --name ci-shared-pg)
+          # and race: one rm -f wins, the other's run -d hits Conflict
+          # because the first race-recreated the container. Bit
+          # v13.11.0, v13.12.0, v13.13.x; manual unstick is
+          # ``docker rm -f ci-shared-pg`` on the runner. /tmp persists
+          # for the runner lifetime so the lockfile survives across
+          # jobs/runs. 300s timeout so a wedged lock surfaces loud
+          # instead of hanging forever. Acquired at script top via
+          # ``exec`` (not a subshell) so the lock lives for the
+          # duration of the bash script + STARTED_PG/STARTED_OR
+          # variable scope is preserved for the trailing
+          # ``$GITHUB_OUTPUT`` writes. Two separate locks (one per
+          # container) rather than one giant lock so the failure mode
+          # signals which resource is wedged when a lock-acquire
+          # times out.
+          exec 9>/tmp/ci-shared-pg.lock
+          flock -w 300 9 || { echo "::error::Failed to acquire ci-shared-pg lock within 300s — runner is wedged"; exit 1; }
+          exec 8>/tmp/ci-shared-oracle.lock
+          flock -w 300 8 || { echo "::error::Failed to acquire ci-shared-oracle lock within 300s — runner is wedged"; exit 1; }
           # v13.3.0 followup — the reuse-by-port path didn't normalize
           # the existing container's name to ``ci-shared-pg`` /
           # ``ci-shared-oracle``, so the subsequent Force-reset step
