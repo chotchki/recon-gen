@@ -70074,7 +70074,7 @@
           "recipient_account_id": "tmpl-cust-012",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-03",
-          "z_bucket": "3-4 sigma"
+          "z_bucket": "4+ sigma"
         }
       },
       {
@@ -70344,7 +70344,7 @@
           "recipient_account_id": "tmpl-cust-012",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-12-05",
-          "z_bucket": "0-1 sigma"
+          "z_bucket": "1-2 sigma"
         }
       },
       {
@@ -70875,6 +70875,33 @@
           "recipient_account_id": "tmpl-cust-014",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-03",
+          "z_bucket": "4+ sigma"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "recipient_account_id": "tmpl-cust-014",
+          "sender_account_id": "external-counterparty-one",
+          "window_end": "2029-10-08",
+          "z_bucket": "0-1 sigma"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "recipient_account_id": "tmpl-cust-014",
+          "sender_account_id": "external-counterparty-one",
+          "window_end": "2029-10-09",
+          "z_bucket": "0-1 sigma"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "recipient_account_id": "tmpl-cust-014",
+          "sender_account_id": "external-counterparty-one",
+          "window_end": "2029-10-10",
           "z_bucket": "1-2 sigma"
         }
       },
@@ -70883,33 +70910,6 @@
         "identity": {
           "recipient_account_id": "tmpl-cust-014",
           "sender_account_id": "external-counterparty-one",
-          "window_end": "2029-10-08",
-          "z_bucket": "0-1 sigma"
-        }
-      },
-      {
-        "kind": "rule_violation",
-        "identity": {
-          "recipient_account_id": "tmpl-cust-014",
-          "sender_account_id": "external-counterparty-one",
-          "window_end": "2029-10-09",
-          "z_bucket": "0-1 sigma"
-        }
-      },
-      {
-        "kind": "rule_violation",
-        "identity": {
-          "recipient_account_id": "tmpl-cust-014",
-          "sender_account_id": "external-counterparty-one",
-          "window_end": "2029-10-10",
-          "z_bucket": "0-1 sigma"
-        }
-      },
-      {
-        "kind": "rule_violation",
-        "identity": {
-          "recipient_account_id": "tmpl-cust-014",
-          "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-12",
           "z_bucket": "0-1 sigma"
         }
@@ -71271,7 +71271,7 @@
           "recipient_account_id": "tmpl-cust-015",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-03",
-          "z_bucket": "2-3 sigma"
+          "z_bucket": "4+ sigma"
         }
       },
       {
@@ -71280,7 +71280,7 @@
           "recipient_account_id": "tmpl-cust-015",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-04",
-          "z_bucket": "2-3 sigma"
+          "z_bucket": "4+ sigma"
         }
       },
       {
@@ -71649,7 +71649,7 @@
           "recipient_account_id": "tmpl-cust-016",
           "sender_account_id": "clearing-suspense",
           "window_end": "2029-10-15",
-          "z_bucket": "0-1 sigma"
+          "z_bucket": "1-2 sigma"
         }
       },
       {
@@ -72027,7 +72027,7 @@
           "recipient_account_id": "tmpl-cust-017",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-03",
-          "z_bucket": "3-4 sigma"
+          "z_bucket": "4+ sigma"
         }
       },
       {
@@ -72036,7 +72036,7 @@
           "recipient_account_id": "tmpl-cust-017",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-04",
-          "z_bucket": "3-4 sigma"
+          "z_bucket": "4+ sigma"
         }
       },
       {
@@ -73116,7 +73116,7 @@
           "recipient_account_id": "tmpl-cust-020",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-03",
-          "z_bucket": "4+ sigma"
+          "z_bucket": "3-4 sigma"
         }
       },
       {
@@ -73125,7 +73125,7 @@
           "recipient_account_id": "tmpl-cust-020",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-04",
-          "z_bucket": "4+ sigma"
+          "z_bucket": "3-4 sigma"
         }
       },
       {
@@ -73422,7 +73422,7 @@
           "recipient_account_id": "tmpl-cust-021",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-03",
-          "z_bucket": "3-4 sigma"
+          "z_bucket": "4+ sigma"
         }
       },
       {
@@ -73431,7 +73431,7 @@
           "recipient_account_id": "tmpl-cust-021",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-04",
-          "z_bucket": "3-4 sigma"
+          "z_bucket": "4+ sigma"
         }
       },
       {
@@ -74565,7 +74565,7 @@
           "recipient_account_id": "tmpl-cust-024",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-03",
-          "z_bucket": "3-4 sigma"
+          "z_bucket": "4+ sigma"
         }
       },
       {
@@ -74574,7 +74574,7 @@
           "recipient_account_id": "tmpl-cust-024",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-04",
-          "z_bucket": "3-4 sigma"
+          "z_bucket": "4+ sigma"
         }
       },
       {
@@ -74952,6 +74952,24 @@
           "recipient_account_id": "tmpl-cust-025",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-03",
+          "z_bucket": "4+ sigma"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "recipient_account_id": "tmpl-cust-025",
+          "sender_account_id": "external-counterparty-one",
+          "window_end": "2029-10-05",
+          "z_bucket": "0-1 sigma"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "recipient_account_id": "tmpl-cust-025",
+          "sender_account_id": "external-counterparty-one",
+          "window_end": "2029-10-09",
           "z_bucket": "1-2 sigma"
         }
       },
@@ -74960,24 +74978,6 @@
         "identity": {
           "recipient_account_id": "tmpl-cust-025",
           "sender_account_id": "external-counterparty-one",
-          "window_end": "2029-10-05",
-          "z_bucket": "0-1 sigma"
-        }
-      },
-      {
-        "kind": "rule_violation",
-        "identity": {
-          "recipient_account_id": "tmpl-cust-025",
-          "sender_account_id": "external-counterparty-one",
-          "window_end": "2029-10-09",
-          "z_bucket": "0-1 sigma"
-        }
-      },
-      {
-        "kind": "rule_violation",
-        "identity": {
-          "recipient_account_id": "tmpl-cust-025",
-          "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-12",
           "z_bucket": "0-1 sigma"
         }
@@ -75213,7 +75213,7 @@
           "recipient_account_id": "tmpl-cust-025",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-12-13",
-          "z_bucket": "0-1 sigma"
+          "z_bucket": "1-2 sigma"
         }
       },
       {
@@ -75645,7 +75645,7 @@
           "recipient_account_id": "tmpl-cust-027",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-03",
-          "z_bucket": "2-3 sigma"
+          "z_bucket": "4+ sigma"
         }
       },
       {
@@ -75654,7 +75654,7 @@
           "recipient_account_id": "tmpl-cust-027",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-04",
-          "z_bucket": "2-3 sigma"
+          "z_bucket": "4+ sigma"
         }
       },
       {
@@ -76410,7 +76410,7 @@
           "recipient_account_id": "tmpl-cust-029",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-03",
-          "z_bucket": "2-3 sigma"
+          "z_bucket": "3-4 sigma"
         }
       },
       {
@@ -76419,7 +76419,7 @@
           "recipient_account_id": "tmpl-cust-029",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-04",
-          "z_bucket": "2-3 sigma"
+          "z_bucket": "3-4 sigma"
         }
       },
       {
@@ -76644,7 +76644,7 @@
           "recipient_account_id": "tmpl-cust-029",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-11-28",
-          "z_bucket": "0-1 sigma"
+          "z_bucket": "1-2 sigma"
         }
       },
       {
@@ -76788,7 +76788,7 @@
           "recipient_account_id": "tmpl-cust-030",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-10-03",
-          "z_bucket": "2-3 sigma"
+          "z_bucket": "4+ sigma"
         }
       },
       {
@@ -77049,7 +77049,7 @@
           "recipient_account_id": "tmpl-cust-030",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-12-03",
-          "z_bucket": "0-1 sigma"
+          "z_bucket": "1-2 sigma"
         }
       },
       {
@@ -77058,7 +77058,7 @@
           "recipient_account_id": "tmpl-cust-030",
           "sender_account_id": "external-counterparty-one",
           "window_end": "2029-12-04",
-          "z_bucket": "0-1 sigma"
+          "z_bucket": "1-2 sigma"
         }
       },
       {
