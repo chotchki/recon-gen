@@ -497,7 +497,7 @@ def docs_test(pytest_args: str) -> None:
 )
 @click.option(
     "--surface",
-    type=click.Choice(["tree", "matrix"]),
+    type=click.Choice(["tree", "matrix", "trainer-cards"]),
     default="tree",
     show_default=True,
     help=(
@@ -505,7 +505,11 @@ def docs_test(pytest_args: str) -> None:
         "bundled mkdocs source for hand-build (legacy behavior). "
         "``matrix`` emits the BU.0.5 §0.5 violation coverage matrix "
         "generated from PLANT_REGISTRY + the three typed section "
-        "catalogues — BV.7 anti-drift artifact (Lock 11)."
+        "catalogues — BV.7 anti-drift artifact (Lock 11). "
+        "``trainer-cards`` emits one ``##`` block per registry kind "
+        "carrying the canonical ``short_statement`` + ``what_to_do`` "
+        "strings (resolve_section dispatch) — BV.7 byte-identity "
+        "verifier for the Trainer's ``/training/`` v3 cards."
     ),
 )
 def docs_export(
@@ -526,6 +530,13 @@ def docs_export(
     reference artifact at
     ``tests/data/_handbook_artifacts/coverage_matrix.md`` is the
     byte-identity anti-drift gate — refresh it after a registry edit.
+
+    ``--surface=trainer-cards`` (BV.7): walk ``PLANT_REGISTRY`` through
+    ``resolve_section`` and emit one ``## {kind}`` block per entry
+    carrying the canonical ``short_statement`` + ``what_to_do`` strings
+    the Trainer's ``/training/`` v3 cards render. Default to stdout;
+    ``--output PATH`` writes to a file. Reference artifact at
+    ``tests/data/_handbook_artifacts/trainer_cards.md``.
     """
     if surface == "matrix":
         from recon_gen.common.handbook.coverage_matrix import (
@@ -548,6 +559,30 @@ def docs_export(
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(markdown, encoding="utf-8")
         click.echo(f"Wrote coverage matrix to {out_path}")
+        return
+
+    if surface == "trainer-cards":
+        from recon_gen.common.handbook.trainer_cards import (
+            render_trainer_cards,
+        )
+
+        if l2_instance_path is not None:
+            raise click.UsageError(
+                "--l2 has no effect with --surface=trainer-cards; the "
+                "cards are L2-independent (they walk the global "
+                "PLANT_REGISTRY through resolve_section)."
+            )
+
+        markdown = render_trainer_cards()
+        if output is None:
+            # render_trainer_cards() already ends in "\n" (the last
+            # block's trailing newline), so suppress click's extra one.
+            click.echo(markdown, nl=False)
+            return
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(markdown, encoding="utf-8")
+        click.echo(f"Wrote trainer cards to {out_path}")
         return
 
     if output is None:
