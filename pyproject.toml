@@ -1,11 +1,17 @@
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
-# CY.1 — make ``build_hook.py`` (sibling of pyproject.toml) importable
-# during the isolated PEP-517 build so the custom ``build_py`` cmdclass
-# can stamp ``src/recon_gen/_build_info.py`` before the wheel copy step.
-# Without this, setuptools' build-env can't find ``build_hook``.
-backend-path = ["."]
+# CY.1.fix1 (2026-06-10) — DROPPED ``backend-path = ["."]`` + the
+# ``[tool.setuptools.cmdclass]`` block below. Per PEP 517,
+# ``backend-path`` makes the front-end ONLY search those directories
+# for the backend module — which hid ``setuptools.build_meta`` (in
+# site-packages) from pyproject_hooks and broke the v13.13.0 build
+# with ``BackendUnavailable: Cannot find module 'setuptools.build_meta'``.
+# Replacement: ``.github/workflows/release.yml`` has a new step that
+# writes ``src/recon_gen/_build_info.py`` BEFORE ``python -m build``
+# runs, so the wheel still carries the baked git_sha + built_at +
+# build_kind. Runtime fallback in ``_git_short_sha`` continues to
+# cover ad-hoc dev builds.
 
 [project]
 name = "recon-gen"
@@ -320,13 +326,18 @@ recon_gen = [
 [tool.setuptools.dynamic]
 version = {attr = "recon_gen.__version__"}
 
-# CY.1 — bake git short SHA + build kind + timestamp into the wheel via a
-# custom ``build_py`` cmdclass. See ``build_hook.py`` at the repo root for
-# the implementation. The cmdclass writes ``src/recon_gen/_build_info.py``
-# before setuptools' package-copy step, so the stamped module ships
-# inside the wheel.
-[tool.setuptools.cmdclass]
-build_py = "build_hook.BuildPyWithBuildInfo"
+# CY.1.fix1 (2026-06-10) — REMOVED ``[tool.setuptools.cmdclass]``
+# block that pointed at ``build_hook.BuildPyWithBuildInfo``. The
+# cmdclass needed ``backend-path = ["."]`` in [build-system] to be
+# importable from the PEP-517 build env, but that ALSO hides
+# ``setuptools.build_meta`` itself, breaking the build. Replaced by
+# a CI-side step in ``.github/workflows/release.yml`` that writes
+# ``src/recon_gen/_build_info.py`` before ``python -m build`` fires.
+# ``build_hook.py`` is kept at repo root for documentation +
+# unit-test reference (the helpers there still describe the
+# canonical _build_info.py shape) but is no longer wired into
+# setuptools. Dev installs use the runtime fallback in
+# ``common/sheets/app_info.py::_git_short_sha``.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
