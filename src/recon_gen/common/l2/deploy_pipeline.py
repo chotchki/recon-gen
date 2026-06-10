@@ -251,6 +251,7 @@ async def step_2_wipe(
     instance: L2Instance,
     *,
     dev_log: DevLogWriter | None = None,
+    synthetic_only: bool = False,
 ) -> tuple[int, int]:
     """Empty ``<prefix>_transactions`` + ``<prefix>_daily_balances``.
 
@@ -269,12 +270,31 @@ async def step_2_wipe(
     block the asyncio loop — the studio's POST /deploy endpoint
     otherwise stalls all other requests for the wipe duration on
     a multi-million-row demo DB.
+
+    CZ.3 — ``synthetic_only`` plumbs the standalone-mode safety gate
+    through to ``wipe_demo_data_sql``. When True (Trainer reset with
+    ``cfg.etl_hook is None``), only rows stamped via CZ.2
+    (``metadata.source='training'``) are deleted; unmarked rows are
+    presumed real customer data and survive. The counted return is the
+    pre-DELETE row count of EACH table — in standalone-mode this
+    over-reports compared to actual deletions (those go via WHERE), but
+    matches the same "table state pre-wipe" framing as the legacy path
+    for the live-tail "wiped N transactions" message; if precise delete
+    counts matter, the studio surface can read post-DELETE ``COUNT(*)``
+    instead. The ``deploy:step2:wipe:start`` event carries
+    ``synthetic_only`` so the operator can tell which path ran.
     """
-    sql = wipe_demo_data_sql(instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect)
+    sql = wipe_demo_data_sql(
+        instance,
+        prefix=cfg.db_table_prefix,
+        dialect=cfg.dialect,
+        synthetic_only=synthetic_only,
+    )
     await _emit(dev_log, {
         "event": "deploy:step2:wipe:start",
         "db_table_prefix": cfg.db_table_prefix,
         "dialect": cfg.dialect.value,
+        "synthetic_only": synthetic_only,
     })
 
     # BX backlog #173 (2026-06-05) — Studio's Session Start lands here
@@ -334,6 +354,7 @@ async def step_2_wipe(
         "event": "deploy:step2:wipe:done",
         "transactions_deleted": tx_count,
         "daily_balances_deleted": bal_count,
+        "synthetic_only": synthetic_only,
     })
     return tx_count, bal_count
 
@@ -908,6 +929,7 @@ async def run_deploy_pipeline(
     subprocess_lock_bracket: (
         Callable[[], AbstractAsyncContextManager[None]] | None
     ) = None,
+    synthetic_only_wipe: bool = False,
 ) -> DeploySummary:
     """Orchestrate the BS.4 4-step deploy pipeline (with the 3.5 derive
     sub-step). Order: wipe → etl_hook → generator → overlays → matviews → reload.
@@ -995,7 +1017,17 @@ async def run_deploy_pipeline(
         })
 
     # BS.4: wipe FIRST so etl_hook + generator write into clean state.
-    tx_del, bal_del = await step_2_wipe(pipeline_cfg, instance, dev_log=_tee)
+    # CZ.3: ``synthetic_only_wipe`` plumbs the standalone-mode safety gate
+    # through — Trainer reset with ``cfg.etl_hook is None`` passes True so
+    # the wipe narrows to ``metadata.source='training'`` (CZ.2 stamp);
+    # unmarked rows (presumed real customer data) survive. Default False
+    # preserves the ETL-mode full-TRUNCATE semantics.
+    tx_del, bal_del = await step_2_wipe(
+        pipeline_cfg,
+        instance,
+        dev_log=_tee,
+        synthetic_only=synthetic_only_wipe,
+    )
 
     # CO.x — release the dashboards' pool lock around step_1_etl_hook so
     # the operator's cfg.etl_hook subprocess can acquire the DuckDB
