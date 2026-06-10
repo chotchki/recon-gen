@@ -1,4 +1,4 @@
-"""BTa.1 — `common/html/_studio_side_panel.py` unit tests.
+"""BTa.1 — `common/html/_side_panel.py` unit tests.
 
 Pins:
 - GLOSSARY shape (one dict, every term has a non-empty markdown body)
@@ -26,7 +26,7 @@ from recon_gen.common.html._smoke_app import (
     stub_money_trail_fetcher,
 )
 from recon_gen.common.html._studio_routes import make_studio_routes
-from recon_gen.common.html._studio_side_panel import (
+from recon_gen.common.html._side_panel import (
     GLOSSARY,
     render_side_panel_drawer_container,
     render_side_panel_trigger,
@@ -97,6 +97,15 @@ def test_drawer_container_includes_escape_key_handler() -> None:
     modal-ish surface)."""
     html = render_side_panel_drawer_container()
     assert "key === 'Escape'" in html
+
+
+def test_drawer_container_exposes_window_open_hook() -> None:
+    """CY.3 — `window.__sidePanelOpen()` is exposed by the IIFE so the
+    CY.6 ctxmenu entry (and any future programmatic opener) can slide
+    the drawer in without synthesizing a `[data-side-panel-trigger]`
+    click."""
+    html = render_side_panel_drawer_container()
+    assert "window.__sidePanelOpen" in html
 
 
 def test_side_panel_trigger_renders_button_with_hx_get() -> None:

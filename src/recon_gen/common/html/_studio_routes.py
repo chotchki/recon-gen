@@ -144,7 +144,7 @@ from recon_gen.common.l2.topology import (
 )
 from recon_gen.common.l2.trainer import plants_per_node
 from recon_gen.common.sql.dialect import Dialect
-from recon_gen.common.html._studio_side_panel import (
+from recon_gen.common.html._side_panel import (
     render_side_panel_trigger,
     side_panel_routes as _side_panel_routes_imported,
 )

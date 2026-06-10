@@ -1,4 +1,4 @@
-"""Studio side-panel drawer infrastructure (BTa.1).
+"""Side-panel drawer infrastructure (BTa.1).
 
 The right-edge slide-out drawer that hosts:
 
@@ -218,6 +218,13 @@ def render_side_panel_drawer_container() -> str:
       close();
     }
   });
+  // CY.3 — expose a programmatic open hook so callers (e.g. the
+  // CY.6 ctxmenu entry) can slide the drawer in without simulating
+  // a click on a `[data-side-panel-trigger]` element. Optional
+  // argument is the element to restore focus to on close.
+  window.__sidePanelOpen = function(trigger) {
+    open(trigger || null);
+  };
 })();
 </script>
 """

@@ -648,7 +648,7 @@ def emit_top_nav(
     # (siblings, not nested — drawer is position: fixed so DOM
     # nesting is cosmetic but semantically the drawer is a
     # complementary landmark, not nav). Single instance per page.
-    from recon_gen.common.html._studio_side_panel import (  # noqa: PLC0415 — lazy to dodge any future circular
+    from recon_gen.common.html._side_panel import (  # noqa: PLC0415 — lazy to dodge any future circular
         render_side_panel_drawer_container,
     )
     parts.append(render_side_panel_drawer_container())
