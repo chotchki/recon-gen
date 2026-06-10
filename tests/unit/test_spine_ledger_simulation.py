@@ -32,6 +32,8 @@ from recon_gen.common.spine import (
     LedgerDriftInvariant,
     LedgerSimulation,
     Perturbation,
+    Transfer,
+    TransferLeg,
     Violation,
 )
 from recon_gen.common.sql import Dialect
@@ -336,5 +338,177 @@ def test_ledger_violation_trajectory_rejects_mismatched_day_counts() -> None:
     try:
         with pytest.raises(ValueError, match="same number of"):
             ledger.violation_trajectory(LedgerDriftInvariant(), conn)
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Cell-A bulk-emit contract — LedgerSimulation.emit routes every transfer
+# leg through `bulk_insert_tx` instead of per-leg `insert_tx`. Row-count
+# + metadata.source='training' must be preserved verbatim.
+# ---------------------------------------------------------------------------
+
+
+def _transfer(day: date, transfer_id: str, sender: str, recipient: str, amount: float) -> Transfer:
+    return Transfer(
+        day=day,
+        transfer_id=transfer_id,
+        rail_name="_test",
+        status="Posted",
+        legs=(
+            TransferLeg(
+                account_id=sender,
+                amount=-amount,
+                account_name=f"Sender ({sender})",
+                account_role="CustomerSubledger",
+                account_scope="internal",
+                account_parent_role="CustomerLedger",
+            ),
+            TransferLeg(
+                account_id=recipient,
+                amount=amount,
+                account_name=f"Recipient ({recipient})",
+                account_role="CustomerSubledger",
+                account_scope="internal",
+                account_parent_role="CustomerLedger",
+            ),
+        ),
+    )
+
+
+def test_ledger_bulk_transfers_row_count_matches_leg_total() -> None:
+    """50 two-leg transfers → exactly 100 _transactions rows. The
+    `_bulk_emit_transfers` chunker must not lose or duplicate rows."""
+    transfers = [
+        _transfer(_D0, f"xfer-bulk-{i:03d}", f"snd-{i}", f"rcv-{i}", 10.0 + i)
+        for i in range(50)
+    ]
+    ledger = LedgerSimulation(transfers=transfers)
+    conn = _fresh_db()
+    try:
+        ledger.emit(conn)
+        conn.commit()
+        cur = conn.cursor()
+        cur.execute(f"SELECT COUNT(*) FROM {_PREFIX}_transactions")
+        row = cur.fetchone()
+        assert row is not None
+        assert row[0] == 100
+    finally:
+        conn.close()
+
+
+def test_ledger_bulk_transfers_stamp_source_training() -> None:
+    """CZ.2 contract preserved through Cell-A: every emitted row
+    carries `metadata.source = 'training'`. The bulk helper does NOT
+    auto-stamp; the LedgerSimulation builder threads the stamp via
+    `scenario_metadata(...)`."""
+    transfers = [
+        _transfer(_D0, "xfer-cz2-1", "snd-a", "rcv-a", 100.0),
+        _transfer(_D1, "xfer-cz2-2", "snd-b", "rcv-b", 200.0),
+    ]
+    ledger = LedgerSimulation(transfers=transfers)
+    conn = _fresh_db()
+    try:
+        ledger.emit(conn, scenario_id="cell-a-test")
+        conn.commit()
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+            f"WHERE json_extract_string(metadata, '$.source') = 'training'"
+        )
+        row = cur.fetchone()
+        assert row is not None
+        assert row[0] == 4, "every leg of every transfer must carry source='training'"
+        # scenario_id round-trips too — Cell-A preserves the tagging
+        # contract end-to-end.
+        cur.execute(
+            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+            f"WHERE json_extract_string(metadata, '$.scenario_id') = 'cell-a-test'"
+        )
+        row = cur.fetchone()
+        assert row is not None
+        assert row[0] == 4
+    finally:
+        conn.close()
+
+
+def test_account_simulation_bulk_emit_row_count_and_stamp() -> None:
+    """Cell-A migration on `AccountSimulation.emit`: 30-day fold with 2
+    legs per day → 60 tx + 30 balance rows; every row carries
+    `metadata.source='training'`. `violation_trajectory` still uses
+    the per-day single-row path (matview refresh between days), so this
+    test only exercises the bulk-emit path."""
+    plans = [
+        DayPlan(_D0 + timedelta(days=i), (10.0, -5.0))
+        for i in range(30)
+    ]
+    sim = AccountSimulation(
+        plans=plans,
+        account_id="acct-bulk-sim",
+        account_role="CustomerSubledger",
+        parent_role="CustomerLedger",
+    )
+    conn = _fresh_db()
+    try:
+        sim.emit(conn, scenario_id="acct-bulk-test")
+        conn.commit()
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+            f"WHERE account_id = 'acct-bulk-sim'"
+        )
+        row = cur.fetchone()
+        assert row is not None
+        assert row[0] == 60
+        cur.execute(
+            f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances "
+            f"WHERE account_id = 'acct-bulk-sim'"
+        )
+        row = cur.fetchone()
+        assert row is not None
+        assert row[0] == 30
+        # Metadata stamp on both tables.
+        cur.execute(
+            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+            f"WHERE json_extract_string(metadata, '$.source') = 'training' "
+            f"AND account_id = 'acct-bulk-sim'"
+        )
+        row = cur.fetchone()
+        assert row is not None
+        assert row[0] == 60
+        cur.execute(
+            f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances "
+            f"WHERE json_extract_string(metadata, '$.source') = 'training' "
+            f"AND account_id = 'acct-bulk-sim'"
+        )
+        row = cur.fetchone()
+        assert row is not None
+        assert row[0] == 30
+    finally:
+        conn.close()
+
+
+def test_account_simulation_bulk_emit_empty_plans_is_safe() -> None:
+    """Edge case: zero-day simulation → empty tuple lists into
+    `bulk_insert_*`. The helpers' empty-rows no-op contract must hold;
+    `emit` must not raise."""
+    sim = AccountSimulation(
+        plans=[],
+        account_id="acct-empty",
+        account_role="CustomerSubledger",
+        parent_role="CustomerLedger",
+    )
+    conn = _fresh_db()
+    try:
+        sim.emit(conn)
+        conn.commit()
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT COUNT(*) FROM {_PREFIX}_transactions "
+            f"WHERE account_id = 'acct-empty'"
+        )
+        row = cur.fetchone()
+        assert row is not None
+        assert row[0] == 0
     finally:
         conn.close()

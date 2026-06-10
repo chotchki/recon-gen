@@ -173,9 +173,61 @@ class AccountSimulation:
 
         AV.5: ``scenario_id`` kwarg tags each emitted row's metadata
         column for ScenarioContext cleanup attribution. ``None``
-        (the default) preserves the pre-AV.5 untagged emit shape."""
-        for em in self._fold():
-            self._emit_day(conn, em, scenario_id=scenario_id)
+        (the default) preserves the pre-AV.5 untagged emit shape.
+
+        Cell-A migration: all days' tx legs + balance rows flush through
+        ONE `bulk_insert_tx` + ONE `bulk_insert_balance` instead of
+        per-day single-row inserts. `violation_trajectory` still uses
+        the per-day `_emit_day` path because it interleaves matview
+        refresh + detect between days (a single bulk flush would lose
+        the per-day violation snapshot)."""
+        from recon_gen.common.spine.scenario_context import scenario_metadata
+        metadata = scenario_metadata(
+            scenario_id, generator="AccountSimulation",
+        )
+        emissions = self._fold()
+        tx_rows: list[tuple[object, ...]] = []
+        bal_rows: list[tuple[object, ...]] = []
+        for em in emissions:
+            if self.emit_legs:
+                for tag, amount in em.legs:
+                    direction = "Credit" if amount >= 0 else "Debit"
+                    tx_vals: dict[str, object | None] = {
+                        "id": f"tx-{self.account_id}-{tag}",
+                        "account_id": self.account_id,
+                        "account_name": f"Sim Acct ({self.account_role})",
+                        "account_role": self.account_role,
+                        "account_scope": "internal",
+                        "account_parent_role": self.parent_role,
+                        "amount_money": amount,
+                        "amount_direction": direction,
+                        "status": "Posted",
+                        "posting": _ts(em.day),
+                        "transfer_id": f"xfer-{self.account_id}-{tag}",
+                        "transfer_parent_id": None,
+                        "rail_name": "_spine_plant",
+                        "template_name": None,
+                        "origin": "etl",
+                        "metadata": metadata,
+                        "supersedes": None,
+                    }
+                    tx_rows.append(tuple(tx_vals.get(c) for c in _TX_COLS))
+            start, end = _day_bounds(em.day)
+            bal_vals: dict[str, object | None] = {
+                "account_id": self.account_id,
+                "account_name": f"Sim Acct ({self.account_role})",
+                "account_role": self.account_role,
+                "account_scope": "internal",
+                "account_parent_role": self.parent_role,
+                "expected_eod_balance": None,
+                "business_day_start": start,
+                "business_day_end": end,
+                "money": em.stored,
+                "metadata": metadata,
+            }
+            bal_rows.append(tuple(bal_vals.get(c) for c in _DB_COLS))
+        _bulk_insert_tx(conn, tx_rows, prefix=self.prefix)
+        _bulk_insert_balance(conn, bal_rows, prefix=self.prefix)
 
     def violation_trajectory(
         self, invariant: Invariant, conn: SyncConnection,
@@ -279,8 +331,19 @@ class AccountSimulation:
 # dialect-aware (detect psycopg / oracledb / sqlite3 placeholder style
 # per AT.5.b) and carry the ``metadata`` column AV.5 added, so the
 # dedup also unlocks AV.5 per-row scenario tagging for free.
-from recon_gen.common.spine._emit_helpers import insert_balance as _insert_balance
-from recon_gen.common.spine._emit_helpers import insert_tx as _insert_tx
+#
+# Cell-A: `emit()` (full-fold one-pass) routes through the bulk helpers;
+# `_emit_day` (used by `violation_trajectory`'s per-day refresh+detect
+# loop) keeps the single-row path because bulk-then-refresh would lose
+# the inter-day violation snapshot.
+from recon_gen.common.spine._emit_helpers import (
+    DB_COLS as _DB_COLS,
+    TX_COLS as _TX_COLS,
+    bulk_insert_balance as _bulk_insert_balance,
+    bulk_insert_tx as _bulk_insert_tx,
+    insert_balance as _insert_balance,
+    insert_tx as _insert_tx,
+)
 
 
 def _day_bounds(day: date) -> tuple[str, str]:

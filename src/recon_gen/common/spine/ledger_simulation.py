@@ -46,7 +46,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal
 
-from recon_gen.common.spine._emit_helpers import insert_tx, ts
+from recon_gen.common.spine._emit_helpers import TX_COLS, bulk_insert_tx, ts
 from recon_gen.common.spine.account_simulation import AccountSimulation
 from recon_gen.common.spine.invariant import Invariant
 from recon_gen.common.spine.violation import Violation
@@ -158,60 +158,68 @@ class LedgerSimulation:
 
         AV.5: ``scenario_id`` kwarg threads through to the per-row
         metadata tag (``{"scenario_id": "..."}``) when set; ``None``
-        preserves the pre-AV.5 untagged emit (byte-identical)."""
+        preserves the pre-AV.5 untagged emit (byte-identical).
+
+        Cell-A migration: all transfer legs across every ``transfer`` in
+        ``self.transfers`` flush through ONE `bulk_insert_tx` call
+        instead of per-leg `insert_tx`. Anomaly's 121-transfer / 242-leg
+        plant + money_trail's chain emit hit the dialect fast path
+        (DuckDB multi-row VALUES coalesce; PG/Oracle `executemany`)."""
         for acct in self.accounts:
             acct.emit(conn, scenario_id=scenario_id)
-        for transfer in self.transfers:
-            self._emit_transfer(conn, transfer, scenario_id=scenario_id)
+        if self.transfers:
+            self._bulk_emit_transfers(conn, scenario_id=scenario_id)
 
-    def _emit_transfer(
+    def _bulk_emit_transfers(
         self,
         conn: SyncConnection,
-        transfer: Transfer,
         *,
         scenario_id: str | None = None,
     ) -> None:
-        """Write one transfer's legs as `_transactions` rows. Per-leg
-        denormalized account fields come from `TransferLeg`; the
-        transfer-level fields (transfer_id, parent, rail, status,
-        posting) come from `Transfer`. When ``scenario_id`` is set,
-        each emitted row carries ``metadata.scenario_id`` for AV.5
-        cleanup attribution."""
+        """Build every leg's tuple positionally over ``TX_COLS`` and
+        flush via `bulk_insert_tx`. Same per-row metadata stamp as the
+        pre-Cell-A per-leg path: ``source='training'`` + (when set)
+        ``scenario_id``.
+
+        Pure-shape builder + one bulk flush; behavioral equivalence to
+        the old `_emit_transfer` loop is the unit-test contract (row
+        count + per-column round-trip)."""
         # Avoid a top-level scenario_context import to keep the
         # AS.1-era spine modules layered cleanly; the helper is a
         # one-line JSON dump.
         from recon_gen.common.spine.scenario_context import scenario_metadata
         # CZ.2: unconditional stamp — every emitted row carries
         # ``metadata.source = 'training'`` (gated cleanup signal) plus
-        # ``scenario_id`` when provided. Pre-CZ.2 this was guarded by
-        # ``if scenario_id is not None else None``; dropping the guard
-        # lets the AnomalyGenerator's untagged 20-row historical window
-        # + spike + baseline pairs all carry the stamp.
+        # ``scenario_id`` when provided.
         metadata = scenario_metadata(
             scenario_id, generator="LedgerSimulation",
         )
-        posting = ts(transfer.day, hour=transfer.hour)
-        for i, leg in enumerate(transfer.legs):
-            direction = "Credit" if leg.amount >= 0 else "Debit"
-            insert_tx(
-                conn,
-                prefix=self.prefix,
-                id=f"tx-{transfer.transfer_id}-leg{i}",
-                account_id=leg.account_id,
-                account_name=leg.account_name,
-                account_role=leg.account_role,
-                account_scope=leg.account_scope,
-                account_parent_role=leg.account_parent_role,
-                amount_money=leg.amount,
-                amount_direction=direction,
-                status=transfer.status,
-                posting=posting,
-                transfer_id=transfer.transfer_id,
-                transfer_parent_id=transfer.parent_transfer_id,
-                rail_name=transfer.rail_name,
-                origin=transfer.origin,
-                metadata=metadata,
-            )
+        rows: list[tuple[object, ...]] = []
+        for transfer in self.transfers:
+            posting = ts(transfer.day, hour=transfer.hour)
+            for i, leg in enumerate(transfer.legs):
+                direction = "Credit" if leg.amount >= 0 else "Debit"
+                row_vals: dict[str, object | None] = {
+                    "id": f"tx-{transfer.transfer_id}-leg{i}",
+                    "account_id": leg.account_id,
+                    "account_name": leg.account_name,
+                    "account_role": leg.account_role,
+                    "account_scope": leg.account_scope,
+                    "account_parent_role": leg.account_parent_role,
+                    "amount_money": leg.amount,
+                    "amount_direction": direction,
+                    "status": transfer.status,
+                    "posting": posting,
+                    "transfer_id": transfer.transfer_id,
+                    "transfer_parent_id": transfer.parent_transfer_id,
+                    "rail_name": transfer.rail_name,
+                    "template_name": None,
+                    "origin": transfer.origin,
+                    "metadata": metadata,
+                    "supersedes": None,
+                }
+                rows.append(tuple(row_vals.get(c) for c in TX_COLS))
+        bulk_insert_tx(conn, rows, prefix=self.prefix)
 
     def violation_trajectory(
         self,
