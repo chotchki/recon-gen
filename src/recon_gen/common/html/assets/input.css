@@ -339,7 +339,7 @@ form:has(select[name="aggregating"] option[value="true"]:checked)
 .handbook-page em { font-style: italic; }
 
 /*
- * CY.6 — ctxmenu item padding.
+ * CY.6 — ctxmenu item padding + width (CY.6.fix1, 2026-06-09).
  *
  * The row-drill / ⋯-button popup gained a synthetic "{} View metadata"
  * entry prepended by ``openRowMenu`` when the visual's section carries
@@ -347,12 +347,25 @@ form:has(select[name="aggregating"] option[value="true"]:checked)
  * drill labels at ctxmenu's default tight padding; widen each li so
  * the menu reads cleanly with three or four items stacked.
  *
+ * Operator cold-read (2026-06-09 screenshot): the longer label wrapped
+ * to a second line and got clipped because the menu container has a
+ * fixed/tight default width and ctxmenu lets entries wrap. Two adds:
+ * ``white-space: nowrap`` keeps each entry on one line; ``min-width:
+ * max-content`` lets the menu grow to the longest entry. Both layout
+ * properties — not palette — so no !important needed (ctxmenu's
+ * injected sheet defines colours, not sizing per the widgets-theme
+ * comment).
+ *
  * ctxmenu injects its own ``<style id="ctxmenu">`` at runtime, after
  * this sheet loads — palette overrides in widgets-theme.css need
  * ``!important`` to win the cascade for that reason. Padding is a
  * layout property (not in ctxmenu's injected sheet), so the rule
  * below applies cleanly without the !important escape hatch.
  */
+.ctxmenu {
+  min-width: max-content;
+}
 .ctxmenu li {
   padding: 0.5rem 0.75rem;
+  white-space: nowrap;
 }
