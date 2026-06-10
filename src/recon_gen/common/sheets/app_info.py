@@ -62,7 +62,9 @@ populate_app_info_sheet(
 from __future__ import annotations
 
 import datetime as _dt
+import importlib
 import subprocess
+from typing import cast
 
 from recon_gen.common import rich_text as rt
 from recon_gen.common.config import Config
@@ -276,22 +278,88 @@ def build_matview_status_dataset(
 
 
 def _git_short_sha() -> str:
-    """Best-effort git short SHA at generate time. Returns ``"unknown"``
-    if not in a repo or git unavailable.
+    """Best-effort git short SHA. Returns ``"unknown"`` if all paths fail.
+
+    Resolution order (CY.1):
+
+    1. ``recon_gen._build_info.__build_info__["git_sha"]`` — baked at
+       wheel-build time by ``build_hook.BuildPyWithBuildInfo``. This is
+       the canonical path for any pip / uv install; the SHA reflects the
+       commit the wheel was built from.
+    2. Runtime ``git rev-parse --short HEAD`` — fallback for dev venvs
+       that imported ``recon_gen`` before the build hook ran (uncached
+       editable install bootstrap). Best-effort: writes the result to
+       ``_build_info.py`` so subsequent imports hit step 1 instead.
+    3. ``"unknown"`` — neither a wheel-baked module nor a git checkout
+       under cwd. Surfaces in the deploy stamp; not load-bearing.
 
     Intentionally swallows errors — the deploy stamp is informational
-    and shouldn't block dashboard generation if the build environment
-    lacks git (e.g., a wheel install on a server without source)."""
+    and shouldn't block dashboard generation."""
+    # Step 1: wheel-baked module. ``importlib.import_module`` avoids
+    # the static-import pyright error since ``_build_info.py`` is
+    # generated at build time and may not exist at type-check time.
+    try:
+        _mod = importlib.import_module("recon_gen._build_info")
+        info_dict = cast(dict[str, str], getattr(_mod, "__build_info__", {}))
+        baked: str = info_dict.get("git_sha", "")
+        if baked and baked != "unknown":
+            return baked
+    except ImportError:
+        pass
+
+    # Step 2: runtime git rev-parse, best-effort. Also persist to
+    # ``_build_info.py`` so later imports in the same venv skip this branch.
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
             capture_output=True, text=True, timeout=2, check=False,
         )
         if result.returncode == 0:
-            return result.stdout.strip()
+            sha = result.stdout.strip()
+            if sha:
+                _persist_build_info_best_effort(sha)
+                return sha
     except (FileNotFoundError, subprocess.SubprocessError, OSError):
         pass
+
     return "unknown"
+
+
+def _persist_build_info_best_effort(sha: str) -> None:
+    """Write a ``_build_info.py`` alongside this package so subsequent
+    ``_git_short_sha()`` calls in the same venv short-circuit on step 1.
+
+    Best-effort: silently swallows any I/O error. The dev-venv case
+    where this fires happens once per venv install; the file then
+    persists until the next ``uv sync``.
+    """
+    try:
+        import recon_gen  # local to avoid an import cycle at module load
+        from pathlib import Path
+        target = Path(recon_gen.__file__).parent / "_build_info.py"
+        if target.exists():
+            return  # don't trample a wheel-baked file
+        ts = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+        content = (
+            '"""Build-time-stamped metadata. AUTO-GENERATED — do not edit.\n'
+            "\n"
+            "Written at runtime by ``_git_short_sha()`` because the wheel\n"
+            "build hook didn't run (likely an editable install pre-build,\n"
+            "or a hand-installed sdist). The wheel-build path (CY.1)\n"
+            "writes the same file via ``build_hook.BuildPyWithBuildInfo``.\n"
+            '"""\n'
+            "\n"
+            "from __future__ import annotations\n"
+            "\n"
+            "__build_info__: dict[str, str] = {\n"
+            f'    "git_sha": {sha!r},\n'
+            f'    "built_at": {ts!r},\n'
+            '    "build_kind": "dev",\n'
+            "}\n"
+        )
+        target.write_text(content, encoding="utf-8")
+    except (OSError, ImportError):
+        pass
 
 
 def _deploy_stamp() -> tuple[str, str, str]:
@@ -405,16 +473,13 @@ def populate_app_info_sheet(
         ],
     )
 
-    # Row 2: deploy stamp text box. BH.21 (2026-05-25) — sqlite is a
-    # dev-only dialect (Postgres / Oracle ship prod); flag sqlite with
-    # an explicit "(dev build)" tag so operators reading the dialect
-    # don't mistake a local dev capture for a production deploy. PG /
-    # Oracle render bare (those ARE prod dialects).
-    dialect_line = (
-        f"dialect: {dialect} (dev build)"
-        if cfg.dialect in (Dialect.DUCKDB)
-        else f"dialect: {dialect}"
-    )
+    # Row 2: deploy stamp text box. CY.2 — DuckDB is the legit local-prod
+    # path post-CA (project_duckdb_local_default_post_ca) and the Mac mini
+    # demos run DuckDB by design. The dialect line renders bare regardless
+    # of dialect; "dev vs release" provenance now flows through CY.1's
+    # ``__build_info__.build_kind`` baked into the wheel, not by inferring
+    # build kind from dialect.
+    dialect_line = f"dialect: {dialect}"
     bullet_lines = [
         f"recon-gen: v{version}",
         f"git: {sha}",

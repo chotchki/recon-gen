@@ -1,6 +1,11 @@
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
+# CY.1 — make ``build_hook.py`` (sibling of pyproject.toml) importable
+# during the isolated PEP-517 build so the custom ``build_py`` cmdclass
+# can stamp ``src/recon_gen/_build_info.py`` before the wheel copy step.
+# Without this, setuptools' build-env can't find ``build_hook``.
+backend-path = ["."]
 
 [project]
 name = "recon-gen"
@@ -314,6 +319,14 @@ recon_gen = [
 
 [tool.setuptools.dynamic]
 version = {attr = "recon_gen.__version__"}
+
+# CY.1 — bake git short SHA + build kind + timestamp into the wheel via a
+# custom ``build_py`` cmdclass. See ``build_hook.py`` at the repo root for
+# the implementation. The cmdclass writes ``src/recon_gen/_build_info.py``
+# before setuptools' package-copy step, so the stamped module ships
+# inside the wheel.
+[tool.setuptools.cmdclass]
+build_py = "build_hook.BuildPyWithBuildInfo"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
