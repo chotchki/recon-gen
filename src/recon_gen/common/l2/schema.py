@@ -44,6 +44,8 @@ the base layer. Add them then.
 
 from __future__ import annotations
 
+from typing import Final
+
 from recon_gen.common.sql import (
     Dialect,
     analyze_table,
@@ -1350,8 +1352,16 @@ def _emit_inv_views(
       ``WINDOW w AS`` clause (added in 21c). The dialect-specific
       ``INTERVAL`` form ships inside the RANGE clause: PG ``INTERVAL
       '1 day'`` / Oracle ``INTERVAL '1' DAY``.
-    - ``{cast_avg_numeric}`` / ``{cast_stddev_numeric}`` — ``::NUMERIC``
-      on Postgres / ``CAST(... AS NUMBER)`` on Oracle.
+    - ``{cast_pair_mean_numeric}`` / ``{cast_pair_stddev_numeric}`` —
+      ``::NUMERIC`` on Postgres / ``CAST(... AS NUMBER)`` on Oracle,
+      wrapped around ``AVG(...) OVER (PARTITION BY ...)`` and
+      ``COALESCE(STDDEV_SAMP(...) OVER (PARTITION BY ...), 0)``
+      respectively. CV.2 switched these from global population
+      aggregates to per-pair PARTITION BY.
+    - ``{pair_partition}`` — the ``PARTITION BY recipient_account_id,
+      sender_account_id`` clause inlined into the OVER (...) shape.
+    - ``{min_n_floor}`` — minimum number of historical pair-windows
+      before z is non-zero (CV.2 ``_INV_MIN_HISTORICAL_WINDOWS``).
     - ``{window_start_expr}`` / ``{window_end_expr}`` — date arithmetic
       + cast to TIMESTAMP, dialect-specific interval form.
     - ``{with_recursive_kw}`` — ``WITH RECURSIVE`` on Postgres / ``WITH``
@@ -1376,21 +1386,49 @@ def _emit_inv_views(
         f"RANGE BETWEEN {range_interval_days(1, dialect)} "
         f"PRECEDING AND CURRENT ROW"
     )
+    # CV.2 — per-pair PARTITION BY z + min-n floor.
+    #
+    # `pair_partition` is the bare OVER (...) shape for partition-only
+    # aggregates (COUNT of pair history). `pair_history_window` adds an
+    # ORDER BY + ROWS UNBOUNDED PRECEDING AND 1 PRECEDING frame so the
+    # AVG / STDDEV_SAMP are computed over the pair's PRIOR rows only —
+    # the spike row never pollutes its own divisor. This is the
+    # standard "z-score vs running history" formulation and dodges the
+    # AT.0 outlier-shifts-mean trap that bit the global-z shape.
+    #
+    # Same reason `rolling_window` inlines: Oracle 19c has no named
+    # WINDOW clause.
+    pair_partition = (
+        "PARTITION BY recipient_account_id, sender_account_id"
+    )
+    pair_history_window = (
+        f"{pair_partition} "
+        f"ORDER BY {order_by_day_expr('posted_day', dialect)} "
+        f"ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING"
+    )
     return _INV_MATVIEWS_TEMPLATE.format(
         p=p,
         matview_options=matview_options(dialect),
         matview_create_kw=matview_create_keyword(dialect),
         recipient_posting_to_date=to_date("recipient.posting", dialect),
         rolling_window=rolling_window,
-        cast_avg_numeric=cast("AVG(window_sum)", "NUMERIC", dialect),
-        cast_stddev_numeric=cast(
-            "COALESCE(STDDEV_SAMP(window_sum), 0)", "NUMERIC", dialect,
+        pair_partition=pair_partition,
+        pair_history_window=pair_history_window,
+        cast_pair_mean_numeric=cast(
+            f"AVG(window_sum) OVER ({pair_history_window})",
+            "NUMERIC", dialect,
         ),
+        cast_pair_stddev_numeric=cast(
+            f"COALESCE(STDDEV_SAMP(window_sum) "
+            f"OVER ({pair_history_window}), 0)",
+            "NUMERIC", dialect,
+        ),
+        min_n_floor=str(_INV_MIN_HISTORICAL_WINDOWS),
         window_start_expr=cast(
-            date_minus_days("pw.posted_day", 1, dialect),
+            date_minus_days("ps.posted_day", 1, dialect),
             "TIMESTAMP", dialect,
         ),
-        window_end_expr=cast("pw.posted_day", "TIMESTAMP", dialect),
+        window_end_expr=cast("ps.posted_day", "TIMESTAMP", dialect),
         with_recursive_kw=with_recursive(dialect),
     )
 
@@ -3514,6 +3552,22 @@ _INV_MATVIEW_DROP_NAMES: tuple[str, ...] = (
 )
 
 
+# CV.2 — minimum number of historical pair-windows a pair must have
+# before the matview computes a non-zero z-score for any of its windows.
+# Pairs with fewer observations get `z_score = 0` (collapsed to the
+# '0-1 sigma' bucket regardless of magnitude). This eliminates the
+# pre-CV "one-shot pair → STDDEV_SAMP NULL → spike collapses" problem
+# AND prevents busy-pair payday clusters with N=1-2 observations from
+# tripping at z>4 against their own tiny sample size.
+#
+# Default 3 is the safety margin under AnomalyGenerator's default
+# `historical_window_count=10` emission (CV.1) — pairs that the plant
+# emits get N=10 observations + the spike day = 11 windows, well above
+# the floor. Customer-ETL pairs with <3 days of activity correctly
+# sit at z=0 (not enough signal to call an anomaly anyway).
+_INV_MIN_HISTORICAL_WINDOWS: Final[int] = 3
+
+
 _INV_MATVIEW_DROPS_HEADER = """\
 -- Investigation matview drops (N.3.b) — like the L1 invariant matview
 -- drops, these MUST run before the base ``{p}_transactions`` table is
@@ -3634,42 +3688,74 @@ pair_windows AS (
         SUM(day_transfer_count) OVER ({rolling_window}) AS transfer_count
     FROM pair_daily
 ),
-population AS (
-    -- Single-row scalar: mean + sample stddev across every pair-window.
-    -- Sample stddev (STDDEV_SAMP) matches the analyst convention of
-    -- "this window vs. the rest of the population".
+pair_stats AS (
+    -- CV.2 — per-pair distribution. Each window is z-scored against
+    -- its OWN pair's mean + sample stddev, not the global population.
+    -- This kills the BU.1.11 false-positive class: pre-CV, the global
+    -- population was bimodal (busy external-counterparty pairs vs
+    -- everyone else), so payday clusters on the busiest pair tripped
+    -- z>=4 from baseline alone. Per-pair z is scale-invariant — each
+    -- pair gets z-scored against its OWN history.
+    --
+    -- `pair_n` (COUNT(*) OVER same partition) drives the min-n floor
+    -- in the final SELECT: pairs with fewer than
+    -- ``_INV_MIN_HISTORICAL_WINDOWS`` observations get z=0 regardless
+    -- of magnitude (insufficient signal to discriminate).
+    --
+    -- Window aggregates (AVG/STDDEV_SAMP/COUNT OVER PARTITION BY)
+    -- are dialect-portable across PG / Oracle / DuckDB; we already
+    -- use them for the rolling SUM above.
     SELECT
-        {cast_avg_numeric}                       AS pop_mean,
-        {cast_stddev_numeric}  AS pop_stddev
+        recipient_account_id,
+        recipient_account_name,
+        recipient_account_type,
+        sender_account_id,
+        sender_account_name,
+        sender_account_type,
+        posted_day,
+        window_sum,
+        transfer_count,
+        {cast_pair_mean_numeric}      AS pair_mean,
+        {cast_pair_stddev_numeric}    AS pair_stddev,
+        -- pair_n counts the same FRAME as mean / stddev so the
+        -- min-n floor compares apples to apples: "how many PRIOR
+        -- windows does this row have to z-score against?"
+        COUNT(*) OVER ({pair_history_window}) AS pair_n
     FROM pair_windows
 )
 SELECT
-    pw.recipient_account_id,
-    pw.recipient_account_name,
-    pw.recipient_account_type,
-    pw.sender_account_id,
-    pw.sender_account_name,
-    pw.sender_account_type,
+    ps.recipient_account_id,
+    ps.recipient_account_name,
+    ps.recipient_account_type,
+    ps.sender_account_id,
+    ps.sender_account_name,
+    ps.sender_account_type,
     {window_start_expr}   AS window_start,
     {window_end_expr}                        AS window_end,
-    pw.window_sum,
-    pw.transfer_count,
-    pop.pop_mean,
-    pop.pop_stddev,
+    ps.window_sum,
+    ps.transfer_count,
+    -- Carry pair_mean + pair_stddev as the columns the dashboard /
+    -- audit PDF reads. Kept the original `pop_mean` / `pop_stddev`
+    -- column names so downstream consumers (Investigation SQL,
+    -- semantic locks, App2 fetchers) don't break — the SEMANTICS
+    -- shifted to per-pair under CV.2 but the column-shape is stable.
+    ps.pair_mean                                    AS pop_mean,
+    ps.pair_stddev                                  AS pop_stddev,
     CASE
-        WHEN pop.pop_stddev = 0 THEN 0
-        ELSE (pw.window_sum - pop.pop_mean) / pop.pop_stddev
+        WHEN ps.pair_n < {min_n_floor} THEN 0
+        WHEN ps.pair_stddev = 0 THEN 0
+        ELSE (ps.window_sum - ps.pair_mean) / ps.pair_stddev
     END                                             AS z_score,
     CASE
-        WHEN pop.pop_stddev = 0 THEN '0-1 sigma'
-        WHEN ABS((pw.window_sum - pop.pop_mean) / pop.pop_stddev) < 1 THEN '0-1 sigma'
-        WHEN ABS((pw.window_sum - pop.pop_mean) / pop.pop_stddev) < 2 THEN '1-2 sigma'
-        WHEN ABS((pw.window_sum - pop.pop_mean) / pop.pop_stddev) < 3 THEN '2-3 sigma'
-        WHEN ABS((pw.window_sum - pop.pop_mean) / pop.pop_stddev) < 4 THEN '3-4 sigma'
+        WHEN ps.pair_n < {min_n_floor} THEN '0-1 sigma'
+        WHEN ps.pair_stddev = 0 THEN '0-1 sigma'
+        WHEN ABS((ps.window_sum - ps.pair_mean) / ps.pair_stddev) < 1 THEN '0-1 sigma'
+        WHEN ABS((ps.window_sum - ps.pair_mean) / ps.pair_stddev) < 2 THEN '1-2 sigma'
+        WHEN ABS((ps.window_sum - ps.pair_mean) / ps.pair_stddev) < 3 THEN '2-3 sigma'
+        WHEN ABS((ps.window_sum - ps.pair_mean) / ps.pair_stddev) < 4 THEN '3-4 sigma'
         ELSE '4+ sigma'
     END                                             AS z_bucket
-FROM pair_windows pw
-CROSS JOIN population pop;
+FROM pair_stats ps;
 
 
 -- Investigation: money-trail recursive-CTE matview.
