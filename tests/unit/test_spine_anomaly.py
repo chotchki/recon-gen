@@ -219,33 +219,54 @@ def test_no_spike_no_anomaly() -> None:
         conn.close()
 
 
-def test_degenerate_baseline_does_not_fire() -> None:
-    """AT.0 finding: with baseline_pair_count=1, the spike's z is too
-    small to fire ('0-1 sigma'). The outlier-shifts-mean effect.
-    Default 3σ slice stays empty."""
+def test_min_n_floor_collapses_spike_when_history_below_threshold() -> None:
+    """CV.2 — replaces the pre-CV `test_degenerate_baseline_does_not_fire`.
+
+    AT.0's "outlier-shifts-mean" finding was a property of GLOBAL z;
+    under per-pair PARTITION BY z (CV.2) the spike pair is z-scored
+    against its own history only, and the matview's min-n floor
+    (default 3) collapses the z-score to 0 when fewer than 3 prior
+    windows exist.
+
+    With `historical_window_count=2`, the spike pair has 2 prior
+    windows. Per-pair `STDDEV_SAMP` computes (n≥2), but `pair_n < 3`
+    → matview returns z=0 → '0-1 sigma' → no 3σ fire.
+
+    AnomalyGenerator's `scenario_for` rejects N<2 at construction; N=2
+    is the minimum value that succeeds + still trips the floor.
+    """
     inv = AnomalyInvariant()
     view = AnomalyView()
     gen = inv.scenario_for(
         "CustomerSubledger", "CustomerSubledger",
-        baseline_pair_count=1,
+        historical_window_count=2,  # ≥ 2 (scenario_for floor); below min_n=3
     )
     conn = _fresh_db()
     try:
         gen.emit(conn)
         conn.commit()
         _refresh(conn)
-        assert view.slice(inv.detect(conn)) == set()
+        assert view.slice(inv.detect(conn)) == set(), (
+            "spike with only 2 prior windows must collapse under "
+            "the matview's min-n floor (default 3)"
+        )
     finally:
         conn.close()
 
 
-def test_generator_emit_writes_baseline_plus_spike_transactions() -> None:
-    """The statistical-by-construction property: emit() writes N
-    baseline pairs * 2 legs + 1 spike pair * 2 legs = (N+1)*2
-    transactions. AT.1 default N=100 → 202 transactions."""
+def test_generator_emit_writes_baseline_plus_history_plus_spike_transactions() -> None:
+    """CV.1 — the statistical-by-construction property: emit() writes
+    N background pairs * 2 legs + M historical pair-windows * 2 legs +
+    1 spike pair * 2 legs = (N + M + 1) * 2 transactions.
+
+    Pre-CV the count was (N + 1) * 2; post-CV.1 each spike pair gets
+    M=historical_window_count prior windows so the matview's per-pair
+    `STDDEV_SAMP` has data to z-score against.
+    """
     gen = AnomalyInvariant().scenario_for(
         "CustomerSubledger", "CustomerSubledger",
         baseline_pair_count=8,  # small for test count check
+        historical_window_count=4,  # small for test count check
     )
     conn = _fresh_db()
     try:
@@ -254,8 +275,58 @@ def test_generator_emit_writes_baseline_plus_spike_transactions() -> None:
         tx_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions",)
     finally:
         conn.close()
-    # 8 baseline pairs * 2 legs + 1 spike pair * 2 legs = 18
-    assert tx_count == 18
+    # 8 background pairs * 2 legs + 4 history pairs * 2 legs + 1 spike pair * 2 legs = 26
+    assert tx_count == 26
+
+
+def test_generator_emits_historical_windows_on_days_preceding_anchor() -> None:
+    """CV.1 — explicit assertion on the historical-window emission shape.
+
+    The spike pair (sender_account_id, recipient_account_id) must
+    appear on `historical_window_count` calendar days preceding
+    `anchor_day` PLUS on `anchor_day` itself (the spike). Verify by
+    querying distinct `posted_at::date` for the spike pair.
+    """
+    from datetime import date
+    inv = AnomalyInvariant()
+    gen = inv.scenario_for(
+        "CustomerSubledger", "CustomerSubledger",
+        historical_window_count=5,
+        baseline_pair_count=2,
+        anchor_day=date(2030, 1, 15),
+    )
+    conn = _fresh_db()
+    try:
+        gen.emit(conn)
+        conn.commit()
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT DISTINCT CAST(posting AS DATE) FROM {_PREFIX}_transactions "
+            f"WHERE account_id IN (?, ?) ORDER BY 1",
+            [gen.sender_account_id, gen.recipient_account_id],
+        )
+        days = [row[0] for row in cur.fetchall()]
+    finally:
+        conn.close()
+    # 5 historical days (Jan 10-14) + the spike on Jan 15 = 6 distinct days.
+    assert len(days) == 6, f"expected 6 distinct days, got {days}"
+    assert days[-1] == date(2030, 1, 15), (
+        f"anchor day must be the latest: {days}"
+    )
+    # Furthest back is anchor_day - historical_window_count.
+    assert days[0] == date(2030, 1, 10), (
+        f"oldest historical day mismatch: {days}"
+    )
+
+
+def test_generator_historical_window_count_below_two_fails_loud() -> None:
+    """CV.1 — per-pair `STDDEV_SAMP` is degenerate at n<2. Loud-fail at
+    construction beats silent zero z-scores downstream."""
+    with pytest.raises(ValueError, match="historical_window_count must be"):
+        AnomalyInvariant().scenario_for(
+            "CustomerSubledger", "CustomerSubledger",
+            historical_window_count=1,
+        )
 
 
 # ---------------------------------------------------------------------------
