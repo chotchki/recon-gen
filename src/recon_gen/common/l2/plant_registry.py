@@ -37,12 +37,47 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, Final
 
+# BV.3.3.c.bug2 — hoisted from per-invoke local-import blocks. Originally
+# every ``_invoke_*_plant`` body did its own ``from recon_gen.common.l2.seed
+# import ...`` to defer the import cost. That deferral meant a stale long-
+# running Studio process (whose ``sys.modules['recon_gen.common.l2.seed']``
+# pre-dated a new dataclass like ``LedgerDriftPlant``) only blew up on the
+# operator's first click — `ImportError: cannot import name
+# 'LedgerDriftPlant' from 'recon_gen.common.l2.seed'` (see
+# docs/audits/_archive/bv_cold_read_v3.md §P1.1). Hoisting to module-level
+# converts that into a process-boot ImportError instead — caught by the
+# anti-drift smoke test (``test_bv33c_ledgerdrift_import_smoke``) AND
+# loudly visible on `recon-gen studio` startup, so the operator never sees
+# the tooltip-buried failure mode again. ``seed`` has no circular dep on
+# ``plant_registry`` (only ``v_overlay`` imports us, behind TYPE_CHECKING).
+from recon_gen.common.l2.seed import (
+    ChainParentDisagreementPlant,
+    DriftPlant,
+    ExpectedEodBalancePlant,
+    FanInChainExtraParentPlant,
+    FanInChainMissingParentPlant,
+    InboundCapBreachPlant,
+    LedgerDriftPlant,
+    LimitBreachPlant,
+    MultiXorMissedPlant,
+    MultiXorOverlapPlant,
+    OverdraftPlant,
+    ScenarioPlant,
+    StuckPendingPlant,
+    StuckUnbundledPlant,
+    SupersessionPlant,
+    TemplateInstance,
+    XorVariantMissedFiringPlant,
+    XorVariantOverlapPlant,
+    emit_seed,
+)
+
 if TYPE_CHECKING:
     from recon_gen.common.l2.primitives import AccountTemplate, L2Instance
-    from recon_gen.common.l2.seed import ScenarioPlant, TemplateInstance
 
 
 class PlantCategory(str, Enum):
@@ -367,7 +402,6 @@ def _emit_scenario(
     dialect: object,
 ) -> str:
     """Call ``emit_seed`` with the right dialect coercion."""
-    from recon_gen.common.l2.seed import emit_seed  # noqa: PLC0415
     from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
 
     return emit_seed(
@@ -393,13 +427,10 @@ def _invoke_drift_plant(
     Picker resolves the inbound 2-leg rail + its external counter Account
     from the L2; the operator picks ``days_ago`` + ``delta_money`` only.
     """
-    from decimal import Decimal  # noqa: PLC0415
-
     from recon_gen.common.l2.auto_scenario import (  # noqa: PLC0415
         _pick_external_counter_for_rail,
         _pick_inbound_2leg_rail,
     )
-    from recon_gen.common.l2.seed import DriftPlant, ScenarioPlant  # noqa: PLC0415
 
     instance = _require_instance(instance)
     template, cust1, cust2 = _materialize_customers(instance)
@@ -450,12 +481,6 @@ def _invoke_ledger_drift_plant(
     parent_role. Operator picks ``days_ago`` + ``delta_money``; the
     spine generator handles the rest.
     """
-    from decimal import Decimal  # noqa: PLC0415
-
-    from recon_gen.common.l2.seed import (  # noqa: PLC0415
-        LedgerDriftPlant, ScenarioPlant,
-    )
-
     instance = _require_instance(instance)
     _, cust1, cust2 = _materialize_customers(instance)
     scenario = ScenarioPlant(
@@ -483,12 +508,6 @@ def _invoke_overdraft_plant(
     """Adapter for ``OverdraftPlant`` — plants a (customer, day) cell
     where stored balance goes negative. ``money`` MUST be negative
     (the SHOULD-constraint fires on balance < 0)."""
-    from decimal import Decimal  # noqa: PLC0415
-
-    from recon_gen.common.l2.seed import (  # noqa: PLC0415
-        OverdraftPlant, ScenarioPlant,
-    )
-
     instance = _require_instance(instance)
     _, cust1, cust2 = _materialize_customers(instance)
     money_dec = Decimal(money)
@@ -538,9 +557,6 @@ def _invoke_limit_breach_outbound_plant(
         _cap_breach_amount,
         _pick_breach_inputs,
     )
-    from recon_gen.common.l2.seed import (  # noqa: PLC0415
-        LimitBreachPlant, ScenarioPlant,
-    )
 
     instance = _require_instance(instance)
     template, cust1, cust2 = _materialize_customers(instance)
@@ -584,9 +600,6 @@ def _invoke_limit_breach_inbound_plant(
         _cap_breach_amount,
         _pick_inbound_breach_inputs,
     )
-    from recon_gen.common.l2.seed import (  # noqa: PLC0415
-        InboundCapBreachPlant, ScenarioPlant,
-    )
 
     instance = _require_instance(instance)
     template, cust1, cust2 = _materialize_customers(instance)
@@ -626,13 +639,8 @@ def _invoke_stuck_pending_plant(
     """Adapter for ``StuckPendingPlant``. Picker finds the first Rail
     declaring ``max_pending_age``; the operator picks ``days_ago``
     (should comfortably exceed the rail's cap) + the amount."""
-    from decimal import Decimal  # noqa: PLC0415
-
     from recon_gen.common.l2.auto_scenario import (  # noqa: PLC0415
         _pick_first_with,
-    )
-    from recon_gen.common.l2.seed import (  # noqa: PLC0415
-        ScenarioPlant, StuckPendingPlant,
     )
 
     instance = _require_instance(instance)
@@ -671,13 +679,8 @@ def _invoke_stuck_unbundled_plant(
 ) -> str:
     """Adapter for ``StuckUnbundledPlant``. Picker finds the first Rail
     declaring ``max_unbundled_age``."""
-    from decimal import Decimal  # noqa: PLC0415
-
     from recon_gen.common.l2.auto_scenario import (  # noqa: PLC0415
         _pick_first_with,
-    )
-    from recon_gen.common.l2.seed import (  # noqa: PLC0415
-        ScenarioPlant, StuckUnbundledPlant,
     )
 
     instance = _require_instance(instance)
@@ -722,9 +725,6 @@ def _invoke_chain_parent_disagreement_plant(
     from recon_gen.common.l2.auto_scenario import (  # noqa: PLC0415
         _pick_two_template_chain_inputs,
     )
-    from recon_gen.common.l2.seed import (  # noqa: PLC0415
-        ChainParentDisagreementPlant, ScenarioPlant,
-    )
 
     instance = _require_instance(instance)
     _, cust1, cust2 = _materialize_customers(instance)
@@ -762,9 +762,6 @@ def _invoke_xor_group_missed_plant(
     a TransferTemplate with ≥1 XOR group AND a witness leg outside it."""
     from recon_gen.common.l2.auto_scenario import (  # noqa: PLC0415
         _pick_xor_missed_firing_inputs,
-    )
-    from recon_gen.common.l2.seed import (  # noqa: PLC0415
-        ScenarioPlant, XorVariantMissedFiringPlant,
     )
 
     instance = _require_instance(instance)
@@ -805,9 +802,6 @@ def _invoke_xor_group_overlap_plant(
     every declared XOR group qualifies)."""
     from recon_gen.common.l2.auto_scenario import (  # noqa: PLC0415
         _pick_xor_overlap_inputs,
-    )
-    from recon_gen.common.l2.seed import (  # noqa: PLC0415
-        ScenarioPlant, XorVariantOverlapPlant,
     )
 
     instance = _require_instance(instance)
@@ -850,9 +844,6 @@ def _invoke_fan_in_missing_parent_plant(
     from recon_gen.common.l2.auto_scenario import (  # noqa: PLC0415
         _pick_fan_in_chain_inputs,
     )
-    from recon_gen.common.l2.seed import (  # noqa: PLC0415
-        FanInChainMissingParentPlant, ScenarioPlant,
-    )
 
     instance = _require_instance(instance)
     _, cust1, cust2 = _materialize_customers(instance)
@@ -894,9 +885,6 @@ def _invoke_fan_in_extra_parent_plant(
     (the picker raises ValueError in that case)."""
     from recon_gen.common.l2.auto_scenario import (  # noqa: PLC0415
         _pick_fan_in_chain_inputs,
-    )
-    from recon_gen.common.l2.seed import (  # noqa: PLC0415
-        FanInChainExtraParentPlant, ScenarioPlant,
     )
 
     instance = _require_instance(instance)
@@ -942,9 +930,6 @@ def _invoke_multi_xor_missed_plant(
     from recon_gen.common.l2.auto_scenario import (  # noqa: PLC0415
         _pick_multi_xor_chain_inputs,
     )
-    from recon_gen.common.l2.seed import (  # noqa: PLC0415
-        MultiXorMissedPlant, ScenarioPlant,
-    )
 
     instance = _require_instance(instance)
     _, cust1, cust2 = _materialize_customers(instance)
@@ -981,9 +966,6 @@ def _invoke_multi_xor_overlap_plant(
     XOR siblings."""
     from recon_gen.common.l2.auto_scenario import (  # noqa: PLC0415
         _pick_multi_xor_chain_inputs,
-    )
-    from recon_gen.common.l2.seed import (  # noqa: PLC0415
-        MultiXorOverlapPlant, ScenarioPlant,
     )
 
     instance = _require_instance(instance)
@@ -1025,13 +1007,8 @@ def _invoke_supersession_audit_plant(
     ``days_ago`` + the original + corrected amounts (the diagnostic
     matview surfaces the (original, correction) pair; non-trivial
     delta is what makes the demo visually obvious)."""
-    from decimal import Decimal  # noqa: PLC0415
-
     from recon_gen.common.l2.auto_scenario import (  # noqa: PLC0415
         _pick_supersession_rail,
-    )
-    from recon_gen.common.l2.seed import (  # noqa: PLC0415
-        ScenarioPlant, SupersessionPlant,
     )
 
     instance = _require_instance(instance)
@@ -1083,12 +1060,7 @@ def _invoke_expected_eod_balance_breach_plant(
     ``<prefix>_expected_eod_balance_breach`` matview surfaces a row when
     variance != 0.
     """
-    from decimal import Decimal  # noqa: PLC0415
-
     from recon_gen.common.l2.primitives import Identifier  # noqa: PLC0415
-    from recon_gen.common.l2.seed import (  # noqa: PLC0415
-        ExpectedEodBalancePlant, ScenarioPlant,
-    )
 
     instance = _require_instance(instance)
     _, cust1, cust2 = _materialize_customers(instance)
