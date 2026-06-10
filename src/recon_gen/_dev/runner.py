@@ -1375,6 +1375,13 @@ AWS_TOUCHING_LAYERS: Final = ("deploy", "qs_api", "qs_browser")
 # ephemeral — their ~5s cold-start doesn't justify the cleanup-hygiene
 # cost, and per-cell naming would just litter the daemon.
 ORACLE_REUSE_CONTAINER_PREFIX: Final = "quicksight-test-oracle-"
+# CB.17.k — the xdist-shared PG container's stable name. Single name
+# (not a prefix family) because one container is shared across all
+# workers in a `pytest -n auto` run; conftest's `pg_container_url`
+# fixture does adopt-or-create against this name. Mirrored from
+# `tests/conftest.py::_SHARED_PG_CONTAINER_NAME`; kept as a separate
+# constant here so `_cmd_down_local` doesn't reach into the test tree.
+PG_SHARED_CONTAINER_NAME: Final = "recon-gen-test-pg"
 # Pinned password matches the testcontainers `OracleDbContainer`
 # behavior when `oracle_password` is explicitly set. Without pinning,
 # testcontainers randomizes per invocation (`hex(randbits(24))`) and
@@ -2898,9 +2905,10 @@ def cmd_down(args: argparse.Namespace) -> int:
     """Tear down dependencies. scope = local (default).
 
     Destructive — requires --yes (Y.2.gate.b.14.3 destructive-op
-    opt-in). Stops the named persistent Oracle containers (PG
-    containers are ephemeral, no action needed). The `aws` scope was
-    removed in CB.11.a.2 along with RDS Aurora.
+    opt-in). Stops the named persistent local DB containers: the
+    Oracle reuse-prefix family (j.5) AND the CB.17.k shared PG
+    container (`recon-gen-test-pg`). The `aws` scope was removed in
+    CB.11.a.2 along with RDS Aurora.
     """
     if not args.yes and not RECON_GEN_RUNNER_YES.get_or_none():
         print(
@@ -2921,9 +2929,18 @@ def cmd_down(args: argparse.Namespace) -> int:
 
 
 def _cmd_down_local() -> int:
-    """Stop persistent local containers (Oracle reuse pattern from j.5).
-    PG containers are ephemeral — testcontainers tears them down per
-    test session — so no action there.
+    """Stop persistent local containers.
+
+    Two families today:
+      * Oracle reuse-prefix containers (j.5 pattern, per-cell names
+        under `quicksight-test-oracle-*`).
+      * The CB.17.k shared PG container `recon-gen-test-pg` (a stable
+        single name; adopted-or-created by the `pg_container_url`
+        session fixture and persists across `pytest` invocations).
+
+    Pre-CB.17.k PG was genuinely ephemeral (testcontainers tore it down
+    per session); the docstring claim has been stale since the shared
+    fixture landed. Symmetric teardown closes that gap.
     """
     result = subprocess.run(
         ["docker", "ps", "--filter",
@@ -2938,6 +2955,28 @@ def _cmd_down_local() -> int:
         )
         return EXIT_NEEDS_OPERATOR
     names = [n for n in result.stdout.strip().splitlines() if n]
+
+    # CB.17.k shared PG container — stable single name, not a prefix
+    # family. `docker ps --filter name=<X>` is a substring match, so a
+    # separate exact-name probe keeps the two concerns decoupled (and
+    # avoids matching unrelated containers that happen to share the
+    # `recon-gen-test-pg` substring).
+    pg_result = subprocess.run(
+        ["docker", "ps", "--filter",
+         f"name=^{PG_SHARED_CONTAINER_NAME}$",
+         "--format", "{{.Names}}"],
+        capture_output=True, text=True, check=False,
+    )
+    if pg_result.returncode != 0:
+        print(
+            f"runner: docker ps (pg) failed (rc={pg_result.returncode}): "
+            f"{pg_result.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return EXIT_NEEDS_OPERATOR
+    pg_names = [n for n in pg_result.stdout.strip().splitlines() if n]
+    names = [*names, *pg_names]
+
     if not names:
         print("runner: down local — no persistent local containers running")
         return EXIT_SUCCESS
