@@ -38,6 +38,16 @@ if TYPE_CHECKING:
     from recon_gen.common.l2.plant_registry import PlantKindEntry
 
 
+# BV.3.3 — apply_plants accepts plants whose contract.mutates is in this
+# set. Re-exported from plant_registry as a single source of truth;
+# guarded by a TYPE_CHECKING-aware lazy lookup inside apply_plants to
+# keep this module's import graph narrow (no eager import of
+# plant_registry at module load, which pulls in seed.py + spine etc.).
+def _allowed_plant_mutation_surfaces() -> frozenset[str]:
+    from recon_gen.common.l2.plant_registry import _ALLOWED_MUTATION_SURFACES  # noqa: PLC0415
+    return _ALLOWED_MUTATION_SURFACES
+
+
 def v_overlay_prefix(base_prefix: str) -> str:
     """The conventional `<base>_v` suffix per DL.3.
 
@@ -512,6 +522,27 @@ async def apply_plants(
                         plants_by_kind[k] for k in diff.to_add
                         if k in plants_by_kind
                     ]
+
+                # BV.3.3 — contract gate. The snapshot/restore lifecycle
+                # assumes every plant_function only mutates v-overlay
+                # tables; if a future entry widens its mutation surface
+                # without updating the snapshot caller, fail loudly here
+                # rather than corrupt the base prefix. The check runs
+                # OUTSIDE the per-plant try/except — a contract violation
+                # is a coding-time bug (registry entry misdeclares its
+                # surface), not a runtime per-plant failure. Surface it
+                # before any plant runs so the operator sees the
+                # actionable RuntimeError instead of a buried "failed
+                # plant" badge.
+                allowed = _allowed_plant_mutation_surfaces()
+                for entry, _kwargs in kinds_to_run:
+                    if entry.contract.mutates not in allowed:
+                        raise RuntimeError(
+                            f"Plant {entry.kind!r} declares "
+                            f"contract.mutates={entry.contract.mutates!r}, "
+                            f"which apply_plants does not support. "
+                            f"Allowed: {sorted(allowed)}."
+                        )
 
                 for entry, kwargs in kinds_to_run:
                     try:

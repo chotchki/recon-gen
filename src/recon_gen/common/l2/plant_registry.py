@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Literal
 
 # BV.3.3.c.bug2 — hoisted from per-invoke local-import blocks. Originally
 # every ``_invoke_*_plant`` body did its own ``from recon_gen.common.l2.seed
@@ -163,6 +163,74 @@ class DashboardCheck:
     expect_text_contains: str | None = None
 
 
+# -- Plant invariant contract (BV.3.3 snapshot) -----------------------------
+#
+# Every registry entry declares which surface its plant_function is
+# allowed to mutate. The contract gates the snapshot/restore pattern:
+# the BV.3.3 trainer-dogfood test snapshots the v-overlay once, runs all
+# plants against the snapshot, restores per-plant; that lifecycle only
+# holds if every plant_function actually constrains its writes to the
+# v overlay tables. Anything that touches DDL, the base prefix, or any
+# out-of-overlay object would invalidate the snapshot.
+#
+# Audit finding (BV.3.3): every plant_function in this module emits
+# only ``INSERT INTO {prefix}_<table>`` / ``DELETE FROM {prefix}_<table>``
+# / ``UPDATE {prefix}_<table>`` SQL, where ``{prefix}`` is the
+# caller-supplied table prefix. The canonical caller (``apply_plants``
+# in ``v_overlay.py``) passes ``v_overlay_prefix(base)``, so the writes
+# land on ``<base>_v_*`` overlay tables. No plant emits DDL; no plant
+# hardcodes ``<base>_*`` references.
+#
+# The contract is caller-blind by design: the plant emits SQL relative
+# to the prefix it gets, and the SNAPSHOT/RESTORE caller is responsible
+# for handing the v-overlay prefix in. The legacy
+# ``/training/plant/<kind>/apply`` route (``_studio_routes.py``) still
+# passes the base prefix directly — out of scope for this contract gate,
+# tracked separately.
+
+# Allowed values for ``PlantContract.mutates``. Single member today;
+# extend only when an audited plant legitimately needs a wider surface
+# (and the BV.3.3 snapshot lifecycle is updated to handle it).
+PlantMutationSurface = Literal["v_overlay_only"]
+
+_ALLOWED_MUTATION_SURFACES: Final[frozenset[str]] = frozenset({"v_overlay_only"})
+
+
+@dataclass(frozen=True, slots=True)
+class PlantContract:
+    """Invariant declared by every PLANT_REGISTRY entry.
+
+    Carries the per-plant guarantees the BV.3.3 snapshot/restore
+    lifecycle relies on. Construction-time validation rejects any value
+    not in ``_ALLOWED_MUTATION_SURFACES`` so a typo in a future entry
+    fails at import time, not at trainer apply time.
+
+    Fields:
+      mutates: Which table surface the plant_function writes to.
+        ``'v_overlay_only'`` is the only currently-allowed value —
+        the plant emits SQL exclusively against ``{prefix}_*`` tables
+        (transactions / daily_balances / config_kv / matviews) and the
+        ``apply_plants`` caller threads in the v-overlay prefix.
+    """
+
+    mutates: PlantMutationSurface = "v_overlay_only"
+
+    def __post_init__(self) -> None:
+        if self.mutates not in _ALLOWED_MUTATION_SURFACES:
+            raise ValueError(
+                f"PlantContract.mutates must be one of "
+                f"{sorted(_ALLOWED_MUTATION_SURFACES)}; got {self.mutates!r}."
+            )
+
+
+# Default contract reused across every BV.3.3-audited registry entry.
+# Module-level singleton (rather than per-entry construction) so the
+# anti-drift unit test can identity-compare against this constant.
+DEFAULT_PLANT_CONTRACT: Final[PlantContract] = PlantContract(
+    mutates="v_overlay_only",
+)
+
+
 # -- The registry entry -----------------------------------------------------
 
 
@@ -191,6 +259,11 @@ class PlantKindEntry:
     # appends this qualifier to the title so the operator can tell
     # the sub-kinds apart. Empty for kinds with a unique section_kind.
     kind_qualifier: str | None = None
+    # BV.3.3 — typed mutation-surface invariant. Defaults to
+    # ``DEFAULT_PLANT_CONTRACT`` (mutates='v_overlay_only') because every
+    # current registry entry audited as v-overlay-only. Override only
+    # with operator review.
+    contract: PlantContract = DEFAULT_PLANT_CONTRACT
 
 
 # -- Plant-function adapters ------------------------------------------------
