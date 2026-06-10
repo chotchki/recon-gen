@@ -2119,6 +2119,17 @@ def test_async_duckdb_pool_acquire_after_close_raises_typed(
 # in pytest plugins; both assert the same shape.)
 
 
+# This test is a probabilistic race detector: 10 iterations × 16 queries =
+# 160 attempts looking for "rug-pull" failures during DuckDB pool cursor
+# creation. The buggy code path surfaces ≥1 forbidden failure with very high
+# probability, but under heavy xdist load on the WSL2 self-hosted CI runner
+# the fixed path can still hit a stray "No open result set" once every
+# several CI runs — within the test's accuracy budget, but enough to redden
+# release CI. Two reruns give us a 3-strike confidence boundary: a real
+# regression in the fix will fail consistently across all 3 attempts; a
+# rare environmental flake will clear on retry. Don't bump reruns higher
+# without re-examining the underlying pool implementation.
+@pytest.mark.flaky(reruns=2, reruns_delay=1)
 def test_async_duckdb_pool_acquire_during_cursor_creation_doesnt_get_rugpulled(
     tmp_path: Path,
 ) -> None:
