@@ -95,7 +95,15 @@ def _apply_schema_and_plant_two_rows(
     """Set up a DuckDB tempfile DB with the L2 schema + two planted rows
     so the wipe has something to delete. Plants conform to the L2 v6
     schema's CHECK constraints (amount_direction enum, sign-direction
-    agreement, account_scope enum)."""
+    agreement, account_scope enum).
+
+    CZ.6.1 — rows carry ``metadata.source='training'`` (the CZ.2 stamp
+    every post-CZ seed-pipeline writer attaches) so the step_2_wipe
+    auto-mark in standalone mode (``cfg.etl_hook is None``) treats
+    them as post-CZ rows and skips the migrate_mark event. Tests that
+    specifically want pre-CZ unstamped rows are in
+    ``test_cz_migrate_mark.py``.
+    """
     schema_sql = emit_schema(
         instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
     )
@@ -104,20 +112,21 @@ def _apply_schema_and_plant_two_rows(
         f"INSERT INTO {p}_transactions ("
         "id, account_id, account_scope, "
         "amount_money, amount_direction, status, posting, "
-        "transfer_id, rail_name, origin"
+        "transfer_id, rail_name, origin, metadata"
         ") VALUES ("
         "'t1', 'a1', 'internal', "
         "100.00, 'Credit', 'posted', '2030-01-01 00:00:00', "
-        "'g1', 'r1', 'inbound'"
+        "'g1', 'r1', 'inbound', '{\"source\":\"training\"}'"
         ");"
     )
     plant_bal = (
         f"INSERT INTO {p}_daily_balances ("
         "account_id, account_scope, "
-        "business_day_start, business_day_end, money"
+        "business_day_start, business_day_end, money, metadata"
         ") VALUES ("
         "'a1', 'internal', "
-        "'2030-01-01 00:00:00', '2030-01-02 00:00:00', 100.00"
+        "'2030-01-01 00:00:00', '2030-01-02 00:00:00', 100.00, "
+        "'{\"source\":\"training\"}'"
         ");"
     )
     conn = connect_demo_db(cfg)

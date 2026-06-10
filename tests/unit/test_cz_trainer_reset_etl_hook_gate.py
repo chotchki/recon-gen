@@ -363,8 +363,16 @@ def test_step_2_wipe_synthetic_only_deletes_only_training_rows(
 ) -> None:
     """End-to-end on DuckDB — synthetic-only wipe deletes only the
     ``metadata.source='training'`` rows. The other three shapes
-    (marked-real / unmarked JSON / NULL metadata) all survive."""
-    cfg = _duckdb_cfg(tmp_path)
+    (marked-real / unmarked JSON / NULL metadata) all survive.
+
+    CZ.6.1 — etl_hook is set so step_2_wipe's auto-mark stays
+    silent (otherwise unmarked rows would be auto-stamped 'training'
+    in standalone mode + caught by the synthetic_only WHERE). This
+    test specifically isolates the CZ.3 wipe SQL narrowing contract;
+    the CZ.6.1 standalone-mode auto-mark interaction is covered in
+    tests/unit/test_cz_migrate_mark.py.
+    """
+    cfg = _duckdb_cfg(tmp_path, etl_hook="/bin/true")
     _apply_schema(cfg, spec_example_instance)
     _plant_tagged_rows(cfg)
     pre_tx, pre_bal = _row_counts(cfg)

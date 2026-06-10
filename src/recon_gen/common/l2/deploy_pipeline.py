@@ -46,6 +46,10 @@ from recon_gen.common.db import (
     execute_script,
     fetch_one_required,
 )
+from recon_gen.common.l2.migrate_mark import (
+    count_unstamped_rows,
+    stamp_unstamped_rows,
+)
 from recon_gen.common.l2.primitives import Identifier
 from recon_gen.common.l2.schema import (
     emit_schema,
@@ -307,9 +311,22 @@ async def step_2_wipe(
     # schema in-place so Session Start is self-sufficient on a virgin
     # DB. Populated DBs cost one no-op SELECT.
     schema_emitted: bool = False
+    # CZ.6.1 — third call site for the pre-CZ auto-mark (alongside the
+    # explicit ``schema migrate-mark`` verb and ``data apply --execute``
+    # pre-flight). Studio's Deploy-changes path lands here without going
+    # through either of those — without auto-marking, a synthetic_only
+    # wipe on a populated pre-CZ DB skips the unstamped rows entirely
+    # (the WHERE narrows to ``metadata.source='training'``), so those
+    # rows pollute every subsequent invariant check. Auto-mark fires
+    # after the schema-emit probe but BEFORE the wipe SQL so the
+    # narrowed DELETE catches them. Gated on ``cfg.etl_hook is None``
+    # (standalone-mode default per the CZ.0 REPLAN locked decision —
+    # in ETL mode the unstamped rows may be real customer data; the
+    # operator must run the explicit verb to choose --source).
+    auto_marked: tuple[int, int] = (0, 0)
 
     def _run_wipe() -> tuple[int, int]:
-        nonlocal schema_emitted
+        nonlocal schema_emitted, auto_marked
         conn = connect_demo_db(cfg)
         try:
             cur = conn.cursor()
@@ -331,6 +348,27 @@ async def step_2_wipe(
                     execute_script(cur, schema_sql, dialect=cfg.dialect)
                     conn.commit()
                     schema_emitted = True
+                # CZ.6.1 — auto-mark pre-CZ rows before the wipe (see
+                # comment block above the nested function). Idempotent:
+                # on a freshly-emitted schema OR an already-stamped DB,
+                # ``count_unstamped_rows`` returns (0, 0) and we skip
+                # the UPDATE + the dev_log event entirely.
+                if cfg.etl_hook is None:
+                    try:
+                        tx_unstamped, bal_unstamped = count_unstamped_rows(
+                            conn, prefix=p, dialect=cfg.dialect,
+                        )
+                    except Exception:  # noqa: BLE001 — dialect-specific catalog errors; defensive — schema_emitted path already created the tables, but a partial-schema state could still raise
+                        tx_unstamped, bal_unstamped = 0, 0
+                    if tx_unstamped + bal_unstamped > 0:
+                        stamp_unstamped_rows(
+                            conn,
+                            prefix=p,
+                            dialect=cfg.dialect,
+                            source="training",
+                        )
+                        conn.commit()
+                        auto_marked = (tx_unstamped, bal_unstamped)
                 # Count first so the dev_log can report what was wiped.
                 cur.execute(f"SELECT COUNT(*) FROM {p}_transactions")
                 tx_count = int(fetch_one_required(cur)[0])
@@ -349,6 +387,17 @@ async def step_2_wipe(
         await _emit(dev_log, {
             "event": "deploy:step2:schema_emitted",
             "reason": "base tables missing — auto-emitted via emit_schema",
+        })
+    if auto_marked[0] + auto_marked[1] > 0:
+        await _emit(dev_log, {
+            "event": "deploy:step2:migrate_mark",
+            "transactions_stamped": auto_marked[0],
+            "daily_balances_stamped": auto_marked[1],
+            "source": "training",
+            "reason": (
+                "pre-CZ rows lacked metadata.source; auto-marked "
+                "(cfg.etl_hook is None ⇒ standalone-mode default)."
+            ),
         })
     await _emit(dev_log, {
         "event": "deploy:step2:wipe:done",

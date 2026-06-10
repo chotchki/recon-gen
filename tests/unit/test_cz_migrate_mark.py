@@ -21,6 +21,7 @@ DB is exercised in the higher tiers).
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -654,3 +655,191 @@ def test_pre_flight_silent_when_base_tables_missing(
     )
     # Should not raise.
     _cz6_pre_flight_migrate_mark(cfg)
+
+
+# ---------------------------------------------------------------------------
+# CZ.6.1 — deploy_pipeline.step_2_wipe auto-mark call site
+# ---------------------------------------------------------------------------
+#
+# step_2_wipe is the third call site for the pre-CZ auto-mark
+# (alongside the explicit ``schema migrate-mark`` verb and the
+# ``data apply --execute`` pre-flight). It fires AFTER the schema-
+# emit probe (which sets ``schema_emitted``) but BEFORE the wipe SQL
+# runs — so that on a populated pre-CZ DB the subsequent
+# synthetic_only wipe correctly DELETEs the now-stamped rows (the
+# WHERE narrows to ``metadata.source='training'``).
+#
+# Gated on ``cfg.etl_hook is None`` per the CZ.0 REPLAN locked
+# decision: in ETL mode the unstamped rows may be real customer data;
+# operator must run the explicit verb to choose --source.
+#
+# These tests exercise the integration through ``step_2_wipe`` — the
+# helper-level count + stamp shapes are covered above.
+
+
+def _load_spec_example() -> "Any":
+    """Local alias for the bundled L2 fixture so the helper functions
+    below don't need to be parameterized over loader paths."""
+    return load_instance(_SPEC_EXAMPLE_YAML)
+
+
+def _step_2_wipe_cfg(db_path: Path, *, etl_hook: str | None) -> Config:
+    """Config bound to a DuckDB tempfile + the requested etl_hook state."""
+    return Config(
+        aws_account_id="111111111111",
+        aws_region="us-east-1",
+        deployment_name="cz6-test",
+        db_table_prefix=_PREFIX,
+        demo_database_url=f"duckdb:///{db_path}",
+        dialect=Dialect.DUCKDB,
+        etl_hook=etl_hook,
+    )
+
+
+def test_step_2_wipe_auto_marks_when_etl_hook_is_none(
+    tmp_path: Path,
+) -> None:
+    """Standalone-mode + populated DB with pre-CZ rows → step_2_wipe
+    auto-stamps them BEFORE the wipe SQL runs.
+
+    This is the CZ.6.1 substantive case: without auto-mark, a
+    Trainer-reset / Studio Deploy-changes synthetic_only wipe would
+    skip the unstamped rows entirely (WHERE narrows to
+    ``metadata.source='training'``), leaving them to pollute the
+    standalone-mode invariant gate. Auto-mark stamps them so the
+    narrowed DELETE catches them.
+    """
+    import asyncio as _asyncio
+
+    from recon_gen.common.l2.deploy_pipeline import step_2_wipe
+
+    db_path = tmp_path / "cz61.duckdb"
+    _seed_unstamped_db(db_path)
+    cfg = _step_2_wipe_cfg(db_path, etl_hook=None)
+    instance = _load_spec_example()
+
+    events: list[Mapping[str, object]] = []
+
+    async def _capture(payload: Mapping[str, object]) -> None:
+        events.append(dict(payload))
+
+    _asyncio.run(step_2_wipe(cfg, instance, dev_log=_capture))
+
+    # Sanity: the migrate_mark event surfaces with the stamped counts
+    # so the operator's live-tail shows what happened.
+    mm_events = [
+        e for e in events if e.get("event") == "deploy:step2:migrate_mark"
+    ]
+    assert len(mm_events) == 1, (
+        f"expected exactly one deploy:step2:migrate_mark event, "
+        f"got events={[e.get('event') for e in events]}"
+    )
+    assert mm_events[0]["transactions_stamped"] == 2
+    assert mm_events[0]["daily_balances_stamped"] == 1
+    assert mm_events[0]["source"] == "training"
+
+    # Post-condition: every row is now stamped (count_unstamped is 0).
+    # The wipe SQL (synthetic_only=False default) then emptied both
+    # tables, but the assertion above proves the auto-mark fired
+    # before that — re-seed + re-count would just show 0 from the
+    # empty tables. So re-run count on the actual updated rows by
+    # seeding again with already-stamped rows is overkill; the event
+    # payload is the contract.
+
+
+def test_step_2_wipe_skips_auto_mark_when_etl_hook_configured(
+    tmp_path: Path,
+) -> None:
+    """ETL mode (``cfg.etl_hook is not None``) → step_2_wipe does NOT
+    auto-mark pre-CZ rows + emits no migrate_mark event.
+
+    Those rows may be real customer data that the integrator's etl_hook
+    loaded before the CZ upgrade; auto-stamping them ``training`` would
+    silently make them eligible for synthetic_only deletion. Operator
+    must opt in via the explicit ``schema migrate-mark`` verb.
+    """
+    import asyncio as _asyncio
+
+    from recon_gen.common.l2.deploy_pipeline import step_2_wipe
+
+    db_path = tmp_path / "cz61.duckdb"
+    _seed_unstamped_db(db_path)
+    cfg = _step_2_wipe_cfg(db_path, etl_hook="/bin/true")
+    instance = _load_spec_example()
+
+    events: list[Mapping[str, object]] = []
+
+    async def _capture(payload: Mapping[str, object]) -> None:
+        events.append(dict(payload))
+
+    _asyncio.run(step_2_wipe(cfg, instance, dev_log=_capture))
+
+    # No migrate_mark event — the auto-mark was skipped entirely.
+    mm_events = [
+        e for e in events if e.get("event") == "deploy:step2:migrate_mark"
+    ]
+    assert mm_events == [], (
+        f"ETL-mode step_2_wipe should NOT auto-mark; got {mm_events}"
+    )
+
+    # Pre-CZ rows were eligible for the full TRUNCATE-style default
+    # wipe (synthetic_only=False), so the table is empty afterward —
+    # but they were never STAMPED. Verifying the "no stamp" half:
+    # re-seed + count_unstamped should still see them all unstamped.
+    # (Easier: re-seed a fresh DB + repeat the run with the dev_log
+    # off to spot-check. The event-absence above is the contract.)
+
+
+def test_step_2_wipe_no_op_when_no_pre_cz_rows(
+    tmp_path: Path,
+) -> None:
+    """Steady-state path: every row already carries metadata.source →
+    step_2_wipe's auto-mark counts (0, 0), runs no UPDATE, and emits
+    no migrate_mark event (no log noise on the common path)."""
+    import asyncio as _asyncio
+
+    from recon_gen.common.l2.deploy_pipeline import step_2_wipe
+
+    db_path = tmp_path / "cz61.duckdb"
+    # Apply schema + plant ONE properly-stamped row per base table so
+    # the wipe has something to delete (rules out "no rows ⇒ trivial").
+    conn = duckdb.connect(str(db_path))
+    instance = _load_spec_example()
+    cur = conn.cursor()
+    execute_script(
+        cur, emit_schema(instance, prefix=_PREFIX, dialect=Dialect.DUCKDB),
+        dialect=Dialect.DUCKDB,
+    )
+    conn.commit()
+    cur.close()
+    # Stamped rows — these DO carry metadata.source.
+    _insert_pre_cz_transaction(
+        conn, tx_id="t1", metadata='{"source":"training"}',
+    )
+    _insert_pre_cz_balance(
+        conn, account_id="acct-1", metadata='{"source":"training"}',
+    )
+    conn.commit()
+    conn.close()
+
+    cfg = _step_2_wipe_cfg(db_path, etl_hook=None)
+
+    events: list[Mapping[str, object]] = []
+
+    async def _capture(payload: Mapping[str, object]) -> None:
+        events.append(dict(payload))
+
+    _asyncio.run(step_2_wipe(cfg, instance, dev_log=_capture))
+
+    # No migrate_mark event — quiet steady-state.
+    mm_events = [
+        e for e in events if e.get("event") == "deploy:step2:migrate_mark"
+    ]
+    assert mm_events == [], (
+        f"clean DB should produce no migrate_mark event; got {mm_events}"
+    )
+    # And the wipe still fired normally — done event surfaces.
+    done_events = [
+        e for e in events if e.get("event") == "deploy:step2:wipe:done"
+    ]
+    assert len(done_events) == 1
