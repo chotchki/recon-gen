@@ -213,50 +213,6 @@ def hash_table_rows(
     return h.hexdigest()
 
 
-def hash_matview_rows(
-    # WHY Any: same DB-API 2.0 sync cursor case — see ``hash_table_rows``.
-    cur: Any,
-    *,
-    matview: str,
-) -> tuple[int, str]:
-    """SHA256 + row count over every row in a matview.
-
-    Distinct from ``hash_table_rows`` (which is bounded by an
-    ``entry`` high-water-mark, since base tables are append-only and
-    we want a stable snapshot point). Matviews don't have ``entry``;
-    they're recomputable from base tables and we want the SHA256 to
-    represent "what the matview contained at audit time". So this
-    helper just hashes ALL rows in a deterministic order.
-
-    Determinism: discover columns alphabetically by lowercased name
-    (same convention as ``hash_table_rows`` — works portably on PG
-    + Oracle), pull all rows into memory as canonicalized tuples,
-    sort by tuple-lex (works for any matview without needing to
-    know its natural key), then stream into SHA256. Matviews are
-    bounded (~tens to hundreds of rows in practice) so memory is
-    fine. Returns ``(row_count, sha256_hex)`` so the appendix can
-    show both side by side.
-    """
-    cur.execute(f"SELECT * FROM {matview}")
-    description: list[tuple[str, object, object, object, object, object, object]] = list(cur.description)
-    sorted_indices = [
-        idx for idx, _ in sorted(
-            enumerate(description),
-            key=lambda i_d: i_d[1][0].lower(),
-        )
-    ]
-    canonical_rows = [
-        tuple(canonical_value(row[i]) for i in sorted_indices)
-        for row in cur.fetchall()  # CA.8 — DuckDB cursor not iterable
-    ]
-    canonical_rows.sort()
-    h = hashlib.sha256()
-    for cells in canonical_rows:
-        h.update(b"\x1f".join(cells))
-        h.update(b"\x1e")
-    return len(canonical_rows), h.hexdigest()
-
-
 def l2_yaml_sha256(l2_instance_path: str | None) -> str:
     """SHA256 of the L2 YAML file bytes (verbatim, no normalization).
 

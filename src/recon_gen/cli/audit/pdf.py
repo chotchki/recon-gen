@@ -52,7 +52,6 @@ from recon_gen.cli.audit import (
 )
 
 if TYPE_CHECKING:
-    from recon_gen.cli.audit import MatviewEvidence
     from recon_gen.common.l2.theme import ThemePreset
 
 
@@ -80,7 +79,6 @@ def _write_audit_pdf(
     version: str,
     l2_label: str,
     provenance: ProvenanceFingerprint | None,
-    matview_evidence: list[MatviewEvidence] | None,
     l2_instance_path: str | None,
 ) -> None:
     """Render the audit report as a PDF.
@@ -298,7 +296,6 @@ def _write_audit_pdf(
         l2_label=l2_label,
         l2_instance_path=l2_instance_path,
         provenance=provenance,
-        matview_evidence=matview_evidence,
     ))
     # multiBuild = two-pass render so TableOfContents picks up the
     # final page numbers (pass 1 collects via the afterFlowable hook,
@@ -1999,33 +1996,31 @@ def _appendix_story(
     *,
     version: str,
     l2_label: str,
-    l2_instance_path: str | None,
+    l2_instance_path: str | None,  # noqa: ARG001 — kept for caller-signature symmetry; CW.1 dropped the section that consumed it
     provenance: ProvenanceFingerprint | None,
-    matview_evidence: list[MatviewEvidence] | None,
 ) -> list[object]:
-    """Provenance Appendix page (U.7.c).
+    """Provenance Appendix page (CW.1 — matview-evidence section removed).
 
     Targets the regulator who wants to audit the auditor: enough
     info to independently re-derive the report's fingerprint
-    without recon-gen installed. Three sections:
+    without recon-gen installed. Two sections:
 
-    1. **Matview Evidence** — per-matview SHA256 + row count.
-       Distinct from the authoritative composite fingerprint
-       (which covers base tables); a divergence here is a
-       *technical* signal (matview needs refresh) rather than a
-       data-binding problem.
-    2. **Reproduce With recon-gen** — the one-shot
+    1. **Reproduce With recon-gen** — the one-shot
        ``audit verify`` command.
-    3. **Reproduce Manually** — the per-source recompute formulas
+    2. **Reproduce Manually** — the per-source recompute formulas
        + a ~50-line Python recipe a third-party verifier can paste
        into a script. SHA256 each input, concatenate the labeled
        lines, hash again — that's the composite.
 
     Bookmarked at outline level 0 alongside the per-invariant
     sections so it shows up in the sidebar nav + TOC. When the
-    audit ran without a DB (skeleton mode), shows the matview
-    table with placeholder dashes; the recipe still renders since
-    it's static text.
+    audit ran without a DB (skeleton mode), the per-source values
+    show ``<pending>`` but the recipe still renders (static text).
+
+    CW.1 (2026-06-09) dropped the Matview Evidence section outright
+    — it was an informational sidecar, not part of the verifiable
+    fingerprint, and burned ~60% of the audit-apply wall-clock.
+    See ``docs/audits/cw_0_audit_pdf_perf_locks.md`` Lock 1.
     """
     from reportlab.lib.colors import HexColor
     from reportlab.lib.styles import ParagraphStyle
@@ -2057,57 +2052,10 @@ def _appendix_story(
         textColor=HexColor(theme.primary_fg),
     )
 
-    # --- (1) Matview evidence table ---
-    if matview_evidence:
-        rows = [
-            [
-                Paragraph("Matview", header_style),
-                Paragraph("Rows", header_style),
-                Paragraph("SHA256", header_style),
-            ],
-        ]
-        for ev in matview_evidence:
-            rows.append([
-                Paragraph(ev.matview, cell_style),
-                Paragraph(f"{ev.row_count:,}", code_style),
-                Paragraph(ev.sha256, code_style),
-            ])
-    else:
-        rows = [
-            [
-                Paragraph("Matview", header_style),
-                Paragraph("Rows", header_style),
-                Paragraph("SHA256", header_style),
-            ],
-            [
-                Paragraph(
-                    "<i>Database not configured at audit time — "
-                    "matview evidence not available.</i>",
-                    cell_style,
-                ),
-                Paragraph("—", cell_style),
-                Paragraph("—", cell_style),
-            ],
-        ]
-    matview_table = Table(
-        rows,
-        colWidths=[2.0 * inch, 0.8 * inch, 3.7 * inch],
-        style=TableStyle([
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("BACKGROUND", (0, 0), (-1, 0),
-             HexColor(theme.link_tint)),
-            ("BOX", (0, 0), (-1, -1), 0.5,
-             HexColor(theme.secondary_fg)),
-            ("INNERGRID", (0, 0), (-1, -1), 0.25,
-             HexColor(theme.secondary_fg)),
-            ("LEFTPADDING", (0, 0), (-1, -1), 6),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ]),
-    )
-
-    # --- (3) Per-source breakdown for the manual-verify recipe ---
+    # --- Per-source breakdown for the manual-verify recipe ---
+    # CW.1 removed the matview-evidence section that previously sat
+    # before this; the appendix now opens directly on the per-source
+    # breakdown + recipe.
     placeholder = "<pending>"
     if provenance is not None:
         tx_hwm = str(provenance.transactions_hwm)
@@ -2187,21 +2135,6 @@ def _appendix_story(
             styles["BodyText"],
         ),
         Spacer(1, 0.2 * inch),
-
-        Paragraph("<b>Matview Evidence</b>", styles["Heading3"]),
-        Paragraph(
-            "<i>Per-matview SHA256 + row count, computed via the "
-            "same alphabetical-column-discovery + canonical-bytes "
-            "recipe as the base-table fingerprint. NOT part of the "
-            "authoritative composite — matviews are derived data. "
-            "A divergence between these and a recompute is a "
-            "technical signal (the matview needs refresh, schema "
-            "drift) rather than a data-binding problem.</i>",
-            styles["BodyText"],
-        ),
-        Spacer(1, 0.1 * inch),
-        matview_table,
-        Spacer(1, 0.3 * inch),
 
         Paragraph(
             "<b>Reproduce With recon-gen</b>",

@@ -10,7 +10,6 @@ data-class shapes — the renderers walk the same dataclass instances
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from recon_gen.common.as_of_frame import AsOfFrame
 from recon_gen.common.intervals import DateInterval as DateInterval  # noqa: F401 — kept for tests that import via this module; BD.2 hides direct period reads
@@ -40,9 +39,6 @@ from recon_gen.cli.audit import (
     _split_stuck_unbundled_by_account_class,
 )
 
-if TYPE_CHECKING:
-    from recon_gen.cli.audit import MatviewEvidence
-
 
 __all__ = [
     "_render_audit_markdown",
@@ -66,8 +62,7 @@ def _render_audit_markdown(
     version: str,
     l2_label: str,
     provenance: ProvenanceFingerprint | None,
-    matview_evidence: list[MatviewEvidence] | None,
-    l2_instance_path: str | None,
+    l2_instance_path: str | None,  # noqa: ARG001 — preserved for renderer-symmetry with the PDF path; not surfaced in markdown
 ) -> str:
     """Markdown rendering of the audit report.
 
@@ -126,7 +121,6 @@ def _render_audit_markdown(
             version=version,
             l2_label=l2_label,
             provenance=provenance,
-            matview_evidence=matview_evidence,
         )
     )
     return cover + body
@@ -770,13 +764,13 @@ def _render_appendix_markdown(
     version: str,
     l2_label: str,
     provenance: ProvenanceFingerprint | None,
-    matview_evidence: list[MatviewEvidence] | None,
 ) -> str:
-    """Provenance Appendix in Markdown (U.7.c).
+    """Provenance Appendix in Markdown (CW.1 — matview sidecar removed).
 
-    Mirrors the PDF appendix: matview SHA256 sidecar table +
-    verify-command instructions + per-source recompute formulas
-    + a copyable Python recipe.
+    Mirrors the PDF appendix: verify-command instructions +
+    per-source recompute formulas + a copyable Python recipe.
+    CW.1 dropped the matview SHA sidecar outright
+    (see ``docs/audits/cw_0_audit_pdf_perf_locks.md`` Lock 1).
     """
     placeholder = "<pending>"
     if provenance is not None:
@@ -792,17 +786,6 @@ def _render_appendix_markdown(
         code_id = f"v{version}"
         composite = placeholder
 
-    # Matview evidence table
-    if matview_evidence:
-        mv_rows = "".join(
-            f"| `{ev.matview}` | {ev.row_count:,} | `{ev.sha256}` |\n"
-            for ev in matview_evidence
-        )
-    else:
-        mv_rows = (
-            "| _Database not configured at audit time_ | — | — |\n"
-        )
-
     return (
         "\n"
         "---\n"
@@ -811,17 +794,6 @@ def _render_appendix_markdown(
         "\n"
         "_Everything an independent verifier needs to reproduce this "
         "report's bindings without recon-gen installed._\n"
-        "\n"
-        "### Matview Evidence\n"
-        "\n"
-        "_Per-matview SHA256 + row count. NOT part of the authoritative "
-        "composite — matviews are derived data; a divergence between "
-        "these and a recompute is a technical signal (matview needs "
-        "refresh, schema drift), not a data-binding problem._\n"
-        "\n"
-        "| Matview | Rows | SHA256 |\n"
-        "| --- | ---: | --- |\n"
-        f"{mv_rows}"
         "\n"
         "### Reproduce With recon-gen\n"
         "\n"
