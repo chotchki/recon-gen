@@ -72,6 +72,36 @@ jobs:
           echo "hostname:    $(hostname)"
           echo "release tag: ${{ github.event.workflow_run.head_branch || 'manual' }}"
 
+      - name: Wait for PyPI index propagation (CZ.1 — race fix for refresh-demos.sh pip upgrade)
+        if: github.event_name == 'workflow_run'
+        # On a release-success workflow_run trigger, PyPI's CDN can lag the
+        # Trusted Publishing event by 30-120s. refresh-demos.sh's
+        # `pip install --upgrade` would otherwise see the OLD version as
+        # latest and silently no-op. Poll PyPI's /pypi/<pkg>/json for
+        # info.version == <tag-strip-v> with 20s × 6 retries (2 min max).
+        # Fail loud if PyPI never shows the version — the demos shouldn't
+        # publish stale code.
+        #
+        # On workflow_dispatch (manual operator re-fire), we trust PyPI is
+        # already propagated and skip the poll (the only reason to manually
+        # fire is to recover from a missed earlier auto-fire).
+        env:
+          RELEASE_TAG: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          EXPECTED="${RELEASE_TAG#v}"
+          echo "Polling PyPI for recon-gen==${EXPECTED} (max 2 min)..."
+          for i in 1 2 3 4 5 6; do
+            ACTUAL=$(curl -fsSL https://pypi.org/pypi/recon-gen/json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["info"]["version"])' 2>/dev/null || echo "")
+            if [ "${ACTUAL}" = "${EXPECTED}" ]; then
+              echo "PyPI shows ${EXPECTED} (attempt ${i}/6) — propagated."
+              exit 0
+            fi
+            echo "Attempt ${i}/6: PyPI shows ${ACTUAL:-<error>}, expected ${EXPECTED}. Sleeping 20s..."
+            sleep 20
+          done
+          echo "::error::PyPI never propagated to ${EXPECTED} after 2 min — refusing to refresh demos with stale package."
+          exit 1
+
       - name: Fire the refresh wrapper
         # The wrapper handles pip install --upgrade + per-instance
         # rebuild + atomic swap + launchctl kickstart. Same script
