@@ -1687,10 +1687,12 @@ def audit_verify(
         tx_sha_now = hash_table_rows(
             cur, table=f"{prefix}_transactions",
             hwm=embedded.transactions_hwm,
+            dialect=cfg.dialect,
         )
         bal_sha_now = hash_table_rows(
             cur, table=f"{prefix}_daily_balances",
             hwm=embedded.balances_hwm,
+            dialect=cfg.dialect,
         )
     finally:
         conn.close()
