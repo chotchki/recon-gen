@@ -412,6 +412,57 @@ Open design questions to lock at CY.0:
 - Plant-emitted metadata uses a known shape (`plant_kind`, `plant_anchor_day`, etc); should the popup auto-detect and render those keys with friendlier labels?
 
 - [ ] CY.0 - **REPLAN.** Operator + agent design pass on the design questions above. Lock UI shape (modal / side-panel / inline), icon placement, scope (L1 Transactions only vs broader transaction surfaces), QS parity stance, and whether plant-metadata gets friendlier rendering. Output: `docs/audits/cy_0_metadata_popup_design.md`. Estimated 30-60 min.
+- [ ] CY.1 - **Bake git SHA into the wheel at build time.** Surfaced 2026-06-09 against the v13.11.0 Mac mini demo: `src/recon_gen/common/sheets/app_info.py::_git_short_sha()` shells out to `git rev-parse --short HEAD` at generate time. From a venv site-packages install (the demo path; also any customer install), the cwd isn't a git checkout → SHA renders "unknown" on every deploy stamp the operator can read. Operator-surfaced as "ummm not good — supposed to be baked at launch or JSON generation." **Fix:** write `__build_info__ = {"git_sha": "<short SHA>", "built_at": "<ISO timestamp>", "build_kind": "release"}` into a `src/recon_gen/_build_info.py` from the `pyproject.toml` build hook (or `setuptools_scm`-style versioning). `_deploy_stamp()` reads `__build_info__.git_sha` instead of shelling out. The dev-checkout path keeps the runtime `git rev-parse` as a fallback when `_build_info.py` is absent (developer working tree). Verify on next release that v13.12.0's deploy stamp shows the proper SHA. Estimated 30-60 min.
+- [ ] CY.2 - **Drop the misleading `(dev build)` label on the deploy stamp's dialect line.** Surfaced 2026-06-09 against the v13.11.0 Mac mini demo: `_deploy_stamp` in `common/sheets/app_info.py` (~line 413) hardcodes `dialect: <X> (dev build)` when `cfg.dialect == DUCKDB`. The (dev build) tag is BH.21 convention from pre-CA when SQLite was the dev-only dialect. Post-CA DuckDB is the legit local-prod path (`project_duckdb_local_default_post_ca`) — the Mac mini demos run DuckDB by design. The label now misleads. **Fix:** drop the dev-build suffix entirely (preferred — the dialect is just the dialect; "dev vs release build" should come from CY.1's `__build_info__.build_kind`, not be inferred from dialect). Alternative: replace with a build-kind-based tag from CY.1's bake. ~15 min.
+
+## Phase CZ - Production-DB safe mode: prevent accidental wipe of non-synthetic data
+
+**Filed 2026-06-09 as a placeholder.** Operator-flagged shape: once a customer turns off the `etl_hook` and lets a real ETL job populate the prod DB with real customer transactions + daily balances, NOTHING in recon-gen prevents a subsequent Trainer reset / `data apply --execute` / Studio Deploy-changes from wiping those real rows and replacing them with synthetic training data. The system can't tell real rows from synthetic rows after the fact, and every destructive surface treats both the same.
+
+**Scope clarification (operator, 2026-06-09):** Trainer plant/reset/wipe flow MUST stay functional on any DB. The gate is narrow — it prevents destructive ops from touching *real (non-synthetic)* rows specifically, not from running at all. Concrete intent: on a real-data DB, "Reset" still removes plants + training data; it just doesn't touch real customer rows.
+
+**Threat shape:**
+- Operator A enables real ETL once → `<prefix>_transactions` / `<prefix>_daily_balances` populated from production.
+- Operator A (or later B) clicks Trainer's "Reset to clean baseline", OR runs `recon-gen data apply --execute`, OR Studio's "Deploy changes". Real prod rows gone; synthetic training rows in their place.
+- No audit trail of what was wiped (the audit-PDF fingerprint covers what's *there*, not what *used to be there*).
+
+**Row-level distinction is the load-bearing primitive.** Plant + training rows already carry `metadata.plant_kind` / `metadata.scenario`-style markers (precedent: `phantom_rail`, `expected_eod_balance_breach`, AnomalyGenerator's emission). The seed pipeline marks everything it writes; the real ETL doesn't. So a "synthetic row" predicate already exists — Trainer reset on a real-data DB can `DELETE WHERE metadata->>'plant_kind' IS NOT NULL OR metadata->>'scenario' = 'training'` instead of TRUNCATE. Real rows survive; synthetic rows go.
+
+**Destructive surfaces — what each must do on a real-data DB:**
+
+| Surface | Current behavior | Target on real-data DB |
+| --- | --- | --- |
+| App2 Trainer `POST /training/reset` (BU.1.6) | full truncate+reseed via deploy_pipeline | DELETE-synthetic-only — real rows survive |
+| App2 Trainer `POST /training/plant/<kind>` | INSERT plant rows | Safe as-is — INSERT-only, marked rows |
+| `recon-gen data apply --execute` | truncate + reseed | Refuse without `--force-prod-wipe`; offer `--clean-synthetic-only` mode |
+| `recon-gen schema apply --execute` | DROP + CREATE TABLES | Refuse without `--force-prod-wipe`; schema migrations need a proper ALTER path |
+| `recon-gen data refresh --execute` | matview refresh | Safe — doesn't touch base rows |
+| Studio's Deploy-changes button | calls schema+data apply | Refuse on real-data DB without explicit operator override |
+| `deploy/launchd/refresh-demos.sh` | full wipe + reseed nightly | Opt-out via plist env (`RECON_GEN_FORCE_PROD_WIPE=1`) — demo install path is consciously chosen |
+
+**Design directions to evaluate at CZ.0:**
+
+1. **Row-level marker on every write** (data-source-of-truth — preferred). Canonicalize a `metadata.source` field across the seed/plant/training paths (one of `"training" | "plant" | "real"` — others as needed). Trainer reset becomes `DELETE WHERE source IN ('training', 'plant')` instead of TRUNCATE. `data apply` / `schema apply --execute` check for any `source='real'` rows and refuse if present without `--force-prod-wipe`. The `etl_hook` documentation tells real-data integrators to set `metadata.source='real'` on every row they insert. Strongest because (a) it lives in the DB the destructive op is about to touch, (b) it supports surgical removal of synthetic rows on real-data DBs, (c) it reuses an existing convention (plant rows already carry metadata).
+2. **DB-level sentinel** (single-row "this is a prod DB" marker, fallback). New `_recon_provenance` table; `recon-gen schema mark-production` writes a row; destructive ops refuse if marked. Weaker than #1 because it can't support DELETE-synthetic-only — it's a binary all-or-nothing gate. Useful if row-level migration is too invasive for some customers.
+3. **cfg-level lock** (belt-and-suspenders). Optional cfg field `production_safe: bool = false` alongside #1; can be circumvented if cfg is edited; useful as a development-time guardrail. Not the primary gate.
+
+**Open design questions to lock at CZ.0:**
+- Pre-CZ DBs in the wild: do existing rows auto-tag as `source=training` on first `data apply` post-CZ (cheap default), or does the operator run an explicit `recon-gen schema migrate-mark --source=<value>` verb (loud)?
+- Trainer reset's "delete synthetic only" path needs matview-refresh aware semantics — the matview shapes assume a fully-seeded DB, so removing synthetic rows from a real+synthetic mix might leave a partial state. Solution: parameterize the deploy_pipeline's truncate step to a "synthetic-only delete" path on real-data DBs and re-refresh matviews after.
+- App2 UX on a real-data DB: surface "this DB has real data — Trainer reset will only remove synthetic" loud (banner color, button label change to "Clear synthetic rows", explainer) — UX must make the narrowed scope visible, not just behave differently silently.
+- Does `audit verify` care about the marker? (Probably yes — a verify that succeeds against a DB with `source=real` rows is meaningful production evidence; the fingerprint covering a pure-synthetic reset is just demo paperwork.)
+- `refresh-demos.sh` opts out via env (`RECON_GEN_FORCE_PROD_WIPE=1`) — confirms the gate doesn't break the nightly Mac mini cadence by design.
+- What's the audit trail of an override-wipe? An op who passes `--force-prod-wipe` should leave a stderr line + ideally an artifact (a pre-wipe `audit apply` PDF) so the wipe is recoverable in evidence even if not in data.
+- Schema apply's `DROP TABLE` is the most destructive — can it ever be safe on a real-data DB, or does a real schema migration need an entirely separate verb (`recon-gen schema migrate` that ALTERs in place)?
+
+**Related prior art:**
+- BU.1.6 Trainer reset implementation (`truncate+reseed via deploy_pipeline`) — the surface most directly affected by the DELETE-synthetic-only path.
+- CU's `banner_text` (UI-only warning, no actual gate).
+- CU.2's `sandbox-exec` profile around Studio (process-level, not DB-level — and demo-side, not prod-side).
+- Provenance fingerprint (CW): proves what's in the DB, doesn't prevent wiping.
+- Plant primitives' existing `metadata.plant_kind` convention — the row-level marker precedent that #1 generalizes.
+
+- [ ] CZ.0 - **REPLAN.** Operator + agent design pass on the row-level marker design (preferred direction #1). Lock: (a) `metadata.source` field schema + canonical value set, (b) `etl_hook` documentation contract for real-data integrators, (c) auto-mark-on-first-write behavior of the seed/plant pipeline, (d) Trainer reset's DELETE-synthetic-only path through deploy_pipeline + matview-refresh semantics, (e) `--force-prod-wipe` UX (env var, CLI flag, both), (f) App2 UI shape on real-data DBs (banner / button label / explainer), (g) audit-trail-of-override artifact, (h) schema-apply migration story, (i) pre-CZ DB migration story (auto-mark vs explicit verb). Output: `docs/audits/cz_0_production_safe_mode_design.md`. Estimated 60-90 min.
 
 ## Phase PLAN - Phase PLAN
 - [ ] PLAN.md - BS.5 — _v_config_chain_children + 7-path conversion
