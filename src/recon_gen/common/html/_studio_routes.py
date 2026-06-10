@@ -189,6 +189,31 @@ _WASM_GRAPHVIZ_DIR = (
     / "wasm-graphviz"
 )
 
+# CZ.4 — refuse banner shown when Studio's POST /deploy fires with
+# ``cfg.etl_hook is None`` (standalone-mode). The deploy pipeline would
+# wipe-and-reseed; without an ETL hook the wipe is not followed by a
+# real-data reload, so any unmarked row in the demo DB might be customer
+# data. The message names the two correct unblock paths so the refusal
+# is a redirect, not a dead-end. See PLAN Phase CZ + repo CLAUDE.md.
+_CZ_STANDALONE_MODE_REFUSE_MESSAGE = (
+    "Standalone mode — Deploy-changes refused.\n"
+    "\n"
+    "Your configuration does not declare an ETL hook (cfg.etl_hook is "
+    "empty). In this mode, Deploy-changes would wipe rows we cannot "
+    "prove are synthetic, which may delete real customer data.\n"
+    "\n"
+    "To deploy changes safely, either:\n"
+    "  1. Configure cfg.etl_hook in your config.yaml so the next ETL "
+    "cycle re-populates the demo DB, or\n"
+    "  2. Use the Trainer 'Clear synthetic rows and re-seed' button, "
+    "which removes only rows tagged metadata.source='training' and "
+    "preserves unmarked rows.\n"
+    "\n"
+    "If you intended to reset everything (including unmarked rows), "
+    "use the CLI:\n"
+    "  recon-gen data apply --execute  (with your operator authority)."
+)
+
 
 def _duckdb_pool_subprocess_bracket(
     db_pool: AsyncConnectionPool | None,
@@ -4864,9 +4889,16 @@ def make_studio_routes(
             TRAINER_CLEAN,
         )
         subprocess_lock_bracket = _duckdb_pool_subprocess_bracket(db_pool)
+        # CZ.3 — standalone-mode (no etl_hook) → DELETE-synthetic-only
+        # so real customer rows survive the Trainer reset; ETL-mode
+        # (etl_hook configured) → full-TRUNCATE (next ETL cycle refills,
+        # so wiping everything is safe). Matview refresh still runs on
+        # both paths per CZ.3's matview_refresh_decision lock.
+        synthetic_only_wipe = cfg.etl_hook is None
         await run_deploy_pipeline(
             cfg, cache.get(), dev_log=None, overlays=TRAINER_CLEAN,
             subprocess_lock_bracket=subprocess_lock_bracket,
+            synthetic_only_wipe=synthetic_only_wipe,
         )
         return RedirectResponse(
             url="/training/?reset=1", status_code=303,
@@ -5685,6 +5717,24 @@ def make_studio_routes(
                 if bound_tg_for_deploy is not None
                 else bound_cfg
             )
+            # CZ.4 — standalone-mode gate. ``cfg.etl_hook is None`` means
+            # the next ETL cycle will NOT re-populate the demo DB after
+            # we wipe it, so any unmarked row in the DB might be real
+            # customer data. Refuse outright (HTTP 409) — no click-through.
+            # Operators who genuinely want demo-data-wipe semantics use
+            # the Trainer "Clear synthetic rows and re-seed" button
+            # (DELETE-synthetic-only); operators who want the full reset
+            # configure ``cfg.etl_hook`` or drop to ``recon-gen data
+            # apply --execute`` (the CLI escape hatch documented in CZ).
+            if effective_cfg.etl_hook is None:
+                return JSONResponse(
+                    {
+                        "halted": True,
+                        "halt_reason": "standalone-mode",
+                        "message": _CZ_STANDALONE_MODE_REFUSE_MESSAGE,
+                    },
+                    status_code=409,
+                )
             subprocess_lock_bracket = _duckdb_pool_subprocess_bracket(db_pool)
             summary = await run_deploy_pipeline(
                 effective_cfg, instance, dev_log=None,

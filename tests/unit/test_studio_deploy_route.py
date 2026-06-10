@@ -100,9 +100,14 @@ def _build_app(yaml_path: Path, cfg: Config | None) -> object:
 def test_post_deploy_runs_pipeline_returns_summary(
     writable_l2_yaml: Path, tmp_path: Path,
 ) -> None:
-    """POST /deploy with no etl_hook configured runs steps 2-5 against
-    the demo DB; returns 200 + the DeploySummary JSON."""
-    cfg = _duckdb_cfg(tmp_path)
+    """POST /deploy with a successful etl_hook configured runs steps
+    1-5 against the demo DB; returns 200 + the DeploySummary JSON.
+
+    CZ.4 added a standalone-mode gate that refuses with 409 when
+    ``cfg.etl_hook is None`` — so the success path now requires a
+    no-op hook (``true`` exits 0) for the pipeline to proceed.
+    """
+    cfg = _duckdb_cfg(tmp_path, etl_hook="true")
     _apply_schema(cfg, writable_l2_yaml)
     app = _build_app(writable_l2_yaml, cfg)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
