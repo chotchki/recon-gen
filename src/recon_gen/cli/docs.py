@@ -479,8 +479,12 @@ def docs_test(pytest_args: str) -> None:
 @docs.command("export")
 @click.option(
     "-o", "--output", "output",
-    type=click.Path(), required=True,
-    help="Target directory; created if missing, merged into if existing.",
+    type=click.Path(), default=None,
+    help=(
+        "Target directory (default mode) OR file path (--surface=matrix). "
+        "Required for the default tree-copy mode; optional for "
+        "--surface=matrix (defaults to stdout)."
+    ),
 )
 @click.option(
     "--l2", "l2_instance_path",
@@ -491,13 +495,66 @@ def docs_test(pytest_args: str) -> None:
         "time via QS_DOCS_L2_INSTANCE env var."
     ),
 )
-def docs_export(output: str, l2_instance_path: str | None) -> None:
-    """Copy the bundled mkdocs source to a folder for hand-build.
+@click.option(
+    "--surface",
+    type=click.Choice(["tree", "matrix"]),
+    default="tree",
+    show_default=True,
+    help=(
+        "Which docs surface to export. ``tree`` (default) copies the "
+        "bundled mkdocs source for hand-build (legacy behavior). "
+        "``matrix`` emits the BU.0.5 §0.5 violation coverage matrix "
+        "generated from PLANT_REGISTRY + the three typed section "
+        "catalogues — BV.7 anti-drift artifact (Lock 11)."
+    ),
+)
+def docs_export(
+    output: str | None,
+    l2_instance_path: str | None,
+    surface: str,
+) -> None:
+    """Export bundled mkdocs source OR a generated docs artifact.
 
-    Different from ``docs apply``: ``apply`` builds the site INTO a
-    directory; ``export`` copies the SOURCE FILES so an integrator
-    can use their own mkdocs config / theme / build pipeline.
+    Default (``--surface=tree``): copy the bundled mkdocs source to
+    ``--output DIR`` so an integrator can use their own mkdocs config /
+    theme / build pipeline. Different from ``docs apply``: ``apply``
+    builds the site INTO a directory; ``export tree`` copies the SOURCE.
+
+    ``--surface=matrix`` (BV.7): walk ``PLANT_REGISTRY`` + the typed
+    section catalogues and emit the §0.5 coverage matrix as Markdown.
+    Default to stdout; ``--output PATH`` writes to a file. The committed
+    reference artifact at
+    ``tests/data/_handbook_artifacts/coverage_matrix.md`` is the
+    byte-identity anti-drift gate — refresh it after a registry edit.
     """
+    if surface == "matrix":
+        from recon_gen.common.handbook.coverage_matrix import (
+            render_coverage_matrix,
+        )
+
+        if l2_instance_path is not None:
+            raise click.UsageError(
+                "--l2 has no effect with --surface=matrix; the matrix is "
+                "L2-independent (it walks the global PLANT_REGISTRY)."
+            )
+
+        markdown = render_coverage_matrix()
+        if output is None:
+            # stdout (the no-newline write is intentional —
+            # render_coverage_matrix() already ends in "\n").
+            click.echo(markdown, nl=False)
+            return
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(markdown, encoding="utf-8")
+        click.echo(f"Wrote coverage matrix to {out_path}")
+        return
+
+    if output is None:
+        raise click.UsageError(
+            "--output DIR is required for --surface=tree (the default "
+            "tree-copy mode writes a directory)."
+        )
     src = _bundled_dir("docs")
     dst = Path(output)
     count = _copy_tree(src, dst)
