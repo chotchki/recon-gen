@@ -1,3 +1,31 @@
+# PLAN — Phase CW (archived 2026-06-09)
+
+**Phase summary:** Audit PDF performance — drop redundant matview hash pass + stream the authoritative base-table fingerprint via per-dialect SQL SHA-256 + Python fetchmany fold. Operator-tested baseline was ~52s wall on a ~3.27M-row dataset; CW lands ~52s → ~2.3s (target), with full SHA-256 cryptographic strength preserved. Five maintainer-locked decisions: matview-evidence drops outright (no COUNT-only fallback), streamed (not additive) base-table fingerprint, pgcrypto-on-PG policy departure scoped to provenance, `provenance_format_version` field bumped to 2 with v1/v2 dispatch on `audit verify`, pyhanko-missing graceful degrade.
+
+**What landed (chronological):**
+
+- **CW.0** — Lock doc `docs/audits/cw_0_audit_pdf_perf_locks.md` capturing the 5 operator-signed decisions verbatim + per-dialect SQL canonicalization templates (DuckDB sha256 / PG pgcrypto digest / Oracle STANDARD_HASH) + format-version migration shape.
+- **CW.1** — Drop matview-evidence pass. `hash_matview_rows` deleted from `common/provenance.py`; `MatviewEvidence` + `_APPENDIX_MATVIEWS` + `_query_matview_evidence` + the matview-table flowable + appendix section all removed from `cli/audit/__init__.py` + `cli/audit/pdf.py` + `cli/audit/markdown.py`. ~60% wall-clock win standalone.
+- **CW.5** — pyhanko-missing graceful degrade (promoted ahead of CW.2 per spec). `audit apply --execute` no longer hard-crashes when the optional `pyhanko` extra isn't installed; emits unsigned PDF + stderr warning + exit 0.
+- **CW.2** — Stream the base-table fingerprint. `hash_table_rows` rewritten to per-dialect SQL (`_row_hash_sql_expr` + `_quote_column` helpers) running per-row SHA-256 in the engine; Python folds `cur.fetchmany(50_000)` digests via `hashlib.sha256().update()`. Empirical Merkle-Damgård equivalence verified on 100-row + 1000-row DuckDB fixtures (streamed fold == `sha256(string_agg(rh ORDER BY entry))`). `common/l2/schema.py::emit_schema` emits `CREATE EXTENSION IF NOT EXISTS pgcrypto` on PG. `canonical_value` + `legacy_hash_table_rows_v1` kept frozen for verify-v1 dispatch.
+- **CW.3** — Bump `provenance_format_version` (Lock 4: verbose-unambiguous name). New field defaults to 2 on new emissions; `from_dict` substitutes 1 for pre-CW PDFs (missing field). PDF appendix + markdown banner surface the version explicitly. Sentinel constants `PROVENANCE_FORMAT_VERSION_LEGACY` + `PROVENANCE_FORMAT_VERSION_CW` exposed module-level so callsites don't repeat magic numbers.
+- **CW.4** — `audit verify` version-dispatch: v1 → `legacy_hash_table_rows_v1`, v2 → `hash_table_rows` per-dialect SQL. Unsupported version → loud Click error. Embedded `verify-provenance.py` recipe + appendix-render Python recipe rewritten from "re-implement canonical_value in pure Python" to "connect to DB, run this per-dialect SQL, fold the digests" (dialect-blind — verifier sets DIALECT constant).
+- **CW.6** — Perf regression test `test_streamed_fingerprint_perf_on_100k_rows` (DuckDB 100k rows < 2s) + Merkle-Damgård equivalence test `test_streamed_fold_equals_listagg_string_agg_form_duckdb` + v1 frozen-ladder regression test `test_legacy_hash_table_rows_v1_stable_against_synthetic_cursor` + format-version sentinel pin `test_format_version_sentinels_match_cw_lock_doc`. All 4 pass.
+- **CW.7** — Sweep. Quirks log gained 3 entries (Oracle LISTAGG ~32KB cap, pgcrypto-required-on-PG, pyhanko-missing-degrade). CLAUDE.md project block updated with the pgcrypto policy-departure exception (scoped to provenance only). PLAN.md → PLAN_ARCHIVE.md.
+
+**Key invariants shipped:**
+
+- Per-dialect SQL canonicalization: `coalesce(CAST(col AS VARCHAR), chr(0))` columns wrapped in `concat_ws(chr(31), …)` (PG/DuckDB) or `|| chr(31) ||` chain (Oracle); columns sorted by `lower(name)` for cross-dialect portability; per-row SHA-256 lowercased before the Python fold.
+- `ProvenanceFingerprint.from_dict(legacy_blob)` defaults missing `provenance_format_version` → 1; `from_dict(cw_blob)` reads explicit 2.
+- `legacy_hash_table_rows_v1` + `canonical_value` are frozen — any byte-drift breaks pre-CW PDF verification. Regression-pinned by `test_legacy_hash_table_rows_v1_stable_against_synthetic_cursor`.
+- `audit verify` exits 0 on v1+v2 match; ClickException on unsupported version or per-source mismatch.
+
+**Deferred / open:**
+
+- Real v1 fixture PDF for end-to-end legacy verification regression (CW.6 covers the function-level regression but a fixture PDF would prove the verify CLI command also lands on the right code path). Per CW.0 lock doc open items — acceptable risk given the function-level test + the size of the frozen surface.
+- PG `CREATE EXTENSION pgcrypto` permission model when schema-apply runs under a non-superuser role — surfaces loud if the role lacks `CREATE`. Backlog candidate: `recon-gen schema check-prereqs` verb.
+- Full `up_to=qs_api` cross-dialect verification of the streamed fingerprint deferred — CW.6 covers DuckDB; cross-dialect coverage rides on the PG/Oracle integration tests under `tests/e2e/db/test_audit_pdf_render_verify.py`.
+
 # PLAN — Phase CG (archived 2026-06-05)
 
 **Phase summary:** Design-language consistency sweep of the L2 Editor surface. Reopened 2026-06-05 under a new charter (the original CG — shared list primitive + toolbar — had shipped folded into CF.4 with CG.0-CG.4 staying WONT DO). 19 cells shipped + 2 cells WONT DO + 3 cells folded in-cycle from the v5 cold-read findings. 730 unit pass; 2 agent-driven cold-reads (v4 at `docs/audits/_archive/cg_cold_read_v4.md`, v5 at `docs/audits/_archive/cg_cold_read_v5.md`).

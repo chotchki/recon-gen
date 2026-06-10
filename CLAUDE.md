@@ -156,7 +156,7 @@ Investigation matviews (per-instance prefixed): `<prefix>_inv_pair_rolling_anoma
 
 - Models use Python dataclasses with `to_aws_json()` → exact AWS QS API dict shape. `_strip_nones()` recursively cleans None.
 - Datasets use custom SQL with Direct Query (no SPICE). Seed changes show up immediately after `demo apply`.
-- SQL portable subset across PG + Oracle: SQL/JSON path syntax; no JSONB, no `->>`, no extensions, no array / range types.
+- SQL portable subset across PG + Oracle: SQL/JSON path syntax; no JSONB, no `->>`, no array / range types. **PG extensions**: scoped exception for `pgcrypto` (audit provenance per Phase CW.2 Lock 3 — `encode(digest(canon, 'sha256'), 'hex')`; MD5 considered + rejected on regulator-defensibility grounds). `recon-gen schema apply` emits `CREATE EXTENSION IF NOT EXISTS pgcrypto` at script top on PG. Do not extend the exception to dataset SQL or schema DDL.
 - Resource IDs kebab-case under `cfg.deployment_name` (Z.C, required, no default). Use `cfg.prefixed(name)` → e.g. `recon-prod-l1-dashboard`. Enforced by `tests/unit/test_typing_smells.py::recon-prefix` (no hardcoded `"recon-..."` outside `common/config.py`).
 - Tags: `ManagedBy: recon-gen` + `Deployment: <deployment_name>` (single-axis, replaces legacy `ResourcePrefix` + `L2Instance`); `extra_tags` merged in. `cleanup` gates on `Deployment` only sweeping its own deployment.
 - Every sheet has a description; every visual has a subtitle — enforced by `Sheet.__post_init__` + `Visual.__post_init__` raising on blank.
