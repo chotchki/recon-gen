@@ -189,54 +189,101 @@ def seeded_v_overlay(
 def _seed_probe_rows(cur: Any, v_prefix: str) -> None:
     """Insert two transactions + two daily_balances + two config_kv
     rows into the v-overlay. Just enough to give the round-trip
-    something to compare."""
-    # transactions — minimal viable shape per the v6 schema.
+    something to compare.
+
+    BV.3.3 fix (test side, 2026-06-10): the helper was authored
+    against a stale column model (``account_type`` / ``business_day`` /
+    ``balance``) — the current base-table DDL uses ``account_role`` /
+    ``account_parent_role`` / ``business_day_start`` /
+    ``business_day_end`` / ``money`` (see ``common/l2/schema.py`` lines
+    1932 + 1995). On Oracle the missing column manifests as the
+    ORA-00904 "ACCOUNT_TYPE": invalid identifier setup error this fix
+    addresses.
+
+    Column refs are *unquoted* — the base-table DDL emits unquoted
+    identifiers (Oracle stores them case-folded to UPPERCASE), and an
+    unquoted ref in the INSERT case-folds to UPPERCASE at parse and
+    matches the stored identifier. (This is the symmetric Oracle
+    side of the production case-folding convention; the production
+    ``_quote_col`` fix in commit 8c5b2347 applies only to the
+    *wrapper-aliased* SELECT path where the outer wrapper deliberately
+    emits case-preserved-lowercase quoted aliases — a different
+    surface than these base-table INSERTs.)
+    """
+    cols_tx = (
+        "id, account_id, account_name, account_role, "
+        "account_scope, account_parent_role, "
+        "amount_money, amount_direction, status, posting, "
+        "transfer_id, rail_name, origin, metadata"
+    )
+    # transactions — minimal viable shape per the v6 schema. The
+    # CHECK constraint pairs amount_money sign with amount_direction
+    # (Credit ≥ 0, Debit ≤ 0); seed both sides so the round-trip
+    # exercises both sign branches.
     cur.execute(
-        f"INSERT INTO {v_prefix}_transactions "
-        "(id, account_id, account_role, account_scope, account_type, "
-        "amount_money, amount_direction, status, posting, transfer_id, "
-        "rail_name, origin, metadata) "
-        "VALUES ('tx-001', 'acct-A', 'control', 'systemic', 'gl_control', "
-        "100, 'in', 'posted', TIMESTAMP '2026-01-15 12:00:00', "
+        f"INSERT INTO {v_prefix}_transactions ({cols_tx}) "
+        "VALUES ('tx-001', 'acct-A', 'Acct A', 'control', "
+        "'internal', 'gl_control', "
+        "100, 'Credit', 'posted', TIMESTAMP '2026-01-15 12:00:00', "
         "'xfer-1', 'core', 'demo', '{}')",
     )
     cur.execute(
-        f"INSERT INTO {v_prefix}_transactions "
-        "(id, account_id, account_role, account_scope, account_type, "
-        "amount_money, amount_direction, status, posting, transfer_id, "
-        "rail_name, origin, metadata) "
-        "VALUES ('tx-002', 'acct-B', 'sub', 'tenant', 'dda', "
-        "200, 'out', 'posted', TIMESTAMP '2026-01-16 12:00:00', "
+        f"INSERT INTO {v_prefix}_transactions ({cols_tx}) "
+        "VALUES ('tx-002', 'acct-B', 'Acct B', 'sub', "
+        "'internal', 'dda', "
+        "-200, 'Debit', 'posted', TIMESTAMP '2026-01-16 12:00:00', "
         "'xfer-2', 'core', 'demo', '{}')",
     )
+    cols_db = (
+        "account_id, account_name, account_role, "
+        "account_scope, account_parent_role, "
+        "business_day_start, business_day_end, "
+        "money, metadata"
+    )
+    # daily_balances — CHECK requires business_day_end > business_day_start.
     cur.execute(
-        f"INSERT INTO {v_prefix}_daily_balances "
-        "(account_id, account_role, account_scope, account_type, "
-        "business_day, balance, metadata) "
-        "VALUES ('acct-A', 'control', 'systemic', 'gl_control', "
-        "DATE '2026-01-15', 100, '{}')",
+        f"INSERT INTO {v_prefix}_daily_balances ({cols_db}) "
+        "VALUES ('acct-A', 'Acct A', 'control', 'internal', 'gl_control', "
+        "TIMESTAMP '2026-01-15 00:00:00', "
+        "TIMESTAMP '2026-01-16 00:00:00', 100, '{}')",
     )
     cur.execute(
-        f"INSERT INTO {v_prefix}_daily_balances "
-        "(account_id, account_role, account_scope, account_type, "
-        "business_day, balance, metadata) "
-        "VALUES ('acct-B', 'sub', 'tenant', 'dda', "
-        "DATE '2026-01-16', -200, '{}')",
+        f"INSERT INTO {v_prefix}_daily_balances ({cols_db}) "
+        "VALUES ('acct-B', 'Acct B', 'sub', 'internal', 'dda', "
+        "TIMESTAMP '2026-01-16 00:00:00', "
+        "TIMESTAMP '2026-01-17 00:00:00', -200, '{}')",
+    )
+    # config_kv — node_id is NOT NULL PK (no auto-increment); supply
+    # it explicitly per the BC.12 schema shape (see
+    # ``common/l2/config_table.py::emit_config_table_ddl``).
+    cur.execute(
+        f"INSERT INTO {v_prefix}_config_kv "
+        "(node_id, parent_id, key, value) VALUES "
+        "('snap_test_node_1', NULL, 'snapshotter_test_key', 'baseline_v1')",
     )
     cur.execute(
-        f"INSERT INTO {v_prefix}_config_kv (key, value) VALUES "
-        "('snapshotter_test_key', 'baseline_v1')",
-    )
-    cur.execute(
-        f"INSERT INTO {v_prefix}_config_kv (key, value) VALUES "
-        "('snapshotter_test_key2', 'baseline_v2')",
+        f"INSERT INTO {v_prefix}_config_kv "
+        "(node_id, parent_id, key, value) VALUES "
+        "('snap_test_node_2', NULL, 'snapshotter_test_key2', 'baseline_v2')",
     )
 
 
 def _select_probe_state(cfg: Any) -> dict[str, list[tuple[Any, ...]]]:
     """SELECT-order the v-overlay base tables; returns per-table
     sorted row tuples so the round-trip equivalence assertion is
-    deterministic regardless of physical row order."""
+    deterministic regardless of physical row order.
+
+    Column refs unquoted — match the base-table DDL convention (Oracle
+    case-folds to UPPERCASE at parse, matching the stored identifier).
+    See ``_seed_probe_rows`` for the case-folding rationale.
+
+    config_kv.value materializes as a CLOB on Oracle (sized to fit
+    the ~37KB sasquatch_pr L2 yaml per ``common/l2/config_table.py``);
+    ``oracledb`` returns an opaque LOB object per row, so identity-based
+    tuple equality breaks the round-trip assertion. ``_lob_str`` reads
+    the LOB to a plain ``str`` before tupling so equality compares
+    content, not handle.
+    """
     base_prefix = cfg.db_table_prefix
     v_prefix = v_overlay_prefix(base_prefix)
     state: dict[str, list[tuple[Any, ...]]] = {}
@@ -252,19 +299,37 @@ def _select_probe_state(cfg: Any) -> dict[str, list[tuple[Any, ...]]]:
                     )
                 elif tbl == "daily_balances":
                     cur.execute(
-                        f"SELECT account_id, business_day, balance "
-                        f"FROM {v_prefix}_{tbl} ORDER BY account_id, business_day",
+                        f"SELECT account_id, business_day_start, money "
+                        f"FROM {v_prefix}_{tbl} "
+                        f"ORDER BY account_id, business_day_start",
                     )
                 else:  # config_kv
                     cur.execute(
-                        f"SELECT key, value FROM {v_prefix}_{tbl} ORDER BY key",
+                        f"SELECT key, value FROM {v_prefix}_{tbl} "
+                        f"ORDER BY key",
                     )
-                state[tbl] = [tuple(row) for row in cur.fetchall()]
+                state[tbl] = [
+                    tuple(_lob_str(v) for v in row) for row in cur.fetchall()
+                ]
         finally:
             cur.close()
     finally:
         conn.close()
     return state
+
+
+def _lob_str(v: Any) -> Any:
+    """Read an ``oracledb`` LOB to ``str``; pass-through for other types.
+
+    Identity-based tuple equality breaks round-trip assertions when
+    ``value`` materializes as a LOB object (two reads = two distinct
+    handles even when the underlying content matches). ``read()``
+    materializes the content once so equality compares strings.
+    """
+    read = getattr(v, "read", None)
+    if callable(read):
+        return read()
+    return v
 
 
 # ---------------------------------------------------------------------------
