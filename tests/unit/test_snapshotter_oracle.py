@@ -571,15 +571,16 @@ async def _count_gold_tables(
     """USER_TABLES probe for our test's gold-table residue."""
     pattern = f"{upper_prefix}\\_%\\_GOLD\\_%"
     async with pool.acquire() as conn:
-        cur = await cast(Any, conn).execute(
-            (
-                "SELECT COUNT(*) FROM USER_TABLES "
-                "WHERE table_name LIKE :pattern ESCAPE '\\'"
-            ),
-            {"pattern": pattern},
-        )
-        rows = await cur.fetchall()
-        return int(rows[0][0])
+        async with cast(Any, conn).cursor() as cur:
+            await cur.execute(
+                (
+                    "SELECT COUNT(*) FROM USER_TABLES "
+                    "WHERE table_name LIKE :pattern ESCAPE '\\'"
+                ),
+                {"pattern": pattern},
+            )
+            rows = await cur.fetchall()
+            return int(rows[0][0])
 
 
 # ---------------------------------------------------------------------------

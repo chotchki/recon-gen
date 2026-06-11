@@ -693,14 +693,15 @@ class OracleGoldenMirrorSnapshotter:
         pattern = f"{upper_prefix}\\_%\\_GOLD\\_%"
         try:
             async with self._pool.acquire() as conn:
-                cur = await cast(Any, conn).execute(
-                    (
-                        "SELECT table_name FROM USER_TABLES "
-                        "WHERE table_name LIKE :pattern ESCAPE '\\'"
-                    ),
-                    {"pattern": pattern},
-                )
-                rows = await cur.fetchall()
+                async with cast(Any, conn).cursor() as cur:
+                    await cur.execute(
+                        (
+                            "SELECT table_name FROM USER_TABLES "
+                            "WHERE table_name LIKE :pattern ESCAPE '\\'"
+                        ),
+                        {"pattern": pattern},
+                    )
+                    rows = await cur.fetchall()
                 for row in rows:
                     # row[0] is the upper-case table name as Oracle
                     # stored it. Each PL/SQL DROP is its own block so
