@@ -1037,6 +1037,121 @@ _FIELD_SPECS_BY_KIND: Mapping[EntityKind, tuple[FieldSpec, ...]] = {
 }
 
 
+# BX.4 (2026-06-11) — Per-kind ordered field sectioning. Groups the
+# flat FieldSpec lists into operator-meaningful clusters (Identity,
+# Classification, Activity / cadence, Aging, ...) so the edit form
+# and the read card both render the same section structure. Used by:
+#
+# - ``_render_edit_page`` — each section becomes a ``<fieldset>`` with
+#   a ``<legend>`` matching the singleton theme form's style.
+# - ``_render_read_card_body`` — each section becomes a header strip
+#   + a ``<dl>`` of just that section's fields.
+#
+# Section ORDER follows the existing FieldSpec list order (CO.3 polish
+# already promoted identity to the top). Each entry is
+# ``(section_label, (field_name, ...))``. Fields whose names aren't
+# listed under any section fall back to a trailing "Other" section so
+# the operator can still see them — the grouping is a hint, not a
+# gate. Empty sections (every field hidden by subtype_only / edit_only)
+# drop gracefully — neither the fieldset nor the read-card header
+# renders for them.
+#
+# Per ``[feedback_browser_drivers_user_facing_locators]``, every
+# rendered section carries ``data-section-name="<label>"`` for stable
+# driver anchoring; never a Tailwind class.
+_FIELD_SECTIONS_BY_KIND: Mapping[
+    EntityKind, tuple[tuple[str, tuple[str, ...]], ...],
+] = {
+    "account": (
+        ("Identity", ("id", "name", "description")),
+        ("Classification", ("scope", "role", "parent_role")),
+        ("Balance", (
+            "expected_eod_balance", "business_day_offset", "balance_cadence",
+        )),
+    ),
+    "account_template": (
+        ("Identity", ("role", "description")),
+        ("Classification", ("scope", "parent_role")),
+        ("Balance", (
+            "expected_eod_balance", "business_day_offset", "balance_cadence",
+        )),
+        ("Instance templates", (
+            "instance_id_template", "instance_name_template",
+        )),
+    ),
+    "rail": (
+        ("Identity", ("name", "description")),
+        ("Topology", (
+            "source_role", "destination_role", "leg_role", "leg_direction",
+        )),
+        ("Origin", ("origin", "source_origin", "destination_origin")),
+        ("Conservation", ("expected_net",)),
+        ("Activity / cadence", (
+            "aggregating", "cadence", "bundles_activity",
+        )),
+        ("Metadata", ("metadata_keys", "metadata_value_examples")),
+        ("Posted requirements", ("posted_requirements",)),
+        ("Aging", ("max_pending_age", "max_unbundled_age")),
+        ("Soft bounds", (
+            "amount_typical_range", "firings_typical_per_period",
+        )),
+    ),
+    "transfer_template": (
+        ("Identity", ("name", "description")),
+        ("Conservation", ("expected_net",)),
+        ("Completion", ("completion",)),
+        ("Composition", (
+            "leg_rails", "transfer_key", "leg_rail_xor_groups",
+        )),
+        ("Soft bounds", ("firings_typical_per_period",)),
+    ),
+    "chain": (
+        ("Identity", ("parent", "description")),
+        ("Composition", ("children",)),
+    ),
+    "limit_schedule": (
+        ("Identity", ("parent_role", "description")),
+        ("Scope", ("rail", "direction")),
+        ("Limit", ("cap",)),
+    ),
+}
+
+
+def _group_specs_into_sections(
+    kind: EntityKind, specs: tuple[FieldSpec, ...],
+) -> tuple[tuple[str, tuple[FieldSpec, ...]], ...]:
+    """BX.4 — bucket ``specs`` (already subtype/hidden-filtered) into the
+    ordered (section_label, section_specs) sequence declared by
+    ``_FIELD_SECTIONS_BY_KIND``.
+
+    Empty sections (every member field absent from the filtered specs)
+    drop. Fields not named under any section land in a trailing
+    ``"Other"`` section so they always render somewhere — surfacing the
+    gap rather than silently swallowing a field the section map missed.
+    """
+    sections = _FIELD_SECTIONS_BY_KIND.get(kind, ())
+    by_name: dict[str, FieldSpec] = {s.name: s for s in specs}
+    assigned: set[str] = set()
+    out: list[tuple[str, tuple[FieldSpec, ...]]] = []
+    for label, names in sections:
+        bucket: list[FieldSpec] = []
+        for name in names:
+            spec = by_name.get(name)
+            if spec is None:
+                continue
+            bucket.append(spec)
+            assigned.add(name)
+        if bucket:
+            out.append((label, tuple(bucket)))
+    # Trailing "Other" catches any spec the section map didn't name.
+    # Preserves the source-list order so the operator sees the field
+    # roughly where they'd expect it.
+    leftovers = tuple(s for s in specs if s.name not in assigned)
+    if leftovers:
+        out.append(("Other", leftovers))
+    return tuple(out)
+
+
 # ---------------------------------------------------------------------------
 # Form-data coercion (form POST/PUT body → typed dataclass fields)
 # ---------------------------------------------------------------------------
@@ -3133,24 +3248,49 @@ def _render_read_card_body(
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed to suppress fields hidden by the two-layer rule
 ) -> str:
     """CF.4.c split — the heavy `<dl>` rows. Lazy-fetched via HTMX
-    `?body_only=1` when the parent card is collapse-by-default."""
+    `?body_only=1` when the parent card is collapse-by-default.
+
+    BX.4 (2026-06-11): sectioned via ``_group_specs_into_sections`` so
+    the read card mirrors the same Identity / Classification / ...
+    grouping the edit form (BX.4 sibling change) renders. Each section
+    becomes a small header strip + a per-section ``<dl>``; empty
+    sections (every member hidden by subtype_only / two-layer rule)
+    drop. ``data-section-name="<label>"`` anchors are per
+    ``[feedback_browser_drivers_user_facing_locators]``.
+    """
     specs = _filter_specs_for_entity(_FIELD_SPECS_BY_KIND[kind], entity)
     hidden = _hidden_fields_for_entity(kind, entity, instance)
+    visible_specs = tuple(s for s in specs if s.name not in hidden)
+    sections = _group_specs_into_sections(kind, visible_specs)
+    if not sections:
+        return ""
     dt_cls = "font-semibold text-xs text-secondary-fg mt-2"
     dd_cls = "ml-0 mt-0.5 text-sm text-primary-fg break-words"
-    rows = "".join(
-        f'<dt class="{dt_cls}">{escape(s.label)}</dt>'
-        f'<dd class="{dd_cls}">'
-        f"{_render_read_value(s, getattr(entity, s.name, None))}"
-        f"</dd>"
-        for s in specs
-        if s.name not in hidden
-    )
     # `minmax(0, 1fr)` on the dd column (not bare `1fr`) lets long
     # unbroken values shrink + the `break-words` utility on `dd_cls`
     # then wraps them inside the card.
     dl_cls = "m-0 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4"
-    return f'<dl class="{dl_cls}">{rows}</dl>'
+    section_header_cls = (
+        "text-xs font-semibold uppercase tracking-wide text-secondary-fg "
+        "mt-3 mb-1 first:mt-0"
+    )
+    parts: list[str] = []
+    for label, section_specs in sections:
+        rows = "".join(
+            f'<dt class="{dt_cls}">{escape(s.label)}</dt>'
+            f'<dd class="{dd_cls}">'
+            f"{_render_read_value(s, getattr(entity, s.name, None))}"
+            f"</dd>"
+            for s in section_specs
+        )
+        parts.append(
+            f'<section data-role="read-card-section" '
+            f'data-section-name="{escape(label)}">'
+            f'<h3 class="{section_header_cls}">{escape(label)}</h3>'
+            f'<dl class="{dl_cls}">{rows}</dl>'
+            f"</section>"
+        )
+    return "".join(parts)
 
 
 # CF.4.c — crossover threshold: when a page renders ≤10 cards, eager
@@ -4796,10 +4936,35 @@ def _render_create_page(
     # surfaces the field's existence so the operator knows about
     # the post-create-edit workflow.
     overrides = form_overrides or {}
-    fields_html = "".join(
-        _render_field(s, overrides.get(s.name, ""), instance)
-        for s in specs
+    # BX.4 (2026-06-11) — sectioned for symmetry with the edit page +
+    # read card. The create page sees more fields than the edit page
+    # in the subtype-only case (the picker drives which subtype-gated
+    # fields are visible), but the same Identity / Topology /
+    # Activity / cadence / ... grouping applies. Same ``<fieldset>``
+    # treatment + ``data-section-name`` anchor.
+    create_sections = _group_specs_into_sections(kind, tuple(specs))
+    create_section_cls = (
+        "border border-surface-border rounded-md p-4 mb-4 "
+        "bg-surface-bg flex flex-col gap-3"
     )
+    create_section_legend_cls = (
+        "font-semibold text-sm text-primary-fg flex items-center gap-2"
+    )
+    if create_sections:
+        fields_html = "".join(
+            f'<fieldset class="{create_section_cls}" '
+            f'data-role="create-form-section" '
+            f'data-section-name="{escape(label)}">'
+            f'<legend class="{create_section_legend_cls}">{escape(label)}</legend>'
+            + "".join(
+                _render_field(s, overrides.get(s.name, ""), instance)
+                for s in section_specs
+            )
+            + "</fieldset>"
+            for label, section_specs in create_sections
+        )
+    else:
+        fields_html = ""
     # BB.2 — Reconciler picker fieldset. Renders for single_leg rails
     # (any subtype variant) AND for two_leg rails (CO.3, 2026-06-06).
     # The picker is *required for non-aggregating single_leg* and for
@@ -4911,16 +5076,43 @@ def _render_edit_page(
     url_id = _url_entity_id(kind, entity)
     overrides = form_overrides or {}
     hidden = _hidden_fields_for_entity(kind, entity, instance)
-    fields_html = "".join(
-        _render_field(
-            s,
-            overrides.get(s.name, getattr(entity, s.name, None)),
-            instance,
-            entity=entity,
-        )
-        for s in specs
-        if s.name not in hidden
+    # BX.4 (2026-06-11) — sectioned via ``_group_specs_into_sections``
+    # so the edit form's Identity / Classification / Activity / ...
+    # grouping matches what ``_render_read_card_body`` paints on the
+    # read card. Each section becomes a ``<fieldset>`` with a
+    # ``<legend>`` matching the singleton theme form's classes; empty
+    # sections (every member hidden by subtype_only / two-layer rule)
+    # drop gracefully. ``data-section-name="<label>"`` anchors are per
+    # ``[feedback_browser_drivers_user_facing_locators]``.
+    visible_specs = tuple(s for s in specs if s.name not in hidden)
+    sections = _group_specs_into_sections(kind, visible_specs)
+    section_cls = (
+        "border border-surface-border rounded-md p-4 mb-4 "
+        "bg-surface-bg flex flex-col gap-3"
     )
+    section_legend_cls = (
+        "font-semibold text-sm text-primary-fg flex items-center gap-2"
+    )
+    if sections:
+        fields_html = "".join(
+            f'<fieldset class="{section_cls}" '
+            f'data-role="edit-form-section" '
+            f'data-section-name="{escape(label)}">'
+            f'<legend class="{section_legend_cls}">{escape(label)}</legend>'
+            + "".join(
+                _render_field(
+                    s,
+                    overrides.get(s.name, getattr(entity, s.name, None)),
+                    instance,
+                    entity=entity,
+                )
+                for s in section_specs
+            )
+            + "</fieldset>"
+            for label, section_specs in sections
+        )
+    else:
+        fields_html = ""
     global_err_html = (
         f'<div role="alert" class="text-sm text-danger bg-red-50 border '
         f'border-danger rounded-sm px-3 py-2 mb-3">{escape(global_error)}</div>'

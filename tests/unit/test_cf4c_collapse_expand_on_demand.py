@@ -148,7 +148,15 @@ def test_eager_card_keeps_dl_body_inlined_via_unit_call(
 
 def test_body_only_returns_dl_only(writable_l2_yaml: Path) -> None:
     """`GET /l2_shape/rail/<name>?body_only=1` returns just the
-    `<dl>` rows — no `<article>` wrapper, no header, no actions."""
+    sectioned `<dl>` rows — no `<article>` wrapper, no header, no
+    actions.
+
+    BX.4 (2026-06-11): the body fragment now wraps each section in
+    ``<section data-role="read-card-section">`` + ``<h3>`` + ``<dl>``;
+    pre-BX.4 it was a single bare ``<dl>``. Still no article / header /
+    Edit / Delete leakage — the section header is read-card-internal,
+    not the page-level <header>.
+    """
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         # Pick a real rail id out of the fixture.
@@ -159,9 +167,15 @@ def test_body_only_returns_dl_only(writable_l2_yaml: Path) -> None:
         assert ids, "fixture has no rails"
         rail_id = ids[0]
         body_only = c.get(f"/l2_shape/rail/{rail_id}?body_only=1").text
-    assert body_only.startswith("<dl ")
+    # BX.4 — first character is the section wrapper, not the bare <dl>.
+    assert body_only.startswith('<section data-role="read-card-section"')
+    assert "<dl " in body_only
     assert "<article" not in body_only
-    assert "<header" not in body_only
+    # Page-level <header class="..."> doesn't leak in (we look for the
+    # opening tag with a space / attribute to avoid colliding on
+    # `<h3>` inside the section header).
+    assert "<header " not in body_only
+    assert "<header>" not in body_only
     # Edit / Delete actions don't leak into the body fragment.
     assert ">Edit<" not in body_only
     assert ">Delete<" not in body_only
