@@ -617,7 +617,23 @@ def _layer_command(
         # j.6 — see unit layer comment.
         cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
-        # CB.7-followup (2026-06-02) — loadgroup dropped; see unit-layer note.
+        # BV.3.3 fix (2026-06-10) — re-enable `--dist=loadgroup` here ONLY.
+        # The BV.3.3 trainer dogfood module pins its session-scope fixture
+        # via `pytest.mark.xdist_group("trainer-<dialect>")` (see
+        # tests/e2e/app2/test_bv33_trainer_dogfood.py:186-187). Under the
+        # xdist default `--dist=load`, that mark is a silent no-op — all
+        # 16 workers concurrently call `trainer_ready_session`, race the
+        # shared `recon-gen-test-pg` container's /etl/run (full schema
+        # drop + seed + matview refresh + clone-to-v-overlay), and pile
+        # up on Playwright 600s timeouts.
+        #
+        # The CB.7-followup unwind that dropped the global loadgroup bump
+        # was specifically the qs_browser marker-deselection × loadgroup
+        # interaction (xdist 3.8 dies at session-start when marker-
+        # deselected items carry xdist_group). App2 discovers via
+        # `tests/e2e/app2/` directory with NO `-m` filter — that hazard
+        # does not apply here. Leave qs_browser at default `--dist=load`.
+        cmd += ["--dist=loadgroup"]
         return (cmd, {**env_addl, RECON_GEN_E2E.name: "1"})
     if layer == "deploy":
         # Y.2.gate.c.5.deploy — `recon-gen json apply --execute` against

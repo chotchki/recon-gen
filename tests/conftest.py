@@ -68,18 +68,26 @@ def pytest_configure(config: Any) -> None:
     if RECON_GEN_FUZZ_SEED.get_or_none() is None:
         os.environ[RECON_GEN_FUZZ_SEED.name] = str(secrets.randbits(32))
 
-    # CB.7-followup (2026-06-02) — the historic loadgroup auto-bump
-    # was deleted. Its rationale (pin a shared-prefix writer fixture's
-    # tests to one worker so module-scope seeds didn't race) was the
-    # exact thing CB.7-followup unwound when it dropped cross-tier
-    # shared prefixes. Each test now self-isolates via a per-(file,
-    # worker) hash suffix, so scattered module-scope fixtures reseed
-    # their own private prefix — no contention, no DDL collisions.
-    # Keeping the bump caused the qs_browser cascade: with full e2e
-    # collection + `-m browser` + loadgroup, worker session-start dies
-    # in ~5s on every worker (xdist 3.8 loadgroup interacts badly with
-    # marker-deselected items that carry xdist_group). See runner.py's
-    # unit-layer `_layer_command` comment for the full repro.
+    # CB.7-followup (2026-06-02) — the historic GLOBAL loadgroup
+    # auto-bump was deleted. Its rationale (pin a shared-prefix writer
+    # fixture's tests to one worker so module-scope seeds didn't race)
+    # was the exact thing CB.7-followup unwound when it dropped
+    # cross-tier shared prefixes. Each test now self-isolates via a
+    # per-(file, worker) hash suffix, so scattered module-scope fixtures
+    # reseed their own private prefix — no contention, no DDL collisions.
+    # Keeping the bump as a global caused the qs_browser cascade: with
+    # full e2e collection + `-m browser` + loadgroup, worker session-start
+    # dies in ~5s on every worker (xdist 3.8 loadgroup interacts badly
+    # with marker-deselected items that carry xdist_group).
+    #
+    # BV.3.3 fix (2026-06-10) — loadgroup is now applied SURGICALLY at
+    # the app2 layer only, via
+    # ``src/recon_gen/_dev/runner.py::_layer_command`` (the app2 branch
+    # appends ``--dist=loadgroup`` to the pytest command). App2 uses
+    # directory discovery with no ``-m`` filter so the marker-deselection
+    # hazard doesn't apply, and the BV.3.3 trainer dogfood module's
+    # ``xdist_group("trainer-<dialect>")`` pin actually funnels grouped
+    # tests onto one worker. qs_browser stays at default ``--dist=load``.
 
     # #741 — redirect runner.RUNS_DIR so in-process runner.main calls
     # land in session tmp instead of the operator's real runs/. Lazy

@@ -139,9 +139,13 @@ prod = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
-    # The runner uses `pytest -n auto` on every layer, and conftest bumps
-    # the xdist dist mode to `loadgroup` so `@pytest.mark.xdist_group`
-    # works. xdist therefore belongs in [dev], not just [e2e] — `uv sync
+    # The runner uses `pytest -n auto` on every layer. The app2 layer
+    # additionally passes `--dist=loadgroup` (see
+    # src/recon_gen/_dev/runner.py::_layer_command app2 branch) so the
+    # BV.3.3 trainer dogfood module's `@pytest.mark.xdist_group(
+    # "trainer-<dialect>")` pin actually funnels grouped tests to one
+    # worker (xdist's default `--dist=load` silently ignores the mark).
+    # xdist therefore belongs in [dev], not just [e2e] — `uv sync
     # --extra dev && pytest -n auto` should work.
     "pytest-xdist>=3.5",
     # CB.17.k — filelock for the xdist-canonical "session-scope-once"
@@ -342,10 +346,16 @@ version = {attr = "recon_gen.__version__"}
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # NOTE: the ``loadgroup`` xdist distribution (so ``@pytest.mark.xdist_group``
-# markers pin grouped tests to one worker — see Y.7-followup) is set in
-# ``tests/conftest.py::pytest_configure`` ONLY when xdist is active, NOT here
-# via ``addopts`` — a no-xdist env (the CI ``test`` job, the wheel-smoke job)
-# chokes on an unrecognized ``--dist``.
+# markers pin grouped tests to one worker) is NOT set here via ``addopts``
+# — a no-xdist env (the wheel-smoke job, bare `pytest tests/unit`) would
+# choke on an unrecognized ``--dist``. The historic auto-bump in
+# ``tests/conftest.py::pytest_configure`` was deleted by CB.7-followup
+# (its global scope caused the qs_browser marker-deselection × loadgroup
+# cascade). It's now applied surgically at the app2 layer ONLY, via
+# ``src/recon_gen/_dev/runner.py::_layer_command`` (the app2 branch
+# appends ``--dist=loadgroup`` to the pytest command). That's where the
+# BV.3.3 trainer dogfood module's ``xdist_group("trainer-<dialect>")``
+# pin gets honored.
 markers = [
     "e2e: end-to-end tests requiring deployed AWS resources",
     "api: API-only e2e tests (no browser)",
