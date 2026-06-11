@@ -139,7 +139,9 @@ def test_u1_duplicate_account_id_rejected() -> None:
     inst = _baseline_instance()
     dup = dataclasses.replace(inst.accounts[1], id=inst.accounts[0].id)
     bad = _replace(inst, accounts=(inst.accounts[0], dup))
-    with pytest.raises(L2ValidationError, match="duplicate Account.id"):
+    with pytest.raises(
+        L2ValidationError, match=r"\[U1\].*account id.*more than once",
+    ):
         validate(bad)
 
 
@@ -151,7 +153,10 @@ def test_u2_duplicate_account_template_role_rejected() -> None:
         parent_role=Identifier("ControlAccount"),
     )
     bad = _replace(inst, account_templates=(*inst.account_templates, dup))
-    with pytest.raises(L2ValidationError, match="duplicate AccountTemplate.role"):
+    with pytest.raises(
+        L2ValidationError,
+        match=r"\[U2\].*account template role.*more than once",
+    ):
         validate(bad)
 
 
@@ -159,7 +164,9 @@ def test_u3_duplicate_rail_name_rejected() -> None:
     inst = _baseline_instance()
     dup = dataclasses.replace(inst.rails[0], name=Identifier("PoolBalancing"))
     bad = _replace(inst, rails=(*inst.rails, dup))
-    with pytest.raises(L2ValidationError, match="duplicate Rail.name"):
+    with pytest.raises(
+        L2ValidationError, match=r"\[U3\].*rail name.*more than once",
+    ):
         validate(bad)
 
 
@@ -170,7 +177,8 @@ def test_u4_duplicate_transfer_template_name_rejected() -> None:
     )
     bad = _replace(inst, transfer_templates=(*inst.transfer_templates, dup))
     with pytest.raises(
-        L2ValidationError, match="duplicate TransferTemplate.name",
+        L2ValidationError,
+        match=r"\[U4\].*transfer template name.*more than once",
     ):
         validate(bad)
 
@@ -197,7 +205,7 @@ def test_u7_template_id_collides_with_singleton_rejected() -> None:
     bad = _replace(inst, accounts=(*inst.accounts, colliding_singleton))
     with pytest.raises(
         L2ValidationError,
-        match=r"materializes account_id 'cust-001' which is already declared",
+        match=r"\[U7\].*materializes account_id 'cust-001'.*already declared",
     ):
         validate(bad)
 
@@ -212,7 +220,9 @@ def test_r1_rail_references_undeclared_role_rejected() -> None:
         source_role=(Identifier("UndeclaredRole"),),
     )
     bad = _replace(inst, rails=(bad_rail, *inst.rails[1:]))
-    with pytest.raises(L2ValidationError, match="ExtInbound.*UndeclaredRole"):
+    with pytest.raises(
+        L2ValidationError, match=r"\[R1\].*ExtInbound.*UndeclaredRole",
+    ):
         validate(bad)
 
 
@@ -222,7 +232,9 @@ def test_r2_account_parent_role_resolves() -> None:
         inst.accounts[0], parent_role=Identifier("UndeclaredRole"),
     )
     bad = _replace(inst, accounts=(bad_acc, *inst.accounts[1:]))
-    with pytest.raises(L2ValidationError, match="gl-control.*parent_role"):
+    with pytest.raises(
+        L2ValidationError, match=r"\[R2\].*gl-control.*parent_role",
+    ):
         validate(bad)
 
 
@@ -244,7 +256,8 @@ def test_r3_account_template_parent_role_must_be_singleton() -> None:
         account_templates=(bad_template, second_template),
     )
     with pytest.raises(
-        L2ValidationError, match="resolves to another AccountTemplate",
+        L2ValidationError,
+        match=r"\[R3\].*resolves to another account template",
     ):
         validate(bad)
 
@@ -257,7 +270,8 @@ def test_r3_account_template_parent_role_undeclared_rejected() -> None:
     )
     bad = _replace(inst, account_templates=(bad_template,))
     with pytest.raises(
-        L2ValidationError, match="not declared on any Account",
+        L2ValidationError,
+        match=r"\[R3\].*no standalone account uses that role",
     ):
         validate(bad)
 
@@ -270,7 +284,8 @@ def test_r4_template_leg_rails_must_exist() -> None:
     )
     bad = _replace(inst, transfer_templates=(bad_template,))
     with pytest.raises(
-        L2ValidationError, match="MerchantSettlementCycle.*NonexistentRail",
+        L2ValidationError,
+        match=r"\[R4\].*MerchantSettlementCycle.*NonexistentRail",
     ):
         validate(bad)
 
@@ -282,7 +297,9 @@ def test_r5_chain_endpoints_must_exist() -> None:
         children=(ChainChildSpec(name=Identifier("NonexistentRail")),),
     )
     bad = _replace(inst, chains=(bad_chain,))
-    with pytest.raises(L2ValidationError, match=r"chains\[0\]\.children\[0\]"):
+    with pytest.raises(
+        L2ValidationError, match=r"\[R5\].*chains\[0\]\.children\[0\]",
+    ):
         validate(bad)
 
 
@@ -294,7 +311,9 @@ def test_r6_limit_schedule_parent_role_must_resolve() -> None:
         cap=Decimal("100"),
     )
     bad = _replace(inst, limit_schedules=(bad_limit,))
-    with pytest.raises(L2ValidationError, match="limit_schedules\\[0\\]"):
+    with pytest.raises(
+        L2ValidationError, match=r"\[R6\].*limit_schedules\[0\]",
+    ):
         validate(bad)
 
 
@@ -333,7 +352,7 @@ def test_c1_at_most_one_variable_leg_per_template() -> None:
     )
     with pytest.raises(
         L2ValidationError,
-        match="contains 2 non-grouped Variable-direction legs",
+        match=r"\[C1\].*contains 2 non-grouped Variable-direction legs",
     ):
         validate(bad)
 
@@ -351,7 +370,8 @@ def test_s1_standalone_two_leg_requires_expected_net() -> None:
     bad_rail = dataclasses.replace(inst.rails[0], expected_net=None)
     bad = _replace(inst, rails=(bad_rail, *inst.rails[1:]))
     with pytest.raises(
-        L2ValidationError, match="standalone two-leg rail.*MUST declare expected_net",
+        L2ValidationError,
+        match=r"\[S1\].*stands alone.*needs its own expected_net",
     ):
         validate(bad)
 
@@ -385,7 +405,7 @@ def test_s2_template_leg_must_not_have_expected_net() -> None:
     )
     with pytest.raises(
         L2ValidationError,
-        match="ClosingLeg.*appears in a TransferTemplate.*MUST NOT carry one",
+        match=r"\[S2\].*ClosingLeg.*part of a transfer template",
     ):
         validate(bad)
 
@@ -428,7 +448,7 @@ def test_s3_unreconciled_single_leg_rejected() -> None:
     bad = _replace(inst, rails=(*inst.rails, orphan))
     with pytest.raises(
         L2ValidationError,
-        match="OrphanLeg.*single-leg rail is not reconciled",
+        match=r"\[S3\].*OrphanLeg.*nothing to reconcile against",
     ):
         validate(bad)
 
@@ -442,7 +462,7 @@ def test_s4_aggregating_rail_rejected_as_chain_child() -> None:
     bad = _replace(inst, chains=(bad_chain,))
     with pytest.raises(
         L2ValidationError,
-        match="aggregating Rails MUST NOT appear in Chain.children",
+        match=r"\[S4\].*aggregating rail",
     ):
         validate(bad)
 
@@ -452,7 +472,8 @@ def test_s5_aggregating_rail_requires_cadence() -> None:
     bad_rail = dataclasses.replace(inst.rails[2], cadence=None)
     bad = _replace(inst, rails=(*inst.rails[:2], bad_rail))
     with pytest.raises(
-        L2ValidationError, match="PoolBalancing.*requires cadence",
+        L2ValidationError,
+        match=r"\[S5\].*PoolBalancing.*doesn't declare a cadence",
     ):
         validate(bad)
 
@@ -462,7 +483,8 @@ def test_s5_aggregating_rail_requires_bundles_activity() -> None:
     bad_rail = dataclasses.replace(inst.rails[2], bundles_activity=())
     bad = _replace(inst, rails=(*inst.rails[:2], bad_rail))
     with pytest.raises(
-        L2ValidationError, match="requires bundles_activity",
+        L2ValidationError,
+        match=r"\[S5\].*doesn't list any bundles_activity",
     ):
         validate(bad)
 
@@ -472,7 +494,8 @@ def test_s6_non_aggregating_rail_rejects_cadence() -> None:
     bad_rail = dataclasses.replace(inst.rails[0], cadence="daily-eod")
     bad = _replace(inst, rails=(bad_rail, *inst.rails[1:]))
     with pytest.raises(
-        L2ValidationError, match="cadence is only meaningful when aggregating",
+        L2ValidationError,
+        match=r"\[S6\].*declares a cadence but isn't aggregating",
     ):
         validate(bad)
 
@@ -484,7 +507,8 @@ def test_s6_non_aggregating_rail_rejects_bundles_activity() -> None:
     )
     bad = _replace(inst, rails=(bad_rail, *inst.rails[1:]))
     with pytest.raises(
-        L2ValidationError, match="bundles_activity is only meaningful",
+        L2ValidationError,
+        match=r"\[S6\].*declares bundles_activity but.*isn't aggregating",
     ):
         validate(bad)
 
@@ -521,7 +545,10 @@ def test_v1_completion_vocabulary_rejects_invalid(bad_completion: str) -> None:
         inst.transfer_templates[0], completion=bad_completion,
     )
     bad = _replace(inst, transfer_templates=(bad_template,))
-    with pytest.raises(L2ValidationError, match="not a v1 CompletionExpression"):
+    with pytest.raises(
+        L2ValidationError,
+        match=r"\[V1\].*isn't a v1 CompletionExpression",
+    ):
         validate(bad)
 
 
@@ -556,7 +583,10 @@ def test_v2_cadence_vocabulary_rejects_invalid(bad_cadence: str) -> None:
     inst = _baseline_instance()
     bad_rail = dataclasses.replace(inst.rails[2], cadence=bad_cadence)
     bad = _replace(inst, rails=(*inst.rails[:2], bad_rail))
-    with pytest.raises(L2ValidationError, match="not a v1 CadenceExpression"):
+    with pytest.raises(
+        L2ValidationError,
+        match=r"\[V2\].*isn't a v1 CadenceExpression",
+    ):
         validate(bad)
 
 
@@ -578,7 +608,9 @@ def test_u5_duplicate_limit_schedule_combination_rejected() -> None:
         # Direction defaults to Outbound — same triple as the base entry.
     )
     bad = _replace(inst, limit_schedules=(*inst.limit_schedules, dup))
-    with pytest.raises(L2ValidationError, match="duplicate"):
+    with pytest.raises(
+        L2ValidationError, match=r"\[U5\].*duplicates an earlier one",
+    ):
         validate(bad)
 
 
@@ -630,7 +662,8 @@ def test_u5_same_triple_inbound_dup_rejected() -> None:
     )
     bad = _replace(inst, limit_schedules=(*inst.limit_schedules, a, b))
     with pytest.raises(
-        L2ValidationError, match="duplicate.*direction='Inbound'",
+        L2ValidationError,
+        match=r"\[U5\].*duplicates an earlier one.*Inbound",
     ):
         validate(bad)
 
@@ -668,7 +701,7 @@ def test_r7_template_leg_rails_must_be_non_aggregating() -> None:
     )
     with pytest.raises(
         L2ValidationError,
-        match=r"leg_rails: rail 'AggLeg' is aggregating",
+        match=r"\[R7\].*'AggLeg'.*aggregating rail",
     ):
         validate(bad)
 
@@ -689,7 +722,7 @@ def test_r8_max_unbundled_age_requires_a_bundling_rail() -> None:
     )
     with pytest.raises(
         L2ValidationError,
-        match=r"max_unbundled_age is set but no aggregating Rail bundles",
+        match=r"\[R8\].*max_unbundled_age watch.*no aggregating rail",
     ):
         validate(bad)
 
@@ -723,7 +756,7 @@ def test_r9_dotted_bundle_selector_unknown_template_rejected() -> None:
     bad = _replace(inst, rails=(*inst.rails[:2], bad_agg))
     with pytest.raises(
         L2ValidationError,
-        match=r"references TransferTemplate 'UnknownTemplate' which is not declared",
+        match=r"\[R9\].*transfer template 'UnknownTemplate' isn't declared",
     ):
         validate(bad)
 
@@ -740,7 +773,7 @@ def test_r9_dotted_bundle_selector_unknown_leg_rejected() -> None:
     bad = _replace(inst, rails=(*inst.rails[:2], bad_agg))
     with pytest.raises(
         L2ValidationError,
-        match=r"references rail 'NotAlegRail' which is not in TransferTemplate",
+        match=r"\[R9\].*'NotAlegRail' isn't a leg of transfer template",
     ):
         validate(bad)
 
@@ -765,7 +798,7 @@ def test_o1_single_leg_rail_without_origin_rejected() -> None:
     bad = _replace(inst, rails=(inst.rails[0], bad_rail, inst.rails[2]))
     with pytest.raises(
         L2ValidationError,
-        match=r"single-leg rail MUST set origin",
+        match=r"\[O1\].*Single-leg rail.*doesn't declare an Origin",
     ):
         validate(bad)
 
@@ -777,7 +810,7 @@ def test_o1_two_leg_rail_with_no_origin_anywhere_rejected() -> None:
     bad = _replace(inst, rails=(bad_rail, *inst.rails[1:]))
     with pytest.raises(
         L2ValidationError,
-        match=r"two-leg rail's source leg has no resolved Origin",
+        match=r"\[O1\].*Two-leg rail.*source leg doesn't have an Origin",
     ):
         validate(bad)
 
@@ -794,7 +827,7 @@ def test_o1_two_leg_rail_one_override_no_fallback_rejected() -> None:
     bad = _replace(inst, rails=(bad_rail, *inst.rails[1:]))
     with pytest.raises(
         L2ValidationError,
-        match=r"two-leg rail's destination leg has no resolved Origin",
+        match=r"\[O1\].*Two-leg rail.*destination leg doesn't have an Origin",
     ):
         validate(bad)
 
@@ -842,7 +875,10 @@ def test_r10_limit_schedule_rail_must_match_some_rail() -> None:
         cap=Decimal("1000.00"),
     )
     inst = _replace(inst, limit_schedules=(*inst.limit_schedules, bad))
-    with pytest.raises(L2ValidationError, match="no declared Rail with this name"):
+    with pytest.raises(
+        L2ValidationError,
+        match=r"\[R10\].*no rail by that name is declared",
+    ):
         validate(inst)
 
 
@@ -851,7 +887,9 @@ def test_r10_typo_in_existing_rail_name_rejected() -> None:
     inst = _baseline_instance()
     typo = dataclasses.replace(inst.limit_schedules[0], rail=RailName("ExtInboundd"))
     inst = _replace(inst, limit_schedules=(typo,))
-    with pytest.raises(L2ValidationError, match=r"rail='ExtInboundd'"):
+    with pytest.raises(
+        L2ValidationError, match=r"\[R10\].*rail='ExtInboundd'",
+    ):
         validate(inst)
 
 
@@ -879,7 +917,7 @@ def test_r11_unresolvable_bare_bundles_activity_selector_rejected() -> None:
     inst = _replace(inst, rails=(*inst.rails[:2], typo))
     with pytest.raises(
         L2ValidationError,
-        match=r"bare selector 'CustomerOutboundACHTypo' resolves to no declared Rail.name",
+        match=r"\[R11\].*'CustomerOutboundACHTypo'.*no rail by that name is declared",
     ):
         validate(inst)
 
@@ -921,7 +959,7 @@ def test_r12_transfer_key_field_missing_from_leg_rail_metadata_keys_rejected() -
     bad = _replace(inst, rails=(inst.rails[0], bad_rail, inst.rails[2]))
     with pytest.raises(
         L2ValidationError,
-        match=r"missing TransferKey field\(s\) \['merchant_id'\]",
+        match=r"\[R12\].*doesn't carry the field\(s\) \['merchant_id'\]",
     ):
         validate(bad)
 
@@ -985,7 +1023,7 @@ def test_c3_variable_single_leg_not_in_any_template_rejected() -> None:
     bad = _replace(inst, rails=(*inst.rails, var_rail))
     with pytest.raises(
         L2ValidationError,
-        match=r"OrphanVariable.*Variable-direction.*not in any TransferTemplate",
+        match=r"\[C3\].*OrphanVariable.*Variable-direction.*isn't a leg",
     ):
         validate(bad)
 
@@ -1023,7 +1061,9 @@ def test_c5_chain_row_with_empty_children_rejected() -> None:
         children=(),
     )  # validator C5 rejects empty children
     bad = _replace(inst, chains=(empty_chain,))
-    with pytest.raises(L2ValidationError, match="children list is empty"):
+    with pytest.raises(
+        L2ValidationError, match=r"\[C5\].*empty children list",
+    ):
         validate(bad)
 
 
@@ -1050,7 +1090,7 @@ def test_c6_duplicate_child_under_same_parent_rejected() -> None:
     bad = _replace(inst, chains=(a, b))
     with pytest.raises(
         L2ValidationError,
-        match=r"Chain parent 'MerchantSettlementCycle'.*ExtInbound",
+        match=r"\[C6\].*'MerchantSettlementCycle'.*ExtInbound",
     ):
         validate(bad)
 
@@ -1129,7 +1169,7 @@ def test_c1a_xor_member_outside_leg_rails_rejected() -> None:
     bad = _replace(inst, transfer_templates=new_templates)
     with pytest.raises(
         L2ValidationError,
-        match=r"SubledgerCharge.*not in this template's `leg_rails`",
+        match=r"\[C1a\].*SubledgerCharge.*isn't in this template's leg_rails",
     ):
         validate(bad)
 
@@ -1169,7 +1209,7 @@ def test_c1b_xor_member_non_variable_rail_rejected() -> None:
     )
     with pytest.raises(
         L2ValidationError,
-        match=r"VarDebitOnly.*Variable-direction.*SingleLegRail",
+        match=r"\[C1b\].*VarDebitOnly.*Variable-direction single-leg rail",
     ):
         validate(bad)
 
@@ -1189,7 +1229,7 @@ def test_c1c_xor_member_in_two_groups_rejected() -> None:
     bad = _replace(inst, transfer_templates=new_templates)
     with pytest.raises(
         L2ValidationError,
-        match=r"VarAuto.*appears in two XOR groups.*groups 0 and 1",
+        match=r"\[C1c\].*VarAuto.*appears in two XOR groups.*groups 0 and 1",
     ):
         validate(bad)
 
@@ -1212,7 +1252,7 @@ def test_c1d_xor_group_singleton_member_rejected() -> None:
     bad = _replace(inst, transfer_templates=new_templates)
     with pytest.raises(
         L2ValidationError,
-        match=r"VarCycle.*leg_rail_xor_groups\[1\].*1 member",
+        match=r"\[C1d\].*VarCycle.*leg_rail_xor_groups\[1\].*1 member",
     ):
         validate(bad)
 
@@ -1235,8 +1275,8 @@ def test_c1_at_most_one_non_grouped_variable_per_template() -> None:
     with pytest.raises(
         L2ValidationError,
         match=(
-            r"contains 3 non-grouped Variable-direction legs.*"
-            r"at most one"
+            r"\[C1\].*contains 3 non-grouped Variable-direction legs.*"
+            r"Only one"
         ),
     ):
         validate(bad)
@@ -1282,7 +1322,7 @@ def test_c8a_fan_in_with_rail_child_rejected() -> None:
     ))
     with pytest.raises(
         L2ValidationError,
-        match=r"child 'ExtInbound'.*fan_in=True must resolve to a TransferTemplate",
+        match=r"\[C8a\].*child 'ExtInbound' has fan_in=True.*only transfer templates",
     ):
         validate(bad)
 
@@ -1324,7 +1364,7 @@ def test_c8b_expected_parent_count_without_fan_in_rejected() -> None:
     ))
     with pytest.raises(
         L2ValidationError,
-        match=r"expected_parent_count is set.*but fan_in is\s+False",
+        match=r"\[C8b\].*expected_parent_count=.*without fan_in=True",
     ):
         validate(bad)
 
@@ -1348,7 +1388,7 @@ def test_c8c_expected_parent_count_one_under_fan_in_rejected() -> None:
     ))
     with pytest.raises(
         L2ValidationError,
-        match=r"fan_in=True with expected_parent_count=1 is degenerate",
+        match=r"\[C8c\].*fan_in=True with expected_parent_count=1",
     ):
         validate(bad)
 
@@ -1401,7 +1441,7 @@ def test_v1a_amount_typical_range_min_eq_max_rejected() -> None:
     bad = _replace(inst, rails=(bad_rail,) + inst.rails[1:])
     with pytest.raises(
         L2ValidationError,
-        match=r"amount_typical_range min.*must be strictly less than max",
+        match=r"\[V1a\].*amount_typical_range min.*must be strictly less than max",
     ):
         validate(bad)
 
@@ -1417,7 +1457,7 @@ def test_v1b_amount_typical_range_zero_or_negative_rejected() -> None:
     bad = _replace(inst, rails=(bad_rail,) + inst.rails[1:])
     with pytest.raises(
         L2ValidationError,
-        match=r"amount_typical_range values must both be > 0",
+        match=r"\[V1b\].*amount_typical_range values must.*both be greater than zero",
     ):
         validate(bad)
 
@@ -1442,7 +1482,7 @@ def test_v1c_amount_typical_range_on_aggregating_rejected() -> None:
     )
     with pytest.raises(
         L2ValidationError,
-        match=r"amount_typical_range is forbidden on aggregating rails",
+        match=r"\[V1c\].*amount_typical_range can't sit on.*aggregating rail",
     ):
         validate(bad)
 
@@ -1488,7 +1528,7 @@ def test_business_day_offset_rejected_on_external_account() -> None:
     bad = _replace(inst, accounts=(inst.accounts[0], bad_ext))
     with pytest.raises(
         L2ValidationError,
-        match=r"M\.4\.4\.14a.*'ext-counter'.*scope='external'",
+        match=r"\[M1\].*'ext-counter'.*scope='external'",
     ):
         validate(bad)
 
@@ -1511,7 +1551,7 @@ def test_business_day_offset_rejected_on_external_account_template() -> None:
     )
     with pytest.raises(
         L2ValidationError,
-        match=r"M\.4\.4\.14a.*'ExternalMerchant'.*scope='external'",
+        match=r"\[M1\].*'ExternalMerchant'.*scope='external'",
     ):
         validate(bad)
 
