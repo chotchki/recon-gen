@@ -168,6 +168,93 @@ def test_home_page_no_legacy_deploy_button(
     assert 'id="deploy-status"' not in body
 
 
+def test_home_page_main_container_uses_full_viewport_width(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.6/11 follow-up #2 (2026-06-11) — anti-regression: the home
+    ``<main id="home-entities">`` wrapper must NOT carry the
+    ``max-w-7xl`` cap. The earlier #1 follow-up (5d50a285) collapsed
+    the inner card grid to 1-col because long entity ids wrapped
+    inside narrow ribbon cards; the real fix is dropping the
+    container cap so the 3-col grid has the full viewport to breathe.
+    `px-8` padding stays so content does not hug the viewport edge
+    on ultrawide.
+    """
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/").text
+    # No max-width cap on the main container — the responsive grid
+    # claims whatever the viewport offers. (No-max-w-* asserted by
+    # scanning for the main element opener.)
+    assert 'id="home-entities"' in body
+    # The opener line must not pin any max-w utility.
+    main_opener_idx = body.index('id="home-entities"')
+    # Walk back to the opening `<` of the element.
+    el_start = body.rfind("<main", 0, main_opener_idx)
+    el_end = body.index(">", main_opener_idx)
+    main_tag = body[el_start:el_end + 1]
+    assert "max-w-" not in main_tag, (
+        f"home <main> should not cap width; got: {main_tag}"
+    )
+    # px-8 padding kept (vs prior px-4) — content does not hug the edge.
+    assert "px-8" in main_tag
+
+
+def test_l2_shape_embed_grid_is_responsive_three_col(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.6/11 follow-up #2 (2026-06-11) — anti-regression: the
+    `_render_list_page` grid restores the responsive
+    `grid-cols-1 md:grid-cols-2 xl:grid-cols-3` shape. The prior #1
+    follow-up (5d50a285) collapsed to 1-col as a workaround for
+    title-wrap inside the narrow `max-w-7xl` ribbon; with the cap
+    lifted on the home + standalone wrappers the responsive grid is
+    correct again. Also asserts the grid itself does NOT pin
+    `max-w-*` (the outer container owns width now).
+    """
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/l2_shape/account/?embed=1").text
+    # Responsive 3-col grid restored.
+    assert "grid-cols-1 md:grid-cols-2 xl:grid-cols-3" in body, (
+        "embed grid should restore the responsive 3-col shape "
+        "(grid-cols-1 md:grid-cols-2 xl:grid-cols-3)"
+    )
+    # The grid wrapper itself drops the max-w-7xl cap — its parent
+    # (the home <main> or the standalone /l2_shape/<kind>/ page) is
+    # full-bleed now, so the grid does not need to constrain.
+    # Locate the grid div: `<div class="grid grid-cols-1 …" data-kind=…>`
+    grid_idx = body.index("grid grid-cols-1 md:grid-cols-2")
+    grid_open = body.rfind("<div", 0, grid_idx)
+    grid_close = body.index(">", grid_idx)
+    grid_tag = body[grid_open:grid_close + 1]
+    assert "max-w-7xl" not in grid_tag, (
+        f"grid wrapper should not carry max-w-7xl; got: {grid_tag}"
+    )
+
+
+def test_l2_shape_standalone_page_drops_max_width_cap(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.6/11 follow-up #2 (2026-06-11) — anti-regression: the
+    dedicated ``/l2_shape/<kind>/`` page's delete-banner wrapper +
+    grid + search/pager wrappers all drop the ``max-w-7xl`` cap so
+    the standalone page matches the home page's full-viewport
+    treatment. The ``px-8`` padding stays for ultrawide breathing
+    room.
+    """
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/l2_shape/account/").text
+    # No max-w-7xl anywhere in the page body — the dedicated page is
+    # full-bleed like the home page now.
+    assert "max-w-7xl" not in body, (
+        "standalone /l2_shape/<kind>/ page should drop max-w-7xl cap"
+    )
+    # The responsive 3-col grid still renders here too.
+    assert "grid-cols-1 md:grid-cols-2 xl:grid-cols-3" in body
+
+
 def test_home_page_first_section_open_default_others_collapsed(
     writable_l2_yaml: Path,
 ) -> None:

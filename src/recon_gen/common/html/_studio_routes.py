@@ -983,7 +983,7 @@ def _render_home_page(
       The diagram link in the top nav shows how the kinds connect.
     </p>
   </header>
-  <main class="px-4 pt-4 pb-8 max-w-7xl mx-auto" id="home-entities">
+  <main class="px-8 pt-4 pb-8" id="home-entities">
     <div id="delete-confirm-banner-slot" data-test-delete-banner-slot></div>
     {sections_html}
   </main>
