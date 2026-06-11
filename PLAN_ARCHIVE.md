@@ -1,3 +1,26 @@
+# PLAN — Phase CZ (archived 2026-06-10)
+
+**Phase summary:** Production-DB safe mode — prevent accidental wipe of non-synthetic data on a real-ETL-populated DB. Operator-flagged shape (2026-06-09): once `cfg.etl_hook` is configured + real ETL populates `<prefix>_transactions` / `<prefix>_daily_balances`, NOTHING in recon-gen prevented a subsequent Trainer reset / Studio Deploy-changes from wiping real customer rows. Locked design: narrow gate on the `cfg.etl_hook` field; absence = standalone-mode (preserve unmarked rows); configured = ETL-mode (wipe-safe). Row-level "synthetic" predicate is `metadata.source = 'training'` stamped by every seed-pipeline writer. Real ETL rows have no marker — absence IS the real-row signal (no integrator-side burden). Scope narrowed to the easy-button surfaces (Trainer reset + Studio Deploy); CLI surfaces stay unprotected (operators using `--execute` know what they're doing).
+
+**What landed:**
+- **CZ.0** REPLAN with operator-locked design decisions. Output: `docs/audits/cz_0_production_safe_mode_design.md`.
+- **CZ.2** `metadata.source = 'training'` stamp on every seed-pipeline writer (commit `bbf93c1c`). 33 files +602/-161. Chokepoint at `scenario_metadata` in `src/recon_gen/common/spine/scenario_context.py` — every caller inherits the stamp. Also touched `_emit_helpers.py` writers + `ledger_simulation.py::emit_one` + drift / overdraft / stuck_pending / inv_fanout / rail_firing + plant primitives. `etl.write_daily_balance` deliberately UN-stamped — absence IS the real-row signal.
+- **CZ.3** Trainer reset `etl_hook` gate + DELETE-synthetic-only path (commit `2caafdac`). `step_2_wipe(synthetic_only: bool)` runs `DELETE FROM <prefix>_transactions WHERE JSON_VALUE(metadata, '$.source') = 'training'` instead of TRUNCATE when synthetic-only.
+- **CZ.4** Studio `POST /deploy` refuses HTTP 409 when `cfg.etl_hook is None` (commit `a47450fe`). Structured `halt_reason` with three unblock paths (configure etl_hook, drop to CLI, switch to ETL-mode). No click-through.
+- **CZ.5** App2 standalone-mode UI: banner + Trainer button label swap + Studio Force-rebuild label swap (commit `4ffca2ac`). REPLAN-locked copy as module constants. Trainer "Reset to clean baseline" renamed on standalone-mode. 18 unit tests.
+- **CZ.6 + CZ.6.1** Pre-CZ DB migration auto-mark on first post-CZ `data apply --execute` + explicit `recon-gen schema migrate-mark` verb (commit `c5ab9265`). CZ.6.1 wired the auto-mark into `step_2_wipe`'s schema_emitted path.
+- **CZ.1** demo-publish.yml polls PyPI for the tagged version before invoking refresh-demos.sh (commit `b3b3895e`). Closes the CDN-propagation race that bit v13.11.0 (pip saw 13.10.2 as latest 3s after Release). Poll loop: 20s × 6 retries against `https://pypi.org/pypi/recon-gen/json`'s `info.version`. Exit 1 on never-propagate.
+
+**Open caveats:**
+- `step_2_wipe` returns PRE-DELETE row counts (`COUNT(*)` before either TRUNCATE or DELETE-WHERE runs). On the synthetic-only path this over-reports actual deletions. Documented in CZ.3, not fixed.
+
+**Out of scope (operator decisions 2026-06-09):**
+- CLI gating (`recon-gen data apply --execute` / `schema apply --execute`) — operators in CLI context by choice.
+- `audit verify` integration with the source marker.
+- `refresh-demos.sh` opt-out env.
+- Schema-apply `DROP TABLE` migration story.
+- Requiring real-data ETL integrators to stamp `metadata.source = 'real'`.
+
 # PLAN — Phase BV (archived 2026-06-10)
 
 **Phase summary:** Dogfood cap-stone — full L2 + ETL + Training round-trip glued under one e2e test that drives Studio through `App2Driver` across DuckDB / PG / Oracle. Shipped 4 deliverables: (1) cross-dialect plant round-trip parametrized over `PLANT_REGISTRY` × Dialect with snapshot/restore-amortized Session Start (replaces the cumulative-walk perf workaround that was the bug2-cumulative root cause); (2) BV.4 dual-prefix Trainer rebuild — `<L2>_v_*` overlay, single-card landing, diff-only Apply, 15 design locks from `docs/audits/bv_5_dual_prefix_spike.md`; (3) PG matview refresh modernization via REFRESH MATERIALIZED VIEW CONCURRENTLY with 22 UNIQUE indexes; (4) `recon-gen docs export` registry-walk emitting 5 consuming surfaces. Closed 2026-06-10 with `./run_tests.sh up_to qs_browser` green across all 6 tiers (run id 20260611T034334Z-00ce44c8).

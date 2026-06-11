@@ -57,20 +57,7 @@ Same cold-read → triage → design → implement → re-cold-read pattern that
 
 Closed at HEAD `00ce44c8` with `./run_tests.sh up_to qs_browser` green across all 6 tiers (run id `20260611T034334Z-00ce44c8`). Full summary + commit trail swept to `PLAN_ARCHIVE.md`. Three sub-items deferred to Backlog (BV.1 / BV.2 / BV.5).
 
-## Backlog
-
-- [>] BV.1 - D3.1 L2 audit redux + per-primitive curriculum doc (the "what's persona for?" deliverable).
-- [>] BV.2 - D3.2 ETL round-trip claim: test data generator hooked as ETL hook; BT.3's coverage report green per fuzz seed.
-- [>] BV.5 - Agent-based design cold-read against the dogfood + the HUGE test. Output: `docs/audits/bv_cold_read.md`. Operator iteration + sign-off.
-- [>] BV-post.qs-browser-skips - **QS Browser tier 117 skips / 76 passed (~60% skip rate)** in `up_to qs_browser` run 20260611T034334Z. Operator flagged 2026-06-10 as NOT a release blocker but worth auditing. Per memory [[feedback_cheapest_validation_must_fire]] — silent drift compounds; verify which skips are intentional (dialect-gated / Need-marker / variant-cell) vs latent gaps.
-- [>] BV-post.app2-wall-tuning - **App2 tier wall 1202s vs synthesis estimate of ~340-450s.** Loadgroup pin works (no errors) but per-test wall still ~70s on PG and ~90-200s on Oracle. Snapshot/restore isn't fully amortizing Session Start per the synthesis prediction. Profile + tune; see `runs/20260611T034334Z-00ce44c8/timings/` per-worker `.jsonl` files for cold data.
-- [>] BV-post.pyright-biome-tailwind-skip-unit - **`RECON_GEN_SKIP_PYRIGHT/BIOME/TAILWIND=1` on unit tier env** (~50s win, xs effort). Other tiers already set these; unit doesn't.
-- [>] BV-post.snapshot-double-matview-refresh - **Drop the duplicate matview refresh in trainer_ready_session._seed_demo_db** (~30s win, s effort). `_seed_demo_db` runs `refresh_matviews_sql` then Session Start's `run_deploy_pipeline → step_4_matviews` runs it again.
-- [>] BV-post.oracle-stuck-asyncio-warning - **Oracle stuck_pending/stuck_unbundled asyncio executor warning** — likely same oracledb cursor pattern as 8b41b83c. ~100s win, s effort.
-- [>] BV-post.typing-smell-parametrize - **Parametrize `test_typing_smells::test_no_typing_smells` per rule** so AST walks parallelize across workers. Single 12.7s test holds one unit worker hostage. ~11s win, s effort.
-- [>] BV-post.n-12-vs-auto - **`-n auto` → `-n 12` on unit + db tiers** (16-core Mac over-provisioned per timing analysis). ~8s win, xs effort. Verify on WSL2 self-hosted CI runner first.
-- [>] BV-post.snap-container-unify - **Snapshotter container unification** (gated on loadgroup pin holding). ~4s + RAM, s effort. The `recon-gen-snap-test-pg/oracle` dedicated containers may be collapsible to prefix-isolation on the shared CB.17.k containers.
-- [>] BV-post.qs-browser-loadgroup-extension - **Extend loadgroup to qs_browser tier** to restore inv/audit producer pins (silent no-ops per the `00ce44c8` stale-comment sync). Currently green so the race hazard is latent; re-validate CB.7-followup marker-deselection × loadgroup cascade hazard first.
+All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phased)** at the bottom of this file.
 
 ## Phase BW - Docs posture (deferred / follow-on)
 
@@ -333,78 +320,35 @@ Three open design items from `docs/audits/_archive/v11_22_1_feedback.md` cold-re
 - [ ] CM.0 - Replan + design — survey state escheatment rule diversity; lock policy-declaration site + filing-output scope (informational vs NAUPA-emitting). SPEC.md update. Output: `docs/audits/cm_0_escheatment_design.md`.
 
 
-## Phase CZ - Production-DB safe mode: prevent accidental wipe of non-synthetic data
-
-**Filed 2026-06-09 as a placeholder.** Operator-flagged shape: once a customer turns off the `etl_hook` and lets a real ETL job populate the prod DB with real customer transactions + daily balances, NOTHING in recon-gen prevents a subsequent Trainer reset / `data apply --execute` / Studio Deploy-changes from wiping those real rows and replacing them with synthetic training data. The system can't tell real rows from synthetic rows after the fact, and every destructive surface treats both the same.
-
-**Scope clarification (operator, 2026-06-09):** Trainer plant/reset/wipe flow MUST stay functional on any DB. The gate is narrow — it prevents destructive ops from touching *real (non-synthetic)* rows specifically, not from running at all. Concrete intent: on a real-data DB, "Reset" still removes plants + training data; it just doesn't touch real customer rows.
-
-**Threat shape:**
-- Operator A enables real ETL once → `<prefix>_transactions` / `<prefix>_daily_balances` populated from production.
-- Operator A (or later B) clicks Trainer's "Reset to clean baseline", OR runs `recon-gen data apply --execute`, OR Studio's "Deploy changes". Real prod rows gone; synthetic training rows in their place.
-- No audit trail of what was wiped (the audit-PDF fingerprint covers what's *there*, not what *used to be there*).
-
-**The gate signal is `cfg.etl_hook` (operator-locked 2026-06-09).** Not a DB sentinel, not a cfg `production_safe` flag — the existing `etl_hook` field IS the production-mode signal. Logic:
-- **`cfg.etl_hook` configured** → ETL owns the data; Trainer reset can `TRUNCATE` because the next ETL cycle refills from source. Safe.
-- **`cfg.etl_hook is None`** → unknown provenance / standalone DB; Trainer reset only deletes rows that are provably synthetic. Unmarked rows are presumed real and survive (conservative default).
-
-**Row-level "synthetic" predicate** — every seed pipeline path stamps `metadata.source = 'training'` on the rows it writes. That covers ALL of: `emit_full_seed` baseline (the 90-day historical noise), plant emissions (`phantom_rail`, `expected_eod_balance_breach`, AnomalyGenerator's spike + historical-window rows, all PLANT_REGISTRY kinds), scenario emissions, fuzz rows. The "synthetic" predicate is `metadata.source = 'training'`, NOT `metadata.plant_kind IS NOT NULL` (plants are a strict subset of synthetic rows — baseline-seed rows are also synthetic but have no plant_kind). Real ETL rows have no `metadata.source` field (or have some non-training value the integrator set); they survive a DELETE-synthetic-only sweep.
-
-Behavior on the in-scope surfaces:
-- `etl_hook` configured → Trainer reset = `TRUNCATE` + reseed (current behavior).
-- `etl_hook is None` → Trainer reset = `DELETE WHERE json_extract_string(metadata, '$.source') = 'training'` + reseed. Matview refresh runs after the delete (the deploy_pipeline already knows how to refresh).
-- Studio Deploy-changes button does the same etl_hook check before invoking its CLI subroutine; on `etl_hook is None` it refuses unless the operator explicitly clicks-through a confirmation.
-
-**Destructive surfaces — narrowed by operator 2026-06-09 to the "easy-to-click button" surface only.** CLI surfaces (`recon-gen data apply --execute`, `schema apply --execute`) stay unprotected — operator-stated: "The cli doesn't need this protection, this is an easy to read button problem" (operators using the CLI know what they're doing; the `--execute` flag already requires explicit intent). Demo install (`deploy/launchd/refresh-demos.sh`) is out of scope — "The demo install never had real data in it, it should be unaffected" (the Mac mini's recon-demo user can't reach a real-data DB).
-
-| In-scope surface | Current behavior | Target on real-data DB |
-| --- | --- | --- |
-| App2 Trainer `POST /training/reset` (BU.1.6) | full truncate+reseed via deploy_pipeline | DELETE-synthetic-only — real rows survive |
-| App2 Trainer `POST /training/plant/<kind>` | INSERT plant rows | Safe as-is — INSERT-only, marked rows |
-| Studio's Deploy-changes button | calls schema+data apply under the hood | Server-side row-source check BEFORE invoking the CLI subroutine; refuse + show banner if real-data rows present |
-
-(`recon-gen data refresh --execute` is non-destructive of base rows — out of scope anywhere.)
-
-**Locked design (operator, 2026-06-09):**
-
-- **Gate signal:** `cfg.etl_hook` field. Configured = ETL-mode (wipe-safe); `None` = standalone-mode (preserve unmarked rows).
-- **Synthetic-row predicate:** `metadata.source = 'training'`. Every seed pipeline write path stamps it. Unmarked rows are presumed real-data and survive DELETE-synthetic-only sweeps (conservative default — we'd rather over-preserve than over-wipe).
-- **Real-row marker:** none. ETL integrators are NOT required to stamp `metadata.source = 'real'`. The absence of `source = 'training'` IS the signal a row may be real; we treat it conservatively.
-
-**Open design questions to lock at CZ.0:**
-- Pre-CZ DBs in the wild: the seed pipeline starts stamping `metadata.source = 'training'` on new writes; existing un-stamped rows from a pre-CZ deploy will look "real" to the predicate and survive a Trainer reset → leaves stale synthetic rows that the next reseed adds to. Mitigation: auto-stamp the existing rows on first post-CZ `data apply` (cheap, idempotent), OR run a one-shot `recon-gen schema migrate-mark --source=training` verb on upgrade. Pick at CZ.0.
-- Matview-refresh awareness on the DELETE-synthetic-only path. The deploy_pipeline currently truncates everything then reseeds; DELETE-only leaves real rows + fresh synthetic rows interleaved. Matviews need a clean refresh after to reflect the new mix.
-- App2 UX on a `etl_hook is None` DB: when the operator clicks Trainer reset, the button label / banner / explainer must make the narrowed scope visible. Locked design says "loud, not silent" — but the exact copy + button-label change (e.g., "Reset" → "Clear synthetic rows") is a CZ.0 lock.
-- Studio Deploy-changes button on `etl_hook is None`: refuse outright vs require a confirmation click-through? Refusing is safest (operator has to drop into CLI to override); confirmation is more flexible. Probably refuse — operators in standalone-mode shouldn't have an easy-button to schema-DROP. Lock at CZ.0.
-
-**Explicitly out of scope (per operator comments 2026-06-09):**
-- CLI gating (`recon-gen data apply --execute` / `schema apply --execute`). The `--execute` flag already requires intent; operators are in CLI context by choice.
-- `audit verify` integration with the source marker — "Audit doesn't care."
-- `refresh-demos.sh` opt-out env (`RECON_GEN_FORCE_PROD_WIPE=1`) — "Shouldn't be needed" since the demo install can't reach real data.
-- `--force-prod-wipe` CLI flag — moot once CLI is out of scope.
-- Schema-apply `DROP TABLE` migration story — moot once CLI is out of scope.
-- Requiring real-data ETL integrators to stamp `metadata.source = 'real'`. The unmarked-default-preserved semantics avoids the integrator-side burden.
-
-**Related prior art:**
-- BU.1.6 Trainer reset implementation (`truncate+reseed via deploy_pipeline`) — the surface most directly affected by the DELETE-synthetic-only path.
-- CU's `banner_text` (UI-only warning, no actual gate).
-- CU.2's `sandbox-exec` profile around Studio (process-level, not DB-level — and demo-side, not prod-side).
-- Provenance fingerprint (CW): proves what's in the DB, doesn't prevent wiping.
-- Plant primitives' existing `metadata.plant_kind` convention — the row-level marker precedent that #1 generalizes.
-
-- [x] CZ.0 - **REPLAN.** Operator + agent design pass with the major design decisions already operator-locked (`cfg.etl_hook` as the gate signal; `metadata.source = 'training'` stamp on every seed pipeline write; unmarked rows preserved by default; button-only scope). The REPLAN tightens the implementation specifics: (a) the auto-mark mechanism in `emit_full_seed` + plant primitives + AnomalyGenerator + every other seed-pipeline writer (find them all; one missing path leaks ambiguity), (b) pre-CZ DB migration story (auto-mark on first post-CZ `data apply` vs explicit `recon-gen schema migrate-mark --source=training` verb), (c) Trainer reset's matview-refresh semantics on the DELETE-only path, (d) Studio Deploy-changes button on `etl_hook is None` (refuse vs click-through confirmation), (e) App2 UI copy on standalone-mode (banner color, button label change, explainer). Output: `docs/audits/cz_0_production_safe_mode_design.md`. Estimated 30-45 min (down from 45-60 min after the `cfg.etl_hook` gate-signal lock).
-- [x] CZ.2 - **Stamp `metadata.source = 'training'` on every seed-pipeline writer (commit `bbf93c1c`).** 33 files +602/-161. Stamp added at the `scenario_metadata` chokepoint in `src/recon_gen/common/spine/scenario_context.py` — every caller of `scenario_metadata` inherits the stamp. Also touched `_emit_helpers.py` writers (insert_tx, insert_balance), `ledger_simulation.py::emit_one` (dropped the `if scenario_id is not None` gate), `drift.py`, `overdraft.py`, `stuck_pending.py`, `inv_fanout.py`, `rail_firing.py`, and the plant primitives. `etl.write_daily_balance` deliberately stays UN-stamped — absence IS the real-row signal. Workflow verifier (`wq143f2hq`) confirmed.
-- [x] CZ.3 - **Trainer reset `etl_hook` gate + DELETE-synthetic-only path (commit `2caafdac`).** Route handler `training_reset` in `src/recon_gen/common/html/_studio_routes.py:4946` sets `synthetic_only_wipe = (cfg.etl_hook is None)` and passes through to `step_2_wipe`. `deploy_pipeline.step_2_wipe` modified to accept `synthetic_only: bool`; when True, runs `DELETE FROM <prefix>_transactions WHERE JSON_VALUE(metadata, '$.source') = 'training'` + same for `_daily_balances`, instead of `TRUNCATE`. `step_4_matviews` unchanged — refresh runs identically post-step-3 (parity with the ETL-mode path; CZ verifier confirmed semantic parity). Concern: `step_2_wipe` returns PRE-DELETE row counts (the `COUNT(*)` before either TRUNCATE or DELETE-WHERE runs); on the synthetic-only path this OVER-reports compared to actual deletions — documented but not fixed in this cell.
-- [x] CZ.4 - **Studio `POST /deploy` refuses (HTTP 409) when `cfg.etl_hook is None` (commit `a47450fe`).** Gate at `src/recon_gen/common/html/_studio_routes.py` `POST /deploy` handler: when `effective_cfg.etl_hook is None`, returns `JSONResponse(status_code=409, body=...)` with the structured `halt_reason` shape the existing frontend already renders (banner with three unblock paths: configure etl_hook, drop to CLI, switch to ETL-mode). No click-through — outright refuse per REPLAN decision. CZ verifier: verified clean.
-- [x] CZ.5 - **App2 standalone-mode UI: banner + Trainer button label swap + Studio Force-rebuild label swap (commit `4ffca2ac`).** REPLAN-locked copy as module constants in `_studio_routes.py`. Trainer's "Reset to clean baseline" button → renamed on standalone-mode (`cfg.etl_hook is None`). Standalone-mode banner appears on Trainer + Studio pages with operator-locked copy. Also extended the standalone-mode label swap to v3's `Force rebuild from base` button in `_render_session_controls`. 18 new unit tests; all pass. The v2 `render_training_landing` got a `standalone_mode` kwarg (default False) for back-compat with orphaned callers (BV.4 era), currently unused at non-default.
-- [x] CZ.6 - **Pre-CZ DB migration: auto-mark on first post-CZ `data apply --execute` + explicit `recon-gen schema migrate-mark` verb (commit `c5ab9265`) — PARTIAL.** Three files: `src/recon_gen/common/l2/migrate_mark.py` (the shared UPDATE helper + count helper), CLI verb wiring, and `data apply --execute` pre-flight integration. 19 unit tests pass. **Gap (CZ verifier flagged):** `deploy_pipeline.step_2_wipe` is NOT wired with the pre-flight migrate-mark per the REPLAN spec ("Same auto-mark fires from step_2_wipe's schema_emitted path"). The verb works; the `data apply` pre-flight works; the auto-mark hook from `step_2_wipe` is missing. **Follow-up cell needed:** wire the migrate-mark into `step_2_wipe`'s schema_emitted path (~30 min). Filed as CZ.6.1 below.
-- [x] CZ.6.1 - **Wire migrate-mark into `step_2_wipe`'s schema_emitted path (CZ.6 gap).** Per CZ.0 REPLAN's auto-mark decision (option (c) — auto-mark default + verb escape hatch), the auto-mark should fire from both `data apply --execute` pre-flight (shipped CZ.6) AND `step_2_wipe`'s schema_emitted detection (NOT shipped CZ.6). Add a one-line call to `migrate_mark.auto_stamp_pre_cz_rows(...)` from inside `step_2_wipe`'s schema_emitted branch in `src/recon_gen/common/l2/deploy_pipeline.py`. The migrate_mark.py helper already exists from CZ.6; the gap is just the call site. Estimated 30 min.
-- [x] CZ.1 - **Polish: demo-publish.yml — poll PyPI for the tagged version before invoking refresh-demos.sh.** Surfaced 2026-06-09 on the v13.11.0 cut: `demo-publish.yml` triggers via `workflow_run` on Release-success, but pip ran ~3s after Release completion — before PyPI's CDN propagated the new version index. `pip install --upgrade recon-gen[prod]` saw 13.10.2 as already-latest and skipped the upgrade silently. Demos stayed at v13.10.2 until a manual re-fire. Same race will bite every future release unless fixed. **Fix:** add a "Wait for PyPI index propagation" step to `.github/workflows/demo-publish.yml` after "Identify runner user" — poll `https://pypi.org/pypi/recon-gen/json`'s `info.version` against the release tag (strip the `v`) with 20s × 6 retries (2 min max wait). Exit 1 with a clear message if PyPI never shows the version. Then proceed to "Fire the refresh wrapper" with confidence. Alternative considered: pass `RECON_GEN_PIN_VERSION=<tag>` from the workflow env so `refresh-demos.sh` pins via `recon-gen[prod]==<version>` (would fail loud if PyPI hasn't propagated) — works but the operator-facing PyPI-poll loop reads cleaner in the run log. Topically a release-pipeline polish item, bundled under CZ at operator request (2026-06-09). Sized as 30-45 min including the polling script + a one-cycle live-fire test on the next release.
 
 ## Phase PLAN - Phase PLAN
 - [ ] PLAN.md - BS.5 — _v_config_chain_children + 7-path conversion
 
 # Backlog (not yet phased)
+
+- **BV.1 — D3.1 L2 audit redux + per-primitive curriculum doc** ("what's persona for?" deliverable). Operator-judgment on audience (CPA reviewer / dev onboarding / investor / sales), format (single page / multi-doc / mkdocs section), depth, worked-example shape. Backlogged 2026-06-10.
+
+- **BV.2 — D3.2 ETL round-trip claim** (test data generator hooked as ETL hook; BT.3's coverage report green per fuzz seed). Likely partially absorbed by snapshot/restore golden-mirror + PlantContract typed invariant; re-scope when re-opened. Backlogged 2026-06-10.
+
+- **BV.5 — Agent-based design cold-read against the dogfood + the HUGE test.** Output: `docs/audits/bv_cold_read.md`. Defaults work; just needs target lock (dogfood test surface / Snapshotter abstraction / Trainer UI / all). Backlogged 2026-06-10.
+
+- **BV-post.qs-browser-skips — QS Browser tier 117 skips / 76 passed (~60% skip rate)** in `up_to qs_browser` run 20260611T034334Z. Operator flagged 2026-06-10 as NOT a release blocker but worth auditing. Per memory `feedback_cheapest_validation_must_fire` — silent drift compounds; verify which skips are intentional (dialect-gated / Need-marker / variant-cell) vs latent gaps.
+
+- **BV-post.app2-wall-tuning — App2 tier wall 1202s vs synthesis estimate of ~340-450s.** Loadgroup pin works (no errors) but per-test wall still ~70s on PG and ~90-200s on Oracle. Snapshot/restore isn't fully amortizing Session Start per the synthesis prediction. Profile + tune; see `runs/20260611T034334Z-00ce44c8/timings/` per-worker `.jsonl` files for cold data.
+
+- **BV-post.pyright-biome-tailwind-skip-unit — `RECON_GEN_SKIP_PYRIGHT/BIOME/TAILWIND=1` on unit tier env** (~50s win, xs effort). Other tiers already set these; unit doesn't.
+
+- **BV-post.snapshot-double-matview-refresh — Drop the duplicate matview refresh in trainer_ready_session._seed_demo_db** (~30s win, s effort). `_seed_demo_db` runs `refresh_matviews_sql` then Session Start's `run_deploy_pipeline → step_4_matviews` runs it again.
+
+- **BV-post.oracle-stuck-asyncio-warning — Oracle stuck_pending/stuck_unbundled asyncio executor warning** — likely same oracledb cursor pattern as 8b41b83c. ~100s win, s effort.
+
+- **BV-post.typing-smell-parametrize — Parametrize `test_typing_smells::test_no_typing_smells` per rule** so AST walks parallelize across workers. Single 12.7s test holds one unit worker hostage. ~11s win, s effort.
+
+- **BV-post.n-12-vs-auto — `-n auto` → `-n 12` on unit + db tiers** (16-core Mac over-provisioned per timing analysis). ~8s win, xs effort. Verify on WSL2 self-hosted CI runner first.
+
+- **BV-post.snap-container-unify — Snapshotter container unification** (gated on loadgroup pin holding). ~4s + RAM, s effort. The `recon-gen-snap-test-pg/oracle` dedicated containers may be collapsible to prefix-isolation on the shared CB.17.k containers.
+
+- **BV-post.qs-browser-loadgroup-extension — Extend loadgroup to qs_browser tier** to restore inv/audit producer pins (silent no-ops per the `00ce44c8` stale-comment sync). Currently green so the race hazard is latent; re-validate CB.7-followup marker-deselection × loadgroup cascade hazard first.
 
 - **CI-followup.2 — `test_async_duckdb_pool_acquire_during_cursor_creation_doesnt_get_rugpulled` is flaky on the WSL2 CI runner.** Surfaced 2026-06-10 on the v13.13.1 CI run (`27279631354`): the test runs 10 iterations × 16 queries (160 attempts) looking for "rug-pull" failures during DuckDB pool cursor creation; on CI it hit `query 10: InvalidInputException: Invalid Input Error: No open result set` (a forbidden failure shape per the test's own contract at line 2197-2209). Passes 5/5 locally — looks like the race window is tighter on the WSL2 runner under xdist load. Two fix candidates: (a) pin the test to an xdist isolated group via `@pytest.mark.xdist_group('async_duckdb_pool')` so it doesn't race other tests for the DuckDB writer lock, (b) add a `@pytest.mark.flaky(reruns=2)` decorator + bump CI's pytest-rerunfailures dep — the test is BY DESIGN a probabilistic race detector, occasional false-positives are within the test's accuracy budget. The race itself is real (the fix it gates against still exists); we just don't want CI red on every other release. Estimated 30 min.
 
