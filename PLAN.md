@@ -186,37 +186,11 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
 
 # Backlog (not yet phased)
 
-- **BK.1 — $0.01 customer-DDA closing balance plant.** Defer: BH.24 cents-vs-dollars cleanup + BH.1 drift formula likely already resolved; no repro in v12/v13.1.1/v13.6.1 cold-reads. Re-file if it surfaces in a future cold-read with a repro.
-
-- **BK.6 — Limit Breach KPI=0 vs 5 rows.** Defer: not reproducible on bundled L2 (sasquatch + spec_example); operator-specific scenario; never reproduced. Re-file if reproducible L2 surfaces.
-
-- **BK.8 — cust-019 / Customer 18 off-by-one.** Defer: needs operator L2 yaml row; never received. Re-file if the L2 yaml arrives.
-
-- **a11y-toolchain-spike** — unblocks CK-deferred.{3,5,7} + CJ.5. Single spike: pick the axe-core integration mechanism (npx-via-pytest-subprocess vs Playwright JS-eval vs alternative). Per memory `feedback_rust_influenced_tool_preferences` operator weigh-in needed (axe-core is npm-only). Backlogged 2026-06-10.
-
-- **CK-deferred.2 — Training `nested-interactive` fix.** Likely a button-inside-clickable-card issue; pull the inner control out. Carried from Phase CK (archived 2026-06-10) — deferred pending visual repro.
-
-- **CK-deferred.3 — Entity-list `aria-allowed-role` sweep (~140 nodes).** Likely a single role wrong somewhere replicated by the renderer. Carried from Phase CK (archived 2026-06-10) — gated on `a11y-toolchain-spike`.
-
-- **CK-deferred.5 — Bounding-box overlap sweep (66 remaining).** Apply-bar overlap already shipped; sweep the remaining (some are likely auto-cleared by CG list primitive + CH table primitive). Carried from Phase CK (archived 2026-06-10) — gated on `a11y-toolchain-spike`.
-
-- **CK-deferred.6 — axe-core CI gate.** If operator OKs, fail the build on new axe-core findings. Carried from Phase CK (archived 2026-06-10) — needs JS/npm build-dep decision (operator weigh-in via `a11y-toolchain-spike`).
-
-- **CK-deferred.7 — Cold-read v3 a11y confirmation.** Manual screen-reader spot-check + axe-core green. Carried from Phase CK (archived 2026-06-10) — gated on CK-deferred.{2,3,5,6}.
-
-- **BW deferred-pending-demand — Docs posture (`_kv`-templated deployment-overview page).** Fire only if an operator requests it. D7 already locked at static-default per BV close summary.
-
-- **BV.1 — D3.1 L2 audit redux + per-primitive curriculum doc** ("what's persona for?" deliverable). Operator-judgment on audience (CPA reviewer / dev onboarding / investor / sales), format (single page / multi-doc / mkdocs section), depth, worked-example shape. Backlogged 2026-06-10.
-
-- **BV.2 — D3.2 ETL round-trip claim** (test data generator hooked as ETL hook; BT.3's coverage report green per fuzz seed). Likely partially absorbed by snapshot/restore golden-mirror + PlantContract typed invariant; re-scope when re-opened. Backlogged 2026-06-10.
-
-- **BV.5 — Agent-based design cold-read against the dogfood + the HUGE test.** Output: `docs/audits/bv_cold_read.md`. Defaults work; just needs target lock (dogfood test surface / Snapshotter abstraction / Trainer UI / all). Backlogged 2026-06-10.
+## Live BV-post tuning (~150s combined savings)
 
 - **BV-post.qs-browser-skips — QS Browser tier 117 skips / 76 passed (~60% skip rate)** in `up_to qs_browser` run 20260611T034334Z. Operator flagged 2026-06-10 as NOT a release blocker but worth auditing. Per memory `feedback_cheapest_validation_must_fire` — silent drift compounds; verify which skips are intentional (dialect-gated / Need-marker / variant-cell) vs latent gaps.
 
 - **BV-post.app2-wall-tuning — App2 tier wall 1202s vs synthesis estimate of ~340-450s.** Loadgroup pin works (no errors) but per-test wall still ~70s on PG and ~90-200s on Oracle. Snapshot/restore isn't fully amortizing Session Start per the synthesis prediction. Profile + tune; see `runs/20260611T034334Z-00ce44c8/timings/` per-worker `.jsonl` files for cold data.
-
-- **BV-post.pyright-biome-tailwind-skip-unit — `RECON_GEN_SKIP_PYRIGHT/BIOME/TAILWIND=1` on unit tier env** (~50s win, xs effort). Other tiers already set these; unit doesn't.
 
 - **BV-post.snapshot-double-matview-refresh — Drop the duplicate matview refresh in trainer_ready_session._seed_demo_db** (~30s win, s effort). `_seed_demo_db` runs `refresh_matviews_sql` then Session Start's `run_deploy_pipeline → step_4_matviews` runs it again.
 
@@ -230,9 +204,25 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
 
 - **BV-post.qs-browser-loadgroup-extension — Extend loadgroup to qs_browser tier** to restore inv/audit producer pins (silent no-ops per the `00ce44c8` stale-comment sync). Currently green so the race hazard is latent; re-validate CB.7-followup marker-deselection × loadgroup cascade hazard first.
 
-- **CI-followup.2 — `test_async_duckdb_pool_acquire_during_cursor_creation_doesnt_get_rugpulled` is flaky on the WSL2 CI runner.** Surfaced 2026-06-10 on the v13.13.1 CI run (`27279631354`): the test runs 10 iterations × 16 queries (160 attempts) looking for "rug-pull" failures during DuckDB pool cursor creation; on CI it hit `query 10: InvalidInputException: Invalid Input Error: No open result set` (a forbidden failure shape per the test's own contract at line 2197-2209). Passes 5/5 locally — looks like the race window is tighter on the WSL2 runner under xdist load. Two fix candidates: (a) pin the test to an xdist isolated group via `@pytest.mark.xdist_group('async_duckdb_pool')` so it doesn't race other tests for the DuckDB writer lock, (b) add a `@pytest.mark.flaky(reruns=2)` decorator + bump CI's pytest-rerunfailures dep — the test is BY DESIGN a probabilistic race detector, occasional false-positives are within the test's accuracy budget. The race itself is real (the fix it gates against still exists); we just don't want CI red on every other release. Estimated 30 min.
+## Deferred phase work
 
-- **CI-followup.1 — ci.yml shared-PG container setup race (back-to-back runs collide on `docker run --name ci-shared-pg`).** Surfaced 2026-06-09 on a fresh CI run that hit `docker: Error response from daemon: Conflict. The container name "/ci-shared-pg" is already in use by container "1e7b977…"`. Recurring failure — same shape bit the v13.11.0 cycle and again on `46ce6a5d`. The retune step in `.github/workflows/ci.yml` (under "Ensure shared PG + Oracle are up") does `docker rm -f ci-shared-pg` followed by `docker run -d --name ci-shared-pg ...` when `max_connections != 300` (the "adoption-path retune" branch from CL-followup). When two CI runs hit the WSL2 self-hosted runner back-to-back, both enter the retune branch; one's `rm -f` succeeds but the second's `run -d` collides because the first race-recreated the container. **Manual unstick:** `docker rm -f ci-shared-pg` on the runner, then `gh run rerun <id> --failed`. **Fix candidates:** (a) wrap the container-setup block in a flock-style lockfile (e.g., `flock /tmp/ci-shared-pg.lock`) so concurrent runs serialize, (b) use `docker rm -f ci-shared-pg || true && docker run -d --name ci-shared-pg ...` with a retry loop on Conflict, OR (c) drop the named-container reuse model entirely and accept per-run container creation (slower but no collision possible). The lock approach (a) is the smallest diff. Estimated 30-60 min.
+- **BK.1 — $0.01 customer-DDA closing balance plant.** Defer: BH.24 cents-vs-dollars cleanup + BH.1 drift formula likely already resolved; no repro in v12/v13.1.1/v13.6.1 cold-reads. Re-file if it surfaces in a future cold-read with a repro.
+
+- **BK.6 — Limit Breach KPI=0 vs 5 rows.** Defer: not reproducible on bundled L2 (sasquatch + spec_example); operator-specific scenario; never reproduced. Re-file if reproducible L2 surfaces.
+
+- **BK.8 — cust-019 / Customer 18 off-by-one.** Defer: needs operator L2 yaml row; never received. Re-file if the L2 yaml arrives.
+
+- **a11y-toolchain-spike** — unblocks CK-deferred.{3,5,6,7} + CJ.5 (the four collapsed items below are gated on this single spike's outcome). Pick the axe-core integration mechanism (npx-via-pytest-subprocess vs Playwright JS-eval vs alternative). Per memory `feedback_rust_influenced_tool_preferences` operator weigh-in needed (axe-core is npm-only). Once the spike resolves, fan out as: entity-list `aria-allowed-role` sweep (~140 nodes); bounding-box overlap sweep (66 remaining; some likely auto-cleared by CG/CH primitives); axe-core CI gate (build-fail on new findings, operator-OK gated); cold-read v3 a11y confirmation (manual screen-reader + axe-core green). Backlogged 2026-06-10.
+
+- **CK-deferred.2 — Training `nested-interactive` fix.** Likely a button-inside-clickable-card issue; pull the inner control out. Carried from Phase CK (archived 2026-06-10) — deferred pending visual repro. Not gated on `a11y-toolchain-spike`.
+
+- **BW deferred-pending-demand — Docs posture (`_kv`-templated deployment-overview page).** Fire only if an operator requests it. D7 already locked at static-default per BV close summary.
+
+- **BV.1 — D3.1 L2 audit redux + per-primitive curriculum doc** ("what's persona for?" deliverable). Operator-judgment on audience (CPA reviewer / dev onboarding / investor / sales), format (single page / multi-doc / mkdocs section), depth, worked-example shape. Backlogged 2026-06-10. (Merged with the separately-deferred D3.1 line.)
+
+- **BV.2 — D3.2 ETL round-trip claim** (test data generator hooked as ETL hook; BT.3's coverage report green per fuzz seed). Likely partially absorbed by snapshot/restore golden-mirror + PlantContract typed invariant; re-scope when re-opened. Backlogged 2026-06-10. (Merged with the separately-deferred D3.2 line.)
+
+- **BV.5 — Agent-based design cold-read against the dogfood + the HUGE test.** Output: `docs/audits/bv_cold_read.md`. Defaults work; just needs target lock (dogfood test surface / Snapshotter abstraction / Trainer UI / all). Backlogged 2026-06-10.
 
 - **CV-followup.1 — per-pair z still flags real biweekly payday clusters.** Filed 2026-06-09 during Phase CV. After CV.2's per-pair PARTITION BY z + min-n floor lands, sasquatch_pr's TRAINER_CLEAN baseline still surfaces ~35 rows at |z| ≥ 4 (down from 52 pre-CV but not 0). Top-5 high-z rows are real customer-payday clusters on busy external counterparties — `ext-payment-gateway-processor → cust-0021-snb` etc. Mathematically per-pair z IS correctly flagging these as anomalies (each cluster day IS the pair's biggest day vs its own history). Differentiating "real anomaly" from "recurring pattern" needs period detection (Fourier / autocorrelation) on top of the z formula. Out of CV's scope. The CV.4 regression test gates on |z| ceiling ≤ 8 rather than count ≤ 0 so the contract is achievable.
 
@@ -240,9 +230,11 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
 
 - **CV-followup.3 — InvFanoutGenerator's anomaly side-effect under per-pair z.** Filed 2026-06-09. InvFanoutGenerator's docstring notes it's "NOT registered for AnomalyInvariant: the rolling-window z-score is probabilistic. The boost is deliberately multiplied to push it over." Under CV.2's per-pair z + min-n floor, the fanout plant's recipient may or may not surface anomaly depending on history depth (the boost's 5× multiplier was calibrated against global z). Verify the fanout boost still trips anomaly post-CV; recalibrate if needed.
 
-- **CG-bug.1 — Markdown Preview tab rendered the wrong field — FIXED 2026-06-05.** Dogfood bug surfaced just after the CG sweep closed. On `/l2_shape/account/<id>/edit` (or any edit form with a markdown-preview-enabled textarea), clicking the Preview tab rendered the `id` field's value ("gl-1010-cash-due-frb") as a paragraph instead of the markdown prose. Root cause: the Preview button sat inside the edit `<form>`, so HTMX's default behavior serialized the ENTIRE form's data on POST + still pulled `hx-include` extras. The server's `/preview/markdown` endpoint takes the FIRST non-meta value from the body — which was `id`, not `description`. Fix: added `hx-params="<spec.name>"` to the Preview button in `_render_field` so the POST body filters down to just the markdown-preview field. 6 unit tests in `test_cg_bug1_markdown_preview_scope.py`: rendered button carries the filter (parametrized across account/rail/account_template), end-to-end POST with just `description=...` renders correctly, documented regression test for the pre-fix shape (whole-form POST picks `id` first) so a future refactor that drops the filter surfaces visibly. 736 unit pass.
+## CI / release pipeline followups
 
-- **Studio /l2 editor — remove Deploy button.** Surfaced 2026-05-30 during BT.0.5 review. The per-entity edit form (`/l2_shape/<kind>/<entity>`) carries the Deploy-changes button in the page header, but per-entity edit context has no deploy semantics — Deploy belongs on the diagram / data / ETL pages where the operator has full-cfg context. Touch `_studio_editor_routes.py`'s edit-page templates to drop the deploy strip. Cleanup; small.
+(none currently — CI-followup.1 + CI-followup.2 shipped per ci.yml flock at .github/workflows/ci.yml:182-183 and `@pytest.mark.flaky(reruns=2)` at tests/unit/test_deploy_pipeline.py:2132.)
+
+## Other
 
 - **BC.12 deferred: `l2_yaml_raw` / `cfg_yaml_raw` opaque-provenance kv rows.**
   Surfaced 2026-05-24 during BC.12 integration. The original design
@@ -293,18 +285,6 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
 
   Sequenced after BC + BD land (those validate the AST-lint + named-
   constructor pattern is workable on a smaller migration before scaling).
-
-- **BB.2.b — Reconciler picker: inline "create new" sub-form.** BB.2
-  shipped attach-existing only (operator picks from existing TTs /
-  aggregating Rails). The PLAN's BB.2 spec also called for an inline
-  "create new" sub-form so the operator can author the reconciler
-  alongside the rail in one atomic save (single picker selection +
-  the new reconciler's required fields nested in the rail form).
-  Deferred because attach-existing was sufficient to unblock BB.3 /
-  BB.4 dogfood (the reference L2's reconcilers always exist; the
-  driver test never needs create-new). Operator-UX nice-to-have:
-  without this, the operator must create the reconciler separately
-  first, then create the rail. Surfaced 2026-05-24.
 
 - **Studio / Dashboards rethink under the post-AW DB-projected
   L2/cfg.** Surfaced 2026-05-23 after AW completed. AW lifted L2 + cfg
@@ -374,12 +354,8 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
 - **BX backlog — Probe name ✓/✗ status badges (deferred from BTa.5)** — added 2026-05-30.
 - **BTb backlog — P2/P3 cluster from BTa cold-read v3** — added 2026-05-31.
 - **Backlog — test_studio_data_route::test_put_emits_hx_push_url_with_state date flake** — added 2026-05-31.
-- ****REPLAN.** Re-read SPEC.md::Phase BV against post-BT + post-BU state. Inventory the parts BV.4 (the HUGE one) actually depends on. Decide e2e test infra: extend `tests/e2e/test_studio_dogfood_browser.py` or new file? AWS-deploy required or App2-only?** — deferred from BV.0 on 2026-05-31.
-- **D3.1 L2 audit redux + per-primitive curriculum doc (the "what's persona for?" deliverable).** — deferred from BV.1 on 2026-05-31.
-- **D3.2 ETL round-trip claim: test data generator hooked as ETL hook; BT.3's coverage report green per fuzz seed.** — deferred from BV.2 on 2026-05-31.
 - **D3.3 Training round-trip claim: every plant kind surfaces correctly per fuzz seed.** — deferred from BV.3 on 2026-05-31.
 - **CA.12 — PG pyarrow adapter via adbc-driver-postgresql** — deferred from CA.12 on 2026-06-02. **Why deferred**: Docker-PG probe @ 131k rows showed `psycopg.cursor.copy()` (the right tool here, not adbc) is only 1.95× faster than the existing `cur.execute(big_seed_text)` path (20.89s → 10.69s). PG was never a Python-bound bottleneck the way DuckDB was — psycopg streams big multi-statement INSERTs efficiently and PG's batch planner handles them well. **Revisit if** we step in a PG-perf problem at full prod scale (the COPY-vs-INSERT curve might widen above ~5× as N grows + indexes deepen), or if a user-facing flow (CB.10 QS-against-Docker-PG iteration, a CI seed-apply slowdown) makes the 2× materially valuable. Implementation if revisited: psycopg3 `cursor.copy()`, NOT adbc-driver-postgresql — psycopg is already a core dep and handles type coercion automatically.
-- **CA.8 — Nuke Dialect.SQLITE and all SQLite-specific arms** — deferred from CA.8 on 2026-06-02.
 - **BX backlog — anomaly/money_trail app2 tests fail on sasquatch_pr L2 (no CustomerSubledger sender)** — added 2026-06-04.
 - **App2 KPI binding gap — Distinct Senders + per-account KPI cards render as None** — added 2026-06-04.
 - **BX backlog — recreate targeted tests for runner.py post-CB.17.d** — added 2026-06-04.
