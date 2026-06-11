@@ -570,6 +570,16 @@ def _render_add_role_modal() -> str:
   const dlg = document.getElementById('add-role-modal');
   if (!dlg) return;
   // Open trigger — the `+ Add Role` button in the wrapper header.
+  // BX.6/11 follow-up (2026-06-11): listen in the CAPTURE phase
+  // (third arg `true`). The button carries an inline
+  // `onclick="event.stopPropagation()"` so clicks don't toggle the
+  // surrounding `<details>` wrapper — but inline onclick runs in
+  // the BUBBLE phase, so a document-bubble listener would never
+  // see the event. Capture-phase fires document→target BEFORE the
+  // button's onclick, so showModal() runs reliably even when the
+  // event is later stopped by the button's stopPropagation call.
+  // Confirmed via WebKit/Playwright: bubble-phase listener never
+  // fired, capture-phase fires unconditionally.
   document.addEventListener('click', function(evt) {{
     const opener = evt.target.closest('[data-add-role-open]');
     if (!opener) return;
@@ -580,7 +590,7 @@ def _render_add_role_modal() -> str:
     }} else {{
       dlg.setAttribute('open', '');
     }}
-  }});
+  }}, true);
   // Backdrop click → close. The form `method="dialog"` already
   // wires Esc + the [×] button.
   dlg.addEventListener('click', function(evt) {{

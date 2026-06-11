@@ -116,9 +116,124 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         navigation is link-click or form-submit."""
         self._page.goto(f"{self._base}/")
 
+    def _ensure_home(self) -> None:
+        """BX.2 follow-up — create-success now 303s to
+        ``/l2_shape/<kind>/<id>`` (the read card) instead of ``/``.
+        The read card route renders ONLY the entity ``<article>`` —
+        no top-nav, no home/list links, no chrome (an editor gap;
+        the bare fragment-as-page response is a BX.2 oversight).
+
+        Without an in-page affordance, the operator's only way home
+        is the browser's back button (a real action, not a URL
+        edit — see ``go_back`` doc). This helper checks the current
+        URL: if it's already home it's a no-op; otherwise it walks
+        ``page.go_back()`` until we land at the base URL or run out
+        of history. Every home-page-needing verb
+        (``_open_add_role_modal_and_pick``, ``_create_simple`` for
+        non-Account kinds, ``create_rail``,
+        ``goto_account_list`` / ``goto_account_template_list`` /
+        ``goto_rail_list`` / ``goto_transfer_template_list``)
+        prefixes its work with ``_ensure_home()`` so the chain works
+        regardless of where the previous verb landed."""
+        # If already home, no-op fast path.
+        if self._page.url.rstrip("/") == self._base.rstrip("/"):
+            return
+        # Direct one-shot to history index 0 — `window.history.go(-N)`
+        # for a large negative N caps at the deepest entry (home).
+        # Cheaper than a chain of `page.go_back()` calls; each
+        # `go_back` does a full DOM reload settle which compounds.
+        # Per the operator-fidelity rule, this is browser-history
+        # navigation (operator action) — not a URL edit. The test
+        # entered the studio at `/` via ``open()``; that's the floor.
+        # Cap iteration anyway as a defensive belt-and-braces: large
+        # create_l2 walks add ~50+ history entries (each create =
+        # form → read card; each rail = subtype picker → form →
+        # read card), so the cap needs to clear that easily.
+        max_backs = 100
+        for _ in range(max_backs):
+            landed = self._page.url.rstrip("/")
+            if landed == self._base.rstrip("/"):
+                return
+            self._page.go_back()
+            # `go_back` returns after the load event by default. The
+            # `domcontentloaded` wait is paranoid (covers slow
+            # renders + back-walks landing on hash-only changes).
+            self._page.wait_for_load_state("domcontentloaded")
+        # Last-resort sanity check; if we still aren't home, surface
+        # the URL so the caller's failure message is actionable.
+        landed = self._page.url.rstrip("/")
+        if landed != self._base.rstrip("/"):
+            raise AssertionError(
+                f"_ensure_home: walked {max_backs} back-navigations "
+                f"but URL is still {landed!r} (expected "
+                f"{self._base.rstrip('/')!r}). The browser may have "
+                f"reached the start of history, or the studio is "
+                f"redirecting back-navigations away from home.",
+            )
+
+    def _open_add_role_modal_and_pick(self, cardinality: str) -> None:
+        """BX.6/11 follow-up — drive the home page's ``+ Add Role``
+        modal funnel for both 1:1 (Account) and 1:N (AccountTemplate)
+        create flows.
+
+        Pre-BX.6/11 the home page rendered separate ``+ Add Account``
+        and ``+ Add Account Template`` links pointing at
+        ``/l2_shape/<kind>/new`` directly. The role reframe collapsed
+        those into one ``[data-add-role-open]`` button that opens a
+        ``<dialog data-add-role-modal>`` carrying two card-anchors —
+        ``[data-cardinality-choice="one-to-one"]`` (→ Account) and
+        ``[data-cardinality-choice="one-to-many"]`` (→ AccountTemplate).
+
+        Verb sequence (matches the operator workflow):
+        1. Click ``[data-add-role-open]`` — JS calls ``dlg.showModal()``
+           which sets the ``[open]`` attribute on the dialog.
+        2. Wait for ``dialog[data-add-role-modal][open]`` to mount
+           visibly. The dialog auto-attaches the ``open`` attr only
+           after ``showModal()`` fires; locating with the bracket
+           filter ensures we don't race the click → showModal handler.
+        3. Click the cardinality card. The card is a plain ``<a href>``
+           so the click triggers native navigation (NOT a dialog form
+           submit) — bypasses ``method="dialog"`` cancel handling and
+           lands at ``/l2_shape/<account|account_template>/new``.
+
+        ``cardinality`` ∈ ``{"one-to-one", "one-to-many"}``; anything
+        else raises. Locators use the data-* anchors documented in
+        ``docs/audits/bx_0_8_design_mockups/bx_6_11_role_reframe.md``
+        per the user-facing-locators rule (memory
+        feedback_browser_drivers_user_facing_locators) — never
+        Tailwind utilities.
+        """
+        if cardinality not in ("one-to-one", "one-to-many"):
+            raise ValueError(
+                f"_open_add_role_modal_and_pick: cardinality must be "
+                f"'one-to-one' or 'one-to-many', got {cardinality!r}",
+            )
+        self._ensure_home()
+        self._page.click('[data-add-role-open]')
+        # Wait for the dialog's `open` attribute to land. Playwright's
+        # `wait_for(state="visible")` is insufficient here — the
+        # `<dialog>` element is always in the DOM; what changes is
+        # the `[open]` attribute (set by `showModal()`). The
+        # `[data-add-role-modal][open]` selector pins both.
+        self._page.locator(
+            'dialog[data-add-role-modal][open]',
+        ).wait_for(state="visible", timeout=self.DEFAULT_TIMEOUT_MS)
+        self._page.click(
+            f'dialog[data-add-role-modal] '
+            f'[data-cardinality-choice="{cardinality}"]',
+        )
+
     def goto_account_create_form(self) -> None:
-        """Click the home nav link to the account-create form."""
-        self._page.click('a[href="/l2_shape/account/new"]')
+        """Open the Add Role modal + pick the 1:1 card → lands on
+        ``/l2_shape/account/new``. See ``_open_add_role_modal_and_pick``
+        for the BX.6/11 reframe context."""
+        self._open_add_role_modal_and_pick("one-to-one")
+
+    def goto_account_template_create_form(self) -> None:
+        """Open the Add Role modal + pick the 1:N card → lands on
+        ``/l2_shape/account_template/new``. See
+        ``_open_add_role_modal_and_pick`` for context."""
+        self._open_add_role_modal_and_pick("one-to-many")
 
     def goto_home(self) -> None:
         """Click any rendered home link. Studio's nav menu / breadcrumbs
@@ -129,13 +244,29 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         self._page.click('a[href="/"]')
 
     def goto_account_list(self) -> None:
-        """Click the home nav link to the account list page."""
-        # First navigate home if not already there (the account list
-        # link is on the home page's entity nav). The submit-success
-        # 303 lands the browser at "/" so this is usually a no-op,
-        # but the verb stays general for callers that arrive from
-        # elsewhere.
-        self._page.click('a[href="/l2_shape/account/"]')
+        """Click the home nav link to the account list page.
+
+        BX.6/11 reframe rendered TWO ``a[href="/l2_shape/account/"]``
+        on the home page: one in the Roles wrapper header (↗ canonical
+        drill-in) and one in the 1:1 sub-bucket header. Scope to the
+        first match (the wrapper header) — Playwright's strict-mode
+        click() would otherwise raise on the duplicate."""
+        # First navigate home if not already there. Post-BX.2 the
+        # create-success 303 lands on the read card, not home, so
+        # the back-walk in ``_ensure_home`` is the standard prefix.
+        self._ensure_home()
+        self._page.locator('a[href="/l2_shape/account/"]').first.click()
+
+    def goto_account_template_list(self) -> None:
+        """Click the home nav link to the account_template list page.
+
+        BX.6/11 reframe — same duplicate-link pattern as
+        ``goto_account_list``: scope to the first match (the 1:N
+        sub-bucket header ↗)."""
+        self._ensure_home()
+        self._page.locator(
+            'a[href="/l2_shape/account_template/"]',
+        ).first.click()
 
     # -- form-fill helpers (transport-agnostic, page-driven) -------------
 
@@ -309,10 +440,28 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
 
     def _submit_create_form(self, kind_label: str) -> None:
         """Click the create form's Submit button + assert the success
-        303 lands us at home (`/`). On validation failure, the server
-        re-renders the form at the POST target with a 400 + an inline
-        error banner — fail FAST with that error visible in the message
-        rather than time out waiting for a redirect that won't happen.
+        303 lands us on a non-form page. On validation failure, the
+        server re-renders the form at the POST target with a 400 +
+        an inline error banner — fail FAST with that error visible
+        in the message rather than time out waiting for a redirect
+        that won't happen.
+
+        Success-landing-URL contract:
+        - Pre-BX.2 (≤2026-06-10): every successful create/edit 303d
+          home (`/`).
+        - Post-BX.2 (2026-06-11+): create-success 303s to the new
+          entity's read card (``/l2_shape/<kind>/<id>``); edit-save
+          303s back to the entity's read card. Singleton edits
+          (instance) still 303 home. ``?from=`` query wins both.
+
+        So "success" = landed URL is NOT a form-render URL (the POST
+        target is the form route; a re-render keeps us there). The
+        check inverts: any landed URL that's NOT the same path as
+        a form route (i.e., doesn't carry the validation re-render
+        marker) counts as success. The straightforward marker:
+        success means the page has no ``role="alert"`` element AND
+        no ``form.create-form`` / ``form.edit-form`` (the failure-
+        re-render keeps the form mounted).
 
         ``kind_label`` is for the error message (e.g., "account",
         "rail") — surfaces which verb failed when the test harness
@@ -328,23 +477,22 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
                 'form.edit-form button[type="submit"]'
             )
         landed = self._page.url
-        if landed.rstrip("/") == self._base:
-            return  # success path: 303 → home
-        # Failure path: extract the inline error the editor renders.
-        # AM.1 step 5 (2026-05-25) retired `.form-global-error` in
-        # favor of the ARIA `role="alert"` semantic marker — locate
-        # via the role (what assistive tech reads) rather than the
-        # styling-utility class.
-        error_locator = self._page.get_by_role("alert")
-        error_text = (
-            error_locator.first.text_content() or ""
-            if error_locator.count() > 0
-            else "(no inline alert block on the rendered page)"
-        )
+        # Validation-failure re-renders the form at the POST target
+        # with a `role="alert"` banner — AM.1 step 5 (2026-05-25)
+        # retired `.form-global-error` in favor of the ARIA
+        # `role="alert"` semantic marker. Sole success signal:
+        # alert absent. (Form-mount can't disambiguate post-BX.2 —
+        # the singleton 303-redirects back to its own form page on
+        # successful save, so "form still mounted" is true on both
+        # success and failure for singletons.)
+        alert_locator = self._page.get_by_role("alert")
+        if alert_locator.count() == 0:
+            return  # success path
+        error_text = alert_locator.first.text_content() or ""
         raise AssertionError(
-            f"create {kind_label}: submit failed to redirect home. "
-            f"Landed at {landed!r} (expected {self._base + '/'!r}); "
-            f"editor's inline error: {error_text.strip()}"
+            f"create {kind_label}: submit landed at {landed!r} with "
+            f"validation re-render; editor's inline error: "
+            f"{error_text.strip()}"
         )
 
     def _create_simple(
@@ -352,17 +500,30 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
     ) -> None:
         """Generic create flow for non-discriminated entity kinds.
 
-        Click home → `/l2_shape/<kind>/new` link → apply form data
-        → submit. Used by ``create_account_template`` /
+        Navigate home → create form → apply form data → submit.
+        Used by ``create_account`` / ``create_account_template`` /
         ``create_transfer_template`` / ``create_chain`` /
         ``create_limit_schedule``. Rails go through ``create_rail``
         (subtype picker click-through) + reconciler handling.
+
+        BX.6/11 reframe — ``account`` and ``account_template`` no
+        longer have a direct ``+ Add`` link on the home page; both
+        funnel through the unified ``+ Add Role`` modal. Dispatch
+        to ``_open_add_role_modal_and_pick(cardinality)`` for those
+        two kinds; the other four still carry a direct
+        ``a[href="/l2_shape/<kind>/new"]`` ``+ Add`` link.
         """
         from tests.e2e._drivers.studio_editor import (  # noqa: PLC0415 — lazy
             create_form_data,
         )
 
-        self._page.click(f'a[href="/l2_shape/{kind}/new"]')
+        if kind == "account":
+            self._open_add_role_modal_and_pick("one-to-one")
+        elif kind == "account_template":
+            self._open_add_role_modal_and_pick("one-to-many")
+        else:
+            self._ensure_home()
+            self._page.click(f'a[href="/l2_shape/{kind}/new"]')
         data = create_form_data(kind, entity)  # type: ignore[arg-type]: EntityKind literal narrows from kind str at the seam
         self._apply_form_data(data)
         self._submit_create_form(kind_label or kind)
@@ -435,6 +596,7 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
             and institution_acronym is None
         ):
             return
+        self._ensure_home()
         self._page.click('a[href="/l2_shape/instance/"]')
         self._page.fill('input[name="institution_name"]', institution_name or "")
         self._page.fill('input[name="institution_acronym"]', institution_acronym or "")
@@ -495,6 +657,7 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
 
         subtype = _rail_subtype_of(rail)
         # Step 1+2: home → subtype picker → form.
+        self._ensure_home()
         self._page.click('a[href="/l2_shape/rail/new"]')
         self._page.click(
             f'a[href="/l2_shape/rail/new?subtype={subtype}"]',
@@ -692,6 +855,7 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
 
         subtype = _rail_subtype_of(rail)
         # Step 1: home → subtype picker → form.
+        self._ensure_home()
         self._page.click('a[href="/l2_shape/rail/new"]')
         self._page.click(
             f'a[href="/l2_shape/rail/new?subtype={subtype}"]',
@@ -752,14 +916,15 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         self._page.go_back()
 
     def goto_rail_list(self) -> None:
-        """Click home → rail list. Precondition: page is at home
-        (`/`). Use `go_back()` to return home first if you're on a
-        sub-page (AI.8 — no home link in sub-page chrome)."""
+        """Click home → rail list. Auto-prefixed with ``_ensure_home``
+        (BX.2 post-create lands on the read card, not home)."""
+        self._ensure_home()
         self._page.click('a[href="/l2_shape/rail/"]')
 
     def goto_transfer_template_list(self) -> None:
-        """Click home → transfer_template list. Same precondition
-        as `goto_rail_list`."""
+        """Click home → transfer_template list. Auto-prefixed with
+        ``_ensure_home`` (BX.2 post-create lands on the read card)."""
+        self._ensure_home()
         self._page.click('a[href="/l2_shape/transfer_template/"]')
 
     def rail_list_contains(self, rail_name: str) -> bool:
