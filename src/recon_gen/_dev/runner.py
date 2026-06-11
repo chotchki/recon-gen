@@ -271,24 +271,82 @@ def _probe_aws() -> ProbeFailure | None:
     )
 
 
+_DOCKER_DAEMON_PROBE_BACKOFFS_SECONDS: Final[tuple[float, ...]] = (5.0, 10.0, 20.0)
+"""CB.17.k — backoff schedule for ``_probe_docker`` daemon-down retries.
+
+Post-macOS-reboot, Docker Desktop's daemon takes ~30-60s to be fully
+responsive: `docker ps` answers immediately but `containers/<id>/start`
+returns 500. Three attempts at 5s/10s/20s = ~35s ceiling matches the
+operator-locked spec and beats the prior "single-shot probe → swallowed
+warning → 32s of confusing db-tier failures" footgun. Wired into
+``_probe_docker`` only for the ``docker_daemon_down`` classification —
+``docker_cli_missing`` (rc=127) + other failure shapes still fail
+fast.
+"""
+
+
 def _probe_docker() -> ProbeFailure | None:
-    """Check Docker daemon is reachable via ``docker ps``."""
+    """Check Docker daemon is reachable via ``docker ps``.
+
+    CB.17.k — when the daemon classification is ``docker_daemon_down``
+    (the post-reboot lag window), retry with exponential backoff
+    (5s, 10s, 20s = ~35s ceiling). Other failure shapes
+    (``docker_cli_missing`` rc=127, ``docker_check_failed``) fail fast
+    on the first attempt — they're not transient.
+
+    Returns the same ``ProbeFailure`` shape on terminal failure; the
+    message is updated to reference the elapsed timeout so the
+    operator knows the retry budget was exhausted.
+    """
     result = _run_probe_subprocess(["docker", "ps"])
     if result.returncode == 0:
         return None
     if result.returncode == 127:
+        # CLI missing — not transient; no retries.
         return ProbeFailure(
             kind="docker_cli_missing",
             message="docker CLI not found — install Docker Desktop / docker engine, then re-invoke",
         )
-    if "cannot connect to the docker daemon" in result.stderr.lower():
+    if "cannot connect to the docker daemon" not in result.stderr.lower():
+        # Non-daemon-down failure (e.g. permission, malformed config) —
+        # not transient; no retries.
         return ProbeFailure(
-            kind="docker_daemon_down",
-            message="Docker daemon not running — start Docker Desktop (or `colima start`), then re-invoke",
+            kind="docker_check_failed",
+            message=f"Docker check failed (rc={result.returncode}): {result.stderr.strip() or '(no stderr)'}",
         )
+
+    # CB.17.k — daemon-down on attempt 1 may be the post-reboot lag
+    # window. Retry with bounded backoff before declaring terminal.
+    for backoff_seconds in _DOCKER_DAEMON_PROBE_BACKOFFS_SECONDS:
+        print(
+            f"runner: docker daemon not responsive — waiting "
+            f"{backoff_seconds:.0f}s then retrying "
+            f"(post-reboot lag window; ~35s ceiling)",
+            file=sys.stderr,
+        )
+        time.sleep(backoff_seconds)
+        result = _run_probe_subprocess(["docker", "ps"])
+        if result.returncode == 0:
+            return None
+        if "cannot connect to the docker daemon" not in result.stderr.lower():
+            # Shape changed mid-retry — surface as terminal.
+            return ProbeFailure(
+                kind="docker_check_failed",
+                message=(
+                    f"Docker check failed mid-retry "
+                    f"(rc={result.returncode}): "
+                    f"{result.stderr.strip() or '(no stderr)'}"
+                ),
+            )
+
+    total_budget = int(sum(_DOCKER_DAEMON_PROBE_BACKOFFS_SECONDS))
     return ProbeFailure(
-        kind="docker_check_failed",
-        message=f"Docker check failed (rc={result.returncode}): {result.stderr.strip() or '(no stderr)'}",
+        kind="docker_daemon_down",
+        message=(
+            f"Docker daemon not responsive after {total_budget}s — try "
+            "`docker info` to diagnose, or wait longer after "
+            "`open -a Docker`"
+        ),
     )
 
 
@@ -2864,10 +2922,40 @@ def cmd_up_to(args: argparse.Namespace) -> int:
                         file=sys.stderr,
                     )
         except Exception as exc:  # noqa: BLE001 — container start failure should fail loud
+            # CB.17.k — fail fast, don't swallow. The probe-side
+            # `_probe_docker` retries cover the daemon-down lag window,
+            # but `containers/<id>/start` can still 500 when the
+            # daemon answers `ps` but isn't ready to honor `start`
+            # (post-reboot race). Continuing here cascades into db/app2/
+            # deploy/qs_* layers running with an unpopulated
+            # `RECON_GEN_DEMO_DATABASE_URL` → fallback to the
+            # operator-authored cfg URL → testcontainers-default
+            # mismatch → 32s of confusing failures. Surface as
+            # EXIT_NEEDS_OPERATOR per the Y.2.gate.h+i convention
+            # (matches the seed-failure abort below).
             print(
                 f"runner: thin container start failed ({exc!r}); "
-                f"db/app2/deploy/qs_* layers will likely fail",
+                f"aborting chain — `docker info` + `docker ps -a` to "
+                f"diagnose (post-reboot daemon may still be warming up)",
                 file=sys.stderr,
+            )
+            if container_handle is not None:
+                try:
+                    container_handle.stop()  # type: ignore[attr-defined]: duck-typed teardown contract — testcontainers Container, _DuckdbHandle, _PersistentContainerHandle all expose .stop() but share no nominal parent
+                except Exception:  # noqa: BLE001 — teardown is best-effort
+                    pass
+            return _finalize_run(
+                run_dir,
+                LayerResult(
+                    layer="unit", exit_code=EXIT_SUCCESS,
+                    duration_seconds=0.0, skipped=True,
+                ),
+                [LayerResult(
+                    layer="container_start",
+                    exit_code=EXIT_NEEDS_OPERATOR,
+                    duration_seconds=0.0,
+                )],
+                EXIT_NEEDS_OPERATOR,
             )
 
     # CB.17.d — seed the PLAIN cfg prefix transitionally. db-tier smoke
