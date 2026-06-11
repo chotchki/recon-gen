@@ -108,20 +108,6 @@ Three open design items from `docs/audits/_archive/v11_22_1_feedback.md` cold-re
 
 - [ ] BN.0 - Triage spike: snapshot per-failure repro shape against sq_pg_aw, sq_or_aw, sp_or_aw. Output: `docs/audits/bn_0_sq_aw_flake_snapshot.md` with per-test root-cause hypothesis + reproduction recipe. Prereq for BN.1+ fixes.
 
-## Phase CE - Trainer dogfood: Session Start as session fixture
-
-**Why:** Backlog #249 (CB.17.m followup) — every trainer dogfood test runs `/etl/run` via Session Start, which is the same heavy ETL replay across all tests (~10 min on Oracle per the in-code estimate at `_studio_routes.py:479`). With 16 xdist workers contending on one shared container per dialect, the cumulative load blows the 600s `_trainer_wait_until_finished` wire for [pg] / [or] parametrize. CI workaround: pin `RECON_GEN_TRAINER_DIALECTS=du` (CB.17.m). Real fix: treat the `/etl/run` payload as **session-scoped setup** — one full Session Start per xdist worker upfront, then per-test reset via the cheap `/training/reclone` path (drops + reclones v overlay from already-ready base prefix, no `/etl/run` re-run).
-
-**Approach:** `/training/reclone` exists already (BV.4.9 — diff-only Apply brought it back as force-full). It tears down + recreates the v overlay from the current base prefix WITHOUT re-running the ETL pipeline. Build the per-test trainer fixture around it: session-scope fixture does one Session Start, per-test fixture does a reclone. Per-test prefix isolation (`isolated_studio_cfg`) already gives every test its own worker-suffix prefix, so reclone-of-the-overlay is sufficient — no contamination across tests on the same worker.
-
-**Done when:** Trainer dogfood tests pass [du, pg, or] under CI's 16-xdist-worker model with the CB.17.m DuckDB pin removed; per-worker wall-clock for the trainer test set drops from N×10min to 10min + N×reclone; #249 sweeps to archive.
-
-- [x] CE.0 - CE.0 — Spike measured (PG: 32.84s full → 13.51s reclone = 2.4× per-test; 50% saved at 7 tests; `docs/audits/_archive/ce_0_session_start_fixture_spike.md`)
-- [x] CE.1 - CE.1 — `App2Driver.trainer_reset_overlay()` verb (clicks Reclone, waits for live-tail finished — mirrors `trainer_start_session()` wait shape)
-- [x] CE.2 - CE.2 — Session-scope `trainer_ready_session` fixture in `test_bv33_trainer_dogfood.py`; does Session Start once per (worker, dialect)
-- [x] CE.3 - CE.3 — Per-test setup calls `trainer_reset_overlay()` (cheap reclone) instead of `trainer_start_session()` + drops dead `isolated_studio_cfg` fixture
-- [ ] CE.4 - CE.4 — Unpin `RECON_GEN_TRAINER_DIALECTS=du` in `.github/workflows/ci.yml`; measure CI wall-clock delta; if green, sweep CB.17.m mitigation comment
-
 ## Phase CF - v12 + v13.1.1 cold-read defects (carryover + DuckDB regressions)
 
 **Why:** Two cold-read reports, both unaddressed end-to-end. v12 (`docs/audits/_archive/v12_0_0_feedback.md`, 6 judges against sqlite v12.0.2) flagged 4 HIGH (U1-U4) + 8 MED (U5-U12) + 2 LOW (U13-U14). v13.1.1 (`docs/audits/_archive/v13_1_1_feedback.md`, 6 judges against DuckDB v13.1.1 / ~300k tx) confirms the CA DuckDB swap shipped a decisive operational win — U1 (App Info clock), U9 (drift KPI cross-sheet agreement), U12 (Session Start sqlite hang) all fixed; statements tie to the penny; the 60s sqlite sheet renders instantly. BUT most v12 UX HIGHs (U2 exec health rollup, U3 `limit_breach_outbound` plant no-op, U4 Apply status contradicting itself) and most v12 MEDs (U6 L2 hairball, U7 editor scroll-walls, U8 Templates Sankey, U10 blank-state sheets) are still open, AND a HIGH regression landed: `drift` plant joins `limit_breach_outbound` in failing-to-plant on DuckDB. Apply reports "2 plant(s) failed: drift, limit_breach_outbound" with byte-identical clean vs violation dashboards.
@@ -209,32 +195,6 @@ Three open design items from `docs/audits/_archive/v11_22_1_feedback.md` cold-re
 - [ ] CJ.4 - **Dark-on-amber rule for button surfaces.** Audit every amber-bg with white text → flip to dark text.
 - [ ] CJ.5 - **Cold-read v3 contrast check.** axe-core pass + visual confirm.
 
-## Phase CK - Accessibility pass (axe-core findings)
-
-**Why:** v13.1.1 design review Accessibility section: app-wide missing `<main>` landmark + missing `<h1>` on several studio pages + `nested-interactive` on training controls + `aria-allowed-role` on entity lists (~140 nodes!) + unlabeled pickers + `empty-table-header` + one `select-name`. Plus 67 bounding-box overlaps documented by the axe-core probe (the Studio Med #2 Apply-bar overlap was one; CF audit followup 3e0c1e1b cleared it). The audit's #7 highest-leverage systemic fix: "Add landmarks + `<h1>`s."
-
-**Status (2026-06-06 retroactive):** CK.0 + CK.1 + CK.4 shipped (commits e009f40f / 53305f93 / 53875f1e; sign-off `docs/audits/_archive/ck_signoff.md`; merge 4594d7c8). CK.2 / CK.3 / CK.5 / CK.6 / CK.7 deferred pending the axe-core toolchain landing (CK.6 carries the JS/npm decision; CK.7 is gated on CK.2/3/5/6). Boxes ticked retroactively so plan reflects ship state; deferred cells stay open for future axe-core work.
-
-**Locks (operator to confirm):**
-- Every page ships `<main>` + a single `<h1>`
-- Training controls fix `nested-interactive` (a button-inside-button issue likely)
-- Entity-list ARIA `aria-allowed-role` warnings clear via correct role assignments
-- Pickers ship explicit `aria-label`
-- Table headers have non-empty content
-- axe-core CI gate: any new finding fails the build (BX backlog #107 probe-name badges adjacent; if BX ships first absorb)
-
-**Done when:** axe-core CI pass on all 31 audited routes; manual screen-reader spot-check on the highest-traffic Studio surfaces (Training landing + L2 editor home + Diagram); no bounding-box overlaps from the probe.
-
-- [x] CK.0 - **REPLAN.** Pull the audit's full axe-core findings list into a tracking artifact. Decide whether to bring axe-core into CI as a gate or as a report.
-- [x] CK.1 - **Landmarks + `<h1>` sweep.** `<main>` on every page + single `<h1>`; some studio pages had nothing.
-- [ ] CK.2 - **Training `nested-interactive` fix.** Likely a button-inside-clickable-card issue; pull the inner control out. **DEFERRED** pending visual repro.
-- [ ] CK.3 - **Entity-list `aria-allowed-role` sweep.** ~140 nodes flagged — likely a single role wrong somewhere replicated by the renderer. **DEFERRED** pending axe-core toolchain.
-- [x] CK.4 - **Picker `aria-label` sweep.** Audit every `<select>` / typeahead / dropdown for an explicit label.
-- [ ] CK.5 - **Bounding-box overlap sweep.** Apply-bar overlap already shipped; sweep the remaining 66 (some are likely auto-cleared by CG list primitive + CH table primitive). **DEFERRED** pending axe-core toolchain.
-- [ ] CK.6 - **axe-core CI gate.** If operator OKs, fail the build on new axe-core findings. **DEFERRED** — needs JS/npm build dep decision.
-- [ ] CK.7 - **Cold-read v3 a11y confirmation.** Manual screen-reader spot-check + axe-core green. **DEFERRED** — gated on CK.2/3/5/6.
-- [x] CF.X - infra - CF.X-infra **SHIPPED** (commit ef19737c): `KPIValueThresholdBanding` typed primitive (3-band amber/red, frozen dataclass with `red_at > amber_at` construction guard, 3-way mutex with the BK.2 zero / BK.9 sign indicators) + `CrossAppDrill` typed primitive (target_dashboard_id + target_sheet_id; QS emit = None per the URL-param-no-control-sync defect). QS emit + App2 shape_kpi + bootstrap.js renderKPI extended with the `warning` semantic color (`text-warning` already compiled into output.css from Studio surfaces). 9 new unit tests pin all three bands + the construction guards + the neutral-on-null contract. EXCLAMATION_CIRCLE icon enum still needs deploy-probe before first QS-side render — fallback list (TRIANGLE → FLAG) inline in the helper. Module-level `common/html/_components.py` deferred until a follow-up needs it; current primitives land cleanly in `common/tree/visuals.py` next to the BK.2/BK.9 siblings.
-
 ## Phase CM - Escheatment tracking sheets (TBD — placeholder)
 
 - Comment: even the name should be considered, escheatment is VERY US centric. Maybe inactive / dormant / unclaimed funds? Pick a neutral term.
@@ -258,6 +218,18 @@ Three open design items from `docs/audits/_archive/v11_22_1_feedback.md` cold-re
 
 
 # Backlog (not yet phased)
+
+- **a11y-toolchain-spike** — unblocks CK-deferred.{3,5,7} + CJ.5. Single spike: pick the axe-core integration mechanism (npx-via-pytest-subprocess vs Playwright JS-eval vs alternative). Per memory `feedback_rust_influenced_tool_preferences` operator weigh-in needed (axe-core is npm-only). Backlogged 2026-06-10.
+
+- **CK-deferred.2 — Training `nested-interactive` fix.** Likely a button-inside-clickable-card issue; pull the inner control out. Carried from Phase CK (archived 2026-06-10) — deferred pending visual repro.
+
+- **CK-deferred.3 — Entity-list `aria-allowed-role` sweep (~140 nodes).** Likely a single role wrong somewhere replicated by the renderer. Carried from Phase CK (archived 2026-06-10) — gated on `a11y-toolchain-spike`.
+
+- **CK-deferred.5 — Bounding-box overlap sweep (66 remaining).** Apply-bar overlap already shipped; sweep the remaining (some are likely auto-cleared by CG list primitive + CH table primitive). Carried from Phase CK (archived 2026-06-10) — gated on `a11y-toolchain-spike`.
+
+- **CK-deferred.6 — axe-core CI gate.** If operator OKs, fail the build on new axe-core findings. Carried from Phase CK (archived 2026-06-10) — needs JS/npm build-dep decision (operator weigh-in via `a11y-toolchain-spike`).
+
+- **CK-deferred.7 — Cold-read v3 a11y confirmation.** Manual screen-reader spot-check + axe-core green. Carried from Phase CK (archived 2026-06-10) — gated on CK-deferred.{2,3,5,6}.
 
 - **BW deferred-pending-demand — Docs posture (`_kv`-templated deployment-overview page).** Fire only if an operator requests it. D7 already locked at static-default per BV close summary.
 

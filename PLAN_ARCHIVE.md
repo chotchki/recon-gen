@@ -1,3 +1,66 @@
+# PLAN — Phase BK (archived 2026-06-10)
+
+**Phase summary:** v11.22.1 cold-read second-pass + deferrals. Cold-read source: `docs/audits/_archive/v11_22_1_feedback.md`. v11.22.3 small-fix batch (2026-05-26) closed #1 / #10 / #14 / #17 / #18 / #19 ahead of Phase BK; the 10 items below survived that pass and required design / fresh data / operator clarification. 7 shipped + 3 deferred to backlog as unreproducible across ~13 subsequent version cuts (v12.0.0 / v13.1.1 / v13.6.1 cold-reads all grep-clean).
+
+**Per-item disposition (10 leaves):**
+- **BK.1 — $0.01 customer-DDA closing balance plant.** **Deferred to backlog.** Likely already resolved upstream by BH.24 cents-vs-dollars cleanup + BH.1 drift formula fix; no repro in v12 / v13.1.1 / v13.6.1 cold-reads. Re-file if a future cold-read surfaces a repro.
+- **BK.2 — Drift KPI conditional formatting.** Shipped 2026-05-29. Built `KPIValueZeroIndicator` typed primitive (icon-first signal CHECKMARK / X + parallel green-700 / red-700 color channel). Wired on all 5 drift KPIs. Three QS shape gotchas (uppercase hex color regex, expression refs column name not field_id, expression must wrap column in aggregation function) pinned in `tests/unit/test_tree.py::TestKPIVisual::test_bk_2_value_zero_indicator_emits_qs_conditional_formatting` + `docs/reference/quicksight-quirks.md::§5.0`. Verified end-to-end on AWS via `run_tests up_to=deploy --dialects=pg --targets=aw`.
+- **BK.3 — One-bar dominance carryovers.** Shipped via Phase BQ. Top-5 + Other rollup on Today's Exceptions (dataset layer; CPA-readable) + log-scale Y on Exec stacked-by-rail_name chart (preserves all categories for trend-spotting).
+- **BK.4 — Investigation Money Trail / Account Network blank-by-default.** Shipped via Phase BQ. Default-pick = largest planted violation (scenario auto-resolves highest-magnitude transfer/account on first load); empty-state caveat handled by BK.10 discipline.
+- **BK.5 — L2 Exceptions distinct-types KPI vs only ~5 visible bars.** Closed 2026-05-29 (probe + pin; already resolved upstream). Cold-read was a v11.22.1 carryover — pre-BL.1 the KPI used `.count()` which rendered DISTINCT on QS via the CategoricalMeasureField(COUNT) quirk and equal-counted on App2. BL.1 flipped to `.distinct_count()` explicitly + BH.11 renamed the KPI title. Pinned by `test_bk_5_distinct_types_kpi_matches_barchart_category_count`. No production code change required this round.
+- **BK.6 — Limit Breach KPI=0 vs 5 rows.** **Deferred to backlog.** Not reproducible on bundled L2 (sasquatch + spec_example); operator-specific scenario; never reproduced across v12 / v13.1.1 / v13.6.1 cold-reads. Re-file if a reproducible L2 yaml surfaces.
+- **BK.7 — Chains Required Total label clarity.** Shipped 2026-05-29. Math was correct; labels were ambiguous. Added `display_name="Required Children Declared"` to `required_total` and `display_name="Required Children Fired"` to `required_fired` on `CHAIN_INSTANCES_CONTRACT`. Subtitle on Chain Instances table leads with the disambiguation (count CHILD CHAINS the L2 declares, not legs of a multi-leg transfer). 114/114 L2FT JSON tests green.
+- **BK.8 — cust-019 / Customer 18 off-by-one probe.** **Deferred to backlog.** Cannot repro in sasquatch (uses `SNB Customer #0011` naming) or auto-scenario fallback (binds `cust-{n:03d}` ↔ `Customer {n}` with same `n`). Needs operator L2 yaml row; never received. Re-file if the L2 yaml arrives.
+- **BK.9 — Executives Net Money Moved sign-aware.** Shipped 2026-05-29. `KPIValueSignIndicator` sibling of BK.2's zero indicator — green ARROW_UP when value ≥ 0 (inflow), red ARROW_DOWN when < 0 (outflow). `KPI.__post_init__` raises if both indicators set on the same KPI (competing ConditionalFormattingOptions). Pinned by `test_bk_9_value_sign_indicator_emits_qs_conditional_formatting` + `test_bk_9_value_sign_indicator_blocks_mixed_indicators`. Verified on AWS via the same v5 deploy probe that pinned BK.2.
+- **BK.10 — Empty-state discipline.** Shipped via Phase BQ. Empty-state convention extended from BO.3's Sankey pattern to Table + Bar + KPI; distinguishes "0 rows match" from legit "value=0" KPIs; QS native empty-state overlay verified per visual type.
+
+**Deferred carries to Backlog (no repro across v12.0.0 / v13.1.1 / v13.6.1 cold-reads):**
+- BK.1 (cents-vs-dollars carryover; BH.24 + BH.1 likely already resolved)
+- BK.6 (operator-specific L2; not bundled)
+- BK.8 (needs operator L2 yaml row; never arrived)
+
+**Closing context:** Phase BQ absorbed the design-locked BK.3 / BK.4 / BK.10 leaves; those ship-paths are owned in PLAN_ARCHIVE under Phase BQ when that phase archives. Three deferrals are documented per `feedback_no_silent_defer` — each carries an explicit re-file gate (repro condition or operator artifact required).
+
+# PLAN — Phase BQ (archived 2026-06-10)
+
+**Phase summary:** BK third-pass cold-read closeout — three open design items from `docs/audits/_archive/v11_22_1_feedback.md`, locked 2026-05-29 via user decisions. (1) BK.3 #6+#7 one-bar dominance: both top-5+Other rollup on Today's Exceptions + log-scale Y on Exec stacked-by-rail_name. (2) BK.4 #8 Investigation Money Trail / Account Network blank-by-default: auto-resolve highest-magnitude transfer/account on first load; empty-state caveat covered by BK.10. (3) BK.10 #20 empty-state discipline: extend BO.3 Sankey pattern to Table + Bar + Line + KPI + ForceGraph + QS native parity audit.
+
+**Commit trail:**
+- BQ.1-BQ.6 shipped 2026-05-29 (rolled up in-leaf — see per-item disposition for tests)
+- BQ.7 shipped via `81a8bec6` (Investigation default-pick = largest chain / largest account) + `b7441fa0` (Oracle ORA-00907 fix in BQ.7 default-pick SQL)
+
+**Per-item disposition (7 leaves, all shipped):**
+- **BQ.1** — BK.10 empty-state extended from BO.3 Sankey to renderTable + renderBarChart + renderLineChart + renderForceGraph. Same Tailwind centered banner + `role="status"`. Pinned by `test_table_renders_zero_rows_without_crashing` (updated) + `test_table_empty_rows_renders_empty_state_banner` (new) + `test_barchart_handles_empty_categories_without_crashing` (updated) + `test_barchart_empty_categories_renders_empty_state_banner` (new) + `test_linechart_handles_empty_series_without_crashing` (updated) + `test_linechart_empty_renders_empty_state_banner` (new).
+- **BQ.2** — BK.10 KPI empty-state via `shape_kpi(...)` `empty: True` sentinel. Distinguishes "no rows" / "all-None first column" from legit value=0 COUNT. Pinned by `test_kpi_empty_flag_renders_empty_state_banner` + `test_kpi_value_zero_not_treated_as_empty`.
+- **BQ.3** — BK.10 QS parity confirmed by `common/browser/helpers.py::visual_is_empty` — QS mounts `[data-automation-id="visual-overlay-title"][data-automation-context="No data"]` on every visual type. Native parity by construction; no quirks-log gap.
+- **BQ.4** — BK.3 Today's Exceptions one-bar dominance: applied `log_scale=True` to the check_type chart (5 categories already, top-N no-op). Subtitle notes the log Y axis.
+- **BQ.5** — BK.3 `log_scale` knob on BarChart tree primitive. Six new model classes (`AxisLogarithmicScale`, `AxisLinearScale`, `AxisScale`, `NumericAxisOptions`, `AxisDataOptions`, `AxisDisplayOptions`) match AWS 5-level nesting verbatim. App2 parity via d3 `scaleLog(base=10, domain=[1, maxVal])`. Wired on L1 Today's Exceptions + Exec stacked Period-Total (Volume + Money). 2 unit tests + 1 JS Playwright test. AWS deploy probe PASSED first iteration.
+- **BQ.6** — BK.3 top-20 + Other rollup on Exec `rail_name`. `DENSE_RANK() OVER (ORDER BY rail_gross_cents DESC)` CTE + `CASE WHEN rank <= 20 THEN rail_name ELSE 'Other' END` outer GROUP BY in `build_transaction_summary_dataset`. Caps legend at 21 entries. Verified totals match exactly on sasquatch_pr.sqlite (6714 transfers, $17.4M gross). Portable PG 17 / Oracle 19c / SQLite 3.38+.
+- **BQ.7** — BK.4 Investigation default-pick: highest-magnitude transfer_id / account_id computed at dataset-build time from scenario context, wired as analysis-param default for Investigation pickers. Empty-state from BQ.1 covers no-plants path. Shipped per commits `81a8bec6` (primary) + `b7441fa0` (Oracle ORA-00907 fix). Parent BK.4 already ticked; plan-bridge tick-state drift on the leaf only.
+
+**Note on the BQ.7 tick state:** plan-bridge state showed BQ.7 unchecked at sweep time despite both ship commits. Verdict-side cleared via in-place tick + this archive entry; parent BK.4 had already been ticked.
+
+---
+
+# PLAN — Phase CE (archived 2026-06-10)
+
+**Phase summary:** Trainer dogfood — Session Start as session fixture. Backlog #249 (CB.17.m followup): every trainer dogfood test ran `/etl/run` via Session Start (~10 min on Oracle per `_studio_routes.py:479`); 16-xdist-worker contention on one shared container per dialect blew the 600s `_trainer_wait_until_finished` wire for [pg] / [or] parametrize. The fix: treat `/etl/run` payload as **session-scoped setup** (one full Session Start per xdist worker upfront) + per-test reset via the cheap `/training/reclone` path (drops + reclones v overlay from the already-ready base prefix, no `/etl/run` re-run). CE.0-CE.3 shipped + verified live; CE.4 (unpin `RECON_GEN_TRAINER_DIALECTS=du` in CI) reverted via CE.4-followup-4 — Oracle/PG ETL wall times still exceed 600s wire under xdist contention even with the reclone pattern. The optimization target has moved on; superseded by BV.3.3 snapshot/restore.
+
+**Live gate today:**
+- `tests/unit/test_bv33_trainer_dogfood.py` — per-(worker, dialect) Session Start via `trainer_ready_session` session-scope fixture; per-test reclone via `App2Driver.trainer_reset_overlay()`; CB.17.m DuckDB pin REMAINS in `.github/workflows/ci.yml:374-387` (re-pinned to `du` by CE.4-followup-4)
+- Spike measurement (CE.0): PG 32.84s full Session Start → 13.51s reclone per-test (2.4× per-test, 50% saved at 7 tests)
+
+**Per-item disposition (5 leaves):**
+- **CE.0** — Spike measured (PG: 32.84s full → 13.51s reclone = 2.4× per-test; 50% saved at 7 tests; `docs/audits/_archive/ce_0_session_start_fixture_spike.md`).
+- **CE.1** — Shipped: `App2Driver.trainer_reset_overlay()` verb (clicks Reclone, waits for live-tail finished — mirrors `trainer_start_session()` wait shape).
+- **CE.2** — Shipped: session-scope `trainer_ready_session` fixture in `test_bv33_trainer_dogfood.py`; does Session Start once per (worker, dialect).
+- **CE.3** — Shipped: per-test setup calls `trainer_reset_overlay()` (cheap reclone) instead of `trainer_start_session()` + drops dead `isolated_studio_cfg` fixture.
+- **CE.4** — **REVERTED 2026-06-10** per `ci.yml:374-387` (CE.4-followup-4): Session Start on the CI's shared persistent PG/Oracle containers STILL hangs at the browser→HTTP→studio_server stack — 14 trainer tests erred with `Page.wait_for_function: Timeout 600000ms`, same symptom 3 CI cycles running, despite CE.0 measuring 33s on a fresh local PG container via direct Python. The bug reproduces in CI but not locally and we can't trace why from log-only triage. Re-pinned `RECON_GEN_TRAINER_DIALECTS=du`. WONT-DO; superseded by BV.3.3 snapshot/restore pattern + the BV-post.snapshot-double-matview-refresh backlog item which re-pins the optimization target.
+
+**Decision rationale (per `[no_silent_defer]`):** CE.4 not deferred silently — explicitly reverted in code (`ci.yml:374-387` comments document the 3-CI-cycle failure pattern + the BV.3.3 supersession). Backlog item `BV-post.snapshot-double-matview-refresh` carries the optimization-target re-pin. Session-fixture pattern (CE.0-CE.3) stays live because the per-test reclone win still helps DuckDB walltime; the CI cross-dialect unpin is what's parked, not the architecture.
+
+---
+
 # PLAN — Phase BW (archived 2026-06-10; deferred-pending-demand)
 
 **Phase summary:** Docs posture follow-on — provisional sub-phase scoped to a `_kv`-templated "your deployment overview" docs page, gated on operator demand. Per SPEC.md::Phase BW, BW.0 was the explicit REPLAN gate: "Confirm operator demand for the `_kv`-templated docs page exists before scheduling BW.1+. If no demand, tick BW.0 as deferred-pending-demand and close Phase BW without further work."
