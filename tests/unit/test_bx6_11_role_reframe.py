@@ -12,8 +12,10 @@ locks)`):
 2. Roles are the user-facing organizing principle on the home page.
    ``_HOME_SECTIONS`` no longer carries account / account_template;
    they nest inside a synthetic Roles wrapper at idx 0.
-3. Single ``+ Add Role`` affordance opens a modal → picks 1:1 or
-   1:N → routes to the existing per-kind create form.
+3. Single ``+ Add Role`` affordance navigates to a dedicated picker
+   page → picks 1:1 or 1:N → routes to the existing per-kind create
+   form. (Post-2026-06-11 follow-up: was a popup modal pre-refactor;
+   moved to a dedicated page to match the rail-subtype picker pattern.)
 4. CPA-readable: "1:1" / "1:N" on badges; "Singleton account" /
    "Templated role" as secondary-fg sublines.
 5. ``data-*`` anchors (NEVER Tailwind utility classes).
@@ -30,8 +32,10 @@ What the tests pin (per the cell brief):
   pointing at ``/studio/side-panel/glossary/roles-cardinality``.
 - Sub-buckets render in 1:1-first order (1:1 ``Singleton accounts``
   before 1:N ``Templated roles``).
-- ``+ Add Role`` modal has two cards with the correct hrefs +
-  ``data-cardinality-choice="one-to-one" | "one-to-many"``.
+- ``+ Add Role`` button is a plain anchor to the dedicated picker
+  page ``/l2_shape/role/new``; the picker page renders two card-
+  anchors with the correct hrefs + ``data-cardinality-choice=
+  "one-to-one" | "one-to-many"``.
 - ``/l2_shape/account/`` h1 reads "Roles — 1:1";
   ``/l2_shape/account_template/`` reads "Roles — 1:N".
 - Read cards carry ``data-cardinality-badge`` + the matching
@@ -224,23 +228,55 @@ def test_home_page_sub_buckets_carry_per_kind_data_anchors(
 
 
 # ---------------------------------------------------------------------------
-# + Add Role modal
+# + Add Role anchor + dedicated picker page
 # ---------------------------------------------------------------------------
 
 
-def test_home_page_renders_add_role_modal_with_two_cards(
+def test_home_page_renders_add_role_button(
     writable_l2_yaml: Path,
 ) -> None:
-    """The modal carries two card-anchors: 1:1 → /l2_shape/account/new,
-    1:N → /l2_shape/account_template/new. Both anchor data-attributes
-    land for App2-driver targeting."""
+    """The single ``+ Add Role`` link lands once in the Roles wrapper
+    header. Post-2026-06-11 follow-up: navigates to the dedicated
+    picker page at ``/l2_shape/role/new`` instead of opening a popup
+    modal. The ``data-add-role-open`` + ``data-role="add-role-button"``
+    anchors are preserved for driver targeting."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/").text
+    assert 'data-add-role-open' in body
+    assert 'data-role="add-role-button"' in body
+    assert '+ Add Role' in body
+    # Anchor link to the picker page (not a modal trigger).
+    assert 'href="/l2_shape/role/new"' in body
 
-    # Modal container
-    assert 'data-add-role-modal' in body
-    assert 'data-role="role-cardinality-modal"' in body
+
+def test_home_page_does_not_render_legacy_add_role_modal(
+    writable_l2_yaml: Path,
+) -> None:
+    """Anti-regression — the BX.6/11 follow-up dropped the popup modal.
+    The home page must NOT ship ``<dialog data-add-role-modal>`` or
+    the legacy ``role-cardinality-modal`` anchor; both shapes belonged
+    to the modal that no longer exists."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/").text
+    assert 'data-add-role-modal' not in body
+    assert 'data-role="role-cardinality-modal"' not in body
+    # The capture-phase document listener workaround is also gone.
+    assert 'showModal' not in body
+
+
+def test_role_picker_page_renders_with_two_cards(
+    writable_l2_yaml: Path,
+) -> None:
+    """The dedicated picker page renders the two cardinality cards:
+    1:1 → /l2_shape/account/new, 1:N → /l2_shape/account_template/new.
+    Both anchor data-attributes land for App2-driver targeting."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/role/new")
+    assert resp.status_code == 200
+    body = resp.text
     # 1:1 card
     assert 'href="/l2_shape/account/new"' in body
     assert 'data-cardinality-choice="one-to-one"' in body
@@ -249,31 +285,49 @@ def test_home_page_renders_add_role_modal_with_two_cards(
     assert 'href="/l2_shape/account_template/new"' in body
     assert 'data-cardinality-choice="one-to-many"' in body
     assert 'data-role="role-kind-1-n"' in body
+    # Page-level data anchor so drivers can pin "we landed on the
+    # picker, not somewhere else".
+    assert 'data-role-picker-page' in body
 
 
-def test_add_role_modal_carries_inline_glossary_triggers(
+def test_role_picker_page_carries_full_page_chrome(
     writable_l2_yaml: Path,
 ) -> None:
-    """Locked OQ2(c) — modal-inline [?] triggers point at the
-    matching per-cardinality glossary anchors."""
+    """Per the d58bff59 chrome-wrap pattern — the picker page is a full
+    editor-style page with an h1 + intro, NOT a chrome-less modal
+    fragment. Matches the rail-subtype picker shape."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
-        body = c.get("/").text
-    assert 'hx-get="/studio/side-panel/glossary/1-to-1"' in body
-    assert 'hx-get="/studio/side-panel/glossary/1-to-n"' in body
+        body = c.get("/l2_shape/role/new").text
+    # H1 with the editor's form-page-header shape.
+    assert 'Add Role — pick cardinality' in body
+    # Intro details with the cardinality explanation.
+    assert 'Pick the role cardinality first' in body
+    # Full HTML5 page, not a fragment.
+    assert '<!doctype html>' in body.lower()
 
 
-def test_home_page_renders_add_role_button(
+def test_role_picker_page_renders_back_breadcrumb_when_from_present(
     writable_l2_yaml: Path,
 ) -> None:
-    """The single ``+ Add Role`` button lands once in the Roles
-    wrapper header (it opens the modal via the inline JS shim)."""
+    """BTb.1 parity with the rail-subtype picker — `?from=<path>`
+    carries through to a Back breadcrumb above the picker so Triage
+    CTA flows preserve the back-link context."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
-        body = c.get("/").text
-    assert 'data-add-role-open' in body
-    assert 'data-role="add-role-button"' in body
-    assert '+ Add Role' in body
+        body = c.get("/l2_shape/role/new?from=/etl/triage").text
+    assert 'data-test-back-breadcrumb' in body
+    assert 'href="/etl/triage"' in body
+
+
+def test_role_picker_page_no_breadcrumb_when_from_absent(
+    writable_l2_yaml: Path,
+) -> None:
+    """Plain /l2_shape/role/new (no `?from=`) ⇒ no breadcrumb."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/l2_shape/role/new").text
+    assert 'data-test-back-breadcrumb' not in body
 
 
 # ---------------------------------------------------------------------------

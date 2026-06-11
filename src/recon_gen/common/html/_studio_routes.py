@@ -459,148 +459,18 @@ def _standalone_mode_banner(cfg: Config | None, *, embed: bool = False) -> str:
     )
 
 
-# BX.6/11 — `+ Add Role` modal. Rendered once per home page (under
-# the role wrapper); reachable via the `+ Add Role` button in the
-# wrapper header. Two card-anchors target the existing per-kind
-# create-page routes (URLs unchanged per locked OQ4(a)). Inline
-# [?] triggers next to each card open the side panel to the matching
-# glossary anchor (locked OQ2(c)).
-#
-# Plain HTML5 `<dialog>` element + a tiny inline JS shim — no HTMX
-# swap on the open path (the modal is static markup that ships with
-# the page) and no swap on the card-click path (cards are anchors;
-# browser navigates to a full form page). Backdrop click + Esc close
-# are native `<dialog>` semantics.
-_ADD_ROLE_MODAL_CARD_CLS = (
-    "block bg-white border border-surface-border rounded-md "
-    "px-5 py-4 no-underline text-primary-fg cursor-pointer "
-    "hover:border-accent hover:bg-link-tint "
-    "focus:outline-2 focus:outline-accent focus:-outline-offset-1"
-)
-
-
-def _render_add_role_modal() -> str:
-    """The `+ Add Role` modal (one per home page).
-
-    Two card-anchors:
-    - 1:1 → ``/l2_shape/account/new`` (Singleton account)
-    - 1:N → ``/l2_shape/account_template/new`` (Templated role)
-
-    Each card carries an inline ``[?]`` side-panel trigger that
-    opens the glossary to the matching anchor. Data anchors:
-
-    - ``data-add-role-modal`` on the ``<dialog>``
-    - ``data-cardinality-choice="one-to-one" | "one-to-many"`` on
-      the cards
-    - ``data-role="role-cardinality-modal"`` (legacy / cross-cell
-      anchor name from the BX.6/11 doc §Constraint Summary)
-    """
-    one_to_one_trigger = render_side_panel_trigger(
-        "/studio/side-panel/glossary/1-to-1",
-        label="[?]",
-        aria_label="Glossary: 1:1 (Singleton account)",
-        extra_classes="text-xs ml-2",
-    )
-    one_to_n_trigger = render_side_panel_trigger(
-        "/studio/side-panel/glossary/1-to-n",
-        label="[?]",
-        aria_label="Glossary: 1:N (Templated role)",
-        extra_classes="text-xs ml-2",
-    )
-    return f"""
-<dialog id="add-role-modal"
-        data-add-role-modal
-        data-role="role-cardinality-modal"
-        class="rounded-md border border-surface-border p-0
-               max-w-lg w-full bg-white shadow-lg
-               backdrop:bg-black/30">
-  <form method="dialog" class="m-0">
-    <header class="flex items-center justify-between px-5 py-3
-                   border-b border-surface-border">
-      <h2 class="text-base font-semibold m-0">Add Role</h2>
-      <button type="submit" value="cancel"
-              class="text-secondary-fg hover:text-primary-fg
-                     text-lg leading-none p-1 -m-1"
-              aria-label="Close Add Role modal"
-              data-add-role-close>&times;</button>
-    </header>
-    <div class="px-5 py-4">
-      <p class="text-sm text-secondary-fg m-0 mb-3">
-        Does this role exist as <strong>one ledger row</strong>,
-        or as <strong>many runtime instances</strong>?
-      </p>
-      <div class="flex flex-col gap-3">
-        <div class="flex items-start gap-2">
-          <a class="{_ADD_ROLE_MODAL_CARD_CLS} flex-1"
-             href="/l2_shape/account/new"
-             data-role="role-kind-1-1"
-             data-cardinality-choice="one-to-one">
-            <strong class="block text-base text-accent mb-1">
-              1:1 — One ledger row &rarr;
-            </strong>
-            <small class="block text-sm text-secondary-fg">
-              The role IS the account. One id, one row on the trial
-              balance. E.g. CashDueFRB, ACHOrigSettlement.
-            </small>
-          </a>
-          {one_to_one_trigger}
-        </div>
-        <div class="flex items-start gap-2">
-          <a class="{_ADD_ROLE_MODAL_CARD_CLS} flex-1"
-             href="/l2_shape/account_template/new"
-             data-role="role-kind-1-n"
-             data-cardinality-choice="one-to-many">
-            <strong class="block text-base text-accent mb-1">
-              1:N — Many runtime instances &rarr;
-            </strong>
-            <small class="block text-sm text-secondary-fg">
-              One declaration; ETL materializes N rows (one per
-              customer, merchant, etc.). E.g. CustomerDDA,
-              MerchantDDA.
-            </small>
-          </a>
-          {one_to_n_trigger}
-        </div>
-      </div>
-    </div>
-  </form>
-</dialog>
-<script>
-(function() {{
-  const dlg = document.getElementById('add-role-modal');
-  if (!dlg) return;
-  // Open trigger — the `+ Add Role` button in the wrapper header.
-  // BX.6/11 follow-up (2026-06-11): listen in the CAPTURE phase
-  // (third arg `true`). The button carries an inline
-  // `onclick="event.stopPropagation()"` so clicks don't toggle the
-  // surrounding `<details>` wrapper — but inline onclick runs in
-  // the BUBBLE phase, so a document-bubble listener would never
-  // see the event. Capture-phase fires document→target BEFORE the
-  // button's onclick, so showModal() runs reliably even when the
-  // event is later stopped by the button's stopPropagation call.
-  // Confirmed via WebKit/Playwright: bubble-phase listener never
-  // fired, capture-phase fires unconditionally.
-  document.addEventListener('click', function(evt) {{
-    const opener = evt.target.closest('[data-add-role-open]');
-    if (!opener) return;
-    evt.preventDefault();
-    evt.stopPropagation();
-    if (typeof dlg.showModal === 'function') {{
-      dlg.showModal();
-    }} else {{
-      dlg.setAttribute('open', '');
-    }}
-  }}, true);
-  // Backdrop click → close. The form `method="dialog"` already
-  // wires Esc + the [×] button.
-  dlg.addEventListener('click', function(evt) {{
-    if (evt.target === dlg) {{
-      dlg.close('backdrop');
-    }}
-  }});
-}})();
-</script>
-"""
+# BX.6/11 follow-up (2026-06-11) — the prior `+ Add Role` popup modal
+# (with its capture-phase document click listener workaround for the
+# surrounding `<details>` toggle) was replaced by a dedicated picker
+# page at ``/l2_shape/role/new`` rendered by
+# ``_studio_editor_routes._render_role_picker``. The home-page button
+# in ``_render_role_wrapper`` below is now a plain anchor link — no
+# modal markup or inline JS rides with the home page. Picker page
+# preserves the same two card-anchors (``data-cardinality-choice``
+# +``data-role="role-kind-1-1" | "role-kind-1-n"``) so callsites that
+# target the cards keep working; modal-specific anchors
+# (``data-add-role-modal``, ``data-role="role-cardinality-modal"``)
+# are gone because there's no modal anymore.
 
 
 def _render_role_wrapper(
@@ -646,17 +516,21 @@ def _render_role_wrapper(
         aria_label="Glossary: roles (1:1 vs 1:N)",
         extra_classes="text-xs ml-2",
     )
-    # Add Role button — opens the modal via the inline JS shim
-    # below `_render_add_role_modal`.
+    # Add Role link — navigates to the dedicated cardinality picker
+    # page at ``/l2_shape/role/new`` (BX.6/11 follow-up 2026-06-11).
+    # Replaces the prior modal trigger. ``onclick="event.stopPropagation()"``
+    # keeps the click from toggling the surrounding Roles ``<details>``
+    # wrapper; with a plain anchor there's no need for the capture-phase
+    # document listener the modal version required.
     add_role_button = (
-        '<button type="button" '
-        'class="ml-2 inline-flex items-center px-2 py-0.5 text-xs '
+        '<a class="ml-2 inline-flex items-center px-2 py-0.5 text-xs '
         'font-semibold border border-accent text-accent rounded-sm '
-        'hover:bg-accent hover:text-white" '
+        'no-underline hover:bg-accent hover:text-white" '
+        'href="/l2_shape/role/new" '
         'data-add-role-open '
         'data-role="add-role-button" '
         'onclick="event.stopPropagation()" '
-        'title="Add a new role (1:1 or 1:N)">+ Add Role</button>'
+        'title="Add a new role (1:1 or 1:N)">+ Add Role</a>'
     )
     # ↗ link → the 1:1 list page (canonical drill-in target;
     # operator pivots to 1:N via the sibling-page link below the
@@ -1112,7 +986,6 @@ def _render_home_page(
     <div id="delete-confirm-banner-slot" data-test-delete-banner-slot></div>
     {sections_html}
   </main>
-  {_render_add_role_modal()}
 </body>
 </html>
 """

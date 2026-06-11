@@ -3978,6 +3978,112 @@ _RAIL_SUBTYPE_PICKER_INTRO: str = (
 )
 
 
+# BX.6/11 follow-up (2026-06-11) — Role-cardinality picker landing page.
+# Mirrors the rail-subtype picker shape: a dedicated editor-style page
+# (not a popup modal). Two card-anchors, one per cardinality, each
+# linking to the existing per-kind create form (URLs unchanged per the
+# locked OQ4(a) — only the chrome around the choice moved). Matches the
+# d58bff59 chrome wrap pattern (top_nav + h1 + body wrapper); reuses
+# the same intro / breadcrumb / card-button styling primitives the rail
+# picker uses so the two pickers feel cohesive.
+_ROLE_PICKER_INTRO: str = (
+    "<p><strong>Pick the role cardinality first.</strong> A role is "
+    "one of two shapes — they live on different tables in the L2 yaml, "
+    "so we need to know which before showing the form.</p>"
+    "<ul>"
+    "<li><strong>1:1 — Singleton account</strong> — the role IS the "
+    "account. One id, one row on the trial balance. E.g. CashDueFRB, "
+    "ACHOrigSettlement.</li>"
+    "<li><strong>1:N — Templated role</strong> — one declaration; ETL "
+    "materializes N rows (one per customer, merchant, etc.). E.g. "
+    "CustomerDDA, MerchantDDA.</li>"
+    "</ul>"
+)
+
+
+def _render_role_picker(
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed to thread the L2 theme override into the page <head>
+    *,
+    from_param: str | None = None,
+    top_nav_html: str = "",
+) -> str:
+    """The Role-cardinality picker landing page.
+
+    Step 1 of the 2-step role-create flow. Two big card-anchors,
+    one per cardinality, each linking to the existing per-kind create
+    form:
+
+    - 1:1 → ``/l2_shape/account/new`` (Singleton account)
+    - 1:N → ``/l2_shape/account_template/new`` (Templated role)
+
+    Matches the rail-subtype picker shape (``_render_rail_subtype_picker``)
+    — dedicated editor-style page with top-nav + h1 + body wrapper,
+    NOT a popup modal. The pre-2026-06-11 modal funnel relied on a
+    capture-phase document click listener to dodge the surrounding
+    ``<details>`` toggle; the dedicated page eliminates that workaround
+    entirely (link click is plain navigation).
+
+    BTb.1 — when arriving with ``?from=<path>``, render the back-
+    breadcrumb above the picker. The cardinality links DON'T propagate
+    ``?from=`` because the destination create pages (``/l2_shape/account/new``
+    + ``/l2_shape/account_template/new``) save-redirect to home by
+    default, not to ``from`` — operators picking a cardinality from a
+    Triage CTA flow end up at home, which is the right post-create
+    target for "Add Role" anyway.
+
+    Per memory feedback_browser_drivers_user_facing_locators, data-*
+    anchors are preserved so the App2 driver targets the cards by
+    semantic attributes (``data-cardinality-choice`` + ``data-role``)
+    rather than Tailwind classes. The legacy modal anchors
+    (``data-role="role-cardinality-modal"``, ``data-add-role-modal``)
+    are dropped — they're modal-specific shapes that don't apply to a
+    full-page picker.
+    """
+    picker_btn_cls = (
+        "block bg-white border border-surface-border rounded-md px-5 py-4 "
+        "no-underline text-primary-fg cursor-pointer "
+        "hover:border-accent hover:bg-link-tint "
+        "focus:outline-2 focus:outline-accent focus:-outline-offset-1"
+    )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Recon-Gen · Studio · Editor · Add Role · pick cardinality</title>
+  {studio_theme_head(instance)}
+  {_htmx_head_block()}
+</head>
+<body class="block min-h-screen font-sans bg-surface-bg text-primary-fg"
+      data-role-picker-page>
+  {top_nav_html}
+  {_form_page_header_html("Add Role — pick cardinality")}
+  {_back_breadcrumb_html(from_param)}
+  <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
+    {_render_intro_details(_ROLE_PICKER_INTRO)}
+    <section class="bg-white border border-surface-border rounded-md p-5">
+      <div class="flex flex-col gap-3">
+        <a class="{picker_btn_cls}"
+           href="/l2_shape/account/new"
+           data-role="role-kind-1-1"
+           data-cardinality-choice="one-to-one">
+          <strong class="block text-base text-accent mb-1">1:1 — Singleton account &rarr;</strong>
+          <small class="block text-sm text-secondary-fg">The role IS the account. One id, one row on the trial balance (CashDueFRB, ACHOrigSettlement).</small>
+        </a>
+        <a class="{picker_btn_cls}"
+           href="/l2_shape/account_template/new"
+           data-role="role-kind-1-n"
+           data-cardinality-choice="one-to-many">
+          <strong class="block text-base text-accent mb-1">1:N — Templated role &rarr;</strong>
+          <small class="block text-sm text-secondary-fg">One declaration; ETL materializes N rows (CustomerDDA, MerchantDDA).</small>
+        </a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
+"""
+
+
 def _render_rail_subtype_picker(
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed to thread the L2 theme override into the page <head>
     *,
@@ -7095,6 +7201,30 @@ def _make_handlers(
         rendered = _md.markdown(text, extensions=["fenced_code", "tables"])
         return HTMLResponse(rendered)
 
+    async def role_picker(request: Request) -> HTMLResponse:
+        """BX.6/11 follow-up (2026-06-11) — dedicated role-cardinality
+        picker page. Replaces the prior `+ Add Role` popup modal +
+        capture-phase document click listener with a plain navigation
+        flow, matching the rail-subtype picker shape (X.4.f.11.5).
+
+        Reachable from the home page's `+ Add Role` button (now an
+        anchor link, not a modal trigger). Two card-anchors on the
+        picker page each navigate to the existing per-kind create form
+        (`/l2_shape/account/new` for 1:1, `/l2_shape/account_template/new`
+        for 1:N) — URLs unchanged per locked OQ4(a).
+
+        BTb.1 — `?from=<path>` renders the back-breadcrumb above the
+        picker for Triage CTA flows.
+        """
+        from_param = request.query_params.get("from")
+        return HTMLResponse(
+            _render_role_picker(
+                cache.get(),
+                from_param=from_param,
+                top_nav_html=top_nav_html_fn("/"),
+            ),
+        )
+
     return {
         "list_view": list_view,
         "read_card": read_card,
@@ -7106,6 +7236,7 @@ def _make_handlers(
         "new_form": new_form,
         "create": create,
         "preview_markdown": preview_markdown,
+        "role_picker": role_picker,
     }
 
 
@@ -7235,6 +7366,16 @@ def make_editor_routes(
         Route(
             "/l2_shape/{kind}/", h["create"], methods=["POST"],
             name="l2_shape_create",
+        ),
+        # BX.6/11 follow-up (2026-06-11) — role-cardinality picker
+        # page. Declared BEFORE the ``/{kind}/new`` catch-all so the
+        # literal ``role`` segment doesn't fall through and 404 against
+        # _VALID_KINDS (``role`` isn't an EntityKind — it's a synthetic
+        # umbrella for account + account_template, surfaced as the
+        # Roles section on the home page).
+        Route(
+            "/l2_shape/role/new", h["role_picker"], methods=["GET"],
+            name="l2_shape_role_picker",
         ),
         Route(
             "/l2_shape/{kind}/new", h["new_form"], methods=["GET"],

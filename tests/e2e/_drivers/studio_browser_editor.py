@@ -131,30 +131,29 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
     # real operator does — they don't hit the browser back button
     # to get home.
 
-    def _open_add_role_modal_and_pick(self, cardinality: str) -> None:
-        """BX.6/11 follow-up — drive the home page's ``+ Add Role``
-        modal funnel for both 1:1 (Account) and 1:N (AccountTemplate)
-        create flows.
+    def _open_role_picker_and_pick(self, cardinality: str) -> None:
+        """BX.6/11 follow-up (2026-06-11) — drive the home page's
+        ``+ Add Role`` navigation flow for both 1:1 (Account) and 1:N
+        (AccountTemplate) create flows.
 
-        Pre-BX.6/11 the home page rendered separate ``+ Add Account``
-        and ``+ Add Account Template`` links pointing at
-        ``/l2_shape/<kind>/new`` directly. The role reframe collapsed
-        those into one ``[data-add-role-open]`` button that opens a
-        ``<dialog data-add-role-modal>`` carrying two card-anchors —
-        ``[data-cardinality-choice="one-to-one"]`` (→ Account) and
-        ``[data-cardinality-choice="one-to-many"]`` (→ AccountTemplate).
+        Pre-2026-06-11 this opened a popup modal (``<dialog
+        data-add-role-modal>``) via a capture-phase document click
+        listener. The follow-up replaced that with a dedicated picker
+        page at ``/l2_shape/role/new`` matching the rail-subtype picker
+        pattern (X.4.f.11.5). The ``+ Add Role`` button is now a plain
+        anchor; the picker page renders the same two card-anchors as
+        the prior modal — ``[data-cardinality-choice="one-to-one"]``
+        (→ Account) and ``[data-cardinality-choice="one-to-many"]``
+        (→ AccountTemplate).
 
         Verb sequence (matches the operator workflow):
-        1. Click ``[data-add-role-open]`` — JS calls ``dlg.showModal()``
-           which sets the ``[open]`` attribute on the dialog.
-        2. Wait for ``dialog[data-add-role-modal][open]`` to mount
-           visibly. The dialog auto-attaches the ``open`` attr only
-           after ``showModal()`` fires; locating with the bracket
-           filter ensures we don't race the click → showModal handler.
+        1. Click ``[data-add-role-open]`` — plain anchor navigation,
+           lands at ``/l2_shape/role/new``.
+        2. Wait for the picker page to load — pinned by
+           ``[data-role-picker-page]`` on the body.
         3. Click the cardinality card. The card is a plain ``<a href>``
-           so the click triggers native navigation (NOT a dialog form
-           submit) — bypasses ``method="dialog"`` cancel handling and
-           lands at ``/l2_shape/<account|account_template>/new``.
+           so the click triggers native navigation and lands at
+           ``/l2_shape/<account|account_template>/new``.
 
         ``cardinality`` ∈ ``{"one-to-one", "one-to-many"}``; anything
         else raises. Locators use the data-* anchors documented in
@@ -165,35 +164,34 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         """
         if cardinality not in ("one-to-one", "one-to-many"):
             raise ValueError(
-                f"_open_add_role_modal_and_pick: cardinality must be "
+                f"_open_role_picker_and_pick: cardinality must be "
                 f"'one-to-one' or 'one-to-many', got {cardinality!r}",
             )
         self.goto_home()
         self._page.click('[data-add-role-open]')
-        # Wait for the dialog's `open` attribute to land. Playwright's
-        # `wait_for(state="visible")` is insufficient here — the
-        # `<dialog>` element is always in the DOM; what changes is
-        # the `[open]` attribute (set by `showModal()`). The
-        # `[data-add-role-modal][open]` selector pins both.
+        # Picker page navigation — wait for the body's
+        # ``[data-role-picker-page]`` anchor before clicking the
+        # cardinality card so we don't race the navigation event.
         self._page.locator(
-            'dialog[data-add-role-modal][open]',
+            'body[data-role-picker-page]',
         ).wait_for(state="visible", timeout=self.DEFAULT_TIMEOUT_MS)
         self._page.click(
-            f'dialog[data-add-role-modal] '
+            f'[data-role-picker-page] '
             f'[data-cardinality-choice="{cardinality}"]',
         )
 
     def goto_account_create_form(self) -> None:
-        """Open the Add Role modal + pick the 1:1 card → lands on
-        ``/l2_shape/account/new``. See ``_open_add_role_modal_and_pick``
-        for the BX.6/11 reframe context."""
-        self._open_add_role_modal_and_pick("one-to-one")
+        """Navigate via the Add Role picker page + pick the 1:1 card →
+        lands on ``/l2_shape/account/new``. See
+        ``_open_role_picker_and_pick`` for the BX.6/11 follow-up
+        context (modal → dedicated page)."""
+        self._open_role_picker_and_pick("one-to-one")
 
     def goto_account_template_create_form(self) -> None:
-        """Open the Add Role modal + pick the 1:N card → lands on
-        ``/l2_shape/account_template/new``. See
-        ``_open_add_role_modal_and_pick`` for context."""
-        self._open_add_role_modal_and_pick("one-to-many")
+        """Navigate via the Add Role picker page + pick the 1:N card →
+        lands on ``/l2_shape/account_template/new``. See
+        ``_open_role_picker_and_pick`` for context."""
+        self._open_role_picker_and_pick("one-to-many")
 
     def goto_home(self) -> None:
         """Click the chrome's ``L2 Editor`` top-nav link → land at
@@ -484,11 +482,13 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         ``create_limit_schedule``. Rails go through ``create_rail``
         (subtype picker click-through) + reconciler handling.
 
-        BX.6/11 reframe — ``account`` and ``account_template`` no
-        longer have a direct ``+ Add`` link on the home page; both
-        funnel through the unified ``+ Add Role`` modal. Dispatch
-        to ``_open_add_role_modal_and_pick(cardinality)`` for those
-        two kinds; the other four still carry a direct
+        BX.6/11 reframe + 2026-06-11 follow-up — ``account`` and
+        ``account_template`` no longer have a direct ``+ Add`` link
+        on the home page; both funnel through the unified ``+ Add
+        Role`` flow that navigates to the dedicated picker page at
+        ``/l2_shape/role/new`` (was a popup modal pre-follow-up).
+        Dispatch to ``_open_role_picker_and_pick(cardinality)`` for
+        those two kinds; the other four still carry a direct
         ``a[href="/l2_shape/<kind>/new"]`` ``+ Add`` link.
         """
         from tests.e2e._drivers.studio_editor import (  # noqa: PLC0415 — lazy
@@ -496,9 +496,9 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         )
 
         if kind == "account":
-            self._open_add_role_modal_and_pick("one-to-one")
+            self._open_role_picker_and_pick("one-to-one")
         elif kind == "account_template":
-            self._open_add_role_modal_and_pick("one-to-many")
+            self._open_role_picker_and_pick("one-to-many")
         else:
             self.goto_home()
             self._page.click(f'a[href="/l2_shape/{kind}/new"]')

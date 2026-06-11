@@ -101,13 +101,22 @@ def test_home_page_each_section_carries_add_button(
     writable_l2_yaml: Path,
 ) -> None:
     """X.4.f.9 — every section's <summary> exposes a "+ Add" link
-    that hx-gets the kind's blank form into the section body."""
+    that navigates to the kind's blank create form.
+
+    BX.6/11 + follow-up (2026-06-11): account + account_template no
+    longer carry direct ``+ Add`` links on the home page — both funnel
+    through the Roles wrapper's ``+ Add Role`` anchor which navigates
+    to the dedicated cardinality picker page at ``/l2_shape/role/new``.
+    The picker page renders the per-kind ``/l2_shape/<account|
+    account_template>/new`` card-anchors. The other four kinds (rail,
+    transfer_template, chain, limit_schedule) still carry a direct
+    ``+ Add`` link in their section header."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/").text
 
     for kind in (
-        "account", "account_template", "rail",
+        "rail",
         "transfer_template", "chain", "limit_schedule",
     ):
         # Plain navigation to the dedicated create page — the create
@@ -117,6 +126,10 @@ def test_home_page_each_section_carries_add_button(
         assert f'href="/l2_shape/{kind}/new"' in body, (
             f"missing + Add for {kind}"
         )
+    # Roles section funnels through the cardinality picker page.
+    assert 'href="/l2_shape/role/new"' in body, (
+        "missing + Add Role link on the Roles wrapper"
+    )
     # stopPropagation prevents the click from toggling the surrounding
     # <details> closed (browser still follows the href).
     assert "event.stopPropagation()" in body
