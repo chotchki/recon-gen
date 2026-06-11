@@ -5,8 +5,17 @@ module catches everything else the SPEC requires at load time — rules
 that need to look across multiple entities to decide.
 
 Public entry point: ``validate(instance)``. Raises ``L2ValidationError``
-on the first failure with a message identifying the offending field +
-the rule that failed.
+on the first failure with a domain-flavor banking message identifying
+the offending entity + the rule that failed.
+
+BX.14 (2026-06-11) — error messages rewritten in CPA-readable banking
+phrasing. Each ``L2ValidationError`` now carries a structured ``code``
+(rule id like ``R5`` / ``C8a`` / ``U7``) + ``message`` (plain-language
+prose); ``str(exc)`` returns ``"[<code>] <message>"`` so the Studio
+error-banner can split the prefix off + wire a per-family side-panel
+``[?]`` trigger pointing at long-form context. Use
+``validator_glossary_anchor_for(code)`` to map an error code to the
+corresponding ``GLOSSARY`` anchor in ``common/html/_side_panel.py``.
 
 **Locked rule (per L.1.18 + M.1.7):** every cross-entity validator that
 ``validate(instance)`` runs has a dedicated rejection test in
@@ -182,7 +191,67 @@ from .primitives import (
 
 
 class L2ValidationError(ValueError):
-    """Raised when a loaded ``L2Instance`` fails cross-entity validation."""
+    """Raised when a loaded ``L2Instance`` fails cross-entity validation.
+
+    BX.14 (2026-06-11) — carries structured ``code`` (rule id like ``R5`` /
+    ``C8a`` / ``U7``) + ``message`` (operator-facing CPA-readable banking
+    prose). ``str(exc)`` returns ``"[<code>] <message>"`` so the Studio
+    error-banner can split the prefix off + wire a per-family side-panel
+    ``[?]`` trigger pointing at long-form context.
+
+    Construction forms:
+      - ``L2ValidationError(code, message)`` — preferred (BX.14 catalog)
+      - ``L2ValidationError(message)`` — legacy bare string (still accepted
+        for callers that haven't been migrated; code defaults to ``""``
+        and the banner falls back to no side-panel pointer)
+    """
+
+    code: str
+    message: str
+
+    def __init__(self, code: str, message: str | None = None) -> None:
+        # Legacy single-arg form: treat the arg as message, code="".
+        if message is None:
+            self.code = ""
+            self.message = code
+            super().__init__(code)
+            return
+        self.code = code
+        self.message = message
+        super().__init__(f"[{code}] {message}")
+
+
+# -- BX.14 plain-language error-family mapping --------------------------------
+
+
+# Each error code maps to a glossary anchor so the Studio side-panel
+# can deep-link the operator to the long-form SPEC context. Families
+# share an anchor when the failure shape + remediation pattern is the
+# same (e.g. every R-rule is "this reference doesn't resolve"; every
+# S-rule is "this rail is wired wrong").
+_VALIDATOR_FAMILY_BY_CODE_PREFIX: dict[str, str] = {
+    "U": "validator-uniqueness-rules",
+    "R": "validator-reference-rules",
+    "C": "validator-cardinality-rules",
+    "S": "validator-state-rules",
+    "V": "validator-vocabulary-rules",
+    "W": "validator-firings-rules",
+    "O": "validator-origin-rules",
+    "M": "validator-scope-rules",
+}
+
+
+def validator_glossary_anchor_for(code: str) -> str | None:
+    """Resolve a validator error code to its side-panel glossary anchor.
+
+    Returns ``None`` for an empty / unrecognized code (legacy errors that
+    haven't been migrated to the BX.14 catalog). The Studio editor's
+    error banner consults this to decide whether to render the per-error
+    ``[?]`` trigger.
+    """
+    if not code:
+        return None
+    return _VALIDATOR_FAMILY_BY_CODE_PREFIX.get(code[0])
 
 
 # -- Vocabulary literals (per SPEC v1) ----------------------------------------
@@ -336,11 +405,13 @@ def _check_unique_limit_schedule_combinations(inst: L2Instance) -> None:
         key = (ls.parent_role, ls.rail, ls.direction)
         if key in seen:
             raise L2ValidationError(
-                f"limit_schedules[{i}]: duplicate "
-                f"(parent_role={ls.parent_role!r}, "
-                f"rail={ls.rail!r}, "
-                f"direction={ls.direction!r}) — also declared at "
-                f"limit_schedules[{seen[key]}]"
+                "U5",
+                f"This limit schedule duplicates an earlier one — "
+                f"role {ls.parent_role!r} already has a {ls.direction!r} "
+                f"cap on rail {ls.rail!r} (declared at "
+                f"limit_schedules[{seen[key]}], duplicated at "
+                f"limit_schedules[{i}]). Either drop the duplicate or "
+                f"change one of (parent_role, rail, direction)."
             )
         seen[key] = i
 
@@ -369,15 +440,19 @@ def _check_no_template_id_collides_with_singleton(inst: L2Instance) -> None:
         for generated in template_instance_ids(template):
             if generated in singleton_ids:
                 raise L2ValidationError(
-                    f"account_templates[{ti}] (role={template.role!r}) "
-                    f"materializes account_id {generated!r} which is "
-                    f"already declared as a singleton at "
-                    f"accounts[{singleton_ids[generated]}] — rename the "
-                    f"singleton, drop the redundant template, OR set "
-                    f"the template's ``instance_id_template`` to a "
-                    f"non-colliding pattern (e.g. "
-                    f"``tmpl-cust-{{n:03d}}``). Per U7 — collision "
-                    f"breaks L1 dashboard per-account narrowing."
+                    "U7",
+                    f"The {template.role!r} role's account template "
+                    f"(account_templates[{ti}]) materializes "
+                    f"account_id {generated!r}, but that id is already "
+                    f"declared as a standalone account "
+                    f"(accounts[{singleton_ids[generated]}]). The two "
+                    f"would land under the same row id with two "
+                    f"different display names, which breaks per-"
+                    f"account narrowing on the dashboards. Either "
+                    f"rename the standalone account, drop the "
+                    f"redundant template, or change the template's "
+                    f"`instance_id_template` to a non-colliding "
+                    f"pattern (e.g. `tmpl-cust-{{n:03d}}`)."
                 )
 
 
@@ -385,9 +460,29 @@ def _reject_duplicates(values: Iterable[Identifier], *, label: str) -> None:
     counts = Counter(values)
     dupes = sorted(v for v, c in counts.items() if c > 1)
     if dupes:
-        raise L2ValidationError(
-            f"duplicate {label} values: {dupes!r}"
+        # Map the internal `label` to (code, human-readable-noun) for
+        # the BX.14 plain-language form. Falls back to the legacy noun
+        # if the caller passes something unmapped.
+        code, noun = _UNIQ_LABEL_TO_PLAIN.get(
+            label, ("U0", label),
         )
+        raise L2ValidationError(
+            code,
+            f"These {noun} values are declared more than once: "
+            f"{dupes!r}. Each one must be unique within the L2; "
+            f"rename or drop the duplicates."
+        )
+
+
+# (code, plain-language noun) for the four U-rules that share the
+# generic duplicate-rejection path. Co-located with the helper so
+# adding a new uniqueness rule lands here, not in a remote enum.
+_UNIQ_LABEL_TO_PLAIN: dict[str, tuple[str, str]] = {
+    "Account.id": ("U1", "account id"),
+    "AccountTemplate.role": ("U2", "account template role"),
+    "Rail.name": ("U3", "rail name"),
+    "TransferTemplate.name": ("U4", "transfer template name"),
+}
 
 
 # -- Reference resolution (R1-R6) --------------------------------------------
@@ -410,8 +505,11 @@ def _check_role_set(
     missing = [r for r in roles if r not in declared]
     if missing:
         raise L2ValidationError(
-            f"{where}: roles {missing!r} are not declared on any "
-            f"Account or AccountTemplate"
+            "R1",
+            f"{where}: role(s) {missing!r} aren't declared anywhere — "
+            f"no account and no account template uses that role. Add "
+            f"the role to an account / template, or fix the typo on "
+            f"this rail."
         )
 
 
@@ -422,8 +520,11 @@ def _check_account_parent_role_resolves(
     for a in inst.accounts:
         if a.parent_role is not None and a.parent_role not in all_roles:
             raise L2ValidationError(
-                f"Account {a.id!r}.parent_role={a.parent_role!r}: "
-                f"role is not declared on any Account or AccountTemplate"
+                "R2",
+                f"Account {a.id!r} rolls up to parent_role "
+                f"{a.parent_role!r}, but that role isn't declared on "
+                f"any account or account template. Either declare the "
+                f"parent role, or fix the typo here."
             )
 
 
@@ -444,15 +545,21 @@ def _check_account_template_parent_role_is_singleton(
             continue
         if t.parent_role in template_roles and t.parent_role not in account_roles:
             raise L2ValidationError(
-                f"AccountTemplate {t.role!r}.parent_role={t.parent_role!r}: "
-                f"resolves to another AccountTemplate, but parent_role MUST "
-                f"resolve to a singleton Account (template-under-template "
-                f"nesting is forbidden)"
+                "R3",
+                f"Account template {t.role!r} tries to roll up to "
+                f"parent_role {t.parent_role!r}, but that role resolves "
+                f"to another account template. A template's parent must "
+                f"be a standalone (1:1) account — template-under-"
+                f"template nesting is forbidden because each child "
+                f"instance would have N possible parents."
             )
         if t.parent_role not in account_roles:
             raise L2ValidationError(
-                f"AccountTemplate {t.role!r}.parent_role={t.parent_role!r}: "
-                f"role is not declared on any Account"
+                "R3",
+                f"Account template {t.role!r} tries to roll up to "
+                f"parent_role {t.parent_role!r}, but no standalone "
+                f"account uses that role. Declare a standalone account "
+                f"with that role, or fix the typo."
             )
 
 
@@ -464,8 +571,11 @@ def _check_template_leg_rails_exist(
         missing = [n for n in t.leg_rails if n not in rail_names]
         if missing:
             raise L2ValidationError(
-                f"TransferTemplate {t.name!r}.leg_rails: rails {missing!r} "
-                f"are not declared in rails"
+                "R4",
+                f"Transfer template {t.name!r} lists leg rail(s) "
+                f"{missing!r} that aren't declared in the rails list. "
+                f"Either declare the rail, or remove it from this "
+                f"template's leg_rails."
             )
 
 
@@ -481,9 +591,11 @@ def _check_template_has_at_least_one_leg_rail(inst: L2Instance) -> None:
     for t in inst.transfer_templates:
         if len(t.leg_rails) == 0:
             raise L2ValidationError(
-                f"TransferTemplate {t.name!r}.leg_rails is empty — "
-                f"a template must declare at least one leg_rail. Either "
-                f"add a replacement rail or delete the whole template."
+                "R4.1",
+                f"Transfer template {t.name!r} has an empty leg_rails "
+                f"list — a template with no legs has nothing to bundle "
+                f"and no expected_net to enforce. Either add at least "
+                f"one rail or delete the template entirely."
             )
 
 
@@ -497,14 +609,20 @@ def _check_chain_endpoints_exist(
     for i, c in enumerate(inst.chains):
         if c.parent not in valid:
             raise L2ValidationError(
-                f"chains[{i}].parent={c.parent!r}: not a declared Rail "
-                f"or TransferTemplate name"
+                "R5",
+                f"Chain row chains[{i}] names {c.parent!r} as its "
+                f"parent, but no rail or transfer template uses that "
+                f"name. Either declare it, or fix the typo on this "
+                f"chain."
             )
         for j, child in enumerate(c.children):
             if child.name not in valid:
                 raise L2ValidationError(
-                    f"chains[{i}].children[{j}]={child.name!r}: not a declared "
-                    f"Rail or TransferTemplate name"
+                    "R5",
+                    f"Chain row chains[{i}].children[{j}] is "
+                    f"{child.name!r}, but no rail or transfer template "
+                    f"uses that name. Either declare it, or fix the "
+                    f"typo on this chain."
                 )
 
 
@@ -515,8 +633,11 @@ def _check_limit_schedule_parent_role_resolves(
     for i, ls in enumerate(inst.limit_schedules):
         if ls.parent_role not in all_roles:
             raise L2ValidationError(
-                f"limit_schedules[{i}].parent_role={ls.parent_role!r}: "
-                f"role is not declared on any Account or AccountTemplate"
+                "R6",
+                f"This limit schedule (limit_schedules[{i}]) caps role "
+                f"{ls.parent_role!r}, but no account or account "
+                f"template uses that role. The cap would never fire — "
+                f"declare the role or fix the typo."
             )
 
 
@@ -537,10 +658,13 @@ def _check_template_leg_rails_are_non_aggregating(
             # when the referenced rail IS aggregating.
             if r is not None and r.aggregating:
                 raise L2ValidationError(
-                    f"TransferTemplate {t.name!r}.leg_rails: rail {n!r} is "
-                    f"aggregating; aggregating rails sweep on a cadence and "
-                    f"cannot serve as a template leg (the template's "
-                    f"ExpectedNet closure can't bind to sweep activity)"
+                    "R7",
+                    f"Transfer template {t.name!r} lists rail {n!r} as "
+                    f"a leg, but {n!r} is an aggregating rail (it "
+                    f"sweeps on a cadence). A sweep can't be a "
+                    f"template leg — per-Transfer closure has no "
+                    f"individual firing to bind to. Replace this leg "
+                    f"with a non-aggregating rail."
                 )
 
 
@@ -576,9 +700,12 @@ def _check_max_unbundled_age_only_on_bundled_rails(inst: L2Instance) -> None:
         if r.name in bundled:
             continue
         raise L2ValidationError(
-            f"Rail {r.name!r}: max_unbundled_age is set but no aggregating "
-            f"Rail bundles this rail (rail name {r.name!r} does not appear "
-            f"in any bundles_activity); the watch can never fire"
+            "R8",
+            f"Rail {r.name!r} sets a max_unbundled_age watch, but no "
+            f"aggregating rail bundles its activity — the watch would "
+            f"never fire because nothing sweeps these rows. Either "
+            f"add {r.name!r} to some aggregator's bundles_activity, "
+            f"or drop max_unbundled_age from this rail."
         )
 
 
@@ -597,10 +724,12 @@ def _check_limit_schedule_rail_resolves(
     for i, ls in enumerate(inst.limit_schedules):
         if ls.rail not in rail_names:
             raise L2ValidationError(
-                f"limit_schedules[{i}].rail={ls.rail!r}: "
-                f"no declared Rail with this name "
-                f"(declared: {sorted(rail_names)!r}). The cap "
-                f"would silently never fire."
+                "R10",
+                f"This limit schedule (limit_schedules[{i}]) caps "
+                f"rail={ls.rail!r}, but no rail by that name is "
+                f"declared. The cap would never fire — declare the "
+                f"rail or fix the typo. Available rail names: "
+                f"{sorted(rail_names)!r}."
             )
 
 
@@ -629,10 +758,12 @@ def _check_bare_bundles_activity_selectors_resolve(inst: L2Instance) -> None:
             if sel_str in rail_names:
                 continue
             raise L2ValidationError(
-                f"Rail {r.name!r}.bundles_activity: bare selector "
-                f"{sel_str!r} resolves to no declared Rail.name "
-                f"(rail names: {sorted(rail_names)!r}). The bundler "
-                f"would silently match nothing."
+                "R11",
+                f"Aggregating rail {r.name!r} bundles activity from "
+                f"{sel_str!r}, but no rail by that name is declared. "
+                f"The bundler would sweep nothing — fix the typo or "
+                f"declare the rail. Available rail names: "
+                f"{sorted(rail_names)!r}."
             )
 
 
@@ -659,17 +790,21 @@ def _check_dotted_bundle_selectors_resolve(inst: L2Instance) -> None:
             tn = Identifier(template_name)
             if tn not in template_leg_rails:
                 raise L2ValidationError(
-                    f"Rail {r.name!r}.bundles_activity: dotted selector "
-                    f"{sel_str!r} references TransferTemplate "
-                    f"{template_name!r} which is not declared in "
-                    f"transfer_templates"
+                    "R9",
+                    f"Aggregating rail {r.name!r} bundles activity "
+                    f"from {sel_str!r}, but transfer template "
+                    f"{template_name!r} isn't declared. Either declare "
+                    f"the template, or fix the typo on this selector."
                 )
             ln = Identifier(leg_name)
             if ln not in template_leg_rails[tn]:
                 raise L2ValidationError(
-                    f"Rail {r.name!r}.bundles_activity: dotted selector "
-                    f"{sel_str!r} references rail {leg_name!r} which is "
-                    f"not in TransferTemplate {template_name!r}.leg_rails"
+                    "R9",
+                    f"Aggregating rail {r.name!r} bundles activity "
+                    f"from {sel_str!r}, but {leg_name!r} isn't a leg "
+                    f"of transfer template {template_name!r}. Either "
+                    f"add the rail to that template's leg_rails, or "
+                    f"fix the selector to reference the right leg."
                 )
 
 
@@ -701,12 +836,15 @@ def _check_transfer_key_in_leg_rail_metadata_keys(
             ]
             if missing:
                 raise L2ValidationError(
-                    f"TransferTemplate {t.name!r}.transfer_key={list(t.transfer_key)!r}: "
-                    f"leg_rail {n!r}.metadata_keys={list(r.metadata_keys)!r} "
-                    f"is missing TransferKey field(s) {missing!r}; the "
-                    f"library auto-derives these as PostedRequirements, "
-                    f"so a leg whose rail can't carry the field can never "
-                    f"reach Status=Posted"
+                    "R12",
+                    f"Transfer template {t.name!r} groups legs by "
+                    f"transfer_key {list(t.transfer_key)!r}, but leg "
+                    f"rail {n!r} doesn't carry the field(s) "
+                    f"{missing!r} in its metadata_keys. The ETL has "
+                    f"nowhere to put those values on this leg, so it "
+                    f"can never reach Status=Posted. Either add the "
+                    f"missing key(s) to rail {n!r}'s metadata_keys, "
+                    f"or drop them from the template's transfer_key."
                 )
 
 
@@ -727,11 +865,13 @@ def _check_metadata_value_example_keys_resolve(inst: L2Instance) -> None:
         for key, _values in r.metadata_value_examples:
             if key not in declared:
                 raise L2ValidationError(
-                    f"Rail {r.name!r}.metadata_value_examples: key "
-                    f"{key!r} is not in metadata_keys "
-                    f"{list(r.metadata_keys)!r}; example values would "
-                    f"be silently ignored. Add the key to metadata_keys "
-                    f"or remove the example list."
+                    "R13",
+                    f"Rail {r.name!r} carries example metadata values "
+                    f"for key {key!r}, but the rail's metadata_keys "
+                    f"({list(r.metadata_keys)!r}) doesn't list that "
+                    f"key. The examples would be silently ignored. "
+                    f"Either add the key to metadata_keys, or remove "
+                    f"the example list."
                 )
 
 
@@ -764,12 +904,15 @@ def _check_variable_leg_count_per_template(inst: L2Instance) -> None:
         non_grouped_variables = [n for n in variable_legs if n not in grouped]
         if len(non_grouped_variables) > 1:
             raise L2ValidationError(
-                f"TransferTemplate {t.name!r}: contains "
+                "C1",
+                f"Transfer template {t.name!r} contains "
                 f"{len(non_grouped_variables)} non-grouped Variable-"
-                f"direction legs ({non_grouped_variables!r}); SPEC C1 "
-                f"requires at most one (otherwise closure is "
-                f"under-determined). Variables in `leg_rail_xor_groups` "
-                f"don't count — see AB.3 lock."
+                f"direction legs ({non_grouped_variables!r}). Only "
+                f"one may be left ungrouped — otherwise the closure "
+                f"that computes each leg's amount + direction can't "
+                f"pick which leg to solve for. Either combine the "
+                f"extras into a leg_rail_xor_groups entry, or fix one "
+                f"to a Debit / Credit direction."
             )
 
 
@@ -799,18 +942,25 @@ def _check_leg_rail_xor_group_shape(inst: L2Instance) -> None:
         for gi, group in enumerate(t.leg_rail_xor_groups):
             if len(group) < 2:
                 raise L2ValidationError(
-                    f"TransferTemplate {t.name!r}.leg_rail_xor_groups[{gi}]: "
-                    f"has {len(group)} member(s); SPEC C1d requires "
-                    f"at least 2 (a 1-member XOR group is degenerate)."
+                    "C1d",
+                    f"Transfer template {t.name!r}'s "
+                    f"leg_rail_xor_groups[{gi}] only has "
+                    f"{len(group)} member(s) — an exclusive-or group "
+                    f"with one option always picks that option, so "
+                    f"it adds no information. Either add more "
+                    f"alternatives, or remove the group and let the "
+                    f"rail stand on its own."
                 )
             for member in group:
                 if member not in leg_rails_set:
                     raise L2ValidationError(
-                        f"TransferTemplate {t.name!r}."
-                        f"leg_rail_xor_groups[{gi}]: member {member!r} "
-                        f"is not in this template's `leg_rails`; SPEC "
-                        f"C1a requires every XOR-group member to also "
-                        f"be declared as a leg_rail."
+                        "C1a",
+                        f"Transfer template {t.name!r}'s "
+                        f"leg_rail_xor_groups[{gi}] includes "
+                        f"{member!r}, but that rail isn't in this "
+                        f"template's leg_rails list. Either add it "
+                        f"to leg_rails, or remove it from the XOR "
+                        f"group."
                     )
                 rail = rails_by_name.get(member)
                 if not (
@@ -818,23 +968,25 @@ def _check_leg_rail_xor_group_shape(inst: L2Instance) -> None:
                     and rail.leg_direction == "Variable"
                 ):
                     raise L2ValidationError(
-                        f"TransferTemplate {t.name!r}."
-                        f"leg_rail_xor_groups[{gi}]: member {member!r} "
-                        f"must resolve to a Variable-direction "
-                        f"SingleLegRail; SPEC C1b excludes Debit/Credit/"
-                        f"non-SingleLeg rails from XOR groups (the "
-                        f"exactly-one-fires runtime check only applies "
-                        f"to Variable closure legs)."
+                        "C1b",
+                        f"Transfer template {t.name!r}'s "
+                        f"leg_rail_xor_groups[{gi}] includes "
+                        f"{member!r}, but that rail isn't a Variable-"
+                        f"direction single-leg rail. Only Variable "
+                        f"closure legs belong in XOR groups — "
+                        f"Debit / Credit / two-leg rails always fire "
+                        f"when the template fires."
                     )
                 if member in seen_members:
                     prior_gi = seen_members[member]
                     raise L2ValidationError(
-                        f"TransferTemplate {t.name!r}: rail {member!r} "
-                        f"appears in two XOR groups (groups {prior_gi} "
-                        f"and {gi}); SPEC C1c forbids overlap because "
-                        f"the exactly-one-fires-per-group rule can't "
-                        f"resolve deterministically when groups share "
-                        f"a member."
+                        "C1c",
+                        f"Transfer template {t.name!r}: rail "
+                        f"{member!r} appears in two XOR groups "
+                        f"(groups {prior_gi} and {gi}). A rail can "
+                        f"belong to at most one XOR group per "
+                        f"template — otherwise the \"exactly one "
+                        f"fires\" rule has nothing to settle on."
                     )
                 seen_members[member] = gi
 
@@ -866,10 +1018,13 @@ def _check_variable_single_leg_in_some_template(
         if r.name in template_leg_names:
             continue
         raise L2ValidationError(
-            f"Rail {r.name!r}: Variable-direction single-leg rail is "
-            f"not in any TransferTemplate.leg_rails; Variable closure "
-            f"semantics require a containing template's ExpectedNet to "
-            f"compute the leg's amount + direction at posting time"
+            "C3",
+            f"Rail {r.name!r} is a Variable-direction single-leg "
+            f"rail, but it isn't a leg of any transfer template. "
+            f"Variable closure needs a containing template's "
+            f"expected_net to solve for the leg's amount + "
+            f"direction — without that, the leg has no way to "
+            f"settle. Add this rail to some template's leg_rails."
         )
 
 
@@ -895,11 +1050,14 @@ def _check_chain_no_duplicate_child_per_parent(inst: L2Instance) -> None:
         dupes = [name for name, count in seen.items() if count > 1]
         if dupes:
             raise L2ValidationError(
-                f"Chain parent {str(parent)!r}: child(ren) {sorted(str(d) for d in dupes)!r} "
-                f"appear in more than one chain row. Each child must "
-                f"appear in exactly one row per parent — singleton row "
-                f"= required, multi-item row = XOR among the listed "
-                f"children. (PLAN.md §Z.A C6.)"
+                "C6",
+                f"Chain parent {str(parent)!r} lists "
+                f"{sorted(str(d) for d in dupes)!r} in more than one "
+                f"chain row. Each child must appear in exactly one "
+                f"row per parent — a single-child row says \"this "
+                f"child always fires\", a multi-child row says "
+                f"\"exactly one of these fires.\" Two rows mentioning "
+                f"the same child contradict each other; merge them."
             )
 
 
@@ -937,34 +1095,40 @@ def _check_fan_in_shape(
             if child.fan_in:
                 if child.name not in template_names:
                     raise L2ValidationError(
-                        f"Chain parent={c.parent!r}: child {child.name!r} "
-                        f"with fan_in=True must resolve to a "
-                        f"TransferTemplate; got non-template name. "
-                        f"SPEC C8a: rail-as-child fan-in is undefined — "
-                        f"a rail's per-Transfer parent is the canonical "
-                        f"1:1 shape (AB.4 gap doc §2 footnote)."
+                        "C8a",
+                        f"Chain parent={c.parent!r}: child "
+                        f"{child.name!r} has fan_in=True, but only "
+                        f"transfer templates can be fan-in "
+                        f"children — a rail's per-Transfer parent "
+                        f"is always 1:1 (one parent firing per rail "
+                        f"leg). Either point this child at a "
+                        f"transfer template, or turn fan_in off."
                     )
                 if (
                     child.expected_parent_count is not None
                     and child.expected_parent_count < 2
                 ):
                     raise L2ValidationError(
-                        f"Chain parent={c.parent!r}: child {child.name!r} "
-                        f"fan_in=True with expected_parent_count="
-                        f"{child.expected_parent_count} is degenerate — "
-                        f"SPEC C8c requires ≥2 (a 1-parent fan-in is "
-                        f"just a 1:1 chain; drop fan_in if you only "
-                        f"have 1 expected parent)."
+                        "C8c",
+                        f"Chain parent={c.parent!r}: child "
+                        f"{child.name!r} has fan_in=True with "
+                        f"expected_parent_count="
+                        f"{child.expected_parent_count}. A 1-parent "
+                        f"fan-in is just a regular 1:1 chain — set "
+                        f"expected_parent_count to 2 or more, or "
+                        f"drop fan_in entirely."
                     )
             else:
                 if child.expected_parent_count is not None:
                     raise L2ValidationError(
-                        f"Chain parent={c.parent!r}: child {child.name!r} "
-                        f"expected_parent_count is set "
-                        f"({child.expected_parent_count}) but fan_in is "
-                        f"False. SPEC C8b: the field only carries "
-                        f"meaning under fan_in=True; remove it or set "
-                        f"fan_in=True."
+                        "C8b",
+                        f"Chain parent={c.parent!r}: child "
+                        f"{child.name!r} sets "
+                        f"expected_parent_count="
+                        f"{child.expected_parent_count} without "
+                        f"fan_in=True. That count only matters "
+                        f"under fan-in — either turn fan_in on, or "
+                        f"remove the count."
                     )
 
 
@@ -983,10 +1147,12 @@ def _check_chain_parent_has_non_empty_children(inst: L2Instance) -> None:
     for c in inst.chains:
         if not c.children:
             raise L2ValidationError(
-                f"Chain parent {str(c.parent)!r}: children list is empty. "
-                f"Each chain row must list at least one child (singleton "
-                f"= required, multi = XOR). Drop the row entirely if no "
-                f"children apply. (PLAN.md §Z.A C5.)"
+                "C5",
+                f"Chain parent {str(c.parent)!r} has an empty "
+                f"children list — a chain row with no children "
+                f"encodes no firing rule. Either add at least one "
+                f"child (one = required, two-or-more = XOR), or drop "
+                f"the row entirely."
             )
 
 
@@ -1005,15 +1171,21 @@ def _check_two_leg_expected_net_consistency(inst: L2Instance) -> None:
         is_template_leg = r.name in template_leg_names
         if is_template_leg and r.expected_net is not None:
             raise L2ValidationError(
-                f"Rail {r.name!r}: appears in a TransferTemplate's "
-                f"leg_rails AND declares expected_net; the template owns "
-                f"the bundle's ExpectedNet so the rail MUST NOT carry one"
+                "S2",
+                f"Two-leg rail {r.name!r} is part of a transfer "
+                f"template and also declares its own expected_net. "
+                f"The template owns the bundle's expected_net — the "
+                f"rail can't carry one too. Drop expected_net from "
+                f"this rail."
             )
         if not is_template_leg and r.expected_net is None:
             raise L2ValidationError(
-                f"Rail {r.name!r}: standalone two-leg rail (not in any "
-                f"TransferTemplate.leg_rails) MUST declare expected_net "
-                f"(typically 0)"
+                "S1",
+                f"Two-leg rail {r.name!r} stands alone (no transfer "
+                f"template wraps it), so it needs its own "
+                f"expected_net to settle the two legs. Set "
+                f"expected_net (typically 0, for a balanced internal "
+                f"transfer)."
             )
 
 
@@ -1052,11 +1224,13 @@ def _check_single_leg_reconciliation(inst: L2Instance) -> None:
         in_aggregating = r.name in aggregating_bundles
         if not (in_template or in_aggregating):
             raise L2ValidationError(
-                f"Rail {r.name!r}: single-leg rail is not reconciled "
-                f"(not listed in any TransferTemplate.leg_rails AND "
-                f"its name does not appear in any aggregating Rail's "
-                f"bundles_activity); the drift it introduces would "
-                f"persist forever"
+                "S3",
+                f"Single-leg rail {r.name!r} has nothing to reconcile "
+                f"against — it isn't part of any transfer template's "
+                f"legs, and no aggregating rail sweeps it. The "
+                f"imbalance it posts would sit on the books forever. "
+                f"Either add it to a template's leg_rails, or list it "
+                f"in some aggregator's bundles_activity."
             )
 
 
@@ -1067,9 +1241,13 @@ def _check_chain_aggregating_not_child(inst: L2Instance) -> None:
         for j, child in enumerate(c.children):
             if child.name in aggregating_names:
                 raise L2ValidationError(
-                    f"chains[{i}].children[{j}]={child.name!r}: aggregating Rails "
-                    f"MUST NOT appear in Chain.children (they sweep on "
-                    f"cadence, not on a per-Transfer parent trigger)"
+                    "S4",
+                    f"Chain row chains[{i}].children[{j}] is "
+                    f"{child.name!r}, which is an aggregating rail. "
+                    f"Aggregating rails sweep on a cadence — they "
+                    f"don't have per-Transfer parents — so they "
+                    f"can't sit as a chain child. Replace with a "
+                    f"non-aggregating rail or a transfer template."
                 )
 
 
@@ -1080,12 +1258,19 @@ def _check_aggregating_rail_required_fields(inst: L2Instance) -> None:
             continue
         if r.cadence is None:
             raise L2ValidationError(
-                f"Rail {r.name!r}: aggregating=true requires cadence to be set"
+                "S5",
+                f"Aggregating rail {r.name!r} doesn't declare a "
+                f"cadence — without one, we don't know when the "
+                f"sweep posts. Set cadence (e.g. `daily-eod`, "
+                f"`intraday-2h`, `monthly-eom`)."
             )
         if not r.bundles_activity:
             raise L2ValidationError(
-                f"Rail {r.name!r}: aggregating=true requires "
-                f"bundles_activity to be a non-empty list"
+                "S5",
+                f"Aggregating rail {r.name!r} doesn't list any "
+                f"bundles_activity — the sweep has nothing to roll "
+                f"up. Either list the rails it bundles, or change "
+                f"aggregating to false."
             )
 
 
@@ -1113,23 +1298,30 @@ def _check_amount_typical_range_shape(inst: L2Instance) -> None:
         lo, hi = r.amount_typical_range
         if lo >= hi:
             raise L2ValidationError(
+                "V1a",
                 f"Rail {r.name!r}: amount_typical_range min ({lo}) "
-                f"must be strictly less than max ({hi}); SPEC V1a "
-                f"rejects degenerate single-point ranges."
+                f"must be strictly less than max ({hi}). A single-"
+                f"point range means every firing samples the same "
+                f"amount — if that's what you want, this field isn't "
+                f"the right tool. Widen the range or drop the field."
             )
         if lo <= 0 or hi <= 0:
             raise L2ValidationError(
+                "V1b",
                 f"Rail {r.name!r}: amount_typical_range values must "
-                f"both be > 0 (got min={lo}, max={hi}); SPEC V1b — "
-                f"the bound is on abs(amount), so signed/zero values "
-                f"have no meaning here."
+                f"both be greater than zero (got min={lo}, max={hi}). "
+                f"The range bounds the absolute amount per firing; "
+                f"signed and zero values don't make sense here. "
+                f"Direction is set elsewhere (leg_direction for "
+                f"fixed rails, closure for Variable rails)."
             )
         if r.aggregating:
             raise L2ValidationError(
-                f"Rail {r.name!r}: amount_typical_range is forbidden "
-                f"on aggregating rails (aggregator amounts derive from "
-                f"bundled children; per-firing bound's meaning is "
-                f"fuzzy); SPEC V1c per AB.5.0 lock."
+                "V1c",
+                f"Rail {r.name!r}: amount_typical_range can't sit on "
+                f"an aggregating rail. Aggregator amounts come from "
+                f"the bundled children, so a per-firing bound has no "
+                f"single meaning. Remove amount_typical_range here."
             )
 
 
@@ -1157,19 +1349,28 @@ def _check_firings_typical_per_period_shape(inst: L2Instance) -> None:
         lo, hi = ftp.count_range
         if lo > hi:
             raise L2ValidationError(
-                f"Rail {r.name!r}: firings_typical_per_period min ({lo}) "
-                f"must be <= max ({hi}); SPEC W1a."
+                "W1a",
+                f"Rail {r.name!r}: firings_typical_per_period "
+                f"min ({lo}) is larger than max ({hi}). The lower "
+                f"bound must not exceed the upper bound — swap the "
+                f"two, or fix the typo."
             )
         if lo < 0 or hi < 0:
             raise L2ValidationError(
-                f"Rail {r.name!r}: firings_typical_per_period values must "
-                f"both be >= 0 (got min={lo}, max={hi}); SPEC W1b."
+                "W1b",
+                f"Rail {r.name!r}: firings_typical_per_period must "
+                f"have both endpoints zero or higher (got min={lo}, "
+                f"max={hi}). A negative firing count doesn't mean "
+                f"anything — set both to 0 or above."
             )
         if r.aggregating:
             raise L2ValidationError(
-                f"Rail {r.name!r}: firings_typical_per_period is forbidden "
-                f"on aggregating rails (the cadence field already governs "
-                f"aggregator firing frequency); SPEC W1c per AF.0 lock."
+                "W1c",
+                f"Rail {r.name!r}: firings_typical_per_period can't "
+                f"sit on an aggregating rail. The cadence already "
+                f"says when the sweep fires (once per cadence "
+                f"period) — a count band would conflict. Remove "
+                f"firings_typical_per_period here."
             )
     for t in inst.transfer_templates:
         ftp = t.firings_typical_per_period
@@ -1178,14 +1379,19 @@ def _check_firings_typical_per_period_shape(inst: L2Instance) -> None:
         lo, hi = ftp.count_range
         if lo > hi:
             raise L2ValidationError(
-                f"TransferTemplate {t.name!r}: firings_typical_per_period "
-                f"min ({lo}) must be <= max ({hi}); SPEC W1a."
+                "W1a",
+                f"Transfer template {t.name!r}: "
+                f"firings_typical_per_period min ({lo}) is larger "
+                f"than max ({hi}). The lower bound must not exceed "
+                f"the upper bound — swap the two, or fix the typo."
             )
         if lo < 0 or hi < 0:
             raise L2ValidationError(
-                f"TransferTemplate {t.name!r}: firings_typical_per_period "
-                f"values must both be >= 0 (got min={lo}, max={hi}); "
-                f"SPEC W1b."
+                "W1b",
+                f"Transfer template {t.name!r}: "
+                f"firings_typical_per_period must have both "
+                f"endpoints zero or higher (got min={lo}, max={hi}). "
+                f"A negative firing count doesn't mean anything."
             )
 
 
@@ -1196,14 +1402,19 @@ def _check_non_aggregating_rail_no_cadence_or_bundles(inst: L2Instance) -> None:
             continue
         if r.cadence is not None:
             raise L2ValidationError(
-                f"Rail {r.name!r}: cadence is only meaningful when "
-                f"aggregating=true; remove cadence or set aggregating=true"
+                "S6",
+                f"Rail {r.name!r} declares a cadence but isn't "
+                f"aggregating. Cadence only governs sweep timing for "
+                f"aggregating rails — either remove cadence, or set "
+                f"aggregating=true."
             )
         if r.bundles_activity:
             raise L2ValidationError(
-                f"Rail {r.name!r}: bundles_activity is only meaningful when "
-                f"aggregating=true; remove bundles_activity or set "
-                f"aggregating=true"
+                "S6",
+                f"Rail {r.name!r} declares bundles_activity but "
+                f"isn't aggregating. Only aggregators bundle other "
+                f"rails — either remove bundles_activity, or set "
+                f"aggregating=true."
             )
 
 
@@ -1215,10 +1426,11 @@ def _check_completion_vocabulary(inst: L2Instance) -> None:
     for t in inst.transfer_templates:
         if not _completion_is_valid(t.completion):
             raise L2ValidationError(
-                f"TransferTemplate {t.name!r}.completion={t.completion!r}: "
-                f"not a v1 CompletionExpression literal. Allowed: "
-                f"business_day_end, business_day_end+Nd, month_end, "
-                f"metadata.<key>"
+                "V1",
+                f"Transfer template {t.name!r}: completion "
+                f"{t.completion!r} isn't a v1 CompletionExpression. "
+                f"Use one of: business_day_end, business_day_end+Nd, "
+                f"month_end, metadata.<key>."
             )
 
 
@@ -1229,10 +1441,11 @@ def _check_cadence_vocabulary(inst: L2Instance) -> None:
             continue
         if not _cadence_is_valid(r.cadence):
             raise L2ValidationError(
-                f"Rail {r.name!r}.cadence={r.cadence!r}: not a v1 "
-                f"CadenceExpression literal. Allowed: intraday-Nh, "
-                f"daily-eod, daily-bod, weekly-<mon..sun>, monthly-eom, "
-                f"monthly-bom, monthly-<1..31>"
+                "V2",
+                f"Rail {r.name!r}: cadence {r.cadence!r} isn't a v1 "
+                f"CadenceExpression. Use one of: intraday-Nh, "
+                f"daily-eod, daily-bod, weekly-<mon..sun>, "
+                f"monthly-eom, monthly-bom, monthly-<1..31>."
             )
 
 
@@ -1257,21 +1470,24 @@ def _check_per_leg_origin_resolution(inst: L2Instance) -> None:
         if isinstance(r, SingleLegRail):
             if r.origin is None:
                 raise L2ValidationError(
-                    f"Rail {r.name!r}: single-leg rail MUST set origin "
-                    f"(per-leg Origin overrides apply only to two-leg rails)"
+                    "O1",
+                    f"Single-leg rail {r.name!r} doesn't declare an "
+                    f"Origin. Set `origin` on the rail — per-leg "
+                    f"Origin overrides only apply to two-leg rails."
                 )
             continue
         # Two-leg
         source_resolved = r.source_origin is not None or r.origin is not None
         dest_resolved = r.destination_origin is not None or r.origin is not None
         if not source_resolved or not dest_resolved:
+            which = "source" if not source_resolved else "destination"
             raise L2ValidationError(
-                f"Rail {r.name!r}: two-leg rail's "
-                f"{'source' if not source_resolved else 'destination'} "
-                f"leg has no resolved Origin. Either set rail-level "
-                f"`origin` OR provide both `source_origin` + "
-                f"`destination_origin` OR set the missing per-leg override "
-                f"alongside rail-level `origin` as fallback."
+                "O1",
+                f"Two-leg rail {r.name!r}: the {which} leg doesn't "
+                f"have an Origin. Either set rail-level `origin` "
+                f"(covers both legs), set both `source_origin` AND "
+                f"`destination_origin`, or set the missing override "
+                f"plus rail-level `origin` as the fallback."
             )
 
 
@@ -1288,21 +1504,21 @@ def _check_business_day_offset_not_on_external(inst: L2Instance) -> None:
     for a in inst.accounts:
         if a.scope == "external" and a.business_day_offset is not None:
             raise L2ValidationError(
-                f"M.4.4.14a: Account {a.id!r} has scope='external' but "
-                f"declares business_day_offset={a.business_day_offset!r}.\n"
-                f"External accounts have no EOD balance row, so the "
-                f"offset has no consumer.\n"
-                f"Remove business_day_offset from this account or "
-                f"change scope to 'internal'."
+                "M1",
+                f"Account {a.id!r} is scope='external' but sets "
+                f"business_day_offset={a.business_day_offset!r}. "
+                f"External accounts have no end-of-day balance row, "
+                f"so the offset has nowhere to land. Either remove "
+                f"business_day_offset, or change scope to 'internal'."
             )
     for t in inst.account_templates:
         if t.scope == "external" and t.business_day_offset is not None:
             raise L2ValidationError(
-                f"M.4.4.14a: AccountTemplate {t.role!r} has "
-                f"scope='external' but declares "
-                f"business_day_offset={t.business_day_offset!r}.\n"
-                f"External accounts have no EOD balance row, so the "
-                f"offset has no consumer.\n"
-                f"Remove business_day_offset from this template or "
-                f"change scope to 'internal'."
+                "M1",
+                f"Account template {t.role!r} is scope='external' "
+                f"but sets business_day_offset="
+                f"{t.business_day_offset!r}. External accounts have "
+                f"no end-of-day balance row, so the offset has "
+                f"nowhere to land. Either remove business_day_offset, "
+                f"or change scope to 'internal'."
             )
