@@ -529,6 +529,33 @@ def _wrapper_close() -> str:
     return "</span>"
 
 
+# Shared base class string for both active + refused Delete anchors.
+# Carries the box-determining utilities (display, padding, font size,
+# border, rounding, no-underline) — i.e. WIDTH. Both states MUST
+# render identically wide so the in-place transition between active
+# and refused doesn't reflow the parent row.
+#
+# Per `[feedback_invariants_in_types]`: shared at the constant level
+# rather than duplicated literals across two helpers, so a future
+# class-string edit can't drift the two apart (the operator-reviewed
+# BX.1 polish bug — visually the refused button "looked off" because
+# nothing structurally guaranteed parity).
+_DELETE_BUTTON_BASE_CLS: str = (
+    "inline-flex items-center px-2 py-0.5 text-xs font-semibold "
+    "border border-danger text-danger rounded-sm "
+    "no-underline"
+)
+
+
+# State-specific class fragments composed onto the base above. Active
+# adds the hover-fill; refused adds the disabled visual cues
+# (opacity, not-allowed cursor). Width-determining utilities live in
+# `_DELETE_BUTTON_BASE_CLS` and MUST NOT appear here — that's the
+# invariant: refused width == active width by construction.
+_DELETE_BUTTON_ACTIVE_CLS: str = " cursor-pointer hover:bg-danger hover:text-white"
+_DELETE_BUTTON_REFUSED_CLS: str = " opacity-50 cursor-not-allowed"
+
+
 def _active_button_html(
     kind: EntityKind, url_id: str, *, surface: Literal["card", "form"],
 ) -> str:
@@ -539,13 +566,7 @@ def _active_button_html(
     confirm_url = f"/l2_shape/{escape(kind)}/{escape(url_id)}/delete-confirm"
     if surface == "form":
         confirm_url += "?from=edit"
-    btn_cls = (
-        # danger-outline at rest, fills on hover.
-        "inline-flex items-center px-2 py-0.5 text-xs font-semibold "
-        "border border-danger text-danger rounded-sm "
-        "no-underline cursor-pointer "
-        "hover:bg-danger hover:text-white"
-    )
+    btn_cls = _DELETE_BUTTON_BASE_CLS + _DELETE_BUTTON_ACTIVE_CLS
     return (
         f'<a class="{btn_cls}" '
         f'data-role="{data_role}" '
@@ -612,15 +633,14 @@ def render_refused_delete_button(
     """
     data_role = "card-delete" if surface == "card" else "form-delete"
     reason = _format_refused_reason(refs)
-    btn_cls = (
-        # Disabled-look: same border / color tokens but at reduced
-        # opacity + not-allowed cursor; no hover state. The aria
-        # disabled + the data-delete-state attr are the test hooks;
-        # the visual is informative only.
-        "inline-flex items-center px-2 py-0.5 text-xs font-semibold "
-        "border border-danger text-danger rounded-sm "
-        "no-underline opacity-50 cursor-not-allowed"
-    )
+    # Disabled-look: same WIDTH-determining base (`_DELETE_BUTTON_BASE_CLS`
+    # — padding, font size, border, no-underline) as the active state
+    # so the in-place transition between states doesn't reflow the
+    # parent row; only `_DELETE_BUTTON_REFUSED_CLS` modifiers (reduced
+    # opacity, not-allowed cursor) differ. The aria-disabled + the
+    # data-delete-state attr are the test hooks; the visual is
+    # informative only.
+    btn_cls = _DELETE_BUTTON_BASE_CLS + _DELETE_BUTTON_REFUSED_CLS
     btn = (
         f'<a class="{btn_cls}" '
         f'data-role="{data_role}" '

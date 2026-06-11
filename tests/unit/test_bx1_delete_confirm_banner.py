@@ -313,6 +313,76 @@ def test_refused_button_carries_disabled_attrs_and_reason() -> None:
     assert "data-delete-wrapper" in html
 
 
+def test_active_and_refused_buttons_share_width_determining_classes() -> None:
+    """BX.1 polish (2026-06-11 operator dogfood) — both Delete
+    button states MUST emit the literal text "Delete" AND share the
+    width-determining Tailwind utility classes (`inline-flex`,
+    `items-center`, `px-2`, `py-0.5`, `text-xs`, `font-semibold`,
+    `border`, `border-danger`, `text-danger`, `rounded-sm`,
+    `no-underline`). Only the state-specific modifiers (active:
+    `cursor-pointer hover:bg-danger hover:text-white`; refused:
+    `opacity-50 cursor-not-allowed`) differ.
+
+    Pinning width-class parity at the unit level prevents the BX.1
+    "the disabled Delete looked off" failure mode from reaching the
+    operator — if a future edit drops one of the base utilities from
+    the refused state (e.g. accidentally substitutes a single-char
+    icon button shape), this gate fires before the dogfood does.
+    """
+    refs = (
+        EntityRef(
+            referrer_kind="transfer_template",
+            referrer_id="ExternalReconciliationCycle",
+            via_field="leg_rails",
+            label="TransferTemplate ExternalReconciliationCycle (leg_rails)",
+        ),
+    )
+    active_html = render_active_delete_button(
+        "rail", "ReconciliationLeg", surface="card",
+    )
+    refused_html = render_refused_delete_button(
+        "rail", "ReconciliationLeg", refs, surface="card",
+    )
+    # Both render the literal text "Delete" — operator-facing label
+    # parity. The chevron-like single-character render shape that
+    # surfaced in BX.1 operator dogfood would fail this gate.
+    assert ">Delete</a>" in active_html, active_html
+    assert ">Delete</a>" in refused_html, refused_html
+    # Both share the width-determining classes. Each class below
+    # influences the rendered bounding box (padding, font-size,
+    # border, rounded), so listing them explicitly makes the
+    # parity contract visible at the test level.
+    width_classes = (
+        "inline-flex", "items-center", "px-2", "py-0.5",
+        "text-xs", "font-semibold", "border", "border-danger",
+        "text-danger", "rounded-sm", "no-underline",
+    )
+    for cls in width_classes:
+        assert cls in active_html, (
+            f"active button missing width-determining class {cls!r}: "
+            f"{active_html}"
+        )
+        assert cls in refused_html, (
+            f"refused button missing width-determining class {cls!r}: "
+            f"{refused_html}"
+        )
+    # State-specific modifiers — active gets hover-fill, refused
+    # gets disabled-visual. Symmetric pinning so a regression on
+    # either side surfaces.
+    assert "cursor-pointer" in active_html
+    assert "hover:bg-danger" in active_html
+    assert "hover:text-white" in active_html
+    assert "opacity-50" in refused_html
+    assert "cursor-not-allowed" in refused_html
+    # Cross-checks: the active button MUST NOT carry refused
+    # modifiers, and vice versa. (Without this, "merge to one class
+    # string" refactors silently flip both states to the same look.)
+    assert "opacity-50" not in active_html
+    assert "cursor-not-allowed" not in active_html
+    assert "cursor-pointer" not in refused_html
+    assert "hover:bg-danger" not in refused_html
+
+
 def test_refused_button_caps_reason_at_three_referrers() -> None:
     """When more than 3 entities reference the target, the reason
     text caps the list at 3 + ``+N more`` so the title/tooltip stays

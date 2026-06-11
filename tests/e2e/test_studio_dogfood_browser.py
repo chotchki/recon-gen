@@ -699,6 +699,49 @@ def test_browser_card_delete_disabled_when_referenced(
         # aria-disabled set so screen-readers + the e2e driver see
         # the disabled affordance.
         assert delete_anchor.get_attribute("aria-disabled") == "true"
+        # BX.1 polish (2026-06-11) — the refused button MUST render
+        # the full literal "Delete" label, NOT a single-character
+        # icon shape. Operator dogfood after the first BX.1 redesign
+        # reported "the disabled delete is still just a single
+        # character" — meaning a CSS regression had collapsed the
+        # button to a chevron-width visual. Pin both text_content
+        # AND a minimum bounding-box width (a single char in text-xs
+        # is roughly 7-9px; "Delete" + px-2 padding is ~50-60px).
+        assert delete_anchor.text_content() == "Delete", (
+            f"Refused Delete button text_content drifted from "
+            f"'Delete' to {delete_anchor.text_content()!r} — operator-"
+            f"facing label regression."
+        )
+        refused_bbox = delete_anchor.bounding_box()
+        assert refused_bbox is not None, "refused button has no bbox"
+        assert refused_bbox["width"] >= 30, (
+            f"Refused Delete button bbox width "
+            f"{refused_bbox['width']}px is below the single-character "
+            f"floor — operator-facing visual is collapsed."
+        )
+        # Sister-rail comparison: also fetch an UNREFERENCED rail's
+        # active Delete button (PoolBalancing — no incoming refs in
+        # spec_example) and assert its bbox width matches the
+        # refused button's within 2px. State transitions MUST NOT
+        # reflow the parent row; the refused-vs-active visual
+        # parity is the operator-facing trust contract.
+        active_rail = page.locator(
+            'article[data-kind="rail"]'
+            '[data-entity-id="PoolBalancing"]'
+        ).first
+        active_anchor = active_rail.locator(
+            'summary [data-role="card-delete"]'
+        ).first
+        assert (
+            active_anchor.get_attribute("data-delete-state") == "active"
+        ), "PoolBalancing was expected to be unreferenced (active state)"
+        active_bbox = active_anchor.bounding_box()
+        assert active_bbox is not None
+        assert abs(active_bbox["width"] - refused_bbox["width"]) < 2, (
+            f"Active Delete bbox width {active_bbox['width']}px vs "
+            f"refused {refused_bbox['width']}px — state transition "
+            f"reflows the parent row."
+        )
         # Detailed reason in data-delete-reason carries the
         # operator-readable referrer list (banking-domain readable
         # per `[project_design_north_stars]`).
