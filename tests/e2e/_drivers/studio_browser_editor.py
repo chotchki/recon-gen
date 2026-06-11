@@ -109,6 +109,29 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
             driver.open()
             yield driver
 
+    # -- raw access (escape hatch for studio-internal assertions) -------
+
+    @property
+    def page(self) -> Any:  # typing-smell: ignore[explicit-any]: Playwright Page — kept Any to stay import-light at the test seam
+        """The underlying Playwright ``Page`` — escape hatch for
+        studio-internal assertions that need to inspect DOM state
+        the typed verbs don't surface (e.g. checking ``<details>``
+        ``open`` attribute, waiting on a specific selector with
+        ``wait_for_function``). Tests that only need typed verbs
+        should NOT touch ``page`` (mirrors App2Driver's escape
+        hatch). Added BX.1 followup to support delete-confirm
+        flow tests that need to verify the parent ``<details>``
+        stays closed after Delete click."""
+        return self._page
+
+    @property
+    def base_url(self) -> str:
+        """The studio server's bound base URL — for tests that need
+        to construct cross-page URLs the protocol verbs don't expose
+        (e.g. direct-nav to a kind's list page). Mirrors
+        App2Driver.base_url."""
+        return self._base
+
     # -- navigation ------------------------------------------------------
 
     def open(self) -> None:

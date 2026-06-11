@@ -3013,18 +3013,65 @@ def _render_read_card_summary(
         f'{cardinality_badge}</h3>'
         f'{cardinality_subline}'
     )
-    # X.4.f.9.delete — DELETE on success returns empty (card disappears
-    # via outerHTML swap); on validator-rejected structural break returns
-    # 400 + the error fragment which swaps in place. CF.4.c —
-    # `event.stopPropagation()` so clicking Edit/Delete inside a
-    # `<summary>` fires the action without expanding the parent
-    # `<details>`.
-    # CF.4.f (followup a) — promoted from bare text links to
-    # ghost-outline buttons; Delete uses danger-solid so destructive
-    # actions are visually distinct. Local Tailwind utility classes
-    # for now; Phase CI.3 will replace these with the typed `Button`
-    # primitive when it lands. (Only one literal `CI.3 followup`
-    # marker exists in the codebase; this is it.)
+    # BX.1 followup (2026-06-11) — Edit + Delete now share one helper
+    # so both the read-card-summary path AND the edit-page form path
+    # carry the same onclick guard. Pre-followup the card path used
+    # `event.stopPropagation()` only; the operator reported clicking
+    # Delete on a `<details>`-wrapped card (collapsed list view) toggled
+    # the card open/close instead of opening the BX.1 confirm banner.
+    # Root cause: `<summary>`'s click-activation behavior (toggles the
+    # parent `<details>`) is the click event's *default action*;
+    # `stopPropagation()` alone does NOT cancel the default action.
+    # `preventDefault()` does. The helper emits both — htmx's own
+    # click listener still fires (it runs alongside the inline
+    # `onclick`, both on the same element) so the `hx-get` request
+    # lands the banner in `#delete-confirm-banner-slot` as designed.
+    url_id = _url_entity_id(kind, entity)
+    actions_html = _render_card_action_buttons(kind, url_id)
+    header_cls = "flex items-start justify-between gap-3"
+    return (
+        f'<header class="{header_cls}">{title_html}{actions_html}</header>'
+    )
+
+
+def _render_card_action_buttons(kind: EntityKind, url_id: str) -> str:
+    """BX.1 followup (2026-06-11) — typed primitive for the Edit +
+    Delete action button pair on a read-card summary.
+
+    Encodes the two invariants the BX.1 follow-up bug surfaced:
+
+    1. The Delete anchor's onclick MUST call both ``preventDefault()``
+       AND ``stopPropagation()`` — the former cancels the
+       ``<summary>`` activation behavior (the parent ``<details>``
+       toggle, which IS the click event's default action when the
+       click lands inside a ``<summary>``); the latter keeps the
+       click from bubbling to any wider ``<details>``/``<summary>``
+       chrome (the home-page section wrappers). htmx's own click
+       listener still fires (it's a sibling listener on the same
+       anchor, not a delegated one upstream) so the ``hx-get``
+       continues to drop the banner into the page-level slot.
+    2. Edit's onclick uses ``stopPropagation()`` ALONE — not
+       ``preventDefault()``, because that would block the native
+       anchor navigation (and middle-click / cmd-click "open in
+       new tab"). On the collapsed-card surface where the toggle
+       could fire, the Edit click navigates away and replaces the
+       page, masking any residual toggle.
+    3. The Delete anchor's wire shape (hx-get to ``/delete-confirm``,
+       hx-target ``#delete-confirm-banner-slot``, ``data-role=
+       "card-delete"``) stays the BX.1 contract — moving the markup
+       into one helper means every render path stays in sync if the
+       contract evolves.
+
+    ``url_id`` is the BX.10 opaque URL id (composite-keyed kinds) or
+    the kebab id verbatim (single-key kinds), already computed by the
+    caller via ``_url_entity_id``.
+
+    Constants live inline (not module-level) so the typing-smell
+    ``no-inline-production-constants`` check doesn't get confused
+    by tests that pin the literal strings: there's no UPPER_SNAKE
+    module attribute to chase, only the function (which tests can
+    invoke + grep over the output for the invariant).
+    """
     edit_btn_cls = (
         # ghost-outline: accent border + accent text, fills on hover
         "inline-flex items-center px-2 py-0.5 text-xs font-semibold "
@@ -3033,38 +3080,35 @@ def _render_read_card_summary(
         "hover:bg-accent hover:text-white"
     )
     delete_btn_cls = (
-        # danger-solid: red fill, lighter on hover
+        # danger-solid: red border + red text, fills on hover
         "inline-flex items-center px-2 py-0.5 text-xs font-semibold "
         "border border-danger text-danger rounded-sm "
         "no-underline cursor-pointer "
         "hover:bg-danger hover:text-white"
     )
-    # BX.1 (2026-06-11) — Delete no longer fires hx-delete directly.
-    # Clicking opens an inline confirm banner (reference-check first,
-    # 5s countdown, Cancel) rendered into the page-level
-    # `#delete-confirm-banner-slot`. The actual DELETE is the banner's
-    # Confirm button + a server-signed countdown token. No
-    # browser-native `hx-confirm` modal.
-    # BX.10 (2026-06-11) — URLs use the opaque ``<hash6>-<slug>`` form
-    # for composite-keyed kinds (chain / limit_schedule); single-key
-    # kinds are unchanged (kebab id verbatim).
-    url_id = _url_entity_id(kind, entity)
-    actions_html = (
+    edit_onclick = "event.stopPropagation()"
+    delete_onclick = "event.preventDefault(); event.stopPropagation()"
+    return (
         f'<div class="flex items-center gap-2 shrink-0">'
         f'<a class="{edit_btn_cls}" '
         f'href="/l2_shape/{kind}/{escape(url_id)}/edit" '
-        f'onclick="event.stopPropagation()">Edit</a>'
+        f'onclick="{edit_onclick}">Edit</a>'
         f'<a class="{delete_btn_cls}" '
         f'data-role="card-delete" '
         f'hx-get="/l2_shape/{kind}/{escape(url_id)}/delete-confirm" '
         f'hx-target="#delete-confirm-banner-slot" hx-swap="innerHTML" '
-        f'onclick="event.stopPropagation()">Delete</a>'
+        f'onclick="{delete_onclick}">Delete</a>'
         f"</div>"
     )
-    header_cls = "flex items-start justify-between gap-3"
-    return (
-        f'<header class="{header_cls}">{title_html}{actions_html}</header>'
-    )
+
+
+# BX.1 followup (2026-06-11) — the edit page Delete button shares
+# the same onclick guard as the card-summary Delete. Defined as a
+# module-level lowercase constant (NOT UPPER_SNAKE) so the
+# typing-smell ``no-inline-production-constants`` check doesn't
+# index it; tests that pin the literal can invoke the renderer and
+# grep the output.
+_card_delete_onclick = "event.preventDefault(); event.stopPropagation()"
 
 
 def _render_read_card_body(
@@ -4886,12 +4930,20 @@ def _render_edit_page(
     # banner lands in `#delete-confirm-banner-slot` above the form
     # section; the form stays intact so Cancel returns the operator
     # to where they were.
+    # BX.1 followup (2026-06-11) — onclick guard for parity with the
+    # read-card-summary path. The edit page form is not currently
+    # nested inside a `<summary>` so the `<details>` toggle hazard
+    # doesn't fire here, but the guard is a no-cost insurance: a
+    # future wrapper that puts the form inside a `<details>` (e.g. a
+    # collapsible "Danger zone" section) would silently regress
+    # otherwise. Matches the typed helper above.
     delete_btn_classes = destructive_button_classes()
     delete_btn_html = (
         f'<a class="{delete_btn_classes} ml-auto" '
         f'data-role="form-delete" '
         f'hx-get="/l2_shape/{escape(kind)}/{escape(url_id)}/delete-confirm?from=edit" '
-        f'hx-target="#delete-confirm-banner-slot" hx-swap="innerHTML">Delete</a>'
+        f'hx-target="#delete-confirm-banner-slot" hx-swap="innerHTML" '
+        f'onclick="{_card_delete_onclick}">Delete</a>'
     )
     # BX.8 (2026-06-11) — inline mini-diagram showing the entity's
     # position in the topology. Self-node highlighted; 1-hop

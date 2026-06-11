@@ -200,13 +200,26 @@ def test_card_route_without_body_only_returns_full_card(
 def test_action_links_stop_propagation_in_collapsed_card(
     writable_l2_yaml: Path,
 ) -> None:
-    """Edit + Delete inside `<summary>` carry
-    `onclick="event.stopPropagation()"` so clicking them doesn't
-    toggle the parent `<details>` (which would expand the card just
-    to immediately navigate away). The card title itself is plain
-    `<h3>` — title-as-diagram-focus was dropped 2026-06-05 (a holdover
-    from before Diagram became its own top-level surface), so title
-    clicks NOW intentionally bubble to toggle the details."""
+    """Edit + Delete inside `<summary>` carry an onclick guard so
+    clicking them doesn't toggle the parent `<details>` (which would
+    expand the card just to immediately navigate away).
+
+    BX.1 followup (2026-06-11): Delete's guard upgraded from
+    ``event.stopPropagation()`` alone to
+    ``event.preventDefault(); event.stopPropagation()``.
+    ``stopPropagation()`` cancels propagation but NOT the default
+    action of the click event; the ``<summary>`` activation behavior
+    (toggle the parent ``<details>``) IS that default action. Adding
+    ``preventDefault()`` cancels it. Edit keeps the bare
+    ``stopPropagation()`` because Edit navigates the operator away
+    (the toggle is invisible to them) AND ``preventDefault()`` on
+    Edit would block middle-click / cmd-click "open in new tab".
+
+    The card title itself is plain ``<h3>`` — title-as-diagram-focus
+    was dropped 2026-06-05 (a holdover from before Diagram became its
+    own top-level surface), so title clicks NOW intentionally bubble
+    to toggle the details.
+    """
     from recon_gen.common.html._studio_editor_routes import (  # noqa: PLC0415
         _render_read_card,
     )
@@ -214,7 +227,29 @@ def test_action_links_stop_propagation_in_collapsed_card(
     inst = cache.get()
     account = next(a for a in inst.accounts if a.id == "cust-001")
     card = _render_read_card("account", account, inst, collapsed=True)
-    # Edit + Delete each guard against toggle propagation.
-    assert card.count('onclick="event.stopPropagation()"') >= 2
+    # Edit guards via `stopPropagation()` only (its click navigates
+    # the operator away — bubbling-induced toggle is invisible).
+    import re
+    edit_anchor = re.search(
+        r'<a\b[^>]*href="/l2_shape/[^"]+/edit"[^>]*>',
+        card,
+    )
+    assert edit_anchor is not None, card
+    assert "event.stopPropagation()" in edit_anchor.group(0)
+    # Delete guards via both — its click does NOT navigate; the
+    # banner appears in place and the operator stays on the card.
+    delete_anchor = re.search(
+        r'<a\b[^>]*\bdata-role="card-delete"[^>]*>',
+        card,
+    )
+    assert delete_anchor is not None, card
+    assert "event.preventDefault()" in delete_anchor.group(0), (
+        "BX.1 followup invariant: Delete anchor MUST carry "
+        "`event.preventDefault()` so the parent `<details>` "
+        "doesn't toggle open when the operator clicks Delete on a "
+        "collapsed card. Missing this guard caused the limit_schedule "
+        "Delete-toggles-card bug (2026-06-11 operator report)."
+    )
+    assert "event.stopPropagation()" in delete_anchor.group(0)
     # Title carries no anchor → no `/diagram?focus=…` link.
     assert "/diagram?focus=" not in card

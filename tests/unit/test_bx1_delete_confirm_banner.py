@@ -448,6 +448,130 @@ def test_edit_page_carries_banner_slot(writable_l2_yaml: Path) -> None:
     assert 'id="delete-confirm-banner-slot"' in body
 
 
+# ---------------------------------------------------------------------------
+# BX.1 followup (2026-06-11) — onclick guard against parent `<details>`
+# toggle when Delete sits inside a `<summary>` (collapsed-card list view)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "kind, list_path",
+    [
+        ("rail", "/l2_shape/rail/"),
+        ("account", "/l2_shape/account/"),
+        ("account_template", "/l2_shape/account_template/"),
+        ("chain", "/l2_shape/chain/"),
+        ("limit_schedule", "/l2_shape/limit_schedule/"),
+        ("transfer_template", "/l2_shape/transfer_template/"),
+    ],
+)
+def test_card_delete_button_onclick_suppresses_summary_toggle(
+    writable_l2_yaml: Path, kind: str, list_path: str,
+) -> None:
+    """BX.1 followup — the card Delete anchor MUST call
+    ``event.preventDefault()`` in addition to ``event.stopPropagation()``.
+
+    Rationale: when the list page renders cards in collapsed form
+    (``<details>``-wrapped, the default since CG.5), the action
+    buttons sit inside ``<summary>``. The native ``<summary>``
+    activation behavior (toggle the parent ``<details>``) is the
+    click event's default action — ``stopPropagation()`` alone does
+    NOT cancel it. Without ``preventDefault()`` a click on Delete
+    silently toggles the card open/close AND fires the htmx request.
+    The operator sees only the toggle (the banner DOES land but the
+    toggle is louder + visible) and concludes Delete is broken.
+
+    The fix: both inline handlers on the Delete anchor. Pin this
+    invariant for every kind that renders in the collapsed-card list
+    view (every L2 entity kind today — same render path)."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get(list_path).text
+    # Locate the Delete anchor (data-role="card-delete") and read its
+    # onclick. The list page may render N Delete anchors (one per
+    # card); they all share the same onclick template, so the first
+    # match is representative.
+    import re
+    matches = re.findall(
+        r'<a\b[^>]*\bdata-role="card-delete"[^>]*>',
+        body,
+    )
+    assert matches, (
+        f"kind={kind!r} list page rendered no card-delete anchor — "
+        f"the fixture may be empty for this kind; if so, expand the "
+        f"fixture instead of skipping (the invariant applies to every "
+        f"render path).\nList page body (first 2KB):\n{body[:2048]}"
+    )
+    for anchor_open in matches:
+        assert "event.preventDefault()" in anchor_open, (
+            f"kind={kind!r} Delete anchor missing "
+            f"`event.preventDefault()` — collapsed-card click will "
+            f"toggle the parent `<details>` instead of opening only "
+            f"the BX.1 confirm banner.\nAnchor: {anchor_open}"
+        )
+        assert "event.stopPropagation()" in anchor_open, (
+            f"kind={kind!r} Delete anchor missing "
+            f"`event.stopPropagation()` — click will bubble to any "
+            f"wider `<summary>` chrome (home-page section wrappers).\n"
+            f"Anchor: {anchor_open}"
+        )
+
+
+def test_edit_page_delete_button_carries_onclick_guard(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.1 followup — the edit-page Delete anchor (data-role=
+    "form-delete") carries the same onclick guard.
+
+    The edit page isn't currently wrapped in a ``<details>``, so the
+    guard is insurance against a future wrapper (e.g. a collapsible
+    "Danger zone" section) silently regressing the same bug. The
+    edit-page render path references the module-level
+    ``_card_delete_onclick`` constant (lowercase to dodge the
+    no-inline-production-constants typing-smell index) — same value
+    as the inline string in ``_render_card_action_buttons``."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        body = c.get("/l2_shape/account/cust-001/edit").text
+    import re
+    m = re.search(
+        r'<a\b[^>]*\bdata-role="form-delete"[^>]*>',
+        body,
+    )
+    assert m is not None, (
+        "edit page rendered no form-delete anchor — the form's Delete "
+        "action button is missing.\nEdit page body (first 2KB):\n"
+        f"{body[:2048]}"
+    )
+    anchor_open = m.group(0)
+    assert "event.preventDefault()" in anchor_open, anchor_open
+    assert "event.stopPropagation()" in anchor_open, anchor_open
+
+
+def test_card_action_buttons_helper_is_typed_primitive() -> None:
+    """BX.1 followup — the Edit + Delete pair is consolidated in
+    ``_render_card_action_buttons``. Pin the helper's existence + its
+    contract (Edit and Delete anchors, the BX.1 wire shape on Delete,
+    the onclick guard on Delete) so a future refactor that re-splits
+    the pair has to update this test too."""
+    from recon_gen.common.html._studio_editor_routes import (  # noqa: PLC0415
+        _render_card_action_buttons,
+    )
+    html = _render_card_action_buttons("rail", "test-rail-id")
+    assert "<a" in html  # both Edit and Delete are anchors.
+    assert ">Edit<" in html
+    assert ">Delete<" in html
+    # Delete carries the BX.1 banner-slot wire shape.
+    assert 'data-role="card-delete"' in html
+    assert (
+        'hx-get="/l2_shape/rail/test-rail-id/delete-confirm"' in html
+    )
+    assert 'hx-target="#delete-confirm-banner-slot"' in html
+    # Delete onclick suppresses both bubbling AND the default action.
+    assert "event.preventDefault()" in html
+    assert "event.stopPropagation()" in html
+
+
 # Silence unused-import warning for COUNTDOWN_SECS — it documents
 # the production default the tests pin against via monkeypatch.
 _ = COUNTDOWN_SECS
