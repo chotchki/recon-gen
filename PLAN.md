@@ -267,9 +267,6 @@ Three open design items from `docs/audits/_archive/v11_22_1_feedback.md` cold-re
 
 
 
-## Phase PLAN - Phase PLAN
-- [ ] PLAN.md - BS.5 — _v_config_chain_children + 7-path conversion
-
 # Backlog (not yet phased)
 
 - **BV.1 — D3.1 L2 audit redux + per-primitive curriculum doc** ("what's persona for?" deliverable). Operator-judgment on audience (CPA reviewer / dev onboarding / investor / sales), format (single page / multi-doc / mkdocs section), depth, worked-example shape. Backlogged 2026-06-10.
