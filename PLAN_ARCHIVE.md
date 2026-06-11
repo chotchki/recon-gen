@@ -1,3 +1,37 @@
+# PLAN — Phase AI (archived 2026-06-10; closed-overcome-by-events)
+
+**Phase summary:** Studio L2 editor dogfood — "ANY L2 yaml (`spec_example` + `sasquatch_pr` + fuzz-sampled) rebuilt via browser-driven editor matches reference structurally + in dashboard output". Locked 2026-05-19 (AI.0); AI.1 audit drove the AI.2.a-e UI gap closures; AI.3-6 wired the harness + L2Instance equivalence + matview-row dashboard equivalence + 5-seed fuzz pool. AI.8-13 closed quirks (phantom framing, WebKit fill-on-hidden, BB.2 expected_net). AI.14 explicitly delegated to Phase BF (which closed). Re-verify gate (AI.7) absorbed by BV close (commit `f541190d`, run `20260611T034334Z-00ce44c8`, 2026-06-10). Closed as **overcome-by-events** per audit `w4n2ismnq`.
+
+**Live gate today:**
+- `tests/unit/test_studio_editor_driver.py` — 14 HTTP variants in ~4s (spec_example + sasquatch_pr + 5 fuzz seeds + AI.4 L2Instance equivalence + AI.5 matview-row equivalence)
+- `tests/e2e/test_studio_dogfood_browser.py` — 3 browser variants (fuzz_12345 + spec_example + sasquatch_pr) gated under `qs_browser` tier per BJ.3 marker collection
+- 5-seed fuzz pool live; deterministic per `RECON_GEN_FUZZ_SEED`; override pool size via `RECON_GEN_AI_FUZZ_SAMPLE_N`
+
+**Per-item disposition (16 leaves):**
+- **AI.0 Locks** — honored or superseded. Lock 1 (scope-split build-vs-defer) shipped via AI.2.a-e + BF. Lock 2 (per-sheet DashboardDriver) superseded by AI.5's tighter SQLite matview-row equality (+ DuckDB migration per CB.8). Lock 3 (hybrid transport HTTP + browser) lives as `StudioHttpEditorDriver` + `StudioBrowserEditorDriver`. Lock 4 (anchor `date(2030, 1, 1)` + determinism), Lock 5 (no source-yaml mutation), Lock 6 (fuzz axis 5 seeds), Lock 7 (editor save-to-yaml POST route) all live in code.
+- **AI.1** — `docs/audits/_archive/ai_1_editor_surface_audit.md` (commit `e8de95fa`)
+- **AI.2.a/b/c/e** — shipped (`8388d218` / `8e0574c3` / `37f23f5b` / `b4760cc1`+`db183590`)
+- **AI.2.d.1 (+.1.a)** — absorbed by Phase BB (commits `c1939621` + `934b274e`; PLAN_ARCHIVE.md BB.5)
+- **AI.2.d.2** — pieces 1-4 shipped in-phase (commits `e7d74c5e`, `967f243b`, `d8c99e04`, `a48c015d`, `b3fd6a0d`); pieces 2-3 final un-skip absorbed by Phase CO (CO.1-CO.3 un-skipped `test_browser_full_create_l2_structural_equality` across spec_example + fuzz seed 12345; CO.7 swept)
+- **AI.3 + AI.4 + AI.6** — `tests/unit/test_studio_editor_driver.py` (commit `17638221`)
+- **AI.5** — SQLite matview-row equivalence migrated to DuckDB post-CB.8 (commit `53938dc8` + CB.8 migration `6946fc5f`); tests stay green
+- **AI.7** — absorbed by BV close (commit `f541190d`, run `20260611T034334Z-00ce44c8`); stale text references `e2e.yml` (retired post-CB.11.c, absorbed into `ci.yml::Layered runner` per BJ.3) + `--dialects=sl` (SQLite nuked in CB.8); CI now gates via `-m browser` marker collection on every push
+- **AI.8** — `31971c6e` (phantom framing closed; driver fix)
+- **AI.9** — `5ecd7b7d` (`_coerce_role_expression` + `__post_init__` runtime defense). BE.7 (pyright-strict-on-tests) tracks the compile-time follow-up
+- **AI.10** — `31971c6e` (textarea MVP) → superseded by BF.3 structured per-rail-checkbox-group picker
+- **AI.11** — `dce98497` (unconditional XOR/Variable injection)
+- **AI.12** — `80121400` (no-hidden-in-e2e AST lint makes bug class structurally unrepresentable; same class as BH.2)
+- **AI.13** — `31971c6e` (aggregator-two-leg expected_net + `setBlockHidden` JS)
+- **AI.14** — explicitly moved to Phase BF; BF.1-BF.5 all closed (PLAN_ARCHIVE.md:4686-4690)
+
+**Stale text in the original (preserved here for archive accuracy):**
+- AI.5 says "SQLite-only" — post-CB.8 SQLite dialect was nuked; tests migrated to DuckDB
+- AI.7 references `e2e.yml` and `--dialects=sl` — both retired (CB.11.c + CB.8 respectively)
+- AI.10 textarea MVP was superseded by BF.3's structured picker — improvement, not regression
+
+**Why closed-overcome-by-events:**
+- No live blocker. Every downstream phase (BB / BF / BV / CE / CL / CP / CO) has been extending the dogfood surface AI built without AI being formally closed. The dogfood claim is actively gated today by 17 test variants spanning HTTP + browser transports.
+
 # PLAN — Phase CZ (archived 2026-06-10)
 
 **Phase summary:** Production-DB safe mode — prevent accidental wipe of non-synthetic data on a real-ETL-populated DB. Operator-flagged shape (2026-06-09): once `cfg.etl_hook` is configured + real ETL populates `<prefix>_transactions` / `<prefix>_daily_balances`, NOTHING in recon-gen prevented a subsequent Trainer reset / Studio Deploy-changes from wiping real customer rows. Locked design: narrow gate on the `cfg.etl_hook` field; absence = standalone-mode (preserve unmarked rows); configured = ETL-mode (wipe-safe). Row-level "synthetic" predicate is `metadata.source = 'training'` stamped by every seed-pipeline writer. Real ETL rows have no marker — absence IS the real-row signal (no integrator-side burden). Scope narrowed to the easy-button surfaces (Trainer reset + Studio Deploy); CLI surfaces stay unprotected (operators using `--execute` know what they're doing).
