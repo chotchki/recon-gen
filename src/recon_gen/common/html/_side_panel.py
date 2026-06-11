@@ -128,7 +128,48 @@ GLOSSARY: dict[str, str] = {
         "**Singleton** account = exactly one instance exists in the "
         "institution (e.g. one GL control account per role). "
         "AccountTemplate, in contrast, materializes N instances at "
-        "runtime (one customer DDA per customer)."
+        "runtime (one customer DDA per customer). Cross-reference: "
+        "see **1-to-1** for the math notation used on Studio role "
+        "cards + the **1:1 / 1:N** choice the `+ Add Role` modal "
+        "exposes."
+    ),
+    # BX.6/11 — role-cardinality vocabulary. The reframe lifts
+    # Accounts + Account templates into one **Roles** organizing
+    # concept on the editor surface, distinguished by cardinality:
+    # 1:1 = one ledger row (an Account); 1:N = pattern with N
+    # runtime instances (an AccountTemplate). CPA-natural framing
+    # per `[[project_design_north_stars]]`; math notation is the
+    # one we use on the role-card badge + in the modal prose.
+    "roles-cardinality": (
+        "**Roles — 1:1 vs 1:N.** A *Role* is a name (e.g. "
+        "`CashDueFRB`, `CustomerDDA`) that every rail / chain / "
+        "limit references. Roles come in two cardinalities:\n\n"
+        "- **1:1 — Singleton account** — the role IS the account. "
+        "One row in the chart of accounts (e.g. cash, GL control "
+        "lines, named subaccounts). Pick this when there's exactly "
+        "one ledger row for the role.\n"
+        "- **1:N — Templated role** — one declaration; ETL "
+        "materializes N runtime rows (one per customer, one per "
+        "merchant, etc.). Pick this when the role fans out at "
+        "runtime (CustomerDDA, MerchantDDA, ZBA subaccounts).\n\n"
+        "Cross-reference: **singleton** (legacy term) + the "
+        "`+ Add Role` modal in the Studio editor's Roles section."
+    ),
+    "1-to-1": (
+        "**1:1 — Singleton account.** One declared role → one "
+        "ledger row. Example: `CashDueFRB`, `ACHOrigSettlement`, "
+        "individual GL control accounts. Lives as an **Account** "
+        "in the L2 YAML (`accounts:` list). Cross-reference: "
+        "**roles-cardinality** for the side-by-side with 1:N + "
+        "**singleton** for the legacy term."
+    ),
+    "1-to-n": (
+        "**1:N — Templated role.** One declared pattern → many "
+        "runtime instances at ETL time. Example: `CustomerDDA` "
+        "materializes one ledger row per customer; `MerchantDDA` "
+        "one per merchant. Lives as an **AccountTemplate** in the "
+        "L2 YAML (`account_templates:` list). Cross-reference: "
+        "**roles-cardinality** for the side-by-side with 1:1."
     ),
     "predicate": (
         "**Predicate** = one column-level expectation BT.5's contract "
