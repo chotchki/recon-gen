@@ -377,12 +377,12 @@ def test_home_page_cards_carry_data_attributes_for_filter(
     assert 'data-entity-id="cust-001"' in body
 
 
-def test_put_from_home_page_redirects_home(
+def test_put_from_home_page_redirects_to_read_card(
     writable_l2_yaml: Path,
 ) -> None:
-    """AI.2.e — a successful save (POST/PUT) 303-redirects to the home page;
-    the full navigation re-renders the diagram + entity sections fresh,
-    replacing the X.4 inline ``HX-Trigger: l2-cascade-reload`` fan-out."""
+    """BX.2 (2026-06-11) — a successful save (POST/PUT) 303-redirects to
+    the entity's read card by default (operator stays in the editing
+    flow). Pre-BX.2 default was the home page."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.put(
@@ -397,7 +397,7 @@ def test_put_from_home_page_redirects_home(
             follow_redirects=False,
         )
         assert resp.status_code == 303, resp.text
-        assert resp.headers.get("location") == "/"
+        assert resp.headers.get("location") == "/l2_shape/account/cust-001"
 
 
 # ---------------------------------------------------------------------------

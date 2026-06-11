@@ -5521,6 +5521,86 @@ def _entity_id(kind: EntityKind, entity: object) -> str:
     )
 
 
+def _read_card_url_for(kind: EntityKind, entity_id: str) -> str:
+    """BX.2 (2026-06-11) — URL of the entity's read card.
+
+    Save-success redirect target for the create / save handlers.
+    ``entity_id`` is the post-save addressing key (see
+    ``_post_save_entity_id`` for the rename-aware derivation).
+
+    Percent-encoding leaves ``::`` (Chain / LimitSchedule composite
+    separator) alone so the URL stays grep-able / human-readable.
+    """
+    from urllib.parse import quote  # noqa: PLC0415
+    return f"/l2_shape/{kind}/{quote(entity_id, safe='::')}"
+
+
+def _post_save_entity_id(
+    kind: EntityKind,
+    original_entity_id: str,
+    new_fields: Mapping[str, Any],  # typing-smell: ignore[explicit-any]: form-coerced field values; heterogeneous per dataclass
+) -> str:
+    """BX.2 — derive the post-save addressing key.
+
+    Combines the original entity_id (the URL-path one) with any
+    addressing-key field overrides in ``new_fields`` so the
+    save-success redirect lands on the right read card even after a
+    rename (Rail.name, TransferTemplate.name, AccountTemplate.role,
+    Account.id, Chain.parent / Chain.children, LimitSchedule.parent_role /
+    LimitSchedule.rail / LimitSchedule.direction).
+
+    Falls back to ``original_entity_id`` when no addressing-key field
+    is in ``new_fields`` (the common "edit a non-addressing field"
+    case — name preserved, just a description change).
+    """
+    if kind == "account":
+        raw = new_fields.get("id") if "id" in new_fields else None
+        return str(raw) if raw else original_entity_id
+    if kind == "account_template":
+        raw = new_fields.get("role") if "role" in new_fields else None
+        return str(raw) if raw else original_entity_id
+    if kind in ("rail", "transfer_template"):
+        raw = new_fields.get("name") if "name" in new_fields else None
+        return str(raw) if raw else original_entity_id
+    if kind == "chain":
+        # Composite "parent::sorted-children-csv". Either component may
+        # have changed; rebuild from new_fields where present, else
+        # parse the original composite for the unchanged component.
+        if "parent" in new_fields or "children" in new_fields:
+            orig_parent, _, orig_children_csv = original_entity_id.partition("::")
+            if "parent" in new_fields:
+                parent_raw = new_fields["parent"]
+                parent_str = str(parent_raw) if parent_raw else orig_parent
+            else:
+                parent_str = orig_parent
+            if "children" in new_fields:
+                raw_children = new_fields["children"]
+                # ChainChildSpec tuple — read .name off each.
+                child_names = sorted(
+                    str(getattr(c, "name", c)) for c in raw_children or ()
+                )
+                children_csv = ",".join(child_names)
+            else:
+                children_csv = orig_children_csv
+            return f"{parent_str}::{children_csv}"
+        return original_entity_id
+    # limit_schedule — 3-part composite "parent_role::rail::direction".
+    if any(k in new_fields for k in ("parent_role", "rail", "direction")):
+        parts = original_entity_id.split("::")
+        # Backward-compat 2-part form means direction="Outbound".
+        if len(parts) == 2:
+            parts = [*parts, "Outbound"]
+        orig_pr, orig_rail, orig_dir = (parts + ["", "", ""])[:3]
+        pr_raw = new_fields.get("parent_role") if "parent_role" in new_fields else None
+        rail_raw = new_fields.get("rail") if "rail" in new_fields else None
+        dir_raw = new_fields.get("direction") if "direction" in new_fields else None
+        pr_str = str(pr_raw) if pr_raw else orig_pr
+        rail_str = str(rail_raw) if rail_raw else orig_rail
+        dir_str = str(dir_raw) if dir_raw else orig_dir
+        return f"{pr_str}::{rail_str}::{dir_str}"
+    return original_entity_id
+
+
 # ---------------------------------------------------------------------------
 # CF.4.b — filter + sort for the editor list view
 # ---------------------------------------------------------------------------
@@ -5911,13 +5991,17 @@ def _make_handlers(
             )
 
         cache.save(new_inst)
-        # AI.2.e — dedicated-screen flow: 303-redirect home on success,
-        # symmetric with the create POST. (Replaces the X.4.e inline
-        # read-card swap + HX-Trigger cascade-reload; a full navigation back
-        # to Studio re-renders the diagram + entity lists fresh anyway.)
-        # BTa.2 P1.5 — when `_back_from` carried in (Triage → Edit), prefer
-        # the carried target so save-then-redirect closes the loop.
-        redirect_target = _safe_back_target(from_param) or "/"
+        # BX.2 (2026-06-11) — save-success 303-redirects to the entity's
+        # read card by default (operator stays in the editing flow,
+        # sees their just-saved fields rendered, can keep iterating).
+        # The pre-BX.2 default was `/` (the home page), which forced an
+        # extra "scroll to the section + find the row" step on every
+        # save. ``?from=`` (carried via the `_back_from` hidden input)
+        # still wins when set, so Triage → Edit → Save → Triage stays
+        # one click (BTa.2 P1.5).
+        new_entity_id = _post_save_entity_id(kind, entity_id, new_fields)
+        default_target = _read_card_url_for(kind, new_entity_id)
+        redirect_target = _safe_back_target(from_param) or default_target
         return RedirectResponse(redirect_target, status_code=303)
 
     async def new_form(request: Request) -> HTMLResponse:
@@ -6057,7 +6141,14 @@ def _make_handlers(
                     status_code=400,
                 )
             cache.save(new_inst)
-            return RedirectResponse("/", status_code=303)
+            # BX.2 (2026-06-11) — singleton save 303-redirects back to
+            # the singleton's own page (`/l2_shape/<kind>/`) so the
+            # operator sees the just-saved values render through the
+            # full singleton page. ``?from=`` still wins for triage /
+            # probe / run round-trips.
+            singleton_target = f"/l2_shape/{kind}/"
+            redirect_target = _safe_back_target(from_param) or singleton_target
+            return RedirectResponse(redirect_target, status_code=303)
 
         if kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse("not editable", status_code=404)
@@ -6326,12 +6417,19 @@ def _make_handlers(
             )
 
         cache.save(new_inst)
-        # Plain-form POST → 303 redirect back to home. Browser navigates;
-        # the operator sees the new entity in its section. No HTMX
-        # involvement here (the create page is full-page nav, not an
-        # in-place swap). BTa.2 P1.5 — `_back_from` short-circuits the
-        # default / so Triage → New → Save → Triage is one click.
-        redirect_target = _safe_back_target(from_param) or "/"
+        # BX.2 (2026-06-11) — create-success 303-redirects to the new
+        # entity's read card by default (the operator sees what they
+        # just made, can fix typos / fill optional fields without
+        # re-navigating from home). ``?from=`` still wins so the
+        # Triage → New → Save → Triage one-click loop is preserved
+        # (BTa.2 P1.5).
+        new_entity_id = _post_save_entity_id(kind, "", new_fields)
+        default_target = (
+            _read_card_url_for(kind, new_entity_id)
+            if new_entity_id
+            else "/"
+        )
+        redirect_target = _safe_back_target(from_param) or default_target
         return RedirectResponse(redirect_target, status_code=303)
 
     async def delete_handler(request: Request) -> HTMLResponse:

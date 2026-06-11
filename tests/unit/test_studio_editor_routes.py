@@ -133,12 +133,16 @@ def test_unknown_kind_returns_404(writable_l2_yaml: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_put_account_persists_to_disk_and_redirects_home(
+def test_put_account_persists_to_disk_and_redirects_to_read_card(
     writable_l2_yaml: Path,
 ) -> None:
-    """AI.2.e save flow: POST/PUT → mutate → validate → cache.save (atomic
-    write) → 303-redirect home (symmetric with the create POST). The mutation
-    persists to the --l2 file on disk.
+    """BX.2 (2026-06-11) save flow: POST/PUT → mutate → validate →
+    cache.save (atomic write) → 303-redirect to the entity's read card
+    (operator stays in the editing flow, sees their just-saved fields
+    rendered). The mutation persists to the --l2 file on disk.
+
+    Pre-BX.2 default was ``/`` (home page); now defaults to
+    ``/l2_shape/<kind>/<id>``.
     """
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -155,9 +159,9 @@ def test_put_account_persists_to_disk_and_redirects_home(
             },
             follow_redirects=False,
         )
-        # Dedicated-screen flow: 303 back to home, not an inline fragment.
+        # BX.2 — 303 to the entity's read card, not home.
         assert resp.status_code == 303, resp.text
-        assert resp.headers.get("location") == "/"
+        assert resp.headers.get("location") == "/l2_shape/account/cust-001"
 
     # Disk persistence — re-load and confirm.
     reloaded = load_instance(writable_l2_yaml)
@@ -456,12 +460,15 @@ def test_rail_edit_form_renders_subtype_requirements_banner(
         assert "Two-leg rail requires" in body
 
 
-def test_post_create_account_redirects_to_home_on_success(
+def test_post_create_account_redirects_to_new_read_card(
     writable_l2_yaml: Path,
 ) -> None:
-    """Successful create returns 303 → /; the operator's browser
-    navigates back to home where the new entity appears in its
-    section. (TestClient default doesn't follow redirects.)"""
+    """BX.2 (2026-06-11) — successful create returns 303 →
+    ``/l2_shape/<kind>/<new_id>``; the operator's browser navigates to
+    the new entity's read card so they can verify what they made (and
+    fix typos / fill optional fields without re-navigating). Pre-BX.2
+    default was the home page.
+    (TestClient default doesn't follow redirects.)"""
     app = _build_app(writable_l2_yaml)
     with TestClient(app, follow_redirects=False) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.post(
@@ -475,7 +482,7 @@ def test_post_create_account_redirects_to_home_on_success(
             },
         )
     assert resp.status_code == 303, resp.text
-    assert resp.headers.get("location") == "/"
+    assert resp.headers.get("location") == "/l2_shape/account/cust-999-new"
 
     reloaded = load_instance(writable_l2_yaml)
     assert any(str(a.id) == "cust-999-new" for a in reloaded.accounts)
@@ -541,9 +548,12 @@ def test_put_account_role_rename_cascades_to_rails_and_templates(
             },
             follow_redirects=False,
         )
-        # AI.2.e — save 303-redirects home; the cascade (below) still ran.
+        # BX.2 — save 303 to the entity's read card (not home); the
+        # cascade (below) still ran. Account.id is the addressing key,
+        # and the operator only changed `role` (not `id`), so the
+        # URL-path entity_id stays `cust-001`.
         assert resp.status_code == 303, resp.text
-        assert resp.headers.get("location") == "/"
+        assert resp.headers.get("location") == "/l2_shape/account/cust-001"
 
     reloaded = load_instance(writable_l2_yaml)
     # Both Accounts that played the role get the new value (rename is
@@ -624,9 +634,14 @@ def test_put_rail_name_rename_cascades_to_templates_and_chains(
             },
             follow_redirects=False,
         )
-        # AI.2.e — save 303-redirects home; the cascade (below) still ran.
+        # BX.2 — save 303 to the entity's read card. Rail.name IS the
+        # addressing key, and the operator renamed it, so the redirect
+        # lands on the NEW name's read card.
         assert resp.status_code == 303, resp.text
-        assert resp.headers.get("location") == "/"
+        assert (
+            resp.headers.get("location")
+            == f"/l2_shape/rail/{new_name}"
+        )
 
     reloaded = load_instance(writable_l2_yaml)
     assert any(str(r.name) == new_name for r in reloaded.rails)
@@ -2525,3 +2540,193 @@ def test_bf10_composite_scalar_fields_render_format_chip(
             f"Missing format chip `e.g. {example}` — check the "
             f"corresponding FieldSpec's `placeholder=` attribute."
         )
+
+
+# ---------------------------------------------------------------------------
+# BX.2 — save-success 303 to read card (per-kind coverage)
+# ---------------------------------------------------------------------------
+
+
+def test_bx2_put_rail_rename_redirects_to_new_name_read_card(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.2 — Rail.name IS the addressing key. A rename PUT must
+    303-redirect to the NEW name's read card, not the old URL (404)
+    nor the home page (the pre-BX.2 default that scattered the
+    operator out of the editing flow).
+    """
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(  # field-isolation-probe: BX.2 redirect-target probe — single-field PUT exercises the rename-cascade redirect shape; mutate_l2's dataclasses.replace preserves the rest.
+            "/l2_shape/rail/SubledgerCharge",
+            data={"name": "SubledgerChargeV2"},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+    assert (
+        resp.headers.get("location")
+        == "/l2_shape/rail/SubledgerChargeV2"
+    )
+
+
+def test_bx2_put_account_template_role_rename_redirects_to_new_role(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.2 — AccountTemplate.role IS the addressing key AND the
+    cascade trigger. A role rename must redirect to the new role's
+    read card, not the now-stale old-role URL.
+    """
+    app = _build_app(writable_l2_yaml)
+    pre = load_instance(writable_l2_yaml)
+    tpl = pre.account_templates[0]
+    old_role = str(tpl.role)
+    new_role = f"{old_role}V2"
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        # Partial PUT — only submits `role`; mutate_l2 keeps the
+        # other fields via dataclasses.replace.
+        resp = c.put(
+            f"/l2_shape/account_template/{old_role}",
+            data={"role": new_role},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+    assert (
+        resp.headers.get("location")
+        == f"/l2_shape/account_template/{new_role}"
+    ), resp.headers.get("location")
+
+
+def test_bx2_put_account_id_rename_redirects_to_new_id(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.2 — Account.id IS the addressing key. Renaming `id` must
+    redirect to the new id's read card.
+    """
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(
+            "/l2_shape/account/external-counterparty-one",
+            data={
+                "id": "external-counterparty-renamed",
+                "scope": "external",
+                "name": "External Counterparty One",
+                "role": "ExternalCounterparty",
+            },
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+    assert (
+        resp.headers.get("location")
+        == "/l2_shape/account/external-counterparty-renamed"
+    )
+
+
+def test_bx2_put_unchanged_addressing_key_redirects_to_same_read_card(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.2 — a save that DOESN'T touch the addressing key still
+    303-redirects to the entity's read card (the URL stays the
+    same; the URL-path entity_id is the post-save id).
+    """
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(  # field-isolation-probe: BX.2 redirect-target probe — minimal body to isolate the "addressing key unchanged" branch.
+            "/l2_shape/rail/SubledgerCharge",
+            data={"description": "Edited description only."},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+    assert resp.headers.get("location") == "/l2_shape/rail/SubledgerCharge"
+
+
+def test_bx2_put_with_safe_back_from_overrides_read_card_redirect(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.2 + BTa.2 P1.5 — `_back_from` hidden input still wins when
+    set to a same-origin path (Triage → Edit → Save → Triage stays a
+    one-click loop). The read-card default ONLY fires when no safe
+    `?from=` is carried.
+    """
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(  # field-isolation-probe: BX.2 redirect-target probe — minimal body, asserts `_back_from` override.
+            "/l2_shape/rail/SubledgerCharge",
+            data={
+                "description": "Edited from Triage.",
+                "_back_from": "/etl/triage",
+            },
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+    assert resp.headers.get("location") == "/etl/triage"
+
+
+def test_bx2_put_with_open_redirect_back_from_falls_back_to_read_card(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.2 — an unsafe `_back_from` (open-redirect shape) is rejected
+    by `_safe_back_target` and the redirect falls back to the read
+    card (NOT to `/`, the pre-BX.2 default — which would have hidden
+    the rejection from the operator).
+    """
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(  # field-isolation-probe: BX.2 redirect-target probe — minimal body to isolate the open-redirect-rejection branch.
+            "/l2_shape/rail/SubledgerCharge",
+            data={
+                "description": "Edited despite poisoned back link.",
+                "_back_from": "http://evil.com",
+            },
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+    assert resp.headers.get("location") == "/l2_shape/rail/SubledgerCharge"
+
+
+def test_bx2_post_create_rail_redirects_to_new_rail_read_card(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.2 — POST create with a fresh name must 303-redirect to the
+    new rail's read card (so the operator immediately sees what they
+    just made).
+    """
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app, follow_redirects=False) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.post(
+            "/l2_shape/rail/",
+            data={
+                "name": "BrandNewRail",
+                "subtype": "two_leg",
+                "source_role": "CustomerSubledger",
+                "destination_role": "CustomerLedger",
+                "transfer_type": "internal",
+                "origin": "demo",
+                "expected_net": "0.00",
+            },
+        )
+    assert resp.status_code == 303, resp.text
+    assert resp.headers.get("location") == "/l2_shape/rail/BrandNewRail"
+
+
+def test_bx2_post_create_with_back_from_still_round_trips(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.2 — the Triage → New → Save → Triage one-click loop is
+    preserved (BTa.2 P1.5). `_back_from` still wins over the read-card
+    default on the create POST.
+    """
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app, follow_redirects=False) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.post(
+            "/l2_shape/account/",
+            data={
+                "id": "cust-from-triage-001",
+                "scope": "internal",
+                "name": "Triage-routed customer",
+                "role": "CustomerSubledger",
+                "parent_role": "CustomerLedger",
+                "_back_from": "/etl/triage",
+            },
+        )
+    assert resp.status_code == 303, resp.text
+    assert resp.headers.get("location") == "/etl/triage"
