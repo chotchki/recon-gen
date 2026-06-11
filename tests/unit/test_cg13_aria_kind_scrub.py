@@ -127,13 +127,23 @@ def test_home_page_add_button_tooltip_no_underscores(
     writable_l2_yaml: Path,
 ) -> None:
     """The `+ Add` button's `title=` tooltip uses the singular
-    operator-readable form."""
+    operator-readable form.
+
+    BX.6/11 (2026-06-11): account + account_template no longer have
+    their own +Add buttons on the home page — they're funnelled
+    through the single ``+ Add Role`` modal in the Roles wrapper.
+    The remaining sections (rail, transfer_template, chain,
+    limit_schedule) keep the per-section +Add tooltips.
+    """
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/").text
     assert 'title="Create a new account_template"' not in body
     assert 'title="Create a new transfer_template"' not in body
-    assert 'title="Create a new account template"' in body
+    # Account + account_template Add buttons moved to the modal.
+    assert 'title="Create a new account template"' not in body
+    assert 'title="Create a new account"' not in body
+    # The remaining kinds keep their per-section +Add buttons.
     assert 'title="Create a new transfer template"' in body
     assert 'title="Create a new limit schedule"' in body
 

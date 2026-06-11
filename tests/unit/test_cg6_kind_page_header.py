@@ -57,9 +57,12 @@ def writable_l2_yaml(tmp_path: Path) -> Iterator[Path]:
 
 
 # Per-kind expectations: (URL kind segment, h1 text, a phrase from the blurb).
+#
+# BX.6/11 (2026-06-11) — Account + AccountTemplate h1s rebrand to
+# the role-cardinality form. URLs unchanged.
 _PAGES = [
-    ("account", "Accounts", "ledger position"),
-    ("account_template", "Account templates", "materialize"),
+    ("account", "Roles — 1:1", "ledger position"),
+    ("account_template", "Roles — 1:N", "materialize"),
     ("rail", "Rails", "money-movement leg"),
     ("transfer_template", "Transfer templates", "two or more rails"),
     ("chain", "Chains", "Parent"),
