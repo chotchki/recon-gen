@@ -59,7 +59,7 @@ from recon_gen.common.html._components import (
 )
 from recon_gen.common.html._studio_routes import asset_url, studio_theme_head
 from recon_gen.common.html._side_panel import render_side_panel_trigger
-from recon_gen.common.ids import GlossaryAnchor, HandbookPath
+from recon_gen.common.ids import GlossaryAnchor, HandbookPath, SurfaceAnchor
 from recon_gen.common.l2.cache import L2InstanceCache
 from recon_gen.common.l2.editor import (
     SINGLETON_KINDS,
@@ -256,6 +256,44 @@ def _glossary_chip_html(spec: FieldSpec) -> str:
         aria_label=f"Open glossary entry for {spec.label}",
         extra_classes=(
             "ml-1 w-4 h-4 rounded-full border border-current "
+            "text-secondary-fg hover:text-accent hover:border-accent "
+            "text-[10px] font-semibold align-middle no-underline"
+        ),
+    )
+
+
+def _surfaces_as_chip_html(
+    anchor: SurfaceAnchor | None,
+    *,
+    field_label: str,
+) -> str:
+    """BX.13 — inline ``where?`` chip emitted next to a field's label when
+    a ``SurfaceAnchor`` is wired for the field. Opens the side-panel
+    drawer with the surfaces-as block (where the value will appear in
+    user-facing surfaces — audit PDF / dashboard headers / chart
+    accents / etc.).
+
+    Sibling to ``_glossary_chip_html`` — separate visual chip + label
+    so the operator can tell the two surfaces apart at a glance:
+
+    - ``glossary_anchor`` → ``?`` chip — "what does this term mean?"
+    - ``SurfaceAnchor`` → ``where?`` chip — "where does this value end up?"
+
+    Takes ``anchor`` directly (not a FieldSpec) because the BXa singleton
+    forms (instance / theme) are hand-rolled and don't route through the
+    standard ``FieldSpec`` dispatcher; the chip needs to plug into those
+    forms by anchor name + label. The anti-drift test pins every wired
+    anchor against the ``SURFACES_AS`` dict.
+    """
+    if not anchor:
+        return ""
+    target = f"/studio/side-panel/surfaces-as/{escape(str(anchor))}"
+    return " " + render_side_panel_trigger(
+        target,
+        label="where?",
+        aria_label=f"See where {field_label} surfaces in dashboards / audit PDF",
+        extra_classes=(
+            "ml-1 px-1.5 py-0 rounded-sm border border-current "
             "text-secondary-fg hover:text-accent hover:border-accent "
             "text-[10px] font-semibold align-middle no-underline"
         ),
@@ -4618,16 +4656,25 @@ def _singleton_yaml_text(instance: object, kind: EntityKind) -> str:
 # L2Instance fields edited per-input; description gets markdown
 # preview per BF.9. Phase CP removed role_business_day_offsets from
 # the singleton — offsets now per-Account / per-AccountTemplate.
-_INSTANCE_STRUCTURED_FIELDS: tuple[tuple[str, str, str, bool], ...] = (
-    # (form-name, label, helper, required)
+#
+# BX.13 — every entry carries an optional ``SurfaceAnchor`` pointing
+# at the SURFACES_AS entry the chip should open. ``None`` skips the
+# chip entirely (acronym has no operator-visible surface beyond
+# substitution into the institution_name string, so no chip).
+_INSTANCE_STRUCTURED_FIELDS: tuple[
+    tuple[str, str, str, bool, SurfaceAnchor | None], ...
+] = (
+    # (form-name, label, helper, required, surfaces_anchor)
     ("institution_name", "Institution name",
      "Display name surfaced in the audit PDF header + Investigation "
      "app landing prose + handbook substitution. Optional; falls back "
-     "to `cfg.deployment_name` when blank.", False),
+     "to `cfg.deployment_name` when blank.", False,
+     SurfaceAnchor("institution-name")),
     ("institution_acronym", "Institution acronym",
      "Short label (2-4 letters) used in dashboard titles + handbook "
      "substitution. Optional; \"SNB\" toggles the bundled-fixture "
-     "Sasquatch concrete examples in the docs.", False),
+     "Sasquatch concrete examples in the docs.", False,
+     None),
 )
 
 
@@ -4650,7 +4697,7 @@ def _instance_form_to_dict(form: Mapping[str, str]) -> dict[str, object]:
     per-Account / per-AccountTemplate.
     """
     out: dict[str, object] = {}
-    for fname, _, _, _ in _INSTANCE_STRUCTURED_FIELDS:
+    for fname, _, _, _, _ in _INSTANCE_STRUCTURED_FIELDS:
         v = str(form.get(fname, "")).strip()
         if v:
             out[fname] = v
@@ -4668,27 +4715,40 @@ def _instance_form_to_dict(form: Mapping[str, str]) -> dict[str, object]:
 
 
 def _render_instance_form(values: Mapping[str, str]) -> str:
-    """BXa.1 — render the instance singleton structured form body."""
+    """BXa.1 — render the instance singleton structured form body.
+
+    BX.13 — every scalar field with a ``SurfaceAnchor`` in
+    ``_INSTANCE_STRUCTURED_FIELDS`` gets an inline ``where?`` chip
+    next to its label; the Description field carries its own chip
+    pointing at ``institution-description``.
+    """
     row_cls = field_row_classes()
     input_cls = field_input_classes()
     label_cls = "font-semibold text-xs text-primary-fg"
     helper_cls = "text-xs text-secondary-fg"
     parts: list[str] = []
-    for fname, label, helper, required in _INSTANCE_STRUCTURED_FIELDS:
+    for fname, label, helper, required, surfaces in _INSTANCE_STRUCTURED_FIELDS:
         req = '<span class="text-danger"> *</span>' if required else ""
         v = values.get(fname, "")
+        surfaces_chip = _surfaces_as_chip_html(surfaces, field_label=label)
         parts.append(
             f'<div class="{row_cls}">'
-            f'<label for="field-{fname}" class="{label_cls}">{escape(label)}{req}</label>'
+            f'<label for="field-{fname}" class="{label_cls}">'
+            f'{escape(label)}{req}{surfaces_chip}</label>'
             f'<input type="text" id="field-{fname}" name="{fname}" '
             f'value="{escape(v)}" class="{input_cls}">'
             f'<small class="{helper_cls}">{escape(helper)}</small>'
             f'</div>'
         )
     desc = values.get("description", "")
+    desc_chip = _surfaces_as_chip_html(
+        SurfaceAnchor("institution-description"),
+        field_label="Description",
+    )
     parts.append(
         f'<div class="{row_cls}">'
-        f'<label for="field-description" class="{label_cls}">Description</label>'
+        f'<label for="field-description" class="{label_cls}">'
+        f'Description{desc_chip}</label>'
         f'<textarea id="field-description" name="description" rows="10" '
         f'class="{input_cls} font-mono whitespace-pre resize-y min-h-16">'
         f'{escape(desc)}</textarea>'
@@ -4703,11 +4763,24 @@ def _render_instance_form(values: Mapping[str, str]) -> str:
 
 
 # browser supports color inputs).
-_THEME_TEXT_FIELDS: tuple[tuple[str, str, str, bool], ...] = (
-    # (form-name, label, helper, required)
-    ("theme_name", "Theme name", "Short identifier (e.g. \"snb-classic\").", True),
-    ("version_description", "Version description", "One-line summary surfaced on the audit PDF cover.", True),
-    ("analysis_name_prefix", "Analysis name prefix", "Optional prefix applied to QS analysis names (\"Demo\" / null for default).", False),
+#
+# BX.13 — each tuple's 5th slot is an optional ``SurfaceAnchor`` pointing
+# at the SURFACES_AS entry; ``None`` skips the chip for that field.
+# Identity scalars + every color get a chip; analysis_name_prefix is
+# QS-internal (no operator-visible surface) so no chip.
+_THEME_TEXT_FIELDS: tuple[
+    tuple[str, str, str, bool, SurfaceAnchor | None], ...
+] = (
+    # (form-name, label, helper, required, surfaces_anchor)
+    ("theme_name", "Theme name",
+     "Short identifier (e.g. \"snb-classic\").", True,
+     SurfaceAnchor("theme-name")),
+    ("version_description", "Version description",
+     "One-line summary surfaced on the audit PDF cover.", True,
+     SurfaceAnchor("theme-version-description")),
+    ("analysis_name_prefix", "Analysis name prefix",
+     "Optional prefix applied to QS analysis names (\"Demo\" / null for default).", False,
+     None),
 )
 
 _THEME_OPTIONAL_URL_FIELDS: tuple[tuple[str, str, str], ...] = (
@@ -4715,27 +4788,48 @@ _THEME_OPTIONAL_URL_FIELDS: tuple[tuple[str, str, str], ...] = (
     ("favicon", "Favicon URL or path", "Optional. Same shape as logo."),
 )
 
-# Each tuple: (form-name, label, helper). All hex colors, rendered
-# as a paired `<input type="color">` + visible text field so the
-# operator can type a hex directly OR pick visually.
-_THEME_COLOR_FIELDS: tuple[tuple[str, str, str], ...] = (
-    ("primary_bg", "Primary background", "Page background — most surfaces."),
-    ("secondary_bg", "Secondary background", "Off-card / subtle stripe surfaces."),
-    ("primary_fg", "Primary text", "Body text colour."),
-    ("secondary_fg", "Secondary text", "Muted text, helpers, axis ticks."),
-    ("accent", "Accent", "Primary brand colour (titles, links, primary buttons)."),
-    ("accent_fg", "Accent foreground", "Text colour ON accent backgrounds (white on accent buttons)."),
-    ("link_tint", "Link tint", "Pale-accent cell tint for right-click drill backgrounds."),
-    ("danger", "Danger", "Error / negative-delta indicator."),
-    ("danger_fg", "Danger foreground", "Text on danger backgrounds."),
-    ("warning", "Warning", "Warning indicator."),
-    ("warning_fg", "Warning foreground", "Text on warning backgrounds."),
-    ("success", "Success", "Positive-delta indicator."),
-    ("success_fg", "Success foreground", "Text on success backgrounds."),
-    ("dimension", "Dimension", "Dimension-axis chip background."),
-    ("dimension_fg", "Dimension foreground", "Text on dimension chips."),
-    ("measure", "Measure", "Measure-axis chip background."),
-    ("measure_fg", "Measure foreground", "Text on measure chips."),
+# Each tuple: (form-name, label, helper, surfaces_anchor). All hex
+# colors, rendered as a paired `<input type="color">` + visible text
+# field so the operator can type a hex directly OR pick visually.
+#
+# BX.13 — every color carries an optional ``SurfaceAnchor`` pointing
+# at where the value lands in dashboards / audit PDF; ``None`` skips
+# the chip (the four surface-bg / surface-fg colours don't have a
+# single canonical "this appears here" pointer — they're everywhere —
+# so we omit the chip rather than write vague prose).
+_THEME_COLOR_FIELDS: tuple[
+    tuple[str, str, str, SurfaceAnchor | None], ...
+] = (
+    ("primary_bg", "Primary background", "Page background — most surfaces.", None),
+    ("secondary_bg", "Secondary background", "Off-card / subtle stripe surfaces.", None),
+    ("primary_fg", "Primary text", "Body text colour.", None),
+    ("secondary_fg", "Secondary text", "Muted text, helpers, axis ticks.", None),
+    ("accent", "Accent", "Primary brand colour (titles, links, primary buttons).",
+     SurfaceAnchor("theme-accent")),
+    ("accent_fg", "Accent foreground", "Text colour ON accent backgrounds (white on accent buttons).",
+     SurfaceAnchor("theme-accent-fg")),
+    ("link_tint", "Link tint", "Pale-accent cell tint for right-click drill backgrounds.",
+     SurfaceAnchor("theme-link-tint")),
+    ("danger", "Danger", "Error / negative-delta indicator.",
+     SurfaceAnchor("theme-danger")),
+    ("danger_fg", "Danger foreground", "Text on danger backgrounds.",
+     SurfaceAnchor("theme-danger-fg")),
+    ("warning", "Warning", "Warning indicator.",
+     SurfaceAnchor("theme-warning")),
+    ("warning_fg", "Warning foreground", "Text on warning backgrounds.",
+     SurfaceAnchor("theme-warning-fg")),
+    ("success", "Success", "Positive-delta indicator.",
+     SurfaceAnchor("theme-success")),
+    ("success_fg", "Success foreground", "Text on success backgrounds.",
+     SurfaceAnchor("theme-success-fg")),
+    ("dimension", "Dimension", "Dimension-axis chip background.",
+     SurfaceAnchor("theme-dimension")),
+    ("dimension_fg", "Dimension foreground", "Text on dimension chips.",
+     SurfaceAnchor("theme-dimension-fg")),
+    ("measure", "Measure", "Measure-axis chip background.",
+     SurfaceAnchor("theme-measure")),
+    ("measure_fg", "Measure foreground", "Text on measure chips.",
+     SurfaceAnchor("theme-measure-fg")),
 )
 
 
@@ -4751,7 +4845,7 @@ def _theme_form_to_dict(form: Mapping[str, str]) -> dict[str, object]:
     """
     out: dict[str, object] = {}
 
-    for fname, _, _, required in _THEME_TEXT_FIELDS:
+    for fname, _, _, required, _ in _THEME_TEXT_FIELDS:
         v = str(form.get(fname, "")).strip()
         if v:
             out[fname] = v
@@ -4798,7 +4892,7 @@ def _theme_form_to_dict(form: Mapping[str, str]) -> dict[str, object]:
         out["gradient"] = [low, high]
 
     # All 17 UI colors.
-    for fname, _, _ in _THEME_COLOR_FIELDS:
+    for fname, _, _, _ in _THEME_COLOR_FIELDS:
         v = str(form.get(fname, "")).strip()
         if v:
             out[fname] = v
@@ -4822,6 +4916,7 @@ def _theme_dict_from_instance(instance: Any) -> dict[str, object]:  # typing-sme
 def _render_color_picker_row(
     name: str, label: str, helper: str, value: str,
     *, pair_with: tuple[str, str] | None = None,
+    surfaces_anchor: SurfaceAnchor | None = None,
 ) -> str:
     """BF.8 — paired `<input type="color">` + hex text input + a
     visible preview chip.
@@ -4837,6 +4932,11 @@ def _render_color_picker_row(
     convention — bg/fg pairing), letting the operator eyeball the
     contrast in context. Without it the preview chip just fills
     with this colour solid.
+
+    ``surfaces_anchor`` (BX.13): optional pointer to a ``SURFACES_AS``
+    entry. When set, a ``where?`` chip appears next to the label so
+    the operator can see which dashboard / audit / PDF surface(s)
+    consume this value before changing it.
     """
     row_cls = field_row_classes()
     label_cls = "font-semibold text-xs text-primary-fg"
@@ -4866,9 +4966,13 @@ def _render_color_picker_row(
             f'class="rounded-sm border border-surface-border w-32 h-9" '
             f'style="background:{escape(hex_value)};"></div>'
         )
+    surfaces_chip = _surfaces_as_chip_html(
+        surfaces_anchor, field_label=label,
+    )
     return (
         f'<div class="{row_cls}">'
-        f'<label for="field-{name}-hex" class="{label_cls}">{escape(label)}</label>'
+        f'<label for="field-{name}-hex" class="{label_cls}">'
+        f'{escape(label)}{surfaces_chip}</label>'
         f'<div class="flex items-center gap-3">'
         f'<input type="color" id="field-{name}-color" '
         f'value="{escape(hex_value)}" '
@@ -4918,12 +5022,14 @@ def _render_theme_form(
         f'<fieldset class="{section_cls}">'
         f'<legend class="{section_label_cls}">Identity</legend>'
     )
-    for fname, label, helper, required in _THEME_TEXT_FIELDS:
+    for fname, label, helper, required, surfaces in _THEME_TEXT_FIELDS:
         req = '<span class="text-danger"> *</span>' if required else ""
         v = str(theme_dict.get(fname, "") or "")
+        surfaces_chip = _surfaces_as_chip_html(surfaces, field_label=label)
         parts.append(
             f'<div class="{row_cls}">'
-            f'<label for="field-{fname}" class="{label_cls}">{escape(label)}{req}</label>'
+            f'<label for="field-{fname}" class="{label_cls}">'
+            f'{escape(label)}{req}{surfaces_chip}</label>'
             f'<input type="text" id="field-{fname}" name="{fname}" '
             f'value="{escape(v)}" class="{input_cls}">'
             f'<small class="{helper_cls}">{escape(helper)}</small>'
@@ -4947,12 +5053,18 @@ def _render_theme_form(
     )
     for i in range(dc_total):
         v = str(dc_items[i]) if i < len(dc_items) else ""
+        # BX.13 — only the first series carries the section-level
+        # surfaces-as chip; the rest of the rows skip it to avoid the
+        # chip stack visually competing with the per-series colour
+        # pickers. Operator clicking any row sees the same content.
+        anchor = SurfaceAnchor("theme-data-colors") if i == 0 else None
         parts.append(
             _render_color_picker_row(
                 f"data_colors_{i}",
                 f"Series {i + 1}",
                 "Hex (e.g. #1f4e79).",
                 v,
+                surfaces_anchor=anchor,
             )
         )
     parts.append('</fieldset>')
@@ -4973,14 +5085,17 @@ def _render_theme_form(
         + _render_color_picker_row(
             "empty_fill_color", "Empty fill",
             "Colour used when a chart cell has no data.", efc,
+            surfaces_anchor=SurfaceAnchor("theme-empty-fill-color"),
         )
         + _render_color_picker_row(
             "gradient_low", "Gradient (low)",
             "Light end of the heatmap gradient.", low,
+            surfaces_anchor=SurfaceAnchor("theme-gradient"),
         )
         + _render_color_picker_row(
             "gradient_high", "Gradient (high)",
             "Dark end of the heatmap gradient.", high,
+            surfaces_anchor=SurfaceAnchor("theme-gradient"),
         )
         + '</fieldset>'
     )
@@ -4994,21 +5109,28 @@ def _render_theme_form(
         return str(theme_dict.get(fname, "") or "")
 
     def _color_label(fname: str) -> str:
-        for (n, lbl, _) in _THEME_COLOR_FIELDS:
+        for (n, lbl, _, _) in _THEME_COLOR_FIELDS:
             if n == fname:
                 return lbl
         return fname
 
     def _color_helper(fname: str) -> str:
-        for (n, _, h) in _THEME_COLOR_FIELDS:
+        for (n, _, h, _) in _THEME_COLOR_FIELDS:
             if n == fname:
                 return h
         return ""
+
+    def _color_surfaces_anchor(fname: str) -> SurfaceAnchor | None:
+        for (n, _, _, anchor) in _THEME_COLOR_FIELDS:
+            if n == fname:
+                return anchor
+        return None
 
     def _render_solo(fname: str) -> str:
         return _render_color_picker_row(
             fname, _color_label(fname), _color_helper(fname),
             _color_value(fname),
+            surfaces_anchor=_color_surfaces_anchor(fname),
         )
 
     def _render_pair(bg_name: str, fg_name: str, sample: str) -> str:
@@ -5020,11 +5142,13 @@ def _render_theme_form(
                 bg_name, _color_label(bg_name), _color_helper(bg_name),
                 _color_value(bg_name),
                 pair_with=(_color_value(fg_name), sample),
+                surfaces_anchor=_color_surfaces_anchor(bg_name),
             )
             + _render_color_picker_row(
                 fg_name, _color_label(fg_name), _color_helper(fg_name),
                 _color_value(fg_name),
                 pair_with=(_color_value(bg_name), sample),
+                surfaces_anchor=_color_surfaces_anchor(fg_name),
             )
         )
 
