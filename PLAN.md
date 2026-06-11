@@ -191,13 +191,13 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
 
 - **BV-post.snapshot-double-matview-refresh — Drop the duplicate matview refresh in trainer_ready_session._seed_demo_db** (~30s win, s effort). `_seed_demo_db` runs `refresh_matviews_sql` then Session Start's `run_deploy_pipeline → step_4_matviews` runs it again.
 
-- **BV-post.oracle-stuck-asyncio-warning — Oracle stuck_pending/stuck_unbundled asyncio executor warning** — likely same oracledb cursor pattern as 8b41b83c. ~100s win, s effort.
+- **BV-post.oracle-stuck-asyncio-warning — Oracle stuck_pending/stuck_unbundled asyncio executor warning** — initial cursor-pattern hypothesis FALSIFIED (warning persisted past 8b41b83c). Single clean-run evidence at 20260611T034334Z-00ce44c8 attributes the disappearance to f9123d2a loadgroup pin serializing trainer fixtures onto one worker per dialect (executor-thread thrash from 16 unpinned trainer fixtures, not cursor semantics). Likely the same defect as the (now-dropped) `asyncio executor not joining within 300s` BX backlog item. Confirm-or-drop on the next push-driven CI run; if warning stays absent, drop entirely.
 
 - **BV-post.typing-smell-parametrize — Parametrize `test_typing_smells::test_no_typing_smells` per rule** so AST walks parallelize across workers. Single 12.7s test holds one unit worker hostage. ~11s win, s effort.
 
 - **BV-post.n-12-vs-auto — `-n auto` → `-n 12` on unit + db tiers** (16-core Mac over-provisioned per timing analysis). ~8s win, xs effort. Verify on WSL2 self-hosted CI runner first.
 
-- **BV-post.snap-container-unify — Snapshotter container unification** (gated on loadgroup pin holding). ~4s + RAM, s effort. The `recon-gen-snap-test-pg/oracle` dedicated containers may be collapsible to prefix-isolation on the shared CB.17.k containers.
+- **BV-post.snap-container-unify — Snapshotter container unification** (loadgroup pin shipped at f9123d2a, app2 layer; gate condition met). ~4s + RAM, s effort. The `recon-gen-snap-test-pg/oracle` dedicated containers may be collapsible to prefix-isolation on the shared CB.17.k containers.
 
 - **BV-post.qs-browser-loadgroup-extension — Extend loadgroup to qs_browser tier** to restore inv/audit producer pins (silent no-ops per the `00ce44c8` stale-comment sync). Currently green so the race hazard is latent; re-validate CB.7-followup marker-deselection × loadgroup cascade hazard first.
 
@@ -229,7 +229,7 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
 
 ## CI / release pipeline followups
 
-(none currently — CI-followup.1 + CI-followup.2 shipped per ci.yml flock at .github/workflows/ci.yml:182-183 and `@pytest.mark.flaky(reruns=2)` at tests/unit/test_deploy_pipeline.py:2132.)
+(none currently — CI-followup.1 + CI-followup.2 shipped per ci.yml flock at `.github/workflows/ci.yml:183` (PG) + `:185` (Oracle) and `@pytest.mark.flaky(reruns=2)` at `tests/unit/test_deploy_pipeline.py:2132`.)
 
 ## Other
 
@@ -357,8 +357,6 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
 - **App2 KPI binding gap — Distinct Senders + per-account KPI cards render as None** — added 2026-06-04.
 - **BX backlog — recreate targeted tests for runner.py post-CB.17.d** — added 2026-06-04.
 - **BX backlog — asyncio executor not joining within 300s (thread leak signal)** — added 2026-06-04.
-- **BX backlog — Oracle container fixture: share one container across xdist workers** — added 2026-06-04.
-- **BX backlog — Trainer dogfood [pg]/[or] times out under 16-worker xdist on shared containers** — added 2026-06-04.
 - **BX backlog — Trainer Session Start hangs through browser→studio_server on CI's shared PG/Oracle (CE.4 retreat)** — added 2026-06-04.
 - **BX backlog — fetch bare public IP at deploy time for QS data source** — added 2026-06-07.
 - **BX backlog — serializer field-emit anti-drift: test gate (A) + auto-derive refactor (B)** — added 2026-06-07.
