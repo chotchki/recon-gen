@@ -93,7 +93,11 @@ from recon_gen.common.l2.primitives import (
     Period,
     TwoLegRail,
 )
-from recon_gen.common.l2.validate import L2ValidationError, validate
+from recon_gen.common.l2.validate import (
+    L2ValidationError,
+    validate,
+    validator_glossary_anchor_for,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -4897,6 +4901,54 @@ def _from_hidden_input(from_param: str | None) -> str:
     return f'<input type="hidden" name="_back_from" value="{escape(target)}">'
 
 
+def _render_global_error_banner(global_error: str | None) -> str:
+    """BX.14 — single source of truth for the rejected-save error banner.
+
+    Splits the ``[CODE]`` prefix off the message + (when it matches a
+    known validator family) renders an inline ``[?]`` trigger pointing
+    at the corresponding long-form glossary entry on the side panel.
+    Banners without a code prefix render the message bare — same shape
+    as the pre-BX.14 banner (legacy ``L2ValidationError`` callers that
+    haven't migrated, ``Field coercion failed: …`` errors that don't
+    map to a validator rule).
+    """
+    if not global_error:
+        return ""
+    # Split a leading "[CODE] " prefix off the message; everything else
+    # stays in the rendered body. A message without the bracket prefix
+    # = legacy non-BX.14 error; render as-is.
+    code: str = ""
+    body: str = global_error
+    if global_error.startswith("[") and "] " in global_error:
+        close = global_error.index("] ")
+        code = global_error[1:close]
+        body = global_error[close + 2:]
+    anchor = validator_glossary_anchor_for(code)
+    help_html = ""
+    if anchor is not None:
+        trigger_url = f"/studio/side-panel/glossary/{escape(anchor)}"
+        help_html = (
+            ' '
+            + render_side_panel_trigger(
+                trigger_url,
+                label="[?]",
+                aria_label=f"Learn more about validator rule {code}",
+                extra_classes="ml-1",
+            )
+        )
+    code_chip = (
+        f'<span class="font-mono text-xs mr-1 px-1.5 py-0.5 bg-red-100 '
+        f'rounded-sm">{escape(code)}</span>'
+        if code else ""
+    )
+    return (
+        f'<div role="alert" class="text-sm text-danger bg-red-50 border '
+        f'border-danger rounded-sm px-3 py-2 mb-3">'
+        f'{code_chip}{escape(body)}{help_html}'
+        f'</div>'
+    )
+
+
 def _render_create_page(
     kind: EntityKind,
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — needed for select_from option resolution
@@ -4989,11 +5041,7 @@ def _render_create_page(
         f'<input type="hidden" name="subtype" value="{escape(subtype)}">'
         if subtype is not None else ""
     )
-    global_err_html = (
-        f'<div role="alert" class="text-sm text-danger bg-red-50 border '
-        f'border-danger rounded-sm px-3 py-2 mb-3">{escape(global_error)}</div>'
-        if global_error else ""
-    )
+    global_err_html = _render_global_error_banner(global_error)
     intro_html = _CREATE_INTRO_BY_KIND.get(kind, "")
     # BF.1 — subtype-specific requirements banner (rail only when
     # subtype is set). Sits above the form in the right column.
@@ -5113,11 +5161,7 @@ def _render_edit_page(
         )
     else:
         fields_html = ""
-    global_err_html = (
-        f'<div role="alert" class="text-sm text-danger bg-red-50 border '
-        f'border-danger rounded-sm px-3 py-2 mb-3">{escape(global_error)}</div>'
-        if global_error else ""
-    )
+    global_err_html = _render_global_error_banner(global_error)
     intro_html = _CREATE_INTRO_BY_KIND.get(kind, "")
     rail_subtype = _rail_subtype_of(entity)
     # BF.1 — subtype-specific requirements banner on the edit page too.
@@ -5656,7 +5700,21 @@ def _render_theme_form(
     *,
     extra_data_color_slots: int = 1,
 ) -> str:
-    """BF.8 — render the structured theme form body."""
+    """BF.8 + BX.9 — render the structured theme form body.
+
+    BX.9 (2026-06-11) — essentials at the top with a live-preview card;
+    everything else collapses into a ``<details>Advanced</details>``
+    block (default-closed at DEFAULT_PRESET; default-open when any
+    advanced field is customized).
+    """
+    # BX.9 — lazy import to keep the _theme_editor_bx9 ↔
+    # _studio_editor_routes cycle one-way (the bx9 module reaches back
+    # into the field-spec tuples only at call time, not at module load).
+    from recon_gen.common.html._theme_editor_bx9 import (  # noqa: PLC0415
+        _THEME_ESSENTIAL_URL_FIELDS,
+        _render_advanced_details_open,
+        _render_theme_essentials_section,
+    )
     row_cls = field_row_classes()
     input_cls = field_input_classes()
     label_cls = "font-semibold text-xs text-primary-fg"
@@ -5670,6 +5728,19 @@ def _render_theme_form(
     )
 
     parts: list[str] = []
+
+    # BX.9 — Essentials section first, then the Advanced <details>
+    # wrapper. Everything appended below lives INSIDE the Advanced
+    # wrapper until the closing ``</div></details>`` at the end of
+    # this function.
+    color_lookup = {n: (lbl, h) for n, lbl, h, _ in _THEME_COLOR_FIELDS}
+    url_lookup = {n: (lbl, h) for n, lbl, h in _THEME_OPTIONAL_URL_FIELDS}
+    parts.append(_render_theme_essentials_section(
+        theme_dict,
+        color_field_lookup=color_lookup,
+        url_field_lookup=url_lookup,
+    ))
+    parts.append(_render_advanced_details_open(theme_dict))
 
     # Identity section.
     parts.append(
@@ -5806,22 +5877,27 @@ def _render_theme_form(
             )
         )
 
+    # BX.9 — secondary_bg promoted to Essentials; the rest of the
+    # surfaces+text fields stay here so operators tuning the body
+    # palette still see them grouped, with a back-pointer to Essentials.
     parts.append(
         f'<fieldset class="{section_cls}">'
         f'<legend class="{section_label_cls}">UI palette — surfaces + text</legend>'
-        f'<p class="{helper_cls} m-0">Page backgrounds + body text. Every panel / card across QS dashboards, the studio chrome, and the audit PDF reads from these. <strong>Pair-previews</strong> show the actual surface/text combo.</p>'
+        f'<p class="{helper_cls} m-0">Page backgrounds + body text. Every panel / card across QS dashboards, the studio chrome, and the audit PDF reads from these. <em>secondary_bg lives in Essentials above.</em></p>'
         + _render_solo("primary_bg")
-        + _render_solo("secondary_bg")
         + _render_solo("primary_fg")
         + _render_solo("secondary_fg")
         + '</fieldset>'
     )
 
+    # BX.9 — accent promoted to Essentials; this section keeps
+    # accent_fg (text on accent) + link_tint so the brand pair stays
+    # visually grouped with a back-pointer to Essentials.
     parts.append(
         f'<fieldset class="{section_cls}">'
         f'<legend class="{section_label_cls}">UI palette — brand</legend>'
-        f'<p class="{helper_cls} m-0">Accent is the primary brand colour — titles, links, primary buttons, focus rings. <code>accent_fg</code> is the text colour ON accent backgrounds (white-on-accent buttons). <code>link_tint</code> is the pale-accent wash used as the background for right-click-drill table cells.</p>'
-        + _render_pair("accent", "accent_fg", "Sample button")
+        f'<p class="{helper_cls} m-0"><code>accent_fg</code> is the text colour ON accent backgrounds (white-on-accent buttons). <code>link_tint</code> is the pale-accent wash used as the background for right-click-drill table cells. <em>The accent colour itself lives in Essentials above.</em></p>'
+        + _render_solo("accent_fg")
         + _render_solo("link_tint")
         + '</fieldset>'
     )
@@ -5845,23 +5921,33 @@ def _render_theme_form(
         + '</fieldset>'
     )
 
-    # Optional brand assets.
-    parts.append(
-        f'<fieldset class="{section_cls}">'
-        f'<legend class="{section_label_cls}">Brand assets (optional)</legend>'
+    # Optional brand assets — BX.9: logo promoted to Essentials, so
+    # only the remaining URL fields (favicon today) render here.
+    advanced_url_fields_remaining = tuple(
+        (n, l, h) for n, l, h in _THEME_OPTIONAL_URL_FIELDS
+        if n not in _THEME_ESSENTIAL_URL_FIELDS
     )
-    for fname, label, helper in _THEME_OPTIONAL_URL_FIELDS:
-        v = str(theme_dict.get(fname, "") or "")
+    if advanced_url_fields_remaining:
         parts.append(
-            f'<div class="{row_cls}">'
-            f'<label for="field-{fname}" class="{label_cls}">{escape(label)}</label>'
-            f'<input type="text" id="field-{fname}" name="{fname}" '
-            f'value="{escape(v)}" placeholder="https://… or /abs/path.png" '
-            f'class="{input_cls}">'
-            f'<small class="{helper_cls}">{escape(helper)}</small>'
-            f'</div>'
+            f'<fieldset class="{section_cls}">'
+            f'<legend class="{section_label_cls}">Brand assets (optional)</legend>'
         )
-    parts.append('</fieldset>')
+        for fname, label, helper in advanced_url_fields_remaining:
+            v = str(theme_dict.get(fname, "") or "")
+            parts.append(
+                f'<div class="{row_cls}">'
+                f'<label for="field-{fname}" class="{label_cls}">{escape(label)}</label>'
+                f'<input type="text" id="field-{fname}" name="{fname}" '
+                f'value="{escape(v)}" placeholder="https://… or /abs/path.png" '
+                f'class="{input_cls}">'
+                f'<small class="{helper_cls}">{escape(helper)}</small>'
+                f'</div>'
+            )
+        parts.append('</fieldset>')
+
+    # BX.9 — close the <details>Advanced</details> wrapper opened at
+    # the top of this function.
+    parts.append('</div></details>')
 
     return "".join(parts)
 
@@ -5883,11 +5969,7 @@ def _render_singleton_page(
     out high enough to warrant it.
     """
     label, intro_html = _SINGLETON_INTRO_BY_KIND[kind]
-    global_err_html = (
-        f'<div role="alert" class="text-sm text-danger bg-red-50 border '
-        f'border-danger rounded-sm px-3 py-2 mb-3">{escape(global_error)}</div>'
-        if global_error else ""
-    )
+    global_err_html = _render_global_error_banner(global_error)
     primary_btn = primary_button_classes()
     input_cls = field_input_classes()
     row_cls = field_row_classes()
@@ -5964,6 +6046,7 @@ def _render_list_page(
     q: str = "",
     embed: bool = False,
     base_url: str = "",
+    cascade_url: str | None = None,
 ) -> str:
     """Full HTML page — every entity of the kind rendered as a read card.
 
@@ -5984,6 +6067,21 @@ def _render_list_page(
     nesting full documents. The home page's own <head> already loads
     htmx + the editor CSS + the htmx:beforeSwap fix, so the embed
     fragment doesn't need to redeclare them.
+
+    ``cascade_url`` (standalone path only): when set, wraps the
+    search + cards + pager region in a ``<div id="list-page-body">``
+    that subscribes to ``HX-Trigger: l2-cascade-reload`` (the trigger
+    every editor save/delete emits). The wrapper re-fetches the same
+    standalone URL (preserving toolbar state — search / sort / page)
+    and uses ``hx-select="#list-page-body"`` + ``hx-swap="outerHTML"``
+    so the freshly-rendered body atomically replaces itself, the
+    deleted/saved entity's article disappears without a manual reload,
+    AND the cascade-reload listener re-attaches in the new wrapper. The
+    home page solves the same problem with its per-section ``hx-trigger``
+    pair (load + cascade) on each section body (see
+    ``_render_home_page``); standalone list pages are this fix's surface.
+    Embed mode ignores ``cascade_url`` — the home page's section body
+    owns cascade-reload there.
     """
     # CG.5 (2026-06-05): chevron + lazy-load uniformly across ALL
     # kinds. CF.4.c's count-threshold (>10 = collapse) was a graceful
@@ -6139,6 +6237,24 @@ def _render_list_page(
         f"</p>"
         f"</header>"
     )
+    # BX.new.list-cascade-reload (2026-06-11) — subscribe the standalone
+    # list page to ``l2-cascade-reload`` so a card-delete inside the page
+    # refreshes the cards grid without a manual browser reload (the bug
+    # the home page solved at X.4.f.7 via per-section hx-trigger pairs;
+    # standalone list pages lacked the same wiring until this cell).
+    # ``hx-select="#list-page-body"`` extracts the post-refresh wrapper
+    # from the full HTML response; ``hx-swap="outerHTML"`` atomically
+    # replaces the whole wrapper, so the freshly-rendered version (with
+    # its own cascade-reload trigger) takes over for the next event.
+    if cascade_url is not None:
+        cascade_attrs = (
+            f'hx-get="{escape(cascade_url)}" '
+            f'hx-trigger="l2-cascade-reload from:body" '
+            f'hx-select="#list-page-body" '
+            f'hx-swap="outerHTML"'
+        )
+    else:
+        cascade_attrs = ""
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -6150,11 +6266,13 @@ def _render_list_page(
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
   {page_header_html}
+  <div id="list-page-body" {cascade_attrs}>
   {search_wrap_open}{search_html}{search_wrap_close}
   <main id="entity-list" class="{grid_cls}">
     {cards}
   </main>
   {pager_wrap_open}{pager_html}{pager_wrap_close}
+  </div>
 </body>
 </html>
 """
@@ -6658,6 +6776,19 @@ def _make_handlers(
         # one (entry_href == "/" requires an exact match per
         # `emit_top_nav._is_active`; passing `/` from sub-pages is
         # the convention).
+        # BX.new.list-cascade-reload (2026-06-11) — `cascade_url` echoes
+        # the operator's current URL (path + raw query string) so the
+        # cascade-reload refetch preserves search / sort / page state.
+        # Embed mode skips this — the home page's section body already
+        # owns cascade-reload for the embedded fragment.
+        if embed:
+            cascade_url: str | None = None
+        else:
+            raw_query = request.url.query or ""
+            cascade_url = (
+                f"/l2_shape/{kind}/?{raw_query}" if raw_query
+                else f"/l2_shape/{kind}/"
+            )
         return HTMLResponse(
             _render_list_page(
                 kind, page_entities, inst,
@@ -6668,6 +6799,7 @@ def _make_handlers(
                 q=state.q,
                 base_url=submit_url,
                 embed=embed,
+                cascade_url=cascade_url,
             ),
         )
 
@@ -7557,6 +7689,21 @@ def _make_handlers(
             ),
         )
 
+    # BX.9 (2026-06-11) — theme editor essentials auto-save +
+    # live-preview handlers. Bound to ``_theme_dict_from_instance`` so
+    # the bx9 module doesn't have to re-import the helper from this
+    # module (cycle-safe).
+    from recon_gen.common.html._theme_editor_bx9 import (  # noqa: PLC0415
+        make_theme_field_save_handler,
+        make_theme_preview_handler,
+    )
+    theme_field_save = make_theme_field_save_handler(
+        cache, _theme_dict_from_instance,
+    )
+    theme_preview = make_theme_preview_handler(
+        cache, _theme_dict_from_instance,
+    )
+
     return {
         "list_view": list_view,
         "read_card": read_card,
@@ -7568,6 +7715,8 @@ def _make_handlers(
         "create": create,
         "preview_markdown": preview_markdown,
         "role_picker": role_picker,
+        "theme_field_save": theme_field_save,
+        "theme_preview": theme_preview,
     }
 
 
@@ -7706,6 +7855,19 @@ def make_editor_routes(
         Route(
             "/l2_shape/{kind}/new", h["new_form"], methods=["GET"],
             name="l2_shape_new_form",
+        ),
+        # BX.9 (2026-06-11) — theme editor essentials auto-save +
+        # live-preview endpoints. MUST sit BEFORE
+        # ``/l2_shape/{kind}/{entity_id}`` so Starlette doesn't match
+        # the POST against the generic save handler (which 404s on
+        # theme since it's a singleton with no entity_id).
+        Route(
+            "/l2_shape/theme/field", h["theme_field_save"],
+            methods=["POST"], name="theme_field_save",
+        ),
+        Route(
+            "/l2_shape/theme/preview", h["theme_preview"],
+            methods=["POST"], name="theme_preview",
         ),
         # BX.1 redesign — delete-confirm endpoint. Declared BEFORE
         # the bare-id read route so Starlette doesn't treat the

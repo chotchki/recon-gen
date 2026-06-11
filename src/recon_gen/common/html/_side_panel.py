@@ -301,6 +301,112 @@ GLOSSARY: dict[str, str] = {
         "Trainer Apply does, so the diagram tint matches the rows "
         "that will land — pure preview, no DB write."
     ),
+    # ---- BX.14 — validator error-family long-form entries ---------------
+    # The Studio editor's error banner reads the `[CODE]` prefix on a
+    # rejected save and renders a `[?]` trigger pointing at one of the
+    # below anchors via ``validator_glossary_anchor_for(code)``
+    # (``common/l2/validate.py``). Each family covers a class of
+    # configuration errors that share a remediation shape — so the
+    # operator who hits one U-rule for the first time learns enough to
+    # recognize the next one without re-reading.
+    "validator-uniqueness-rules": (
+        "**Uniqueness rules (U1-U7)** catch values that should be "
+        "unique across the L2 but aren't. The pattern is always the "
+        "same: two declarations claim the same identifier (an account "
+        "id, a rail name, a (parent_role, rail, direction) limit-cap "
+        "triple), and the second wins arbitrarily — which silently "
+        "corrupts dashboards, reconciler matching, or per-account "
+        "narrowing depending on the entity. Fix by renaming or "
+        "dropping the duplicate. U7 has a special shape: an account "
+        "template materializes an id that collides with a declared "
+        "standalone account, producing two display names under one "
+        "row id (the L1 dashboard's `current_daily_balances` "
+        "dropdown then advertises both labels but the WHERE clause "
+        "picks one, so narrowing breaks)."
+    ),
+    "validator-reference-rules": (
+        "**Reference rules (R1-R13)** catch a name in one entity that "
+        "doesn't resolve to anything declared elsewhere — typos in "
+        "role references, rail names, transfer-template names, "
+        "metadata keys. Each one names exactly which entity carries "
+        "the dangling reference plus which target was looked up. "
+        "Fix by either declaring the target, removing the reference, "
+        "or correcting the typo. R-rules never silently corrupt "
+        "downstream behavior — the L1 invariants would just never "
+        "fire on the affected entity — but they do mean a chunk of "
+        "your L2 is dead code."
+    ),
+    "validator-cardinality-rules": (
+        "**Cardinality rules (C1-C8c)** catch transfer templates + "
+        "chains whose leg / child structure is mathematically "
+        "ill-formed. Variable closure (C1, C3) needs exactly one "
+        "ungrouped variable leg or one element per XOR group to "
+        "solve for amount + direction; XOR groups (C1a-d) need ≥2 "
+        "distinct Variable members; chain rows (C5, C6) need ≥1 "
+        "non-duplicated child; fan-in (C8a-c) only works when the "
+        "child is a transfer template and the parent count is ≥2. "
+        "The fix is always structural — combine groups, drop "
+        "duplicates, adjust the leg direction, or restructure the "
+        "chain row."
+    ),
+    "validator-state-rules": (
+        "**State rules (S1-S6)** catch rails whose configuration "
+        "fields contradict each other or leave the rail unreconciled. "
+        "Two-leg rails need expected_net only when standalone (S1, "
+        "S2); single-leg rails need a reconciler (S3) — either a "
+        "containing transfer template or an aggregating sweep; "
+        "aggregating rails need cadence + bundles_activity (S5) "
+        "and can't appear as chain children (S4); non-aggregating "
+        "rails can't carry sweep-only fields (S6). Each error names "
+        "the misconfigured rail and the field combination at "
+        "fault."
+    ),
+    "validator-vocabulary-rules": (
+        "**Vocabulary rules (V1, V2, V1a-c)** catch values that "
+        "don't match v1's controlled vocabulary. V1 covers transfer-"
+        "template completion expressions (``business_day_end``, "
+        "``business_day_end+Nd``, ``month_end``, ``metadata.<key>``); "
+        "V2 covers aggregating-rail cadences (``intraday-Nh``, "
+        "``daily-eod``, ``daily-bod``, ``weekly-<day>``, "
+        "``monthly-eom``, ``monthly-bom``, ``monthly-<1..31>``). "
+        "V1a-c govern amount_typical_range shape (strict min<max, "
+        "both positive, forbidden on aggregators). Fix by typing the "
+        "literal exactly — these are case-sensitive matches against "
+        "fixed regexes."
+    ),
+    "validator-firings-rules": (
+        "**Firings rules (W1a-c)** catch malformed "
+        "firings_typical_per_period bands on rails + transfer "
+        "templates. W1a: lower bound ≤ upper bound. W1b: both "
+        "endpoints zero or higher (zero allowed — a seasonal rail "
+        "may fire zero times in some periods). W1c: forbidden on "
+        "aggregating rails because the cadence field already "
+        "governs sweep frequency, so a count band would conflict. "
+        "Fix by adjusting the band — or, on an aggregator, drop "
+        "the field entirely."
+    ),
+    "validator-origin-rules": (
+        "**Origin rules (O1)** catch rails that don't resolve to an "
+        "Origin class on every leg. Single-leg rails MUST set "
+        "``origin`` directly. Two-leg rails can set rail-level "
+        "``origin`` (covers both legs), provide both ``source_origin`` "
+        "AND ``destination_origin`` (per-leg control), or set one "
+        "per-leg override plus rail-level ``origin`` as the "
+        "fallback for the unspecified leg. Origin drives whether L1 "
+        "looks for an external-system reference (trace ID, IMAD) or "
+        "an internal initiator — leaving a leg unresolved means the "
+        "PostedRequirements check has no anchor."
+    ),
+    "validator-scope-rules": (
+        "**Scope rules (M1+)** catch fields that conflict with an "
+        "account or template's scope. The current one (M1): "
+        "scope='external' accounts and templates have no end-of-day "
+        "balance row, so a ``business_day_offset`` would have nowhere "
+        "to land. Fix by either dropping the offset (the typical "
+        "copy-paste-from-internal fix) or changing scope to "
+        "'internal' (rare — external accounts are by definition "
+        "outside the institution's ledger)."
+    ),
 }
 
 
