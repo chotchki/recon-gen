@@ -63,7 +63,6 @@ from recon_gen.common.html._delete_confirm import (
     build_reference_graph,
     find_references as _find_references,
     render_active_delete_button,
-    render_active_delete_button_inner,
     render_countdown_swap,
     render_refused_delete_button,
     verify_confirm_token,
@@ -7309,40 +7308,6 @@ def _make_handlers(
         )
         return HTMLResponse(swap_html)
 
-    async def delete_cancel_handler(request: Request) -> HTMLResponse:
-        """BX.1 redesign (2026-06-11) — GET
-        /l2_shape/<kind>/<id>/delete-cancel: returns the at-rest
-        active Delete button (innerHTML swap) so the wrapper goes
-        back to the initial state, ready for a fresh Delete click.
-
-        The wrapper itself survives the swap; only its innerHTML is
-        replaced with the bare active-button anchor (no wrapper
-        open/close — those came from the surrounding template).
-        """
-        kind = _kind_from_path(request.path_params["kind"])
-        url_seg = request.path_params["entity_id"]
-        if kind is None or kind not in _FIELD_SPECS_BY_KIND:
-            return HTMLResponse("not editable", status_code=404)
-        instance = cache.get()
-        resolved_entity, _canonical = _resolve_url_entity_id(
-            instance, kind, url_seg,
-        )
-        if resolved_entity is None:
-            # Entity is gone — return empty so the wrapper just
-            # blanks out. The cascade-reload listener will refresh
-            # the relevant section.
-            return HTMLResponse("")
-        url_id = _url_entity_id(kind, resolved_entity)
-        from_source = request.query_params.get("from", "")
-        surface: Literal["card", "form"] = (
-            "form" if from_source == "edit" else "card"
-        )
-        return HTMLResponse(
-            render_active_delete_button_inner(
-                kind, url_id, surface=surface,
-            ),
-        )
-
     async def preview_markdown(request: Request) -> HTMLResponse:
         """BF.9 (2026-05-25) — markdown → HTML preview endpoint.
 
@@ -7407,7 +7372,6 @@ def _make_handlers(
         "save": save,
         "delete": delete_handler,
         "delete_confirm": delete_confirm_handler,
-        "delete_cancel": delete_cancel_handler,
         "new_form": new_form,
         "create": create,
         "preview_markdown": preview_markdown,
@@ -7526,9 +7490,9 @@ def make_editor_routes(
     h = _make_handlers(cache, top_nav_fn=top_nav_fn)
     # ``/new`` MUST be declared before ``/{entity_id}`` so Starlette's
     # path matcher doesn't treat the literal "new" as an entity_id.
-    # BX.1 redesign (2026-06-11): the cancel endpoint now lives at
-    # ``/l2_shape/<kind>/<id>/delete-cancel`` (in-place wrapper-
-    # innerHTML swap restores the active-state Delete button).
+    # BX.1 polish (2026-06-11): the delete-cancel endpoint was dropped
+    # with the Cancel link itself — if the operator changes their mind
+    # during the countdown they navigate away or reload.
     routes: list[Route] = [
         Route(
             "/l2_shape/{kind}/", h["list_view"], methods=["GET"],
@@ -7551,18 +7515,13 @@ def make_editor_routes(
             "/l2_shape/{kind}/new", h["new_form"], methods=["GET"],
             name="l2_shape_new_form",
         ),
-        # BX.1 redesign — delete-confirm + delete-cancel endpoints.
-        # Both declared BEFORE the bare-id read route so Starlette
-        # doesn't treat the literal segment as an entity_id.
+        # BX.1 redesign — delete-confirm endpoint. Declared BEFORE
+        # the bare-id read route so Starlette doesn't treat the
+        # literal segment as an entity_id.
         Route(
             "/l2_shape/{kind}/{entity_id}/delete-confirm",
             h["delete_confirm"],
             methods=["GET"], name="l2_shape_delete_confirm",
-        ),
-        Route(
-            "/l2_shape/{kind}/{entity_id}/delete-cancel",
-            h["delete_cancel"],
-            methods=["GET"], name="l2_shape_delete_cancel",
         ),
         Route(
             "/l2_shape/{kind}/{entity_id}", h["read_card"],

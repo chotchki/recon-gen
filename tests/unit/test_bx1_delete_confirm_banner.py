@@ -40,13 +40,13 @@ TestClient = pytest.importorskip("starlette.testclient").TestClient
 from recon_gen.common.html import _delete_confirm
 from recon_gen.common.html._delete_confirm import (
     COUNTDOWN_SECS,
+    REFUSED_TOOLTIP_TEXT,
     EntityRef,
     ReferenceGraph,
     build_reference_graph,
     find_references,
     make_confirm_token,
     render_active_delete_button,
-    render_active_delete_button_inner,
     render_countdown_swap,
     render_refused_delete_button,
     verify_confirm_token,
@@ -270,10 +270,16 @@ def test_active_button_form_surface_carries_from_edit() -> None:
 
 def test_refused_button_carries_disabled_attrs_and_reason() -> None:
     """Refs non-empty → refused state → anchor with
-    ``aria-disabled="true"``, ``data-delete-state="refused"``, the
-    reason in ``title`` AND ``data-delete-reason`` so the e2e
-    driver can read the reason without triggering the tooltip
-    render."""
+    ``aria-disabled="true"``, ``data-delete-state="refused"``, a
+    terse ``title`` (REFUSED_TOOLTIP_TEXT) for the hover surface,
+    AND the detailed referrer list in ``data-delete-reason`` so the
+    e2e driver / power users can read the underlying refs without
+    cluttering the tooltip.
+
+    Per the 2026-06-11 polish: the prior verbose "Referenced by …"
+    in ``title`` was noise — the operator just wants to know the
+    button is unavailable.
+    """
     refs = (
         EntityRef(
             referrer_kind="transfer_template",
@@ -288,14 +294,17 @@ def test_refused_button_carries_disabled_attrs_and_reason() -> None:
     assert 'data-delete-state="refused"' in html
     assert 'aria-disabled="true"' in html
     assert 'data-delete-ref-count="1"' in html
-    # Reason text reads banking-domain-readable per
+    # Detailed reason still lives in data-delete-reason (driver
+    # introspection + power users): banking-domain readable per
     # `[project_design_north_stars]`. NOT "FK violation".
     assert 'data-delete-reason="' in html
     assert "TransferTemplate" in html
     assert "ExternalReconciliationCycle" in html
     assert "leg_rails" in html
-    # Tooltip-friendly title carries the same text.
-    assert 'title="Referenced by' in html
+    # Tooltip-friendly title is TERSE — operator-facing primary
+    # surface. The detailed list does NOT bleed into title.
+    assert f'title="{REFUSED_TOOLTIP_TEXT}"' in html
+    assert 'title="Referenced by' not in html
     # No hx-get on the refused anchor — clicking does nothing.
     assert "hx-get=" not in html
     # Wrapper still present so a future state change (operator
@@ -335,11 +344,12 @@ def test_refused_button_caps_reason_at_three_referrers() -> None:
 
 
 def test_countdown_swap_carries_state_and_ready_after_ms() -> None:
-    """Countdown swap body: Confirm anchor with
+    """Countdown swap body: SINGLE Confirm anchor with
     ``data-delete-state="countdown"``, ``aria-disabled``, the
     ``data-ready-after-ms`` wall time + the visible label "Confirming…
-    Ns". Sibling Cancel link points at the in-place cancel endpoint
-    targeting ``closest [data-delete-wrapper]``."""
+    Ns". Per the 2026-06-11 polish, NO Cancel sibling — if the
+    operator changes their mind they navigate away or reload.
+    """
     html = render_countdown_swap(
         "account", "cust-001", "cust-001",
         countdown_secs=5.0,
@@ -358,9 +368,10 @@ def test_countdown_swap_carries_state_and_ready_after_ms() -> None:
     # signed confirm token (verifier round-trip below).
     assert 'hx-delete="/l2_shape/account/cust-001?confirm_token=' in html
     assert 'hx-target="closest [data-delete-wrapper]"' in html
-    # Cancel link → wrapper innerHTML restored to active state.
-    assert 'data-role="card-delete-cancel"' in html
-    assert 'hx-get="/l2_shape/account/cust-001/delete-cancel"' in html
+    # NO Cancel sibling anywhere.
+    assert "card-delete-cancel" not in html
+    assert "/delete-cancel" not in html
+    assert ">Cancel<" not in html
 
 
 def test_countdown_swap_zero_seconds_arrives_ready() -> None:
@@ -384,32 +395,17 @@ def test_countdown_swap_zero_seconds_arrives_ready() -> None:
 
 def test_countdown_swap_form_surface_carries_from_edit() -> None:
     """Form surface (edit page) appends ``&from=edit`` to the
-    hx-delete URL + ``?from=edit`` to the cancel URL so the
-    post-delete handler redirects to the list page."""
+    hx-delete URL so the post-delete handler redirects to the list
+    page instead of leaving the operator on a stale edit form.
+    """
     html = render_countdown_swap(
         "account", "cust-001", "cust-001",
         countdown_secs=1.0, surface="form",
     )
     assert "&from=edit" in html
-    assert (
-        'hx-get="/l2_shape/account/cust-001/delete-cancel?from=edit"'
-        in html
-    )
-
-
-def test_render_active_delete_button_inner_returns_no_wrapper() -> None:
-    """The Cancel endpoint returns just the inner anchor (no
-    wrapper open/close) so the existing wrapper survives the swap
-    and only its innerHTML changes back to the active state."""
-    html = render_active_delete_button_inner(
-        "account", "cust-001", surface="card",
-    )
-    # No wrapper <span> emitted — the existing wrapper survives the
-    # swap. The hx-target attr "closest [data-delete-wrapper]" still
-    # contains the literal string; assert against the opening tag.
-    assert "<span data-delete-wrapper" not in html
-    assert 'data-delete-state="active"' in html
-    assert 'hx-get="/l2_shape/account/cust-001/delete-confirm"' in html
+    # No Cancel sibling — the form surface lost it too in the
+    # 2026-06-11 polish.
+    assert "/delete-cancel" not in html
 
 
 # ---------------------------------------------------------------------------
@@ -460,14 +456,15 @@ def test_get_delete_confirm_returns_countdown_swap(
 ) -> None:
     """GET /l2_shape/account/cust-002/delete-confirm returns the
     countdown swap body (cust-002 has no incoming refs). NOT a
-    full-banner aside."""
+    full-banner aside, and NO Cancel sibling (2026-06-11 polish)."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps
         resp = c.get("/l2_shape/account/cust-002/delete-confirm")
     assert resp.status_code == 200
     assert 'data-delete-state="countdown"' in resp.text
-    # Cancel sibling link.
-    assert 'data-role="card-delete-cancel"' in resp.text
+    # No Cancel sibling — operator navigates away if they change
+    # their mind.
+    assert "card-delete-cancel" not in resp.text
     # NO page-level banner shape.
     assert 'data-test-delete-banner' not in resp.text
     assert "#delete-confirm-banner-slot" not in resp.text
@@ -493,20 +490,16 @@ def test_get_delete_confirm_returns_refused_when_stale_tab_referenced(
     assert 'data-delete-state="countdown"' not in resp.text
 
 
-def test_get_delete_cancel_returns_active_button(
+def test_delete_cancel_endpoint_is_removed(
     writable_l2_yaml: Path,
 ) -> None:
-    """GET /l2_shape/account/cust-002/delete-cancel returns the
-    active-state Delete anchor (no wrapper — wrapper-innerHTML swap
-    preserves the existing wrapper). The hx-target attribute carries
-    "closest [data-delete-wrapper]" so the literal string still
-    appears in the response; assert against the opening tag instead."""
+    """2026-06-11 polish — the /delete-cancel endpoint is gone
+    alongside the Cancel link. A direct GET returns 404 (Starlette
+    has no route to match it)."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps
         resp = c.get("/l2_shape/account/cust-002/delete-cancel")
-    assert resp.status_code == 200
-    assert 'data-delete-state="active"' in resp.text
-    assert "<span data-delete-wrapper" not in resp.text
+    assert resp.status_code == 404
 
 
 def test_delete_during_countdown_rejected_with_too_early(

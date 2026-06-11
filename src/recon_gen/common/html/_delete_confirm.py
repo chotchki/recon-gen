@@ -22,10 +22,10 @@ The Delete UI has three render-time states + one post-click state:
 
 3. **countdown** (post-click swap response) — anchor text counts
    "Confirming… 5s" → 4 → 3 → 2 → 1, then changes to "Confirm delete"
-   and becomes clickable. Sibling "Cancel" link is always present;
-   clicking it ``hx-get``s the cancel endpoint which swaps the
-   wrapper back to the active button. The anchor fires ``hx-delete``
-   to the real DELETE endpoint with a signed confirm token.
+   and becomes clickable. No Cancel link: per the 2026-06-11 operator
+   polish, if the operator changes their mind they navigate away or
+   reload — Cancel was noise. The anchor fires ``hx-delete`` to the
+   real DELETE endpoint with a signed confirm token.
 
 4. **ready** (countdown reached zero, JS flips state) — same DOM
    element as countdown; only ``data-delete-state`` changes from
@@ -577,13 +577,16 @@ def render_active_delete_button(
     )
 
 
-def render_active_delete_button_inner(
-    kind: EntityKind, url_id: str, *, surface: Literal["card", "form"],
-) -> str:
-    """Render JUST the active-state anchor (no wrapper) — the Cancel
-    endpoint returns this so the existing wrapper is preserved and
-    only the innerHTML swaps back to the at-rest state."""
-    return _active_button_html(kind, url_id, surface=surface)
+REFUSED_TOOLTIP_TEXT: str = "In use — linked to other entities"
+"""Operator-facing terse tooltip for the refused Delete state.
+
+Per the 2026-06-11 polish: the prior verbose "Referenced by
+TransferTemplate: ExternalReconciliationCycle (leg_rails)" form was
+noise in the hover surface. The terse text rides in ``title``; the
+detailed referrer list still lives in ``data-delete-reason`` for
+driver introspection / power users (matching
+``[feedback_browser_drivers_user_facing_locators]``).
+"""
 
 
 def render_refused_delete_button(
@@ -595,16 +598,17 @@ def render_refused_delete_button(
 ) -> str:
     """Render the refused Delete anchor (state="refused") wrapped.
 
-    Refs are non-empty → anchor renders disabled with the reason in
-    ``title`` (browser-native tooltip on hover/focus) AND ``data-
-    delete-reason`` (driver introspection without triggering tooltip
-    render).
+    Refs are non-empty → anchor renders disabled with the terse
+    ``REFUSED_TOOLTIP_TEXT`` in ``title`` (browser-native tooltip on
+    hover/focus) AND the detailed referrer list in
+    ``data-delete-reason`` (driver introspection / power users without
+    cluttering the hover surface).
 
-    Per ``[project_design_north_stars]`` the reason reads
-    "Referenced by Rail: customer_ach_inbound (leg_rails); …" — list
-    each referrer with kind: id, comma-separated; the via_field
+    Per ``[project_design_north_stars]`` the detailed reason still
+    reads "Referenced by Rail: customer_ach_inbound (leg_rails); …" —
+    list each referrer with kind: id, comma-separated; the via_field
     suffix shows WHICH field carries the reference (so the operator
-    knows where to edit).
+    knows where to edit). Only the tooltip surface got terse.
     """
     data_role = "card-delete" if surface == "card" else "form-delete"
     reason = _format_refused_reason(refs)
@@ -624,7 +628,7 @@ def render_refused_delete_button(
         f'data-delete-reason="{escape(reason)}" '
         f'data-delete-ref-count="{len(refs)}" '
         f'aria-disabled="true" '
-        f'title="{escape(reason)}" '
+        f'title="{escape(REFUSED_TOOLTIP_TEXT)}" '
         # Keyboard-focusable for tooltip parity (focus reveals title
         # in most browsers via the accessibility tree).
         f'tabindex="0" '
@@ -685,8 +689,11 @@ def render_countdown_swap(
     """Render the post-click swap body (state="countdown" → "ready").
 
     Returned by the ``/delete-confirm`` GET endpoint. The HX-swap
-    replaces the wrapper's innerHTML so only this body changes
-    (Confirm + Cancel pair); the wrapper itself stays in place.
+    replaces the wrapper's innerHTML so only this body changes (a
+    single Confirm anchor — Cancel was dropped in the 2026-06-11
+    polish); the wrapper itself stays in place. If the operator
+    changes their mind during the countdown they navigate away or
+    reload — no Cancel click target needed.
 
     ``entity_id`` is the L2-canonical composite key (used to sign the
     HMAC confirm token — the DELETE handler resolves the URL form
@@ -746,22 +753,6 @@ def render_countdown_swap(
         f'<span data-delete-confirm-label>{escape(countdown_label)}</span>'
         f'</a>'
     )
-    cancel_cls = (
-        "text-xs text-secondary-fg cursor-pointer hover:underline "
-        "hover:text-primary-fg ml-1"
-    )
-    cancel_url = (
-        f"/l2_shape/{escape(kind)}/{escape(url_id)}/delete-cancel"
-    )
-    if surface == "form":
-        cancel_url += "?from=edit"
-    cancel_btn = (
-        f'<a class="{cancel_cls}" '
-        f'data-role="card-delete-cancel" '
-        f'hx-get="{cancel_url}" '
-        f'hx-target="closest [data-delete-wrapper]" hx-swap="innerHTML" '
-        f'onclick="{_card_click_guard}">Cancel</a>'
-    )
     # Inline JS: countdown ticker, flips state attr to "ready" at 0.
     # Identified by the per-swap unique id so post-HTMX-eval the
     # script finds the button reliably. 250ms tick tolerates
@@ -796,4 +787,4 @@ def render_countdown_swap(
         )
     else:
         script = ""
-    return f"{btn}{cancel_btn}{script}"
+    return f"{btn}{script}"

@@ -657,17 +657,15 @@ def test_browser_card_delete_disabled_when_referenced(
     """BX.1 redesign — when an entity has incoming references the
     Delete button renders in the REFUSED state at render time:
     ``aria-disabled="true"``, ``data-delete-state="refused"``, a
-    ``title`` tooltip + ``data-delete-reason`` carrying the reason
-    text.
+    TERSE ``title`` tooltip ("In use — linked to other entities" per
+    the 2026-06-11 polish) + the detailed referrer list in
+    ``data-delete-reason`` for driver introspection / power users.
 
     Picks ``ReconciliationLeg`` rail — referenced by
     ``ExternalReconciliationCycle.leg_rails`` in spec_example.
 
     The button is functionally disabled: clicking does nothing (no
     hx-get; the onclick guard suppresses the parent details toggle).
-    The reason text reads banking-domain (per
-    ``[project_design_north_stars]``): "Referenced by
-    TransferTemplate: ExternalReconciliationCycle (leg_rails)".
     """
     import shutil
     fixture_src = (
@@ -701,7 +699,7 @@ def test_browser_card_delete_disabled_when_referenced(
         # aria-disabled set so screen-readers + the e2e driver see
         # the disabled affordance.
         assert delete_anchor.get_attribute("aria-disabled") == "true"
-        # Reason text in title + data-delete-reason carries the
+        # Detailed reason in data-delete-reason carries the
         # operator-readable referrer list (banking-domain readable
         # per `[project_design_north_stars]`).
         reason = delete_anchor.get_attribute("data-delete-reason") or ""
@@ -715,13 +713,19 @@ def test_browser_card_delete_disabled_when_referenced(
         assert "leg_rails" in reason, (
             f"Reason text missing via_field hint: {reason!r}"
         )
-        # title attr matches data-delete-reason (browser-native
-        # tooltip on hover/focus).
+        # title attr is TERSE per the 2026-06-11 polish — operator-
+        # facing hover surface stays clean. The detailed list lives
+        # ONLY in data-delete-reason (asserted above).
         title = delete_anchor.get_attribute("title") or ""
-        assert title == reason, (
-            f"title ({title!r}) must mirror data-delete-reason "
-            f"({reason!r}) so the visible tooltip + the driver-side "
-            f"introspection see the same reason text."
+        assert title == "In use — linked to other entities", (
+            f"title ({title!r}) must be the terse refused-tooltip "
+            f"text — the detailed referrer list belongs in "
+            f"data-delete-reason, not the hover surface."
+        )
+        # Negative check: the detailed list MUST NOT bleed into title.
+        assert "TransferTemplate" not in title, (
+            f"title ({title!r}) leaked the detailed referrer kind — "
+            f"that surface is reserved for data-delete-reason."
         )
         # Clicking the refused button MUST NOT cascade — no countdown
         # swap, no <details> toggle. The onclick guard absorbs the
