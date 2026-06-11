@@ -138,6 +138,91 @@ GLOSSARY: dict[str, str] = {
         "The Probe page evaluates predicates against observed rows + "
         "shows per-cell ✓/✗."
     ),
+    # ---- BX.12 — Rail / Chain / LimitSchedule per-field vocabulary -------
+    # Cold-read v1a flagged these as the highest-friction terms a banker
+    # hits when editing L2 entities in the Studio. Banker-readable prose
+    # (CPA framing, not engineering jargon) per project_design_north_stars.
+    "posted-requirements": (
+        "**Posted requirements** are the rail-specific fields the L1 "
+        "PostedRequirements view requires every posted Transaction to "
+        "carry beyond the auto-derived TransferKey + chain-Required "
+        "fields. Think of them as the line items your reconciler "
+        "*must* be able to fill in before a transaction is considered "
+        "complete (e.g., for an ACH credit: trace number, effective "
+        "date). One per line. Anything missing surfaces on the L1 "
+        "Today's Exceptions table as a Posted-Requirements violation."
+    ),
+    "bundles-activity": (
+        "**Bundles activity** lists the rails or transfer templates "
+        "whose Transactions this aggregating rail rolls up into one "
+        "sweep / batch posting. Example: a daily ACH-batch sweep rail "
+        "would bundle every customer-DDA ACH-debit firing from the day. "
+        "L1 Conservation reconciles the sweep amount against the sum of "
+        "the bundled activity — if they disagree, the breach surfaces on "
+        "the Exceptions table. Applies only when ``aggregating = true``."
+    ),
+    "cadence": (
+        "**Cadence** is the firing schedule for an aggregating rail — "
+        "the frequency at which the sweep / batch posts. Common shapes: "
+        "``daily-eod`` (one posting at end of day), ``intraday-2h`` "
+        "(every two hours during business hours), ``weekly`` (one per "
+        "week). Time-invariant in v1 (no per-quarter or per-month "
+        "overrides). Required when ``aggregating = true``; ignored "
+        "when the rail fires per-Transfer."
+    ),
+    "origin-overrides": (
+        "**Origin overrides** let a Two-leg rail declare a different "
+        "Origin class per leg — useful when the rail straddles your "
+        "ledger and a counterparty's. Example: an ACH-credit rail has "
+        "the customer's side as **ExternalForcePosted** (the bank "
+        "receives the wire and must post it) and the internal "
+        "settlement leg as **InternalInitiated** (your ops team books "
+        "it). Leave blank to use the rail-level Origin for both legs. "
+        "Origin drives whether L1 looks for an external-system "
+        "reference (trace ID, IMAD) or an internal initiator."
+    ),
+    "xor": (
+        "**XOR** (exclusive-or) means *exactly one* of the candidate "
+        "children fires per parent firing. Cold-read framing: \"the "
+        "parent firing has multiple ways to satisfy itself, and the "
+        "demo / your ETL picks one per cycle.\" Example: a "
+        "MerchantSettlement parent may settle as Charge-Settlement OR "
+        "Charge-Reversal — never both, never neither. A chain with one "
+        "child is **Required** (the child always fires); a chain with "
+        "two-or-more children is XOR. L1 Chain Compliance flags any "
+        "parent firing that produced ≠1 child."
+    ),
+    "fan-in": (
+        "**Fan-in** is N-to-1 chaining: N parent firings collectively "
+        "settle into ONE child firing. Example: 50 individual "
+        "ACH-credit Transfers (each one a parent firing) all roll up "
+        "into a single daily ACH-batch sweep (the one child firing). "
+        "The opposite of the default 1:1 (or XOR 1-of-N) chain. Per "
+        "validator C8a, fan-in is only allowed when the child is a "
+        "**TransferTemplate** (not a bare Rail) — the template owns "
+        "the bundling semantics."
+    ),
+    "expected-parent-count": (
+        "**Expected parent count** (``epc``) is the typical or "
+        "contractual number of parent firings that should fan-in to "
+        "ONE child. Example: a daily ACH-batch child expects ~200 "
+        "parent ACH-credit Transfers; setting ``epc=200`` tells L1 "
+        "Limit Breach + Chain Compliance to flag any day where the "
+        "fan-in count is materially off (suggests a missing batch or "
+        "an unprocessed wave). Leave blank to skip the count check; "
+        "the chain still validates as fan-in shape."
+    ),
+    "direction": (
+        "**Direction** picks which side of a flow the LimitSchedule "
+        "cap watches. **Outbound** = money leaving the parent role's "
+        "children (the classic per-rail send cap — e.g., \"customers "
+        "can't wire more than $X/day\"). **Inbound** = money arriving "
+        "(the AML / structuring threshold — e.g., \"flag any customer "
+        "receiving more than $Y/day in cash deposits\"). The same "
+        "(parent_role, rail) pair may carry **both** an Outbound and "
+        "an Inbound LimitSchedule; the duplicate-detection key is the "
+        "(parent_role, rail, direction) triple."
+    ),
 }
 
 

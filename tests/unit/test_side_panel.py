@@ -75,6 +75,23 @@ def test_glossary_includes_load_bearing_l2_terms() -> None:
         assert must_have in GLOSSARY, f"missing must-have term {must_have!r}"
 
 
+def test_glossary_includes_bx12_per_field_terms() -> None:
+    """BX.12 — the per-field vocabulary the cold-read v1a flagged as
+    needing inline ``[?]`` triggers on the L2 entity edit pages. Pin
+    these so a silent rename / removal breaks loudly here, not at the
+    operator's first click on the chip."""
+    for must_have in (
+        # Rail
+        "posted-requirements", "bundles-activity", "cadence",
+        "origin-overrides",
+        # Chain
+        "xor", "fan-in", "expected-parent-count",
+        # LimitSchedule
+        "direction",
+    ):
+        assert must_have in GLOSSARY, f"missing BX.12 term {must_have!r}"
+
+
 # -- Render helpers --------------------------------------------------------
 
 
@@ -247,3 +264,142 @@ def test_glossary_term_route_is_case_insensitive(
         body_upper = c.get("/studio/side-panel/glossary/RAIL").text
     # Same content (display name normalization is uniform).
     assert body_lower == body_upper
+
+
+# -- BX.12 — FieldSpec.glossary_anchor anti-drift -------------------------
+
+
+def _all_field_spec_anchors() -> list[tuple[str, str, str]]:
+    """Collect every (kind, field_name, anchor) triple from the editor's
+    per-kind FieldSpec lists. Used by both directions of the anti-drift
+    test (anchor → GLOSSARY + chip → field reachable from page)."""
+    from recon_gen.common.html._studio_editor_routes import (
+        _FIELD_SPECS_BY_KIND,
+    )
+    triples: list[tuple[str, str, str]] = []
+    for kind, specs in _FIELD_SPECS_BY_KIND.items():
+        for spec in specs:
+            if spec.glossary_anchor is not None:
+                triples.append((kind, spec.name, str(spec.glossary_anchor)))
+    return triples
+
+
+def test_every_field_spec_glossary_anchor_resolves_to_glossary() -> None:
+    """BX.12 anti-drift: every FieldSpec.glossary_anchor MUST point to
+    a real GLOSSARY key. A typo here breaks at sessionstart, not at
+    the operator's first click on the chip."""
+    triples = _all_field_spec_anchors()
+    # Should have shipped at least one anchor — guard against the
+    # entire wiring layer getting deleted in a refactor without anyone
+    # noticing.
+    assert triples, "no FieldSpec carries glossary_anchor — wiring removed?"
+    for kind, field_name, anchor in triples:
+        assert anchor in GLOSSARY, (
+            f"{kind}.{field_name} carries glossary_anchor={anchor!r} but "
+            f"GLOSSARY has no such key. Add the entry to "
+            f"common/html/_side_panel.py::GLOSSARY or fix the anchor."
+        )
+
+
+def test_bx12_load_bearing_anchors_wired_into_field_specs() -> None:
+    """BX.12 — pin the cold-read-flagged per-field anchors to their
+    target FieldSpec so a future cleanup that drops them surfaces
+    here, not in a cold-read regression. Maps (kind, field) → anchor.
+    """
+    expected_wirings = {
+        ("rail", "posted_requirements"): "posted-requirements",
+        ("rail", "bundles_activity"): "bundles-activity",
+        ("rail", "cadence"): "cadence",
+        ("rail", "source_origin"): "origin-overrides",
+        ("rail", "destination_origin"): "origin-overrides",
+        ("chain", "children"): "xor",
+        ("limit_schedule", "direction"): "direction",
+    }
+    actual = {
+        (kind, field): anchor
+        for kind, field, anchor in _all_field_spec_anchors()
+    }
+    for key, expected_anchor in expected_wirings.items():
+        kind, field = key
+        assert key in actual, (
+            f"{kind}.{field} lost its glossary_anchor wiring — "
+            f"expected {expected_anchor!r}"
+        )
+        assert actual[key] == expected_anchor, (
+            f"{kind}.{field} anchor drifted: expected "
+            f"{expected_anchor!r}, got {actual[key]!r}"
+        )
+
+
+def test_glossary_chip_emits_side_panel_trigger() -> None:
+    """The ``_glossary_chip_html`` helper emits the same
+    ``data-side-panel-trigger`` shape the drawer JS recognizes. Verifies
+    the chip is wired through ``render_side_panel_trigger`` rather than
+    hand-rolling a button (which would silently miss future trigger-
+    semantics changes)."""
+    from recon_gen.common.html._studio_editor_routes import (
+        FieldSpec,
+        _glossary_chip_html,
+    )
+    from recon_gen.common.ids import GlossaryAnchor
+
+    spec = FieldSpec(
+        name="cadence",
+        label="Cadence",
+        helper="",
+        kind="text",
+        glossary_anchor=GlossaryAnchor("cadence"),
+    )
+    html = _glossary_chip_html(spec)
+    assert html.strip(), "non-empty when anchor set"
+    assert "data-side-panel-trigger" in html
+    assert "/studio/side-panel/glossary/cadence" in html
+    assert 'aria-label="Open glossary entry for Cadence"' in html
+    # When anchor is None → empty string (caller concatenates).
+    spec_empty = FieldSpec(name="x", label="X", helper="", kind="text")
+    assert _glossary_chip_html(spec_empty) == ""
+
+
+def test_rail_chain_limitschedule_edit_pages_contain_glossary_chips(
+    writable_l2_yaml: Path,
+) -> None:
+    """Per-page wiring check: hit the Rail / Chain / LimitSchedule edit
+    fragments + verify the BX.12 chips actually land in the rendered
+    HTML. Catches "FieldSpec has anchor but renderer skips it"
+    regressions (e.g., a future kind-specific renderer that forgets to
+    call ``_glossary_chip_html``)."""
+    from recon_gen.common.l2.cache import L2InstanceCache
+
+    cache = L2InstanceCache.from_path(writable_l2_yaml)
+    instance = cache.get()
+
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
+        # Rail: pick the first rail in the L2 + hit its edit fragment.
+        rail_name = str(instance.rails[0].name)
+        rail_resp = c.get(f"/l2_shape/rail/{rail_name}/edit")
+        assert rail_resp.status_code == 200, rail_resp.text
+        rail_body = rail_resp.text
+        # `cadence` is rail-universal (always renders); the chip MUST
+        # appear. The same for `posted_requirements`.
+        assert "/studio/side-panel/glossary/cadence" in rail_body
+        assert "/studio/side-panel/glossary/posted-requirements" in rail_body
+
+        # Chain: first chain in the L2. Composite key shape
+        # ``<parent>::<sorted-children-csv>`` per editor lookup.
+        if instance.chains:
+            ch = instance.chains[0]
+            children_csv = ",".join(sorted(str(c.name) for c in ch.children))
+            chain_id = f"{ch.parent}::{children_csv}"
+            chain_resp = c.get(f"/l2_shape/chain/{chain_id}/edit")
+            assert chain_resp.status_code == 200, chain_resp.text
+            assert "/studio/side-panel/glossary/xor" in chain_resp.text
+
+        # LimitSchedule: first one in the L2. Composite key shape
+        # ``<parent_role>::<rail>::<direction>`` per editor lookup.
+        if instance.limit_schedules:
+            ls = instance.limit_schedules[0]
+            ls_id = f"{ls.parent_role}::{ls.rail}::{ls.direction}"
+            ls_resp = c.get(f"/l2_shape/limit_schedule/{ls_id}/edit")
+            assert ls_resp.status_code == 200, ls_resp.text
+            assert "/studio/side-panel/glossary/direction" in ls_resp.text

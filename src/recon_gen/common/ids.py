@@ -41,3 +41,12 @@ DashboardId = NewType("DashboardId", str)
 # ``handbook_path`` field can't be confused with arbitrary strings at
 # wiring sites.
 HandbookPath = NewType("HandbookPath", str)
+# BX.12 — typed reference to a GLOSSARY key in
+# ``common/html/_side_panel.py``. Used by ``FieldSpec.glossary_anchor``
+# to emit a per-field ``[?]`` side-panel trigger that opens to the
+# matching glossary entry. NewType so a FieldSpec's optional
+# ``glossary_anchor`` can't be confused with arbitrary strings at
+# wiring sites; an anti-drift test pins every used anchor against the
+# GLOSSARY dict so a typo here breaks at sessionstart, not at the
+# first click.
+GlossaryAnchor = NewType("GlossaryAnchor", str)

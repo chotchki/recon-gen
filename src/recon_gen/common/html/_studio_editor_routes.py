@@ -58,7 +58,8 @@ from recon_gen.common.html._components import (
     render_list_search,
 )
 from recon_gen.common.html._studio_routes import asset_url, studio_theme_head
-from recon_gen.common.ids import HandbookPath
+from recon_gen.common.html._side_panel import render_side_panel_trigger
+from recon_gen.common.ids import GlossaryAnchor, HandbookPath
 from recon_gen.common.l2.cache import L2InstanceCache
 from recon_gen.common.l2.editor import (
     SINGLETON_KINDS,
@@ -194,6 +195,17 @@ class FieldSpec:
     # carry the context the operator needs (validator semantics,
     # cross-entity dependencies, L1 invariant the field drives).
     handbook_path: HandbookPath | None = None
+    # BX.12 — optional pointer to a GLOSSARY key in
+    # ``common/html/_side_panel.py``. When set, the renderer emits a
+    # small ``[?]`` button next to the field label that opens the
+    # side-panel drawer with that single glossary entry pre-loaded.
+    # Use this for vocabulary the field's helper line can't expand on
+    # without ballooning ("XOR", "fan-in", "bundles activity") — the
+    # helper stays one-line; the drawer carries the prose. An anti-
+    # drift test (``test_side_panel_field_anchors``) pins every
+    # anchor used here against the GLOSSARY dict so a typo breaks at
+    # sessionstart, not at the first click.
+    glossary_anchor: GlossaryAnchor | None = None
 
 
 def _handbook_chip_html(spec: FieldSpec) -> str:
@@ -213,6 +225,40 @@ def _handbook_chip_html(spec: FieldSpec) -> str:
         f'text-[10px] font-semibold align-middle no-underline" '
         f'title="Open handbook for this field" '
         f'data-handbook-path="{href}">?</a>'
+    )
+
+
+def _glossary_chip_html(spec: FieldSpec) -> str:
+    """BX.12 — inline ``[?]`` chip emitted next to a field's label when
+    its FieldSpec carries a ``glossary_anchor``. Opens the side-panel
+    drawer with the single matching glossary entry pre-loaded via the
+    shared ``data-side-panel-trigger`` hook from ``_side_panel.py``.
+
+    Separate from ``_handbook_chip_html`` because the two surfaces
+    serve different audiences:
+
+    - ``handbook_path`` (handbook) — deep prose for the L2 author /
+      operator working through a topic-area.
+    - ``glossary_anchor`` (side panel) — terse banker-readable
+      definition of one vocabulary term, surfaced inline so the
+      operator doesn't have to leave the form.
+
+    A field can carry both (rare) — they render side-by-side. The
+    anti-drift test pins every anchor against the GLOSSARY dict.
+    """
+    if not spec.glossary_anchor:
+        return ""
+    anchor = str(spec.glossary_anchor)
+    target = f"/studio/side-panel/glossary/{anchor}"
+    return " " + render_side_panel_trigger(
+        target,
+        label="?",
+        aria_label=f"Open glossary entry for {spec.label}",
+        extra_classes=(
+            "ml-1 w-4 h-4 rounded-full border border-current "
+            "text-secondary-fg hover:text-accent hover:border-accent "
+            "text-[10px] font-semibold align-middle no-underline"
+        ),
     )
 
 
@@ -515,6 +561,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         helper="Per-leg override. Blank ⇒ use the rail-level Origin for both legs.",
         kind="text",
         subtype_only="two_leg",
+        glossary_anchor=GlossaryAnchor("origin-overrides"),
     ),
     FieldSpec(
         name="destination_origin",
@@ -522,6 +569,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         helper="Per-leg override. Blank ⇒ use the rail-level Origin for both legs.",
         kind="text",
         subtype_only="two_leg",
+        glossary_anchor=GlossaryAnchor("origin-overrides"),
     ),
     FieldSpec(
         name="expected_net",
@@ -556,6 +604,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         label="Cadence",
         helper="For aggregating rails (e.g. intraday-2h / daily-eod).",
         kind="text",
+        glossary_anchor=GlossaryAnchor("cadence"),
     ),
     # X.4.f.11.9 — bundles_activity (aggregating rails only).
     # tuple[BundlesActivityRef = Identifier, ...] — multi-select from
@@ -572,6 +621,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         select_from="rails_or_templates",
         render_as="chip_list",  # CF.4.g — list of identifiers
         handbook_path=HandbookPath("l2-editor/bundles-activity"),
+        glossary_anchor=GlossaryAnchor("bundles-activity"),
     ),
     # X.4.f.11.6 — metadata_keys + metadata_value_examples (paired).
     # BF.4 (2026-06-07) — chip-list picker; option universe is the
@@ -619,6 +669,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
             "fields (see derived.posted_requirements_for)."
         ),
         kind="textarea",
+        glossary_anchor=GlossaryAnchor("posted-requirements"),
     ),
     # X.4.f.11.7 — aging windows (Duration | None). ISO 8601 literal;
     # empty ⇒ None (no aging watch).
@@ -736,6 +787,13 @@ _CHAIN_FIELDS: tuple[FieldSpec, ...] = (
         select_from="rails_or_templates",
         required=True,
         handbook_path=HandbookPath("l2-editor/chain-children"),
+        # BX.12 — anchor to "xor" as the primary banker-facing concept
+        # the children field expresses. fan-in + expected-parent-count
+        # terms live in GLOSSARY and surface via the top-nav glossary
+        # (the per-child fan-in checkbox lives inside the children
+        # editor — operators see the term while editing, then can pop
+        # the glossary for the definition).
+        glossary_anchor=GlossaryAnchor("xor"),
     ),
 )
 
@@ -910,6 +968,7 @@ _LIMIT_SCHEDULE_FIELDS: tuple[FieldSpec, ...] = (
         kind="select",
         options=("Outbound", "Inbound"),
         required=True,
+        glossary_anchor=GlossaryAnchor("direction"),
     ),
 )
 
@@ -1555,6 +1614,7 @@ def _render_field(
         f'<label for="field-{spec.name}" class="font-semibold text-xs text-primary-fg">{escape(spec.label)}'
         f'{"<span class=\"text-danger\"> *</span>" if spec.required else ""}'
         f"{_handbook_chip_html(spec)}"
+        f"{_glossary_chip_html(spec)}"
         f"</label>"
     )
     helper = (
@@ -2075,7 +2135,8 @@ def _render_multi_select_groups_field(
     """
     label_html = (
         f'<label class="font-semibold text-xs text-primary-fg">'
-        f'{escape(spec.label)}{_handbook_chip_html(spec)}</label>'
+        f'{escape(spec.label)}{_handbook_chip_html(spec)}'
+        f'{_glossary_chip_html(spec)}</label>'
     )
     helper_html = (
         f'<small class="text-xs text-secondary-fg">{escape(spec.helper)}</small>'
@@ -2364,6 +2425,7 @@ def _render_chain_children_field(
         f'{escape(spec.label)}'
         f'{"<span class=\"text-danger\"> *</span>" if spec.required else ""}'
         f"{_handbook_chip_html(spec)}"
+        f"{_glossary_chip_html(spec)}"
         f"</label>"
     )
     helper = (
