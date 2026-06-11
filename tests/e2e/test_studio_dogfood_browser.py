@@ -699,17 +699,19 @@ def test_browser_card_delete_disabled_when_referenced(
         # aria-disabled set so screen-readers + the e2e driver see
         # the disabled affordance.
         assert delete_anchor.get_attribute("aria-disabled") == "true"
-        # BX.1 polish (2026-06-11) — the refused button MUST render
-        # the full literal "Delete" label, NOT a single-character
-        # icon shape. Operator dogfood after the first BX.1 redesign
-        # reported "the disabled delete is still just a single
-        # character" — meaning a CSS regression had collapsed the
-        # button to a chevron-width visual. Pin both text_content
-        # AND a minimum bounding-box width (a single char in text-xs
-        # is roughly 7-9px; "Delete" + px-2 padding is ~50-60px).
-        assert delete_anchor.text_content() == "Delete", (
+        # BX.1 polish (2026-06-11 round-2) — the refused button now
+        # renders the literal text "In Use" instead of "Delete".
+        # Round-1 polish moved the disabled-state reason into the
+        # `title` tooltip, but round-2 operator dogfood found the
+        # tooltip rendering as a single unicode character in some
+        # browsers (likely a font / overflow issue), so the reason
+        # is now conveyed by the button text directly.
+        # Pin both text_content AND a minimum bounding-box width (a
+        # single char in text-xs is roughly 7-9px; "In Use" + px-2
+        # padding is ~50-60px).
+        assert delete_anchor.text_content() == "In Use", (
             f"Refused Delete button text_content drifted from "
-            f"'Delete' to {delete_anchor.text_content()!r} — operator-"
+            f"'In Use' to {delete_anchor.text_content()!r} — operator-"
             f"facing label regression."
         )
         refused_bbox = delete_anchor.bounding_box()

@@ -314,14 +314,19 @@ def test_refused_button_carries_disabled_attrs_and_reason() -> None:
 
 
 def test_active_and_refused_buttons_share_width_determining_classes() -> None:
-    """BX.1 polish (2026-06-11 operator dogfood) — both Delete
-    button states MUST emit the literal text "Delete" AND share the
-    width-determining Tailwind utility classes (`inline-flex`,
-    `items-center`, `px-2`, `py-0.5`, `text-xs`, `font-semibold`,
-    `border`, `border-danger`, `text-danger`, `rounded-sm`,
-    `no-underline`). Only the state-specific modifiers (active:
-    `cursor-pointer hover:bg-danger hover:text-white`; refused:
-    `opacity-50 cursor-not-allowed`) differ.
+    """BX.1 polish (2026-06-11 operator dogfood round-2) — active and
+    refused Delete buttons now diverge intentionally in text content:
+    active renders "Delete" (the action label), refused renders "In Use"
+    (the disabled-state reason). The tooltip-as-affordance round-1 polish
+    proved unreliable (single-character render in some browsers), so the
+    refused-state reason is conveyed by the button text itself.
+
+    Both states STILL share the width-determining Tailwind utility
+    classes (`inline-flex`, `items-center`, `px-2`, `py-0.5`, `text-xs`,
+    `font-semibold`, `border`, `border-danger`, `text-danger`,
+    `rounded-sm`, `no-underline`). Only the state-specific modifiers
+    (active: `cursor-pointer hover:bg-danger hover:text-white`; refused:
+    `opacity-50 cursor-not-allowed`) AND the inner text differ.
 
     Pinning width-class parity at the unit level prevents the BX.1
     "the disabled Delete looked off" failure mode from reaching the
@@ -343,11 +348,12 @@ def test_active_and_refused_buttons_share_width_determining_classes() -> None:
     refused_html = render_refused_delete_button(
         "rail", "ReconciliationLeg", refs, surface="card",
     )
-    # Both render the literal text "Delete" — operator-facing label
-    # parity. The chevron-like single-character render shape that
-    # surfaced in BX.1 operator dogfood would fail this gate.
+    # Active renders the action label "Delete"; refused renders the
+    # disabled-state reason "In Use". The text divergence IS the
+    # affordance — tooltip-as-affordance proved unreliable.
     assert ">Delete</a>" in active_html, active_html
-    assert ">Delete</a>" in refused_html, refused_html
+    assert ">In Use</a>" in refused_html, refused_html
+    assert ">Delete</a>" not in refused_html, refused_html
     # Both share the width-determining classes. Each class below
     # influences the rendered bounding box (padding, font-size,
     # border, rounded), so listing them explicitly makes the
@@ -791,6 +797,14 @@ def test_card_action_buttons_helper_renders_state_aware_delete() -> None:
     assert 'data-delete-state="refused"' in refused_html
     assert 'aria-disabled="true"' in refused_html
     assert 'data-delete-reason="Referenced by' in refused_html
+    # Refused state replaces "Delete" with "In Use" — 2026-06-11
+    # round-2 polish moves the disabled-state reason from the
+    # unreliable tooltip surface onto the button text itself.
+    assert ">In Use<" in refused_html
+    # Edit is still labeled "Edit" — the card still carries the
+    # Edit+Delete pair, just with the Delete side relabeled in
+    # the refused state.
+    assert ">Edit<" in refused_html
 
 
 # Silence unused-import warning for COUNTDOWN_SECS — it documents

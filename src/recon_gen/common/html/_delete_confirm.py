@@ -655,7 +655,15 @@ def render_refused_delete_button(
         # No hx-get; the click guard exists only to prevent the
         # disabled-anchor click from bubbling to the parent
         # `<summary>` toggle hazard (collapsed-card list view).
-        f'onclick="{_card_click_guard}">Delete</a>'
+        #
+        # Button text is "In Use" (not "Delete"): the 2026-06-11 polish
+        # round-2 dogfood found the tooltip surface unreliable (rendered
+        # as a single unicode character in some renderers), so the
+        # disabled-state reason is conveyed by the button text itself
+        # instead. The `title` attr stays as a screen-reader fallback +
+        # for hover-curious operators, but it is no longer the primary
+        # affordance for "why can't I click this?".
+        f'onclick="{_card_click_guard}">In Use</a>'
     )
     return f"{_wrapper_open(kind, url_id)}{btn}{_wrapper_close()}"
 
