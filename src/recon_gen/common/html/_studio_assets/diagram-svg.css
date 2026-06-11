@@ -103,3 +103,69 @@
   stroke: #f59e0b !important;
   stroke-width: 3px !important;
 }
+
+/* BX.8 (2026-06-11) — Direction D2 hover-Edit badge.
+ *
+ * Hidden by default; revealed on node hover OR keyboard focus
+ * (`:focus-within` covers the focused tabindex=0 group AND any of
+ * its descendants taking focus). Suppressed entirely on bundles
+ * and roles — those nodes never receive a badge in the first place
+ * (JS gates on _editorUrlForNode returning null), so no CSS hide
+ * rule needed for them.
+ *
+ * The badge is a tiny SVG <a> with a rounded rect + "Edit" text.
+ * Accent-coloured background reads as actionable without competing
+ * with the node's own label colour.
+ */
+.topology-svg g.node .edit-badge {
+  display: none;
+  cursor: pointer;
+}
+.topology-svg g.node:hover .edit-badge,
+.topology-svg g.node:focus-within .edit-badge,
+.topology-svg g.node:focus .edit-badge {
+  display: inline;
+}
+.topology-svg g.node .edit-badge .edit-badge-bg {
+  fill: #1f4e79;  /* accent — matches studio chrome */
+  stroke: #ffffff;
+  stroke-width: 1px;
+  opacity: 0.95;
+}
+.topology-svg g.node .edit-badge .edit-badge-text {
+  fill: #ffffff;
+  font-size: 9pt;
+  font-weight: 600;
+  pointer-events: none;  /* clicks pass to the <a> */
+  user-select: none;
+}
+.topology-svg g.node .edit-badge:hover .edit-badge-bg {
+  fill: #2563eb;  /* slightly brighter accent on direct hover */
+  opacity: 1;
+}
+
+/* BX.8 — inline mini-diagram on edit pages. Self-node highlighted
+ * with an accent border + glow so the operator's eye lands on
+ * "this is what you're editing" within the focused neighborhood.
+ *
+ * Scoped to `.studio-mini` so the same `.topology-svg` rules from the
+ * main diagram (hide-X, coverage-on, trainer-on) don't bleed into a
+ * smaller surface where the chrome toggles don't exist. */
+.studio-mini .topology-svg {
+  cursor: default;
+}
+.studio-mini .topology-svg g.node.self > polygon,
+.studio-mini .topology-svg g.node.self > rect,
+.studio-mini .topology-svg g.node.self > ellipse,
+.studio-mini .topology-svg g.node.self > path {
+  stroke: #1f4e79 !important;
+  stroke-width: 3px !important;
+  filter: drop-shadow(0 0 4px rgba(31, 78, 121, 0.6));
+}
+/* Mini-diagram drops the hover-Edit badge — the edit page IS the
+ * edit surface for the self-node; clicking other nodes goes to
+ * THEIR edit pages directly via the badge if visible, but in mini
+ * mode we want a calm read-only display, so suppress badges. */
+.studio-mini .topology-svg g.node .edit-badge {
+  display: none !important;
+}

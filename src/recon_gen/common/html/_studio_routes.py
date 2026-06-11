@@ -3327,6 +3327,160 @@ def _render_diagram_page(
 """
 
 
+# BX.8 (2026-06-11) — inline mini-diagram on edit pages (Direction D2).
+#
+# Reuses the full /diagram render path: the same `_build_digraph_cached`
+# helper produces a focused subgraph; we inline the resulting DOT into a
+# `<template>` and let `mini-diagram.js` drive wasm-graphviz to render
+# it client-side (same renderer as the main diagram — no system `dot`
+# dependency; one shared client-side path).
+#
+# Operator Q1 lock (bx_8.md): use the same 1-hop neighborhood the main
+# `/diagram?focus=<id>` route emits. The `_build_digraph_cached` call
+# below threads `focus_node_id` and the same `layer` semantics so the
+# mini is a faithful zoom-in.
+#
+# Operator Q3 lock: `limit_schedule` returns None — that kind doesn't
+# have a clean topology projection (it's a constraint on a rail triple,
+# not a node). Edit page renders without a mini-diagram section.
+def _focus_node_id_for_entity(
+    kind: str, entity: object,
+) -> str | None:
+    """Map an entity (kind, entity) to its diagram focus-node id.
+
+    Bijective inverse-ish of `_editor_url_for_focus_node` for the kinds
+    that have a topology projection. Returns None when the entity has
+    no clean projection (`limit_schedule` per operator Q3) OR is a
+    singleton with no per-entity node (`theme`, `instance`).
+
+    Account / account_template both project to the `role__<role>` node
+    they declare. Multiple entities can share a role, so the mini
+    centers on the role-node and 1-hop neighborhood — same UX as a
+    role-focus on the main diagram.
+    """
+    if kind == "rail":
+        name = getattr(entity, "name", None)
+        if not name:
+            return None
+        return f"rail__{name}"
+    if kind == "transfer_template":
+        name = getattr(entity, "name", None)
+        if not name:
+            return None
+        return f"tmpl__{name}"
+    if kind == "account":
+        role = getattr(entity, "role", None)
+        if not role:
+            return None
+        return f"role__{role}"
+    if kind == "account_template":
+        role = getattr(entity, "role", None)
+        if not role:
+            return None
+        return f"role__{role}"
+    if kind == "chain":
+        # A Chain is a sequencing edge between rails — center on its
+        # parent rail node so the operator sees the parent + the
+        # children (which the focus 1-hop will include via the chain
+        # edges).
+        parent = getattr(entity, "parent", None)
+        if not parent:
+            return None
+        return f"rail__{parent}"
+    # limit_schedule (Q3), theme, instance → no topology projection.
+    return None
+
+
+def render_mini_diagram_html(
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — kept generic to dodge the editor-routes import cycle
+    kind: str,
+    entity: object,
+    *,
+    cfg: Config | None = None,
+) -> str:
+    """BX.8 — render the inline mini-diagram fragment for an edit page.
+
+    `instance` is the live L2Instance (caller passes `cache.get()`).
+    Returns an HTML string suitable for direct embedding into the edit
+    page chrome (above the form). Returns empty string when the entity
+    has no topology projection (`limit_schedule`, theme, instance) —
+    callers should still always invoke this so the absent-mini case is
+    a single source of truth (no per-kind branching at every callsite).
+
+    The fragment is a `<section class="studio-mini">` containing:
+      - A small caption ("Where this rail sits") + "Open full diagram"
+        anchor pointing at `/diagram?focus=<node_id>`.
+      - A `<template id="mini-topology-dot">` carrying the focused DOT
+        source.
+      - A `<div id="mini-diagram-target">` the JS shim renders into.
+      - Per-node `data-edit-href` driven self-highlight via
+        `data-self-id="<focus_node_id>"` on the wrapper.
+
+    The mini-diagram JS shim post-processes the rendered SVG to add
+    `class="self"` + `data-role="mini-diagram-self"` to the matching
+    `<g.node>` so the CSS + the browser driver can locate it. Other
+    nodes get the same hover-Edit badge the main diagram emits — per
+    operator Q2 (bx_8.md), clicking a neighbor in the mini-diagram
+    navigates to THAT neighbor's edit page (the badge does it
+    directly; clicking the node body itself is suppressed in mini
+    mode because the surrounding scope `.studio-mini` doesn't wire
+    the focus-navigation handler).
+    """
+    focus_node_id = _focus_node_id_for_entity(kind, entity)
+    if focus_node_id is None:
+        return ""
+
+    # Cfg-or-fallback prefix, matching `_render_diagram_page`.
+    db_prefix = (
+        cfg.db_table_prefix if cfg is not None else "unbound"
+    )
+    # Layer 3 keeps templates + chains visible — operator Q6 lock:
+    # "show more" on the mini even if the operator's last full-diagram
+    # view was layer=1. The mini doesn't need to match their toggle
+    # state; it's a "you are here" inset.
+    layer = 3
+    try:
+        digraph = _build_digraph_cached(
+            instance,
+            db_table_prefix=db_prefix,
+            focus_node_id=focus_node_id,
+            layer=layer,
+            hide_singleleg=False,
+            show=None,
+        )
+    except Exception:
+        # Defensive: a stale focus id (entity renamed since last save)
+        # or a topology-emit edge case shouldn't crash the edit page.
+        # Render no-mini and let the operator continue editing.
+        return ""
+
+    dot_source: str = getattr(digraph, "source", "") or ""
+    if not dot_source.strip():
+        return ""
+
+    # Full-diagram link preserves layer + focus so the operator can
+    # zoom out from the mini to the full canvas with the same anchor.
+    full_diagram_url = f"/diagram?layer={layer}&amp;focus={escape(focus_node_id)}"
+
+    return f"""
+    <section class="studio-mini bg-white border border-surface-border rounded-md p-3 flex flex-col gap-2"
+             data-role="mini-diagram"
+             data-self-id="{escape(focus_node_id)}">
+      <div class="flex items-baseline gap-3">
+        <h2 class="text-sm font-semibold text-primary-fg m-0">Where this sits</h2>
+        <a class="text-accent no-underline text-xs cursor-pointer hover:underline ml-auto"
+           href="{full_diagram_url}"
+           data-role="mini-diagram-open-full">Open full diagram →</a>
+      </div>
+      <div id="mini-diagram-target"
+           class="w-full"
+           style="height:280px;overflow:hidden;background:#fafbfc;border:1px solid #e5e7eb;border-radius:4px"></div>
+      <template id="mini-topology-dot">{escape(dot_source)}</template>
+      <script type="module" src="{asset_url("mini-diagram.js")}"></script>
+    </section>
+    """
+
+
 _PLANT_LABELS: tuple[tuple[PlantKind, str], ...] = (
     ("drift", "Drift"),
     ("overdraft", "Overdraft"),

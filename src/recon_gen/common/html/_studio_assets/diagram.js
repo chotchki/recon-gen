@@ -204,6 +204,17 @@ async function renderDiagram() {
       if (meta.templated) g.setAttribute('data-templated', 'true');
     }
     if (kind in counts) counts[kind] += 1;
+    // BX.8 (2026-06-11) — Direction D2: hover-revealed "Edit" badge
+    // in the upper-right of every editable node. Suppressed on
+    // bundles + roles (no unique edit target — same rule the
+    // right-click menu uses). Keyboard-focus reveal piggybacks on
+    // `:focus-within` in the CSS rule + the `tabindex` we add here.
+    const editHref = _editorUrlForNode(title);
+    if (editHref) {
+      g.setAttribute('data-edit-href', editHref);
+      g.setAttribute('tabindex', '0');  // keyboard reachable
+      _injectEditBadge(g, editHref, id);
+    }
   }
 
   // Annotate every edge for visibility-toggle CSS. Adjacency is no
@@ -425,6 +436,14 @@ function _wireFocus(svg) {
   for (const node of svg.querySelectorAll('g.node')) {
     node.style.cursor = "pointer";
     node.addEventListener("click", (e) => {
+      // BX.8 (2026-06-11) — clicks on the hover-Edit badge let the
+      // browser's native <a> navigation fire; do NOT preempt with
+      // ?focus= navigation. The badge sits inside this <g.node>, so
+      // we check the click target's ancestry.
+      const tgt = e.target;
+      if (tgt && typeof tgt.closest === "function" && tgt.closest('.edit-badge')) {
+        return;
+      }
       e.stopPropagation();
       const id = node.getAttribute('data-id');
       if (id) _navigateToFocus(id);
@@ -452,6 +471,81 @@ function _wireFocus(svg) {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") _navigateToFocus(null);
   });
+}
+
+// BX.8 (2026-06-11) — Direction D2 hover-Edit badge injection.
+//
+// Append an SVG <a> anchor with a rounded rect + "Edit" text label to
+// the upper-right corner of the node's bounding shape. Default hidden;
+// `.topology-svg g.node:hover .edit-badge` (CSS) reveals it. Keyboard
+// focus also reveals it via `:focus-within` on the tabindex=0 group.
+//
+// The anchor is wired to navigate (via the browser's default <a> click
+// handler) — we do NOT call `e.stopPropagation()` from the badge
+// itself; instead, the existing _wireFocus click handler ignores
+// clicks whose target is inside an `.edit-badge` subtree.
+//
+// Positioning: we read the bounding box from the node's primary shape
+// (polygon / rect / ellipse / path). Graphviz emits shapes in user
+// coordinates already, so we can compute the upper-right corner
+// directly without coordinate-space transforms.
+function _injectEditBadge(nodeGroup, href, displayId) {
+  // Find the primary shape to anchor against. Graphviz emits a single
+  // dominant shape per node (rect / polygon / ellipse / path). Pick
+  // the first match.
+  const shape = nodeGroup.querySelector('polygon, rect, ellipse, path');
+  if (!shape) return;
+  let bbox;
+  try {
+    bbox = shape.getBBox();
+  } catch (err) {
+    // Defensive: getBBox can throw on detached / zero-size nodes; skip
+    // badge injection rather than crash the render pipeline.
+    return;
+  }
+
+  const NS = 'http://www.w3.org/2000/svg';
+  // Sizing: tuned so the badge sits inside the node's top-right corner
+  // without spilling outside. 36×14 user-units feels right at the
+  // default graphviz fontsize (10pt nodes).
+  const padX = 4;
+  const padY = 2;
+  const badgeW = 36;
+  const badgeH = 14;
+  // Anchor at upper-right INSIDE the shape; clamp to a minimum so
+  // tiny nodes still show something.
+  const x = bbox.x + bbox.width - badgeW - padX;
+  const y = bbox.y + padY;
+
+  const a = document.createElementNS(NS, 'a');
+  // SVG2 href; legacy xlink:href as fallback for older renderers.
+  a.setAttribute('href', href);
+  a.setAttributeNS('http://www.w3.org/1999/xlink', 'href', href);
+  a.setAttribute('class', 'edit-badge');
+  a.setAttribute('data-role', 'diagram-edit-link');
+  a.setAttribute('data-edit-href', href);
+  // aria-label for SR users so they hear "Edit <id>" not just "Edit".
+  a.setAttribute('aria-label', `Edit ${displayId}`);
+
+  const rect = document.createElementNS(NS, 'rect');
+  rect.setAttribute('x', String(x));
+  rect.setAttribute('y', String(y));
+  rect.setAttribute('width', String(badgeW));
+  rect.setAttribute('height', String(badgeH));
+  rect.setAttribute('rx', '3');
+  rect.setAttribute('ry', '3');
+  rect.setAttribute('class', 'edit-badge-bg');
+
+  const text = document.createElementNS(NS, 'text');
+  text.setAttribute('x', String(x + badgeW / 2));
+  text.setAttribute('y', String(y + badgeH - 4));
+  text.setAttribute('text-anchor', 'middle');
+  text.setAttribute('class', 'edit-badge-text');
+  text.textContent = 'Edit';
+
+  a.appendChild(rect);
+  a.appendChild(text);
+  nodeGroup.appendChild(a);
 }
 
 // CF.3.m polish — node-id → L2 Editor *edit* URL. Mirror of the
@@ -715,6 +809,8 @@ if (typeof window !== "undefined" && window.__test_mode__) {
     _parseEdgeTitle,
     _edgeKind,
     _stripIdPrefix,
+    _editorUrlForNode,
+    _injectEditBadge,
   };
 } else if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", renderDiagram);

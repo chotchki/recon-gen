@@ -63,7 +63,11 @@ from recon_gen.common.html._delete_confirm import (
     render_delete_confirm_banner,
     verify_confirm_token,
 )
-from recon_gen.common.html._studio_routes import asset_url, studio_theme_head
+from recon_gen.common.html._studio_routes import (
+    asset_url,
+    render_mini_diagram_html,
+    studio_theme_head,
+)
 from recon_gen.common.html._side_panel import render_side_panel_trigger
 from recon_gen.common.ids import GlossaryAnchor, HandbookPath, SurfaceAnchor
 from recon_gen.common.l2.cache import L2InstanceCache
@@ -4566,12 +4570,28 @@ def _render_edit_page(
         f'hx-get="/l2_shape/{escape(kind)}/{escape(url_id)}/delete-confirm?from=edit" '
         f'hx-target="#delete-confirm-banner-slot" hx-swap="innerHTML">Delete</a>'
     )
+    # BX.8 (2026-06-11) — inline mini-diagram showing the entity's
+    # position in the topology. Self-node highlighted; 1-hop
+    # neighbors visible for spatial context. Empty string for kinds
+    # without a clean topology projection (limit_schedule per
+    # operator Q3; theme + instance — no per-entity node) — the
+    # helper returns "" so the markup just omits the section.
+    mini_diagram_html = render_mini_diagram_html(instance, kind, entity)
+    # The diagram-svg.css is loaded on /diagram but the edit page
+    # doesn't link it; pull it in when the mini-diagram is present so
+    # the self-highlight + hover-Edit badge rules fire. Hash-cache-bust
+    # via asset_url stays consistent with the main diagram page.
+    mini_diagram_css_html = (
+        f'<link rel="stylesheet" href="{asset_url("diagram-svg.css")}">'
+        if mini_diagram_html else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>Recon-Gen · Studio · Editor · {escape(edit_title_detail)}</title>
   {studio_theme_head(instance)}
+  {mini_diagram_css_html}
   {_htmx_head_block()}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
@@ -4583,6 +4603,7 @@ def _render_edit_page(
     {_render_intro_details(intro_html)}
     {subtype_banner_html}
     <div id="delete-confirm-banner-slot" data-test-delete-banner-slot></div>
+    {mini_diagram_html}
     <section class="bg-white border border-surface-border rounded-md p-5">
       <form method="post" action="/l2_shape/{escape(kind)}/{escape(url_id)}" class="edit-form group">
         {global_err_html}
