@@ -651,6 +651,113 @@ def test_browser_delete_confirm_flow_completes_and_removes_entity(
 
 
 @pytest.mark.browser
+def test_browser_list_page_delete_removes_article_without_manual_reload(
+    tmp_path: Path,
+) -> None:
+    """BX.new.list-cascade-reload (2026-06-11) — after Confirm fires
+    on a list page, the deleted article disappears from view WITHOUT
+    a manual ``page.reload()``.
+
+    Bug pre-fix: the DELETE handler returned
+    ``HX-Trigger: l2-cascade-reload`` but no listener on the standalone
+    list page caught it, so the cards grid stayed stale. The operator
+    deleted an entity, saw the Delete button vanish, then watched the
+    same article keep sitting there — they reported it as "Delete
+    broken; nothing happens." This test pins the no-manual-reload
+    behavior so the wiring can't silently regress.
+
+    Asserts BOTH the wrapper rendered (#list-page-body) + the
+    deleted article is GONE from the DOM by the time we look (no
+    ``page.reload()`` between Confirm and the assertion).
+    """
+    import shutil
+    fixture_src = (
+        Path(__file__).parent.parent / "l2" / "spec_example.yaml"
+    )
+    fixture_dst = tmp_path / "list_cascade_reload.yaml"
+    shutil.copy(fixture_src, fixture_dst)
+    cache = L2InstanceCache.from_path(fixture_dst)
+    asgi = _build_studio_asgi(cache)
+
+    from recon_gen.common.l2.loader import load_instance
+    pre_inst = load_instance(fixture_dst)
+    assert pre_inst.limit_schedules, (
+        "spec_example fixture must carry at least one limit_schedule "
+        "for the list-cascade-reload test."
+    )
+    target_ls = pre_inst.limit_schedules[0]
+    target_entity_id = (
+        f"{target_ls.parent_role}::{target_ls.rail}::{target_ls.direction}"
+    )
+
+    with StudioBrowserEditorDriver.serving(
+        asgi, l2_path=fixture_dst,
+    ) as driver:
+        page = driver.page
+        page.goto(f"{driver.base_url}/l2_shape/limit_schedule/")
+        page.wait_for_load_state("domcontentloaded")
+
+        # Pre-condition: the cascade wrapper rendered.
+        cascade_wrapper = page.locator('#list-page-body').first
+        assert cascade_wrapper.count() == 1, (
+            "BX.new.list-cascade-reload — the standalone list page "
+            "rendered without the `#list-page-body` cascade wrapper. "
+            "Without it, HX-Trigger: l2-cascade-reload fires into the "
+            "void and the deleted article would stay visible until "
+            "manual reload."
+        )
+
+        article = page.locator(
+            f'article[data-kind="limit_schedule"]'
+            f'[data-entity-id="{target_entity_id}"]'
+        ).first
+        assert article.count() == 1, (
+            f"target limit_schedule {target_entity_id!r} not rendered "
+            f"on initial list page load."
+        )
+
+        wrapper = article.locator('[data-delete-wrapper]').first
+        delete_anchor = wrapper.locator(
+            '[data-role="card-delete"]'
+        ).first
+        assert delete_anchor.get_attribute("data-delete-state") == "active", (
+            f"limit_schedule {target_entity_id!r} Delete button not "
+            f"in active state — fixture entity must be unreferenced "
+            f"so the countdown flow fires."
+        )
+        delete_anchor.scroll_into_view_if_needed()
+        delete_anchor.click()
+
+        confirm_btn = wrapper.locator(
+            '[data-role="card-delete-confirm"]'
+        ).first
+        confirm_btn.wait_for(state="visible", timeout=5_000)
+        page.wait_for_function(
+            "(node) => node.getAttribute('data-delete-state') === 'ready'",
+            arg=confirm_btn.element_handle(),
+            timeout=10_000,
+        )
+        confirm_btn.click()
+        # No `page.reload()` here — the cascade wrapper must refetch
+        # the list URL automatically on the HX-Trigger event.
+        page.wait_for_selector(
+            f'article[data-kind="limit_schedule"]'
+            f'[data-entity-id="{target_entity_id}"]',
+            state="detached",
+            timeout=10_000,
+        )
+        # And the wrapper re-attached after the swap — assert by id
+        # presence (outerHTML swap removes the OLD wrapper element +
+        # the response carries a fresh #list-page-body).
+        assert page.locator('#list-page-body').count() == 1, (
+            "after cascade-reload the wrapper element id wasn't "
+            "re-attached — either the swap dropped the id OR "
+            "hx-select='#list-page-body' missed on the response. "
+            "Subsequent deletes on this page would silently no-op."
+        )
+
+
+@pytest.mark.browser
 def test_browser_card_delete_disabled_when_referenced(
     tmp_path: Path,
 ) -> None:
