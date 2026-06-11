@@ -254,7 +254,7 @@ class DuckDBFileSnapshotter:
         # created the directory — caller-owned tmp_paths stay intact for
         # post-test inspection.
         if snap_dir is None:
-            self._snap_dir = Path(tempfile.mkdtemp(prefix="recon-snap-duckdb-"))
+            self._snap_dir = Path(tempfile.mkdtemp(prefix="snap-duckdb-"))
             self._owns_snap_dir = True
         else:
             snap_dir.mkdir(parents=True, exist_ok=True)
@@ -386,7 +386,7 @@ class DuckDBFileSnapshotter:
             # ``rmdir`` only succeeds on empty directories — matches
             # the docstring's "if empty" semantics. If a snapshot was
             # taken but never dropped, the dir stays; the operator
-            # then sees the leftover under /tmp/recon-snap-duckdb-*
+            # then sees the leftover under /tmp/snap-duckdb-*
             # and can clean it manually (or the next reboot does).
             self._snap_dir.rmdir()
         except OSError:
@@ -605,19 +605,25 @@ class OracleGoldenMirrorSnapshotter:
                 await self._exec(conn, "COMMIT")
                 # IDENTITY sequence bump — only relevant for tables
                 # that DECLARE an entry column. transactions + balances
-                # do; config_kv doesn't (PK is the kv key). The MODIFY
-                # IDENTITY is wrapped in a PL/SQL block so a config_kv
-                # variant (no entry column) is swallowed via
-                # ORA-00904 (invalid identifier) rather than failing
-                # the whole restore. ORA-32793 / ORA-30673 cover the
-                # "column exists but isn't identity" variants that
-                # would surface if the schema ever swapped IDENTITY
-                # for a plain column.
+                # do; config_kv doesn't (PK is the kv key). Both the
+                # MAX(entry) SELECT and the ALTER TABLE MODIFY IDENTITY
+                # run via ``EXECUTE IMMEDIATE`` so the table's column
+                # set is resolved at RUNTIME, not at PL/SQL compile
+                # time. Without EXECUTE IMMEDIATE, the static SELECT
+                # against a no-entry table (config_kv) raises ORA-06550
+                # wrapping ORA-00904 BEFORE the inner EXCEPTION handler
+                # can see it — compile-time errors aren't catchable.
+                # ORA-00904 / -32793 / -30673 cover the
+                # "column missing" / "column-exists-but-isn't-identity"
+                # variants that would surface if the schema ever swapped
+                # IDENTITY for a plain column on transactions/balances.
                 await self._exec(
                     conn,
                     (
                         "DECLARE max_entry NUMBER; BEGIN "
-                        f"BEGIN SELECT NVL(MAX(entry), 0) + 1 INTO max_entry FROM {live}; "
+                        "BEGIN EXECUTE IMMEDIATE "
+                        f"'SELECT NVL(MAX(entry), 0) + 1 FROM {live}' "
+                        "INTO max_entry; "
                         "EXCEPTION WHEN OTHERS THEN "
                         "IF SQLCODE = -904 THEN RETURN; ELSE RAISE; END IF; "
                         "END; "
