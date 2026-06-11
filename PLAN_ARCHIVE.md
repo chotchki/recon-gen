@@ -1,3 +1,49 @@
+# PLAN — Phase BV (archived 2026-06-10)
+
+**Phase summary:** Dogfood cap-stone — full L2 + ETL + Training round-trip glued under one e2e test that drives Studio through `App2Driver` across DuckDB / PG / Oracle. Shipped 4 deliverables: (1) cross-dialect plant round-trip parametrized over `PLANT_REGISTRY` × Dialect with snapshot/restore-amortized Session Start (replaces the cumulative-walk perf workaround that was the bug2-cumulative root cause); (2) BV.4 dual-prefix Trainer rebuild — `<L2>_v_*` overlay, single-card landing, diff-only Apply, 15 design locks from `docs/audits/bv_5_dual_prefix_spike.md`; (3) PG matview refresh modernization via REFRESH MATERIALIZED VIEW CONCURRENTLY with 22 UNIQUE indexes; (4) `recon-gen docs export` registry-walk emitting 5 consuming surfaces. Closed 2026-06-10 with `./run_tests.sh up_to qs_browser` green across all 6 tiers (run id 20260611T034334Z-00ce44c8).
+
+**What landed:**
+
+- **BV.0** — REPLAN via `docs/audits/bv_5_dual_prefix_spike.md` (15 DL.1-DL.15 locks). Dependency inventory + infra decision (extend existing e2e + App2-only path) + BV.4 rebuild scope.
+- **BV.3.1** — Parametrized plant round-trip framework at `tests/e2e/db/test_bv31_plant_round_trip.py`. Per-entry PASS/FAIL feeds BV.3.2.
+- **BV.3.2** — 21 pass / 5 explicit-skip / 0 fail across `PLANT_REGISTRY`. BV.3.2.b 5-kind defer surfaced for BV.3.3 browser e2e (chain_orphan / dead_bundles_activity / dead_metadata / dead_limit_schedule / supersession_audit).
+- **BV.3.3.a/b** — Trainer dogfood e2e harness + App2Driver Trainer verbs (open_training, start_session, enable_plant, apply_selection, take_violation_tour, dashboard_surface_contains).
+- **BV.3.3.c bug stack — RESOLVED 2026-06-10:**
+  - bug1 (ledger_drift surface) — 5e223266 LedgerDriftPlant + Generator
+  - bug2 (stuck_unbundled cust-0002-snb render)
+  - bug2-cumulative-followup — **obsoleted by snapshot/restore pattern** (BV.3.3 snapshot work below)
+  - bug3 (expected_eod_balance_breach acct-eod-ACHOrigSettlement render) — 44bb650a
+  - bug4 (chain-coherence signature picker false-positive) — 26adbe81 split priority into `_SIGNATURE_ID_COLUMNS` + `_SIGNATURE_DATE_COLUMNS` with AssertionError on missing ID col
+  - bug4-followup (chain-coherence dashboard rendering) — ffe39e09 baked page_size + sort_by into htmx data-fetch URL; 6aa73a53 re-enabled 6 kinds
+  - bug5 (l1exc-missed-zero-magnitude-filter) — 77632bad relaxed C7 guard with `transfer_id IS NOT NULL` for transfer-keyed branches; preemptively fixed in apps/executives/datasets.py too
+  - snapshot-port — df96f404 consolidated dialect impls to src/recon_gen/common/snapshotter.py + ccca40b5 dedicated `recon-gen-snap-test-pg/oracle` containers for test isolation
+- **BV.3.3 hygiene (4 cells)** — 85cde6cf needs(Need.PLAYWRIGHT/DOCKER) markers; dcadcad9 make_studio_cfg(dialect=, demo_database_url=) kwargs; 9736877d _cmd_down_local stops recon-gen-test-pg; 23bcac37 PLAN.md text reconcile post-CB.17.i.
+- **BV.3.3.d (PG)** — 766cff9c confirmed-green 17/17 in 519.53s. Fix stack: f68c0708 (safe_identifier hash-suffix for PG 63-byte collision in _metadata_index_name) + 59b3bb64 (_reset_pg_password_via_socket fails loud + URL contract converges on testcontainers defaults).
+- **BV.3.3.e (Oracle 19c production-parity)** — RESOLVED with operator-locked Oracle 19c image. Fix stack: c139bef3 (ORA-00001 partial-NULL UNIQUE divergence — PG NULLS DISTINCT and Oracle composite-NULL UNIQUE do NOT converge, fix via `seq` ROW_NUMBER 6-tuple matching the `inv_money_trail_edges`/`edge_seq` pattern) + 8c5b2347 (ORA-00904 `_paginate_table_sql` case-folding — replaced `column_name(sort_col, dialect)` with `_quote_col(sort_col)` to match `_oracle_lowercase_alias_wrapper`'s quoted-lowercase output) + a078be6e (EXECUTE IMMEDIATE for MAX(entry) — PL/SQL binds static SQL at compile time so ORA-06550 is uncatchable by inner EXCEPTION handlers) + 4416489d (App2Driver httpx 300s timeout + body-surface). Memory entry [[project_pg_vs_oracle_composite_null_unique]] saved.
+- **BV.3.3 snapshot pattern (8 commits)** — operator-locked direction after seeing the cumulative-walk perf workaround. Replaces 15× sequential Session Start (~30 min Oracle) with 1× Session Start + N× restore. Per-dialect picks: DuckDB shutil.copy2 ~50ms; PG schema-namespace CTAS + TRUNCATE+INSERT+matview-refresh ~150ms; Oracle golden-mirror CTAS + TRUNCATE+INSERT/*+APPEND*/+DBMS_MVIEW.REFRESH ~2500ms (accepted by operator). Foundation f4df4338 + driver verbs be5c11f8 + HTTP routes ecbda2f7 + PlantContract typed invariant 72c27f31 + DuckDB impl 91d96d5c + Oracle impl 804d6d4f + PG impl 0d01b263 + rewire 758a9087 + module consolidation df96f404 + dedicated containers ccca40b5. Snapshotter Protocol + factory at `src/recon_gen/common/snapshotter.py`; trainer_ready_session calls `snapshot_take` once after Session Start, tests call `snapshot_restore` at top of each body.
+- **BV.3.3 final polish** — 3b704d64 pyright-ignore why comment format; ae4827ed test_snapshotter_oracle._seed_probe_rows column-name fix; c6c44087 test_snapshotter_pg cross-event-loop pool reuse fix; 8b41b83c oracledb cursor pattern fix (test + 2 production sites); f9123d2a re-enable `--dist=loadgroup` on app2 layer (silently-no-op xdist_group("trainer-pg") marker root cause — pytest-xdist's default --dist=load ignores xdist_group); 00ce44c8 stale-comment sync across 2 agreement test files.
+- **BV.4 dual-prefix Trainer** — 15 design locks realized end-to-end. `<L2>_v_*` overlay surface, single-card landing with checkbox+inline-form, two-link Tour, diff-only Apply (DL.9), Currently-planted badge, live diff preview, streaming Session Start progress, pending-checkbox preservation. BV.4.3 + BV.4.7 deferred-by-design.
+- **BV.6 PG matview refresh modernization** — 22 UNIQUE indexes across all matviews (19 base + 3 hard-key composites: fan_in_disagreement, l1_exceptions 5-tuple, inv_money_trail_edges synthetic edge_seq + inv_pair_rolling_anomalies followup tightening GROUP BY drop FD'd cols). `refresh_matviews_sql` emits REFRESH MATERIALIZED VIEW CONCURRENTLY on PG; `step_4_matviews` flips PG to per-call autocommit. Commits 66e22ff3 + 37cdc3c5.
+- **BV.7 `recon-gen docs export` 5 surfaces** — S2 bundle violations handbook (f739b6ce, `docs/handbook/violations.md` with h2-per-kind + slugified anchors + Contents TOC + cross-links to typed source classes); S3+S5 trainer-cards verifier + extended `--surface` choice list (5a8894f6); S4 full dynamic plant banner on /etl/triage per BU.0 Lock 11.4 (f240e9fa, reads `<v>_config_kv['trainer_applied_plants']` KV at render time + filters to L2 categories). Byte-identity reference artifacts under `tests/data/_handbook_artifacts/`.
+
+**Test-infra wins surfaced + landed:**
+- **Container readiness fix** (da95cb60) — runner now probes Docker daemon with bounded retry (3 attempts at 5s/10s/20s = ~35s ceiling); swallowed "thin container start failed; layers will likely fail" warning converted to `_finalize_run` with `EXIT_NEEDS_OPERATOR=2`. Surfaced when post-macOS-reboot Docker Desktop took ~30s to be fully responsive — runner fell through to doomed db-tier tests instead of failing fast. 6 new pinning tests in `tests/unit/test_cb17k_docker_daemon_probe_retry.py`.
+
+**Deferred-out:**
+- **BV.1** → backlogged (D3.1 L2 audit redux + per-primitive curriculum doc — "what's persona for?" deliverable; operator-judgment on audience + format + worked-example pending)
+- **BV.2** → backlogged (D3.2 ETL round-trip claim — likely partially absorbed by snapshot/restore golden-mirror + PlantContract typed invariant; re-scope when re-opened)
+- **BV.5** → backlogged (Agent-based design cold-read against dogfood + HUGE test; defaults work, just needs target + output path locked)
+- **BV.3.2.b** → carved to BV.3.3 browser e2e (5 kinds need dashboard-render assertions, not unit matview probes; resolved in BV.3.3.c.bug2/3/4/5 + snapshot work)
+- **BV.4.3, BV.4.7** → DEFERRED-BY-DESIGN (streaming progress page + per-app cold-read; re-evaluate when Oracle /etl/run pain surfaces or BV.3.1 dialect axis surfaces a real divergence)
+
+**Test-tier wall (run id 20260611T034334Z-00ce44c8):**
+- Unit: 4762 passed / 81 skipped — 69.82s
+- DB: 98 passed / 19 skipped — 43.28s
+- App2: passed (17×3 dialects trainer dogfood) — 1202.74s (loadgroup pin works; per-test wall still ~70s on PG — synthesis estimate was ~340-450s, gap is post-BV tuning opportunity)
+- Deploy: 4 analyses + 4 dashboards CREATION_SUCCESSFUL — 57.66s
+- QS API: 45 passed — 12.03s
+- QS Browser: 76 passed / 117 skipped / 2 xfailed / 2 xpassed — 128.13s (high skip count noted; not a release blocker; backlogged)
+
 # PLAN — Phase BU (archived 2026-06-09)
 
 **Phase summary:** Rebuilt the `/training/` Trainer surface as a registry-driven Studio page covering ALL 21 violation kinds across 8 families through ONE shared pattern. Pre-BU, `/training/` 404'd and the existing trainer pane only covered L1 invariants. Phase BU shipped the `PlantKindEntry` typed registry, three typed catalogues (`InvariantSection` / `L2FTExceptionSection` / `L2TriageGapSection`), 5 needs-build plant primitives, the vertical-slice (`phantom_rail`) end-to-end, and the BU.1.6 clean-baseline reset. 11 Lock-N's from BU.0's 4-round design pass either honored in-phase or carried forward.
