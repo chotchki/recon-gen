@@ -94,17 +94,23 @@ if TYPE_CHECKING:
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
-    # Y.7-followup — pin every test in this module onto a single
-    # pytest-xdist worker. ``tests/conftest.py::pytest_configure`` bumps
-    # the xdist dist mode to ``loadgroup`` when xdist is active so this
-    # marker takes effect. Reason: ``seeded_audit`` is module-scoped
-    # but xdist re-runs module-scoped fixtures once per worker; the
-    # fixture re-applies the dialect schema (DROP + CREATE every prefixed
-    # object), and on Oracle — where DDL auto-commits, so there's no
-    # transactional isolation between concurrent workers — two workers
-    # racing the same ``CREATE TABLE`` produce ORA-00955 ("name already
-    # used"). Grouping forces the fixture to run exactly once. Bonus: no
-    # redundant N× re-seed of the (slow) Aurora schema.
+    # Y.7-followup — intent: pin every test in this module onto a single
+    # pytest-xdist worker so ``seeded_audit`` (module-scoped) only runs
+    # the dialect DROP + CREATE once instead of N× per worker, avoiding
+    # Oracle ORA-00955 ("name already used") when concurrent workers race
+    # the same DDL. Bonus: skips the redundant Aurora re-seed cost.
+    # CAVEAT: this module runs at Tier.QS_BROWSER (line 109) where the
+    # runner deliberately leaves ``--dist=load`` (default), so this
+    # ``xdist_group`` marker is a SILENT NO-OP. The BV.3.3 loadgroup
+    # re-enable (runner.py:619) only covers app2 layer — qs_browser
+    # stays at default --dist=load to avoid the CB.7-followup
+    # marker-deselection × loadgroup cascade hazard. If this module
+    # actually surfaces ORA-00955 in practice, the fix shape is one of:
+    # (a) extend loadgroup to qs_browser layer (re-validate CB.7
+    # hazard), (b) wrap ``seeded_audit`` in a per-worker FileLock
+    # rendezvous (similar to ``pg_container_url`` / ``oracle_container_url``
+    # in tests/conftest.py), or (c) make the seed operation idempotent
+    # on Oracle. Currently green, so the hazard is latent.
     pytest.mark.xdist_group("audit_dashboard_agreement_seed"),
     tier(Tier.QS_BROWSER),
     needs(Need.AWS_QS, Need.PLAYWRIGHT),

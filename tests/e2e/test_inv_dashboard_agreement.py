@@ -114,9 +114,17 @@ pytestmark = [
     # agreement test can land on a DIFFERENT worker, which causes the
     # second worker's setup to DROP CASCADE the first worker's tables
     # (or vice versa, the first worker's module-teardown drops while
-    # the second is still querying). Pin every test in this module to a
-    # single worker via xdist_group + the conftest's loadgroup
-    # promotion so the module-scope fixtures run exactly once.
+    # the second is still querying).
+    # CAVEAT (2026-06-10): this module runs at Tier.QS_BROWSER where the
+    # runner deliberately leaves --dist=load (default), so this
+    # xdist_group marker is a SILENT NO-OP. The BV.3.3 loadgroup
+    # re-enable (runner.py:619) only covers app2 layer. Currently green,
+    # so the race hazard is latent. Fix options if it surfaces:
+    # (a) extend loadgroup to qs_browser layer (re-validate CB.7
+    # marker-deselection × loadgroup cascade hazard first),
+    # (b) wrap seeded_l2_db in a per-worker FileLock rendezvous like
+    # tests/conftest.py::pg_container_url, or (c) make the fixture's
+    # schema setup idempotent (CREATE IF NOT EXISTS + skip-if-prefixed).
     pytest.mark.xdist_group("inv_dashboard_agreement"),
 ]
 
