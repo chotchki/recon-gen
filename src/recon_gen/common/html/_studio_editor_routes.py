@@ -57,6 +57,12 @@ from recon_gen.common.html._components import (
     render_list_pager,
     render_list_search,
 )
+from recon_gen.common.html import _delete_confirm
+from recon_gen.common.html._delete_confirm import (
+    find_references as _find_references,
+    render_delete_confirm_banner,
+    verify_confirm_token,
+)
 from recon_gen.common.html._studio_routes import asset_url, studio_theme_head
 from recon_gen.common.html._side_panel import render_side_panel_trigger
 from recon_gen.common.ids import GlossaryAnchor, HandbookPath, SurfaceAnchor
@@ -2961,17 +2967,22 @@ def _render_read_card_summary(
         "no-underline cursor-pointer "
         "hover:bg-danger hover:text-white"
     )
+    # BX.1 (2026-06-11) — Delete no longer fires hx-delete directly.
+    # Clicking opens an inline confirm banner (reference-check first,
+    # 5s countdown, Cancel) rendered into the page-level
+    # `#delete-confirm-banner-slot`. The actual DELETE is the banner's
+    # Confirm button + a server-signed countdown token. No
+    # browser-native `hx-confirm` modal.
     actions_html = (
         f'<div class="flex items-center gap-2 shrink-0">'
         f'<a class="{edit_btn_cls}" '
         f'href="/l2_shape/{kind}/{escape(entity_id)}/edit" '
         f'onclick="event.stopPropagation()">Edit</a>'
         f'<a class="{delete_btn_cls}" '
-        f'hx-delete="/l2_shape/{kind}/{escape(entity_id)}" '
-        f'hx-target="#{html_id}" hx-swap="outerHTML" '
-        f'onclick="event.stopPropagation()" '
-        f'hx-confirm="Delete this entity? References that block deletion '
-        f'will be reported inline.">Delete</a>'
+        f'data-role="card-delete" '
+        f'hx-get="/l2_shape/{kind}/{escape(entity_id)}/delete-confirm" '
+        f'hx-target="#delete-confirm-banner-slot" hx-swap="innerHTML" '
+        f'onclick="event.stopPropagation()">Delete</a>'
         f"</div>"
     )
     header_cls = "flex items-start justify-between gap-3"
@@ -4531,13 +4542,16 @@ def _render_edit_page(
         f'href="{escape(list_url)}">← back to {escape(kind_label_plural(kind))}</a>'
         f'</div>'
     )
+    # BX.1 (2026-06-11) — same banner pattern on the edit page. The
+    # banner lands in `#delete-confirm-banner-slot` above the form
+    # section; the form stays intact so Cancel returns the operator
+    # to where they were.
     delete_btn_classes = destructive_button_classes()
     delete_btn_html = (
         f'<a class="{delete_btn_classes} ml-auto" '
         f'data-role="form-delete" '
-        f'hx-delete="/l2_shape/{escape(kind)}/{escape(entity_id)}?from=edit" '
-        f'hx-confirm="Delete this entity? References that block deletion '
-        f'will be reported inline.">Delete</a>'
+        f'hx-get="/l2_shape/{escape(kind)}/{escape(entity_id)}/delete-confirm?from=edit" '
+        f'hx-target="#delete-confirm-banner-slot" hx-swap="innerHTML">Delete</a>'
     )
     return f"""<!doctype html>
 <html lang="en">
@@ -4555,6 +4569,7 @@ def _render_edit_page(
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
     {_render_intro_details(intro_html)}
     {subtype_banner_html}
+    <div id="delete-confirm-banner-slot" data-test-delete-banner-slot></div>
     <section class="bg-white border border-surface-border rounded-md p-5">
       <form method="post" action="/l2_shape/{escape(kind)}/{escape(entity_id)}" class="edit-form group">
         {global_err_html}
@@ -5428,6 +5443,13 @@ def _render_list_page(
         '<div class="max-w-7xl mx-auto px-4 pb-12">' if pager_html else ""
     )
     pager_wrap_close = "</div>" if pager_html else ""
+    # BX.1 (2026-06-11) — page-level slot for the delete-confirm
+    # banner. ONE per page (single in-flight delete at a time);
+    # card Delete buttons swap their banner in here via
+    # `hx-target="#delete-confirm-banner-slot"`. In `embed` mode the
+    # home page's wrapper already declares a slot of its own —
+    # the per-section embed body skips its own slot to avoid id
+    # duplication (handled in `_render_home`).
     if embed:
         return (
             f"{search_wrap_open}{search_html}{search_wrap_close}"
@@ -5459,6 +5481,9 @@ def _render_list_page(
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
   {page_header_html}
+  <div class="max-w-7xl mx-auto px-4 pt-3">
+    <div id="delete-confirm-banner-slot" data-test-delete-banner-slot></div>
+  </div>
   {search_wrap_open}{search_html}{search_wrap_close}
   <main id="entity-list" class="{grid_cls}">
     {cards}
@@ -6315,6 +6340,48 @@ def _make_handlers(
         if kind is None or kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse("not editable", status_code=404)
 
+        # BX.1 (2026-06-11) — DELETE requires the server-signed confirm
+        # token issued by GET /l2_shape/<kind>/<id>/delete-confirm.
+        # The token encodes start_ts (HMAC-signed); the verifier
+        # enforces ``now - start_ts >= COUNTDOWN_SECS`` server-side so
+        # a client that disables the disabled-attribute via DevTools
+        # still hits the wall clock check. No backward-compat path
+        # for unsigned DELETEs: any pre-BX.1 client tab that fires
+        # raw DELETE gets a 400 with the actionable error.
+        confirm_token = request.query_params.get("confirm_token", "")
+        if not confirm_token:
+            return HTMLResponse(
+                '<div role="alert" data-test-delete-error="missing-token" '
+                'class="text-sm text-danger bg-red-50 border '
+                'border-danger rounded-sm px-3 py-2 mb-3">'
+                "Confirm required — click Delete on the entity to "
+                "open the inline confirm banner; wait the countdown; "
+                "then click Confirm.</div>",
+                status_code=400,
+            )
+        verify = verify_confirm_token(
+            confirm_token, kind, entity_id,
+            countdown_secs=_delete_confirm.COUNTDOWN_SECS,
+        )
+        if verify.status == "invalid":
+            return HTMLResponse(
+                '<div role="alert" data-test-delete-error="invalid-token" '
+                'class="text-sm text-danger bg-red-50 border '
+                'border-danger rounded-sm px-3 py-2 mb-3">'
+                "Confirm token invalid — reload the page and try "
+                "again.</div>",
+                status_code=400,
+            )
+        if verify.status == "too_early":
+            return HTMLResponse(
+                f'<div role="alert" data-test-delete-error="too-early" '
+                f'class="text-sm text-danger bg-red-50 border '
+                f'border-danger rounded-sm px-3 py-2 mb-3">'
+                f"Wait for the countdown — only {verify.elapsed:.1f}s "
+                f"elapsed.</div>",
+                status_code=400,
+            )
+
         try:
             new_inst = delete_l2_entity(cache.get(), kind, entity_id)
         except KeyError:
@@ -6336,17 +6403,56 @@ def _make_handlers(
         # to the list page so the operator lands on the kind's list
         # instead of seeing the now-stale edit form. Card-source
         # deletes keep the empty-body shape (HX-Swap removes the
-        # card in place).
+        # banner; the home page's cascade-reload listener refreshes
+        # the relevant section).
         from_source = request.query_params.get("from", "")
         if from_source == "edit":
             resp = HTMLResponse("")
             resp.headers["HX-Redirect"] = f"/l2_shape/{kind}/"
             resp.headers["HX-Trigger"] = "l2-cascade-reload"
             return resp
-        # Empty body — the chrome's HX-Swap removes the card.
+        # Empty body — the chrome's HX-Swap removes the banner.
         resp = HTMLResponse("")
         resp.headers["HX-Trigger"] = "l2-cascade-reload"
         return resp
+
+    async def delete_confirm_handler(request: Request) -> HTMLResponse:
+        """BX.1 — GET /l2_shape/<kind>/<id>/delete-confirm: returns
+        the inline confirm banner. Walks the L2Instance for incoming
+        references first; when refs are present the banner renders
+        in `blocked` mode (no Confirm button, listing each referrer
+        with an edit link). When refs are absent the banner renders
+        in `armed` mode with a 5s countdown + signed Confirm token.
+
+        Lives behind GET (not POST) so it's idempotent + safe to
+        re-fire if the operator clicks Delete twice.
+        """
+        kind = _kind_from_path(request.path_params["kind"])
+        entity_id = request.path_params["entity_id"]
+        if kind is None or kind not in _FIELD_SPECS_BY_KIND:
+            return HTMLResponse("not editable", status_code=404)
+        instance = cache.get()
+        # Guard against the mid-flight stale-id case: if the entity
+        # was deleted from another tab between the operator opening
+        # the page and clicking Delete, surface the same 410-Gone
+        # shape the save handler uses.
+        if _find_entity_or_none(instance, kind, entity_id) is None:
+            return _entity_gone_response(kind, entity_id)
+        refs = _find_references(instance, kind, entity_id)
+        banner_html = render_delete_confirm_banner(
+            kind, entity_id, refs,
+            countdown_secs=_delete_confirm.COUNTDOWN_SECS,
+        )
+        return HTMLResponse(banner_html)
+
+    async def delete_cancel_handler(_request: Request) -> HTMLResponse:
+        """BX.1 — GET /l2_shape/_delete_cancel: returns an empty
+        replacement so the Cancel button kills the in-flight banner.
+        The Cancel button's hx-swap=outerHTML on `#delete-confirm-banner`
+        replaces the banner aside with the empty-string body — leaving
+        the slot div empty and ready for the next Delete click.
+        """
+        return HTMLResponse("")
 
     async def preview_markdown(request: Request) -> HTMLResponse:
         """BF.9 (2026-05-25) — markdown → HTML preview endpoint.
@@ -6387,6 +6493,8 @@ def _make_handlers(
         "edit_form": edit_form,
         "save": save,
         "delete": delete_handler,
+        "delete_confirm": delete_confirm_handler,
+        "delete_cancel": delete_cancel_handler,
         "new_form": new_form,
         "create": create,
         "preview_markdown": preview_markdown,
@@ -6504,7 +6612,15 @@ def make_editor_routes(
     h = _make_handlers(cache, top_nav_fn=top_nav_fn)
     # ``/new`` MUST be declared before ``/{entity_id}`` so Starlette's
     # path matcher doesn't treat the literal "new" as an entity_id.
+    # BX.1 (2026-06-11): the ``/_delete_cancel`` literal MUST be
+    # declared before the ``/{kind}/`` catch-all for the same reason.
     routes: list[Route] = [
+        # BX.1 — delete-confirm cancel endpoint. Empty-body GET so
+        # Cancel button hx-swap=outerHTML kills the in-flight banner.
+        Route(
+            "/l2_shape/_delete_cancel", h["delete_cancel"],
+            methods=["GET"], name="l2_shape_delete_cancel",
+        ),
         Route(
             "/l2_shape/{kind}/", h["list_view"], methods=["GET"],
         ),
@@ -6515,6 +6631,14 @@ def make_editor_routes(
         Route(
             "/l2_shape/{kind}/new", h["new_form"], methods=["GET"],
             name="l2_shape_new_form",
+        ),
+        # BX.1 — delete-confirm banner endpoint. Declared BEFORE the
+        # bare-id read route so Starlette doesn't treat
+        # "delete-confirm" as an entity_id.
+        Route(
+            "/l2_shape/{kind}/{entity_id}/delete-confirm",
+            h["delete_confirm"],
+            methods=["GET"], name="l2_shape_delete_confirm",
         ),
         Route(
             "/l2_shape/{kind}/{entity_id}", h["read_card"],

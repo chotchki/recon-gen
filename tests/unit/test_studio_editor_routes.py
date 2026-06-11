@@ -211,18 +211,37 @@ def test_put_invalid_value_returns_400_with_inline_error(
 # ---------------------------------------------------------------------------
 
 
-def test_delete_dependent_rail_returns_400(writable_l2_yaml: Path) -> None:
+def test_delete_dependent_rail_returns_400(
+    writable_l2_yaml: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """SPEC's structural-break rule: deleting a Rail that a
-    TransferTemplate.leg_rails still references returns 400 with the
-    validator's error inline; the disk file is untouched."""
+    TransferTemplate.leg_rails still references returns 400 — now
+    surfaced through the BX.1 banner's `blocked` mode BEFORE the
+    operator can confirm. The GET /delete-confirm endpoint returns a
+    `data-test-delete-state="blocked"` banner listing the
+    referrers; no confirm-token is issued so a raw DELETE against
+    the rail returns 400 (missing-token) and the disk file is
+    untouched."""
+    # Zero out countdown so other tests in the file can mint tokens
+    # without sleeping — this test only exercises the blocked branch.
+    monkeypatch.setattr(
+        "recon_gen.common.html._delete_confirm.COUNTDOWN_SECS", 0.0,
+    )
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         # ReconciliationLeg is in ExternalReconciliationCycle.leg_rails.
+        # GET the confirm banner — references must be listed.
+        banner = c.get("/l2_shape/rail/ReconciliationLeg/delete-confirm")
+        assert banner.status_code == 200, banner.text
+        assert 'data-test-delete-state="blocked"' in banner.text
+        # Referrer chip points at the transfer_template.
+        assert "ExternalReconciliationCycle" in banner.text
+
+        # Raw DELETE without a confirm_token: 400 missing-token.
         resp = c.delete("/l2_shape/rail/ReconciliationLeg")
         assert resp.status_code == 400, resp.text
-        # AM.1 step 5 (2026-05-25): `.form-global-error` retired;
-        # the "Cannot delete" prose is the stable user-visible signal.
-        assert "Cannot delete" in resp.text
+        assert "missing-token" in resp.text
 
     # Disk untouched.
     reloaded = load_instance(writable_l2_yaml)
@@ -288,17 +307,20 @@ def test_parent_role_hidden_when_account_is_already_a_parent(
 def test_card_renders_delete_link_with_confirm(
     writable_l2_yaml: Path,
 ) -> None:
-    """X.4.f.9 — every read card carries a Delete link wired to the
-    DELETE route, with hx-confirm so a stray click can't wipe an
-    entity."""
+    """BX.1 (2026-06-11) — Delete on a read card now opens the inline
+    confirm banner via GET /delete-confirm (not a direct hx-delete +
+    browser hx-confirm modal). The wire shape: `hx-get` pointing at
+    `/l2_shape/<kind>/<id>/delete-confirm` targeting the page-level
+    banner slot. No `hx-confirm` modal."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/l2_shape/account/cust-001").text
-    # AM.1 step 6 (2026-05-25): `.delete-link` semantic class retired;
-    # check the stable HTMX hooks instead — those are what actually
-    # makes the link wire up to the DELETE route + confirm dialog.
-    assert 'hx-delete="/l2_shape/account/cust-001"' in body
-    assert "hx-confirm=" in body
+    assert (
+        'hx-get="/l2_shape/account/cust-001/delete-confirm"' in body
+    ), body
+    assert 'hx-target="#delete-confirm-banner-slot"' in body
+    # No browser-native modal — BX.1 lock.
+    assert "hx-confirm=" not in body
 
 
 def test_get_new_form_returns_full_page_with_intro_prose(
@@ -1177,12 +1199,22 @@ def test_chain_card_id_replaces_double_colon_to_avoid_css_pseudo_element(
     assert f'id="entity-chain-{slug}"' in body
     # NO raw ``::`` in the id attr.
     assert f'id="entity-chain-{composite}"' not in body
-    # hx-target (the Delete link's outerHTML swap) uses the slug too.
-    assert f'hx-target="#entity-chain-{slug}"' in body
+    # BX.1 (2026-06-11) — the Delete button now targets the page-
+    # level ``#delete-confirm-banner-slot`` (the banner displays the
+    # confirm flow); the card's CSS-safe id remains important for
+    # the post-delete cascade-reload swap shape but no longer
+    # surfaces on the Delete button's hx-target. Pin the new shape
+    # AND keep the CSS-safe id assertion above so the original
+    # X.4.f.10 fix isn't lost.
+    assert 'hx-target="#delete-confirm-banner-slot"' in body
     # URL path KEEPS the original ``::``. The Edit link is now a plain
-    # navigation to the dedicated edit screen (AI.2.e); card id + delete
-    # hx-target use the CSS-safe slug.
+    # navigation to the dedicated edit screen (AI.2.e); the delete-
+    # confirm GET URL also keeps the raw composite (Starlette path
+    # params don't need slug encoding).
     assert f'href="/l2_shape/chain/{composite}/edit"' in body
+    assert (
+        f'hx-get="/l2_shape/chain/{composite}/delete-confirm"' in body
+    )
 
 
 def test_put_chain_edit_renders_card_after_save(
@@ -1768,17 +1800,46 @@ def test_singleton_instance_empty_clears_both(
     assert reloaded.institution_acronym is None
 
 
-def test_delete_unreferenced_account_persists(writable_l2_yaml: Path) -> None:
+def test_delete_unreferenced_account_persists(
+    writable_l2_yaml: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Deleting cust-002 succeeds — no rail / template references it
-    by id; the role CustomerSubledger is still satisfied by cust-001."""
+    by id; the role CustomerSubledger is still satisfied by cust-001.
+
+    BX.1 (2026-06-11): the operator now goes through the confirm
+    banner. Test pinches the countdown to 0s via monkeypatch so the
+    server-side wall-clock check passes immediately."""
+    monkeypatch.setattr(
+        "recon_gen.common.html._delete_confirm.COUNTDOWN_SECS", 0.0,
+    )
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
-        resp = c.delete("/l2_shape/account/cust-002")
+        # GET the banner. cust-002 is unreferenced → armed mode.
+        banner = c.get("/l2_shape/account/cust-002/delete-confirm")
+        assert banner.status_code == 200, banner.text
+        assert 'data-test-delete-state="armed"' in banner.text
+        # Extract the confirm_token from the banner's hx-delete URL.
+        token = _extract_confirm_token(banner.text)
+
+        resp = c.delete(
+            f"/l2_shape/account/cust-002?confirm_token={token}",
+        )
         assert resp.status_code == 200, resp.text
         assert resp.headers.get("HX-Trigger") == "l2-cascade-reload"
 
     reloaded = load_instance(writable_l2_yaml)
     assert not any(str(a.id) == "cust-002" for a in reloaded.accounts)
+
+
+def _extract_confirm_token(banner_html: str) -> str:
+    """Pull the ``confirm_token=…`` value out of the banner's
+    ``hx-delete`` URL. Stable token format is ``<start_ts>:<hex>``
+    so the regex is permissive (the verify path tightens it)."""
+    import re
+    m = re.search(r"confirm_token=([0-9.]+:[0-9a-f]+)", banner_html)
+    assert m is not None, f"banner missing confirm_token: {banner_html}"
+    return m.group(1)
 
 
 # ---------------------------------------------------------------------------

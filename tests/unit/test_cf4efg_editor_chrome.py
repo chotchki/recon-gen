@@ -143,9 +143,11 @@ def test_delete_button_is_danger_solid(writable_l2_yaml: Path) -> None:
     # Delete carries the danger token (red).
     assert "border-danger" in card
     assert "text-danger" in card
-    # Still wires the htmx delete via hx-delete + hx-confirm guard.
-    assert "hx-delete=" in card
-    assert "hx-confirm=" in card
+    # BX.1 (2026-06-11) — the Delete button now opens the inline
+    # confirm banner via GET /delete-confirm; no direct hx-delete +
+    # browser-native hx-confirm modal.
+    assert "/delete-confirm" in card
+    assert "hx-confirm=" not in card
 
 
 def test_delete_visually_distinct_from_edit(
