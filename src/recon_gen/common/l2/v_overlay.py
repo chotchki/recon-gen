@@ -129,7 +129,9 @@ def drop_v_overlay_sql(
     )
 
 
-def clone_base_to_v_sql(base_prefix: str) -> str:
+def clone_base_to_v_sql(
+    base_prefix: str, dialect: object = None,
+) -> str:
     """Pure data copy from base prefix tables → v overlay tables.
 
     Three base data tables (per `step_2_wipe` survey):
@@ -142,8 +144,47 @@ def clone_base_to_v_sql(base_prefix: str) -> str:
     data. Cheaper than copying every matview row + guarantees v
     matview rows are derivable from the v base tables (the v
     overlay is internally consistent, not a snapshot artifact).
+
+    Dialect branching (DI.1 perf — 2026-06-10):
+
+    - **PG / Oracle / default**: ``DELETE FROM v_X; INSERT INTO v_X
+      SELECT * FROM base_X`` — the classic two-pass shape. Safe
+      everywhere; preserves the ``create_v_overlay_sql`` schema
+      (constraints, indexes, sequence DEFAULTs).
+    - **DuckDB**: ``CREATE OR REPLACE TABLE v_X AS SELECT * FROM
+      base_X`` — single-pass columnar bulk load. On a 500k-row table
+      this is ~57× faster than DELETE+INSERT through PK validation
+      (DELETE costs ~75% of the wall time; INSERT through a PK costs
+      ~25%). The trade-off: CTAS drops the table's PK / CHECK /
+      sequence DEFAULT. Callers MUST follow up with
+      :func:`realign_v_overlay_entry_sequences_sql` so plant INSERTs
+      that omit ``entry`` (relying on the DEFAULT sequence) keep
+      working post-clone. The v overlay is ephemeral training-mode
+      data — losing CHECK / PK constraints there is an accepted
+      cost; production paths (etl into base, not v) still get full
+      schema enforcement.
+
+    ``dialect`` is accepted as ``object`` (not the ``Dialect`` enum
+    directly) so existing call sites that pre-date this signature
+    keep working — the default ``None`` falls through to the legacy
+    DELETE+INSERT shape which is correct on every dialect.
     """
+    from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
+
     v = v_overlay_prefix(base_prefix)
+    if isinstance(dialect, Dialect) and dialect is Dialect.DUCKDB:
+        # CTAS path — drops the table's PK + CHECK + sequence DEFAULT
+        # as a side effect; caller follows up with
+        # realign_v_overlay_entry_sequences_sql to re-attach the
+        # sequence DEFAULT for plant INSERTs.
+        return "\n".join([
+            f"CREATE OR REPLACE TABLE {v}_transactions AS "
+            f"SELECT * FROM {base_prefix}_transactions;",
+            f"CREATE OR REPLACE TABLE {v}_daily_balances AS "
+            f"SELECT * FROM {base_prefix}_daily_balances;",
+            f"CREATE OR REPLACE TABLE {v}_config_kv AS "
+            f"SELECT * FROM {base_prefix}_config_kv;",
+        ])
     return "\n".join([
         f"DELETE FROM {v}_transactions;",
         f"DELETE FROM {v}_daily_balances;",
@@ -152,6 +193,95 @@ def clone_base_to_v_sql(base_prefix: str) -> str:
         f"INSERT INTO {v}_daily_balances SELECT * FROM {base_prefix}_daily_balances;",
         f"INSERT INTO {v}_config_kv SELECT * FROM {base_prefix}_config_kv;",
     ])
+
+
+def realign_v_overlay_entry_sequences_sql(
+    base_prefix: str, *,
+    max_tx_entry: int, max_db_entry: int,
+) -> str:
+    """DI.1 — post-CTAS sequence realignment for DuckDB v overlay.
+
+    :func:`clone_base_to_v_sql`'s DuckDB CTAS branch drops the v
+    overlay tables' ``entry`` column DEFAULT (the ``nextval('<v>_X
+    _entry_seq')`` reference). Plant INSERTs that omit ``entry`` rely
+    on that DEFAULT to generate the next supersession key. This
+    helper emits the SQL to:
+
+    1. Drop the existing v entry sequences (started at 1 by
+       ``create_v_overlay_sql``; advanced by any prior plant INSERTs).
+    2. Recreate them starting at ``max(entry) + 1`` so the next
+       ``nextval`` call doesn't collide with the cloned base rows
+       (entries 1..N from base).
+    3. ``ALTER TABLE ... ALTER COLUMN entry SET DEFAULT
+       nextval('<seq>')`` to re-attach the DEFAULT.
+
+    DuckDB-specific — no-op for PG / Oracle (their entry columns use
+    BIGSERIAL / IDENTITY, which CTAS doesn't touch on those dialects
+    because they use DELETE+INSERT, not CTAS).
+
+    ``max_tx_entry`` + ``max_db_entry`` are computed by the caller
+    via ``SELECT COALESCE(MAX(entry), 0) FROM <v>_X`` — DuckDB
+    ``CREATE SEQUENCE START WITH`` requires a literal, not a
+    subquery, so the value must be substituted at SQL build time.
+    """
+    v = v_overlay_prefix(base_prefix)
+    tx_seq = f"{v}_transactions_entry_seq"
+    db_seq = f"{v}_daily_balances_entry_seq"
+    return "\n".join([
+        f"DROP SEQUENCE IF EXISTS {tx_seq};",
+        f"DROP SEQUENCE IF EXISTS {db_seq};",
+        f"CREATE SEQUENCE {tx_seq} START WITH {max_tx_entry + 1};",
+        f"CREATE SEQUENCE {db_seq} START WITH {max_db_entry + 1};",
+        f"ALTER TABLE {v}_transactions ALTER COLUMN entry "
+        f"SET DEFAULT nextval('{tx_seq}');",
+        f"ALTER TABLE {v}_daily_balances ALTER COLUMN entry "
+        f"SET DEFAULT nextval('{db_seq}');",
+    ])
+
+
+def _realign_v_overlay_entry_sequences(
+    cur: object, cfg: "Config", base_prefix: str,
+) -> None:
+    """DI.1 — DuckDB-only post-CTAS sequence realignment.
+
+    DuckDB's ``CREATE OR REPLACE TABLE v_X AS SELECT * FROM base_X``
+    is the columnar fast-path clone but drops the table's
+    ``entry`` column DEFAULT (the ``nextval('<v>_X_entry_seq')``
+    reference). This helper fetches ``MAX(entry)`` from each v
+    overlay base table and emits SQL to:
+
+    1. Drop + recreate the v entry sequences starting at ``max+1``.
+    2. ``ALTER TABLE`` to re-attach the DEFAULT.
+
+    No-op for PG / Oracle — their clone path is DELETE+INSERT, which
+    preserves the schema (CTAS isn't used). The function is silent
+    on those dialects so callers can invoke it unconditionally.
+    """
+    from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
+
+    if cfg.dialect is not Dialect.DUCKDB:
+        return
+    v = v_overlay_prefix(base_prefix)
+
+    def _max_entry(table: str) -> int:
+        cur.execute(f"SELECT COALESCE(MAX(entry), 0) FROM {table}")  # type: ignore[attr-defined]: structural DBAPI cursor
+        row: object = cur.fetchone()  # type: ignore[attr-defined]: structural DBAPI cursor
+        # DBAPI cursor returns a sequence-like row (tuple / Row); index 0
+        # is the COALESCE'd MAX(entry). Cast through ``object`` so the
+        # structural cursor typing stays pyright-clean.
+        if row is None:
+            return 0
+        val = row[0]  # type: ignore[index]: DBAPI rows are sequence-like
+        return int(val) if val is not None else 0  # type: ignore[arg-type]: int() accepts the DB driver's numeric scalar
+
+    max_tx_entry = _max_entry(f"{v}_transactions")
+    max_db_entry = _max_entry(f"{v}_daily_balances")
+    realign_sql = realign_v_overlay_entry_sequences_sql(
+        base_prefix,
+        max_tx_entry=max_tx_entry,
+        max_db_entry=max_db_entry,
+    )
+    execute_script(cur, realign_sql, dialect=cfg.dialect)
 
 
 def refresh_v_overlay_matviews_sql(
@@ -282,8 +412,17 @@ async def session_start(
                 execute_script(cur, create_sql, dialect=cfg.dialect)
                 step_log.append(("session_start:create_v_done", {}))
 
-                clone_sql = clone_base_to_v_sql(base_prefix)
+                clone_sql = clone_base_to_v_sql(
+                    base_prefix, dialect=cfg.dialect,
+                )
                 execute_script(cur, clone_sql, dialect=cfg.dialect)
+                # DI.1 — DuckDB CTAS clone drops the v overlay tables'
+                # entry-column DEFAULT (the nextval('<v>_X_entry_seq')
+                # reference). Re-attach via realign so plant INSERTs
+                # that omit ``entry`` keep working. PG/Oracle use the
+                # DELETE+INSERT branch which preserves the schema, so
+                # the realign is a no-op there.
+                _realign_v_overlay_entry_sequences(cur, cfg, base_prefix)
                 step_log.append(("session_start:clone_done", {}))
 
                 refresh_sql = refresh_v_overlay_matviews_sql(
@@ -503,8 +642,16 @@ async def apply_plants(
                     # data (including kinds whose fingerprint didn't
                     # change — the cloned baseline no longer carries
                     # their planted rows).
-                    clone_sql = clone_base_to_v_sql(base_prefix)
+                    clone_sql = clone_base_to_v_sql(
+                        base_prefix, dialect=cfg.dialect,
+                    )
                     execute_script(cur, clone_sql, dialect=cfg.dialect)
+                    # DI.1 — DuckDB CTAS path drops the v overlay
+                    # tables' entry-column DEFAULT; realign so the
+                    # plant INSERTs below pick up nextval() again.
+                    _realign_v_overlay_entry_sequences(
+                        cur, cfg, base_prefix,
+                    )
                     step_log.append(("apply:clone_done", {}))
                     kinds_to_run: list[
                         tuple["PlantKindEntry", Mapping[str, object]]

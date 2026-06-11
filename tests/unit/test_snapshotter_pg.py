@@ -207,7 +207,7 @@ def v_overlay_seeded(
             )
             execute_script(
                 cur,
-                clone_base_to_v_sql(base_prefix),
+                clone_base_to_v_sql(base_prefix, dialect=pg_cfg.dialect),
                 dialect=pg_cfg.dialect,
             )
             conn.commit()

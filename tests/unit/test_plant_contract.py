@@ -46,6 +46,7 @@ from recon_gen.common.l2.plant_registry import (
 from recon_gen.common.l2.schema import emit_schema
 from recon_gen.common.l2.seed import emit_full_seed
 from recon_gen.common.l2.v_overlay import (
+    _realign_v_overlay_entry_sequences,
     apply_plants,
     clone_base_to_v_sql,
     create_v_overlay_sql,
@@ -161,8 +162,13 @@ def fresh_v_overlay(tmp_path: Path) -> Iterator[tuple[Config, Path]]:
                 dialect=cfg.dialect,
             )
             execute_script(
-                cur, clone_base_to_v_sql(base_prefix), dialect=cfg.dialect,
+                cur,
+                clone_base_to_v_sql(base_prefix, dialect=cfg.dialect),
+                dialect=cfg.dialect,
             )
+            # DI.1 — DuckDB CTAS clone drops the v entry-column DEFAULT;
+            # realign so subsequent plant INSERTs work.
+            _realign_v_overlay_entry_sequences(cur, cfg, base_prefix)
             execute_script(
                 cur,
                 refresh_v_overlay_matviews_sql(
