@@ -71,7 +71,25 @@ from tests._marks import Tier, tier
 from recon_gen.common.snapshotter import PostgresSchemaSnapshotter
 
 
-pytestmark = tier(Tier.UNIT)
+# BV.3.3.f xdist-isolation fix (2026-06-11) — `xdist_group` mark pins
+# ALL tests in this file to ONE xdist worker. CAVEAT: this is a silent
+# no-op under xdist's default `--dist=load` (which the unit layer uses
+# per `_dev/runner.py::_layer_pytest_argv`). It documents intent + acts
+# as belt-and-suspenders for the day someone re-enables `--dist=loadgroup`
+# for the unit layer. The LOAD-BEARING fix is the per-worker
+# `db_table_prefix` disambiguation in `pg_cfg` below: each worker
+# operates on its own `snap_pg_test_<worker>` prefix so concurrent
+# `emit_schema` DROP-then-CREATE streams against the shared
+# `recon-gen-snap-test-pg` container don't race. PG hasn't surfaced
+# the race spectrum that Oracle did (PG DDL is transactional with
+# rollback, so most collisions surface as recoverable SQLSTATEs rather
+# than the Oracle ORA-00955/00942/04063/12003/12006 storm), but the
+# latent isolation bug is identical — the Oracle fix template
+# (commit e09c3cf5) applies one-to-one.
+pytestmark = [
+    tier(Tier.UNIT),
+    pytest.mark.xdist_group("snapshotter-pg"),
+]
 
 
 _BASE_PREFIX = "snap_pg_test"
@@ -83,7 +101,7 @@ _BASE_PREFIX = "snap_pg_test"
 
 
 @pytest.fixture(scope="module")
-def pg_cfg(snapshotter_pg_container_url: str) -> Config:
+def pg_cfg(snapshotter_pg_container_url: str, worker_id: str) -> Config:
     """Pin a module-scoped ``Config`` against the snapshotter-dedicated
     PG container.
 
@@ -91,13 +109,23 @@ def pg_cfg(snapshotter_pg_container_url: str) -> Config:
     test file rather than per test. Each test ``take``s a fresh
     snapshot then ``restore``s it, so cross-test contamination is
     impossible by construction.
+
+    BV.3.3.f (2026-06-11): the ``db_table_prefix`` is per-(file, worker)
+    suffixed so concurrent xdist workers don't collide on the shared
+    ``recon-gen-snap-test-pg`` container's namespace. ``worker_id`` is
+    ``"master"`` under bare pytest and ``"gw<N>"`` under xdist. The
+    longest envelope (``snap_pg_test_gw15_v_inv_money_trail_edges`` ≈
+    45 chars) stays well under PG's 63-byte identifier cap.
+
+    See the file-level xdist isolation note above for the load-bearing
+    rationale + the Oracle sibling fix template.
     """
     from dataclasses import replace
     from tests._test_helpers import make_test_config
 
     base = make_test_config(
         dialect=Dialect.POSTGRES,
-        db_table_prefix=_BASE_PREFIX,
+        db_table_prefix=f"{_BASE_PREFIX}_{worker_id}",
     )
     return replace(base, demo_database_url=snapshotter_pg_container_url)
 
@@ -111,25 +139,89 @@ def l2_instance_fixture() -> L2Instance:
     return default_l2_instance()
 
 
+def _ensure_pgcrypto_installed(
+    pg_cfg: Config, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
+) -> None:
+    """Pre-install ``pgcrypto`` under a cross-worker FileLock.
+
+    BV.3.3.f (2026-06-11): ``emit_schema`` emits ``CREATE EXTENSION IF
+    NOT EXISTS pgcrypto`` (Phase CW.2 Lock 3 — audit provenance SHA-256).
+    Despite the ``IF NOT EXISTS`` guard, concurrent xdist workers all
+    finding pgcrypto missing simultaneously race the underlying
+    ``INSERT INTO pg_extension`` and one (or more) get
+    ``UniqueViolation: duplicate key value violates unique constraint
+    "pg_extension_name_index"``. The guard is TOCTOU, not atomic.
+
+    Mitigation: pre-create pgcrypto ONCE under a session-shared
+    ``FileLock`` (same rendezvous shape as the container-URL fixtures).
+    Once the extension exists cluster-wide, the per-worker
+    ``emit_schema`` ``CREATE EXTENSION IF NOT EXISTS`` runs become true
+    no-ops (the ``SELECT FROM pg_available_extensions`` short-circuits
+    before any INSERT attempt) and the per-worker setups parallelize
+    cleanly on their separate ``db_table_prefix`` namespaces.
+    """
+    from filelock import FileLock  # noqa: PLC0415 — lazy
+
+    # Bare pytest: no xdist, no lock needed.
+    if worker_id == "master":
+        _install_pgcrypto(pg_cfg)
+        return
+
+    root_tmp_dir = tmp_path_factory.getbasetemp().parent
+    sentinel = root_tmp_dir / "snap-pg-pgcrypto.installed"
+    lock = FileLock(str(sentinel) + ".lock")
+    with lock:
+        if sentinel.is_file():
+            return
+        _install_pgcrypto(pg_cfg)
+        sentinel.touch()
+
+
+def _install_pgcrypto(pg_cfg: Config) -> None:
+    """Single-shot ``CREATE EXTENSION IF NOT EXISTS pgcrypto``."""
+    conn = connect_demo_db(pg_cfg)
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+            conn.commit()
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+
+
 @pytest.fixture(scope="module")
-def v_overlay_seeded(pg_cfg: Config, l2_instance_fixture: L2Instance) -> Iterator[Config]:
+def v_overlay_seeded(
+    pg_cfg: Config,
+    l2_instance_fixture: L2Instance,
+    tmp_path_factory: pytest.TempPathFactory,
+    worker_id: str,
+) -> Iterator[Config]:
     """Build the base + v-overlay schema once, yield the cfg.
 
     Steps:
 
-    1. Drop any prior base schema (idempotent).
-    2. Emit + apply base schema (empty tables — we don't need rows for
+    1. Pre-install ``pgcrypto`` under FileLock (BV.3.3.f — xdist race).
+    2. Drop any prior base schema (idempotent).
+    3. Emit + apply base schema (empty tables — we don't need rows for
        the snapshot round-trip; the round-trip pins state, not
        semantics).
-    3. Drop + create v-overlay schema.
-    4. Clone base → v (empty clone is fine for state-round-trip).
-    5. Refresh v matviews (empty matviews — still a valid post-
+    4. Drop + create v-overlay schema.
+    5. Clone base → v (empty clone is fine for state-round-trip).
+    6. Refresh v matviews (empty matviews — still a valid post-
        session_start state for the snapshotter to capture).
 
     Module-scope teardown drops both schemas so the shared container
     is left clean for sibling test modules.
     """
     from recon_gen.common.l2.schema import emit_schema_drop_sql
+
+    base_prefix = pg_cfg.db_table_prefix
+
+    # BV.3.3.f — ensure pgcrypto exists BEFORE any worker's emit_schema
+    # runs. See ``_ensure_pgcrypto_installed`` for the race rationale.
+    _ensure_pgcrypto_installed(pg_cfg, tmp_path_factory, worker_id)
 
     conn = connect_demo_db(pg_cfg)
     try:
@@ -138,10 +230,10 @@ def v_overlay_seeded(pg_cfg: Config, l2_instance_fixture: L2Instance) -> Iterato
             # Best-effort drop of any prior schema/v-overlay debris.
             for drop in (
                 drop_v_overlay_sql(
-                    l2_instance_fixture, base_prefix=_BASE_PREFIX, dialect=pg_cfg.dialect,
+                    l2_instance_fixture, base_prefix=base_prefix, dialect=pg_cfg.dialect,
                 ),
                 emit_schema_drop_sql(
-                    l2_instance_fixture, prefix=_BASE_PREFIX, dialect=pg_cfg.dialect,
+                    l2_instance_fixture, prefix=base_prefix, dialect=pg_cfg.dialect,
                 ),
             ):
                 try:
@@ -152,20 +244,20 @@ def v_overlay_seeded(pg_cfg: Config, l2_instance_fixture: L2Instance) -> Iterato
             execute_script(
                 cur,
                 emit_schema(
-                    l2_instance_fixture, prefix=_BASE_PREFIX, dialect=pg_cfg.dialect,
+                    l2_instance_fixture, prefix=base_prefix, dialect=pg_cfg.dialect,
                 ),
                 dialect=pg_cfg.dialect,
             )
             execute_script(
                 cur,
                 create_v_overlay_sql(
-                    l2_instance_fixture, base_prefix=_BASE_PREFIX, dialect=pg_cfg.dialect,
+                    l2_instance_fixture, base_prefix=base_prefix, dialect=pg_cfg.dialect,
                 ),
                 dialect=pg_cfg.dialect,
             )
             execute_script(
                 cur,
-                clone_base_to_v_sql(_BASE_PREFIX),
+                clone_base_to_v_sql(base_prefix),
                 dialect=pg_cfg.dialect,
             )
             conn.commit()
@@ -189,17 +281,17 @@ def v_overlay_seeded(pg_cfg: Config, l2_instance_fixture: L2Instance) -> Iterato
     yield pg_cfg
 
     # Teardown — drop both schemas. Best-effort: shared container
-    # survives, sibling modules don't see _BASE_PREFIX debris.
+    # survives, sibling modules don't see this prefix's debris.
     conn = connect_demo_db(pg_cfg)
     try:
         cur = conn.cursor()
         try:
             for drop in (
                 drop_v_overlay_sql(
-                    l2_instance_fixture, base_prefix=_BASE_PREFIX, dialect=pg_cfg.dialect,
+                    l2_instance_fixture, base_prefix=base_prefix, dialect=pg_cfg.dialect,
                 ),
                 emit_schema_drop_sql(
-                    l2_instance_fixture, prefix=_BASE_PREFIX, dialect=pg_cfg.dialect,
+                    l2_instance_fixture, prefix=base_prefix, dialect=pg_cfg.dialect,
                 ),
             ):
                 try:
@@ -232,10 +324,13 @@ async def _pool_and_snap(
     inside a queue.get()). Mirrors the Oracle snapshotter test pattern
     (``test_snapshotter_oracle.py``), which already builds the pool +
     snapshotter inside the single ``_round_trip`` coroutine.
+
+    Threads ``cfg.db_table_prefix`` through to the snapshotter so the
+    per-worker prefix from ``pg_cfg`` is honored (BV.3.3.f).
     """
     pool = await make_connection_pool(cfg)
     snap = PostgresSchemaSnapshotter(
-        pool=pool, base_prefix=_BASE_PREFIX, l2_instance=l2_instance,
+        pool=pool, base_prefix=cfg.db_table_prefix, l2_instance=l2_instance,
     )
     try:
         yield pool, snap
@@ -249,12 +344,12 @@ async def _pool_and_snap(
 # ---------------------------------------------------------------------------
 
 
-def _v_prefix() -> str:
-    return v_overlay_prefix(_BASE_PREFIX)
+def _v_prefix(base_prefix: str) -> str:
+    return v_overlay_prefix(base_prefix)
 
 
 async def _insert_marker_row(
-    pool: AsyncConnectionPool, marker: str,
+    pool: AsyncConnectionPool, base_prefix: str, marker: str,
 ) -> None:
     """Insert a single marker row into ``{v}_config_kv`` — a small,
     idempotent mutation we can detect via SELECT.
@@ -263,7 +358,7 @@ async def _insert_marker_row(
     ``node_id`` VARCHAR PK / ``parent_id`` VARCHAR / ``key`` VARCHAR(255)
     / ``value`` TEXT. We use a unique node_id per marker so concurrent
     inserts in the same test don't collide on the PK."""
-    v = _v_prefix()
+    v = _v_prefix(base_prefix)
     async with pool.acquire() as conn:
         raw: Any = conn
         await raw.execute(
@@ -281,11 +376,11 @@ async def _insert_marker_row(
 
 
 async def _select_marker_count(
-    pool: AsyncConnectionPool, marker: str,
+    pool: AsyncConnectionPool, base_prefix: str, marker: str,
 ) -> int:
     """Count rows in ``{v}_config_kv`` whose ``value`` matches ``marker``.
     The single-cell shape sidesteps the heterogeneous-row typing dance."""
-    v = _v_prefix()
+    v = _v_prefix(base_prefix)
     async with pool.acquire() as conn:
         raw: Any = conn
         cur = await raw.execute(
@@ -311,12 +406,14 @@ class TestRoundTrip:
         v_overlay_seeded: Config,
         l2_instance_fixture: L2Instance,
     ) -> None:
+        base_prefix = v_overlay_seeded.db_table_prefix
+
         async def _run() -> None:
             async with _pool_and_snap(
                 v_overlay_seeded, l2_instance_fixture,
             ) as (pool, snap):
                 # Pre-take state — empty config_kv.
-                pre = await _select_marker_count(pool, "round_trip_marker")
+                pre = await _select_marker_count(pool, base_prefix, "round_trip_marker")
                 assert pre == 0, (
                     f"pre-take config_kv already has marker rows (count={pre}); "
                     "the module fixture's clean-slate guarantee is broken."
@@ -326,13 +423,13 @@ class TestRoundTrip:
                 await snap.take("rt")
 
                 # Mutate — insert a marker row.
-                await _insert_marker_row(pool, "round_trip_marker")
-                mid = await _select_marker_count(pool, "round_trip_marker")
+                await _insert_marker_row(pool, base_prefix, "round_trip_marker")
+                mid = await _select_marker_count(pool, base_prefix, "round_trip_marker")
                 assert mid == 1, "mutation didn't land — INSERT path is broken"
 
                 # Restore — marker should disappear.
                 await snap.restore("rt")
-                post = await _select_marker_count(pool, "round_trip_marker")
+                post = await _select_marker_count(pool, base_prefix, "round_trip_marker")
                 assert post == 0, (
                     f"restore didn't undo the mutation (count={post} after "
                     "restore from clean snapshot); base-table TRUNCATE+INSERT "
@@ -355,6 +452,8 @@ class TestMultiSnapshot:
         v_overlay_seeded: Config,
         l2_instance_fixture: L2Instance,
     ) -> None:
+        base_prefix = v_overlay_seeded.db_table_prefix
+
         async def _run() -> None:
             async with _pool_and_snap(
                 v_overlay_seeded, l2_instance_fixture,
@@ -363,17 +462,17 @@ class TestMultiSnapshot:
                 await snap.take("a")
 
                 # Mutate, then snapshot B — has the marker_b row.
-                await _insert_marker_row(pool, "multi_b")
+                await _insert_marker_row(pool, base_prefix, "multi_b")
                 await snap.take("b")
 
                 # Both snapshots should now exist in information_schema.
-                v_prefix = _v_prefix()
+                v_prefix = _v_prefix(base_prefix)
                 async with pool.acquire() as conn:
                     raw: Any = conn
                     cur = await raw.execute(
                         "SELECT COUNT(*) FROM information_schema.schemata "
                         "WHERE schema_name = %s OR schema_name = %s",
-                        (f"{_BASE_PREFIX}_v_snap_a", f"{_BASE_PREFIX}_v_snap_b"),
+                        (f"{base_prefix}_v_snap_a", f"{base_prefix}_v_snap_b"),
                     )
                     rows: list[Any] = await cur.fetchall()
                 assert int(rows[0][0]) == 2, (
@@ -384,17 +483,17 @@ class TestMultiSnapshot:
 
                 # Insert another marker so the live state is now distinct
                 # from BOTH snapshots.
-                await _insert_marker_row(pool, "multi_c")
+                await _insert_marker_row(pool, base_prefix, "multi_c")
 
                 # Restore A — both markers should disappear.
                 await snap.restore("a")
-                assert await _select_marker_count(pool, "multi_b") == 0
-                assert await _select_marker_count(pool, "multi_c") == 0
+                assert await _select_marker_count(pool, base_prefix, "multi_b") == 0
+                assert await _select_marker_count(pool, base_prefix, "multi_c") == 0
 
                 # Restore B — marker_b returns, marker_c stays gone.
                 await snap.restore("b")
-                assert await _select_marker_count(pool, "multi_b") == 1
-                assert await _select_marker_count(pool, "multi_c") == 0
+                assert await _select_marker_count(pool, base_prefix, "multi_b") == 1
+                assert await _select_marker_count(pool, base_prefix, "multi_c") == 0
 
                 # Cleanup.
                 await snap.drop("a")
@@ -515,6 +614,8 @@ class TestAcloseSweepsLeftoverSchemas:
         v_overlay_seeded: Config,
         l2_instance_fixture: L2Instance,
     ) -> None:
+        base_prefix = v_overlay_seeded.db_table_prefix
+
         async def _run() -> None:
             # Build a fresh pool + snapshotter inline; we want to call
             # aclose() ourselves and observe its sweep, so we bypass the
@@ -522,7 +623,7 @@ class TestAcloseSweepsLeftoverSchemas:
             pool = await make_connection_pool(v_overlay_seeded)
             try:
                 local = PostgresSchemaSnapshotter(
-                    pool=pool, base_prefix=_BASE_PREFIX,
+                    pool=pool, base_prefix=base_prefix,
                     l2_instance=l2_instance_fixture,
                 )
                 await local.take("orphan")
@@ -533,7 +634,7 @@ class TestAcloseSweepsLeftoverSchemas:
                     cur = await raw.execute(
                         "SELECT COUNT(*) FROM information_schema.schemata "
                         "WHERE schema_name = %s",
-                        (f"{_BASE_PREFIX}_v_snap_orphan",),
+                        (f"{base_prefix}_v_snap_orphan",),
                     )
                     rows: list[Any] = await cur.fetchall()
                 assert int(rows[0][0]) == 1, "take didn't create the snap schema"
@@ -546,7 +647,7 @@ class TestAcloseSweepsLeftoverSchemas:
                     cur2 = await raw2.execute(
                         "SELECT COUNT(*) FROM information_schema.schemata "
                         "WHERE schema_name = %s",
-                        (f"{_BASE_PREFIX}_v_snap_orphan",),
+                        (f"{base_prefix}_v_snap_orphan",),
                     )
                     rows2: list[Any] = await cur2.fetchall()
                 assert int(rows2[0][0]) == 0, (
