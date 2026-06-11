@@ -96,6 +96,10 @@ from recon_gen.common.html._components import (
     kind_label_singular,
     render_summary_search_input,
 )
+from recon_gen.common.html._role_cardinality import (
+    completeness_glyph,
+    compute_role_completeness,
+)
 from recon_gen.common.l2.editor import EntityKind
 from recon_gen.common.html._studio_assets.tw_classes import (
     chrome_button_classes,
@@ -312,10 +316,46 @@ def _dev_log_head_snippets(dev_log: bool) -> tuple[str, str]:
     )
 
 
+# BX.6/11 — role reframe (D1 wrapper-accordion).
+#
+# Pre-reframe: ``account`` and ``account_template`` were two top-level
+# entries; ``rail`` was idx 2. The reframe collapses both Account
+# kinds under one synthetic outer **Roles** wrapper that renders two
+# sub-buckets (1:1 — Accounts, then 1:N — Account templates). The
+# wrapper sits at idx 0; the dependency order shifts the remaining
+# kinds down by one (Rails 2., Transfer templates 3., Chains 4.,
+# Limit schedules 5.).
+#
+# YAML schema is untouched (operator lock #1 of the BX.6/11 doc).
+# ``EntityKind`` still carries ``account`` + ``account_template`` —
+# the rename is editor-chrome only. The two sub-bucket entries below
+# carry the real kinds; the home renderer special-cases the
+# ``ROLE_SUB_BUCKETS`` pair (instead of treating them as top-level
+# sections) and wraps them in a single ``<details>``.
+ROLE_SUB_BUCKETS: tuple[tuple[str, str, str, str, str], ...] = (
+    # (kind, sub-header label, accessor on L2Instance,
+    #  short prose under the sub-header, cardinality token)
+    (
+        "account", "1:1 — Singleton accounts", "accounts",
+        "GL line items + control accounts — one ledger row each.",
+        "one-to-one",
+    ),
+    (
+        "account_template", "1:N — Templated roles", "account_templates",
+        "Patterns fanned out by ETL — one declaration, many "
+        "runtime rows per declaration.",
+        "one-to-many",
+    ),
+)
+
 _HOME_SECTIONS: tuple[tuple[str, str, str], ...] = (
-    # (kind, label, accessor on L2Instance)
-    ("account", "Accounts", "accounts"),
-    ("account_template", "Account templates", "account_templates"),
+    # (kind, label, accessor on L2Instance). Post-BX.6/11 the
+    # ``account`` + ``account_template`` entries no longer live
+    # here — they're nested inside the synthetic "roles" wrapper
+    # the home renderer assembles outside this loop. The wrapper
+    # is rendered FIRST so the dependency-ordered band stays:
+    # 1. Roles → 2. Rails → 3. Transfer templates → 4. Chains →
+    # 5. Limit schedules.
     ("rail", "Rails", "rails"),
     ("transfer_template", "Transfer templates", "transfer_templates"),
     ("chain", "Chains", "chains"),
@@ -419,6 +459,349 @@ def _standalone_mode_banner(cfg: Config | None, *, embed: bool = False) -> str:
     )
 
 
+# BX.6/11 — `+ Add Role` modal. Rendered once per home page (under
+# the role wrapper); reachable via the `+ Add Role` button in the
+# wrapper header. Two card-anchors target the existing per-kind
+# create-page routes (URLs unchanged per locked OQ4(a)). Inline
+# [?] triggers next to each card open the side panel to the matching
+# glossary anchor (locked OQ2(c)).
+#
+# Plain HTML5 `<dialog>` element + a tiny inline JS shim — no HTMX
+# swap on the open path (the modal is static markup that ships with
+# the page) and no swap on the card-click path (cards are anchors;
+# browser navigates to a full form page). Backdrop click + Esc close
+# are native `<dialog>` semantics.
+_ADD_ROLE_MODAL_CARD_CLS = (
+    "block bg-white border border-surface-border rounded-md "
+    "px-5 py-4 no-underline text-primary-fg cursor-pointer "
+    "hover:border-accent hover:bg-link-tint "
+    "focus:outline-2 focus:outline-accent focus:-outline-offset-1"
+)
+
+
+def _render_add_role_modal() -> str:
+    """The `+ Add Role` modal (one per home page).
+
+    Two card-anchors:
+    - 1:1 → ``/l2_shape/account/new`` (Singleton account)
+    - 1:N → ``/l2_shape/account_template/new`` (Templated role)
+
+    Each card carries an inline ``[?]`` side-panel trigger that
+    opens the glossary to the matching anchor. Data anchors:
+
+    - ``data-add-role-modal`` on the ``<dialog>``
+    - ``data-cardinality-choice="one-to-one" | "one-to-many"`` on
+      the cards
+    - ``data-role="role-cardinality-modal"`` (legacy / cross-cell
+      anchor name from the BX.6/11 doc §Constraint Summary)
+    """
+    one_to_one_trigger = render_side_panel_trigger(
+        "/studio/side-panel/glossary/1-to-1",
+        label="[?]",
+        aria_label="Glossary: 1:1 (Singleton account)",
+        extra_classes="text-xs ml-2",
+    )
+    one_to_n_trigger = render_side_panel_trigger(
+        "/studio/side-panel/glossary/1-to-n",
+        label="[?]",
+        aria_label="Glossary: 1:N (Templated role)",
+        extra_classes="text-xs ml-2",
+    )
+    return f"""
+<dialog id="add-role-modal"
+        data-add-role-modal
+        data-role="role-cardinality-modal"
+        class="rounded-md border border-surface-border p-0
+               max-w-lg w-full bg-white shadow-lg
+               backdrop:bg-black/30">
+  <form method="dialog" class="m-0">
+    <header class="flex items-center justify-between px-5 py-3
+                   border-b border-surface-border">
+      <h2 class="text-base font-semibold m-0">Add Role</h2>
+      <button type="submit" value="cancel"
+              class="text-secondary-fg hover:text-primary-fg
+                     text-lg leading-none p-1 -m-1"
+              aria-label="Close Add Role modal"
+              data-add-role-close>&times;</button>
+    </header>
+    <div class="px-5 py-4">
+      <p class="text-sm text-secondary-fg m-0 mb-3">
+        Does this role exist as <strong>one ledger row</strong>,
+        or as <strong>many runtime instances</strong>?
+      </p>
+      <div class="flex flex-col gap-3">
+        <div class="flex items-start gap-2">
+          <a class="{_ADD_ROLE_MODAL_CARD_CLS} flex-1"
+             href="/l2_shape/account/new"
+             data-role="role-kind-1-1"
+             data-cardinality-choice="one-to-one">
+            <strong class="block text-base text-accent mb-1">
+              1:1 — One ledger row &rarr;
+            </strong>
+            <small class="block text-sm text-secondary-fg">
+              The role IS the account. One id, one row on the trial
+              balance. E.g. CashDueFRB, ACHOrigSettlement.
+            </small>
+          </a>
+          {one_to_one_trigger}
+        </div>
+        <div class="flex items-start gap-2">
+          <a class="{_ADD_ROLE_MODAL_CARD_CLS} flex-1"
+             href="/l2_shape/account_template/new"
+             data-role="role-kind-1-n"
+             data-cardinality-choice="one-to-many">
+            <strong class="block text-base text-accent mb-1">
+              1:N — Many runtime instances &rarr;
+            </strong>
+            <small class="block text-sm text-secondary-fg">
+              One declaration; ETL materializes N rows (one per
+              customer, merchant, etc.). E.g. CustomerDDA,
+              MerchantDDA.
+            </small>
+          </a>
+          {one_to_n_trigger}
+        </div>
+      </div>
+    </div>
+  </form>
+</dialog>
+<script>
+(function() {{
+  const dlg = document.getElementById('add-role-modal');
+  if (!dlg) return;
+  // Open trigger — the `+ Add Role` button in the wrapper header.
+  document.addEventListener('click', function(evt) {{
+    const opener = evt.target.closest('[data-add-role-open]');
+    if (!opener) return;
+    evt.preventDefault();
+    evt.stopPropagation();
+    if (typeof dlg.showModal === 'function') {{
+      dlg.showModal();
+    }} else {{
+      dlg.setAttribute('open', '');
+    }}
+  }});
+  // Backdrop click → close. The form `method="dialog"` already
+  // wires Esc + the [×] button.
+  dlg.addEventListener('click', function(evt) {{
+    if (evt.target === dlg) {{
+      dlg.close('backdrop');
+    }}
+  }});
+}})();
+</script>
+"""
+
+
+def _render_role_wrapper(
+    *,
+    instance: L2Instance,
+    qp: Mapping[str, str],
+    section_query: Mapping[str, str],
+    section_has_state: Mapping[str, bool],
+    open_by_default: bool,
+    any_state_active: bool,
+) -> str:
+    """BX.6/11 — outer Roles wrapper accordion.
+
+    Renders one ``<details>`` whose body contains TWO sibling
+    ``<details>`` sub-buckets, ordered 1:1 first then 1:N (locked
+    OQ1 — "the simpler case teaches the concept; templated is the
+    extension").
+
+    Wrapper header:
+    - Numbered (1.) — the role wrapper takes the first dependency
+      slot (rails / chains / templates / limits all reference roles).
+    - Completeness glyph rolled up from the two child kinds (set
+      iff both children are set; partial if either is partial;
+      empty if both are empty).
+    - Glossary ``[?]`` side-panel trigger pointing at the
+      ``roles-cardinality`` anchor (locked OQ2(a)).
+    - One ``+ Add Role`` button that opens the modal — no per-
+      sub-bucket Add buttons (locked Constraint #3, "single + Add
+      Role affordance").
+    - ``↗`` link points at the 1:1 list page (the canonical
+      "drill into roles" landing — operator can pivot to 1:N via
+      the sibling page link inside).
+
+    Sub-buckets each carry an embed body that lazy-loads the same
+    ``/l2_shape/<account|account_template>/?embed=1`` fragment the
+    pre-reframe sections used. Sub-bucket headers carry their own
+    ``data-role-cardinality`` anchor + completeness glyph.
+    """
+    completeness = compute_role_completeness(instance)
+    glossary_trigger = render_side_panel_trigger(
+        "/studio/side-panel/glossary/roles-cardinality",
+        label="[?]",
+        aria_label="Glossary: roles (1:1 vs 1:N)",
+        extra_classes="text-xs ml-2",
+    )
+    # Add Role button — opens the modal via the inline JS shim
+    # below `_render_add_role_modal`.
+    add_role_button = (
+        '<button type="button" '
+        'class="ml-2 inline-flex items-center px-2 py-0.5 text-xs '
+        'font-semibold border border-accent text-accent rounded-sm '
+        'hover:bg-accent hover:text-white" '
+        'data-add-role-open '
+        'data-role="add-role-button" '
+        'onclick="event.stopPropagation()" '
+        'title="Add a new role (1:1 or 1:N)">+ Add Role</button>'
+    )
+    # ↗ link → the 1:1 list page (canonical drill-in target;
+    # operator pivots to 1:N via the sibling-page link below the
+    # 1:1 h1, which BX.6/11 list-page rebrand wires).
+    open_link = (
+        '<a class="ml-2 text-accent no-underline font-normal '
+        'text-sm hover:underline" '
+        'href="/l2_shape/account/" '
+        'onclick="event.stopPropagation()" '
+        'title="Open the 1:1 Roles list page">↗</a>'
+    )
+    section_chevron_html = (
+        '<span class="inline-block transition-transform '
+        'group-open:rotate-90 text-secondary-fg select-none" '
+        'aria-hidden="true" data-role="section-chevron">▸</span>'
+    )
+    # Outer header — numbered (1.), Roles label + (N declared),
+    # completeness glyph, glossary trigger, +Add Role, ↗.
+    total_declared = (
+        len(instance.accounts) + len(instance.account_templates)
+    )
+    glyph = completeness_glyph(completeness.roles)
+    glyph_class = {
+        "set": "text-success",
+        "partial": "text-warning",
+        "empty": "text-secondary-fg",
+    }[completeness.roles]
+    open_attr = " open" if open_by_default else ""
+    # Sub-bucket bodies — render one <details> per ROLE_SUB_BUCKETS
+    # entry. Each carries its own embed body + glossary anchor +
+    # per-kind completeness glyph + per-kind count.
+    sub_bucket_blocks: list[str] = []
+    for kind, sub_label, accessor, prose, card_token in ROLE_SUB_BUCKETS:
+        n = len(getattr(instance, accessor))
+        body_id = f"home-section-body-{kind}"
+        sub_url = f"/l2_shape/{kind}/?embed=1{section_query.get(kind, '')}"
+        per_kind_state = (
+            completeness.account
+            if kind == "account"
+            else completeness.account_template
+        )
+        per_kind_glyph = completeness_glyph(per_kind_state)
+        per_kind_glyph_cls = {
+            "set": "text-success",
+            "partial": "text-warning",
+            "empty": "text-secondary-fg",
+        }[per_kind_state]
+        # Sub-bucket auto-opens when its kind has active toolbar
+        # state (search / sort / page). When NO state is active
+        # anywhere, the 1:1 bucket opens by default (it's the
+        # simpler-case teaching surface per OQ1). When some OTHER
+        # section has active state (e.g. ?chain_q=foo), the 1:1
+        # bucket stays collapsed — mirrors the legacy CF.4.d rule
+        # ("active state overrides default first-open" — see
+        # `test_home_active_state_overrides_default_first_open`).
+        if section_has_state.get(kind, False):
+            sub_open = " open"
+        elif not any_state_active and kind == "account":
+            sub_open = " open"
+        else:
+            sub_open = ""
+        # Per-sub-bucket search input — same as the legacy section
+        # input (search-without-expanding, auto-open on input).
+        sub_search_html = render_summary_search_input(
+            kind=cast("EntityKind", kind),
+            initial_q=qp.get(f"{kind}_q", ""),
+            section_url=sub_url,
+            body_id=body_id,
+            url_prefix=kind,
+        )
+        sub_chevron_html = (
+            '<span class="inline-block transition-transform '
+            'group-open:rotate-90 text-secondary-fg select-none" '
+            'aria-hidden="true" data-role="section-chevron">▸</span>'
+        )
+        # ↗ link → the per-cardinality dedicated list page.
+        sub_open_link = (
+            '<a class="ml-2 text-accent no-underline font-normal '
+            'text-sm hover:underline" '
+            f'href="/l2_shape/{kind}/" '
+            'onclick="event.stopPropagation()" '
+            f'title="Open {escape(sub_label)} in a dedicated page">↗</a>'
+        )
+        sub_bucket_blocks.append(
+            f'<details class="group bg-white border border-surface-border '
+            f'rounded-md mb-2 overflow-hidden ml-3" '
+            f'data-kind="{escape(kind)}" '
+            f'data-role-cardinality="{escape(card_token)}"{sub_open}>'
+            f'<summary class="cursor-pointer px-4 py-2 font-semibold '
+            f'text-accent bg-surface-bg select-none hover:bg-link-tint '
+            f'flex items-center gap-2 flex-wrap list-none '
+            f'[&::-webkit-details-marker]:hidden">'
+            f'{sub_chevron_html}'
+            f'<span class="{per_kind_glyph_cls}" '
+            f'data-role="sub-completeness" '
+            f'data-state="{escape(per_kind_state)}" aria-hidden="true">'
+            f'{escape(per_kind_glyph)}</span>'
+            f'<span>{escape(sub_label)} '
+            f'<span class="text-xs text-secondary-fg font-normal">({n})</span>'
+            f'</span>'
+            f'{sub_search_html}'
+            f'{sub_open_link}'
+            f'</summary>'
+            f'<p class="px-4 py-2 text-sm text-secondary-fg m-0">'
+            f'{escape(prose)}</p>'
+            # NOTE: the URL `sub_url` is composed from a fixed prefix
+            # + values that we (the server) emit; the only `&` that
+            # appears is the toolbar-state separator we add upstream.
+            # Match the legacy section block's raw-`&` form so the
+            # CF.4.d URL-state tests (which assert the bare ampersand
+            # shape) continue to pin both surfaces uniformly.
+            f'<div id="{body_id}" '
+            f'hx-get="{sub_url}" '
+            f'hx-trigger="load, l2-cascade-reload from:body" '
+            f'hx-swap="innerHTML">'
+            f'<p class="p-4 text-secondary-fg italic m-0">loading…</p>'
+            f'</div>'
+            f'</details>'
+        )
+    sub_buckets_html = "\n  ".join(sub_bucket_blocks)
+    return (
+        f'<details class="group bg-white border border-surface-border '
+        f'rounded-md mb-3 overflow-hidden" '
+        f'data-section="roles" '
+        f'data-role-section="roles"{open_attr}>'
+        f'<summary class="cursor-pointer px-4 py-2 font-semibold '
+        f'text-accent bg-surface-bg select-none hover:bg-link-tint '
+        f'flex items-center gap-2 flex-wrap list-none '
+        f'[&::-webkit-details-marker]:hidden">'
+        f'{section_chevron_html}'
+        f'<span class="{glyph_class}" '
+        f'data-completeness="roles" '
+        f'data-state="{escape(completeness.roles)}" aria-hidden="true">'
+        f'{escape(glyph)}</span>'
+        f'<span><span class="text-secondary-fg font-normal">1.</span> '
+        f'Roles '
+        f'<span class="text-xs text-secondary-fg font-normal">'
+        f'({total_declared} declared)</span>'
+        f'</span>'
+        f'{glossary_trigger}'
+        f'{add_role_button}'
+        f'{open_link}'
+        f'</summary>'
+        f'<div class="px-4 py-2">'
+        f'<p class="text-sm text-secondary-fg m-0 mb-3">'
+        f'How roles work — every rail, chain, and limit references '
+        f'a role; some roles are one ledger row (1:1), others fan '
+        f'out at ETL time into many runtime instances (1:N).'
+        f'</p>'
+        f'  {sub_buckets_html}'
+        f'</div>'
+        f'</details>'
+    )
+
+
 def _render_home_page(
     cache: L2InstanceCache, dev_log: bool, *, cfg: Config | None = None,
     top_nav_html: str = "",
@@ -463,7 +846,14 @@ def _render_home_page(
     _TOOLBAR_KEYS = ("q", "sort_column", "page_offset", "page_size")
     section_query: dict[str, str] = {}
     section_has_state: dict[str, bool] = {}
-    for kind, _label, _accessor in _HOME_SECTIONS:
+    # BX.6/11 — role wrapper computes state for both account kinds
+    # (so the wrapper auto-opens when either child is searched) but
+    # neither account kind appears as a top-level section in
+    # `_HOME_SECTIONS` anymore.
+    _all_state_kinds = tuple(k for k, _l, _a in _HOME_SECTIONS) + (
+        "account", "account_template",
+    )
+    for kind in _all_state_kinds:
         parts: list[str] = []
         active = False
         for base in _TOOLBAR_KEYS:
@@ -492,12 +882,38 @@ def _render_home_page(
     any_state_active = any(section_has_state.values())
 
     section_blocks: list[str] = []
-    for idx, (kind, label, accessor) in enumerate(_HOME_SECTIONS):
+    # BX.6/11 — Roles wrapper sits at idx 0; Rails / Transfer
+    # templates / Chains / Limit schedules follow. The wrapper has
+    # NO `data-kind` attribute (it isn't a real EntityKind) — it
+    # carries `data-section="roles"` instead so test selectors can
+    # find it without colliding with the per-sub-bucket `data-kind`
+    # anchors the embed bodies emit.
+    role_wrapper_open_default = not any_state_active
+    role_wrapper_open = role_wrapper_open_default or (
+        section_has_state.get("account", False)
+        or section_has_state.get("account_template", False)
+    )
+    section_blocks.append(
+        _render_role_wrapper(
+            instance=instance,
+            qp=qp,
+            section_query=section_query,
+            section_has_state=section_has_state,
+            open_by_default=role_wrapper_open,
+            any_state_active=any_state_active,
+        )
+    )
+    for kind, label, accessor in _HOME_SECTIONS:
         n = len(getattr(instance, accessor))
         if any_state_active:
             open_attr = " open" if section_has_state[kind] else ""
         else:
-            open_attr = " open" if idx == 0 else ""
+            # BX.6/11: the Roles wrapper takes the default-open slot
+            # (it's the first section the operator sees + the
+            # learning surface for the 1:1 / 1:N concept). Every
+            # other entry collapses by default — same uniform-UX
+            # principle as CG.5 for list cards.
+            open_attr = ""
         body_id = f"home-section-body-{kind}"
         # AM.2 step 2: section chrome migrated. `.home-section` /
         # `.home-section-add` / `.home-section-link` / `.home-section-body`
@@ -686,6 +1102,7 @@ def _render_home_page(
     <div id="delete-confirm-banner-slot" data-test-delete-banner-slot></div>
     {sections_html}
   </main>
+  {_render_add_role_modal()}
 </body>
 </html>
 """

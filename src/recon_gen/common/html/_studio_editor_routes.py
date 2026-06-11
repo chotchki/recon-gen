@@ -2827,7 +2827,6 @@ def _render_read_card_summary(
     Edit/Delete actions). Renders without the heavy `<dl>` body so
     `<details>`-wrapped cards stay cheap when collapsed.
     """
-    del instance  # parity with `_render_read_card_body` — kept for the API
     # X.4.f.11 — surface rail subtype as a small badge on the read
     # card so the operator can tell a TwoLeg apart from a SingleLeg
     # at a glance. Non-rail entities don't get a badge.
@@ -2842,6 +2841,73 @@ def _render_read_card_summary(
         subtype_badge = (
             f' <span class="{badge_cls}">{escape(subtype_label)}</span>'
         )
+    # BX.6/11 D5 carry-forward — role-cardinality badge on Account
+    # (1:1) + AccountTemplate (1:N) read cards. The math notation
+    # (1:1 / 1:N) leads on the badge per locked OQ5; the secondary
+    # phrase (Singleton account / Templated role) renders on the
+    # card body as a sub-line (`data-role="card-cardinality-subline"`).
+    # The 1:N badge optionally carries a live instance count when a
+    # cfg-bound count_provider is wired into the L2Instance via
+    # `_role_instance_count` — None → no count suffix; 0 →
+    # "awaiting first ETL"; positive → "~N instances".
+    cardinality_badge = ""
+    cardinality_subline = ""
+    badge_cls = (
+        "inline-block ml-2 px-1.5 py-0.5 text-xs font-semibold "
+        "rounded-sm bg-link-tint text-accent border border-accent/25"
+    )
+    subline_cls = (
+        "block text-xs text-secondary-fg mt-0.5"
+    )
+    if kind == "account":
+        cardinality_badge = (
+            f' <span class="{badge_cls}" '
+            f'data-cardinality-badge data-cardinality="one-to-one">'
+            f'1:1</span>'
+        )
+        cardinality_subline = (
+            f'<span class="{subline_cls}" '
+            f'data-role="card-cardinality-subline">'
+            f'Singleton account</span>'
+        )
+    elif kind == "account_template":
+        # Optional live-count probe — the L2Instance can carry a
+        # cosmetic `_role_instance_counts` mapping (str → int|None)
+        # set by the studio's per-request hydrator; absent →
+        # badge renders math notation alone (the no-DB shape per
+        # OQ3 locked recommendation).
+        role_attr = getattr(entity, "role", None)
+        count_suffix = ""
+        counts: object = getattr(instance, "_role_instance_counts", None)
+        if (
+            role_attr is not None
+            and isinstance(counts, Mapping)
+        ):
+            counts_map = cast(
+                "Mapping[str, object]",
+                counts,
+            )
+            raw_count: object = counts_map.get(str(role_attr))
+            if raw_count is not None:
+                try:
+                    count_int = int(raw_count)  # pyright: ignore[reportArgumentType]: int() accepts str / numeric, narrowed at runtime
+                except (TypeError, ValueError):
+                    count_int = -1
+                if count_int == 0:
+                    count_suffix = " · awaiting first ETL"
+                elif count_int > 0:
+                    count_suffix = f" · ~{count_int} instances"
+        cardinality_badge = (
+            f' <span class="{badge_cls}" '
+            f'data-cardinality-badge data-cardinality="one-to-many">'
+            f'1:N{escape(count_suffix)}</span>'
+        )
+        cardinality_subline = (
+            f'<span class="{subline_cls}" '
+            f'data-role="card-cardinality-subline">'
+            f'Templated role</span>'
+        )
+    del instance  # parity with `_render_read_card_body` — kept for the API
     # `min-w-0` lets the h3 shrink inside the flex header so
     # `break-all` can wrap composite IDs (chain / limit_schedule use
     # `::` separators which aren't natural break points; without
@@ -2943,7 +3009,9 @@ def _render_read_card_summary(
             )
     title_html = (
         f'<h3 class="{h3_base}">{escape(title_text)}'
-        f'{display_name_html}{direction_badge_html}{subtype_badge}</h3>'
+        f'{display_name_html}{direction_badge_html}{subtype_badge}'
+        f'{cardinality_badge}</h3>'
+        f'{cardinality_subline}'
     )
     # X.4.f.9.delete — DELETE on success returns empty (card disappears
     # via outerHTML swap); on validator-rejected structural break returns
@@ -3127,6 +3195,50 @@ def _render_read_card(
 # a white `border-b` strip). Keep blurbs short — the operator
 # already knows the kind by name; the strip is anchor + context,
 # not documentation.
+# BX.6/11 (2026-06-11) — h1 + cross-link rebrand for the per-
+# cardinality list pages. The pre-reframe ``Accounts`` / ``Account
+# templates`` h1s become ``Roles — 1:1`` / ``Roles — 1:N`` so the
+# editor surface speaks the role vocabulary end-to-end. The blurb
+# below keeps the per-kind explanation; the sub-line under the h1
+# adds the legacy term (Singleton account / Templated role) in
+# secondary-fg + a cross-link to the sibling-cardinality page.
+def _list_page_h1_for_kind(kind: EntityKind) -> tuple[str, str]:
+    """Return ``(h1_text, extra_html_below_h1)`` for the kind's
+    list page header.
+
+    ``h1_text`` is the visible string in the ``<h1>`` element
+    (pre-escape). ``extra_html_below_h1`` is a fragment rendered
+    immediately under the h1 (already HTML-escaped where needed)
+    — used for the BX.6/11 cross-link strip on the account /
+    account_template pages.
+    """
+    if kind == "account":
+        # Sibling page → 1:N templated roles
+        extra = (
+            '<p class="text-xs text-secondary-fg m-0 mt-1" '
+            'data-role="card-cardinality-subline">'
+            'Singleton account &middot; one ledger row per role. '
+            '<a class="text-accent hover:underline" '
+            'href="/l2_shape/account_template/">'
+            '&rarr; See 1:N templated roles</a>'
+            '</p>'
+        )
+        return ("Roles — 1:1", extra)
+    if kind == "account_template":
+        extra = (
+            '<p class="text-xs text-secondary-fg m-0 mt-1" '
+            'data-role="card-cardinality-subline">'
+            'Templated role &middot; N runtime instances per declaration. '
+            '<a class="text-accent hover:underline" '
+            'href="/l2_shape/account/">'
+            '&rarr; See 1:1 singleton accounts</a>'
+            '</p>'
+        )
+        return ("Roles — 1:N", extra)
+    # Every other kind keeps the plural-label h1 + no sub-line.
+    return (kind_label_plural(kind), "")
+
+
 _LIST_PAGE_BLURB_BY_KIND: Mapping[EntityKind, str] = {
     "account": (
         "One row per ledger position the institution holds — "
@@ -5494,11 +5606,22 @@ def _render_list_page(
     # the same trainer-style header strip as `/`, `/training/`, and
     # `/etl/`. h1 = operator-readable plural label; blurb = one-line
     # per-kind anchor pulled from `_LIST_PAGE_BLURB_BY_KIND`.
-    page_title = escape(kind_label_plural(kind))
+    #
+    # BX.6/11 (2026-06-11) — Account + AccountTemplate list pages
+    # rebrand to lead with **Roles** (the user-facing organizing
+    # principle the editor reframe lifted account-vs-template into).
+    # URLs unchanged per the locked OQ4(a) decision; only the h1 +
+    # blurb tags speak the role vocabulary now. The cross-link to
+    # the sibling cardinality page appears below the h1 so the
+    # operator can pivot 1:1 ↔ 1:N without bouncing through the home.
+    page_title_str, page_h1_extra_html = _list_page_h1_for_kind(kind)
+    page_title = escape(page_title_str)
     page_blurb = _LIST_PAGE_BLURB_BY_KIND.get(kind, "")
     page_header_html = (
         f'<header class="px-8 py-4 border-b border-surface-border bg-white">'
-        f'<h1 class="text-xl font-semibold m-0">{page_title}</h1>'
+        f'<h1 class="text-xl font-semibold m-0" '
+        f'data-list-h1="{escape(kind)}">{page_title}</h1>'
+        f'{page_h1_extra_html}'
         f'<p class="text-sm text-secondary-fg max-w-3xl m-0 mt-1">'
         f"{page_blurb}"
         f"</p>"

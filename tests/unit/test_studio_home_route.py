@@ -160,14 +160,25 @@ def test_home_page_first_section_open_default_others_collapsed(
 ) -> None:
     """The first <details> renders with the ``open`` attribute; the
     others render closed so a 7-rail / 30-account L2 isn't an
-    unbroken wall on first paint."""
+    unbroken wall on first paint.
+
+    BX.6/11 (2026-06-11): the first section is the synthetic Roles
+    wrapper (data-section="roles"); inside it the 1:1 sub-bucket
+    (data-kind="account") opens by default (the simpler-case
+    teaching surface per OQ1).
+    """
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/").text
 
-    # Account is the first section per _HOME_SECTIONS order.
-    assert 'data-kind="account" open' in body
-    # Every other kind appears WITHOUT the open attribute.
+    # Roles wrapper opens by default.
+    assert 'data-section="roles"' in body
+    assert 'data-section="roles" data-role-section="roles" open' in body
+    # 1:1 sub-bucket opens (simpler case leads).
+    assert 'data-kind="account" data-role-cardinality="one-to-one" open' in body
+    # Every non-Account entity section appears WITHOUT the open
+    # attribute. (account_template lives inside the wrapper too; it
+    # doesn't auto-open by default.)
     for kind in (
         "account_template", "rail", "transfer_template",
         "chain", "limit_schedule",
