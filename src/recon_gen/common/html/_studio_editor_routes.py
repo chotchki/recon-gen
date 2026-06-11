@@ -57,8 +57,19 @@ from recon_gen.common.html._components import (
     render_list_pager,
     render_list_search,
 )
-from recon_gen.common.html._studio_routes import asset_url, studio_theme_head
-from recon_gen.common.ids import HandbookPath
+from recon_gen.common.html import _delete_confirm
+from recon_gen.common.html._delete_confirm import (
+    find_references as _find_references,
+    render_delete_confirm_banner,
+    verify_confirm_token,
+)
+from recon_gen.common.html._studio_routes import (
+    asset_url,
+    render_mini_diagram_html,
+    studio_theme_head,
+)
+from recon_gen.common.html._side_panel import render_side_panel_trigger
+from recon_gen.common.ids import GlossaryAnchor, HandbookPath, SurfaceAnchor
 from recon_gen.common.l2.cache import L2InstanceCache
 from recon_gen.common.l2.editor import (
     SINGLETON_KINDS,
@@ -194,6 +205,17 @@ class FieldSpec:
     # carry the context the operator needs (validator semantics,
     # cross-entity dependencies, L1 invariant the field drives).
     handbook_path: HandbookPath | None = None
+    # BX.12 — optional pointer to a GLOSSARY key in
+    # ``common/html/_side_panel.py``. When set, the renderer emits a
+    # small ``[?]`` button next to the field label that opens the
+    # side-panel drawer with that single glossary entry pre-loaded.
+    # Use this for vocabulary the field's helper line can't expand on
+    # without ballooning ("XOR", "fan-in", "bundles activity") — the
+    # helper stays one-line; the drawer carries the prose. An anti-
+    # drift test (``test_side_panel_field_anchors``) pins every
+    # anchor used here against the GLOSSARY dict so a typo breaks at
+    # sessionstart, not at the first click.
+    glossary_anchor: GlossaryAnchor | None = None
 
 
 def _handbook_chip_html(spec: FieldSpec) -> str:
@@ -213,6 +235,78 @@ def _handbook_chip_html(spec: FieldSpec) -> str:
         f'text-[10px] font-semibold align-middle no-underline" '
         f'title="Open handbook for this field" '
         f'data-handbook-path="{href}">?</a>'
+    )
+
+
+def _glossary_chip_html(spec: FieldSpec) -> str:
+    """BX.12 — inline ``[?]`` chip emitted next to a field's label when
+    its FieldSpec carries a ``glossary_anchor``. Opens the side-panel
+    drawer with the single matching glossary entry pre-loaded via the
+    shared ``data-side-panel-trigger`` hook from ``_side_panel.py``.
+
+    Separate from ``_handbook_chip_html`` because the two surfaces
+    serve different audiences:
+
+    - ``handbook_path`` (handbook) — deep prose for the L2 author /
+      operator working through a topic-area.
+    - ``glossary_anchor`` (side panel) — terse banker-readable
+      definition of one vocabulary term, surfaced inline so the
+      operator doesn't have to leave the form.
+
+    A field can carry both (rare) — they render side-by-side. The
+    anti-drift test pins every anchor against the GLOSSARY dict.
+    """
+    if not spec.glossary_anchor:
+        return ""
+    anchor = str(spec.glossary_anchor)
+    target = f"/studio/side-panel/glossary/{anchor}"
+    return " " + render_side_panel_trigger(
+        target,
+        label="?",
+        aria_label=f"Open glossary entry for {spec.label}",
+        extra_classes=(
+            "ml-1 w-4 h-4 rounded-full border border-current "
+            "text-secondary-fg hover:text-accent hover:border-accent "
+            "text-[10px] font-semibold align-middle no-underline"
+        ),
+    )
+
+
+def _surfaces_as_chip_html(
+    anchor: SurfaceAnchor | None,
+    *,
+    field_label: str,
+) -> str:
+    """BX.13 — inline ``where?`` chip emitted next to a field's label when
+    a ``SurfaceAnchor`` is wired for the field. Opens the side-panel
+    drawer with the surfaces-as block (where the value will appear in
+    user-facing surfaces — audit PDF / dashboard headers / chart
+    accents / etc.).
+
+    Sibling to ``_glossary_chip_html`` — separate visual chip + label
+    so the operator can tell the two surfaces apart at a glance:
+
+    - ``glossary_anchor`` → ``?`` chip — "what does this term mean?"
+    - ``SurfaceAnchor`` → ``where?`` chip — "where does this value end up?"
+
+    Takes ``anchor`` directly (not a FieldSpec) because the BXa singleton
+    forms (instance / theme) are hand-rolled and don't route through the
+    standard ``FieldSpec`` dispatcher; the chip needs to plug into those
+    forms by anchor name + label. The anti-drift test pins every wired
+    anchor against the ``SURFACES_AS`` dict.
+    """
+    if not anchor:
+        return ""
+    target = f"/studio/side-panel/surfaces-as/{escape(str(anchor))}"
+    return " " + render_side_panel_trigger(
+        target,
+        label="where?",
+        aria_label=f"See where {field_label} surfaces in dashboards / audit PDF",
+        extra_classes=(
+            "ml-1 px-1.5 py-0 rounded-sm border border-current "
+            "text-secondary-fg hover:text-accent hover:border-accent "
+            "text-[10px] font-semibold align-middle no-underline"
+        ),
     )
 
 
@@ -515,6 +609,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         helper="Per-leg override. Blank ⇒ use the rail-level Origin for both legs.",
         kind="text",
         subtype_only="two_leg",
+        glossary_anchor=GlossaryAnchor("origin-overrides"),
     ),
     FieldSpec(
         name="destination_origin",
@@ -522,6 +617,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         helper="Per-leg override. Blank ⇒ use the rail-level Origin for both legs.",
         kind="text",
         subtype_only="two_leg",
+        glossary_anchor=GlossaryAnchor("origin-overrides"),
     ),
     FieldSpec(
         name="expected_net",
@@ -556,6 +652,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         label="Cadence",
         helper="For aggregating rails (e.g. intraday-2h / daily-eod).",
         kind="text",
+        glossary_anchor=GlossaryAnchor("cadence"),
     ),
     # X.4.f.11.9 — bundles_activity (aggregating rails only).
     # tuple[BundlesActivityRef = Identifier, ...] — multi-select from
@@ -572,6 +669,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
         select_from="rails_or_templates",
         render_as="chip_list",  # CF.4.g — list of identifiers
         handbook_path=HandbookPath("l2-editor/bundles-activity"),
+        glossary_anchor=GlossaryAnchor("bundles-activity"),
     ),
     # X.4.f.11.6 — metadata_keys + metadata_value_examples (paired).
     # BF.4 (2026-06-07) — chip-list picker; option universe is the
@@ -619,6 +717,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
             "fields (see derived.posted_requirements_for)."
         ),
         kind="textarea",
+        glossary_anchor=GlossaryAnchor("posted-requirements"),
     ),
     # X.4.f.11.7 — aging windows (Duration | None). ISO 8601 literal;
     # empty ⇒ None (no aging watch).
@@ -736,6 +835,13 @@ _CHAIN_FIELDS: tuple[FieldSpec, ...] = (
         select_from="rails_or_templates",
         required=True,
         handbook_path=HandbookPath("l2-editor/chain-children"),
+        # BX.12 — anchor to "xor" as the primary banker-facing concept
+        # the children field expresses. fan-in + expected-parent-count
+        # terms live in GLOSSARY and surface via the top-nav glossary
+        # (the per-child fan-in checkbox lives inside the children
+        # editor — operators see the term while editing, then can pop
+        # the glossary for the definition).
+        glossary_anchor=GlossaryAnchor("xor"),
     ),
 )
 
@@ -910,6 +1016,7 @@ _LIMIT_SCHEDULE_FIELDS: tuple[FieldSpec, ...] = (
         kind="select",
         options=("Outbound", "Inbound"),
         required=True,
+        glossary_anchor=GlossaryAnchor("direction"),
     ),
 )
 
@@ -1555,6 +1662,7 @@ def _render_field(
         f'<label for="field-{spec.name}" class="font-semibold text-xs text-primary-fg">{escape(spec.label)}'
         f'{"<span class=\"text-danger\"> *</span>" if spec.required else ""}'
         f"{_handbook_chip_html(spec)}"
+        f"{_glossary_chip_html(spec)}"
         f"</label>"
     )
     helper = (
@@ -2075,7 +2183,8 @@ def _render_multi_select_groups_field(
     """
     label_html = (
         f'<label class="font-semibold text-xs text-primary-fg">'
-        f'{escape(spec.label)}{_handbook_chip_html(spec)}</label>'
+        f'{escape(spec.label)}{_handbook_chip_html(spec)}'
+        f'{_glossary_chip_html(spec)}</label>'
     )
     helper_html = (
         f'<small class="text-xs text-secondary-fg">{escape(spec.helper)}</small>'
@@ -2364,6 +2473,7 @@ def _render_chain_children_field(
         f'{escape(spec.label)}'
         f'{"<span class=\"text-danger\"> *</span>" if spec.required else ""}'
         f"{_handbook_chip_html(spec)}"
+        f"{_glossary_chip_html(spec)}"
         f"</label>"
     )
     helper = (
@@ -2578,6 +2688,29 @@ def _metadata_value_examples_to_yaml(
     return yaml.safe_dump(as_dict, default_flow_style=False, sort_keys=False).rstrip() + "\n"
 
 
+def _format_money_for_display(raw: str) -> str | None:
+    """BX.5 — format a money string as USD for the read card.
+
+    Returns ``$1,234.56`` for ``"1234.56"``, ``-$1,234.56`` for
+    ``"-1234.56"`` (negative sign before the symbol, matching the
+    QS + tree-fields ``currency=True`` convention). Returns ``None``
+    when ``raw`` doesn't parse as a Decimal — caller falls through to
+    the plain-escape path. Two decimal places fixed (Money is the
+    L2 primitive's 2dp Decimal alias; see
+    ``common/l2/primitives.py::Money``).
+    """
+    from decimal import Decimal, InvalidOperation  # noqa: PLC0415 — lazy
+    try:
+        amount = Decimal(raw)
+    except (InvalidOperation, ValueError):
+        return None
+    # Quantize to 2dp; preserves sign. `f"{value:,.2f}"` thousand-separates.
+    quantized = amount.quantize(Decimal("0.01"))
+    negative = quantized < 0
+    abs_str = f"{abs(quantized):,.2f}"
+    return f"-${abs_str}" if negative else f"${abs_str}"
+
+
 def _render_read_value(spec: FieldSpec, value: object) -> str:
     """Render a dataclass field value for the read-only card.
 
@@ -2646,6 +2779,20 @@ def _render_read_value(spec: FieldSpec, value: object) -> str:
     raw = _value_to_input_str(value)
     if not raw:
         return "—"
+    # BX.5 — `kind="money"` IS the typed currency signal: the FieldSpec
+    # dataclass already discriminates money from text/select. Render
+    # money values as USD ($1,234.56) on the read card so cap /
+    # expected_eod_balance / expected_net display in the operator's
+    # vocabulary instead of bare Decimal repr. Matches the
+    # `currency=True` pattern on `common/tree/fields.py::Dim`/`Measure`
+    # + `common/dataset_contract.py::Column` — parallel API for the
+    # editor-card surface. Money values whose decimal parse fails fall
+    # through to the plain-escape path; the loader rejects malformed
+    # money upstream so this should never fire.
+    if spec.kind == "money":
+        formatted = _format_money_for_display(raw)
+        if formatted is not None:
+            return escape(formatted)
     # CF.4.g — `render_as="monospace"` wraps in a font-mono span so
     # id-shaped values read as identifiers rather than prose.
     if spec.render_as == "monospace":
@@ -2824,17 +2971,26 @@ def _render_read_card_summary(
         "no-underline cursor-pointer "
         "hover:bg-danger hover:text-white"
     )
+    # BX.1 (2026-06-11) — Delete no longer fires hx-delete directly.
+    # Clicking opens an inline confirm banner (reference-check first,
+    # 5s countdown, Cancel) rendered into the page-level
+    # `#delete-confirm-banner-slot`. The actual DELETE is the banner's
+    # Confirm button + a server-signed countdown token. No
+    # browser-native `hx-confirm` modal.
+    # BX.10 (2026-06-11) — URLs use the opaque ``<hash6>-<slug>`` form
+    # for composite-keyed kinds (chain / limit_schedule); single-key
+    # kinds are unchanged (kebab id verbatim).
+    url_id = _url_entity_id(kind, entity)
     actions_html = (
         f'<div class="flex items-center gap-2 shrink-0">'
         f'<a class="{edit_btn_cls}" '
-        f'href="/l2_shape/{kind}/{escape(entity_id)}/edit" '
+        f'href="/l2_shape/{kind}/{escape(url_id)}/edit" '
         f'onclick="event.stopPropagation()">Edit</a>'
         f'<a class="{delete_btn_cls}" '
-        f'hx-delete="/l2_shape/{kind}/{escape(entity_id)}" '
-        f'hx-target="#{html_id}" hx-swap="outerHTML" '
-        f'onclick="event.stopPropagation()" '
-        f'hx-confirm="Delete this entity? References that block deletion '
-        f'will be reported inline.">Delete</a>'
+        f'data-role="card-delete" '
+        f'hx-get="/l2_shape/{kind}/{escape(url_id)}/delete-confirm" '
+        f'hx-target="#delete-confirm-banner-slot" hx-swap="innerHTML" '
+        f'onclick="event.stopPropagation()">Delete</a>'
         f"</div>"
     )
     header_cls = "flex items-start justify-between gap-3"
@@ -2893,6 +3049,10 @@ def _render_read_card(
     heavy_density_v1 (100+ rails) collapses.
     """
     entity_id = _entity_id(kind, entity)
+    # BX.10 (2026-06-11) — opaque URL form for composite-keyed kinds;
+    # single-key kinds keep the kebab id verbatim. Used wherever the
+    # card emits a URL pointing at this entity.
+    url_id = _url_entity_id(kind, entity)
     # CSS-safe id slug — composite-keyed kinds use ``::`` in their
     # addressing string, which CSS parses as pseudo-element syntax;
     # the URL-side path stays ``::``, only the HTML id swaps.
@@ -2907,7 +3067,7 @@ def _render_read_card(
         # exactly once; subsequent open/close cycles re-use the
         # already-fetched body. Placeholder reads "loading…" until
         # the swap completes; reader-friendly for screen readers.
-        body_url = f"/l2_shape/{kind}/{escape(entity_id)}?body_only=1"
+        body_url = f"/l2_shape/{kind}/{escape(url_id)}?body_only=1"
         body_placeholder = (
             '<div data-role="card-body" class="text-xs '
             'text-secondary-fg italic mt-1">loading…</div>'
@@ -4343,6 +4503,11 @@ def _render_edit_page(
     """
     specs = _filter_specs_for_entity(_FIELD_SPECS_BY_KIND[kind], entity)
     entity_id = _entity_id(kind, entity)
+    # BX.10 (2026-06-11) — URL side uses the opaque form for composite
+    # kinds. The form ACTION + the Delete hx-get reference this so a
+    # save / delete posts back to the same opaque URL the operator is
+    # already on.
+    url_id = _url_entity_id(kind, entity)
     overrides = form_overrides or {}
     hidden = _hidden_fields_for_entity(kind, entity, instance)
     fields_html = "".join(
@@ -4394,13 +4559,31 @@ def _render_edit_page(
         f'href="{escape(list_url)}">← back to {escape(kind_label_plural(kind))}</a>'
         f'</div>'
     )
+    # BX.1 (2026-06-11) — same banner pattern on the edit page. The
+    # banner lands in `#delete-confirm-banner-slot` above the form
+    # section; the form stays intact so Cancel returns the operator
+    # to where they were.
     delete_btn_classes = destructive_button_classes()
     delete_btn_html = (
         f'<a class="{delete_btn_classes} ml-auto" '
         f'data-role="form-delete" '
-        f'hx-delete="/l2_shape/{escape(kind)}/{escape(entity_id)}?from=edit" '
-        f'hx-confirm="Delete this entity? References that block deletion '
-        f'will be reported inline.">Delete</a>'
+        f'hx-get="/l2_shape/{escape(kind)}/{escape(url_id)}/delete-confirm?from=edit" '
+        f'hx-target="#delete-confirm-banner-slot" hx-swap="innerHTML">Delete</a>'
+    )
+    # BX.8 (2026-06-11) — inline mini-diagram showing the entity's
+    # position in the topology. Self-node highlighted; 1-hop
+    # neighbors visible for spatial context. Empty string for kinds
+    # without a clean topology projection (limit_schedule per
+    # operator Q3; theme + instance — no per-entity node) — the
+    # helper returns "" so the markup just omits the section.
+    mini_diagram_html = render_mini_diagram_html(instance, kind, entity)
+    # The diagram-svg.css is loaded on /diagram but the edit page
+    # doesn't link it; pull it in when the mini-diagram is present so
+    # the self-highlight + hover-Edit badge rules fire. Hash-cache-bust
+    # via asset_url stays consistent with the main diagram page.
+    mini_diagram_css_html = (
+        f'<link rel="stylesheet" href="{asset_url("diagram-svg.css")}">'
+        if mini_diagram_html else ""
     )
     return f"""<!doctype html>
 <html lang="en">
@@ -4408,6 +4591,7 @@ def _render_edit_page(
   <meta charset="utf-8">
   <title>Recon-Gen · Studio · Editor · {escape(edit_title_detail)}</title>
   {studio_theme_head(instance)}
+  {mini_diagram_css_html}
   {_htmx_head_block()}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
@@ -4418,8 +4602,10 @@ def _render_edit_page(
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
     {_render_intro_details(intro_html)}
     {subtype_banner_html}
+    <div id="delete-confirm-banner-slot" data-test-delete-banner-slot></div>
+    {mini_diagram_html}
     <section class="bg-white border border-surface-border rounded-md p-5">
-      <form method="post" action="/l2_shape/{escape(kind)}/{escape(entity_id)}" class="edit-form group">
+      <form method="post" action="/l2_shape/{escape(kind)}/{escape(url_id)}" class="edit-form group">
         {global_err_html}
         {_from_hidden_input(from_param)}
         {fields_html}
@@ -4519,16 +4705,25 @@ def _singleton_yaml_text(instance: object, kind: EntityKind) -> str:
 # L2Instance fields edited per-input; description gets markdown
 # preview per BF.9. Phase CP removed role_business_day_offsets from
 # the singleton — offsets now per-Account / per-AccountTemplate.
-_INSTANCE_STRUCTURED_FIELDS: tuple[tuple[str, str, str, bool], ...] = (
-    # (form-name, label, helper, required)
+#
+# BX.13 — every entry carries an optional ``SurfaceAnchor`` pointing
+# at the SURFACES_AS entry the chip should open. ``None`` skips the
+# chip entirely (acronym has no operator-visible surface beyond
+# substitution into the institution_name string, so no chip).
+_INSTANCE_STRUCTURED_FIELDS: tuple[
+    tuple[str, str, str, bool, SurfaceAnchor | None], ...
+] = (
+    # (form-name, label, helper, required, surfaces_anchor)
     ("institution_name", "Institution name",
      "Display name surfaced in the audit PDF header + Investigation "
      "app landing prose + handbook substitution. Optional; falls back "
-     "to `cfg.deployment_name` when blank.", False),
+     "to `cfg.deployment_name` when blank.", False,
+     SurfaceAnchor("institution-name")),
     ("institution_acronym", "Institution acronym",
      "Short label (2-4 letters) used in dashboard titles + handbook "
      "substitution. Optional; \"SNB\" toggles the bundled-fixture "
-     "Sasquatch concrete examples in the docs.", False),
+     "Sasquatch concrete examples in the docs.", False,
+     None),
 )
 
 
@@ -4551,7 +4746,7 @@ def _instance_form_to_dict(form: Mapping[str, str]) -> dict[str, object]:
     per-Account / per-AccountTemplate.
     """
     out: dict[str, object] = {}
-    for fname, _, _, _ in _INSTANCE_STRUCTURED_FIELDS:
+    for fname, _, _, _, _ in _INSTANCE_STRUCTURED_FIELDS:
         v = str(form.get(fname, "")).strip()
         if v:
             out[fname] = v
@@ -4569,27 +4764,40 @@ def _instance_form_to_dict(form: Mapping[str, str]) -> dict[str, object]:
 
 
 def _render_instance_form(values: Mapping[str, str]) -> str:
-    """BXa.1 — render the instance singleton structured form body."""
+    """BXa.1 — render the instance singleton structured form body.
+
+    BX.13 — every scalar field with a ``SurfaceAnchor`` in
+    ``_INSTANCE_STRUCTURED_FIELDS`` gets an inline ``where?`` chip
+    next to its label; the Description field carries its own chip
+    pointing at ``institution-description``.
+    """
     row_cls = field_row_classes()
     input_cls = field_input_classes()
     label_cls = "font-semibold text-xs text-primary-fg"
     helper_cls = "text-xs text-secondary-fg"
     parts: list[str] = []
-    for fname, label, helper, required in _INSTANCE_STRUCTURED_FIELDS:
+    for fname, label, helper, required, surfaces in _INSTANCE_STRUCTURED_FIELDS:
         req = '<span class="text-danger"> *</span>' if required else ""
         v = values.get(fname, "")
+        surfaces_chip = _surfaces_as_chip_html(surfaces, field_label=label)
         parts.append(
             f'<div class="{row_cls}">'
-            f'<label for="field-{fname}" class="{label_cls}">{escape(label)}{req}</label>'
+            f'<label for="field-{fname}" class="{label_cls}">'
+            f'{escape(label)}{req}{surfaces_chip}</label>'
             f'<input type="text" id="field-{fname}" name="{fname}" '
             f'value="{escape(v)}" class="{input_cls}">'
             f'<small class="{helper_cls}">{escape(helper)}</small>'
             f'</div>'
         )
     desc = values.get("description", "")
+    desc_chip = _surfaces_as_chip_html(
+        SurfaceAnchor("institution-description"),
+        field_label="Description",
+    )
     parts.append(
         f'<div class="{row_cls}">'
-        f'<label for="field-description" class="{label_cls}">Description</label>'
+        f'<label for="field-description" class="{label_cls}">'
+        f'Description{desc_chip}</label>'
         f'<textarea id="field-description" name="description" rows="10" '
         f'class="{input_cls} font-mono whitespace-pre resize-y min-h-16">'
         f'{escape(desc)}</textarea>'
@@ -4604,11 +4812,24 @@ def _render_instance_form(values: Mapping[str, str]) -> str:
 
 
 # browser supports color inputs).
-_THEME_TEXT_FIELDS: tuple[tuple[str, str, str, bool], ...] = (
-    # (form-name, label, helper, required)
-    ("theme_name", "Theme name", "Short identifier (e.g. \"snb-classic\").", True),
-    ("version_description", "Version description", "One-line summary surfaced on the audit PDF cover.", True),
-    ("analysis_name_prefix", "Analysis name prefix", "Optional prefix applied to QS analysis names (\"Demo\" / null for default).", False),
+#
+# BX.13 — each tuple's 5th slot is an optional ``SurfaceAnchor`` pointing
+# at the SURFACES_AS entry; ``None`` skips the chip for that field.
+# Identity scalars + every color get a chip; analysis_name_prefix is
+# QS-internal (no operator-visible surface) so no chip.
+_THEME_TEXT_FIELDS: tuple[
+    tuple[str, str, str, bool, SurfaceAnchor | None], ...
+] = (
+    # (form-name, label, helper, required, surfaces_anchor)
+    ("theme_name", "Theme name",
+     "Short identifier (e.g. \"snb-classic\").", True,
+     SurfaceAnchor("theme-name")),
+    ("version_description", "Version description",
+     "One-line summary surfaced on the audit PDF cover.", True,
+     SurfaceAnchor("theme-version-description")),
+    ("analysis_name_prefix", "Analysis name prefix",
+     "Optional prefix applied to QS analysis names (\"Demo\" / null for default).", False,
+     None),
 )
 
 _THEME_OPTIONAL_URL_FIELDS: tuple[tuple[str, str, str], ...] = (
@@ -4616,27 +4837,48 @@ _THEME_OPTIONAL_URL_FIELDS: tuple[tuple[str, str, str], ...] = (
     ("favicon", "Favicon URL or path", "Optional. Same shape as logo."),
 )
 
-# Each tuple: (form-name, label, helper). All hex colors, rendered
-# as a paired `<input type="color">` + visible text field so the
-# operator can type a hex directly OR pick visually.
-_THEME_COLOR_FIELDS: tuple[tuple[str, str, str], ...] = (
-    ("primary_bg", "Primary background", "Page background — most surfaces."),
-    ("secondary_bg", "Secondary background", "Off-card / subtle stripe surfaces."),
-    ("primary_fg", "Primary text", "Body text colour."),
-    ("secondary_fg", "Secondary text", "Muted text, helpers, axis ticks."),
-    ("accent", "Accent", "Primary brand colour (titles, links, primary buttons)."),
-    ("accent_fg", "Accent foreground", "Text colour ON accent backgrounds (white on accent buttons)."),
-    ("link_tint", "Link tint", "Pale-accent cell tint for right-click drill backgrounds."),
-    ("danger", "Danger", "Error / negative-delta indicator."),
-    ("danger_fg", "Danger foreground", "Text on danger backgrounds."),
-    ("warning", "Warning", "Warning indicator."),
-    ("warning_fg", "Warning foreground", "Text on warning backgrounds."),
-    ("success", "Success", "Positive-delta indicator."),
-    ("success_fg", "Success foreground", "Text on success backgrounds."),
-    ("dimension", "Dimension", "Dimension-axis chip background."),
-    ("dimension_fg", "Dimension foreground", "Text on dimension chips."),
-    ("measure", "Measure", "Measure-axis chip background."),
-    ("measure_fg", "Measure foreground", "Text on measure chips."),
+# Each tuple: (form-name, label, helper, surfaces_anchor). All hex
+# colors, rendered as a paired `<input type="color">` + visible text
+# field so the operator can type a hex directly OR pick visually.
+#
+# BX.13 — every color carries an optional ``SurfaceAnchor`` pointing
+# at where the value lands in dashboards / audit PDF; ``None`` skips
+# the chip (the four surface-bg / surface-fg colours don't have a
+# single canonical "this appears here" pointer — they're everywhere —
+# so we omit the chip rather than write vague prose).
+_THEME_COLOR_FIELDS: tuple[
+    tuple[str, str, str, SurfaceAnchor | None], ...
+] = (
+    ("primary_bg", "Primary background", "Page background — most surfaces.", None),
+    ("secondary_bg", "Secondary background", "Off-card / subtle stripe surfaces.", None),
+    ("primary_fg", "Primary text", "Body text colour.", None),
+    ("secondary_fg", "Secondary text", "Muted text, helpers, axis ticks.", None),
+    ("accent", "Accent", "Primary brand colour (titles, links, primary buttons).",
+     SurfaceAnchor("theme-accent")),
+    ("accent_fg", "Accent foreground", "Text colour ON accent backgrounds (white on accent buttons).",
+     SurfaceAnchor("theme-accent-fg")),
+    ("link_tint", "Link tint", "Pale-accent cell tint for right-click drill backgrounds.",
+     SurfaceAnchor("theme-link-tint")),
+    ("danger", "Danger", "Error / negative-delta indicator.",
+     SurfaceAnchor("theme-danger")),
+    ("danger_fg", "Danger foreground", "Text on danger backgrounds.",
+     SurfaceAnchor("theme-danger-fg")),
+    ("warning", "Warning", "Warning indicator.",
+     SurfaceAnchor("theme-warning")),
+    ("warning_fg", "Warning foreground", "Text on warning backgrounds.",
+     SurfaceAnchor("theme-warning-fg")),
+    ("success", "Success", "Positive-delta indicator.",
+     SurfaceAnchor("theme-success")),
+    ("success_fg", "Success foreground", "Text on success backgrounds.",
+     SurfaceAnchor("theme-success-fg")),
+    ("dimension", "Dimension", "Dimension-axis chip background.",
+     SurfaceAnchor("theme-dimension")),
+    ("dimension_fg", "Dimension foreground", "Text on dimension chips.",
+     SurfaceAnchor("theme-dimension-fg")),
+    ("measure", "Measure", "Measure-axis chip background.",
+     SurfaceAnchor("theme-measure")),
+    ("measure_fg", "Measure foreground", "Text on measure chips.",
+     SurfaceAnchor("theme-measure-fg")),
 )
 
 
@@ -4652,7 +4894,7 @@ def _theme_form_to_dict(form: Mapping[str, str]) -> dict[str, object]:
     """
     out: dict[str, object] = {}
 
-    for fname, _, _, required in _THEME_TEXT_FIELDS:
+    for fname, _, _, required, _ in _THEME_TEXT_FIELDS:
         v = str(form.get(fname, "")).strip()
         if v:
             out[fname] = v
@@ -4699,7 +4941,7 @@ def _theme_form_to_dict(form: Mapping[str, str]) -> dict[str, object]:
         out["gradient"] = [low, high]
 
     # All 17 UI colors.
-    for fname, _, _ in _THEME_COLOR_FIELDS:
+    for fname, _, _, _ in _THEME_COLOR_FIELDS:
         v = str(form.get(fname, "")).strip()
         if v:
             out[fname] = v
@@ -4723,6 +4965,7 @@ def _theme_dict_from_instance(instance: Any) -> dict[str, object]:  # typing-sme
 def _render_color_picker_row(
     name: str, label: str, helper: str, value: str,
     *, pair_with: tuple[str, str] | None = None,
+    surfaces_anchor: SurfaceAnchor | None = None,
 ) -> str:
     """BF.8 — paired `<input type="color">` + hex text input + a
     visible preview chip.
@@ -4738,6 +4981,11 @@ def _render_color_picker_row(
     convention — bg/fg pairing), letting the operator eyeball the
     contrast in context. Without it the preview chip just fills
     with this colour solid.
+
+    ``surfaces_anchor`` (BX.13): optional pointer to a ``SURFACES_AS``
+    entry. When set, a ``where?`` chip appears next to the label so
+    the operator can see which dashboard / audit / PDF surface(s)
+    consume this value before changing it.
     """
     row_cls = field_row_classes()
     label_cls = "font-semibold text-xs text-primary-fg"
@@ -4767,9 +5015,13 @@ def _render_color_picker_row(
             f'class="rounded-sm border border-surface-border w-32 h-9" '
             f'style="background:{escape(hex_value)};"></div>'
         )
+    surfaces_chip = _surfaces_as_chip_html(
+        surfaces_anchor, field_label=label,
+    )
     return (
         f'<div class="{row_cls}">'
-        f'<label for="field-{name}-hex" class="{label_cls}">{escape(label)}</label>'
+        f'<label for="field-{name}-hex" class="{label_cls}">'
+        f'{escape(label)}{surfaces_chip}</label>'
         f'<div class="flex items-center gap-3">'
         f'<input type="color" id="field-{name}-color" '
         f'value="{escape(hex_value)}" '
@@ -4819,12 +5071,14 @@ def _render_theme_form(
         f'<fieldset class="{section_cls}">'
         f'<legend class="{section_label_cls}">Identity</legend>'
     )
-    for fname, label, helper, required in _THEME_TEXT_FIELDS:
+    for fname, label, helper, required, surfaces in _THEME_TEXT_FIELDS:
         req = '<span class="text-danger"> *</span>' if required else ""
         v = str(theme_dict.get(fname, "") or "")
+        surfaces_chip = _surfaces_as_chip_html(surfaces, field_label=label)
         parts.append(
             f'<div class="{row_cls}">'
-            f'<label for="field-{fname}" class="{label_cls}">{escape(label)}{req}</label>'
+            f'<label for="field-{fname}" class="{label_cls}">'
+            f'{escape(label)}{req}{surfaces_chip}</label>'
             f'<input type="text" id="field-{fname}" name="{fname}" '
             f'value="{escape(v)}" class="{input_cls}">'
             f'<small class="{helper_cls}">{escape(helper)}</small>'
@@ -4848,12 +5102,18 @@ def _render_theme_form(
     )
     for i in range(dc_total):
         v = str(dc_items[i]) if i < len(dc_items) else ""
+        # BX.13 — only the first series carries the section-level
+        # surfaces-as chip; the rest of the rows skip it to avoid the
+        # chip stack visually competing with the per-series colour
+        # pickers. Operator clicking any row sees the same content.
+        anchor = SurfaceAnchor("theme-data-colors") if i == 0 else None
         parts.append(
             _render_color_picker_row(
                 f"data_colors_{i}",
                 f"Series {i + 1}",
                 "Hex (e.g. #1f4e79).",
                 v,
+                surfaces_anchor=anchor,
             )
         )
     parts.append('</fieldset>')
@@ -4874,14 +5134,17 @@ def _render_theme_form(
         + _render_color_picker_row(
             "empty_fill_color", "Empty fill",
             "Colour used when a chart cell has no data.", efc,
+            surfaces_anchor=SurfaceAnchor("theme-empty-fill-color"),
         )
         + _render_color_picker_row(
             "gradient_low", "Gradient (low)",
             "Light end of the heatmap gradient.", low,
+            surfaces_anchor=SurfaceAnchor("theme-gradient"),
         )
         + _render_color_picker_row(
             "gradient_high", "Gradient (high)",
             "Dark end of the heatmap gradient.", high,
+            surfaces_anchor=SurfaceAnchor("theme-gradient"),
         )
         + '</fieldset>'
     )
@@ -4895,21 +5158,28 @@ def _render_theme_form(
         return str(theme_dict.get(fname, "") or "")
 
     def _color_label(fname: str) -> str:
-        for (n, lbl, _) in _THEME_COLOR_FIELDS:
+        for (n, lbl, _, _) in _THEME_COLOR_FIELDS:
             if n == fname:
                 return lbl
         return fname
 
     def _color_helper(fname: str) -> str:
-        for (n, _, h) in _THEME_COLOR_FIELDS:
+        for (n, _, h, _) in _THEME_COLOR_FIELDS:
             if n == fname:
                 return h
         return ""
+
+    def _color_surfaces_anchor(fname: str) -> SurfaceAnchor | None:
+        for (n, _, _, anchor) in _THEME_COLOR_FIELDS:
+            if n == fname:
+                return anchor
+        return None
 
     def _render_solo(fname: str) -> str:
         return _render_color_picker_row(
             fname, _color_label(fname), _color_helper(fname),
             _color_value(fname),
+            surfaces_anchor=_color_surfaces_anchor(fname),
         )
 
     def _render_pair(bg_name: str, fg_name: str, sample: str) -> str:
@@ -4921,11 +5191,13 @@ def _render_theme_form(
                 bg_name, _color_label(bg_name), _color_helper(bg_name),
                 _color_value(bg_name),
                 pair_with=(_color_value(fg_name), sample),
+                surfaces_anchor=_color_surfaces_anchor(bg_name),
             )
             + _render_color_picker_row(
                 fg_name, _color_label(fg_name), _color_helper(fg_name),
                 _color_value(fg_name),
                 pair_with=(_color_value(bg_name), sample),
+                surfaces_anchor=_color_surfaces_anchor(fg_name),
             )
         )
 
@@ -5205,6 +5477,13 @@ def _render_list_page(
         '<div class="max-w-7xl mx-auto px-4 pb-12">' if pager_html else ""
     )
     pager_wrap_close = "</div>" if pager_html else ""
+    # BX.1 (2026-06-11) — page-level slot for the delete-confirm
+    # banner. ONE per page (single in-flight delete at a time);
+    # card Delete buttons swap their banner in here via
+    # `hx-target="#delete-confirm-banner-slot"`. In `embed` mode the
+    # home page's wrapper already declares a slot of its own —
+    # the per-section embed body skips its own slot to avoid id
+    # duplication (handled in `_render_home`).
     if embed:
         return (
             f"{search_wrap_open}{search_html}{search_wrap_close}"
@@ -5236,6 +5515,9 @@ def _render_list_page(
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
   {page_header_html}
+  <div class="max-w-7xl mx-auto px-4 pt-3">
+    <div id="delete-confirm-banner-slot" data-test-delete-banner-slot></div>
+  </div>
   {search_wrap_open}{search_html}{search_wrap_close}
   <main id="entity-list" class="{grid_cls}">
     {cards}
@@ -5248,7 +5530,16 @@ def _render_list_page(
 
 def _entity_id(kind: EntityKind, entity: object) -> str:
     """Read the addressing key off an entity — symmetric with editor.py's
-    ``_find_entity`` lookup."""
+    ``_find_entity`` lookup.
+
+    BX.10 (2026-06-11): this stays returning the *internal composite key*
+    (e.g. ``"CustomerInboundACH::Foo,Bar"`` for chain) because the
+    addressing key is the L2-shape lookup contract — search-by-name in
+    `_filter_entities`, HTML id slugs in `_render_read_card`, validation
+    paths in `mutate_l2`, etc. all key off the composite form. Only the
+    *URL surface* moves to opaque ``hash6-slug`` (see
+    ``_url_entity_id`` + ``_resolve_url_entity_id``).
+    """
     if kind == "account":
         return str(getattr(entity, "id"))
     if kind == "account_template":
@@ -5271,6 +5562,222 @@ def _entity_id(kind: EntityKind, entity: object) -> str:
         f"{getattr(entity, 'rail')}::"
         f"{getattr(entity, 'direction')}"
     )
+
+
+# ---------------------------------------------------------------------------
+# BX.10 (2026-06-11) — composite-key opaque URL IDs
+# ---------------------------------------------------------------------------
+#
+# Operator lock (BX.0.7 + BX.10 Direction E): chain + limit_schedule
+# URLs go opaque (``/l2_shape/chain/<hash6>-<slug>``) so renames don't
+# rot bookmarks. YAML untouched; the composite-key form remains the
+# in-memory addressing key (see ``_entity_id`` above).
+#
+# Single-key kinds (account / account_template / rail / transfer_template)
+# keep their existing kebab-slug URLs verbatim — the cold-read complaint
+# was specifically about composite-keyed kinds (chain / limit_schedule)
+# where the ``::,`` chars rot in Slack pastes. Future cells can extend
+# `_url_entity_id` to opaque single-key kinds for consistency (open
+# question #2 in `bx_10.md`); the helper structure makes that a
+# one-branch addition without rewiring callsites.
+
+# Kinds that get the opaque URL treatment. Closed tuple so pyright catches
+# the "new composite kind" case at the call site.
+_OPAQUE_URL_KINDS: tuple[EntityKind, ...] = ("chain", "limit_schedule")
+
+
+def _slug_source_for(kind: EntityKind, entity: object) -> str:
+    """BX.10 — pick the human-readable slug source per kind.
+
+    Chain → parent (the operator-readable rail name, e.g.
+    ``"CustomerInboundACH"`` → slug ``"customerinboundach"``).
+    LimitSchedule → parent_role (the role name, e.g. ``"DDAControl"``
+    → ``"ddacontrol"``). Empty result is acceptable — the URL falls
+    back to hash6-only (still valid per ``parse_opaque_url_id``).
+    """
+    if kind == "chain":
+        return str(getattr(entity, "parent", "") or "")
+    if kind == "limit_schedule":
+        return str(getattr(entity, "parent_role", "") or "")
+    return ""
+
+
+def _url_entity_id(kind: EntityKind, entity: object) -> str:
+    """BX.10 — URL-side addressing for an entity.
+
+    Composite-keyed kinds (chain / limit_schedule) return
+    ``<hash6>-<slug>``; single-key kinds return the same as
+    ``_entity_id`` (kebab id / role / name verbatim).
+
+    The hash is derived from the *composite key string* (which is what
+    ``_entity_id`` returns), so a rename that changes the composite
+    key changes the URL — but that's the intended behavior: renamed
+    entity is a different addressing tuple. Stale-URL handling is the
+    301-redirect at the route layer (the slug drifted but the hash
+    still matches an existing entity).
+    """
+    if kind in _OPAQUE_URL_KINDS:
+        from recon_gen.common.html._components import (  # noqa: PLC0415
+            build_opaque_url_id,
+        )
+        composite = _entity_id(kind, entity)
+        return build_opaque_url_id(composite, _slug_source_for(kind, entity))
+    return _entity_id(kind, entity)
+
+
+def _resolve_url_entity_id(
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — read-only iteration
+    kind: EntityKind,
+    url_seg: str,
+) -> tuple[object | None, str | None]:
+    """BX.10 — resolve a URL path segment to ``(entity, canonical_url)``.
+
+    Return shape:
+    - ``(entity, None)`` — URL is canonical, no redirect needed.
+    - ``(entity, "<new-url>")`` — entity found via hash match but the
+      slug portion is stale; caller should 301-redirect to the new URL.
+    - ``(None, None)`` — no entity matches; caller should 404.
+
+    For composite-keyed kinds, parses the URL as ``<hash6>-<slug>`` and
+    matches by walking entities + computing each one's hash.
+    For single-key kinds, falls through to the existing
+    ``_find_entity_or_none`` shape — URL is the addressing key verbatim.
+    """
+    if kind not in _OPAQUE_URL_KINDS:
+        entity = _find_entity_or_none(instance, kind, url_seg)
+        return (entity, None)
+
+    from recon_gen.common.html._components import (  # noqa: PLC0415
+        parse_opaque_url_id,
+    )
+    parsed = parse_opaque_url_id(url_seg)
+    if parsed is None:
+        # BX.10 — URL doesn't match the opaque ``<hash6>-<slug>`` shape.
+        # Fall through to the legacy composite-form lookup so flows
+        # that still carry composite ids (banner DELETE URLs built
+        # server-side, programmatic PUT clients, the e2e suites) keep
+        # working through the cell. The 301-redirect target carries
+        # the canonical opaque form so a manual GET against the
+        # composite URL self-heals on next visit.
+        entity = _find_entity_or_none(instance, kind, url_seg)
+        if entity is None:
+            return (None, None)
+        canonical = _url_entity_id(kind, entity)
+        # Composite-form URL → canonical opaque URL is always a redirect
+        # (never an exact match, by construction).
+        return (entity, canonical)
+    target_hash, _url_slug = parsed
+    for e in _entities_for_kind(instance, kind):
+        canonical = _url_entity_id(kind, e)
+        # canonical is always "<hash6>" or "<hash6>-<slug>". Compare
+        # hash bits via the parsed form so the comparison is symmetric.
+        canonical_parsed = parse_opaque_url_id(canonical)
+        if canonical_parsed is None:
+            continue  # defensive — _url_entity_id always returns the shape
+        c_hash, _c_slug = canonical_parsed
+        if c_hash == target_hash:
+            if canonical == url_seg:
+                return (e, None)  # exact match
+            # Hash matched but slug drifted — caller redirects.
+            return (e, canonical)
+    return (None, None)
+
+
+def _read_card_url_for(kind: EntityKind, entity_id: str) -> str:
+    """BX.2 (2026-06-11) — URL of the entity's read card.
+
+    Save-success redirect target for the create / save handlers.
+    ``entity_id`` is the post-save addressing key (see
+    ``_post_save_entity_id`` for the rename-aware derivation).
+
+    BX.10 (2026-06-11) — for composite-keyed kinds the URL goes opaque
+    (``<hash6>-<slug>``) so the save-redirect lands on the canonical
+    opaque URL; single-key kinds keep their kebab-slug shape unchanged.
+    Percent-encoding leaves ``::`` (composite separator) alone for
+    legacy callers that still pass composite-form ids — those go
+    through the 301-redirect path on next GET if BX.10's resolver
+    finds them.
+    """
+    from urllib.parse import quote  # noqa: PLC0415
+    return f"/l2_shape/{kind}/{quote(entity_id, safe='::-')}"
+
+
+def _read_card_url_from_entity(kind: EntityKind, entity: object) -> str:
+    """BX.10 — same as ``_read_card_url_for`` but takes the entity
+    directly so composite-keyed kinds get the canonical opaque URL
+    without the caller having to wire ``_url_entity_id`` themselves.
+
+    Save-success / create-success redirects use this so the operator
+    lands on the opaque URL post-mutation (matches what
+    ``_render_read_card_summary``'s Edit link points at).
+    """
+    return _read_card_url_for(kind, _url_entity_id(kind, entity))
+
+
+def _post_save_entity_id(
+    kind: EntityKind,
+    original_entity_id: str,
+    new_fields: Mapping[str, Any],  # typing-smell: ignore[explicit-any]: form-coerced field values; heterogeneous per dataclass
+) -> str:
+    """BX.2 — derive the post-save addressing key.
+
+    Combines the original entity_id (the URL-path one) with any
+    addressing-key field overrides in ``new_fields`` so the
+    save-success redirect lands on the right read card even after a
+    rename (Rail.name, TransferTemplate.name, AccountTemplate.role,
+    Account.id, Chain.parent / Chain.children, LimitSchedule.parent_role /
+    LimitSchedule.rail / LimitSchedule.direction).
+
+    Falls back to ``original_entity_id`` when no addressing-key field
+    is in ``new_fields`` (the common "edit a non-addressing field"
+    case — name preserved, just a description change).
+    """
+    if kind == "account":
+        raw = new_fields.get("id") if "id" in new_fields else None
+        return str(raw) if raw else original_entity_id
+    if kind == "account_template":
+        raw = new_fields.get("role") if "role" in new_fields else None
+        return str(raw) if raw else original_entity_id
+    if kind in ("rail", "transfer_template"):
+        raw = new_fields.get("name") if "name" in new_fields else None
+        return str(raw) if raw else original_entity_id
+    if kind == "chain":
+        # Composite "parent::sorted-children-csv". Either component may
+        # have changed; rebuild from new_fields where present, else
+        # parse the original composite for the unchanged component.
+        if "parent" in new_fields or "children" in new_fields:
+            orig_parent, _, orig_children_csv = original_entity_id.partition("::")
+            if "parent" in new_fields:
+                parent_raw = new_fields["parent"]
+                parent_str = str(parent_raw) if parent_raw else orig_parent
+            else:
+                parent_str = orig_parent
+            if "children" in new_fields:
+                raw_children = new_fields["children"]
+                # ChainChildSpec tuple — read .name off each.
+                child_names = sorted(
+                    str(getattr(c, "name", c)) for c in raw_children or ()
+                )
+                children_csv = ",".join(child_names)
+            else:
+                children_csv = orig_children_csv
+            return f"{parent_str}::{children_csv}"
+        return original_entity_id
+    # limit_schedule — 3-part composite "parent_role::rail::direction".
+    if any(k in new_fields for k in ("parent_role", "rail", "direction")):
+        parts = original_entity_id.split("::")
+        # Backward-compat 2-part form means direction="Outbound".
+        if len(parts) == 2:
+            parts = [*parts, "Outbound"]
+        orig_pr, orig_rail, orig_dir = (parts + ["", "", ""])[:3]
+        pr_raw = new_fields.get("parent_role") if "parent_role" in new_fields else None
+        rail_raw = new_fields.get("rail") if "rail" in new_fields else None
+        dir_raw = new_fields.get("direction") if "direction" in new_fields else None
+        pr_str = str(pr_raw) if pr_raw else orig_pr
+        rail_str = str(rail_raw) if rail_raw else orig_rail
+        dir_str = str(dir_raw) if dir_raw else orig_dir
+        return f"{pr_str}::{rail_str}::{dir_str}"
+    return original_entity_id
 
 
 # ---------------------------------------------------------------------------
@@ -5528,15 +6035,28 @@ def _make_handlers(
             ),
         )
 
-    async def read_card(request: Request) -> HTMLResponse:
+    async def read_card(request: Request) -> Response:
         kind = _kind_from_path(request.path_params["kind"])
-        entity_id = request.path_params["entity_id"]
+        url_seg = request.path_params["entity_id"]
         if kind is None or kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse("not editable", status_code=404)
         inst = cache.get()
-        entity = _find_entity_or_none(inst, kind, entity_id)
+        # BX.10 (2026-06-11) — opaque URL resolution for composite-keyed
+        # kinds. Returns (entity, canonical_url) where canonical_url is
+        # not None when the slug portion drifted from the entity's
+        # current name (rename → stale bookmark → 301 self-heal).
+        entity, canonical_url = _resolve_url_entity_id(inst, kind, url_seg)
         if entity is None:
             return HTMLResponse("not found", status_code=404)
+        if canonical_url is not None:
+            # Preserve ``?body_only=1`` etc. across the redirect so a
+            # stale-slug HTMX lazy-load still hits the body-fragment
+            # endpoint after the bounce.
+            qs = request.url.query
+            target = f"/l2_shape/{kind}/{canonical_url}"
+            if qs:
+                target = f"{target}?{qs}"
+            return RedirectResponse(target, status_code=301)
         # CF.4.c — ``?body_only=1`` returns just the `<dl>` rows so
         # collapse-by-default cards can lazy-fetch the heavy body on
         # first expand. Same endpoint, same auth path, no new route
@@ -5547,15 +6067,22 @@ def _make_handlers(
             _render_read_card(kind, entity, inst),
         )
 
-    async def edit_form(request: Request) -> HTMLResponse:
+    async def edit_form(request: Request) -> Response:
         kind = _kind_from_path(request.path_params["kind"])
-        entity_id = request.path_params["entity_id"]
+        url_seg = request.path_params["entity_id"]
         if kind is None or kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse("not editable", status_code=404)
         inst = cache.get()
-        entity = _find_entity_or_none(inst, kind, entity_id)
+        entity, canonical_url = _resolve_url_entity_id(inst, kind, url_seg)
         if entity is None:
             return HTMLResponse("not found", status_code=404)
+        if canonical_url is not None:
+            # BX.10 — stale-slug 301 to canonical edit URL.
+            qs = request.url.query
+            target = f"/l2_shape/{kind}/{canonical_url}/edit"
+            if qs:
+                target = f"{target}?{qs}"
+            return RedirectResponse(target, status_code=301)
         from_param = request.query_params.get("from")
         return HTMLResponse(_render_edit_page_local(kind, entity, inst, from_param=from_param))
 
@@ -5567,11 +6094,28 @@ def _make_handlers(
         re-rendered with the error banner + the operator's typed values
         preserved. Bound to both POST and PUT /l2_shape/<kind>/<id> so the
         plain HTML edit form (POST) and any programmatic PUT both work.
+
+        BX.10 (2026-06-11) — for composite-keyed kinds the path segment
+        is opaque (``<hash6>-<slug>``); resolved to the composite key
+        ONCE up front, then the composite key feeds every mutate /
+        rename / find call below. Save-success redirect re-derives the
+        opaque URL from the post-mutate entity (rename → new hash).
         """
         kind = _kind_from_path(request.path_params["kind"])
-        entity_id = request.path_params["entity_id"]
+        url_seg = request.path_params["entity_id"]
         if kind is None or kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse("not editable", status_code=404)
+
+        # BX.10 — resolve opaque URL → composite entity_id for the
+        # mutate / find calls below. The path may be opaque (chain /
+        # limit_schedule) or single-key (account / rail / etc.).
+        inst_for_resolve = cache.get()
+        resolved_entity, _canonical = _resolve_url_entity_id(
+            inst_for_resolve, kind, url_seg,
+        )
+        if resolved_entity is None:
+            return HTMLResponse("not found", status_code=404)
+        entity_id = _entity_id(kind, resolved_entity)
 
         form = await request.form()
         # BTa.2 P1.5 — `_back_from` hidden input round-trips the
@@ -5663,13 +6207,30 @@ def _make_handlers(
             )
 
         cache.save(new_inst)
-        # AI.2.e — dedicated-screen flow: 303-redirect home on success,
-        # symmetric with the create POST. (Replaces the X.4.e inline
-        # read-card swap + HX-Trigger cascade-reload; a full navigation back
-        # to Studio re-renders the diagram + entity lists fresh anyway.)
-        # BTa.2 P1.5 — when `_back_from` carried in (Triage → Edit), prefer
-        # the carried target so save-then-redirect closes the loop.
-        redirect_target = _safe_back_target(from_param) or "/"
+        # BX.2 (2026-06-11) — save-success 303-redirects to the entity's
+        # read card by default (operator stays in the editing flow,
+        # sees their just-saved fields rendered, can keep iterating).
+        # The pre-BX.2 default was `/` (the home page), which forced an
+        # extra "scroll to the section + find the row" step on every
+        # save. ``?from=`` (carried via the `_back_from` hidden input)
+        # still wins when set, so Triage → Edit → Save → Triage stays
+        # one click (BTa.2 P1.5).
+        # BX.10 (2026-06-11) — derive the opaque URL from the post-save
+        # entity so a rename (composite key changed → hash changed)
+        # lands on the new canonical URL. Look up the entity by its
+        # post-save composite key, then render the URL via
+        # ``_read_card_url_from_entity`` to get the opaque form for
+        # composite kinds.
+        new_entity_id = _post_save_entity_id(kind, entity_id, new_fields)
+        new_entity = _find_entity_or_none(new_inst, kind, new_entity_id)
+        if new_entity is not None:
+            default_target = _read_card_url_from_entity(kind, new_entity)
+        else:
+            # Fall back to the pre-BX.10 composite-form redirect if the
+            # post-save entity can't be re-found (shouldn't happen, but
+            # don't 500 the response).
+            default_target = _read_card_url_for(kind, new_entity_id)
+        redirect_target = _safe_back_target(from_param) or default_target
         return RedirectResponse(redirect_target, status_code=303)
 
     async def new_form(request: Request) -> HTMLResponse:
@@ -5809,7 +6370,14 @@ def _make_handlers(
                     status_code=400,
                 )
             cache.save(new_inst)
-            return RedirectResponse("/", status_code=303)
+            # BX.2 (2026-06-11) — singleton save 303-redirects back to
+            # the singleton's own page (`/l2_shape/<kind>/`) so the
+            # operator sees the just-saved values render through the
+            # full singleton page. ``?from=`` still wins for triage /
+            # probe / run round-trips.
+            singleton_target = f"/l2_shape/{kind}/"
+            redirect_target = _safe_back_target(from_param) or singleton_target
+            return RedirectResponse(redirect_target, status_code=303)
 
         if kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse("not editable", status_code=404)
@@ -6078,19 +6646,90 @@ def _make_handlers(
             )
 
         cache.save(new_inst)
-        # Plain-form POST → 303 redirect back to home. Browser navigates;
-        # the operator sees the new entity in its section. No HTMX
-        # involvement here (the create page is full-page nav, not an
-        # in-place swap). BTa.2 P1.5 — `_back_from` short-circuits the
-        # default / so Triage → New → Save → Triage is one click.
-        redirect_target = _safe_back_target(from_param) or "/"
+        # BX.2 (2026-06-11) — create-success 303-redirects to the new
+        # entity's read card by default (the operator sees what they
+        # just made, can fix typos / fill optional fields without
+        # re-navigating from home). ``?from=`` still wins so the
+        # Triage → New → Save → Triage one-click loop is preserved
+        # (BTa.2 P1.5).
+        new_entity_id = _post_save_entity_id(kind, "", new_fields)
+        # BX.10 (2026-06-11) — redirect to the opaque URL form for
+        # composite-keyed kinds so the operator lands on the canonical
+        # post-BX.10 URL (matching what the Edit link on the read card
+        # already points at). Look up the newly-created entity to
+        # derive its hash + slug.
+        if new_entity_id:
+            new_entity = _find_entity_or_none(new_inst, kind, new_entity_id)
+            default_target = (
+                _read_card_url_from_entity(kind, new_entity)
+                if new_entity is not None
+                else _read_card_url_for(kind, new_entity_id)
+            )
+        else:
+            default_target = "/"
+        redirect_target = _safe_back_target(from_param) or default_target
         return RedirectResponse(redirect_target, status_code=303)
 
-    async def delete_handler(request: Request) -> HTMLResponse:
+    async def delete_handler(request: Request) -> Response:
         kind = _kind_from_path(request.path_params["kind"])
-        entity_id = request.path_params["entity_id"]
+        url_seg = request.path_params["entity_id"]
         if kind is None or kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse("not editable", status_code=404)
+
+        # BX.10 (2026-06-11) — resolve opaque URL → composite entity_id
+        # so HMAC verify + mutate / delete keys off the composite key
+        # (the banner-side HMAC was issued against the composite via
+        # `delete_confirm_handler`). The resolver accepts both opaque
+        # and composite-form URL segs.
+        inst_for_resolve = cache.get()
+        resolved_entity, _canonical = _resolve_url_entity_id(
+            inst_for_resolve, kind, url_seg,
+        )
+        if resolved_entity is None:
+            return HTMLResponse("not found", status_code=404)
+        entity_id = _entity_id(kind, resolved_entity)
+
+        # BX.1 (2026-06-11) — DELETE requires the server-signed confirm
+        # token issued by GET /l2_shape/<kind>/<id>/delete-confirm.
+        # The token encodes start_ts (HMAC-signed); the verifier
+        # enforces ``now - start_ts >= COUNTDOWN_SECS`` server-side so
+        # a client that disables the disabled-attribute via DevTools
+        # still hits the wall clock check. No backward-compat path
+        # for unsigned DELETEs: any pre-BX.1 client tab that fires
+        # raw DELETE gets a 400 with the actionable error.
+        confirm_token = request.query_params.get("confirm_token", "")
+        if not confirm_token:
+            return HTMLResponse(
+                '<div role="alert" data-test-delete-error="missing-token" '
+                'class="text-sm text-danger bg-red-50 border '
+                'border-danger rounded-sm px-3 py-2 mb-3">'
+                "Confirm required — click Delete on the entity to "
+                "open the inline confirm banner; wait the countdown; "
+                "then click Confirm.</div>",
+                status_code=400,
+            )
+        verify = verify_confirm_token(
+            confirm_token, kind, entity_id,
+            countdown_secs=_delete_confirm.COUNTDOWN_SECS,
+        )
+        if verify.status == "invalid":
+            return HTMLResponse(
+                '<div role="alert" data-test-delete-error="invalid-token" '
+                'class="text-sm text-danger bg-red-50 border '
+                'border-danger rounded-sm px-3 py-2 mb-3">'
+                "Confirm token invalid — reload the page and try "
+                "again.</div>",
+                status_code=400,
+            )
+        if verify.status == "too_early":
+            return HTMLResponse(
+                f'<div role="alert" data-test-delete-error="too-early" '
+                f'class="text-sm text-danger bg-red-50 border '
+                f'border-danger rounded-sm px-3 py-2 mb-3">'
+                f"Wait for the countdown — only {verify.elapsed:.1f}s "
+                f"elapsed.</div>",
+                status_code=400,
+            )
 
         try:
             new_inst = delete_l2_entity(cache.get(), kind, entity_id)
@@ -6113,17 +6752,65 @@ def _make_handlers(
         # to the list page so the operator lands on the kind's list
         # instead of seeing the now-stale edit form. Card-source
         # deletes keep the empty-body shape (HX-Swap removes the
-        # card in place).
+        # banner; the home page's cascade-reload listener refreshes
+        # the relevant section).
         from_source = request.query_params.get("from", "")
         if from_source == "edit":
             resp = HTMLResponse("")
             resp.headers["HX-Redirect"] = f"/l2_shape/{kind}/"
             resp.headers["HX-Trigger"] = "l2-cascade-reload"
             return resp
-        # Empty body — the chrome's HX-Swap removes the card.
+        # Empty body — the chrome's HX-Swap removes the banner.
         resp = HTMLResponse("")
         resp.headers["HX-Trigger"] = "l2-cascade-reload"
         return resp
+
+    async def delete_confirm_handler(request: Request) -> Response:
+        """BX.1 — GET /l2_shape/<kind>/<id>/delete-confirm: returns
+        the inline confirm banner. Walks the L2Instance for incoming
+        references first; when refs are present the banner renders
+        in `blocked` mode (no Confirm button, listing each referrer
+        with an edit link). When refs are absent the banner renders
+        in `armed` mode with a 5s countdown + signed Confirm token.
+
+        Lives behind GET (not POST) so it's idempotent + safe to
+        re-fire if the operator clicks Delete twice.
+
+        BX.10 (2026-06-11) — for composite-keyed kinds the path is
+        opaque (``<hash6>-<slug>``); resolved to the composite key
+        once up front. The composite key feeds the find-references /
+        HMAC-issue calls below so the operator-visible banner shows
+        a human-readable id and the DELETE URL the banner builds
+        carries the same composite (matching the HMAC payload).
+        """
+        kind = _kind_from_path(request.path_params["kind"])
+        url_seg = request.path_params["entity_id"]
+        if kind is None or kind not in _FIELD_SPECS_BY_KIND:
+            return HTMLResponse("not editable", status_code=404)
+        instance = cache.get()
+        resolved_entity, _canonical = _resolve_url_entity_id(
+            instance, kind, url_seg,
+        )
+        if resolved_entity is None:
+            # Same 410-Gone shape as the save / read-card mid-flight
+            # delete race.
+            return _entity_gone_response(kind, url_seg)
+        entity_id = _entity_id(kind, resolved_entity)
+        refs = _find_references(instance, kind, entity_id)
+        banner_html = render_delete_confirm_banner(
+            kind, entity_id, refs,
+            countdown_secs=_delete_confirm.COUNTDOWN_SECS,
+        )
+        return HTMLResponse(banner_html)
+
+    async def delete_cancel_handler(_request: Request) -> HTMLResponse:
+        """BX.1 — GET /l2_shape/_delete_cancel: returns an empty
+        replacement so the Cancel button kills the in-flight banner.
+        The Cancel button's hx-swap=outerHTML on `#delete-confirm-banner`
+        replaces the banner aside with the empty-string body — leaving
+        the slot div empty and ready for the next Delete click.
+        """
+        return HTMLResponse("")
 
     async def preview_markdown(request: Request) -> HTMLResponse:
         """BF.9 (2026-05-25) — markdown → HTML preview endpoint.
@@ -6164,6 +6851,8 @@ def _make_handlers(
         "edit_form": edit_form,
         "save": save,
         "delete": delete_handler,
+        "delete_confirm": delete_confirm_handler,
+        "delete_cancel": delete_cancel_handler,
         "new_form": new_form,
         "create": create,
         "preview_markdown": preview_markdown,
@@ -6281,7 +6970,15 @@ def make_editor_routes(
     h = _make_handlers(cache, top_nav_fn=top_nav_fn)
     # ``/new`` MUST be declared before ``/{entity_id}`` so Starlette's
     # path matcher doesn't treat the literal "new" as an entity_id.
+    # BX.1 (2026-06-11): the ``/_delete_cancel`` literal MUST be
+    # declared before the ``/{kind}/`` catch-all for the same reason.
     routes: list[Route] = [
+        # BX.1 — delete-confirm cancel endpoint. Empty-body GET so
+        # Cancel button hx-swap=outerHTML kills the in-flight banner.
+        Route(
+            "/l2_shape/_delete_cancel", h["delete_cancel"],
+            methods=["GET"], name="l2_shape_delete_cancel",
+        ),
         Route(
             "/l2_shape/{kind}/", h["list_view"], methods=["GET"],
         ),
@@ -6292,6 +6989,14 @@ def make_editor_routes(
         Route(
             "/l2_shape/{kind}/new", h["new_form"], methods=["GET"],
             name="l2_shape_new_form",
+        ),
+        # BX.1 — delete-confirm banner endpoint. Declared BEFORE the
+        # bare-id read route so Starlette doesn't treat
+        # "delete-confirm" as an entity_id.
+        Route(
+            "/l2_shape/{kind}/{entity_id}/delete-confirm",
+            h["delete_confirm"],
+            methods=["GET"], name="l2_shape_delete_confirm",
         ),
         Route(
             "/l2_shape/{kind}/{entity_id}", h["read_card"],

@@ -119,10 +119,14 @@ def test_chain_card_id_matches_delete_hx_target(
 ) -> None:
     """For every chain in the fixture (including multi-child chains
     whose composite key carries commas), the rendered card's
-    `id="entity-chain-..."` attribute must match the Delete button's
-    `hx-target="#..."` selector character-for-character. If they
-    diverge, HTMX swaps the wrong DOM node on Delete — the cold-read
-    v4 P0 #3 data-loss bug."""
+    ``id="entity-chain-..."`` attribute must remain CSS-safe.
+
+    BX.1 (2026-06-11): the Delete button no longer targets the card
+    via ``hx-target="#<card-id>"`` — it targets the page-level
+    ``#delete-confirm-banner-slot``. The CG.16 contract (no commas
+    in the CSS-safe slug) still matters because OTHER hx-targets
+    (the card body lazy-load, the editor's cascade-reload re-render)
+    still address the card by id. Pin both invariants."""
     cache = L2InstanceCache.from_path(writable_l2_yaml)
     inst = cache.get()
     multi_child_seen = False
@@ -133,12 +137,11 @@ def test_chain_card_id_matches_delete_hx_target(
         card = _render_read_card(
             "chain", chain, inst, collapsed=True,
         )
-        # The card's id and the Delete hx-target must reference the
-        # same slug. The slug must NOT contain a comma (that's the
-        # whole point — CSS selector safety).
+        # The card's id is the CSS-safe slug (no commas, no `::`).
         expected_slug = _html_id_slug(composite)
         assert f'id="entity-chain-{expected_slug}"' in card
-        assert f'hx-target="#entity-chain-{expected_slug}"' in card
+        # BX.1 — Delete targets the banner slot, not the card.
+        assert 'hx-target="#delete-confirm-banner-slot"' in card
         # Belt + suspenders: prove the slug itself is CSS-safe.
         assert "," not in expected_slug
         if "," in composite:

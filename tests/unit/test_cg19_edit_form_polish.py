@@ -150,9 +150,10 @@ def test_edit_form_has_back_link(
 def test_edit_form_has_delete_button(
     writable_l2_yaml: Path,
 ) -> None:
-    """Edit form's actions row carries a `data-role="form-delete"`
-    anchor with the same `hx-confirm` text the card's Delete button
-    uses."""
+    """Edit form's actions row carries a ``data-role="form-delete"``
+    anchor. BX.1 (2026-06-11): the Delete now opens the inline
+    confirm banner via GET ``/delete-confirm`` (not a browser-native
+    ``hx-confirm`` modal)."""
     cache = L2InstanceCache.from_path(writable_l2_yaml)
     inst = cache.get()
     account = inst.accounts[0]
@@ -160,16 +161,19 @@ def test_edit_form_has_delete_button(
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get(f"/l2_shape/account/{account.id}/edit").text
     assert 'data-role="form-delete"' in body
-    assert 'hx-confirm="Delete this entity?' in body
+    assert "/delete-confirm" in body
+    assert "hx-confirm=" not in body
 
 
 def test_edit_form_delete_url_carries_from_edit(
     writable_l2_yaml: Path,
 ) -> None:
-    """The Delete button's `hx-delete` URL appends `?from=edit` so
-    the delete handler distinguishes form-source from card-source
-    deletes and responds with HX-Redirect to the list (card-source
-    keeps the empty-body in-place swap)."""
+    """The Delete button on the edit form points its GET
+    ``/delete-confirm`` request at the same entity with
+    ``?from=edit`` so the eventual DELETE handler distinguishes
+    form-source from card-source deletes and responds with
+    HX-Redirect to the list (card-source keeps the empty-body
+    in-place swap)."""
     cache = L2InstanceCache.from_path(writable_l2_yaml)
     inst = cache.get()
     account = inst.accounts[0]
@@ -177,29 +181,47 @@ def test_edit_form_delete_url_carries_from_edit(
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get(f"/l2_shape/account/{account.id}/edit").text
     assert (
-        f'hx-delete="/l2_shape/account/{account.id}?from=edit"' in body
+        f'hx-get="/l2_shape/account/{account.id}/delete-confirm?from=edit"'
+        in body
+    )
+
+
+def _mint_confirm_token(kind: str, entity_id: str) -> str:
+    """Server-side helper — mint a token directly (test bypasses the
+    GET endpoint to avoid coupling to the banner's HTML when the
+    test's focus is the DELETE response shape, not the banner)."""
+    import time  # noqa: PLC0415
+    from typing import cast  # noqa: PLC0415
+    from recon_gen.common.html._delete_confirm import (  # noqa: PLC0415
+        make_confirm_token,
+    )
+    from recon_gen.common.l2.editor import EntityKind  # noqa: PLC0415
+    # Use start_ts = 0 → "elapsed" is ~now, well past the 0-secs
+    # countdown the tests pin via monkeypatch.
+    return make_confirm_token(
+        cast("EntityKind", kind), entity_id, time.time() - 10.0,
     )
 
 
 def test_delete_from_edit_responds_with_hx_redirect(
     writable_l2_yaml: Path,
+    monkeypatch: "pytest.MonkeyPatch",
 ) -> None:
-    """End-to-end: DELETE the entity with `?from=edit` and assert
-    the response carries the HX-Redirect header pointing at the
-    list page."""
+    """End-to-end: DELETE the entity with `?from=edit` AND a valid
+    confirm-token; assert the response carries the HX-Redirect
+    header pointing at the list page."""
+    monkeypatch.setattr(
+        "recon_gen.common.html._delete_confirm.COUNTDOWN_SECS", 0.0,
+    )
     cache = L2InstanceCache.from_path(writable_l2_yaml)
     inst = cache.get()
-    # Pick an account that's deletion-safe (no FK references). The
-    # spec_example fixture's accounts vary; pick one with no children.
-    # `cust-001` is the customer-id-1 instance which is referenced by
-    # children + chains — to avoid the validator-rejection branch
-    # we'd need a leaf. For this test the focus is the HX-Redirect
-    # header on a successful delete, so use a freshly-created leaf
-    # account in a temp L2.
     target_id = inst.accounts[0].id
+    token = _mint_confirm_token("account", str(target_id))
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
-        resp = c.delete(f"/l2_shape/account/{target_id}?from=edit")
+        resp = c.delete(
+            f"/l2_shape/account/{target_id}?from=edit&confirm_token={token}",
+        )
     # Either the delete succeeds (200 + HX-Redirect) or the validator
     # rejects it (400 + inline error). EITHER way the form-source
     # branch should fire — we assert the SHAPE of the success path
@@ -213,15 +235,23 @@ def test_delete_from_edit_responds_with_hx_redirect(
 
 def test_delete_from_card_does_not_redirect(
     writable_l2_yaml: Path,
+    monkeypatch: "pytest.MonkeyPatch",
 ) -> None:
     """The pre-existing card-source delete (no `?from=edit`) must
-    KEEP its empty-body / no-redirect behavior so the card's
-    outerHTML swap still works in place."""
+    KEEP its empty-body / no-redirect behavior so the banner's
+    outerHTML swap still works in place. BX.1: token + countdown
+    monkeypatch as above."""
+    monkeypatch.setattr(
+        "recon_gen.common.html._delete_confirm.COUNTDOWN_SECS", 0.0,
+    )
     cache = L2InstanceCache.from_path(writable_l2_yaml)
     inst = cache.get()
     target_id = inst.accounts[0].id
+    token = _mint_confirm_token("account", str(target_id))
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
-        resp = c.delete(f"/l2_shape/account/{target_id}")
+        resp = c.delete(
+            f"/l2_shape/account/{target_id}?confirm_token={token}",
+        )
     if resp.status_code == 200:
         assert resp.headers.get("HX-Redirect") is None

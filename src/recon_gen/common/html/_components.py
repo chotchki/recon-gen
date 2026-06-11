@@ -36,6 +36,8 @@ Operator locks (from CF.4 design review §3):
 
 from __future__ import annotations
 
+import hashlib
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from html import escape
@@ -96,6 +98,112 @@ def kind_label_plural(kind: EntityKind, *, lowercase: bool = False) -> str:
     for aria-labels / mid-sentence use ("Search account templates")."""
     label = _KIND_LABEL_PLURAL.get(kind, f"{kind}s")
     return label.lower() if lowercase else label
+
+
+# ---------------------------------------------------------------------------
+# BX.10 (2026-06-11) — composite-key opaque URL IDs (hash + slug)
+# ---------------------------------------------------------------------------
+#
+# Operator lock (BX.0.7 + BX.10 Direction E): URL only, YAML untouched.
+# Composite-keyed kinds (chain / limit_schedule) build URLs like
+# ``/l2_shape/chain/<hash6>-<slug>/edit`` where the 6-char hex digest
+# is the *authority* and the slug is purely a human-grep affordance.
+# Stale-slug bookmarks 301-redirect to the canonical form so links shared
+# in Slack / audit trails self-heal on next visit.
+#
+# Hash length lock: 6 hex chars (24 bits, ~16M space) at the cell's
+# ~30-100 composite-key entities, the collision probability is
+# <1 in 100k by the birthday bound; the resolver fails loud at cache
+# read time if a collision lands (operator-visible, not silent rot).
+
+# blake2s digest_size=3 yields 6 hex chars when ``.hex()``-encoded.
+# Picked over sha256[:6] because blake2 has a tunable digest_size and
+# is materially faster on small inputs (~3x throughput vs sha256 on the
+# typical ~50-byte composite key). The hash is for *addressing*, not
+# cryptographic security — any uniform-distribution PRF works.
+_HASH_DIGEST_BYTES = 3  # → 6 hex chars on ``.hex()``
+
+# URL-shape: ``<hash6>-<slug>`` with the hash in lowercase hex + the
+# slug derived from a human-readable component of the composite key.
+# Anchored at start so ``re.fullmatch`` rejects "Foo::Bar,Baz"
+# (the legacy composite form, which is what the 301-redirect catches).
+_URL_HASH_SLUG_RE = re.compile(r"^([0-9a-f]{6})(?:-([a-z0-9-]+))?$")
+
+# Slug character whitelist — kebab-case lowercase ASCII alphanumerics.
+# ``str.lower()`` collapses PascalCase; non-alphanumerics fold to ``-``;
+# leading / trailing / repeated dashes collapse so the slug stays clean
+# in copy-pastes. Empty slug → "" (the URL becomes hash6 only, valid).
+_SLUG_KEEP = re.compile(r"[a-z0-9]+")
+
+
+def hash_composite_key(composite_key: str) -> str:
+    """BX.10 — 6-char hex digest of a composite addressing key.
+
+    Deterministic across processes (blake2s is salt-free in this mode).
+    The same composite key always hashes to the same 6 hex chars; a
+    different composite (one char different) hashes to ~independent
+    bits, so the collision probability at the cell's scale is
+    operator-invisible.
+
+    The composite_key string is the canonical addressing form (e.g.
+    ``"CustomerInboundACH::CustomerInboundACHReturnNSF,CustomerInboundACHReturnStopPay"``
+    for a Chain; ``"DDAControl::CustomerOutboundACH::Outbound"`` for a
+    LimitSchedule). Callers stringify their composite first; this
+    helper is composite-shape-blind.
+    """
+    digest = hashlib.blake2s(
+        composite_key.encode("utf-8"),
+        digest_size=_HASH_DIGEST_BYTES,
+    ).digest()
+    return digest.hex()
+
+
+def slugify_for_url(text: str) -> str:
+    """BX.10 — kebab-case slug from any human-readable string.
+
+    PascalCase / camelCase / Title Case / snake_case all flatten to
+    ``-``-joined lowercase alphanumerics. Empty input → ``""``; the
+    URL-side caller treats empty as "hash-only" (still valid per
+    ``parse_opaque_url_id``).
+
+    Examples:
+    - ``"CustomerInboundACH"`` → ``"customerinboundach"``
+    - ``"DDA Control"`` → ``"dda-control"``
+    - ``"gl-1010-cash-due-frb"`` → ``"gl-1010-cash-due-frb"``
+    """
+    return "-".join(_SLUG_KEEP.findall(text.lower()))
+
+
+def build_opaque_url_id(composite_key: str, slug_source: str) -> str:
+    """BX.10 — assemble a URL-side id from a composite key + a
+    human-readable slug source. Pattern: ``<hash6>-<slug>`` (slug
+    omitted when empty).
+
+    ``composite_key`` is the addressing string (only the hash bits get
+    derived from it). ``slug_source`` is whichever human-readable name
+    the kind picks (chain.parent for chains; parent_role for
+    limit_schedules) — slug drift on rename is fine, the hash carries
+    the lookup.
+    """
+    h = hash_composite_key(composite_key)
+    slug = slugify_for_url(slug_source)
+    return f"{h}-{slug}" if slug else h
+
+
+def parse_opaque_url_id(url_seg: str) -> tuple[str, str] | None:
+    """BX.10 — split a URL-side id back into ``(hash6, slug)``.
+
+    Returns ``None`` if ``url_seg`` doesn't match the opaque shape
+    (which is how the resolver detects a legacy composite-form URL
+    landing in the new opaque-form route). Slug may be the empty
+    string when the URL is hash-only.
+    """
+    m = _URL_HASH_SLUG_RE.fullmatch(url_seg)
+    if m is None:
+        return None
+    hash6 = m.group(1)
+    slug = m.group(2) or ""
+    return (hash6, slug)
 
 
 # ---------------------------------------------------------------------------

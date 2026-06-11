@@ -138,6 +138,287 @@ GLOSSARY: dict[str, str] = {
         "The Probe page evaluates predicates against observed rows + "
         "shows per-cell ✓/✗."
     ),
+    # ---- BX.12 — Rail / Chain / LimitSchedule per-field vocabulary -------
+    # Cold-read v1a flagged these as the highest-friction terms a banker
+    # hits when editing L2 entities in the Studio. Banker-readable prose
+    # (CPA framing, not engineering jargon) per project_design_north_stars.
+    "posted-requirements": (
+        "**Posted requirements** are the rail-specific fields the L1 "
+        "PostedRequirements view requires every posted Transaction to "
+        "carry beyond the auto-derived TransferKey + chain-Required "
+        "fields. Think of them as the line items your reconciler "
+        "*must* be able to fill in before a transaction is considered "
+        "complete (e.g., for an ACH credit: trace number, effective "
+        "date). One per line. Anything missing surfaces on the L1 "
+        "Today's Exceptions table as a Posted-Requirements violation."
+    ),
+    "bundles-activity": (
+        "**Bundles activity** lists the rails or transfer templates "
+        "whose Transactions this aggregating rail rolls up into one "
+        "sweep / batch posting. Example: a daily ACH-batch sweep rail "
+        "would bundle every customer-DDA ACH-debit firing from the day. "
+        "L1 Conservation reconciles the sweep amount against the sum of "
+        "the bundled activity — if they disagree, the breach surfaces on "
+        "the Exceptions table. Applies only when ``aggregating = true``."
+    ),
+    "cadence": (
+        "**Cadence** is the firing schedule for an aggregating rail — "
+        "the frequency at which the sweep / batch posts. Common shapes: "
+        "``daily-eod`` (one posting at end of day), ``intraday-2h`` "
+        "(every two hours during business hours), ``weekly`` (one per "
+        "week). Time-invariant in v1 (no per-quarter or per-month "
+        "overrides). Required when ``aggregating = true``; ignored "
+        "when the rail fires per-Transfer."
+    ),
+    "origin-overrides": (
+        "**Origin overrides** let a Two-leg rail declare a different "
+        "Origin class per leg — useful when the rail straddles your "
+        "ledger and a counterparty's. Example: an ACH-credit rail has "
+        "the customer's side as **ExternalForcePosted** (the bank "
+        "receives the wire and must post it) and the internal "
+        "settlement leg as **InternalInitiated** (your ops team books "
+        "it). Leave blank to use the rail-level Origin for both legs. "
+        "Origin drives whether L1 looks for an external-system "
+        "reference (trace ID, IMAD) or an internal initiator."
+    ),
+    "xor": (
+        "**XOR** (exclusive-or) means *exactly one* of the candidate "
+        "children fires per parent firing. Cold-read framing: \"the "
+        "parent firing has multiple ways to satisfy itself, and the "
+        "demo / your ETL picks one per cycle.\" Example: a "
+        "MerchantSettlement parent may settle as Charge-Settlement OR "
+        "Charge-Reversal — never both, never neither. A chain with one "
+        "child is **Required** (the child always fires); a chain with "
+        "two-or-more children is XOR. L1 Chain Compliance flags any "
+        "parent firing that produced ≠1 child."
+    ),
+    "fan-in": (
+        "**Fan-in** is N-to-1 chaining: N parent firings collectively "
+        "settle into ONE child firing. Example: 50 individual "
+        "ACH-credit Transfers (each one a parent firing) all roll up "
+        "into a single daily ACH-batch sweep (the one child firing). "
+        "The opposite of the default 1:1 (or XOR 1-of-N) chain. Per "
+        "validator C8a, fan-in is only allowed when the child is a "
+        "**TransferTemplate** (not a bare Rail) — the template owns "
+        "the bundling semantics."
+    ),
+    "expected-parent-count": (
+        "**Expected parent count** (``epc``) is the typical or "
+        "contractual number of parent firings that should fan-in to "
+        "ONE child. Example: a daily ACH-batch child expects ~200 "
+        "parent ACH-credit Transfers; setting ``epc=200`` tells L1 "
+        "Limit Breach + Chain Compliance to flag any day where the "
+        "fan-in count is materially off (suggests a missing batch or "
+        "an unprocessed wave). Leave blank to skip the count check; "
+        "the chain still validates as fan-in shape."
+    ),
+    "direction": (
+        "**Direction** picks which side of a flow the LimitSchedule "
+        "cap watches. **Outbound** = money leaving the parent role's "
+        "children (the classic per-rail send cap — e.g., \"customers "
+        "can't wire more than $X/day\"). **Inbound** = money arriving "
+        "(the AML / structuring threshold — e.g., \"flag any customer "
+        "receiving more than $Y/day in cash deposits\"). The same "
+        "(parent_role, rail) pair may carry **both** an Outbound and "
+        "an Inbound LimitSchedule; the duplicate-detection key is the "
+        "(parent_role, rail, direction) triple."
+    ),
+}
+
+
+# -- BX.13 — Surfaces-as content (where a field's value ends up) -------------
+
+
+# Cold-read v1b P3.5 flagged that operators editing the L2 had no
+# visibility into *where* a given field's value would end up — they'd
+# type a hex into ``theme.accent`` with no signal that the same value
+# would drive the L1 KPI bar AND the QS chart-series default AND the
+# Studio top-nav. Same drift concern as BX.12 (single source of truth,
+# rendered both as side-panel content + per-field chips); a separate
+# dict because the *content* is fundamentally different — these are
+# location pointers, not vocabulary definitions. The chip label is
+# "where?" not "?" so the operator can tell the two surfaces apart at
+# a glance.
+#
+# Bullet-list HTML on render — every entry's prose is markdown bullets
+# (4+ items per `[feedback_terminology_over_churn]` style note).
+# Keep entries terse + concrete: name the page/element, not the
+# implementation file. CPA-readable framing, not engineering jargon.
+SURFACES_AS: dict[str, str] = {
+    # BXa-scope: institution-identity fields.
+    "institution-name": (
+        "**Institution name** appears on:\n\n"
+        "- the **audit PDF cover page** (regulator-facing identifier)\n"
+        "- the **L1 Dashboard header** + every dashboard's title bar\n"
+        "- the **Investigation app** landing prose\n"
+        "- the **handbook** intro paragraph (mkdocs substitution)\n"
+        "- the **Studio top-nav** title chip\n\n"
+        "Falls back to `cfg.deployment_name` when blank; regex-"
+        "extracted from the Description below when both are blank."
+    ),
+    "institution-description": (
+        "**Description** appears on:\n\n"
+        "- the **handbook** intro / preface page rendered from `docs/handbook/`\n"
+        "- the **audit PDF appendix** (\"About this institution\" section)\n"
+        "- the **L2 Editor** read card for the Instance singleton\n"
+        "- regex-extraction fallback source for **institution_name** when blank\n\n"
+        "Free-form markdown; first paragraph carries most weight on "
+        "the handbook + PDF render."
+    ),
+    # Theme — identity scalars.
+    "theme-name": (
+        "**Theme name** appears on:\n\n"
+        "- the **QuickSight Theme resource** in your AWS account (visible in the QS console)\n"
+        "- the **audit PDF cover** as the build-stamp identifier\n"
+        "- the **Studio L2 Editor** Theme read card\n"
+        "- `cfg.prefixed(theme_name)` for the deployed QS resource ID\n\n"
+        "Short identifier — letters / digits / dashes only."
+    ),
+    "theme-version-description": (
+        "**Version description** appears on:\n\n"
+        "- the **audit PDF cover** under the theme name\n"
+        "- the **QS Theme resource** Description metadata\n"
+        "- the **Studio Theme read card** as the one-line summary\n\n"
+        "One-line summary — operator-facing build-note (\"Q2-2026 "
+        "rebrand\")."
+    ),
+    # Theme — brand colours.
+    "theme-accent": (
+        "**Accent** appears on:\n\n"
+        "- **L1 KPI bars** — the primary measure colour across all four apps\n"
+        "- **Chart accent** — default series colour in QS bars / lines / pies\n"
+        "- **Sheet titles + section headers** across every dashboard\n"
+        "- **Link text + primary buttons** (Studio + dashboards)\n"
+        "- **Focus rings** + hover highlights\n"
+        "- **PDF brand bar** at the top of the audit cover\n\n"
+        "Aim for AA contrast against `primary_bg` — the pair-preview "
+        "above shows the actual button rendering."
+    ),
+    "theme-accent-fg": (
+        "**Accent foreground** appears on:\n\n"
+        "- **Text on accent backgrounds** — primary buttons + accent KPI bars\n"
+        "- **Active-tab text** in the Studio top-nav\n"
+        "- **PDF brand-bar text** on the audit cover\n"
+        "- **focus-ring text** for keyboard-navigated links\n\n"
+        "Usually white (`#ffffff`) on a saturated accent; aim for AA "
+        "contrast against `accent` — pair-preview shows the actual "
+        "button text."
+    ),
+    "theme-link-tint": (
+        "**Link tint** appears on:\n\n"
+        "- **Right-click-drill cell backgrounds** — pale-accent wash on tables that carry a context-menu drill\n"
+        "- **Pale hover states** on accent-text rows\n\n"
+        "Very pale (10-15% saturation of `accent`); the wash signals "
+        "\"this row is clickable\" without competing with the actual "
+        "data colour."
+    ),
+    # Theme — state colours.
+    "theme-success": (
+        "**Success** appears on:\n\n"
+        "- the **drift-zero status indicator** on the L1 Dashboard header\n"
+        "- **positive-delta chips** (\"closed clean today\") on Today's Exceptions\n"
+        "- **green-band heatmap cells** where invariant holds\n"
+        "- the **audit PDF status block** when no violations\n\n"
+        "Reserve for unambiguous \"all good\" — never use as a brand "
+        "colour."
+    ),
+    "theme-success-fg": (
+        "**Success foreground** appears on:\n\n"
+        "- **Text on success backgrounds** — drift-zero status chips\n"
+        "- **positive-delta chip text** on Today's Exceptions\n"
+        "- **PDF status-block text** when no violations\n\n"
+        "Aim for AA contrast against `success` — pair-preview shows "
+        "the actual chip text."
+    ),
+    "theme-danger": (
+        "**Danger** appears on:\n\n"
+        "- **L1 Exceptions table** breach-row backgrounds\n"
+        "- **invariant-violated KPI cards** (red border + value)\n"
+        "- the **drift-non-zero status indicator** on the L1 header\n"
+        "- the **audit PDF violations block** banner\n"
+        "- **error toasts** in the Studio (form validation failures)\n\n"
+        "Reserve for genuine errors — never for \"important.\""
+    ),
+    "theme-danger-fg": (
+        "**Danger foreground** appears on:\n\n"
+        "- **Text on danger backgrounds** — L1 Exceptions breach rows\n"
+        "- **error-toast text** in Studio form validation\n"
+        "- **PDF violations-block text** on the audit cover\n\n"
+        "Aim for AA contrast against `danger` — pair-preview shows "
+        "the actual chip text."
+    ),
+    "theme-warning": (
+        "**Warning** appears on:\n\n"
+        "- **L1 Exceptions** rows at the suspect/heads-up tier\n"
+        "- **rolling-anomaly z-score** mid-band cells (yellow)\n"
+        "- the **Studio L2-Editor unsaved-changes banner**\n"
+        "- the **audit PDF caveats appendix** marker\n\n"
+        "Between `success` and `danger` — \"look at this but don't "
+        "freak out yet.\""
+    ),
+    "theme-warning-fg": (
+        "**Warning foreground** appears on:\n\n"
+        "- **Text on warning backgrounds** — yellow heatmap cells\n"
+        "- the **Studio unsaved-changes banner** text\n"
+        "- **PDF caveats-appendix** marker text\n\n"
+        "Usually dark text on a yellow wash; aim for AA contrast "
+        "against `warning` — pair-preview shows the actual chip text."
+    ),
+    # Theme — data-color palette + gradient.
+    "theme-data-colors": (
+        "**Data colour palette** appears on:\n\n"
+        "- **QS chart series** — cycled in order across bars / lines / pie slices\n"
+        "- the **L2 Flow Tracing** money-trail link colours\n"
+        "- the **Investigation network graph** node-class palette\n"
+        "- the **audit PDF chart inserts** when violations have a per-series breakdown\n\n"
+        "First entry drives the most-common single-series visual; "
+        "later entries fill in as the legend grows. At least one "
+        "required."
+    ),
+    "theme-empty-fill-color": (
+        "**Empty fill colour** appears on:\n\n"
+        "- **QS chart cells** with no data (gap days, unpopulated buckets)\n"
+        "- **heatmap zero-row** background\n"
+        "- the **drift-no-data** state indicator\n\n"
+        "Distinct from `primary_bg` — operators need to tell \"chart "
+        "with empty cell\" from \"chart whose canvas is the page\"."
+    ),
+    "theme-gradient": (
+        "**Gradient** (low / high) appears on:\n\n"
+        "- **Heatmap cell fills** — interpolated between the two endpoints by value\n"
+        "- **rolling-anomaly z-score** ramp on Investigation\n"
+        "- **PDF heatmap inserts** when violations have a value-magnitude axis\n\n"
+        "`low` = least-intense (often very pale); `high` = most-"
+        "intense (often saturated accent). Same hue family across "
+        "the pair reads as a single ramp."
+    ),
+    # Theme — chart-axis chips.
+    "theme-dimension": (
+        "**Dimension** appears on:\n\n"
+        "- **QS field-well chips** for category axes (\"by Account\", \"by Date\")\n"
+        "- **chart x-axis tick** background pills on App2 renders\n\n"
+        "Chip background colour; pair with `dimension_fg` for the text."
+    ),
+    "theme-dimension-fg": (
+        "**Dimension foreground** appears on:\n\n"
+        "- **Text on dimension chips** in QS field-wells\n"
+        "- **Axis-pill text** on App2-rendered category axes\n"
+        "- **Chart legend text** for dimension-typed series labels\n\n"
+        "Aim for AA contrast against `dimension`."
+    ),
+    "theme-measure": (
+        "**Measure** appears on:\n\n"
+        "- **QS field-well chips** for value axes (\"SUM(amount)\", \"COUNT(*)\")\n"
+        "- **chart y-axis label** background pills on App2 renders\n\n"
+        "Chip background colour; pair with `measure_fg` for the text."
+    ),
+    "theme-measure-fg": (
+        "**Measure foreground** appears on:\n\n"
+        "- **Text on measure chips** in QS field-wells\n"
+        "- **Measure-pill text** on App2-rendered value axes\n"
+        "- **KPI-card measure-label text** when not on the accent bar\n\n"
+        "Aim for AA contrast against `measure`."
+    ),
 }
 
 
@@ -312,6 +593,36 @@ async def _glossary_term(request: Request) -> HTMLResponse:
     )
 
 
+async def _surfaces_as_entry(request: Request) -> HTMLResponse:
+    """BX.13 — return the surfaces-as pointer block for one anchor.
+
+    Path param ``anchor`` MUST match a ``SURFACES_AS`` key (lowercase
+    slug; same convention as glossary). Unknown anchor → 404 with a
+    pointer back to the editor surface so the operator isn't stranded.
+    """
+    anchor = str(request.path_params.get("anchor", "")).lower()
+    if anchor not in SURFACES_AS:
+        return HTMLResponse(
+            f'<p class="text-warning">'
+            f'No surfaces-as entry for <code>{escape(anchor)}</code>. '
+            f'This pointer was wired without a matching SURFACES_AS key — '
+            f'check <code>common/html/_side_panel.py</code>.</p>',
+            status_code=404,
+        )
+    display = anchor.replace("-", " ").title()
+    return HTMLResponse(
+        f'<h3 class="text-base font-semibold m-0 mb-2">'
+        f'Where does this surface?'
+        f'</h3>'
+        f'<p class="text-xs text-secondary-fg m-0 mb-2">'
+        f'<strong>{escape(display)}</strong>'
+        f'</p>'
+        f'<div class="text-sm text-primary-fg">'
+        f'{_markdown_render(SURFACES_AS[anchor])}'
+        f'</div>'
+    )
+
+
 def _markdown_render(text: str) -> str:
     """Tiny markdown → HTML for the glossary entries. Currently handles
     `**bold**`, `*italic*`, `` `code` ``, and §-prefixed cross-refs.
@@ -357,6 +668,11 @@ def side_panel_routes(
         Route(
             "/studio/side-panel/glossary/{term}",
             _glossary_term, methods=["GET"],
+        ),
+        # BX.13 — per-field surfaces-as pointer entries.
+        Route(
+            "/studio/side-panel/surfaces-as/{anchor}",
+            _surfaces_as_entry, methods=["GET"],
         ),
     ]
     if cache is not None:

@@ -133,12 +133,16 @@ def test_unknown_kind_returns_404(writable_l2_yaml: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_put_account_persists_to_disk_and_redirects_home(
+def test_put_account_persists_to_disk_and_redirects_to_read_card(
     writable_l2_yaml: Path,
 ) -> None:
-    """AI.2.e save flow: POST/PUT → mutate → validate → cache.save (atomic
-    write) → 303-redirect home (symmetric with the create POST). The mutation
-    persists to the --l2 file on disk.
+    """BX.2 (2026-06-11) save flow: POST/PUT → mutate → validate →
+    cache.save (atomic write) → 303-redirect to the entity's read card
+    (operator stays in the editing flow, sees their just-saved fields
+    rendered). The mutation persists to the --l2 file on disk.
+
+    Pre-BX.2 default was ``/`` (home page); now defaults to
+    ``/l2_shape/<kind>/<id>``.
     """
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
@@ -155,9 +159,9 @@ def test_put_account_persists_to_disk_and_redirects_home(
             },
             follow_redirects=False,
         )
-        # Dedicated-screen flow: 303 back to home, not an inline fragment.
+        # BX.2 — 303 to the entity's read card, not home.
         assert resp.status_code == 303, resp.text
-        assert resp.headers.get("location") == "/"
+        assert resp.headers.get("location") == "/l2_shape/account/cust-001"
 
     # Disk persistence — re-load and confirm.
     reloaded = load_instance(writable_l2_yaml)
@@ -211,18 +215,37 @@ def test_put_invalid_value_returns_400_with_inline_error(
 # ---------------------------------------------------------------------------
 
 
-def test_delete_dependent_rail_returns_400(writable_l2_yaml: Path) -> None:
+def test_delete_dependent_rail_returns_400(
+    writable_l2_yaml: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """SPEC's structural-break rule: deleting a Rail that a
-    TransferTemplate.leg_rails still references returns 400 with the
-    validator's error inline; the disk file is untouched."""
+    TransferTemplate.leg_rails still references returns 400 — now
+    surfaced through the BX.1 banner's `blocked` mode BEFORE the
+    operator can confirm. The GET /delete-confirm endpoint returns a
+    `data-test-delete-state="blocked"` banner listing the
+    referrers; no confirm-token is issued so a raw DELETE against
+    the rail returns 400 (missing-token) and the disk file is
+    untouched."""
+    # Zero out countdown so other tests in the file can mint tokens
+    # without sleeping — this test only exercises the blocked branch.
+    monkeypatch.setattr(
+        "recon_gen.common.html._delete_confirm.COUNTDOWN_SECS", 0.0,
+    )
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         # ReconciliationLeg is in ExternalReconciliationCycle.leg_rails.
+        # GET the confirm banner — references must be listed.
+        banner = c.get("/l2_shape/rail/ReconciliationLeg/delete-confirm")
+        assert banner.status_code == 200, banner.text
+        assert 'data-test-delete-state="blocked"' in banner.text
+        # Referrer chip points at the transfer_template.
+        assert "ExternalReconciliationCycle" in banner.text
+
+        # Raw DELETE without a confirm_token: 400 missing-token.
         resp = c.delete("/l2_shape/rail/ReconciliationLeg")
         assert resp.status_code == 400, resp.text
-        # AM.1 step 5 (2026-05-25): `.form-global-error` retired;
-        # the "Cannot delete" prose is the stable user-visible signal.
-        assert "Cannot delete" in resp.text
+        assert "missing-token" in resp.text
 
     # Disk untouched.
     reloaded = load_instance(writable_l2_yaml)
@@ -288,17 +311,20 @@ def test_parent_role_hidden_when_account_is_already_a_parent(
 def test_card_renders_delete_link_with_confirm(
     writable_l2_yaml: Path,
 ) -> None:
-    """X.4.f.9 — every read card carries a Delete link wired to the
-    DELETE route, with hx-confirm so a stray click can't wipe an
-    entity."""
+    """BX.1 (2026-06-11) — Delete on a read card now opens the inline
+    confirm banner via GET /delete-confirm (not a direct hx-delete +
+    browser hx-confirm modal). The wire shape: `hx-get` pointing at
+    `/l2_shape/<kind>/<id>/delete-confirm` targeting the page-level
+    banner slot. No `hx-confirm` modal."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/l2_shape/account/cust-001").text
-    # AM.1 step 6 (2026-05-25): `.delete-link` semantic class retired;
-    # check the stable HTMX hooks instead — those are what actually
-    # makes the link wire up to the DELETE route + confirm dialog.
-    assert 'hx-delete="/l2_shape/account/cust-001"' in body
-    assert "hx-confirm=" in body
+    assert (
+        'hx-get="/l2_shape/account/cust-001/delete-confirm"' in body
+    ), body
+    assert 'hx-target="#delete-confirm-banner-slot"' in body
+    # No browser-native modal — BX.1 lock.
+    assert "hx-confirm=" not in body
 
 
 def test_get_new_form_returns_full_page_with_intro_prose(
@@ -434,12 +460,15 @@ def test_rail_edit_form_renders_subtype_requirements_banner(
         assert "Two-leg rail requires" in body
 
 
-def test_post_create_account_redirects_to_home_on_success(
+def test_post_create_account_redirects_to_new_read_card(
     writable_l2_yaml: Path,
 ) -> None:
-    """Successful create returns 303 → /; the operator's browser
-    navigates back to home where the new entity appears in its
-    section. (TestClient default doesn't follow redirects.)"""
+    """BX.2 (2026-06-11) — successful create returns 303 →
+    ``/l2_shape/<kind>/<new_id>``; the operator's browser navigates to
+    the new entity's read card so they can verify what they made (and
+    fix typos / fill optional fields without re-navigating). Pre-BX.2
+    default was the home page.
+    (TestClient default doesn't follow redirects.)"""
     app = _build_app(writable_l2_yaml)
     with TestClient(app, follow_redirects=False) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.post(
@@ -453,7 +482,7 @@ def test_post_create_account_redirects_to_home_on_success(
             },
         )
     assert resp.status_code == 303, resp.text
-    assert resp.headers.get("location") == "/"
+    assert resp.headers.get("location") == "/l2_shape/account/cust-999-new"
 
     reloaded = load_instance(writable_l2_yaml)
     assert any(str(a.id) == "cust-999-new" for a in reloaded.accounts)
@@ -519,9 +548,12 @@ def test_put_account_role_rename_cascades_to_rails_and_templates(
             },
             follow_redirects=False,
         )
-        # AI.2.e — save 303-redirects home; the cascade (below) still ran.
+        # BX.2 — save 303 to the entity's read card (not home); the
+        # cascade (below) still ran. Account.id is the addressing key,
+        # and the operator only changed `role` (not `id`), so the
+        # URL-path entity_id stays `cust-001`.
         assert resp.status_code == 303, resp.text
-        assert resp.headers.get("location") == "/"
+        assert resp.headers.get("location") == "/l2_shape/account/cust-001"
 
     reloaded = load_instance(writable_l2_yaml)
     # Both Accounts that played the role get the new value (rename is
@@ -602,9 +634,14 @@ def test_put_rail_name_rename_cascades_to_templates_and_chains(
             },
             follow_redirects=False,
         )
-        # AI.2.e — save 303-redirects home; the cascade (below) still ran.
+        # BX.2 — save 303 to the entity's read card. Rail.name IS the
+        # addressing key, and the operator renamed it, so the redirect
+        # lands on the NEW name's read card.
         assert resp.status_code == 303, resp.text
-        assert resp.headers.get("location") == "/"
+        assert (
+            resp.headers.get("location")
+            == f"/l2_shape/rail/{new_name}"
+        )
 
     reloaded = load_instance(writable_l2_yaml)
     assert any(str(r.name) == new_name for r in reloaded.rails)
@@ -1158,9 +1195,17 @@ def test_chain_card_id_replaces_double_colon_to_avoid_css_pseudo_element(
     through CSS-selector parsing, so an id ``entity-chain-Foo::Bar``
     can't be targeted (selector ``#entity-chain-Foo::Bar`` interprets
     ``::Bar`` as a pseudo-element). The card's HTML id swaps ``::``
-    for ``__`` while the URL-side path keeps ``::`` (matches the L2
-    API key contract). This was the actual root cause of "chain edit
-    doesn't work" — Edit click → broken hx-target → silent swap miss."""
+    for ``__`` while the URL-side path uses the opaque hash form
+    (BX.10). This was the actual root cause of "chain edit doesn't
+    work" — Edit click → broken hx-target → silent swap miss.
+
+    BX.10 (2026-06-11) — Edit + delete-confirm hrefs now point at the
+    opaque ``<hash6>-<slug>`` URL form, not the raw composite. The
+    composite key still drives the HTML id (since the operator-facing
+    HTML id stays grep-able by name); only the URL surface goes
+    opaque.
+    """
+    from recon_gen.common.html._components import build_opaque_url_id  # noqa: PLC0415
     app = _build_app(writable_l2_yaml)
     pre = load_instance(writable_l2_yaml)
     if not pre.chains:
@@ -1171,18 +1216,31 @@ def test_chain_card_id_replaces_double_colon_to_avoid_css_pseudo_element(
     children_csv = ",".join(sorted(str(ch.name) for ch in chain.children))
     composite = f"{chain.parent}::{children_csv}"
     slug = composite.replace("::", "__")
+    # BX.10 — opaque URL form: hash6 + slug(parent).
+    url_id = build_opaque_url_id(composite, str(chain.parent))
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
-        body = c.get(f"/l2_shape/chain/{composite}").text
-    # CSS-safe id.
+        body = c.get(f"/l2_shape/chain/{url_id}").text
+    # CSS-safe id (still composite-derived — the HTML id is operator-
+    # readable grep target; only the URL goes opaque).
     assert f'id="entity-chain-{slug}"' in body
     # NO raw ``::`` in the id attr.
     assert f'id="entity-chain-{composite}"' not in body
-    # hx-target (the Delete link's outerHTML swap) uses the slug too.
-    assert f'hx-target="#entity-chain-{slug}"' in body
-    # URL path KEEPS the original ``::``. The Edit link is now a plain
-    # navigation to the dedicated edit screen (AI.2.e); card id + delete
-    # hx-target use the CSS-safe slug.
-    assert f'href="/l2_shape/chain/{composite}/edit"' in body
+    # BX.1 (2026-06-11) — the Delete button now targets the page-
+    # level ``#delete-confirm-banner-slot`` (the banner displays the
+    # confirm flow); the card's CSS-safe id remains important for
+    # the post-delete cascade-reload swap shape but no longer
+    # surfaces on the Delete button's hx-target. Pin the new shape
+    # AND keep the CSS-safe id assertion above so the original
+    # X.4.f.10 fix isn't lost.
+    assert 'hx-target="#delete-confirm-banner-slot"' in body
+    # BX.10 — URLs now point at the opaque form. Raw composite no
+    # longer appears in href/hx-get.
+    assert f'href="/l2_shape/chain/{url_id}/edit"' in body
+    assert (
+        f'hx-get="/l2_shape/chain/{url_id}/delete-confirm"' in body
+    )
+    # Sanity — the legacy composite form is gone from URL attrs.
+    assert f'href="/l2_shape/chain/{composite}/edit"' not in body
 
 
 def test_put_chain_edit_renders_card_after_save(
@@ -1768,17 +1826,46 @@ def test_singleton_instance_empty_clears_both(
     assert reloaded.institution_acronym is None
 
 
-def test_delete_unreferenced_account_persists(writable_l2_yaml: Path) -> None:
+def test_delete_unreferenced_account_persists(
+    writable_l2_yaml: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Deleting cust-002 succeeds — no rail / template references it
-    by id; the role CustomerSubledger is still satisfied by cust-001."""
+    by id; the role CustomerSubledger is still satisfied by cust-001.
+
+    BX.1 (2026-06-11): the operator now goes through the confirm
+    banner. Test pinches the countdown to 0s via monkeypatch so the
+    server-side wall-clock check passes immediately."""
+    monkeypatch.setattr(
+        "recon_gen.common.html._delete_confirm.COUNTDOWN_SECS", 0.0,
+    )
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
-        resp = c.delete("/l2_shape/account/cust-002")
+        # GET the banner. cust-002 is unreferenced → armed mode.
+        banner = c.get("/l2_shape/account/cust-002/delete-confirm")
+        assert banner.status_code == 200, banner.text
+        assert 'data-test-delete-state="armed"' in banner.text
+        # Extract the confirm_token from the banner's hx-delete URL.
+        token = _extract_confirm_token(banner.text)
+
+        resp = c.delete(
+            f"/l2_shape/account/cust-002?confirm_token={token}",
+        )
         assert resp.status_code == 200, resp.text
         assert resp.headers.get("HX-Trigger") == "l2-cascade-reload"
 
     reloaded = load_instance(writable_l2_yaml)
     assert not any(str(a.id) == "cust-002" for a in reloaded.accounts)
+
+
+def _extract_confirm_token(banner_html: str) -> str:
+    """Pull the ``confirm_token=…`` value out of the banner's
+    ``hx-delete`` URL. Stable token format is ``<start_ts>:<hex>``
+    so the regex is permissive (the verify path tightens it)."""
+    import re
+    m = re.search(r"confirm_token=([0-9.]+:[0-9a-f]+)", banner_html)
+    assert m is not None, f"banner missing confirm_token: {banner_html}"
+    return m.group(1)
 
 
 # ---------------------------------------------------------------------------
@@ -2464,3 +2551,193 @@ def test_bf10_composite_scalar_fields_render_format_chip(
             f"Missing format chip `e.g. {example}` — check the "
             f"corresponding FieldSpec's `placeholder=` attribute."
         )
+
+
+# ---------------------------------------------------------------------------
+# BX.2 — save-success 303 to read card (per-kind coverage)
+# ---------------------------------------------------------------------------
+
+
+def test_bx2_put_rail_rename_redirects_to_new_name_read_card(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.2 — Rail.name IS the addressing key. A rename PUT must
+    303-redirect to the NEW name's read card, not the old URL (404)
+    nor the home page (the pre-BX.2 default that scattered the
+    operator out of the editing flow).
+    """
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(  # field-isolation-probe: BX.2 redirect-target probe — single-field PUT exercises the rename-cascade redirect shape; mutate_l2's dataclasses.replace preserves the rest.
+            "/l2_shape/rail/SubledgerCharge",
+            data={"name": "SubledgerChargeV2"},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+    assert (
+        resp.headers.get("location")
+        == "/l2_shape/rail/SubledgerChargeV2"
+    )
+
+
+def test_bx2_put_account_template_role_rename_redirects_to_new_role(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.2 — AccountTemplate.role IS the addressing key AND the
+    cascade trigger. A role rename must redirect to the new role's
+    read card, not the now-stale old-role URL.
+    """
+    app = _build_app(writable_l2_yaml)
+    pre = load_instance(writable_l2_yaml)
+    tpl = pre.account_templates[0]
+    old_role = str(tpl.role)
+    new_role = f"{old_role}V2"
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        # Partial PUT — only submits `role`; mutate_l2 keeps the
+        # other fields via dataclasses.replace.
+        resp = c.put(
+            f"/l2_shape/account_template/{old_role}",
+            data={"role": new_role},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+    assert (
+        resp.headers.get("location")
+        == f"/l2_shape/account_template/{new_role}"
+    ), resp.headers.get("location")
+
+
+def test_bx2_put_account_id_rename_redirects_to_new_id(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.2 — Account.id IS the addressing key. Renaming `id` must
+    redirect to the new id's read card.
+    """
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(
+            "/l2_shape/account/external-counterparty-one",
+            data={
+                "id": "external-counterparty-renamed",
+                "scope": "external",
+                "name": "External Counterparty One",
+                "role": "ExternalCounterparty",
+            },
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+    assert (
+        resp.headers.get("location")
+        == "/l2_shape/account/external-counterparty-renamed"
+    )
+
+
+def test_bx2_put_unchanged_addressing_key_redirects_to_same_read_card(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.2 — a save that DOESN'T touch the addressing key still
+    303-redirects to the entity's read card (the URL stays the
+    same; the URL-path entity_id is the post-save id).
+    """
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(  # field-isolation-probe: BX.2 redirect-target probe — minimal body to isolate the "addressing key unchanged" branch.
+            "/l2_shape/rail/SubledgerCharge",
+            data={"description": "Edited description only."},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+    assert resp.headers.get("location") == "/l2_shape/rail/SubledgerCharge"
+
+
+def test_bx2_put_with_safe_back_from_overrides_read_card_redirect(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.2 + BTa.2 P1.5 — `_back_from` hidden input still wins when
+    set to a same-origin path (Triage → Edit → Save → Triage stays a
+    one-click loop). The read-card default ONLY fires when no safe
+    `?from=` is carried.
+    """
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(  # field-isolation-probe: BX.2 redirect-target probe — minimal body, asserts `_back_from` override.
+            "/l2_shape/rail/SubledgerCharge",
+            data={
+                "description": "Edited from Triage.",
+                "_back_from": "/etl/triage",
+            },
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+    assert resp.headers.get("location") == "/etl/triage"
+
+
+def test_bx2_put_with_open_redirect_back_from_falls_back_to_read_card(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.2 — an unsafe `_back_from` (open-redirect shape) is rejected
+    by `_safe_back_target` and the redirect falls back to the read
+    card (NOT to `/`, the pre-BX.2 default — which would have hidden
+    the rejection from the operator).
+    """
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.put(  # field-isolation-probe: BX.2 redirect-target probe — minimal body to isolate the open-redirect-rejection branch.
+            "/l2_shape/rail/SubledgerCharge",
+            data={
+                "description": "Edited despite poisoned back link.",
+                "_back_from": "http://evil.com",
+            },
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+    assert resp.headers.get("location") == "/l2_shape/rail/SubledgerCharge"
+
+
+def test_bx2_post_create_rail_redirects_to_new_rail_read_card(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.2 — POST create with a fresh name must 303-redirect to the
+    new rail's read card (so the operator immediately sees what they
+    just made).
+    """
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app, follow_redirects=False) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.post(
+            "/l2_shape/rail/",
+            data={
+                "name": "BrandNewRail",
+                "subtype": "two_leg",
+                "source_role": "CustomerSubledger",
+                "destination_role": "CustomerLedger",
+                "transfer_type": "internal",
+                "origin": "demo",
+                "expected_net": "0.00",
+            },
+        )
+    assert resp.status_code == 303, resp.text
+    assert resp.headers.get("location") == "/l2_shape/rail/BrandNewRail"
+
+
+def test_bx2_post_create_with_back_from_still_round_trips(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.2 — the Triage → New → Save → Triage one-click loop is
+    preserved (BTa.2 P1.5). `_back_from` still wins over the read-card
+    default on the create POST.
+    """
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app, follow_redirects=False) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.post(
+            "/l2_shape/account/",
+            data={
+                "id": "cust-from-triage-001",
+                "scope": "internal",
+                "name": "Triage-routed customer",
+                "role": "CustomerSubledger",
+                "parent_role": "CustomerLedger",
+                "_back_from": "/etl/triage",
+            },
+        )
+    assert resp.status_code == 303, resp.text
+    assert resp.headers.get("location") == "/etl/triage"

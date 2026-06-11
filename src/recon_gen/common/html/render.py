@@ -496,15 +496,18 @@ class TopNavEntry:
     """Phase BS.2/BS.3 (D1+D2 nav contract) — single nav entry.
 
     A flat top-nav across the App2 binary's surfaces. ``group`` lets
-    callers signal which role-bucket the entry belongs to (authoring
-    / viewing / reading) so the renderer can place visual dividers
-    between groups when the operator asked for them. Per BS.0 Lock 2,
-    the lock-in shipped is ``<hr>`` separator between EVERY entry —
-    ``group`` is reserved for future styling, currently unused.
+    callers signal which role-bucket the entry belongs to (``build`` /
+    ``view`` / ``ref``) so the renderer can color-code per-group + emit
+    a stable ``data-nav-group="..."`` attribute for browser drivers.
+
+    BX.7 (2026-06-11) renamed the token values from
+    ``authoring/viewing/reading`` to ``build/view/ref`` so internal
+    vocabulary matches the operator-facing chip text (BUILD / VIEW /
+    REFERENCE).
     """
     label: str
     href: str
-    group: str = "viewing"
+    group: str = "view"
 
 
 def emit_top_nav(
@@ -541,6 +544,16 @@ def emit_top_nav(
     # control dividers per-entry: thin (between same-group entries),
     # heavy (between different groups, plus group label chip). Cold-read
     # v3 finding: the prior uniform `divide-x` made grouping invisible.
+    #
+    # BX.7 (2026-06-11) — color-coded grouping: each entry carries a
+    # 2-px group-tinted underline (`border-b-2 border-<group-hue>`);
+    # the active page upgrades to a heavier 4-px underline in the same
+    # hue. The group-label chip + heavy separator stay (redundant
+    # non-color cue per WCAG AA). Group hues are theme-token-driven so
+    # L2 overrides re-tint without per-brand engineering:
+    #   build → accent (default blue)
+    #   view  → success (default green)
+    #   ref   → secondary-fg (neutral grey)
     nav_class = (
         "flex items-center bg-surface border-b border-surface-border text-sm"
     )
@@ -548,16 +561,50 @@ def emit_top_nav(
         "px-4 py-3 font-semibold text-accent select-none "
         "border-r-2 border-surface-border"
     )
+    # BX.7 — per-group color tokens. Three triples:
+    #   underline_class   — inactive entry's 2-px border + group hue
+    #   active_class      — active page's 4-px border + group hue + tint
+    #   label_class       — group-label chip's text/bg in group hue
+    # Hover stays accent-tinted across all groups (it's an "interaction"
+    # signal, not a "where are you" signal — same as today).
+    group_styles: Mapping[str, Mapping[str, str]] = {
+        "build": {
+            "underline": "border-b-2 border-accent",
+            "active": "font-semibold text-accent bg-accent/5 border-b-4 border-accent",
+            "label": (
+                "px-3 py-3 text-[10px] uppercase tracking-wide text-accent "
+                "font-bold select-none bg-accent/10"
+            ),
+            "title": "BUILD",
+        },
+        "view": {
+            "underline": "border-b-2 border-success",
+            "active": "font-semibold text-success bg-success/5 border-b-4 border-success",
+            "label": (
+                "px-3 py-3 text-[10px] uppercase tracking-wide text-success "
+                "font-bold select-none bg-success/10"
+            ),
+            "title": "VIEW",
+        },
+        "ref": {
+            "underline": "border-b-2 border-secondary-fg",
+            "active": (
+                "font-semibold text-secondary-fg bg-secondary-fg/5 "
+                "border-b-4 border-secondary-fg"
+            ),
+            "label": (
+                "px-3 py-3 text-[10px] uppercase tracking-wide text-secondary-fg "
+                "font-bold select-none bg-secondary-fg/10"
+            ),
+            "title": "REFERENCE",
+        },
+    }
+    # Fallback for an unknown group token — accent-tinted, no chip
+    # title (caller error; rendered defensively rather than crashing).
+    _DEFAULT_GROUP_STYLE: Mapping[str, str] = group_styles["build"]
     link_base = (
         "px-4 py-3 text-primary-fg hover:bg-accent hover:text-accent-fg "
-        "transition-colors border-b-2 border-transparent"
-    )
-    # Active page — accent underline + bolder weight so the operator
-    # always sees where they are. Cold-read v3 finding: the prior
-    # `font-bold text-accent` alone was too subtle.
-    link_active = (
-        "font-semibold text-accent bg-accent/5 "
-        "border-b-2 border-accent"
+        "transition-colors"
     )
     # Same-group separator (thin), different-group (heavier double bar).
     sep_thin = '<span class="self-stretch w-px bg-surface-border" aria-hidden="true"></span>'
@@ -572,19 +619,6 @@ def emit_top_nav(
         f'<nav class="{nav_class}" aria-label="App nav">',
         f'  <span class="{title_class}">Recon-Gen</span>',
     ]
-    # BTa.7 — visual grouping of top-nav entries by `entry.group`.
-    # Heavier separator between groups + a small uppercase group label
-    # so operators pre-attentively see the boundaries. Cold-read v3
-    # finding: v2's uniform divider made grouping invisible.
-    group_label_class = (
-        "px-3 py-3 text-[10px] uppercase tracking-wide text-accent "
-        "font-bold select-none bg-accent/10"
-    )
-    group_titles: Mapping[str, str] = {
-        "authoring": "Studio",
-        "viewing": "Dashboards",
-        "reading": "Reference",
-    }
     # BTa.7 — active match is prefix-aware so sub-pages light up their
     # parent nav entry. `/etl/run` should highlight `ETL Support`
     # (href `/etl/`); `/dashboards/l1/sheets/x` should highlight the
@@ -602,14 +636,17 @@ def emit_top_nav(
 
     last_group: str | None = None
     for entry in entries:
+        style = group_styles.get(entry.group, _DEFAULT_GROUP_STYLE)
         same_group = entry.group == last_group
         if not same_group:
             # Heavy divider + group label between groups.
             parts.append(f"  {sep_heavy}")
-            title = group_titles.get(entry.group, "")
+            title = style.get("title", "")
             if title:
                 parts.append(
-                    f'  <span class="{group_label_class}">{html.escape(title)}</span>'
+                    f'  <span class="{style["label"]}" '
+                    f'data-nav-group-label="{html.escape(entry.group)}">'
+                    f'{html.escape(title)}</span>'
                 )
             last_group = entry.group
         else:
@@ -617,11 +654,16 @@ def emit_top_nav(
             parts.append(f"  {sep_thin}")
         esc_href = html.escape(entry.href)
         esc_label = html.escape(entry.label)
-        cls = link_base
+        # BX.7 — per-group 2-px tinted underline always; active page
+        # upgrades to a heavier 4-px underline in the same hue.
         if _is_active(entry.href):
-            cls = f"{link_base} {link_active}"
+            cls = f"{link_base} {style['active']}"
+        else:
+            cls = f"{link_base} {style['underline']}"
         parts.append(
-            f'  <a href="{esc_href}" class="{cls}">{esc_label}</a>'
+            f'  <a href="{esc_href}" class="{cls}" '
+            f'data-nav-group="{html.escape(entry.group)}">'
+            f'{esc_label}</a>'
         )
     # BTa.1 (2026-05-30): always-on side-panel `[?]` trigger as the
     # last nav element. Opens the glossary via the BTa.1 drawer chrome.
@@ -1176,10 +1218,15 @@ def build_top_nav_entries(
     """Phase BS.3 — assemble the flat top-nav entries list from the
     App2 binary's deployed-state args.
 
-    Order per BS.0 Lock 2: Studio entries first (authoring), then
-    dashboards (viewing), then Docs (reading). Studio entries only
+    Order per BS.0 Lock 2: Studio entries first (``build``), then
+    dashboards (``view``), then Docs (``ref``). Studio entries only
     when ``studio_enabled=True``; Docs entry only when handbook is
     embedded (caller passes ``docs_url`` or ``None``).
+
+    BX.7 (2026-06-11) renamed token values from
+    ``authoring/viewing/reading`` to ``build/view/ref`` so internal
+    vocabulary matches the operator-facing chip text (BUILD / VIEW /
+    REFERENCE).
 
     Callers pass the result to ``emit_top_nav`` with ``active_href``
     matching the current page's path.
@@ -1190,16 +1237,16 @@ def build_top_nav_entries(
         # left of the editor. Was an iframe in the L2 Editor page;
         # cold-read on the heavy_density_v1 fixture surfaced enough
         # value in the diagram that it deserves its own destination.
-        entries.append(TopNavEntry("Diagram", "/diagram", group="authoring"))
-        entries.append(TopNavEntry("L2 Editor", "/", group="authoring"))
-        entries.append(TopNavEntry("ETL Support", "/etl/", group="authoring"))
-        entries.append(TopNavEntry("Training", "/training/", group="authoring"))
+        entries.append(TopNavEntry("Diagram", "/diagram", group="build"))
+        entries.append(TopNavEntry("L2 Editor", "/", group="build"))
+        entries.append(TopNavEntry("ETL Support", "/etl/", group="build"))
+        entries.append(TopNavEntry("Training", "/training/", group="build"))
     for dash_id, dash_title in dashboards:
         entries.append(TopNavEntry(
-            dash_title, f"/dashboards/{dash_id}", group="viewing",
+            dash_title, f"/dashboards/{dash_id}", group="view",
         ))
     if docs_url is not None:
-        entries.append(TopNavEntry("Docs", docs_url, group="reading"))
+        entries.append(TopNavEntry("Docs", docs_url, group="ref"))
     return entries
 
 
