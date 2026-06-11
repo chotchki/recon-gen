@@ -1243,11 +1243,33 @@ class App2Driver:
         so the test surfaces the snapshotter's actionable message
         (carried in the response body) rather than continuing against
         an indeterminate v-overlay state.
+
+        Timeout: httpx's default is 5s — too tight for PG (matview
+        refresh under restore can push past 5s when CONCURRENTLY
+        serializes on the v-overlay's narrow row count) and well below
+        Oracle's ~2.5s ceiling with golden-mirror restores that hit
+        DBMS_MVIEW.REFRESH. 300s ceiling matches the test-harness's
+        Session Start budget and aborts a genuinely-stuck snapshotter
+        before a CI run wedges indefinitely.
         """
         url = f"{self._base}/training/snapshot/{verb}"
-        with httpx.Client() as client:
+        with httpx.Client(timeout=300.0) as client:
             response = client.post(url, params={"name": name})
-        response.raise_for_status()
+        if response.status_code >= 400:
+            # Surface the Snapshotter's actionable message (carried in
+            # the response body) — ``raise_for_status`` alone discards
+            # it, leaving the test with an opaque "500 Internal Server
+            # Error" line. The dialect impls deliberately format the
+            # underlying SQL exception into the body for exactly this.
+            body = response.text.strip()
+            raise httpx.HTTPStatusError(
+                (
+                    f"snapshot {verb} returned "
+                    f"{response.status_code}: {body}"
+                ),
+                request=response.request,
+                response=response,
+            )
 
     # -- Trainer (BV.4 dual-prefix flow) ---------------------------------
 
