@@ -1,3 +1,36 @@
+# PLAN — Phase BW (archived 2026-06-10; deferred-pending-demand)
+
+**Phase summary:** Docs posture follow-on — provisional sub-phase scoped to a `_kv`-templated "your deployment overview" docs page, gated on operator demand. Per SPEC.md::Phase BW, BW.0 was the explicit REPLAN gate: "Confirm operator demand for the `_kv`-templated docs page exists before scheduling BW.1+. If no demand, tick BW.0 as deferred-pending-demand and close Phase BW without further work."
+
+**Disposition:** Closed via the gate's own deferred-pending-demand exit clause. BV closed 2026-06-10 with D7 locked at static-default; no operator demand surfaced for the templated overview page. BW.0 ticked deferred-pending-demand; BW.0.5 / BW.1 / BW.2 absorbed into the single Backlog carry "BW deferred-pending-demand — Docs posture (`_kv`-templated deployment-overview page). Fire only if an operator requests it. D7 already locked at static-default per BV close summary."
+
+**Per-item disposition (4 leaves):**
+- **BW.0** REPLAN gate — ticked deferred-pending-demand 2026-06-10 per the gate's own exit clause. No operator demand surfaced.
+- **BW.0.5** Agent-driven design mockup — never fired (gated on BW.0 = yes).
+- **BW.1** D7 lock + minimal static-default implementation — D7 already locked at static-default per BV close; nothing further to do absent demand.
+- **BW.2** "Your deployment overview" page reading from `_kv` — never fired (gated on BW.0 = yes).
+
+**Re-entry trigger:** Operator request for the `_kv`-templated docs page. On re-entry, restart from BW.0.5 (mockup) → BW.2 (implementation); D7's static-default lock from BV stays the floor.
+
+# PLAN — Phase CK (archived 2026-06-10; partial close)
+
+**Phase summary:** Accessibility pass against v13.1.1 design review axe-core findings — app-wide missing `<main>` landmark + missing `<h1>` on several studio pages + `nested-interactive` on training controls + `aria-allowed-role` on entity lists (~140 nodes) + unlabeled pickers + `empty-table-header` + one `select-name`, plus 67 bounding-box overlaps from the axe-core probe. Audit's #7 highest-leverage systemic fix: landmarks + `<h1>`s. **3 of 8 sub-cells shipped** (CK.0 + CK.1 + CK.4); remaining 5 deferred to backlog behind the axe-core toolchain spike (npm/JS dep decision pending operator weigh-in per `feedback_rust_influenced_tool_preferences`). Sign-off at `docs/audits/_archive/ck_signoff.md`; merge `4594d7c8`.
+
+**Shipped:**
+- **CK.0 REPLAN** — pulled axe-core findings into tracking artifact; CI gate vs report decision recorded (commit `e009f40f`).
+- **CK.1 Landmarks + `<h1>` sweep** — `<main>` on every page + single `<h1>` per page; some studio pages had nothing (commit `53305f93`).
+- **CK.4 Picker `aria-label` sweep** — every `<select>` / typeahead / dropdown carries an explicit label (commit `53875f1e`).
+- **CF.X-infra companion** (commit `ef19737c`): `KPIValueThresholdBanding` typed primitive (3-band amber/red, frozen dataclass with `red_at > amber_at` construction guard, 3-way mutex with the BK.2 zero / BK.9 sign indicators) + `CrossAppDrill` typed primitive. 9 new unit tests pin all bands + construction guards + neutral-on-null contract. (Was tagged onto CK in the original plan; landed independent of CK.2-7.)
+
+**Deferred to backlog (5 cells):**
+- CK.2 Training `nested-interactive` fix — pending visual repro.
+- CK.3 Entity-list `aria-allowed-role` sweep (~140 nodes) — pending axe-core toolchain.
+- CK.5 Bounding-box overlap sweep (66 remaining) — pending axe-core toolchain; some likely auto-cleared by CG list primitive + CH table primitive.
+- CK.6 axe-core CI gate — needs JS/npm build-dep decision (operator weigh-in).
+- CK.7 Cold-read v3 a11y confirmation — gated on CK.2/3/5/6.
+
+**Why partial-close (not full close, not overcome-by-events):** The shipped 3 deliver concrete a11y wins that don't depend on the toolchain decision. The remaining 5 all wait on a single upstream decision (axe-core integration mechanism — npx-via-pytest-subprocess vs Playwright JS-eval vs alternative) that operator hasn't locked. Spike (`a11y-toolchain-spike` in backlog) gates re-opening; CJ.5 + the 5 deferred items unblock once it lands. Per `feedback_no_silent_defer`: every deferred item has a documented blocker.
+
 # PLAN — Phase AI (archived 2026-06-10; closed-overcome-by-events)
 
 **Phase summary:** Studio L2 editor dogfood — "ANY L2 yaml (`spec_example` + `sasquatch_pr` + fuzz-sampled) rebuilt via browser-driven editor matches reference structurally + in dashboard output". Locked 2026-05-19 (AI.0); AI.1 audit drove the AI.2.a-e UI gap closures; AI.3-6 wired the harness + L2Instance equivalence + matview-row dashboard equivalence + 5-seed fuzz pool. AI.8-13 closed quirks (phantom framing, WebKit fill-on-hidden, BB.2 expected_net). AI.14 explicitly delegated to Phase BF (which closed). Re-verify gate (AI.7) absorbed by BV close (commit `f541190d`, run `20260611T034334Z-00ce44c8`, 2026-06-10). Closed as **overcome-by-events** per audit `w4n2ismnq`.

@@ -59,16 +59,6 @@ Closed at HEAD `00ce44c8` with `./run_tests.sh up_to qs_browser` green across al
 
 All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phased)** at the bottom of this file.
 
-## Phase BW - Docs posture (deferred / follow-on)
-
-**Provisional + may not fire.** SPEC.md::Phase BW. Only schedule if an operator asks for the "your deployment overview" page; otherwise D7 ticks as "static-default locked, follow-on deferred" at BV exit.
-
-- [ ] BW.0 - **REPLAN.** Confirm operator demand for the `_kv`-templated docs page exists before scheduling BW.1+. If no demand, tick BW.0 as deferred-pending-demand and close Phase BW without further work.
-- [ ] BW.0.5 - **Agent-driven design mockup session** (only if BW.0 said yes). Mock the deployment-overview page reading from `_kv`.
-- [ ] BW.1 - D7 lock + minimal implementation (static-default, per SPEC).
-- [ ] BW.2 - "Your deployment overview" page reading from `_kv`, if BW.0 said yes.
-
-
 ## Phase BK - v11.22.1 cold-read second-pass + deferrals
 
 Cold-read at `docs/audits/_archive/v11_22_1_feedback.md`. Closed in v11.22.3 small-fix batch (2026-05-26): #1 Daily Statement signed-labels, #10 Drift Timelines parent-vs-leaf scope explainer, #14 Overdraft scope label, #17 Open/Active KPI disambiguation, #18 Avg-Daily-Volume integer format (new `Measure.decimals=` kwarg), #19 strip internal-phase-ref language from exec subtitles. Remaining items below survived the small-fix pass — they need design work, fresh data, or operator clarification.
@@ -268,6 +258,8 @@ Three open design items from `docs/audits/_archive/v11_22_1_feedback.md` cold-re
 
 
 # Backlog (not yet phased)
+
+- **BW deferred-pending-demand — Docs posture (`_kv`-templated deployment-overview page).** Fire only if an operator requests it. D7 already locked at static-default per BV close summary.
 
 - **BV.1 — D3.1 L2 audit redux + per-primitive curriculum doc** ("what's persona for?" deliverable). Operator-judgment on audience (CPA reviewer / dev onboarding / investor / sales), format (single page / multi-doc / mkdocs section), depth, worked-example shape. Backlogged 2026-06-10.
 
