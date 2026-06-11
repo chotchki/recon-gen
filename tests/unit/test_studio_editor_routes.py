@@ -88,16 +88,149 @@ def test_list_view_renders_every_account(writable_l2_yaml: Path) -> None:
             assert acct_id in body
 
 
-def test_read_card_returns_fragment(writable_l2_yaml: Path) -> None:
+def test_read_card_returns_full_page_chrome_by_default(
+    writable_l2_yaml: Path,
+) -> None:
+    """BX.6/11 follow-up (2026-06-11) — bare GET on the read-card
+    route now wraps the ``<article>`` in the same full-page chrome
+    list / edit / create wear. Pre-follow-up the route returned the
+    bare fragment, leaving the operator on a chromeless page with
+    only Edit + Delete actions and no way back to the list short
+    of the browser back button (driving the ``_ensure_home``
+    workaround in ``tests/e2e/_drivers/studio_browser_editor.py``).
+
+    The card body's ``<dl>`` is still present — the wrap is
+    additive.
+    """
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         resp = c.get("/l2_shape/account/cust-001")
         assert resp.status_code == 200
-        # Read card renders the dl with the per-field rows. AM.1
-        # step 6 (2026-05-25) added utility classes to the <dl>;
-        # check the unclosed prefix to remain class-agnostic.
-        assert "<dl" in resp.text
-        assert "Customer Number One" in resp.text
+        body = resp.text
+        # Full-page chrome shell.
+        assert "<!doctype html>" in body
+        assert "<header" in body
+        # h1 — per-kind read-card title (Account → role framing).
+        assert '<h1' in body
+        assert "Roles" in body and "1:1" in body
+        assert "read card" in body
+        assert "cust-001" in body
+        # Article (the actual card) still wraps the per-field <dl>.
+        assert "<article" in body
+        assert "<dl" in body
+        assert "Customer Number One" in body
+        # Back-to-list affordance is rendered + carries the
+        # user-facing-locators ``data-role`` anchor (memory
+        # ``feedback_browser_drivers_user_facing_locators``).
+        assert 'data-role="read-card-back-link"' in body
+        assert 'href="/l2_shape/account/"' in body
+
+
+def test_read_card_body_only_returns_bare_dl(writable_l2_yaml: Path) -> None:
+    """CF.4.c lazy-expand contract — ``?body_only=1`` returns the
+    per-field ``<dl>`` rows alone (no chrome, no <article>, no
+    <header>). Preserves the home-page list_view's collapse-by-
+    default pattern: the heavy body fragment is htmx-fetched on
+    first expand."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/account/cust-001?body_only=1")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "<dl" in body
+        assert "Customer Number One" in body
+        # No chrome — no doctype, no <h1>, no top-nav header.
+        assert "<!doctype html>" not in body
+        assert "<h1" not in body
+
+
+def test_read_card_embed_returns_bare_article(writable_l2_yaml: Path) -> None:
+    """``?embed=1`` parity with the list_view embed flow: returns
+    the bare ``<article>`` so the home-page section embed can
+    splice the card into a ``<details>`` body without nesting full
+    documents. No chrome on the embed path."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/account/cust-001?embed=1")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "<article" in body
+        assert "Customer Number One" in body
+        assert "<!doctype html>" not in body
+        assert "<h1" not in body
+
+
+def test_read_card_hx_request_header_returns_bare_article(
+    writable_l2_yaml: Path,
+) -> None:
+    """In-page htmx swap targets (post-mutate refresh, Edit/Delete
+    in-place updates) hit this URL with ``HX-Request: true``; they
+    expect the bare ``<article>`` to slot back into the card's
+    outerHTML slot, NOT a fresh full-page document. Skipping the
+    chrome on the htmx path keeps existing swap targets working."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get(
+            "/l2_shape/account/cust-001",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        body = resp.text
+        assert "<article" in body
+        assert "Customer Number One" in body
+        assert "<!doctype html>" not in body
+        assert "<h1" not in body
+
+
+def test_read_card_h1_account_template_uses_role_framing(
+    writable_l2_yaml: Path,
+) -> None:
+    """``account_template`` read-card h1 leads with ``Roles — 1:N
+    read card`` so the operator landing on the post-save card sees
+    the same vocabulary the list page just taught them. Account
+    uses ``1:1``; other kinds use the bare singular (exercised by
+    ``test_read_card_h1_rail_uses_singular``)."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        # spec_example has at least one account_template; discover its id.
+        from recon_gen.common.l2.loader import load_instance  # noqa: PLC0415 — lazy
+        inst = load_instance(writable_l2_yaml)
+        if not inst.account_templates:
+            pytest.skip("spec_example has no account_templates")
+        tmpl = inst.account_templates[0]
+        tmpl_role = str(tmpl.role)
+        resp = c.get(f"/l2_shape/account_template/{tmpl_role}")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "<h1" in body
+        assert "Roles" in body and "1:N" in body
+        assert "read card" in body
+        assert tmpl_role in body
+
+
+def test_read_card_h1_rail_uses_singular(writable_l2_yaml: Path) -> None:
+    """Non-role kinds (rail / transfer_template / chain /
+    limit_schedule) keep the bare singular framing for the read-
+    card h1 — only ``account`` / ``account_template`` carry the
+    role-cardinality treatment."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        from recon_gen.common.l2.loader import load_instance  # noqa: PLC0415 — lazy
+        inst = load_instance(writable_l2_yaml)
+        if not inst.rails:
+            pytest.skip("spec_example has no rails")
+        rail = inst.rails[0]
+        rail_name = str(rail.name)
+        resp = c.get(f"/l2_shape/rail/{rail_name}")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "<h1" in body
+        # Singular framing — neither role-cardinality phrase.
+        assert "Roles &mdash; 1:1" not in body and "Roles — 1:1" not in body
+        assert "Roles &mdash; 1:N" not in body and "Roles — 1:N" not in body
+        assert "Rail" in body
+        assert "read card" in body
+        assert rail_name in body
 
 
 def test_edit_form_is_full_page_with_post_form(writable_l2_yaml: Path) -> None:

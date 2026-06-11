@@ -116,60 +116,20 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         navigation is link-click or form-submit."""
         self._page.goto(f"{self._base}/")
 
-    def _ensure_home(self) -> None:
-        """BX.2 follow-up — create-success now 303s to
-        ``/l2_shape/<kind>/<id>`` (the read card) instead of ``/``.
-        The read card route renders ONLY the entity ``<article>`` —
-        no top-nav, no home/list links, no chrome (an editor gap;
-        the bare fragment-as-page response is a BX.2 oversight).
-
-        Without an in-page affordance, the operator's only way home
-        is the browser's back button (a real action, not a URL
-        edit — see ``go_back`` doc). This helper checks the current
-        URL: if it's already home it's a no-op; otherwise it walks
-        ``page.go_back()`` until we land at the base URL or run out
-        of history. Every home-page-needing verb
-        (``_open_add_role_modal_and_pick``, ``_create_simple`` for
-        non-Account kinds, ``create_rail``,
-        ``goto_account_list`` / ``goto_account_template_list`` /
-        ``goto_rail_list`` / ``goto_transfer_template_list``)
-        prefixes its work with ``_ensure_home()`` so the chain works
-        regardless of where the previous verb landed."""
-        # If already home, no-op fast path.
-        if self._page.url.rstrip("/") == self._base.rstrip("/"):
-            return
-        # Direct one-shot to history index 0 — `window.history.go(-N)`
-        # for a large negative N caps at the deepest entry (home).
-        # Cheaper than a chain of `page.go_back()` calls; each
-        # `go_back` does a full DOM reload settle which compounds.
-        # Per the operator-fidelity rule, this is browser-history
-        # navigation (operator action) — not a URL edit. The test
-        # entered the studio at `/` via ``open()``; that's the floor.
-        # Cap iteration anyway as a defensive belt-and-braces: large
-        # create_l2 walks add ~50+ history entries (each create =
-        # form → read card; each rail = subtype picker → form →
-        # read card), so the cap needs to clear that easily.
-        max_backs = 100
-        for _ in range(max_backs):
-            landed = self._page.url.rstrip("/")
-            if landed == self._base.rstrip("/"):
-                return
-            self._page.go_back()
-            # `go_back` returns after the load event by default. The
-            # `domcontentloaded` wait is paranoid (covers slow
-            # renders + back-walks landing on hash-only changes).
-            self._page.wait_for_load_state("domcontentloaded")
-        # Last-resort sanity check; if we still aren't home, surface
-        # the URL so the caller's failure message is actionable.
-        landed = self._page.url.rstrip("/")
-        if landed != self._base.rstrip("/"):
-            raise AssertionError(
-                f"_ensure_home: walked {max_backs} back-navigations "
-                f"but URL is still {landed!r} (expected "
-                f"{self._base.rstrip('/')!r}). The browser may have "
-                f"reached the start of history, or the studio is "
-                f"redirecting back-navigations away from home.",
-            )
+    # BX.6/11 follow-up (2026-06-11) — ``_ensure_home`` dropped. The
+    # historical helper was a ``page.go_back()`` back-walk loop that
+    # existed only because the BX.2 save-success 303 left the
+    # operator on the read-card route which (pre-follow-up) returned
+    # a bare ``<article>`` fragment with no chrome, no top-nav, no
+    # home link. This same follow-up branch wrapped the read_card
+    # route in full-page chrome (top-nav + h1 + back-to-list link),
+    # so there's now always a rendered ``a[href="/"]`` to click — no
+    # history walking needed. Callsites now use ``goto_home()``
+    # directly. Click is idempotent: from the home page itself the
+    # click just re-navigates to ``/`` (no-op for the test's
+    # downstream-assertion shape). The chrome-link path is what a
+    # real operator does — they don't hit the browser back button
+    # to get home.
 
     def _open_add_role_modal_and_pick(self, cardinality: str) -> None:
         """BX.6/11 follow-up — drive the home page's ``+ Add Role``
@@ -208,7 +168,7 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
                 f"_open_add_role_modal_and_pick: cardinality must be "
                 f"'one-to-one' or 'one-to-many', got {cardinality!r}",
             )
-        self._ensure_home()
+        self.goto_home()
         self._page.click('[data-add-role-open]')
         # Wait for the dialog's `open` attribute to land. Playwright's
         # `wait_for(state="visible")` is insufficient here — the
@@ -236,12 +196,27 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         self._open_add_role_modal_and_pick("one-to-many")
 
     def goto_home(self) -> None:
-        """Click any rendered home link. Studio's nav menu / breadcrumbs
-        carry a link to /. On pages where home isn't linked (e.g.,
-        the home page itself), use ``goto_home_via_back()`` instead.
-        Most callers won't need this — every create-verb's 303
-        leaves the browser at /."""
+        """Click the chrome's ``L2 Editor`` top-nav link → land at
+        ``/`` (the studio home).
+
+        BX.6/11 follow-up (2026-06-11) — replaces the dropped
+        ``_ensure_home`` back-walk loop. Every editor page
+        (list / read-card / edit / create / singleton) now wears
+        the shared top-nav with an ``a[href="/"]`` entry, so the
+        click resolves from anywhere. From the home page itself the
+        click just re-navigates to ``/`` (no-op for downstream
+        assertions).
+
+        Real-operator-fidelity check: this is the operator-visible
+        affordance, not the browser history; it matches what a
+        human does to get home from a sub-page (single click on the
+        ``L2 Editor`` nav entry).
+        """
         self._page.click('a[href="/"]')
+        # `domcontentloaded` covers the chrome re-render before any
+        # downstream click locator resolves. The next verb in the
+        # chain otherwise races the navigation event.
+        self._page.wait_for_load_state("domcontentloaded")
 
     def goto_account_list(self) -> None:
         """Click the home nav link to the account list page.
@@ -251,10 +226,13 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         drill-in) and one in the 1:1 sub-bucket header. Scope to the
         first match (the wrapper header) — Playwright's strict-mode
         click() would otherwise raise on the duplicate."""
-        # First navigate home if not already there. Post-BX.2 the
-        # create-success 303 lands on the read card, not home, so
-        # the back-walk in ``_ensure_home`` is the standard prefix.
-        self._ensure_home()
+        # First navigate home. Post-BX.2 the create-success 303
+        # lands on the read card, not home; BX.6/11 follow-up wraps
+        # the read card in full-page chrome with a top-nav
+        # ``L2 Editor`` link, so ``goto_home()`` is a single click
+        # from anywhere in the editor (replaced the historical
+        # ``_ensure_home`` back-walk loop).
+        self.goto_home()
         self._page.locator('a[href="/l2_shape/account/"]').first.click()
 
     def goto_account_template_list(self) -> None:
@@ -263,7 +241,7 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         BX.6/11 reframe — same duplicate-link pattern as
         ``goto_account_list``: scope to the first match (the 1:N
         sub-bucket header ↗)."""
-        self._ensure_home()
+        self.goto_home()
         self._page.locator(
             'a[href="/l2_shape/account_template/"]',
         ).first.click()
@@ -522,7 +500,7 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         elif kind == "account_template":
             self._open_add_role_modal_and_pick("one-to-many")
         else:
-            self._ensure_home()
+            self.goto_home()
             self._page.click(f'a[href="/l2_shape/{kind}/new"]')
         data = create_form_data(kind, entity)  # type: ignore[arg-type]: EntityKind literal narrows from kind str at the seam
         self._apply_form_data(data)
@@ -596,7 +574,7 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
             and institution_acronym is None
         ):
             return
-        self._ensure_home()
+        self.goto_home()
         self._page.click('a[href="/l2_shape/instance/"]')
         self._page.fill('input[name="institution_name"]', institution_name or "")
         self._page.fill('input[name="institution_acronym"]', institution_acronym or "")
@@ -657,7 +635,7 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
 
         subtype = _rail_subtype_of(rail)
         # Step 1+2: home → subtype picker → form.
-        self._ensure_home()
+        self.goto_home()
         self._page.click('a[href="/l2_shape/rail/new"]')
         self._page.click(
             f'a[href="/l2_shape/rail/new?subtype={subtype}"]',
@@ -855,7 +833,7 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
 
         subtype = _rail_subtype_of(rail)
         # Step 1: home → subtype picker → form.
-        self._ensure_home()
+        self.goto_home()
         self._page.click('a[href="/l2_shape/rail/new"]')
         self._page.click(
             f'a[href="/l2_shape/rail/new?subtype={subtype}"]',
@@ -907,24 +885,30 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         )
 
     def go_back(self) -> None:
-        """Click the browser's back button — a real-operator action
-        that, in the current editor, is the ONLY way to get from a
-        sub-page (list / read-card / edit form) back to the studio
-        home. AI.8 logs the editor-side gap that makes this verb
-        necessary; once AI.8 lands a home-link in the sub-page
-        chrome, this verb becomes redundant + can be retired."""
+        """Click the browser's back button — a real-operator
+        action retained for tests that need to step backwards in
+        history specifically (e.g. assert a 301-self-heal landed
+        on the canonical URL). The sub-page-to-home gap that
+        historically forced this verb is closed: BX.6/11 follow-up
+        wraps the read_card route in full-page chrome with a
+        top-nav ``L2 Editor`` link, so ``goto_home()`` covers the
+        normal "get back to home" flow without history walking."""
         self._page.go_back()
 
     def goto_rail_list(self) -> None:
-        """Click home → rail list. Auto-prefixed with ``_ensure_home``
-        (BX.2 post-create lands on the read card, not home)."""
-        self._ensure_home()
+        """Click home → rail list. Auto-prefixed with ``goto_home()``
+        (BX.2 post-create lands on the read card, not home; BX.6/11
+        follow-up made the read-card chrome carry an ``L2 Editor``
+        top-nav link)."""
+        self.goto_home()
         self._page.click('a[href="/l2_shape/rail/"]')
 
     def goto_transfer_template_list(self) -> None:
         """Click home → transfer_template list. Auto-prefixed with
-        ``_ensure_home`` (BX.2 post-create lands on the read card)."""
-        self._ensure_home()
+        ``goto_home()`` (BX.2 post-create lands on the read card;
+        BX.6/11 follow-up made the read-card chrome carry an
+        ``L2 Editor`` top-nav link)."""
+        self.goto_home()
         self._page.click('a[href="/l2_shape/transfer_template/"]')
 
     def rail_list_contains(self, rail_name: str) -> bool:

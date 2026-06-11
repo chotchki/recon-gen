@@ -542,3 +542,88 @@ raise — only ``ImportError`` on the optional dep is caught.
 
 Unit test: ``tests/audit/test_cli_smoke.py
 ::test_audit_apply_signing_pyhanko_missing_degrades_gracefully``.
+
+## Inline `onclick="event.stopPropagation()"` + delegated `document.addEventListener('click', ...)` (bubble phase) = silent failure — BX.6/11 follow-up, 2026-06-11
+
+### Symptom
+
+The Studio Add-Role modal's open trigger renders as a button with
+an inline ``onclick="event.stopPropagation()"`` AND a separate
+document-level ``click`` listener that's supposed to call
+``dlg.showModal()``. The inline handler exists to stop the click
+from toggling the surrounding ``<details>`` wrapper accordion.
+The document-level listener exists because the button is
+rendered inside an htmx-swapped fragment, so direct
+``button.addEventListener(...)`` would miss every fragment
+re-render.
+
+When wired in the bubble phase (the default —
+``document.addEventListener('click', handler)`` with no third
+arg) the document listener NEVER fires: the click event bubbles
+from ``<button>`` upward through DOM ancestors, hits the inline
+``onclick`` first, ``stopPropagation()`` halts the bubble, and
+the event never reaches ``document``. The modal silently does
+not open. No console error. No visible feedback. The button
+"looks broken".
+
+Surfaced via wthx888lp incident-bit during BX.6/11 dogfood
+(2026-06-11): operator clicked ``+ Add Role`` → nothing
+happened → repeatedly clicked → escalated.
+
+### Confirmed-via
+
+Inline-event-order trace + Playwright reproduction in WebKit:
+bubble-phase document listener fires 0 times; capture-phase
+document listener fires 1 time per click. AT-SPI accessibility
+tree shows the click event landing on the button (DOM did
+receive the event) — confirms the issue is propagation, not
+event dispatch.
+
+### Workaround / fix
+
+Switch the document listener to the CAPTURE phase by passing
+``true`` as the third argument:
+
+```js
+// BX.6/11 (2026-06-11): capture phase (third arg `true`).
+// Bubble-phase listener never fires when the target carries
+// inline `onclick="event.stopPropagation()"` — the capture-
+// phase walk goes document → target BEFORE the inline onclick,
+// so the modal-open handler still runs even when the click is
+// later stopped at the button.
+document.addEventListener('click', handler, true);
+```
+
+Capture-phase listeners fire on the way DOWN the DOM tree
+(``document → html → body → ... → button``), so they run before
+ANY handler attached to the target itself — including inline
+``onclick`` attributes, which run in the bubble phase. The
+``stopPropagation()`` call still prevents the click from
+toggling the wrapping ``<details>`` (its listener is also
+bubble-phase), but the capture-phase modal-open handler
+already fired.
+
+Concrete site:
+``src/recon_gen/common/html/_studio_routes.py`` (BX.6/11
+follow-up, 2026-06-11) — the ``add-role-modal`` opener block.
+See commit 97f91d77.
+
+### Notes
+
+Generalizes beyond the modal case: any pattern that mixes
+inline ``onclick="stopPropagation()"`` (a common idiom for
+buttons inside expand/collapse containers — list cards, tree
+nodes, accordions) with delegated document listeners needs
+the document listener in capture phase, OR the inline handler
+needs to drop ``stopPropagation()`` and instead check the
+event target inside the parent's click handler.
+
+Editorial preference: keep the inline ``stopPropagation()`` (it
+documents intent at the affordance site, survives htmx swaps)
+and migrate the document listener to capture. Capture-phase
+listeners are rare enough in the codebase that adding the
+third arg is the cheaper local change.
+
+Append-only quirks log: this entry stays even after the
+underlying inline-handler pattern is refactored out, so the
+shape is recognizable on the next regression.

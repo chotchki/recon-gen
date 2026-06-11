@@ -3184,6 +3184,111 @@ def _render_read_card(
     )
 
 
+def _read_card_h1_for_kind(kind: EntityKind, entity_id: str) -> tuple[str, str]:
+    """BX.6/11 follow-up (2026-06-11) — read-card page h1 inner +
+    ``<title>`` detail slot, mirroring ``_edit_h1_parts`` / the
+    ``_list_page_h1_for_kind`` cardinality-aware shape.
+
+    For account / account_template the h1 leads with the role
+    framing (``Roles — 1:1 read card · {id}`` / ``Roles — 1:N read
+    card · {id}``) so the operator landing on the post-save card
+    sees the same vocabulary the list page just taught them. Other
+    kinds use the bare singular (``Rail read card · {id}``).
+
+    Returns ``(h1_inner_html, title_detail_text)``. ``h1_inner_html``
+    is pre-escaped + safe to drop into ``_form_page_header_raw_html``.
+    ``title_detail_text`` is plain text the caller escapes at the
+    ``<title>`` interpolation.
+
+    Pre-follow-up the read-card route returned the bare ``<article>``
+    fragment with no chrome, no h1, no top-nav — operators landing
+    on the BX.2 post-save 303 had only Edit + Delete affordances and
+    no way home except the browser back button (the
+    ``_ensure_home`` driver workaround).
+    """
+    singular = kind_label_singular(kind)
+    if kind == "account":
+        h1_inner = (
+            f"Roles &mdash; 1:1 read card &middot; {escape(entity_id)}"
+        )
+        title_detail = f"Roles — 1:1 read card · {entity_id}"
+        return h1_inner, title_detail
+    if kind == "account_template":
+        h1_inner = (
+            f"Roles &mdash; 1:N read card &middot; {escape(entity_id)}"
+        )
+        title_detail = f"Roles — 1:N read card · {entity_id}"
+        return h1_inner, title_detail
+    h1_inner = (
+        f"{escape(singular)} read card &middot; {escape(entity_id)}"
+    )
+    title_detail = f"{singular} read card · {entity_id}"
+    return h1_inner, title_detail
+
+
+def _render_read_card_page(
+    kind: EntityKind,
+    entity: object,
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — passed through to _render_read_card / studio_theme_head
+    *,
+    top_nav_html: str = "",
+) -> str:
+    """BX.6/11 follow-up (2026-06-11) — full-page chrome wrapper around
+    the bare ``_render_read_card`` ``<article>`` fragment.
+
+    Symmetric with ``_render_create_page`` / ``_render_edit_page``:
+    doctype + head (title + theme + htmx) + body wrapper + top-nav
+    + ``<h1>`` header strip + back-to-list link + the read card
+    itself. The bare-fragment shape stays available via
+    ``?body_only=1`` (CF.4.c lazy-fetch contract), ``?embed=1``
+    (home-page section embed parity with list_view), and the
+    ``HX-Request`` header (any in-page hx-swap target — Edit /
+    Delete actions, the post-mutate refresh).
+
+    Pre-follow-up the ``read_card`` route returned ``_render_read_card``
+    directly, leaving the operator on a chromeless page with only the
+    Edit + Delete actions visible — no top-nav, no h1, no breadcrumb,
+    no way back to the list short of the browser back button. The
+    BX.2 save-success 303 to ``/l2_shape/<kind>/<id>`` made this the
+    landing page after every successful edit / create flow, which is
+    when the gap surfaced. The
+    ``tests/e2e/_drivers/studio_browser_editor.py::_ensure_home``
+    back-walk loop was the workaround it forced; it drops in the
+    same branch as this fix.
+    """
+    entity_id = _entity_id(kind, entity)
+    h1_inner, title_detail = _read_card_h1_for_kind(kind, entity_id)
+    list_url = f"/l2_shape/{kind}/"
+    back_link_html = (
+        f'<div class="max-w-4xl mx-auto px-4 pt-3 -mb-1">'
+        f'<a class="text-accent no-underline text-xs cursor-pointer hover:underline" '
+        f'data-role="read-card-back-link" '
+        f'href="{escape(list_url)}">'
+        f"&larr; back to {escape(kind_label_plural(kind))}</a>"
+        f"</div>"
+    )
+    card_html = _render_read_card(kind, entity, instance)
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Recon-Gen · Studio · Editor · {escape(title_detail)}</title>
+  {studio_theme_head(instance)}
+  {_htmx_head_block()}
+</head>
+<body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
+  {top_nav_html}
+  {_form_page_header_raw_html(h1_inner)}
+  {back_link_html}
+  <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4" data-role="read-card-main">
+    <div id="delete-confirm-banner-slot" data-test-delete-banner-slot></div>
+    {card_html}
+  </main>
+</body>
+</html>
+"""
+
+
 # CG.13 (2026-06-05) — operator-readable kind labels moved to
 # `_components.py` as the shared source of truth, so the aria-label
 # site there and the h1 / page-title sites here read the same map.
@@ -6052,6 +6157,10 @@ def _make_handlers(
         return _render_singleton_page(*args, top_nav_html=top_nav_html_fn("/"), **kwargs)
     def _render_rail_subtype_picker_local(*args: Any, **kwargs: Any) -> str:
         return _render_rail_subtype_picker(*args, top_nav_html=top_nav_html_fn("/"), **kwargs)
+    def _render_read_card_page_local(*args: Any, **kwargs: Any) -> str:
+        return _render_read_card_page(
+            *args, top_nav_html=top_nav_html_fn("/"), **kwargs,
+        )
 
     async def list_view(request: Request) -> HTMLResponse:
         kind = _kind_from_path(request.path_params["kind"])
@@ -6186,8 +6295,26 @@ def _make_handlers(
         # to drift against the full-card one.
         if request.query_params.get("body_only") == "1":
             return HTMLResponse(_render_read_card_body(kind, entity, inst))
+        # BX.6/11 follow-up (2026-06-11) — three fragment-mode escape
+        # hatches return the bare ``<article>`` so existing htmx
+        # consumers + the list_view's embed flow keep working:
+        # - ``?embed=1`` (parity with ``list_view`` — the home-page
+        #   section embed expects no html/head/body wrapper).
+        # - ``HX-Request`` header (any in-page hx-swap target — the
+        #   Edit / Delete actions, post-mutate refresh paths).
+        # - (``?body_only=1`` already returned above — fragment of
+        #   the fragment for CF.4.c lazy-expand).
+        # The default (operator-facing GET, browser-follow-redirect
+        # from BX.2 save-success 303) gets the full-page chrome:
+        # top-nav + h1 + back-to-list link wrapping the same card,
+        # so the post-save landing has the same affordances every
+        # other editor sub-page does.
+        embed = request.query_params.get("embed") == "1"
+        is_hx_request = request.headers.get("HX-Request") == "true"
+        if embed or is_hx_request:
+            return HTMLResponse(_render_read_card(kind, entity, inst))
         return HTMLResponse(
-            _render_read_card(kind, entity, inst),
+            _render_read_card_page_local(kind, entity, inst),
         )
 
     async def edit_form(request: Request) -> Response:
