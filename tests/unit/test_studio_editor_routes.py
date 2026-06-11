@@ -1195,9 +1195,17 @@ def test_chain_card_id_replaces_double_colon_to_avoid_css_pseudo_element(
     through CSS-selector parsing, so an id ``entity-chain-Foo::Bar``
     can't be targeted (selector ``#entity-chain-Foo::Bar`` interprets
     ``::Bar`` as a pseudo-element). The card's HTML id swaps ``::``
-    for ``__`` while the URL-side path keeps ``::`` (matches the L2
-    API key contract). This was the actual root cause of "chain edit
-    doesn't work" — Edit click → broken hx-target → silent swap miss."""
+    for ``__`` while the URL-side path uses the opaque hash form
+    (BX.10). This was the actual root cause of "chain edit doesn't
+    work" — Edit click → broken hx-target → silent swap miss.
+
+    BX.10 (2026-06-11) — Edit + delete-confirm hrefs now point at the
+    opaque ``<hash6>-<slug>`` URL form, not the raw composite. The
+    composite key still drives the HTML id (since the operator-facing
+    HTML id stays grep-able by name); only the URL surface goes
+    opaque.
+    """
+    from recon_gen.common.html._components import build_opaque_url_id  # noqa: PLC0415
     app = _build_app(writable_l2_yaml)
     pre = load_instance(writable_l2_yaml)
     if not pre.chains:
@@ -1208,9 +1216,12 @@ def test_chain_card_id_replaces_double_colon_to_avoid_css_pseudo_element(
     children_csv = ",".join(sorted(str(ch.name) for ch in chain.children))
     composite = f"{chain.parent}::{children_csv}"
     slug = composite.replace("::", "__")
+    # BX.10 — opaque URL form: hash6 + slug(parent).
+    url_id = build_opaque_url_id(composite, str(chain.parent))
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
-        body = c.get(f"/l2_shape/chain/{composite}").text
-    # CSS-safe id.
+        body = c.get(f"/l2_shape/chain/{url_id}").text
+    # CSS-safe id (still composite-derived — the HTML id is operator-
+    # readable grep target; only the URL goes opaque).
     assert f'id="entity-chain-{slug}"' in body
     # NO raw ``::`` in the id attr.
     assert f'id="entity-chain-{composite}"' not in body
@@ -1222,14 +1233,14 @@ def test_chain_card_id_replaces_double_colon_to_avoid_css_pseudo_element(
     # AND keep the CSS-safe id assertion above so the original
     # X.4.f.10 fix isn't lost.
     assert 'hx-target="#delete-confirm-banner-slot"' in body
-    # URL path KEEPS the original ``::``. The Edit link is now a plain
-    # navigation to the dedicated edit screen (AI.2.e); the delete-
-    # confirm GET URL also keeps the raw composite (Starlette path
-    # params don't need slug encoding).
-    assert f'href="/l2_shape/chain/{composite}/edit"' in body
+    # BX.10 — URLs now point at the opaque form. Raw composite no
+    # longer appears in href/hx-get.
+    assert f'href="/l2_shape/chain/{url_id}/edit"' in body
     assert (
-        f'hx-get="/l2_shape/chain/{composite}/delete-confirm"' in body
+        f'hx-get="/l2_shape/chain/{url_id}/delete-confirm"' in body
     )
+    # Sanity — the legacy composite form is gone from URL attrs.
+    assert f'href="/l2_shape/chain/{composite}/edit"' not in body
 
 
 def test_put_chain_edit_renders_card_after_save(

@@ -2973,14 +2973,18 @@ def _render_read_card_summary(
     # `#delete-confirm-banner-slot`. The actual DELETE is the banner's
     # Confirm button + a server-signed countdown token. No
     # browser-native `hx-confirm` modal.
+    # BX.10 (2026-06-11) — URLs use the opaque ``<hash6>-<slug>`` form
+    # for composite-keyed kinds (chain / limit_schedule); single-key
+    # kinds are unchanged (kebab id verbatim).
+    url_id = _url_entity_id(kind, entity)
     actions_html = (
         f'<div class="flex items-center gap-2 shrink-0">'
         f'<a class="{edit_btn_cls}" '
-        f'href="/l2_shape/{kind}/{escape(entity_id)}/edit" '
+        f'href="/l2_shape/{kind}/{escape(url_id)}/edit" '
         f'onclick="event.stopPropagation()">Edit</a>'
         f'<a class="{delete_btn_cls}" '
         f'data-role="card-delete" '
-        f'hx-get="/l2_shape/{kind}/{escape(entity_id)}/delete-confirm" '
+        f'hx-get="/l2_shape/{kind}/{escape(url_id)}/delete-confirm" '
         f'hx-target="#delete-confirm-banner-slot" hx-swap="innerHTML" '
         f'onclick="event.stopPropagation()">Delete</a>'
         f"</div>"
@@ -3041,6 +3045,10 @@ def _render_read_card(
     heavy_density_v1 (100+ rails) collapses.
     """
     entity_id = _entity_id(kind, entity)
+    # BX.10 (2026-06-11) — opaque URL form for composite-keyed kinds;
+    # single-key kinds keep the kebab id verbatim. Used wherever the
+    # card emits a URL pointing at this entity.
+    url_id = _url_entity_id(kind, entity)
     # CSS-safe id slug — composite-keyed kinds use ``::`` in their
     # addressing string, which CSS parses as pseudo-element syntax;
     # the URL-side path stays ``::``, only the HTML id swaps.
@@ -3055,7 +3063,7 @@ def _render_read_card(
         # exactly once; subsequent open/close cycles re-use the
         # already-fetched body. Placeholder reads "loading…" until
         # the swap completes; reader-friendly for screen readers.
-        body_url = f"/l2_shape/{kind}/{escape(entity_id)}?body_only=1"
+        body_url = f"/l2_shape/{kind}/{escape(url_id)}?body_only=1"
         body_placeholder = (
             '<div data-role="card-body" class="text-xs '
             'text-secondary-fg italic mt-1">loading…</div>'
@@ -4491,6 +4499,11 @@ def _render_edit_page(
     """
     specs = _filter_specs_for_entity(_FIELD_SPECS_BY_KIND[kind], entity)
     entity_id = _entity_id(kind, entity)
+    # BX.10 (2026-06-11) — URL side uses the opaque form for composite
+    # kinds. The form ACTION + the Delete hx-get reference this so a
+    # save / delete posts back to the same opaque URL the operator is
+    # already on.
+    url_id = _url_entity_id(kind, entity)
     overrides = form_overrides or {}
     hidden = _hidden_fields_for_entity(kind, entity, instance)
     fields_html = "".join(
@@ -4550,7 +4563,7 @@ def _render_edit_page(
     delete_btn_html = (
         f'<a class="{delete_btn_classes} ml-auto" '
         f'data-role="form-delete" '
-        f'hx-get="/l2_shape/{escape(kind)}/{escape(entity_id)}/delete-confirm?from=edit" '
+        f'hx-get="/l2_shape/{escape(kind)}/{escape(url_id)}/delete-confirm?from=edit" '
         f'hx-target="#delete-confirm-banner-slot" hx-swap="innerHTML">Delete</a>'
     )
     return f"""<!doctype html>
@@ -4571,7 +4584,7 @@ def _render_edit_page(
     {subtype_banner_html}
     <div id="delete-confirm-banner-slot" data-test-delete-banner-slot></div>
     <section class="bg-white border border-surface-border rounded-md p-5">
-      <form method="post" action="/l2_shape/{escape(kind)}/{escape(entity_id)}" class="edit-form group">
+      <form method="post" action="/l2_shape/{escape(kind)}/{escape(url_id)}" class="edit-form group">
         {global_err_html}
         {_from_hidden_input(from_param)}
         {fields_html}
@@ -5496,7 +5509,16 @@ def _render_list_page(
 
 def _entity_id(kind: EntityKind, entity: object) -> str:
     """Read the addressing key off an entity — symmetric with editor.py's
-    ``_find_entity`` lookup."""
+    ``_find_entity`` lookup.
+
+    BX.10 (2026-06-11): this stays returning the *internal composite key*
+    (e.g. ``"CustomerInboundACH::Foo,Bar"`` for chain) because the
+    addressing key is the L2-shape lookup contract — search-by-name in
+    `_filter_entities`, HTML id slugs in `_render_read_card`, validation
+    paths in `mutate_l2`, etc. all key off the composite form. Only the
+    *URL surface* moves to opaque ``hash6-slug`` (see
+    ``_url_entity_id`` + ``_resolve_url_entity_id``).
+    """
     if kind == "account":
         return str(getattr(entity, "id"))
     if kind == "account_template":
@@ -5521,6 +5543,125 @@ def _entity_id(kind: EntityKind, entity: object) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# BX.10 (2026-06-11) — composite-key opaque URL IDs
+# ---------------------------------------------------------------------------
+#
+# Operator lock (BX.0.7 + BX.10 Direction E): chain + limit_schedule
+# URLs go opaque (``/l2_shape/chain/<hash6>-<slug>``) so renames don't
+# rot bookmarks. YAML untouched; the composite-key form remains the
+# in-memory addressing key (see ``_entity_id`` above).
+#
+# Single-key kinds (account / account_template / rail / transfer_template)
+# keep their existing kebab-slug URLs verbatim — the cold-read complaint
+# was specifically about composite-keyed kinds (chain / limit_schedule)
+# where the ``::,`` chars rot in Slack pastes. Future cells can extend
+# `_url_entity_id` to opaque single-key kinds for consistency (open
+# question #2 in `bx_10.md`); the helper structure makes that a
+# one-branch addition without rewiring callsites.
+
+# Kinds that get the opaque URL treatment. Closed tuple so pyright catches
+# the "new composite kind" case at the call site.
+_OPAQUE_URL_KINDS: tuple[EntityKind, ...] = ("chain", "limit_schedule")
+
+
+def _slug_source_for(kind: EntityKind, entity: object) -> str:
+    """BX.10 — pick the human-readable slug source per kind.
+
+    Chain → parent (the operator-readable rail name, e.g.
+    ``"CustomerInboundACH"`` → slug ``"customerinboundach"``).
+    LimitSchedule → parent_role (the role name, e.g. ``"DDAControl"``
+    → ``"ddacontrol"``). Empty result is acceptable — the URL falls
+    back to hash6-only (still valid per ``parse_opaque_url_id``).
+    """
+    if kind == "chain":
+        return str(getattr(entity, "parent", "") or "")
+    if kind == "limit_schedule":
+        return str(getattr(entity, "parent_role", "") or "")
+    return ""
+
+
+def _url_entity_id(kind: EntityKind, entity: object) -> str:
+    """BX.10 — URL-side addressing for an entity.
+
+    Composite-keyed kinds (chain / limit_schedule) return
+    ``<hash6>-<slug>``; single-key kinds return the same as
+    ``_entity_id`` (kebab id / role / name verbatim).
+
+    The hash is derived from the *composite key string* (which is what
+    ``_entity_id`` returns), so a rename that changes the composite
+    key changes the URL — but that's the intended behavior: renamed
+    entity is a different addressing tuple. Stale-URL handling is the
+    301-redirect at the route layer (the slug drifted but the hash
+    still matches an existing entity).
+    """
+    if kind in _OPAQUE_URL_KINDS:
+        from recon_gen.common.html._components import (  # noqa: PLC0415
+            build_opaque_url_id,
+        )
+        composite = _entity_id(kind, entity)
+        return build_opaque_url_id(composite, _slug_source_for(kind, entity))
+    return _entity_id(kind, entity)
+
+
+def _resolve_url_entity_id(
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — read-only iteration
+    kind: EntityKind,
+    url_seg: str,
+) -> tuple[object | None, str | None]:
+    """BX.10 — resolve a URL path segment to ``(entity, canonical_url)``.
+
+    Return shape:
+    - ``(entity, None)`` — URL is canonical, no redirect needed.
+    - ``(entity, "<new-url>")`` — entity found via hash match but the
+      slug portion is stale; caller should 301-redirect to the new URL.
+    - ``(None, None)`` — no entity matches; caller should 404.
+
+    For composite-keyed kinds, parses the URL as ``<hash6>-<slug>`` and
+    matches by walking entities + computing each one's hash.
+    For single-key kinds, falls through to the existing
+    ``_find_entity_or_none`` shape — URL is the addressing key verbatim.
+    """
+    if kind not in _OPAQUE_URL_KINDS:
+        entity = _find_entity_or_none(instance, kind, url_seg)
+        return (entity, None)
+
+    from recon_gen.common.html._components import (  # noqa: PLC0415
+        parse_opaque_url_id,
+    )
+    parsed = parse_opaque_url_id(url_seg)
+    if parsed is None:
+        # BX.10 — URL doesn't match the opaque ``<hash6>-<slug>`` shape.
+        # Fall through to the legacy composite-form lookup so flows
+        # that still carry composite ids (banner DELETE URLs built
+        # server-side, programmatic PUT clients, the e2e suites) keep
+        # working through the cell. The 301-redirect target carries
+        # the canonical opaque form so a manual GET against the
+        # composite URL self-heals on next visit.
+        entity = _find_entity_or_none(instance, kind, url_seg)
+        if entity is None:
+            return (None, None)
+        canonical = _url_entity_id(kind, entity)
+        # Composite-form URL → canonical opaque URL is always a redirect
+        # (never an exact match, by construction).
+        return (entity, canonical)
+    target_hash, _url_slug = parsed
+    for e in _entities_for_kind(instance, kind):
+        canonical = _url_entity_id(kind, e)
+        # canonical is always "<hash6>" or "<hash6>-<slug>". Compare
+        # hash bits via the parsed form so the comparison is symmetric.
+        canonical_parsed = parse_opaque_url_id(canonical)
+        if canonical_parsed is None:
+            continue  # defensive — _url_entity_id always returns the shape
+        c_hash, _c_slug = canonical_parsed
+        if c_hash == target_hash:
+            if canonical == url_seg:
+                return (e, None)  # exact match
+            # Hash matched but slug drifted — caller redirects.
+            return (e, canonical)
+    return (None, None)
+
+
 def _read_card_url_for(kind: EntityKind, entity_id: str) -> str:
     """BX.2 (2026-06-11) — URL of the entity's read card.
 
@@ -5528,11 +5669,28 @@ def _read_card_url_for(kind: EntityKind, entity_id: str) -> str:
     ``entity_id`` is the post-save addressing key (see
     ``_post_save_entity_id`` for the rename-aware derivation).
 
-    Percent-encoding leaves ``::`` (Chain / LimitSchedule composite
-    separator) alone so the URL stays grep-able / human-readable.
+    BX.10 (2026-06-11) — for composite-keyed kinds the URL goes opaque
+    (``<hash6>-<slug>``) so the save-redirect lands on the canonical
+    opaque URL; single-key kinds keep their kebab-slug shape unchanged.
+    Percent-encoding leaves ``::`` (composite separator) alone for
+    legacy callers that still pass composite-form ids — those go
+    through the 301-redirect path on next GET if BX.10's resolver
+    finds them.
     """
     from urllib.parse import quote  # noqa: PLC0415
-    return f"/l2_shape/{kind}/{quote(entity_id, safe='::')}"
+    return f"/l2_shape/{kind}/{quote(entity_id, safe='::-')}"
+
+
+def _read_card_url_from_entity(kind: EntityKind, entity: object) -> str:
+    """BX.10 — same as ``_read_card_url_for`` but takes the entity
+    directly so composite-keyed kinds get the canonical opaque URL
+    without the caller having to wire ``_url_entity_id`` themselves.
+
+    Save-success / create-success redirects use this so the operator
+    lands on the opaque URL post-mutation (matches what
+    ``_render_read_card_summary``'s Edit link points at).
+    """
+    return _read_card_url_for(kind, _url_entity_id(kind, entity))
 
 
 def _post_save_entity_id(
@@ -5856,15 +6014,28 @@ def _make_handlers(
             ),
         )
 
-    async def read_card(request: Request) -> HTMLResponse:
+    async def read_card(request: Request) -> Response:
         kind = _kind_from_path(request.path_params["kind"])
-        entity_id = request.path_params["entity_id"]
+        url_seg = request.path_params["entity_id"]
         if kind is None or kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse("not editable", status_code=404)
         inst = cache.get()
-        entity = _find_entity_or_none(inst, kind, entity_id)
+        # BX.10 (2026-06-11) — opaque URL resolution for composite-keyed
+        # kinds. Returns (entity, canonical_url) where canonical_url is
+        # not None when the slug portion drifted from the entity's
+        # current name (rename → stale bookmark → 301 self-heal).
+        entity, canonical_url = _resolve_url_entity_id(inst, kind, url_seg)
         if entity is None:
             return HTMLResponse("not found", status_code=404)
+        if canonical_url is not None:
+            # Preserve ``?body_only=1`` etc. across the redirect so a
+            # stale-slug HTMX lazy-load still hits the body-fragment
+            # endpoint after the bounce.
+            qs = request.url.query
+            target = f"/l2_shape/{kind}/{canonical_url}"
+            if qs:
+                target = f"{target}?{qs}"
+            return RedirectResponse(target, status_code=301)
         # CF.4.c — ``?body_only=1`` returns just the `<dl>` rows so
         # collapse-by-default cards can lazy-fetch the heavy body on
         # first expand. Same endpoint, same auth path, no new route
@@ -5875,15 +6046,22 @@ def _make_handlers(
             _render_read_card(kind, entity, inst),
         )
 
-    async def edit_form(request: Request) -> HTMLResponse:
+    async def edit_form(request: Request) -> Response:
         kind = _kind_from_path(request.path_params["kind"])
-        entity_id = request.path_params["entity_id"]
+        url_seg = request.path_params["entity_id"]
         if kind is None or kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse("not editable", status_code=404)
         inst = cache.get()
-        entity = _find_entity_or_none(inst, kind, entity_id)
+        entity, canonical_url = _resolve_url_entity_id(inst, kind, url_seg)
         if entity is None:
             return HTMLResponse("not found", status_code=404)
+        if canonical_url is not None:
+            # BX.10 — stale-slug 301 to canonical edit URL.
+            qs = request.url.query
+            target = f"/l2_shape/{kind}/{canonical_url}/edit"
+            if qs:
+                target = f"{target}?{qs}"
+            return RedirectResponse(target, status_code=301)
         from_param = request.query_params.get("from")
         return HTMLResponse(_render_edit_page_local(kind, entity, inst, from_param=from_param))
 
@@ -5895,11 +6073,28 @@ def _make_handlers(
         re-rendered with the error banner + the operator's typed values
         preserved. Bound to both POST and PUT /l2_shape/<kind>/<id> so the
         plain HTML edit form (POST) and any programmatic PUT both work.
+
+        BX.10 (2026-06-11) — for composite-keyed kinds the path segment
+        is opaque (``<hash6>-<slug>``); resolved to the composite key
+        ONCE up front, then the composite key feeds every mutate /
+        rename / find call below. Save-success redirect re-derives the
+        opaque URL from the post-mutate entity (rename → new hash).
         """
         kind = _kind_from_path(request.path_params["kind"])
-        entity_id = request.path_params["entity_id"]
+        url_seg = request.path_params["entity_id"]
         if kind is None or kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse("not editable", status_code=404)
+
+        # BX.10 — resolve opaque URL → composite entity_id for the
+        # mutate / find calls below. The path may be opaque (chain /
+        # limit_schedule) or single-key (account / rail / etc.).
+        inst_for_resolve = cache.get()
+        resolved_entity, _canonical = _resolve_url_entity_id(
+            inst_for_resolve, kind, url_seg,
+        )
+        if resolved_entity is None:
+            return HTMLResponse("not found", status_code=404)
+        entity_id = _entity_id(kind, resolved_entity)
 
         form = await request.form()
         # BTa.2 P1.5 — `_back_from` hidden input round-trips the
@@ -5999,8 +6194,21 @@ def _make_handlers(
         # save. ``?from=`` (carried via the `_back_from` hidden input)
         # still wins when set, so Triage → Edit → Save → Triage stays
         # one click (BTa.2 P1.5).
+        # BX.10 (2026-06-11) — derive the opaque URL from the post-save
+        # entity so a rename (composite key changed → hash changed)
+        # lands on the new canonical URL. Look up the entity by its
+        # post-save composite key, then render the URL via
+        # ``_read_card_url_from_entity`` to get the opaque form for
+        # composite kinds.
         new_entity_id = _post_save_entity_id(kind, entity_id, new_fields)
-        default_target = _read_card_url_for(kind, new_entity_id)
+        new_entity = _find_entity_or_none(new_inst, kind, new_entity_id)
+        if new_entity is not None:
+            default_target = _read_card_url_from_entity(kind, new_entity)
+        else:
+            # Fall back to the pre-BX.10 composite-form redirect if the
+            # post-save entity can't be re-found (shouldn't happen, but
+            # don't 500 the response).
+            default_target = _read_card_url_for(kind, new_entity_id)
         redirect_target = _safe_back_target(from_param) or default_target
         return RedirectResponse(redirect_target, status_code=303)
 
@@ -6424,19 +6632,41 @@ def _make_handlers(
         # Triage → New → Save → Triage one-click loop is preserved
         # (BTa.2 P1.5).
         new_entity_id = _post_save_entity_id(kind, "", new_fields)
-        default_target = (
-            _read_card_url_for(kind, new_entity_id)
-            if new_entity_id
-            else "/"
-        )
+        # BX.10 (2026-06-11) — redirect to the opaque URL form for
+        # composite-keyed kinds so the operator lands on the canonical
+        # post-BX.10 URL (matching what the Edit link on the read card
+        # already points at). Look up the newly-created entity to
+        # derive its hash + slug.
+        if new_entity_id:
+            new_entity = _find_entity_or_none(new_inst, kind, new_entity_id)
+            default_target = (
+                _read_card_url_from_entity(kind, new_entity)
+                if new_entity is not None
+                else _read_card_url_for(kind, new_entity_id)
+            )
+        else:
+            default_target = "/"
         redirect_target = _safe_back_target(from_param) or default_target
         return RedirectResponse(redirect_target, status_code=303)
 
-    async def delete_handler(request: Request) -> HTMLResponse:
+    async def delete_handler(request: Request) -> Response:
         kind = _kind_from_path(request.path_params["kind"])
-        entity_id = request.path_params["entity_id"]
+        url_seg = request.path_params["entity_id"]
         if kind is None or kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse("not editable", status_code=404)
+
+        # BX.10 (2026-06-11) — resolve opaque URL → composite entity_id
+        # so HMAC verify + mutate / delete keys off the composite key
+        # (the banner-side HMAC was issued against the composite via
+        # `delete_confirm_handler`). The resolver accepts both opaque
+        # and composite-form URL segs.
+        inst_for_resolve = cache.get()
+        resolved_entity, _canonical = _resolve_url_entity_id(
+            inst_for_resolve, kind, url_seg,
+        )
+        if resolved_entity is None:
+            return HTMLResponse("not found", status_code=404)
+        entity_id = _entity_id(kind, resolved_entity)
 
         # BX.1 (2026-06-11) — DELETE requires the server-signed confirm
         # token issued by GET /l2_shape/<kind>/<id>/delete-confirm.
@@ -6514,7 +6744,7 @@ def _make_handlers(
         resp.headers["HX-Trigger"] = "l2-cascade-reload"
         return resp
 
-    async def delete_confirm_handler(request: Request) -> HTMLResponse:
+    async def delete_confirm_handler(request: Request) -> Response:
         """BX.1 — GET /l2_shape/<kind>/<id>/delete-confirm: returns
         the inline confirm banner. Walks the L2Instance for incoming
         references first; when refs are present the banner renders
@@ -6524,18 +6754,27 @@ def _make_handlers(
 
         Lives behind GET (not POST) so it's idempotent + safe to
         re-fire if the operator clicks Delete twice.
+
+        BX.10 (2026-06-11) — for composite-keyed kinds the path is
+        opaque (``<hash6>-<slug>``); resolved to the composite key
+        once up front. The composite key feeds the find-references /
+        HMAC-issue calls below so the operator-visible banner shows
+        a human-readable id and the DELETE URL the banner builds
+        carries the same composite (matching the HMAC payload).
         """
         kind = _kind_from_path(request.path_params["kind"])
-        entity_id = request.path_params["entity_id"]
+        url_seg = request.path_params["entity_id"]
         if kind is None or kind not in _FIELD_SPECS_BY_KIND:
             return HTMLResponse("not editable", status_code=404)
         instance = cache.get()
-        # Guard against the mid-flight stale-id case: if the entity
-        # was deleted from another tab between the operator opening
-        # the page and clicking Delete, surface the same 410-Gone
-        # shape the save handler uses.
-        if _find_entity_or_none(instance, kind, entity_id) is None:
-            return _entity_gone_response(kind, entity_id)
+        resolved_entity, _canonical = _resolve_url_entity_id(
+            instance, kind, url_seg,
+        )
+        if resolved_entity is None:
+            # Same 410-Gone shape as the save / read-card mid-flight
+            # delete race.
+            return _entity_gone_response(kind, url_seg)
+        entity_id = _entity_id(kind, resolved_entity)
         refs = _find_references(instance, kind, entity_id)
         banner_html = render_delete_confirm_banner(
             kind, entity_id, refs,
