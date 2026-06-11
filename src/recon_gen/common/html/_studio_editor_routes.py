@@ -2578,6 +2578,29 @@ def _metadata_value_examples_to_yaml(
     return yaml.safe_dump(as_dict, default_flow_style=False, sort_keys=False).rstrip() + "\n"
 
 
+def _format_money_for_display(raw: str) -> str | None:
+    """BX.5 — format a money string as USD for the read card.
+
+    Returns ``$1,234.56`` for ``"1234.56"``, ``-$1,234.56`` for
+    ``"-1234.56"`` (negative sign before the symbol, matching the
+    QS + tree-fields ``currency=True`` convention). Returns ``None``
+    when ``raw`` doesn't parse as a Decimal — caller falls through to
+    the plain-escape path. Two decimal places fixed (Money is the
+    L2 primitive's 2dp Decimal alias; see
+    ``common/l2/primitives.py::Money``).
+    """
+    from decimal import Decimal, InvalidOperation  # noqa: PLC0415 — lazy
+    try:
+        amount = Decimal(raw)
+    except (InvalidOperation, ValueError):
+        return None
+    # Quantize to 2dp; preserves sign. `f"{value:,.2f}"` thousand-separates.
+    quantized = amount.quantize(Decimal("0.01"))
+    negative = quantized < 0
+    abs_str = f"{abs(quantized):,.2f}"
+    return f"-${abs_str}" if negative else f"${abs_str}"
+
+
 def _render_read_value(spec: FieldSpec, value: object) -> str:
     """Render a dataclass field value for the read-only card.
 
@@ -2646,6 +2669,20 @@ def _render_read_value(spec: FieldSpec, value: object) -> str:
     raw = _value_to_input_str(value)
     if not raw:
         return "—"
+    # BX.5 — `kind="money"` IS the typed currency signal: the FieldSpec
+    # dataclass already discriminates money from text/select. Render
+    # money values as USD ($1,234.56) on the read card so cap /
+    # expected_eod_balance / expected_net display in the operator's
+    # vocabulary instead of bare Decimal repr. Matches the
+    # `currency=True` pattern on `common/tree/fields.py::Dim`/`Measure`
+    # + `common/dataset_contract.py::Column` — parallel API for the
+    # editor-card surface. Money values whose decimal parse fails fall
+    # through to the plain-escape path; the loader rejects malformed
+    # money upstream so this should never fire.
+    if spec.kind == "money":
+        formatted = _format_money_for_display(raw)
+        if formatted is not None:
+            return escape(formatted)
     # CF.4.g — `render_as="monospace"` wraps in a font-mono span so
     # id-shaped values read as identifiers rather than prose.
     if spec.render_as == "monospace":
