@@ -589,6 +589,156 @@ def test_topology_graph_for_sasquatch_pr_meets_richness_bar() -> None:
     assert "template_role" not in edge_kinds
 
 
+# -- role_carriers sidecar -------------------------------------------------
+#
+# CF.3.m + BX.6/11 follow-up (2026-06-11) — the diagram's right-click
+# menu surfaces each role's carriers (Account + AccountTemplate
+# references) so the operator can navigate straight to the editor for
+# the concrete entity, not the abstract role node. The sidecar build
+# walks the L2 instance and produces a deterministic per-role list;
+# these tests pin the shape + ordering + degenerate (orphan) handling.
+
+
+def test_build_role_carriers_kitchen_instance_keyed_by_role_node_id() -> None:
+    """Every role node id in the typed projection must be a key in
+    ``role_carriers``. Orphan roles (referenced only by rails) appear
+    with an empty list — the JS side surfaces them as "No matches".
+    """
+    from recon_gen.common.l2.topology import build_role_carriers
+
+    carriers = build_role_carriers(_kitchen_instance())
+    # Every declared role in the kitchen instance has a key.
+    assert set(carriers.keys()) == {
+        "role__InternalRole",
+        "role__ExternalRole",
+        "role__CustomerSubledger",
+    }
+    # InternalRole — 1 Account carrier.
+    assert carriers["role__InternalRole"] == [
+        {"kind": "account", "id": "acc-internal"},
+    ]
+    # ExternalRole — 1 Account carrier.
+    assert carriers["role__ExternalRole"] == [
+        {"kind": "account", "id": "acc-external"},
+    ]
+    # CustomerSubledger — 1 AccountTemplate carrier (no Account
+    # declares it in the kitchen instance).
+    assert carriers["role__CustomerSubledger"] == [
+        {"kind": "account_template", "id": "CustomerSubledger"},
+    ]
+
+
+def test_build_role_carriers_spec_example_multi_carrier() -> None:
+    """spec_example declares two Accounts AND one AccountTemplate that
+    all reference the ``CustomerSubledger`` role. The carriers list
+    captures all three, sorted by (kind, id) so menu order is stable
+    across runs.
+    """
+    from recon_gen.common.l2.topology import build_role_carriers
+
+    inst = load_instance(FIXTURES / "spec_example.yaml")
+    carriers = build_role_carriers(inst)
+    # CustomerSubledger: 2 Accounts (cust-001, cust-002) + 1 template
+    # (role=CustomerSubledger). Sort key (kind, id) puts the two
+    # accounts first (kind="account") followed by the template
+    # (kind="account_template").
+    assert carriers["role__CustomerSubledger"] == [
+        {"kind": "account", "id": "cust-001"},
+        {"kind": "account", "id": "cust-002"},
+        {"kind": "account_template", "id": "CustomerSubledger"},
+    ]
+    # Single-carrier check: ClearingSuspense → 1 Account.
+    assert carriers["role__ClearingSuspense"] == [
+        {"kind": "account", "id": "clearing-suspense"},
+    ]
+    # Template-only carrier: AlphaCustomerStub → 1 AccountTemplate.
+    assert carriers["role__AlphaCustomerStub"] == [
+        {"kind": "account_template", "id": "AlphaCustomerStub"},
+    ]
+
+
+def test_build_role_carriers_orphan_role_emits_empty_list() -> None:
+    """A role referenced ONLY by a rail (no declaring Account /
+    AccountTemplate) still appears as a key, but with an empty list.
+    The JS side surfaces this as the disabled "No matches" item.
+    """
+    from recon_gen.common.l2 import SingleLegRail
+    from recon_gen.common.l2.topology import build_role_carriers
+
+    inst = L2Instance(
+        accounts=(
+            Account(
+                id=Identifier("acct-int"),
+                role=Identifier("Declared"),
+                scope="internal",
+            ),
+        ),
+        account_templates=(),
+        rails=(
+            SingleLegRail(
+                name=Identifier("RailToOrphan"),
+                leg_role=(Identifier("OrphanRole"),),
+                leg_direction="Debit",
+                origin="InternalInitiated",
+                metadata_keys=(),
+            ),
+        ),
+        transfer_templates=(),
+        chains=(),
+        limit_schedules=(),
+    )
+    carriers = build_role_carriers(inst)
+    # Both the declared + the orphan role appear as keys.
+    assert "role__Declared" in carriers
+    assert "role__OrphanRole" in carriers
+    # Orphan role surfaces as empty list → "No matches" on the JS side.
+    assert carriers["role__OrphanRole"] == []
+    # Declared role retains its single Account carrier.
+    assert carriers["role__Declared"] == [
+        {"kind": "account", "id": "acct-int"},
+    ]
+
+
+def test_build_role_carriers_sort_order_deterministic() -> None:
+    """Carriers within a role are sorted by (kind, id). Construct an
+    L2 with shuffled declaration order + assert the carriers list comes
+    out canonically sorted regardless.
+    """
+    from recon_gen.common.l2.topology import build_role_carriers
+
+    inst = L2Instance(
+        accounts=(
+            # Declared in reverse-alpha to make sorting visible.
+            Account(
+                id=Identifier("cust-zeta"),
+                role=Identifier("SharedRole"),
+                scope="internal",
+            ),
+            Account(
+                id=Identifier("cust-alpha"),
+                role=Identifier("SharedRole"),
+                scope="internal",
+            ),
+            Account(
+                id=Identifier("cust-mid"),
+                role=Identifier("SharedRole"),
+                scope="internal",
+            ),
+        ),
+        account_templates=(),
+        rails=(),
+        transfer_templates=(),
+        chains=(),
+        limit_schedules=(),
+    )
+    carriers = build_role_carriers(inst)
+    assert carriers["role__SharedRole"] == [
+        {"kind": "account", "id": "cust-alpha"},
+        {"kind": "account", "id": "cust-mid"},
+        {"kind": "account", "id": "cust-zeta"},
+    ]
+
+
 # -- Frozen-dataclass invariants --------------------------------------------
 
 

@@ -290,6 +290,53 @@ def _is_templated(
     return any(t.role == role for t in templates)
 
 
+def build_role_carriers(
+    instance: L2Instance,
+) -> dict[str, list[dict[str, str]]]:
+    """Map every role node id → its (Account + AccountTemplate) carriers.
+
+    A "carrier" is any Account or AccountTemplate that *references* the
+    role via its ``role`` field. The L2 schema allows multiple carriers
+    per role (e.g. ``spec_example.yaml`` declares two ``CustomerSubledger``
+    Accounts AND one ``CustomerSubledger`` AccountTemplate); the diagram
+    right-click menu uses this map to surface every concrete entity the
+    operator might want to edit.
+
+    Keyed by ``"role__<role>"`` (the node id graphviz emits, matching
+    ``_role_id``) so the JS sidecar reader can look up directly with the
+    node's ``data-id`` attr. Roles referenced ONLY by rails (no
+    declaring Account / AccountTemplate) still appear as keys with an
+    empty list — that's the "orphan" case the menu surfaces as a
+    disabled ``No matches`` item.
+
+    Each carrier dict has two keys:
+      - ``kind``: ``"account"`` or ``"account_template"`` (matches the
+        ``EntityKind`` literal so callers can plug it straight into
+        ``/l2_shape/<kind>/<id>/edit`` URLs).
+      - ``id``: the carrier's addressing id (``Account.id`` for
+        accounts; ``AccountTemplate.role`` for templates — templates
+        key on ``role`` per primitives.py's U2 uniqueness lock).
+
+    Carriers within a role are sorted by ``(kind, id)`` so menu order
+    stays deterministic across runs (matches the rest of the typed
+    projection's stability contract).
+    """
+    out: dict[str, list[dict[str, str]]] = {
+        _role_id(role): [] for role in _collect_roles(instance)
+    }
+    for account in instance.accounts:
+        out.setdefault(_role_id(account.role), []).append(
+            {"kind": "account", "id": str(account.id)},
+        )
+    for template in instance.account_templates:
+        out.setdefault(_role_id(template.role), []).append(
+            {"kind": "account_template", "id": str(template.role)},
+        )
+    for carriers in out.values():
+        carriers.sort(key=lambda c: (c["kind"], c["id"]))
+    return out
+
+
 def _collect_roles(instance: L2Instance) -> tuple[Identifier, ...]:
     """All roles referenced by accounts, templates, or rails — sorted, deduped.
 

@@ -126,16 +126,17 @@ function _getRenderer() {
 
 function _readSidecar() {
   const el = document.getElementById("topology-meta");
-  if (!el) return { role_meta: {}, edge_meta: {} };
+  if (!el) return { role_meta: {}, edge_meta: {}, role_carriers: {} };
   try {
     const parsed = JSON.parse(el.textContent || "{}");
     return {
       role_meta: parsed.role_meta || {},
       edge_meta: parsed.edge_meta || {},
+      role_carriers: parsed.role_carriers || {},
     };
   } catch (err) {
     console.error("studio/diagram: bad sidecar JSON", err);
-    return { role_meta: {}, edge_meta: {} };
+    return { role_meta: {}, edge_meta: {}, role_carriers: {} };
   }
 }
 
@@ -259,7 +260,7 @@ async function renderDiagram() {
   // Wire chrome interactivity now that the SVG is annotated.
   _wireToggles(svg);
   _wireEdgeLabelToggles(svg);
-  _wireFocus(svg);
+  _wireFocus(svg, sidecar.role_carriers || {});
   _wirePanZoom(svg);
   _wireCoverage(svg);
   _wireTrainer(svg);
@@ -420,7 +421,7 @@ function _wireEdgeLabelToggles(svg) {
 // in" semantics — re-render so the focused subset gets dot's full
 // canvas. Server-side filter keeps the implementation small (no DOT
 // rewriting on the JS side).
-function _wireFocus(svg) {
+function _wireFocus(svg, roleCarriers) {
   const _navigateToFocus = (focusId) => {
     // Preserve ?layer= so click-to-focus doesn't reset the user's
     // chosen layer. Only ?focus= changes.
@@ -448,18 +449,28 @@ function _wireFocus(svg) {
       const id = node.getAttribute('data-id');
       if (id) _navigateToFocus(id);
     });
-    // CF.3.m — right-click → context menu with "Open in editor".
-    // Skip when the node id can't be mapped to a unique edit URL
-    // (bundles + roles) — the browser's native menu fires instead,
-    // so the operator isn't stuck with a no-op popup.
+    // CF.3.m + BX.6/11 follow-up — right-click → context menu ALWAYS
+    // fires (never defers to the browser's native menu — operator
+    // feedback flagged the native menu as jarring inside the canvas).
+    //
+    // Menu shape per node kind:
+    //   - rail__X / tmpl__X        →  1 item "Edit this entity"
+    //   - role__X with N carriers  →  N items "Edit <kind>: <id>"
+    //   - role__X with 0 carriers  →  1 disabled "No matches" item
+    //   - rail__bundle_N (synthetic) → 1 disabled "No matches" item
+    //
+    // Roles CAN be shared across accounts + templates per the L2
+    // schema (Account.role + AccountTemplate.role both reference
+    // role names; nothing prevents duplicates). The earlier BX.6/11
+    // assumption of 1-role-1-carrier was wrong — this menu handles
+    // the real multi-carrier case.
     node.addEventListener("contextmenu", (e) => {
       const id = node.getAttribute('data-id');
       if (!id) return;
-      const editorUrl = _editorUrlForNode(id);
-      if (!editorUrl) return;  // unresolvable; defer to browser menu
+      const items = _menuItemsForNode(id, roleCarriers);
       e.preventDefault();
       e.stopPropagation();
-      _showNodeContextMenu(e.clientX, e.clientY, id, editorUrl);
+      _showNodeContextMenu(e.clientX, e.clientY, id, items);
     });
   }
 
@@ -552,10 +563,10 @@ function _injectEditBadge(nodeGroup, href, displayId) {
 // Python `_editor_url_for_focus_node` in `_studio_routes.py`; drift
 // between the two is a UX bug. Per operator lock (2026-06-05):
 // right-click "Open in editor" must land directly on `/edit`, not a
-// list / view page. Synthetic bundles + roles (shared across
-// multiple accounts) return null and the caller suppresses the
-// context menu entirely — disambiguation deferred until we wire a
-// "which entity uses this role?" picker.
+// list / view page. Synthetic bundles + roles return null here —
+// the right-click handler routes those through `_menuItemsForNode`'s
+// role-carrier branch (CF.3.m + BX.6/11 follow-up, 2026-06-11) so
+// the menu still fires; this function stays bijective-only.
 function _editorUrlForNode(nodeId) {
   if (!nodeId) return null;
   if (nodeId.startsWith("rail__bundle_")) return null;
@@ -570,12 +581,55 @@ function _editorUrlForNode(nodeId) {
   return null;
 }
 
-// CF.3.m — single-item right-click menu. Lazily-created floating div;
-// dismisses on next click anywhere, Esc, or scroll. Keeps the surface
-// tiny — when we need a second item we can lift this into a typed
-// menu primitive.
+// CF.3.m + BX.6/11 follow-up — build the right-click menu's items
+// array from the node id. Returns at least one item; for unresolvable
+// nodes (orphan role / synthetic bundle / unknown prefix) the single
+// item carries ``href: null`` so the renderer marks it disabled.
+//
+// Items shape: ``[{label: string, href: string | null}, ...]``.
+function _menuItemsForNode(nodeId, roleCarriers) {
+  if (!nodeId) {
+    return [{ label: "No matches", href: null }];
+  }
+  // Roles (multi-carrier — the BX.6/11 fix). Carriers are
+  // server-sorted; preserve that order in the menu.
+  if (nodeId.startsWith("role__")) {
+    const carriers = (roleCarriers && roleCarriers[nodeId]) || [];
+    if (carriers.length === 0) {
+      return [{ label: "No matches", href: null }];
+    }
+    return carriers.map((c) => {
+      // ``kind`` is the EntityKind literal ("account" /
+      // "account_template") so it plugs straight into the
+      // /l2_shape/<kind>/<id>/edit URL.
+      const label =
+        c.kind === "account"
+          ? `Edit Account: ${c.id}`
+          : `Edit AccountTemplate: ${c.id}`;
+      return {
+        label,
+        href: `/l2_shape/${c.kind}/${encodeURIComponent(c.id)}/edit`,
+      };
+    });
+  }
+  // Synthetic bundle nodes — no source-side entity to edit.
+  if (nodeId.startsWith("rail__bundle_")) {
+    return [{ label: "No matches", href: null }];
+  }
+  // Rail / template — bijective (one editable target per node).
+  const editorUrl = _editorUrlForNode(nodeId);
+  if (editorUrl) {
+    return [{ label: "Edit this entity", href: editorUrl }];
+  }
+  return [{ label: "No matches", href: null }];
+}
+
+// CF.3.m + BX.6/11 follow-up — multi-item right-click menu. Lazily-
+// created floating div; dismisses on next click anywhere, Esc, or
+// scroll. Items array shape: ``[{label, href}, ...]``. ``href: null``
+// renders the item as a disabled non-navigable span.
 let _contextMenuEl = null;
-function _showNodeContextMenu(x, y, nodeId, editorUrl) {
+function _showNodeContextMenu(x, y, nodeId, items) {
   _hideNodeContextMenu();
   const menu = document.createElement("div");
   menu.id = "diagram-node-contextmenu";
@@ -586,15 +640,29 @@ function _showNodeContextMenu(x, y, nodeId, editorUrl) {
   );
   menu.style.top = y + "px";
   menu.style.left = x + "px";
-  const link = document.createElement("a");
-  link.href = editorUrl;
-  link.className = (
-    "block px-3 py-1.5 text-primary-fg no-underline " +
-    "hover:bg-link-tint"
-  );
-  link.textContent = "Edit this entity";
-  link.setAttribute("data-node-id", nodeId);
-  menu.appendChild(link);
+  for (const item of items) {
+    if (item.href) {
+      const link = document.createElement("a");
+      link.href = item.href;
+      link.className = (
+        "block px-3 py-1.5 text-primary-fg no-underline " +
+        "hover:bg-link-tint"
+      );
+      link.textContent = item.label;
+      link.setAttribute("data-node-id", nodeId);
+      menu.appendChild(link);
+    } else {
+      // Disabled "No matches" item — span, not <a>; no onclick.
+      const span = document.createElement("span");
+      span.className = (
+        "block px-3 py-1.5 text-secondary-fg cursor-default"
+      );
+      span.textContent = item.label;
+      span.setAttribute("data-node-id", nodeId);
+      span.setAttribute("data-disabled", "true");
+      menu.appendChild(span);
+    }
+  }
   document.body.appendChild(menu);
   _contextMenuEl = menu;
   // One-shot dismiss handlers.

@@ -340,7 +340,14 @@ def test_diagram_js_inverse_arms_match_python() -> None:
     """The JS `_editorUrlForNode` arms must mirror the Python
     `_editor_url_for_focus_node` arms. Both sides must:
     (a) handle the same four prefixes; (b) emit `/edit` URLs for
-    resolvable cases; (c) return null/None for ambiguous cases."""
+    resolvable cases; (c) return null/None for ambiguous cases.
+
+    CF.3.m + BX.6/11 follow-up (2026-06-11) — the right-click handler
+    no longer defers to the browser's native menu when ``_editorUrlForNode``
+    returns null; it ALWAYS fires a custom menu. The fallback shape lives
+    in ``_menuItemsForNode``, which surfaces role carriers (Account +
+    AccountTemplate references) or a disabled "No matches" item.
+    """
     diagram_js = (
         Path(__file__).parent.parent.parent
         / "src" / "recon_gen" / "common" / "html"
@@ -362,10 +369,14 @@ def test_diagram_js_inverse_arms_match_python() -> None:
     assert '"/l2_shape/rail/" + nodeId.slice("rail__".length) + "/edit"' in diagram_js
     assert "+ nodeId.slice(\"tmpl__\".length) + \"/edit\"" in diagram_js
     # The right-click handler routes contextmenu events through the
-    # inverse, and skips when it returns null (defers to native menu).
+    # general builder + always-fires path (BX.6/11 follow-up).
     assert 'addEventListener("contextmenu"' in diagram_js
     assert "_showNodeContextMenu" in diagram_js
-    assert "_editorUrlForNode" in diagram_js
-    assert "if (!editorUrl) return" in diagram_js  # null → defer
-    # Menu item label calls out the action explicitly.
+    assert "_menuItemsForNode" in diagram_js
+    # Menu item labels — rail/tmpl bijective stays unchanged; role + bundle +
+    # orphan share the "No matches" disabled shape.
     assert '"Edit this entity"' in diagram_js
+    assert '"No matches"' in diagram_js
+    # Role-carrier item labels.
+    assert "Edit Account:" in diagram_js
+    assert "Edit AccountTemplate:" in diagram_js

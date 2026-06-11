@@ -155,6 +155,7 @@ from recon_gen.common.l2.topology import (
     _categories_for_layer,
     _rail_id,
     _template_id,
+    build_role_carriers,
     build_topology_graph_per_rail,
     topology_graph_for,
     visible_entities_for,
@@ -3194,8 +3195,21 @@ def _render_diagram_page(
     # post-CF.3.f port-anchored edges.
     edge_meta_raw = getattr(digraph, "edge_meta", None)
     edge_meta: dict[str, str] = dict(edge_meta_raw) if edge_meta_raw else {}
+    # CF.3.m + BX.6/11 follow-up — per-role carriers map so the
+    # diagram's right-click menu can always fire (never defers to the
+    # browser's native menu). For a role with N carriers, the menu
+    # surfaces N "Edit <Account|AccountTemplate>: <id>" items; for
+    # an orphan role (or a synthetic ``rail__bundle_N`` node) the menu
+    # surfaces a single disabled "No matches" item.
+    role_carriers: dict[str, list[dict[str, str]]] = (
+        build_role_carriers(instance)
+    )
     sidecar = json.dumps(  # typing-smell: ignore[json-indent]: inline page payload — compact saves bytes
-        {"role_meta": role_meta, "edge_meta": edge_meta},
+        {
+            "role_meta": role_meta,
+            "edge_meta": edge_meta,
+            "role_carriers": role_carriers,
+        },
     )
 
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
