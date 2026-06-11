@@ -151,9 +151,11 @@ def test_edit_form_has_delete_button(
     writable_l2_yaml: Path,
 ) -> None:
     """Edit form's actions row carries a ``data-role="form-delete"``
-    anchor. BX.1 (2026-06-11): the Delete now opens the inline
-    confirm banner via GET ``/delete-confirm`` (not a browser-native
-    ``hx-confirm`` modal)."""
+    anchor. BX.1 redesign (2026-06-11): the Delete is now wrapped in
+    its in-place swap boundary; no browser-native ``hx-confirm``
+    modal. Refused entities render disabled with the reason in
+    ``data-delete-reason``; unreferenced entities render the active
+    Delete with ``hx-get`` pointing at /delete-confirm."""
     cache = L2InstanceCache.from_path(writable_l2_yaml)
     inst = cache.get()
     account = inst.accounts[0]
@@ -161,27 +163,30 @@ def test_edit_form_has_delete_button(
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get(f"/l2_shape/account/{account.id}/edit").text
     assert 'data-role="form-delete"' in body
-    assert "/delete-confirm" in body
+    assert "data-delete-wrapper" in body
+    # Either active (with hx-get → /delete-confirm) or refused
+    # (with data-delete-reason). Both shapes pass the BX.1 contract.
+    has_active = "/delete-confirm" in body
+    has_refused = 'data-delete-state="refused"' in body
+    assert has_active or has_refused, body
     assert "hx-confirm=" not in body
 
 
 def test_edit_form_delete_url_carries_from_edit(
     writable_l2_yaml: Path,
 ) -> None:
-    """The Delete button on the edit form points its GET
-    ``/delete-confirm`` request at the same entity with
-    ``?from=edit`` so the eventual DELETE handler distinguishes
-    form-source from card-source deletes and responds with
-    HX-Redirect to the list (card-source keeps the empty-body
-    in-place swap)."""
-    cache = L2InstanceCache.from_path(writable_l2_yaml)
-    inst = cache.get()
-    account = inst.accounts[0]
+    """The Delete button on the edit form for an UNREFERENCED entity
+    points its GET ``/delete-confirm`` request at the same entity
+    with ``?from=edit`` so the eventual DELETE handler distinguishes
+    form-source from card-source deletes.
+
+    Pick cust-002 (shared CustomerSubledger role with cust-001 + the
+    template; no incoming references → active Delete with hx-get)."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
-        body = c.get(f"/l2_shape/account/{account.id}/edit").text
+        body = c.get("/l2_shape/account/cust-002/edit").text
     assert (
-        f'hx-get="/l2_shape/account/{account.id}/delete-confirm?from=edit"'
+        'hx-get="/l2_shape/account/cust-002/delete-confirm?from=edit"'
         in body
     )
 

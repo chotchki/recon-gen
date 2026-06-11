@@ -43,7 +43,6 @@ from starlette.routing import Route
 
 from recon_gen.common.html._studio_assets.tw_classes import (
     chrome_button_classes,
-    destructive_button_classes,
     entity_card_classes,
     field_input_classes,
     field_row_classes,
@@ -59,8 +58,14 @@ from recon_gen.common.html._components import (
 )
 from recon_gen.common.html import _delete_confirm
 from recon_gen.common.html._delete_confirm import (
+    EntityRef,
+    ReferenceGraph,
+    build_reference_graph,
     find_references as _find_references,
-    render_delete_confirm_banner,
+    render_active_delete_button,
+    render_active_delete_button_inner,
+    render_countdown_swap,
+    render_refused_delete_button,
     verify_confirm_token,
 )
 from recon_gen.common.html._studio_routes import (
@@ -2822,10 +2827,20 @@ def _render_read_card_summary(
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — retained for callsite parity with body helper
     entity_id: str,
     html_id: str,
+    *,
+    graph_refs: tuple[EntityRef, ...] = (),
 ) -> str:
     """CF.4.c split — the always-visible part of a read card (title +
     Edit/Delete actions). Renders without the heavy `<dl>` body so
     `<details>`-wrapped cards stay cheap when collapsed.
+
+    BX.1 redesign (2026-06-11) — ``graph_refs`` carries the tuple of
+    incoming references for THIS entity, sourced from the page-level
+    ``ReferenceGraph`` (built once per render via
+    ``build_reference_graph``). Non-empty → Delete renders in
+    refused state with a ``title`` tooltip; empty → active state.
+    Default ``()`` keeps callers that haven't been wired-up rendering
+    in the "always-active" pre-redesign shape.
     """
     # X.4.f.11 — surface rail subtype as a small badge on the read
     # card so the operator can tell a TwoLeg apart from a SingleLeg
@@ -3013,64 +3028,68 @@ def _render_read_card_summary(
         f'{cardinality_badge}</h3>'
         f'{cardinality_subline}'
     )
-    # BX.1 followup (2026-06-11) — Edit + Delete now share one helper
-    # so both the read-card-summary path AND the edit-page form path
-    # carry the same onclick guard. Pre-followup the card path used
-    # `event.stopPropagation()` only; the operator reported clicking
-    # Delete on a `<details>`-wrapped card (collapsed list view) toggled
-    # the card open/close instead of opening the BX.1 confirm banner.
-    # Root cause: `<summary>`'s click-activation behavior (toggles the
-    # parent `<details>`) is the click event's *default action*;
-    # `stopPropagation()` alone does NOT cancel the default action.
-    # `preventDefault()` does. The helper emits both — htmx's own
-    # click listener still fires (it runs alongside the inline
-    # `onclick`, both on the same element) so the `hx-get` request
-    # lands the banner in `#delete-confirm-banner-slot` as designed.
+    # BX.1 redesign (2026-06-11) — the Delete action is now in-place:
+    # the wrapper-anchored button swaps innerHTML between active /
+    # refused / countdown / ready in place. No more top-of-page
+    # banner — operators on scrolled-down cards lost the banner above
+    # the fold. State + click-target both live on the wrapper element
+    # which `closest [data-delete-wrapper]` resolves to from the
+    # button's hx-target.
     url_id = _url_entity_id(kind, entity)
-    actions_html = _render_card_action_buttons(kind, url_id)
+    # Refs come from the page-level reference graph when one is
+    # passed in (`graph_refs`); the read-card-page handler builds
+    # the graph for a single entity render so the call shape stays
+    # uniform. Empty refs → active state; non-empty → refused state
+    # with the operator-readable reason in `title` + `data-delete-reason`.
+    actions_html = _render_card_action_buttons(
+        kind, url_id, refs=graph_refs,
+    )
     header_cls = "flex items-start justify-between gap-3"
     return (
         f'<header class="{header_cls}">{title_html}{actions_html}</header>'
     )
 
 
-def _render_card_action_buttons(kind: EntityKind, url_id: str) -> str:
-    """BX.1 followup (2026-06-11) — typed primitive for the Edit +
-    Delete action button pair on a read-card summary.
+def _render_card_action_buttons(
+    kind: EntityKind,
+    url_id: str,
+    *,
+    refs: tuple[EntityRef, ...],
+) -> str:
+    """BX.1 redesign (2026-06-11) — typed primitive for the Edit +
+    Delete action pair on a read-card summary.
 
-    Encodes the two invariants the BX.1 follow-up bug surfaced:
+    The Delete portion now delegates to ``_delete_confirm``'s typed
+    state-aware renderers:
 
-    1. The Delete anchor's onclick MUST call both ``preventDefault()``
-       AND ``stopPropagation()`` — the former cancels the
-       ``<summary>`` activation behavior (the parent ``<details>``
-       toggle, which IS the click event's default action when the
-       click lands inside a ``<summary>``); the latter keeps the
-       click from bubbling to any wider ``<details>``/``<summary>``
-       chrome (the home-page section wrappers). htmx's own click
-       listener still fires (it's a sibling listener on the same
-       anchor, not a delegated one upstream) so the ``hx-get``
-       continues to drop the banner into the page-level slot.
-    2. Edit's onclick uses ``stopPropagation()`` ALONE — not
-       ``preventDefault()``, because that would block the native
-       anchor navigation (and middle-click / cmd-click "open in
-       new tab"). On the collapsed-card surface where the toggle
-       could fire, the Edit click navigates away and replaces the
-       page, masking any residual toggle.
-    3. The Delete anchor's wire shape (hx-get to ``/delete-confirm``,
-       hx-target ``#delete-confirm-banner-slot``, ``data-role=
-       "card-delete"``) stays the BX.1 contract — moving the markup
-       into one helper means every render path stays in sync if the
-       contract evolves.
+    - ``refs`` empty → ``render_active_delete_button(surface="card")``
+      → the wrapper + at-rest Delete anchor; clicking it swaps the
+      wrapper innerHTML to the countdown-state button via the
+      ``/delete-confirm`` GET endpoint.
+    - ``refs`` non-empty → ``render_refused_delete_button(surface=
+      "card")`` → the wrapper + a disabled Delete anchor with
+      ``aria-disabled="true"`` + ``title``/``data-delete-reason``
+      carrying the operator-readable referrer list. No swap target;
+      the operator must clear referrers first.
+
+    Both surfaces emit the same wrapper shape (``data-delete-wrapper``)
+    so the hx-target ``closest [data-delete-wrapper]`` resolves to
+    the same element regardless of which state the wrapper is
+    currently rendering. The wrapper survives every swap; only its
+    innerHTML changes.
+
+    Edit stays a plain anchor — ``stopPropagation()`` alone (not
+    ``preventDefault()``) so middle-click / cmd-click "open in new
+    tab" still works. The collapsed-card surface where the
+    ``<summary>`` toggle could fire is masked because Edit navigates
+    away; the inline-delete wrapper's click guard handles the toggle
+    hazard on its own click path.
 
     ``url_id`` is the BX.10 opaque URL id (composite-keyed kinds) or
-    the kebab id verbatim (single-key kinds), already computed by the
-    caller via ``_url_entity_id``.
-
-    Constants live inline (not module-level) so the typing-smell
-    ``no-inline-production-constants`` check doesn't get confused
-    by tests that pin the literal strings: there's no UPPER_SNAKE
-    module attribute to chase, only the function (which tests can
-    invoke + grep over the output for the invariant).
+    the kebab id verbatim (single-key kinds), already computed by
+    the caller via ``_url_entity_id``. ``refs`` comes from the page-
+    level reference graph (one walk per render via
+    ``build_reference_graph`` — O(1) per card lookup).
     """
     edit_btn_cls = (
         # ghost-outline: accent border + accent text, fills on hover
@@ -3079,35 +3098,34 @@ def _render_card_action_buttons(kind: EntityKind, url_id: str) -> str:
         "no-underline cursor-pointer "
         "hover:bg-accent hover:text-white"
     )
-    delete_btn_cls = (
-        # danger-solid: red border + red text, fills on hover
-        "inline-flex items-center px-2 py-0.5 text-xs font-semibold "
-        "border border-danger text-danger rounded-sm "
-        "no-underline cursor-pointer "
-        "hover:bg-danger hover:text-white"
-    )
     edit_onclick = "event.stopPropagation()"
-    delete_onclick = "event.preventDefault(); event.stopPropagation()"
-    return (
-        f'<div class="flex items-center gap-2 shrink-0">'
+    edit_anchor = (
         f'<a class="{edit_btn_cls}" '
         f'href="/l2_shape/{kind}/{escape(url_id)}/edit" '
         f'onclick="{edit_onclick}">Edit</a>'
-        f'<a class="{delete_btn_cls}" '
-        f'data-role="card-delete" '
-        f'hx-get="/l2_shape/{kind}/{escape(url_id)}/delete-confirm" '
-        f'hx-target="#delete-confirm-banner-slot" hx-swap="innerHTML" '
-        f'onclick="{delete_onclick}">Delete</a>'
+    )
+    if refs:
+        delete_html = render_refused_delete_button(
+            kind, url_id, refs, surface="card",
+        )
+    else:
+        delete_html = render_active_delete_button(
+            kind, url_id, surface="card",
+        )
+    return (
+        f'<div class="flex items-center gap-2 shrink-0">'
+        f'{edit_anchor}{delete_html}'
         f"</div>"
     )
 
 
-# BX.1 followup (2026-06-11) — the edit page Delete button shares
-# the same onclick guard as the card-summary Delete. Defined as a
-# module-level lowercase constant (NOT UPPER_SNAKE) so the
+# BX.1 redesign (2026-06-11) — the edit-page Delete button shares
+# the same wrapper / state shape as the card-summary Delete. Defined
+# as a module-level lowercase constant (NOT UPPER_SNAKE) so the
 # typing-smell ``no-inline-production-constants`` check doesn't
 # index it; tests that pin the literal can invoke the renderer and
-# grep the output.
+# grep the output. Retained for backwards-compat with tests pinning
+# the constant; new render paths flow through `_delete_confirm`.
 _card_delete_onclick = "event.preventDefault(); event.stopPropagation()"
 
 
@@ -3148,6 +3166,7 @@ def _render_read_card(
     kind: EntityKind, entity: object,
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — passed through to body / summary helpers
     *, collapsed: bool = False,
+    graph: ReferenceGraph | None = None,
 ) -> str:
     """Read-only card — the post-PUT response + the click-to-expand
     target for the list view.
@@ -3159,6 +3178,14 @@ def _render_read_card(
     threshold is ``COLLAPSE_THRESHOLD`` — `_render_list_page` decides
     based on total_count. Sasquatch_pr (7 rails) stays eager;
     heavy_density_v1 (100+ rails) collapses.
+
+    BX.1 redesign (2026-06-11): ``graph`` is the precomputed
+    ``ReferenceGraph`` used to render the Delete button in its
+    refused state when this entity has incoming references. When
+    ``None`` (single-card callers like the read-card-page handler),
+    the caller is responsible for ensuring the active vs refused
+    decision is correct — the Delete will render as ``active`` by
+    default which is safe (the DELETE handler still validates).
     """
     entity_id = _entity_id(kind, entity)
     # BX.10 (2026-06-11) — opaque URL form for composite-keyed kinds;
@@ -3169,8 +3196,13 @@ def _render_read_card(
     # addressing string, which CSS parses as pseudo-element syntax;
     # the URL-side path stays ``::``, only the HTML id swaps.
     html_id = f"entity-{kind}-{escape(_html_id_slug(entity_id))}"
+    # BX.1 redesign — read the per-entity refs out of the page-level
+    # graph if one is wired in; default to empty for the
+    # single-card-render call sites that haven't been wired yet.
+    graph_refs = graph.refs_for(kind, entity_id) if graph else ()
     summary_html = _render_read_card_summary(
         kind, entity, instance, entity_id, html_id,
+        graph_refs=graph_refs,
     )
     card_cls = entity_card_classes()
     if collapsed:
@@ -3276,6 +3308,7 @@ def _render_read_card_page(
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — passed through to _render_read_card / studio_theme_head
     *,
     top_nav_html: str = "",
+    graph: ReferenceGraph | None = None,
 ) -> str:
     """BX.6/11 follow-up (2026-06-11) — full-page chrome wrapper around
     the bare ``_render_read_card`` ``<article>`` fragment.
@@ -3311,7 +3344,10 @@ def _render_read_card_page(
         f"&larr; back to {escape(kind_label_plural(kind))}</a>"
         f"</div>"
     )
-    card_html = _render_read_card(kind, entity, instance)
+    card_html = _render_read_card(kind, entity, instance, graph=graph)
+    # BX.1 redesign (2026-06-11) — the page-level banner slot is
+    # gone. In-place Delete swaps the wrapper inside the card itself;
+    # there's no top-of-page chrome that needs a placeholder.
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -3325,7 +3361,6 @@ def _render_read_card_page(
   {_form_page_header_raw_html(h1_inner)}
   {back_link_html}
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4" data-role="read-card-main">
-    <div id="delete-confirm-banner-slot" data-test-delete-banner-slot></div>
     {card_html}
   </main>
 </body>
@@ -4926,25 +4961,30 @@ def _render_edit_page(
         f'href="{escape(list_url)}">← back to {escape(kind_label_plural(kind))}</a>'
         f'</div>'
     )
-    # BX.1 (2026-06-11) — same banner pattern on the edit page. The
-    # banner lands in `#delete-confirm-banner-slot` above the form
-    # section; the form stays intact so Cancel returns the operator
-    # to where they were.
-    # BX.1 followup (2026-06-11) — onclick guard for parity with the
-    # read-card-summary path. The edit page form is not currently
-    # nested inside a `<summary>` so the `<details>` toggle hazard
-    # doesn't fire here, but the guard is a no-cost insurance: a
-    # future wrapper that puts the form inside a `<details>` (e.g. a
-    # collapsible "Danger zone" section) would silently regress
-    # otherwise. Matches the typed helper above.
-    delete_btn_classes = destructive_button_classes()
-    delete_btn_html = (
-        f'<a class="{delete_btn_classes} ml-auto" '
-        f'data-role="form-delete" '
-        f'hx-get="/l2_shape/{escape(kind)}/{escape(url_id)}/delete-confirm?from=edit" '
-        f'hx-target="#delete-confirm-banner-slot" hx-swap="innerHTML" '
-        f'onclick="{_card_delete_onclick}">Delete</a>'
-    )
+    # BX.1 redesign (2026-06-11) — in-place Delete on the edit page.
+    # Operator dogfood (2026-06-11) flagged that the prior top-of-page
+    # banner sat above the form's Delete button which scrolled out of
+    # view on a long form; clicking Delete made nothing visibly
+    # happen. The wrapper-anchored Delete button now swaps in place,
+    # within the form's action row, so the countdown / refused state
+    # is always next to the click site.
+    #
+    # Reference-graph walk: edit-page renders ONE entity, so a single
+    # `find_references` call is the cheapest path. Refs non-empty →
+    # refused state with title tooltip; empty → active state.
+    form_refs = _find_references(instance, kind, entity_id)
+    if form_refs:
+        delete_btn_html = (
+            f'<div class="ml-auto">'
+            f'{render_refused_delete_button(kind, url_id, form_refs, surface="form")}'
+            f'</div>'
+        )
+    else:
+        delete_btn_html = (
+            f'<div class="ml-auto">'
+            f'{render_active_delete_button(kind, url_id, surface="form")}'
+            f'</div>'
+        )
     # BX.8 (2026-06-11) — inline mini-diagram showing the entity's
     # position in the topology. Self-node highlighted; 1-hop
     # neighbors visible for spatial context. Empty string for kinds
@@ -4977,7 +5017,6 @@ def _render_edit_page(
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
     {_render_intro_details(intro_html)}
     {subtype_banner_html}
-    <div id="delete-confirm-banner-slot" data-test-delete-banner-slot></div>
     {mini_diagram_html}
     <section class="bg-white border border-surface-border rounded-md p-5">
       <form method="post" action="/l2_shape/{escape(kind)}/{escape(url_id)}" class="edit-form group">
@@ -5769,9 +5808,15 @@ def _render_list_page(
     # `_render_read_card`'s default — they're rendering ONE card,
     # not a list, so the chevron pattern doesn't apply.
     collapsed = total_count is not None
+    # BX.1 redesign (2026-06-11) — precompute the reference graph
+    # ONCE per list-page render. The per-card Delete-button render
+    # asks ``graph.refs_for(kind, id)`` in O(1) so a 100-card page
+    # pays one walk instead of 100. Refused state's tooltip + reason
+    # text both come from the cached refs.
+    graph = build_reference_graph(instance)
     cards = "\n".join(
         _render_read_card(
-            kind, e, instance, collapsed=collapsed,
+            kind, e, instance, collapsed=collapsed, graph=graph,
         )
         for e in entities
     )
@@ -5867,13 +5912,11 @@ def _render_list_page(
         '<div class="px-8 pb-12">' if pager_html else ""
     )
     pager_wrap_close = "</div>" if pager_html else ""
-    # BX.1 (2026-06-11) — page-level slot for the delete-confirm
-    # banner. ONE per page (single in-flight delete at a time);
-    # card Delete buttons swap their banner in here via
-    # `hx-target="#delete-confirm-banner-slot"`. In `embed` mode the
-    # home page's wrapper already declares a slot of its own —
-    # the per-section embed body skips its own slot to avoid id
-    # duplication (handled in `_render_home`).
+    # BX.1 redesign (2026-06-11) — the page-level
+    # `#delete-confirm-banner-slot` is GONE. Delete is now in-place:
+    # each card wraps its Delete in `<span data-delete-wrapper>` and
+    # HTMX targets that via `closest`. No top-of-page slot exists
+    # because the swap target lives next to the click site.
     if embed:
         return (
             f"{search_wrap_open}{search_html}{search_wrap_close}"
@@ -5916,9 +5959,6 @@ def _render_list_page(
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
   {page_header_html}
-  <div class="px-8 pt-3">
-    <div id="delete-confirm-banner-slot" data-test-delete-banner-slot></div>
-  </div>
   {search_wrap_open}{search_html}{search_wrap_close}
   <main id="entity-list" class="{grid_cls}">
     {cards}
@@ -6484,10 +6524,18 @@ def _make_handlers(
         # other editor sub-page does.
         embed = request.query_params.get("embed") == "1"
         is_hx_request = request.headers.get("HX-Request") == "true"
+        # BX.1 redesign — build the reference graph so the Delete
+        # button on this single-card render correctly renders refused
+        # state when the entity has incoming refs. The graph walks
+        # the L2 instance once; for a single card render that's the
+        # same cost as the prior single `find_references` call.
+        graph = build_reference_graph(inst)
         if embed or is_hx_request:
-            return HTMLResponse(_render_read_card(kind, entity, inst))
+            return HTMLResponse(
+                _render_read_card(kind, entity, inst, graph=graph),
+            )
         return HTMLResponse(
-            _render_read_card_page_local(kind, entity, inst),
+            _render_read_card_page_local(kind, entity, inst, graph=graph),
         )
 
     async def edit_form(request: Request) -> Response:
@@ -7189,22 +7237,32 @@ def _make_handlers(
         return resp
 
     async def delete_confirm_handler(request: Request) -> Response:
-        """BX.1 — GET /l2_shape/<kind>/<id>/delete-confirm: returns
-        the inline confirm banner. Walks the L2Instance for incoming
-        references first; when refs are present the banner renders
-        in `blocked` mode (no Confirm button, listing each referrer
-        with an edit link). When refs are absent the banner renders
-        in `armed` mode with a 5s countdown + signed Confirm token.
+        """BX.1 redesign (2026-06-11) — GET
+        /l2_shape/<kind>/<id>/delete-confirm: returns the in-place
+        countdown swap body. Swapped into the wrapper's innerHTML by
+        HTMX so the countdown / Confirm button + Cancel link land
+        exactly where the active Delete button was — no top-of-page
+        banner.
+
+        Refs are checked at render time (the at-rest Delete button
+        renders in the refused state when refs exist), so this
+        endpoint only ever fires for unreferenced entities. The
+        signed Confirm token is HMAC'd over (kind, entity_id,
+        start_ts) keyed by the per-process secret; the DELETE
+        handler verifies the signature AND enforces ``now - start_ts
+        >= COUNTDOWN_SECS`` server-side. A client that disables the
+        aria-disabled attr via DevTools still hits the wall clock
+        check.
 
         Lives behind GET (not POST) so it's idempotent + safe to
-        re-fire if the operator clicks Delete twice.
+        re-fire if the operator clicks Delete twice (a defense-in-
+        depth path race that re-mints the token without side-effect).
 
         BX.10 (2026-06-11) — for composite-keyed kinds the path is
         opaque (``<hash6>-<slug>``); resolved to the composite key
-        once up front. The composite key feeds the find-references /
-        HMAC-issue calls below so the operator-visible banner shows
-        a human-readable id and the DELETE URL the banner builds
-        carries the same composite (matching the HMAC payload).
+        once up front. The composite key feeds HMAC signing while
+        the opaque url_id feeds the DELETE URL the button fires
+        (matching the registered Starlette route).
         """
         kind = _kind_from_path(request.path_params["kind"])
         url_seg = request.path_params["entity_id"]
@@ -7219,21 +7277,71 @@ def _make_handlers(
             # delete race.
             return _entity_gone_response(kind, url_seg)
         entity_id = _entity_id(kind, resolved_entity)
+        url_id = _url_entity_id(kind, resolved_entity)
+        # Defense-in-depth: if the operator's tab is stale + the
+        # entity grew incoming refs since the page render, return
+        # refused state instead of the active countdown so the
+        # DELETE click can't bypass the render-time check.
         refs = _find_references(instance, kind, entity_id)
-        banner_html = render_delete_confirm_banner(
-            kind, entity_id, refs,
-            countdown_secs=_delete_confirm.COUNTDOWN_SECS,
+        from_source = request.query_params.get("from", "")
+        surface: Literal["card", "form"] = (
+            "form" if from_source == "edit" else "card"
         )
-        return HTMLResponse(banner_html)
+        if refs:
+            # Swap to refused-state inner (without re-emitting the
+            # wrapper — innerHTML swap).
+            swap_html = (
+                render_refused_delete_button(
+                    kind, url_id, refs, surface=surface,
+                )
+                # Strip wrapper open/close so only inner content
+                # lands; the existing wrapper survives.
+                .removeprefix(
+                    _delete_confirm._wrapper_open(kind, url_id),
+                )
+                .removesuffix(_delete_confirm._wrapper_close())
+            )
+            return HTMLResponse(swap_html)
+        swap_html = render_countdown_swap(
+            kind, entity_id, url_id,
+            countdown_secs=_delete_confirm.COUNTDOWN_SECS,
+            surface=surface,
+        )
+        return HTMLResponse(swap_html)
 
-    async def delete_cancel_handler(_request: Request) -> HTMLResponse:
-        """BX.1 — GET /l2_shape/_delete_cancel: returns an empty
-        replacement so the Cancel button kills the in-flight banner.
-        The Cancel button's hx-swap=outerHTML on `#delete-confirm-banner`
-        replaces the banner aside with the empty-string body — leaving
-        the slot div empty and ready for the next Delete click.
+    async def delete_cancel_handler(request: Request) -> HTMLResponse:
+        """BX.1 redesign (2026-06-11) — GET
+        /l2_shape/<kind>/<id>/delete-cancel: returns the at-rest
+        active Delete button (innerHTML swap) so the wrapper goes
+        back to the initial state, ready for a fresh Delete click.
+
+        The wrapper itself survives the swap; only its innerHTML is
+        replaced with the bare active-button anchor (no wrapper
+        open/close — those came from the surrounding template).
         """
-        return HTMLResponse("")
+        kind = _kind_from_path(request.path_params["kind"])
+        url_seg = request.path_params["entity_id"]
+        if kind is None or kind not in _FIELD_SPECS_BY_KIND:
+            return HTMLResponse("not editable", status_code=404)
+        instance = cache.get()
+        resolved_entity, _canonical = _resolve_url_entity_id(
+            instance, kind, url_seg,
+        )
+        if resolved_entity is None:
+            # Entity is gone — return empty so the wrapper just
+            # blanks out. The cascade-reload listener will refresh
+            # the relevant section.
+            return HTMLResponse("")
+        url_id = _url_entity_id(kind, resolved_entity)
+        from_source = request.query_params.get("from", "")
+        surface: Literal["card", "form"] = (
+            "form" if from_source == "edit" else "card"
+        )
+        return HTMLResponse(
+            render_active_delete_button_inner(
+                kind, url_id, surface=surface,
+            ),
+        )
 
     async def preview_markdown(request: Request) -> HTMLResponse:
         """BF.9 (2026-05-25) — markdown → HTML preview endpoint.
@@ -7418,15 +7526,10 @@ def make_editor_routes(
     h = _make_handlers(cache, top_nav_fn=top_nav_fn)
     # ``/new`` MUST be declared before ``/{entity_id}`` so Starlette's
     # path matcher doesn't treat the literal "new" as an entity_id.
-    # BX.1 (2026-06-11): the ``/_delete_cancel`` literal MUST be
-    # declared before the ``/{kind}/`` catch-all for the same reason.
+    # BX.1 redesign (2026-06-11): the cancel endpoint now lives at
+    # ``/l2_shape/<kind>/<id>/delete-cancel`` (in-place wrapper-
+    # innerHTML swap restores the active-state Delete button).
     routes: list[Route] = [
-        # BX.1 — delete-confirm cancel endpoint. Empty-body GET so
-        # Cancel button hx-swap=outerHTML kills the in-flight banner.
-        Route(
-            "/l2_shape/_delete_cancel", h["delete_cancel"],
-            methods=["GET"], name="l2_shape_delete_cancel",
-        ),
         Route(
             "/l2_shape/{kind}/", h["list_view"], methods=["GET"],
         ),
@@ -7448,13 +7551,18 @@ def make_editor_routes(
             "/l2_shape/{kind}/new", h["new_form"], methods=["GET"],
             name="l2_shape_new_form",
         ),
-        # BX.1 — delete-confirm banner endpoint. Declared BEFORE the
-        # bare-id read route so Starlette doesn't treat
-        # "delete-confirm" as an entity_id.
+        # BX.1 redesign — delete-confirm + delete-cancel endpoints.
+        # Both declared BEFORE the bare-id read route so Starlette
+        # doesn't treat the literal segment as an entity_id.
         Route(
             "/l2_shape/{kind}/{entity_id}/delete-confirm",
             h["delete_confirm"],
             methods=["GET"], name="l2_shape_delete_confirm",
+        ),
+        Route(
+            "/l2_shape/{kind}/{entity_id}/delete-cancel",
+            h["delete_cancel"],
+            methods=["GET"], name="l2_shape_delete_cancel",
         ),
         Route(
             "/l2_shape/{kind}/{entity_id}", h["read_card"],

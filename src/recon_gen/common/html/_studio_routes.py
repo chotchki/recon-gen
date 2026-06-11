@@ -984,7 +984,6 @@ def _render_home_page(
     </p>
   </header>
   <main class="px-8 pt-4 pb-8" id="home-entities">
-    <div id="delete-confirm-banner-slot" data-test-delete-banner-slot></div>
     {sections_html}
   </main>
 </body>

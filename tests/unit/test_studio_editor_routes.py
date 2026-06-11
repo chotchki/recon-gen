@@ -368,11 +368,12 @@ def test_delete_dependent_rail_returns_400(
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         # ReconciliationLeg is in ExternalReconciliationCycle.leg_rails.
-        # GET the confirm banner — references must be listed.
+        # BX.1 redesign — confirm endpoint returns the refused-state
+        # inner when refs exist (defense-in-depth for stale tabs).
         banner = c.get("/l2_shape/rail/ReconciliationLeg/delete-confirm")
         assert banner.status_code == 200, banner.text
-        assert 'data-test-delete-state="blocked"' in banner.text
-        # Referrer chip points at the transfer_template.
+        assert 'data-delete-state="refused"' in banner.text
+        # Referrer named in the reason text.
         assert "ExternalReconciliationCycle" in banner.text
 
         # Raw DELETE without a confirm_token: 400 missing-token.
@@ -455,7 +456,9 @@ def test_card_renders_delete_link_with_confirm(
     assert (
         'hx-get="/l2_shape/account/cust-001/delete-confirm"' in body
     ), body
-    assert 'hx-target="#delete-confirm-banner-slot"' in body
+    # BX.1 redesign — wrapper-innerHTML in-place swap, NOT page-level slot.
+    assert 'hx-target="closest [data-delete-wrapper]"' in body
+    assert "#delete-confirm-banner-slot" not in body
     # No browser-native modal — BX.1 lock.
     assert "hx-confirm=" not in body
 
@@ -1358,14 +1361,10 @@ def test_chain_card_id_replaces_double_colon_to_avoid_css_pseudo_element(
     assert f'id="entity-chain-{slug}"' in body
     # NO raw ``::`` in the id attr.
     assert f'id="entity-chain-{composite}"' not in body
-    # BX.1 (2026-06-11) — the Delete button now targets the page-
-    # level ``#delete-confirm-banner-slot`` (the banner displays the
-    # confirm flow); the card's CSS-safe id remains important for
-    # the post-delete cascade-reload swap shape but no longer
-    # surfaces on the Delete button's hx-target. Pin the new shape
-    # AND keep the CSS-safe id assertion above so the original
-    # X.4.f.10 fix isn't lost.
-    assert 'hx-target="#delete-confirm-banner-slot"' in body
+    # BX.1 redesign (2026-06-11) — Delete swaps in place via
+    # ``hx-target="closest [data-delete-wrapper]"``; the per-card
+    # wrapper IS the swap boundary, no page-level slot.
+    assert 'hx-target="closest [data-delete-wrapper]"' in body
     # BX.10 — URLs now point at the opaque form. Raw composite no
     # longer appears in href/hx-get.
     assert f'href="/l2_shape/chain/{url_id}/edit"' in body
@@ -1966,19 +1965,23 @@ def test_delete_unreferenced_account_persists(
     """Deleting cust-002 succeeds — no rail / template references it
     by id; the role CustomerSubledger is still satisfied by cust-001.
 
-    BX.1 (2026-06-11): the operator now goes through the confirm
-    banner. Test pinches the countdown to 0s via monkeypatch so the
-    server-side wall-clock check passes immediately."""
+    BX.1 redesign (2026-06-11): the operator clicks Delete → wrapper
+    swaps to the countdown body → at ready they click Confirm which
+    fires hx-delete with the signed token. Test pinches the countdown
+    to 0s via monkeypatch so the swap arrives already in "ready"
+    state (no JS tick needed) + the server-side wall-clock check
+    passes immediately."""
     monkeypatch.setattr(
         "recon_gen.common.html._delete_confirm.COUNTDOWN_SECS", 0.0,
     )
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
-        # GET the banner. cust-002 is unreferenced → armed mode.
+        # GET the swap body. cust-002 is unreferenced → countdown
+        # body (which arrives as "ready" because we pinned 0s above).
         banner = c.get("/l2_shape/account/cust-002/delete-confirm")
         assert banner.status_code == 200, banner.text
-        assert 'data-test-delete-state="armed"' in banner.text
-        # Extract the confirm_token from the banner's hx-delete URL.
+        assert 'data-delete-state="ready"' in banner.text
+        # Extract the confirm_token from the hx-delete URL.
         token = _extract_confirm_token(banner.text)
 
         resp = c.delete(

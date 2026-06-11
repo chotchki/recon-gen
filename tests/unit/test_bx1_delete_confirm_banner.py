@@ -1,30 +1,26 @@
-"""BX.1 — Delete-confirm inline banner + 5s countdown + Cancel +
-reference-check.
+"""BX.1 — In-place Delete button + reference-check + countdown.
 
-Covers the unit-level surface added in BX.1:
+Post-redesign (2026-06-11): replaces the top-of-page banner UX with
+an in-place wrapper-swap. Three render-time states + one post-click
+state, tested here at the unit level:
 
 1. ``find_references`` walks the L2Instance for incoming refs and
    surfaces them as typed ``EntityRef`` tuples. Includes the
-   account-as-parent_role case (Account.role → other Account /
-   AccountTemplate / Rail / LimitSchedule fields), the rail-as-leg
-   case (Rail.name → TransferTemplate.leg_rails / Chain.parent /
-   Chain.children / LimitSchedule.rail), and the unreferenced-leaf
-   case (returns empty).
-2. ``render_delete_confirm_banner`` emits the two visual modes:
-   ``blocked`` when refs exist (no Confirm button; lists referrers)
-   and ``armed`` when refs are empty (countdown attrs + Confirm
-   button rendered ``disabled``). Renders ``data-test-*`` hooks so
-   browser drivers locate by ARIA / semantic attrs, not Tailwind
-   utility classes (per `feedback_browser_drivers_user_facing_locators`).
-3. ``verify_confirm_token`` enforces the 5-second window
-   server-side: ``too_early`` when called before the countdown
-   elapses, ``ok`` after.
-4. Route-level flow: the card's Delete button is wired with hx-get
-   to ``/l2_shape/<kind>/<id>/delete-confirm`` (not a direct
-   hx-delete); the DELETE handler rejects a request without
-   ``confirm_token`` AND rejects an early-confirm (before countdown
-   elapsed); both Cancel and post-success flows correctly remove
-   the banner via the slot.
+   account-as-parent_role case, the rail-as-leg case, and the
+   unreferenced-leaf case (returns empty).
+2. ``build_reference_graph`` precomputes ``find_references`` for
+   every entity in one pass so a list-page render is O(N) not O(N²).
+3. ``render_active_delete_button`` / ``render_refused_delete_button``
+   / ``render_countdown_swap`` emit the three render-time states +
+   the post-click swap body. State lives in ``data-delete-state``
+   attribute (per ``[feedback_invariants_in_types]``); tooltip
+   reason lives in ``title`` + ``data-delete-reason`` (per
+   ``[feedback_browser_drivers_user_facing_locators]``).
+4. ``verify_confirm_token`` enforces the 5-second window
+   server-side.
+5. Route-level flow: card Delete points at the in-place confirm
+   endpoint with ``hx-target="closest [data-delete-wrapper]"``;
+   the cancel endpoint restores the active button.
 """
 
 from __future__ import annotations
@@ -43,12 +39,16 @@ TestClient = pytest.importorskip("starlette.testclient").TestClient
 
 from recon_gen.common.html import _delete_confirm
 from recon_gen.common.html._delete_confirm import (
-    BANNER_DOM_ID,
     COUNTDOWN_SECS,
     EntityRef,
+    ReferenceGraph,
+    build_reference_graph,
     find_references,
     make_confirm_token,
-    render_delete_confirm_banner,
+    render_active_delete_button,
+    render_active_delete_button_inner,
+    render_countdown_swap,
+    render_refused_delete_button,
     verify_confirm_token,
 )
 from recon_gen.common.html._smoke_app import (
@@ -105,15 +105,12 @@ def test_find_references_finds_rail_referencing_account_role(
     surface each referrer once, typed."""
     inst = load_instance(writable_l2_yaml)
     refs = find_references(inst, "account", "customer-ledger")
-    # cust-001 + cust-002 reference CustomerLedger as parent_role.
     cust_001_refs = [r for r in refs if r.referrer_id == "cust-001"]
     cust_002_refs = [r for r in refs if r.referrer_id == "cust-002"]
     assert cust_001_refs, "cust-001 references CustomerLedger as parent_role"
     assert cust_002_refs, "cust-002 references CustomerLedger as parent_role"
     assert all(r.via_field == "parent_role" for r in cust_001_refs)
     assert all(r.referrer_kind == "account" for r in cust_001_refs)
-    # AccountTemplates AlphaCustomerStub + CustomerSubledger also
-    # carry parent_role=CustomerLedger.
     template_refs = [
         r for r in refs if r.referrer_kind == "account_template"
     ]
@@ -124,10 +121,7 @@ def test_find_references_finds_template_referenced_rail(
     writable_l2_yaml: Path,
 ) -> None:
     """``ReconciliationLeg`` is in
-    ``ExternalReconciliationCycle.leg_rails``. The find walk surfaces
-    that template as a referrer; the existing
-    test_delete_dependent_rail_returns_400 (in
-    test_studio_editor_routes.py) exercises the routing path."""
+    ``ExternalReconciliationCycle.leg_rails``."""
     inst = load_instance(writable_l2_yaml)
     refs = find_references(inst, "rail", "ReconciliationLeg")
     tt_refs = [
@@ -148,9 +142,7 @@ def test_find_references_empty_when_role_shared(
     cust-001 + the CustomerSubledger template also carry. Deleting
     cust-002 leaves the role universe intact (cust-001 +
     AccountTemplate still cover CustomerSubledger), so the validator
-    accepts the delete. ``find_references`` MUST report no blockers
-    in this shared-role case — otherwise every role-shared
-    singleton would be undeletable through the banner."""
+    accepts the delete. ``find_references`` MUST report no blockers."""
     inst = load_instance(writable_l2_yaml)
     refs = find_references(inst, "account", "cust-002")
     assert refs == (), (
@@ -184,14 +176,13 @@ def test_find_references_limit_schedule_is_leaf(
     assert refs == (), "LimitSchedule has no incoming refs"
 
 
-def test_find_references_returns_typed_entity_ref() -> None:
+def test_find_references_returns_typed_entity_ref(
+    writable_l2_yaml: Path,
+) -> None:
     """``find_references`` returns ``tuple[EntityRef, ...]`` — typed
     dataclass, not raw dicts. Pin the class to prevent regression
     back to stringly-typed plumbing."""
-    # Build a minimal in-memory shape via the writable fixture so the
-    # call path is exercised; the type check is the focus.
-    here = Path(__file__).resolve().parent.parent / "l2"
-    inst = load_instance(here / "spec_example.yaml")
+    inst = load_instance(writable_l2_yaml)
     refs = find_references(inst, "account", "customer-ledger")
     assert isinstance(refs, tuple)
     for r in refs:
@@ -203,67 +194,222 @@ def test_find_references_returns_typed_entity_ref() -> None:
 
 
 # ---------------------------------------------------------------------------
-# render_delete_confirm_banner — visual modes
+# build_reference_graph — precompute, O(1) per-card lookup
 # ---------------------------------------------------------------------------
 
 
-def test_banner_armed_carries_countdown_attribute() -> None:
-    """No refs → armed mode → Confirm button rendered disabled
-    with ``data-ready-after-ms`` carrying the wall time after which
-    the client-side script should re-enable. Tests assert the
-    attribute exists + parses as an int — they don't drive the JS
-    countdown directly."""
-    html = render_delete_confirm_banner(
-        "account", "test-id", refs=(),
-        countdown_secs=5.0,
+def test_build_reference_graph_caches_every_kind(
+    writable_l2_yaml: Path,
+) -> None:
+    """Graph is built ONCE per render; lookup returns the same
+    refs as a fresh `find_references` call. Pin the equivalence so
+    we don't silently miss a kind in the cache walk."""
+    inst = load_instance(writable_l2_yaml)
+    graph = build_reference_graph(inst)
+    # Spot-check: every entity the fixture carries should resolve
+    # through the graph to the same value find_references returns.
+    for acc in inst.accounts:
+        assert graph.refs_for("account", str(acc.id)) == find_references(
+            inst, "account", str(acc.id),
+        )
+    for r in inst.rails:
+        assert graph.refs_for("rail", str(r.name)) == find_references(
+            inst, "rail", str(r.name),
+        )
+
+
+def test_build_reference_graph_missing_key_returns_empty_tuple() -> None:
+    """A lookup for an entity not in the graph (stale URL / typo)
+    returns the empty tuple — the active-state Delete renders and
+    the DELETE handler still validates server-side."""
+    inst = load_instance(_FIXTURES / "spec_example.yaml")
+    graph = build_reference_graph(inst)
+    refs = graph.refs_for("account", "no-such-account")
+    assert refs == ()
+
+
+# ---------------------------------------------------------------------------
+# render_active_delete_button + render_refused_delete_button — render-time states
+# ---------------------------------------------------------------------------
+
+
+def test_active_button_carries_wrapper_and_state_attr() -> None:
+    """No refs → active state → wrapper around an at-rest Delete
+    anchor with ``data-delete-state="active"``. Wrapper exposes
+    ``data-delete-wrapper`` so HTMX can target it via ``closest``."""
+    html = render_active_delete_button(
+        "account", "test-id", surface="card",
     )
-    assert f'id="{BANNER_DOM_ID}"' in html
-    assert 'data-test-delete-state="armed"' in html
-    assert 'data-test-delete-confirm' in html
-    assert 'disabled' in html
-    # countdown wall-time attr present + parses.
-    m = re.search(r'data-ready-after-ms="(\d+)"', html)
-    assert m is not None, html
-    ready_after_ms = int(m.group(1))
-    # Should be at least now + 4 seconds (countdown=5; allow 1s slack).
-    assert ready_after_ms > (time.time() * 1000) + 4000
+    assert "data-delete-wrapper" in html
+    assert 'data-delete-state="active"' in html
+    assert 'data-role="card-delete"' in html
+    # The Delete anchor fires hx-get against the in-place confirm URL.
+    assert 'hx-get="/l2_shape/account/test-id/delete-confirm"' in html
+    # Wrapper-targeted swap (closest [data-delete-wrapper]).
+    assert 'hx-target="closest [data-delete-wrapper]"' in html
+    assert 'hx-swap="innerHTML"' in html
+    # No page-level slot referenced.
+    assert "#delete-confirm-banner-slot" not in html
+    # No browser-native modal — BX.1 lock.
+    assert "hx-confirm=" not in html
 
 
-def test_banner_blocked_lists_referrers_no_confirm_button() -> None:
-    """References present → blocked mode → Confirm button absent;
-    each referrer listed with a data-test-ref-* hook."""
+def test_active_button_form_surface_carries_from_edit() -> None:
+    """``surface="form"`` adds ``?from=edit`` so the post-DELETE
+    handler HX-Redirects to the list page instead of leaving the
+    operator on a stale edit form."""
+    html = render_active_delete_button(
+        "account", "test-id", surface="form",
+    )
+    assert (
+        'hx-get="/l2_shape/account/test-id/delete-confirm?from=edit"'
+        in html
+    )
+    assert 'data-role="form-delete"' in html
+
+
+def test_refused_button_carries_disabled_attrs_and_reason() -> None:
+    """Refs non-empty → refused state → anchor with
+    ``aria-disabled="true"``, ``data-delete-state="refused"``, the
+    reason in ``title`` AND ``data-delete-reason`` so the e2e
+    driver can read the reason without triggering the tooltip
+    render."""
     refs = (
         EntityRef(
             referrer_kind="transfer_template",
-            referrer_id="SomeTT",
+            referrer_id="ExternalReconciliationCycle",
             via_field="leg_rails",
-            label="TransferTemplate SomeTT (leg_rails)",
+            label="TransferTemplate ExternalReconciliationCycle (leg_rails)",
         ),
     )
-    html = render_delete_confirm_banner(
-        "rail", "BlockedRail", refs=refs,
+    html = render_refused_delete_button(
+        "rail", "ReconciliationLeg", refs, surface="card",
+    )
+    assert 'data-delete-state="refused"' in html
+    assert 'aria-disabled="true"' in html
+    assert 'data-delete-ref-count="1"' in html
+    # Reason text reads banking-domain-readable per
+    # `[project_design_north_stars]`. NOT "FK violation".
+    assert 'data-delete-reason="' in html
+    assert "TransferTemplate" in html
+    assert "ExternalReconciliationCycle" in html
+    assert "leg_rails" in html
+    # Tooltip-friendly title carries the same text.
+    assert 'title="Referenced by' in html
+    # No hx-get on the refused anchor — clicking does nothing.
+    assert "hx-get=" not in html
+    # Wrapper still present so a future state change (operator
+    # removes referrers + re-renders the card) lands on the same
+    # swap boundary.
+    assert "data-delete-wrapper" in html
+
+
+def test_refused_button_caps_reason_at_three_referrers() -> None:
+    """When more than 3 entities reference the target, the reason
+    text caps the list at 3 + ``+N more`` so the title/tooltip stays
+    readable. The full list lives in the operator's blocker-
+    resolution path (clicking through to each referrer's edit page)."""
+    refs = tuple(
+        EntityRef(
+            referrer_kind="transfer_template",
+            referrer_id=f"TT_{i}",
+            via_field="leg_rails",
+            label=f"TransferTemplate TT_{i} (leg_rails)",
+        )
+        for i in range(5)
+    )
+    html = render_refused_delete_button(
+        "rail", "TestRail", refs, surface="card",
+    )
+    assert "TT_0" in html
+    assert "TT_1" in html
+    assert "TT_2" in html
+    # +2 more (refs 3, 4 not enumerated by name).
+    assert "+2 more" in html
+    assert 'data-delete-ref-count="5"' in html
+
+
+# ---------------------------------------------------------------------------
+# render_countdown_swap — post-click in-place body
+# ---------------------------------------------------------------------------
+
+
+def test_countdown_swap_carries_state_and_ready_after_ms() -> None:
+    """Countdown swap body: Confirm anchor with
+    ``data-delete-state="countdown"``, ``aria-disabled``, the
+    ``data-ready-after-ms`` wall time + the visible label "Confirming…
+    Ns". Sibling Cancel link points at the in-place cancel endpoint
+    targeting ``closest [data-delete-wrapper]``."""
+    html = render_countdown_swap(
+        "account", "cust-001", "cust-001",
         countdown_secs=5.0,
     )
-    assert 'data-test-delete-state="blocked"' in html
-    assert 'data-test-delete-ref-count="1"' in html
-    # The referrer chip carries the per-ref hook.
-    assert 'data-test-ref-kind="transfer_template"' in html
-    assert 'data-test-ref-id="SomeTT"' in html
-    assert 'data-test-ref-field="leg_rails"' in html
-    # No Confirm button in blocked mode.
-    assert 'data-test-delete-confirm' not in html
-    # Cancel button always present.
-    assert 'data-test-delete-cancel' in html
+    assert 'data-delete-state="countdown"' in html
+    assert 'data-role="card-delete-confirm"' in html
+    assert 'aria-disabled="true"' in html
+    # Countdown wall time.
+    m = re.search(r'data-ready-after-ms="(\d+)"', html)
+    assert m is not None, html
+    ready_after_ms = int(m.group(1))
+    assert ready_after_ms > (time.time() * 1000) + 4000
+    # Visible countdown label.
+    assert "Confirming… 5s" in html
+    # hx-delete fires against the real DELETE endpoint with the
+    # signed confirm token (verifier round-trip below).
+    assert 'hx-delete="/l2_shape/account/cust-001?confirm_token=' in html
+    assert 'hx-target="closest [data-delete-wrapper]"' in html
+    # Cancel link → wrapper innerHTML restored to active state.
+    assert 'data-role="card-delete-cancel"' in html
+    assert 'hx-get="/l2_shape/account/cust-001/delete-cancel"' in html
 
 
-def test_banner_cancel_button_targets_banner_outerhtml() -> None:
-    """Cancel button posts to the no-op cancel endpoint with
-    ``hx-swap=outerHTML`` so clicking it removes the banner aside
-    without round-tripping any state."""
-    html = render_delete_confirm_banner("account", "x", (), countdown_secs=5.0)
-    assert 'hx-get="/l2_shape/_delete_cancel"' in html
-    assert f'hx-target="#{BANNER_DOM_ID}"' in html
-    assert 'hx-swap="outerHTML"' in html
+def test_countdown_swap_zero_seconds_arrives_ready() -> None:
+    """When ``countdown_secs=0`` (the test monkeypatch path), the
+    swap body arrives already in the "ready" state — no
+    ``aria-disabled``, no countdown ticker script. Tests that
+    monkeypatch ``COUNTDOWN_SECS=0`` rely on this to fire DELETE
+    immediately."""
+    html = render_countdown_swap(
+        "account", "cust-001", "cust-001",
+        countdown_secs=0.0,
+    )
+    assert 'data-delete-state="ready"' in html
+    assert "aria-disabled" not in html
+    # Visible label is already "Confirm delete" (not "Confirming…").
+    assert "Confirm delete" in html
+    assert "Confirming…" not in html
+    # No JS ticker needed when countdown <=0.
+    assert "<script>" not in html
+
+
+def test_countdown_swap_form_surface_carries_from_edit() -> None:
+    """Form surface (edit page) appends ``&from=edit`` to the
+    hx-delete URL + ``?from=edit`` to the cancel URL so the
+    post-delete handler redirects to the list page."""
+    html = render_countdown_swap(
+        "account", "cust-001", "cust-001",
+        countdown_secs=1.0, surface="form",
+    )
+    assert "&from=edit" in html
+    assert (
+        'hx-get="/l2_shape/account/cust-001/delete-cancel?from=edit"'
+        in html
+    )
+
+
+def test_render_active_delete_button_inner_returns_no_wrapper() -> None:
+    """The Cancel endpoint returns just the inner anchor (no
+    wrapper open/close) so the existing wrapper survives the swap
+    and only its innerHTML changes back to the active state."""
+    html = render_active_delete_button_inner(
+        "account", "cust-001", surface="card",
+    )
+    # No wrapper <span> emitted — the existing wrapper survives the
+    # swap. The hx-target attr "closest [data-delete-wrapper]" still
+    # contains the literal string; assert against the opening tag.
+    assert "<span data-delete-wrapper" not in html
+    assert 'data-delete-state="active"' in html
+    assert 'hx-get="/l2_shape/account/cust-001/delete-confirm"' in html
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +418,7 @@ def test_banner_cancel_button_targets_banner_outerhtml() -> None:
 
 
 def test_verify_token_ok_after_countdown() -> None:
-    start_ts = time.time() - 6.0  # 6s ago
+    start_ts = time.time() - 6.0
     token = make_confirm_token("account", "x", start_ts)
     verify = verify_confirm_token(token, "account", "x", countdown_secs=5.0)
     assert verify.status == "ok", verify
@@ -280,7 +426,7 @@ def test_verify_token_ok_after_countdown() -> None:
 
 
 def test_verify_token_too_early_within_countdown() -> None:
-    start_ts = time.time() - 1.0  # 1s ago
+    start_ts = time.time() - 1.0
     token = make_confirm_token("account", "x", start_ts)
     verify = verify_confirm_token(token, "account", "x", countdown_secs=5.0)
     assert verify.status == "too_early", verify
@@ -290,7 +436,6 @@ def test_verify_token_too_early_within_countdown() -> None:
 def test_verify_token_invalid_when_tampered() -> None:
     start_ts = time.time() - 10.0
     token = make_confirm_token("account", "x", start_ts)
-    # Tamper the sig — anything other than the canonical HMAC.
     tampered = token.rsplit(":", 1)[0] + ":deadbeef"
     verify = verify_confirm_token(tampered, "account", "x")
     assert verify.status == "invalid"
@@ -298,8 +443,7 @@ def test_verify_token_invalid_when_tampered() -> None:
 
 def test_verify_token_invalid_when_swapped_to_different_entity() -> None:
     """The signature covers (kind, entity_id, start_ts) — a token
-    minted for one entity cannot delete another, even with the
-    same kind + countdown window."""
+    minted for one entity cannot delete another."""
     start_ts = time.time() - 10.0
     token = make_confirm_token("account", "cust-001", start_ts)
     verify = verify_confirm_token(token, "account", "cust-002")
@@ -307,55 +451,77 @@ def test_verify_token_invalid_when_swapped_to_different_entity() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Route-level flow — GET /delete-confirm + DELETE rejection paths
+# Route-level flow — confirm + cancel endpoints, DELETE rejection paths
 # ---------------------------------------------------------------------------
 
 
-def test_get_delete_confirm_returns_banner(
+def test_get_delete_confirm_returns_countdown_swap(
     writable_l2_yaml: Path,
 ) -> None:
     """GET /l2_shape/account/cust-002/delete-confirm returns the
-    armed banner (cust-002 has no incoming refs)."""
+    countdown swap body (cust-002 has no incoming refs). NOT a
+    full-banner aside."""
     app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps
         resp = c.get("/l2_shape/account/cust-002/delete-confirm")
     assert resp.status_code == 200
-    assert f'id="{BANNER_DOM_ID}"' in resp.text
-    assert 'data-test-delete-state="armed"' in resp.text
+    assert 'data-delete-state="countdown"' in resp.text
+    # Cancel sibling link.
+    assert 'data-role="card-delete-cancel"' in resp.text
+    # NO page-level banner shape.
+    assert 'data-test-delete-banner' not in resp.text
+    assert "#delete-confirm-banner-slot" not in resp.text
 
 
-def test_get_delete_confirm_blocked_when_referenced(
+def test_get_delete_confirm_returns_refused_when_stale_tab_referenced(
     writable_l2_yaml: Path,
 ) -> None:
-    """GET /l2_shape/rail/ReconciliationLeg/delete-confirm returns
-    the blocked banner — TransferTemplate.leg_rails references it."""
+    """Defense-in-depth: if the operator's tab is stale and the
+    entity gained references since the render, the confirm endpoint
+    returns the REFUSED inner so a click that bypassed the
+    render-time check still surfaces the blocker.
+
+    Picks ``ReconciliationLeg`` — referenced by
+    ``ExternalReconciliationCycle.leg_rails`` in the fixture."""
     app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps
         resp = c.get("/l2_shape/rail/ReconciliationLeg/delete-confirm")
     assert resp.status_code == 200
-    assert 'data-test-delete-state="blocked"' in resp.text
-    # The blocking referrer is named.
+    assert 'data-delete-state="refused"' in resp.text
     assert "ExternalReconciliationCycle" in resp.text
+    # No countdown / confirm anchor leaked.
+    assert 'data-delete-state="countdown"' not in resp.text
+
+
+def test_get_delete_cancel_returns_active_button(
+    writable_l2_yaml: Path,
+) -> None:
+    """GET /l2_shape/account/cust-002/delete-cancel returns the
+    active-state Delete anchor (no wrapper — wrapper-innerHTML swap
+    preserves the existing wrapper). The hx-target attribute carries
+    "closest [data-delete-wrapper]" so the literal string still
+    appears in the response; assert against the opening tag instead."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps
+        resp = c.get("/l2_shape/account/cust-002/delete-cancel")
+    assert resp.status_code == 200
+    assert 'data-delete-state="active"' in resp.text
+    assert "<span data-delete-wrapper" not in resp.text
 
 
 def test_delete_during_countdown_rejected_with_too_early(
     writable_l2_yaml: Path,
 ) -> None:
-    """POST /delete with a confirm_token whose start_ts is fresher
-    than COUNTDOWN_SECS gets a 400 ``too-early`` — the client side
-    countdown can be bypassed via DevTools, but the server wall
-    clock catches it."""
-    # Mint a token with start_ts = now (no monkeypatch — we exercise
-    # the production-default 5s window).
+    """Server wall-clock check: a token whose start_ts is fresher
+    than COUNTDOWN_SECS gets a 400 ``too-early``."""
     token = make_confirm_token("account", "cust-002", time.time())
     app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps
         resp = c.delete(
             f"/l2_shape/account/cust-002?confirm_token={token}",
         )
     assert resp.status_code == 400, resp.text
     assert "too-early" in resp.text
-    # Disk unchanged.
     reloaded = load_instance(writable_l2_yaml)
     assert any(str(a.id) == "cust-002" for a in reloaded.accounts)
 
@@ -363,26 +529,13 @@ def test_delete_during_countdown_rejected_with_too_early(
 def test_delete_without_token_rejected_with_missing_token(
     writable_l2_yaml: Path,
 ) -> None:
-    """A direct DELETE that skips the banner entirely (e.g. a
-    stale-tab refresh fired from cached HTML, or an integration
-    script that hasn't been migrated) gets a 400 ``missing-token``
-    — never a silent delete."""
+    """A direct DELETE that skips the confirm flow entirely gets a
+    400 ``missing-token`` — never a silent delete."""
     app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps
         resp = c.delete("/l2_shape/account/cust-002")
     assert resp.status_code == 400, resp.text
     assert "missing-token" in resp.text
-
-
-def test_delete_cancel_returns_empty(writable_l2_yaml: Path) -> None:
-    """GET /l2_shape/_delete_cancel returns an empty body so the
-    Cancel button's outerHTML swap kills the banner aside in place
-    without any other side effect."""
-    app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
-        resp = c.get("/l2_shape/_delete_cancel")
-    assert resp.status_code == 200
-    assert resp.text == ""
 
 
 def test_delete_after_countdown_with_monkeypatched_zero_secs_succeeds(
@@ -390,8 +543,7 @@ def test_delete_after_countdown_with_monkeypatched_zero_secs_succeeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """End-to-end: pin COUNTDOWN_SECS=0, mint a token, fire DELETE
-    — the entity disappears from disk + the response carries the
-    cascade-reload trigger."""
+    — the entity disappears from disk."""
     monkeypatch.setattr(
         "recon_gen.common.html._delete_confirm.COUNTDOWN_SECS", 0.0,
     )
@@ -399,7 +551,7 @@ def test_delete_after_countdown_with_monkeypatched_zero_secs_succeeds(
         cast("EntityKind", "account"), "cust-002", time.time(),
     )
     app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps
         resp = c.delete(
             f"/l2_shape/account/cust-002?confirm_token={token}",
         )
@@ -414,43 +566,77 @@ def test_delete_after_countdown_with_monkeypatched_zero_secs_succeeds(
 # ---------------------------------------------------------------------------
 
 
-def test_card_delete_button_targets_confirm_endpoint(
+def test_card_delete_button_targets_wrapper_swap(
     writable_l2_yaml: Path,
 ) -> None:
     """Card Delete button: hx-get pointed at /delete-confirm,
-    hx-target at the page-level banner slot. No hx-confirm modal."""
+    hx-target at ``closest [data-delete-wrapper]`` (NOT the old
+    page-level slot). Wrapper present + active state for the
+    unreferenced cust-001 card."""
     app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps
         body = c.get("/l2_shape/account/cust-001").text
-    assert (
-        'hx-get="/l2_shape/account/cust-001/delete-confirm"' in body
-    )
-    assert 'hx-target="#delete-confirm-banner-slot"' in body
+    assert 'hx-get="/l2_shape/account/cust-001/delete-confirm"' in body
+    assert 'hx-target="closest [data-delete-wrapper]"' in body
     assert 'data-role="card-delete"' in body
+    assert "data-delete-wrapper" in body
     assert "hx-confirm=" not in body
+    # The OLD page-level slot shape is gone.
+    assert "#delete-confirm-banner-slot" not in body
+    assert 'id="delete-confirm-banner-slot"' not in body
 
 
-def test_list_page_carries_banner_slot(writable_l2_yaml: Path) -> None:
-    """List page reserves a top-level ``#delete-confirm-banner-slot``
-    so card Delete clicks have somewhere to land their banner."""
+def test_card_delete_refused_when_referenced_renders_refused_state(
+    writable_l2_yaml: Path,
+) -> None:
+    """A card whose entity has incoming refs renders Delete in the
+    refused state at render time — operator sees the disabled
+    button BEFORE clicking, with the tooltip reason in
+    ``title``/``data-delete-reason``.
+
+    Uses ReconciliationLeg (referenced by
+    ExternalReconciliationCycle.leg_rails)."""
     app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps
+        body = c.get("/l2_shape/rail/ReconciliationLeg").text
+    assert 'data-delete-state="refused"' in body
+    assert 'aria-disabled="true"' in body
+    assert "ExternalReconciliationCycle" in body
+    assert 'data-delete-reason="Referenced by' in body
+
+
+def test_list_page_has_no_banner_slot(writable_l2_yaml: Path) -> None:
+    """BX.1 redesign — the page-level
+    ``#delete-confirm-banner-slot`` is GONE. Each card carries its
+    own in-place wrapper."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps
         body = c.get("/l2_shape/account/").text
-    assert 'id="delete-confirm-banner-slot"' in body
-    assert 'data-test-delete-banner-slot' in body
+    assert 'id="delete-confirm-banner-slot"' not in body
+    assert 'data-test-delete-banner-slot' not in body
+    # But each card DOES have a wrapper.
+    assert "data-delete-wrapper" in body
 
 
-def test_edit_page_carries_banner_slot(writable_l2_yaml: Path) -> None:
-    """Edit page reserves the same slot above the form section."""
+def test_edit_page_has_no_banner_slot(writable_l2_yaml: Path) -> None:
+    """Edit page — same redesign, no slot at the top. Form Delete
+    is in-place in the action row."""
     app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps
         body = c.get("/l2_shape/account/cust-001/edit").text
-    assert 'id="delete-confirm-banner-slot"' in body
+    assert 'id="delete-confirm-banner-slot"' not in body
+    assert 'data-test-delete-banner-slot' not in body
+    # Form Delete present + wrapped.
+    assert 'data-role="form-delete"' in body
+    assert "data-delete-wrapper" in body
+    assert (
+        'hx-get="/l2_shape/account/cust-001/delete-confirm?from=edit"'
+        in body
+    )
 
 
 # ---------------------------------------------------------------------------
-# BX.1 followup (2026-06-11) — onclick guard against parent `<details>`
-# toggle when Delete sits inside a `<summary>` (collapsed-card list view)
+# onclick guard parity — Delete inside <summary> must not toggle <details>
 # ---------------------------------------------------------------------------
 
 
@@ -468,111 +654,84 @@ def test_edit_page_carries_banner_slot(writable_l2_yaml: Path) -> None:
 def test_card_delete_button_onclick_suppresses_summary_toggle(
     writable_l2_yaml: Path, kind: str, list_path: str,
 ) -> None:
-    """BX.1 followup — the card Delete anchor MUST call
-    ``event.preventDefault()`` in addition to ``event.stopPropagation()``.
-
-    Rationale: when the list page renders cards in collapsed form
-    (``<details>``-wrapped, the default since CG.5), the action
-    buttons sit inside ``<summary>``. The native ``<summary>``
-    activation behavior (toggle the parent ``<details>``) is the
-    click event's default action — ``stopPropagation()`` alone does
-    NOT cancel it. Without ``preventDefault()`` a click on Delete
-    silently toggles the card open/close AND fires the htmx request.
-    The operator sees only the toggle (the banner DOES land but the
-    toggle is louder + visible) and concludes Delete is broken.
-
-    The fix: both inline handlers on the Delete anchor. Pin this
-    invariant for every kind that renders in the collapsed-card list
-    view (every L2 entity kind today — same render path)."""
+    """Cards render in collapsed form (``<details>``-wrapped); the
+    Delete anchor MUST call both ``preventDefault()`` AND
+    ``stopPropagation()`` so clicking it doesn't toggle the parent
+    ``<details>`` open as a confusing side-effect."""
     app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps
         body = c.get(list_path).text
-    # Locate the Delete anchor (data-role="card-delete") and read its
-    # onclick. The list page may render N Delete anchors (one per
-    # card); they all share the same onclick template, so the first
-    # match is representative.
-    import re
     matches = re.findall(
         r'<a\b[^>]*\bdata-role="card-delete"[^>]*>',
         body,
     )
     assert matches, (
-        f"kind={kind!r} list page rendered no card-delete anchor — "
-        f"the fixture may be empty for this kind; if so, expand the "
-        f"fixture instead of skipping (the invariant applies to every "
-        f"render path).\nList page body (first 2KB):\n{body[:2048]}"
+        f"kind={kind!r} list page rendered no card-delete anchor.\n"
+        f"List page body (first 2KB):\n{body[:2048]}"
     )
     for anchor_open in matches:
-        assert "event.preventDefault()" in anchor_open, (
-            f"kind={kind!r} Delete anchor missing "
-            f"`event.preventDefault()` — collapsed-card click will "
-            f"toggle the parent `<details>` instead of opening only "
-            f"the BX.1 confirm banner.\nAnchor: {anchor_open}"
-        )
-        assert "event.stopPropagation()" in anchor_open, (
-            f"kind={kind!r} Delete anchor missing "
-            f"`event.stopPropagation()` — click will bubble to any "
-            f"wider `<summary>` chrome (home-page section wrappers).\n"
-            f"Anchor: {anchor_open}"
-        )
+        assert "event.preventDefault()" in anchor_open, anchor_open
+        assert "event.stopPropagation()" in anchor_open, anchor_open
 
 
 def test_edit_page_delete_button_carries_onclick_guard(
     writable_l2_yaml: Path,
 ) -> None:
-    """BX.1 followup — the edit-page Delete anchor (data-role=
-    "form-delete") carries the same onclick guard.
-
-    The edit page isn't currently wrapped in a ``<details>``, so the
-    guard is insurance against a future wrapper (e.g. a collapsible
-    "Danger zone" section) silently regressing the same bug. The
-    edit-page render path references the module-level
-    ``_card_delete_onclick`` constant (lowercase to dodge the
-    no-inline-production-constants typing-smell index) — same value
-    as the inline string in ``_render_card_action_buttons``."""
+    """Edit page form-delete anchor — same guard for parity with
+    the card path."""
     app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps
         body = c.get("/l2_shape/account/cust-001/edit").text
-    import re
     m = re.search(
         r'<a\b[^>]*\bdata-role="form-delete"[^>]*>',
         body,
     )
     assert m is not None, (
-        "edit page rendered no form-delete anchor — the form's Delete "
-        "action button is missing.\nEdit page body (first 2KB):\n"
-        f"{body[:2048]}"
+        "edit page rendered no form-delete anchor."
+        f"\nEdit page body (first 2KB):\n{body[:2048]}"
     )
     anchor_open = m.group(0)
     assert "event.preventDefault()" in anchor_open, anchor_open
     assert "event.stopPropagation()" in anchor_open, anchor_open
 
 
-def test_card_action_buttons_helper_is_typed_primitive() -> None:
-    """BX.1 followup — the Edit + Delete pair is consolidated in
-    ``_render_card_action_buttons``. Pin the helper's existence + its
-    contract (Edit and Delete anchors, the BX.1 wire shape on Delete,
-    the onclick guard on Delete) so a future refactor that re-splits
-    the pair has to update this test too."""
+def test_card_action_buttons_helper_renders_state_aware_delete() -> None:
+    """``_render_card_action_buttons`` consolidates the Edit + Delete
+    pair and renders Delete in active OR refused state based on the
+    ``refs`` argument."""
     from recon_gen.common.html._studio_editor_routes import (  # noqa: PLC0415
         _render_card_action_buttons,
     )
-    html = _render_card_action_buttons("rail", "test-rail-id")
-    assert "<a" in html  # both Edit and Delete are anchors.
-    assert ">Edit<" in html
-    assert ">Delete<" in html
-    # Delete carries the BX.1 banner-slot wire shape.
-    assert 'data-role="card-delete"' in html
-    assert (
-        'hx-get="/l2_shape/rail/test-rail-id/delete-confirm"' in html
+    # Empty refs → active.
+    active_html = _render_card_action_buttons(
+        "rail", "test-rail-id", refs=(),
     )
-    assert 'hx-target="#delete-confirm-banner-slot"' in html
-    # Delete onclick suppresses both bubbling AND the default action.
-    assert "event.preventDefault()" in html
-    assert "event.stopPropagation()" in html
+    assert ">Edit<" in active_html
+    assert ">Delete<" in active_html
+    assert 'data-delete-state="active"' in active_html
+    assert "data-delete-wrapper" in active_html
+    assert 'hx-get="/l2_shape/rail/test-rail-id/delete-confirm"' in active_html
+    assert 'hx-target="closest [data-delete-wrapper]"' in active_html
+
+    # Non-empty refs → refused.
+    refs = (
+        EntityRef(
+            referrer_kind="transfer_template",
+            referrer_id="TT_x",
+            via_field="leg_rails",
+            label="TransferTemplate TT_x (leg_rails)",
+        ),
+    )
+    refused_html = _render_card_action_buttons(
+        "rail", "test-rail-id", refs=refs,
+    )
+    assert 'data-delete-state="refused"' in refused_html
+    assert 'aria-disabled="true"' in refused_html
+    assert 'data-delete-reason="Referenced by' in refused_html
 
 
 # Silence unused-import warning for COUNTDOWN_SECS — it documents
 # the production default the tests pin against via monkeypatch.
 _ = COUNTDOWN_SECS
 _ = _delete_confirm
+_ = ReferenceGraph

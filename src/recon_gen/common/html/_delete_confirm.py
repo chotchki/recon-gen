@@ -1,47 +1,54 @@
-"""BX.1 — Delete-confirm inline banner with reference-check + 5s countdown.
+"""BX.1 — In-place Delete button + reference-check + countdown.
 
-Replaces the previous browser-native ``hx-confirm="Delete this entity?"``
-modal with an inline banner that:
+Post-redesign (2026-06-11 operator dogfood): the prior top-of-page
+banner UX failed for tall list pages — operator clicks Delete on a
+card scrolled-down, banner appears at the top out of view, operator
+concludes nothing happened. Replaced with an in-place button swap.
 
-1. **References-first.** Walks the L2Instance for every entity that
-   references the deletion target (Rail.source_role pointing at the
-   account's role, TransferTemplate.leg_rails containing the rail's
-   name, Chain.children naming this rail/template, etc.). Renders a
-   "referenced by" listing.
+The Delete UI has three render-time states + one post-click state:
 
-   When references are present → the banner renders in **blocked**
-   mode: Confirm button is absent. The operator must remove the
-   references first. Matches the SPEC's "structural break = reject,
-   don't auto-cascade" rule the existing DELETE handler enforces via
-   ``validate()``, but surfaces the same information **before** the
-   destructive click so the operator doesn't have to learn it through
-   the post-hoc 400.
+1. **active** (render time, unreferenced entity) — Delete anchor
+   renders enabled, sitting in the card / form action row exactly
+   where the old "Delete" button did. Clicking it ``hx-get``s the
+   confirm endpoint which swaps the wrapper innerHTML to ``countdown``.
 
-2. **5-second countdown.** When the entity is unreferenced, the
-   Confirm button renders disabled with ``data-ready-after="<ts>"``.
-   A small inline ``<script>`` re-enables it once ``Date.now() >=
-   ready_after``. The text counter decrements visibly so the
-   countdown is obvious.
+2. **refused** (render time, entity has incoming references) — Delete
+   anchor renders DISABLED with ``aria-disabled="true"`` and a
+   ``title`` carrying the operator-readable reason ("Referenced by
+   Rail: customer_ach_inbound …"). No click action; the operator
+   must remove the referrers first. The reason ALSO lives in
+   ``data-delete-reason`` so the e2e driver can read it without
+   triggering tooltip rendering.
 
-3. **Cancel kills it.** Cancel is an ``hx-get`` that replaces the
-   banner with an empty fragment — the existing card / edit form
-   stays untouched.
+3. **countdown** (post-click swap response) — anchor text counts
+   "Confirming… 5s" → 4 → 3 → 2 → 1, then changes to "Confirm delete"
+   and becomes clickable. Sibling "Cancel" link is always present;
+   clicking it ``hx-get``s the cancel endpoint which swaps the
+   wrapper back to the active button. The anchor fires ``hx-delete``
+   to the real DELETE endpoint with a signed confirm token.
 
-4. **Server-signed token.** The Confirm button posts to
-   ``DELETE /l2_shape/<kind>/<id>?confirm_token=<sig>``. The token is
-   an HMAC over ``(kind, entity_id, start_ts)`` keyed by a per-process
-   secret. The DELETE handler verifies the signature AND enforces
-   ``now - start_ts >= countdown_secs`` server-side — a client that
-   tried to disable the disabled-attribute via DevTools still hits
-   the server clock check.
+4. **ready** (countdown reached zero, JS flips state) — same DOM
+   element as countdown; only ``data-delete-state`` changes from
+   ``"countdown"`` to ``"ready"`` and the ``aria-disabled`` attribute
+   is removed. Tests + drivers can wait on the state attr instead of
+   timing the JS.
 
-The banner is the same inline-aside shape as ``_plant_banner.py``
-(BTa.2-era): no modal chrome, ``role="status"`` alert, lives in the
-DOM where the card/edit-form sat.
+The countdown's wall time is HMAC-signed server-side via
+``make_confirm_token`` / ``verify_confirm_token`` — a client that
+disables the disabled attr via DevTools still hits the server clock
+check.
 
 Per ``[feedback_invariants_in_types]``: typed dataclasses for refs +
-typed verify result. Per ``[feedback_browser_drivers_user_facing_locators]``:
-``data-*`` test hooks, no Tailwind classes as locators.
+typed verify result; state lives in ``data-delete-state`` attribute
+NOT scattered template conditionals.
+
+Per ``[feedback_browser_drivers_user_facing_locators]``: ``data-*``
+hooks + ``aria-disabled`` / ``title`` for refused tooltip; never
+Tailwind utility classes as test locators.
+
+Per ``[project_design_north_stars]``: reason text reads like
+"Referenced by Rail: customer_ach_inbound (leg_rails)" — banking-
+domain readable, never "FK constraint violation".
 """
 
 from __future__ import annotations
@@ -49,7 +56,7 @@ from __future__ import annotations
 import hmac
 import secrets
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 from html import escape
@@ -66,7 +73,7 @@ from recon_gen.common.l2.primitives import (
 
 
 # Per-process secret for HMAC-signing confirm tokens. Restarting the
-# server invalidates outstanding banners — acceptable for a single-user
+# server invalidates outstanding tokens — acceptable for a single-user
 # studio; the operator just clicks Delete again.
 _TOKEN_SECRET: bytes = secrets.token_bytes(32)
 
@@ -87,6 +94,11 @@ RefKind: TypeAlias = Literal[
 ]
 
 
+# Typed surface of the four UI states. Closed Literal so callers branch
+# at the type level (per `[feedback_invariants_in_types]`).
+DeleteState: TypeAlias = Literal["active", "refused", "countdown", "ready"]
+
+
 @dataclass(frozen=True, slots=True)
 class EntityRef:
     """One reference from another entity to the deletion target.
@@ -95,7 +107,7 @@ class EntityRef:
     parsing a string. ``referrer_kind`` + ``referrer_id`` address the
     referring entity (the one the operator must edit / delete first);
     ``via_field`` names the field carrying the reference; ``label`` is
-    an operator-readable summary the banner displays.
+    an operator-readable summary the refused tooltip surfaces.
     """
 
     referrer_kind: RefKind
@@ -185,6 +197,67 @@ def find_references(
         r for r in refs
         if not (r.referrer_kind == kind and r.referrer_id == entity_id)
     )
+
+
+# ---------------------------------------------------------------------------
+# Reference graph — precompute once per render so an N-card list page
+# answers find_references in O(1) per card instead of O(N) per card.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceGraph:
+    """Precomputed incoming-reference map keyed by ``(kind, entity_id)``.
+
+    Built once per page render in ``build_reference_graph`` so the
+    per-card Delete-button rendering can ask ``graph.refs_for(kind, id)``
+    in O(1) instead of re-walking the L2Instance N times for an N-card
+    list page.
+    """
+
+    _by_target: Mapping[tuple[EntityKind, str], tuple[EntityRef, ...]]
+
+    def refs_for(
+        self, kind: EntityKind, entity_id: str,
+    ) -> tuple[EntityRef, ...]:
+        """O(1) lookup. Returns the empty tuple when no refs exist."""
+        return self._by_target.get((kind, entity_id), ())
+
+
+def build_reference_graph(instance: L2Instance) -> ReferenceGraph:
+    """Walk the L2Instance and cache ``find_references`` for every
+    target entity. List-page render then asks ``graph.refs_for(kind, id)``
+    per card in O(1) instead of paying the full walk N times.
+
+    The cache key is ``(kind, entity_id)``. Composite-keyed entities
+    use their composite-id form (matching ``_entity_id`` in the editor
+    module). Leaf kinds (chain / limit_schedule) always resolve to
+    ``()`` — they're cached for shape parity with the lookup branch.
+    """
+    cache: dict[tuple[EntityKind, str], tuple[EntityRef, ...]] = {}
+    for acc in instance.accounts:
+        key: tuple[EntityKind, str] = ("account", str(acc.id))
+        cache[key] = find_references(instance, "account", str(acc.id))
+    for tmpl in instance.account_templates:
+        key = ("account_template", str(tmpl.role))
+        cache[key] = find_references(
+            instance, "account_template", str(tmpl.role),
+        )
+    for rail in instance.rails:
+        key = ("rail", str(rail.name))
+        cache[key] = find_references(instance, "rail", str(rail.name))
+    for tt in instance.transfer_templates:
+        key = ("transfer_template", str(tt.name))
+        cache[key] = find_references(
+            instance, "transfer_template", str(tt.name),
+        )
+    for ch in instance.chains:
+        key = ("chain", _chain_id(ch))
+        cache[key] = ()
+    for ls in instance.limit_schedules:
+        key = ("limit_schedule", _limit_id(ls))
+        cache[key] = ()
+    return ReferenceGraph(_by_target=cache)
 
 
 def _resolve_target(
@@ -427,211 +500,300 @@ def verify_confirm_token(
 
 
 # ---------------------------------------------------------------------------
-# Banner rendering
+# In-place Delete button rendering — three states
 # ---------------------------------------------------------------------------
 
 
-# The DOM id of the banner container — the cancel/replace HTMX target
-# hooks key off this. Module-level so tests can pin the same string.
-BANNER_DOM_ID = "delete-confirm-banner"
+# Onclick guard: prevent the click from bubbling to a parent
+# ``<details>``/``<summary>`` (collapsed-card list view's toggle hazard)
+# AND from triggering the summary's native open/close default action.
+# Carries forward from the BX.1 followup (aab08a79).
+_card_click_guard = "event.preventDefault(); event.stopPropagation()"
 
 
-def render_delete_confirm_banner(
+def _wrapper_open(kind: EntityKind, url_id: str) -> str:
+    """Open the wrapper ``<span>`` that HTMX swaps via ``hx-target=
+    "closest [data-delete-wrapper]"``. The wrapper is the stable
+    swap boundary across all four states — only its innerHTML
+    changes.
+    """
+    return (
+        f'<span data-delete-wrapper '
+        f'data-delete-kind="{escape(kind)}" '
+        f'data-delete-url-id="{escape(url_id)}" '
+        f'class="inline-flex items-center gap-2">'
+    )
+
+
+def _wrapper_close() -> str:
+    return "</span>"
+
+
+def _active_button_html(
+    kind: EntityKind, url_id: str, *, surface: Literal["card", "form"],
+) -> str:
+    """Bare active-state Delete anchor — no wrapper. Used both inside
+    the initial render path AND by the Cancel endpoint to restore the
+    active state without re-emitting the wrapper itself."""
+    data_role = "card-delete" if surface == "card" else "form-delete"
+    confirm_url = f"/l2_shape/{escape(kind)}/{escape(url_id)}/delete-confirm"
+    if surface == "form":
+        confirm_url += "?from=edit"
+    btn_cls = (
+        # danger-outline at rest, fills on hover.
+        "inline-flex items-center px-2 py-0.5 text-xs font-semibold "
+        "border border-danger text-danger rounded-sm "
+        "no-underline cursor-pointer "
+        "hover:bg-danger hover:text-white"
+    )
+    return (
+        f'<a class="{btn_cls}" '
+        f'data-role="{data_role}" '
+        f'data-delete-state="active" '
+        f'hx-get="{confirm_url}" '
+        f'hx-target="closest [data-delete-wrapper]" hx-swap="innerHTML" '
+        f'onclick="{_card_click_guard}">Delete</a>'
+    )
+
+
+def render_active_delete_button(
+    kind: EntityKind, url_id: str, *, surface: Literal["card", "form"],
+) -> str:
+    """Render the at-rest Delete button wrapped in its swap boundary.
+
+    ``surface="card"`` for the read-card summary; ``surface="form"``
+    for the edit page action row. Differs only in:
+
+    - ``data-role`` value (kept for test continuity with the BX.1
+      ``card-delete`` / ``form-delete`` locators).
+    - The ``?from=edit`` query param on the confirm endpoint (form
+      surface uses it so the post-delete handler can redirect to the
+      list page instead of swapping into the now-stale edit form).
+    """
+    return (
+        f"{_wrapper_open(kind, url_id)}"
+        f"{_active_button_html(kind, url_id, surface=surface)}"
+        f"{_wrapper_close()}"
+    )
+
+
+def render_active_delete_button_inner(
+    kind: EntityKind, url_id: str, *, surface: Literal["card", "form"],
+) -> str:
+    """Render JUST the active-state anchor (no wrapper) — the Cancel
+    endpoint returns this so the existing wrapper is preserved and
+    only the innerHTML swaps back to the at-rest state."""
+    return _active_button_html(kind, url_id, surface=surface)
+
+
+def render_refused_delete_button(
+    kind: EntityKind,
+    url_id: str,
+    refs: tuple[EntityRef, ...],
+    *,
+    surface: Literal["card", "form"],
+) -> str:
+    """Render the refused Delete anchor (state="refused") wrapped.
+
+    Refs are non-empty → anchor renders disabled with the reason in
+    ``title`` (browser-native tooltip on hover/focus) AND ``data-
+    delete-reason`` (driver introspection without triggering tooltip
+    render).
+
+    Per ``[project_design_north_stars]`` the reason reads
+    "Referenced by Rail: customer_ach_inbound (leg_rails); …" — list
+    each referrer with kind: id, comma-separated; the via_field
+    suffix shows WHICH field carries the reference (so the operator
+    knows where to edit).
+    """
+    data_role = "card-delete" if surface == "card" else "form-delete"
+    reason = _format_refused_reason(refs)
+    btn_cls = (
+        # Disabled-look: same border / color tokens but at reduced
+        # opacity + not-allowed cursor; no hover state. The aria
+        # disabled + the data-delete-state attr are the test hooks;
+        # the visual is informative only.
+        "inline-flex items-center px-2 py-0.5 text-xs font-semibold "
+        "border border-danger text-danger rounded-sm "
+        "no-underline opacity-50 cursor-not-allowed"
+    )
+    btn = (
+        f'<a class="{btn_cls}" '
+        f'data-role="{data_role}" '
+        f'data-delete-state="refused" '
+        f'data-delete-reason="{escape(reason)}" '
+        f'data-delete-ref-count="{len(refs)}" '
+        f'aria-disabled="true" '
+        f'title="{escape(reason)}" '
+        # Keyboard-focusable for tooltip parity (focus reveals title
+        # in most browsers via the accessibility tree).
+        f'tabindex="0" '
+        # No hx-get; the click guard exists only to prevent the
+        # disabled-anchor click from bubbling to the parent
+        # `<summary>` toggle hazard (collapsed-card list view).
+        f'onclick="{_card_click_guard}">Delete</a>'
+    )
+    return f"{_wrapper_open(kind, url_id)}{btn}{_wrapper_close()}"
+
+
+def _format_refused_reason(refs: tuple[EntityRef, ...]) -> str:
+    """Banking-domain readable reason text per
+    ``[project_design_north_stars]``.
+
+    Shape: ``Referenced by Rail: customer_ach_inbound (leg_rails),
+    LimitSchedule: DDAControl→…→Inbound (rail)``. One clause per
+    referrer; kind label-cased + ":" + id; via_field in parens.
+    Caps at 3 referrers + ``; +N more`` to keep the tooltip + the
+    ``data-delete-reason`` attr readable; the full list is still
+    browsable by clicking through to each referrer's edit page (the
+    operator's blocker-resolution path).
+    """
+    if not refs:
+        return "Referenced by other entities."
+    parts: list[str] = []
+    for r in refs[:3]:
+        kind_label = _kind_display_label(r.referrer_kind)
+        parts.append(f"{kind_label}: {r.referrer_id} ({r.via_field})")
+    suffix = ""
+    if len(refs) > 3:
+        suffix = f"; +{len(refs) - 3} more"
+    return "Referenced by " + ", ".join(parts) + suffix
+
+
+def _kind_display_label(kind: RefKind) -> str:
+    """Banking-domain CamelCase per kind. CPA-readable.
+    Per ``[project_design_north_stars]``."""
+    return {
+        "account": "Account",
+        "account_template": "AccountTemplate",
+        "rail": "Rail",
+        "transfer_template": "TransferTemplate",
+        "chain": "Chain",
+        "limit_schedule": "LimitSchedule",
+    }[kind]
+
+
+def render_countdown_swap(
     kind: EntityKind,
     entity_id: str,
-    refs: tuple[EntityRef, ...],
+    url_id: str,
     *,
     now: float | None = None,
     countdown_secs: float = COUNTDOWN_SECS,
+    surface: Literal["card", "form"] = "card",
 ) -> str:
-    """Render the inline confirm banner.
+    """Render the post-click swap body (state="countdown" → "ready").
 
-    Two visual modes:
+    Returned by the ``/delete-confirm`` GET endpoint. The HX-swap
+    replaces the wrapper's innerHTML so only this body changes
+    (Confirm + Cancel pair); the wrapper itself stays in place.
 
-    - ``blocked`` — references exist → red banner, listing each
-      referrer; Confirm button absent. Operator must Cancel + remove
-      the references first.
-    - ``armed`` — no references → amber banner, countdown timer,
-      Confirm button disabled until ``ready_after`` server time
-      passes. Cancel always present.
+    ``entity_id`` is the L2-canonical composite key (used to sign the
+    HMAC confirm token — the DELETE handler resolves the URL form
+    back to the same composite and verifies against it). ``url_id``
+    is the BX.10 URL-side form (opaque hash-slug for composite-keyed
+    kinds, bare id otherwise) and feeds the DELETE URL the button
+    fires; it MUST match the route Starlette registers.
 
-    The Cancel button is an HTMX ``hx-get`` against a no-op endpoint
-    that returns empty HTML — replaces the banner with nothing.
+    Wrapper is NOT emitted here — the parent wrapper survives the
+    swap. Only the innerHTML changes.
     """
     start_ts = time.time() if now is None else now
-    blocked = len(refs) > 0
-    if blocked:
-        return _render_blocked(kind, entity_id, refs)
     token = make_confirm_token(kind, entity_id, start_ts)
-    return _render_armed(
-        kind, entity_id,
-        start_ts=start_ts,
-        countdown_secs=countdown_secs,
-        token=token,
-    )
-
-
-def _render_blocked(
-    kind: EntityKind, entity_id: str, refs: tuple[EntityRef, ...],
-) -> str:
-    """References present — delete blocked. Lists the referrers with
-    edit-links so the operator can navigate-and-fix in one click."""
-    ref_items: list[str] = []
-    for r in refs:
-        edit_url = _referrer_edit_url(r)
-        ref_items.append(
-            f'<li data-test-delete-ref '
-            f'data-test-ref-kind="{escape(r.referrer_kind)}" '
-            f'data-test-ref-id="{escape(r.referrer_id)}" '
-            f'data-test-ref-field="{escape(r.via_field)}">'
-            f'<a class="text-accent no-underline hover:underline" '
-            f'href="{escape(edit_url)}">'
-            f'{escape(r.label)}</a></li>'
-        )
-    items_html = "".join(ref_items)
-    cancel_btn = (
-        f'<button type="button" '
-        f'class="inline-flex items-center px-3 py-1 text-xs font-semibold '
-        f'border border-surface-border text-primary-fg bg-white rounded-sm '
-        f'cursor-pointer hover:bg-surface-bg" '
-        f'data-test-delete-cancel '
-        f'hx-get="/l2_shape/_delete_cancel" '
-        f'hx-target="#{BANNER_DOM_ID}" hx-swap="outerHTML">'
-        f'Cancel</button>'
-    )
-    return (
-        f'<aside id="{BANNER_DOM_ID}" '
-        f'class="mx-0 mt-4 mb-4 bg-red-50 border border-danger '
-        f'rounded-md px-4 py-3 text-sm" '
-        f'role="alert" '
-        f'data-test-delete-banner '
-        f'data-test-delete-state="blocked" '
-        f'data-test-delete-kind="{escape(kind)}" '
-        f'data-test-delete-entity-id="{escape(entity_id)}" '
-        f'data-test-delete-ref-count="{len(refs)}">'
-        f'<strong class="text-danger">Delete blocked.</strong> '
-        f'<span class="text-secondary-fg">'
-        f'{escape(kind)} <code>{escape(entity_id)}</code> is '
-        f'referenced by the following — edit or delete those first, '
-        f'then try again.'
-        f'</span>'
-        f'<ul class="mt-2 mb-3 pl-6 list-disc text-sm text-primary-fg" '
-        f'data-test-delete-ref-list>'
-        f'{items_html}'
-        f'</ul>'
-        f'<div class="flex items-center gap-2">{cancel_btn}</div>'
-        f'</aside>'
-    )
-
-
-def _render_armed(
-    kind: EntityKind,
-    entity_id: str,
-    *,
-    start_ts: float,
-    countdown_secs: float,
-    token: str,
-) -> str:
-    """No references — countdown then Confirm. The Confirm button
-    renders disabled with ``data-ready-after-ms`` carrying the wall
-    time when it should re-enable. A small inline script flips
-    ``disabled`` and updates the visible counter."""
-    ready_after_ms = int((start_ts + countdown_secs) * 1000)
-    countdown_int = int(countdown_secs)
-    # The confirm button posts (via htmx hx-delete) to the existing
-    # DELETE route + the signed confirm token query param. On success
-    # the existing handler returns the same HX-Trigger / HX-Redirect
-    # shape it always has.
     delete_url = (
-        f"/l2_shape/{escape(kind)}/{escape(entity_id)}"
+        f"/l2_shape/{escape(kind)}/{escape(url_id)}"
         f"?confirm_token={escape(token)}"
     )
-    confirm_btn = (
-        f'<button type="button" '
-        f'class="inline-flex items-center px-3 py-1 text-xs font-semibold '
-        f'border border-danger text-white bg-danger rounded-sm '
-        f'cursor-not-allowed opacity-60" '
-        f'data-test-delete-confirm '
+    if surface == "form":
+        # form surface — append ?from=edit so the post-DELETE
+        # handler HX-Redirects to the list page (per BX.1).
+        delete_url += "&from=edit"
+    ready_after_ms = int((start_ts + countdown_secs) * 1000)
+    countdown_int = max(int(countdown_secs), 0)
+    # Per-swap unique id so the inline JS can grab the right button by
+    # ID after HTMX evaluates the swapped script tag. start_ts at
+    # microsecond resolution disambiguates rapid-fire repeats of the
+    # same entity's Delete click.
+    btn_id = f"delete-confirm-btn-{int(start_ts * 1_000_000):x}"
+    btn_cls = (
+        "inline-flex items-center px-2 py-0.5 text-xs font-semibold "
+        "border border-danger text-danger rounded-sm "
+        "no-underline cursor-not-allowed opacity-70"
+    )
+    countdown_label = (
+        f"Confirming… {countdown_int}s" if countdown_int > 0
+        else "Confirm delete"
+    )
+    initial_state: DeleteState = (
+        "ready" if countdown_int <= 0 else "countdown"
+    )
+    # When countdown_secs=0 the button arrives already in the "ready"
+    # state — tests that monkeypatch COUNTDOWN_SECS=0 want the confirm
+    # URL clickable immediately (no JS tick needed to remove
+    # aria-disabled).
+    aria_disabled_attr = (
+        'aria-disabled="true"' if countdown_int > 0 else ""
+    )
+    btn = (
+        f'<a id="{btn_id}" class="{btn_cls}" '
+        f'data-role="card-delete-confirm" '
+        f'data-delete-state="{initial_state}" '
         f'data-ready-after-ms="{ready_after_ms}" '
-        f'data-countdown-secs="{countdown_int}" '
-        f'disabled '
+        f'data-countdown-remaining="{countdown_int}" '
+        f'{aria_disabled_attr} '
         f'hx-delete="{delete_url}" '
-        f'hx-target="#{BANNER_DOM_ID}" hx-swap="outerHTML">'
-        f'<span data-test-delete-confirm-label>'
-        f'Confirm delete in {countdown_int}s'
-        f'</span></button>'
+        f'hx-target="closest [data-delete-wrapper]" hx-swap="innerHTML">'
+        f'<span data-delete-confirm-label>{escape(countdown_label)}</span>'
+        f'</a>'
     )
+    cancel_cls = (
+        "text-xs text-secondary-fg cursor-pointer hover:underline "
+        "hover:text-primary-fg ml-1"
+    )
+    cancel_url = (
+        f"/l2_shape/{escape(kind)}/{escape(url_id)}/delete-cancel"
+    )
+    if surface == "form":
+        cancel_url += "?from=edit"
     cancel_btn = (
-        f'<button type="button" '
-        f'class="inline-flex items-center px-3 py-1 text-xs font-semibold '
-        f'border border-surface-border text-primary-fg bg-white rounded-sm '
-        f'cursor-pointer hover:bg-surface-bg" '
-        f'data-test-delete-cancel '
-        f'hx-get="/l2_shape/_delete_cancel" '
-        f'hx-target="#{BANNER_DOM_ID}" hx-swap="outerHTML">'
-        f'Cancel</button>'
+        f'<a class="{cancel_cls}" '
+        f'data-role="card-delete-cancel" '
+        f'hx-get="{cancel_url}" '
+        f'hx-target="closest [data-delete-wrapper]" hx-swap="innerHTML" '
+        f'onclick="{_card_click_guard}">Cancel</a>'
     )
-    # Inline script: counts down on the button, flips disabled + tw
-    # classes at zero. Scoped to this banner by id so multiple banners
-    # don't cross-trigger. Note the script uses string concatenation
-    # (not f-string at JS level) — Python f-string parses { and } as
-    # placeholders; the JS uses a template literal which would clash.
-    script_block = (
-        '<script>(function(){'
-        f"var el=document.querySelector('#{BANNER_DOM_ID} "
-        "[data-test-delete-confirm]');"
-        "if(!el)return;"
-        "var label=el.querySelector('[data-test-delete-confirm-label]');"
-        "var readyAt=parseInt(el.getAttribute('data-ready-after-ms'),10);"
-        "function tick(){"
-        "var now=Date.now();"
-        "var remainingMs=readyAt-now;"
-        "if(remainingMs<=0){"
-        "el.removeAttribute('disabled');"
-        "el.className='inline-flex items-center px-3 py-1 text-xs "
-        "font-semibold border border-danger text-white bg-danger "
-        "rounded-sm cursor-pointer hover:bg-red-700';"
-        "if(label)label.textContent='Confirm delete';"
-        "return;"
-        "}"
-        "var remainingSec=Math.ceil(remainingMs/1000);"
-        "if(label)label.textContent='Confirm delete in '+remainingSec+'s';"
-        "setTimeout(tick,100);"
-        "}tick();"
-        "})();</script>"
-    )
-    return (
-        f'<aside id="{BANNER_DOM_ID}" '
-        f'class="mx-0 mt-4 mb-4 bg-warning/5 border border-warning '
-        f'rounded-md px-4 py-3 text-sm" '
-        f'role="alert" '
-        f'data-test-delete-banner '
-        f'data-test-delete-state="armed" '
-        f'data-test-delete-kind="{escape(kind)}" '
-        f'data-test-delete-entity-id="{escape(entity_id)}" '
-        f'data-test-delete-ref-count="0" '
-        f'data-test-delete-ready-after-ms="{ready_after_ms}">'
-        f'<strong class="text-warning">Confirm delete.</strong> '
-        f'<span class="text-secondary-fg">'
-        f'No other entities reference {escape(kind)} '
-        f'<code>{escape(entity_id)}</code>. Wait {countdown_int}s, '
-        f'then click Confirm. Cancel anytime.'
-        f'</span>'
-        f'<div class="flex items-center gap-2 mt-3">'
-        f'{confirm_btn}{cancel_btn}'
-        f'</div>'
-        f'{script_block}'
-        f'</aside>'
-    )
-
-
-def _referrer_edit_url(ref: EntityRef) -> str:
-    """Build the edit URL for a referrer so the operator can click
-    through to fix it. Uses ``?from=`` so the back-breadcrumb returns
-    them to wherever they triggered the delete from (BTa.2 P1.5)."""
-    return (
-        f"/l2_shape/{ref.referrer_kind}/{ref.referrer_id}/edit"
-        f"?from=delete-blocked"
-    )
-
-
+    # Inline JS: countdown ticker, flips state attr to "ready" at 0.
+    # Identified by the per-swap unique id so post-HTMX-eval the
+    # script finds the button reliably. 250ms tick tolerates
+    # background-tab throttling without falling far behind the wall
+    # clock. Skip the script when countdown_secs <= 0 — the button
+    # arrives already in the "ready" state (test monkeypatch path).
+    if countdown_int > 0:
+        script = (
+            '<script>(function(){'
+            f"var btn=document.getElementById('{btn_id}');"
+            "if(!btn)return;"
+            "var label=btn.querySelector('[data-delete-confirm-label]');"
+            "var readyAt=parseInt(btn.getAttribute('data-ready-after-ms'),10);"
+            "function tick(){"
+            "var remainingMs=readyAt-Date.now();"
+            "if(remainingMs<=0){"
+            "btn.removeAttribute('aria-disabled');"
+            "btn.setAttribute('data-delete-state','ready');"
+            "btn.setAttribute('data-countdown-remaining','0');"
+            "btn.className='inline-flex items-center px-2 py-0.5 text-xs "
+            "font-semibold border border-danger text-white bg-danger "
+            "rounded-sm no-underline cursor-pointer hover:bg-red-700';"
+            "if(label)label.textContent='Confirm delete';"
+            "return;"
+            "}"
+            "var remainingSec=Math.ceil(remainingMs/1000);"
+            "btn.setAttribute('data-countdown-remaining',String(remainingSec));"
+            "if(label)label.textContent='Confirming\\u2026 '+remainingSec+'s';"
+            "setTimeout(tick,250);"
+            "}tick();"
+            "})();</script>"
+        )
+    else:
+        script = ""
+    return f"{btn}{cancel_btn}{script}"

@@ -458,40 +458,24 @@ def test_browser_operator_creates_rail_with_bb2_create_new_reconciler(
         ("limit_schedule", "/l2_shape/limit_schedule/"),
     ],
 )
-def test_browser_card_delete_opens_banner_without_toggling_details(
+def test_browser_card_delete_swaps_button_inplace_without_toggling_details(
     tmp_path: Path, kind: str, list_path: str,
 ) -> None:
-    """BX.1 followup (2026-06-11) — clicking Delete on a collapsed
+    """BX.1 redesign (2026-06-11) — clicking Delete on a collapsed
     card must:
 
-    1. Drop the BX.1 confirm banner into ``#delete-confirm-banner-slot``
-       (the htmx `hx-get` fires).
+    1. Swap the Delete button's wrapper innerHTML to the countdown
+       body IN PLACE (next to the click site, NOT at the top of the
+       page). Verified via ``data-delete-state="countdown"`` on the
+       same wrapper.
     2. Leave the parent ``<details>`` collapsed (the native
        ``<summary>`` activation behavior MUST be suppressed by the
        onclick `event.preventDefault()` guard).
 
-    Pre-fix the inline `onclick="event.stopPropagation()"` cancelled
-    propagation but not the default action; the click toggled the
-    card open AND fired the request, and the toggle was the louder
-    visual signal so the operator concluded Delete was broken.
-
-    The test drives the real browser through one click and checks
-    BOTH halves: the banner ``data-test-delete-banner`` lands AND the
-    article's ``<details>`` has no ``open`` attribute.
-
-    Parametrized across rail, chain, and limit_schedule — three
-    distinct addressing shapes (single-key kebab, BX.10 opaque
-    composite-2, BX.10 opaque composite-3) that all flow through
-    ``_render_read_card_summary`` → ``_render_card_action_buttons``.
-    If a future render-path refactor splits one kind onto a separate
-    code path, this test surfaces the gap immediately rather than
-    on the next operator dogfood pass.
-
-    NOTE: The fixture (spec_example) carries limit_schedules + chains
-    + rails — the three kinds the parametrize covers. If
-    spec_example's fixture changes to drop one of these, this test
-    will skip the missing kind with a clear message (operator can
-    expand the fixture or this test rather than a silent green).
+    Pre-redesign operator dogfood: top-of-page banner sat above the
+    fold for scrolled-down cards; operator saw nothing happen and
+    concluded Delete was broken. The wrapper-anchored swap lives
+    where the click landed — no scroll lottery.
     """
     import shutil
     fixture_src = (
@@ -503,64 +487,62 @@ def test_browser_card_delete_opens_banner_without_toggling_details(
     asgi = _build_studio_asgi(cache)
 
     with StudioBrowserEditorDriver.serving(asgi) as driver:
-        # Direct-nav to the kind's list page. The list page is the
-        # surface that renders the cards in collapsed form.
         page = driver.page  # operator-fidelity escape hatch; see X.2.q
         page.goto(f"{driver.base_url}{list_path}")
         page.wait_for_load_state("domcontentloaded")
-        # Find the first card-delete anchor. Scope to article→summary
-        # so we only pick up cards in their collapsed shape (the
-        # bug-surface). data-role="card-delete" is the BX.1 anchor
-        # marker; the article wraps every read card.
-        delete_anchor = page.locator(
+        # Find any active Delete anchor on this list page. Spec
+        # example has at least one unreferenced entity per kind
+        # (chains + limit_schedules are leaves; rails include
+        # PoolBalancing / InternalBalanceMaintenance).
+        active_anchor = page.locator(
             'article[data-kind] details > summary '
-            '[data-role="card-delete"]'
+            '[data-role="card-delete"][data-delete-state="active"]'
         ).first
-        if delete_anchor.count() == 0:
-            # Fixture has no entities of this kind — surface as
-            # explicit fail with a hint, not a silent pass.
+        if active_anchor.count() == 0:
             pytest.fail(
                 f"spec_example fixture rendered no collapsed cards "
-                f"for kind={kind!r} at {list_path!r}. Either the "
-                f"fixture lost entities of this kind OR the list "
-                f"page render path changed (collapsed-card markup "
-                f"differs from the article→details→summary→delete "
-                f"locator chain).\nPage body (first 4KB):\n"
-                f"{driver.page_body()[:4096]}"
+                f"with active Delete buttons for kind={kind!r} at "
+                f"{list_path!r}. Possible causes: fixture lost the "
+                f"kind, OR every entity of this kind is referenced "
+                f"(all Delete buttons in refused state) and the "
+                f"test needs a fresh fixture branch.\n"
+                f"Page body (first 4KB):\n{driver.page_body()[:4096]}"
             )
-        # Capture the parent <details>'s starting state (closed).
-        parent_details = page.locator(
-            f'article[data-kind="{kind}"] details'
+        # Read the entity-id off the surrounding article so we can
+        # re-scope locators around it (the active anchor's element
+        # handle is detached after the swap).
+        entity_id = active_anchor.evaluate(
+            "el => el.closest('article[data-kind]').getAttribute('data-entity-id')",
+        )
+        article = page.locator(
+            f'article[data-kind][data-entity-id="{entity_id}"]'
         ).first
-        # Confirm the card starts collapsed (the test's precondition).
-        # If a fixture change opens it by default, the toggle-assertion
-        # below loses meaning — surface that as a clear precondition
-        # failure.
+        wrapper = article.locator('[data-delete-wrapper]').first
+        delete_anchor = wrapper.locator(
+            '[data-role="card-delete"]'
+        ).first
+        parent_details = article.locator('details').first
         assert parent_details.get_attribute("open") is None, (
             f"kind={kind!r} card pre-condition violated: <details> "
-            f"already has `open` attribute on page load. This test "
-            f"needs the card to start collapsed so the "
-            f"no-toggle-on-Delete-click invariant has signal."
+            f"already has `open` attribute on page load."
         )
         # Click Delete.
         delete_anchor.click()
-        # Banner MUST appear in the slot.
-        page.locator(
-            '#delete-confirm-banner-slot [data-test-delete-banner]'
+        # The same wrapper now contains the countdown body — Confirm
+        # anchor with data-delete-state="countdown" (or "ready" if
+        # the JS tick beat us to it).
+        wrapper.locator(
+            '[data-role="card-delete-confirm"]'
         ).first.wait_for(state="visible", timeout=5_000)
-        # The card MUST stay collapsed — the <details> open attribute
-        # MUST still be unset. This is the core invariant the
-        # `event.preventDefault()` guard exists to enforce.
+        # Parent details MUST stay collapsed.
         assert parent_details.get_attribute("open") is None, (
-            f"BX.1 followup bug regressed: kind={kind!r} card "
+            f"BX.1 redesign regressed: kind={kind!r} card "
             f"<details> opened when Delete was clicked. The "
             f"`event.preventDefault()` guard on the Delete anchor "
             f"either was dropped from "
             f"`_render_card_action_buttons` or the `<summary>` "
             f"activation behavior is firing through a different "
-            f"path. Operator-visible symptom: clicking Delete "
-            f"appears to expand the card; the actual banner does "
-            f"appear but the toggle is the louder signal."
+            f"path."
         )
 
 
@@ -568,22 +550,15 @@ def test_browser_card_delete_opens_banner_without_toggling_details(
 def test_browser_delete_confirm_flow_completes_and_removes_entity(
     tmp_path: Path,
 ) -> None:
-    """BX.1 followup — end-to-end delete flow: click Delete on a
-    rail card → banner appears with countdown → wait for the
-    countdown to elapse → click Confirm → entity disappears from
-    the list.
+    """BX.1 redesign — end-to-end delete flow: click Delete on an
+    unreferenced limit_schedule card → in-place wrapper swap shows
+    countdown → wait for ready state → click Confirm → entity
+    disappears from disk.
 
-    Picks rail because spec_example's rails include
-    ``ReconciliationLeg`` (referenced — would render the blocked
-    banner) AND single-rail leaf candidates we can delete cleanly.
-    The reference walk finds an unreferenced rail dynamically so
-    the test stays robust to fixture additions.
-
-    Monkeypatching the countdown to 0 is the BX.1 unit-test
-    pattern; here we drive the REAL browser through the full
-    5s countdown (the production default) since the unit test
-    already covers the 0s short-circuit path. This proves the
-    inline JS countdown actually re-enables the Confirm button.
+    Drives the REAL browser through the full 5s countdown (the
+    production default) — proves the inline JS countdown actually
+    flips ``data-delete-state`` from "countdown" to "ready" + removes
+    the ``aria-disabled`` attr.
     """
     import shutil
     fixture_src = (
@@ -594,16 +569,11 @@ def test_browser_delete_confirm_flow_completes_and_removes_entity(
     cache = L2InstanceCache.from_path(fixture_dst)
     asgi = _build_studio_asgi(cache)
 
-    # Pre-compute an unreferenced limit_schedule for a clean delete
-    # (limit_schedules are leaf entities per the find_references
-    # walk — no incoming refs ever). Pick the FIRST one on disk so
-    # the URL is stable.
     from recon_gen.common.l2.loader import load_instance
     pre_inst = load_instance(fixture_dst)
     assert pre_inst.limit_schedules, (
         "spec_example fixture must carry at least one limit_schedule "
-        "for this delete-flow test; if the fixture lost them, expand "
-        "the fixture or pick another leaf kind (chain)."
+        "for this delete-flow test."
     )
     target_ls = pre_inst.limit_schedules[0]
     target_entity_id = (
@@ -616,77 +586,58 @@ def test_browser_delete_confirm_flow_completes_and_removes_entity(
         page = driver.page
         page.goto(f"{driver.base_url}/l2_shape/limit_schedule/")
         page.wait_for_load_state("domcontentloaded")
-        # Locate the specific card by data-entity-id (the in-memory
-        # composite key, NOT the BX.10 opaque URL — the article's
-        # data-entity-id keeps the addressing key verbatim).
         article = page.locator(
             f'article[data-kind="limit_schedule"]'
             f'[data-entity-id="{target_entity_id}"]'
         ).first
-        delete_anchor = article.locator(
-            'summary [data-role="card-delete"]'
+        wrapper = article.locator('[data-delete-wrapper]').first
+        delete_anchor = wrapper.locator(
+            '[data-role="card-delete"]'
         ).first
+        # Active state required (limit_schedule is a leaf — no refs).
+        assert delete_anchor.get_attribute("data-delete-state") == "active", (
+            f"limit_schedule fixture entity {target_entity_id!r} "
+            f"rendered with Delete state "
+            f"{delete_anchor.get_attribute('data-delete-state')!r} "
+            f"— expected active (leaf entity has no incoming refs)."
+        )
         delete_anchor.scroll_into_view_if_needed()
         delete_anchor.click()
-        # Banner appears (armed mode — limit_schedule is leaf).
-        banner = page.locator(
-            '#delete-confirm-banner-slot '
-            '[data-test-delete-banner][data-test-delete-state="armed"]'
+        # Countdown anchor appears in the same wrapper. State starts
+        # as "countdown"; the inline JS flips to "ready" at 0.
+        confirm_btn = wrapper.locator(
+            '[data-role="card-delete-confirm"]'
         ).first
-        banner.wait_for(state="visible", timeout=5_000)
-        # Confirm button is initially disabled (countdown not elapsed).
-        confirm_btn = banner.locator(
-            '[data-test-delete-confirm]'
-        ).first
-        assert confirm_btn.is_disabled(), (
-            "BX.1 confirm button must render disabled while "
-            "countdown is running; the inline JS countdown will "
-            "re-enable it after `data-ready-after-ms` elapses."
+        confirm_btn.wait_for(state="visible", timeout=5_000)
+        # Initial state is countdown — aria-disabled set.
+        assert confirm_btn.get_attribute("aria-disabled") == "true", (
+            "BX.1 redesign — confirm button must render "
+            "aria-disabled while countdown is running."
         )
-        # Wait for the countdown's wall time + a small slack. The
-        # banner's data-ready-after-ms is set at GET time so we use
-        # ~6s (5s countdown + 1s buffer for JS tick interval).
+        # Wait for the JS tick to flip state to "ready".
         page.wait_for_function(
-            "() => {"
-            "const btn = document.querySelector("
-            "'#delete-confirm-banner-slot [data-test-delete-confirm]'"
-            ");"
-            "return btn && !btn.disabled;"
-            "}",
+            "(node) => node.getAttribute('data-delete-state') === 'ready'",
+            arg=confirm_btn.element_handle(),
             timeout=10_000,
         )
         # Click Confirm — fires hx-delete with the signed token.
         confirm_btn.click()
-        # The banner is HX-Swap removed on success (empty body
-        # returned + ``hx-target="#delete-confirm-banner-slot"``
-        # outerHTML swap leaves the slot empty). Wait for the banner
-        # to detach as the visual confirmation the request landed
-        # 200 — a 400 (too-early / missing-token) would re-render the
-        # banner in place instead.
-        banner.wait_for(state="detached", timeout=5_000)
-        # The article itself stays on the list page until reload —
-        # only the home page's cascade-reload sections auto-refresh
-        # on the ``l2-cascade-reload`` HX-Trigger; standalone list
-        # pages don't subscribe. Verify the delete persisted on disk
-        # — the source of truth the cache flushes to. (A future cell
-        # may add list-page subscription to the cascade-reload event;
-        # this test then becomes both an on-disk + DOM-state check.)
+        # Empty body returned → wrapper innerHTML becomes empty (the
+        # Delete button vanishes). Wait for the button to detach.
+        confirm_btn.wait_for(state="detached", timeout=5_000)
+        # Verify the delete persisted on disk.
         post_inst = load_instance(fixture_dst)
         assert not any(
             f"{ls.parent_role}::{ls.rail}::{ls.direction}"
             == target_entity_id
             for ls in post_inst.limit_schedules
         ), (
-            "BX.1 followup — limit_schedule survived the delete "
+            "BX.1 redesign — limit_schedule survived the delete "
             "round-trip. Either the Confirm click never fired the "
             "DELETE request OR the token/countdown server-side "
-            "check rejected it (look at the network log; the "
-            "`too-early` rejection on a stale token would surface "
-            "as a 400 from the DELETE endpoint)."
+            "check rejected it."
         )
-        # After a manual reload the article also disappears — proves
-        # the visual matches the persisted state (no client-side
-        # cache lag that would mislead a future operator).
+        # After a manual reload the article disappears too.
         page.reload()
         page.wait_for_load_state("domcontentloaded")
         deleted_article_selector = (
@@ -694,8 +645,95 @@ def test_browser_delete_confirm_flow_completes_and_removes_entity(
             f'[data-entity-id="{target_entity_id}"]'
         )
         assert page.locator(deleted_article_selector).count() == 0, (
-            "BX.1 followup — the on-disk YAML lost the entity but the "
-            "list page still rendered it after a reload. Indicates a "
-            "cache layer that isn't observing the disk write (or a "
-            "render-from-stale-cache code path)."
+            "BX.1 redesign — the on-disk YAML lost the entity but "
+            "the list page still rendered it after a reload."
         )
+
+
+@pytest.mark.browser
+def test_browser_card_delete_disabled_when_referenced(
+    tmp_path: Path,
+) -> None:
+    """BX.1 redesign — when an entity has incoming references the
+    Delete button renders in the REFUSED state at render time:
+    ``aria-disabled="true"``, ``data-delete-state="refused"``, a
+    ``title`` tooltip + ``data-delete-reason`` carrying the reason
+    text.
+
+    Picks ``ReconciliationLeg`` rail — referenced by
+    ``ExternalReconciliationCycle.leg_rails`` in spec_example.
+
+    The button is functionally disabled: clicking does nothing (no
+    hx-get; the onclick guard suppresses the parent details toggle).
+    The reason text reads banking-domain (per
+    ``[project_design_north_stars]``): "Referenced by
+    TransferTemplate: ExternalReconciliationCycle (leg_rails)".
+    """
+    import shutil
+    fixture_src = (
+        Path(__file__).parent.parent / "l2" / "spec_example.yaml"
+    )
+    fixture_dst = tmp_path / "delete_refused.yaml"
+    shutil.copy(fixture_src, fixture_dst)
+    cache = L2InstanceCache.from_path(fixture_dst)
+    asgi = _build_studio_asgi(cache)
+
+    with StudioBrowserEditorDriver.serving(asgi) as driver:
+        page = driver.page
+        page.goto(f"{driver.base_url}/l2_shape/rail/")
+        page.wait_for_load_state("domcontentloaded")
+        article = page.locator(
+            'article[data-kind="rail"]'
+            '[data-entity-id="ReconciliationLeg"]'
+        ).first
+        delete_anchor = article.locator(
+            'summary [data-role="card-delete"]'
+        ).first
+        # State should be refused (referenced rail).
+        assert (
+            delete_anchor.get_attribute("data-delete-state") == "refused"
+        ), (
+            "ReconciliationLeg is referenced by "
+            "ExternalReconciliationCycle.leg_rails — Delete MUST "
+            "render in refused state. Either the reference walk "
+            "missed it or the render path didn't propagate the graph."
+        )
+        # aria-disabled set so screen-readers + the e2e driver see
+        # the disabled affordance.
+        assert delete_anchor.get_attribute("aria-disabled") == "true"
+        # Reason text in title + data-delete-reason carries the
+        # operator-readable referrer list (banking-domain readable
+        # per `[project_design_north_stars]`).
+        reason = delete_anchor.get_attribute("data-delete-reason") or ""
+        assert "TransferTemplate" in reason, (
+            f"Reason text missing TransferTemplate kind label: "
+            f"{reason!r}"
+        )
+        assert "ExternalReconciliationCycle" in reason, (
+            f"Reason text missing referrer id: {reason!r}"
+        )
+        assert "leg_rails" in reason, (
+            f"Reason text missing via_field hint: {reason!r}"
+        )
+        # title attr matches data-delete-reason (browser-native
+        # tooltip on hover/focus).
+        title = delete_anchor.get_attribute("title") or ""
+        assert title == reason, (
+            f"title ({title!r}) must mirror data-delete-reason "
+            f"({reason!r}) so the visible tooltip + the driver-side "
+            f"introspection see the same reason text."
+        )
+        # Clicking the refused button MUST NOT cascade — no countdown
+        # swap, no <details> toggle. The onclick guard absorbs the
+        # click; no hx-get is wired so nothing fires.
+        parent_details = article.locator('details').first
+        assert parent_details.get_attribute("open") is None
+        delete_anchor.click()
+        # Wait a beat so any racing swap could land (it shouldn't).
+        page.wait_for_timeout(250)
+        # State still refused — no swap fired.
+        assert (
+            delete_anchor.get_attribute("data-delete-state") == "refused"
+        )
+        # Details still closed — toggle guard worked.
+        assert parent_details.get_attribute("open") is None
