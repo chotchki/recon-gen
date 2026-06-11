@@ -53,7 +53,26 @@ from recon_gen.common.snapshotter import (
 )
 
 
-pytestmark = [tier(Tier.DB), dialects(MarkDialect.OR), needs(Need.DOCKER)]
+# BV.3.3.f xdist-isolation fix (2026-06-11) — `xdist_group` mark pins
+# ALL tests in this file to ONE xdist worker. CAVEAT: this is a silent
+# no-op under xdist's default `--dist=load` (which the unit layer uses
+# per `_dev/runner.py::_layer_pytest_argv`). It documents intent + acts
+# as belt-and-suspenders for the day someone re-enables `--dist=loadgroup`
+# for the unit layer. The LOAD-BEARING fix is the per-worker
+# `db_table_prefix` disambiguation in `oracle_cfg` below: each worker
+# operates on its own `snap_or_<worker>` schema namespace so concurrent
+# `emit_schema` DROP-then-CREATE streams against the shared
+# `recon-gen-snap-test-oracle` container don't race on object-existence
+# (the ORA-00955 / ORA-12003 / ORA-12006 / ORA-00942 / ORA-04063 storm
+# observed in CI). Oracle's DDL auto-commit-per-statement was surfacing
+# a real isolation bug per `feedback_strict_engines_surface_isolation_bugs`
+# — fix the isolation, don't relax the engine.
+pytestmark = [
+    tier(Tier.DB),
+    dialects(MarkDialect.OR),
+    needs(Need.DOCKER),
+    pytest.mark.xdist_group("snapshotter-oracle"),
+]
 
 
 _FIXTURES = Path(__file__).resolve().parent.parent / "l2"
@@ -76,18 +95,42 @@ def spec_instance() -> L2Instance:
 def oracle_cfg(
     snapshotter_oracle_container_url: str,
     spec_instance: L2Instance,
+    worker_id: str,
 ) -> Any:
     """Build a ``Config`` pointed at the snapshotter-dedicated Oracle
     container.
 
-    The ``db_table_prefix`` is per-module-suffixed (``snap_or``) so
-    other Oracle-tier tests running in parallel don't collide on the
-    v-overlay schema namespace.
+    BV.3.3.f (2026-06-11): the ``db_table_prefix`` is per-(file, worker)
+    suffixed so concurrent xdist workers running tests from this module
+    don't collide on the shared ``recon-gen-snap-test-oracle`` container's
+    schema namespace. Under xdist's default ``--dist=load`` (the unit
+    layer's mode per ``_dev/runner.py::_layer_pytest_argv``) any
+    ``xdist_group`` mark is a silent no-op, so the file-level ``pytestmark``
+    above pins intent only — the load-bearing isolation lives in this
+    prefix. Each worker gets ``snap_or_<worker>`` (e.g. ``snap_or_gw0``);
+    Oracle 19c's 128-byte identifier cap leaves comfortable headroom
+    even with the longest gold-table envelope
+    (``<prefix>_v_inv_money_trail_edges_gold_<name>`` ≈ 60 chars +
+    snapshot name up to 32 chars).
+
+    Without this disambiguation, two workers' concurrent ``emit_schema``
+    DROP-then-CREATE streams against the same prefix race on
+    object-existence (DDL auto-commits per statement on Oracle, no way
+    to roll back). The race window covers ORA-00955 ("name is already
+    used"), ORA-12006 ("matview already exists"), ORA-12003 ("matview
+    does not exist"), ORA-00942 ("table or view does not exist"), and
+    ORA-04063 ("view has errors") — each one is a different point in
+    the DROP-CREATE-REFERENCE sequence where worker B's compile hits
+    something worker A is mid-flight on.
     """
+    # ``worker_id`` is ``"master"`` under bare pytest (no xdist) and
+    # ``"gw<N>"`` under xdist. Suffix is short enough to fit Oracle's
+    # identifier cap; using the raw worker_id (rather than a hash)
+    # keeps the prefix grep-able during triage.
     return make_test_config(
         dialect=Dialect.ORACLE,
         demo_database_url=snapshotter_oracle_container_url,
-        db_table_prefix="snap_or",
+        db_table_prefix=f"snap_or_{worker_id}",
     )
 
 
