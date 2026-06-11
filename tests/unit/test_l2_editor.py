@@ -254,7 +254,10 @@ def test_attach_rail_then_validate_passes_for_clean_composite(
         },
     )
     # Bare-rail validate fails — proving the rail needs a reconciler.
-    with pytest.raises(L2ValidationError, match="not reconciled"):
+    with pytest.raises(
+        L2ValidationError,
+        match=r"\[S3\].*nothing to reconcile against",
+    ):
         validate_instance(after_rail)
     # Attaching to an existing aggregating rail closes the gap; validate
     # now passes.

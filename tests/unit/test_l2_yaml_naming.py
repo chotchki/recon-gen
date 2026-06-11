@@ -363,7 +363,10 @@ def test_validator_r13_rejects_example_key_not_in_metadata_keys(
     inst = load_instance(p, validate=False)
     with pytest.raises(
         L2ValidationError,
-        match="metadata_value_examples: key 'merchant_idx' is not in metadata_keys",
+        match=(
+            r"\[R13\].*example metadata values for key 'merchant_idx'.*"
+            r"metadata_keys"
+        ),
     ):
         validate(inst)
 

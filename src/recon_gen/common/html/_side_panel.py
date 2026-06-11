@@ -387,15 +387,16 @@ GLOSSARY: dict[str, str] = {
     ),
     "validator-origin-rules": (
         "**Origin rules (O1)** catch rails that don't resolve to an "
-        "Origin class on every leg. Single-leg rails MUST set "
-        "``origin`` directly. Two-leg rails can set rail-level "
+        "Origin class on every leg. Single-leg rails need ``origin`` "
+        "set directly. Two-leg rails can either set rail-level "
         "``origin`` (covers both legs), provide both ``source_origin`` "
         "AND ``destination_origin`` (per-leg control), or set one "
         "per-leg override plus rail-level ``origin`` as the "
         "fallback for the unspecified leg. Origin drives whether L1 "
         "looks for an external-system reference (trace ID, IMAD) or "
         "an internal initiator — leaving a leg unresolved means the "
-        "PostedRequirements check has no anchor."
+        "PostedRequirements check has no anchor. Fix by setting the "
+        "missing origin on the named leg or at the rail level."
     ),
     "validator-scope-rules": (
         "**Scope rules (M1+)** catch fields that conflict with an "
