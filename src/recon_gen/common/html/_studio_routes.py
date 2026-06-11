@@ -3380,25 +3380,49 @@ def _render_diagram_page(
         aria="toggle control hierarchy category",
     )
 
+    # BX.15 — inline ``[?]`` triggers next to the Coverage + Trainer
+    # toggles open the side-panel glossary entries that explain what
+    # the tint means + where the data comes from. Render OUTSIDE the
+    # ``<label>`` (clicks inside the label toggle the checkbox; the
+    # chip needs its own click target). Wrapper ``<div class="flex">``
+    # keeps label + chip on the same row.
+    coverage_help_chip = render_side_panel_trigger(
+        "/studio/side-panel/glossary/coverage",
+        label="[?]",
+        aria_label="What does the Coverage overlay show?",
+        extra_classes="ml-1 text-xs",
+    )
+    trainer_help_chip = render_side_panel_trigger(
+        "/studio/side-panel/glossary/trainer-tint",
+        label="[?]",
+        aria_label="What does the Trainer tint show?",
+        extra_classes="ml-1 text-xs",
+    )
     # X.4.c.5.d — Coverage toggle. Mounted only when the demo-DB pool
     # is wired (which the JS shim also gates by reading the
     # diagram-coverage-available meta). Off by default — clean diagram;
     # on overlays presence/absence tint per node.
     coverage_toggle_html = (
+        '<div class="flex items-center" data-bx15-coverage-row>'
         f'<label class="{toggle_label_cls}">'
         '<input type="checkbox" id="toggle-coverage">'
         ' Coverage'
         '</label>'
+        f'{coverage_help_chip}'
+        '</div>'
         if coverage_available
         else ""
     )
     # X.4.c.6 — Trainer toggle. Always available (pure scenario walk).
     # Off by default; on overlays per-plant-kind badges per node.
     trainer_toggle_html = (
+        '<div class="flex items-center" data-bx15-trainer-row>'
         f'<label class="{toggle_label_cls}">'
         '<input type="checkbox" id="toggle-trainer">'
         ' Trainer'
         '</label>'
+        f'{trainer_help_chip}'
+        '</div>'
     )
     # CF.3.h — server-side SingleLegRail hide. Server re-emit (not
     # CSS hide) so dot re-lays-out the smaller subset cleanly. Modeled

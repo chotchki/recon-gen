@@ -264,6 +264,43 @@ GLOSSARY: dict[str, str] = {
         "an Inbound LimitSchedule; the duplicate-detection key is the "
         "(parent_role, rail, direction) triple."
     ),
+    # ---- BX.15 — Diagram sidebar overlay vocabulary ---------------------
+    # Cold-read v2 flagged the Coverage + Trainer checkboxes on the
+    # diagram sidebar as opaque: the operator sees a toggle, flips it,
+    # something tints — but the *meaning* of the tint (which colour
+    # signals what?) and the *source* of the data (is it live ETL?
+    # planted scenario rows? both?) only lives in scattered code
+    # comments. These two entries surface the answers inline via the
+    # ``[?]`` chip pattern (BX.12 sibling).
+    "coverage": (
+        "**Coverage** tints diagram nodes (rails, transfer templates, "
+        "chains) by *observed activity* — has the demo / customer DB "
+        "actually produced rows for this node? Green tint = at least "
+        "one Transaction row attributed to this rail / template / "
+        "chain in the current window; grey / faded = zero observed "
+        "rows (the rail is *declared* in L2 but nothing has fired). "
+        "Read it as the ETL contract: every internal-scope node "
+        "should be green once your feed warms up. Persistent grey on "
+        "an internal node usually means the ETL hook isn't emitting "
+        "rows for it (or the rail's predicates exclude every observed "
+        "row). Source: the demo-DB pool's row counts joined against "
+        "the L2 topology — only mounts when the pool is wired; absent "
+        "without a DB connection."
+    ),
+    "trainer-tint": (
+        "**Trainer tint** highlights diagram nodes the Trainer's "
+        "scenario walk *plants synthetic rows for* in the current "
+        "trainer window. Use it to see at a glance which corners of "
+        "your L2 the demo scenario actually exercises — green badge "
+        "with a plant count (e.g. ``+12``) means the trainer is "
+        "actively writing rows there during the next Apply; no badge "
+        "means the scenario skips this node. Pair with the Trainer "
+        "tab's knobs (``densify_factor``, ``add_broken_rail_plants``, "
+        "``boost_inv_fanout_plants``) to dial coverage up or down. "
+        "Source: ``plants_per_node`` walks the scenario the same way "
+        "Trainer Apply does, so the diagram tint matches the rows "
+        "that will land — pure preview, no DB write."
+    ),
 }
 
 
