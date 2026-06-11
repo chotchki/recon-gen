@@ -40,7 +40,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Iterator
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
@@ -208,36 +209,35 @@ def v_overlay_seeded(pg_cfg: Config, l2_instance_fixture: L2Instance) -> Iterato
         conn.close()
 
 
-@pytest.fixture
-def pool(v_overlay_seeded: Config) -> Iterator[AsyncConnectionPool]:
-    """Per-test async pool. Function scope so a test that mutates
-    autocommit state (the restore path's matview-refresh phase) doesn't
-    leak into the next test's pool conn — though our impl restores the
-    prior autocommit value in a ``finally``, function-scope makes that
-    a belt-and-braces."""
-    p = asyncio.run(make_connection_pool(v_overlay_seeded))
-    try:
-        yield p
-    finally:
-        asyncio.run(p.close())
+@asynccontextmanager
+async def _pool_and_snap(
+    cfg: Config, l2_instance: L2Instance,
+) -> AsyncGenerator[tuple[AsyncConnectionPool, PostgresSchemaSnapshotter]]:
+    """Build pool + snapshotter inside the caller's event loop and
+    guarantee teardown.
 
-
-@pytest.fixture
-def snap(
-    v_overlay_seeded: Config,
-    pool: AsyncConnectionPool,
-    l2_instance_fixture: L2Instance,
-) -> Iterator[PostgresSchemaSnapshotter]:
-    """Per-test snapshotter instance. ``aclose()`` sweeps any leftover
-    snap schemas so a half-finished test doesn't leak namespace into the
-    next."""
-    s = PostgresSchemaSnapshotter(
-        pool=pool, base_prefix=_BASE_PREFIX, l2_instance=l2_instance_fixture,
+    Why an async-context-manager rather than two ``@pytest.fixture``
+    wrappers: ``psycopg_pool.AsyncConnectionPool`` binds its internal
+    ``asyncio.Lock`` / ``Event`` / ``Queue`` primitives to the event
+    loop on which ``open()`` is awaited. The earlier shape — a sync
+    fixture calling ``asyncio.run(make_connection_pool(...))`` then
+    yielding the pool to a test that ran its own ``asyncio.run(_run())``
+    — created the pool on loop A, then handed it to loop B. Acquires
+    on loop B hung forever waiting on the dead loop A's primitives
+    (sample(1) showed every test thread parked in ``_PySemaphore_Wait``
+    inside a queue.get()). Mirrors the Oracle snapshotter test pattern
+    (``test_snapshotter_oracle.py``), which already builds the pool +
+    snapshotter inside the single ``_round_trip`` coroutine.
+    """
+    pool = await make_connection_pool(cfg)
+    snap = PostgresSchemaSnapshotter(
+        pool=pool, base_prefix=_BASE_PREFIX, l2_instance=l2_instance,
     )
     try:
-        yield s
+        yield pool, snap
     finally:
-        asyncio.run(s.aclose())
+        await snap.aclose()
+        await pool.close()
 
 
 # ---------------------------------------------------------------------------
@@ -303,35 +303,40 @@ class TestRoundTrip:
     re-numbering which ``RESTART IDENTITY`` resets explicitly)."""
 
     def test_take_then_mutate_then_restore_undoes_mutation(
-        self, pool: AsyncConnectionPool, snap: PostgresSchemaSnapshotter,
+        self,
+        v_overlay_seeded: Config,
+        l2_instance_fixture: L2Instance,
     ) -> None:
         async def _run() -> None:
-            # Pre-take state — empty config_kv.
-            pre = await _select_marker_count(pool, "round_trip_marker")
-            assert pre == 0, (
-                f"pre-take config_kv already has marker rows (count={pre}); "
-                "the module fixture's clean-slate guarantee is broken."
-            )
+            async with _pool_and_snap(
+                v_overlay_seeded, l2_instance_fixture,
+            ) as (pool, snap):
+                # Pre-take state — empty config_kv.
+                pre = await _select_marker_count(pool, "round_trip_marker")
+                assert pre == 0, (
+                    f"pre-take config_kv already has marker rows (count={pre}); "
+                    "the module fixture's clean-slate guarantee is broken."
+                )
 
-            # Take snapshot of clean state.
-            await snap.take("rt")
+                # Take snapshot of clean state.
+                await snap.take("rt")
 
-            # Mutate — insert a marker row.
-            await _insert_marker_row(pool, "round_trip_marker")
-            mid = await _select_marker_count(pool, "round_trip_marker")
-            assert mid == 1, "mutation didn't land — INSERT path is broken"
+                # Mutate — insert a marker row.
+                await _insert_marker_row(pool, "round_trip_marker")
+                mid = await _select_marker_count(pool, "round_trip_marker")
+                assert mid == 1, "mutation didn't land — INSERT path is broken"
 
-            # Restore — marker should disappear.
-            await snap.restore("rt")
-            post = await _select_marker_count(pool, "round_trip_marker")
-            assert post == 0, (
-                f"restore didn't undo the mutation (count={post} after "
-                "restore from clean snapshot); base-table TRUNCATE+INSERT "
-                "phase isn't producing byte-equivalent state."
-            )
+                # Restore — marker should disappear.
+                await snap.restore("rt")
+                post = await _select_marker_count(pool, "round_trip_marker")
+                assert post == 0, (
+                    f"restore didn't undo the mutation (count={post} after "
+                    "restore from clean snapshot); base-table TRUNCATE+INSERT "
+                    "phase isn't producing byte-equivalent state."
+                )
 
-            # Cleanup the snapshot — drop is idempotent.
-            await snap.drop("rt")
+                # Cleanup the snapshot — drop is idempotent.
+                await snap.drop("rt")
 
         asyncio.run(_run())
 
@@ -342,65 +347,70 @@ class TestMultiSnapshot:
     that ``restore(A)`` reads ``snap_A``'s tables (not ``snap_B``'s)."""
 
     def test_two_snapshots_coexist_and_restore_independently(
-        self, pool: AsyncConnectionPool, snap: PostgresSchemaSnapshotter,
+        self,
+        v_overlay_seeded: Config,
+        l2_instance_fixture: L2Instance,
     ) -> None:
         async def _run() -> None:
-            # Snapshot A — empty state.
-            await snap.take("a")
+            async with _pool_and_snap(
+                v_overlay_seeded, l2_instance_fixture,
+            ) as (pool, snap):
+                # Snapshot A — empty state.
+                await snap.take("a")
 
-            # Mutate, then snapshot B — has the marker_b row.
-            await _insert_marker_row(pool, "multi_b")
-            await snap.take("b")
+                # Mutate, then snapshot B — has the marker_b row.
+                await _insert_marker_row(pool, "multi_b")
+                await snap.take("b")
 
-            # Both snapshots should now exist in information_schema.
-            v_prefix = _v_prefix()
-            async with pool.acquire() as conn:
-                raw: Any = conn
-                cur = await raw.execute(
-                    "SELECT COUNT(*) FROM information_schema.schemata "
-                    "WHERE schema_name = %s OR schema_name = %s",
-                    (f"{_BASE_PREFIX}_v_snap_a", f"{_BASE_PREFIX}_v_snap_b"),
+                # Both snapshots should now exist in information_schema.
+                v_prefix = _v_prefix()
+                async with pool.acquire() as conn:
+                    raw: Any = conn
+                    cur = await raw.execute(
+                        "SELECT COUNT(*) FROM information_schema.schemata "
+                        "WHERE schema_name = %s OR schema_name = %s",
+                        (f"{_BASE_PREFIX}_v_snap_a", f"{_BASE_PREFIX}_v_snap_b"),
+                    )
+                    rows: list[Any] = await cur.fetchall()
+                assert int(rows[0][0]) == 2, (
+                    "two named snapshots should both exist post-take; "
+                    f"got {int(rows[0][0])} matching schemas. Snap-schema "
+                    "naming collision?"
                 )
-                rows: list[Any] = await cur.fetchall()
-            assert int(rows[0][0]) == 2, (
-                "two named snapshots should both exist post-take; "
-                f"got {int(rows[0][0])} matching schemas. Snap-schema "
-                "naming collision?"
-            )
 
-            # Insert another marker so the live state is now distinct
-            # from BOTH snapshots.
-            await _insert_marker_row(pool, "multi_c")
+                # Insert another marker so the live state is now distinct
+                # from BOTH snapshots.
+                await _insert_marker_row(pool, "multi_c")
 
-            # Restore A — both markers should disappear.
-            await snap.restore("a")
-            assert await _select_marker_count(pool, "multi_b") == 0
-            assert await _select_marker_count(pool, "multi_c") == 0
+                # Restore A — both markers should disappear.
+                await snap.restore("a")
+                assert await _select_marker_count(pool, "multi_b") == 0
+                assert await _select_marker_count(pool, "multi_c") == 0
 
-            # Restore B — marker_b returns, marker_c stays gone.
-            await snap.restore("b")
-            assert await _select_marker_count(pool, "multi_b") == 1
-            assert await _select_marker_count(pool, "multi_c") == 0
+                # Restore B — marker_b returns, marker_c stays gone.
+                await snap.restore("b")
+                assert await _select_marker_count(pool, "multi_b") == 1
+                assert await _select_marker_count(pool, "multi_c") == 0
 
-            # Cleanup.
-            await snap.drop("a")
-            await snap.drop("b")
+                # Cleanup.
+                await snap.drop("a")
+                await snap.drop("b")
 
-            # Final state should be just marker_b — restore to empty
-            # via a fresh "clean" snapshot for the next test.
-            await snap.take("__cleanup__")
-            await snap.restore("__cleanup__")  # no-op but proves clean
-            await snap.drop("__cleanup__")
-            # Drop marker_b directly via raw DELETE — quicker than
-            # round-tripping another snapshot.
-            v = v_prefix
-            async with pool.acquire() as conn:
-                raw2: Any = conn
-                await raw2.execute(
-                    f"DELETE FROM {v}_config_kv WHERE kv_value IN (%s, %s)",
-                    ("multi_b", "multi_c"),
-                )
-                await raw2.commit()
+                # Final state should be just marker_b — restore to empty
+                # via a fresh "clean" snapshot for the next test.
+                await snap.take("__cleanup__")
+                await snap.restore("__cleanup__")  # no-op but proves clean
+                await snap.drop("__cleanup__")
+                # Drop marker_b directly via raw DELETE — quicker than
+                # round-tripping another snapshot.
+                v = v_prefix
+                async with pool.acquire() as conn:
+                    raw2: Any = conn
+                    await raw2.execute(
+                        f"DELETE FROM {v}_config_kv WHERE value IN (%s, %s)",
+                        ("multi_b", "multi_c"),
+                    )
+                    await raw2.commit()
 
         asyncio.run(_run())
 
@@ -418,18 +428,23 @@ class TestRestoreSLA:
     """
 
     def test_restore_completes_under_sla(
-        self, pool: AsyncConnectionPool, snap: PostgresSchemaSnapshotter,
+        self,
+        v_overlay_seeded: Config,
+        l2_instance_fixture: L2Instance,
     ) -> None:
         async def _run() -> float:
-            await snap.take("sla")
-            # Warm-up — first restore may pay JIT / plan-cache cost.
-            await snap.restore("sla")
-            # Measured restore.
-            t0 = time.perf_counter()
-            await snap.restore("sla")
-            elapsed = time.perf_counter() - t0
-            await snap.drop("sla")
-            return elapsed
+            async with _pool_and_snap(
+                v_overlay_seeded, l2_instance_fixture,
+            ) as (_pool, snap):
+                await snap.take("sla")
+                # Warm-up — first restore may pay JIT / plan-cache cost.
+                await snap.restore("sla")
+                # Measured restore.
+                t0 = time.perf_counter()
+                await snap.restore("sla")
+                elapsed = time.perf_counter() - t0
+                await snap.drop("sla")
+                return elapsed
 
         elapsed = asyncio.run(_run())
         # 750ms = 5× the operator-locked target. Tight enough to
@@ -451,22 +466,32 @@ class TestDropIdempotent:
     test's per-plant cleanup ``finally`` relies on this."""
 
     def test_drop_of_never_taken_name_is_a_no_op(
-        self, snap: PostgresSchemaSnapshotter,
+        self,
+        v_overlay_seeded: Config,
+        l2_instance_fixture: L2Instance,
     ) -> None:
         async def _run() -> None:
-            # Must not raise.
-            await snap.drop("never_taken")
+            async with _pool_and_snap(
+                v_overlay_seeded, l2_instance_fixture,
+            ) as (_pool, snap):
+                # Must not raise.
+                await snap.drop("never_taken")
 
         asyncio.run(_run())
 
     def test_drop_after_take_is_idempotent(
-        self, snap: PostgresSchemaSnapshotter,
+        self,
+        v_overlay_seeded: Config,
+        l2_instance_fixture: L2Instance,
     ) -> None:
         async def _run() -> None:
-            await snap.take("dropme")
-            await snap.drop("dropme")
-            # Second drop should be a no-op.
-            await snap.drop("dropme")
+            async with _pool_and_snap(
+                v_overlay_seeded, l2_instance_fixture,
+            ) as (_pool, snap):
+                await snap.take("dropme")
+                await snap.drop("dropme")
+                # Second drop should be a no-op.
+                await snap.drop("dropme")
 
         asyncio.run(_run())
 
@@ -478,43 +503,48 @@ class TestAcloseSweepsLeftoverSchemas:
 
     def test_aclose_drops_orphan_snap_schemas(
         self,
-        pool: AsyncConnectionPool,
         v_overlay_seeded: Config,
         l2_instance_fixture: L2Instance,
     ) -> None:
         async def _run() -> None:
-            # Build a snapshotter, take a snapshot, then aclose WITHOUT
-            # explicit drop — emulates a test crash mid-walk.
-            local = PostgresSchemaSnapshotter(
-                pool=pool, base_prefix=_BASE_PREFIX, l2_instance=l2_instance_fixture,
-            )
-            await local.take("orphan")
-
-            # Verify the orphan schema exists.
-            async with pool.acquire() as conn:
-                raw: Any = conn
-                cur = await raw.execute(
-                    "SELECT COUNT(*) FROM information_schema.schemata "
-                    "WHERE schema_name = %s",
-                    (f"{_BASE_PREFIX}_v_snap_orphan",),
+            # Build a fresh pool + snapshotter inline; we want to call
+            # aclose() ourselves and observe its sweep, so we bypass the
+            # _pool_and_snap helper's automatic aclose() teardown.
+            pool = await make_connection_pool(v_overlay_seeded)
+            try:
+                local = PostgresSchemaSnapshotter(
+                    pool=pool, base_prefix=_BASE_PREFIX,
+                    l2_instance=l2_instance_fixture,
                 )
-                rows: list[Any] = await cur.fetchall()
-            assert int(rows[0][0]) == 1, "take didn't create the snap schema"
+                await local.take("orphan")
 
-            # aclose should sweep it.
-            await local.aclose()
+                # Verify the orphan schema exists.
+                async with pool.acquire() as conn:
+                    raw: Any = conn
+                    cur = await raw.execute(
+                        "SELECT COUNT(*) FROM information_schema.schemata "
+                        "WHERE schema_name = %s",
+                        (f"{_BASE_PREFIX}_v_snap_orphan",),
+                    )
+                    rows: list[Any] = await cur.fetchall()
+                assert int(rows[0][0]) == 1, "take didn't create the snap schema"
 
-            async with pool.acquire() as conn:
-                raw2: Any = conn
-                cur2 = await raw2.execute(
-                    "SELECT COUNT(*) FROM information_schema.schemata "
-                    "WHERE schema_name = %s",
-                    (f"{_BASE_PREFIX}_v_snap_orphan",),
+                # aclose should sweep it.
+                await local.aclose()
+
+                async with pool.acquire() as conn:
+                    raw2: Any = conn
+                    cur2 = await raw2.execute(
+                        "SELECT COUNT(*) FROM information_schema.schemata "
+                        "WHERE schema_name = %s",
+                        (f"{_BASE_PREFIX}_v_snap_orphan",),
+                    )
+                    rows2: list[Any] = await cur2.fetchall()
+                assert int(rows2[0][0]) == 0, (
+                    "aclose didn't sweep the orphan schema — leftover "
+                    "namespace pollution across test sessions."
                 )
-                rows2: list[Any] = await cur2.fetchall()
-            assert int(rows2[0][0]) == 0, (
-                "aclose didn't sweep the orphan schema — leftover "
-                "namespace pollution across test sessions."
-            )
+            finally:
+                await pool.close()
 
         asyncio.run(_run())
