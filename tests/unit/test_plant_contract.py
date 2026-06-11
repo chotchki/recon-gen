@@ -105,7 +105,7 @@ def test_plant_contract_construction_rejects_unknown_mutates() -> None:
     evaluates ``PlantContract(...)`` calls at import) rather than the
     first time the trainer tries to plant that kind."""
     with pytest.raises(ValueError, match="PlantContract.mutates"):
-        PlantContract(mutates="base_prefix_too")  # pyright: ignore[reportArgumentType]
+        PlantContract(mutates="base_prefix_too")  # pyright: ignore[reportArgumentType]  # intentional violation tests
 
 
 def test_plant_contract_default_constructor_succeeds() -> None:
