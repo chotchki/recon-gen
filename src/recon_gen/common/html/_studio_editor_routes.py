@@ -5788,8 +5788,20 @@ def _render_list_page(
     # `studio-header` / `nav-link` semantic classes drop in favor
     # of raw utilities. `id="entity-list"` kept as the hx-target
     # hook the routes' delete + save fragments swap into.
+    # BX.6/11 followup (2026-06-11) — single-column card grid.
+    # Pre-followup the grid was `grid-cols-1 md:grid-cols-2
+    # xl:grid-cols-3`, which on the home Roles wrapper's 1:1 Accounts
+    # sub-bucket (and on the dedicated `/l2_shape/<kind>/` pages at
+    # ≥xl widths) squeezed each card to ~1/3 of the container width.
+    # Long entity ids like `gl-1010-cash-due-frb` wrapped onto two
+    # lines inside the card title, hurting CPA-readability. Single
+    # column = full content width = no title wrap, same vertical
+    # scroll budget per page since cards stack at the same density
+    # the narrow viewport already used. Both the embed body (home
+    # wrapper sub-buckets) and the standalone list page path share
+    # this class, so one change covers both surfaces uniformly.
     grid_cls = (
-        "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 "
+        "grid grid-cols-1 gap-4 "
         "max-w-7xl mx-auto px-4 pt-4 pb-2"
     )
     search_wrap_open = (
