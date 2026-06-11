@@ -904,6 +904,7 @@ def _shared_container_url(
     state_filename: str,
     container_name: str,
     spinup_fn: "Callable[[str], tuple[str, object]]",
+    post_spinup_fn: "Callable[[str], None] | None" = None,
 ) -> str:
     """xdist canonical "session-scope-once" coordinator for shared
     Docker containers (CB.17.k).
@@ -919,6 +920,17 @@ def _shared_container_url(
     uniqueness enforcement collapses concurrent creates onto one
     container). Subsequent workers read the URL from the state file.
 
+    ``post_spinup_fn`` runs INSIDE the FileLock immediately after the
+    URL is established and BEFORE the state_file is written. This is
+    the single-shot post-init hook for cluster-level setup (extension
+    installs, role grants, etc.) that needs to happen exactly once per
+    pytest invocation regardless of xdist worker count. Because it runs
+    under the same lock that serializes spinup, concurrent workers
+    don't race the TOCTOU window between "extension missing" and
+    ``CREATE EXTENSION IF NOT EXISTS`` — only the first worker enters
+    this branch; followers see ``state_file.is_file()`` and short-
+    circuit. ``worker_id == "master"`` (bare pytest) runs it inline.
+
     ``worker_id == "master"`` skips the lock dance — bare pytest with
     no xdist plugin doesn't need cross-worker coordination.
 
@@ -931,6 +943,8 @@ def _shared_container_url(
     # Bare pytest (no xdist): straight create.
     if worker_id == "master":
         url, _ = spinup_fn(container_name)
+        if post_spinup_fn is not None:
+            post_spinup_fn(url)
         return url
 
     # xdist path: the parent of each worker's basetemp is the dir
@@ -942,6 +956,8 @@ def _shared_container_url(
         if state_file.is_file():
             return state_file.read_text().strip()
         url, _ = spinup_fn(container_name)
+        if post_spinup_fn is not None:
+            post_spinup_fn(url)
         state_file.write_text(url)
         return url
 
@@ -965,6 +981,71 @@ _SHARED_SNAP_PG_CONTAINER_NAME: Final = "recon-gen-snap-test-pg"
 _SHARED_SNAP_ORACLE_CONTAINER_NAME: Final = "recon-gen-snap-test-oracle"
 
 
+def _install_pgcrypto_extension(url: str) -> None:
+    """Install ``pgcrypto`` exactly once per PG container fixture spinup.
+
+    ``emit_schema`` emits ``CREATE EXTENSION IF NOT EXISTS pgcrypto``
+    (Phase CW.2 Lock 3 — audit provenance SHA-256). Despite the
+    ``IF NOT EXISTS`` guard, concurrent xdist workers all finding
+    pgcrypto missing simultaneously race the underlying
+    ``INSERT INTO pg_extension`` and one (or more) raise
+    ``psycopg.errors.UniqueViolation: pg_extension_name_index``. The
+    guard is TOCTOU, not atomic.
+
+    Mitigation: install pgcrypto at the CONTAINER fixture layer, inside
+    the same FileLock that ``_shared_container_url`` already uses to
+    serialize spinup. Only the first-firing worker enters this branch;
+    followers see ``state_file.is_file()`` and adopt the URL without
+    re-running the install. Idempotent against persistent containers
+    that already have pgcrypto installed from a prior run.
+
+    Replaces the per-test ``_ensure_pgcrypto_installed`` helper in
+    ``tests/unit/test_snapshotter_pg.py`` (BV.3.3.f, commit bcf9fc25).
+    The invariant — pgcrypto exists before any consumer's
+    ``emit_schema`` runs — belongs at the fixture layer, not in
+    per-test pre-amble.
+    """
+    import psycopg  # noqa: PLC0415 — lazy: PG-only path
+
+    with psycopg.connect(url, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+
+
+def _install_pgcrypto_under_filelock(
+    *,
+    url: str,
+    tmp_path_factory: pytest.TempPathFactory,
+    worker_id: str,
+    sentinel_filename: str,
+) -> None:
+    """Cross-worker-safe pgcrypto install for the env-URL escape hatch.
+
+    The in-process spinup path (``_shared_container_url``) wraps the
+    install in its own FileLock — only the first worker enters spinup,
+    so only one install runs. The env-URL path skips spinup entirely
+    (every worker hits its own ``_resolve_pg_container_url`` and finds
+    the env-URL), so we need our own lock. Sentinel file lives in the
+    xdist-shared dir; first worker installs + touches sentinel,
+    followers see it + short-circuit.
+    """
+    from filelock import FileLock  # noqa: PLC0415 — lazy
+
+    if worker_id == "master":
+        # Bare pytest (no xdist): single process, no race.
+        _install_pgcrypto_extension(url)
+        return
+
+    root_tmp_dir = tmp_path_factory.getbasetemp().parent
+    sentinel = root_tmp_dir / sentinel_filename
+    lock = FileLock(str(sentinel) + ".lock")
+    with lock:
+        if sentinel.is_file():
+            return
+        _install_pgcrypto_extension(url)
+        sentinel.touch()
+
+
 def _resolve_pg_container_url(
     *,
     tmp_path_factory: pytest.TempPathFactory,
@@ -981,9 +1062,34 @@ def _resolve_pg_container_url(
     which named container the caller asks for — CI workflows pin a
     single pre-spun URL, the schema/prefix isolation is what keeps
     the two test families from colliding inside that one container.
+
+    Installs ``pgcrypto`` once per fixture spinup via
+    ``_install_pgcrypto_extension`` (see that function for the TOCTOU
+    rationale). The install runs inside ``_shared_container_url``'s
+    FileLock so concurrent xdist workers can't race the
+    ``CREATE EXTENSION IF NOT EXISTS`` ⇒ ``INSERT INTO pg_extension``
+    sequence. The env-URL escape hatch path also installs (CI workflows
+    pinning a pre-spun container still need pgcrypto present); the
+    first call wins, subsequent ``CREATE EXTENSION IF NOT EXISTS``
+    calls find the extension present and short-circuit before any
+    INSERT attempt, so no UniqueViolation.
     """
     env_url = RECON_GEN_DEMO_DATABASE_URL_PG.get_or_none()
     if env_url is not None:
+        # Pre-spun-container path: guard the install with the same
+        # cross-worker FileLock pattern as the in-process spinup
+        # branch. Otherwise each xdist worker probes the env URL
+        # independently and concurrent first-time installs race the
+        # ``CREATE EXTENSION IF NOT EXISTS`` ⇒ ``INSERT INTO
+        # pg_extension`` TOCTOU window (same shape as the in-process
+        # branch). Sentinel file in the xdist-shared dir ⇒ first
+        # worker installs, followers short-circuit.
+        _install_pgcrypto_under_filelock(
+            url=env_url,
+            tmp_path_factory=tmp_path_factory,
+            worker_id=worker_id,
+            sentinel_filename=f"pgcrypto-installed.{state_filename}",
+        )
         return env_url
 
     from recon_gen._dev.runner import (  # noqa: PLC0415 — lazy
@@ -1005,6 +1111,7 @@ def _resolve_pg_container_url(
         state_filename=state_filename,
         container_name=container_name,
         spinup_fn=_spinup_pg,
+        post_spinup_fn=_install_pgcrypto_extension,
     )
 
 

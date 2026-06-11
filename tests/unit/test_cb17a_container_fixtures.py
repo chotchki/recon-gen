@@ -73,9 +73,23 @@ def test_pg_container_url_yields_env_when_set(
     ``(tmp_path_factory, worker_id)`` for the xdist-shared-container
     coordinator. The env-URL fast path bails before either is
     consulted, so any values are fine.
+
+    BV.3.3.f follow-up (2026-06-11): the env-URL path now runs the
+    pgcrypto cluster-init hook (``_install_pgcrypto_extension`` under
+    a FileLock) before yielding. Monkeypatch the installer to a no-op
+    so this smoke test doesn't try to connect to the fake URL —
+    coverage of the install itself lives in the live-container path.
+    Asserts the installer IS called against the env URL (the contract
+    is "env-URL still gets pgcrypto installed, just without spinning
+    a new container").
     """
     fake = "postgresql://fake:5432/x"
     monkeypatch.setenv(RECON_GEN_DEMO_DATABASE_URL_PG.name, fake)
+    install_calls: list[str] = []
+    monkeypatch.setattr(
+        "tests.conftest._install_pgcrypto_extension",
+        install_calls.append,
+    )
     # pytest's @fixture decorator stashes the undecorated function on
     # `__wrapped__`; cast to its real Iterator type since the decorator
     # erases the return annotation under strict pyright.
@@ -86,6 +100,7 @@ def test_pg_container_url_yields_env_when_set(
         ),
     )
     assert next(gen) == fake
+    assert install_calls == [fake]
     # Exhaust the generator to trigger the (no-op) finalize.
     with pytest.raises(StopIteration):
         next(gen)

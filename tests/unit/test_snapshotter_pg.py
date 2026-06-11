@@ -139,89 +139,39 @@ def l2_instance_fixture() -> L2Instance:
     return default_l2_instance()
 
 
-def _ensure_pgcrypto_installed(
-    pg_cfg: Config, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
-) -> None:
-    """Pre-install ``pgcrypto`` under a cross-worker FileLock.
-
-    BV.3.3.f (2026-06-11): ``emit_schema`` emits ``CREATE EXTENSION IF
-    NOT EXISTS pgcrypto`` (Phase CW.2 Lock 3 — audit provenance SHA-256).
-    Despite the ``IF NOT EXISTS`` guard, concurrent xdist workers all
-    finding pgcrypto missing simultaneously race the underlying
-    ``INSERT INTO pg_extension`` and one (or more) get
-    ``UniqueViolation: duplicate key value violates unique constraint
-    "pg_extension_name_index"``. The guard is TOCTOU, not atomic.
-
-    Mitigation: pre-create pgcrypto ONCE under a session-shared
-    ``FileLock`` (same rendezvous shape as the container-URL fixtures).
-    Once the extension exists cluster-wide, the per-worker
-    ``emit_schema`` ``CREATE EXTENSION IF NOT EXISTS`` runs become true
-    no-ops (the ``SELECT FROM pg_available_extensions`` short-circuits
-    before any INSERT attempt) and the per-worker setups parallelize
-    cleanly on their separate ``db_table_prefix`` namespaces.
-    """
-    from filelock import FileLock  # noqa: PLC0415 — lazy
-
-    # Bare pytest: no xdist, no lock needed.
-    if worker_id == "master":
-        _install_pgcrypto(pg_cfg)
-        return
-
-    root_tmp_dir = tmp_path_factory.getbasetemp().parent
-    sentinel = root_tmp_dir / "snap-pg-pgcrypto.installed"
-    lock = FileLock(str(sentinel) + ".lock")
-    with lock:
-        if sentinel.is_file():
-            return
-        _install_pgcrypto(pg_cfg)
-        sentinel.touch()
-
-
-def _install_pgcrypto(pg_cfg: Config) -> None:
-    """Single-shot ``CREATE EXTENSION IF NOT EXISTS pgcrypto``."""
-    conn = connect_demo_db(pg_cfg)
-    try:
-        cur = conn.cursor()
-        try:
-            cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
-            conn.commit()
-        finally:
-            cur.close()
-    finally:
-        conn.close()
-
-
 @pytest.fixture(scope="module")
 def v_overlay_seeded(
     pg_cfg: Config,
     l2_instance_fixture: L2Instance,
-    tmp_path_factory: pytest.TempPathFactory,
-    worker_id: str,
 ) -> Iterator[Config]:
     """Build the base + v-overlay schema once, yield the cfg.
 
     Steps:
 
-    1. Pre-install ``pgcrypto`` under FileLock (BV.3.3.f — xdist race).
-    2. Drop any prior base schema (idempotent).
-    3. Emit + apply base schema (empty tables — we don't need rows for
+    1. Drop any prior base schema (idempotent).
+    2. Emit + apply base schema (empty tables — we don't need rows for
        the snapshot round-trip; the round-trip pins state, not
        semantics).
-    4. Drop + create v-overlay schema.
-    5. Clone base → v (empty clone is fine for state-round-trip).
-    6. Refresh v matviews (empty matviews — still a valid post-
+    3. Drop + create v-overlay schema.
+    4. Clone base → v (empty clone is fine for state-round-trip).
+    5. Refresh v matviews (empty matviews — still a valid post-
        session_start state for the snapshotter to capture).
 
     Module-scope teardown drops both schemas so the shared container
     is left clean for sibling test modules.
+
+    BV.3.3.f follow-up (2026-06-11): pgcrypto install lifted up to the
+    ``snapshotter_pg_container_url`` container fixture's
+    ``post_spinup_fn`` hook (tests/conftest.py::
+    ``_install_pgcrypto_extension``). The invariant — pgcrypto exists
+    before any consumer's ``emit_schema`` runs — belongs at the
+    container layer, not in per-test pre-amble, and the
+    ``_shared_container_url`` FileLock serializes the install across
+    xdist workers (only the first-firing worker enters spinup).
     """
     from recon_gen.common.l2.schema import emit_schema_drop_sql
 
     base_prefix = pg_cfg.db_table_prefix
-
-    # BV.3.3.f — ensure pgcrypto exists BEFORE any worker's emit_schema
-    # runs. See ``_ensure_pgcrypto_installed`` for the race rationale.
-    _ensure_pgcrypto_installed(pg_cfg, tmp_path_factory, worker_id)
 
     conn = connect_demo_db(pg_cfg)
     try:
