@@ -467,4 +467,8 @@ def test_preview_card_composes_with_cached_full_palette(
             data={"accent": "#777777"},
         )
     body = resp.text
-    assert "#FFFFFF" in body or "#ffffff" in body
+    # The fixture's accent_fg comes from DEFAULT_PRESET; assert it
+    # surfaces (case-insensitively because the loader normalizes but
+    # render preserves operator-typed case).
+    expected = DEFAULT_PRESET.accent_fg
+    assert expected in body or expected.lower() in body or expected.upper() in body

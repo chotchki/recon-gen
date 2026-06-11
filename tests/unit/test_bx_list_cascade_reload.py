@@ -132,7 +132,7 @@ def test_cascade_reload_url_preserves_search_sort_page_state(
     to the top.
     """
     app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but make_app return type is inferred Any
         body = c.get(
             "/l2_shape/rail/?q=ach&sort_column=name&page_offset=25",
         ).text
@@ -164,7 +164,7 @@ def test_embed_form_does_not_emit_cascade_wrapper(
     same trigger.
     """
     app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but make_app return type is inferred Any
         body = c.get("/l2_shape/rail/?embed=1").text
 
     assert 'id="list-page-body"' not in body, (
@@ -185,7 +185,7 @@ def test_cascade_wrapper_contains_search_main_and_pager(
     the cards but leave the pager showing the pre-delete total.
     """
     app = _build_app(writable_l2_yaml)
-    with TestClient(app) as c:  # type: ignore[arg-type]
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but make_app return type is inferred Any
         body = c.get("/l2_shape/rail/").text
 
     open_idx = body.index('id="list-page-body"')

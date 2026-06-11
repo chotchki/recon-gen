@@ -44,7 +44,7 @@ from recon_gen.common.theme import DEFAULT_PRESET
 # _studio_editor_routes (closure-friendly) and operates on an
 # L2Instance dataclass — we pass it in instead of importing because
 # this module sits below that one in the dependency graph.
-_ThemeDictFetcher = Callable[[Any], dict[str, object]]  # typing-smell: ignore[explicit-any]: L2Instance dataclass
+_ThemeDictFetcher = Callable[[Any], dict[str, object]]  # typing-smell: ignore[explicit-any]: L2Instance dataclass type (avoid import cycle)
 
 
 # Re-export the private helpers so pyright's strict reportUnusedFunction
@@ -124,7 +124,7 @@ def _theme_advanced_has_customizations(
         if current is None and default is None:
             continue
         if isinstance(current, list) and isinstance(default, list):
-            if list(current) != list(default):  # pyright: ignore[reportUnknownArgumentType]: form-derived list[Any]
+            if list(current) != list(default):  # pyright: ignore[reportUnknownArgumentType]: form-derived list[Any] element type
                 return True
             continue
         if current != default:
