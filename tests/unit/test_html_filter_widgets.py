@@ -167,6 +167,22 @@ def test_bootstrap_defines_and_exports_wire_filter_widgets() -> None:
     assert "wireFilterWidgets: wireFilterWidgets," in src
 
 
+def test_bootstrap_picker_plugins_per_select_kind() -> None:
+    """2026-06-12 — Tom Select single-select pickers carry the
+    ``clear_button`` plugin so a one-click ×-affordance clears the
+    selection (vs. the pre-2026-06-12 click-into + Delete-key workaround).
+    Multi-select pickers stay with ``remove_button`` (×-chip per item;
+    a separate clear-all is redundant when each chip is removable).
+
+    The plugin list is set at the Tom Select settings level in
+    bootstrap.js; anti-regression test pins the per-kind shape so a
+    future refactor can't silently drop the clear button.
+    """
+    src = _BOOTSTRAP_JS_PATH.read_text(encoding="utf-8")
+    # The setting carries both plugin names; one ternary picks which.
+    assert 'el.multiple ? ["remove_button"] : ["clear_button"]' in src
+
+
 def test_bootstrap_filter_widgets_degrade_when_lib_absent() -> None:
     """Each widget branch is guarded by a ``typeof X === "undefined"``
     check so a missing CDN lib (offline / blocked) leaves the plain

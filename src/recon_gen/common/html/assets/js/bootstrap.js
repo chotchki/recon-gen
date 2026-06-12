@@ -2075,7 +2075,12 @@
     var typeaheadUrl =
       el.dataset.typeahead === "1" ? el.dataset.typeaheadUrl : null;
     var settings = {
-      plugins: el.multiple ? ["remove_button"] : [],
+      // 2026-06-12 — single-select pickers get Tom Select's `clear_button`
+      // plugin so the operator can clear a selection in one click instead
+      // of click-into + Delete-key. Multi-select pickers already carry
+      // `remove_button` (× on each chip); they don't need a separate
+      // clear-all affordance since the chip × covers the use case.
+      plugins: el.multiple ? ["remove_button"] : ["clear_button"],
       // Tom Select syncs the underlying <select>'s selected options but
       // doesn't always re-fire a native `change` on it — do it
       // explicitly so wireFilterAutoRefresh sees the new value.
