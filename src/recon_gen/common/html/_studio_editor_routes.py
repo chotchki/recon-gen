@@ -7080,11 +7080,24 @@ def _render_list_page(
     # replaces the whole wrapper, so the freshly-rendered version (with
     # its own cascade-reload trigger) takes over for the next event.
     if cascade_url is not None:
+        # 2026-06-12 — `hx-disinherit="*"` is LOAD-BEARING. HTMX inherits
+        # ``hx-select`` (and several other hx-* attrs) by default to all
+        # descendants. Without disinherit, every Delete / Edit / save /
+        # toggle button INSIDE the list-page-body picks up
+        # ``hx-select="#list-page-body"`` from this wrapper. When those
+        # descendants make their own swaps (e.g. Delete-confirm swaps an
+        # in-place countdown into ``[data-delete-wrapper]``), HTMX applies
+        # the inherited select against the swap response — which doesn't
+        # contain ``#list-page-body``, so the swap ends up empty. The bug
+        # is silent: HTMX's afterSwap fires normally; the target just gets
+        # cleared with nothing in. Spent ~3h tracing through MutationObservers
+        # to find this.
         cascade_attrs = (
             f'hx-get="{escape(cascade_url)}" '
             f'hx-trigger="l2-cascade-reload from:body" '
             f'hx-select="#list-page-body" '
-            f'hx-swap="outerHTML"'
+            f'hx-swap="outerHTML" '
+            f'hx-disinherit="*"'
         )
     else:
         cascade_attrs = ""
