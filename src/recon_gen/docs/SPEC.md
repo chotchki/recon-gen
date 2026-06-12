@@ -76,7 +76,7 @@ Time:
 Transfer machinery:
 - `Status` ⊇ {Pending, Posted}
 - `TransferType` ⊇ {Sale}
-- `Origin` ⊇ {InternalInitiated, ExternalForcePosted}
+- `Origin` ⊇ {InternalInitiated, ExternalForcePosted, ExternalAggregated} — deliberately open at L1; integrators may extend. Canonical constants: `ORIGIN_INTERNAL_INITIATED`, `ORIGIN_EXTERNAL_FORCE_POSTED`, `ORIGIN_EXTERNAL_AGGREGATED` (see `common/l2/primitives.py`).
 - `SupersedeReason` ⊇ {Inflight, BundleAssignment, TechnicalCorrection}
 - `Metadata`: `Map[Name, Value]`
 
