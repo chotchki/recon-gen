@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
 
-from recon_gen.common.l2.primitives import L2Instance
+from recon_gen.common.l2.primitives import POSTED_STATUS, L2Instance
 from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
     insert_tx,
@@ -246,7 +246,7 @@ class MultiXorMissedGenerator:
             account_parent_role="CustomerLedger",
             amount_money=100.0,
             amount_direction="Credit",
-            status="Posted",
+            status=POSTED_STATUS,
             posting=ts(self.anchor_day),
             transfer_id=self.parent_transfer_id,
             rail_name=rail_name,
@@ -330,7 +330,7 @@ class MultiXorOverlapGenerator:
             account_parent_role="CustomerLedger",
             amount_money=100.0,
             amount_direction="Credit",
-            status="Posted",
+            status=POSTED_STATUS,
             posting=ts(self.anchor_day, hour=12),
             transfer_id=self.parent_transfer_id,
             rail_name=parent_rail,
@@ -360,7 +360,7 @@ class MultiXorOverlapGenerator:
                 account_parent_role="CustomerLedger",
                 amount_money=100.0,
                 amount_direction="Credit",
-                status="Posted",
+                status=POSTED_STATUS,
                 posting=ts(self.anchor_day, hour=13),
                 transfer_id=(
                     f"tr-mxor-overlap-{self.chain_parent_name}-{suffix}"

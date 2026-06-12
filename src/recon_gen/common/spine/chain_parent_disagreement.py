@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import ClassVar
 
-from recon_gen.common.l2.primitives import L2Instance
+from recon_gen.common.l2.primitives import POSTED_STATUS, L2Instance
 from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
     insert_tx,
@@ -235,7 +235,7 @@ class ChainParentDisagreementGenerator:
                 account_parent_role="CustomerLedger",
                 amount_money=100.0,  # arbitrary; matview only counts parents
                 amount_direction="Credit",
-                status="Posted",
+                status=POSTED_STATUS,
                 posting=posting,
                 transfer_id=self.transfer_id,
                 transfer_parent_id=parent_tid,

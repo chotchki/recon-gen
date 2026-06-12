@@ -42,7 +42,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import timedelta
 from decimal import Decimal
-from typing import Literal, NewType, TypeAlias
+from typing import Final, Literal, NewType, TypeAlias
 
 from .theme import ThemePreset
 
@@ -88,6 +88,18 @@ LegDirection: TypeAlias = Literal["Debit", "Credit", "Variable"]
 # rejection. See ``docs/audits/untyped_enum_audit_2026_06_11.md`` for the
 # survey + the close-vs-open lock per enum.
 AmountDirection: TypeAlias = Literal["Debit", "Credit"]
+
+
+# Transaction lifecycle status. Per Schema_v6 the canonical values are
+# ``Posted`` (the default "settled" terminal state), ``Pending`` (in-flight
+# leg awaiting reconciliation), and ``Failed`` (terminal — leg refused).
+# **HALF-OPEN per operator lock** (audit q.1, 2026-06-11): we name the
+# canonical value the dashboards filter on as a ``Final`` constant for
+# writers to import instead of a literal sprinkled across ~30 spine sites,
+# but the column type stays ``str`` (no schema CHECK) so integrators can
+# carry richer in-house lifecycle vocabularies — e.g. ``"Returned"``,
+# ``"Charged-Off"`` — without an upstream type change.
+POSTED_STATUS: Final = "Posted"
 
 # A Rail's name. Distinct NewType from Identifier so pyright catches
 # kind-swap bugs at the call site (passing a Role / TransferTemplateName

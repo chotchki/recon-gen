@@ -41,7 +41,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
 
-from recon_gen.common.l2.primitives import L2Instance, TransferTemplate
+from recon_gen.common.l2.primitives import POSTED_STATUS, L2Instance, TransferTemplate
 from recon_gen.common.spine._emit_helpers import (
     insert_tx,
     load_spec_example,
@@ -231,7 +231,7 @@ class TwoTemplateChainGenerator:
             account_parent_role="CustomerLedger",
             amount_money=-100.0,
             amount_direction="Debit",
-            status="Posted",
+            status=POSTED_STATUS,
             posting=parent_posting,
             transfer_id=self.parent_transfer_id,
             rail_name=self.parent_rail_name,
@@ -259,7 +259,7 @@ class TwoTemplateChainGenerator:
                 account_parent_role="CustomerLedger",
                 amount_money=50.0,  # arbitrary; matview ignores amount
                 amount_direction="Credit",
-                status="Posted",
+                status=POSTED_STATUS,
                 posting=child_posting,
                 transfer_id=self.child_transfer_id,
                 transfer_parent_id=self.parent_transfer_id,

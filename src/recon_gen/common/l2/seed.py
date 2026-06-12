@@ -73,6 +73,7 @@ from recon_gen.common.as_of_frame import AsOfFrame
 from recon_gen.common.sql import Dialect
 
 from .primitives import (
+    POSTED_STATUS,
     AccountTemplate,
     AmountDirection,
     BalanceCadence,
@@ -4466,7 +4467,7 @@ def _txn_row_tuple(
     rail_name: Identifier,
     origin: str,
     metadata: dict[str, str],
-    status: str = "Posted",
+    status: str = POSTED_STATUS,
     bundle_id: str | None = None,
     supersedes: str | None = None,
     template_name: Identifier | None = None,
@@ -4605,7 +4606,7 @@ def _txn_row(
     origin: str,
     metadata: dict[str, str],
     dialect: Dialect,
-    status: str = "Posted",
+    status: str = POSTED_STATUS,
     bundle_id: str | None = None,
     supersedes: str | None = None,
     template_name: Identifier | None = None,

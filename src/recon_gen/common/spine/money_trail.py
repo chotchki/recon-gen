@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import ClassVar
 
-from recon_gen.common.l2.primitives import L2Instance
+from recon_gen.common.l2.primitives import POSTED_STATUS, L2Instance
 from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
     find_internal_with_role,
@@ -257,7 +257,7 @@ class MoneyTrailGenerator:
                 day=day,
                 transfer_id=self._transfer_id(i),
                 rail_name="_spine_plant",
-                status="Posted",
+                status=POSTED_STATUS,
                 parent_transfer_id=parent,
                 legs=(
                     TransferLeg(

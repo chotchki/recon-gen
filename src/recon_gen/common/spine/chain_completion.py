@@ -27,7 +27,7 @@ from recon_gen.common.db import SyncConnection
 from dataclasses import dataclass
 from datetime import date
 
-from recon_gen.common.l2.primitives import L2Instance
+from recon_gen.common.l2.primitives import POSTED_STATUS, L2Instance
 from recon_gen.common.spine._emit_helpers import insert_tx, ts
 from recon_gen.common.spine.violation import CoverageObservation
 
@@ -143,7 +143,7 @@ class ChainCompletionGenerator:
                 account_parent_role=self.account_parent_role,
                 amount_money=100.0,
                 amount_direction="Credit",
-                status="Posted",
+                status=POSTED_STATUS,
                 posting=posting,
                 transfer_id=(
                     f"tr-chainfill-{self.parent_transfer_id}-"

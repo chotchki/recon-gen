@@ -40,6 +40,7 @@ from datetime import date
 from typing import ClassVar
 
 from recon_gen.common.l2.primitives import (
+    POSTED_STATUS,
     AmountDirection,
     L2Instance,
     SingleLegRail,
@@ -219,7 +220,7 @@ class TransferTemplateGenerator:
                 account_parent_role="CustomerLedger",
                 amount_money=-self.amount,
                 amount_direction="Debit",
-                status="Posted",
+                status=POSTED_STATUS,
                 posting=posting,
                 transfer_id=self.transfer_id,
                 rail_name=self.rail_name,
@@ -240,7 +241,7 @@ class TransferTemplateGenerator:
                 account_parent_role="CustomerLedger",
                 amount_money=self.amount,
                 amount_direction="Credit",
-                status="Posted",
+                status=POSTED_STATUS,
                 posting=posting,
                 transfer_id=self.transfer_id,
                 rail_name=self.rail_name,
@@ -265,7 +266,7 @@ class TransferTemplateGenerator:
             account_parent_role="CustomerLedger",
             amount_money=signed_amount,
             amount_direction=self.single_leg_direction,
-            status="Posted",
+            status=POSTED_STATUS,
             posting=posting,
             transfer_id=self.transfer_id,
             rail_name=self.rail_name,

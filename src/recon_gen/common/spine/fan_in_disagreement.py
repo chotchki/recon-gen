@@ -41,7 +41,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
 
-from recon_gen.common.l2.primitives import L2Instance
+from recon_gen.common.l2.primitives import POSTED_STATUS, L2Instance
 from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
     insert_tx,
@@ -306,7 +306,7 @@ class FanInChainGenerator:
                 account_parent_role="CustomerLedger",
                 amount_money=-100.0,
                 amount_direction="Debit",
-                status="Posted",
+                status=POSTED_STATUS,
                 posting=parent_posting,
                 transfer_id=parent_tid,
                 rail_name=self.chain_parent_name,
@@ -337,7 +337,7 @@ class FanInChainGenerator:
                 account_parent_role="CustomerLedger",
                 amount_money=50.0,
                 amount_direction="Credit",
-                status="Posted",
+                status=POSTED_STATUS,
                 posting=child_posting,
                 transfer_id=self.child_transfer_id,
                 transfer_parent_id=parent_tid,

@@ -44,6 +44,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
 
+from recon_gen.common.l2.primitives import POSTED_STATUS
 from recon_gen.common.spine._emit_helpers import insert_tx
 from recon_gen.common.spine.violation import CoverageObservation
 
@@ -215,7 +216,7 @@ class InvFanoutGenerator:
                 account_parent_role=self.sender_parent_role,
                 amount_money=-self.amount_per_transfer,
                 amount_direction="Debit",
-                status="Posted",
+                status=POSTED_STATUS,
                 posting=posting,
                 transfer_id=transfer_id,
                 rail_name=self.rail_name,
@@ -234,7 +235,7 @@ class InvFanoutGenerator:
                 account_parent_role=self.recipient_parent_role,
                 amount_money=self.amount_per_transfer,
                 amount_direction="Credit",
-                status="Posted",
+                status=POSTED_STATUS,
                 posting=posting,
                 transfer_id=transfer_id,
                 rail_name=self.rail_name,

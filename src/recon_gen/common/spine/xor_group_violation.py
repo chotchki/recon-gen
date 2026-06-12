@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
 
-from recon_gen.common.l2.primitives import L2Instance
+from recon_gen.common.l2.primitives import POSTED_STATUS, L2Instance
 from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
     insert_tx,
@@ -218,7 +218,7 @@ class XorGroupMissedFiringGenerator:
             account_parent_role="CustomerLedger",
             amount_money=100.0,
             amount_direction="Credit",
-            status="Posted",
+            status=POSTED_STATUS,
             posting=ts(self.anchor_day),
             transfer_id=self.transfer_id,
             rail_name=self.witness_rail_name,
@@ -305,7 +305,7 @@ class XorGroupOverlapGenerator:
                 account_parent_role="CustomerLedger",
                 amount_money=100.0,
                 amount_direction="Credit",
-                status="Posted",
+                status=POSTED_STATUS,
                 posting=posting,
                 transfer_id=self.transfer_id,
                 rail_name=variant,

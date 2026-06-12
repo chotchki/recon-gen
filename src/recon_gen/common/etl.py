@@ -26,7 +26,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Protocol, runtime_checkable
 
-from recon_gen.common.l2.primitives import AmountDirection
+from recon_gen.common.l2.primitives import POSTED_STATUS, AmountDirection
 from recon_gen.common.money import Cents
 from recon_gen.common.sql.dialect import Dialect
 from recon_gen.common.sql.literals import render_sql_literal
@@ -172,7 +172,7 @@ def write_transaction(
     rail_name: str,
     posting: str,
     origin: str,
-    status: str = "Posted",
+    status: str = POSTED_STATUS,
     metadata: dict[str, object] | None = None,
 ) -> None:
     """Insert one row into ``<prefix>_transactions`` via SQL literals.

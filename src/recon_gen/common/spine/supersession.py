@@ -31,6 +31,7 @@ from recon_gen.common.db import SyncConnection
 from dataclasses import dataclass
 from datetime import date
 
+from recon_gen.common.l2.primitives import POSTED_STATUS
 from recon_gen.common.spine._emit_helpers import insert_tx, ts
 from recon_gen.common.spine.violation import AuditFixture
 
@@ -111,7 +112,7 @@ class SupersessionGenerator:
             account_parent_role=self.account_parent_role,
             amount_money=-self.original_amount,
             amount_direction="Debit",
-            status="Posted",
+            status=POSTED_STATUS,
             posting=ts(self.anchor_day, hour=9),
             transfer_id=self.transfer_id,
             rail_name=self.rail_name,
@@ -131,7 +132,7 @@ class SupersessionGenerator:
             account_parent_role=self.account_parent_role,
             amount_money=-self.corrected_amount,
             amount_direction="Debit",
-            status="Posted",
+            status=POSTED_STATUS,
             posting=ts(self.anchor_day, hour=10),  # 09:30 in OLD; 10 here keeps insert_tx's ts() helper signature simple
             transfer_id=self.transfer_id,
             rail_name=self.rail_name,

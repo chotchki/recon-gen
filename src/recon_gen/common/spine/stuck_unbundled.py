@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import ClassVar
 
-from recon_gen.common.l2.primitives import L2Instance, SingleLegRail, TwoLegRail
+from recon_gen.common.l2.primitives import POSTED_STATUS, L2Instance, SingleLegRail, TwoLegRail
 from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
     find_internal_with_role,
@@ -189,7 +189,7 @@ class StuckUnbundledGenerator:
             account_parent_role=self.account_parent_role,
             amount_money=100.0,
             amount_direction="Credit",
-            status="Posted",
+            status=POSTED_STATUS,
             posting=posting_dt.strftime("%Y-%m-%d %H:%M:%S"),
             transfer_id=self.transfer_id,
             rail_name=self.rail_name,
