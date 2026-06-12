@@ -109,6 +109,17 @@ FieldKind: TypeAlias = Literal[
     "text", "select", "money", "textarea", "multi_select", "yaml_block",
     "multi_select_groups", "chain_children",
     "metadata_value_examples",  # BF.4 — inline-edit picker per locked P2
+    # BX.17.a (2026-06-11) — operator-locked quick-pick chips for ISO
+    # 8601 duration fields. Renders the chip strip + a free-text fallback
+    # against the same name= contract as ``kind="text"`` so the existing
+    # ``_load_duration`` coerce path keeps working without branching at
+    # the loader. Reach for it on any FieldSpec whose value is a
+    # Duration / timedelta. Per [feedback_invariants_in_types], a typed
+    # FieldKind variant beats sprinkling ``data-role="duration-picker"``
+    # on the ``kind="text"`` render path because the chip choices ARE
+    # part of the field-shape contract — closed Literal == pyright catches
+    # "new duration field forgot to opt into the picker" at the spec site.
+    "duration",
 ]
 
 # X.4.f.11 — Rail is a discriminated union (TwoLegRail | SingleLegRail).
@@ -736,7 +747,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
             "ISO 8601 duration (e.g. PT24H, PT4H, P1D). L1 Pending Aging "
             "flags any pending Transaction older than this. Empty ⇒ no watch."
         ),
-        kind="text",
+        kind="duration",
         placeholder="PT24H",
     ),
     FieldSpec(
@@ -747,7 +758,7 @@ _RAIL_FIELDS: tuple[FieldSpec, ...] = (
             "Transaction older than this without a bundling parent. "
             "Empty ⇒ no watch."
         ),
-        kind="text",
+        kind="duration",
         placeholder="P3D",
         handbook_path=HandbookPath("l2-editor/max-unbundled-age"),
     ),
@@ -1760,6 +1771,164 @@ def _resolve_grouped_roles(
     return tuple(groups), True
 
 
+# BX.17.a (2026-06-11) — operator-locked quick-pick chips for ISO 8601
+# duration fields. Tuple-of-(label, value) — value is the literal that
+# fills the free-text input on chip click. Closed list per
+# [feedback_invariants_in_types]: a typed tuple of well-known values
+# beats a magic-string registry the operator and the test both have to
+# guess. The four picks cover the L1 aging windows that drove the field
+# kind in the first place (Instant ⇒ unbounded watch off; 1h ⇒ wire
+# timeliness; EOD ⇒ ACH next-business-day; Next-day ⇒ aging-watch
+# default). Free-text fallback accepts any ISO 8601 literal the loader
+# parses (the chip set isn't a gate).
+_DURATION_QUICK_PICKS: tuple[tuple[str, str], ...] = (
+    ("Instant", "PT0S"),
+    ("1h", "PT1H"),
+    ("EOD", "PT24H"),
+    ("Next-day", "P1D"),
+)
+
+
+def _render_duration_picker_field(spec: FieldSpec, val_str: str) -> str:
+    """BX.17.a — render the operator-locked quick-pick chip strip + the
+    free-text fallback for an ISO 8601 duration FieldSpec.
+
+    Wire shape:
+    - ``<fieldset data-role="duration-picker">`` carries the chips + the
+      input. Per [feedback_browser_drivers_user_facing_locators], drivers
+      anchor on ``data-role``, never a Tailwind class.
+    - Each chip is a ``<button type="button" data-duration-pick="<iso>">``
+      that the delegated JS hook reads to populate the free-text input.
+    - The free-text input STILL has ``name=<spec.name>`` so the existing
+      coerce path keeps reading the same form key. The chips don't
+      submit a separate value — they're a UI affordance on top of the
+      same one form field.
+
+    Active-chip flagging on render: when the current value matches a
+    quick-pick value, that chip carries ``data-active="true"``. The JS
+    hook reapplies this state on chip clicks + un-flags on free-text
+    edit.
+    """
+    input_cls = field_input_classes()
+    chip_active_cls = (
+        "px-2 py-0.5 text-xs rounded-sm border cursor-pointer "
+        "bg-accent text-white border-accent hover:bg-accent/90"
+    )
+    chip_inactive_cls = (
+        "px-2 py-0.5 text-xs rounded-sm border cursor-pointer "
+        "bg-white text-primary-fg border-surface-border "
+        "hover:bg-link-tint hover:border-accent"
+    )
+    chip_parts: list[str] = []
+    for label, iso_value in _DURATION_QUICK_PICKS:
+        is_active = val_str == iso_value
+        cls = chip_active_cls if is_active else chip_inactive_cls
+        active_attr = ' data-active="true"' if is_active else ""
+        chip_parts.append(
+            f'<button type="button" class="{cls}" '
+            f'data-duration-pick="{escape(iso_value)}" '
+            f'data-target="field-{escape(spec.name)}"{active_attr} '
+            f'aria-label="Set {escape(spec.label)} to {escape(label)}">'
+            f"{escape(label)}</button>"
+        )
+    chips_html = (
+        '<div class="flex flex-wrap items-center gap-1 mt-1" '
+        'data-role="duration-quick-picks">'
+        + "".join(chip_parts)
+        + "</div>"
+    )
+    placeholder_attr = (
+        f' placeholder="{escape(spec.placeholder)}"'
+        if spec.placeholder else ""
+    )
+    input_html = (
+        f'<input id="field-{escape(spec.name)}" name="{escape(spec.name)}" '
+        f'type="text" value="{escape(val_str)}"{placeholder_attr} '
+        f'class="{input_cls}" '
+        f'data-role="duration-free-text">'
+    )
+    return (
+        '<fieldset class="border-0 p-0 m-0" '
+        'data-role="duration-picker">'
+        f"{input_html}"
+        f"{chips_html}"
+        "</fieldset>"
+    )
+
+
+# BX.17.c (2026-06-11) — completion-expression DSL autocomplete.
+# Closed vocabulary literals per the v1 grammar (mirrors the regex
+# patterns in ``common/l2/validate.py::_COMPLETION_PATTERNS``).
+# ``business_day_end+Nd`` is sampled at the four shifts the SPEC's
+# worked examples use; the validator accepts any non-negative N so
+# the operator can still hand-type +5d / +7d / etc. when needed.
+# Per [feedback_invariants_in_types], the closed tuple keeps the
+# suggestion set in lock-step with the validator — a new SPEC
+# vocabulary literal lands here AND in the validator, never one
+# without the other.
+_COMPLETION_VOCAB_LITERALS: tuple[str, ...] = (
+    "business_day_end",
+    "business_day_end+1d",
+    "business_day_end+2d",
+    "business_day_end+3d",
+    "business_day_end+5d",
+    "month_end",
+)
+
+
+def _completion_metadata_suggestions(instance: Any) -> tuple[str, ...]:  # typing-smell: ignore[explicit-any]: L2Instance structural read
+    """Walk the L2's TransferTemplate.transfer_key entries + the Rail's
+    metadata_keys; surface each unique key as a ``metadata.<key>``
+    completion suggestion.
+
+    A TT.completion can reference any metadata key that survives the
+    grouping the SPEC's worked example calls out (e.g. a rail with
+    metadata_keys=('ach_settlement_date',) feeds a TT whose completion
+    is ``metadata.ach_settlement_date``). We pull from both surfaces so
+    the operator sees suggestions even on a fresh template before
+    they've populated transfer_key.
+    """
+    keys: set[str] = set()
+    for tt in getattr(instance, "transfer_templates", ()):
+        for k in getattr(tt, "transfer_key", ()):
+            ks = str(k).strip()
+            if ks:
+                keys.add(ks)
+    for rail in getattr(instance, "rails", ()):
+        for k in getattr(rail, "metadata_keys", ()):
+            ks = str(k).strip()
+            if ks:
+                keys.add(ks)
+    return tuple(sorted(keys))
+
+
+def _render_completion_datalist(instance: Any, datalist_id: str) -> str:  # typing-smell: ignore[explicit-any]: L2Instance structural read
+    """BX.17.c — render the ``<datalist>`` carrying both the static
+    completion-vocabulary literals + the dynamic ``metadata.<key>``
+    entries derived from the L2.
+
+    Caller wires the input's ``list="<datalist_id>"`` attribute to this
+    list. The HTMX hook on the input swaps THIS element out on edit so
+    the dynamic suggestions stay fresh as the operator types (e.g.,
+    declaring a new transfer_key on a sibling template makes the new
+    ``metadata.<new_key>`` suggestion appear without a page reload).
+    """
+    metadata_keys = _completion_metadata_suggestions(instance)
+    options: list[str] = []
+    for lit in _COMPLETION_VOCAB_LITERALS:
+        options.append(f'<option value="{escape(lit)}"></option>')
+    for key in metadata_keys:
+        options.append(
+            f'<option value="metadata.{escape(key)}"></option>'
+        )
+    return (
+        f'<datalist id="{datalist_id}" '
+        f'data-role="dsl-autocomplete-list">'
+        + "".join(options)
+        + "</datalist>"
+    )
+
+
 def _render_field(
     spec: FieldSpec,
     value: object,
@@ -2157,6 +2326,17 @@ def _render_field(
             f'rows="10" spellcheck="false" class="{input_cls} resize-y min-h-16 font-mono whitespace-pre">'
             f'{escape(val_str)}</textarea>'
         )
+    elif spec.kind == "duration":
+        # BX.17.a (2026-06-11) — operator-locked quick-pick chip strip
+        # for ISO 8601 duration fields. Chip click sets the free-text
+        # input + visually flags the chip active; typing in the input
+        # un-flags the chips. JS hook is the bootstrap.js delegated
+        # listener (no per-field inline handler — minimal-JS posture).
+        # The free-text input STILL carries name=<spec.name> so the
+        # existing ``_load_duration`` coerce path keeps working without
+        # the form data shape changing.
+        val_str = _value_to_input_str(value)
+        input_html = _render_duration_picker_field(spec, val_str)
     else:
         # text + money both render as <input type="text"> — the loader's
         # _load_money handles numeric strings either way.
@@ -2170,9 +2350,46 @@ def _render_field(
             f' placeholder="{escape(spec.placeholder)}"'
             if spec.placeholder else ""
         )
+        # BX.17.c (2026-06-11) — completion-expression DSL autocomplete.
+        # TransferTemplate.completion has a fixed-grammar vocabulary
+        # (business_day_end / +Nd / month_end / metadata.<key>); wire
+        # a ``<datalist>`` so the browser surfaces the v1 vocabulary
+        # literals + any ``metadata.<key>`` keys already declared on
+        # OTHER templates' transfer_key lists. Native ``<input list>``
+        # delivers the typeahead behaviour without JS; HTMX-driven
+        # refresh (hx-trigger="input changed delay:200ms") swaps the
+        # datalist body so the suggestion set tracks the L2 as the
+        # operator types — same wire shape as the multi-select datalist
+        # at line ~1843.
+        datalist_prefix = ""
+        list_attr = ""
+        autocomplete_role_attr = ""
+        # The completion field name is unique to TransferTemplate per
+        # the FieldSpec registry (no other entity carries a field named
+        # "completion"); no need to thread kind through to disambiguate.
+        if spec.name == "completion":
+            datalist_id = f"field-{escape(spec.name)}-autocomplete"
+            datalist_prefix = _render_completion_datalist(
+                instance, datalist_id,
+            )
+            list_attr = f' list="{datalist_id}"'
+            # HTMX-driven refresh: each typed char (after 200ms idle)
+            # POSTs the current value to the autocomplete endpoint;
+            # response replaces the <datalist> with a freshly-computed
+            # suggestion set so the universe tracks the L2 as new
+            # transfer_key entries land on sibling templates.
+            autocomplete_role_attr = (
+                ' data-role="dsl-autocomplete-input"'
+                f' hx-get="/l2_shape/transfer_template/completion-autocomplete"'
+                f' hx-trigger="input changed delay:200ms"'
+                f' hx-target="#{datalist_id}"'
+                f' hx-swap="outerHTML"'
+            )
         input_html = (
+            f'{datalist_prefix}'
             f'<input id="field-{spec.name}" name="{escape(spec.name)}" '
-            f'type="text" value="{escape(val_str)}"{placeholder_attr} '
+            f'type="text" value="{escape(val_str)}"{placeholder_attr}'
+            f'{list_attr}{autocomplete_role_attr} '
             f'class="{input_cls}">'
         )
         if spec.placeholder:
@@ -4330,16 +4547,97 @@ _RAIL_SUBTYPE_REQUIREMENTS_BANNER: Mapping[RailSubtype, str] = {
 }
 
 
-def _render_intro_details(intro_html: str) -> str:
+# BX.17.b (2026-06-11) — kind → L2Instance accessor map for the
+# empty-list-default-open rule. Closed Mapping per
+# [feedback_invariants_in_types]: pyright catches a new EntityKind
+# that doesn't have an accessor wired here at the call site (the
+# `_kind_is_empty` lookup raises KeyError, which the tests catch).
+# Mirror of the `_HOME_SECTIONS` accessor name in `_studio_routes.py`;
+# kept local to dodge an import cycle.
+_KIND_LIST_ACCESSOR: Mapping[EntityKind, str] = {
+    "account": "accounts",
+    "account_template": "account_templates",
+    "rail": "rails",
+    "transfer_template": "transfer_templates",
+    "chain": "chains",
+    "limit_schedule": "limit_schedules",
+}
+
+
+def _kind_is_empty(instance: Any, kind: EntityKind) -> bool:  # typing-smell: ignore[explicit-any]: L2Instance is structurally just `getattr(instance, accessor)`
+    """BX.17.b — True when the L2 carries zero entities of ``kind``.
+
+    Used to decide whether the create / edit / list page's
+    ``ⓘ Reference`` panel renders default-open (operator landing on a
+    first-time blank state needs the prose visible) or default-closed
+    (operator who already populated the L2 doesn't need to re-skim it).
+
+    Robust to a missing accessor (defaults to empty), so an unmapped
+    EntityKind just falls through to "no entities" → open. Validator-
+    style preference: surface in tests, not at runtime.
+    """
+    accessor = _KIND_LIST_ACCESSOR.get(kind)
+    if accessor is None:
+        return True
+    coll = getattr(instance, accessor, ())
+    return len(coll) == 0
+
+
+def _singleton_has_no_value(instance: Any, kind: EntityKind) -> bool:  # typing-smell: ignore[explicit-any]: L2Instance — structural getattr
+    """BX.17.b — True when a singleton kind (theme / instance) carries
+    no value yet.
+
+    Symmetric to ``_kind_is_empty`` for non-singleton kinds: drives the
+    ``ⓘ Reference`` panel's default-open state on the singleton edit
+    page. Theme = "not set" when ``instance.theme is None``; instance =
+    "not set" when none of description / institution_name /
+    institution_acronym are populated (mirrors the home-page is_set
+    rule in ``_studio_routes.py``).
+
+    Returns False for non-singleton kinds (defensive — the caller
+    shouldn't reach this path, but the inversion keeps the
+    ``or`` chain at the callsite straightforward).
+    """
+    if kind == "theme":
+        return getattr(instance, "theme", None) is None
+    if kind == "instance":
+        return (
+            getattr(instance, "description", None) is None
+            and getattr(instance, "institution_name", None) is None
+            and getattr(instance, "institution_acronym", None) is None
+        )
+    return False
+
+
+def _render_intro_details(
+    intro_html: str, *, open_by_default: bool = False,
+) -> str:
     """Wrap a per-kind / per-singleton intro card in a collapsible
     ``<details>`` so it doesn't push the actual form down the page
     (user 2026-05-25, dogfood: the dense theme structured form +
     the always-visible intro card made the page very tall). Native
-    HTML — no JS required for the toggle. Default-closed; operator
-    clicks "ⓘ Reference" to expand."""
+    HTML — no JS required for the toggle.
+
+    ``open_by_default`` (BX.17.b, 2026-06-11) — when True, render with
+    ``<details open>``. Operator-locked rule: only flag True when the
+    page has zero entities of the kind / no value set (caller's
+    judgment). The first-time landing surface NEEDS the reference
+    prose visible; once the operator has populated the L2, the
+    reference becomes noise + collapses. ZERO persistence — same
+    shape per page load (no localStorage, no cookie). Operator can
+    click to collapse / expand on this load; the next load recomputes.
+
+    Pre-BX.17.b behavior (always closed) is preserved when callers
+    omit the kwarg, so callsites that haven't migrated to the empty-
+    page check stay sane. Per [feedback_browser_drivers_user_facing_locators],
+    drivers anchor on ``data-role="reference-panel"`` — not a Tailwind
+    class — so the test layer can assert the open/closed default
+    without coupling to the styling shape.
+    """
+    open_attr = " open" if open_by_default else ""
     return (
-        '<details class="bg-white border border-surface-border '
-        'rounded-md overflow-hidden">'
+        f'<details class="bg-white border border-surface-border '
+        f'rounded-md overflow-hidden" data-role="reference-panel"{open_attr}>'
         '<summary class="cursor-pointer px-5 py-3 font-semibold '
         'text-accent bg-surface-bg select-none hover:bg-link-tint">'
         'ⓘ Reference'
@@ -5248,6 +5546,13 @@ def _render_create_page(
     # (selects `form.create-form button[type="submit"]`). Drops when
     # the driver migrates to `form[action^="/l2_shape/"]`.
     primary_btn = primary_button_classes()
+    # BX.17.a (2026-06-11) — rail create page also surfaces duration
+    # fields (max_pending_age + max_unbundled_age), so the chip-click
+    # delegated listener loads here too.
+    duration_picker_js_html = (
+        f'<script src="{asset_url("duration-picker.js")}"></script>'
+        if kind == "rail" else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -5255,13 +5560,14 @@ def _render_create_page(
   <title>Recon-Gen · Studio · Editor · Create {escape(kind_label_singular(kind))}{escape(title_suffix)}</title>
   {studio_theme_head(instance)}
   {_htmx_head_block()}
+  {duration_picker_js_html}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
   {_form_page_header_html(f"Create new {kind_label_singular(kind)}{title_suffix}")}
   {_back_breadcrumb_html(from_param)}
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
-    {_render_intro_details(intro_html)}
+    {_render_intro_details(intro_html, open_by_default=_kind_is_empty(instance, kind))}
     {subtype_banner_html}
     <section class="bg-white border border-surface-border rounded-md p-5">
       <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form group">
@@ -5432,6 +5738,14 @@ def _render_edit_page(
         f'src="{asset_url("chain-shape-preview.js")}"></script>'
         if kind == "chain" else ""
     )
+    # BX.17.a (2026-06-11) — rail edit page wires the duration-picker
+    # chip-click delegated listener. Only rail today carries
+    # ``kind="duration"`` FieldSpecs (max_pending_age + max_unbundled_age);
+    # any future kind that opts in needs to add itself here.
+    duration_picker_js_html = (
+        f'<script src="{asset_url("duration-picker.js")}"></script>'
+        if kind == "rail" else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -5441,6 +5755,7 @@ def _render_edit_page(
   {mini_diagram_css_html}
   {_htmx_head_block()}
   {chain_shape_preview_js_html}
+  {duration_picker_js_html}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
@@ -6216,7 +6531,7 @@ def _render_singleton_page(
   {top_nav_html}
   {_form_page_header_html(label)}
   <main class="max-w-4xl mx-auto pt-6 px-4 pb-12 flex flex-col gap-4">
-    {_render_intro_details(intro_html)}
+    {_render_intro_details(intro_html, open_by_default=_singleton_has_no_value(instance, kind))}
     <section class="bg-white border border-surface-border rounded-md p-5">
       <form method="post" action="/l2_shape/{escape(kind)}/" class="create-form group">
         <input type="hidden" name="_method" value="PUT">
@@ -8172,6 +8487,28 @@ def _make_handlers(
         )
         return HTMLResponse(inner)
 
+    async def completion_autocomplete(request: Request) -> HTMLResponse:
+        """BX.17.c (2026-06-11) — completion-expression DSL autocomplete
+        endpoint. HTMX-driven refresh of the ``<datalist>`` on the
+        TransferTemplate.completion field.
+
+        The input fires ``hx-trigger="input changed delay:200ms"`` and
+        targets the datalist by id; this handler rebuilds the datalist
+        from the live L2 cache so suggestions track new transfer_key /
+        metadata_keys entries on sibling entities. The current typed
+        value is ignored — the suggestion universe is the same regardless
+        of prefix; the browser's native datalist filtering narrows on
+        display. Keeping the universe full + delegating the prefix-match
+        to the browser is consistent with the multi-select datalist
+        pattern at line ~1843.
+        """
+        instance = cache.get()
+        # Match the id rendered by ``_render_completion_datalist`` so the
+        # outerHTML swap replaces the existing element by id, not by
+        # position.
+        datalist_id = "field-completion-autocomplete"
+        return HTMLResponse(_render_completion_datalist(instance, datalist_id))
+
     async def preview_markdown(request: Request) -> HTMLResponse:
         """BF.9 (2026-05-25) — markdown → HTML preview endpoint.
 
@@ -8255,6 +8592,7 @@ def _make_handlers(
         "create": create,
         "preview_markdown": preview_markdown,
         "chain_shape_preview": chain_shape_preview,
+        "completion_autocomplete": completion_autocomplete,
         "role_picker": role_picker,
         "theme_field_save": theme_field_save,
         "theme_preview": theme_preview,
@@ -8420,6 +8758,18 @@ def make_editor_routes(
         Route(
             "/l2_shape/chain/shape-preview", h["chain_shape_preview"],
             methods=["POST"], name="chain_shape_preview",
+        ),
+        # BX.17.c (2026-06-11) — completion-expression DSL autocomplete.
+        # GET endpoint that returns a fresh ``<datalist>`` fragment for
+        # the TransferTemplate.completion field. Declared BEFORE the
+        # ``/{kind}/{entity_id}`` catch-all so the literal
+        # ``completion-autocomplete`` segment doesn't fall through to
+        # the read-card handler (which would 404 against
+        # ``_VALID_KINDS``).
+        Route(
+            "/l2_shape/transfer_template/completion-autocomplete",
+            h["completion_autocomplete"],
+            methods=["GET"], name="completion_autocomplete",
         ),
         # BX.1 redesign — delete-confirm endpoint. Declared BEFORE
         # the bare-id read route so Starlette doesn't treat the
