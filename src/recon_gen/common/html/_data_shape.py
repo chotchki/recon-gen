@@ -387,9 +387,14 @@ def shape_line_chart(
     }
 
 
+_SANKEY_OTHERS_NAME = "(others)"
+
+
 def shape_sankey(
     rows: Sequence[Sequence[Any]],
     columns: Sequence[str],
+    *,
+    items_limit: int | None = None,
 ) -> dict[str, Any]:
     """Shape SQL rows as a d3-sankey ``{nodes, links}`` payload.
 
@@ -398,23 +403,65 @@ def shape_sankey(
     (stable across calls with the same row set). Self-loops
     dropped (d3-sankey rejects them).
 
+    Phase DB.1.2 — ``items_limit`` parity with QS's
+    ``SourceItemsLimit.ItemsLimit`` + ``DestinationItemsLimit.ItemsLimit``
+    + ``OtherCategories: INCLUDE``: cap Source nodes to the top-N by
+    aggregate OUTgoing weight + Destination nodes to top-N by aggregate
+    INcoming weight; the trimmed source/dest names collapse into a
+    single ``(others)`` bucket per side, and link weights re-aggregate.
+    ``None`` means no cap (pre-DB.1.2 behavior — App2 rendered the full
+    universe regardless of tree-level cap).
+
     Mirrors the existing ``_db_fetcher._money_trail_to_sankey``
     behavior — they could share an implementation in a follow-up,
     but for X.2.f the contract lives here and the existing helper
     stays in place to avoid a sweep.
     """
     del columns
+    # Compute aggregate weights per Source + per Destination before
+    # capping so the top-N selection sees the full picture.
+    src_weight: dict[Any, float] = {}
+    dst_weight: dict[Any, float] = {}
+    for row in rows:
+        source, target, amount = row[0], row[1], row[2]
+        if source == target:
+            continue
+        v = float(amount)
+        src_weight[source] = src_weight.get(source, 0.0) + v
+        dst_weight[target] = dst_weight.get(target, 0.0) + v
+
+    def _topn(weights: dict[Any, float], n: int) -> set[Any]:
+        ranked = sorted(weights.items(), key=lambda kv: kv[1], reverse=True)
+        return {name for name, _ in ranked[:n]}
+
+    keep_src: set[Any] | None = None
+    keep_dst: set[Any] | None = None
+    if items_limit is not None:
+        keep_src = _topn(src_weight, items_limit)
+        keep_dst = _topn(dst_weight, items_limit)
+
+    def _rename(name: Any, keep: set[Any] | None) -> Any:
+        if keep is None or name in keep:
+            return name
+        return _SANKEY_OTHERS_NAME
+
     name_to_idx: dict[Any, int] = {}
     aggregated: dict[tuple[int, int], float] = {}
     for row in rows:
         source, target, amount = row[0], row[1], row[2]
         if source == target:
             continue
-        if source not in name_to_idx:
-            name_to_idx[source] = len(name_to_idx)
-        if target not in name_to_idx:
-            name_to_idx[target] = len(name_to_idx)
-        key = (name_to_idx[source], name_to_idx[target])
+        s_name = _rename(source, keep_src)
+        t_name = _rename(target, keep_dst)
+        if s_name == t_name:
+            # Renaming may collapse a (Others)-on-both-sides edge.
+            # Drop to match d3-sankey's self-loop rejection.
+            continue
+        if s_name not in name_to_idx:
+            name_to_idx[s_name] = len(name_to_idx)
+        if t_name not in name_to_idx:
+            name_to_idx[t_name] = len(name_to_idx)
+        key = (name_to_idx[s_name], name_to_idx[t_name])
         aggregated[key] = aggregated.get(key, 0.0) + float(amount)
     return {
         "nodes": [{"name": str(n)} for n in name_to_idx],

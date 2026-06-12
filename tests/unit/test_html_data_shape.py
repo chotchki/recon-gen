@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from recon_gen.common.html._data_shape import (
+    _SANKEY_OTHERS_NAME,
     shape_bar_chart,
     shape_for_kind,
     shape_kpi,
@@ -311,6 +312,82 @@ def test_shape_sankey_drops_self_loops() -> None:
     assert len(out["links"]) == 1
     # 'a' still gets a node (it appears as source in the surviving row).
     assert any(n["name"] == "a" for n in out["nodes"])
+
+
+# Phase DB.1.2 — items_limit parity with QS SourceItemsLimit /
+# DestinationItemsLimit + OtherCategories: INCLUDE rollup.
+
+
+def test_shape_sankey_items_limit_none_keeps_all_nodes() -> None:
+    """No cap → all distinct sources + destinations land on the diagram
+    (pre-DB.1.2 behavior). Smoke check against a 5-node universe."""
+    out = shape_sankey(
+        rows=[
+            ("s1", "d1", 10.0),
+            ("s2", "d1", 9.0),
+            ("s3", "d2", 8.0),
+            ("s4", "d2", 7.0),
+            ("s5", "d3", 6.0),
+        ],
+        columns=["src", "dst", "value"],
+    )
+    names = {n["name"] for n in out["nodes"]}
+    assert names == {"s1", "s2", "s3", "s4", "s5", "d1", "d2", "d3"}
+    assert _SANKEY_OTHERS_NAME not in names
+
+
+def test_shape_sankey_items_limit_caps_sources_into_others() -> None:
+    """items_limit=2 → top-2 sources by aggregate weight keep their
+    names; the rest collapse into a single ``(others)`` node. Mirrors
+    QS's SourceItemsLimit.OtherCategories=INCLUDE shape."""
+    out = shape_sankey(
+        rows=[
+            # s1 = 100 (top), s2 = 50 (top), s3 = 5, s4 = 3 → (others) = 8
+            ("s1", "d1", 100.0),
+            ("s2", "d1", 50.0),
+            ("s3", "d1", 5.0),
+            ("s4", "d1", 3.0),
+        ],
+        columns=["src", "dst", "value"],
+        items_limit=2,
+    )
+    node_names = {n["name"] for n in out["nodes"]}
+    assert node_names == {"s1", "s2", _SANKEY_OTHERS_NAME, "d1"}
+    # The (others) → d1 link aggregates s3+s4 = 8.0
+    nodes_by_idx = [n["name"] for n in out["nodes"]]
+    others_idx = nodes_by_idx.index(_SANKEY_OTHERS_NAME)
+    d1_idx = nodes_by_idx.index("d1")
+    others_link = next(
+        link for link in out["links"]
+        if link["source"] == others_idx and link["target"] == d1_idx
+    )
+    assert others_link["value"] == 8.0
+
+
+def test_shape_sankey_items_limit_caps_destinations_into_others() -> None:
+    """Same cap shape applied to the destination side. Top-2 destinations
+    keep their names; rest land in a destination ``(others)`` bucket."""
+    out = shape_sankey(
+        rows=[
+            # d1 = 100, d2 = 50, d3 = 3, d4 = 2 → (others) = 5
+            ("s1", "d1", 100.0),
+            ("s1", "d2", 50.0),
+            ("s1", "d3", 3.0),
+            ("s1", "d4", 2.0),
+        ],
+        columns=["src", "dst", "value"],
+        items_limit=2,
+    )
+    node_names = {n["name"] for n in out["nodes"]}
+    assert node_names == {"s1", "d1", "d2", _SANKEY_OTHERS_NAME}
+    nodes_by_idx = [n["name"] for n in out["nodes"]]
+    s1_idx = nodes_by_idx.index("s1")
+    others_idx = nodes_by_idx.index(_SANKEY_OTHERS_NAME)
+    others_link = next(
+        link for link in out["links"]
+        if link["source"] == s1_idx and link["target"] == others_idx
+    )
+    assert others_link["value"] == 5.0
 
 
 # ---------------------------------------------------------------------------

@@ -339,6 +339,14 @@ class _VisualPlan:
     #: ``kpi_zero_is_healthy`` / ``kpi_inflow_is_healthy`` (the KPI
     #: constructor's 3-way mutex blocks combinations).
     kpi_threshold_banding: tuple[int, int] | None
+    #: Phase DB.1.2 — Sankey ``SourceItemsLimit.ItemsLimit`` /
+    #: ``DestinationItemsLimit.ItemsLimit`` parity with QS. When set,
+    #: ``shape_sankey`` caps Source nodes to the top-N by aggregate
+    #: outgoing weight + Destination nodes to top-N by aggregate
+    #: incoming weight; the remainder collapses into an ``(others)``
+    #: node (matches QS's ``OtherCategories: INCLUDE`` rollup). ``None``
+    #: means no cap — App2 renders the full universe.
+    sankey_items_limit: int | None = None
 
 
 def _apply_cents_to_dollars(
@@ -635,6 +643,20 @@ def _kpi_inflow_is_healthy(visual: object) -> bool:
     return bool(getattr(indicator, "inflow_is_healthy", False))
 
 
+def _sankey_items_limit(visual: object) -> int | None:
+    """Phase DB.1.2 — read the tree Sankey's ``items_limit`` setting,
+    which feeds the ``SourceItemsLimit.ItemsLimit`` +
+    ``DestinationItemsLimit.ItemsLimit`` blocks on QS's
+    ``SankeyDiagramSortConfiguration``. ``None`` for any other Visual
+    kind or when the author didn't cap the Sankey."""
+    if type(visual).__name__ != "Sankey":
+        return None
+    limit: Any = getattr(visual, "items_limit", None)  # typing-smell: ignore[explicit-any]: dynamic getattr against Sankey subtype
+    if not isinstance(limit, int) or limit <= 0:
+        return None
+    return limit
+
+
 def _kpi_threshold_banding(visual: object) -> tuple[int, int] | None:
     """CF.X-infra — read the tree KPI's ``value_threshold_banding``
     setting. Returns ``(amber_at, red_at)`` tuple when set, None
@@ -751,6 +773,7 @@ def make_tree_db_fetcher(
                 kpi_zero_is_healthy=_kpi_zero_is_healthy(visual),
                 kpi_inflow_is_healthy=_kpi_inflow_is_healthy(visual),
                 kpi_threshold_banding=_kpi_threshold_banding(visual),
+                sankey_items_limit=_sankey_items_limit(visual),
             )
 
     base_prefix = str(cfg.db_table_prefix)
@@ -891,11 +914,20 @@ def make_tree_db_fetcher(
             if plan.kpi_threshold_banding is not None:
                 kpi_kwargs["threshold_banding"] = plan.kpi_threshold_banding
             return shape_for_kind(kind, rows, columns, **kpi_kwargs)
-        # ForceGraph + Sankey have specialized projectors today
-        # (_db_fetcher._topology_to_force_graph, etc.); the generic
-        # SQL path handles KPI / Table / Sankey via shape_for_kind.
-        # Visual kinds without a SQL adapter raise from shape_for_kind —
-        # same loud-failure pattern as the SQL lookup above.
+        if kind == "Sankey":
+            # DB.1.2 — Sankey items_limit parity with QS. When the tree
+            # caps the Sankey via items_limit, pass it through so
+            # shape_sankey caps Source + Destination nodes and rolls
+            # the remainder into an (others) bucket.
+            sankey_kwargs: dict[str, Any] = {}  # typing-smell: ignore[explicit-any]: heterogeneous shape-fn kwargs — same justification as chart_kwargs
+            if plan.sankey_items_limit is not None:
+                sankey_kwargs["items_limit"] = plan.sankey_items_limit
+            return shape_for_kind(kind, rows, columns, **sankey_kwargs)
+        # ForceGraph has a specialized projector
+        # (_db_fetcher._topology_to_force_graph); the generic SQL path
+        # handles KPI / Table / Sankey via shape_for_kind. Visual kinds
+        # without a SQL adapter raise from shape_for_kind — same
+        # loud-failure pattern as the SQL lookup above.
         return shape_for_kind(kind, rows, columns)
 
     return fetcher
