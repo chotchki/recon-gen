@@ -1,6 +1,132 @@
 # Release Notes
 
-## v13.9.0 — Phase CS + Phase CT: backlog drain + Oracle 19c plant flow fix
+> **Gap notice (2026-06-12).** Release notes for v13.10.0 through
+> v13.14.3 were not maintained inline with their cuts. Phase histories
+> for that range live in `PLAN_ARCHIVE.md` (Phase CU, CV, CW, CY, CZ,
+> AI, BK, BQ, BW, CK, BV close, snapshotter pattern, runner readiness).
+> v13.14.4 below resumes the convention.
+
+## v13.14.4 — Phase BX close + typed-enum sweep + silent HTMX swap bug fix
+
+Forty-eight commits since v13.14.3. Three load-bearing themes plus
+infrastructure cleanup.
+
+**1. Phase BX close — editor polish + role-reframe row.** The L2
+editor's open cells from the 2026-05 cold-read land:
+
+- **BX.3** Rail list table view (`?view=table` session toggle, grouped
+  by source role with single-leg rails grouping by their `leg_role`
+  too; toggle anchors strip `embed=1` so a click from a home-section
+  embed lands on the chromed standalone page, not the bare fragment).
+- **BX.4** Read-card sections mirror the edit form's grouping (Identity
+  / Classification / Topology / etc.) instead of one flat `<dl>`.
+- **BX.9** Theme editor reorder — essentials (accent / secondary / logo)
+  at top with a live-preview card and 300ms-debounced auto-save on
+  blur; everything else collapses into `<details>Advanced</details>`,
+  default-closed at DEFAULT_PRESET, default-open when an L2 has
+  non-default values.
+- **BX.14** Domain-flavor banking phrasing for every L2 validator error
+  + `[?]` glossary triggers in the rejected-save banner, sourced from
+  8 new GLOSSARY entries keyed by error code family.
+- **BX.15** `[?]` chip tooltips next to Coverage + Trainer toggles on
+  the diagram sidebar.
+- **BX.16** Inline chain shape-preview below the children chip-list on
+  chain edit pages (reuses the BX.8 mini-diagram wasm-graphviz
+  renderer; fires on `load` so the initial paint pre-populates from
+  the form's current parent value).
+- **BX.17** Polish cluster — duration picker quick-select chips
+  (Instant / 1h / EOD / Next-day + free-text), reference-panel
+  default-open behavior on empty list pages only, completion-DSL
+  autocomplete.
+
+The persona audit confirmed BXa absorbed all live references; two
+dead-code refs cleaned up (`_VALID_KINDS` retightened to
+`frozenset[EntityKind]`; unreachable `("theme", "persona")` ternary
+removed).
+
+**2. Untyped-enum sweep — typed primitives for the five most-touched
+enum surfaces.** Per a fresh audit
+(`docs/audits/untyped_enum_audit_2026_06_11.md`), L2 primitives carried
+five enums as bare `str` despite stable schema CHECKs (or no CHECK at
+all). Sweep landed in staged commits for bisect-ability:
+
+- `AmountDirection = Literal["Debit", "Credit"]` (closed); ~12 spine
+  writers + `etl.write_transaction` annotated.
+- `POSTED_STATUS: Final = "Posted"` (half-open per operator lock —
+  "Posted" is canonical materialized state; other values stay
+  integrator-extensible; no CHECK added).
+- `Scope` threaded through 4 spine generators that were dropping to
+  bare `str` (chain_completion / failed_transaction / supersession /
+  inv_fanout).
+- `SupersedeReason` annotated on `_txn_row{,_tuple}` and supersession
+  writers (`str | None` → `SupersedeReason | None`).
+- `Origin` — `ORIGIN_INTERNAL_INITIATED`, `ORIGIN_EXTERNAL_FORCE_POSTED`,
+  `ORIGIN_EXTERNAL_AGGREGATED` `Final` constants (half-open like
+  status; the survey also surfaced + fixed a typo bug in
+  `inv_fanout.py:222,241` that used `"ExternalInitiated"` — not in
+  the canonical set per fuzzer + ETL walkthrough; corrected to
+  `ORIGIN_EXTERNAL_AGGREGATED`. SPEC docs synced).
+
+A new `no-raw-enum-equality` AST lint sits at the test boundary so
+raw-string comparisons against the canonical values can't regress
+(extended through the constructor-input sweep — 187 raw `kind=`/`scope=`/
+`origin=` etc. kwargs across 25 test files now carry typed constants).
+
+**3. `BX.new.list-cascade-reload` HTMX-inheritance silent swap bug.**
+The biggest single fix this cycle. The standalone list page's
+cascade-reload wrapper carried `hx-select="#list-page-body"`, which
+HTMX 1.9 inherits to all descendants by default. Every Delete / Edit /
+save / toggle button inside the wrapper picked up the inherited
+`hx-select`. When the Delete button fired its hx-get to `/delete-confirm`,
+HTMX applied the inherited select against the countdown HTML response
+— there is no `#list-page-body` in that response, so the swap silently
+emptied the target. `afterSwap` fires successfully; the wrapper just
+gets cleared with nothing in. ~3h of MutationObserver tracing to find.
+
+Fix: `hx-disinherit="*"` on the cascade-reload wrapper. Documented as a
+generic quirks-log entry in `docs/reference/quicksight-quirks.md` —
+this is exactly the silent-success failure mode the docs file exists to
+catch.
+
+**Test infrastructure + audits.** Five smaller landings:
+
+- **CB.5 deletion + runner collapse** — the two deprecated agreement
+  test files (`test_inv_dashboard_agreement.py` + `test_audit_dashboard_agreement.py`)
+  carrying "CB.5 follow-up deletes the file entirely" comments since
+  2026-05 finally get deleted (1,835 lines), with a 13-file orphan
+  reference sweep. The runner's qs_browser layer's two-invocation
+  split (the `agree_file` Oracle-DDL-race carve-out) collapses to one.
+- **BK.6 / #35** — `LimitBreach` and `InboundCapBreach` plants on cust1
+  + cust2 (was cust1-only) so the L1 inverse-picker test has ≥2
+  distinct account_id values. Calendar-drift footgun caught the next
+  day: `days_ago=8` sat at the boundary of a 7-day window and broke
+  at the day rollover; clamped to `5` and filed as backlog for a
+  bounded `days_into_window` type (see `date_range_model_audit.md §10`).
+- **QS typeahead_filter** — non-empty-query branch landed on
+  `QsEmbedDriver` per the code comment that described the pattern;
+  unblocks 4 dispatch-level skips. The picker tests themselves were
+  already calling `filter_options` / `pick_filter`, so the actual
+  skip reclaim is narrower than the triage claimed.
+- **Three audit docs landed** — untyped enum surface, no-raw-str-args
+  lint blast radius (1,364 hits across the corpus; recommended
+  Option A scoped to 39 enum-shaped names + treat as its own future
+  phase), QS Browser skip triage (117 skips → 40 recoverable across
+  8 buckets).
+- **PG snapshotter pgcrypto FileLock refactor** — already shipped in
+  v13.14.2, now fully exercised; one corner-case stale-tab race
+  caught + fixed.
+
+**Operator-facing UX rotation worth flagging.** Delete behavior went
+through three iterations this cycle in response to live dogfood:
+top-of-page confirm banner → in-place button swap with countdown +
+Cancel + reason tooltip → terser `"In use"` button text + dropped
+Cancel + smaller tooltip → text-on-button only ("Delete" / "In Use"),
+no countdown tooltip. The cumulative result is a Delete UX that
+indicates state via button text + position rather than a separate
+hover/popup affordance. Browser e2e tests cover all three render
+paths.
+
+
 
 Two clusters land together:
 
