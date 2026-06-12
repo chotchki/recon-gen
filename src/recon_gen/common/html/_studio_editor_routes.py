@@ -6620,12 +6620,14 @@ def _rail_table_columns(entity: object) -> tuple[str, str, str, str]:
 
 
 def _rail_grouping_key(entity: object) -> str:
-    """Source-role grouping key for the table view's ``<tbody>`` sections.
+    """Role grouping key for the table view's ``<tbody>`` sections.
 
-    TwoLegRail groups by its ``source_role`` (the first identifier if
-    the role expression is a tuple — keeps the section count tractable).
-    SingleLegRail collapses into a single ``"(single-leg)"`` bucket
-    because it has no source-role concept at all.
+    TwoLegRail groups by ``source_role`` (first identifier if it's a
+    tuple). SingleLegRail groups by ``leg_role`` so single-leg rails
+    that share the role of a two-leg rail land in the SAME bucket
+    (e.g. a single-leg CustomerFeeAccrual + a two-leg CustomerCashWithdrawal
+    both sit under CustomerDDA when that's their role identifier).
+    The subtype column still distinguishes them per-row.
     """
     from recon_gen.common.l2.primitives import (  # noqa: PLC0415
         SingleLegRail,
@@ -6640,7 +6642,13 @@ def _rail_grouping_key(entity: object) -> str:
             return ""
         return str(src) if src else ""
     if isinstance(entity, SingleLegRail):
-        return "(single-leg)"
+        leg: object = getattr(entity, "leg_role", ())
+        if isinstance(leg, tuple):
+            leg_tuple = cast("tuple[object, ...]", leg)
+            if leg_tuple:
+                return str(leg_tuple[0])
+            return ""
+        return str(leg) if leg else ""
     return ""
 
 

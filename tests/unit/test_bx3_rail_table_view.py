@@ -135,8 +135,10 @@ def test_view_table_groups_by_source_role(writable_l2_yaml: Path) -> None:
     ``<tr data-role="rail-role-header">`` separator carrying the
     group label. spec_example carries TwoLegRails with at least two
     distinct source roles (ExternalCounterparty, CustomerSubledger,
-    NorthPool); single-leg rails collapse into the ``(single-leg)``
-    bucket."""
+    NorthPool); single-leg rails also group by their ``leg_role`` so
+    a single-leg rail with leg_role=CustomerDDA lands in the same
+    bucket as a two-leg rail with source_role=CustomerDDA (unified
+    grouping axis — fixed 2026-06-11 after operator review)."""
     app = _build_app(writable_l2_yaml)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
         body = c.get("/l2_shape/rail/?view=table").text
@@ -152,7 +154,10 @@ def test_view_table_groups_by_source_role(writable_l2_yaml: Path) -> None:
     # Specific known source roles from spec_example surface as
     # ``data-source-role`` attributes on the headers.
     assert 'data-source-role="ExternalCounterparty"' in body
-    assert 'data-source-role="(single-leg)"' in body
+    # Single-leg rails no longer collapse into a generic bucket —
+    # they group by their leg_role same as two-leg rails group by
+    # source_role. The "(single-leg)" header is gone.
+    assert 'data-source-role="(single-leg)"' not in body
 
 
 def test_view_table_rows_carry_entity_id(writable_l2_yaml: Path) -> None:
