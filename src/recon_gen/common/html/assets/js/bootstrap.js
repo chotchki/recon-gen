@@ -2076,11 +2076,16 @@
       el.dataset.typeahead === "1" ? el.dataset.typeaheadUrl : null;
     var settings = {
       // 2026-06-12 — single-select pickers get Tom Select's `clear_button`
-      // plugin so the operator can clear a selection in one click instead
-      // of click-into + Delete-key. Multi-select pickers already carry
-      // `remove_button` (× on each chip); they don't need a separate
-      // clear-all affordance since the chip × covers the use case.
-      plugins: el.multiple ? ["remove_button"] : ["clear_button"],
+      // plugin (× at the right edge clears the selection in one click).
+      // Multi-select pickers get BOTH `remove_button` (per-chip ×) AND
+      // `clear_button` (single × at the right edge that clears ALL chips
+      // in one click). Operator follow-up: same affordance for both —
+      // the per-chip × handles one-at-a-time edits, the right-edge ×
+      // handles the "start over" gesture without click-and-delete per
+      // chip.
+      plugins: el.multiple
+        ? ["remove_button", "clear_button"]
+        : ["clear_button"],
       // Tom Select syncs the underlying <select>'s selected options but
       // doesn't always re-fire a native `change` on it — do it
       // explicitly so wireFilterAutoRefresh sees the new value.

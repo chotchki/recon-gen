@@ -103,13 +103,24 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  /* Glyph is U+2A2F (vector cross). Bumped to 1.5rem + bold so the
-   * affordance reads at typical body-text zoom without squinting. */
-  font-size: 1.5rem;
-  font-weight: 600;
-  line-height: 1;
+  /* Hide the vendor's ⨯ text node (U+2A2F — a math operator whose ink
+   * centers on the math-axis, not the line-box geometric center; visibly
+   * floats above the text baseline). The replacement glyph is injected
+   * via ::before below. ``font-size: 0`` is the standard trick (rather
+   * than ``visibility: hidden`` on a child) — Tom Select sets the text
+   * node directly on the button, not in a wrappable child element. */
+  font-size: 0;
   color: var(--color-secondary-fg);
   transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+.ts-wrapper.plugin-clear_button .clear-button::before {
+  /* U+2715 MULTIPLICATION X — canonical UI close glyph; font designers
+   * center it as a standalone symbol (unlike U+2A2F which centers on
+   * the math-axis). Optically aligns with surrounding text. */
+  content: "\2715";
+  font-size: 1.1rem;
+  font-weight: 600;
+  line-height: 1;
 }
 .ts-wrapper.plugin-clear_button .clear-button:hover {
   background: color-mix(in srgb, var(--color-danger, #C62828) 12%, transparent);
