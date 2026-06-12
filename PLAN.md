@@ -34,7 +34,7 @@ Same cold-read → triage → design → implement → re-cold-read pattern that
 - [ ] BX.16 - **Inline shape-preview on chain form** (P3.8). Tiny parent → child arrow diagram updating as children checkboxes toggle. BX.0.8 mockup decides inline-vs-side-panel placement. Estimated 2-3h.
 - [x] BX.17 - **Polish cluster** (P3.3 + P3.4 + P3.7 bundled). Duration picker with common picks + free-form fallback; reference panels default-open only on empty list pages (zero persistence); completion-expression DSL autocomplete. Estimated 3-4h total.
 - [ ] BX.18 - **Cold-read v2** (phase exit). Iterative-screenshot pattern; same L2-author persona; assert headline P1s closed. Output: `docs/audits/bx_cold_read_v2_author.md`. Operator iteration + sign-off → archive Phase BX. Estimated 90-120 min.
-- [x] BX.new.persona-removal-confirm - **Audit — persona-removal confirmation (BXa absorbed).** Per BX.0.7 replan, BXa absorbed P1.1 (instance form), P1.4 (stakeholders rename), P3.5/P3.6. **COMPLETE 2026-06-11.** 15-min grep audit of `src/recon_gen/common/html/`, `src/recon_gen/common/l2/primitives.py`, and `_studio_routes.py`/`_studio_editor_routes.py` confirms `DemoPersona` is fully removed; no live persona UI surface. Remaining `persona` mentions are: (a) L1-doctrine docstring prose ("persona-blind invariants" — the L1/L2/L3 architecture vocabulary, KEEP); (b) BXa.1 archeology breadcrumb comments (KEEP — intentional); (c) `InvestigationPersona` (distinct concept — Investigation app's vocabulary, not the deleted `DemoPersona` singleton, KEEP). **Two vestigial dead-code references flagged for micro-cleanup** (not removed in audit — operator decides scope): `_studio_editor_routes.py:7395` lists `"persona"` in `_VALID_KINDS: frozenset[str]` (typed as `str` not `EntityKind`, bypasses Literal check; but `SINGLETON_KINDS = {"theme", "instance"}` so `/l2_shape/persona/` routes through the `kind not in _FIELD_SPECS_BY_KIND` 404 branch — behaviorally equivalent to the slug-not-in-`_VALID_KINDS` 404); `_studio_routes.py:889-897` retains `"structured form" if kind in ("theme", "persona")` ternary that's now unreachable (persona never reaches that code path since `_HOME_SINGLETONS` no longer carries persona). Filing as `BX.backlog.persona-dead-code-cleanup`.
+- [x] BX.new.persona - removal-confirm - **Audit — persona-removal confirmation (BXa absorbed).** Per BX.0.7 replan, BXa absorbed P1.1 (instance form), P1.4 (stakeholders rename), P3.5/P3.6. **COMPLETE 2026-06-11.** 15-min grep audit of `src/recon_gen/common/html/`, `src/recon_gen/common/l2/primitives.py`, and `_studio_routes.py`/`_studio_editor_routes.py` confirms `DemoPersona` is fully removed; no live persona UI surface. Remaining `persona` mentions are: (a) L1-doctrine docstring prose ("persona-blind invariants" — the L1/L2/L3 architecture vocabulary, KEEP); (b) BXa.1 archeology breadcrumb comments (KEEP — intentional); (c) `InvestigationPersona` (distinct concept — Investigation app's vocabulary, not the deleted `DemoPersona` singleton, KEEP). **Two vestigial dead-code references flagged for micro-cleanup** (not removed in audit — operator decides scope): `_studio_editor_routes.py:7395` lists `"persona"` in `_VALID_KINDS: frozenset[str]` (typed as `str` not `EntityKind`, bypasses Literal check; but `SINGLETON_KINDS = {"theme", "instance"}` so `/l2_shape/persona/` routes through the `kind not in _FIELD_SPECS_BY_KIND` 404 branch — behaviorally equivalent to the slug-not-in-`_VALID_KINDS` 404); `_studio_routes.py:889-897` retains `"structured form" if kind in ("theme", "persona")` ternary that's now unreachable (persona never reaches that code path since `_HOME_SINGLETONS` no longer carries persona). Filing as `BX.backlog.persona-dead-code-cleanup`.
 
 
 
@@ -48,7 +48,7 @@ Same cold-read → triage → design → implement → re-cold-read pattern that
   - [ ] BX.backlog.session - start-silent-no-op - BX backlog — Studio /training/session-start silent no-op when base schema missing
   - [ ] BX.backlog.studio - plant-oracle-broken - BX backlog — Studio plant flow broken on Oracle (caught manually 2026-06-01)
   - [ ] BX.backlog.qs - tablecellstyle-adapter - BX backlog (ex-CH.x) — QS-side TableCellStyle adapter for per-column right-align + tabular-nums on the deployed QuickSight bundle. ~1 day spike. Not blocking — operator runs against App2 locally. Tracked from Phase CH archive 2026-06-08.
-  - [ ] BX.backlog.persona-dead-code-cleanup - BX backlog — Two vestigial `"persona"` references after BXa nuke: (1) `src/recon_gen/common/html/_studio_editor_routes.py:7395` includes `"persona"` in `_VALID_KINDS` (typed `frozenset[str]` not `frozenset[EntityKind]` so Literal-check bypass slips through); functionally inert because `SINGLETON_KINDS = {"theme", "instance"}` so `/l2_shape/persona/` routes to the `kind not in _FIELD_SPECS_BY_KIND` 404 branch instead of the slug-not-in-`_VALID_KINDS` 404 branch — same `_render_unknown_kind_page`. (2) `src/recon_gen/common/html/_studio_routes.py:889-897` retains `singleton_form_kind = "structured form" if kind in ("theme", "persona") else "single YAML block"` — unreachable since `_HOME_SINGLETONS` no longer carries persona. Cleanup: drop `"persona"` from `_VALID_KINDS` + retighten the type to `frozenset[EntityKind]`; drop `"persona"` from the ternary. 15-min cleanup. Surfaced via `BX.new.persona-removal-confirm` audit 2026-06-11.
+  - [ ] BX.backlog.persona - dead-code-cleanup - BX backlog — Two vestigial `"persona"` references after BXa nuke: (1) `src/recon_gen/common/html/_studio_editor_routes.py:7395` includes `"persona"` in `_VALID_KINDS` (typed `frozenset[str]` not `frozenset[EntityKind]` so Literal-check bypass slips through); functionally inert because `SINGLETON_KINDS = {"theme", "instance"}` so `/l2_shape/persona/` routes to the `kind not in _FIELD_SPECS_BY_KIND` 404 branch instead of the slug-not-in-`_VALID_KINDS` 404 branch — same `_render_unknown_kind_page`. (2) `src/recon_gen/common/html/_studio_routes.py:889-897` retains `singleton_form_kind = "structured form" if kind in ("theme", "persona") else "single YAML block"` — unreachable since `_HOME_SINGLETONS` no longer carries persona. Cleanup: drop `"persona"` from `_VALID_KINDS` + retighten the type to `frozenset[EntityKind]`; drop `"persona"` from the ternary. 15-min cleanup. Surfaced via `BX.new.persona-removal-confirm` audit 2026-06-11.
 - [>] BU.5 - MOVED to BV.7 (2026-06-09). Registry-walk `recon-gen docs export` lives in Phase BV now.
 - [>] BU.6 - SUBSUMED by BV.4.8 (final cold-read of the dual-prefix Trainer surface lands there; no separate BU exit cold-read).
 
@@ -179,172 +179,39 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
 - Investigation's existing dormant-account surface — does it absorb or fork from CM?
   - Comment: I don't see that on investigation
 
-- [ ] CM.0 - Replan + design — survey state escheatment rule diversity; lock policy-declaration site + filing-output scope (informational vs NAUPA-emitting). SPEC.md update. Output: `docs/audits/cm_0_escheatment_design.md`.
-
-
-
-# Backlog (not yet phased)
-
 ## Live BV-post tuning (~150s combined savings)
-
 - **BV-post.qs-browser-skips — QS Browser tier 117 skips / 76 passed (~60% skip rate)** in `up_to qs_browser` run 20260611T034334Z. Operator flagged 2026-06-10 as NOT a release blocker but worth auditing. Per memory `feedback_cheapest_validation_must_fire` — silent drift compounds; verify which skips are intentional (dialect-gated / Need-marker / variant-cell) vs latent gaps.
-
 - **BV-post.app2-wall-tuning — App2 tier wall 1202s vs synthesis estimate of ~340-450s.** Loadgroup pin works (no errors) but per-test wall still ~70s on PG and ~90-200s on Oracle. Snapshot/restore isn't fully amortizing Session Start per the synthesis prediction. Profile + tune; see `runs/20260611T034334Z-00ce44c8/timings/` per-worker `.jsonl` files for cold data.
-
 - **BV-post.snapshot-double-matview-refresh — Drop the duplicate matview refresh in trainer_ready_session._seed_demo_db** (~30s win, s effort). `_seed_demo_db` runs `refresh_matviews_sql` then Session Start's `run_deploy_pipeline → step_4_matviews` runs it again.
-
 - **BV-post.oracle-stuck-asyncio-warning — Oracle stuck_pending/stuck_unbundled asyncio executor warning** — initial cursor-pattern hypothesis FALSIFIED (warning persisted past 8b41b83c). Single clean-run evidence at 20260611T034334Z-00ce44c8 attributes the disappearance to f9123d2a loadgroup pin serializing trainer fixtures onto one worker per dialect (executor-thread thrash from 16 unpinned trainer fixtures, not cursor semantics). Likely the same defect as the (now-dropped) `asyncio executor not joining within 300s` BX backlog item. Confirm-or-drop on the next push-driven CI run; if warning stays absent, drop entirely.
-
 - **BV-post.typing-smell-parametrize — Parametrize `test_typing_smells::test_no_typing_smells` per rule** so AST walks parallelize across workers. Single 12.7s test holds one unit worker hostage. ~11s win, s effort.
-
 - **BV-post.n-12-vs-auto — `-n auto` → `-n 12` on unit + db tiers** (16-core Mac over-provisioned per timing analysis). ~8s win, xs effort. Verify on WSL2 self-hosted CI runner first.
-
 - **BV-post.snap-container-unify — Snapshotter container unification** (loadgroup pin shipped at f9123d2a, app2 layer; gate condition met). ~4s + RAM, s effort. The `recon-gen-snap-test-pg/oracle` dedicated containers may be collapsible to prefix-isolation on the shared CB.17.k containers.
-
 - **BV-post.qs-browser-loadgroup-extension — Extend loadgroup to qs_browser tier** to restore inv/audit producer pins (silent no-ops per the `00ce44c8` stale-comment sync). Currently green so the race hazard is latent; re-validate CB.7-followup marker-deselection × loadgroup cascade hazard first.
-
 ## Deferred phase work
-
 - **BK.1 — $0.01 customer-DDA closing balance plant.** Defer: BH.24 cents-vs-dollars cleanup + BH.1 drift formula likely already resolved; no repro in v12/v13.1.1/v13.6.1 cold-reads. Re-file if it surfaces in a future cold-read with a repro.
-
 - **BK.6 — Limit Breach KPI=0 vs 5 rows.** Defer: not reproducible on bundled L2 (sasquatch + spec_example); operator-specific scenario; never reproduced. Re-file if reproducible L2 surfaces.
-
 - **BK.8 — cust-019 / Customer 18 off-by-one.** Defer: needs operator L2 yaml row; never received. Re-file if the L2 yaml arrives.
-
 - **a11y-toolchain-spike** — unblocks CK-deferred.{3,5,6,7} + CJ.5 (the four collapsed items below are gated on this single spike's outcome). Pick the axe-core integration mechanism (npx-via-pytest-subprocess vs Playwright JS-eval vs alternative). Per memory `feedback_rust_influenced_tool_preferences` operator weigh-in needed (axe-core is npm-only). Once the spike resolves, fan out as: entity-list `aria-allowed-role` sweep (~140 nodes); bounding-box overlap sweep (66 remaining; some likely auto-cleared by CG/CH primitives); axe-core CI gate (build-fail on new findings, operator-OK gated); cold-read v3 a11y confirmation (manual screen-reader + axe-core green). Backlogged 2026-06-10.
-
 - **CK-deferred.2 — Training `nested-interactive` fix.** Likely a button-inside-clickable-card issue; pull the inner control out. Carried from Phase CK (archived 2026-06-10) — deferred pending visual repro. Not gated on `a11y-toolchain-spike`.
-
 - **BW deferred-pending-demand — Docs posture (`_kv`-templated deployment-overview page).** Fire only if an operator requests it. D7 already locked at static-default per BV close summary.
-
 - **BV.1 — D3.1 L2 audit redux + per-primitive curriculum doc** ("what's persona for?" deliverable). Operator-judgment on audience (CPA reviewer / dev onboarding / investor / sales), format (single page / multi-doc / mkdocs section), depth, worked-example shape. Backlogged 2026-06-10. (Merged with the separately-deferred D3.1 line.)
-
 - **BV.2 — D3.2 ETL round-trip claim** (test data generator hooked as ETL hook; BT.3's coverage report green per fuzz seed). Likely partially absorbed by snapshot/restore golden-mirror + PlantContract typed invariant; re-scope when re-opened. Backlogged 2026-06-10. (Merged with the separately-deferred D3.2 line.)
-
 - **BV.5 — Agent-based design cold-read against the dogfood + the HUGE test.** Output: `docs/audits/bv_cold_read.md`. Defaults work; just needs target lock (dogfood test surface / Snapshotter abstraction / Trainer UI / all). Backlogged 2026-06-10.
-
 - **CV-followup.1 — per-pair z still flags real biweekly payday clusters.** Filed 2026-06-09 during Phase CV. After CV.2's per-pair PARTITION BY z + min-n floor lands, sasquatch_pr's TRAINER_CLEAN baseline still surfaces ~35 rows at |z| ≥ 4 (down from 52 pre-CV but not 0). Top-5 high-z rows are real customer-payday clusters on busy external counterparties — `ext-payment-gateway-processor → cust-0021-snb` etc. Mathematically per-pair z IS correctly flagging these as anomalies (each cluster day IS the pair's biggest day vs its own history). Differentiating "real anomaly" from "recurring pattern" needs period detection (Fourier / autocorrelation) on top of the z formula. Out of CV's scope. The CV.4 regression test gates on |z| ceiling ≤ 8 rather than count ≤ 0 so the contract is achievable.
-
 - **CV-followup.2 — σ=2 dashboard default needs per-pair calibration.** Filed 2026-06-09 during Phase CV. The dashboard's default `AnomalyView.sigma_threshold` is 3.0; the visual control slider defaults to σ=2. Pre-CV neither was calibrated (per v11_21_0_triage). Post-CV per-pair z has a hard ceiling at N/sqrt(N+1) ≈ 6-7 on the 90-day seed. At σ=2 a large fraction of pairs surfaces; at σ=3 ~100 rows on sasq; at σ=4 ~35 rows. The right default depends on operator intent (deep-dive triage vs systemic-alert) — picking it needs an operator decision + cold-read with both threshold values.
-
 - **CV-followup.3 — InvFanoutGenerator's anomaly side-effect under per-pair z.** Filed 2026-06-09. InvFanoutGenerator's docstring notes it's "NOT registered for AnomalyInvariant: the rolling-window z-score is probabilistic. The boost is deliberately multiplied to push it over." Under CV.2's per-pair z + min-n floor, the fanout plant's recipient may or may not surface anomaly depending on history depth (the boost's 5× multiplier was calibrated against global z). Verify the fanout boost still trips anomaly post-CV; recalibrate if needed.
-
 ## CI / release pipeline followups
-
 (none currently — CI-followup.1 + CI-followup.2 shipped per ci.yml flock at `.github/workflows/ci.yml:183` (PG) + `:185` (Oracle) and `@pytest.mark.flaky(reruns=2)` at `tests/unit/test_deploy_pipeline.py:2132`.)
-
 ## Other
-
 - **BC.12 deferred: `l2_yaml_raw` / `cfg_yaml_raw` opaque-provenance kv rows.**
-  Surfaced 2026-05-24 during BC.12 integration. The original design
-  said the kv would hold both per-field decompositions AND opaque-raw
-  rows (`key='l2_yaml_raw'`, value=<full JSON>) so the operator could
-  SELECT the original yaml back from the DB. **Deferred** because the
-  Oracle chunked literal shape (`TO_CLOB(c1) || TO_CLOB(c2) || ...`,
-  required to dodge ORA-01704's ~4000-char string-literal cap)
-  collides with `batch_oracle_inserts`'s quote-aware coalescer —
-  the batcher counts quotes per row to detect VALUES tuple boundaries,
-  and the chunked TO_CLOB form has multiple quoted segments per row
-  that confuse the count.
-
-  Operators retain access via the `--l2 <path>` source file (the yaml
-  on disk is the canonical artifact); matview consumption goes through
-  the typed projection views. The provenance feature is the loss.
-
-  Fix shape (when prioritized): either (a) teach `batch_oracle_inserts`
-  to handle multi-quoted-segment VALUES tuples correctly, OR (b) emit
-  the provenance rows as single-row INSERTs that skip the batcher
-  entirely (~1KB SQL per deploy event; negligible cost).
-
 - **`no-raw-str-args` AST lint — extend BC.1's D8 family to bare `str` parameters.**
-  Surfaced 2026-05-24 by user during BC.0 sign-off. The codebase already has
-  typed string newtypes (`SheetId`, `VisualId`, `FilterGroupId`, `ParameterName`,
-  `DashboardId` in `common/ids.py`; `AccountId`, `RailName`, etc.) but a sweep
-  for bare `str` parameters across `src/recon_gen/**` would surface every
-  callsite that slipped through. Same shape as D8 (`no-raw-temporal-args`):
-  AST-walk function/method signatures, flag any param annotated `str` (or
-  `str | None`), require migration to a NewType wrapper OR a
-  `# typing-smell: ignore[raw-str-arg]: WHY` escape.
-
-  Expected to be a BIG migration — `str` is everywhere. Whitelist surface
-  needs care:
-  - SQL fragments + column names (low value to wrap; they're already
-    SQL-injected territory if the caller is wrong).
-  - User-facing display strings (titles, descriptions, error messages —
-    these are content, not identifiers).
-  - Dataclass field annotations stay unaffected (point values, not policy).
-  - Stdlib-facing seams (Click string opts, env-var reads, file paths via
-    `os.PathLike[str]`).
-  - The `# typing-smell: ignore[raw-str-arg]: WHY` escape with required
-    WHY.
-
-  Staged like D8 — disabled during the migration, enabled at end. Probably
-  a dedicated phase rather than a sub-task: scale similar to a full
-  Phase BC × N.
-
-  Sequenced after BC + BD land (those validate the AST-lint + named-
-  constructor pattern is workable on a smaller migration before scaling).
-
 - **Studio / Dashboards rethink under the post-AW DB-projected
-  L2/cfg.** Surfaced 2026-05-23 after AW completed. AW lifted L2 + cfg
-  yaml into `<prefix>_config` as DB-resident JSON; matviews now JOIN to
-  it for per-L2 values. That changes a bunch of Studio/Dashboard
-  questions that deserve evaluation as a unit, not piecemeal:
-  - **Studio editing model.** Studio currently writes the L2 yaml file
-    only; deploy regenerates the schema + populates the config table.
-    Options: (a) yaml stays the only source of truth; deploy projects;
-    (b) Studio also UPDATEs `<prefix>_config` on save for "live-reflect"
-    semantics; (c) Studio writes the DB; exports back to yaml on
-    operator request. AW makes (b) + (c) feasible; whether they're
-    desirable is the open question.
-  - **"Deployed-vs-edited" Studio view.** Studio could show the
-    DB-resident `<prefix>_config` row alongside the WIP yaml edit — a
-    "what's deployed vs what you're authoring" diff surface. Useful for
-    "this rail's cap was 5000 in prod; my edit sets it to 7000."
-  - **Dashboard pickers from L2 yaml** (the originally-queued item):
-    pickers that show L2-DECLARED values (vs dataset-derived which
-    shows whatever's in the data); pickers that JOIN to L2 metadata
-    (descriptions, types, classifications); pickers that survive
-    deploys without re-emitting JSON. Caveat: requires changing
-    dashboard JSON's filter shape from `StaticValues` to
-    `LinkToDataSetColumn`.
-  - **Cross-tabular L2 context in dashboards.** Per-rail
-    descriptions / per-account roles surfaced in tooltips, drill
-    contexts, etc. — directly JOIN to `<prefix>_config.l2_yaml` from
-    the dataset SQL rather than baking at emit time.
-  - **Customer ETL access.** Operators / customer pipelines may want
-    SQL access to "the same L2 values the matview uses" — DB-resident
-    is friendlier than parsing yaml.
-  - **Auditability.** `<prefix>_config` could carry timestamps for
-    "when did the config last replace?" — Studio could surface "L2
-    last updated 3 hours ago" as a deploy-state indicator.
-  Scope this as its own evaluation phase (likely audit + spike +
-  decision per surface); each Studio/Dashboard surface gets a "use
-  DB / don't use DB / hybrid" call. Sized after picking a driver
-  goal (analyst-friendliness vs operator ergonomics vs Studio
-  iteration speed).
-
-
-
 - **Q.6 — CLI shape revisit: cfg ⇄ L2 dual-yaml factoring.** Surfaced 2026-05-08 during `Y.2.gate.h.6`. The runner reads `cfg.default_l2_instance` and threads `QS_GEN_TEST_L2_INSTANCE` to subprocesses, making the CLI's dual-arg shape (`-c <cfg.yaml> --l2 <l2.yaml>`) partially redundant. Spike-before-implement (per `feedback_spike_before_locking_implementation`); CLI-surface change touches every operator command + doc example + tests.
-  - **Q.6.0 SPIKE: combined-yaml vs cfg-with-L2-pointer vs status-quo** (LOCKED 2026-05-08; deferred from PLAN 2026-05-19). Output `docs/audits/y_11_cli_shape_spike.md`. Four candidates: **(A)** status quo + `--l2` defaults from `cfg.default_l2_instance` (smallest delta, mostly additive); **(B)** single combined yaml (eliminates dual-yaml friction but env-only fields co-mingle with institution-flavor — Q.5 separation existed for a reason); **(C)** cfg-with-L2-pointer + `--l2` removed entirely (forces multi-instance operators to duplicate cfg); **(D)** `--l2 <name>` indexed against an `l2_instances:` registry in cfg + `default_l2_instance:` (named ergonomics, one indirection layer). Constraints: (1) no-args `json apply --execute` deploys the default L2; (2) multi-L2 operators don't copy cfg files; (3) existing `--l2 <yaml>` keeps working or has a documented migration; (4) doc examples shrink; (5) tests pass without env-var passthrough. Likely outcome: A or D — A smallest delta, D cleanest if multi-L2-per-cfg becomes common.
-  - **Q.6.1–Q.6.3 implement per spike result.** Updates `cli/{json,schema,data,audit}.py`, `cli/_helpers.py::resolve_l2_for_demo`, every CLAUDE.md / README / handbook example, every `runner.invoke([..., "--l2", ...])` test, every CI workflow YAML that uses `--l2`. Migration warning ≥1 minor version. Sweep memory entries + docs for stale `--l2 <yaml>` refs. Update CLAUDE.md "Commands" block to show the new shape as canonical; keep explicit `--l2` form as the multi-instance/override sub-pattern.
-  - **Q.6.4 bump version (breaking CLI change — post-v9.0.0) + RELEASE_NOTES** (deferred from PLAN 2026-05-19) — entry highlighting the simplification + migration recipe.
 - **Dashboards-local L1 dashboard render errors (surfaced 2026-05-10, X.2.g.4 territory, NOT a Y.2.g regression).** With the Y.2.g.2.d pool-lifespan fix landed, `dashboards --app l1_dashboard` starts cleanly + the drift KPI fetches data from the live matview, but other L1 visuals throw render errors in Dashboards (smoke + drift KPI work, broader rendering doesn't). Per-visual coverage in `_tree_fetcher` / `wrap_for_visual` — investigation/L2FT shipped via X.2.g.{2,3} with the same pattern, so the gap is L1-specific visual kinds the renderer hasn't grown arms for yet. Triage: capture the failing visual_ids + renderer error, extend `wrap_for_visual` with the missing arms, mirror the Investigation/L2FT shape. Out of Y.2.g scope (Dashboards visual coverage ≠ pushdown SQL); on the X.2.g roadmap. *(deferred from PLAN 2026-05-19)*
 - **Ephemeral AWS infra arc** *(consolidated; six related items, deferred 2026-05-19/05-20 per `[[feedback_ephemeral_aws_infra]]`)*. Six sub-tasks, sequence matters:
-  1. **Cleanup-scope bugs (3)** — CI/release cleanup currently targets the wrong scope (sweeps `database-2` + QS resources from other runs). Harmless to release-correctness, leaks resources.
-  2. **IAM widen** — `rds-start-stop` inline policy → also allow Create/Delete on `recon-gen-local` + `Github_e2e_testing` (DBCluster + DBInstance + DBSubnetGroup + `iam:PassRole` for monitoring + `ec2:` SG/subnet describe+authorize).
-  3. **CI fresh-DB-per-run** — create the DB at run start, apply locked seed, drop at end. No snapshots (seeds churn). Runner `up`/`down` lifecycle.
-  4. **Local scripts** — same pattern locally; ephemeral per-run DB pointed at the one standing QS account.
-  5. **Per-run cleanup verification** — `tests/e2e/test_cleanup_completeness.py` asserts deploy→teardown leaves no DB row or QS resource tagged with the run's `deployment_name`.
-  6. **Verify + close** — confirm idle RDS = ~$0 between runs in Cost Explorer.
 - **X.10 — Runner: intra-cell layer DAG (deploy starts right after seed).** The per-cell chain `unit → seed_variant → db → app2 → deploy → api → browser` runs strictly serially today, but `db` / `app2` / `deploy` only depend on `seed_variant` — they're siblings. `deploy` is the long pole (~2 min QS async creation); `db` (~45 s) + `app2` (~30 s) fit inside it. Fan `{db, app2, deploy}` with `asyncio.gather` after seed, then gather `{api, browser}` after `deploy` → ~75 s saved per `aw`-target cell (~6 min off a full-matrix run). The `asyncio` plumbing exists (`Y.2.gate.c.6.async`). Sub-tasks: (a) `cell_chain` returns a `{layer: frozenset[deps]}` DAG; (b) `_run_one_variant` topo-sorts + gathers siblings; (c) failure semantics for in-flight `deploy` (boto3 isn't cleanly cancellable — let it finish, report `db` failure, skip downstream); (d) unit tests for the DAG dispatch (topo/sibling-gather/truncation/failure-skips-downstream, mocked layer dispatch); (e) live wall-clock check, pyright, commit; update CLAUDE.md "Commands" chain description.
 - **AA.0 Dashboard UX + exception literacy** *(COMPLETE — shipped v10.1.0a1; full plan archived in `PLAN_ARCHIVE.md` → "Phase AA")*. Six follow-ups still queued from that work:
-  - **AA.A.10 (stretch) Tree-walk picker→column derivation.** `PickerSpec.column` still hand-mapped; the tree carries the wiring formally (`ParameterControl.parameter → Parameter.mapped_dataset_params → (dataset, dataset_param_name) → SQL <<$p>> site → column`). Either parse the dataset SQL or annotate `DataSetParameter` with a `narrows_column` field at construction. Spike before locking annotation-vs-parse.
-  - **AA.A.l2ft rails-inverse.4 Type-encode the `table_rows()` invariant.** `table_rows()` for narrowing-assertion sites is a smell — picker-row-survival is about SQL row count, not DOM visibility. Deprecate `len(table_rows())` for assertion use, or rename to `dom_visible_rows()`.
-  - **AA.A.daterange.3 Structural refactor: single DATE_RANGE control.** Replace each sheet's `(DateTimePickerControl from + to + TimeRangeFilter)` triplet with one `FilterDateTimePickerControl(Type="DATE_RANGE")`. Closes "from > to" footgun; aligns L1 / L2FT / Exec with Investigation. **Wall:** L1's multi-dataset-per-sheet model needs a sharing mechanism (Investigation's filter-bound widget binds to ONE filter on ONE dataset). Options: (a) consolidate L1 datasets, (b) one widget per dataset per sheet, (c) QS mechanism driving multiple parameter-bound filters via intermediates. Spike before locking.
-  - **AA.A.daterange.4 App2 renderer for widget-bound DATE_RANGE.** Already proven for Investigation; extends to the new L1/L2FT/Exec range controls. Follows .3.
-  - **AA.A.daterange.5 Test infra.** `apply_anchor_to_pickers` becomes "set the range to span anchor's date ±1 day" instead of separate from/to. Single picker spec. Follows .3.
 - **Model-driven docs (drift reduction).** Headline carried forward; design TBD.
 - **Mobile / responsive.** Tailwind handles the layout primitives but no explicit mobile-first design pass. Promote when there's a customer story. Note: dashboards are dense by nature; mobile may always be a worse experience than desktop, regardless of effort.
 - **Per-table CSV / XLSX export.** Operators expect "export to spreadsheet" on tables (QS has it). Lower priority than feature parity — punt unless it's a small agent task. The audit PDF already covers the "regulator-ready snapshot" case; spreadsheet export is for analyst self-serve.
@@ -388,3 +255,166 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
 - **CS.11.followup — Investigate App2 Distinct Senders KPI = None root cause** — added 2026-06-09.
 - CS.5 - descoped from phase `CS` on 2026-06-09
 - **BX backlog — App2 Anchor parameter pick doesn't trigger /visuals/*/data refetch on CI** — added 2026-06-09.
+- [ ] CM.0 - Replan + design — survey state escheatment rule diversity; lock policy-declaration site + filing-output scope (informational vs NAUPA-emitting). SPEC.md update. Output: `docs/audits/cm_0_escheatment_design.md`.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  Surfaced 2026-05-24 during BC.12 integration. The original design
+  said the kv would hold both per-field decompositions AND opaque-raw
+  rows (`key='l2_yaml_raw'`, value=<full JSON>) so the operator could
+  SELECT the original yaml back from the DB. **Deferred** because the
+  Oracle chunked literal shape (`TO_CLOB(c1) || TO_CLOB(c2) || ...`,
+  required to dodge ORA-01704's ~4000-char string-literal cap)
+  collides with `batch_oracle_inserts`'s quote-aware coalescer —
+  the batcher counts quotes per row to detect VALUES tuple boundaries,
+  and the chunked TO_CLOB form has multiple quoted segments per row
+  that confuse the count.
+
+  Operators retain access via the `--l2 <path>` source file (the yaml
+  on disk is the canonical artifact); matview consumption goes through
+  the typed projection views. The provenance feature is the loss.
+
+  Fix shape (when prioritized): either (a) teach `batch_oracle_inserts`
+  to handle multi-quoted-segment VALUES tuples correctly, OR (b) emit
+  the provenance rows as single-row INSERTs that skip the batcher
+  entirely (~1KB SQL per deploy event; negligible cost).
+
+  Surfaced 2026-05-24 by user during BC.0 sign-off. The codebase already has
+  typed string newtypes (`SheetId`, `VisualId`, `FilterGroupId`, `ParameterName`,
+  `DashboardId` in `common/ids.py`; `AccountId`, `RailName`, etc.) but a sweep
+  for bare `str` parameters across `src/recon_gen/**` would surface every
+  callsite that slipped through. Same shape as D8 (`no-raw-temporal-args`):
+  AST-walk function/method signatures, flag any param annotated `str` (or
+  `str | None`), require migration to a NewType wrapper OR a
+  `# typing-smell: ignore[raw-str-arg]: WHY` escape.
+
+  Expected to be a BIG migration — `str` is everywhere. Whitelist surface
+  needs care:
+  - SQL fragments + column names (low value to wrap; they're already
+    SQL-injected territory if the caller is wrong).
+  - User-facing display strings (titles, descriptions, error messages —
+    these are content, not identifiers).
+  - Dataclass field annotations stay unaffected (point values, not policy).
+  - Stdlib-facing seams (Click string opts, env-var reads, file paths via
+    `os.PathLike[str]`).
+  - The `# typing-smell: ignore[raw-str-arg]: WHY` escape with required
+    WHY.
+
+  Staged like D8 — disabled during the migration, enabled at end. Probably
+  a dedicated phase rather than a sub-task: scale similar to a full
+  Phase BC × N.
+
+  Sequenced after BC + BD land (those validate the AST-lint + named-
+  constructor pattern is workable on a smaller migration before scaling).
+
+  L2/cfg.** Surfaced 2026-05-23 after AW completed. AW lifted L2 + cfg
+  yaml into `<prefix>_config` as DB-resident JSON; matviews now JOIN to
+  it for per-L2 values. That changes a bunch of Studio/Dashboard
+  questions that deserve evaluation as a unit, not piecemeal:
+  - **Studio editing model.** Studio currently writes the L2 yaml file
+    only; deploy regenerates the schema + populates the config table.
+    Options: (a) yaml stays the only source of truth; deploy projects;
+    (b) Studio also UPDATEs `<prefix>_config` on save for "live-reflect"
+    semantics; (c) Studio writes the DB; exports back to yaml on
+    operator request. AW makes (b) + (c) feasible; whether they're
+    desirable is the open question.
+  - **"Deployed-vs-edited" Studio view.** Studio could show the
+    DB-resident `<prefix>_config` row alongside the WIP yaml edit — a
+    "what's deployed vs what you're authoring" diff surface. Useful for
+    "this rail's cap was 5000 in prod; my edit sets it to 7000."
+  - **Dashboard pickers from L2 yaml** (the originally-queued item):
+    pickers that show L2-DECLARED values (vs dataset-derived which
+    shows whatever's in the data); pickers that JOIN to L2 metadata
+    (descriptions, types, classifications); pickers that survive
+    deploys without re-emitting JSON. Caveat: requires changing
+    dashboard JSON's filter shape from `StaticValues` to
+    `LinkToDataSetColumn`.
+  - **Cross-tabular L2 context in dashboards.** Per-rail
+    descriptions / per-account roles surfaced in tooltips, drill
+    contexts, etc. — directly JOIN to `<prefix>_config.l2_yaml` from
+    the dataset SQL rather than baking at emit time.
+  - **Customer ETL access.** Operators / customer pipelines may want
+    SQL access to "the same L2 values the matview uses" — DB-resident
+    is friendlier than parsing yaml.
+  - **Auditability.** `<prefix>_config` could carry timestamps for
+    "when did the config last replace?" — Studio could surface "L2
+    last updated 3 hours ago" as a deploy-state indicator.
+  Scope this as its own evaluation phase (likely audit + spike +
+  decision per surface); each Studio/Dashboard surface gets a "use
+  DB / don't use DB / hybrid" call. Sized after picking a driver
+  goal (analyst-friendliness vs operator ergonomics vs Studio
+  iteration speed).
+
+
+
+  - **Q.6.0 SPIKE: combined-yaml vs cfg-with-L2-pointer vs status-quo** (LOCKED 2026-05-08; deferred from PLAN 2026-05-19). Output `docs/audits/y_11_cli_shape_spike.md`. Four candidates: **(A)** status quo + `--l2` defaults from `cfg.default_l2_instance` (smallest delta, mostly additive); **(B)** single combined yaml (eliminates dual-yaml friction but env-only fields co-mingle with institution-flavor — Q.5 separation existed for a reason); **(C)** cfg-with-L2-pointer + `--l2` removed entirely (forces multi-instance operators to duplicate cfg); **(D)** `--l2 <name>` indexed against an `l2_instances:` registry in cfg + `default_l2_instance:` (named ergonomics, one indirection layer). Constraints: (1) no-args `json apply --execute` deploys the default L2; (2) multi-L2 operators don't copy cfg files; (3) existing `--l2 <yaml>` keeps working or has a documented migration; (4) doc examples shrink; (5) tests pass without env-var passthrough. Likely outcome: A or D — A smallest delta, D cleanest if multi-L2-per-cfg becomes common.
+  - **Q.6.1–Q.6.3 implement per spike result.** Updates `cli/{json,schema,data,audit}.py`, `cli/_helpers.py::resolve_l2_for_demo`, every CLAUDE.md / README / handbook example, every `runner.invoke([..., "--l2", ...])` test, every CI workflow YAML that uses `--l2`. Migration warning ≥1 minor version. Sweep memory entries + docs for stale `--l2 <yaml>` refs. Update CLAUDE.md "Commands" block to show the new shape as canonical; keep explicit `--l2` form as the multi-instance/override sub-pattern.
+  - **Q.6.4 bump version (breaking CLI change — post-v9.0.0) + RELEASE_NOTES** (deferred from PLAN 2026-05-19) — entry highlighting the simplification + migration recipe.
+  1. **Cleanup-scope bugs (3)** — CI/release cleanup currently targets the wrong scope (sweeps `database-2` + QS resources from other runs). Harmless to release-correctness, leaks resources.
+  2. **IAM widen** — `rds-start-stop` inline policy → also allow Create/Delete on `recon-gen-local` + `Github_e2e_testing` (DBCluster + DBInstance + DBSubnetGroup + `iam:PassRole` for monitoring + `ec2:` SG/subnet describe+authorize).
+  3. **CI fresh-DB-per-run** — create the DB at run start, apply locked seed, drop at end. No snapshots (seeds churn). Runner `up`/`down` lifecycle.
+  4. **Local scripts** — same pattern locally; ephemeral per-run DB pointed at the one standing QS account.
+  5. **Per-run cleanup verification** — `tests/e2e/test_cleanup_completeness.py` asserts deploy→teardown leaves no DB row or QS resource tagged with the run's `deployment_name`.
+  6. **Verify + close** — confirm idle RDS = ~$0 between runs in Cost Explorer.
+  - **AA.A.10 (stretch) Tree-walk picker→column derivation.** `PickerSpec.column` still hand-mapped; the tree carries the wiring formally (`ParameterControl.parameter → Parameter.mapped_dataset_params → (dataset, dataset_param_name) → SQL <<$p>> site → column`). Either parse the dataset SQL or annotate `DataSetParameter` with a `narrows_column` field at construction. Spike before locking annotation-vs-parse.
+  - **AA.A.l2ft rails-inverse.4 Type-encode the `table_rows()` invariant.** `table_rows()` for narrowing-assertion sites is a smell — picker-row-survival is about SQL row count, not DOM visibility. Deprecate `len(table_rows())` for assertion use, or rename to `dom_visible_rows()`.
+  - **AA.A.daterange.3 Structural refactor: single DATE_RANGE control.** Replace each sheet's `(DateTimePickerControl from + to + TimeRangeFilter)` triplet with one `FilterDateTimePickerControl(Type="DATE_RANGE")`. Closes "from > to" footgun; aligns L1 / L2FT / Exec with Investigation. **Wall:** L1's multi-dataset-per-sheet model needs a sharing mechanism (Investigation's filter-bound widget binds to ONE filter on ONE dataset). Options: (a) consolidate L1 datasets, (b) one widget per dataset per sheet, (c) QS mechanism driving multiple parameter-bound filters via intermediates. Spike before locking.
+  - **AA.A.daterange.4 App2 renderer for widget-bound DATE_RANGE.** Already proven for Investigation; extends to the new L1/L2FT/Exec range controls. Follows .3.
+  - **AA.A.daterange.5 Test infra.** `apply_anchor_to_pickers` becomes "set the range to span anchor's date ±1 day" instead of separate from/to. Single picker spec. Follows .3.
+- [ ] backlog - multi-select clear_button visual verification (no real picker to test)
+
+## Phase CN - App2/QS click-drill decoration parity + type-system gate
+
+**Why:** Operator dogfood 2026-06-12 (L1 Overdraft sheet): two coupled defects in the click-drill decoration story.
+
+1. **App2 ignores `conditional_formatting` entirely.** The renderer (`bootstrap.js::renderTable`) reads `columns[i].format` (currency / number) but never reads any decoration spec. So in App2 every drillable column looks identical to non-drillable columns — operator can't tell which cells carry drills until they hover.
+2. **Every app misuses `CellAccentText` (the LEFT-click cue) for `DATA_POINT_MENU` drills.** Grep of `apps/l1_dashboard/app.py`: 8 sites pair `CellAccentText` with `trigger="DATA_POINT_MENU"`. Zero usage of `CellAccentMenu` anywhere in `apps/`. So even on the QS side the column shows plain accent text (suggesting left-click drill) when the actual drill is menu-only — analyst expectation vs reality drift.
+
+Together these break the project convention "left clicks move LEFT, right clicks move RIGHT" — the visual cue doesn't match the actual idiom. Operator wants App2 to decorate the drill column identically to QS.
+
+**Locks (operator to confirm at CN.0 exit):**
+- App2 renders `CellAccentText` as accent-colored text on the `<td>`; `CellAccentMenu` as accent text + pale tint background. Same QS color tokens for parity (no separate App2 palette).
+- Semantics: `CellAccentText` ↔ at least one `DATA_POINT_CLICK` drill writes from that column. `CellAccentMenu` ↔ at least one `DATA_POINT_MENU` drill writes from that column. A column with BOTH triggers → render as `CellAccentMenu` (tint cue subsumes accent-text cue).
+- Type-system gate at `Table.__post_init__` (per `[[feedback_invariants_in_types]]`) — cross-checks each `CellFormat`'s `on.column` against the trigger of the drill writing from it. Raises at the wiring site (apps/<app>/app.py:NNN), not at render time. Pre-stable-version posture — no compat shim.
+- No interim release. Bundle clear_button + cache-bust + row-drill-MENU contract + this phase into one v13.15.x release at CN.7.
+
+**Done when:** every MENU-only sheet uses `CellAccentMenu`; App2's `renderTable` decorates drill columns identically to QS (cold-read v4 visual parity confirms); the type-system gate fails any new mismatch at construction time; release notes for v13.15.x bundle all four themes.
+
+- [ ] CN.0 - **Audit + scope confirmation.** Grep every `CellAccentText` / `CellAccentMenu` callsite across `apps/` + `common/`. Per-sheet table of (column, drill trigger, current format, correct format). Output: `docs/audits/cn_0_clickability_audit.md`. Operator-confirm scope + edge-case rules (column with both CLICK + MENU drills → `CellAccentMenu` wins?) before sub-cells fire.
+- [ ] CN.1 - **App2 renderer plumbing.** Extend `_VisualPlan` with `column_decoration: Mapping[str, str]`; `_table_column_meta` reads `visual.conditional_formatting` and maps `CellAccentText` → `"accent"`, `CellAccentMenu` → `"accent-menu"`. `_data_shape.shape_table` forwards as per-column `"decoration"` field. `bootstrap.js::renderTable` applies CSS class `cell-accent` / `cell-accent-menu` on each `<td>` when `cell.col.decoration` is set.
+- [ ] CN.2 - **CSS classes.** `widgets-theme.css` adds `.cell-accent { color: var(--color-accent); font-weight: 500; }` and `.cell-accent-menu { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 10%, transparent); font-weight: 500; }`. Cursor-pointer + hover-tint variants where the cell is also drillable (CLICK only — MENU stays per-row ⋯).
+- [ ] CN.3 - **Apps sweep — MENU-only sites swap to `CellAccentMenu`.** Per CN.0 audit table. Each app site that pairs `CellAccentText` with `trigger="DATA_POINT_MENU"` swaps to `CellAccentMenu(on=..., text_color=accent, background_color=<accent-tint>)`. Verify the QS deploy + the L1 dashboards still render correctly; capture screenshots.
+- [ ] CN.4 - **Type-system gate in `Table.__post_init__`.** Walks `conditional_formatting × actions` and asserts each `CellFormat.on.column` matches the trigger of at least one drill writing from that column (`CellAccentText` → `DATA_POINT_CLICK`; `CellAccentMenu` → `DATA_POINT_MENU`). Raises `ValueError` at construction with the offending Table + format + drill trigger in the message. Unit test that constructs a mismatched Table and asserts the raise. Sweep any latent mismatches uncovered.
+- [ ] CN.5 - **Tests.** New unit: `_table_column_meta` returns expected decoration map for a Table with both formats. New JS (Playwright): `renderTable` applies `cell-accent` / `cell-accent-menu` class on the right `<td>`. Anti-regression for the CN.4 gate.
+- [ ] CN.6 - **Cold-read v4 parity verify.** Visual side-by-side (QS embed + App2) of L1 Drift + Overdraft + L1 Exceptions sheets; confirm drill columns decorate identically. Output: `docs/audits/cn_6_parity_verify.md`.
+- [ ] CN.7 - **Phase exit + v13.15.x release cut.** Bundle clear_button + cache-bust + row-drill MENU contract + Phase CN into one release notes entry. Bump 13.14.5 → 13.15.0 (minor for the new App2 decoration feature). Operator authorize-at-cut per `[[feedback_always_ask_before_release_cut]]`. Sweep CN to PLAN_ARCHIVE.md.
+
+## Backlog (not yet phased)
+
+- **date-model.plant-days_ago-bounded — replace plant days_ago: int with days_into_window bounded type** — added 2026-06-12.
