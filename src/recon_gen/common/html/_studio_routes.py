@@ -886,13 +886,15 @@ def _render_home_page(
         else:
             is_set = getattr(instance, attr, None) is not None
         status = "set" if is_set else "not set"
-        # BF.7+BF.8 (2026-05-25): theme + persona are structured forms
-        # now (per-field controls, not yaml blocks). Only `instance`
-        # is still a single YAML block (two top-level scalars don't
-        # warrant a decomposed form). Title + body reflect the
-        # actual editor surface so the home-page prose doesn't lie.
+        # BF.8 (2026-05-25): theme is a structured form (per-field
+        # controls, not a yaml block). `instance` is still a single
+        # YAML block (two top-level scalars don't warrant a decomposed
+        # form). Title + body reflect the actual editor surface so the
+        # home-page prose doesn't lie. (BXa.1 + persona-dead-code-
+        # cleanup 2026-06-11 dropped the persona singleton from this
+        # ternary; persona was structured-form per BF.7 before deletion.)
         singleton_form_kind = (
-            "structured form" if kind in ("theme", "persona")
+            "structured form" if kind == "theme"
             else "single YAML block"
         )
         singleton_link = (

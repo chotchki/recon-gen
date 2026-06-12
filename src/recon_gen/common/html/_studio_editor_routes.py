@@ -5331,13 +5331,14 @@ def _singleton_yaml_text(instance: object, kind: EntityKind) -> str:
             instance_map, default_flow_style=False, sort_keys=False,
         ).rstrip() + "\n"
 
-    attr = "theme" if kind == "theme" else "persona"
-    value = getattr(instance, attr, None)
+    # Only "theme" reaches here (instance branched above; persona deleted
+    # by BXa.1 + persona-dead-code-cleanup 2026-06-11).
+    value = getattr(instance, "theme", None)
     if value is None:
         return ""
     # Walk the dataclass to a plain dict that yaml.safe_dump can handle.
     # The L2 loader's per-kind helper round-trips this cleanly.
-    as_dict = dc.asdict(value)  # pyright: ignore[reportUnknownArgumentType,reportUnknownVariableType]  # WHY: ThemePreset/DemoPersona are dataclasses; asdict returns plain dict[str, Any]
+    as_dict = dc.asdict(value)  # pyright: ignore[reportUnknownArgumentType,reportUnknownVariableType]  # WHY: ThemePreset is a dataclass; asdict returns plain dict[str, Any]
     return yaml.safe_dump(as_dict, default_flow_style=False, sort_keys=False).rstrip() + "\n"
 
 
@@ -7725,15 +7726,18 @@ def _make_handlers(
 # ---------------------------------------------------------------------------
 
 
-_VALID_KINDS: frozenset[str] = frozenset(
+_VALID_KINDS: frozenset[EntityKind] = frozenset(
     ("account", "account_template", "rail", "transfer_template", "chain",
      "limit_schedule",
-     # X.4.f.12 — singletons (theme, persona) are valid kinds for the
-     # URL path; the route handlers branch on SINGLETON_KINDS to use
-     # the singleton form/save flow instead of list/CRUD.
-     # AI.2.c — ``instance`` is the third singleton (top-level
+     # X.4.f.12 — `theme` is a singleton URL-path kind; the route
+     # handlers branch on SINGLETON_KINDS to use the singleton form/
+     # save flow instead of list/CRUD.
+     # AI.2.c — `instance` is the second singleton (top-level
      # description + institution_name + institution_acronym).
-     "theme", "persona", "instance"),
+     # BXa.1 + persona-dead-code-cleanup (2026-06-11) — `persona`
+     # singleton removed; was the source of institution_name +
+     # institution_acronym before BXa.1 promoted them to `instance`.
+     "theme", "instance"),
 )
 
 
