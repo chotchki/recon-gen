@@ -25,6 +25,11 @@ from recon_gen.common.dataset_contract import (
     build_dataset,
 )
 from recon_gen.common.l2 import L2Instance
+from recon_gen.common.l2.primitives import (
+    SUPERSEDE_BUNDLE_ASSIGNMENT,
+    SUPERSEDE_INFLIGHT,
+    SUPERSEDE_TECHNICAL_CORRECTION,
+)
 from recon_gen.common.models import (
     DataSet,
     DatasetParameter,
@@ -151,9 +156,9 @@ _L1_CHECK_TYPE_VALUES: tuple[str, ...] = (
 # storage column is open enum, but the loader pins this set at load
 # time; the demo data only ever produces these three.
 _L1_SUPERSEDE_REASON_VALUES: tuple[str, ...] = (
-    "BundleAssignment",
-    "Inflight",
-    "TechnicalCorrection",
+    SUPERSEDE_BUNDLE_ASSIGNMENT,
+    SUPERSEDE_INFLIGHT,
+    SUPERSEDE_TECHNICAL_CORRECTION,
 )
 
 

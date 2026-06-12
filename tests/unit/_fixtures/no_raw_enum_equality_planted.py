@@ -58,6 +58,21 @@ def planted_neq_external() -> bool:
     return scope != "external"  # planted (Scope)
 
 
+def planted_eq_inflight() -> bool:
+    supersedes = "Inflight"
+    return supersedes == "Inflight"  # planted (SupersedeReason)
+
+
+def planted_neq_bundle_assignment() -> bool:
+    supersedes = "BundleAssignment"
+    return supersedes != "BundleAssignment"  # planted (SupersedeReason)
+
+
+def planted_eq_technical_correction() -> bool:
+    supersedes = "TechnicalCorrection"
+    return supersedes == "TechnicalCorrection"  # planted (SupersedeReason)
+
+
 # -- Negative controls (lint MUST NOT flag) ------------------------------
 
 

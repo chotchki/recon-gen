@@ -214,9 +214,18 @@ Duration: TypeAlias = timedelta
 # prior row of the same logical key MUST set ``Supersedes`` to one of
 # these v1 categories. Storage column is open enum (no DB CHECK) so
 # integrators may extend; the loader pins the v1 set at load time.
+#
+# The three Final constants pair with the Literal so writers + tests
+# import the canonical spelling instead of sprinkling literals. The
+# column itself stays open (no DB CHECK) per the SPEC's integrator-
+# extension contract; the Literal closes the v1 set for type-checking,
+# and the constants give writers the canonical handle.
 SupersedeReason: TypeAlias = Literal[
     "Inflight", "BundleAssignment", "TechnicalCorrection",
 ]
+SUPERSEDE_INFLIGHT: Final = "Inflight"
+SUPERSEDE_BUNDLE_ASSIGNMENT: Final = "BundleAssignment"
+SUPERSEDE_TECHNICAL_CORRECTION: Final = "TechnicalCorrection"
 
 # AB.1 (2026-05-19): the *cap-watch perspective* of a LimitSchedule —
 # whether the cap watches money leaving the parent's children

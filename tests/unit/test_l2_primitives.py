@@ -255,12 +255,19 @@ def test_supersede_reason_v1_set() -> None:
     """SPEC v1 SupersedeReason categories. The TypeAlias is open (Literal
     accepts the v1 set; storage column is open enum at the schema layer)."""
     from recon_gen.common.l2 import SupersedeReason
+    from recon_gen.common.l2.primitives import (
+        SUPERSEDE_BUNDLE_ASSIGNMENT,
+        SUPERSEDE_INFLIGHT,
+        SUPERSEDE_TECHNICAL_CORRECTION,
+    )
     # Smoke: the three v1 values type-check as SupersedeReason at runtime.
-    inflight: SupersedeReason = "Inflight"
-    bundle: SupersedeReason = "BundleAssignment"
-    correction: SupersedeReason = "TechnicalCorrection"
+    inflight: SupersedeReason = SUPERSEDE_INFLIGHT
+    bundle: SupersedeReason = SUPERSEDE_BUNDLE_ASSIGNMENT
+    correction: SupersedeReason = SUPERSEDE_TECHNICAL_CORRECTION
     assert {inflight, bundle, correction} == {
-        "Inflight", "BundleAssignment", "TechnicalCorrection",
+        SUPERSEDE_INFLIGHT,
+        SUPERSEDE_BUNDLE_ASSIGNMENT,
+        SUPERSEDE_TECHNICAL_CORRECTION,
     }
 
 

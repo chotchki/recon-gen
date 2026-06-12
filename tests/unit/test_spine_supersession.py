@@ -19,6 +19,7 @@ from pathlib import Path
 from recon_gen.common.db import execute_script
 from recon_gen.common.l2.config_table import replace_config
 from recon_gen.common.l2.loader import load_instance
+from recon_gen.common.l2.primitives import SUPERSEDE_TECHNICAL_CORRECTION
 from recon_gen.common.l2.schema import emit_schema
 from recon_gen.common.spine import (
     AuditFixture,
@@ -122,7 +123,7 @@ def test_emit_writes_two_rows_sharing_one_id() -> None:
     assert rows[1][2] == -20000
     # Original has no `supersedes`; correction tags 'TechnicalCorrection'.
     assert rows[0][3] is None
-    assert rows[1][3] == "TechnicalCorrection"
+    assert rows[1][3] == SUPERSEDE_TECHNICAL_CORRECTION
 
 
 def test_emit_supersession_pair_satisfies_audit_pdf_filter() -> None:

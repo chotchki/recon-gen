@@ -2339,6 +2339,9 @@ class NoPartialFormPutInTestsCheck(Check):
 # - ``"Credit"``                  → ``CREDIT``
 # - ``"internal"``                → ``SCOPE_INTERNAL``
 # - ``"external"``                → ``SCOPE_EXTERNAL``
+# - ``"Inflight"``                → ``SUPERSEDE_INFLIGHT``
+# - ``"BundleAssignment"``        → ``SUPERSEDE_BUNDLE_ASSIGNMENT``
+# - ``"TechnicalCorrection"``     → ``SUPERSEDE_TECHNICAL_CORRECTION``
 _ENUM_VALUE_TO_CONSTANT: dict[str, str] = {
     "Posted": "POSTED_STATUS",
     "InternalInitiated": "ORIGIN_INTERNAL_INITIATED",
@@ -2348,6 +2351,9 @@ _ENUM_VALUE_TO_CONSTANT: dict[str, str] = {
     "Credit": "CREDIT",
     "internal": "SCOPE_INTERNAL",
     "external": "SCOPE_EXTERNAL",
+    "Inflight": "SUPERSEDE_INFLIGHT",
+    "BundleAssignment": "SUPERSEDE_BUNDLE_ASSIGNMENT",
+    "TechnicalCorrection": "SUPERSEDE_TECHNICAL_CORRECTION",
 }
 
 
@@ -2922,7 +2928,9 @@ def _build_checks() -> list[Check]:
                 "of the canonical enum values (Posted / "
                 "InternalInitiated / ExternalForcePosted / "
                 "ExternalAggregated / Debit / Credit / internal / "
-                "external). Import the matching ``Final`` constant from "
+                "external / Inflight / BundleAssignment / "
+                "TechnicalCorrection). Import the matching ``Final`` "
+                "constant from "
                 "``common/l2/primitives.py`` and compare against it — a "
                 "test that pins the raw literal pins the implementation; "
                 "one that pins the constant follows a rename. "
@@ -3090,7 +3098,7 @@ def test_no_raw_enum_equality_finds_planted() -> None:
     src = fixture.read_text(encoding="utf-8")
     tree = ast.parse(src)
     smells = list(check.find_smells(src, tree, fixture))
-    # 10 planted hits:
+    # 13 planted hits:
     #   - planted_eq_posted               → 1 ("Posted")
     #   - planted_neq_internal_initiated  → 1 ("InternalInitiated")
     #   - planted_in_tuple_*              → 2 ("ExternalForcePosted",
@@ -3102,9 +3110,12 @@ def test_no_raw_enum_equality_finds_planted() -> None:
     #   - planted_neq_credit              → 1 ("Credit")
     #   - planted_eq_internal             → 1 ("internal")
     #   - planted_neq_external            → 1 ("external")
-    assert len(smells) == 10, (
-        f"smoke expected exactly 10 hits on the planted fixture "
-        f"(9 plant functions, one of which plants 2 enum hits in the "
+    #   - planted_eq_inflight             → 1 ("Inflight")
+    #   - planted_neq_bundle_assignment   → 1 ("BundleAssignment")
+    #   - planted_eq_technical_correction → 1 ("TechnicalCorrection")
+    assert len(smells) == 13, (
+        f"smoke expected exactly 13 hits on the planted fixture "
+        f"(12 plant functions, one of which plants 2 enum hits in the "
         f"in-tuple shape); got {len(smells)}:\n"
         f"{chr(10).join(repr(s) for s in smells)}\n"
         f"Either the Compare visitor stopped walking, the "

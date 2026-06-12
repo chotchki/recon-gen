@@ -34,6 +34,7 @@ from datetime import date
 from recon_gen.common.l2.primitives import (
     ORIGIN_INTERNAL_INITIATED,
     POSTED_STATUS,
+    SUPERSEDE_TECHNICAL_CORRECTION,
     Scope,
 )
 from recon_gen.common.spine._emit_helpers import insert_tx, ts
@@ -142,5 +143,5 @@ class SupersessionGenerator:
             rail_name=self.rail_name,
             origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
-            supersedes="TechnicalCorrection",
+            supersedes=SUPERSEDE_TECHNICAL_CORRECTION,
         )

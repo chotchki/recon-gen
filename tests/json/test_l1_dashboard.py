@@ -25,7 +25,12 @@ from typing import Any
 from click.testing import CliRunner
 
 from recon_gen.common.l2 import default_l2_instance
-from recon_gen.common.l2.primitives import SCOPE_INTERNAL
+from recon_gen.common.l2.primitives import (
+    SCOPE_INTERNAL,
+    SUPERSEDE_BUNDLE_ASSIGNMENT,
+    SUPERSEDE_INFLIGHT,
+    SUPERSEDE_TECHNICAL_CORRECTION,
+)
 from recon_gen.apps.l1_dashboard.app import (
     _DAILY_STATEMENT_NAME,
     _DAILY_STATEMENT_TITLE,
@@ -1922,7 +1927,9 @@ def test_y2g_enum_value_helpers_reflect_l2_instance() -> None:
 
     # Fixed schema enums — L2-independent.
     assert l1_supersede_reason_values() == [
-        "BundleAssignment", "Inflight", "TechnicalCorrection",
+        SUPERSEDE_BUNDLE_ASSIGNMENT,
+        SUPERSEDE_INFLIGHT,
+        SUPERSEDE_TECHNICAL_CORRECTION,
     ]
     assert l1_check_type_values() == [
         "balance_cadence_gap",  # CL.6 — cadence-aware missing balance
