@@ -1880,6 +1880,15 @@ class App:
         self._validate_parameter_references()
         self._validate_filter_param_settability()
         self._validate_drill_destinations()
+        # Phase DB.2 — App2 completeness gate. Walk every Visual + assert
+        # each dataclass field has a registry entry. Catches the DA-shape
+        # gap class (tree adds a field, emit() lands it in QS JSON, App2
+        # silently drops it) at the wiring site instead of months later
+        # via operator dogfood.
+        from recon_gen.common.tree.app2_parity_registry import (  # noqa: PLC0415 — lazy import to avoid circular at module load
+            check_app2_parity,
+        )
+        check_app2_parity(self)
         self._validate_no_bare_string_columns()
         return ModelAnalysis(
             AwsAccountId=self.cfg.aws_account_id,
