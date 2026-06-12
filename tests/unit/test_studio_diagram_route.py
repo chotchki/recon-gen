@@ -120,9 +120,14 @@ def test_studio_diagram_route_uses_sasquatch_pr_when_loaded() -> None:
         # robustness regression fixture, inflating it again — sas/spec
         # now ≈ 1.18x. The CashDueFRB / not-in-spec_body assertion
         # above is the load-bearing identity check; this ratio just
-        # proves the DOT block grows with L2 size, so >1.1x is enough
+        # proves the DOT block grows with L2 size, so >1.08x is enough
         # signal without false-positiving on small fixture additions.
-        assert len(sas_body) > len(spec_body) * 1.1
+        # BK.6/#35 (2026-06-11) — softened 1.1→1.08 after the LimitBreach
+        # cust2 plant landed: the auto-scenario state blob grows
+        # ~proportionally on both fixtures, so the ratio shrinks even
+        # when both bodies grow. CashDueFRB identity check above is
+        # still the load-bearing guarantee.
+        assert len(sas_body) > len(spec_body) * 1.08
 
 
 def test_studio_static_serves_diagram_js() -> None:
