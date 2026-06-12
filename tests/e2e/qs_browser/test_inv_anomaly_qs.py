@@ -1,7 +1,8 @@
 """CB.5 stage 2 — qs_browser tier producer: L2 anomaly rendered rows.
 
-Decomposed from `test_inv_dashboard_agreement.py`'s
-`test_invariant_three_way_agreement[anomaly]` QS leg.
+Decomposed from the retired ``test_inv_dashboard_agreement.py``'s
+``test_invariant_three_way_agreement[anomaly]`` QS leg
+(superseded + deleted in the CB.5 follow-up cleanup).
 
 Per-leg degradation: when the isolated Investigation dashboard is
 NOT deployed (default — the runner deploys against the shared cfg

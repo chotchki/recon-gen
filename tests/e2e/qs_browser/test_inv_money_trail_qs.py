@@ -1,7 +1,8 @@
 """CB.5 stage 2 — qs_browser tier producer: L2 money_trail rendered rows.
 
-Decomposed from `test_inv_dashboard_agreement.py`'s
-`test_invariant_three_way_agreement[money_trail]` QS leg.
+Decomposed from the retired ``test_inv_dashboard_agreement.py``'s
+``test_invariant_three_way_agreement[money_trail]`` QS leg
+(superseded + deleted in the CB.5 follow-up cleanup).
 """
 
 from __future__ import annotations

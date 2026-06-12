@@ -52,10 +52,10 @@ def qs_driver_or_none(
     (either from cfg.auth.aws_profile derivation or the explicit
     ``RECON_E2E_USER_ARN`` env override). When unavailable, yields
     ``None`` — the caller decides whether to ``pytest.skip`` or run
-    with reduced renderer coverage. (``per_dialect_qs_driver`` in
-    ``test_audit_dashboard_agreement.py`` takes the latter path so
-    the SQLite cell + missing-ARN cases still exercise direct-SQL +
-    App2 + PDF as a clean 3-way.)
+    with reduced renderer coverage. (The per-renderer agreement
+    producers under ``tests/e2e/qs_browser/`` take the latter path so
+    missing-ARN cases still exercise direct-SQL + App2 + PDF as a
+    clean 3-way.)
 
     Viewport defaults to ``(1600, 1000)``. Pass ``(1600, 4000)`` for
     fixtures whose tests touch stacked KPI+chart+table layouts where

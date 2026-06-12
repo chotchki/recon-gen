@@ -1535,10 +1535,10 @@ class NoRawStrArgsCheck(Check):
 # accesses them through the public ``register_*`` / ``get_*`` helpers;
 # tests that need to clean up writes from a second-cfg-in-process build
 # use ``isolated_dataset_registries()`` (BL.0.A). Direct attribute
-# access outside ``dataset_contract.py`` (the previous band-aid in
-# ``test_inv_dashboard_agreement.py`` carried six
-# ``# pyright: ignore[reportPrivateUsage]`` comments to skip the
-# private-name complaint) is the smell — it papers over a missing
+# access outside ``dataset_contract.py`` (the prior pattern carried
+# ``# pyright: ignore[reportPrivateUsage]`` comments at second-cfg-in-
+# process test sites to skip the private-name complaint) is the smell
+# — it papers over a missing
 # public API. This lint forces future test-isolation needs through the
 # context manager instead of accumulating new ignore comments.
 

@@ -386,9 +386,9 @@ def isolated_dataset_registries() -> Generator[None, None, None]:
     ``_SQL_REGISTRY`` / ``_DSP_REGISTRY`` / ``_CONTRACT_REGISTRY`` are
     fine in that mode. Tests that build a second app tree with a
     non-canonical ``cfg.db_table_prefix`` in the same process (e.g.
-    ``tests/e2e/test_inv_dashboard_agreement.py::isolated_inv_app``,
-    which builds an `iagree`-prefixed clone for the 4-way agreement
-    test) overwrite the canonical entries on a shared key — downstream
+    the per-renderer agreement producers under ``tests/e2e/qs_browser/``
+    and ``tests/e2e/app2/`` that build an `iagree`-prefixed Investigation
+    clone) overwrite the canonical entries on a shared key — downstream
     tests then read the polluted SQL and 500 against the dropped
     isolation schema.
 
@@ -398,9 +398,9 @@ def isolated_dataset_registries() -> Generator[None, None, None]:
     .. code-block:: python
 
         @pytest.fixture(scope="module")
-        def isolated_inv_app(isolated_inv_cfg):
+        def isolated_inv_app(isolated_cfg):
             with isolated_dataset_registries():
-                app = build_investigation_app(isolated_inv_cfg, l2_instance=_INSTANCE)
+                app = build_investigation_app(isolated_cfg, l2_instance=_INSTANCE)
                 app.emit_analysis()
                 yield app
 

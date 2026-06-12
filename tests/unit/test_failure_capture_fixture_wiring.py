@@ -4,20 +4,21 @@ wires the failure-capture hook.
 The bug AA.H.10 fixes: AA.H.6 lifted ``trigger_failure_capture`` to a
 DashboardDriver-friendly verb and added a ``_maybe_capture_on_failure``
 helper invoked from fixture teardown — but the helper was wired only
-into ``_parametrized_dashboard_driver`` in ``conftest.py``. Two other
-QS-driver fixtures (``qs_driver`` in the same conftest, and
-``per_dialect_qs_driver`` in ``test_audit_dashboard_agreement.py``)
-silently dropped artifacts on failure. Today's chain lost all 4 of
-the audit-agreement failures' DOM / screenshot / trace.zip because
-of exactly that gap.
+into ``_parametrized_dashboard_driver`` in ``conftest.py``; ``qs_driver``
+in the same conftest silently dropped artifacts on failure.
 
-This test pins all three fixtures to call the shared hook — a future
+This test pins each QS-driver fixture to call the shared hook — a future
 new QS-driver fixture without the wiring will fail this test loudly
 instead of going to production with silent capture-drops.
 
 AST-based to avoid running the fixtures: the wiring is "is the call
 present near the ``yield`` in this fixture function?", which a
 parser can answer without spinning Playwright.
+
+CB.5 stage 2 follow-up (qs-browser-skip-triage, 2026-06-11): the third
+guarded fixture (``per_dialect_qs_driver`` in
+``test_audit_dashboard_agreement.py``) was retired alongside its host
+file's deletion. Only the two conftest-level fixtures are guarded now.
 """
 
 from __future__ import annotations
@@ -27,7 +28,6 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).parents[2]
 _CONFTEST = _REPO_ROOT / "tests" / "e2e" / "conftest.py"
-_AUDIT_TEST = _REPO_ROOT / "tests" / "e2e" / "test_audit_dashboard_agreement.py"
 
 
 def _function_body_text(source: str, fn_name: str) -> str:
@@ -107,34 +107,16 @@ def test_parametrized_dashboard_driver_wires_capture_hook() -> None:
     )
 
 
-def test_per_dialect_qs_driver_fixture_wires_capture_hook() -> None:
-    """``per_dialect_qs_driver`` in test_audit_dashboard_agreement.py
-    — the audit-agreement test's per-dialect QS driver. Pre-AA.H.10
-    didn't wire the hook; today's chain lost all 4 audit-agreement
-    failures' diagnostic artifacts because of this gap. AA.H.12
-    routes through the shared ``qs_driver_or_none`` lifecycle."""
-    body = _function_body_text(
-        _AUDIT_TEST.read_text(), "per_dialect_qs_driver",
-    )
-    assert _has_capture_wiring(body), (
-        "per_dialect_qs_driver fixture missing capture wiring — "
-        "audit-agreement test failures will silently drop diagnostic "
-        "artifacts. Wire either via the shared `qs_driver_or_none` "
-        "lifecycle OR directly call `maybe_capture_on_failure(request, "
-        "driver)` post-yield."
-    )
-
-
 def test_lifecycle_primitive_lives_at_shared_path() -> None:
     """The shared ``qs_driver_or_none`` context manager exists at the
-    path the three fixtures import from. Catches an accidental
-    rename / move that would break all three at import time."""
+    path the conftest fixtures import from. Catches an accidental
+    rename / move that would break them at import time."""
     lifecycle = _REPO_ROOT / "tests" / "e2e" / "_drivers" / "_lifecycle.py"
     assert lifecycle.is_file(), (
         f"missing shared lifecycle helper at {lifecycle} — AA.H.12 "
         f"extracted the QS embed lifecycle here; deleting it without "
-        f"inlining the lifecycle back into all 3 fixtures will silently "
-        f"break the capture-hook wiring across the e2e suite."
+        f"inlining the lifecycle back into the conftest fixtures will "
+        f"silently break the capture-hook wiring across the e2e suite."
     )
     content = lifecycle.read_text()
     assert "def qs_driver_or_none" in content, (

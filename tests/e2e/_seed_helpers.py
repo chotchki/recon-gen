@@ -5,9 +5,11 @@ non-harness e2e tests that still need a per-test schema+seed+refresh
 flow have it at a stable location after the layer-8 harness drop.
 
 Consumers:
-- ``test_audit_dashboard_agreement.py`` (direct ``apply_db_seed`` call)
 - ``seeded_cfg`` fixture (CB.17.d) — wraps ``isolated_cfg`` with full
   schema + data + refresh on setup, drops on teardown.
+- per-renderer agreement producers under ``tests/e2e/qs_browser/`` and
+  ``tests/e2e/app2/`` (direct ``apply_db_seed`` calls; CB.5 stage 2
+  decomposition).
 
 ``build_planted_manifest`` did NOT lift — it was harness-specific
 (walked plants for the harness's per-test triage manifest).
@@ -82,8 +84,8 @@ def apply_db_seed(
       today (legacy, BC.4 superseded by `plant_window`): the reference
         date the scenario builder uses to compute plant `days_ago`
         offsets. Kept for backward-compat with callers that don't yet
-        thread an audit window through (e.g. `test_pdf_matches_scenario`
-        / `test_inv_dashboard_agreement`); when both `today` AND
+        thread an audit window through (e.g. `test_pdf_matches_scenario`);
+        when both `today` AND
         `plant_window` are supplied, `plant_window.end` wins for
         spine-generator anchoring (the day plants land on) while
         `today` continues to drive the scenario's `days_ago` math.
@@ -181,9 +183,12 @@ def apply_db_seed(
         # `frame=None` fallback) so plants with `days_ago > 0` (drift/
         # overdraft default to 4) pass SingleDayPlant.at_offset_from_end
         # validation. The pre-2026-05-26 single-day fallback rejected
-        # every plant with days_ago>0 — surfaced via
-        # `test_inv_dashboard_agreement`'s seeded_l2_db ERROR'ing on
-        # `target 2026-05-22 falls outside window [2026-05-26, …]`.
+        # every plant with days_ago>0 — surfaced via the L2 agreement
+        # seeded_l2_db fixture ERROR'ing on
+        # `target 2026-05-22 falls outside window [2026-05-26, …]`
+        # (the originating site, ``test_inv_dashboard_agreement.py``, has
+        # since been retired in favor of the per-renderer producers under
+        # ``tests/e2e/qs_browser/`` + ``tests/e2e/app2/``).
         if plant_window is not None:
             seed_frame = AsOfFrame(
                 as_of=plant_window.end, window=plant_window,

@@ -674,11 +674,12 @@ def _qs_pre_warm_dashboards(  # pyright: ignore[reportUnusedFunction]: pytest au
     Phase BM (2026-05-28): take ``deployment_name`` directly and
     compute each ``<deployment>-<app>-dashboard`` id locally instead
     of depending on the per-app dashboard_id fixtures. The
-    ``inv_dashboard_id`` fixture is module-scope-overridable in
-    ``test_inv_dashboard_agreement.py`` (the isolated cfg per BL.0),
-    which collides with this session-scope fixture's resolution and
-    raises ``ScopeMismatch`` on collection. Computing the IDs here
-    sidesteps the override without breaking the BL.0 isolation.
+    ``inv_dashboard_id`` fixture is module-scope-overridable in the
+    per-renderer agreement producers under ``tests/e2e/qs_browser/``
+    (the isolated cfg per BL.0), which collides with this session-
+    scope fixture's resolution and raises ``ScopeMismatch`` on
+    collection. Computing the IDs here sidesteps the override without
+    breaking the BL.0 isolation.
     """
     import os
     if os.environ.get(RECON_GEN_E2E.name) != "1":
@@ -820,14 +821,11 @@ def l2ft_app(cfg: Config) -> "App":
 # in ~1–2 s, acceptable. See docs/audits/x_2_u_parametrized_driver_spike.md.
 
 
-# AA.H.10 — moved to tests/e2e/_capture.py so the three QS-driver
-# fixtures (qs_driver here, _parametrized_dashboard_driver here,
-# per_dialect_qs_driver in test_audit_dashboard_agreement.py) can all
-# import a single hook. Originally lived inline here and was wired
-# only into _parametrized_dashboard_driver — the other two fixtures
-# silently dropped failure-capture artifacts. Today's chain
-# (20260516T203824Z) lost all 4 audit-agreement failures' artifacts
-# for exactly that reason.
+# AA.H.10 — moved to tests/e2e/_capture.py so the QS-driver
+# fixtures (qs_driver here, _parametrized_dashboard_driver here) can
+# all import a single hook. Originally lived inline here and was
+# wired only into _parametrized_dashboard_driver — qs_driver
+# silently dropped failure-capture artifacts.
 from tests.e2e._capture import maybe_capture_on_failure as _maybe_capture_on_failure  # noqa: E402
 
 

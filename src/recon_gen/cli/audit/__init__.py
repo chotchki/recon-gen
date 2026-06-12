@@ -1576,8 +1576,8 @@ def audit_test(pytest_args: str) -> None:
 
     Targets ``tests/audit/`` for pytest — scenario expectations,
     PDF/dashboard extractors, PDF-matches-scenario, persona-clean,
-    and smoke. Defers the browser matrix
-    (``tests/e2e/test_audit_dashboard_agreement.py``) to
+    and smoke. Defers the browser matrix (the per-renderer agreement
+    producers + validators under ``tests/e2e/qs_browser/``) to
     ``RECON_GEN_E2E=1`` — not run here.
 
     Pyright covers the audit package (``cli/audit/``).

@@ -26,10 +26,10 @@ spine (``AnomalyGenerator`` / ``MoneyTrailGenerator``) rather than on
 ``ScenarioPlant`` — the spine's `intended` and dataclass fields
 already encode the lower bound the dashboard / matview should
 surface, so the same "the planter IS the source of truth" pattern
-extends without growing ScenarioPlant. The L2 3-way agreement test
-(``tests/e2e/test_inv_dashboard_agreement.py``) consumes these to
-replace hardcoded ``_MONEY_TRAIL_CHAIN_LENGTH`` / spike-count
-constants.
+extends without growing ScenarioPlant. The per-renderer L2 agreement
+producers under ``tests/e2e/qs_browser/`` and ``tests/e2e/app2/``
+consume these to replace hardcoded ``_MONEY_TRAIL_CHAIN_LENGTH`` /
+spike-count constants.
 """
 
 from __future__ import annotations
@@ -168,10 +168,10 @@ class ExpectedL2AuditCounts:
     Counts are LOWER bounds — the matview may surface more rows
     (rolling-window neighbors for anomaly; the L1+broad seed's
     organic chains for money_trail) — but at least these are
-    guaranteed by the plant. The 3-way agreement test
-    (``test_inv_dashboard_agreement::test_invariant_three_way_agreement``)
-    uses these as the producer-side regression anchor: every
-    renderer's count must be ≥ the lower bound.
+    guaranteed by the plant. The per-renderer L2 agreement producers
+    + high-watermark validators (``tests/e2e/qs_browser/test_inv_*.py``
+    + ``tests/e2e/app2/test_inv_*.py``) use these as the producer-side
+    regression anchor: every renderer's count must be ≥ the lower bound.
 
     Key projections expose the natural-key tuples the matview's
     detail surface uses (matches the App2 / QS table group_by). The

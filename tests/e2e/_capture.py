@@ -4,19 +4,15 @@ AA.H.6 bridged the pytest yield-fixture semantics gap by capturing 6
 diagnostic artifacts (screenshot, DOM, console, network, qs-error
 overlay, trace.zip) from a fixture's teardown after a failed test.
 Originally lived in ``conftest.py`` and was wired only into
-``_parametrized_dashboard_driver`` — the other two QS-driver fixtures
-(``qs_driver`` in conftest, ``per_dialect_qs_driver`` in
-``test_audit_dashboard_agreement.py``) silently dropped artifacts on
-failure. AA.H.10 lifts the helper here so all three (and any future
-fixture) can import it from a single import path.
+``_parametrized_dashboard_driver`` — ``qs_driver`` (in the same
+conftest) silently dropped artifacts on failure. AA.H.10 lifts the
+helper here so both conftest fixtures (and any future driver fixture)
+can import it from a single import path.
 
 The bug it fixes: pytest doesn't re-throw the test-body exception back
 into the generator-fixture's ``yield`` — the ``with`` block exits
 cleanly, ``webkit_page``'s ``except BaseException:`` never fires, and
-the 6 artifacts never land. Today's audit-agreement chain (4 failures
-in ``test_invariant_four_way_agreement``) dropped zero artifacts even
-though AA.H.6's regression-test pinned the capture path — because the
-fixture this test uses (``per_dialect_qs_driver``) wasn't wired.
+the 6 artifacts never land.
 """
 
 from __future__ import annotations

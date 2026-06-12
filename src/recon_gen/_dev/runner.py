@@ -34,7 +34,6 @@ import json
 import os
 import re
 import secrets
-import shlex
 import shutil
 import subprocess
 import sys
@@ -775,23 +774,14 @@ def _layer_command(
         # workers thrash QS embed limits). Behind `RECON_GEN_E2E=1`.
         # `RECON_E2E_USER_ARN` already in subprocess env via h.1 derivation.
         #
-        # Z.B.12-followup (2026-05-15) — split into two sequential pytest
-        # invocations via a shell wrapper:
-        #   1. The main browser tier with `-n 4` workers, ignoring the
-        #      audit-dashboard-agreement file.
-        #   2. ONLY ``test_audit_dashboard_agreement.py`` with ``-n 1`` —
-        #      its module-scoped ``seeded_audit`` fixture re-applies the
-        #      dialect schema (DROP MATERIALIZED VIEW + CREATE …); on
-        #      ``aw`` target with persistent Aurora the conftest's
-        #      ``--dist loadgroup`` bump has been observed not to pin
-        #      both parametrizations onto a single worker, so multiple
-        #      workers race the schema apply (Oracle DDL auto-commits;
-        #      ORA-12006 fires when worker B's CREATE collides with
-        #      worker A's). Forcing a single worker is the only race-free
-        #      way; the test only contributes a few minutes total so the
-        #      sequential run isn't a meaningful wall-clock cost. CI's
-        #      ``e2e-pg-browser`` job already follows this pattern (the
-        #      file runs as a separate step).
+        # CB.5 stage 2 follow-up (qs-browser-skip-triage, 2026-06-11) —
+        # the prior Z.B.12 two-invocation split (a `-n N` main run + a
+        # `-n 1` ``test_audit_dashboard_agreement.py`` carve-out) is gone:
+        # both ``test_audit_dashboard_agreement.py`` and
+        # ``test_inv_dashboard_agreement.py`` were deleted (superseded by
+        # per-renderer producers + high-watermark validators under
+        # ``tests/e2e/qs_browser/``). With no schema-DROP-CREATE-racing
+        # fixture left in the browser tier, one pytest invocation suffices.
         nworkers = str(opts.parallel) if opts.parallel > 1 else "4"
         # BR.x — Oracle cells lower the cap to 2. Oracle SE2 19c has no
         # DRCP (project_drcp_on_aws_oracle_dead_end) so every worker
@@ -815,19 +805,8 @@ def _layer_command(
             except Exception:  # noqa: BLE001 — peek failure shouldn't gate the layer
                 pass
         only = ["-k", opts.only] if opts.only else []
-        agree_file = "tests/e2e/test_audit_dashboard_agreement.py"
-        # Note (2026-05-26): test_inv_dashboard_agreement.py *also*
-        # used to need an --ignore here — its seeded_l2_db fixture
-        # DROP CASCADE'd the shared schema, clobbering the runner's
-        # broad seed for every co-tenant browser test. That's now
-        # fixed at the test side: the fixture builds an
-        # ``isolated_inv_cfg`` (suffix "_iagree") so the destructive
-        # seed lands in its own per-test prefix and can't affect
-        # other tests. No --ignore needed — it runs as a normal
-        # browser-tier member.
-        main_cmd = [
+        cmd = [
             str(_VENV_BIN / "pytest"), "tests/e2e/",
-            f"--ignore={agree_file}",
             "-m", "browser", "-q",
             *only, *_cov_args,
             "-n", nworkers,
@@ -860,23 +839,6 @@ def _layer_command(
             "--reruns", "2", "--reruns-delay", "60",
             # CB.7-followup (2026-06-02) — loadgroup dropped; see unit-layer note.
         ]
-        agree_cmd = [
-            str(_VENV_BIN / "pytest"), agree_file, "-q",
-            *only, *_cov_args,
-            "-n", "1",
-            "--reruns", "2", "--reruns-delay", "60",
-        ]
-        # ``bash -c '… && …'`` chains the two pytest invocations
-        # sequentially; the shell exits non-zero if EITHER fails, which
-        # is what dispatch_layer's stop-on-first-failure honors. Quote
-        # each argv element so paths/args with spaces survive (none in
-        # practice but defensive).
-        chained = (
-            " ".join(shlex.quote(a) for a in main_cmd)
-            + " && "
-            + " ".join(shlex.quote(a) for a in agree_cmd)
-        )
-        cmd = ["bash", "-c", chained]
         # Bump the per-page Playwright timeout for the browser layer to 60 s
         # (matches the CI `e2e-pg-browser` job). The default 30 s
         # (tests/e2e/conftest.py) is fine for a local-pg container but too
