@@ -91,6 +91,11 @@
 .ts-wrapper.plugin-clear_button.single .clear-button {
   left: auto;
   right: 0.375rem;
+  /* Vertically center the absolute-positioned button regardless of the
+   * .ts-control's height (which varies with the Tailwind py-* utility
+   * copied onto .ts-wrapper). Override the vendor's fixed top: 8px. */
+  top: 50%;
+  transform: translateY(-50%);
   /* Larger, circular click target with subtle hover background. */
   width: 1.5rem;
   height: 1.5rem;
