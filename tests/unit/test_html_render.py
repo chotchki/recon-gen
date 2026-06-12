@@ -25,6 +25,7 @@ import pytest
 from tests._test_helpers import make_test_config
 from recon_gen.common.html import emit_html
 from recon_gen.common.ids import SheetId, VisualId
+from recon_gen.common.l2.primitives import POSTED_STATUS
 from recon_gen.common.tree.structure import Analysis, App, Sheet
 from recon_gen.common.tree.visuals import KPI
 
@@ -338,7 +339,7 @@ def test_emit_visual_data_fragment_stamps_url_params_as_data_attr() -> None:
         {"rows": []},
         url_params={
             "param_pL1DsAccount": ["Customer 11 (cust-011)"],
-            "filter_status": ["Posted"],
+            "filter_status": [POSTED_STATUS],
             "date_from": [""],
             "date_to": [""],
             "page_size": ["50"],  # NOT param_/filter_/date — should be excluded
@@ -346,7 +347,7 @@ def test_emit_visual_data_fragment_stamps_url_params_as_data_attr() -> None:
     )
     assert 'data-bound-params="' in out
     assert "Customer 11 (cust-011)" in out
-    assert "Posted" in out
+    assert POSTED_STATUS in out
     assert "page_size" not in out  # excluded
     # Attribute value uses HTML-escaped JSON (quote-safe).
     assert '&quot;param_pL1DsAccount&quot;' in out

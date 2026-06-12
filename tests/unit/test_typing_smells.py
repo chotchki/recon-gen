@@ -2318,6 +2318,102 @@ class NoPartialFormPutInTestsCheck(Check):
         return v.smells
 
 
+# ---------------------------------------------------------------------------
+# Check: no-raw-enum-equality
+# ---------------------------------------------------------------------------
+
+
+# The 5 canonical enum values shipped at d363a349..1c64f5c1 + the operator's
+# 2026-06-11 "type is what carries" sweep. Raw-string equality against any
+# of these in a test is a smell — the test pins the implementation rather
+# than the contract. Replace with the typed constant from
+# ``common/l2/primitives.py``:
+#
+# - ``"Posted"``                  → ``POSTED_STATUS``
+# - ``"InternalInitiated"``       → ``ORIGIN_INTERNAL_INITIATED``
+# - ``"ExternalForcePosted"``     → ``ORIGIN_EXTERNAL_FORCE_POSTED``
+# - ``"ExternalAggregated"``      → ``ORIGIN_EXTERNAL_AGGREGATED``
+#
+# (AmountDirection / Scope / SupersedeReason remain raw-string TypeAliases
+# at this commit — the operator's intent is the closed-Literal type itself
+# does the carrying, no Final constant exists to import. Once those gain
+# Final constants, extend this dict to cover them.)
+_ENUM_VALUE_TO_CONSTANT: dict[str, str] = {
+    "Posted": "POSTED_STATUS",
+    "InternalInitiated": "ORIGIN_INTERNAL_INITIATED",
+    "ExternalForcePosted": "ORIGIN_EXTERNAL_FORCE_POSTED",
+    "ExternalAggregated": "ORIGIN_EXTERNAL_AGGREGATED",
+}
+
+
+class _NoRawEnumEqualityVisitor(ast.NodeVisitor):
+    """Walk Compare nodes; flag raw-string equality/inequality against
+    any of the 5 canonical enum values. Catches ``x == "Posted"``,
+    ``x != "Posted"``, ``"Posted" == x``, and the ``in (...)`` /
+    ``{...}`` membership shapes that hide the same comparison."""
+
+    def __init__(self, file: Path) -> None:
+        self.file = file
+        self.smells: list[Smell] = []
+
+    def _flag(self, lineno: int, raw_value: str) -> None:
+        constant = _ENUM_VALUE_TO_CONSTANT[raw_value]
+        self.smells.append(Smell(
+            file=self.file,
+            lineno=lineno,
+            checker="no-raw-enum-equality",
+            message=(
+                f"raw-string equality / membership against {raw_value!r} "
+                f"— import ``{constant}`` from "
+                f"``recon_gen.common.l2.primitives`` and compare against "
+                f"the constant. A test that pins the raw value pins the "
+                f"implementation; one that pins the constant follows a "
+                f"rename. Suppress with ``# typing-smell: ignore"
+                f"[no-raw-enum-equality]: <reason>`` only when the test "
+                f"deliberately holds the raw wire value (rare — most "
+                f"such cases want the constant on both sides)."
+            ),
+        ))
+
+    def _scan_constant(self, node: ast.AST) -> str | None:
+        """Return the raw-string value if ``node`` is a Constant matching
+        one of the 5 canonical enum values; else None."""
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if node.value in _ENUM_VALUE_TO_CONSTANT:
+                return node.value
+        return None
+
+    def visit_Compare(self, node: ast.Compare) -> None:
+        # Flag ANY participant of the comparison chain that's a flagged
+        # raw literal — covers both `x == "Posted"` and `"Posted" == x`,
+        # plus chained shapes. Restrict to the equality / membership
+        # operator family; ordering ops (>, <, etc.) on these strings
+        # make no semantic sense but aren't the drift-class we care about.
+        flagged_ops = (ast.Eq, ast.NotEq, ast.In, ast.NotIn)
+        if not any(isinstance(op, flagged_ops) for op in node.ops):
+            self.generic_visit(node)
+            return
+        for participant in (node.left, *node.comparators):
+            raw = self._scan_constant(participant)
+            if raw is not None:
+                self._flag(participant.lineno, raw)
+            # `x in ("Posted", "Pending")` — walk into the tuple / list /
+            # set literal looking for a flagged raw value.
+            if isinstance(participant, (ast.Tuple, ast.List, ast.Set)):
+                for elt in participant.elts:
+                    raw_elt = self._scan_constant(elt)
+                    if raw_elt is not None:
+                        self._flag(elt.lineno, raw_elt)
+        self.generic_visit(node)
+
+
+class NoRawEnumEqualityCheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        v = _NoRawEnumEqualityVisitor(file)
+        v.visit(tree)
+        return v.smells
+
+
 def _build_checks() -> list[Check]:
     pyright_scope = _read_pyright_include()
     # Tighter scope for explicit-any: the freshest async files where
@@ -2808,6 +2904,31 @@ def _build_checks() -> list[Check]:
                 if fixtures_dir not in p.parents
             ],
         ),
+        # Operator 2026-06-11 sweep — the 5 closed enums landed at
+        # d363a349..1c64f5c1; this lint locks the test-side baseline.
+        # Scope: tests/ only (src/ already uses the constants — the
+        # commit-5 sweep covered every callsite). Excludes the planted-
+        # fixture dir per the standard pattern.
+        NoRawEnumEqualityCheck(
+            name="no-raw-enum-equality",
+            description=(
+                "raw-string equality / membership in tests/ against any "
+                "of the 5 canonical enum values (Posted / "
+                "InternalInitiated / ExternalForcePosted / "
+                "ExternalAggregated). Import the matching ``Final`` "
+                "constant from ``common/l2/primitives.py`` and compare "
+                "against it — a test that pins the raw literal pins the "
+                "implementation; one that pins the constant follows a "
+                "rename. Constructor-call inputs (``status=\"Posted\"`` "
+                "passed as a function arg) are NOT flagged — they're the "
+                "wire-shape input the function-under-test parses, not "
+                "internal state being checked."
+            ),
+            files=[
+                p for p in _expand_paths([REPO_ROOT / "tests"])
+                if fixtures_dir not in p.parents
+            ],
+        ),
     ]
 
 
@@ -2897,7 +3018,7 @@ def test_cq_3_no_l2_derived_static_values_finds_planted() -> None:
     # The fixed-form `StaticValues(values=["Posted", ...])` call MUST
     # NOT have been flagged — code-bounded enums are forever allowed.
     for smell in smells:
-        assert "Posted" not in smell.message
+        assert "Posted" not in smell.message  # typing-smell: ignore[no-raw-enum-equality]: asserting on lint-output string content, not a status-field value, so the constant doesn't apply
 
 
 def test_co_6_no_partial_form_put_in_tests_finds_planted() -> None:
@@ -2935,6 +3056,68 @@ def test_co_6_no_partial_form_put_in_tests_finds_planted() -> None:
     for smell in smells:
         assert "rail" not in smell.message
         assert "/new" not in smell.message
+
+
+def test_no_raw_enum_equality_finds_planted() -> None:
+    """Operator-2026-06-11 sweep smoke test — the lint must flag every
+    planted raw-string comparison against the 5 canonical enum values
+    AND must NOT flag the constructor-call / dict-value / unrelated-
+    string negative controls.
+
+    If the visitor stops walking (Compare ops list change), the
+    ``_ENUM_VALUE_TO_CONSTANT`` map drifts, or the membership-tuple
+    branch breaks, this smoke goes red even when the real-corpus
+    lint reports 0.
+    """
+    fixtures_dir = REPO_ROOT / "tests/unit/_fixtures"
+    fixture = fixtures_dir / "no_raw_enum_equality_planted.py"
+    assert fixture.exists(), (
+        f"smoke fixture missing: {fixture} — re-create per the "
+        f"planted-fixture contract"
+    )
+    check = NoRawEnumEqualityCheck(
+        name="no-raw-enum-equality",
+        description="smoke-test instance",
+        files=[fixture],
+    )
+    src = fixture.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    smells = list(check.find_smells(src, tree, fixture))
+    # 6 planted hits:
+    #   - planted_eq_posted               → 1 ("Posted")
+    #   - planted_neq_internal_initiated  → 1 ("InternalInitiated")
+    #   - planted_in_tuple_*              → 2 ("ExternalForcePosted",
+    #                                          "InternalInitiated" in the
+    #                                          tuple)
+    #   - planted_external_aggregated_*   → 1 ("ExternalAggregated")
+    #   - planted_reversed_order          → 1 ("Posted" on the LEFT)
+    assert len(smells) == 6, (
+        f"smoke expected exactly 6 hits on the planted fixture "
+        f"(5 plant functions, one of which plants 2 enum hits in the "
+        f"in-tuple shape); got {len(smells)}:\n"
+        f"{chr(10).join(repr(s) for s in smells)}\n"
+        f"Either the Compare visitor stopped walking, the "
+        f"_ENUM_VALUE_TO_CONSTANT map drifted, or the tuple-literal "
+        f"membership branch broke."
+    )
+    flagged_values: set[str] = set()
+    for smell in smells:
+        assert smell.checker == "no-raw-enum-equality"
+        # The message names the raw value in quotes — pull it back out
+        # to verify which enum tripped.
+        for value in _ENUM_VALUE_TO_CONSTANT:
+            if repr(value) in smell.message:
+                flagged_values.add(value)
+                break
+    # Compare against the lint's own canonical-set map keys to avoid
+    # re-inlining the raw literals here (which would self-trip the
+    # very lint we're testing).
+    assert flagged_values == set(_ENUM_VALUE_TO_CONSTANT.keys()), (
+        f"smoke expected every one of the canonical enum values to "
+        f"appear at least once in the hit set; got {flagged_values!r}. "
+        f"If one is missing, the _ENUM_VALUE_TO_CONSTANT map dropped "
+        f"a key OR the fixture lost a planted shape."
+    )
 
 
 def test_be_1_no_test_src_sql_duplication_finds_planted_dup() -> None:

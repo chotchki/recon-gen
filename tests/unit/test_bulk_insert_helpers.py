@@ -27,6 +27,7 @@ import duckdb
 
 from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
+from recon_gen.common.l2.primitives import POSTED_STATUS
 from recon_gen.common.l2.schema import emit_schema
 from recon_gen.common.spine._emit_helpers import (
     DB_COLS,
@@ -146,7 +147,7 @@ def test_bulk_insert_tx_lands_one_hundred_rows() -> None:
         f"FROM {_PREFIX}_transactions WHERE id = 'tx-0042'"
     )
     fetched = cur.fetchone()
-    assert fetched == ("tx-0042", "clearing-suspense-1", 10000, "Credit", "Posted")
+    assert fetched == ("tx-0042", "clearing-suspense-1", 10000, "Credit", POSTED_STATUS)
 
 
 def test_bulk_insert_balance_lands_one_hundred_rows() -> None:
