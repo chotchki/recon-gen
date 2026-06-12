@@ -2981,8 +2981,15 @@ def _render_chain_shape_preview_container(
         f'<div id="chain-shape-preview" '
         f'data-section-name="chain-shape-preview" '
         f'hx-post="/l2_shape/chain/shape-preview" '
-        f'hx-trigger="input changed delay:300ms from:closest form, '
+        # BX.16 follow-up (2026-06-11) — fire once on `load` so the
+        # initial paint uses the form-populated parent rather than the
+        # empty-string placeholder. Without this trigger the operator
+        # saw "(pick a parent)" on every edit-page load even when the
+        # chain's parent was already set, because the container's
+        # initial render passes parent="" (no entity context here).
+        f'hx-trigger="load, input changed delay:300ms from:closest form, '
         f'change delay:200ms from:closest form" '
+        f'hx-include="closest form" '
         f'hx-target="#chain-shape-preview" '
         f'hx-swap="innerHTML" '
         f'class="mt-3 bg-white border border-surface-border rounded-md p-3 '
