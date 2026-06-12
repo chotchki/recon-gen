@@ -85,6 +85,7 @@ from .primitives import (
     Period,
     Rail,
     SingleLegRail,
+    SupersedeReason,
     TransferTemplate,
     TwoLegRail,
 )
@@ -4469,7 +4470,7 @@ def _txn_row_tuple(
     metadata: dict[str, str],
     status: str = POSTED_STATUS,
     bundle_id: str | None = None,
-    supersedes: str | None = None,
+    supersedes: SupersedeReason | None = None,
     template_name: Identifier | None = None,
     transfer_parent_id: str | None = None,
 ) -> tuple[object, ...]:
@@ -4608,7 +4609,7 @@ def _txn_row(
     dialect: Dialect,
     status: str = POSTED_STATUS,
     bundle_id: str | None = None,
-    supersedes: str | None = None,
+    supersedes: SupersedeReason | None = None,
     template_name: Identifier | None = None,
     transfer_parent_id: str | None = None,
 ) -> str:
