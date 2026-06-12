@@ -648,13 +648,26 @@ class KPI:
                     # practice the UI always produces this shape and
                     # rejects partial shapes at CreateAnalysis time).
                     # Mirror exactly what QS UI defaults to.
+                    #
+                    # DB.1.3 (2026-06-12) — Sparkline.Visibility flipped
+                    # from VISIBLE to HIDDEN. The tree never wired a
+                    # ``TrendGroups`` data source (KPIFieldWells emits
+                    # ``TrendGroups=[]``), so QS had nothing to plot and
+                    # rendered an empty sparkline placeholder below the
+                    # primary value. The block stays in the JSON to keep
+                    # the KPIOptions schema valid (QS still rejects
+                    # partial KPIOptions per M.4.4.8); HIDDEN tells QS
+                    # not to reserve UI space for it. App2's renderKPI
+                    # never drew a sparkline either, so HIDDEN=parity.
+                    # A future "App2 ⊇ QS richer graphics" pass can wire
+                    # both sides (TrendGroups + App2 trend renderer).
                     KPIOptions=KPIOptions(
                         Comparison={"ComparisonMethod": "PERCENT_DIFFERENCE"},
                         PrimaryValueDisplayType="ACTUAL",
                         SecondaryValueFontConfiguration={
                             "FontSize": {"Relative": "EXTRA_LARGE"},
                         },
-                        Sparkline={"Visibility": "VISIBLE", "Type": "AREA"},
+                        Sparkline={"Visibility": "HIDDEN"},
                         VisualLayoutOptions={
                             "StandardLayout": {"Type": "VERTICAL"},
                         },

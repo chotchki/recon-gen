@@ -35,7 +35,7 @@ Legend: ✅ honored / ⚠ partial / 🟥 shipping gap / 🟨 latent gap (tree ex
 | `KPIFieldWells.Values[0]` | KPI value via SQL projection + `_kpi_format` | ✅ |
 | `KPIFieldWells.TargetValues=[]` + `TrendGroups=[]` | unused by both sides (QS quirk: required-empty per M.4.4.8) | 🟫 |
 | `KPIOptions.Comparison`/`SecondaryValueFontConfiguration` | QS-only — no target → no comparison rendered on either side | 🟫 |
-| **`KPIOptions.Sparkline` (Visibility: VISIBLE, Type: AREA)** | App2 renderKPI shows just the number — no sparkline rendered | 🟨 **latent** (tree always emits VISIBLE; no app declares a sparkline data source so the QS render is empty/inert. Worth confirming on a live QS embed — possibly a noticeable visual delta if QS auto-derives a sparkline from history.) |
+| `KPIOptions.Sparkline.Visibility=HIDDEN` (post-DB.1.3) | App2 renderKPI shows just the number — matches QS | ✅ resolved by flipping the tree's hardcoded `Visibility` from `VISIBLE` to `HIDDEN`. Pre-DB.1.3 the tree emitted VISIBLE for schema-validation appeasement (per M.4.4.8 — QS rejects partial KPIOptions), but `TrendGroups=[]` left QS with nothing to plot so it rendered an empty placeholder. HIDDEN tells QS not to reserve the UI space; App2 ≡ QS at the visible-render level. |
 | **`KPIOptions.VisualLayoutOptions.StandardLayout.Type=VERTICAL`** | App2 has its own vertical layout | ✅ by-construction |
 | Author-extensible KPI conditional formatting | tree only emits the 3 named indicators; arbitrary CF (e.g. text-color on threshold) **not exposed** | 🟨 **latent surface** — if a future app needs arbitrary KPI CF, both tree-level emit AND App2 consumer would need extension. Worth noting in DB.2 gate so we don't drift. |
 
@@ -124,7 +124,7 @@ Out of scope here — chrome, not a SQL visual. Covered by `project_qs_text_box_
 
 ### 🟨 Latent gaps (tree primitive exists, no app callsite)
 
-1. **KPI `Sparkline`** — tree always emits VISIBLE; QS may auto-derive, App2 doesn't render.
+1. ~~KPI `Sparkline`~~ — **resolved DB.1.3**: tree now emits `Visibility=HIDDEN`. App2 ≡ QS today (both show just the value). Sparkline data source design (TrendGroups wiring + App2 trend renderer) flagged as future enhancement — operator likes the idea but wants to land it later, not in this phase.
 2. **KPI arbitrary `ConditionalFormatting`** — tree only exposes the 3 named indicators; future drift surface.
 3. **Table `FieldOptions.Width`** — column widths not exposed on tree.
 4. **Table multi-column sort** — tree single-column only.
@@ -145,7 +145,7 @@ In priority order:
 2. **BarChart color label.** `_ChartMeta` grows `color_label: str | None`. `shape_bar_chart` forwards as `series_label`. `renderBarChart` paints it above the legend list. ~30min.
 3. **Sankey items_limit.** 4 shipping callsites confirmed (`apps/investigation/app.py:716, 955, 979` + `apps/l2_flow_tracing/app.py:1167`). `shape_sankey` walks nodes/links and caps Source/Destination at the limit per QS's `OtherCategories: INCLUDE` shape (link the trimmed source/dest to a synthetic `(others)` node, aggregating remaining weight). `_VisualPlan` grows `sankey_items_limit: int | None`. ~1.5hr.
 4. **LineChart `Type`.** `_ChartMeta` grows `type: Literal["LINE", "AREA", "STACKED_AREA"]`. `shape_line_chart` forwards. `renderLineChart` branches on type (AREA = area fill below line; STACKED_AREA = d3.stack + area per series). ~2hr (renderer + tests).
-5. **KPI Sparkline.** Visual-confirm whether QS even renders a sparkline today without a `TrendGroups` data source. If empty on QS too, drop from scope (effective parity). Otherwise plumb. ~1hr investigation.
+5. ~~KPI Sparkline plumbing~~ — operator-locked at the sparkline conversation: don't plumb for now. Tree flipped to `Visibility=HIDDEN` (`KPI.emit()`) so both sides show just the value. Future-work flag: "App2 ⊇ QS richer graphics" can wire trend data source + renderer when there's a use case to push.
 
 Total estimate: ~7-10hr including tests. Splits cleanly into 4-5 DB.1.x sub-leaves.
 
@@ -161,5 +161,5 @@ Open question for DB.2: registry granularity. Per-field (one entry per Visual cl
 
 1. **Lock the priority order above.** Is BarChart orientation actually top priority, or do you want to start with the smaller wins (color label, Type) first?
 2. ~~Sankey items_limit~~ resolved during audit — 4 callsites confirmed shipping, scoped into DB.1.3 above.
-3. **KPI Sparkline:** worth a live QS dogfood pass before any plumbing? (May be effective parity already — empty on both sides.)
+3. ~~KPI Sparkline~~ — operator-locked 2026-06-12: don't plumb sparkline data source for this phase; flip tree to `Visibility=HIDDEN` and land the trend-data design as a future enhancement.
 4. **DB.2 registry granularity:** per-field vs. per-JSON-path?
