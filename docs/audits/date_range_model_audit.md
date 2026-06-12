@@ -1153,3 +1153,95 @@ This audit is intentionally analysis-only. The AO.10 Oracle fix (ORA-00932,
 `day_text`) and AO.S2.a (trainer pin) already landed and are independent of these
 decisions. The QS balance-date blocker (C1/D2) is the one item gating the release;
 everything else is consolidation that should follow the model chosen here.
+
+## 10. Follow-up — `days_ago` is calendar-drift fragile; bound it to the window
+
+Discovered 2026-06-12 (commit ``8ff1fc59``, fixed 2026-06-11 — broke at
+the day rollover one calendar day later). Adds a concrete shape to the
+"time is the unowned coordinate" thesis in §5.
+
+### Shape
+
+L1 plant authors declare positions as ``days_ago: int`` — an offset
+back from "now". The seed-time spine resolves the audit window
+(``window.end`` ≈ today, ``window.duration`` = audit_window_days,
+typically 7), and ``SingleDayPlant.at_offset_from_end(window, days_ago)``
+in ``common/intervals.py`` validates ``window.end - days_ago`` against
+the window. Out-of-window ⇒ ``ValueError``.
+
+That validation is the right shape — wrong-window plants fail loudly.
+But because ``days_ago`` is *open-ended* (any non-negative int), the
+fail-loud only fires at *seed time*, not at *plant authoring time*. A
+plant authored with ``days_ago=8`` against a 7-day window:
+
+- **Passes review** — the constant looks fine; there's nothing in the
+  type that says "must be < window.duration".
+- **Passes its first run** — if the calendar happens to give a
+  window where ``today`` rolls over later in the day, the boundary
+  can land in-window. (The literal mechanism for skip-move-2 plant:
+  committed evening of 2026-06-11; window.end was effectively
+  ``2026-06-11``; ``days_ago=8`` → ``2026-06-03`` — barely
+  out-of-window by 1 day, but the rolling window computation gave
+  it some slack because the spine clock and ``audit_window_days``
+  collaborate to set window.end such that the boundary held for one
+  day.)
+- **Breaks at the day rollover** — overnight, ``today`` advances,
+  ``window.end`` advances, the boundary slips, the ValueError
+  fires. CI catches it the next morning. The author has no idea
+  what changed.
+
+This is the §5 framing in miniature: ``days_ago`` is a coordinate
+expressed in terms of an unowned frame (today's calendar) instead of
+the typed frame (the window). The fix at construction time can only
+catch what the runtime window happens to make catchable.
+
+### Fix shape: ``days_into_window`` (bounded by window duration)
+
+Replace the ``days_ago: int`` field on plant dataclasses with
+``days_into_window: int`` (or equivalent — naming open):
+
+- ``0`` = ``window.start`` (oldest day in the audit window).
+- ``window.duration - 1`` = ``window.end`` (most recent closed day).
+- Construction-time validator on the plant dataclass:
+  ``0 <= days_into_window < window.duration``. Fails at the
+  authoring line, with the literal bound printed.
+
+The window duration is a property of the audit / invariant being
+exercised, not of the calendar. Plant authors who want "5 days back
+from window end" write ``days_into_window=window.duration - 1 - 5``
+(or call a helper ``at_end_offset(5)`` that does the arithmetic), and
+the construction-time check prevents any value outside ``[0, duration)``
+from ever being committed.
+
+The runtime ``SingleDayPlant.at_offset_from_end`` validator stays
+(defense in depth — a plant spec mutating across runs still needs
+the spine-time check), but the authoring-time form makes the
+calendar-drift class go away: a plant that compiles is by
+construction inside its window.
+
+### Where this maps in §5
+
+The plant author is making a *request* shape (using the §5 vocabulary):
+"plant this violation N days into the audit window". The current
+``days_ago`` field encodes that request in *coordinate* space (today's
+calendar) instead of *frame* space (the window). The §5 fix — "own the
+``as_of`` frame; let coordinates be derived" — wants the same posture
+at plant-author scale: own the window frame; let the calendar date
+fall out of it.
+
+This isn't a §5 BLOCKER (the spine still validates; nothing wrong gets
+into the seed; CI catches it) but it's the same root, and the same
+typed-spine refactor is the durable answer. Queue it for the next pass
+on ``common/intervals.py`` + ``common/l2/plant_registry.py``.
+
+### Footprint
+
+Eight ``days_ago: int`` fields on plant dataclasses in
+``common/l2/plant_registry.py`` (drift / overdraft / stuck_unbundled /
+limit_breach / supersession / stuck_pending / and two siblings) —
+plus ``L1_Invariants.md`` doc examples that quote ``days_ago=N`` in
+prose. The doc prose can stay (the rendered date is what matters);
+the dataclass migration is the change.
+
+Concrete catch: commit ``8ff1fc59`` ("BK.6/#35 followup — clamp
+Limit Breach days_ago=8 to 5 (was outside audit window)").

@@ -627,3 +627,109 @@ third arg is the cheaper local change.
 Append-only quirks log: this entry stays even after the
 underlying inline-handler pattern is refactored out, so the
 shape is recognizable on the next regression.
+
+## HTMX `hx-select` inherited by descendants silently empties unrelated swap targets — BX.new.list-cascade-reload follow-up, 2026-06-12
+
+### Symptom
+
+A wrapper element carries the cascade-reload triple:
+
+```html
+<div id="list-page-body"
+     hx-trigger="l2-cascade-reload from:body"
+     hx-get="/l2_shape/<kind>/"
+     hx-select="#list-page-body"
+     hx-swap="outerHTML">
+  ...
+</div>
+```
+
+Every descendant button — Delete, Edit, save toggles, the
+countdown-driven Delete-confirm flow — does its own swap
+against an unrelated target (e.g. ``[data-delete-wrapper]``
+or an in-place ``<article>``). The descendant swap fires,
+``htmx:afterSwap`` reports success, and the target gets
+silently emptied. No console error, no swap-failure event.
+
+Concrete failure mode caught by CI on commit 8ff1fc59 (5
+browser tests across rail / chain / limit_schedule):
+
+- ``test_browser_card_delete_swaps_button_inplace_without_toggling_details``
+- ``test_browser_delete_confirm_flow_completes_and_removes_entity``
+- ``test_browser_list_page_delete_removes_article_without_manual_reload``
+
+A MutationObserver pinned to the target shows the class chain
+transition through ``htmx-swapping`` → ``htmx-settling`` →
+done, with childList recording the ORIGINAL element removed
+and NO new element appended. The swap response was processed,
+filtered, and produced an empty fragment.
+
+### Root cause
+
+Per [HTMX 1.9 inheritance docs](https://htmx.org/reference/#attributes),
+``hx-select`` (along with ``hx-target``, ``hx-swap``,
+``hx-trigger``, etc.) is INHERITED by descendant elements
+unless explicitly disinherited. So every descendant button
+inside ``#list-page-body`` picks up the wrapper's
+``hx-select="#list-page-body"`` even though it has its own
+``hx-target`` / ``hx-swap`` pointed elsewhere.
+
+When the descendant swap runs, HTMX fetches the response (e.g.
+a countdown-in-progress fragment), applies the inherited
+``hx-select="#list-page-body"`` against that response, finds
+NOTHING matching (the countdown HTML has no
+``#list-page-body``), and swaps the empty result into the
+descendant's target. afterSwap fires normally — the empty
+swap IS a successful swap from HTMX's perspective.
+
+The wrapper's OWN swap (the cascade-reload it actually
+orchestrates) works fine because its response is the full
+page body and DOES contain ``#list-page-body``. The bug only
+surfaces on descendant swaps whose responses don't carry the
+selected ID.
+
+### Fix
+
+Add ``hx-disinherit="*"`` to the wrapper. This disinherits
+EVERY htmx attribute from descendants — they keep only the
+attributes explicitly set on themselves. Coarse hammer; we
+considered ``hx-disinherit="hx-select"`` (just the offender)
+but the wrapper's full attribute set is conceptually scoped
+to its own cascade-reload swap, not anything any descendant
+does.
+
+```html
+<div id="list-page-body"
+     hx-trigger="l2-cascade-reload from:body"
+     hx-get="/l2_shape/<kind>/"
+     hx-select="#list-page-body"
+     hx-swap="outerHTML"
+     hx-disinherit="*">
+  ...
+</div>
+```
+
+Concrete site: the standalone-list-page wrapper rendered by
+the Studio L2 routes. Commit ``01330cf4``.
+
+### Notes
+
+Generalizes beyond list pages: any time a wrapper that
+orchestrates its own swap also contains descendants doing
+unrelated swaps, the wrapper's ``hx-select`` / ``hx-target``
+/ ``hx-swap`` will silently apply to those descendants.
+Default to ``hx-disinherit="*"`` on swap-orchestrating
+wrappers whose attribute set isn't meaningful to children;
+only fall back to attribute-by-attribute disinherit when a
+specific attribute genuinely IS meant to cascade.
+
+The silent-success failure mode is the dangerous part: a
+swap that returns no rows looks indistinguishable from a
+swap that returns the right rows but doesn't change the
+visible state. The afterSwap event fires; the response is
+200; the only signal is "the thing got emptied". Browser-
+test the wrapper-with-descendants case end-to-end whenever
+adding ``hx-select`` to a wrapper.
+
+Append-only quirks log: this entry stays even after the
+underlying wrapper pattern is refactored out.
