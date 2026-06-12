@@ -49,6 +49,7 @@ import datetime as _dt
 import html
 import json
 import re
+import secrets
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
@@ -281,6 +282,29 @@ FilterSpec = (
 )
 
 
+# Boot-time cache-bust token. Stays stable for the lifetime of the
+# process; restart the server to force every browser to refetch every
+# /static/ asset (no Cmd+Shift+R needed). Studio shares this same token
+# via ``asset_url()`` for its own static URLs — single source of truth.
+# Starlette's StaticFiles ETag/Last-Modified still revalidates between
+# server restarts; the boot-id flip just guarantees a *fresh URL* the
+# browser hasn't seen, so it can't serve from cache without revalidating.
+_BOOT_ID: str = secrets.token_hex(4)
+
+
+def asset_url(path: str) -> str:
+    """Versioned URL for any static asset served by render.py / Studio.
+
+    ``asset_url("/static/widgets-theme.css")`` →
+        ``/static/widgets-theme.css?cb=<boot>``
+    ``asset_url("diagram-svg.css")`` →
+        ``/studio/static/diagram-svg.css?cb=<boot>``
+    """
+    if path.startswith("/"):
+        return f"{path}?cb={_BOOT_ID}"
+    return f"/studio/static/{path}?cb={_BOOT_ID}"
+
+
 # Third-party browser libs — served from ``/static/vendor/...`` (the
 # existing ``assets/`` static mount), NOT a CDN. The dist files are
 # committed under ``common/html/assets/vendor/{js,css}/`` and shipped via
@@ -332,11 +356,11 @@ _CTXMENU_JS = "/static/vendor/js/ctxmenu.min.js"
 # maps the libs' own hooks onto those vars). ``_VENDOR_JS`` lands at the
 # bottom of ``<head>`` where htmx / d3 already loaded.
 _VENDOR_CSS = "\n".join(
-    f'  <link rel="stylesheet" href="{href}">'
+    f'  <link rel="stylesheet" href="{asset_url(href)}">'
     for href in (_TOM_SELECT_CSS, _FLATPICKR_CSS, _NOUISLIDER_CSS)
 )
 _VENDOR_JS = "\n".join(
-    f'  <script src="{src}"></script>'
+    f'  <script src="{asset_url(src)}"></script>'
     for src in (
         _HTMX_SRC, _D3_SRC, _D3_SANKEY_SRC,
         _TOM_SELECT_JS, _FLATPICKR_JS, _NOUISLIDER_JS, _CTXMENU_JS,
@@ -395,9 +419,9 @@ _PAGE_SHELL = """\
   <meta charset="utf-8">
   <title>{title}</title>
 {dev_log_meta}{data_generation_meta}
-  <link rel="stylesheet" href="/static/output.css">
+  <link rel="stylesheet" href="/static/output.css?cb={cb}">
 {vendor_css}
-  <link rel="stylesheet" href="/static/widgets-theme.css">
+  <link rel="stylesheet" href="/static/widgets-theme.css?cb={cb}">
 {theme_style}
 {vendor_js}
 </head>
@@ -1318,6 +1342,7 @@ def emit_dashboards_list(
         vendor_js=_VENDOR_JS,
         bootstrap_js=_BOOTSTRAP_JS,
         dev_log_js=_DEV_LOG_JS,
+        cb=_BOOT_ID,
         dev_log_meta="",
         data_generation_meta="",
         theme_style=_emit_theme_style(theme),
@@ -1410,6 +1435,7 @@ def emit_error_page(
         vendor_js=_VENDOR_JS,
         bootstrap_js=_BOOTSTRAP_JS,
         dev_log_js=_DEV_LOG_JS,
+        cb=_BOOT_ID,
         dev_log_meta="",
         data_generation_meta=reload_meta,
         theme_style=_emit_theme_style(theme),
@@ -1818,6 +1844,7 @@ def emit_html(
         vendor_js=_VENDOR_JS,
         bootstrap_js=_BOOTSTRAP_JS,
         dev_log_js=_DEV_LOG_JS,
+        cb=_BOOT_ID,
         dev_log_meta=(
             '  <meta name="dev-log" content="1">' if dev_log else ""
         ),

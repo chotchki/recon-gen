@@ -121,7 +121,9 @@ def test_theme_style_appears_after_tailwind_link() -> None:
     silently win."""
     app, sheet = _build_app()
     out = emit_html(app, sheet, dashboard_id="x")
-    link_pos = out.index('href="/static/output.css"')
+    # Anchor on the path, not the closing quote — the URL now carries a
+    # ``?cb=<boot>`` cache-bust query (test_vendor_assets covers).
+    link_pos = out.index('href="/static/output.css?cb=')
     style_pos = out.index("--color-accent")
     assert style_pos > link_pos
 

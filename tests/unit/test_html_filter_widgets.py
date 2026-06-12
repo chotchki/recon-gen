@@ -124,9 +124,11 @@ def test_vendor_css_before_theme_style_before_vendor_js() -> None:
     libs in terms of the ``--color-*`` tokens — must follow their base
     CSS) → per-instance ``:root`` theme override → vendor widget JS."""
     for shell in _shells():
-        i_tailwind = shell.index('href="/static/output.css"')
+        # ``?cb=<boot>`` suffix on every /static URL — anchor on the path,
+        # not the closing quote, so the cache-bust query doesn't break us.
+        i_tailwind = shell.index('href="/static/output.css?cb=')
         i_vendor_css = shell.index("tom-select.min.css")
-        i_widget_theme = shell.index("/static/widgets-theme.css")
+        i_widget_theme = shell.index("/static/widgets-theme.css?cb=")
         i_theme = shell.index(":root {")
         i_vendor_js = shell.index("tom-select.complete.min.js")
         assert (
@@ -139,7 +141,9 @@ def test_widget_theme_override_sheet_is_linked() -> None:
     is linked so the widgets pick up the per-instance ``--color-*``
     tokens; it ships with the package (``common/html/assets/*.css``)."""
     for shell in _shells():
-        assert '<link rel="stylesheet" href="/static/widgets-theme.css">' in shell
+        # Anchor on the path (the cache-bust ``?cb=<boot>`` suffix varies
+        # per process boot; see ``test_page_shell_static_urls_cache_busted``).
+        assert '<link rel="stylesheet" href="/static/widgets-theme.css?cb=' in shell
     css_path = (
         Path(__file__).parents[2]
         / "src" / "recon_gen" / "common" / "html" / "assets"

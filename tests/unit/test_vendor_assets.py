@@ -93,3 +93,36 @@ def test_page_shell_has_no_external_script_or_link() -> None:
     # Belt-and-braces: the vendor blocks themselves carry only /static/.
     assert "http" not in render._VENDOR_JS, render._VENDOR_JS
     assert "http" not in render._VENDOR_CSS, render._VENDOR_CSS
+
+
+# Cache-bust regression — every ``/static/`` URL the shared page shell
+# emits must carry a ``?cb=<boot>`` token so a server restart forces a
+# browser refetch. Without this guard, adding a new ``<link>`` /
+# ``<script>`` to ``_PAGE_SHELL`` (or ``_VENDOR_CSS``/``_VENDOR_JS``)
+# silently bypasses cache-busting and re-introduces the "operator must
+# Cmd+Shift+R after restart" footgun (which bit us iterating on
+# ``widgets-theme.css`` for the Tom Select clear_button polish).
+_STATIC_ASSET_URL_RE = re.compile(
+    r'(?:href|src)\s*=\s*"(/static/[^"]+)"', re.IGNORECASE,
+)
+
+
+def test_page_shell_static_urls_cache_busted() -> None:
+    """Every ``<link href="/static/...">`` / ``<script src="/static/...">``
+    the page shell emits carries the boot-id ``?cb=<hex>`` cache-bust
+    token so a Studio / dashboards restart forces browsers to refetch
+    output.css / widgets-theme.css / vendor JS+CSS. Render two distinct
+    shells (dashboards list + the per-sheet shell via emit_dashboards_list's
+    sibling) to ensure both code paths route through ``asset_url()``."""
+    shell = emit_dashboards_list([("d1", "Dashboard One")])
+    urls = _STATIC_ASSET_URL_RE.findall(shell)
+    assert urls, "expected ≥1 /static/ URL in the rendered page shell"
+    missing = [u for u in urls if "?cb=" not in u]
+    assert not missing, (
+        f"{len(missing)} /static/ URL(s) in the page shell are missing the "
+        f"?cb=<boot> cache-bust token — adding a bare /static/... reference "
+        f"to _PAGE_SHELL / _VENDOR_CSS / _VENDOR_JS bypasses the boot-id "
+        f"flip and silently re-introduces the 'operator must Cmd+Shift+R "
+        f"after restart' footgun. Route via render.asset_url() (or pass "
+        f"cb={{_BOOT_ID}} through the .format(...) call). Offenders: {missing}"
+    )

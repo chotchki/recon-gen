@@ -38,7 +38,6 @@ Severability: this module is Studio-only. ``cli.dashboards`` calls
 from __future__ import annotations
 
 import json
-import secrets
 from collections import OrderedDict
 from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager
@@ -56,27 +55,12 @@ if TYPE_CHECKING:
 from urllib.parse import quote
 
 
-# X.4.e cache-bust — boot-time random hex appended as `?cb=…` to every
-# Studio asset URL the rendered pages emit. Stays stable for the
-# lifetime of the process; restart the server to force every browser
-# to refetch (no `Cmd+Shift+R` needed). Static-asset cache headers
-# (Starlette's StaticFiles ETag/Last-Modified) still revalidate
-# between server restarts; this just guarantees a fresh URL when the
-# server itself bumps.
-_BOOT_ID: str = secrets.token_hex(4)
-
-
-def asset_url(path: str) -> str:
-    """Versioned URL for a Studio asset.
-
-    ``asset_url("diagram-svg.css")`` → ``/studio/static/diagram-svg.css?cb=<boot>``
-    ``asset_url("/studio/wasm-graphviz/index.js")`` →
-        ``/studio/wasm-graphviz/index.js?cb=<boot>`` (absolute path
-    passes through unchanged except for the cb suffix).
-    """
-    if path.startswith("/"):
-        return f"{path}?cb={_BOOT_ID}"
-    return f"/studio/static/{path}?cb={_BOOT_ID}"
+# X.4.e cache-bust — boot-id + asset_url() live in render.py now so the
+# shared page shell + Studio's own static URLs use the SAME ?cb=<boot>
+# token (single source of truth, single browser-cache flip per restart).
+# Re-exported here for backwards-compat with the historical Studio
+# call-sites; new code can import directly from render.
+from recon_gen.common.html.render import _BOOT_ID, asset_url
 
 from datetime import date, datetime, timedelta
 
