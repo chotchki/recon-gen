@@ -109,7 +109,14 @@ def _encode_spec(spec: object, value: object, data: FormData) -> None:
         # both values + order (DOM order). The `__order` field is gone.
         if items:
             data[name] = items
-    elif kind in ("text", "select", "money", "textarea", "yaml_block"):
+    elif kind in (
+        "text", "select", "money", "textarea", "yaml_block",
+        # BX.17.a (2026-06-11) — "duration" is a scalar text-shape
+        # FieldKind; the form-data wire shape is the same as kind="text"
+        # (one input named=<spec.name> carrying the ISO 8601 literal),
+        # so the same _value_to_input_str round-trip applies.
+        "duration",
+    ):
         rendered = _value_to_input_str(value)
         if rendered:
             data[name] = [rendered]
