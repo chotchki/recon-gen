@@ -45,7 +45,7 @@ from recon_gen.common.tree._helpers import (
     auto_id,
 )
 from recon_gen.common.tree.actions import Action, Drill
-from recon_gen.common.tree.formatting import CellFormat
+from recon_gen.common.tree.formatting import Drillable
 from recon_gen.common.tree.calc_fields import CalcField
 from recon_gen.common.tree.controls import (
     FilterControlLike,
@@ -622,7 +622,7 @@ class Row:
             | None
         ) = None,
         actions: list[Action] | None = None,
-        conditional_formatting: list[CellFormat] | None = None,
+        conditional_formatting: list[Drillable] | None = None,
         metadata_popup: bool = False,
         visual_id: VisualId | AutoResolved = AUTO,
     ) -> Table:
@@ -840,7 +840,7 @@ class AbsoluteSlot:
             | None
         ) = None,
         actions: list[Action] | None = None,
-        conditional_formatting: list[CellFormat] | None = None,
+        conditional_formatting: list[Drillable] | None = None,
         metadata_popup: bool = False,
         visual_id: VisualId | AutoResolved = AUTO,
     ) -> Table:

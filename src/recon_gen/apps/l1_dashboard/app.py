@@ -132,7 +132,7 @@ from recon_gen.common.tree import (
     AutoResolved,
     CalcField,
     CategoryFilter,
-    CellAccentText,
+    Drillable,
     Dataset,
     DateTimeParam,
     DateView,
@@ -818,7 +818,7 @@ def _populate_drift_sheet(
             ),
         ],
         conditional_formatting=[
-            CellAccentText(on=leaf_account_col, color=accent),
+            Drillable(on=leaf_account_col, color=accent),
         ],
     )
 
@@ -862,7 +862,7 @@ def _populate_drift_sheet(
             ),
         ],
         conditional_formatting=[
-            CellAccentText(on=parent_account_col, color=accent),
+            Drillable(on=parent_account_col, color=accent),
         ],
     )
 
@@ -1040,7 +1040,7 @@ def _populate_overdraft_sheet(
             ),
         ],
         conditional_formatting=[
-            CellAccentText(on=account_col, color=accent),
+            Drillable(on=account_col, color=accent),
         ],
     )
 
@@ -1186,7 +1186,7 @@ def _populate_l1_exceptions_sheet(
             ),
         ],
         conditional_formatting=[
-            CellAccentText(on=account_col, color=accent),
+            Drillable(on=account_col, color=accent),
         ],
     )
 
@@ -1314,7 +1314,7 @@ def _populate_limit_breach_sheet(
             ),
         ],
         conditional_formatting=[
-            CellAccentText(on=account_col, color=accent),
+            Drillable(on=account_col, color=accent),
         ],
     )
 
@@ -1427,7 +1427,7 @@ def _populate_pending_aging_sheet(
             ),
         ],
         conditional_formatting=[
-            CellAccentText(on=transfer_col, color=accent),
+            Drillable(on=transfer_col, color=accent),
         ],
     )
 
@@ -1551,7 +1551,7 @@ def _populate_unbundled_aging_sheet(
             ),
         ],
         conditional_formatting=[
-            CellAccentText(on=transfer_col, color=accent),
+            Drillable(on=transfer_col, color=accent),
         ],
     )
 
@@ -1668,7 +1668,7 @@ def _populate_supersession_audit_sheet(
             ds_tx["bundle_id"].dim(),
         ],
         conditional_formatting=[
-            CellAccentText(on=tx_id_col, color=accent),
+            Drillable(on=tx_id_col, color=accent),
         ],
     )
 
@@ -1695,7 +1695,7 @@ def _populate_supersession_audit_sheet(
             ds_db["money"].numerical(currency=True),
         ],
         conditional_formatting=[
-            CellAccentText(on=db_account_col, color=accent),
+            Drillable(on=db_account_col, color=accent),
         ],
     )
 
@@ -1744,8 +1744,8 @@ def _populate_transactions_sheet(
         ],
         sort_by=(posting_col, "DESC"),
         conditional_formatting=[
-            CellAccentText(on=account_col, color=accent),
-            CellAccentText(on=transfer_col, color=accent),
+            Drillable(on=account_col, color=accent),
+            Drillable(on=transfer_col, color=accent),
         ],
         # CY.4 — App2 renderer surfaces the per-row ``metadata`` JSON
         # as a popup; the column is carried on every row payload but
@@ -1868,7 +1868,7 @@ def _populate_daily_statement_sheet(
             ),
         ],
         conditional_formatting=[
-            CellAccentText(on=transfer_col, color=accent),
+            Drillable(on=transfer_col, color=accent),
         ],
         # CY.4 — App2 renderer surfaces the per-row ``metadata`` JSON
         # as a popup; the column is carried on every row payload but

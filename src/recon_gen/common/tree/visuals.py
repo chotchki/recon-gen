@@ -58,8 +58,8 @@ from recon_gen.common.tree._helpers import (
     subtitle_label,
     title_label,
 )
-from recon_gen.common.tree.actions import Action
-from recon_gen.common.tree.formatting import CellFormat
+from recon_gen.common.tree.actions import Action, Drill
+from recon_gen.common.tree.formatting import Drillable
 from recon_gen.common.tree.calc_fields import CalcField, resolve_column
 from recon_gen.common.tree.datasets import Dataset
 from recon_gen.common.tree.fields import Dim, FieldRef, Measure, resolve_field_id
@@ -681,9 +681,12 @@ class Table:
     Optional ``sort_by`` is a ``(field_ref, direction)`` tuple —
     direction is ``"ASC"`` or ``"DESC"``.
 
-    Optional ``conditional_formatting`` passes through to the model's
-    raw dict (see ``common/clickability.py`` for the standard
-    accent-text and tint-background helpers).
+    Optional ``conditional_formatting`` is a list of ``Drillable(on,
+    color)`` markers — one per column the analyst should be able to drill
+    from. The visual cue (accent text vs. accent + tint background)
+    auto-derives from the column's drill triggers at emit time. The
+    Phase DA type gate (``__post_init__``) raises if any ``Drillable.on``
+    column has no drill writing from it.
 
     ``visual_id`` is optional (L.1.8.5 auto-ID).
     """
@@ -698,7 +701,7 @@ class Table:
         | None
     ) = None
     actions: list[Action] = field(default_factory=list[Action])
-    conditional_formatting: list[CellFormat] | None = None
+    conditional_formatting: list[Drillable] | None = None
     #: CY.4 — when True, every row of this table carries a per-row
     #: ``metadata`` column that the App2 renderer surfaces as a popup
     #: (and the renderer stamps ``data-metadata-popup="1"`` on the
@@ -886,7 +889,12 @@ class Table:
                 Actions=[a.emit() for a in self.actions] if self.actions else None,
                 ConditionalFormatting=(
                     {"ConditionalFormattingOptions": [
-                        cf.emit() for cf in self.conditional_formatting
+                        # Drillable.emit walks the Table's drill set to
+                        # pick the visual cue (accent vs accent+tint).
+                        # Drill is filtered out of Action to avoid
+                        # confusing SameSheetFilter or other action kinds.
+                        cf.emit([a for a in self.actions if isinstance(a, Drill)])
+                        for cf in self.conditional_formatting
                     ]}
                     if self.conditional_formatting else None
                 ),

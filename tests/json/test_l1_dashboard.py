@@ -1130,7 +1130,7 @@ def test_account_id_link_tints_on_every_table_with_account_id() -> None:
     there's nothing to drill from. The assertion walks each table's
     actual columns to decide whether the tint is required."""
     from recon_gen.common.theme import DEFAULT_PRESET
-    from recon_gen.common.tree import CellAccentText, Table
+    from recon_gen.common.tree import Table
 
     accent = DEFAULT_PRESET.accent
     app = build_l1_dashboard_app(_CFG)
@@ -1158,10 +1158,10 @@ def test_account_id_link_tints_on_every_table_with_account_id() -> None:
             if "account_id" not in col_names:
                 continue
             cf = visual.conditional_formatting or []
-            tints = [
-                f for f in cf
-                if isinstance(f, CellAccentText) and f.color == accent
-            ]
+            # Phase DA — `conditional_formatting` is `list[Drillable]`,
+            # so the isinstance(Drillable) filter became redundant. Just
+            # check the color matches the theme accent.
+            tints = [f for f in cf if f.color == accent]
             assert len(tints) >= 1, (
                 f"sheet {sheet.name!r} table {visual.title!r} exposes "
                 f"account_id but is missing the theme-accent link tint"
