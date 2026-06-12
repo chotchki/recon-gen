@@ -22,6 +22,7 @@ import pytest
 from recon_gen.common.db import execute_script
 from recon_gen.common.l2.config_table import replace_config
 from recon_gen.common.l2.loader import load_instance
+from recon_gen.common.l2.primitives import POSTED_STATUS
 from recon_gen.common.l2.schema import emit_schema
 from recon_gen.common.spine import (
     ClaimedAccountsGenerator,
@@ -177,7 +178,7 @@ def test_two_leg_emit_writes_balanced_pair_sharing_transfer_id() -> None:
     assert len(rows) == 2
     assert {r[0] for r in rows} == {gen.transfer_id}
     assert {r[3] for r in rows} == {_TWO_LEG_RAIL}
-    assert {r[4] for r in rows} == {"Posted"}
+    assert {r[4] for r in rows} == {POSTED_STATUS}
     # Σ amount = 0 (the L1 conservation shape).
     assert sum(float(r[1]) for r in rows) == pytest.approx(0.0)
     assert {r[2] for r in rows} == {"Debit", "Credit"}

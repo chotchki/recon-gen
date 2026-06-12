@@ -36,6 +36,10 @@ import pytest
 from recon_gen.common.db import execute_script
 from recon_gen.common.l2.config_table import replace_config
 from recon_gen.common.l2.loader import load_instance
+from recon_gen.common.l2.primitives import (
+    ORIGIN_INTERNAL_INITIATED,
+    POSTED_STATUS,
+)
 from recon_gen.common.l2.schema import emit_schema
 from recon_gen.common.spine import (
     AccountSimulation,
@@ -122,9 +126,9 @@ def test_transfer_leg_constructs_with_required_fields() -> None:
 
 def test_transfer_constructs_with_defaults() -> None:
     t = _balanced_pair(day=date(2030, 1, 1), transfer_id="x")
-    assert t.status == "Posted"
+    assert t.status == POSTED_STATUS
     assert t.parent_transfer_id is None
-    assert t.origin == "InternalInitiated"
+    assert t.origin == ORIGIN_INTERNAL_INITIATED
     assert t.hour == 12  # documented noon default
 
 
@@ -206,8 +210,8 @@ def test_transfer_emit_writes_one_tx_row_per_leg() -> None:
     # AO.1: amount_money is BIGINT cents — $250 → 25000.
     assert len(rows) == 2
     src, tgt = rows[0], rows[1]
-    assert src == ("xfer-1", "acct-src", -25000, "Debit", "Posted", "ach")
-    assert tgt == ("xfer-1", "acct-tgt", 25000, "Credit", "Posted", "ach")
+    assert src == ("xfer-1", "acct-src", -25000, "Debit", POSTED_STATUS, "ach")
+    assert tgt == ("xfer-1", "acct-tgt", 25000, "Credit", POSTED_STATUS, "ach")
 
 
 def test_transfer_emit_preserves_parent_transfer_id() -> None:

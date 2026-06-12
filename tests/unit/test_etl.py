@@ -20,6 +20,10 @@ import pytest
 
 from recon_gen.common.db import open_demo_db
 from recon_gen.common.etl import write_daily_balance, write_transaction
+from recon_gen.common.l2.primitives import (
+    ORIGIN_INTERNAL_INITIATED,
+    POSTED_STATUS,
+)
 from recon_gen.common.sql.dialect import Dialect
 from recon_gen.common.sql.literals import (
     render_sql_literal,
@@ -278,11 +282,11 @@ def test_write_transaction_debit_leg_derives_direction_and_signed_cents() -> Non
         assert row[1] == "acct-cust-0001"
         assert row[2] == -2500  # -$25.00 = -2500 cents
         assert row[3] == "Debit"
-        assert row[4] == "Posted"  # default
+        assert row[4] == POSTED_STATUS  # default
         assert str(row[5]) == "2026-06-07 10:30:00"
         assert row[6] == "tr-001"
         assert row[7] == "CustomerFeeAccrual"
-        assert row[8] == "InternalInitiated"
+        assert row[8] == ORIGIN_INTERNAL_INITIATED
         assert row[9] is None
     finally:
         conn.close()

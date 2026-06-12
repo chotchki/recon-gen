@@ -29,6 +29,7 @@ import pytest
 
 from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
+from recon_gen.common.l2.primitives import POSTED_STATUS
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.spine import (
     INVARIANT_GENERATOR_EDGES,
@@ -215,7 +216,7 @@ def test_emission_leaves_bundle_id_null() -> None:
     assert bundle_id is None, (
         f"stuck_unbundled plant must leave bundle_id NULL; got {bundle_id!r}"
     )
-    assert status == "Posted", (
+    assert status == POSTED_STATUS, (
         f"stuck_unbundled plant must be Posted (vs stuck_pending's "
         f"Pending); got {status!r}"
     )

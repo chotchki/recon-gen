@@ -19,6 +19,7 @@ from pathlib import Path
 from recon_gen.common.db import execute_script
 from recon_gen.common.l2.config_table import replace_config
 from recon_gen.common.l2.loader import load_instance
+from recon_gen.common.l2.primitives import POSTED_STATUS
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.spine import (
     ChainParentDisagreementInvariant,
@@ -168,7 +169,7 @@ def test_emit_writes_parent_plus_n_child_legs_sharing_transfer_id() -> None:
     # All child legs stamp the child template name.
     assert {r[2] for r in child_rows} == {gen.child_template_name}
     # All rows are Posted; child legs Credit, parent Debit.
-    assert all(r[4] == "Posted" for r in all_rows)
+    assert all(r[4] == POSTED_STATUS for r in all_rows)
     assert parent_rows[0][3] == "Debit"
     assert all(r[3] == "Credit" for r in child_rows)
 
