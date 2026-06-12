@@ -1,5 +1,5 @@
 """no-raw-enum-equality smoke fixture — planted raw-string comparisons
-against the 5 canonical enum values, plus negative-control shapes that
+against the canonical enum values, plus negative-control shapes that
 the lint MUST NOT flag.
 
 This file lives OUTSIDE the lint's normal ``tests/`` scope (per the
@@ -36,6 +36,16 @@ def planted_external_aggregated_membership() -> bool:
 def planted_reversed_order() -> bool:
     status = "Posted"
     return "Posted" == status  # planted (raw on the LEFT side of comparison)
+
+
+def planted_eq_debit() -> bool:
+    direction = "Debit"
+    return direction == "Debit"  # planted (AmountDirection)
+
+
+def planted_neq_credit() -> bool:
+    direction = "Credit"
+    return direction != "Credit"  # planted (AmountDirection)
 
 
 # -- Negative controls (lint MUST NOT flag) ------------------------------

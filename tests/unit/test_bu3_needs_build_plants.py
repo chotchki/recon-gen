@@ -30,6 +30,7 @@ import pytest
 
 from recon_gen.common.l2 import load_instance
 from recon_gen.common.l2.plant_registry import get_entry
+from recon_gen.common.l2.primitives import DEBIT
 from recon_gen.common.sql.dialect import Dialect
 
 
@@ -103,7 +104,7 @@ def test_dead_limit_schedule_adapter_happy_path(instance: object) -> None:
     assert "DELETE FROM" in sql
     # Targets parent_role + rail_name + Debit direction.
     assert "account_parent_role" in sql
-    assert "Debit" in sql
+    assert DEBIT in sql
 
 
 # -- Negative path: missing instance --------------------------------------

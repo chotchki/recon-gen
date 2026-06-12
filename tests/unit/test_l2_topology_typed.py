@@ -27,6 +27,7 @@ from recon_gen.common.l2 import (
     TwoLegRail,
     load_instance,
 )
+from recon_gen.common.l2.primitives import DEBIT
 from recon_gen.common.l2.topology import (
     TopologyEdge,
     TopologyGraph,
@@ -204,7 +205,7 @@ def test_topology_graph_self_loop_for_single_leg_rail() -> None:
     loop = self_loops[0]
     assert loop.source == "role__CustomerSubledger"
     assert loop.target == "role__CustomerSubledger"
-    assert loop.metadata["direction"] == "Debit"
+    assert loop.metadata["direction"] == DEBIT
     assert loop.metadata["rail_name"] == "FeeCharge"
 
 

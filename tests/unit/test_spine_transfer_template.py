@@ -23,6 +23,7 @@ import pytest
 from recon_gen.common.db import execute_script
 from recon_gen.common.l2.config_table import replace_config
 from recon_gen.common.l2.loader import load_instance
+from recon_gen.common.l2.primitives import CREDIT, DEBIT
 from recon_gen.common.l2.schema import emit_schema
 from recon_gen.common.spine import (
     ClaimedAccountsGenerator,
@@ -87,7 +88,7 @@ def test_factory_resolves_single_leg_first_template() -> None:
     assert gen.destination_account_id is None
     assert gen.rail_name == "SubledgerCharge"
     # SubledgerCharge has leg_direction='Debit' on the L2.
-    assert gen.single_leg_direction == "Debit"
+    assert gen.single_leg_direction == DEBIT
 
 
 def test_factory_rejects_unknown_template_loudly() -> None:
@@ -155,7 +156,7 @@ def test_two_leg_first_emit_writes_balanced_pair_stamped_with_template() -> None
     assert {r[3] for r in rows} == {"ReconciliationLeg"}
     assert {r[0] for r in rows} == {gen.transfer_id}
     assert sum(float(r[1]) for r in rows) == pytest.approx(0.0)
-    assert {r[2] for r in rows} == {"Debit", "Credit"}
+    assert {r[2] for r in rows} == {DEBIT, CREDIT}
 
 
 def test_single_leg_first_emit_writes_one_leg_stamped_with_template() -> None:

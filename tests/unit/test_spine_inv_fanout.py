@@ -23,6 +23,7 @@ import pytest
 from recon_gen.common.db import execute_script
 from recon_gen.common.l2.config_table import replace_config
 from recon_gen.common.l2.loader import load_instance
+from recon_gen.common.l2.primitives import CREDIT
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.spine import (
     ALL_COVERAGE_GENERATORS,
@@ -161,7 +162,7 @@ def test_emit_credits_recipient_n_times() -> None:
     finally:
         conn.close()
     assert len(recipient_rows) == 4
-    assert all(r[0] == "Credit" for r in recipient_rows)
+    assert all(r[0] == CREDIT for r in recipient_rows)
     # The anomaly matview's filter: scope='internal' + parent_role IS NOT NULL.
     assert all(r[2] == "internal" for r in recipient_rows)
     assert all(r[3] is not None for r in recipient_rows)

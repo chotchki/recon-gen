@@ -26,6 +26,7 @@ from recon_gen.common.l2 import (
     load_instance,
     validate,
 )
+from recon_gen.common.l2.primitives import DEBIT
 
 
 def _pipeline(yaml_text: str, tmp_path: Path, *, prefix: str):
@@ -127,7 +128,7 @@ def test_pipeline_single_leg_rail_in_transfer_template(tmp_path: Path) -> None:
         """), tmp_path, prefix="t4")
     rail = inst.rails[0]
     assert isinstance(rail, SingleLegRail)
-    assert rail.leg_direction == "Debit"
+    assert rail.leg_direction == DEBIT
 
 
 def test_pipeline_single_leg_variable_direction_rail(tmp_path: Path) -> None:

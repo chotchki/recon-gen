@@ -102,7 +102,14 @@ LegDirection: TypeAlias = Literal["Debit", "Credit", "Variable"]
 # system catches the same drift at the write-callsite instead of at INSERT
 # rejection. See ``docs/audits/untyped_enum_audit_2026_06_11.md`` for the
 # survey + the close-vs-open lock per enum.
+#
+# The two Final constants pair with the Literal so writers can import the
+# canonical spelling instead of sprinkling literals across ~12 spine
+# generators + ETL. Closed enum (schema CHECK enforces) — no integrator-
+# extension hatch needed.
 AmountDirection: TypeAlias = Literal["Debit", "Credit"]
+DEBIT: Final = "Debit"
+CREDIT: Final = "Credit"
 
 
 # Transaction lifecycle status. Per Schema_v6 the canonical values are

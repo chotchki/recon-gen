@@ -2323,26 +2323,27 @@ class NoPartialFormPutInTestsCheck(Check):
 # ---------------------------------------------------------------------------
 
 
-# The 5 canonical enum values shipped at d363a349..1c64f5c1 + the operator's
-# 2026-06-11 "type is what carries" sweep. Raw-string equality against any
-# of these in a test is a smell — the test pins the implementation rather
-# than the contract. Replace with the typed constant from
-# ``common/l2/primitives.py``:
+# The canonical enum values shipped at d363a349..1c64f5c1 + the operator's
+# 2026-06-11 "type is what carries" sweep, extended to cover the
+# remaining closed-Literal enums (AmountDirection, Scope, SupersedeReason)
+# once their Final constants landed alongside this dict. Raw-string
+# equality against any of these in a test is a smell — the test pins the
+# implementation rather than the contract. Replace with the typed
+# constant from ``common/l2/primitives.py``:
 #
 # - ``"Posted"``                  → ``POSTED_STATUS``
 # - ``"InternalInitiated"``       → ``ORIGIN_INTERNAL_INITIATED``
 # - ``"ExternalForcePosted"``     → ``ORIGIN_EXTERNAL_FORCE_POSTED``
 # - ``"ExternalAggregated"``      → ``ORIGIN_EXTERNAL_AGGREGATED``
-#
-# (AmountDirection / Scope / SupersedeReason remain raw-string TypeAliases
-# at this commit — the operator's intent is the closed-Literal type itself
-# does the carrying, no Final constant exists to import. Once those gain
-# Final constants, extend this dict to cover them.)
+# - ``"Debit"``                   → ``DEBIT``
+# - ``"Credit"``                  → ``CREDIT``
 _ENUM_VALUE_TO_CONSTANT: dict[str, str] = {
     "Posted": "POSTED_STATUS",
     "InternalInitiated": "ORIGIN_INTERNAL_INITIATED",
     "ExternalForcePosted": "ORIGIN_EXTERNAL_FORCE_POSTED",
     "ExternalAggregated": "ORIGIN_EXTERNAL_AGGREGATED",
+    "Debit": "DEBIT",
+    "Credit": "CREDIT",
 }
 
 
@@ -2904,23 +2905,25 @@ def _build_checks() -> list[Check]:
                 if fixtures_dir not in p.parents
             ],
         ),
-        # Operator 2026-06-11 sweep — the 5 closed enums landed at
+        # Operator 2026-06-11 sweep — the closed enums landed at
         # d363a349..1c64f5c1; this lint locks the test-side baseline.
         # Scope: tests/ only (src/ already uses the constants — the
         # commit-5 sweep covered every callsite). Excludes the planted-
-        # fixture dir per the standard pattern.
+        # fixture dir per the standard pattern. Extended past the initial
+        # 5-value POSTED/ORIGIN_* set as further Final constants land.
         NoRawEnumEqualityCheck(
             name="no-raw-enum-equality",
             description=(
                 "raw-string equality / membership in tests/ against any "
-                "of the 5 canonical enum values (Posted / "
+                "of the canonical enum values (Posted / "
                 "InternalInitiated / ExternalForcePosted / "
-                "ExternalAggregated). Import the matching ``Final`` "
-                "constant from ``common/l2/primitives.py`` and compare "
-                "against it — a test that pins the raw literal pins the "
-                "implementation; one that pins the constant follows a "
-                "rename. Constructor-call inputs (``status=\"Posted\"`` "
-                "passed as a function arg) are NOT flagged — they're the "
+                "ExternalAggregated / Debit / Credit). Import the "
+                "matching ``Final`` constant from "
+                "``common/l2/primitives.py`` and compare against it — a "
+                "test that pins the raw literal pins the implementation; "
+                "one that pins the constant follows a rename. "
+                "Constructor-call inputs (``status=\"Posted\"`` passed "
+                "as a function arg) are NOT flagged — they're the "
                 "wire-shape input the function-under-test parses, not "
                 "internal state being checked."
             ),
@@ -3060,7 +3063,7 @@ def test_co_6_no_partial_form_put_in_tests_finds_planted() -> None:
 
 def test_no_raw_enum_equality_finds_planted() -> None:
     """Operator-2026-06-11 sweep smoke test — the lint must flag every
-    planted raw-string comparison against the 5 canonical enum values
+    planted raw-string comparison against the canonical enum values
     AND must NOT flag the constructor-call / dict-value / unrelated-
     string negative controls.
 
@@ -3083,7 +3086,7 @@ def test_no_raw_enum_equality_finds_planted() -> None:
     src = fixture.read_text(encoding="utf-8")
     tree = ast.parse(src)
     smells = list(check.find_smells(src, tree, fixture))
-    # 6 planted hits:
+    # 8 planted hits:
     #   - planted_eq_posted               → 1 ("Posted")
     #   - planted_neq_internal_initiated  → 1 ("InternalInitiated")
     #   - planted_in_tuple_*              → 2 ("ExternalForcePosted",
@@ -3091,9 +3094,11 @@ def test_no_raw_enum_equality_finds_planted() -> None:
     #                                          tuple)
     #   - planted_external_aggregated_*   → 1 ("ExternalAggregated")
     #   - planted_reversed_order          → 1 ("Posted" on the LEFT)
-    assert len(smells) == 6, (
-        f"smoke expected exactly 6 hits on the planted fixture "
-        f"(5 plant functions, one of which plants 2 enum hits in the "
+    #   - planted_eq_debit                → 1 ("Debit")
+    #   - planted_neq_credit              → 1 ("Credit")
+    assert len(smells) == 8, (
+        f"smoke expected exactly 8 hits on the planted fixture "
+        f"(7 plant functions, one of which plants 2 enum hits in the "
         f"in-tuple shape); got {len(smells)}:\n"
         f"{chr(10).join(repr(s) for s in smells)}\n"
         f"Either the Compare visitor stopped walking, the "

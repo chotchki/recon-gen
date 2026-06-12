@@ -22,7 +22,7 @@ import pytest
 from recon_gen.common.db import execute_script
 from recon_gen.common.l2.config_table import replace_config
 from recon_gen.common.l2.loader import load_instance
-from recon_gen.common.l2.primitives import POSTED_STATUS
+from recon_gen.common.l2.primitives import CREDIT, DEBIT, POSTED_STATUS
 from recon_gen.common.l2.schema import emit_schema
 from recon_gen.common.spine import (
     ClaimedAccountsGenerator,
@@ -83,7 +83,7 @@ def test_factory_resolves_single_leg_debit_rail() -> None:
     )
     assert gen.is_two_leg is False
     assert gen.account_id_b is None
-    assert gen.single_leg_direction == "Debit"
+    assert gen.single_leg_direction == DEBIT
 
 
 def test_factory_resolves_single_leg_credit_rail() -> None:
@@ -93,7 +93,7 @@ def test_factory_resolves_single_leg_credit_rail() -> None:
         _SINGLE_LEG_CREDIT_RAIL, anchor_day=date(2030, 1, 1),
     )
     assert gen.is_two_leg is False
-    assert gen.single_leg_direction == "Credit"
+    assert gen.single_leg_direction == CREDIT
 
 
 def test_factory_rejects_unknown_rail_loudly() -> None:
@@ -181,7 +181,7 @@ def test_two_leg_emit_writes_balanced_pair_sharing_transfer_id() -> None:
     assert {r[4] for r in rows} == {POSTED_STATUS}
     # Σ amount = 0 (the L1 conservation shape).
     assert sum(float(r[1]) for r in rows) == pytest.approx(0.0)
-    assert {r[2] for r in rows} == {"Debit", "Credit"}
+    assert {r[2] for r in rows} == {DEBIT, CREDIT}
 
 
 def test_single_leg_debit_emit_writes_one_negative_leg() -> None:
@@ -199,7 +199,7 @@ def test_single_leg_debit_emit_writes_one_negative_leg() -> None:
     finally:
         conn.close()
     # AO.1: amount_money is BIGINT cents — $-100.00 → -10000.
-    assert rows == [(-10000, "Debit", _SINGLE_LEG_DEBIT_RAIL)]
+    assert rows == [(-10000, DEBIT, _SINGLE_LEG_DEBIT_RAIL)]
 
 
 def test_single_leg_credit_emit_writes_one_positive_leg() -> None:
@@ -217,7 +217,7 @@ def test_single_leg_credit_emit_writes_one_positive_leg() -> None:
     finally:
         conn.close()
     # AO.1: amount_money is BIGINT cents — $75.00 → 7500.
-    assert rows == [(7500, "Credit", _SINGLE_LEG_CREDIT_RAIL)]
+    assert rows == [(7500, CREDIT, _SINGLE_LEG_CREDIT_RAIL)]
 
 
 # ---------------------------------------------------------------------------
