@@ -867,6 +867,106 @@ class TestTableVisual:
             )
             assert table.metadata_popup is True
 
+    # Phase DA — Drillable type-system gate. The gate at
+    # ``Table.__post_init__`` walks ``conditional_formatting × actions``
+    # and asserts every ``Drillable.on.column`` has at least one Drill
+    # writing from it. Catches the operator-flagged bug class at the
+    # apps/<app>/app.py wiring site instead of letting QS emit a visual
+    # cue with no actual drill behind it.
+
+    def test_drillable_without_matching_drill_raises(self):
+        """Phase DA — `Drillable(on=col)` with NO Drill writing from
+        that column on the same Table is a type error; the gate at
+        construction raises with a diagnostic listing every Drill on
+        the Table and the columns each one writes from."""
+        from recon_gen.common.tree import Drillable
+
+        ds = Dataset(
+            identifier="da-gate-ds",
+            arn="arn:aws:quicksight:::dataset/da-gate-ds",
+        )
+        col_id = Dim(dataset=ds, field_id="f-id", column="id")
+        with pytest.raises(
+            ValueError, match=r"Drillable\(on='id'\) is in conditional_formatting",
+        ):
+            Table(
+                visual_id=VisualId("v-tbl"),
+                title="Detail",
+                subtitle="t",
+                columns=[col_id],
+                # No actions=[] at all — Drillable has no Drill to back it.
+                conditional_formatting=[Drillable(on=col_id, color="#000000")],
+            )
+
+    def test_drillable_with_drill_on_other_column_raises(self):
+        """The gate is column-specific: a Drill on a different column
+        than the Drillable.on doesn't satisfy the invariant. Catches the
+        off-by-one column mistake (analyst put the visual cue on column
+        A but wired the drill to write from column B — the cell B looks
+        clickable but A's click does nothing)."""
+        from recon_gen.common.tree import Drill, Drillable, DrillParam
+
+        ds = Dataset(
+            identifier="da-gate-mismatch-ds",
+            arn="arn:aws:quicksight:::dataset/da-gate-mismatch-ds",
+        )
+        col_a = Dim(dataset=ds, field_id="f-a", column="a")
+        col_b = Dim(dataset=ds, field_id="f-b", column="b")
+        # Param shape doesn't matter for the gate — the gate only walks
+        # column names, not types.
+        from recon_gen.common.drill import ColumnShape
+
+        param_b = DrillParam(name=ParameterName("pB"), shape=ColumnShape.ACCOUNT_ID)
+        with pytest.raises(ValueError, match=r"Drillable\(on='a'\)"):
+            Table(
+                visual_id=VisualId("v-tbl"),
+                title="Detail",
+                subtitle="t",
+                columns=[col_a, col_b],
+                # Drill writes from `b` but the Drillable is on `a`.
+                actions=[Drill(
+                    writes=[(param_b, col_b)],
+                    name="View B downstream",
+                    trigger="DATA_POINT_MENU",
+                    action_id="act-1",
+                    target_sheet=AUTO,
+                )],
+                conditional_formatting=[Drillable(on=col_a, color="#000000")],
+            )
+
+    def test_drillable_with_matching_drill_passes(self):
+        """Happy path: when at least one Drill on the same Table writes
+        from `Drillable.on.column`, construction succeeds. Mirrors the
+        shape of every Class C wire + Class D add landed in DA.4."""
+        from recon_gen.common.tree import Drill, Drillable, DrillParam
+
+        ds = Dataset(
+            identifier="da-gate-pass-ds",
+            arn="arn:aws:quicksight:::dataset/da-gate-pass-ds",
+        )
+        col_account = Dim(dataset=ds, field_id="f-acct", column="account_id")
+        from recon_gen.common.drill import ColumnShape
+
+        param_account = DrillParam(
+            name=ParameterName("pAcct"), shape=ColumnShape.ACCOUNT_ID,
+        )
+        table = Table(
+            visual_id=VisualId("v-tbl"),
+            title="Detail",
+            subtitle="t",
+            columns=[col_account],
+            actions=[Drill(
+                writes=[(param_account, col_account)],
+                name="View Daily Statement",
+                trigger="DATA_POINT_MENU",
+                action_id="act-1",
+                target_sheet=AUTO,
+            )],
+            conditional_formatting=[Drillable(on=col_account, color="#000000")],
+        )
+        assert table.conditional_formatting is not None
+        assert len(table.conditional_formatting) == 1
+
 
 class TestBarChartVisual:
     def test_emits_bar_with_category_and_values(self):

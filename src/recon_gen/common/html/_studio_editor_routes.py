@@ -216,7 +216,7 @@ class FieldSpec:
     # that don't need relabeling.
     option_labels: Mapping[str, str] | None = None
     # CN.5a — optional pointer to a handbook page under
-    # ``docs/handbook/`` (same shape as ``Sheet.handbook_path``;
+    # ``src/recon_gen/docs/_handbook_per_sheet/`` (same shape as ``Sheet.handbook_path``;
     # `<area>/<topic>` without `.md`). When set, the renderer emits
     # a small `?` button next to the field label that opens the
     # handbook side panel via the same JS hook the dashboard `?`

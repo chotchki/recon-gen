@@ -34,7 +34,7 @@ ParameterName = NewType("ParameterName", str)
 # routing slug. NewType so a SheetId can't be passed where a
 # DashboardId is expected at the route boundary.
 DashboardId = NewType("DashboardId", str)
-# CN.5 — typed reference to a handbook page under ``docs/handbook/``.
+# CN.5 — typed reference to a handbook page under ``src/recon_gen/docs/_handbook_per_sheet/``.
 # Conventional shape is ``<app>/<sheet>`` (e.g. ``l1/drift``) without
 # the ``.md`` extension; the Starlette ``GET /handbook/<path>`` route
 # appends ``.md`` when resolving. NewType so a Sheet's optional

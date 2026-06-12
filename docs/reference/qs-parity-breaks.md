@@ -145,7 +145,7 @@ Each entry below records a deliberate divergence between App2 (the self-hosted H
 
 **References:**
 - `src/recon_gen/common/html/_studio_editor_routes.py`
-- `docs/handbook/l2-editor/`
+- `src/recon_gen/docs/_handbook_per_sheet/l2-editor/`
 
 ### `xlsx_export_button`
 

@@ -912,7 +912,7 @@ def build_executives_app(
         app.add_dataset(ds)
 
     # CN.5 — sheet_id → handbook page. Keep in sync with
-    # docs/handbook/executives/*.md; CN.6's liveness gate (Phase CN.6)
+    # src/recon_gen/docs/_handbook_per_sheet/executives/*.md; CN.6's liveness gate (Phase CN.6)
     # asserts every Sheet.handbook_path resolves to a real file.
     _HANDBOOK_PATHS: dict[SheetId, str] = {
         SHEET_EXEC_GETTING_STARTED: "executives/getting-started",

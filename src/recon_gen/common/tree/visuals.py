@@ -58,8 +58,8 @@ from recon_gen.common.tree._helpers import (
     subtitle_label,
     title_label,
 )
-from recon_gen.common.tree.actions import Action
-from recon_gen.common.tree.formatting import CellFormat
+from recon_gen.common.tree.actions import Action, Drill
+from recon_gen.common.tree.formatting import Drillable
 from recon_gen.common.tree.calc_fields import CalcField, resolve_column
 from recon_gen.common.tree.datasets import Dataset
 from recon_gen.common.tree.fields import Dim, FieldRef, Measure, resolve_field_id
@@ -681,9 +681,12 @@ class Table:
     Optional ``sort_by`` is a ``(field_ref, direction)`` tuple —
     direction is ``"ASC"`` or ``"DESC"``.
 
-    Optional ``conditional_formatting`` passes through to the model's
-    raw dict (see ``common/clickability.py`` for the standard
-    accent-text and tint-background helpers).
+    Optional ``conditional_formatting`` is a list of ``Drillable(on,
+    color)`` markers — one per column the analyst should be able to drill
+    from. The visual cue (accent text vs. accent + tint background)
+    auto-derives from the column's drill triggers at emit time. The
+    Phase DA type gate (``__post_init__``) raises if any ``Drillable.on``
+    column has no drill writing from it.
 
     ``visual_id`` is optional (L.1.8.5 auto-ID).
     """
@@ -698,7 +701,7 @@ class Table:
         | None
     ) = None
     actions: list[Action] = field(default_factory=list[Action])
-    conditional_formatting: list[CellFormat] | None = None
+    conditional_formatting: list[Drillable] | None = None
     #: CY.4 — when True, every row of this table carries a per-row
     #: ``metadata`` column that the App2 renderer surfaces as a popup
     #: (and the renderer stamps ``data-metadata-popup="1"`` on the
@@ -796,6 +799,56 @@ class Table:
                         f"field-well list."
                     )
                 seen[key] = well_name
+        # Phase DA — Drillable type-system gate. Every Drillable in
+        # `conditional_formatting` declares a column as drillable; that
+        # column MUST have at least one Drill in `actions` writing from
+        # it (matched by column name on the Drill's writes list). Raises
+        # at the wiring site with the offending Table + column + the
+        # actual drill set so the author can fix the row at apps/<app>/
+        # app.py without going through emit / deploy / dogfood loops.
+        if self.conditional_formatting:
+            drill_actions = [a for a in self.actions if isinstance(a, Drill)]
+            for cf in self.conditional_formatting:
+                target_col = resolve_column(cf.on.column)
+                matching_drills: list[Drill] = []
+                from recon_gen.common.tree.fields import Dim as _Dim
+                for d in drill_actions:
+                    for _param, src in d.writes:
+                        if (
+                            isinstance(src, _Dim)
+                            and resolve_column(src.column) == target_col
+                        ):
+                            matching_drills.append(d)
+                            break
+                if not matching_drills:
+                    # Build a helpful diagnostic — what drills DO exist
+                    # on this Table, and which columns do they write
+                    # from? Operator can spot the off-by-one column name
+                    # at a glance.
+                    drill_summary: list[str] = []
+                    for d in drill_actions:
+                        sources: list[str] = []
+                        for _param, src in d.writes:
+                            if isinstance(src, _Dim):
+                                sources.append(resolve_column(src.column))
+                        sources_str = (
+                            ", ".join(sources) if sources else "(no Dim sources)"
+                        )
+                        drill_summary.append(
+                            f"  {d.name!r} ({d.trigger}) writes from: {sources_str}"
+                        )
+                    summary = "\n".join(drill_summary) if drill_summary else (
+                        "  (no Drill actions on this Table)"
+                    )
+                    raise ValueError(
+                        f"Table {self.title!r}: Drillable(on={target_col!r}) "
+                        f"is in conditional_formatting but no Drill in "
+                        f"actions writes from that column. Either remove "
+                        f"the Drillable, add a Drill that writes from "
+                        f"{target_col!r}, or move the Drillable to the "
+                        f"column the existing drill writes from.\nDrills "
+                        f"currently on this Table:\n{summary}"
+                    )
 
     @property
     def element_id(self) -> str:
@@ -886,7 +939,12 @@ class Table:
                 Actions=[a.emit() for a in self.actions] if self.actions else None,
                 ConditionalFormatting=(
                     {"ConditionalFormattingOptions": [
-                        cf.emit() for cf in self.conditional_formatting
+                        # Drillable.emit walks the Table's drill set to
+                        # pick the visual cue (accent vs accent+tint).
+                        # Drill is filtered out of Action to avoid
+                        # confusing SameSheetFilter or other action kinds.
+                        cf.emit([a for a in self.actions if isinstance(a, Drill)])
+                        for cf in self.conditional_formatting
                     ]}
                     if self.conditional_formatting else None
                 ),

@@ -292,6 +292,13 @@ class _VisualPlan:
     #: ``ColumnSpec.hidden`` flag (minus any column the visual EXPLICITLY
     #: lands on a field well — author intent overrides contract default).
     column_hidden: Mapping[str, bool]
+    #: Phase DA — per-column decoration key. ``"accent"`` = accent text
+    #: only (cell carries CLICK-only drill); ``"accent-menu"`` = accent
+    #: text + tint background (cell carries at least one MENU drill).
+    #: Derived from the visual's ``conditional_formatting`` list of
+    #: ``Drillable``s + the visual's ``actions`` Drill set. Empty when
+    #: the visual carries no Drillable (no decoration to emit).
+    column_decoration: Mapping[str, str]
     chart: _ChartMeta | None
     money_columns: frozenset[str]
     #: KPI's value format (``"currency"`` / ``"number"``), derived
@@ -386,9 +393,9 @@ def _leaf_column_name(leaf: Any) -> str | None:  # typing-smell: ignore[explicit
 def _table_column_meta(
     visual: Any,  # typing-smell: ignore[explicit-any]: dynamic visual subtype walked via getattr
     ds_id: str | None,
-) -> tuple[dict[str, str], dict[str, str], dict[str, bool]]:
-    """AO.R.1 — per-column ``(label, format, hidden)`` for a visual,
-    derived from the SAME sources QuickSight uses so App2 renders
+) -> tuple[dict[str, str], dict[str, str], dict[str, bool], dict[str, str]]:
+    """AO.R.1 — per-column ``(label, format, hidden, decoration)`` for a
+    visual, derived from the SAME sources QuickSight uses so App2 renders
     identical headers + money.
 
     - ``label`` ← the dataset contract's ``ColumnSpec.human_name`` (the
@@ -406,6 +413,14 @@ def _table_column_meta(
       declares columns that appear on the visual's field wells, so a
       hidden contract column never lands in QS's visual unless it was
       put there explicitly.
+    - ``decoration`` ← Phase DA — for each ``Drillable`` in the visual's
+      ``conditional_formatting``, ``"accent-menu"`` when any drill in
+      the visual's ``actions`` writes from the column with
+      ``DATA_POINT_MENU`` trigger; ``"accent"`` when only
+      ``DATA_POINT_CLICK`` writes from it. Columns without a Drillable
+      stay out of the map (no decoration). Same code path the QS-side
+      ``Drillable.emit(drills)`` uses to pick the visual cue — App2
+      ≡ QS by construction.
 
     Empty maps when the visual has no resolvable contract (text boxes etc.):
     the renderer then falls back to the raw column name, unformatted.
@@ -413,6 +428,7 @@ def _table_column_meta(
     labels: dict[str, str] = {}
     formats: dict[str, str] = {}
     hidden: dict[str, bool] = {}
+    decoration: dict[str, str] = {}
     if ds_id is not None:
         try:
             contract = get_contract(ds_id)
@@ -450,7 +466,22 @@ def _table_column_meta(
             # The contract-derived hidden flag is the default; the visual's
             # field-wells list is the override.
             hidden.pop(name, None)
-    return labels, formats, hidden
+    # Phase DA — Drillable cells. Same visual-resolution code path as
+    # Drillable.emit(drills) on the QS side: lazy-import to avoid a
+    # tree → html circular at module load.
+    cond_fmt_raw: Any = getattr(visual, "conditional_formatting", None) or []  # typing-smell: ignore[explicit-any]: tree visuals walked via getattr — Any narrows inside the isinstance guard below
+    actions_raw: Any = getattr(visual, "actions", None) or []  # typing-smell: ignore[explicit-any]: same — narrowed by Drill isinstance
+    if cond_fmt_raw:
+        from recon_gen.common.tree.actions import Drill
+        from recon_gen.common.tree.formatting import Drillable
+        drills = [a for a in actions_raw if isinstance(a, Drill)]
+        for cf in cond_fmt_raw:
+            if not isinstance(cf, Drillable):
+                continue
+            col = _leaf_column_name(cf.on)
+            if col is not None:
+                decoration[col] = cf.visual_kind(drills)
+    return labels, formats, hidden, decoration
 
 
 def _chart_meta(visual: Any) -> _ChartMeta | None:  # typing-smell: ignore[explicit-any]: dynamic visual subtype walked via getattr
@@ -679,12 +710,15 @@ def make_tree_db_fetcher(
                 # signal vs the silent-misbehavior fallback shape.
                 contract = get_contract(ds_id)
                 sql = wrap_for_visual(base_sql, visual, contract=contract)
-            col_labels, col_formats, col_hidden = _table_column_meta(visual, ds_id)
+            col_labels, col_formats, col_hidden, col_decoration = (
+                _table_column_meta(visual, ds_id)
+            )
             money_cols = _resolve_money_columns(ds_id, col_formats)
             visual_index[vid] = _VisualPlan(
                 kind=kind, sql=sql, ds_id=ds_id,
                 column_labels=col_labels, column_formats=col_formats,
                 column_hidden=col_hidden,
+                column_decoration=col_decoration,
                 chart=_chart_meta(visual),
                 money_columns=money_cols,
                 kpi_format=_kpi_format(visual),
@@ -780,6 +814,7 @@ def make_tree_db_fetcher(
                 column_labels=plan.column_labels,
                 column_formats=plan.column_formats,
                 column_hidden=plan.column_hidden,
+                column_decoration=plan.column_decoration,
             )
         rows, columns = await execute_visual_sql_async(
             pool, sql, params, dialect=cfg.dialect,

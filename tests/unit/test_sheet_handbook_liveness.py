@@ -2,7 +2,7 @@
 
 Walk every app's tree, collect every Sheet, and verify each
 ``Sheet.handbook_path`` value resolves to an actual file under
-``docs/handbook/<path>.md``. Companion to the
+``src/recon_gen/docs/_handbook_per_sheet/<path>.md``. Companion to the
 ``test_field_spec_handbook.py`` liveness gate which covers
 FieldSpec.handbook_path on the Studio editor side.
 
@@ -35,9 +35,9 @@ def _all_sheets(app: App) -> tuple[Sheet, ...]:
 
 def test_all_sheet_handbook_paths_resolve_to_files() -> None:
     """Every Sheet.handbook_path across all four apps points at an
-    actual file under ``docs/handbook/<path>.md``."""
+    actual file under ``src/recon_gen/docs/_handbook_per_sheet/<path>.md``."""
     repo_root = Path(__file__).resolve().parents[2]
-    handbook_root = repo_root / "docs" / "handbook"
+    handbook_root = repo_root / "src" / "recon_gen" / "docs" / "_handbook_per_sheet"
 
     all_sheets: list[tuple[str, Sheet]] = []
     for app_name in ("l1_dashboard", "l2_flow_tracing",

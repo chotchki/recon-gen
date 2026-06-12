@@ -147,6 +147,7 @@ def shape_table(
     column_labels: Mapping[str, str] | None = None,
     column_formats: Mapping[str, str] | None = None,
     column_hidden: Mapping[str, bool] | None = None,
+    column_decoration: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Shape SQL rows as a paginated table.
 
@@ -166,20 +167,23 @@ def shape_table(
     the cell value positionally, so row-level wiring (popup, drills) can
     still read it.
 
-    ``column_labels`` / ``column_formats`` / ``column_hidden`` are keyed
-    by raw SQL column name (AO.R.1). They carry the SAME per-column
-    presentation QuickSight derives from the contract + the visual's field
-    leaves (``human_name`` header, ``currency`` measure format, ``hidden``
-    contract flag) — the App2 tree fetcher resolves them and passes them
-    here. When ALL are omitted, columns emit as the bare ``[{"name"}]``
-    shape (renderer falls back to the raw name) so callers that don't
-    have the tree (test stubs) are unaffected. A per-column key is
-    omitted (not None / not False) when there's no mapping for it,
-    keeping the JSON clean.
+    ``column_labels`` / ``column_formats`` / ``column_hidden`` /
+    ``column_decoration`` are keyed by raw SQL column name (AO.R.1).
+    They carry the SAME per-column presentation QuickSight derives from
+    the contract + the visual's field leaves (``human_name`` header,
+    ``currency`` measure format, ``hidden`` contract flag) + the
+    visual's ``conditional_formatting`` list (Phase DA — per-column
+    ``"accent"`` / ``"accent-menu"`` decoration cue). The App2 tree
+    fetcher resolves them and passes them here. When ALL are omitted,
+    columns emit as the bare ``[{"name"}]`` shape (renderer falls back
+    to the raw name) so callers that don't have the tree (test stubs)
+    are unaffected. A per-column key is omitted (not None / not False)
+    when there's no mapping for it, keeping the JSON clean.
     """
     labels = column_labels or {}
     formats = column_formats or {}
     hidden = column_hidden or {}
+    decoration = column_decoration or {}
 
     def _col(name: str) -> dict[str, Any]:
         out: dict[str, Any] = {"name": name}
@@ -191,6 +195,9 @@ def shape_table(
             out["format"] = fmt
         if hidden.get(name):
             out["hidden"] = True
+        deco = decoration.get(name)
+        if deco is not None:
+            out["decoration"] = deco
         return out
 
     return {

@@ -443,7 +443,7 @@ SURFACES_AS: dict[str, str] = {
     ),
     "institution-description": (
         "**Description** appears on:\n\n"
-        "- the **handbook** intro / preface page rendered from `docs/handbook/`\n"
+        "- the **handbook** intro / preface page rendered from `src/recon_gen/docs/_handbook_per_sheet/`\n"
         "- the **audit PDF appendix** (\"About this institution\" section)\n"
         "- the **L2 Editor** read card for the Instance singleton\n"
         "- regex-extraction fallback source for **institution_name** when blank\n\n"

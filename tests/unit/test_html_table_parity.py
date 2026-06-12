@@ -108,7 +108,7 @@ def test_app2_table_columns_carry_contract_header_and_currency(app_name: str) ->
             if type(visual).__name__ != "Table":
                 continue
             ds_id = _find_visual_dataset_identifier(visual)
-            labels, formats, _hidden = _table_column_meta(visual, ds_id)
+            labels, formats, _hidden, _decoration = _table_column_meta(visual, ds_id)
             contract: DatasetContract | None = None
             if ds_id is not None:
                 try:
@@ -158,3 +158,145 @@ def test_app2_table_columns_carry_contract_header_and_currency(app_name: str) ->
         f"{app_name}: no Table columns checked — the parity gate is "
         f"vacuous (did the app's Table visuals or field wells change?)."
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase DA — decoration map parity (Drillable visual cue)
+# ---------------------------------------------------------------------------
+
+
+def test_table_column_meta_returns_decoration_map_for_drillable() -> None:
+    """Phase DA — `_table_column_meta` returns a per-column decoration
+    map keyed by `Drillable.on.column`. The visual kind ("accent" vs
+    "accent-menu") is resolved by the same Drillable.visual_kind code
+    path the QS-side `Drillable.emit` uses, so App2 ≡ QS by
+    construction: a column with any DATA_POINT_MENU drill writing from
+    it resolves to "accent-menu"; a column with only DATA_POINT_CLICK
+    drill(s) resolves to "accent".
+
+    Standalone Table fixture (not an app build) so the test names the
+    expected decoration for each shape rather than discovering it from
+    apps that may evolve.
+    """
+    from recon_gen.common.drill import ColumnShape
+    from recon_gen.common.dataset_contract import (
+        ColumnSpec,
+        DatasetContract,
+        isolated_dataset_registries,
+        register_contract,
+    )
+    from recon_gen.common.tree.structure import Dataset
+    from recon_gen.common.tree import (
+        AUTO,
+        Drill,
+        Drillable,
+        DrillParam,
+    )
+    from recon_gen.common.tree.visuals import Table
+    from recon_gen.common.ids import ParameterName, VisualId
+
+    with isolated_dataset_registries():
+        ds = Dataset(
+            identifier="da-deco-ds",
+            arn="arn:aws:quicksight:::dataset/da-deco-ds",
+        )
+        register_contract(
+            ds.identifier,
+            DatasetContract(columns=[
+                ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
+                ColumnSpec("transfer_id", "STRING", shape=ColumnShape.TRANSFER_ID),
+            ]),
+        )
+        col_account = Dim(dataset=ds, field_id="f-acct", column="account_id")
+        col_transfer = Dim(dataset=ds, field_id="f-tx", column="transfer_id")
+        param_account = DrillParam(
+            name=ParameterName("pAcct"), shape=ColumnShape.ACCOUNT_ID,
+        )
+        param_transfer = DrillParam(
+            name=ParameterName("pTx"), shape=ColumnShape.TRANSFER_ID,
+        )
+        # account_id carries a CLICK drill -> "accent".
+        # transfer_id carries a MENU drill  -> "accent-menu".
+        table = Table(
+            visual_id=VisualId("v-tbl"),
+            title="Decoration mix",
+            subtitle="t",
+            columns=[col_account, col_transfer],
+            actions=[
+                Drill(
+                    writes=[(param_account, col_account)],
+                    name="Walk to account",
+                    trigger="DATA_POINT_CLICK",
+                    action_id="act-1",
+                    target_sheet=AUTO,
+                ),
+                Drill(
+                    writes=[(param_transfer, col_transfer)],
+                    name="View transfer downstream",
+                    trigger="DATA_POINT_MENU",
+                    action_id="act-2",
+                    target_sheet=AUTO,
+                ),
+            ],
+            conditional_formatting=[
+                Drillable(on=col_account, color="#000000"),
+                Drillable(on=col_transfer, color="#000000"),
+            ],
+        )
+        _labels, _formats, _hidden, decoration = _table_column_meta(
+            table, ds.identifier,
+        )
+        assert decoration == {
+            "account_id": "accent",
+            "transfer_id": "accent-menu",
+        }
+
+
+def test_shape_table_forwards_decoration_to_column_payload() -> None:
+    """Phase DA — `shape_table` emits the per-column `"decoration"` key
+    when `column_decoration` is supplied. The renderer reads this from
+    `col.decoration` and maps "accent" / "accent-menu" to CSS classes.
+    Columns without a decoration entry omit the key entirely so the
+    JSON stays tight."""
+    shaped = shape_table(
+        rows=[],
+        columns=["account_id", "transfer_id", "amount"],
+        column_decoration={
+            "account_id": "accent",
+            "transfer_id": "accent-menu",
+        },
+    )
+    cols = {c["name"]: c for c in shaped["columns"]}
+    assert cols["account_id"]["decoration"] == "accent"
+    assert cols["transfer_id"]["decoration"] == "accent-menu"
+    # `amount` has no decoration -> key absent (NOT None / empty).
+    assert "decoration" not in cols["amount"]
+
+
+def test_l1_overdraft_account_resolves_to_accent_menu() -> None:
+    """Anti-regression for the operator-flagged Overdraft bug class:
+    the account_id column on the Overdraft sheet's Violations table
+    carries a Drillable + a DATA_POINT_MENU drill writing from it, so
+    `_table_column_meta` must resolve it to "accent-menu" (tint
+    background — the cue that subsumes plain accent text)."""
+    app = _build_app("l1_dashboard")
+    assert app.analysis is not None
+
+    found = False
+    for sheet in app.analysis.sheets:
+        for visual in sheet.visuals:
+            if type(visual).__name__ != "Table":
+                continue
+            title = getattr(visual, "title", "")
+            if title != "Overdraft Violations":
+                continue
+            ds_id = _find_visual_dataset_identifier(visual)
+            _l, _f, _h, decoration = _table_column_meta(visual, ds_id)
+            assert decoration.get("account_id") == "accent-menu", (
+                f"Overdraft Violations: account_id decoration was "
+                f"{decoration.get('account_id')!r}; expected "
+                f"'accent-menu' since the menu drill writes from it. "
+                f"Full decoration map: {decoration}"
+            )
+            found = True
+    assert found, "Overdraft Violations Table not found on L1 app"

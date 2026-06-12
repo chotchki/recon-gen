@@ -124,11 +124,7 @@ from recon_gen.common.tree.fields import (
     Measure,
     MeasureKind,
 )
-from recon_gen.common.tree.formatting import (
-    CellAccentMenu,
-    CellAccentText,
-    CellFormat,
-)
+from recon_gen.common.tree.formatting import Drillable
 from recon_gen.common.tree.filters import (
     Bound,
     CategoryFilter,
@@ -219,8 +215,8 @@ __all__ = [
     # Drill actions (L.1.10)
     "Action", "Drill", "DrillParam", "DrillSourceField", "DrillResetSentinel",
     "DrillStaticDateTime", "SameSheetFilter",
-    # Conditional formatting (L.3.7-followup)
-    "CellAccentText", "CellAccentMenu", "CellFormat",
+    # Conditional formatting (Phase DA — collapsed two-type design to one)
+    "Drillable",
     # Structure
     "GridSlot", "Sheet", "Analysis", "Dashboard", "App",
     # Layout DSL (L.1.21)

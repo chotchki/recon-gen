@@ -716,9 +716,10 @@ deploying.
 > failed to satisfy constraint: Member must satisfy regular
 > expression pattern: ^#[A-F0-9]{6}$
 
-Same field shape on Table cells (`CellAccentText` /
-`CellAccentMenu`) appears to accept lowercase hex — the case
-constraint is field-path-specific to KPI conditional formatting.
+Same field shape on Table cells (`Drillable` — collapsed in
+Phase DA from the earlier `CellAccentText` / `CellAccentMenu` pair)
+appears to accept lowercase hex — the case constraint is field-path-
+specific to KPI conditional formatting.
 
 **(b) Expression references the COLUMN, not the field_id.** First
 emit used `{<field_id>}` (the auto-derived UUID-shape id the App
