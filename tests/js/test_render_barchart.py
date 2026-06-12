@@ -377,3 +377,82 @@ def test_barchart_log_scale_y_axis_labels_only_decades() -> None:
         f"only powers of 10 should be labeled. Pre-C5 d3 .ticks(5) on "
         f"a scaleLog produced this overlap."
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase DB.1.1 — orientation + color_label parity with QS
+# ---------------------------------------------------------------------------
+
+
+def test_barchart_horizontal_renders_via_horizontal_branch() -> None:
+    """``data.orientation === "HORIZONTAL"`` takes the horizontal code
+    path: bars sweep right (width=value), categories on Y axis (no
+    rotation since labels go left of axis). The vertical path's
+    ``barchart-x-axis`` becomes the value axis at the bottom; the
+    ``barchart-y-axis`` becomes the category band on the left. Same
+    rect class so the count assertion shape stays consistent."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_into_target(page, {
+            "categories": ["Wire", "ACH", "Check"],
+            "series": [{"name": "count", "values": [12, 7, 3]}],
+            "orientation": "HORIZONTAL",
+        })
+        bars = page.locator("#barchart-target svg rect.barchart-bar").count()
+        # In horizontal, bar widths are the value-scale projection; the
+        # tallest bar's width should be > its height (vertical inverts
+        # that relationship). Spot-check the first bar's bbox.
+        bar_box = cast(dict[str, Any], page.evaluate("""() => {
+            var r = document.querySelector('#barchart-target svg rect.barchart-bar');
+            return {w: r.getAttribute('width'), h: r.getAttribute('height')};
+        }"""))
+        browser.close()
+    assert bars == 3
+    # width > height confirms horizontal geometry (Wire = 12, the largest
+    # value, → widest bar).
+    assert float(bar_box["w"]) > float(bar_box["h"])
+
+
+def test_barchart_color_label_paints_legend_header() -> None:
+    """Multi-series + ``data.color_label`` paints an extra
+    ``barchart-color-label`` text node above the legend swatches
+    (parity with QS's ColorLabelOptions.CustomLabel). Single-series
+    charts have no legend and skip the header entirely."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_into_target(page, {
+            "categories": ["Q1", "Q2"],
+            "series": [
+                {"name": "Wire", "values": [100, 120]},
+                {"name": "ACH", "values": [50, 55]},
+            ],
+            "color_label": "Rail",
+        })
+        header = page.locator("#barchart-target svg text.barchart-color-label").count()
+        header_text = page.locator(
+            "#barchart-target svg text.barchart-color-label",
+        ).first.text_content()
+        browser.close()
+    assert header == 1
+    assert header_text == "Rail"
+
+
+def test_barchart_color_label_omitted_when_not_in_data() -> None:
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_into_target(page, {
+            "categories": ["Q1", "Q2"],
+            "series": [
+                {"name": "Wire", "values": [100, 120]},
+                {"name": "ACH", "values": [50, 55]},
+            ],
+        })
+        header = page.locator("#barchart-target svg text.barchart-color-label").count()
+        browser.close()
+    assert header == 0

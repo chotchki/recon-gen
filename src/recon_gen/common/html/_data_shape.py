@@ -220,6 +220,13 @@ def shape_bar_chart(
     format: str | None = None,
     stacked: bool = False,
     log_scale: bool = False,
+    # Phase DB.1.1 — orientation forks the renderer geometry between
+    # vertical (category on X, value on Y) and horizontal (category on
+    # Y, value on X). color_label paints the legend header (e.g. "Rail"
+    # above the rail-name swatches). Both default to the "no QS-side
+    # override" shape so existing chart fixtures stay unchanged.
+    orientation: str = "VERTICAL",
+    color_label: str | None = None,
 ) -> dict[str, Any]:
     """Shape SQL rows as a bar chart.
 
@@ -251,6 +258,13 @@ def shape_bar_chart(
             out["stacked"] = True
         if log_scale:
             out["log_scale"] = True
+        # Phase DB.1.1 — only emit non-default values so test fixtures
+        # without orientation/color_label still match their pre-DB.1.1
+        # JSON shape.
+        if orientation == "HORIZONTAL":
+            out["orientation"] = "HORIZONTAL"
+        if color_label is not None:
+            out["color_label"] = color_label
         return out
 
     if series_column is None:

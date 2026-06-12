@@ -261,6 +261,17 @@ class _ChartMeta:
     value_format: str
     stacked: bool
     log_scale: bool = False  # BQ.5 — BarChart.log_scale parity for App2
+    # Phase DB.1.1 — BarChart parity additions:
+    # - ``orientation`` selects vertical (default; bars sweep up) vs.
+    #   horizontal (bars sweep right, category labels on Y axis). 7
+    #   l1_dashboard / executives / l2_flow_tracing callsites declare
+    #   HORIZONTAL today; pre-DB.1.1 the renderer ignored it.
+    # - ``color_label`` is the BarChart's ``ColorLabelOptions.CustomLabel``
+    #   (the legend header — e.g. "Rail" above the rail-name color
+    #   swatches). 4 callsites on L1 + Exec; pre-DB.1.1 App2 legends
+    #   showed no label.
+    orientation: str = "VERTICAL"  # "VERTICAL" | "HORIZONTAL"
+    color_label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -513,6 +524,19 @@ def _chart_meta(visual: Any) -> _ChartMeta | None:  # typing-smell: ignore[expli
         "STACKED", "STACKED_PERCENT",
     )
     log_scale = bool(getattr(visual, "log_scale", False))
+    # Phase DB.1.1 — orientation + color_label parity with QS.
+    # ``orientation`` only meaningful on BarChart; LineChart leaves the
+    # default "VERTICAL" (no horizontal-line idiom). ``color_label``
+    # falls back to the colors-dim's _field_label when the author
+    # didn't override — same fallback chain as x_label / y_label so
+    # multi-series charts always show a legend header.
+    orientation = getattr(visual, "orientation", None) or "VERTICAL"
+    author_color_label = getattr(visual, "color_label", None)
+    color_label: str | None = None
+    if author_color_label is not None:
+        color_label = author_color_label
+    elif colors:
+        color_label = _field_label(colors[0])
     return _ChartMeta(
         series_column_name=series_name,
         x_label=str(x_label),
@@ -520,6 +544,8 @@ def _chart_meta(visual: Any) -> _ChartMeta | None:  # typing-smell: ignore[expli
         value_format=value_format,
         stacked=stacked,
         log_scale=log_scale,
+        orientation=orientation,
+        color_label=color_label,
     )
 
 
@@ -842,6 +868,9 @@ def make_tree_db_fetcher(
             if kind == "BarChart":
                 chart_kwargs["stacked"] = plan.chart.stacked
                 chart_kwargs["log_scale"] = plan.chart.log_scale
+                # DB.1.1 — BarChart orientation + color label parity.
+                chart_kwargs["orientation"] = plan.chart.orientation
+                chart_kwargs["color_label"] = plan.chart.color_label
             return shape_for_kind(kind, rows, columns, **chart_kwargs)
         if kind == "KPI":
             # v11.21.0 finding #14 fix (BH.14): pass the visual's

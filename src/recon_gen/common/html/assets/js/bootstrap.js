@@ -831,6 +831,12 @@
     var format = data.format;
     var multi = series.length > 1;
     var stacked = !!data.stacked && multi;
+    // Phase DB.1.1 — orientation parity with QS BarChartConfiguration.
+    // "HORIZONTAL" rotates the chart 90° (categories on Y, values on X)
+    // and is declared by 7 callsites across l1_dashboard / executives /
+    // l2_flow_tracing today. Pre-DB.1.1 App2 ignored the field and
+    // always rendered vertical regardless.
+    var horizontal = data.orientation === "HORIZONTAL";
 
     // BQ.1 — explicit empty-state mirroring BO.3's Sankey + BQ.1's Table.
     // Detects "no bars to draw" via either zero categories OR every series
@@ -860,6 +866,29 @@
       (m, c) => Math.max(m, String(c).length),
       0,
     );
+
+    // Phase DB.1.1 — horizontal branch. Categories on Y axis (no
+    // rotation needed — labels go left of the axis), values on X axis.
+    // For multi-series: non-stacked sub-positions within each category
+    // row; stacked accumulates left-to-right per category. Legend +
+    // color_label header live in the same right gutter as the vertical
+    // path.
+    if (horizontal) {
+      renderBarChartHorizontal(
+        target,
+        data,
+        categories,
+        series,
+        multi,
+        stacked,
+        format,
+        width,
+        plotH,
+        maxCatLen,
+      );
+      return;
+    }
+
     var rotateX = categories.length > 8 || maxCatLen > 6;
     // Bottom margin is dynamic when labels rotate — pre-fix used a
     // fixed 92px which clipped at the "ExternalCounterparty"-class
@@ -938,6 +967,10 @@
       .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
 
     var seriesNames = series.map((s, i) => s.name || String(i));
+    // Hoisted for biome's noInnerDeclarations rule — set inside the
+    // multi-series legend branch below; default vertical offset is
+    // margin.top, bumped by one line when color_label paints a header.
+    var legendOffsetTop = 0;
     // Ordinal color scale — fixed fallback palette so we don't depend on
     // d3.schemeCategory10 being present in the minified bundle.
     var palette = d3.schemeCategory10 || [
@@ -1110,6 +1143,23 @@
     // Legend — multi-series only (single-series needs none). One <g>
     // per series, positioned by index in the right gutter.
     if (multi) {
+      // Phase DB.1.1 — color_label (e.g. "Rail") paints above the
+      // legend swatches as the series-axis header, parity with QS's
+      // ColorLabelOptions.CustomLabel. Indents the swatch rows by one
+      // line-height when present.
+      legendOffsetTop = margin.top;
+      if (data.color_label) {
+        svg
+          .append("text")
+          .attr(
+            "class",
+            "barchart-color-label text-xs fill-secondary-fg font-semibold",
+          )
+          .attr("x", width - margin.right + 12)
+          .attr("y", margin.top + 4)
+          .text(data.color_label);
+        legendOffsetTop = margin.top + 18;
+      }
       seriesNames.forEach((name, i) => {
         var row = svg
           .append("g")
@@ -1119,7 +1169,7 @@
             "translate(" +
               (width - margin.right + 12) +
               "," +
-              (margin.top + i * 18) +
+              (legendOffsetTop + i * 18) +
               ")",
           );
         row
@@ -1143,6 +1193,253 @@
         if (label !== name) {
           txt.append("title").text(name);
         }
+      });
+    }
+  }
+
+  // Phase DB.1.1 — horizontal BarChart variant. Categories live on the
+  // Y axis (band scale, labels left of axis — no rotation since they
+  // have full left-margin width); values on the X axis (linear or
+  // logarithmic). Empty-state + width/height + palette + color scale
+  // are computed by the caller; this helper does the axes + bars +
+  // legend in the horizontal orientation.
+  function renderBarChartHorizontal(
+    target,
+    data,
+    categories,
+    series,
+    multi,
+    stacked,
+    format,
+    width,
+    plotH,
+    maxCatLen,
+  ) {
+    // Margin: left grows for longest category label; bottom is just
+    // tick + axis label (val_label); right has the legend gutter.
+    var leftMargin = Math.max(64, maxCatLen * 7 + 16);
+    var bottomMargin = data.y_label ? 40 : 24;
+    var rightMargin = multi ? 132 : 24;
+    var margin = {
+      top: 16,
+      right: rightMargin,
+      bottom: bottomMargin,
+      left: leftMargin,
+    };
+    // Plot height scales with N categories so each row stays readable;
+    // the operator typically declares HORIZONTAL when categories are
+    // long-form strings (rail names, check types) so a per-row
+    // allowance of 24-32px reads cleanly. innerH floor at the vertical
+    // path's plot area so a 3-row chart isn't squashed.
+    var perRow = 28;
+    var innerH = Math.max(plotH, categories.length * perRow);
+    var height = innerH + margin.top + margin.bottom;
+    // Account for legend height same as vertical path.
+    var legendH = multi
+      ? series.length * 18 + (data.color_label ? 18 : 0) + 8
+      : 0;
+    if (legendH > height - margin.top) height = legendH + margin.top;
+    var innerW = Math.max(0, width - margin.left - margin.right);
+
+    var svg = d3
+      .select(target)
+      .append("svg")
+      .attr("width", width)
+      .attr("height", height);
+    var g = svg
+      .append("g")
+      .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+    var seriesNames = series.map((s, i) => s.name || String(i));
+    var palette = d3.schemeCategory10 || [
+      "#2E5090",
+      "#E8833A",
+      "#3FA34D",
+      "#C0392B",
+      "#8E44AD",
+      "#16A085",
+      "#D4AC0D",
+      "#7F8C8D",
+      "#2980B9",
+      "#CB4335",
+    ];
+    var color = d3.scaleOrdinal().domain(seriesNames).range(palette);
+
+    // y0 = category band; y1 = sub-band per series (only multi-non-stacked).
+    var y0 = d3.scaleBand().domain(categories).range([0, innerH]).padding(0.15);
+    var y1 = d3
+      .scaleBand()
+      .domain(seriesNames)
+      .range([0, y0.bandwidth()])
+      .padding(0.05);
+
+    // x domain: stacked → per-category column sum; else max single value.
+    var maxVal;
+    if (stacked) {
+      maxVal =
+        d3.max(
+          categories.map((_c, ci) =>
+            d3.sum(series, (s) =>
+              typeof s.values[ci] === "number" ? s.values[ci] : 0,
+            ),
+          ),
+        ) || 0;
+    } else {
+      maxVal =
+        d3.max(
+          series.flatMap((s) =>
+            (s.values || []).filter((v) => typeof v === "number"),
+          ),
+        ) || 0;
+    }
+    var x;
+    if (data.log_scale && maxVal > 0) {
+      x = d3.scaleLog().base(10).domain([1, maxVal]).range([0, innerW]).nice();
+    } else {
+      x = d3
+        .scaleLinear()
+        .domain([0, maxVal || 1])
+        .nice()
+        .range([0, innerW]);
+    }
+
+    // Y axis — category labels left of the band.
+    g.append("g")
+      .attr("class", "barchart-y-axis")
+      .call(d3.axisLeft(y0))
+      .selectAll("text")
+      .attr("class", "text-xs fill-primary-fg");
+
+    // X axis — value ticks, currency/number formatted.
+    var xAxis = d3.axisBottom(x).tickFormat((v) => formatKPIValue(v, format));
+    var decades;
+    var p;
+    if (data.log_scale && maxVal > 0) {
+      decades = [];
+      for (p = 0; p <= Math.ceil(Math.log10(maxVal)); p++)
+        decades.push(10 ** p);
+      xAxis.tickValues(decades);
+    } else {
+      xAxis.ticks(5);
+    }
+    g.append("g")
+      .attr("class", "barchart-x-axis")
+      .attr("transform", "translate(0," + innerH + ")")
+      .call(xAxis)
+      .selectAll("text")
+      .attr("class", "text-xs fill-primary-fg");
+
+    // Axis labels — in horizontal, x_label (category) goes on Y axis
+    // (rotated, left side) and y_label (value) goes on X axis (bottom).
+    if (data.x_label) {
+      svg
+        .append("text")
+        .attr("class", "barchart-x-label text-xs fill-secondary-fg")
+        .attr("text-anchor", "middle")
+        .attr(
+          "transform",
+          "translate(16," + (margin.top + innerH / 2) + ") rotate(-90)",
+        )
+        .text(data.x_label);
+    }
+    if (data.y_label) {
+      svg
+        .append("text")
+        .attr("class", "barchart-y-label text-xs fill-secondary-fg")
+        .attr("text-anchor", "middle")
+        .attr("x", margin.left + innerW / 2)
+        .attr("y", height - 6)
+        .text(data.y_label);
+    }
+
+    // Bars — geometry mirrors the vertical path with x/y axes swapped.
+    var rects = [];
+    if (stacked) {
+      categories.forEach((cat, ci) => {
+        var offset = 0;
+        series.forEach((s, si) => {
+          var v = typeof s.values[ci] === "number" ? s.values[ci] : 0;
+          rects.push({
+            x: x(offset),
+            w: x(offset + v) - x(offset),
+            y: y0(cat) || 0,
+            h: y0.bandwidth(),
+            fill: color(s.name || String(si)),
+          });
+          offset += v;
+        });
+      });
+    } else {
+      series.forEach((s, si) => {
+        (s.values || []).forEach((v, ci) => {
+          var num = typeof v === "number" ? v : 0;
+          rects.push({
+            x: 0,
+            w: x(num),
+            y:
+              (y0(categories[ci]) || 0) +
+              (multi ? y1(s.name || String(si)) || 0 : 0),
+            h: multi ? y1.bandwidth() : y0.bandwidth(),
+            fill: color(s.name || String(si)),
+          });
+        });
+      });
+    }
+    g.selectAll("rect.barchart-bar")
+      .data(rects)
+      .enter()
+      .append("rect")
+      .attr(
+        "class",
+        "barchart-bar hover:opacity-80" + (multi ? "" : " fill-accent"),
+      )
+      .attr("x", (d) => d.x)
+      .attr("y", (d) => d.y)
+      .attr("width", (d) => d.w)
+      .attr("height", (d) => d.h)
+      .attr("fill", (d) => (multi ? d.fill : null));
+
+    // Legend (multi-series only). Identical to the vertical path's legend.
+    var legendOffsetTop;
+    if (multi) {
+      legendOffsetTop = margin.top;
+      if (data.color_label) {
+        svg
+          .append("text")
+          .attr(
+            "class",
+            "barchart-color-label text-xs fill-secondary-fg font-semibold",
+          )
+          .attr("x", width - margin.right + 12)
+          .attr("y", margin.top + 4)
+          .text(data.color_label);
+        legendOffsetTop = margin.top + 18;
+      }
+      seriesNames.forEach((name, i) => {
+        var row = svg
+          .append("g")
+          .attr("class", "barchart-legend")
+          .attr(
+            "transform",
+            "translate(" +
+              (width - margin.right + 12) +
+              "," +
+              (legendOffsetTop + i * 18) +
+              ")",
+          );
+        row
+          .append("rect")
+          .attr("width", 12)
+          .attr("height", 12)
+          .attr("fill", color(name));
+        var label = name.length > 18 ? name.slice(0, 17) + "…" : name;
+        var txt = row
+          .append("text")
+          .attr("x", 16)
+          .attr("y", 10)
+          .attr("class", "text-xs fill-primary-fg")
+          .text(label);
+        if (label !== name) txt.append("title").text(name);
       });
     }
   }

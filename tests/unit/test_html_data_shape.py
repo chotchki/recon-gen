@@ -183,6 +183,52 @@ def test_shape_bar_chart_explicit_axis_labels_override() -> None:
     assert out["y_label"] == "Open Count"
 
 
+# Phase DB.1.1 — BarChart orientation + color_label parity with QS.
+
+
+def test_shape_bar_chart_horizontal_emits_orientation_key() -> None:
+    """``orientation="HORIZONTAL"`` flows from `_ChartMeta` through
+    `shape_bar_chart` to the renderer as ``data.orientation``. Pre-DB.1.1
+    the kwarg didn't exist and the renderer always painted vertical."""
+    out = shape_bar_chart(
+        rows=[("a", 1)],
+        columns=["status", "count"],
+        orientation="HORIZONTAL",
+    )
+    assert out["orientation"] == "HORIZONTAL"
+
+
+def test_shape_bar_chart_vertical_omits_orientation_key() -> None:
+    """Default VERTICAL stays out of the payload so test fixtures
+    without `orientation=` keep their pre-DB.1.1 JSON shape."""
+    out = shape_bar_chart(
+        rows=[("a", 1)],
+        columns=["status", "count"],
+        # orientation defaults to "VERTICAL".
+    )
+    assert "orientation" not in out
+
+
+def test_shape_bar_chart_color_label_emits_when_set() -> None:
+    """``color_label`` flows through to ``data.color_label`` so the
+    renderer can paint the legend header (e.g. "Rail" above the
+    rail-name swatches). Parity with QS's ColorLabelOptions.CustomLabel."""
+    out = shape_bar_chart(
+        rows=[("a", 10)],
+        columns=["status", "count"],
+        color_label="Rail",
+    )
+    assert out["color_label"] == "Rail"
+
+
+def test_shape_bar_chart_color_label_omitted_by_default() -> None:
+    out = shape_bar_chart(
+        rows=[("a", 10)],
+        columns=["status", "count"],
+    )
+    assert "color_label" not in out
+
+
 # ---------------------------------------------------------------------------
 # LineChart — single + multi series
 # ---------------------------------------------------------------------------
