@@ -54,7 +54,7 @@
         "identity": {
           "account_id": "tmpl-cust-002",
           "business_day": "2029-11-29",
-          "drift": 1500.0
+          "drift": -6000.0
         }
       },
       {
@@ -77406,18 +77406,18 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-002",
-          "business_day": "2029-11-27",
-          "direction": "Outbound",
-          "rail_name": "ExternalRailOutbound"
+          "business_day": "2029-11-28",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
         }
       },
       {
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-002",
-          "business_day": "2029-11-28",
-          "direction": "Inbound",
-          "rail_name": "ExternalRailInbound"
+          "business_day": "2029-11-30",
+          "direction": "Outbound",
+          "rail_name": "ExternalRailOutbound"
         }
       },
       {

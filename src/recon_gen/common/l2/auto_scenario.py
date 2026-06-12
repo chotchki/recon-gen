@@ -325,8 +325,13 @@ def default_scenario_for(
                 counter_account_id=breach_counter.id,
             ),
             LimitBreachPlant(
+                # BK.6/#35 followup (2026-06-12) — was days_ago=8 which
+                # falls outside the 7-day audit window when the calendar
+                # advances; clamped to 5 to stay inside while still
+                # giving the inverse-picker test a 2nd distinct date
+                # from cust1's days_ago=4.
                 account_id=cust2.account_id,
-                days_ago=8,
+                days_ago=5,
                 rail_name=breach_rail.name,
                 amount=breach_amount,
                 counter_account_id=breach_counter.id,

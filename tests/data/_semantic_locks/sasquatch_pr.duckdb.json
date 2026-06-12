@@ -62,7 +62,7 @@
         "identity": {
           "account_id": "cust-0002-snb",
           "business_day": "2029-11-29",
-          "drift": -6501.0
+          "drift": -21501.0
         }
       },
       {
@@ -445083,18 +445083,18 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0002-snb",
-          "business_day": "2029-11-27",
-          "direction": "Outbound",
-          "rail_name": "CustomerCashWithdrawal"
+          "business_day": "2029-11-28",
+          "direction": "Inbound",
+          "rail_name": "CustomerInboundACH"
         }
       },
       {
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0002-snb",
-          "business_day": "2029-11-28",
-          "direction": "Inbound",
-          "rail_name": "CustomerInboundACH"
+          "business_day": "2029-11-30",
+          "direction": "Outbound",
+          "rail_name": "CustomerCashWithdrawal"
         }
       },
       {
