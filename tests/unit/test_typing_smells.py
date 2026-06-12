@@ -2118,7 +2118,13 @@ class NoL2DerivedStaticValuesCheck(Check):
 # time — so adding a new required field to a kind automatically tightens
 # the rule without code changes here.
 _PARTIAL_PUT_URL_RE = re.compile(
-    r"^/l2_shape/(?P<kind>[a-z_]+)/(?P<entity_id>(?!new$)[^/]+)$",
+    # BX.16 (2026-06-11) — extended exclusion to cover non-save endpoint
+    # leaves under /l2_shape/<kind>/<leaf>: `new` (create form GET),
+    # `shape-preview` (chain shape-preview POST). Add new ones here as
+    # new non-save POST leaves land. The shape-preview endpoint is a
+    # form-state-driven render; treating it as a save partial would
+    # be a false positive.
+    r"^/l2_shape/(?P<kind>[a-z_]+)/(?P<entity_id>(?!new$|shape-preview$)[^/]+)$",
 )
 _FIELD_ISOLATION_PROBE_RE = re.compile(r"#\s*field-isolation-probe\b")
 

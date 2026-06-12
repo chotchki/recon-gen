@@ -2687,6 +2687,19 @@ def _render_chain_children_field(
         f"</template>"
     )
     input_cls = field_input_classes()
+    # BX.16 (2026-06-11) — inline chain shape-preview wire. The chip-list
+    # editor + the typeahead input both live inside the edit `<form>`,
+    # so HTMX's default include-the-form behavior picks up `parent` +
+    # all `children` hidden inputs + the per-name `fan_in_*`/`epc_*`
+    # rows. `hx-trigger="input changed delay:300ms from:closest form"`
+    # listens on the form so chip add/remove (mutates hidden inputs) +
+    # parent-select change + per-child fan_in/epc edits all trigger a
+    # re-render. The preview container holds the rendered mini-diagram;
+    # the empty-state prompt renders here on initial paint when the
+    # children list is empty.
+    preview_container_html = _render_chain_shape_preview_container(
+        instance, selected_in_order,
+    )
     input_html = (
         # Hidden marker — see comment above.
         f'<input type="hidden" name="children__present" value="1">'
@@ -2706,11 +2719,186 @@ def _render_chain_children_field(
         f'list="{datalist_id}" '
         f'placeholder="Type to add a child..." '
         f'class="{input_cls} w-full">'
+        f"{preview_container_html}"
     )
     return (
         f'<div class="{field_row_classes()}">'
         f"{label}{input_html}{helper}{err_html}</div>"
     )
+
+
+# BX.16 (2026-06-11) — inline chain shape-preview helpers.
+#
+# Reuses the BX.8 wasm-graphviz / topology-svg infrastructure. The
+# preview is FORM-STATE-DRIVEN, not L2Instance-state-driven — it shows
+# the operator what the chain would look like with the in-progress
+# edits, NOT what's saved. So we build a tiny standalone Graphviz
+# Digraph from the form values directly instead of routing through
+# `_build_digraph_cached` (which keys off `id(instance)` and would
+# return a stale focused subgraph).
+#
+# Empty children list ⇒ render a small prompt, no DOT, no JS render.
+# The shape preview shim short-circuits when no `<template>` is present.
+
+
+def _render_chain_shape_preview_container(
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — for child-kind disambiguation
+    children: list[tuple[str, bool, int | None]],
+) -> str:
+    """Build the `#chain-shape-preview` container with the initial paint.
+
+    BX.16 — wires `hx-post=/l2_shape/chain/shape-preview` on the
+    surrounding form so every keystroke / chip mutation re-fetches a
+    fresh shape preview. The container holds either:
+
+    - The rendered mini-diagram fragment (when children is non-empty),
+      including the `<template id="chain-shape-dot">` the shim renders;
+    - A small prompt fragment (when children is empty).
+
+    The shim (`chain-shape-preview.js`) re-renders on `htmx:afterSwap`
+    against `#chain-shape-preview`, the same wasm-graphviz path
+    `mini-diagram.js` uses.
+    """
+    inner = _render_chain_shape_preview_inner(instance, "", children)
+    return (
+        f'<div id="chain-shape-preview" '
+        f'data-section-name="chain-shape-preview" '
+        f'hx-post="/l2_shape/chain/shape-preview" '
+        f'hx-trigger="input changed delay:300ms from:closest form, '
+        f'change delay:200ms from:closest form" '
+        f'hx-target="#chain-shape-preview" '
+        f'hx-swap="innerHTML" '
+        f'class="mt-3 bg-white border border-surface-border rounded-md p-3 '
+        f'flex flex-col gap-2">'
+        f"{inner}"
+        f"</div>"
+    )
+
+
+def _render_chain_shape_preview_inner(
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — for child-kind disambiguation
+    parent: str,
+    children: list[tuple[str, bool, int | None]],
+) -> str:
+    """Render the *inner* fragment of the chain shape preview.
+
+    Returns the prompt fragment when ``children`` is empty (no DOT, no
+    JS render); otherwise returns the caption + render target + DOT
+    template the shim layouts.
+
+    ``parent`` is the form-state parent name (rail or transfer-template
+    name) — may be empty when the operator hasn't picked yet. Empty
+    parent renders as a placeholder node so the operator still sees the
+    children fan-out shape.
+    """
+    if not children:
+        # Empty-state prompt — no DOT template, shim short-circuits.
+        return (
+            '<p class="text-xs italic text-secondary-fg m-0" '
+            'data-role="chain-shape-empty">'
+            "Add children to see the chain shape."
+            "</p>"
+        )
+
+    dot_source = _build_chain_shape_dot(instance, parent, children)
+    return (
+        '<div class="flex items-baseline gap-3">'
+        '<h3 class="text-xs font-semibold text-primary-fg m-0">'
+        "Chain shape preview</h3>"
+        '<span class="text-xs text-secondary-fg ml-auto">'
+        "Updates as you edit</span>"
+        "</div>"
+        '<div id="chain-shape-target" '
+        'data-role="chain-shape-target" '
+        'class="w-full" '
+        'style="height:220px;overflow:hidden;background:#fafbfc;'
+        'border:1px solid #e5e7eb;border-radius:4px"></div>'
+        f'<template id="chain-shape-dot">{escape(dot_source)}</template>'
+    )
+
+
+def _classify_chain_node(instance: Any, name: str) -> str:
+    """Disambiguate a chain parent / child name as rail or template.
+
+    Drives the BX.16 DOT label prefix (`rail__` vs `tmpl__`) so the
+    `chain-shape-preview.js` shim can — if we ever wire neighbor-click
+    navigation — resolve the right edit URL. Defaults to ``"rail"`` so
+    an unresolvable name (typeahead mid-typing) renders as a rail node
+    rather than crashing.
+    """
+    for t in getattr(instance, "transfer_templates", ()):
+        if str(getattr(t, "name", "")) == name:
+            return "tmpl"
+    return "rail"
+
+
+def _build_chain_shape_dot(
+    instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — for child-kind disambiguation
+    parent: str,
+    children: list[tuple[str, bool, int | None]],
+) -> str:
+    """Build a tiny standalone Graphviz DOT for the chain shape preview.
+
+    Edge style follows the SPEC's Z.A grammar (encoded in
+    ``common/l2/primitives.py::Chain``):
+
+    - Singleton child  ⇒ **required** — solid edge.
+    - Multiple children ⇒ **XOR alternation** — dashed edges (matches
+      the main diagram's chain edge style).
+
+    Per-child fan_in renders as an edge label suffix (``N:1`` or
+    ``N:1 (EPC=K)``) so the operator can verify the fan-in choices
+    without reading the chip subwidget.
+
+    The DOT is a self-contained string — no L2Instance walk beyond
+    rail-vs-template classification for node-id prefix parity with
+    the main diagram.
+    """
+    import graphviz  # noqa: PLC0415  # pyright: ignore[reportMissingTypeStubs]  # WHY: graphviz ships no stubs; topology.py uses file-level suppression — match the project's lazy-import-once pattern with a per-line ignore here since editor-routes can't pyright-suppress module-wide
+    g: Any = graphviz.Digraph(name="chain_shape_preview")
+    g.attr(rankdir="LR", bgcolor="transparent")
+    g.attr("node", shape="box", style="rounded,filled",
+           fillcolor="#eef2ff", color="#94a3b8",
+           fontname="Helvetica", fontsize="10")
+    g.attr("edge", color="#475569", fontname="Helvetica", fontsize="9")
+
+    # Parent node — empty/missing parent renders as a placeholder so
+    # the children fan-out is still visible to the operator.
+    if parent:
+        parent_kind = _classify_chain_node(instance, parent)
+        parent_id = f"{parent_kind}__{parent}"
+        g.node(parent_id, label=parent)
+    else:
+        parent_id = "__parent_placeholder__"
+        g.node(
+            parent_id, label="(pick a parent)",
+            fillcolor="#fef3c7", color="#d97706",
+            style="rounded,filled,dashed",
+        )
+
+    # Z.A: singleton ⇒ required (solid); multi ⇒ XOR (dashed).
+    xor = len(children) > 1
+    for name, fan_in, epc in children:
+        child_kind = _classify_chain_node(instance, name)
+        child_id = f"{child_kind}__{name}"
+        g.node(child_id, label=name)
+        label_parts: list[str] = []
+        if xor:
+            label_parts.append("xor")
+        if fan_in:
+            if epc is not None:
+                label_parts.append(f"N:1 (EPC={epc})")
+            else:
+                label_parts.append("N:1")
+        edge_label = " ".join(label_parts)
+        edge_kwargs: dict[str, str] = {}
+        if xor:
+            edge_kwargs["style"] = "dashed"
+        if edge_label:
+            edge_kwargs["label"] = edge_label
+        g.edge(parent_id, child_id, **edge_kwargs)
+
+    return str(getattr(g, "source", ""))
 
 
 def _multi_value_as_strs(value: object) -> tuple[str, ...]:
@@ -5235,6 +5423,15 @@ def _render_edit_page(
         f'<link rel="stylesheet" href="{asset_url("diagram-svg.css")}">'
         if mini_diagram_html else ""
     )
+    # BX.16 (2026-06-11) — chain edit page wires the inline shape
+    # preview below the children field. Reuses the BX.8 wasm-graphviz
+    # path via the dedicated shim. Loaded only on chain pages to keep
+    # other edit pages payload-lean.
+    chain_shape_preview_js_html = (
+        f'<script type="module" '
+        f'src="{asset_url("chain-shape-preview.js")}"></script>'
+        if kind == "chain" else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -5243,6 +5440,7 @@ def _render_edit_page(
   {studio_theme_head(instance)}
   {mini_diagram_css_html}
   {_htmx_head_block()}
+  {chain_shape_preview_js_html}
 </head>
 <body class="block min-h-screen font-sans bg-surface-bg text-primary-fg">
   {top_nav_html}
@@ -7934,6 +8132,46 @@ def _make_handlers(
         )
         return HTMLResponse(swap_html)
 
+    async def chain_shape_preview(request: Request) -> HTMLResponse:
+        """BX.16 (2026-06-11) — chain shape-preview endpoint.
+
+        POST body carries the live edit-form state: `parent` (the
+        rail/template name from the parent select), zero or more
+        `children=<name>` entries from the chip-list hidden inputs, and
+        sibling `fan_in_<name>` / `epc_<name>` rows. Reads them, builds
+        a tiny standalone Graphviz DOT showing parent → children with
+        Z.A grammar (singleton = solid required edge; multi = dashed
+        XOR edges) plus per-child fan_in labels, returns the inner
+        fragment of `#chain-shape-preview`. Empty children list returns
+        the empty-state prompt.
+
+        Renders against the live L2Instance only for parent / child
+        rail-vs-template disambiguation (for the DOT node id prefix);
+        the shape itself is pure form-state.
+        """
+        form = await request.form()
+        parent = str(form.get("parent", "") or "")
+        child_names = [
+            str(v) for v in form.getlist("children") if str(v).strip()
+        ]
+        children: list[tuple[str, bool, int | None]] = []
+        for name in child_names:
+            fan_in = bool(form.get(f"fan_in_{name}"))
+            epc_raw = str(form.get(f"epc_{name}", "") or "").strip()
+            epc: int | None
+            if epc_raw:
+                try:
+                    epc = int(epc_raw)
+                except ValueError:
+                    epc = None
+            else:
+                epc = None
+            children.append((name, fan_in, epc))
+        inner = _render_chain_shape_preview_inner(
+            cache.get(), parent, children,
+        )
+        return HTMLResponse(inner)
+
     async def preview_markdown(request: Request) -> HTMLResponse:
         """BF.9 (2026-05-25) — markdown → HTML preview endpoint.
 
@@ -8016,6 +8254,7 @@ def _make_handlers(
         "new_form": new_form,
         "create": create,
         "preview_markdown": preview_markdown,
+        "chain_shape_preview": chain_shape_preview,
         "role_picker": role_picker,
         "theme_field_save": theme_field_save,
         "theme_preview": theme_preview,
@@ -8173,6 +8412,14 @@ def make_editor_routes(
         Route(
             "/l2_shape/theme/preview", h["theme_preview"],
             methods=["POST"], name="theme_preview",
+        ),
+        # BX.16 (2026-06-11) — chain shape-preview endpoint. MUST sit
+        # BEFORE ``/l2_shape/{kind}/{entity_id}`` so Starlette doesn't
+        # match the POST against the generic save handler (which would
+        # treat the literal ``shape-preview`` segment as an entity_id).
+        Route(
+            "/l2_shape/chain/shape-preview", h["chain_shape_preview"],
+            methods=["POST"], name="chain_shape_preview",
         ),
         # BX.1 redesign — delete-confirm endpoint. Declared BEFORE
         # the bare-id read route so Starlette doesn't treat the
