@@ -1562,6 +1562,8 @@ def _populate_supersession_audit_sheet(
     sheet: Sheet,
     *,
     datasets: dict[str, Dataset],
+    transactions_sheet: Sheet,
+    daily_statement_sheet: Sheet,
     theme: ThemePreset,
 ) -> None:
     """Supersession Audit sheet — 2 KPIs + 2 detail tables.
@@ -1642,7 +1644,12 @@ def _populate_supersession_audit_sheet(
 
     # Row 2: transactions audit detail — every entry of every
     # superseded logical row, sorted by (transaction_id, entry).
-    tx_id_col = ds_tx["transaction_id"].dim()
+    # Phase DA — Drillable moved from `transaction_id` to `transfer_id`:
+    # the natural drill target is "show me all legs of this same
+    # transfer" (filtering by tx_id lands on a single-row table, useless).
+    # transfer_id reuses the existing _DP_TX_TRANSFER drill param landing
+    # pad on the Transactions sheet — no new parameter plumbing.
+    tx_transfer_col = ds_tx["transfer_id"].dim()
     sheet.layout.row(height=_TABLE_ROW_SPAN).add_table(
         width=_FULL,
         title="Transactions Audit",
@@ -1651,15 +1658,16 @@ def _populate_supersession_audit_sheet(
             "The `supersedes` column on the higher-entry row tells you "
             "why it exists. Use the supersedes filter (Inflight / "
             "BundleAssignment / TechnicalCorrection) to narrow the "
-            "audit to one cause class."
+            "audit to one cause class. Right-click the transfer_id cell "
+            "to view every leg of this transfer on the Transactions sheet."
         ),
         columns=[
             ds_tx["entry"].numerical(),
-            tx_id_col,
+            ds_tx["transaction_id"].dim(),
             ds_tx["supersedes"].dim(),
             ds_tx["account_id"].dim(),
             ds_tx["account_name"].dim(),
-            ds_tx["transfer_id"].dim(),
+            tx_transfer_col,
             ds_tx["rail_name"].dim(),
             ds_tx["amount_money"].numerical(currency=True),
             ds_tx["amount_direction"].dim(),
@@ -1667,14 +1675,30 @@ def _populate_supersession_audit_sheet(
             ds_tx["posting"].date(),
             ds_tx["bundle_id"].dim(),
         ],
+        actions=[
+            _l1_drill(
+                target_sheet=transactions_sheet,
+                name="View Transactions for this transfer",
+                # _wide_date_writes — Supersession Audit is current-state-
+                # unscoped, Transactions is universally date-scoped. Without
+                # the widening writes the drilled transfer may sit outside
+                # the destination's default 7-day window and render empty.
+                writes=[
+                    (_DP_TX_TRANSFER, tx_transfer_col),
+                    *_wide_date_writes(),
+                ],
+                trigger="DATA_POINT_MENU",
+            ),
+        ],
         conditional_formatting=[
-            Drillable(on=tx_id_col, color=accent),
+            Drillable(on=tx_transfer_col, color=accent),
         ],
     )
 
     # Row 3: daily-balances audit detail — every entry of every
     # superseded (account_id, business_day_start) cell.
     db_account_col = ds_db["account_id"].dim()
+    db_day_col = ds_db["business_day_start"].date()
     sheet.layout.row(height=_TABLE_ROW_SPAN).add_table(
         width=_FULL,
         title="Daily Balances Audit",
@@ -1682,7 +1706,8 @@ def _populate_supersession_audit_sheet(
             "Every entry of every (account, business_day) cell with "
             "more than one stored value. The `money` column changing "
             "across entries is the audit trail for an end-of-day "
-            "re-statement."
+            "re-statement. Right-click the account_id cell to view the "
+            "Daily Statement for that account-day."
         ),
         columns=[
             ds_db["entry"].numerical(),
@@ -1690,9 +1715,20 @@ def _populate_supersession_audit_sheet(
             ds_db["account_name"].dim(),
             ds_db["account_role"].dim(),
             ds_db["supersedes"].dim(),
-            ds_db["business_day_start"].date(),
+            db_day_col,
             ds_db["business_day_end"].date(),
             ds_db["money"].numerical(currency=True),
+        ],
+        actions=[
+            _l1_drill(
+                target_sheet=daily_statement_sheet,
+                name="View Daily Statement for this account-day",
+                writes=[
+                    (_DP_DS_ACCOUNT, db_account_col),
+                    (_DP_DS_BALANCE_DATE, db_day_col),
+                ],
+                trigger="DATA_POINT_MENU",
+            ),
         ],
         conditional_formatting=[
             Drillable(on=db_account_col, color=accent),
@@ -1705,6 +1741,7 @@ def _populate_transactions_sheet(
     sheet: Sheet,
     *,
     datasets: dict[str, Dataset],
+    daily_statement_sheet: Sheet,
     theme: ThemePreset,
 ) -> None:
     """Transactions sheet — single detail table over the per-leg ledger.
@@ -1712,8 +1749,11 @@ def _populate_transactions_sheet(
     No KPIs above the table — the value of this sheet is "show me every
     leg + filter to the slice I care about." Filter dropdowns (wired in
     `_wire_per_sheet_dropdowns`) cover account / transfer / status /
-    origin / rail_name. M.2b.2 link tint on `account_id` +
-    `transfer_id` cues the M.2b.7 drill plumbing.
+    origin / rail_name. Phase DA drill: right-click an `account_id` cell
+    to land on Daily Statement for the leg's account-day (uses
+    `business_day` = DATE_TRUNC of `posting` so the destination filter
+    aligns with day-grain `business_day_start`). `transfer_id` is NOT
+    drillable — natural target is this sheet itself (self-drill).
     """
     accent = theme.accent
     ds_tx = datasets[DS_TRANSACTIONS]
@@ -1721,6 +1761,13 @@ def _populate_transactions_sheet(
     account_col = ds_tx["account_id"].dim()
     transfer_col = ds_tx["transfer_id"].dim()
     posting_col = ds_tx["posting"].date()
+    # Phase DA — day-grain drill source. `posting` is minute-grain; the
+    # `business_day` column is its DATE_TRUNC at SELECT time (see
+    # TRANSACTIONS_CONTRACT). Lives in the column field-well so its
+    # field_id auto-resolves (the drill writes from it). Header reads
+    # "Business Day" next to "Posting" — slight grain duplication for
+    # auditor sanity (which day did the leg post to?).
+    business_day_col = ds_tx["business_day"].date()
     sheet.layout.row(height=_TABLE_ROW_SPAN).add_table(
         width=_FULL,
         title="Posting Ledger",
@@ -1728,7 +1775,8 @@ def _populate_transactions_sheet(
             "Every Money record (leg) in the L2 instance's current "
             "view — supersession-aware, so replaced entries don't "
             "show. Sorted by posting time DESC so the most recent "
-            "activity is at the top."
+            "activity is at the top. Right-click the account_id cell "
+            "to view the Daily Statement for that account's business-day."
         ),
         columns=[
             account_col,
@@ -1740,12 +1788,31 @@ def _populate_transactions_sheet(
             ds_tx["amount_direction"].dim(),
             ds_tx["status"].dim(),
             ds_tx["origin"].dim(),
+            business_day_col,
             posting_col,
         ],
         sort_by=(posting_col, "DESC"),
+        actions=[
+            # Phase DA — Posting Ledger account_col drills to Daily
+            # Statement for the leg's (account, business-day) cell.
+            # `business_day_col` is the day-truncated companion of
+            # `posting` (DATE_TRUNC in the dataset SQL), so the
+            # destination's `_DP_DS_BALANCE_DATE` filter aligns with
+            # the daily_balances side's `business_day_start` column.
+            _l1_drill(
+                target_sheet=daily_statement_sheet,
+                name="View Daily Statement for this account-day",
+                writes=[
+                    (_DP_DS_ACCOUNT, account_col),
+                    (_DP_DS_BALANCE_DATE, business_day_col),
+                ],
+                trigger="DATA_POINT_MENU",
+            ),
+        ],
+        # Phase DA — transfer_col stripped (self-drill: target would be
+        # this same Transactions sheet). account_col only.
         conditional_formatting=[
             Drillable(on=account_col, color=accent),
-            Drillable(on=transfer_col, color=accent),
         ],
         # CY.4 — App2 renderer surfaces the per-row ``metadata`` JSON
         # as a popup; the column is carried on every row payload but
@@ -2872,7 +2939,10 @@ def build_l1_dashboard_app(
     )
     _populate_supersession_audit_sheet(
         cfg, analysis, supersession_audit_sheet,
-        datasets=datasets, theme=theme,
+        datasets=datasets,
+        transactions_sheet=transactions_sheet,
+        daily_statement_sheet=daily_statement_sheet,
+        theme=theme,
     )
     _populate_l1_exceptions_sheet(
         cfg, l1_exceptions_sheet,
@@ -2885,7 +2955,8 @@ def build_l1_dashboard_app(
         transactions_sheet=transactions_sheet, theme=theme,
     )
     _populate_transactions_sheet(
-        cfg, transactions_sheet, datasets=datasets, theme=theme,
+        cfg, transactions_sheet, datasets=datasets,
+        daily_statement_sheet=daily_statement_sheet, theme=theme,
     )
     populate_app_info_sheet(
         cfg, app_info_sheet,

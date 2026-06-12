@@ -1808,11 +1808,12 @@ def test_drill_emission_navigation_plus_set_parameters() -> None:
                         f"action {action['Name']!r} missing set-params op"
                     )
                     drill_count += 1
-    # 8 drill source sites: Today's Exc (2), Drift (2), Overdraft (1),
+    # 11 drill source sites: Today's Exc (2), Drift (2), Overdraft (1),
     # Limit Breach (1), Pending Aging (1), Unbundled Aging (1), Daily
-    # Statement (1) = 9 total drills.
-    assert drill_count == 9, (
-        f"expected 9 drills total, saw {drill_count}"
+    # Statement (1) + Phase DA wires (Posting Ledger / Transactions Audit
+    # / Daily Balances Audit = 3) = 12 total drills.
+    assert drill_count == 12, (
+        f"expected 12 drills total, saw {drill_count}"
     )
 
 

@@ -580,6 +580,11 @@ TRANSACTIONS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("status", "STRING"),
     ColumnSpec("origin", "STRING"),
     ColumnSpec("posting", "DATETIME"),
+    # Phase DA — day-grain projection of `posting`, drill source for the
+    # Daily Statement balance-date parameter on the Posting Ledger.
+    # Distinct from `posting` which stays minute-grain for sort + display.
+    # Filled at SELECT time via date_trunc_day('posting', dialect).
+    ColumnSpec("business_day", "DATETIME", shape=ColumnShape.DATETIME_DAY),
     ColumnSpec("transfer_completion", "DATETIME"),
     # CY.4 — surfaced for the Table visual's metadata_popup feature.
     # Carried on every row so the App2 renderer can show a per-row
@@ -1320,12 +1325,17 @@ def build_transactions_dataset(
     # AO.1.impl — amount_money is BIGINT cents on the matview; wrap to
     # dollars at projection.
     amount = cents_to_dollars_sql("amount_money", dialect=cfg.dialect)
+    # Phase DA — `business_day` is the day-truncated companion of
+    # `posting` (matches the contract's DATETIME_DAY shape so the Posting
+    # Ledger's Daily Statement drill can write it to _DP_DS_BALANCE_DATE).
+    business_day_expr = date_trunc_day("posting", cfg.dialect)
     sql = (
         f"SELECT id AS transaction_id, account_id, account_name,"
         f" account_role, account_parent_role,"
         f" transfer_id, transfer_parent_id, rail_name,"
         f" {amount} AS amount_money, amount_direction, status, origin,"
-        f" posting, transfer_completion,"
+        f" posting, {business_day_expr} AS business_day,"
+        f" transfer_completion,"
         f" metadata"
         f" FROM {prefix}_current_transactions\n"
         f"WHERE {_account_display_clause(P_L1_TX_ACCOUNT)}\n"

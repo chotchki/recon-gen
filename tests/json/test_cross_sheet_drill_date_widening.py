@@ -168,16 +168,17 @@ def test_drills_into_transactions_widen_date_range(emitted: _JsonDict) -> None:
 def test_drills_into_transactions_count_matches_known_sites(
     emitted: _JsonDict,
 ) -> None:
-    """Sanity check: there should be exactly 3 cross-sheet drills into
+    """Sanity check: there should be exactly 5 cross-sheet drills into
     Transactions (Pending Aging / Unbundled Aging / Supersession Audit
-    detail tables). If a new one is added, this fails — extending the
-    expected count is fine, but flag it as a deliberate review point so
-    the new drill's ``writes=`` is checked for the wide-date pattern."""
+    Transactions Audit table / Daily Statement / Supersession Audit
+    Transactions Audit row drill — Phase DA wired the last one). If a
+    new one is added, this fails — extending the expected count is fine,
+    but flag it as a deliberate review point so the new drill's
+    ``writes=`` is checked for the wide-date pattern."""
     drills = _drills_into_transactions(emitted)
-    expected = 3
+    expected = 4
     assert len(drills) == expected, (
-        f"Expected {expected} cross-sheet drills into Transactions "
-        f"(Pending Aging / Unbundled Aging / Supersession Audit); "
+        f"Expected {expected} cross-sheet drills into Transactions; "
         f"found {len(drills)}. If a new drill was added intentionally, "
         f"bump the expected count and confirm the new drill includes "
         f"``*_wide_date_writes()`` in its writes list. Found:\n"

@@ -83,6 +83,7 @@ from recon_gen.common.tree import (
     Dataset,
     Drill,
     DrillParam,
+    Drillable,
     FilterGroup,
     IntegerParam,
     LinkedValues,
@@ -809,7 +810,7 @@ def _build_money_trail_sheet(
 # ---------------------------------------------------------------------------
 
 def _build_account_network_sheet(
-    cfg: Config, app: App, analysis: Analysis,
+    cfg: Config, app: App, analysis: Analysis, *, theme: ThemePreset,
 ) -> Sheet:
     """Account Network — directional Sankeys + touching-edges table.
 
@@ -997,8 +998,8 @@ def _build_account_network_sheet(
             "Every edge involving the anchor account in either "
             "direction, ordered by amount descending. The "
             "Counterparty column shows the side that isn't the "
-            "current anchor — right-click any row and pick \"Walk "
-            "to other account on this edge\" to make that "
+            "current anchor — right-click the counterparty cell and "
+            "pick \"Walk to other account on this edge\" to make that "
             "counterparty the new anchor."
         ),
         group_by=[
@@ -1018,6 +1019,13 @@ def _build_account_network_sheet(
             trigger="DATA_POINT_MENU",
             action_id="action-anetwork-table-walk-counterparty",
         )],
+        # Phase DA — Class D: counterparty is the drill source for the
+        # menu drill above. Previously undecorated; now cues the menu
+        # affordance (tint background; left-click on the cell opens the
+        # menu drill).
+        conditional_formatting=[
+            Drillable(on=counterparty_dim, color=theme.accent),
+        ],
     )
 
     # Y.2.b — FG_INV_ANETWORK_ANCHOR removed; the broad anchor narrow
@@ -1125,7 +1133,7 @@ def build_investigation_app(
     _build_recipient_fanout_sheet(cfg, app, analysis)
     _build_volume_anomalies_sheet(cfg, app, analysis)
     _build_money_trail_sheet(cfg, app, analysis)
-    _build_account_network_sheet(cfg, app, analysis)
+    _build_account_network_sheet(cfg, app, analysis, theme=theme)
     _build_app_info_sheet(
         cfg, app, analysis, theme=theme, l2_instance=l2_instance,
     )

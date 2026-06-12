@@ -92,6 +92,7 @@ from recon_gen.common.tree import (
     DateTimeParam,
     Drill,
     DrillParam,
+    Drillable,
     LinkedValues,
     Sheet,
     StaticValues,
@@ -1261,8 +1262,9 @@ def _populate_l2_exceptions_sheet(
     """
     accent = theme.accent
 
-    del accent  # unused after the M.3.10l rewrite — kept the lookup
-                # so a future legend / KPI tint can pick it up cheaply.
+    # Phase DA (2026-06-12) — `accent` is no longer "future use"; the
+    # L2 Violation Detail table below has a Drillable on entity_a_col
+    # cued in `accent`. Keep the lookup live, no `del`.
     ds = datasets[DS_UNIFIED_L2_EXCEPTIONS]
 
     # Row 1 — KPI (narrow, left) + bar chart (wide, right). KPI sits
@@ -1340,6 +1342,13 @@ def _populate_l2_exceptions_sheet(
                 writes=[(_DP_CHAIN_DRILL, entity_a_col)],
                 trigger="DATA_POINT_MENU",
             ),
+        ],
+        # Phase DA — Class D: entity_a is the drill source for both menu
+        # actions above, but the column was previously undecorated. Now
+        # cues the menu affordance (tint background; left-click on the
+        # cell opens the menu drill).
+        conditional_formatting=[
+            Drillable(on=entity_a_col, color=accent),
         ],
     )
 
