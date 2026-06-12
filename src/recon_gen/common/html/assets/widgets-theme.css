@@ -70,26 +70,48 @@
 }
 
 /*
- * 2026-06-12 — Tom Select clear_button positioning override.
+ * 2026-06-12 — Tom Select clear_button positioning + visual override.
  *
- * The vendor CSS positions the × button via
+ * Positioning fix: the vendor CSS positions the × via
  *   .plugin-clear_button.single .clear-button { right: max(--ts-pr-caret, 8px) }
- * which on its own resolves to right: 8px. But the renderer copies
- * Tailwind utility classes from the original <select> onto .ts-wrapper
- * (px-3 py-2 min-w-48 etc), and the cascade causes `left: 8px` to be
- * applied to the clear button too. With both left + right set on a
+ * which resolves to right: 8px, but the renderer copies Tailwind
+ * utility classes from the original <select> onto .ts-wrapper (px-3
+ * py-2 min-w-48 etc), and the cascade causes `left: 8px` to also be
+ * applied to the clear-button. With both left + right set on a
  * position:absolute element, the browser stretches it horizontally,
- * rendering the × at the LEFT edge of the picker, overlapping the
- * first character of the selected text.
+ * rendering the × glyph at the LEFT edge of the picker. Pin left:auto
+ * to keep the × on the right.
  *
- * Pin left:auto + right:0.5rem so the × sticks to the right edge
- * regardless of inherited cascade. Apply to both `single` and the
- * generic .plugin-clear_button variant for safety.
+ * Visual fix: the bare vendor styling renders the × small + flush
+ * against the trailing text (no breathing room, no hover affordance).
+ * Pad the input so text reserves space for the button; size + circle
+ * the button so it reads as an obvious affordance with hover state.
  */
 .ts-wrapper.plugin-clear_button .clear-button,
 .ts-wrapper.plugin-clear_button.single .clear-button {
   left: auto;
-  right: 0.5rem;
+  right: 0.375rem;
+  /* Larger, circular click target with subtle hover background. */
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  line-height: 1;
+  color: var(--color-secondary-fg);
+  transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+.ts-wrapper.plugin-clear_button .clear-button:hover {
+  background: color-mix(in srgb, var(--color-danger, #C62828) 12%, transparent);
+  color: var(--color-danger, #C62828);
+}
+/* Reserve right-padding inside .ts-control so text doesn't run under
+ * the × button. Without this the selected-item text overlaps with
+ * the click target. */
+.ts-wrapper.plugin-clear_button .ts-control {
+  padding-right: 1.75rem !important;
 }
 
 /* ---------------------------------------------------------------- */
