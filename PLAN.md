@@ -389,6 +389,30 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
   - **AA.A.daterange.5 Test infra.** `apply_anchor_to_pickers` becomes "set the range to span anchor's date ±1 day" instead of separate from/to. Single picker spec. Follows .3.
 - [ ] backlog - multi-select clear_button visual verification (no real picker to test)
 
+## Phase DB - QS-to-App2 parity audit + completeness gate (App2 ⊇ QS)
+
+**Why:** Phase DA (closed 2026-06-12, v13.15.0) uncovered a hidden parity gap of recognizable shape: a tree-level feature (`conditional_formatting`) emitted to QS JSON, NOT extracted by `_VisualPlan`, silently dropped by App2's renderer. The DA gap sat in production for months unnoticed because the existing parity tests checked tree→fetcher derivation but not renderer-side honoring. Same shape almost certainly lives in ≥1 other place — most likely candidates:
+
+- **KPI conditional formatting beyond the three indicators we plumb.** `_VisualPlan` carries `kpi_zero_is_healthy` / `kpi_inflow_is_healthy` / `kpi_threshold_banding`; QS's `KPIConfiguration.ConditionalFormatting` also accepts arbitrary background/icon CF.
+- **BarChart / LineChart per-series color encoding.** `_ChartMeta` covers axis labels + stacking but probably not the `colors=` field-well or per-category color overrides.
+- **`SameSheetFilter` highlight-without-narrowing.** Operator docs deprecate this for filter intent but it's still a Visual-level construct QS would honor and App2 wouldn't render.
+- **Filter-group date widening on cross-sheet drills.** Tested at JSON layer; renderer-landing parity not explicitly covered.
+
+**Goal (operator-locked at DB filing 2026-06-12):** **App2 is a SUPERSET of QuickSight.** Every QS-emit-able feature renders correctly on App2 (DA-shape gap = bug); App2-only features stay enhancements (handbook `?` button, ⋯ row menu, xlsx export, markdown prose, Studio L2 editor, ETL hooks — see `parity/breaks.py` PARITY_BREAKS registry). The audit explicitly measures coverage in the QS→App2 direction. The completeness gate enforces it forward.
+
+**Locks (operator to confirm at DB.0 exit):**
+- **Audit direction is QS → App2** (every QS-emit field has an App2 consumer). The reverse direction (App2 features not in QS) is tracked as ENHANCEMENT in `PARITY_BREAKS` and stays out of scope here.
+- **Completeness gate fails at construction time** (per `[[feedback_invariants_in_types]]`), not at deploy or render. A tree-level visual attribute that lands in the QS JSON without a registered App2 consumer raises `ValueError` at App / Visual construction.
+- **Hard-divergence and workaround entries in `PARITY_BREAKS` are exempted.** Some QS features (`count_distinct_quirk_bl1` etc.) are deliberate workarounds, not parity to chase; the registry is the authority.
+
+**Done when:** every QS-emit feature on every Visual kind has a registered App2 consumer OR a `PARITY_BREAKS` entry explaining why not; the construction-time completeness gate fails any new mismatch at the wiring site; cold-read v5 visual parity across all 4 apps confirms no visual divergence beyond the ENHANCEMENT set.
+
+- [ ] DB.0 - **Audit.** For each Visual kind in `common/tree/visuals.py`, walk `emit()` and inventory the QS JSON fields it sets. Walk `_VisualPlan` extraction (`_table_column_meta`, `_chart_meta`, `_kpi_*`) + `shape_*` adapters + the d3 renderers to inventory honored fields. Diff. Output: `docs/audits/db_0_qs_to_app2_parity_audit.md` with a per-Visual coverage table. Operator-confirm scope before sub-cells fire.
+- [ ] DB.1 - **Close the DB.0 gaps.** Per-feature scope (may split if many). Each gap closes via a `_VisualPlan` field + extraction + `shape_*` forwarding + renderer consumption (the same 4-layer pattern DA used). Each gap also gets an anti-regression unit + JS test mirroring DA.6's shape.
+- [ ] DB.2 - **Completeness gate.** At `App` (or `Analysis`) construction, walk every Visual + cross-check emitted-attribute set against a registry of "App2-consumed attribute keys". Mismatch raises `ValueError` with the offending Visual / attribute / path. The registry is the typed source of truth; adding a Visual attribute later forces the author to add a registry entry (so the gap can't sneak back in).
+- [ ] DB.3 - **Cold-read v5 parity verify.** Visual side-by-side (QS embed + App2) of every Visual kind across 4 apps; confirm no divergence beyond the ENHANCEMENT set in `PARITY_BREAKS`. Output: `docs/audits/db_3_parity_verify.md`.
+- [ ] DB.4 - **Phase exit + v13.16.x release cut.** Bundle DB into one release notes entry. Bump 13.15.x → 13.16.0 (minor if any user-visible visual rendering changes; patch if only the gate lands without behavior change). Operator authorize-at-cut per `[[feedback_always_ask_before_release_cut]]`. Sweep DB to PLAN_ARCHIVE.md.
+
 ## Backlog (not yet phased)
 
 - **date-model.plant-days_ago-bounded — replace plant days_ago: int with days_into_window bounded type** — added 2026-06-12.
