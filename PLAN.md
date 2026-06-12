@@ -409,10 +409,28 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
 
 - [ ] DB.0 - **Audit.** For each Visual kind in `common/tree/visuals.py`, walk `emit()` and inventory the QS JSON fields it sets. Walk `_VisualPlan` extraction (`_table_column_meta`, `_chart_meta`, `_kpi_*`) + `shape_*` adapters + the d3 renderers to inventory honored fields. Diff. Output: `docs/audits/db_0_qs_to_app2_parity_audit.md` with a per-Visual coverage table. Operator-confirm scope before sub-cells fire.
 - [ ] DB.1 - **Close the DB.0 gaps.** Per-feature scope (may split if many). Each gap closes via a `_VisualPlan` field + extraction + `shape_*` forwarding + renderer consumption (the same 4-layer pattern DA used). Each gap also gets an anti-regression unit + JS test mirroring DA.6's shape.
-  - [ ] DB.1.1 - DB.1.1 BarChart color_label + orientation parity
+  - [x] DB.1.1 - DB.1.1 BarChart color_label + orientation parity
 - [ ] DB.2 - **Completeness gate.** At `App` (or `Analysis`) construction, walk every Visual + cross-check emitted-attribute set against a registry of "App2-consumed attribute keys". Mismatch raises `ValueError` with the offending Visual / attribute / path. The registry is the typed source of truth; adding a Visual attribute later forces the author to add a registry entry (so the gap can't sneak back in).
 - [ ] DB.3 - **Cold-read v5 parity verify.** Visual side-by-side (QS embed + App2) of every Visual kind across 4 apps; confirm no divergence beyond the ENHANCEMENT set in `PARITY_BREAKS`. Output: `docs/audits/db_3_parity_verify.md`.
 - [ ] DB.4 - **Phase exit + v13.16.x release cut.** Bundle DB into one release notes entry. Bump 13.15.x → 13.16.0 (minor if any user-visible visual rendering changes; patch if only the gate lands without behavior change). Operator authorize-at-cut per `[[feedback_always_ask_before_release_cut]]`. Sweep DB to PLAN_ARCHIVE.md.
+
+## Phase DC - HTTPS support for studio / dashboards (draft 2026-06-12)
+
+**Why:** Operator-flagged 2026-06-12 — `recon-gen studio` + `recon-gen dashboards` currently serve plain HTTP via uvicorn. Deployed copies need HTTPS for: (1) QuickSight embedded analytics URLs (QS embed sessions require https origin), (2) modern browser security posture (HSTS / Secure cookies / mixed-content blockers on the docs site mount), (3) credential handling in any future auth surface (login forms over HTTP get a browser warning + degrade UX).
+
+**Locks (operator to confirm at DC.0 exit):**
+- TBD. Open questions:
+  - **Cert provisioning surface.** uvicorn `--ssl-keyfile`/`--ssl-certfile` flags (operator pre-provisions PEM files), or generate self-signed at boot with a stable local CA (mkcert-style), or expect a reverse proxy (Caddy/nginx) to terminate TLS?
+  - **Local dev experience.** Self-signed cert means browser warning on first hit; mkcert locally-trusted CA fixes that but requires `brew install mkcert && mkcert -install`. Acceptable?
+  - **CLI shape.** `recon-gen studio --tls` (auto-generate) vs `--tls-cert <file> --tls-key <file>` (explicit) vs both?
+  - **Deployed-mode default.** Assume reverse proxy terminates TLS (the wheel-served Studio listens on HTTP behind it), or assume in-process TLS termination?
+  - **QS embed implications.** QS embed URLs are HTTPS-only; does App2's QS-embed driver path need any change beyond the origin protocol?
+  - **HTMX + browser cache interactions.** `Secure` cookies on HTTPS — does anything in App2 set cookies?
+
+- [ ] DC.0 - **Spike + lock cert provisioning + CLI surface.** Output: `docs/audits/dc_0_https_spike.md`. Per `[[feedback_spike_before_locking_implementation]]` — pick a real path (mkcert-vs-reverse-proxy-vs-in-process) before committing the CLI shape. Operator-confirm locks.
+- [ ] DC.1 - **CLI plumbing + uvicorn TLS wiring.** Add `--tls-cert` / `--tls-key` (and maybe `--tls` auto-gen) flags to the studio + dashboards Click commands. Thread through to uvicorn config. Unit test on the CLI parsing.
+- [ ] DC.2 - **Local dev DX.** Onboarding doc + (optional) `recon-gen tls bootstrap` subcommand that drives mkcert install + cert gen for the operator. Or accept the browser warning as the local-dev posture.
+- [ ] DC.3 - **Phase exit + release.** Sweep to PLAN_ARCHIVE.md.
 
 ## Backlog (not yet phased)
 
