@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Literal
 
+from recon_gen.common.l2.primitives import AmountDirection
 from recon_gen.common.spine.invariant import Invariant
 from recon_gen.common.spine.rng import scenario_rng
 from recon_gen.common.spine.violation import Violation
@@ -191,7 +192,7 @@ class AccountSimulation:
         for em in emissions:
             if self.emit_legs:
                 for tag, amount in em.legs:
-                    direction = "Credit" if amount >= 0 else "Debit"
+                    direction: AmountDirection = "Credit" if amount >= 0 else "Debit"
                     tx_vals: dict[str, object | None] = {
                         "id": f"tx-{self.account_id}-{tag}",
                         "account_id": self.account_id,
@@ -289,7 +290,7 @@ class AccountSimulation:
         )
         if self.emit_legs:
             for tag, amount in em.legs:
-                direction = "Credit" if amount >= 0 else "Debit"
+                direction: AmountDirection = "Credit" if amount >= 0 else "Debit"
                 _insert_tx(
                     conn, prefix=self.prefix,
                     id=f"tx-{self.account_id}-{tag}",

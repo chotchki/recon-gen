@@ -80,6 +80,15 @@ Origin: TypeAlias = str
 # TransferTemplate's ExpectedNet at posting time.
 LegDirection: TypeAlias = Literal["Debit", "Credit", "Variable"]
 
+# The realized accounting direction stamped on a transactions row. Distinct
+# from ``LegDirection`` (which carries the rail-declaration ``Variable``
+# sentinel): once a leg posts, its direction MUST be a concrete Debit or
+# Credit. The schema enforces this with a CHECK constraint; the type
+# system catches the same drift at the write-callsite instead of at INSERT
+# rejection. See ``docs/audits/untyped_enum_audit_2026_06_11.md`` for the
+# survey + the close-vs-open lock per enum.
+AmountDirection: TypeAlias = Literal["Debit", "Credit"]
+
 # A Rail's name. Distinct NewType from Identifier so pyright catches
 # kind-swap bugs at the call site (passing a Role / TransferTemplateName
 # where a RailName is expected). Z.B (2026-05-15) collapsed the legacy

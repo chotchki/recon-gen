@@ -46,6 +46,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal
 
+from recon_gen.common.l2.primitives import AmountDirection
 from recon_gen.common.spine._emit_helpers import TX_COLS, bulk_insert_tx, ts
 from recon_gen.common.spine.account_simulation import AccountSimulation
 from recon_gen.common.spine.invariant import Invariant
@@ -198,7 +199,7 @@ class LedgerSimulation:
         for transfer in self.transfers:
             posting = ts(transfer.day, hour=transfer.hour)
             for i, leg in enumerate(transfer.legs):
-                direction = "Credit" if leg.amount >= 0 else "Debit"
+                direction: AmountDirection = "Credit" if leg.amount >= 0 else "Debit"
                 row_vals: dict[str, object | None] = {
                     "id": f"tx-{transfer.transfer_id}-leg{i}",
                     "account_id": leg.account_id,

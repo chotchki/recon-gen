@@ -40,7 +40,7 @@ from datetime import date
 from typing import ClassVar
 
 from recon_gen.common.l2.primitives import (
-    Account, L2Instance, LimitDirection, LimitSchedule,
+    Account, AmountDirection, L2Instance, LimitDirection, LimitSchedule,
 )
 from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
@@ -194,6 +194,7 @@ class LimitBreachGenerator:
             scenario_id, generator="LimitBreachGenerator",
         )
         amount_magnitude = self.cap + self.overshoot
+        amount_direction: AmountDirection
         if self.direction == "Outbound":
             amount_direction = "Debit"
             amount_money = -amount_magnitude

@@ -26,6 +26,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Protocol, runtime_checkable
 
+from recon_gen.common.l2.primitives import AmountDirection
 from recon_gen.common.money import Cents
 from recon_gen.common.sql.dialect import Dialect
 from recon_gen.common.sql.literals import render_sql_literal
@@ -236,7 +237,7 @@ def write_transaction(
     # consistent so the L1 Conservation invariant
     # (SUM(amount_money) over a transfer_id = 0 for paired legs)
     # doesn't get fooled by a sign / direction mismatch.
-    amount_direction = "Credit" if money_cents > 0 else "Debit"
+    amount_direction: AmountDirection = "Credit" if money_cents > 0 else "Debit"
     metadata_json = (
         json.dumps(metadata, sort_keys=True, separators=(", ", ": "))
         if metadata else None

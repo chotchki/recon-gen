@@ -74,6 +74,7 @@ from recon_gen.common.sql import Dialect
 
 from .primitives import (
     AccountTemplate,
+    AmountDirection,
     BalanceCadence,
     Chain,
     ChainChildSpec,
@@ -4459,7 +4460,7 @@ def _txn_row_tuple(
     account_scope: str,
     account_parent_role: Identifier | None,
     money: Decimal,
-    direction: str,
+    direction: AmountDirection,
     posting: str,
     transfer_id: str,
     rail_name: Identifier,
@@ -4597,7 +4598,7 @@ def _txn_row(
     account_scope: str,
     account_parent_role: Identifier | None,
     money: Decimal,
-    direction: str,
+    direction: AmountDirection,
     posting: str,
     transfer_id: str,
     rail_name: Identifier,

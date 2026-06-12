@@ -38,9 +38,10 @@ from __future__ import annotations
 from recon_gen.common.db import SyncConnection
 from dataclasses import dataclass
 from datetime import date
-from typing import ClassVar, Literal
+from typing import ClassVar
 
 from recon_gen.common.l2.primitives import (
+    AmountDirection,
     L2Instance,
     Rail,
     SingleLegRail,
@@ -108,7 +109,7 @@ class RailFiringFactory:
         # Determine the per-leg direction (single-leg only). Variable
         # → Debit per the OLD path's convention (closing-leg semantics
         # aren't material to seed-color coverage).
-        leg_direction: Literal["Debit", "Credit"] = "Debit"
+        leg_direction: AmountDirection = "Debit"
         if isinstance(rail, SingleLegRail) and rail.leg_direction == "Credit":
             leg_direction = "Credit"
         return RailFiringGenerator(
@@ -162,7 +163,7 @@ class RailFiringGenerator:
     account_id_a: str
     account_id_b: str | None
     amount: float
-    single_leg_direction: Literal["Debit", "Credit"]
+    single_leg_direction: AmountDirection
     firing_seq: int
     anchor_day: date
     prefix: str = "spec_example"
