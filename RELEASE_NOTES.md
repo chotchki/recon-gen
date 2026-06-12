@@ -6,12 +6,99 @@
 > AI, BK, BQ, BW, CK, BV close, snapshotter pattern, runner readiness).
 > v13.14.4 below resumes the convention.
 
-## v13.14.5 — Tom Select clear-button affordance + boot-id cache-bust
+## v13.15.0 — Phase DA App2/QS click-drill decoration parity + clear-button + cache-bust + row-drill MENU contract
 
-Seven commits since v13.14.4. Two themes, both surfaced by live
-dogfooding of Studio against `sasquatch_pr.yaml`.
+Three operator-dogfood bug-fix themes plus a substantive new feature
+(Phase DA) collected into one release. Minor bump for the new App2
+decoration feature (App2's renderer now paints drillable-column visuals
+in parity with the QuickSight side).
 
-**1. Tom Select clear-button (× to clear a selection).** Single-select
+**1. Phase DA — App2/QS click-drill decoration parity + type-system gate.**
+Operator dogfood (2026-06-12, L1 Overdraft sheet) surfaced two coupled
+defects in the click-drill decoration story:
+
+- App2's `renderTable` ignored `conditional_formatting` entirely, so
+  every drillable column looked identical to non-drillable columns —
+  operator couldn't tell which cells carried drills until they hovered.
+- Every L1 app site misused `CellAccentText` (the LEFT-click cue) for
+  `DATA_POINT_MENU` drills. Zero usage of `CellAccentMenu` anywhere.
+  Even on the QS side the column showed plain accent text while the
+  actual drill was menu-only — analyst expectation vs reality drift.
+
+The audit at `docs/audits/da_0_clickability_audit.md` found 15 mutations
+across 12 Tables in 4 apps. Phase DA landed:
+
+- **Collapsed two-type CellFormat design to one `Drillable(on=Dim,
+  color=str)` marker.** The visual cue (plain accent text vs accent
+  text + tint background) auto-derives from the drill triggers writing
+  from `on.column` at QS-emit time and at App2 plan-build time. Authors
+  declare "this column carries a drill"; the type system + renderer
+  pick the visual from the drill set:
+  - any `DATA_POINT_MENU` drill writes from the column → accent text
+    + accent-tint background
+  - only `DATA_POINT_CLICK` drill(s) → accent text only
+  Dropped `CellAccentText` + `CellAccentMenu` + the `CellFormat` union
+  + `common/clickability.py` + `tests/unit/test_clickability.py` —
+  pre-stable posture, no compat shim.
+- **App2 renderer plumbing.** `_VisualPlan` grows
+  `column_decoration: Mapping[str, str]`; `_table_column_meta` walks
+  `visual.conditional_formatting` and resolves the per-column kind via
+  the same `Drillable.visual_kind(drills)` code path the QS-side
+  `Drillable.emit` uses — App2 ≡ QS by construction.
+  `_data_shape.shape_table` forwards as `column.decoration`; `bootstrap.
+  js::renderTable` paints `cell-accent` / `cell-accent-menu` CSS
+  classes on each `<td>`.
+- **CSS + cell-click affordance.** `widgets-theme.css` adds
+  `.cell-accent { color: var(--color-accent); font-weight: 500 }` and
+  `.cell-accent-menu { color: var(--color-accent); background:
+  color-mix(in srgb, var(--color-accent) 10%, transparent); cursor:
+  pointer }`. `bootstrap.js::wireRowDrills` binds left-click on
+  `<td.cell-accent-menu>` → opens the menu drill (same code path as the
+  ⋯ button). `stopPropagation()` prevents the row-level CLICK drill
+  from firing on Class B mix cells. Documents an operator-locked
+  exception to "left clicks move LEFT" — App2 may break the rule when
+  the explicit visual cue makes the affordance discoverable.
+- **Apps sweep.** All 13 existing `CellAccentText` callsites in
+  `apps/l1_dashboard/app.py` migrated to `Drillable`. Class C wires:
+  Transactions Audit `transfer_id` → Posting Ledger (uses the existing
+  `_DP_TX_TRANSFER` landing pad + `_wide_date_writes()` pattern); Daily
+  Balances Audit `db_account_id` → Daily Statement; Posting Ledger
+  `account_id` → Daily Statement (added `business_day` column to
+  `l1-transactions-ds` via `date_trunc_day('posting', dialect)` at
+  SELECT time, tagged `ColumnShape.DATETIME_DAY` so the drill writes a
+  day-grain date). Class C strip: Posting Ledger `transfer_id`
+  (self-drill). Class D adds: L2FT Violation Detail `entity_a`;
+  Investigation Account Network — Touching Edges `counterparty`.
+- **Type-system gate at `Table.__post_init__`** (per
+  `[[feedback_invariants_in_types]]`). Walks
+  `conditional_formatting × actions`; for each `Drillable.on.column`,
+  asserts ≥1 drill writes from that column. Raises `ValueError` at
+  construction with diagnostic listing every Drill on the Table + the
+  columns each one writes from, so the operator can spot off-by-one
+  column-name typos at a glance. Permanently prevents the bug class
+  from recurring.
+- **Convention origin memory.** "Left clicks move LEFT, right clicks
+  move RIGHT" is a QuickSight-limitation workaround, not a deep design
+  principle (operator clarification). App2 may break the rule when a
+  better affordance exists — Phase DA's cell-click-opens-menu is one
+  such authorized break.
+- **Deployed-Studio handbook 404 fix.** The per-sheet `?` button's
+  handbook source (`docs/handbook/_shared/`, `l1/`, `executives/`, etc.)
+  moved into the wheel package at
+  `src/recon_gen/docs/_handbook_per_sheet/`. The Starlette
+  `/handbook/<path>` route updated to `parents[2]/docs/_handbook_per_sheet/`
+  so it resolves identically in repo-checkout AND wheel-install. Mkdocs
+  configured to `exclude_docs: _handbook_per_sheet/` so the per-sheet
+  snippets stay out of the curated site build.
+- **QS uppercase-hex fix.** `_tint_hex` emits `{:02X}` so the auto-derived
+  background tint satisfies QS's `^#[A-F0-9]{6}$` validation pattern
+  (CI 27439942692 caught the original lowercase-hex regression).
+
+Full audit + locks + per-site resolution: `docs/audits/da_0_clickability_audit.md`.
+App2-side parity screenshots: `docs/audits/da_7_app2_snaps/`.
+Parity verify checklist: `docs/audits/da_7_parity_verify.md`.
+
+**2. Tom Select clear-button (× to clear a selection).** Single-select
 pickers previously required click-into + Delete-key to clear; the
 operator flagged this as friction. Wired Tom Select's `clear_button`
 plugin so a one-click ✕ at the right edge of the picker clears the
@@ -20,37 +107,24 @@ selection. Multi-select pickers also carry both `remove_button`
 
 Visual polish iterated against operator dogfood feedback:
 
-- Override vendor cascade so the × pins to the right edge (Tailwind
-  utility classes copied onto `.ts-wrapper` were causing a `left: 8px`
-  conflict; pinned `left: auto; right: 0.375rem`).
+- Override vendor cascade so the × pins to the right edge.
 - 1.5rem circular click target with danger-tint hover background.
-- Bumped glyph from default 0.95rem to 1.5rem + font-weight 600 for
-  body-text-zoom readability.
 - Vertical-centered via `top: 50% + translateY(-50%)` (overrides
   vendor's fixed `top: 8px` which assumed default 20px-tall
   `.ts-control`).
-- Swapped the glyph from U+2A2F ⨯ (vector cross — a math operator
-  whose ink centers on the math-axis, not the line-box geometric
-  center) to U+2715 ✕ (canonical UI close glyph, designed by font
-  vendors to optically center) via `.clear-button::before`. Eliminates
-  the "× floats above text baseline" perception.
+- Swapped the glyph from U+2A2F ⨯ (math operator — math-axis ink, not
+  geometric center) to U+2715 ✕ (canonical UI close glyph, designed by
+  font vendors to optically center) via `.clear-button::before`.
+  Eliminates the "× floats above text baseline" perception.
 
-Anti-regression test in `test_html_filter_widgets.py` pins the
-`["remove_button", "clear_button"]` (multi) / `["clear_button"]`
-(single) plugin shape so future refactors can't silently drop the
-affordance. Multi-select live visual verification deferred to backlog
-#47 — every deployed app uses the Phase Y SQL-pushdown single-select
-pattern, so there's no live multi-select picker to dogfood against
-until a new persona / CategoryFilterSpec lands.
+Anti-regression test in `test_html_filter_widgets.py` pins the plugin
+shape so future refactors can't silently drop the affordance.
 
-**2. Boot-id cache-bust for page-shell static assets.** The shared
-page shell in `render.py` (used by every Studio page + dashboards +
-probes) hardcoded bare `/static/output.css`, `/static/widgets-theme.css`,
-and seven vendor JS+CSS files. Iterating on `widgets-theme.css` (Tom
-Select clear-button polish above) required the operator to Cmd+Shift+R
-after every Studio restart to escape the browser cache — Starlette's
-StaticFiles ETag/Last-Modified revalidation didn't always fire on
-HTMX-swap-triggered fetches.
+**3. Boot-id cache-bust for page-shell static assets.** The shared
+page shell in `render.py` hardcoded bare `/static/output.css`,
+`/static/widgets-theme.css`, and seven vendor JS+CSS files. Iterating
+on `widgets-theme.css` required the operator to Cmd+Shift+R after every
+Studio restart to escape the browser cache.
 
 Lifted Studio's existing `_BOOT_ID` + `asset_url()` helper (a
 process-lifetime random hex token) from `_studio_routes.py` up to
@@ -63,28 +137,21 @@ token, forcing every browser to refetch every asset on next page load
 Anti-regression test in `test_vendor_assets.py`
 (`test_page_shell_static_urls_cache_busted`) regexes every
 `(href|src)="/static/..."` out of a rendered shell and asserts `?cb=`
-appears in each. Catches future bare-URL additions to `_PAGE_SHELL` /
-`_VENDOR_CSS` / `_VENDOR_JS` at unit-tier speed (no Studio boot, no
-browser).
+appears in each one.
 
-**3. Row-drill MENU-only contract restored.** Operator dogfood found
+**4. Row-drill MENU-only contract restored.** Operator dogfood found
 the L1 Overdraft sheet's table was making the entire row a left-click
-target despite being declared as `DATA_POINT_MENU`-only (the trailing
-"⋯" affordance + right-click). Root cause: a `clickDrill = drills[0]`
-fallback in `bootstrap.js::wireRowDrills` that promoted any first
-drill to a row-wide left-click handler, overriding the documented
-contract (`render.py::_serialize_table_row_drills` —
-`DATA_POINT_CLICK` = whole-row click; `DATA_POINT_MENU` = trailing "⋯"
-+ right-click only).
+target despite being declared as `DATA_POINT_MENU`-only. Root cause:
+a `clickDrill = drills[0]` fallback in
+`bootstrap.js::wireRowDrills` that promoted any first drill to a
+row-wide left-click handler, overriding the documented contract.
 
 Fallback removed. The existing
 `test_menu_drill_adds_ellipsis_button_per_row_and_header_cell` test
 was wrong (asserted `n_drillable == 2` for MENU-only) — updated to
 assert the correct shape: MENU-only Tables have `n_drillable == 0`,
 no `cursor: pointer` on `<tr>`, and surface their drill ONLY via the
-⋯ button + ctxmenu. Matches the project convention: left clicks move
-LEFT (back-toward-source), right clicks move RIGHT
-(deeper/down-the-pipeline).
+⋯ button + ctxmenu.
 
 ## v13.14.4 — Phase BX close + typed-enum sweep + silent HTMX swap bug fix
 
