@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
 
-from recon_gen.common.l2.primitives import POSTED_STATUS
+from recon_gen.common.l2.primitives import POSTED_STATUS, Scope
 from recon_gen.common.spine._emit_helpers import insert_tx
 from recon_gen.common.spine.violation import CoverageObservation
 
@@ -130,7 +130,7 @@ class InvFanoutGenerator:
     # source); senders may be any scope — the matview only filters
     # the recipient side.
     sender_role: str = "ExternalCounterparty"
-    sender_scope: str = "external"
+    sender_scope: Scope = "external"
     sender_parent_role: str | None = None
 
     @property

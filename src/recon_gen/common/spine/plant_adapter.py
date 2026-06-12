@@ -58,6 +58,7 @@ from recon_gen.common.as_of_frame import AsOfFrame
 from recon_gen.common.intervals import DateInterval, SingleDayPlant
 from recon_gen.common.l2.primitives import (
     L2Instance,
+    Scope,
     SingleLegRail,
     TransferTemplate,
     TwoLegRail,
@@ -864,7 +865,7 @@ def _adapt_inv_fanout(
 
 def _resolve_account_triple(
     instance: L2Instance, scenarios: ScenarioPlant, account_id: object,
-) -> tuple[str, str, str | None]:
+) -> tuple[str, Scope, str | None]:
     """Return `(role, scope, parent_role)` for an account_id referenced
     by a plant. Looks in two places:
 
@@ -883,7 +884,7 @@ def _resolve_account_triple(
         if str(a.id) == target:
             return (
                 str(a.role),
-                str(a.scope),
+                a.scope,
                 str(a.parent_role) if a.parent_role is not None else None,
             )
     # (2) Materialized customer accounts from AccountTemplate instances.
@@ -902,7 +903,7 @@ def _resolve_account_triple(
                 )
             return (
                 str(template.role),
-                str(template.scope),
+                template.scope,
                 (
                     str(template.parent_role)
                     if template.parent_role is not None
