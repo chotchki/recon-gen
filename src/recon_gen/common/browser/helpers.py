@@ -2314,6 +2314,92 @@ def read_dropdown_options(
     ]
 
 
+def narrow_dropdown_options_by_query(
+    page: Page, control_title: str, query: str, timeout_ms: int,
+) -> list[str]:
+    """Return the dropdown options after typing ``query`` into the
+    search-enabled FilterControl's MUI Autocomplete search input.
+
+    This is the QS leg of ``DashboardDriver.typeahead_filter`` —
+    drives the popover's search input to exercise QS's server-narrowed
+    typeahead path, then reads the resulting ``[role="option"]`` labels
+    + dismisses the popover.
+
+    Both autocomplete-input shapes are probed (legacy
+    ``sheet_control_search_results_dropdown-menu`` + modern
+    ``dropdown-search_search_input``) — mirrors the dispatch already
+    in ``set_dropdown_value`` so the verb works against both QS
+    rendering variants.
+
+    For SIMPLE-variant (small option universe, no search input) the
+    popover holds the full set already; ``query`` is ignored and the
+    same options as ``read_dropdown_options`` come back. The
+    ``filter_options``-via-empty-query path stays a separate code
+    path: callers wanting "seed page" semantics use
+    ``read_dropdown_options`` directly. This helper is for the
+    operator's typed-narrowing flow.
+
+    Filtered-out sentinels match ``read_dropdown_options``:
+    ``"Select all"`` / ``"All"`` / blanks.
+    """
+    _open_control_dropdown(page, control_title, timeout_ms)
+    # Probe both autocomplete input variants (same dispatch as
+    # ``set_dropdown_value``). ``count()`` is DOM-only; the absence
+    # path stays cheap for the SIMPLE variant.
+    legacy_search_input = page.locator(
+        f'[data-automation-id="sheet_control_search_results_dropdown-menu"]'
+        f'[data-automation-context="{control_title}"] input'
+    ).first
+    modern_search_input = page.locator(
+        '[data-automation-id="dropdown-search_search_input"] input'
+    ).first
+    search_input = None
+    if legacy_search_input.count() > 0:
+        search_input = legacy_search_input
+    elif modern_search_input.count() > 0:
+        search_input = modern_search_input
+    if search_input is not None:
+        # MUI Autocomplete narrows the listbox via the search input;
+        # wait on ``_OPTION_SELECTOR`` (the multi-shape matcher) for
+        # the filtered listbox to repopulate before reading. Same
+        # pattern as ``set_dropdown_value`` post-fill wait — without
+        # it we'd race the pre-filter listbox.
+        #
+        # NOTE: an empty ``query`` against the autocomplete clears
+        # the filter (the seed page returns). A non-empty query that
+        # matches zero rows surfaces ``.MuiAutocomplete-noOptions``
+        # rather than any ``[role="option"]`` — wait on either so
+        # the empty-result path doesn't time out.
+        search_input.fill(query, timeout=timeout_ms)
+        from playwright.sync_api import TimeoutError as _PWTimeout
+        try:
+            page.wait_for_selector(
+                f'{_OPTION_SELECTOR}, .MuiAutocomplete-noOptions',
+                timeout=timeout_ms, state="visible",
+            )
+        except _PWTimeout:
+            # Best-effort: read whatever's there even if the wait
+            # didn't catch the listbox repopulating (the autocomplete
+            # can stay empty across a typed query when the source
+            # universe is empty — surface as ``[]`` rather than a
+            # raised timeout so the caller can assert on the empty
+            # set if that's the test contract).
+            pass
+    # Read both shapes (listbox + sheet_control_value-menu) so the
+    # SIMPLE variant's options + the SEARCH variant's narrowed
+    # options both come back through one code path.
+    labels = page.evaluate(
+        f"""() => Array.from(
+            document.querySelectorAll('{_OPTION_SELECTOR}')
+        ).map(o => o.innerText.trim())"""
+    )
+    page.keyboard.press("Escape")
+    return [
+        label for label in labels
+        if label and label not in ("Select all", "All")
+    ]
+
+
 def clear_dropdown(page: Page, control_title: str, timeout_ms: int) -> None:
     """Reset a FilterControl to its "all values" default.
 

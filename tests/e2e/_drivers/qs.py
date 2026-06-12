@@ -60,6 +60,7 @@ from recon_gen.common.browser.helpers import (
     get_sheet_tab_names,
     get_visual_titles,
     find_row_in_table_via_scroll,
+    narrow_dropdown_options_by_query,
     read_kpi_value,
     read_table_rows_dom,
     right_click_first_row_of_visual,
@@ -438,25 +439,23 @@ class QsEmbedDriver:
         )
 
     def typeahead_filter(self, label: str, query: str) -> list[str]:
-        # QS LinkedValues dropdowns have a native search box; typing
-        # there narrows the displayed options. The current QS helper
-        # (wait_for_dropdown_options_present) only reads the open
-        # popover — for a query-narrowed read we'd need to type into
-        # the popover's search input + re-read. Defer until the first
-        # browser test actually needs the QS leg of typeahead_filter
-        # (CR.x scope flagged: build verbs not skip — so when a test
-        # adds a typeahead_filter call on QS, implement here rather
-        # than skipping). Empty query just returns the seed-page set
-        # via filter_options.
+        # QS LinkedValues / search-enabled FilterControls render the
+        # MUI Autocomplete popover with a built-in search input.
+        # ``narrow_dropdown_options_by_query`` opens the popover,
+        # types ``query`` into whichever search-input variant is
+        # mounted (legacy ``sheet_control_search_results_dropdown-menu``
+        # input vs modern ``dropdown-search_search_input``), waits
+        # for the listbox to re-narrow, reads the option labels, and
+        # dismisses the popover. Mirrors App2's per-query Tom Select
+        # ``load(query)`` path — same renderer-agnostic contract.
+        #
+        # Empty query: keep the historical ``filter_options`` short-
+        # circuit (no popover-search dance needed; seed page IS the
+        # answer for the empty case).
         if not query:
             return self.filter_options(label)
-        raise NotImplementedError(
-            "QsEmbedDriver.typeahead_filter for non-empty query not "
-            "yet implemented — first test to need it should add the "
-            "type-into-popover-search wiring here (see App2Driver."
-            "typeahead_filter for the pattern). Per memory "
-            "feedback_build_verbs_not_skip: do NOT skip the QS leg; "
-            "implement when first needed."
+        return narrow_dropdown_options_by_query(
+            self._page, label, query, self._visual_timeout,
         )
 
     def wait_loaded(
