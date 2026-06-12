@@ -1427,6 +1427,106 @@ class NoRawTemporalArgsCheck(Check):
 
 
 # ---------------------------------------------------------------------------
+# Check: no-raw-str-args (BC.1 D9 SPIKE — REPORT-ONLY, NOT REGISTERED)
+# ---------------------------------------------------------------------------
+#
+# Sibling of no-raw-temporal-args. Flags function/method parameters
+# annotated as bare ``str`` (or ``str | None`` / ``Optional[str]``)
+# in ``src/recon_gen/**``. The full-corpus blast radius is 1364 hits
+# across 131 files (measured 2026-06-11 — see
+# ``docs/audits/no_raw_str_args_lint_spike_2026_06_11.md``); the spike
+# recommends shipping scoped to enum-shaped names only (~39 hits) as
+# BC.1 D9. This Check class exists in code but is NOT registered in
+# ``_build_checks()`` — only invoked by ``test_no_raw_str_args_blast_radius``
+# as a report-only measurement.
+#
+# To enable enforcement: register in ``_build_checks()`` with a
+# filtered ``files=`` list AND extend the visitor with an
+# ``_enum_shaped_names`` allowlist (see spike doc Option A).
+
+
+def _annotation_str_shape(ann: ast.AST | None) -> str | None:
+    """If ``ann`` is a bare-``str`` shape we'd flag, return a label;
+    else None.
+
+    Catches:
+    - ``str`` (bare Name)
+    - ``str | None`` (BinOp Union)
+    - ``Optional[str]`` (Subscript of Optional)
+    Does NOT catch ``list[str]`` / ``dict[str, X]`` / ``Mapping[str, X]``
+    — those are container shapes where the str is structural, not
+    policy-carrying.
+    """
+    if ann is None:
+        return None
+    if isinstance(ann, ast.Name) and ann.id == "str":
+        return "str"
+    if isinstance(ann, ast.BinOp) and isinstance(ann.op, ast.BitOr):
+        for side in (ann.left, ann.right):
+            sub = _annotation_str_shape(side)
+            if sub is not None:
+                return f"{sub} | None" if sub == "str" else sub
+        return None
+    if isinstance(ann, ast.Subscript):
+        outer = ann.value
+        if isinstance(outer, ast.Name) and outer.id == "Optional":
+            inner = _annotation_str_shape(ann.slice)
+            if inner is not None:
+                return "Optional[str]"
+    return None
+
+
+class _NoRawStrArgsVisitor(ast.NodeVisitor):
+    """Flag function/method parameters annotated bare ``str`` (or
+    ``str | None`` / ``Optional[str]``). ``self`` / ``cls`` skipped
+    defensively (they typically have no annotation)."""
+
+    def __init__(self, file: Path) -> None:
+        self.file = file
+        self.smells: list[Smell] = []
+
+    def _check_args(self, args: list[ast.arg]) -> None:
+        for arg in args:
+            if arg.arg in ("self", "cls"):
+                continue
+            shape = _annotation_str_shape(arg.annotation)
+            if shape is None:
+                continue
+            self.smells.append(Smell(
+                file=self.file,
+                lineno=arg.lineno,
+                checker="no-raw-str-args",
+                message=(
+                    f"parameter {arg.arg!r} typed as bare ``{shape}``; "
+                    f"wrap in a NewType (common/ids.py), Literal (closed "
+                    f"enum), or accept the suppression ``# typing-smell: "
+                    f"ignore[no-raw-str-args]: <reason>``. See "
+                    f"docs/audits/no_raw_str_args_lint_spike_2026_06_11.md "
+                    f"for the migration roadmap."
+                ),
+            ))
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._check_args(node.args.args)
+        self._check_args(node.args.kwonlyargs)
+        self._check_args(node.args.posonlyargs)
+        self.generic_visit(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._check_args(node.args.args)
+        self._check_args(node.args.kwonlyargs)
+        self._check_args(node.args.posonlyargs)
+        self.generic_visit(node)
+
+
+class NoRawStrArgsCheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        v = _NoRawStrArgsVisitor(file)
+        v.visit(tree)
+        return v.smells
+
+
+# ---------------------------------------------------------------------------
 # Check: no-dataset-registry-leak (BL.0.C)
 # ---------------------------------------------------------------------------
 #
@@ -3009,4 +3109,55 @@ def test_be_5_no_test_e2e_driver_internals_finds_planted_dup() -> None:
     assert "be_5_planted_driver.py" in smell.message, (
         f"BE.5 smoke: expected the message to name the driver-side "
         f"fixture as the migration target; got {smell.message!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Report-only blast-radius measurement (BC.1 D9 spike)
+# ---------------------------------------------------------------------------
+
+
+def test_no_raw_str_args_blast_radius() -> None:
+    """Report-only blast-radius measurement for the proposed
+    ``no-raw-str-args`` lint. Walks ``src/recon_gen/**`` and counts
+    hits; asserts only that the count stays below a generous ceiling
+    (2000) so a 10× regression would fire but the current 1364 hits
+    don't fail builds. See
+    ``docs/audits/no_raw_str_args_lint_spike_2026_06_11.md`` for the
+    migration roadmap + Option A/B/C tradeoff.
+
+    To flip from report-only to enforcement: register
+    ``NoRawStrArgsCheck`` in ``_build_checks()`` (with a filtered
+    ``files=`` list scoped to enum-shaped names per Option A), drop
+    this test, and bake the count gate into the existing
+    ``test_no_typing_smells`` runner.
+    """
+    src_root = REPO_ROOT / "src/recon_gen"
+    files = _expand_paths([src_root])
+    check = NoRawStrArgsCheck(
+        name="no-raw-str-args",
+        description="report-only blast-radius measurement",
+        files=files,
+    )
+    smells: list[Smell] = []
+    for file in files:
+        if "__pycache__" in file.parts:
+            continue
+        src = file.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        smells.extend(check.find_smells(src, tree, file))
+    # Generous ceiling — 10× headroom over 2026-06-11 measurement
+    # (1364). Below this is "no surprise"; above flags either a new
+    # huge file with bare str params or a visitor regression (the
+    # spike + planted fixture catches the latter).
+    ceiling = 2000
+    assert len(smells) <= ceiling, (
+        f"no-raw-str-args blast radius exceeded ceiling: got "
+        f"{len(smells)} hits, ceiling {ceiling}. Either a large new "
+        f"surface landed (re-measure + bump ceiling) or the visitor "
+        f"is over-flagging (compare to baseline 1364 from "
+        f"docs/audits/no_raw_str_args_lint_spike_2026_06_11.md)."
     )
