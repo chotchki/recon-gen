@@ -299,6 +299,14 @@ def default_scenario_for(
         ),
     )
 
+    # BK.6 / Backlog #35 (2026-06-11): plant LimitBreach on BOTH cust1
+    # AND cust2 so the L1 Limit Breach sheet's Account dropdown carries
+    # ≥2 distinct values. Without cust2 the inverse-picker test skips
+    # ("only 1 distinct value, can't invert"); ~6 L1 additive-picker
+    # skips on sasquatch_pr trace back to this single-account seed gap
+    # (docs/audits/qs_browser_skip_triage_2026_06_11.md bucket C).
+    # Different days_ago per customer (4 vs 8) keeps the planted rows
+    # visually distinct on the date axis.
     limit_breach_plants: tuple[LimitBreachPlant, ...] = ()
     if breach_picks is not None:
         ls, breach_rail, breach_counter = breach_picks
@@ -316,11 +324,22 @@ def default_scenario_for(
                 amount=breach_amount,
                 counter_account_id=breach_counter.id,
             ),
+            LimitBreachPlant(
+                account_id=cust2.account_id,
+                days_ago=8,
+                rail_name=breach_rail.name,
+                amount=breach_amount,
+                counter_account_id=breach_counter.id,
+            ),
         )
 
     # AB.1 — Inbound cap breach mirrors Outbound. Different days_ago
     # (3 vs 4) to keep the planted rows visually distinct on the L1
     # Limit Breach sheet's date axis.
+    # BK.6 / Backlog #35 — same cust1 + cust2 enrichment as the outbound
+    # side above so the Inbound branch of the L1 Limit Breach sheet
+    # also carries ≥2 distinct account_id values for inverse-picker
+    # coverage.
     inbound_cap_breach_plants: tuple[InboundCapBreachPlant, ...] = ()
     if inbound_breach_picks is not None:
         in_ls, in_rail, in_counter = inbound_breach_picks
@@ -329,6 +348,13 @@ def default_scenario_for(
             InboundCapBreachPlant(
                 account_id=cust1.account_id,
                 days_ago=3,
+                rail_name=in_rail.name,
+                amount=in_amount,
+                counter_account_id=in_counter.id,
+            ),
+            InboundCapBreachPlant(
+                account_id=cust2.account_id,
+                days_ago=7,
                 rail_name=in_rail.name,
                 amount=in_amount,
                 counter_account_id=in_counter.id,

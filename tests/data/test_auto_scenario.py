@@ -60,8 +60,12 @@ def test_auto_scenario_against_spec_example_covers_all_six_plant_kinds(
     assert len(sc.template_instances) == 2
     assert len(sc.drift_plants) == 1
     assert len(sc.overdraft_plants) == 1
-    assert len(sc.limit_breach_plants) == 1
-    assert len(sc.inbound_cap_breach_plants) == 1  # AB.1.5.spec
+    # BK.6 / Backlog #35 (2026-06-11) — Limit Breach plants now seed
+    # on BOTH cust1 + cust2 so the L1 Limit Breach sheet's Account
+    # dropdown carries ≥2 distinct values for inverse-picker coverage.
+    # Same for the AB.1 Inbound mirror below.
+    assert len(sc.limit_breach_plants) == 2
+    assert len(sc.inbound_cap_breach_plants) == 2  # AB.1.5.spec + BK.6
     assert len(sc.stuck_pending_plants) == 1
     assert len(sc.stuck_unbundled_plants) == 1
     assert len(sc.supersession_plants) == 1
