@@ -33,7 +33,14 @@ from recon_gen.common.l2 import (
     TwoLegRail,
     validate,
 )
-from recon_gen.common.l2.primitives import SCOPE_EXTERNAL, SCOPE_INTERNAL
+from recon_gen.common.l2.primitives import (
+    CREDIT,
+    DEBIT,
+    ORIGIN_EXTERNAL_FORCE_POSTED,
+    ORIGIN_INTERNAL_INITIATED,
+    SCOPE_EXTERNAL,
+    SCOPE_INTERNAL,
+)
 
 
 # -- Baseline ----------------------------------------------------------------
@@ -50,20 +57,20 @@ def _baseline_instance() -> L2Instance:
         accounts=(
             Account(
                 id=Identifier("gl-control"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
                 name=Name("Control Account"),
                 role=Identifier("ControlAccount"),
             ),
             Account(
                 id=Identifier("ext-counter"),
-                scope="external",
+                scope=SCOPE_EXTERNAL,
                 role=Identifier("ExternalCounterparty"),
             ),
         ),
         account_templates=(
             AccountTemplate(
                 role=Identifier("CustomerSubledger"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
                 parent_role=Identifier("ControlAccount"),
             ),
         ),
@@ -71,7 +78,7 @@ def _baseline_instance() -> L2Instance:
             # Standalone two-leg with expected_net (S1).
             TwoLegRail(
                 name=Identifier("ExtInbound"),
-                origin="ExternalForcePosted",
+                origin=ORIGIN_EXTERNAL_FORCE_POSTED,
                 metadata_keys=(Identifier("external_reference"),),
                 source_role=(Identifier("ExternalCounterparty"),),
                 destination_role=(Identifier("ControlAccount"),),
@@ -80,18 +87,18 @@ def _baseline_instance() -> L2Instance:
             # Single-leg, reconciled by the TransferTemplate below (S3).
             SingleLegRail(
                 name=Identifier("SubledgerCharge"),
-                origin="InternalInitiated",
+                origin=ORIGIN_INTERNAL_INITIATED,
                 metadata_keys=(
                     Identifier("merchant_id"),
                     Identifier("settlement_period"),
                 ),
                 leg_role=(Identifier("CustomerSubledger"),),
-                leg_direction="Debit",
+                leg_direction=DEBIT,
             ),
             # Aggregating rail (two-leg) with cadence + bundles_activity (S5).
             TwoLegRail(
                 name=Identifier("PoolBalancing"),
-                origin="InternalInitiated",
+                origin=ORIGIN_INTERNAL_INITIATED,
                 metadata_keys=(),
                 source_role=(Identifier("ControlAccount"),),
                 destination_role=(Identifier("ControlAccount"),),
@@ -150,7 +157,7 @@ def test_u2_duplicate_account_template_role_rejected() -> None:
     inst = _baseline_instance()
     dup = AccountTemplate(
         role=inst.account_templates[0].role,
-        scope="internal",
+        scope=SCOPE_INTERNAL,
         parent_role=Identifier("ControlAccount"),
     )
     bad = _replace(inst, account_templates=(*inst.account_templates, dup))
@@ -198,7 +205,7 @@ def test_u7_template_id_collides_with_singleton_rejected() -> None:
     inst = _baseline_instance()
     colliding_singleton = Account(
         id=Identifier("cust-001"),  # what the fallback renders for n=1
-        scope="internal",
+        scope=SCOPE_INTERNAL,
         name=Name("Customer Number One"),
         role=Identifier("CustomerSubledger"),
         parent_role=Identifier("ControlAccount"),
@@ -245,7 +252,7 @@ def test_r3_account_template_parent_role_must_be_singleton() -> None:
     # Add another template; first template references the second (NOT a singleton).
     second_template = AccountTemplate(
         role=Identifier("MerchantLedger"),
-        scope="internal",
+        scope=SCOPE_INTERNAL,
         parent_role=Identifier("ControlAccount"),
     )
     bad_template = dataclasses.replace(
@@ -330,7 +337,7 @@ def test_c1_at_most_one_variable_leg_per_template() -> None:
     # settlement_period.
     second_var = SingleLegRail(
         name=Identifier("SettlementCloseB"),
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         metadata_keys=(
             Identifier("merchant_id"),
             Identifier("settlement_period"),
@@ -386,7 +393,7 @@ def test_s2_template_leg_must_not_have_expected_net() -> None:
     # fields appear in every leg_rail's metadata_keys.
     closing = TwoLegRail(
         name=Identifier("ClosingLeg"),
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         metadata_keys=(
             Identifier("merchant_id"),
             Identifier("settlement_period"),
@@ -421,10 +428,10 @@ def test_s3_aggregating_single_leg_exempt_from_reconciliation() -> None:
     inst = _baseline_instance()
     sweep = SingleLegRail(
         name=Identifier("DailySweepToExternal"),
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         metadata_keys=(),
         leg_role=(Identifier("ExternalCounterparty"),),
-        leg_direction="Credit",
+        leg_direction=CREDIT,
         aggregating=True,
         bundles_activity=(Identifier("ExtInbound"),),
         cadence="daily-eod",
@@ -441,10 +448,10 @@ def test_s3_unreconciled_single_leg_rejected() -> None:
     # aggregating bundles_activity.
     orphan = SingleLegRail(
         name=Identifier("OrphanLeg"),
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         metadata_keys=(),
         leg_role=(Identifier("ControlAccount"),),
-        leg_direction="Debit",
+        leg_direction=DEBIT,
     )
     bad = _replace(inst, rails=(*inst.rails, orphan))
     with pytest.raises(
@@ -683,7 +690,7 @@ def test_r7_template_leg_rails_must_be_non_aggregating() -> None:
     # Add an aggregating rail and reference it from the template's leg_rails.
     agg = SingleLegRail(
         name=Identifier("AggLeg"),
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         metadata_keys=(),
         leg_role=(Identifier("ControlAccount"),),
         leg_direction="Variable",
@@ -822,7 +829,7 @@ def test_o1_two_leg_rail_one_override_no_fallback_rejected() -> None:
     bad_rail = dataclasses.replace(
         inst.rails[0],
         origin=None,
-        source_origin="ExternalForcePosted",
+        source_origin=ORIGIN_EXTERNAL_FORCE_POSTED,
         # destination_origin still None; rail-level origin still None
     )
     bad = _replace(inst, rails=(bad_rail, *inst.rails[1:]))
@@ -838,8 +845,8 @@ def test_o1_two_leg_rail_one_override_plus_rail_origin_accepted() -> None:
     inst = _baseline_instance()
     ok_rail = dataclasses.replace(
         inst.rails[0],
-        origin="InternalInitiated",  # fallback
-        source_origin="ExternalForcePosted",  # override on source
+        origin=ORIGIN_INTERNAL_INITIATED,  # fallback
+        source_origin=ORIGIN_EXTERNAL_FORCE_POSTED,  # override on source
         # destination falls back to rail-level "InternalInitiated"
     )
     ok = _replace(inst, rails=(ok_rail, *inst.rails[1:]))
@@ -852,8 +859,8 @@ def test_o1_two_leg_rail_both_per_leg_overrides_accepted() -> None:
     ok_rail = dataclasses.replace(
         inst.rails[0],
         origin=None,
-        source_origin="ExternalForcePosted",
-        destination_origin="InternalInitiated",
+        source_origin=ORIGIN_EXTERNAL_FORCE_POSTED,
+        destination_origin=ORIGIN_INTERNAL_INITIATED,
     )
     ok = _replace(inst, rails=(ok_rail, *inst.rails[1:]))
     validate(ok)
@@ -1008,7 +1015,7 @@ def test_c3_variable_single_leg_not_in_any_template_rejected() -> None:
     # in any TransferTemplate.leg_rails — should trip C3.
     var_rail = SingleLegRail(
         name=Identifier("OrphanVariable"),
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         metadata_keys=(),
         leg_role=(Identifier("CustomerSubledger"),),
         leg_direction="Variable",
@@ -1110,21 +1117,21 @@ def _xor_baseline_instance() -> L2Instance:
     extra_rails = (
         SingleLegRail(
             name=Identifier("VarAuto"),
-            origin="InternalInitiated",
+            origin=ORIGIN_INTERNAL_INITIATED,
             metadata_keys=(Identifier("cycle_id"),),
             leg_role=(Identifier("CustomerSubledger"),),
             leg_direction="Variable",
         ),
         SingleLegRail(
             name=Identifier("VarStandard"),
-            origin="InternalInitiated",
+            origin=ORIGIN_INTERNAL_INITIATED,
             metadata_keys=(Identifier("cycle_id"),),
             leg_role=(Identifier("CustomerSubledger"),),
             leg_direction="Variable",
         ),
         SingleLegRail(
             name=Identifier("VarSlow"),
-            origin="InternalInitiated",
+            origin=ORIGIN_INTERNAL_INITIATED,
             metadata_keys=(Identifier("cycle_id"),),
             leg_role=(Identifier("CustomerSubledger"),),
             leg_direction="Variable",
@@ -1184,10 +1191,10 @@ def test_c1b_xor_member_non_variable_rail_rejected() -> None:
     inst = _xor_baseline_instance()
     debit_rail = SingleLegRail(
         name=Identifier("VarDebitOnly"),
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         metadata_keys=(Identifier("cycle_id"),),
         leg_role=(Identifier("CustomerSubledger"),),
-        leg_direction="Debit",
+        leg_direction=DEBIT,
     )
     # All 3 Variables + 1 Debit in leg_rails; group spans 2 Variables
     # + the Debit → C1b on the Debit; VarSlow non-grouped (legal C1).
@@ -1543,7 +1550,7 @@ def test_business_day_offset_rejected_on_external_account_template() -> None:
     # Add an external template + flip it to carry an offset.
     bad_tmpl = AccountTemplate(
         role=Identifier("ExternalMerchant"),
-        scope="external",
+        scope=SCOPE_EXTERNAL,
         business_day_offset=9,
     )
     bad = _replace(

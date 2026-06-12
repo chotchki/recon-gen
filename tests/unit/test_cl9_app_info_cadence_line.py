@@ -12,10 +12,14 @@ from decimal import Decimal
 from recon_gen.common.l2.primitives import (
     Account,
     AccountTemplate,
+    DEBIT,
     Identifier,
     L2Instance,
     Money,
     Name,
+    ORIGIN_INTERNAL_INITIATED,
+    SCOPE_EXTERNAL,
+    SCOPE_INTERNAL,
     SingleLegRail,
     TransferTemplate,
 )
@@ -33,10 +37,10 @@ def _l2(
         rails=(
             SingleLegRail(
                 name=Identifier("R"),
-                origin="InternalInitiated",
+                origin=ORIGIN_INTERNAL_INITIATED,
                 metadata_keys=(Identifier("k"),),
                 leg_role=(Identifier("X"),),
-                leg_direction="Debit",
+                leg_direction=DEBIT,
             ),
         ),
         transfer_templates=(
@@ -60,7 +64,7 @@ def test_singleton_explicit_daily_counted() -> None:
     inst = _l2(accounts=(
         Account(
             id=Identifier("a"), role=Identifier("R"),
-            scope="internal", name=Name("A"),
+            scope=SCOPE_INTERNAL, name=Name("A"),
             balance_cadence="explicit_daily",
         ),
     ))
@@ -73,7 +77,7 @@ def test_none_defaults_to_sparse() -> None:
     inst = _l2(accounts=(
         Account(
             id=Identifier("a"), role=Identifier("R"),
-            scope="internal", name=Name("A"),
+            scope=SCOPE_INTERNAL, name=Name("A"),
             balance_cadence=None,
         ),
     ))
@@ -86,7 +90,7 @@ def test_external_scope_excluded() -> None:
     inst = _l2(accounts=(
         Account(
             id=Identifier("ext"), role=Identifier("ExtR"),
-            scope="external", name=Name("Ext"),
+            scope=SCOPE_EXTERNAL, name=Name("Ext"),
             balance_cadence="explicit_daily",
         ),
     ))
@@ -99,7 +103,7 @@ def test_template_counted_once_not_per_instance() -> None:
     inst = _l2(templates=(
         AccountTemplate(
             role=Identifier("CustomerSubledger"),
-            scope="internal",
+            scope=SCOPE_INTERNAL,
             balance_cadence="explicit_daily",
         ),
     ))
@@ -111,27 +115,27 @@ def test_mixed_singletons_and_templates() -> None:
         accounts=(
             Account(
                 id=Identifier("a1"), role=Identifier("R1"),
-                scope="internal", name=Name("A1"),
+                scope=SCOPE_INTERNAL, name=Name("A1"),
                 balance_cadence="explicit_daily",
             ),
             Account(
                 id=Identifier("a2"), role=Identifier("R2"),
-                scope="internal", name=Name("A2"),
+                scope=SCOPE_INTERNAL, name=Name("A2"),
                 balance_cadence="sparse",
             ),
             Account(
                 id=Identifier("a3"), role=Identifier("R3"),
-                scope="internal", name=Name("A3"),
+                scope=SCOPE_INTERNAL, name=Name("A3"),
                 balance_cadence=None,
             ),
         ),
         templates=(
             AccountTemplate(
-                role=Identifier("T1"), scope="internal",
+                role=Identifier("T1"), scope=SCOPE_INTERNAL,
                 balance_cadence="explicit_daily",
             ),
             AccountTemplate(
-                role=Identifier("T2"), scope="internal",
+                role=Identifier("T2"), scope=SCOPE_INTERNAL,
                 balance_cadence="sparse",
             ),
         ),

@@ -12,7 +12,13 @@ from datetime import date
 from decimal import Decimal
 
 from recon_gen.common.l2.auto_scenario import filter_scenario_plants
-from recon_gen.common.l2.primitives import Identifier, Name
+from recon_gen.common.l2.primitives import (
+    CREDIT,
+    Identifier,
+    Name,
+    ORIGIN_INTERNAL_INITIATED,
+    SCOPE_INTERNAL,
+)
 from recon_gen.common.l2.seed import (
     DriftPlant,
     FailedTransactionPlant,
@@ -369,22 +375,22 @@ def test_pick_multi_xor_chain_inputs_skips_per_child_fan_in_entries() -> None:
         name=Identifier("Trigger"),
         metadata_keys=(),
         leg_role=Identifier("ParentRole"),
-        leg_direction="Credit",
-        origin="InternalInitiated",
+        leg_direction=CREDIT,
+        origin=ORIGIN_INTERNAL_INITIATED,
     )
     a_rail = SingleLegRail(
         name=Identifier("ChildA"),
         metadata_keys=(),
         leg_role=Identifier("ParentRole"),
-        leg_direction="Credit",
-        origin="InternalInitiated",
+        leg_direction=CREDIT,
+        origin=ORIGIN_INTERNAL_INITIATED,
     )
     b_rail = SingleLegRail(
         name=Identifier("ChildB"),
         metadata_keys=(),
         leg_role=Identifier("ParentRole"),
-        leg_direction="Credit",
-        origin="InternalInitiated",
+        leg_direction=CREDIT,
+        origin=ORIGIN_INTERNAL_INITIATED,
     )
     fan_in_tpl = TransferTemplate(
         name=Identifier("FanInChild"),
@@ -398,7 +404,7 @@ def test_pick_multi_xor_chain_inputs_skips_per_child_fan_in_entries() -> None:
             Account(
                 id=Identifier("acct"),
                 role=Identifier("ParentRole"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
                 name=Name("Parent Account"),
             ),
         ),
@@ -450,20 +456,20 @@ def test_pick_multi_xor_chain_inputs_returns_none_for_singleton_chain() -> None:
         name=Identifier("P"),
         metadata_keys=(),
         leg_role=Identifier("R"),
-        leg_direction="Credit",
-        origin="InternalInitiated",
+        leg_direction=CREDIT,
+        origin=ORIGIN_INTERNAL_INITIATED,
     )
     rail_c = SingleLegRail(
         name=Identifier("C"),
         metadata_keys=(),
         leg_role=Identifier("R"),
-        leg_direction="Credit",
-        origin="InternalInitiated",
+        leg_direction=CREDIT,
+        origin=ORIGIN_INTERNAL_INITIATED,
     )
     inst = L2Instance(
         accounts=(
             Account(
-                id=Identifier("a"), role=Identifier("R"), scope="internal",
+                id=Identifier("a"), role=Identifier("R"), scope=SCOPE_INTERNAL,
                 name=Name("Acct"),
             ),
         ),

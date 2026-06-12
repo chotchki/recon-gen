@@ -38,6 +38,8 @@ from recon_gen.common.l2.primitives import (
     L2Instance,
     Money,
     Name,
+    ORIGIN_INTERNAL_INITIATED,
+    SCOPE_INTERNAL,
     SingleLegRail,
     TransferTemplate,
 )
@@ -50,7 +52,7 @@ def _single_leg(
 ) -> SingleLegRail:
     return SingleLegRail(
         name=Identifier(name),
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         metadata_keys=(Identifier("k"),),
         leg_role=(Identifier("R"),),
         leg_direction=direction,
@@ -77,12 +79,12 @@ def _l2_with_chain(
             Account(
                 id=Identifier("a1"),
                 role=Identifier("R"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
                 name=Name("Acct1"),
             ),
         ),
         account_templates=(
-            AccountTemplate(role=Identifier("R"), scope="internal"),
+            AccountTemplate(role=Identifier("R"), scope=SCOPE_INTERNAL),
         ),
         rails=extra_rails,
         transfer_templates=extra_templates,

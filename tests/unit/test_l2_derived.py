@@ -26,7 +26,10 @@ from recon_gen.common.l2 import (
     TwoLegRail,
     posted_requirements_for,
 )
-from recon_gen.common.l2.primitives import Rail
+from recon_gen.common.l2.primitives import (
+    Rail,
+    SCOPE_INTERNAL,
+)
 
 
 def _make_instance(
@@ -38,8 +41,8 @@ def _make_instance(
     """Minimal L2Instance for isolating one derivation source at a time."""
     return L2Instance(
         accounts=(
-            Account(id=Identifier("a"), scope="internal", role=Identifier("A")),
-            Account(id=Identifier("b"), scope="internal", role=Identifier("B")),
+            Account(id=Identifier("a"), scope=SCOPE_INTERNAL, role=Identifier("A")),
+            Account(id=Identifier("b"), scope=SCOPE_INTERNAL, role=Identifier("B")),
         ),
         account_templates=(),
         rails=rails,

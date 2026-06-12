@@ -43,6 +43,10 @@ from recon_gen.common.l2.probe import (
 )
 from recon_gen.common.sql.dialect import Dialect
 from tests._test_helpers import make_test_config
+from recon_gen.common.l2.primitives import (
+    CREDIT,
+    ORIGIN_INTERNAL_INITIATED,
+)
 
 
 # -- Fetcher fixture ---------------------------------------------------------
@@ -376,8 +380,8 @@ def _make_l2_instance_with_templates() -> L2Instance:
                 name=Identifier("ach_credit"),
                 metadata_keys=(Identifier("trace_id"),),
                 leg_role=(Identifier("CustomerLedger"),),
-                leg_direction="Credit",
-                origin="InternalInitiated",
+                leg_direction=CREDIT,
+                origin=ORIGIN_INTERNAL_INITIATED,
             ),
         ),
         transfer_templates=(

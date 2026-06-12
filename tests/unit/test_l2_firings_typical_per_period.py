@@ -28,6 +28,9 @@ from recon_gen.common.l2.primitives import (
     L2Instance,
     Money,
     Name,
+    ORIGIN_INTERNAL_INITIATED,
+    SCOPE_EXTERNAL,
+    SCOPE_INTERNAL,
     SingleLegRail,
     TransferTemplate,
     TwoLegRail,
@@ -140,7 +143,7 @@ def _single_leg(
 ) -> SingleLegRail:
     return SingleLegRail(
         name=Identifier(name),
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         metadata_keys=(Identifier("k"),),
         leg_role=(Identifier("R"),),
         leg_direction=direction,
@@ -154,10 +157,10 @@ def _instance_with_rail(rail: SingleLegRail) -> L2Instance:
         accounts=(
             Account(
                 id=Identifier("a1"), role=Identifier("R"),
-                scope="internal", name=Name("A1"),
+                scope=SCOPE_INTERNAL, name=Name("A1"),
             ),
         ),
-        account_templates=(AccountTemplate(role=Identifier("R"), scope="internal"),),
+        account_templates=(AccountTemplate(role=Identifier("R"), scope=SCOPE_INTERNAL),),
         rails=(rail,),
         transfer_templates=(),
         chains=(),
@@ -221,10 +224,10 @@ def test_validator_template_w1a_min_gt_max_rejected() -> None:
         accounts=(
             Account(
                 id=Identifier("a1"), role=Identifier("R"),
-                scope="internal", name=Name("A1"),
+                scope=SCOPE_INTERNAL, name=Name("A1"),
             ),
         ),
-        account_templates=(AccountTemplate(role=Identifier("R"), scope="internal"),),
+        account_templates=(AccountTemplate(role=Identifier("R"), scope=SCOPE_INTERNAL),),
         rails=(_single_leg("R1"),),
         transfer_templates=(tmpl,),
         chains=(),
@@ -305,15 +308,15 @@ def _rail_count_l2(ftp: FiringsTypicalPerPeriod | None) -> L2Instance:
         accounts=(
             Account(
                 id=Identifier("src"), role=Identifier("SRC"),
-                scope="internal", name=Name("Src"),
+                scope=SCOPE_INTERNAL, name=Name("Src"),
             ),
             Account(
                 id=Identifier("dst"), role=Identifier("DST"),
-                scope="external", name=Name("Dst"),
+                scope=SCOPE_EXTERNAL, name=Name("Dst"),
             ),
         ),
         account_templates=(
-            AccountTemplate(role=Identifier("SRC"), scope="internal"),
+            AccountTemplate(role=Identifier("SRC"), scope=SCOPE_INTERNAL),
         ),
         rails=(
             TwoLegRail(
@@ -321,7 +324,7 @@ def _rail_count_l2(ftp: FiringsTypicalPerPeriod | None) -> L2Instance:
                 metadata_keys=(Identifier("k"),),
                 source_role=(Identifier("SRC"),),
                 destination_role=(Identifier("DST"),),
-                origin="InternalInitiated",
+                origin=ORIGIN_INTERNAL_INITIATED,
                 firings_typical_per_period=ftp,
             ),
         ),

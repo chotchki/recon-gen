@@ -16,8 +16,10 @@ import random
 from decimal import Decimal
 
 from recon_gen.common.l2.primitives import (
+    DEBIT,
     Identifier,
     Money,
+    ORIGIN_INTERNAL_INITIATED,
     SingleLegRail,
 )
 from recon_gen.common.l2.seed import _baseline_amount_sample
@@ -28,8 +30,8 @@ def _rail_with_range(lo: str, hi: str) -> SingleLegRail:
         name=Identifier("RailA"),
         metadata_keys=(),
         leg_role=(Identifier("R"),),
-        leg_direction="Debit",
-        origin="InternalInitiated",
+        leg_direction=DEBIT,
+        origin=ORIGIN_INTERNAL_INITIATED,
         amount_typical_range=(Money(Decimal(lo)), Money(Decimal(hi))),
     )
 
@@ -103,8 +105,8 @@ def test_amount_picker_falls_back_to_lognormal_when_no_range() -> None:
         name=Identifier("RailNoRange"),
         metadata_keys=(),
         leg_role=(Identifier("R"),),
-        leg_direction="Debit",
-        origin="InternalInitiated",
+        leg_direction=DEBIT,
+        origin=ORIGIN_INTERNAL_INITIATED,
     )
     rng = random.Random(42)
     amount = _baseline_amount_sample(rng, "internal_transfer", rail=rail)

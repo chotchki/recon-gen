@@ -49,6 +49,13 @@ from recon_gen.common.l2 import (
     validate,
 )
 from recon_gen.common.l2.validate import validator_glossary_anchor_for
+from recon_gen.common.l2.primitives import (
+    DEBIT,
+    ORIGIN_EXTERNAL_FORCE_POSTED,
+    ORIGIN_INTERNAL_INITIATED,
+    SCOPE_EXTERNAL,
+    SCOPE_INTERNAL,
+)
 
 
 # -- 1. Structured error shape -----------------------------------------------
@@ -80,13 +87,13 @@ def _baseline() -> L2Instance:
         accounts=(
             Account(
                 id=Identifier("gl-1010-cash-due-frb"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
                 name=Name("Cash Due FRB"),
                 role=Identifier("CashDueFRB"),
             ),
             Account(
                 id=Identifier("ext-counter"),
-                scope="external",
+                scope=SCOPE_EXTERNAL,
                 role=Identifier("ExtCounterparty"),
             ),
         ),
@@ -94,7 +101,7 @@ def _baseline() -> L2Instance:
         rails=(
             TwoLegRail(
                 name=Identifier("WireOutbound"),
-                origin="ExternalForcePosted",
+                origin=ORIGIN_EXTERNAL_FORCE_POSTED,
                 metadata_keys=(Identifier("imad"),),
                 source_role=(Identifier("CashDueFRB"),),
                 destination_role=(Identifier("ExtCounterparty"),),
@@ -153,10 +160,10 @@ def test_s3_message_says_nothing_to_reconcile() -> None:
     """S3: unreconciled single-leg rail uses the plain-language phrase."""
     orphan = SingleLegRail(
         name=Identifier("OrphanDDADebit"),
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         metadata_keys=(),
         leg_role=(Identifier("CashDueFRB"),),
-        leg_direction="Debit",
+        leg_direction=DEBIT,
     )
     inst = _baseline()
     bad = dataclasses.replace(inst, rails=(*inst.rails, orphan))

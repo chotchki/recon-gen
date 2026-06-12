@@ -27,7 +27,12 @@ from recon_gen.common.l2 import (
     TwoLegRail,
     load_instance,
 )
-from recon_gen.common.l2.primitives import DEBIT, SCOPE_EXTERNAL, SCOPE_INTERNAL
+from recon_gen.common.l2.primitives import (
+    DEBIT,
+    ORIGIN_INTERNAL_INITIATED,
+    SCOPE_EXTERNAL,
+    SCOPE_INTERNAL,
+)
 from recon_gen.common.l2.topology import (
     TopologyEdge,
     TopologyGraph,
@@ -50,7 +55,7 @@ def _make_two_leg(
         metadata_keys=(),
         source_role=(Identifier(src),),
         destination_role=(Identifier(dst),),
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         expected_net=Decimal("0"),
     )
 
@@ -63,19 +68,19 @@ def _kitchen_instance() -> L2Instance:
                 id=Identifier("acc-internal"),
                 name=Name("Internal Account"),
                 role=Identifier("InternalRole"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
             ),
             Account(
                 id=Identifier("acc-external"),
                 name=Name("External Account"),
                 role=Identifier("ExternalRole"),
-                scope="external",
+                scope=SCOPE_EXTERNAL,
             ),
         ),
         account_templates=(
             AccountTemplate(
                 role=Identifier("CustomerSubledger"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
                 parent_role=Identifier("InternalRole"),
             ),
         ),
@@ -88,8 +93,8 @@ def _kitchen_instance() -> L2Instance:
                 name=Identifier("FeeCharge"),
                 metadata_keys=(),
                 leg_role=(Identifier("CustomerSubledger"),),
-                leg_direction="Debit",
-                origin="InternalInitiated",
+                leg_direction=DEBIT,
+                origin=ORIGIN_INTERNAL_INITIATED,
             ),
         ),
         transfer_templates=(
@@ -176,8 +181,8 @@ def test_topology_graph_bundle_edge_collapses_parallel_rails() -> None:
     )
     inst = L2Instance(
         accounts=(
-            Account(id=Identifier("a"), role=Identifier("X"), scope="internal"),
-            Account(id=Identifier("b"), role=Identifier("Y"), scope="internal"),
+            Account(id=Identifier("a"), role=Identifier("X"), scope=SCOPE_INTERNAL),
+            Account(id=Identifier("b"), role=Identifier("Y"), scope=SCOPE_INTERNAL),
         ),
         account_templates=(),
         rails=rails,
@@ -251,9 +256,9 @@ def test_topology_graph_chain_edge_carries_required_metadata() -> None:
 def test_topology_graph_chain_edge_carries_xor_group_metadata() -> None:
     inst = L2Instance(
         accounts=(
-            Account(id=Identifier("a"), role=Identifier("X"), scope="internal"),
-            Account(id=Identifier("b"), role=Identifier("Y"), scope="internal"),
-            Account(id=Identifier("c"), role=Identifier("Z"), scope="internal"),
+            Account(id=Identifier("a"), role=Identifier("X"), scope=SCOPE_INTERNAL),
+            Account(id=Identifier("b"), role=Identifier("Y"), scope=SCOPE_INTERNAL),
+            Account(id=Identifier("c"), role=Identifier("Z"), scope=SCOPE_INTERNAL),
         ),
         account_templates=(),
         rails=(
@@ -292,8 +297,8 @@ def test_topology_graph_template_member_edge_carries_xor_group_metadata() -> Non
     """
     inst = L2Instance(
         accounts=(
-            Account(id=Identifier("a"), role=Identifier("X"), scope="internal"),
-            Account(id=Identifier("b"), role=Identifier("Y"), scope="internal"),
+            Account(id=Identifier("a"), role=Identifier("X"), scope=SCOPE_INTERNAL),
+            Account(id=Identifier("b"), role=Identifier("Y"), scope=SCOPE_INTERNAL),
         ),
         account_templates=(),
         rails=(
@@ -302,21 +307,21 @@ def test_topology_graph_template_member_edge_carries_xor_group_metadata() -> Non
                 metadata_keys=(),
                 leg_role=(Identifier("X"),),
                 leg_direction="Variable",
-                origin="InternalInitiated",
+                origin=ORIGIN_INTERNAL_INITIATED,
             ),
             SingleLegRail(
                 name=Identifier("Standard"),
                 metadata_keys=(),
                 leg_role=(Identifier("X"),),
                 leg_direction="Variable",
-                origin="InternalInitiated",
+                origin=ORIGIN_INTERNAL_INITIATED,
             ),
             SingleLegRail(
                 name=Identifier("Slow"),
                 metadata_keys=(),
                 leg_role=(Identifier("X"),),
                 leg_direction="Variable",
-                origin="InternalInitiated",
+                origin=ORIGIN_INTERNAL_INITIATED,
             ),
         ),
         transfer_templates=(
@@ -398,8 +403,8 @@ def test_topology_graph_chain_edge_carries_fan_in_metadata() -> None:
     """
     inst = L2Instance(
         accounts=(
-            Account(id=Identifier("a"), role=Identifier("X"), scope="internal"),
-            Account(id=Identifier("b"), role=Identifier("Y"), scope="internal"),
+            Account(id=Identifier("a"), role=Identifier("X"), scope=SCOPE_INTERNAL),
+            Account(id=Identifier("b"), role=Identifier("Y"), scope=SCOPE_INTERNAL),
         ),
         account_templates=(),
         rails=(
@@ -506,7 +511,7 @@ def test_topology_graphviz_per_rail_hide_singleleg_drops_standalone_single_legs(
             Account(
                 id=Identifier("acct-int"),
                 role=Identifier("Internal"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
             ),
         ),
         account_templates=(),
@@ -514,8 +519,8 @@ def test_topology_graphviz_per_rail_hide_singleleg_drops_standalone_single_legs(
             SingleLegRail(
                 name=Identifier("Standalone1L"),
                 leg_role=(Identifier("Internal"),),
-                leg_direction="Debit",
-                origin="InternalInitiated",
+                leg_direction=DEBIT,
+                origin=ORIGIN_INTERNAL_INITIATED,
                 metadata_keys=(),
             ),
         ),
@@ -671,7 +676,7 @@ def test_build_role_carriers_orphan_role_emits_empty_list() -> None:
             Account(
                 id=Identifier("acct-int"),
                 role=Identifier("Declared"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
             ),
         ),
         account_templates=(),
@@ -679,8 +684,8 @@ def test_build_role_carriers_orphan_role_emits_empty_list() -> None:
             SingleLegRail(
                 name=Identifier("RailToOrphan"),
                 leg_role=(Identifier("OrphanRole"),),
-                leg_direction="Debit",
-                origin="InternalInitiated",
+                leg_direction=DEBIT,
+                origin=ORIGIN_INTERNAL_INITIATED,
                 metadata_keys=(),
             ),
         ),
@@ -713,17 +718,17 @@ def test_build_role_carriers_sort_order_deterministic() -> None:
             Account(
                 id=Identifier("cust-zeta"),
                 role=Identifier("SharedRole"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
             ),
             Account(
                 id=Identifier("cust-alpha"),
                 role=Identifier("SharedRole"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
             ),
             Account(
                 id=Identifier("cust-mid"),
                 role=Identifier("SharedRole"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
             ),
         ),
         account_templates=(),

@@ -26,6 +26,10 @@ from recon_gen.common.l2 import (
     emit_schema,
     refresh_matviews_sql,
 )
+from recon_gen.common.l2.primitives import (
+    CREDIT,
+    ORIGIN_INTERNAL_INITIATED,
+)
 
 
 def _strip_comments(sql: str) -> str:
@@ -782,8 +786,8 @@ def _instance_with_pending_age(prefix: str) -> L2Instance:
                 name=Identifier("ach-credit"),
                 metadata_keys=(),
                 leg_role="DDAControl",
-                leg_direction="Credit",
-                origin="InternalInitiated",
+                leg_direction=CREDIT,
+                origin=ORIGIN_INTERNAL_INITIATED,
                 max_pending_age=timedelta(hours=24),
             ),
         ),
@@ -881,8 +885,8 @@ def _instance_with_unbundled_age(prefix: str) -> L2Instance:
                 name=Identifier("ach-orig"),
                 metadata_keys=(),
                 leg_role="DDAControl",
-                leg_direction="Credit",
-                origin="InternalInitiated",
+                leg_direction=CREDIT,
+                origin=ORIGIN_INTERNAL_INITIATED,
                 max_unbundled_age=timedelta(days=1),
             ),
         ),

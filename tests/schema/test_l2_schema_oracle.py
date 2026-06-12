@@ -32,6 +32,7 @@ from recon_gen.common.l2 import (
     refresh_matviews_sql,
 )
 from recon_gen.common.l2.primitives import (
+    DEBIT,
     LimitSchedule,
     SingleLegRail,
 )
@@ -62,7 +63,7 @@ def _full_instance(prefix: str) -> L2Instance:
                 description="Settlement rail with aging",
                 metadata_keys=(),
                 leg_role=(Identifier("gl_control"),),
-                leg_direction="Debit",
+                leg_direction=DEBIT,
                 posted_requirements=(),
                 max_pending_age=timedelta(days=1),
                 max_unbundled_age=timedelta(days=2),

@@ -39,6 +39,10 @@ _PREFIX = "triage_test"
 
 
 from collections.abc import Sequence
+from recon_gen.common.l2.primitives import (
+    CREDIT,
+    ORIGIN_INTERNAL_INITIATED,
+)
 
 SeedRow = tuple[
     str, str | None, str | None, str | None, str | None,
@@ -176,7 +180,7 @@ def test_detect_gaps_skips_known_rail_name(pool_factory: PoolFactory) -> None:
             metadata_keys=(),
             source_role=(Identifier("A"),),
             destination_role=(Identifier("B"),),
-            origin="InternalInitiated",
+            origin=ORIGIN_INTERNAL_INITIATED,
             expected_net=Decimal("0"),
         ),),
         transfer_templates=(), chains=(), limit_schedules=(),
@@ -203,13 +207,13 @@ def test_detect_gaps_unmatched_rail_lists_declared_rails_in_extras(
                 name=Identifier("ach_credit"), metadata_keys=(),
                 source_role=(Identifier("A"),),
                 destination_role=(Identifier("B"),),
-                origin="InternalInitiated", expected_net=Decimal("0"),
+                origin=ORIGIN_INTERNAL_INITIATED, expected_net=Decimal("0"),
             ),
             TwoLegRail(
                 name=Identifier("wire"), metadata_keys=(),
                 source_role=(Identifier("A"),),
                 destination_role=(Identifier("B"),),
-                origin="InternalInitiated", expected_net=Decimal("0"),
+                origin=ORIGIN_INTERNAL_INITIATED, expected_net=Decimal("0"),
             ),
         ),
         transfer_templates=(), chains=(), limit_schedules=(),
@@ -325,8 +329,8 @@ def test_detect_gaps_finds_missing_required_metadata_key(pool_factory: PoolFacto
         rails=(SingleLegRail(
             name=Identifier("leg"), metadata_keys=(),
             leg_role=(Identifier("C"),),
-            leg_direction="Credit",
-            origin="InternalInitiated",
+            leg_direction=CREDIT,
+            origin=ORIGIN_INTERNAL_INITIATED,
         ),),
         transfer_templates=(TransferTemplate(
             name=Identifier("T"),
@@ -362,8 +366,8 @@ def test_detect_gaps_no_gap_when_all_rows_carry_required_key(pool_factory: PoolF
         rails=(SingleLegRail(
             name=Identifier("leg"), metadata_keys=(),
             leg_role=(Identifier("C"),),
-            leg_direction="Credit",
-            origin="InternalInitiated",
+            leg_direction=CREDIT,
+            origin=ORIGIN_INTERNAL_INITIATED,
         ),),
         transfer_templates=(TransferTemplate(
             name=Identifier("T"),

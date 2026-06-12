@@ -61,8 +61,10 @@ from recon_gen.common.l2.cache import L2InstanceCache
 from decimal import Decimal
 
 from recon_gen.common.l2.primitives import (
+    CREDIT,
     Identifier,
     L2Instance,
+    ORIGIN_INTERNAL_INITIATED,
     SingleLegRail,
     TwoLegRail,
 )
@@ -202,7 +204,7 @@ def test_browser_operator_creates_rail_with_role_checkbox(
             source_role=(Identifier("RoleA"),),
             destination_role=(Identifier("RoleB"),),
             expected_net=Decimal("0.00"),  # type: ignore[arg-type]: Money accepts Decimal at runtime
-            origin="InternalInitiated",  # type: ignore[arg-type]: Origin literal accepts validated str at runtime
+            origin=ORIGIN_INTERNAL_INITIATED,
         )
         driver.create_rail(rail)
         # Verify via the rail list — same operator-facing UI surface
@@ -384,8 +386,8 @@ def test_browser_operator_creates_rail_with_bb2_create_new_reconciler(
             # tuples match the strict type hint; bare Identifier also
             # works via the guard.
             leg_role=(Identifier("LegRole"),),
-            leg_direction="Credit",  # type: ignore[arg-type]: LegDirection literal accepts validated str
-            origin="InternalInitiated",  # type: ignore[arg-type]: Origin literal accepts validated str
+            leg_direction=CREDIT,
+            origin=ORIGIN_INTERNAL_INITIATED,
         )
         # Click "Create new" radio → fill TT's required fields →
         # submit. Both the rail AND the new TT land atomically (BB.1

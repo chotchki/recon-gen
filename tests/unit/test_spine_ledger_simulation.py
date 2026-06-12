@@ -37,6 +37,9 @@ from recon_gen.common.spine import (
     Violation,
 )
 from recon_gen.common.sql import Dialect
+from recon_gen.common.l2.primitives import (
+    POSTED_STATUS,
+)
 
 _SPEC_EXAMPLE = (
     Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
@@ -354,7 +357,7 @@ def _transfer(day: date, transfer_id: str, sender: str, recipient: str, amount: 
         day=day,
         transfer_id=transfer_id,
         rail_name="_test",
-        status="Posted",
+        status=POSTED_STATUS,
         legs=(
             TransferLeg(
                 account_id=sender,

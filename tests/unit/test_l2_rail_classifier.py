@@ -20,14 +20,18 @@ from __future__ import annotations
 
 from typing import Literal
 
-from recon_gen.common.l2.primitives import Identifier, SingleLegRail
+from recon_gen.common.l2.primitives import (
+    Identifier,
+    ORIGIN_INTERNAL_INITIATED,
+    SingleLegRail,
+)
 from recon_gen.common.l2.seed import _RAIL_KIND_PARAMS, _RailKind, _classify_rail
 
 
 def _leg(name: str, *, direction: Literal["Debit", "Credit"] = "Credit") -> SingleLegRail:
     return SingleLegRail(
         name=Identifier(name),
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         metadata_keys=(Identifier("k"),),
         leg_role=(Identifier("R"),),
         leg_direction=direction,

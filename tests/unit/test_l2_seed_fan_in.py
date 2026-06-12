@@ -20,12 +20,16 @@ from decimal import Decimal
 
 from recon_gen.common.l2.primitives import (
     Account,
+    CREDIT,
     Chain,
     ChainChildSpec,
+    DEBIT,
     Identifier,
     L2Instance,
     Money,
     Name,
+    ORIGIN_INTERNAL_INITIATED,
+    SCOPE_INTERNAL,
     SingleLegRail,
     TransferTemplate,
 )
@@ -43,24 +47,24 @@ def _toy_instance(
     """A minimal 3-rail / 1-template / 1-fan_in-chain fixture."""
     leg_a = SingleLegRail(
         name=Identifier("LegA"),
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         metadata_keys=(Identifier("cycle_id"),),
         leg_role=(Identifier("R"),),
-        leg_direction="Debit",
+        leg_direction=DEBIT,
     )
     leg_b = SingleLegRail(
         name=Identifier("LegB"),
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         metadata_keys=(Identifier("cycle_id"),),
         leg_role=(Identifier("R"),),
-        leg_direction="Credit",
+        leg_direction=CREDIT,
     )
     parent_rail = SingleLegRail(
         name=Identifier("ParentRail"),
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         metadata_keys=(),
         leg_role=(Identifier("R"),),
-        leg_direction="Debit",
+        leg_direction=DEBIT,
     )
     tmpl = TransferTemplate(
         name=Identifier("BatchedPayout"),
@@ -74,7 +78,7 @@ def _toy_instance(
             Account(
                 id=Identifier("a"),
                 role=Identifier("R"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
                 name=Name("Acct"),
             ),
         ),

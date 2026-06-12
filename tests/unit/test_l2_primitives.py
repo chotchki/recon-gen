@@ -28,8 +28,11 @@ from recon_gen.common.l2 import (
     TwoLegRail,
 )
 from recon_gen.common.l2.primitives import (
+    CREDIT,
+    DEBIT,
     ORIGIN_EXTERNAL_FORCE_POSTED,
     ORIGIN_INTERNAL_INITIATED,
+    SCOPE_INTERNAL,
 )
 
 
@@ -39,7 +42,7 @@ def _example_instance() -> L2Instance:
         accounts=(
             Account(
                 id=Identifier("int-001"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
                 name=Name("Internal Operations Account"),
                 role=Identifier("InternalDDA"),
             ),
@@ -47,14 +50,14 @@ def _example_instance() -> L2Instance:
         account_templates=(
             AccountTemplate(
                 role=Identifier("CustomerSubledger"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
                 parent_role=Identifier("SouthPool"),
             ),
         ),
         rails=(
             TwoLegRail(
                 name=Identifier("ExtInbound"),
-                origin="ExternalForcePosted",
+                origin=ORIGIN_EXTERNAL_FORCE_POSTED,
                 metadata_keys=(Identifier("external_reference"),),
                 source_role=(Identifier("ExternalCounterparty"),),
                 destination_role=(Identifier("InternalDDA"),),
@@ -62,13 +65,13 @@ def _example_instance() -> L2Instance:
             ),
             SingleLegRail(
                 name=Identifier("SubledgerCharge"),
-                origin="InternalInitiated",
+                origin=ORIGIN_INTERNAL_INITIATED,
                 metadata_keys=(
                     Identifier("merchant_id"),
                     Identifier("settlement_period"),
                 ),
                 leg_role=(Identifier("CustomerSubledger"),),
-                leg_direction="Debit",
+                leg_direction=DEBIT,
             ),
         ),
         transfer_templates=(
@@ -137,7 +140,7 @@ def test_aggregating_flag_optional_on_both_rail_shapes() -> None:
     """Per SPEC: aggregating MAY be true on either two-leg or single-leg."""
     two = TwoLegRail(
         name=Identifier("PoolBalancing"),
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         metadata_keys=(),
         source_role=(Identifier("NorthPool"),),
         destination_role=(Identifier("SouthPool"),),
@@ -151,10 +154,10 @@ def test_aggregating_flag_optional_on_both_rail_shapes() -> None:
 
     single = SingleLegRail(
         name=Identifier("ExternalSweep"),
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         metadata_keys=(),
         leg_role=(Identifier("ExternalCounterparty"),),
-        leg_direction="Credit",
+        leg_direction=CREDIT,
         aggregating=True,
         bundles_activity=(Identifier("ach"),),
         cadence="daily-eod",
@@ -177,8 +180,8 @@ def test_two_leg_rail_accepts_per_leg_origin_overrides() -> None:
         metadata_keys=(),
         source_role=(Identifier("ExternalCounterparty"),),
         destination_role=(Identifier("ClearingSuspense"),),
-        source_origin="ExternalForcePosted",
-        destination_origin="InternalInitiated",
+        source_origin=ORIGIN_EXTERNAL_FORCE_POSTED,
+        destination_origin=ORIGIN_INTERNAL_INITIATED,
         expected_net=Decimal("0"),
     )
     assert rail.origin is None
@@ -193,8 +196,8 @@ def test_two_leg_rail_origin_optional_when_per_leg_set() -> None:
         metadata_keys=(),
         source_role=(Identifier("A"),),
         destination_role=(Identifier("B"),),
-        source_origin="ExternalForcePosted",
-        destination_origin="InternalInitiated",
+        source_origin=ORIGIN_EXTERNAL_FORCE_POSTED,
+        destination_origin=ORIGIN_INTERNAL_INITIATED,
         expected_net=Decimal("0"),
     )
     assert rail.origin is None
@@ -213,8 +216,8 @@ def test_rails_carry_posted_requirements() -> None:
         name=Identifier("ExtRail"),
         metadata_keys=(Identifier("external_reference"),),
         leg_role=(Identifier("InternalDDA"),),
-        leg_direction="Credit",
-        origin="ExternalForcePosted",
+        leg_direction=CREDIT,
+        origin=ORIGIN_EXTERNAL_FORCE_POSTED,
         posted_requirements=(Identifier("external_reference"),),
     )
     assert rail.posted_requirements == (Identifier("external_reference"),)
@@ -227,7 +230,7 @@ def test_rails_carry_aging_thresholds() -> None:
         metadata_keys=(),
         source_role=(Identifier("A"),),
         destination_role=(Identifier("B"),),
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         expected_net=Decimal("0"),
         max_pending_age=timedelta(hours=24),
         max_unbundled_age=timedelta(hours=4),
@@ -243,8 +246,8 @@ def test_rails_default_to_no_aging_or_posted_requirements() -> None:
         name=Identifier("R"),
         metadata_keys=(),
         leg_role=(Identifier("A"),),
-        leg_direction="Debit",
-        origin="InternalInitiated",
+        leg_direction=DEBIT,
+        origin=ORIGIN_INTERNAL_INITIATED,
     )
     assert rail.posted_requirements == ()
     assert rail.max_pending_age is None
@@ -292,7 +295,7 @@ def test_single_leg_rail_coerces_bare_identifier_leg_role() -> None:
         name=Identifier("Rail_A"),
         metadata_keys=(),
         leg_role=Identifier("RoleA"),  # type: ignore[arg-type]: AI.9 — the runtime coerces; intentional test of the guard
-        leg_direction="Credit",
+        leg_direction=CREDIT,
     )
     assert rail.leg_role == (Identifier("RoleA"),)
     assert isinstance(rail.leg_role, tuple)
@@ -305,7 +308,7 @@ def test_single_leg_rail_preserves_tuple_leg_role() -> None:
         name=Identifier("Rail_B"),
         metadata_keys=(),
         leg_role=(Identifier("RoleA"), Identifier("RoleB")),
-        leg_direction="Credit",
+        leg_direction=CREDIT,
     )
     assert rail.leg_role == (Identifier("RoleA"), Identifier("RoleB"))
 
@@ -317,7 +320,7 @@ def test_two_leg_rail_coerces_bare_identifier_source_and_destination() -> None:
         metadata_keys=(),
         source_role=Identifier("SrcRole"),  # type: ignore[arg-type]: AI.9 — test of the guard
         destination_role=Identifier("DstRole"),  # type: ignore[arg-type]: AI.9 — test of the guard
-        origin="InternalInitiated",
+        origin=ORIGIN_INTERNAL_INITIATED,
         expected_net=Decimal("0"),
     )
     assert rail.source_role == (Identifier("SrcRole"),)
@@ -333,7 +336,7 @@ def test_role_expression_coerce_rejects_none() -> None:
             name=Identifier("Rail_D"),
             metadata_keys=(),
             leg_role=None,  # type: ignore[arg-type]: AI.9 — test of the guard rejecting None
-            leg_direction="Credit",
+            leg_direction=CREDIT,
         )
 
 
@@ -351,7 +354,7 @@ class TestBusinessDayOffsetRange:
     def test_account_accepts_none(self) -> None:
         """The field defaults to None (⇒ midnight-aligned at the seed layer)."""
         a = Account(
-            id=Identifier("a1"), scope="internal", role=Identifier("R1"),
+            id=Identifier("a1"), scope=SCOPE_INTERNAL, role=Identifier("R1"),
         )
         assert a.business_day_offset is None
 
@@ -359,7 +362,7 @@ class TestBusinessDayOffsetRange:
     def test_account_accepts_in_range(self, offset: int) -> None:
         """Every value in [-23, 23] inclusive constructs cleanly."""
         a = Account(
-            id=Identifier("a1"), scope="internal", role=Identifier("R1"),
+            id=Identifier("a1"), scope=SCOPE_INTERNAL, role=Identifier("R1"),
             business_day_offset=offset,
         )
         assert a.business_day_offset == offset
@@ -369,18 +372,18 @@ class TestBusinessDayOffsetRange:
         """Anything outside [-23, 23] raises ValueError naming the rule."""
         with pytest.raises(ValueError, match=r"business_day_offset must be in \[-23, 23\]"):
             Account(
-                id=Identifier("a1"), scope="internal", role=Identifier("R1"),
+                id=Identifier("a1"), scope=SCOPE_INTERNAL, role=Identifier("R1"),
                 business_day_offset=offset,
             )
 
     def test_account_template_accepts_none(self) -> None:
-        t = AccountTemplate(role=Identifier("R1"), scope="internal")
+        t = AccountTemplate(role=Identifier("R1"), scope=SCOPE_INTERNAL)
         assert t.business_day_offset is None
 
     @pytest.mark.parametrize("offset", [-23, 0, 23])
     def test_account_template_accepts_in_range(self, offset: int) -> None:
         t = AccountTemplate(
-            role=Identifier("R1"), scope="internal", business_day_offset=offset,
+            role=Identifier("R1"), scope=SCOPE_INTERNAL, business_day_offset=offset,
         )
         assert t.business_day_offset == offset
 
@@ -388,7 +391,7 @@ class TestBusinessDayOffsetRange:
     def test_account_template_rejects_out_of_range(self, offset: int) -> None:
         with pytest.raises(ValueError, match=r"business_day_offset must be in \[-23, 23\]"):
             AccountTemplate(
-                role=Identifier("R1"), scope="internal",
+                role=Identifier("R1"), scope=SCOPE_INTERNAL,
                 business_day_offset=offset,
             )
 
@@ -405,7 +408,7 @@ class TestBalanceCadence:
     def test_account_accepts_none(self) -> None:
         from recon_gen.common.l2 import resolve_cadence
         a = Account(
-            id=Identifier("a1"), scope="internal", role=Identifier("R1"),
+            id=Identifier("a1"), scope=SCOPE_INTERNAL, role=Identifier("R1"),
         )
         assert a.balance_cadence is None
         assert resolve_cadence(a) == "sparse"
@@ -414,7 +417,7 @@ class TestBalanceCadence:
     def test_account_accepts_valid_cadence(self, cadence: str) -> None:
         from recon_gen.common.l2 import resolve_cadence
         a = Account(
-            id=Identifier("a1"), scope="internal", role=Identifier("R1"),
+            id=Identifier("a1"), scope=SCOPE_INTERNAL, role=Identifier("R1"),
             balance_cadence=cadence,  # type: ignore[arg-type]: parametrize values are str literals widened by pytest; runtime guard accepts both
         )
         assert a.balance_cadence == cadence
@@ -422,14 +425,14 @@ class TestBalanceCadence:
 
     def test_account_template_accepts_none_with_sparse_fallback(self) -> None:
         from recon_gen.common.l2 import resolve_cadence
-        t = AccountTemplate(role=Identifier("R1"), scope="internal")
+        t = AccountTemplate(role=Identifier("R1"), scope=SCOPE_INTERNAL)
         assert t.balance_cadence is None
         assert resolve_cadence(t) == "sparse"
 
     def test_account_template_accepts_explicit_daily(self) -> None:
         from recon_gen.common.l2 import resolve_cadence
         t = AccountTemplate(
-            role=Identifier("R1"), scope="internal",
+            role=Identifier("R1"), scope=SCOPE_INTERNAL,
             balance_cadence="explicit_daily",
         )
         assert t.balance_cadence == "explicit_daily"

@@ -89,7 +89,7 @@ def _balanced_pair(
         day=day,
         transfer_id=transfer_id,
         rail_name="ach",
-        status="Posted",
+        status=POSTED_STATUS,
         parent_transfer_id=parent,
         legs=(
             TransferLeg(

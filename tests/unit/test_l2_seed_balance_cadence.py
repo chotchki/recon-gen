@@ -24,10 +24,13 @@ from recon_gen.common.l2.primitives import (
     Account,
     AccountTemplate,
     BalanceCadence,
+    DEBIT,
     Identifier,
     L2Instance,
     Money,
     Name,
+    ORIGIN_INTERNAL_INITIATED,
+    SCOPE_INTERNAL,
     SingleLegRail,
     TransferTemplate,
     TwoLegRail,
@@ -51,14 +54,14 @@ def _build_l2(
             Account(
                 id=Identifier("a-sparse"),
                 role=Identifier("RoleA"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
                 name=Name("AcctSparse"),
                 balance_cadence=a_cadence,
             ),
             Account(
                 id=Identifier("a-daily"),
                 role=Identifier("RoleB"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
                 name=Name("AcctDaily"),
                 balance_cadence=b_cadence,
             ),
@@ -67,7 +70,7 @@ def _build_l2(
         rails=(
             TwoLegRail(
                 name=Identifier("RailAB"),
-                origin="InternalInitiated",
+                origin=ORIGIN_INTERNAL_INITIATED,
                 metadata_keys=(Identifier("k"),),
                 source_role=(Identifier("RoleA"),),
                 destination_role=(Identifier("RoleB"),),
@@ -184,17 +187,17 @@ def test_template_cadence_fans_out_to_instances() -> None:
         account_templates=(
             AccountTemplate(
                 role=Identifier("FooRole"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
                 balance_cadence="explicit_daily",
             ),
         ),
         rails=(
             SingleLegRail(
                 name=Identifier("RailB"),
-                origin="InternalInitiated",
+                origin=ORIGIN_INTERNAL_INITIATED,
                 metadata_keys=(Identifier("k"),),
                 leg_role=(Identifier("FooRole"),),
-                leg_direction="Debit",
+                leg_direction=DEBIT,
             ),
         ),
         transfer_templates=(
@@ -222,7 +225,7 @@ def test_template_cadence_fans_out_to_instances() -> None:
         account_templates=(
             AccountTemplate(
                 role=Identifier("FooRole"),
-                scope="internal",
+                scope=SCOPE_INTERNAL,
                 balance_cadence="sparse",
             ),
         ),

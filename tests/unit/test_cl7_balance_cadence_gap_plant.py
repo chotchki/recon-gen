@@ -32,10 +32,14 @@ from recon_gen.common.l2.plant_registry import (
 from recon_gen.common.l2.primitives import (
     Account,
     AccountTemplate,
+    DEBIT,
     Identifier,
     L2Instance,
     Money,
     Name,
+    ORIGIN_INTERNAL_INITIATED,
+    SCOPE_EXTERNAL,
+    SCOPE_INTERNAL,
     SingleLegRail,
     TransferTemplate,
 )
@@ -52,10 +56,10 @@ def _minimal_l2(
         rails=(
             SingleLegRail(
                 name=Identifier("R"),
-                origin="InternalInitiated",
+                origin=ORIGIN_INTERNAL_INITIATED,
                 metadata_keys=(Identifier("k"),),
                 leg_role=(Identifier("RoleA"),),
-                leg_direction="Debit",
+                leg_direction=DEBIT,
             ),
         ),
         transfer_templates=(
@@ -75,7 +79,7 @@ def test_picker_returns_singleton_when_only_one_declared() -> None:
     inst = _minimal_l2(accounts=(
         Account(
             id=Identifier("acct-1"), role=Identifier("RoleA"),
-            scope="internal", name=Name("A1"),
+            scope=SCOPE_INTERNAL, name=Name("A1"),
             balance_cadence="explicit_daily",
         ),
     ))
@@ -87,7 +91,7 @@ def test_picker_returns_template_when_only_one_declared() -> None:
     inst = _minimal_l2(templates=(
         AccountTemplate(
             role=Identifier("CustomerSubledger"),
-            scope="internal",
+            scope=SCOPE_INTERNAL,
             balance_cadence="explicit_daily",
         ),
     ))
@@ -99,7 +103,7 @@ def test_picker_returns_none_when_no_declaration() -> None:
     inst = _minimal_l2(accounts=(
         Account(
             id=Identifier("acct-2"), role=Identifier("RoleA"),
-            scope="internal", name=Name("A2"),
+            scope=SCOPE_INTERNAL, name=Name("A2"),
             balance_cadence="sparse",  # NOT explicit_daily
         ),
     ))
@@ -113,7 +117,7 @@ def test_picker_skips_external_scope() -> None:
     inst = _minimal_l2(accounts=(
         Account(
             id=Identifier("acct-ext"), role=Identifier("ExtCounter"),
-            scope="external", name=Name("Ext"),
+            scope=SCOPE_EXTERNAL, name=Name("Ext"),
             balance_cadence="explicit_daily",
         ),
     ))
@@ -124,7 +128,7 @@ def test_adapter_emits_singleton_delete() -> None:
     inst = _minimal_l2(accounts=(
         Account(
             id=Identifier("acct-1"), role=Identifier("RoleA"),
-            scope="internal", name=Name("A1"),
+            scope=SCOPE_INTERNAL, name=Name("A1"),
             balance_cadence="explicit_daily",
         ),
     ))
@@ -148,7 +152,7 @@ def test_adapter_emits_template_delete_keys_on_role() -> None:
     inst = _minimal_l2(templates=(
         AccountTemplate(
             role=Identifier("CustomerSubledger"),
-            scope="internal",
+            scope=SCOPE_INTERNAL,
             balance_cadence="explicit_daily",
         ),
     ))
@@ -173,7 +177,7 @@ def test_adapter_raises_on_missing_declaration() -> None:
     inst = _minimal_l2(accounts=(
         Account(
             id=Identifier("acct-2"), role=Identifier("RoleA"),
-            scope="internal", name=Name("A2"),
+            scope=SCOPE_INTERNAL, name=Name("A2"),
             balance_cadence="sparse",
         ),
     ))
@@ -198,7 +202,7 @@ def test_adapter_uses_date_literal_for_oracle_portability() -> None:
     inst = _minimal_l2(accounts=(
         Account(
             id=Identifier("acct-1"), role=Identifier("RoleA"),
-            scope="internal", name=Name("A1"),
+            scope=SCOPE_INTERNAL, name=Name("A1"),
             balance_cadence="explicit_daily",
         ),
     ))

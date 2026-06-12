@@ -84,6 +84,7 @@ from recon_gen.common.l2.primitives import (
     L2Instance,
     Money,
     Name,
+    SCOPE_INTERNAL,
 )
 from tests._test_helpers import make_test_config
 
@@ -567,7 +568,7 @@ def _build_instance(
     acct_tuple = tuple(
         Account(
             id=Identifier(f"a{i}"),
-            scope="internal",
+            scope=SCOPE_INTERNAL,
             role=Identifier(f"Role{i}"),
             name=Name(f"Account {i}"),
             description=None,
@@ -580,7 +581,7 @@ def _build_instance(
         AccountTemplate(
             role=Identifier(f"Tpl{i}"),
             description=None,
-            scope="internal",
+            scope=SCOPE_INTERNAL,
             parent_role=None,
             expected_eod_balance=Money(0),
         )
