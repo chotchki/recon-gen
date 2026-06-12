@@ -69,6 +69,29 @@
   background: color-mix(in srgb, black 18%, var(--color-accent));
 }
 
+/*
+ * 2026-06-12 — Tom Select clear_button positioning override.
+ *
+ * The vendor CSS positions the × button via
+ *   .plugin-clear_button.single .clear-button { right: max(--ts-pr-caret, 8px) }
+ * which on its own resolves to right: 8px. But the renderer copies
+ * Tailwind utility classes from the original <select> onto .ts-wrapper
+ * (px-3 py-2 min-w-48 etc), and the cascade causes `left: 8px` to be
+ * applied to the clear button too. With both left + right set on a
+ * position:absolute element, the browser stretches it horizontally,
+ * rendering the × at the LEFT edge of the picker, overlapping the
+ * first character of the selected text.
+ *
+ * Pin left:auto + right:0.5rem so the × sticks to the right edge
+ * regardless of inherited cascade. Apply to both `single` and the
+ * generic .plugin-clear_button variant for safety.
+ */
+.ts-wrapper.plugin-clear_button .clear-button,
+.ts-wrapper.plugin-clear_button.single .clear-button {
+  left: auto;
+  right: 0.5rem;
+}
+
 /* ---------------------------------------------------------------- */
 /* Flatpickr — date-range popover                                    */
 /* ---------------------------------------------------------------- */
