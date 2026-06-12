@@ -6,6 +6,67 @@
 > AI, BK, BQ, BW, CK, BV close, snapshotter pattern, runner readiness).
 > v13.14.4 below resumes the convention.
 
+## v13.14.5 — Tom Select clear-button affordance + boot-id cache-bust
+
+Seven commits since v13.14.4. Two themes, both surfaced by live
+dogfooding of Studio against `sasquatch_pr.yaml`.
+
+**1. Tom Select clear-button (× to clear a selection).** Single-select
+pickers previously required click-into + Delete-key to clear; the
+operator flagged this as friction. Wired Tom Select's `clear_button`
+plugin so a one-click ✕ at the right edge of the picker clears the
+selection. Multi-select pickers also carry both `remove_button`
+(per-chip ×) AND `clear_button` (clear-all ×) for symmetric affordance.
+
+Visual polish iterated against operator dogfood feedback:
+
+- Override vendor cascade so the × pins to the right edge (Tailwind
+  utility classes copied onto `.ts-wrapper` were causing a `left: 8px`
+  conflict; pinned `left: auto; right: 0.375rem`).
+- 1.5rem circular click target with danger-tint hover background.
+- Bumped glyph from default 0.95rem to 1.5rem + font-weight 600 for
+  body-text-zoom readability.
+- Vertical-centered via `top: 50% + translateY(-50%)` (overrides
+  vendor's fixed `top: 8px` which assumed default 20px-tall
+  `.ts-control`).
+- Swapped the glyph from U+2A2F ⨯ (vector cross — a math operator
+  whose ink centers on the math-axis, not the line-box geometric
+  center) to U+2715 ✕ (canonical UI close glyph, designed by font
+  vendors to optically center) via `.clear-button::before`. Eliminates
+  the "× floats above text baseline" perception.
+
+Anti-regression test in `test_html_filter_widgets.py` pins the
+`["remove_button", "clear_button"]` (multi) / `["clear_button"]`
+(single) plugin shape so future refactors can't silently drop the
+affordance. Multi-select live visual verification deferred to backlog
+#47 — every deployed app uses the Phase Y SQL-pushdown single-select
+pattern, so there's no live multi-select picker to dogfood against
+until a new persona / CategoryFilterSpec lands.
+
+**2. Boot-id cache-bust for page-shell static assets.** The shared
+page shell in `render.py` (used by every Studio page + dashboards +
+probes) hardcoded bare `/static/output.css`, `/static/widgets-theme.css`,
+and seven vendor JS+CSS files. Iterating on `widgets-theme.css` (Tom
+Select clear-button polish above) required the operator to Cmd+Shift+R
+after every Studio restart to escape the browser cache — Starlette's
+StaticFiles ETag/Last-Modified revalidation didn't always fire on
+HTMX-swap-triggered fetches.
+
+Lifted Studio's existing `_BOOT_ID` + `asset_url()` helper (a
+process-lifetime random hex token) from `_studio_routes.py` up to
+`render.py` so the shared page shell's `_VENDOR_CSS` + `_VENDOR_JS` +
+`_PAGE_SHELL` all route through it. Every `<link>` / `<script>` URL
+the shell emits now carries `?cb=<boot>`. Studio restart flips the
+token, forcing every browser to refetch every asset on next page load
+— no hard refresh needed.
+
+Anti-regression test in `test_vendor_assets.py`
+(`test_page_shell_static_urls_cache_busted`) regexes every
+`(href|src)="/static/..."` out of a rendered shell and asserts `?cb=`
+appears in each. Catches future bare-URL additions to `_PAGE_SHELL` /
+`_VENDOR_CSS` / `_VENDOR_JS` at unit-tier speed (no Studio boot, no
+browser).
+
 ## v13.14.4 — Phase BX close + typed-enum sweep + silent HTMX swap bug fix
 
 Forty-eight commits since v13.14.3. Three load-bearing themes plus
