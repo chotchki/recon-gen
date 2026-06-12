@@ -272,6 +272,12 @@ class _ChartMeta:
     #   showed no label.
     orientation: str = "VERTICAL"  # "VERTICAL" | "HORIZONTAL"
     color_label: str | None = None
+    # Phase DB.1.4 — LineChart Type parity with QS. "LINE" (default),
+    # "AREA" (fill below each line), or "STACKED_AREA" (d3.stack +
+    # area per series). Latent gap closed; no app callsite uses
+    # chart_type today but the tree primitive exists so a future
+    # AREA-declaring app won't silently render as plain LINE.
+    chart_type: str = "LINE"
 
 
 @dataclass(frozen=True)
@@ -545,6 +551,10 @@ def _chart_meta(visual: Any) -> _ChartMeta | None:  # typing-smell: ignore[expli
         color_label = author_color_label
     elif colors:
         color_label = _field_label(colors[0])
+    # DB.1.4 — LineChart Type. Default "LINE" for BarChart + un-typed
+    # LineChart; visual.chart_type is None when the author didn't
+    # override (LineChart's default).
+    chart_type = getattr(visual, "chart_type", None) or "LINE"
     return _ChartMeta(
         series_column_name=series_name,
         x_label=str(x_label),
@@ -554,6 +564,7 @@ def _chart_meta(visual: Any) -> _ChartMeta | None:  # typing-smell: ignore[expli
         log_scale=log_scale,
         orientation=orientation,
         color_label=color_label,
+        chart_type=chart_type,
     )
 
 
@@ -894,6 +905,12 @@ def make_tree_db_fetcher(
                 # DB.1.1 — BarChart orientation + color label parity.
                 chart_kwargs["orientation"] = plan.chart.orientation
                 chart_kwargs["color_label"] = plan.chart.color_label
+            elif kind == "LineChart":
+                # DB.1.4 — LineChart Type parity (LINE / AREA /
+                # STACKED_AREA). Forward only when non-default so
+                # existing fixtures stay unchanged.
+                if plan.chart.chart_type != "LINE":
+                    chart_kwargs["chart_type"] = plan.chart.chart_type
             return shape_for_kind(kind, rows, columns, **chart_kwargs)
         if kind == "KPI":
             # v11.21.0 finding #14 fix (BH.14): pass the visual's

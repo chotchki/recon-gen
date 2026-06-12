@@ -317,6 +317,12 @@ def shape_line_chart(
     y_label: str | None = None,
     series_column: int | None = None,
     format: str | None = None,
+    # Phase DB.1.4 — LineChart Type parity. "LINE" (default) plots
+    # plain lines; "AREA" fills below each line; "STACKED_AREA" stacks
+    # series and fills. Forwarded as ``data.chart_type`` so the
+    # renderer can branch on it. Default omitted from payload so
+    # existing fixtures stay byte-stable.
+    chart_type: str | None = None,
 ) -> dict[str, Any]:
     """Shape SQL rows as one or more line series.
 
@@ -344,6 +350,14 @@ def shape_line_chart(
         x_label if x_label is not None
         else (str(columns[0]) if columns else "")
     )
+    # DB.1.4 — chart_type forwarded as-is. "LINE" is the renderer's
+    # default and we OMIT it from the payload so existing fixtures
+    # without `chart_type=` keep their byte-stable JSON.
+    type_extra: dict[str, Any] = (
+        {"chart_type": chart_type}
+        if chart_type is not None and chart_type != "LINE"
+        else {}
+    )
     if series_column is None:
         x_values = [r[0] for r in rows]
         values: list[Any] = [r[1] if len(r) > 1 else 0 for r in rows]
@@ -357,6 +371,7 @@ def shape_line_chart(
                 else (str(columns[1]) if len(columns) > 1 else "")
             ),
             **({"format": format} if format is not None else {}),
+            **type_extra,
         }
     # Multi-series — bucket each series' (x → y) and align every
     # series to the shared, first-seen-ordered x axis.
@@ -384,6 +399,7 @@ def shape_line_chart(
         "x_label": x_label_out,
         "y_label": y_label if y_label is not None else "",
         **({"format": format} if format is not None else {}),
+        **type_extra,
     }
 
 

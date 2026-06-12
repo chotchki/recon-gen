@@ -230,6 +230,51 @@ def test_shape_bar_chart_color_label_omitted_by_default() -> None:
     assert "color_label" not in out
 
 
+# Phase DB.1.4 — LineChart Type parity with QS.
+
+
+def test_shape_line_chart_chart_type_default_omits_key() -> None:
+    """No ``chart_type=`` → omit from payload so existing fixtures
+    stay byte-stable. Renderer falls back to ``LINE`` when absent."""
+    out = shape_line_chart(
+        rows=[(1, 10.0), (2, 20.0)],
+        columns=["x", "y"],
+    )
+    assert "chart_type" not in out
+
+
+def test_shape_line_chart_chart_type_line_explicit_omits_key() -> None:
+    """Explicit ``chart_type="LINE"`` is the default — omit it too so
+    only deviations show up in the payload."""
+    out = shape_line_chart(
+        rows=[(1, 10.0)],
+        columns=["x", "y"],
+        chart_type="LINE",
+    )
+    assert "chart_type" not in out
+
+
+def test_shape_line_chart_chart_type_area_forwards() -> None:
+    out = shape_line_chart(
+        rows=[(1, 10.0), (2, 20.0)],
+        columns=["x", "y"],
+        chart_type="AREA",
+    )
+    assert out["chart_type"] == "AREA"
+
+
+def test_shape_line_chart_chart_type_stacked_area_forwards() -> None:
+    out = shape_line_chart(
+        rows=[(1, 10.0, "A"), (1, 5.0, "B"), (2, 20.0, "A"), (2, 8.0, "B")],
+        columns=["x", "y", "series"],
+        series_column=2,
+        chart_type="STACKED_AREA",
+    )
+    assert out["chart_type"] == "STACKED_AREA"
+    # Verify the multi-series shape stayed intact.
+    assert len(out["series"]) == 2
+
+
 # ---------------------------------------------------------------------------
 # LineChart — single + multi series
 # ---------------------------------------------------------------------------

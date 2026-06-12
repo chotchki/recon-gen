@@ -1596,21 +1596,81 @@
       .x((d) => xScale(d.x))
       .y((d) => yScale(d.y));
 
-    series.forEach((s, si) => {
-      var colour = s.color || defaultPalette[si % defaultPalette.length];
-      var points = (s.values || []).map((y, i) => ({
-        x: xParsed[i],
-        y: typeof y === "number" ? y : null,
-      }));
-      g.append("path")
-        .datum(points)
-        .attr("class", "linechart-line")
-        .attr("data-series-name", s.name || String(si))
-        .attr("fill", "none")
-        .attr("stroke", colour)
-        .attr("stroke-width", 2)
-        .attr("d", line);
-    });
+    // Phase DB.1.4 — chart_type parity with QS LineChartConfiguration.Type.
+    //   "LINE" (default)   → plain stroked line per series
+    //   "AREA"             → fill below each line + stroked outline
+    //   "STACKED_AREA"     → series stacked + per-band area fill
+    var chartType = data.chart_type || "LINE";
+    // Hoisted for biome's noInnerDeclarations rule — stacked branch
+    // populates these; LINE/AREA leaves them untouched.
+    var stackKeys, stackInput, stackLayers, area, areaUnder;
+    if (chartType === "STACKED_AREA" && series.length > 0) {
+      // Stack the series across the x-axis. d3.stack treats undefined
+      // / non-numeric as 0 — same defined() filter as the LINE path.
+      stackKeys = series.map((s, i) => s.name || String(i));
+      stackInput = xParsed.map((_x, i) => {
+        var row = {};
+        series.forEach((s, si) => {
+          var v = (s.values || [])[i];
+          row[s.name || String(si)] = typeof v === "number" ? v : 0;
+        });
+        return row;
+      });
+      stackLayers = d3.stack().keys(stackKeys)(stackInput);
+      area = d3
+        .area()
+        .x((_d, i) => xScale(xParsed[i]))
+        .y0((d) => yScale(d[0]))
+        .y1((d) => yScale(d[1]));
+      stackLayers.forEach((layer, li) => {
+        var colour =
+          series[li].color || defaultPalette[li % defaultPalette.length];
+        g.append("path")
+          .datum(layer)
+          .attr("class", "linechart-area linechart-area-stacked")
+          .attr("data-series-name", series[li].name || String(li))
+          .attr("fill", colour)
+          .attr("fill-opacity", 0.85)
+          .attr("stroke", colour)
+          .attr("stroke-width", 1)
+          .attr("d", area);
+      });
+    } else {
+      series.forEach((s, si) => {
+        var colour = s.color || defaultPalette[si % defaultPalette.length];
+        var points = (s.values || []).map((y, i) => ({
+          x: xParsed[i],
+          y: typeof y === "number" ? y : null,
+        }));
+        // AREA fills below each line (independent per series — they
+        // overlap when ranges intersect). Same defined-filter shape
+        // as the LINE path so non-numeric / null gaps don't fill.
+        if (chartType === "AREA") {
+          areaUnder = d3
+            .area()
+            .defined((d) => d.y != null && !Number.isNaN(d.y))
+            .x((d) => xScale(d.x))
+            .y0(() => yScale(0))
+            .y1((d) => yScale(d.y));
+          g.append("path")
+            .datum(points)
+            .attr("class", "linechart-area")
+            .attr("data-series-name", s.name || String(si))
+            .attr("fill", colour)
+            .attr("fill-opacity", 0.25)
+            .attr("stroke", "none")
+            .attr("d", areaUnder);
+        }
+        g.append("path")
+          .datum(points)
+          .attr("class", "linechart-line")
+          .attr("data-series-name", s.name || String(si))
+          .attr("fill", "none")
+          .attr("stroke", colour)
+          .attr("stroke-width", 2)
+          .attr("d", line);
+      });
+    }
 
     // Legend — only when 2+ series (single-series chart's legend
     // is just visual noise; the title carries the meaning).

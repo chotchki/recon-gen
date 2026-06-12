@@ -301,3 +301,71 @@ def test_linechart_empty_renders_empty_state_banner() -> None:
         browser.close()
     assert empty_count == 1
     assert svg_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase DB.1.4 — chart_type parity with QS LineChartConfiguration.Type
+# ---------------------------------------------------------------------------
+
+
+def test_linechart_default_renders_line_only_no_area() -> None:
+    """Default ``chart_type`` unset (or "LINE") → plain line path,
+    no ``.linechart-area`` fill below."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_into_target(page, {
+            "x_values": ["2026-01-01", "2026-01-02", "2026-01-03"],
+            "series": [{"name": "v", "values": [10, 20, 15]}],
+        })
+        lines = page.locator("#linechart-target svg path.linechart-line").count()
+        areas = page.locator("#linechart-target svg path.linechart-area").count()
+        browser.close()
+    assert lines == 1
+    assert areas == 0
+
+
+def test_linechart_area_renders_line_plus_filled_area() -> None:
+    """``chart_type="AREA"`` paints both the line stroke and a fill
+    below the line (per-series, independent — overlaps allowed)."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_into_target(page, {
+            "x_values": ["2026-01-01", "2026-01-02", "2026-01-03"],
+            "series": [{"name": "v", "values": [10, 20, 15]}],
+            "chart_type": "AREA",
+        })
+        lines = page.locator("#linechart-target svg path.linechart-line").count()
+        areas = page.locator("#linechart-target svg path.linechart-area").count()
+        browser.close()
+    assert lines == 1
+    assert areas == 1
+
+
+def test_linechart_stacked_area_renders_stacked_areas_no_separate_line() -> None:
+    """``chart_type="STACKED_AREA"`` paints one
+    ``.linechart-area.linechart-area-stacked`` per series (stacked) and
+    NO separate ``.linechart-line`` paths (the area's own stroke
+    outlines the band)."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render_into_target(page, {
+            "x_values": ["2026-01-01", "2026-01-02"],
+            "series": [
+                {"name": "A", "values": [10, 20]},
+                {"name": "B", "values": [5, 8]},
+            ],
+            "chart_type": "STACKED_AREA",
+        })
+        stacked = page.locator(
+            "#linechart-target svg path.linechart-area-stacked",
+        ).count()
+        lines = page.locator("#linechart-target svg path.linechart-line").count()
+        browser.close()
+    assert stacked == 2
+    assert lines == 0
