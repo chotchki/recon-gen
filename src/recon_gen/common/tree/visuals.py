@@ -799,6 +799,56 @@ class Table:
                         f"field-well list."
                     )
                 seen[key] = well_name
+        # Phase DA — Drillable type-system gate. Every Drillable in
+        # `conditional_formatting` declares a column as drillable; that
+        # column MUST have at least one Drill in `actions` writing from
+        # it (matched by column name on the Drill's writes list). Raises
+        # at the wiring site with the offending Table + column + the
+        # actual drill set so the author can fix the row at apps/<app>/
+        # app.py without going through emit / deploy / dogfood loops.
+        if self.conditional_formatting:
+            drill_actions = [a for a in self.actions if isinstance(a, Drill)]
+            for cf in self.conditional_formatting:
+                target_col = resolve_column(cf.on.column)
+                matching_drills: list[Drill] = []
+                from recon_gen.common.tree.fields import Dim as _Dim
+                for d in drill_actions:
+                    for _param, src in d.writes:
+                        if (
+                            isinstance(src, _Dim)
+                            and resolve_column(src.column) == target_col
+                        ):
+                            matching_drills.append(d)
+                            break
+                if not matching_drills:
+                    # Build a helpful diagnostic — what drills DO exist
+                    # on this Table, and which columns do they write
+                    # from? Operator can spot the off-by-one column name
+                    # at a glance.
+                    drill_summary: list[str] = []
+                    for d in drill_actions:
+                        sources: list[str] = []
+                        for _param, src in d.writes:
+                            if isinstance(src, _Dim):
+                                sources.append(resolve_column(src.column))
+                        sources_str = (
+                            ", ".join(sources) if sources else "(no Dim sources)"
+                        )
+                        drill_summary.append(
+                            f"  {d.name!r} ({d.trigger}) writes from: {sources_str}"
+                        )
+                    summary = "\n".join(drill_summary) if drill_summary else (
+                        "  (no Drill actions on this Table)"
+                    )
+                    raise ValueError(
+                        f"Table {self.title!r}: Drillable(on={target_col!r}) "
+                        f"is in conditional_formatting but no Drill in "
+                        f"actions writes from that column. Either remove "
+                        f"the Drillable, add a Drill that writes from "
+                        f"{target_col!r}, or move the Drillable to the "
+                        f"column the existing drill writes from.\nDrills "
+                        f"currently on this Table:\n{summary}"
+                    )
 
     @property
     def element_id(self) -> str:
