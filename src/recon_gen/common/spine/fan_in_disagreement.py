@@ -41,7 +41,11 @@ from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
 
-from recon_gen.common.l2.primitives import POSTED_STATUS, L2Instance
+from recon_gen.common.l2.primitives import (
+    ORIGIN_INTERNAL_INITIATED,
+    POSTED_STATUS,
+    L2Instance,
+)
 from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
     insert_tx,
@@ -311,7 +315,7 @@ class FanInChainGenerator:
                 transfer_id=parent_tid,
                 rail_name=self.chain_parent_name,
                 template_name=self.chain_parent_name,
-                origin="InternalInitiated",
+                origin=ORIGIN_INTERNAL_INITIATED,
                 metadata=metadata,
             )
 
@@ -343,6 +347,6 @@ class FanInChainGenerator:
                 transfer_parent_id=parent_tid,
                 rail_name=self.child_template_name,
                 template_name=self.child_template_name,
-                origin="InternalInitiated",
+                origin=ORIGIN_INTERNAL_INITIATED,
                 metadata=metadata,
             )

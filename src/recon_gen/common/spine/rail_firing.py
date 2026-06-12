@@ -41,6 +41,7 @@ from datetime import date
 from typing import ClassVar
 
 from recon_gen.common.l2.primitives import (
+    ORIGIN_INTERNAL_INITIATED,
     POSTED_STATUS,
     AmountDirection,
     L2Instance,
@@ -253,7 +254,7 @@ class RailFiringGenerator:
                 posting=posting,
                 transfer_id=self.transfer_id,
                 rail_name=self.rail_name,
-                origin="InternalInitiated",
+                origin=ORIGIN_INTERNAL_INITIATED,
                 metadata=metadata,
             )
             # Destination-side credit leg.
@@ -272,7 +273,7 @@ class RailFiringGenerator:
                 posting=posting,
                 transfer_id=self.transfer_id,
                 rail_name=self.rail_name,
-                origin="InternalInitiated",
+                origin=ORIGIN_INTERNAL_INITIATED,
                 metadata=metadata,
             )
             return
@@ -297,6 +298,6 @@ class RailFiringGenerator:
             posting=posting,
             transfer_id=self.transfer_id,
             rail_name=self.rail_name,
-            origin="InternalInitiated",
+            origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
         )

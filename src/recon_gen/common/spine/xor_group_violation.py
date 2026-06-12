@@ -39,7 +39,11 @@ from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
 
-from recon_gen.common.l2.primitives import POSTED_STATUS, L2Instance
+from recon_gen.common.l2.primitives import (
+    ORIGIN_INTERNAL_INITIATED,
+    POSTED_STATUS,
+    L2Instance,
+)
 from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
     insert_tx,
@@ -223,7 +227,7 @@ class XorGroupMissedFiringGenerator:
             transfer_id=self.transfer_id,
             rail_name=self.witness_rail_name,
             template_name=self.template_name,
-            origin="InternalInitiated",
+            origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
         )
 
@@ -310,6 +314,6 @@ class XorGroupOverlapGenerator:
                 transfer_id=self.transfer_id,
                 rail_name=variant,
                 template_name=self.template_name,
-                origin="InternalInitiated",
+                origin=ORIGIN_INTERNAL_INITIATED,
                 metadata=metadata,
             )

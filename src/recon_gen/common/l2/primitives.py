@@ -71,9 +71,24 @@ Money: TypeAlias = Decimal
 Scope: TypeAlias = Literal["internal", "external"]
 
 # L1's Transaction.Origin — open enum on L1, but L2 declares each Rail's
-# Origin per-instance. The SPEC pins {InternalInitiated, ExternalForcePosted}
-# as the v1 set; integrators may extend.
+# Origin per-instance. The v1 canonical set (per ETL walkthrough +
+# tests/l2/fuzz.py::_ORIGINS):
+#
+# - ``InternalInitiated`` — we drove the posting (the ~99% default).
+# - ``ExternalForcePosted`` — external counterparty drove a single
+#   transfer; excluded from drift.
+# - ``ExternalAggregated`` — external counterparty sent a netted /
+#   rolled-up posting (the third bucket the ETL walkthrough enumerates).
+#
+# Integrators may extend; the column has no schema CHECK (half-open per
+# the 2026-06-11 audit lock — q.3). The three Final constants below let
+# writers import the canonical spelling instead of sprinkling literals;
+# the type stays str so integrator extensions don't require an upstream
+# Literal change.
 Origin: TypeAlias = str
+ORIGIN_INTERNAL_INITIATED: Final = "InternalInitiated"
+ORIGIN_EXTERNAL_FORCE_POSTED: Final = "ExternalForcePosted"
+ORIGIN_EXTERNAL_AGGREGATED: Final = "ExternalAggregated"
 
 # Every Transaction leg's direction. ``Variable`` is the closing-leg sentinel
 # whose amount + direction are both determined by a containing

@@ -73,6 +73,8 @@ from recon_gen.common.as_of_frame import AsOfFrame
 from recon_gen.common.sql import Dialect
 
 from .primitives import (
+    ORIGIN_EXTERNAL_FORCE_POSTED,
+    ORIGIN_INTERNAL_INITIATED,
     POSTED_STATUS,
     AccountTemplate,
     AmountDirection,
@@ -2065,16 +2067,16 @@ def _emit_baseline_for_rail(
     if isinstance(rail, TwoLegRail):
         src_origin = (
             str(rail.source_origin) if rail.source_origin is not None
-            else (str(rail.origin) if rail.origin is not None else "InternalInitiated")
+            else (str(rail.origin) if rail.origin is not None else ORIGIN_INTERNAL_INITIATED)
         )
         dst_origin = (
             str(rail.destination_origin) if rail.destination_origin is not None
-            else (str(rail.origin) if rail.origin is not None else "InternalInitiated")
+            else (str(rail.origin) if rail.origin is not None else ORIGIN_INTERNAL_INITIATED)
         )
     else:
         src_origin = (
             str(rail.origin) if rail.origin is not None
-            else "InternalInitiated"
+            else ORIGIN_INTERNAL_INITIATED
         )
         dst_origin = src_origin  # unused for single-leg
 
@@ -2329,11 +2331,11 @@ def _emit_opening_balance_rows(
         txn_id = f"tx-base-opening-{n:04d}"
         src_origin = (
             str(rail.source_origin) if rail.source_origin is not None
-            else (str(rail.origin) if rail.origin is not None else "ExternalForcePosted")
+            else (str(rail.origin) if rail.origin is not None else ORIGIN_EXTERNAL_FORCE_POSTED)
         )
         dst_origin = (
             str(rail.destination_origin) if rail.destination_origin is not None
-            else (str(rail.origin) if rail.origin is not None else "ExternalForcePosted")
+            else (str(rail.origin) if rail.origin is not None else ORIGIN_EXTERNAL_FORCE_POSTED)
         )
         metadata = _baseline_metadata(rail, n, 0)
         rows.append(_txn_row(
@@ -2505,11 +2507,11 @@ def _emit_baseline_for_aggregating_rail(
             return []
         src_origin = (
             str(rail.source_origin) if rail.source_origin is not None
-            else (str(rail.origin) if rail.origin is not None else "InternalInitiated")
+            else (str(rail.origin) if rail.origin is not None else ORIGIN_INTERNAL_INITIATED)
         )
         dst_origin = (
             str(rail.destination_origin) if rail.destination_origin is not None
-            else (str(rail.origin) if rail.origin is not None else "InternalInitiated")
+            else (str(rail.origin) if rail.origin is not None else ORIGIN_INTERNAL_INITIATED)
         )
     else:
         assert isinstance(rail, SingleLegRail)
@@ -2522,7 +2524,7 @@ def _emit_baseline_for_aggregating_rail(
         dst_accounts = []
         src_origin = (
             str(rail.origin) if rail.origin is not None
-            else "InternalInitiated"
+            else ORIGIN_INTERNAL_INITIATED
         )
         dst_origin = src_origin
 
@@ -3391,11 +3393,11 @@ def _emit_chain_child_leg(
         dst = dst_accounts[rng.randrange(len(dst_accounts))]
         src_origin = (
             str(child_rail.source_origin) if child_rail.source_origin is not None
-            else (str(child_rail.origin) if child_rail.origin is not None else "InternalInitiated")
+            else (str(child_rail.origin) if child_rail.origin is not None else ORIGIN_INTERNAL_INITIATED)
         )
         dst_origin = (
             str(child_rail.destination_origin) if child_rail.destination_origin is not None
-            else (str(child_rail.origin) if child_rail.origin is not None else "InternalInitiated")
+            else (str(child_rail.origin) if child_rail.origin is not None else ORIGIN_INTERNAL_INITIATED)
         )
         rows = [
             _txn_row(
@@ -3453,7 +3455,7 @@ def _emit_chain_child_leg(
             direction, signed = "Debit", -amount
         leg_origin = (
             str(child_rail.origin) if child_rail.origin is not None
-            else "InternalInitiated"
+            else ORIGIN_INTERNAL_INITIATED
         )
         rows = [_txn_row(
             id_=txn_id,
@@ -3946,7 +3948,7 @@ def _emit_cascade_pair(
             posting=posting,
             transfer_id=transfer_id,
             rail_name=balance_rail if balance_rail is not None else cascade_label,
-            origin="ExternalForcePosted",
+            origin=ORIGIN_EXTERNAL_FORCE_POSTED,
             metadata=metadata,
             dialect=dialect,
         ),
@@ -3963,7 +3965,7 @@ def _emit_cascade_pair(
             posting=posting,
             transfer_id=transfer_id,
             rail_name=balance_rail if balance_rail is not None else cascade_label,
-            origin="InternalInitiated",
+            origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
             dialect=dialect,
         ),

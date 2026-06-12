@@ -40,7 +40,12 @@ from datetime import date
 from typing import ClassVar
 
 from recon_gen.common.l2.primitives import (
-    POSTED_STATUS, Account, AmountDirection, L2Instance, LimitDirection,
+    ORIGIN_INTERNAL_INITIATED,
+    POSTED_STATUS,
+    Account,
+    AmountDirection,
+    L2Instance,
+    LimitDirection,
     LimitSchedule,
 )
 from recon_gen.common.spine._db import fetch_all
@@ -217,7 +222,7 @@ class LimitBreachGenerator:
             posting=ts(self.anchor_day),
             transfer_id=f"xfer-limit-breach-{self.rail_name}-{self.direction}-{self.account_id}",
             rail_name=self.rail_name,
-            origin="etl",
+            origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
         )
 

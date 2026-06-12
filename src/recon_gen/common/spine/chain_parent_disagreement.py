@@ -39,7 +39,11 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import ClassVar
 
-from recon_gen.common.l2.primitives import POSTED_STATUS, L2Instance
+from recon_gen.common.l2.primitives import (
+    ORIGIN_EXTERNAL_FORCE_POSTED,
+    POSTED_STATUS,
+    L2Instance,
+)
 from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
     insert_tx,
@@ -241,6 +245,6 @@ class ChainParentDisagreementGenerator:
                 transfer_parent_id=parent_tid,
                 rail_name=self.rail_name,
                 template_name=self.child_template_name,
-                origin="ExternalForcePosted",
+                origin=ORIGIN_EXTERNAL_FORCE_POSTED,
                 metadata=metadata,
             )

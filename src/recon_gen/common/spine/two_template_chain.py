@@ -41,7 +41,12 @@ from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
 
-from recon_gen.common.l2.primitives import POSTED_STATUS, L2Instance, TransferTemplate
+from recon_gen.common.l2.primitives import (
+    ORIGIN_INTERNAL_INITIATED,
+    POSTED_STATUS,
+    L2Instance,
+    TransferTemplate,
+)
 from recon_gen.common.spine._emit_helpers import (
     insert_tx,
     load_spec_example,
@@ -236,7 +241,7 @@ class TwoTemplateChainGenerator:
             transfer_id=self.parent_transfer_id,
             rail_name=self.parent_rail_name,
             template_name=self.parent_template_name,
-            origin="InternalInitiated",
+            origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
         )
 
@@ -265,6 +270,6 @@ class TwoTemplateChainGenerator:
                 transfer_parent_id=self.parent_transfer_id,
                 rail_name=leg_rail,
                 template_name=self.child_template_name,
-                origin="InternalInitiated",
+                origin=ORIGIN_INTERNAL_INITIATED,
                 metadata=metadata,
             )

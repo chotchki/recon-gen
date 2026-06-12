@@ -124,7 +124,7 @@ def test_transfer_constructs_with_defaults() -> None:
     t = _balanced_pair(day=date(2030, 1, 1), transfer_id="x")
     assert t.status == "Posted"
     assert t.parent_transfer_id is None
-    assert t.origin == "etl"
+    assert t.origin == "InternalInitiated"
     assert t.hour == 12  # documented noon default
 
 

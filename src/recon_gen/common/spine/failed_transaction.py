@@ -27,7 +27,7 @@ from recon_gen.common.db import SyncConnection
 from dataclasses import dataclass
 from datetime import date
 
-from recon_gen.common.l2.primitives import Scope
+from recon_gen.common.l2.primitives import ORIGIN_INTERNAL_INITIATED, Scope
 from recon_gen.common.spine._emit_helpers import insert_tx, ts
 from recon_gen.common.spine.violation import AuditFixture
 
@@ -105,6 +105,6 @@ class FailedTransactionGenerator:
             posting=ts(self.anchor_day),
             transfer_id=f"tr-failed-{self.account_id}",
             rail_name=self.rail_name,
-            origin="InternalInitiated",
+            origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
         )

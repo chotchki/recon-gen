@@ -31,7 +31,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import ClassVar
 
-from recon_gen.common.l2.primitives import POSTED_STATUS, L2Instance, SingleLegRail, TwoLegRail
+from recon_gen.common.l2.primitives import (
+    ORIGIN_INTERNAL_INITIATED,
+    POSTED_STATUS,
+    L2Instance,
+    SingleLegRail,
+    TwoLegRail,
+)
 from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
     find_internal_with_role,
@@ -193,7 +199,7 @@ class StuckUnbundledGenerator:
             posting=posting_dt.strftime("%Y-%m-%d %H:%M:%S"),
             transfer_id=self.transfer_id,
             rail_name=self.rail_name,
-            origin="etl",
+            origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
         )
 

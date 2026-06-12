@@ -39,7 +39,11 @@ from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
 
-from recon_gen.common.l2.primitives import POSTED_STATUS, L2Instance
+from recon_gen.common.l2.primitives import (
+    ORIGIN_INTERNAL_INITIATED,
+    POSTED_STATUS,
+    L2Instance,
+)
 from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
     insert_tx,
@@ -251,7 +255,7 @@ class MultiXorMissedGenerator:
             transfer_id=self.parent_transfer_id,
             rail_name=rail_name,
             template_name=template_name,
-            origin="InternalInitiated",
+            origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
         )
 
@@ -335,7 +339,7 @@ class MultiXorOverlapGenerator:
             transfer_id=self.parent_transfer_id,
             rail_name=parent_rail,
             template_name=parent_template,
-            origin="InternalInitiated",
+            origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
         )
         # Two child firings; both reference the parent via
@@ -368,6 +372,6 @@ class MultiXorOverlapGenerator:
                 transfer_parent_id=self.parent_transfer_id,
                 rail_name=rail_name,
                 template_name=template_name,
-                origin="InternalInitiated",
+                origin=ORIGIN_INTERNAL_INITIATED,
                 metadata=metadata,
             )

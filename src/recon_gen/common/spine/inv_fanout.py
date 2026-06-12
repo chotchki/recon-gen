@@ -44,7 +44,11 @@ from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
 
-from recon_gen.common.l2.primitives import POSTED_STATUS, Scope
+from recon_gen.common.l2.primitives import (
+    ORIGIN_EXTERNAL_AGGREGATED,
+    POSTED_STATUS,
+    Scope,
+)
 from recon_gen.common.spine._emit_helpers import insert_tx
 from recon_gen.common.spine.violation import CoverageObservation
 
@@ -220,7 +224,7 @@ class InvFanoutGenerator:
                 posting=posting,
                 transfer_id=transfer_id,
                 rail_name=self.rail_name,
-                origin="ExternalInitiated",
+                origin=ORIGIN_EXTERNAL_AGGREGATED,
                 metadata=metadata,
             )
             # Recipient credit leg.
@@ -239,6 +243,6 @@ class InvFanoutGenerator:
                 posting=posting,
                 transfer_id=transfer_id,
                 rail_name=self.rail_name,
-                origin="ExternalInitiated",
+                origin=ORIGIN_EXTERNAL_AGGREGATED,
                 metadata=metadata,
             )

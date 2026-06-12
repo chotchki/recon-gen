@@ -35,7 +35,11 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Literal
 
-from recon_gen.common.l2.primitives import POSTED_STATUS, AmountDirection
+from recon_gen.common.l2.primitives import (
+    ORIGIN_INTERNAL_INITIATED,
+    POSTED_STATUS,
+    AmountDirection,
+)
 from recon_gen.common.spine.invariant import Invariant
 from recon_gen.common.spine.rng import scenario_rng
 from recon_gen.common.spine.violation import Violation
@@ -208,7 +212,7 @@ class AccountSimulation:
                         "transfer_parent_id": None,
                         "rail_name": "_spine_plant",
                         "template_name": None,
-                        "origin": "etl",
+                        "origin": ORIGIN_INTERNAL_INITIATED,
                         "metadata": metadata,
                         "supersedes": None,
                     }
@@ -302,7 +306,7 @@ class AccountSimulation:
                     amount_money=amount, amount_direction=direction,
                     status=POSTED_STATUS, posting=_ts(em.day),
                     transfer_id=f"xfer-{self.account_id}-{tag}",
-                    rail_name="_spine_plant", origin="etl",
+                    rail_name="_spine_plant", origin=ORIGIN_INTERNAL_INITIATED,
                     metadata=metadata,
                 )
         start, end = _day_bounds(em.day)

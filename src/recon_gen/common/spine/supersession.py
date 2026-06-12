@@ -31,7 +31,11 @@ from recon_gen.common.db import SyncConnection
 from dataclasses import dataclass
 from datetime import date
 
-from recon_gen.common.l2.primitives import POSTED_STATUS, Scope
+from recon_gen.common.l2.primitives import (
+    ORIGIN_INTERNAL_INITIATED,
+    POSTED_STATUS,
+    Scope,
+)
 from recon_gen.common.spine._emit_helpers import insert_tx, ts
 from recon_gen.common.spine.violation import AuditFixture
 
@@ -116,7 +120,7 @@ class SupersessionGenerator:
             posting=ts(self.anchor_day, hour=9),
             transfer_id=self.transfer_id,
             rail_name=self.rail_name,
-            origin="InternalInitiated",
+            origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
         )
         # TechnicalCorrection at 09:30 — same logical id, different
@@ -136,7 +140,7 @@ class SupersessionGenerator:
             posting=ts(self.anchor_day, hour=10),  # 09:30 in OLD; 10 here keeps insert_tx's ts() helper signature simple
             transfer_id=self.transfer_id,
             rail_name=self.rail_name,
-            origin="InternalInitiated",
+            origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
             supersedes="TechnicalCorrection",
         )

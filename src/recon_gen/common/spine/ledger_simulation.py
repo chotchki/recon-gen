@@ -46,7 +46,10 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal
 
-from recon_gen.common.l2.primitives import AmountDirection
+from recon_gen.common.l2.primitives import (
+    ORIGIN_INTERNAL_INITIATED,
+    AmountDirection,
+)
 from recon_gen.common.spine._emit_helpers import TX_COLS, bulk_insert_tx, ts
 from recon_gen.common.spine.account_simulation import AccountSimulation
 from recon_gen.common.spine.invariant import Invariant
@@ -99,7 +102,7 @@ class Transfer:
     legs: tuple[TransferLeg, ...]
     status: Literal["Posted", "Pending"] = "Posted"
     parent_transfer_id: str | None = None
-    origin: str = "etl"
+    origin: str = ORIGIN_INTERNAL_INITIATED
     #: Hour of day used for the ``posting`` timestamp on each leg.
     #: Defaults to noon so each leg lands inside the day's balance
     #: window (00:00 ≤ posting < 24:00). Mirrors `ts()`'s convention.

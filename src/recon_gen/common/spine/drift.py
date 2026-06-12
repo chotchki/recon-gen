@@ -32,7 +32,11 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import ClassVar
 
-from recon_gen.common.l2.primitives import POSTED_STATUS, L2Instance
+from recon_gen.common.l2.primitives import (
+    ORIGIN_INTERNAL_INITIATED,
+    POSTED_STATUS,
+    L2Instance,
+)
 from recon_gen.common.money import Cents
 from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
@@ -269,7 +273,7 @@ class DriftGenerator:
             posting=ts(self.anchor_day),
             transfer_id=f"xfer-drift-{self.child_role}-{self.child_account_id}-1",
             rail_name="_spine_plant",
-            origin="etl",
+            origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
         )
         # Parent (when present in the shape): stored money equals the
@@ -379,7 +383,7 @@ class LedgerDriftGenerator:
             posting=ts(self.anchor_day),
             transfer_id=f"xfer-ledger-drift-{self.parent_role}-1",
             rail_name="_spine_plant",
-            origin="etl",
+            origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
         )
         # Parent: stored money = leg_amount + delta. Σ children for our
