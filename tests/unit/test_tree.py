@@ -934,6 +934,27 @@ class TestTableVisual:
                 conditional_formatting=[Drillable(on=col_a, color="#000000")],
             )
 
+    def test_drillable_emit_uses_uppercase_hex_for_qs_validation(self):
+        """Phase DA — QS `backgroundColor.solid.color` enforces
+        `^#[A-F0-9]{6}$` (UPPERCASE hex only). The auto-derived tint
+        from `_tint_hex` must round-trip uppercase or QS rejects the
+        analysis at create_analysis time with a ValidationException.
+        CI 27439942692 caught the original lowercase-hex regression."""
+        from recon_gen.common.tree.formatting import _tint_hex
+
+        # Lowercase input should still produce uppercase output — authors
+        # may write theme.accent either case; output must satisfy QS's
+        # pattern regardless.
+        for accent_in in ("#1f77b4", "#1F77B4", "#0b5394"):
+            tint = _tint_hex(accent_in)
+            assert tint.startswith("#")
+            hex_body = tint[1:]
+            assert len(hex_body) == 6
+            assert hex_body == hex_body.upper(), (
+                f"_tint_hex({accent_in!r}) returned {tint!r}; QS pattern "
+                f"^#[A-F0-9]{{6}}$ requires uppercase."
+            )
+
     def test_drillable_with_matching_drill_passes(self):
         """Happy path: when at least one Drill on the same Table writes
         from `Drillable.on.column`, construction succeeds. Mirrors the

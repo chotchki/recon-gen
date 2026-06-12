@@ -85,7 +85,11 @@ def _tint_hex(hex_color: str, *, amount: float = 0.10) -> str:
     r2 = round(r * amount + 255 * (1 - amount))
     g2 = round(g * amount + 255 * (1 - amount))
     b2 = round(b * amount + 255 * (1 - amount))
-    return f"#{r2:02x}{g2:02x}{b2:02x}"
+    # QS conditional-formatting `backgroundColor.solid.color` enforces
+    # `^#[A-F0-9]{6}$` — UPPERCASE hex only. Lowercase hex on the same
+    # field path raises `ValidationException` at create_analysis time
+    # (CI 27439942692 caught this; documented in the quirks log).
+    return f"#{r2:02X}{g2:02X}{b2:02X}"
 
 
 @dataclass(frozen=True)
