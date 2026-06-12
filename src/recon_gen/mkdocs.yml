@@ -14,6 +14,16 @@ site_url: https://chotchki.github.io/recon-gen/
 # (extra_css, extra_javascript, plugins.macros.include_dir) all stay
 # relative to docs_dir.
 docs_dir: docs
+# Phase DA — the Studio ``?``-button per-sheet handbook snippets live
+# under ``docs/_handbook_per_sheet/`` so they ship with the wheel
+# package. Mkdocs's underscore convention skips top-level
+# underscore-prefixed FILES but NOT directories, so exclude the whole
+# tree explicitly. The Starlette ``/handbook/<path>`` route in
+# common/html/server.py reads from this directory directly (no mkdocs
+# rendering — markdown is parsed at request time into a side-panel
+# fragment).
+exclude_docs: |
+  _handbook_per_sheet/
 
 theme:
   name: material
