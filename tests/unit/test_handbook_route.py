@@ -64,7 +64,9 @@ def test_handbook_route_renders_existing_page() -> None:
     # H1 should land in the HTML — the page header is "Drift" but we
     # assert on a more page-specific phrase from the body so the test
     # doesn't drift with the L1 sheet's display name. The phrase below
-    # comes from docs/handbook/l1/drift.md's first paragraph.
+    # comes from src/recon_gen/docs/_handbook_per_sheet/l1/drift.md's
+    # first paragraph (the file moved into the wheel package during DA
+    # so deployed Studio's ``?`` button works).
     assert "Sub-ledger drift" in res.text  # typing-smell: ignore[no-inline-production-constants]: the literal is a handbook prose fragment, not a code constant
     assert "<article" in res.text
     assert "handbook-page" in res.text
@@ -89,5 +91,5 @@ def test_handbook_route_rejects_path_traversal() -> None:
     client = _client()
     res = client.get("/handbook/..%2Fetc%2Fpasswd")
     # 400 or 404 either means the operator can't reach files outside
-    # docs/handbook/.
+    # the handbook directory.
     assert res.status_code in (400, 404)

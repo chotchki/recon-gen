@@ -24,7 +24,7 @@ the docs claim violations the data doesn't produce, the test fires
 loud — the documented scenario can't silently fail to demonstrate.
 
 What this REPLACES (eventually): hand-written prose in
-`docs/handbook/` that lives parallel to the seed; the docs walk
+`src/recon_gen/docs/_handbook_per_sheet/` that lives parallel to the seed; the docs walk
 ASSUMED to match the data. With `TrainingScenario`, the docs
 mkdocs-macros can render `scenario.description` next to a
 mkdocs-side `scenario.intended` summary, and a CI test runs

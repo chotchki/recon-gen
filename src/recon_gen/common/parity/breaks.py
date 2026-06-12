@@ -183,7 +183,7 @@ PARITY_BREAKS: Final[tuple[QSParityBreak, ...]] = (
         discovered="2026-06-08",
         references=(
             "src/recon_gen/common/html/_studio_editor_routes.py",
-            "docs/handbook/l2-editor/",
+            "src/recon_gen/docs/_handbook_per_sheet/l2-editor/",
         ),
     ),
     QSParityBreak(

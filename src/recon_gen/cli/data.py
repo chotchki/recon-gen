@@ -529,7 +529,7 @@ def data_etl_example(output: str) -> None:
     header naming the business invariant and a ``-- Consumed by:``
     header naming the dashboard view that reads the resulting rows.
 
-    See docs/handbook/etl.md for the walkthroughs that reference this
+    See src/recon_gen/docs/_handbook_per_sheet/etl.md for the walkthroughs that reference this
     output.
     """
     from recon_gen.common.etl_examples import (

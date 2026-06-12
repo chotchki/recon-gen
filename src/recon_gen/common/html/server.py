@@ -794,10 +794,19 @@ def make_app(
 
         Route: ``GET /handbook/{handbook_path:path}``. The path comes
         from a Sheet's ``handbook_path: HandbookPath`` field (e.g.
-        ``l1/drift``); resolved to ``docs/handbook/<path>.md`` on disk
-        and rendered through the same markdown pipeline the rest of
-        the App2 surface uses. Returns an HTML fragment ready for
-        injection into the side panel container — no full-page chrome.
+        ``l1/drift``); resolved to
+        ``<package>/docs/_handbook_per_sheet/<path>.md`` on disk and
+        rendered through the same markdown pipeline the rest of the
+        App2 surface uses. Returns an HTML fragment ready for injection
+        into the side panel container — no full-page chrome.
+
+        Lookup path is package-relative so the route works identically
+        in repo-checkout dev mode AND in wheel-installed deployed mode
+        (pre-DA the lookup used ``repo_root/docs/handbook`` which only
+        existed in dev — deployed Studio's ``?`` button always 404'd).
+        The ``_handbook_per_sheet`` directory is underscore-prefixed so
+        mkdocs (whose source root is the parent ``docs/`` directory)
+        skips it during the curated site build.
 
         404 if the file doesn't exist (e.g. a Sheet declared a path
         that wasn't authored yet) or if the path tries to escape the
@@ -807,9 +816,11 @@ def make_app(
         import markdown as _md  # noqa: PLC0415 — lazy
 
         # server.py lives at src/recon_gen/common/html/server.py;
-        # parents[0]=html, [1]=common, [2]=recon_gen, [3]=src, [4]=repo
-        repo_root = _Path(__file__).resolve().parents[4]
-        handbook_root = repo_root / "docs" / "handbook"
+        # parents[0]=html, [1]=common, [2]=recon_gen (package root —
+        # same in repo-checkout AND wheel-install). The bundled
+        # per-sheet handbook source ships at <package>/docs/_handbook_per_sheet/.
+        package_root = _Path(__file__).resolve().parents[2]
+        handbook_root = package_root / "docs" / "_handbook_per_sheet"
         raw_path = request.path_params["handbook_path"]
         # Resolve + ensure the final path is still inside handbook_root.
         # Defense against ``../../etc/passwd`` style traversal.

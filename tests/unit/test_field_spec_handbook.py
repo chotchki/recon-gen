@@ -7,7 +7,7 @@ Three layers:
    when populated and "" when not — same hook the dashboard ``?``
    button uses, so a single ``bootstrap.js`` handler services both.
 3. Liveness gate: every wired FieldSpec.handbook_path across the
-   editor routes resolves to an actual file under ``docs/handbook/``.
+   editor routes resolves to an actual file under ``src/recon_gen/docs/_handbook_per_sheet/``.
 """
 
 from __future__ import annotations
@@ -61,11 +61,11 @@ def test_handbook_chip_html_emits_anchor_when_set() -> None:
 
 def test_all_wired_handbook_paths_resolve_to_files() -> None:
     """Liveness gate — every FieldSpec wired with a handbook_path
-    points at an actual file under ``docs/handbook/<path>.md``.
+    points at an actual file under ``src/recon_gen/docs/_handbook_per_sheet/<path>.md``.
     Catches typos + dangling references at unit-test time, before
     the operator clicks the ``?`` button and gets a 404."""
     repo_root = Path(__file__).resolve().parents[2]
-    handbook_root = repo_root / "docs" / "handbook"
+    handbook_root = repo_root / "src" / "recon_gen" / "docs" / "_handbook_per_sheet"
     all_specs: tuple[FieldSpec, ...] = (
         _ACCOUNT_FIELDS
         + _ACCOUNT_TEMPLATE_FIELDS

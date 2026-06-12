@@ -420,11 +420,10 @@ Together these break the project convention "left clicks move LEFT, right clicks
   - Class C strip (1 site): Posting Ledger `transfer_col` — remove the `Drillable`.
   - Class D adds (2 sites): L2FT Violation Detail `entity_a_col`; Investigation Account Network — Touching Edges (column to be identified at implementation).
 - [x] DA.5 - **Type-system gate in `Table.__post_init__`.** Walks `conditional_formatting × actions`; for each `Drillable.on.column`, asserts ≥1 drill writes from that column. Raises `ValueError` at construction with the offending Table + column + drill set in the message. Unit test constructs a mismatched Table and asserts the raise.
-- [ ] DA.6 - **Tests.** Unit: `_table_column_meta` returns expected decoration map (accent vs accent-menu) for a Table with each shape. JS (Playwright): `renderTable` applies the right class on the right `<td>`; cell-click on menu-decorated cell opens the menu. Anti-regression for the DA.5 gate.
-- [ ] DA.7 - **Cold-read v4 parity verify.** Visual side-by-side (QS embed + App2) of L1 Drift + Overdraft + L1 Exceptions sheets; confirm drill columns decorate identically. Output: `docs/audits/da_7_parity_verify.md`.
+- [x] DA.6 - **Tests.** Unit: `_table_column_meta` returns expected decoration map (accent vs accent-menu) for a Table with each shape. JS (Playwright): `renderTable` applies the right class on the right `<td>`; cell-click on menu-decorated cell opens the menu. Anti-regression for the DA.5 gate.
+- [x] DA.7 - **Cold-read v4 parity verify.** Visual side-by-side (QS embed + App2) of L1 Drift + Overdraft + L1 Exceptions sheets; confirm drill columns decorate identically. Output: `docs/audits/da_7_parity_verify.md`.
 - [ ] DA.8 - **Phase exit + v13.15.x release cut.** Bundle clear_button + cache-bust + row-drill MENU contract + Phase DA into one release notes entry. Bump 13.14.5 → 13.15.0 (minor for the new App2 decoration feature). Operator authorize-at-cut per `[[feedback_always_ask_before_release_cut]]`. Sweep CN to PLAN_ARCHIVE.md.
 
 ## Backlog (not yet phased)
 
-- **handbook link 404 in deployed Studio (2026-06-12 operator heads-up).** `render.py:1741` emits `<a href="/handbook/<path>">` for the per-sheet ? button. Works locally (Studio has a `/handbook/<path>` Starlette route). In a deployed copy the handbook lives under `/docs/handbook/<path>` (mkdocs site mount) — the `/handbook/<path>` URL 404s. Fix: emit a `/docs/handbook/<path>` URL OR make `/handbook/<path>` redirect to `/docs/handbook/<path>` in non-Studio mode. Same shape applies to `_studio_editor_routes.py:250`.
 - **date-model.plant-days_ago-bounded — replace plant days_ago: int with days_into_window bounded type** — added 2026-06-12.
