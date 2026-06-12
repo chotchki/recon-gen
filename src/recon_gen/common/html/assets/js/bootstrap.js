@@ -716,7 +716,15 @@
       if (d.trigger === "DATA_POINT_MENU") hasMenu = true;
       if (!clickDrill && d.trigger === "DATA_POINT_CLICK") clickDrill = d;
     });
-    if (!clickDrill) clickDrill = drills[0] || null;
+    // 2026-06-12 — do NOT fall back to drills[0] when no DATA_POINT_CLICK
+    // exists. A MENU-only Table (e.g. L1 Overdraft → Daily Statement)
+    // should expose its drill ONLY via the trailing ⋯ button + right-click
+    // contextmenu — left-clicking anywhere on the row must NOT navigate.
+    // Prior fallback ``if (!clickDrill) clickDrill = drills[0]`` made the
+    // whole row left-clickable regardless of trigger, violating the
+    // documented contract (render.py::_serialize_table_row_drills) and
+    // the project convention (left clicks move LEFT, right clicks move
+    // RIGHT — MENU is the right-direction surface).
     // CY.6 — metadata popup forces the ⋯ menu column even when no
     // DATA_POINT_MENU drill exists; the menu's sole entry is the
     // synthetic "{} View metadata" item ``openRowMenu`` prepends.

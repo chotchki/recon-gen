@@ -115,6 +115,17 @@ _CLICK_DRILL = [{
 
 
 def test_menu_drill_adds_ellipsis_button_per_row_and_header_cell() -> None:
+    """A MENU-only Table exposes its drill VIA the trailing ⋯ button per
+    row (+ a corresponding header column), NOT via a row-wide left-click
+    handler. The row stays non-clickable: no ``data-row-drill`` attribute,
+    no cursor: pointer, no navigation on row click.
+
+    2026-06-12 — operator dogfood (L1 Overdraft → Daily Statement): the
+    whole row was a click target despite being declared as MENU-only.
+    Root cause was a ``clickDrill = drills[0]`` fallback in wireRowDrills
+    that promoted MENU drills to whole-row left-click. Now removed: a
+    MENU drill stays MENU.
+    """
     with playwright_sync_api.sync_playwright() as p:
         browser = p.webkit.launch(headless=True)
         page = browser.new_page()
@@ -123,9 +134,15 @@ def test_menu_drill_adds_ellipsis_button_per_row_and_header_cell() -> None:
         n_btns = page.locator("#drill-host tbody tr .row-drill-menu-btn").count()
         n_drillable = page.locator("#drill-host tbody tr[data-row-drill]").count()
         n_head_extra = page.locator("#drill-host thead th.row-drill-col").count()
+        # CSS guard — no cursor: pointer on MENU-only rows.
+        first_row_cursor = page.locator("#drill-host tbody tr").first.evaluate(
+            "(el) => getComputedStyle(el).cursor"
+        )
         browser.close()
     assert n_btns == 2
-    assert n_drillable == 2
+    # MENU-only drill must NOT make rows left-clickable.
+    assert n_drillable == 0
+    assert first_row_cursor != "pointer"
     assert n_head_extra == 1
 
 

@@ -67,6 +67,25 @@ appears in each. Catches future bare-URL additions to `_PAGE_SHELL` /
 `_VENDOR_CSS` / `_VENDOR_JS` at unit-tier speed (no Studio boot, no
 browser).
 
+**3. Row-drill MENU-only contract restored.** Operator dogfood found
+the L1 Overdraft sheet's table was making the entire row a left-click
+target despite being declared as `DATA_POINT_MENU`-only (the trailing
+"⋯" affordance + right-click). Root cause: a `clickDrill = drills[0]`
+fallback in `bootstrap.js::wireRowDrills` that promoted any first
+drill to a row-wide left-click handler, overriding the documented
+contract (`render.py::_serialize_table_row_drills` —
+`DATA_POINT_CLICK` = whole-row click; `DATA_POINT_MENU` = trailing "⋯"
++ right-click only).
+
+Fallback removed. The existing
+`test_menu_drill_adds_ellipsis_button_per_row_and_header_cell` test
+was wrong (asserted `n_drillable == 2` for MENU-only) — updated to
+assert the correct shape: MENU-only Tables have `n_drillable == 0`,
+no `cursor: pointer` on `<tr>`, and surface their drill ONLY via the
+⋯ button + ctxmenu. Matches the project convention: left clicks move
+LEFT (back-toward-source), right clicks move RIGHT
+(deeper/down-the-pipeline).
+
 ## v13.14.4 — Phase BX close + typed-enum sweep + silent HTMX swap bug fix
 
 Forty-eight commits since v13.14.3. Three load-bearing themes plus
