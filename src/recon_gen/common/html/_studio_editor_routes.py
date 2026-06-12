@@ -6036,6 +6036,262 @@ def _render_singleton_page(
 """
 
 
+# ---------------------------------------------------------------------------
+# BX.3 (2026-06-11) — Rail list table view (session-only, ?view=table)
+# ---------------------------------------------------------------------------
+#
+# Operator lock: card grid stays the DEFAULT; table view is opt-in via
+# ``?view=table`` on the URL. Session-only — no .studio-state.yaml persist;
+# a full reload without the query param resets to grid. The toggle chip
+# renders next to the existing toolbar so the operator can flip between
+# the two shapes without leaving the rail list.
+#
+# Group-by-source_role: table rows sort by source role; each distinct
+# role gets a ``<tr class="role-header">`` separator above its rows.
+# TwoLegRail uses ``source_role`` / ``destination_role``; SingleLegRail
+# carries only ``leg_role`` and renders under the "(single-leg)" bucket
+# (the leg_role is its own column inside the row — kept distinct from
+# the grouping axis because a single-leg rail has no "from → to"
+# semantic).
+
+RailViewMode: TypeAlias = Literal["grid", "table"]
+
+
+def _parse_view_mode(raw: str | None) -> RailViewMode:
+    """Decode the ``?view=`` query param. Default = grid (operator lock).
+
+    Only ``"table"`` flips to the table view; anything else (including
+    missing, empty string, ``"grid"``, garbage) stays on the default
+    grid shape. Typed-return narrows the call-site branching.
+    """
+    if raw == "table":
+        return "table"
+    return "grid"
+
+
+def _role_expression_text(value: object) -> str:
+    """Join a ``RoleExpression`` tuple into a human-readable label.
+
+    Single role → bare name. Multiple roles (e.g. ``("A", "B")``) →
+    ``"A | B"`` (matches the loader / handbook convention). Non-tuple
+    fallback → ``str(value)`` so the table renders something rather
+    than crashing on a weirdly-typed entity.
+    """
+    if isinstance(value, tuple):
+        items = cast("tuple[object, ...]", value)
+        return " | ".join(str(v) for v in items)
+    return str(value) if value is not None else ""
+
+
+def _rail_table_columns(entity: object) -> tuple[str, str, str, str]:
+    """Return ``(name, source_role, destination_role, subtype)`` for a
+    rail entity. SingleLegRail carries only ``leg_role``; we surface
+    that in both source + destination columns prefixed with ``(leg)``
+    so the table stays uniform without lying about the shape."""
+    from recon_gen.common.l2.primitives import (  # noqa: PLC0415 — lazy to dodge cycle
+        SingleLegRail,
+        TwoLegRail,
+    )
+    name = str(getattr(entity, "name", ""))
+    if isinstance(entity, TwoLegRail):
+        return (
+            name,
+            _role_expression_text(getattr(entity, "source_role", ())),
+            _role_expression_text(getattr(entity, "destination_role", ())),
+            "two-leg",
+        )
+    if isinstance(entity, SingleLegRail):
+        leg = _role_expression_text(getattr(entity, "leg_role", ()))
+        return (name, f"(leg) {leg}", f"(leg) {leg}", "single-leg")
+    return (name, "", "", "")
+
+
+def _rail_grouping_key(entity: object) -> str:
+    """Source-role grouping key for the table view's ``<tbody>`` sections.
+
+    TwoLegRail groups by its ``source_role`` (the first identifier if
+    the role expression is a tuple — keeps the section count tractable).
+    SingleLegRail collapses into a single ``"(single-leg)"`` bucket
+    because it has no source-role concept at all.
+    """
+    from recon_gen.common.l2.primitives import (  # noqa: PLC0415
+        SingleLegRail,
+        TwoLegRail,
+    )
+    if isinstance(entity, TwoLegRail):
+        src: object = getattr(entity, "source_role", ())
+        if isinstance(src, tuple):
+            src_tuple = cast("tuple[object, ...]", src)
+            if src_tuple:
+                return str(src_tuple[0])
+            return ""
+        return str(src) if src else ""
+    if isinstance(entity, SingleLegRail):
+        return "(single-leg)"
+    return ""
+
+
+def _rail_badges_html(entity: object) -> str:
+    """Render a small set of inline badges for the table view's badges
+    column. Currently surfaces ``aggregating`` (when true) — the same
+    flag the read-card body highlights. Extensible per-cell follow-on
+    if more flags want surfacing later."""
+    badges: list[str] = []
+    if bool(getattr(entity, "aggregating", False)):
+        badge_cls = (
+            "inline-block px-1.5 py-0.5 text-xs font-semibold "
+            "rounded-sm bg-link-tint text-accent border border-accent/25"
+        )
+        badges.append(
+            f'<span class="{badge_cls}" data-role="rail-badge-aggregating">'
+            "aggregating</span>"
+        )
+    return " ".join(badges)
+
+
+def render_rail_view_toggle(
+    *, current: RailViewMode, base_url: str, embed: bool = False,
+) -> str:
+    """Toggle chip — flips between ``?view=grid`` (default) and
+    ``?view=table``. Renders TWO anchors so the active one carries
+    ``aria-pressed="true"`` for accessibility; the other anchor links
+    to the opposite mode. ``data-view-toggle="grid"`` / ``"table"``
+    anchors are stable test handles per memory
+    ``feedback_browser_drivers_user_facing_locators`` (label / ARIA
+    role / data attribute, NOT Tailwind classes).
+
+    ``base_url`` is the route's submit URL (``/l2_shape/rail/`` or
+    ``/l2_shape/rail/?embed=1``). The query-string keys for q / sort /
+    pagination are NOT preserved on the toggle anchors — flipping the
+    view shape is a fresh-start action; the operator's prior search
+    snaps back to the kind's first page in the new shape. Session-only
+    per operator lock (no .studio-state.yaml).
+    """
+    # Build the two target URLs. ``?view=table`` flips to table;
+    # ``?view=grid`` is shorthand for "no view param" so we emit the
+    # plain base URL there (avoids a no-op query string in the address
+    # bar when the operator clicks "Cards").
+    sep = "&" if "?" in base_url else "?"
+    grid_url = base_url
+    table_url = f"{base_url}{sep}view=table"
+    push_attr = ' hx-push-url="true"' if not embed else ""
+    base_chip_cls = (
+        "px-2 py-0.5 text-xs font-medium border border-surface-border "
+        "rounded-sm no-underline"
+    )
+    active_cls = f"{base_chip_cls} bg-accent text-white border-accent"
+    inactive_cls = (
+        f"{base_chip_cls} bg-white text-secondary-fg hover:bg-link-tint"
+    )
+    grid_cls = active_cls if current == "grid" else inactive_cls
+    table_cls = active_cls if current == "table" else inactive_cls
+    grid_aria = "true" if current == "grid" else "false"
+    table_aria = "true" if current == "table" else "false"
+    return (
+        '<div class="flex items-center gap-1" '
+        'data-role="rail-view-toggle" role="group" aria-label="View mode">'
+        f'<a class="{grid_cls}" href="{escape(grid_url)}" '
+        f'data-view-toggle="grid" aria-pressed="{grid_aria}"'
+        f'{push_attr}>Cards</a>'
+        f'<a class="{table_cls}" href="{escape(table_url)}" '
+        f'data-view-toggle="table" aria-pressed="{table_aria}"'
+        f'{push_attr}>Table</a>'
+        '</div>'
+    )
+
+
+def _render_rail_table(entities: tuple[object, ...]) -> str:
+    """Render the rail list as a ``<table>`` grouped by source_role.
+
+    Layout: one ``<tbody>`` per distinct source-role group, headed by a
+    ``<tr class="role-header">`` carrying the group label.  Columns:
+    name, source_role, dest_role, subtype, badges.  Entities are pre-
+    sliced by ``list_view`` (search + pagination still apply), then
+    grouped here in source-role order.
+
+    Empty entities tuple renders the column header only — the existing
+    empty-state message above the table already covers "no rails
+    yet" / "no matches".
+    """
+    th_cls = (
+        "px-3 py-2 text-left text-xs font-semibold "
+        "text-secondary-fg uppercase tracking-wider"
+    )
+    td_cls = "px-3 py-2 text-sm text-primary-fg align-top"
+    role_header_cls = (
+        "bg-surface-bg text-xs font-semibold text-secondary-fg "
+        "uppercase tracking-wider"
+    )
+    table_cls = (
+        "min-w-full divide-y divide-surface-border bg-white "
+        "border border-surface-border rounded-sm"
+    )
+    head_html = (
+        '<thead class="bg-surface-bg">'
+        '<tr>'
+        f'<th class="{th_cls}" scope="col">Name</th>'
+        f'<th class="{th_cls}" scope="col">Source role</th>'
+        f'<th class="{th_cls}" scope="col">Destination role</th>'
+        f'<th class="{th_cls}" scope="col">Subtype</th>'
+        f'<th class="{th_cls}" scope="col">Badges</th>'
+        '</tr>'
+        '</thead>'
+    )
+    # Group + sort. Stable sort within each group by name keeps the
+    # operator's mental model intact ("alphabetical inside each role").
+    grouped: dict[str, list[object]] = {}
+    for entity in entities:
+        key = _rail_grouping_key(entity)
+        grouped.setdefault(key, []).append(entity)
+    tbody_chunks: list[str] = []
+    for group_key in sorted(grouped.keys()):
+        rows: list[str] = []
+        # role-header separator row spans every column.
+        rows.append(
+            f'<tr class="role-header {role_header_cls}" '
+            f'data-role="rail-role-header" '
+            f'data-source-role="{escape(group_key)}">'
+            f'<td colspan="5" class="px-3 py-1.5">{escape(group_key)}</td>'
+            '</tr>'
+        )
+        group_entities = sorted(
+            grouped[group_key],
+            key=lambda e: str(getattr(e, "name", "")),
+        )
+        for entity in group_entities:
+            name, src, dst, subtype = _rail_table_columns(entity)
+            badges_html = _rail_badges_html(entity)
+            url_id = _url_entity_id("rail", entity)
+            name_html = (
+                f'<a class="text-accent no-underline hover:underline" '
+                f'href="/l2_shape/rail/{escape(url_id)}">{escape(name)}</a>'
+            )
+            rows.append(
+                f'<tr data-role="rail-row" '
+                f'data-entity-id="{escape(name)}" '
+                f'data-source-role="{escape(group_key)}">'
+                f'<td class="{td_cls}">{name_html}</td>'
+                f'<td class="{td_cls}">{escape(src)}</td>'
+                f'<td class="{td_cls}">{escape(dst)}</td>'
+                f'<td class="{td_cls}">{escape(subtype)}</td>'
+                f'<td class="{td_cls}">{badges_html}</td>'
+                '</tr>'
+            )
+        tbody_chunks.append(
+            f'<tbody data-role="rail-role-section" '
+            f'data-source-role="{escape(group_key)}">'
+            + "".join(rows)
+            + '</tbody>'
+        )
+    body_html = "".join(tbody_chunks)
+    return (
+        f'<table class="{table_cls}" data-role="rail-list-table">'
+        f'{head_html}'
+        f'{body_html}'
+        f'</table>'
+    )
+
+
 def _render_list_page(
     kind: EntityKind, entities: tuple[object, ...],
     instance: Any,  # typing-smell: ignore[explicit-any]: L2Instance — passed through to per-card hide logic
@@ -6048,6 +6304,8 @@ def _render_list_page(
     embed: bool = False,
     base_url: str = "",
     cascade_url: str | None = None,
+    view_mode: RailViewMode = "grid",
+    view_toggle_html: str = "",
 ) -> str:
     """Full HTML page — every entity of the kind rendered as a read card.
 
@@ -6104,12 +6362,19 @@ def _render_list_page(
     # pays one walk instead of 100. Refused state's tooltip + reason
     # text both come from the cached refs.
     graph = build_reference_graph(instance)
-    cards = "\n".join(
-        _render_read_card(
-            kind, e, instance, collapsed=collapsed, graph=graph,
+    # BX.3 (2026-06-11) — rail kind, ?view=table flips to the
+    # source-role-grouped table render. Card grid stays the default.
+    # ``cards`` holds whichever shape's HTML body so the downstream
+    # wrap (id="entity-list") doesn't need to branch.
+    if view_mode == "table" and kind == "rail" and entities:
+        cards = _render_rail_table(entities)
+    else:
+        cards = "\n".join(
+            _render_read_card(
+                kind, e, instance, collapsed=collapsed, graph=graph,
+            )
+            for e in entities
         )
-        for e in entities
-    )
     # CG.8 (2026-06-05) — empty-state in-place message. When the
     # cards grid is empty AND there's an active search, render a
     # centered prompt inside the grid area instead of letting the
@@ -6190,10 +6455,15 @@ def _render_list_page(
     # the embed body (home wrapper sub-buckets) and the standalone
     # list page path share this class, so one change covers both
     # surfaces uniformly.
-    grid_cls = (
-        "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 "
-        "px-8 pt-4 pb-2"
-    )
+    # BX.3 (2026-06-11) — table view skips the responsive grid wrapper;
+    # the <table> spans the full width with side padding to match.
+    if view_mode == "table" and kind == "rail":
+        grid_cls = "px-8 pt-4 pb-2"
+    else:
+        grid_cls = (
+            "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 "
+            "px-8 pt-4 pb-2"
+        )
     search_wrap_open = (
         '<div class="px-8 pt-4">' if search_html else ""
     )
@@ -6202,6 +6472,12 @@ def _render_list_page(
         '<div class="px-8 pb-12">' if pager_html else ""
     )
     pager_wrap_close = "</div>" if pager_html else ""
+    # BX.3 (2026-06-11) — view-toggle chip wraps with the same padding
+    # convention as the search bar so the two strips align visually.
+    view_toggle_wrap_open = (
+        '<div class="px-8 pt-2 flex justify-end">' if view_toggle_html else ""
+    )
+    view_toggle_wrap_close = "</div>" if view_toggle_html else ""
     # BX.1 redesign (2026-06-11) — the page-level
     # `#delete-confirm-banner-slot` is GONE. Delete is now in-place:
     # each card wraps its Delete in `<span data-delete-wrapper>` and
@@ -6210,7 +6486,9 @@ def _render_list_page(
     if embed:
         return (
             f"{search_wrap_open}{search_html}{search_wrap_close}"
-            f'<div class="{grid_cls}" data-kind="{escape(kind)}">{cards}</div>'
+            f"{view_toggle_wrap_open}{view_toggle_html}{view_toggle_wrap_close}"
+            f'<div class="{grid_cls}" data-kind="{escape(kind)}" '
+            f'data-view-mode="{escape(view_mode)}">{cards}</div>'
             f"{pager_wrap_open}{pager_html}{pager_wrap_close}"
         )
     # CG.6 (2026-06-05) — dedicated `/l2_shape/<kind>/` pages wear
@@ -6269,7 +6547,8 @@ def _render_list_page(
   {page_header_html}
   <div id="list-page-body" {cascade_attrs}>
   {search_wrap_open}{search_html}{search_wrap_close}
-  <main id="entity-list" class="{grid_cls}">
+  {view_toggle_wrap_open}{view_toggle_html}{view_toggle_wrap_close}
+  <main id="entity-list" class="{grid_cls}" data-view-mode="{escape(view_mode)}">
     {cards}
   </main>
   {pager_wrap_open}{pager_html}{pager_wrap_close}
@@ -6790,6 +7069,26 @@ def _make_handlers(
                 f"/l2_shape/{kind}/?{raw_query}" if raw_query
                 else f"/l2_shape/{kind}/"
             )
+        # BX.3 (2026-06-11) — rail-only view-mode toggle. ``?view=table``
+        # flips to the source-role-grouped table; anything else (default,
+        # ``grid``, garbage) keeps the card grid. SESSION-only — no
+        # .studio-state.yaml persist. The toggle chip emits two anchors
+        # (Cards / Table) with stable ``data-view-toggle`` handles.
+        view_mode: RailViewMode = _parse_view_mode(
+            request.query_params.get("view"),
+        )
+        if kind == "rail":
+            # Toggle URL base = the list URL stripped of view= so the
+            # chip anchors are clean ("?view=table" vs the bare URL).
+            toggle_base = (
+                f"/l2_shape/{kind}/?embed=1" if embed
+                else f"/l2_shape/{kind}/"
+            )
+            view_toggle_html = render_rail_view_toggle(
+                current=view_mode, base_url=toggle_base, embed=embed,
+            )
+        else:
+            view_toggle_html = ""
         return HTMLResponse(
             _render_list_page(
                 kind, page_entities, inst,
@@ -6801,6 +7100,8 @@ def _make_handlers(
                 base_url=submit_url,
                 embed=embed,
                 cascade_url=cascade_url,
+                view_mode=view_mode,
+                view_toggle_html=view_toggle_html,
             ),
         )
 
