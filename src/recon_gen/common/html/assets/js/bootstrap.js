@@ -440,12 +440,22 @@
       )
       .enter()
       .append("td")
-      .attr(
-        "class",
-        (cell) =>
+      .attr("class", (cell) => {
+        // Phase DA — per-column decoration classes paint the
+        // accent-text / accent-text+tint cue on drillable cells.
+        // The plumbing is column_decoration (server-side) → col.decoration
+        // (renderer); class names map 1:1 to widgets-theme.css's
+        // .cell-accent / .cell-accent-menu rules.
+        var deco = cell.col.decoration;
+        var decoClass = "";
+        if (deco === "accent") decoClass = " cell-accent";
+        else if (deco === "accent-menu") decoClass = " cell-accent-menu";
+        return (
           "px-3 py-2 border-b border-surface-border " +
-          (isNumericFormat(cell.col.format) ? "tabular-nums text-right" : ""),
-      )
+          (isNumericFormat(cell.col.format) ? "tabular-nums text-right" : "") +
+          decoClass
+        );
+      })
       .text((cell) => formatTableCell(cell.value, cell.col.format));
 
     // Pager — "0–50 of 1247" + Prev/Next links. Range uses 1-based

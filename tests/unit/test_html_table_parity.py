@@ -108,7 +108,7 @@ def test_app2_table_columns_carry_contract_header_and_currency(app_name: str) ->
             if type(visual).__name__ != "Table":
                 continue
             ds_id = _find_visual_dataset_identifier(visual)
-            labels, formats, _hidden = _table_column_meta(visual, ds_id)
+            labels, formats, _hidden, _decoration = _table_column_meta(visual, ds_id)
             contract: DatasetContract | None = None
             if ds_id is not None:
                 try:
