@@ -27,7 +27,7 @@ from recon_gen.common.l2 import (
     TwoLegRail,
     load_instance,
 )
-from recon_gen.common.l2.primitives import DEBIT
+from recon_gen.common.l2.primitives import DEBIT, SCOPE_EXTERNAL, SCOPE_INTERNAL
 from recon_gen.common.l2.topology import (
     TopologyEdge,
     TopologyGraph,
@@ -129,15 +129,15 @@ def test_topology_graph_role_carries_scope_and_templated() -> None:
     nodes_by_id = {n.id: n for n in g.nodes}
     # Internal singleton: scope=internal, templated=False
     internal = nodes_by_id["role__InternalRole"]
-    assert internal.scope == "internal"
+    assert internal.scope == SCOPE_INTERNAL
     assert internal.templated is False
     # External singleton: scope=external, templated=False
     external = nodes_by_id["role__ExternalRole"]
-    assert external.scope == "external"
+    assert external.scope == SCOPE_EXTERNAL
     assert external.templated is False
     # Templated role: scope=internal (template's scope), templated=True
     templated = nodes_by_id["role__CustomerSubledger"]
-    assert templated.scope == "internal"
+    assert templated.scope == SCOPE_INTERNAL
     assert templated.templated is True
 
 

@@ -191,7 +191,7 @@ def test_app2_filter_options_lists_dropdown_values(
     assert driver.filter_options("View") == ["summary", "detail", "drill"]
     # Multi-select reads the same way.
     assert set(driver.filter_options("Rails")) == {  # typing-smell: ignore[no-inline-production-constants]: smoke-app filter label declared inline at common/html/_smoke_app.py; coincidentally matches _RAILS_NAME (L2FT sheet name) — different surface
-        "ach", "wire", "check", "internal", "zba",
+        "ach", "wire", "check", "internal", "zba",  # typing-smell: ignore[no-raw-enum-equality]: smoke-app rail label, not Scope; coincides with the SCOPE_INTERNAL literal but lives in the rail filter universe
     }
 
 

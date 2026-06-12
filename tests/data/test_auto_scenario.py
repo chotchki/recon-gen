@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from recon_gen.common.l2 import Identifier, L2Instance, load_instance
+from recon_gen.common.l2.primitives import SCOPE_INTERNAL
 from recon_gen.common.l2.auto_scenario import (
     default_scenario_for,
 )
@@ -309,7 +310,7 @@ def test_auto_scenario_inv_fanout_recipient_is_leaf_internal(
         t for t in spec_instance.account_templates
         if t.role == template_instance.template_role
     )
-    assert template.scope == "internal"
+    assert template.scope == SCOPE_INTERNAL
     assert template.parent_role is not None
 
 

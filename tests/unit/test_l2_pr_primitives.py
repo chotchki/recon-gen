@@ -36,6 +36,7 @@ from recon_gen.common.l2 import (
     load_instance,
     posted_requirements_for,
 )
+from recon_gen.common.l2.primitives import SCOPE_INTERNAL
 
 
 YAML_PATH = Path(__file__).parent.parent / "l2" / "sasquatch_pr.yaml"
@@ -174,7 +175,7 @@ class TestVariableClosure:
         inst = _instance()
         singleton_internal_roles = {
             str(a.role) for a in inst.accounts
-            if a.scope == "internal"
+            if a.scope == SCOPE_INTERNAL
         }
         for r in inst.rails:
             if not isinstance(r, SingleLegRail):

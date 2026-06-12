@@ -47,6 +47,8 @@ from typing import Any
 
 import yaml
 
+from recon_gen.common.l2.primitives import SCOPE_INTERNAL
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -360,7 +362,7 @@ def _build_account_templates(
         # generator only emits scope=internal templates today; the
         # guard makes the dependency explicit (if a future widen-up
         # adds external templates, this branch stays correct).
-        if t["scope"] == "internal":
+        if t["scope"] == SCOPE_INTERNAL:
             bdo = _maybe_business_day_offset(rng)
             if bdo is not None:
                 t["business_day_offset"] = bdo

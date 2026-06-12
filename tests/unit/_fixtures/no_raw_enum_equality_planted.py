@@ -48,6 +48,16 @@ def planted_neq_credit() -> bool:
     return direction != "Credit"  # planted (AmountDirection)
 
 
+def planted_eq_internal() -> bool:
+    scope = "internal"
+    return scope == "internal"  # planted (Scope)
+
+
+def planted_neq_external() -> bool:
+    scope = "external"
+    return scope != "external"  # planted (Scope)
+
+
 # -- Negative controls (lint MUST NOT flag) ------------------------------
 
 

@@ -32,6 +32,7 @@ from recon_gen.common.l2 import (
     load_instance,
     validate,
 )
+from recon_gen.common.l2.primitives import SCOPE_EXTERNAL, SCOPE_INTERNAL
 
 
 YAML_PATH = Path(__file__).parent.parent / "l2" / "sasquatch_pr.yaml"
@@ -65,8 +66,8 @@ def test_top_level_description_present() -> None:
 def test_account_counts_pinned() -> None:
     """Concrete count guards against accidental drift in the fixture."""
     inst = _instance()
-    internal = [a for a in inst.accounts if a.scope == "internal"]
-    external = [a for a in inst.accounts if a.scope == "external"]
+    internal = [a for a in inst.accounts if a.scope == SCOPE_INTERNAL]
+    external = [a for a in inst.accounts if a.scope == SCOPE_EXTERNAL]
     assert len(internal) == 10, (
         f"sasquatch_pr should declare 10 internal singletons; "
         f"got {len(internal)}"
@@ -211,7 +212,7 @@ def test_encompasses_ar_inbound_outbound_external_rails() -> None:
     outbound (internal-source → external-dest) two-leg rails. PR must too."""
     inst = _instance()
     external_roles = {
-        str(a.role) for a in inst.accounts if a.scope == "external"
+        str(a.role) for a in inst.accounts if a.scope == SCOPE_EXTERNAL
     }
     inbound_count = 0
     outbound_count = 0

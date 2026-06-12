@@ -33,6 +33,7 @@ from recon_gen.common.l2 import (
     TwoLegRail,
     validate,
 )
+from recon_gen.common.l2.primitives import SCOPE_EXTERNAL, SCOPE_INTERNAL
 
 
 # -- Baseline ----------------------------------------------------------------
@@ -1521,7 +1522,7 @@ def test_business_day_offset_rejected_on_external_account() -> None:
     offset would silently no-op at seed time."""
     inst = _baseline_instance()
     # inst.accounts[1] is the ext-counter (scope='external').
-    assert inst.accounts[1].scope == "external"
+    assert inst.accounts[1].scope == SCOPE_EXTERNAL
     bad_ext = dataclasses.replace(
         inst.accounts[1], business_day_offset=5,
     )
@@ -1559,7 +1560,7 @@ def test_business_day_offset_rejected_on_external_account_template() -> None:
 def test_business_day_offset_accepted_on_internal_account() -> None:
     """M.4.4.14a positive: internal account with an offset is fine."""
     inst = _baseline_instance()
-    assert inst.accounts[0].scope == "internal"
+    assert inst.accounts[0].scope == SCOPE_INTERNAL
     ok_int = dataclasses.replace(
         inst.accounts[0], business_day_offset=17,
     )

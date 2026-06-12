@@ -73,7 +73,7 @@ import pytest
 from recon_gen.common.as_of_frame import LOCKED_ANCHOR, AsOfFrame
 from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
-from recon_gen.common.l2.primitives import L2Instance
+from recon_gen.common.l2.primitives import L2Instance, SCOPE_INTERNAL
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.spine import (
     Invariant,
@@ -374,7 +374,7 @@ def _find_internal_with_role(instance: L2Instance, role: str) -> object:
     for a in instance.accounts:
         if (
             getattr(a, "role", None) == role
-            and getattr(a, "scope", None) == "internal"
+            and getattr(a, "scope", None) == SCOPE_INTERNAL
         ):
             return a
     raise ValueError(
@@ -389,7 +389,7 @@ def _find_internal_with_role_and_parent(instance: L2Instance, role: str) -> obje
     for a in instance.accounts:
         if (
             getattr(a, "role", None) == role
-            and getattr(a, "scope", None) == "internal"
+            and getattr(a, "scope", None) == SCOPE_INTERNAL
             and getattr(a, "parent_role", None) is not None
         ):
             return a

@@ -2337,6 +2337,8 @@ class NoPartialFormPutInTestsCheck(Check):
 # - ``"ExternalAggregated"``      → ``ORIGIN_EXTERNAL_AGGREGATED``
 # - ``"Debit"``                   → ``DEBIT``
 # - ``"Credit"``                  → ``CREDIT``
+# - ``"internal"``                → ``SCOPE_INTERNAL``
+# - ``"external"``                → ``SCOPE_EXTERNAL``
 _ENUM_VALUE_TO_CONSTANT: dict[str, str] = {
     "Posted": "POSTED_STATUS",
     "InternalInitiated": "ORIGIN_INTERNAL_INITIATED",
@@ -2344,6 +2346,8 @@ _ENUM_VALUE_TO_CONSTANT: dict[str, str] = {
     "ExternalAggregated": "ORIGIN_EXTERNAL_AGGREGATED",
     "Debit": "DEBIT",
     "Credit": "CREDIT",
+    "internal": "SCOPE_INTERNAL",
+    "external": "SCOPE_EXTERNAL",
 }
 
 
@@ -2917,8 +2921,8 @@ def _build_checks() -> list[Check]:
                 "raw-string equality / membership in tests/ against any "
                 "of the canonical enum values (Posted / "
                 "InternalInitiated / ExternalForcePosted / "
-                "ExternalAggregated / Debit / Credit). Import the "
-                "matching ``Final`` constant from "
+                "ExternalAggregated / Debit / Credit / internal / "
+                "external). Import the matching ``Final`` constant from "
                 "``common/l2/primitives.py`` and compare against it — a "
                 "test that pins the raw literal pins the implementation; "
                 "one that pins the constant follows a rename. "
@@ -3086,7 +3090,7 @@ def test_no_raw_enum_equality_finds_planted() -> None:
     src = fixture.read_text(encoding="utf-8")
     tree = ast.parse(src)
     smells = list(check.find_smells(src, tree, fixture))
-    # 8 planted hits:
+    # 10 planted hits:
     #   - planted_eq_posted               → 1 ("Posted")
     #   - planted_neq_internal_initiated  → 1 ("InternalInitiated")
     #   - planted_in_tuple_*              → 2 ("ExternalForcePosted",
@@ -3096,9 +3100,11 @@ def test_no_raw_enum_equality_finds_planted() -> None:
     #   - planted_reversed_order          → 1 ("Posted" on the LEFT)
     #   - planted_eq_debit                → 1 ("Debit")
     #   - planted_neq_credit              → 1 ("Credit")
-    assert len(smells) == 8, (
-        f"smoke expected exactly 8 hits on the planted fixture "
-        f"(7 plant functions, one of which plants 2 enum hits in the "
+    #   - planted_eq_internal             → 1 ("internal")
+    #   - planted_neq_external            → 1 ("external")
+    assert len(smells) == 10, (
+        f"smoke expected exactly 10 hits on the planted fixture "
+        f"(9 plant functions, one of which plants 2 enum hits in the "
         f"in-tuple shape); got {len(smells)}:\n"
         f"{chr(10).join(repr(s) for s in smells)}\n"
         f"Either the Compare visitor stopped walking, the "

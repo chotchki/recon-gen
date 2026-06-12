@@ -25,6 +25,7 @@ from typing import Any
 from click.testing import CliRunner
 
 from recon_gen.common.l2 import default_l2_instance
+from recon_gen.common.l2.primitives import SCOPE_INTERNAL
 from recon_gen.apps.l1_dashboard.app import (
     _DAILY_STATEMENT_NAME,
     _DAILY_STATEMENT_TITLE,
@@ -936,7 +937,7 @@ def test_drift_sheet_lists_internal_accounts_from_l2() -> None:
     from recon_gen.common.l2 import default_l2_instance
     instance = default_l2_instance()
     internal_account_ids = [
-        a.id for a in instance.accounts if a.scope == "internal"
+        a.id for a in instance.accounts if a.scope == SCOPE_INTERNAL
     ]
     assert len(internal_account_ids) > 0, (
         "fixture must have internal accounts for this test to be meaningful"

@@ -68,7 +68,13 @@ Money: TypeAlias = Decimal
 
 # L1's Account.Scope discriminates whether reconciliation tracks the
 # account's balance (Internal) or treats it as a counterparty (External).
+# Closed Literal — schema CHECK at schema.py:1939 enforces the same set.
+# The two Final constants let writers + tests import the canonical
+# spelling instead of sprinkling lowercase string literals across the
+# spine + validator + loader sites that thread account_scope.
 Scope: TypeAlias = Literal["internal", "external"]
+SCOPE_INTERNAL: Final = "internal"
+SCOPE_EXTERNAL: Final = "external"
 
 # L1's Transaction.Origin — open enum on L1, but L2 declares each Rail's
 # Origin per-instance. The v1 canonical set (per ETL walkthrough +

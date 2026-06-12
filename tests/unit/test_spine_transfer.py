@@ -41,6 +41,7 @@ from recon_gen.common.l2.primitives import (
     DEBIT,
     ORIGIN_INTERNAL_INITIATED,
     POSTED_STATUS,
+    SCOPE_INTERNAL,
 )
 from recon_gen.common.l2.schema import emit_schema
 from recon_gen.common.spine import (
@@ -256,7 +257,7 @@ def test_transfer_emit_account_denorm_fields_round_trip() -> None:
         conn.close()
     # Both legs are internal CustomerSubledger under CustomerLedger.
     for r in rows:
-        assert r == ("CustomerSubledger", "internal", "CustomerLedger")
+        assert r == ("CustomerSubledger", SCOPE_INTERNAL, "CustomerLedger")
 
 
 def test_transfer_posting_hour_defaults_to_noon() -> None:

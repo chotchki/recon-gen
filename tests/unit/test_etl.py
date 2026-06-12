@@ -25,6 +25,7 @@ from recon_gen.common.l2.primitives import (
     DEBIT,
     ORIGIN_INTERNAL_INITIATED,
     POSTED_STATUS,
+    SCOPE_INTERNAL,
 )
 from recon_gen.common.sql.dialect import Dialect
 from recon_gen.common.sql.literals import (
@@ -141,7 +142,7 @@ def test_write_daily_balance_roundtrip_minimum_fields() -> None:
         assert row[0] == "acct-cust-0001"
         assert row[1] == "Customer #0001"
         assert row[2] == "CustomerDDA"
-        assert row[3] == "internal"
+        assert row[3] == SCOPE_INTERNAL
         assert row[4] == "DDAControl"
         assert row[5] is None  # expected_eod_balance defaults None
         assert str(row[6]) == "2026-06-07 00:00:00"

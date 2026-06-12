@@ -57,6 +57,7 @@ import pytest
 
 from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
+from recon_gen.common.l2.primitives import SCOPE_INTERNAL
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.sql import Dialect
 
@@ -288,7 +289,7 @@ class DriftInvariant:
         candidates = [
             a for a in instance.accounts
             if getattr(a, "role", None) == account_role
-            and getattr(a, "scope", None) == "internal"
+            and getattr(a, "scope", None) == SCOPE_INTERNAL
             and getattr(a, "parent_role", None) is not None
         ]
         if not candidates:

@@ -37,7 +37,7 @@ from recon_gen.common.l2.seed import (
     ScenarioPlant,
     SupersessionPlant,
 )
-from recon_gen.common.l2.primitives import Identifier, L2Instance
+from recon_gen.common.l2.primitives import Identifier, L2Instance, SCOPE_INTERNAL
 from recon_gen.common.spine import (
     DriftGenerator,
     InvFanoutGenerator,
@@ -84,7 +84,7 @@ def test_drift_plant_dispatches_to_drift_generator() -> None:
     # Pick the first CustomerSubledger account on spec_example.
     cust = next(
         a for a in inst.accounts
-        if str(a.role) == "CustomerSubledger" and str(a.scope) == "internal"
+        if str(a.role) == "CustomerSubledger" and str(a.scope) == SCOPE_INTERNAL
         and a.parent_role is not None
     )
     plant = DriftPlant(
@@ -110,7 +110,7 @@ def test_overdraft_plant_dispatches_to_overdraft_generator() -> None:
     inst = _load_instance()
     cust = next(
         a for a in inst.accounts
-        if str(a.role) == "CustomerSubledger" and str(a.scope) == "internal"
+        if str(a.role) == "CustomerSubledger" and str(a.scope) == SCOPE_INTERNAL
     )
     plant = OverdraftPlant(
         account_id=cust.id,
@@ -160,7 +160,7 @@ def test_supersession_plant_dispatches_to_supersession_generator() -> None:
     inst = _load_instance()
     cust = next(
         a for a in inst.accounts
-        if str(a.role) == "CustomerSubledger" and str(a.scope) == "internal"
+        if str(a.role) == "CustomerSubledger" and str(a.scope) == SCOPE_INTERNAL
     )
     plant = SupersessionPlant(
         account_id=cust.id,
@@ -197,7 +197,7 @@ def test_n_drift_plants_produce_n_distinct_generators() -> None:
     # Pick 2 distinct CustomerSubledger leaf accounts.
     cust_accounts = [
         a for a in inst.accounts
-        if str(a.role) == "CustomerSubledger" and str(a.scope) == "internal"
+        if str(a.role) == "CustomerSubledger" and str(a.scope) == SCOPE_INTERNAL
         and a.parent_role is not None
     ][:2]
     assert len(cust_accounts) == 2, (
@@ -343,7 +343,7 @@ def test_focused_single_plant_round_trips_through_compose_render() -> None:
     inst = _load_instance()
     cust = next(
         a for a in inst.accounts
-        if str(a.role) == "CustomerSubledger" and str(a.scope) == "internal"
+        if str(a.role) == "CustomerSubledger" and str(a.scope) == SCOPE_INTERNAL
         and a.parent_role is not None
     )
     plant = DriftPlant(
