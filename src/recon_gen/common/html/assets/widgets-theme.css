@@ -134,6 +134,43 @@
 }
 
 /* ---------------------------------------------------------------- */
+/* Phase DA — Table cell decoration for drillable columns            */
+/* ---------------------------------------------------------------- */
+/* The App2 renderer paints these classes on <td> when the column's
+ * Drillable resolves to a decoration kind. Decisions live in
+ * common/tree/formatting.py::Drillable.visual_kind() — App2 + QS use
+ * the same code path so the cue stays in parity.
+ *
+ *   .cell-accent       — column carries CLICK-only drill(s) (accent text)
+ *   .cell-accent-menu  — column carries at least one MENU drill (accent
+ *                        text + tint background; left-click on the cell
+ *                        opens the menu via bootstrap.js::wireRowDrills)
+ *
+ * The tint hue mirrors the QS-side _tint_hex (10% accent / 90% white) —
+ * by visual intent, not pixel: QS needs a solid hex while App2 uses
+ * color-mix against transparent, which composites slightly differently.
+ *
+ * Convention exception (operator-locked at DA.0): a left-click on a
+ * cell-accent-menu cell goes RIGHT (opens the menu drill) — breaks the
+ * "left moves LEFT" rule because the explicit visual cue makes the
+ * affordance discoverable. The row-level left-click stays inert (per
+ * the row-drill MENU contract; see bootstrap.js commit 279c52c8). */
+.cell-accent {
+  color: var(--color-accent);
+  font-weight: 500;
+}
+.cell-accent-menu {
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.cell-accent-menu:hover {
+  background: color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+/* ---------------------------------------------------------------- */
 /* Flatpickr — date-range popover                                    */
 /* ---------------------------------------------------------------- */
 .flatpickr-calendar {

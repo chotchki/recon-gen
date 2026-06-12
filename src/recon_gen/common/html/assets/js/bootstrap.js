@@ -793,6 +793,18 @@
         });
         td.appendChild(btn);
         tr.appendChild(td);
+        // Phase DA — menu-decorated cells (the column with the Drillable
+        // resolving to "accent-menu") become left-click targets that
+        // open the menu. Same code path as the ⋯ button. stopPropagation
+        // preempts the row-level clickDrill (Class B — CLICK + MENU mix
+        // on the same column — would otherwise navigate via the row
+        // handler before the menu paints).
+        tr.querySelectorAll("td.cell-accent-menu").forEach((cellTd) => {
+          cellTd.addEventListener("click", (e) => {
+            e.stopPropagation();
+            openRowMenu(e, drills, row, colIndex, section);
+          });
+        });
       }
     });
   }
