@@ -435,3 +435,182 @@ def test_dash_sheet_from_fetch_url_parses_typical_url() -> None:
     assert result["empty"] is None
     assert result["wrong"] is None
     assert result["null_arg"] is None
+
+
+# ---------------------------------------------------------------------------
+# Phase DA — per-column drill decoration on Table cells
+# ---------------------------------------------------------------------------
+
+
+_DECO_DATA: dict[str, Any] = {
+    "columns": [
+        {"name": "account_id", "label": "Account", "decoration": "accent-menu"},
+        {"name": "amount", "label": "Amount", "format": "currency"},
+    ],
+    "rows": [
+        ["acct-1", 1234.5],
+        ["acct-2", 5678.0],
+    ],
+    "total_rows": 2,
+    "page_offset": 0,
+    "page_size": 50,
+    "sort_column": "",
+}
+
+_DECO_DATA_CLICK: dict[str, Any] = {
+    "columns": [
+        {"name": "account_id", "label": "Account", "decoration": "accent"},
+        {"name": "amount", "label": "Amount", "format": "currency"},
+    ],
+    "rows": [
+        ["acct-1", 1234.5],
+    ],
+    "total_rows": 1,
+    "page_offset": 0,
+    "page_size": 50,
+    "sort_column": "",
+}
+
+
+def test_render_table_paints_cell_accent_menu_class() -> None:
+    """Phase DA — `renderTable` reads `col.decoration` and adds the
+    matching CSS class to every `<td>` in that column. `account_id`
+    cells with `decoration: "accent-menu"` carry `cell-accent-menu`;
+    the un-decorated `amount` column has neither class."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render(page, _DECO_DATA, _MENU_DRILL)
+        n_menu_cells = page.locator(
+            "#drill-host tbody td.cell-accent-menu"
+        ).count()
+        n_plain_cells = page.locator(
+            "#drill-host tbody td.cell-accent"
+        ).count()
+        # Amount column carries no decoration → no class.
+        amount_cell_classes = page.locator(
+            "#drill-host tbody tr:nth-child(1) td:nth-child(2)"
+        ).get_attribute("class")
+        browser.close()
+    # 2 rows × 1 menu-decorated column = 2 cells.
+    assert n_menu_cells == 2
+    # accent-only column not present in this fixture.
+    assert n_plain_cells == 0
+    assert amount_cell_classes is not None
+    assert "cell-accent" not in amount_cell_classes
+
+
+def test_render_table_paints_cell_accent_class_for_click_decoration() -> None:
+    """Phase DA — `decoration: "accent"` (CLICK-only column) paints
+    `cell-accent`, NOT `cell-accent-menu`. Distinct CSS hooks for the
+    two click idioms."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render(page, _DECO_DATA_CLICK, _CLICK_DRILL)
+        n_accent = page.locator(
+            "#drill-host tbody td.cell-accent"
+        ).count()
+        # Don't confuse the substring match — assert the menu variant absent.
+        n_menu = page.locator(
+            "#drill-host tbody td.cell-accent-menu"
+        ).count()
+        browser.close()
+    assert n_accent == 1
+    assert n_menu == 0
+
+
+def test_cell_accent_menu_left_click_opens_menu() -> None:
+    """Phase DA — left-click on a `.cell-accent-menu` cell opens the row
+    menu via the same `openRowMenu` code path the ⋯ button calls.
+    Operator-locked exception to "left moves LEFT" because the explicit
+    visual cue makes the affordance discoverable.
+
+    `e.stopPropagation()` prevents the row-level click drill (if any)
+    from firing — protects the Class B case where the same column carries
+    both CLICK + MENU drills (without stopPropagation the row handler's
+    navigation would preempt the menu paint)."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        _render(page, _DECO_DATA, _MENU_DRILL)
+        # Stub ctxmenu.show to capture the items the menu would render.
+        page.evaluate("""() => {
+            window.__ctx_items__ = null;
+            window.ctxmenu = { show: (items) => {
+                window.__ctx_items__ = items;
+            }};
+            var cell = document.querySelector(
+                '#drill-host tbody tr:nth-child(1) td.cell-accent-menu',
+            );
+            cell.click();
+        }""")
+        items = cast(
+            list[dict[str, Any]],
+            page.evaluate("() => window.__ctx_items__"),
+        )
+        browser.close()
+    # The menu opened with the MENU drill's label as the first (and only) item.
+    assert items is not None
+    assert len(items) == 1
+    assert items[0]["text"] == "View Transactions for this transfer"
+
+
+def test_cell_accent_menu_click_stops_propagation_to_row_handler() -> None:
+    """Phase DA — when the Table also has a CLICK drill (Class B mix
+    case — both CLICK + MENU write from the same column), cell-click on
+    a menu-decorated cell opens the menu and STOPS propagation so the
+    row-level click drill (`tr.addEventListener('click', navigate)`)
+    does not fire.
+
+    Verified by installing a sibling click listener on the row that
+    increments a counter; the bootstrap's row handler and our test
+    listener are both on the `<tr>`, so they both fire only if the
+    click event bubbles up from the `<td>`. `stopPropagation()` on the
+    cell means neither fires."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        # Both CLICK + MENU drills on the same column.
+        drills = [
+            {
+                "label": "Walk to account",
+                "trigger": "DATA_POINT_CLICK",
+                "target_path": "/dashboards/d1/sheets/accounts",
+                "params": [{"name": "pAcct", "column": "account_id"}],
+            },
+            {
+                "label": "View transactions",
+                "trigger": "DATA_POINT_MENU",
+                "target_path": "/dashboards/d1/sheets/transactions",
+                "params": [{"name": "pTxAcct", "column": "account_id"}],
+            },
+        ]
+        _render(page, _DECO_DATA, drills)
+        result = cast(dict[str, Any], page.evaluate("""() => {
+            window.__ctx_items__ = null;
+            window.ctxmenu = { show: (items) => {
+                window.__ctx_items__ = items;
+            }};
+            var tr = document.querySelector('#drill-host tbody tr:nth-child(1)');
+            // Sibling listener on the row — fires if the click bubbles.
+            var rowBubbleCount = 0;
+            tr.addEventListener('click', () => { rowBubbleCount++; });
+            var cell = tr.querySelector('td.cell-accent-menu');
+            cell.click();
+            return {
+                items: window.__ctx_items__,
+                rowBubbleCount: rowBubbleCount,
+            };
+        }"""))
+        browser.close()
+    # Menu opened with both drills available.
+    items = result["items"]
+    assert items is not None
+    assert len(items) == 2
+    # The cell's stopPropagation prevented the click from reaching <tr>.
+    assert result["rowBubbleCount"] == 0
