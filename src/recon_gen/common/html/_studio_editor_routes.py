@@ -6677,6 +6677,24 @@ def _rail_badges_html(entity: object) -> str:
     return " ".join(badges)
 
 
+def _strip_embed_from_url(url: str) -> str:
+    """Drop ``embed=1`` from a URL's query string, normalizing leftover
+    separators. Used by ``render_rail_view_toggle`` so the toggle anchor
+    always navigates to the chromed standalone page rather than the
+    bare HTMX fragment, regardless of which surface (embed home section
+    vs standalone list page) emitted the toggle.
+    """
+    if "embed=1" not in url:
+        return url
+    # Naive strip — works because embed=1 is always literal in the URLs
+    # we build (never URL-encoded, never followed by other values). Handle
+    # leading-? case, mid-string &, and trailing-& cleanup.
+    cleaned = url.replace("?embed=1&", "?").replace("&embed=1", "")
+    if cleaned.endswith("?"):
+        cleaned = cleaned[:-1]
+    return cleaned.replace("?embed=1", "")
+
+
 def render_rail_view_toggle(
     *, current: RailViewMode, base_url: str, embed: bool = False,
 ) -> str:
@@ -6699,9 +6717,17 @@ def render_rail_view_toggle(
     # ``?view=grid`` is shorthand for "no view param" so we emit the
     # plain base URL there (avoids a no-op query string in the address
     # bar when the operator clicks "Cards").
-    sep = "&" if "?" in base_url else "?"
-    grid_url = base_url
-    table_url = f"{base_url}{sep}view=table"
+    # BX.3 follow-up (2026-06-11) — strip embed=1 from the navigation
+    # URLs. When the toggle is rendered inside a home-page section
+    # (`base_url = "/l2_shape/rail/?embed=1"`), letting embed=1 ride
+    # the toggle anchor means clicking it does a full-page navigation
+    # to the bare fragment (chrome-less, just the article HTML).
+    # Toggle clicks should always land on the chromed standalone page,
+    # same shape as the section's "(↗ open)" arrow.
+    nav_url = _strip_embed_from_url(base_url)
+    sep = "&" if "?" in nav_url else "?"
+    grid_url = nav_url
+    table_url = f"{nav_url}{sep}view=table"
     push_attr = ' hx-push-url="true"' if not embed else ""
     base_chip_cls = (
         "px-2 py-0.5 text-xs font-medium border border-surface-border "

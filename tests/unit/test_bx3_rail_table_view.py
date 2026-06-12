@@ -301,3 +301,35 @@ def test_view_table_in_embed_mode(writable_l2_yaml: Path) -> None:
     assert "<html" not in body
     assert 'data-role="rail-list-table"' in body
     assert 'data-view-toggle="table"' in body
+
+
+def test_view_toggle_strips_embed_from_anchor_urls() -> None:
+    """BX.3 follow-up (2026-06-11): when the toggle renders inside the
+    home-page rail section (``base_url`` carries ``?embed=1``), the
+    anchor href MUST drop embed=1 so a click navigates to the chromed
+    standalone page rather than the bare fragment.
+
+    Operator-flagged regression: clicking Table from the home section
+    sent the operator to ``/l2_shape/rail/?embed=1&view=table`` which
+    rendered as an unstyled bare fragment.
+    """
+    from recon_gen.common.html._studio_editor_routes import (
+        _strip_embed_from_url,
+        render_rail_view_toggle,
+    )
+
+    # Helper: every case the home page section's base_url can produce.
+    assert _strip_embed_from_url("/l2_shape/rail/?embed=1") == "/l2_shape/rail/"
+    assert _strip_embed_from_url("/l2_shape/rail/?embed=1&q=x") == "/l2_shape/rail/?q=x"
+    assert _strip_embed_from_url("/l2_shape/rail/?q=x&embed=1") == "/l2_shape/rail/?q=x"
+    assert _strip_embed_from_url("/l2_shape/rail/") == "/l2_shape/rail/"
+
+    # Toggle rendered with embed base_url emits anchors WITHOUT embed=1.
+    html = render_rail_view_toggle(
+        current="grid",
+        base_url="/l2_shape/rail/?embed=1",
+        embed=True,
+    )
+    assert 'href="/l2_shape/rail/"' in html
+    assert 'href="/l2_shape/rail/?view=table"' in html
+    assert "embed=1" not in html
