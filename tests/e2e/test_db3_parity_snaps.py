@@ -28,6 +28,16 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from recon_gen.apps.l1_dashboard.app import (
+    _DRIFT_NAME,
+    _L1_EXCEPTIONS_NAME,
+    _PENDING_AGING_NAME,
+    _UNBUNDLED_AGING_NAME,
+)
+from recon_gen.apps.l2_flow_tracing.app import (
+    _CHAINS_NAME,
+    _L2_EXCEPTIONS_NAME,
+)
 from tests._marks import Need, Tier, needs, tier
 
 if TYPE_CHECKING:
@@ -75,7 +85,7 @@ def test_db3_snap_l1_exceptions_horizontal_bar(
     chart (orientation=HORIZONTAL). Pre-DB.1.1 App2 rendered vertical
     despite the QS-side orientation. Capture both."""
     driver, dashboard_id = l1_dashboard_driver
-    driver.open(dashboard_id, sheet="L1 Exceptions")
+    driver.open(dashboard_id, sheet=_L1_EXCEPTIONS_NAME)
     driver.wait_loaded("Open Exceptions")
     _snap(driver, "l1-exceptions-horizontal-bar", dashboard_id)
 
@@ -87,7 +97,7 @@ def test_db3_snap_l1_pending_aging_stacked_horizontal(
     Exercises orientation=HORIZONTAL + bars_arrangement=STACKED +
     color_label in one capture."""
     driver, dashboard_id = l1_dashboard_driver
-    driver.open(dashboard_id, sheet="Pending Aging")
+    driver.open(dashboard_id, sheet=_PENDING_AGING_NAME)
     driver.wait_loaded("Stuck Pending by Age Bucket")
     _snap(driver, "l1-pending-aging-stacked-horizontal", dashboard_id)
 
@@ -99,7 +109,7 @@ def test_db3_snap_l1_unbundled_aging_stacked_horizontal(
     pattern. Both renderers should show the 'Rail' header above the
     legend."""
     driver, dashboard_id = l1_dashboard_driver
-    driver.open(dashboard_id, sheet="Unbundled Aging")
+    driver.open(dashboard_id, sheet=_UNBUNDLED_AGING_NAME)
     driver.wait_loaded("Stuck Unbundled by Age Bucket")
     _snap(driver, "l1-unbundled-aging-stacked-horizontal", dashboard_id)
 
@@ -171,7 +181,7 @@ def test_db3_snap_l2ft_exceptions(
     """L2FT L2 Exceptions — horizontal bar chart by check_type.
     DB.1.1 site."""
     driver, dashboard_id = l2ft_dashboard_driver
-    driver.open(dashboard_id, sheet="L2 Exceptions")
+    driver.open(dashboard_id, sheet=_L2_EXCEPTIONS_NAME)
     driver.wait_loaded("L2 Violation Detail")
     _snap(driver, "l2ft-l2-exceptions", dashboard_id)
 
@@ -183,7 +193,7 @@ def test_db3_snap_l2ft_chains_sankey(
     Investigation; the (others) bucket should still appear when the
     L2 instance has >50 chain templates."""
     driver, dashboard_id = l2ft_dashboard_driver
-    driver.open(dashboard_id, sheet="Chains")
+    driver.open(dashboard_id, sheet=_CHAINS_NAME)
     driver.wait_loaded("Chain Templates")
     _snap(driver, "l2ft-chains-sankey", dashboard_id)
 
@@ -202,6 +212,6 @@ def test_db3_snap_l1_drift_kpis_no_sparkline_placeholder(
     renderers should show the value tightly; pre-DB.1.3 QS reserved
     UI space for a sparkline below each value that was always empty."""
     driver, dashboard_id = l1_dashboard_driver
-    driver.open(dashboard_id, sheet="Drift")
+    driver.open(dashboard_id, sheet=_DRIFT_NAME)
     driver.wait_loaded("Drifting Leaf Accounts")
     _snap(driver, "l1-drift-kpis", dashboard_id)
