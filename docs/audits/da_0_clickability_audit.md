@@ -1,8 +1,8 @@
-# CN.0 — Clickability decoration audit
+# DA.0 — Clickability decoration audit
 
 **Date:** 2026-06-12
-**Phase:** CN.0 (audit + scope confirmation)
-**Goal:** map every drillable Table column to its current `CellFormat` (if any) and the correct `CellFormat` per the Phase CN locks, so CN.1–CN.7 know exactly what to change.
+**Phase:** DA.0 (audit + scope confirmation)
+**Goal:** map every drillable Table column to its current `CellFormat` (if any) and the correct `CellFormat` per the Phase DA locks, so DA.1–DA.7 know exactly what to change.
 
 ## Methodology
 
@@ -16,12 +16,12 @@ Walked every `add_table(...)` block across `src/recon_gen/apps/` via AST-shaped 
 
 ## The locks (operator-confirmed 2026-06-12, re-stated for traceability)
 
-Per `PLAN.md::Phase CN` + operator's review of this doc:
+Per `PLAN.md::Phase DA` + operator's review of this doc:
 
 1. **Collapse `CellAccentText` + `CellAccentMenu` → single `Drillable(on=Dim)` type** (operator: "is cell accent text really just a code smell that should be removed?" → yes). The visual cue (accent text vs accent + tint background) auto-derives from the trigger of the drill writing from the column at plan-build / emit time. Authors don't pick the cue — they declare the column is drillable, and the type system + renderer pick the visual from the drill triggers.
    - `Drillable.on` column has ≥1 `DATA_POINT_MENU` drill writing from it → menu-tint visual (accent text + accent-tint background).
    - `Drillable.on` column has ONLY `DATA_POINT_CLICK` drill(s) writing from it → accent-text-only visual.
-   - `Drillable.on` column has NO drills writing from it → **`ValueError` at `Table.__post_init__`** (CN.4 type gate).
+   - `Drillable.on` column has NO drills writing from it → **`ValueError` at `Table.__post_init__`** (DA.4 type gate).
 2. **App2 cell-click opens the menu on menu-decorated cells.** Per operator comment 5: "making the column clickable is fine... the row was the problem." The `<td.cell-accent-menu>` left-click → opens the menu (same code path as the ⋯ button click). Row left-click stays inert (the row-drill commit `279c52c8` contract holds). Right-click contextmenu on row still opens the menu. **Documents an exception to "left clicks move LEFT"**: a left-click on a menu-decorated cell goes right (opens the menu). Operator-accepted: the explicit visual cue makes the affordance discoverable.
 3. **Tint hue:** auto-derived via `color-mix(in srgb, var(--color-accent) 10%, transparent)` (no new theme token).
 4. **Class C resolution (per-site, per operator comment 2 — "wire if possible, strip if not"):**
@@ -74,7 +74,7 @@ Five sites. Cells render in accent text but the operator clicks and nothing happ
 | `_populate_transactions_sheet` | Posting Ledger | 1747 | `account_col` | No `actions=` at all | Same |
 | `_populate_transactions_sheet` | Posting Ledger | 1748 | `transfer_col` | No `actions=` at all | Same |
 
-**Operator-confirm edge case C:** keep the `CellAccentText` and add the missing drill, or strip the format? My read of the original intent (these are detail tables where the analyst is already at the bottom of the navigation tree) is they're vestigial — no drill was ever planned. Recommend: **strip** in CN.3 unless you flag otherwise. This is the kind of cleanup the type-system gate in CN.4 will permanently prevent.
+**Operator-confirm edge case C:** keep the `CellAccentText` and add the missing drill, or strip the format? My read of the original intent (these are detail tables where the analyst is already at the bottom of the navigation tree) is they're vestigial — no drill was ever planned. Recommend: **strip** in DA.3 unless you flag otherwise. This is the kind of cleanup the type-system gate in DA.4 will permanently prevent.
 
 ### D. Drillable column with NO `CellFormat` at all (decoration missing)
 
@@ -97,21 +97,21 @@ Audit found ZERO `add_table(...)` blocks with `actions=` in `apps/executives/`. 
 |---|---|---|
 | A — MENU drill wrong format | 7 | Swap `CellAccentText` → `CellAccentMenu` |
 | B — CLICK + MENU mix | 1 | Swap `CellAccentText` → `CellAccentMenu` (lock 3) |
-| C — Format without drill | 5 (4 columns × 2 sheets + 1 extra) | **Strip** (CN.3 — operator can override) |
+| C — Format without drill | 5 (4 columns × 2 sheets + 1 extra) | **Strip** (DA.3 — operator can override) |
 | D — Drill without format | 2 | Add `CellAccentMenu` |
-| **Total mutations CN.3 will land** | **15 sites across 12 tables, 4 apps** | |
+| **Total mutations DA.3 will land** | **15 sites across 12 tables, 4 apps** | |
 
-## Open questions for operator (please confirm before CN.1 fires)
+## Open questions for operator (please confirm before DA.1 fires)
 
-1. **Lock 3 — CLICK + MENU mix.** Site B (Exception Detail) has a `CellAccentText` on `account_col` even though there's both a CLICK and a MENU drill writing from it. The Phase CN draft says "`CellAccentMenu` wins (tint subsumes accent-text cue)". Confirm: ✕ swap to `CellAccentMenu` / ☐ keep `CellAccentText` and represent the MENU drill differently / ☐ allow both formats stacked (currently rejected — `CellFormat` is one-format-per-column-per-table).
+1. **Lock 3 — CLICK + MENU mix.** Site B (Exception Detail) has a `CellAccentText` on `account_col` even though there's both a CLICK and a MENU drill writing from it. The Phase DA draft says "`CellAccentMenu` wins (tint subsumes accent-text cue)". Confirm: ✕ swap to `CellAccentMenu` / ☐ keep `CellAccentText` and represent the MENU drill differently / ☐ allow both formats stacked (currently rejected — `CellFormat` is one-format-per-column-per-table).
  - Comment: Menu wins in my mind. We should make those mutually exclusive OR is cell accent text really just a code smell that should be removed?
 
 2. **Class C — accent text without drill.** Five sites currently visually suggest a click affordance that doesn't exist. Two reasonable resolutions:
-   - **Strip** the `CellAccentText` (recommended — type-gate in CN.4 will permanently prevent re-introducing one without a matching drill). The cell renders as plain text alongside its peers.
-   - **Wire the missing drill.** Each of these columns COULD have been planned as a drill source (e.g. `tx_id` → "find this txn in its bundle"); was the formatting an unfinished feature? If yes, CN.3 should also stage the drill wiring. Estimate: +4 hours.
+   - **Strip** the `CellAccentText` (recommended — type-gate in DA.4 will permanently prevent re-introducing one without a matching drill). The cell renders as plain text alongside its peers.
+   - **Wire the missing drill.** Each of these columns COULD have been planned as a drill source (e.g. `tx_id` → "find this txn in its bundle"); was the formatting an unfinished feature? If yes, DA.3 should also stage the drill wiring. Estimate: +4 hours.
    - Comment: Wire if its possible, strip if not.
 
-3. **Class D — uncovered decoration.** L2FT Violation Detail + Investigation Account Network — Touching Edges are currently undecorated. CN.3 will add `CellAccentMenu`. Confirm: any L2FT / Investigation sheet you'd also like decorated, or just these two? (My grep found these two; nothing else in those apps carries `actions=` on a table.)
+3. **Class D — uncovered decoration.** L2FT Violation Detail + Investigation Account Network — Touching Edges are currently undecorated. DA.3 will add `CellAccentMenu`. Confirm: any L2FT / Investigation sheet you'd also like decorated, or just these two? (My grep found these two; nothing else in those apps carries `actions=` on a table.)
   - Comment: Decorate.
 
 4. **Tint hue.** `CellAccentMenu` emits both a text color and a background color. The L1 sheets use `accent` (the theme accent token) for text. What background hue?
@@ -126,9 +126,9 @@ Audit found ZERO `add_table(...)` blocks with `actions=` in `apps/executives/`. 
    - Recommend: **stay non-clickable** for consistency with the convention.
   - Comment: making the column clickable is fine... the row was the problem.
 
-## Type-system gate (CN.4 preview)
+## Type-system gate (DA.4 preview)
 
-Once the swaps land in CN.3, the gate at `Table.__post_init__` (in `common/tree/visuals.py`) will:
+Once the swaps land in DA.3, the gate at `Table.__post_init__` (in `common/tree/visuals.py`) will:
 
 ```python
 # For each CellFormat in self.conditional_formatting:
@@ -141,4 +141,4 @@ Once the swaps land in CN.3, the gate at `Table.__post_init__` (in `common/tree/
 #                format + drill triggers.
 ```
 
-This permanently prevents Classes A, B, C, D from recurring. The unit test that constructs a mismatched Table + asserts the raise is part of CN.4.
+This permanently prevents Classes A, B, C, D from recurring. The unit test that constructs a mismatched Table + asserts the raise is part of DA.4.

@@ -242,7 +242,7 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
 - BH.24.5 - **Migration sweep + cleanup** — **DEFERRED** (blocked on BH.24.4). Once Cents-typed read boundaries exist, audit whether the SQL-side `cents_to_dollars_sql` wraps can be dropped. If so, drop the wraps from datasets, mark every currency column `storage=CENTS`, single canonical conversion path. Otherwise document the dual-storage pattern as the new convention. *(deferred from phase `BH` on 2026-06-07)*
 - **BX backlog — Handbook route wheel-portability** — added 2026-06-08.
 - **BX backlog — L1 Exceptions copy says 10, matview has 12** — added 2026-06-08.
-- **BX backlog — CN.7 v1 iterative-screenshot cold-read** — added 2026-06-08.
+- **BX backlog — DA.7 v1 iterative-screenshot cold-read** — added 2026-06-08.
 - **BX backlog — Themed 503 page for PoolReleasedDuringRefresh** — added 2026-06-08.
 - **BX backlog — Configurable etl_hook subprocess timeout** — added 2026-06-08.
 - **BX backlog — Extend semantic-lock to PG + Oracle dialects** — added 2026-06-08.
@@ -389,7 +389,7 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
   - **AA.A.daterange.5 Test infra.** `apply_anchor_to_pickers` becomes "set the range to span anchor's date ±1 day" instead of separate from/to. Single picker spec. Follows .3.
 - [ ] backlog - multi-select clear_button visual verification (no real picker to test)
 
-## Phase CN - App2/QS click-drill decoration parity + type-system gate
+## Phase DA - App2/QS click-drill decoration parity + type-system gate
 
 **Why:** Operator dogfood 2026-06-12 (L1 Overdraft sheet): two coupled defects in the click-drill decoration story.
 
@@ -398,31 +398,31 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
 
 Together these break the project convention "left clicks move LEFT, right clicks move RIGHT" — the visual cue doesn't match the actual idiom. Operator wants App2 to decorate the drill column identically to QS.
 
-**Locks (operator-confirmed 2026-06-12 — full reasoning in `docs/audits/cn_0_clickability_audit.md`):**
+**Locks (operator-confirmed 2026-06-12 — full reasoning in `docs/audits/da_0_clickability_audit.md`):**
 - **Collapse to one type.** Drop `CellAccentText` + `CellAccentMenu`; introduce single `Drillable(on=Dim)` marker. Visual cue (accent text vs accent + tint background) auto-derives from drill triggers writing from `on.column` at plan-build / QS-emit time. Authors declare "this column is drillable"; type system + renderer pick the visual from the drill set. Pre-stable posture: drop old types same phase, no compat shim (per `[[feedback_no_compat_shims]]`).
-- **Visual resolution:** any `DATA_POINT_MENU` drill writes from the column → menu-tint visual; only `DATA_POINT_CLICK` drills → accent-text-only; no drills → `ValueError` at `Table.__post_init__` (CN.5 gate).
+- **Visual resolution:** any `DATA_POINT_MENU` drill writes from the column → menu-tint visual; only `DATA_POINT_CLICK` drills → accent-text-only; no drills → `ValueError` at `Table.__post_init__` (DA.5 gate).
 - **App2 cell-click affordance:** `<td.cell-accent-menu>` left-click opens the menu (same code path as ⋯ button). Row left-click stays inert (`279c52c8` contract); right-click on row still opens. Documents explicit exception to "left moves LEFT" — operator-accepted because the visual cue makes the affordance discoverable.
 - **Convention origin:** "left moves LEFT, right moves RIGHT" is a QuickSight-limitation workaround, not a design principle (operator clarification). App2 may break the rule when a better affordance exists.
 - **Tint hue:** auto-derived via `color-mix(in srgb, var(--color-accent) 10%, transparent)`. No new theme token.
 - **Class C per-site:** wire 3, strip 1 (Transactions Audit `tx_id_col` → Posting Ledger; Daily Balances Audit `db_account_col` → Daily Statement; Posting Ledger `account_col` → Daily Statement; **strip** Posting Ledger `transfer_col` — self-drill).
 - **Class D:** decorate L2FT Violation Detail + Investigation Account Network — Touching Edges.
-- **No interim release.** Bundle clear_button + cache-bust + row-drill-MENU contract + this phase into one v13.15.x release at CN.8.
+- **No interim release.** Bundle clear_button + cache-bust + row-drill-MENU contract + this phase into one v13.15.x release at DA.8.
 
 **Done when:** all 13 existing `CellAccentText` callsites migrated to `Drillable`; the 3 Class C wires + 1 strip land; Class D decorations land; App2's `renderTable` decorates drill columns identically to QS (cold-read v4 visual parity confirms); the type-system gate fails any mismatch at construction; release notes for v13.15.x bundle all four themes.
 
-- [x] CN.0 - **Audit + scope confirmation.** Grep every `CellAccentText` / `CellAccentMenu` callsite across `apps/` + `common/`. Per-sheet table of (column, drill trigger, current format, correct format). Output: `docs/audits/cn_0_clickability_audit.md`. **DONE 2026-06-12** — 15 mutations across 4 classes (A: 7 MENU-only swaps, B: 1 CLICK+MENU mix, C: 5 cue-without-drill, D: 2 drill-without-cue). All 5 operator locks resolved; collapse to single `Drillable` type confirmed.
-- [ ] CN.1 - **Define `Drillable` + drop the old types.** Add `Drillable(on: Dim)` to `common/tree/formatting.py`. **Delete** `CellAccentText` + `CellAccentMenu` outright (no compat shim — pre-stable). Update `common/tree/__init__.py` exports. The `CellFormat` union becomes redundant with one type — either inline or keep for future-extensibility (operator preference at implementation).
-- [ ] CN.2 - **App2 renderer plumbing.** Extend `_VisualPlan` with `column_decoration: Mapping[str, str]` (values: `"accent"` / `"accent-menu"`). `_table_column_meta` walks `visual.conditional_formatting`, for each `Drillable.on` column finds the drills in `visual.actions` writing from it, picks `"accent-menu"` if any MENU trigger present else `"accent"`. `_data_shape.shape_table` forwards as per-column `"decoration"` field. `bootstrap.js::renderTable` applies CSS class `cell-accent` / `cell-accent-menu` on each `<td>` when `cell.col.decoration` is set.
-- [ ] CN.3 - **CSS + cell-click affordance.** `widgets-theme.css` adds `.cell-accent { color: var(--color-accent); font-weight: 500; }` and `.cell-accent-menu { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 10%, transparent); font-weight: 500; cursor: pointer; }`. Hover deepens the tint. `bootstrap.js::wireRowDrills` wires `<td.cell-accent-menu>` left-click → opens the menu drill (reuse the ⋯ button's `openRowMenu` code path).
-- [ ] CN.4 - **Apps sweep — collapse + Class C/D.**
+- [x] DA.0 - **Audit + scope confirmation.** Grep every `CellAccentText` / `CellAccentMenu` callsite across `apps/` + `common/`. Per-sheet table of (column, drill trigger, current format, correct format). Output: `docs/audits/da_0_clickability_audit.md`. **DONE 2026-06-12** — 15 mutations across 4 classes (A: 7 MENU-only swaps, B: 1 CLICK+MENU mix, C: 5 cue-without-drill, D: 2 drill-without-cue). All 5 operator locks resolved; collapse to single `Drillable` type confirmed.
+- [ ] DA.1 - **Define `Drillable` + drop the old types.** Add `Drillable(on: Dim)` to `common/tree/formatting.py`. **Delete** `CellAccentText` + `CellAccentMenu` outright (no compat shim — pre-stable). Update `common/tree/__init__.py` exports. The `CellFormat` union becomes redundant with one type — either inline or keep for future-extensibility (operator preference at implementation).
+- [ ] DA.2 - **App2 renderer plumbing.** Extend `_VisualPlan` with `column_decoration: Mapping[str, str]` (values: `"accent"` / `"accent-menu"`). `_table_column_meta` walks `visual.conditional_formatting`, for each `Drillable.on` column finds the drills in `visual.actions` writing from it, picks `"accent-menu"` if any MENU trigger present else `"accent"`. `_data_shape.shape_table` forwards as per-column `"decoration"` field. `bootstrap.js::renderTable` applies CSS class `cell-accent` / `cell-accent-menu` on each `<td>` when `cell.col.decoration` is set.
+- [ ] DA.3 - **CSS + cell-click affordance.** `widgets-theme.css` adds `.cell-accent { color: var(--color-accent); font-weight: 500; }` and `.cell-accent-menu { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 10%, transparent); font-weight: 500; cursor: pointer; }`. Hover deepens the tint. `bootstrap.js::wireRowDrills` wires `<td.cell-accent-menu>` left-click → opens the menu drill (reuse the ⋯ button's `openRowMenu` code path).
+- [ ] DA.4 - **Apps sweep — collapse + Class C/D.**
   - All 13 existing `CellAccentText(on=...)` → `Drillable(on=...)` (drop the `color=` arg).
   - Class C wires (3 sites): Transactions Audit `tx_id_col` → Posting Ledger via new `_DP_TX_TXN_ID` param; Daily Balances Audit `db_account_col` → Daily Statement; Posting Ledger `account_col` → Daily Statement.
   - Class C strip (1 site): Posting Ledger `transfer_col` — remove the `Drillable`.
   - Class D adds (2 sites): L2FT Violation Detail `entity_a_col`; Investigation Account Network — Touching Edges (column to be identified at implementation).
-- [ ] CN.5 - **Type-system gate in `Table.__post_init__`.** Walks `conditional_formatting × actions`; for each `Drillable.on.column`, asserts ≥1 drill writes from that column. Raises `ValueError` at construction with the offending Table + column + drill set in the message. Unit test constructs a mismatched Table and asserts the raise.
-- [ ] CN.6 - **Tests.** Unit: `_table_column_meta` returns expected decoration map (accent vs accent-menu) for a Table with each shape. JS (Playwright): `renderTable` applies the right class on the right `<td>`; cell-click on menu-decorated cell opens the menu. Anti-regression for the CN.5 gate.
-- [ ] CN.7 - **Cold-read v4 parity verify.** Visual side-by-side (QS embed + App2) of L1 Drift + Overdraft + L1 Exceptions sheets; confirm drill columns decorate identically. Output: `docs/audits/cn_7_parity_verify.md`.
-- [ ] CN.8 - **Phase exit + v13.15.x release cut.** Bundle clear_button + cache-bust + row-drill MENU contract + Phase CN into one release notes entry. Bump 13.14.5 → 13.15.0 (minor for the new App2 decoration feature). Operator authorize-at-cut per `[[feedback_always_ask_before_release_cut]]`. Sweep CN to PLAN_ARCHIVE.md.
+- [ ] DA.5 - **Type-system gate in `Table.__post_init__`.** Walks `conditional_formatting × actions`; for each `Drillable.on.column`, asserts ≥1 drill writes from that column. Raises `ValueError` at construction with the offending Table + column + drill set in the message. Unit test constructs a mismatched Table and asserts the raise.
+- [ ] DA.6 - **Tests.** Unit: `_table_column_meta` returns expected decoration map (accent vs accent-menu) for a Table with each shape. JS (Playwright): `renderTable` applies the right class on the right `<td>`; cell-click on menu-decorated cell opens the menu. Anti-regression for the DA.5 gate.
+- [ ] DA.7 - **Cold-read v4 parity verify.** Visual side-by-side (QS embed + App2) of L1 Drift + Overdraft + L1 Exceptions sheets; confirm drill columns decorate identically. Output: `docs/audits/da_7_parity_verify.md`.
+- [ ] DA.8 - **Phase exit + v13.15.x release cut.** Bundle clear_button + cache-bust + row-drill MENU contract + Phase DA into one release notes entry. Bump 13.14.5 → 13.15.0 (minor for the new App2 decoration feature). Operator authorize-at-cut per `[[feedback_always_ask_before_release_cut]]`. Sweep CN to PLAN_ARCHIVE.md.
 
 ## Backlog (not yet phased)
 
