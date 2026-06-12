@@ -29,6 +29,7 @@ from recon_gen.common.l2.editor import (
 )
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.primitives import (
+    ORIGIN_INTERNAL_INITIATED,
     Account as Account,
     ChainChildSpec,
     Identifier,
@@ -390,7 +391,7 @@ def test_mutate_rail_replaces_field(spec_example: L2Instance) -> None:
     new_rail = next(
         r for r in new_inst.rails if str(r.name) == "ExternalRailInbound"
     )
-    assert new_rail.origin == "InternalInitiated"
+    assert new_rail.origin == ORIGIN_INTERNAL_INITIATED
 
 
 def test_mutate_chain_uses_composite_key(spec_example: L2Instance) -> None:

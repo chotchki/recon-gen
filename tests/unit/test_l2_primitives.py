@@ -27,6 +27,10 @@ from recon_gen.common.l2 import (
     TransferTemplate,
     TwoLegRail,
 )
+from recon_gen.common.l2.primitives import (
+    ORIGIN_EXTERNAL_FORCE_POSTED,
+    ORIGIN_INTERNAL_INITIATED,
+)
 
 
 def _example_instance() -> L2Instance:
@@ -178,8 +182,8 @@ def test_two_leg_rail_accepts_per_leg_origin_overrides() -> None:
         expected_net=Decimal("0"),
     )
     assert rail.origin is None
-    assert rail.source_origin == "ExternalForcePosted"
-    assert rail.destination_origin == "InternalInitiated"
+    assert rail.source_origin == ORIGIN_EXTERNAL_FORCE_POSTED
+    assert rail.destination_origin == ORIGIN_INTERNAL_INITIATED
 
 
 def test_two_leg_rail_origin_optional_when_per_leg_set() -> None:

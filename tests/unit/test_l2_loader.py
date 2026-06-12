@@ -30,6 +30,10 @@ from recon_gen.common.l2 import (
     TwoLegRail,
     load_instance,
 )
+from recon_gen.common.l2.primitives import (
+    ORIGIN_EXTERNAL_FORCE_POSTED,
+    ORIGIN_INTERNAL_INITIATED,
+)
 from recon_gen.common.env_keys import RECON_GEN_RUN_DIR
 
 
@@ -331,8 +335,8 @@ def test_two_leg_rail_loads_per_leg_origin_overrides(tmp_path: Path) -> None:
     from recon_gen.common.l2 import TwoLegRail
     assert isinstance(rail, TwoLegRail)
     assert rail.origin is None
-    assert rail.source_origin == "ExternalForcePosted"
-    assert rail.destination_origin == "InternalInitiated"
+    assert rail.source_origin == ORIGIN_EXTERNAL_FORCE_POSTED
+    assert rail.destination_origin == ORIGIN_INTERNAL_INITIATED
 
 
 def test_single_leg_rail_rejects_per_leg_origin_overrides(tmp_path: Path) -> None:
