@@ -71,9 +71,9 @@ def l1_matview_specs(cfg: Config) -> list[tuple[str, str | None]]:
       - limit_breach / l1_exceptions → ``business_day``
 
     Z.C — was ``l1_matview_specs(l2_instance)`` reading
-    ``l2_instance.instance``; now reads ``cfg.db_table_prefix``.
+    ``l2_instance.instance``; now reads ``cfg.db.table_prefix``.
     """
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     return [
         (f"{p}_transactions", "posting"),
         (f"{p}_daily_balances", "business_day_start"),
@@ -750,11 +750,11 @@ P_L1_DATE_START = "pL1DateStart"
 P_L1_DATE_END = "pL1DateEnd"
 
 # AR.4 — the universal date-range is a 7-day window anchored at
-# ``cfg.test_generator.as_of_frame()``'s as-of. One DateView per cfg
+# ``cfg.test.generator.as_of_frame()``'s as-of. One DateView per cfg
 # drives both the analysis-param defaults (picker initial state) AND
 # the dataset-param defaults (BM-shape pushdown defaults).
 def _l1_universal_range_view(cfg: Config) -> DateView:
-    return DateView(frame=cfg.test_generator.as_of_frame(window_days=7))
+    return DateView(frame=cfg.test.generator.as_of_frame(window_days=7))
 
 
 def _l1_universal_range_params(cfg: Config) -> list[DatasetParameter]:
@@ -790,7 +790,7 @@ def _l1_date_range_clause(date_column: str, cfg: Config) -> str:
         date_column,
         start_param=P_L1_DATE_START,
         end_param=P_L1_DATE_END,
-        dialect=cfg.dialect,
+        dialect=cfg.db.dialect,
     )
 
 
@@ -831,10 +831,10 @@ def build_drift_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
     receives dollars. SELECT * is replaced with the explicit column
     list because the wrap needs per-column control.
     """
-    prefix = cfg.db_table_prefix
-    sb = cents_to_dollars_sql("stored_balance", dialect=cfg.dialect)
-    cb = cents_to_dollars_sql("computed_balance", dialect=cfg.dialect)
-    drift = cents_to_dollars_sql("drift", dialect=cfg.dialect)
+    prefix = cfg.db.table_prefix
+    sb = cents_to_dollars_sql("stored_balance", dialect=cfg.db.dialect)
+    cb = cents_to_dollars_sql("computed_balance", dialect=cfg.db.dialect)
+    drift = cents_to_dollars_sql("drift", dialect=cfg.db.dialect)
     # BO.4 — ABS wrap goes OUTSIDE cents_to_dollars_sql so the
     # cents-to-dollars float divide doesn't flip sign on weird DB-driver
     # types; the inner result is a dollar-valued number, ABS of a number
@@ -854,7 +854,7 @@ def build_drift_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
         f"  AND {_l1_date_range_clause('business_day_start', cfg)}"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l1-drift-dataset"),
+        cfg, cfg.aws.prefixed("l1-drift-dataset"),
         "L1 Drift", "l1-drift",
         sql, DRIFT_CONTRACT,
         visual_identifier=DS_DRIFT,
@@ -881,10 +881,10 @@ def build_ledger_drift_dataset(
 
     AO.1.impl — cents → dollars wrap mirrors ``build_drift_dataset``.
     """
-    prefix = cfg.db_table_prefix
-    sb = cents_to_dollars_sql("stored_balance", dialect=cfg.dialect)
-    cb = cents_to_dollars_sql("computed_balance", dialect=cfg.dialect)
-    drift = cents_to_dollars_sql("drift", dialect=cfg.dialect)
+    prefix = cfg.db.table_prefix
+    sb = cents_to_dollars_sql("stored_balance", dialect=cfg.db.dialect)
+    cb = cents_to_dollars_sql("computed_balance", dialect=cfg.db.dialect)
+    drift = cents_to_dollars_sql("drift", dialect=cfg.db.dialect)
     abs_drift = f"ABS({drift})"  # BO.4 — see build_drift_dataset comment.
     sql = (
         f"SELECT account_id, account_name, account_role,"
@@ -899,7 +899,7 @@ def build_ledger_drift_dataset(
         f"  AND {_l1_date_range_clause('business_day_start', cfg)}"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l1-ledger-drift-dataset"),
+        cfg, cfg.aws.prefixed("l1-ledger-drift-dataset"),
         "L1 Ledger Drift", "l1-ledger-drift",
         sql, LEDGER_DRIFT_CONTRACT,
         visual_identifier=DS_LEDGER_DRIFT,
@@ -935,8 +935,8 @@ def build_overdraft_dataset(
 
     AO.1.impl — wrap ``stored_balance`` (BIGINT cents) → dollars.
     """
-    prefix = cfg.db_table_prefix
-    sb = cents_to_dollars_sql("stored_balance", dialect=cfg.dialect)
+    prefix = cfg.db.table_prefix
+    sb = cents_to_dollars_sql("stored_balance", dialect=cfg.db.dialect)
     sql = (
         f"SELECT account_id, account_name, account_role,"
         f" account_parent_role, business_day_start, business_day_end,"
@@ -947,7 +947,7 @@ def build_overdraft_dataset(
         f"  AND {_l1_date_range_clause('business_day_start', cfg)}"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l1-overdraft-dataset"),
+        cfg, cfg.aws.prefixed("l1-overdraft-dataset"),
         "L1 Overdraft", "l1-overdraft",
         sql, OVERDRAFT_CONTRACT,
         visual_identifier=DS_OVERDRAFT,
@@ -979,9 +979,9 @@ def build_limit_breach_dataset(
     so cents-vs-cents comparison holds) project as BIGINT cents; wrap
     each → dollars at the dataset boundary.
     """
-    prefix = cfg.db_table_prefix
-    outbound = cents_to_dollars_sql("outbound_total", dialect=cfg.dialect)
-    cap = cents_to_dollars_sql("cap", dialect=cfg.dialect)
+    prefix = cfg.db.table_prefix
+    outbound = cents_to_dollars_sql("outbound_total", dialect=cfg.db.dialect)
+    cap = cents_to_dollars_sql("cap", dialect=cfg.db.dialect)
     sql = (
         f"SELECT account_id, account_name, account_role,"
         f" account_parent_role, business_day, rail_name, direction,"
@@ -993,7 +993,7 @@ def build_limit_breach_dataset(
         f"  AND {_l1_date_range_clause('business_day', cfg)}"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l1-limit-breach-dataset"),
+        cfg, cfg.aws.prefixed("l1-limit-breach-dataset"),
         "L1 Limit Breach", "l1-limit-breach",
         sql, LIMIT_BREACH_CONTRACT,
         visual_identifier=DS_LIMIT_BREACH,
@@ -1037,9 +1037,9 @@ def build_l1_exceptions_dataset(
     branches). Exactly one is non-NULL per row. Wrap ``magnitude_amount``
     cents → dollars; pass ``magnitude_count`` through bare.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     magnitude_amount = cents_to_dollars_sql(
-        "magnitude_amount", dialect=cfg.dialect,
+        "magnitude_amount", dialect=cfg.db.dialect,
     )
     # C7 (cold-read v11.26.1) — suppress degenerate rows where neither
     # magnitude_amount nor magnitude_count carries a real value. The
@@ -1081,7 +1081,7 @@ def build_l1_exceptions_dataset(
         f")"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l1-exceptions-dataset"),
+        cfg, cfg.aws.prefixed("l1-exceptions-dataset"),
         "L1 L1 Exceptions", "l1-exceptions",
         sql, L1_EXCEPTIONS_CONTRACT,
         visual_identifier=DS_L1_EXCEPTIONS,
@@ -1149,8 +1149,8 @@ def build_daily_statement_summary_dataset(
     sheet's account dropdown reads its options from the ``DS_L1_ACCOUNTS``
     companion (not this parameterized dataset).
     """
-    prefix = cfg.db_table_prefix
-    view = DateView(frame=cfg.test_generator.as_of_frame())
+    prefix = cfg.db.table_prefix
+    view = DateView(frame=cfg.test.generator.as_of_frame())
     # AO.10 / AR.2 — compare the balance date as YYYY-MM-DD text on both
     # sides. The param substitutes TWO shapes: a string LITERAL in the
     # api/smoke path (smoke reads the dataset's StaticValues default and
@@ -1162,10 +1162,10 @@ def build_daily_statement_summary_dataset(
     # literals AND timestamp values; Oracle's the same. SQLite has no
     # real DATE type — strftime parses ISO strings directly — so the
     # cast is dialect-skipped to keep the no-op out of SQLite's path.
-    day = day_text("business_day_start", cfg.dialect)
+    day = day_text("business_day_start", cfg.db.dialect)
     _param_ref = f"<<${P_L1_DS_BALANCE_DATE_DSP}>>"
     bdate_param = f"CAST({_param_ref} AS DATE)"
-    bdate = day_text(bdate_param, cfg.dialect)
+    bdate = day_text(bdate_param, cfg.db.dialect)
     acct = account_display_expr("account_name", "account_id")
     # AO.2 / AR.2 — balance-date narrow is a strict day equality. The
     # pre-AR.2 ``OR (bdate ≥ sentinel ...)`` latest-on-empty fallback is
@@ -1179,17 +1179,17 @@ def build_daily_statement_summary_dataset(
     # closing_balance_recomputed / drift) project as BIGINT cents from
     # the daily-statement-summary matview; wrap each into dollars at the
     # dataset boundary so dashboard KPIs receive dollars.
-    opening = cents_to_dollars_sql("opening_balance", dialect=cfg.dialect)
-    debits = cents_to_dollars_sql("total_debits", dialect=cfg.dialect)
-    credits = cents_to_dollars_sql("total_credits", dialect=cfg.dialect)
-    net = cents_to_dollars_sql("net_flow", dialect=cfg.dialect)
+    opening = cents_to_dollars_sql("opening_balance", dialect=cfg.db.dialect)
+    debits = cents_to_dollars_sql("total_debits", dialect=cfg.db.dialect)
+    credits = cents_to_dollars_sql("total_credits", dialect=cfg.db.dialect)
+    net = cents_to_dollars_sql("net_flow", dialect=cfg.db.dialect)
     closing_st = cents_to_dollars_sql(
-        "closing_balance_stored", dialect=cfg.dialect,
+        "closing_balance_stored", dialect=cfg.db.dialect,
     )
     closing_rc = cents_to_dollars_sql(
-        "closing_balance_recomputed", dialect=cfg.dialect,
+        "closing_balance_recomputed", dialect=cfg.db.dialect,
     )
-    drift_d = cents_to_dollars_sql("drift", dialect=cfg.dialect)
+    drift_d = cents_to_dollars_sql("drift", dialect=cfg.db.dialect)
     sql = (
         f"SELECT account_id, account_name, account_role,"
         f" account_parent_role, account_scope,"
@@ -1207,7 +1207,7 @@ def build_daily_statement_summary_dataset(
         f"  AND {day} = {bdate}"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l1-daily-statement-summary-dataset"),
+        cfg, cfg.aws.prefixed("l1-daily-statement-summary-dataset"),
         "L1 Daily Statement Summary", "l1-daily-statement-summary",
         sql, DAILY_STATEMENT_SUMMARY_CONTRACT,
         visual_identifier=DS_DAILY_STATEMENT_SUMMARY,
@@ -1271,10 +1271,10 @@ def build_daily_statement_transactions_dataset(
     cfg: Config, l2_instance: L2Instance,
 ) -> DataSet:
     """Wrap the per-leg ledger feed for Daily Statement detail rows."""
-    sql = _daily_statement_transactions_sql(cfg.db_table_prefix, cfg.dialect)
-    view = DateView(frame=cfg.test_generator.as_of_frame())
+    sql = _daily_statement_transactions_sql(cfg.db.table_prefix, cfg.db.dialect)
+    view = DateView(frame=cfg.test.generator.as_of_frame())
     return build_dataset(
-        cfg, cfg.prefixed("l1-daily-statement-transactions-dataset"),
+        cfg, cfg.aws.prefixed("l1-daily-statement-transactions-dataset"),
         "L1 Daily Statement Transactions",
         "l1-daily-statement-transactions",
         sql, DAILY_STATEMENT_TRANSACTIONS_CONTRACT,
@@ -1321,14 +1321,14 @@ def build_transactions_dataset(
     (TIMESTAMP); the helper's upper-bound expands to "+1 day" so
     same-day non-midnight rows on the end day are included.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     # AO.1.impl — amount_money is BIGINT cents on the matview; wrap to
     # dollars at projection.
-    amount = cents_to_dollars_sql("amount_money", dialect=cfg.dialect)
+    amount = cents_to_dollars_sql("amount_money", dialect=cfg.db.dialect)
     # Phase DA — `business_day` is the day-truncated companion of
     # `posting` (matches the contract's DATETIME_DAY shape so the Posting
     # Ledger's Daily Statement drill can write it to _DP_DS_BALANCE_DATE).
-    business_day_expr = date_trunc_day("posting", cfg.dialect)
+    business_day_expr = date_trunc_day("posting", cfg.db.dialect)
     sql = (
         f"SELECT id AS transaction_id, account_id, account_name,"
         f" account_role, account_parent_role,"
@@ -1346,7 +1346,7 @@ def build_transactions_dataset(
         f"  AND {_l1_date_range_clause('posting', cfg)}"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l1-transactions-dataset"),
+        cfg, cfg.aws.prefixed("l1-transactions-dataset"),
         "L1 Transactions", "l1-transactions",
         sql, TRANSACTIONS_CONTRACT,
         visual_identifier=DS_TRANSACTIONS,
@@ -1378,11 +1378,11 @@ def build_drift_timeline_dataset(
     ``business_day_end``; the date-range AND-clause lands BEFORE the
     GROUP BY so the narrowing is part of the WHERE.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     # AO.1.impl — SUM(ABS(drift)) is BIGINT cents from the matview;
     # wrap the aggregate to dollars at projection.
     abs_drift = cents_to_dollars_sql(
-        "SUM(ABS(drift))", dialect=cfg.dialect,
+        "SUM(ABS(drift))", dialect=cfg.db.dialect,
     )
     sql = (
         f"SELECT business_day_end,"
@@ -1394,7 +1394,7 @@ def build_drift_timeline_dataset(
         f" GROUP BY business_day_end, account_role"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l1-drift-timeline-dataset"),
+        cfg, cfg.aws.prefixed("l1-drift-timeline-dataset"),
         "L1 Drift Timeline", "l1-drift-timeline",
         sql, DRIFT_TIMELINE_CONTRACT,
         visual_identifier=DS_DRIFT_TIMELINE,
@@ -1418,11 +1418,11 @@ def build_ledger_drift_timeline_dataset(
     Phase BM — date pushdown via ``<<$pL1Date*>>`` matches
     ``build_drift_timeline_dataset``.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     # AO.1.impl — same as build_drift_timeline_dataset: aggregate of
     # BIGINT-cents drift wrapped to dollars at projection.
     abs_drift = cents_to_dollars_sql(
-        "SUM(ABS(drift))", dialect=cfg.dialect,
+        "SUM(ABS(drift))", dialect=cfg.db.dialect,
     )
     sql = (
         f"SELECT business_day_end,"
@@ -1434,7 +1434,7 @@ def build_ledger_drift_timeline_dataset(
         f" GROUP BY business_day_end, account_role"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l1-ledger-drift-timeline-dataset"),
+        cfg, cfg.aws.prefixed("l1-ledger-drift-timeline-dataset"),
         "L1 Ledger Drift Timeline", "l1-ledger-drift-timeline",
         sql, DRIFT_TIMELINE_CONTRACT,
         visual_identifier=DS_LEDGER_DRIFT_TIMELINE,
@@ -1466,13 +1466,13 @@ def build_stuck_pending_dataset(
     stays a thin SELECT * passthrough plus the Y.2.g pushdown WHERE
     (account_id data-value + rail_name / rail_name enums).
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     # AO.1.impl — t.amount_money projects from the matview as BIGINT
     # cents (the stuck-pending matview SELECTs ct.amount_money straight
     # through); wrap to dollars at the dataset boundary. SELECT t.* is
     # expanded to explicit columns so the per-money-column wrap can be
     # applied without touching non-money columns.
-    amount = cents_to_dollars_sql("t.amount_money", dialect=cfg.dialect)
+    amount = cents_to_dollars_sql("t.amount_money", dialect=cfg.db.dialect)
     sql = (
         f"SELECT t.transaction_id, t.account_id, t.account_name,"
         f" t.account_role, t.account_parent_role,"
@@ -1488,7 +1488,7 @@ def build_stuck_pending_dataset(
         f"  AND {_data_value_clause('rail_name', P_L1_PENDING_RAIL)}"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l1-stuck-pending-dataset"),
+        cfg, cfg.aws.prefixed("l1-stuck-pending-dataset"),
         "L1 Stuck Pending", "l1-stuck-pending",
         sql, STUCK_PENDING_CONTRACT,
         visual_identifier=DS_STUCK_PENDING,
@@ -1510,10 +1510,10 @@ def build_stuck_unbundled_dataset(
     Aging sheet. Same Y.2.g pushdown vectors as the Pending Aging
     dataset.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     # AO.1.impl — same shape as build_stuck_pending_dataset; expand
     # SELECT t.* to wrap amount_money cents → dollars.
-    amount = cents_to_dollars_sql("t.amount_money", dialect=cfg.dialect)
+    amount = cents_to_dollars_sql("t.amount_money", dialect=cfg.db.dialect)
     sql = (
         f"SELECT t.transaction_id, t.account_id, t.account_name,"
         f" t.account_role, t.account_parent_role,"
@@ -1529,7 +1529,7 @@ def build_stuck_unbundled_dataset(
         f"  AND {_data_value_clause('rail_name', P_L1_UNBUNDLED_RAIL)}"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l1-stuck-unbundled-dataset"),
+        cfg, cfg.aws.prefixed("l1-stuck-unbundled-dataset"),
         "L1 Stuck Unbundled", "l1-stuck-unbundled",
         sql, STUCK_UNBUNDLED_CONTRACT,
         visual_identifier=DS_STUCK_UNBUNDLED,
@@ -1573,10 +1573,10 @@ def build_supersession_transactions_dataset(
     narrowing (you always see the trail, the dropdown narrows which
     cause class you're auditing).
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     # AO.1.impl — amount_money lives in the BASE table as BIGINT cents;
     # wrap the outer projection so the dataset surfaces dollars.
-    amount = cents_to_dollars_sql("amount_money", dialect=cfg.dialect)
+    amount = cents_to_dollars_sql("amount_money", dialect=cfg.db.dialect)
     sql = (
         f"SELECT entry, transaction_id, supersedes,"
         f" CASE WHEN entry > 1 AND supersedes IS NULL THEN 1 ELSE 0 END"
@@ -1598,7 +1598,7 @@ def build_supersession_transactions_dataset(
         f" OR supersedes IS NULL)"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l1-supersession-transactions-dataset"),
+        cfg, cfg.aws.prefixed("l1-supersession-transactions-dataset"),
         "L1 Supersession — Transactions",
         "l1-supersession-transactions",
         sql, SUPERSESSION_TRANSACTIONS_CONTRACT,
@@ -1619,10 +1619,10 @@ def build_supersession_daily_balances_dataset(
     — `COUNT(*) OVER (PARTITION BY account_id, business_day_start)`
     + outer `WHERE > 1` filter. Sort handled by the dashboard.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     # AO.1.impl — daily_balances.money is BIGINT cents under the
     # foundation; wrap to dollars at the outer projection.
-    money = cents_to_dollars_sql("money", dialect=cfg.dialect)
+    money = cents_to_dollars_sql("money", dialect=cfg.db.dialect)
     sql = (
         f"SELECT entry,"
         f" account_id, account_name, account_role, supersedes,"
@@ -1639,7 +1639,7 @@ def build_supersession_daily_balances_dataset(
         f" WHERE entry_count > 1"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l1-supersession-daily-balances-dataset"),
+        cfg, cfg.aws.prefixed("l1-supersession-daily-balances-dataset"),
         "L1 Supersession — Daily Balances",
         "l1-supersession-daily-balances",
         sql, SUPERSESSION_DAILY_BALANCES_CONTRACT,
@@ -1680,7 +1680,7 @@ def build_l1_accounts_dataset(
     ``docs/reference/quicksight-quirks.md`` — unmapped DatasetParameter
     entry). Dropping the dead substitution dissolves both errors.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     display = account_display_expr("account_name", "account_id")
     sql = (
         f"SELECT DISTINCT account_id, account_role, account_name,"
@@ -1717,7 +1717,7 @@ def build_l1_accounts_dataset(
         f" ) accounts_universe"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l1-accounts-dataset"),
+        cfg, cfg.aws.prefixed("l1-accounts-dataset"),
         "L1 Accounts", "l1-accounts",
         sql, L1_ACCOUNTS_CONTRACT,
         visual_identifier=DS_L1_ACCOUNTS,
@@ -1754,7 +1754,7 @@ def build_l1_ds_accounts_dataset(
     ``scope = 'internal'`` account (control GLs + customer DDAs +
     merchant DDAs all surface); external counterparties stay out.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     display = account_display_expr("account_name", "account_id")
     sql = (
         f"SELECT DISTINCT account_id, account_role, account_name,"
@@ -1763,7 +1763,7 @@ def build_l1_ds_accounts_dataset(
         f" WHERE account_scope = 'internal'"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l1-ds-accounts-dataset"),
+        cfg, cfg.aws.prefixed("l1-ds-accounts-dataset"),
         "L1 Daily Statement Accounts", "l1-ds-accounts",
         sql, L1_ACCOUNTS_CONTRACT,
         visual_identifier=DS_L1_DS_ACCOUNTS,
@@ -1815,7 +1815,7 @@ def build_l1_ds_control_accounts_dataset(
     template-materialized children, NOT control accounts; operators
     reach them via the wide picker above, not this reference list.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     display = account_display_expr("account_name", "account_id")
     # CR.x — two "last activity" date columns surface staleness at a
     # glance. The pre-CR.x SELECT DISTINCT worked because every
@@ -1841,7 +1841,7 @@ def build_l1_ds_control_accounts_dataset(
         f" ORDER BY cdb.account_role, cdb.account_id"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l1-ds-control-accounts-dataset"),
+        cfg, cfg.aws.prefixed("l1-ds-control-accounts-dataset"),
         "L1 Daily Statement Control Accounts",
         "l1-ds-control-accounts",
         sql, L1_CONTROL_ACCOUNTS_CONTRACT,
@@ -1856,13 +1856,13 @@ def build_l1_tx_ids_dataset(
     ledger. Feeds the Transactions sheet's Transfer dropdown via
     ``LinkedValues``.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     sql = (
         f"SELECT DISTINCT transfer_id FROM {prefix}_current_transactions"
         f" WHERE transfer_id IS NOT NULL"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l1-tx-ids-dataset"),
+        cfg, cfg.aws.prefixed("l1-tx-ids-dataset"),
         "L1 Transfer IDs", "l1-tx-ids",
         sql, L1_TX_IDS_CONTRACT,
         visual_identifier=DS_L1_TX_IDS,
@@ -1887,10 +1887,10 @@ def build_l1_tx_facets_dataset(
     companion (cheap, well-formed query) replaces the StaticValues path
     used for the bounded enum columns.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     sql = f"SELECT DISTINCT status, origin FROM {prefix}_current_transactions"
     return build_dataset(
-        cfg, cfg.prefixed("l1-tx-facets-dataset"),
+        cfg, cfg.aws.prefixed("l1-tx-facets-dataset"),
         "L1 Transaction Facets", "l1-tx-facets",
         sql, L1_TX_FACETS_CONTRACT,
         visual_identifier=DS_L1_TX_FACETS,
@@ -1905,7 +1905,7 @@ def build_all_l1_dashboard_datasets(
     `build_l1_dashboard_app` calls this and registers each result on the
     App tree. Per Z.C, the cfg arrives fully populated (``deployment_name``
     + ``db_table_prefix`` are required cfg fields), so dataset IDs carry
-    the deployment prefix via ``cfg.prefixed(...)`` directly — no auto-
+    the deployment prefix via ``cfg.aws.prefixed(...)`` directly — no auto-
     stamping dance.
     """
     return [

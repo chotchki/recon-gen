@@ -301,7 +301,7 @@ def _build_recipient_fanout_sheet(
 
     ds_fanout = app.add_dataset(Dataset(
         identifier=DS_INV_RECIPIENT_FANOUT,
-        arn=app.cfg.dataset_arn(app.cfg.prefixed("inv-recipient-fanout-dataset")),
+        arn=app.cfg.aws.dataset_arn(app.cfg.aws.prefixed("inv-recipient-fanout-dataset")),
     ))
 
     # Y.3.a — bridge the analyst-facing slider param into the
@@ -454,7 +454,7 @@ def _build_volume_anomalies_sheet(
 
     ds_anomalies = app.add_dataset(Dataset(
         identifier=DS_INV_VOLUME_ANOMALIES,
-        arn=app.cfg.dataset_arn(app.cfg.prefixed("inv-volume-anomalies-dataset")),
+        arn=app.cfg.aws.dataset_arn(app.cfg.aws.prefixed("inv-volume-anomalies-dataset")),
     ))
     # Y.1.b.companion — same matview, no σ pushdown. Distribution
     # chart binds to this so it stays unfiltered while KPI + Table
@@ -462,8 +462,8 @@ def _build_volume_anomalies_sheet(
     # filter.
     ds_anomalies_distribution = app.add_dataset(Dataset(
         identifier=DS_INV_VOLUME_ANOMALIES_DISTRIBUTION,
-        arn=app.cfg.dataset_arn(
-            app.cfg.prefixed("inv-volume-anomalies-distribution-dataset"),
+        arn=app.cfg.aws.dataset_arn(
+            app.cfg.aws.prefixed("inv-volume-anomalies-distribution-dataset"),
         ),
     ))
 
@@ -638,7 +638,7 @@ def _build_money_trail_sheet(
 
     ds_money_trail = app.add_dataset(Dataset(
         identifier=DS_INV_MONEY_TRAIL,
-        arn=app.cfg.dataset_arn(app.cfg.prefixed("inv-money-trail-dataset")),
+        arn=app.cfg.aws.dataset_arn(app.cfg.aws.prefixed("inv-money-trail-dataset")),
     ))
     # Y.2.a.companion — unfiltered roots dataset feeding only the
     # chain-root dropdown's LinkedValues. Without it, the dropdown's
@@ -647,8 +647,8 @@ def _build_money_trail_sheet(
     # sentinel default (i.e. nothing).
     ds_money_trail_roots = app.add_dataset(Dataset(
         identifier=DS_INV_MONEY_TRAIL_ROOTS,
-        arn=app.cfg.dataset_arn(
-            app.cfg.prefixed("inv-money-trail-roots-dataset"),
+        arn=app.cfg.aws.dataset_arn(
+            app.cfg.aws.prefixed("inv-money-trail-roots-dataset"),
         ),
     ))
 
@@ -840,7 +840,7 @@ def _build_account_network_sheet(
 
     ds_anet = app.add_dataset(Dataset(
         identifier=DS_INV_ACCOUNT_NETWORK,
-        arn=app.cfg.dataset_arn(app.cfg.prefixed("inv-account-network-dataset")),
+        arn=app.cfg.aws.dataset_arn(app.cfg.aws.prefixed("inv-account-network-dataset")),
     ))
     # BO.2 — directional siblings of ds_anet. The bidirectional ds_anet
     # feeds the Touching-Edges table; each Sankey reads its own pre-
@@ -849,19 +849,19 @@ def _build_account_network_sheet(
     # split exists.
     ds_anet_inbound = app.add_dataset(Dataset(
         identifier=DS_INV_ACCOUNT_NETWORK_INBOUND,
-        arn=app.cfg.dataset_arn(
-            app.cfg.prefixed("inv-account-network-inbound-dataset"),
+        arn=app.cfg.aws.dataset_arn(
+            app.cfg.aws.prefixed("inv-account-network-inbound-dataset"),
         ),
     ))
     ds_anet_outbound = app.add_dataset(Dataset(
         identifier=DS_INV_ACCOUNT_NETWORK_OUTBOUND,
-        arn=app.cfg.dataset_arn(
-            app.cfg.prefixed("inv-account-network-outbound-dataset"),
+        arn=app.cfg.aws.dataset_arn(
+            app.cfg.aws.prefixed("inv-account-network-outbound-dataset"),
         ),
     ))
     ds_accounts = app.add_dataset(Dataset(
         identifier=DS_INV_ANETWORK_ACCOUNTS,
-        arn=app.cfg.dataset_arn(app.cfg.prefixed("inv-anetwork-accounts-dataset")),
+        arn=app.cfg.aws.dataset_arn(app.cfg.aws.prefixed("inv-anetwork-accounts-dataset")),
     ))
 
     # Y.2.b — bridge each analysis-level parameter to its dataset-level
@@ -1091,8 +1091,8 @@ def build_investigation_app(
     Per the N.2 audit, Investigation is fed by the same institution
     YAML that drives L1 + L2FT. Z.C: the deployment + DB-table
     prefixes are required cfg fields — both come from
-    ``cfg.deployment_name`` (QS-resource segment) and
-    ``cfg.db_table_prefix`` (DB table-name prefix). Defaults to the
+    ``cfg.aws.deployment_name`` (QS-resource segment) and
+    ``cfg.db.table_prefix`` (DB table-name prefix). Defaults to the
     persona-neutral ``spec_example`` L2 instance — the same default
     L1 uses.
 
@@ -1177,11 +1177,11 @@ def _build_app_info_sheet(
     )
     liveness_ds = app.add_dataset(Dataset(
         identifier=_DS_APP_INFO_LIVENESS,
-        arn=cfg.dataset_arn(liveness_aws.DataSetId),
+        arn=cfg.aws.dataset_arn(liveness_aws.DataSetId),
     ))
     matviews_ds = app.add_dataset(Dataset(
         identifier=_DS_APP_INFO_MATVIEWS,
-        arn=cfg.dataset_arn(matviews_aws.DataSetId),
+        arn=cfg.aws.dataset_arn(matviews_aws.DataSetId),
     ))
     sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_INV_APP_INFO,
@@ -1201,7 +1201,7 @@ def _analysis_name(cfg: Config) -> str:
     """Title shown in QuickSight — matches L1/L2FT's ``Name (deployment)``
     shape so multi-deployment runs are visually distinguishable in the
     dashboard list."""
-    return f"Investigation ({cfg.deployment_name})"
+    return f"Investigation ({cfg.aws.deployment_name})"
 
 
 # ---------------------------------------------------------------------------

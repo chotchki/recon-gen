@@ -462,7 +462,7 @@ _TRANSACTIONS_DESCRIPTION = (
 
 def _analysis_name(cfg: Config, l2_instance: L2Instance) -> str:
     """Title shown on the deployed QuickSight Analysis."""
-    return f"L1 Reconciliation Dashboard ({cfg.deployment_name})"
+    return f"L1 Reconciliation Dashboard ({cfg.aws.deployment_name})"
 
 
 # -- L2-prose helpers --------------------------------------------------------
@@ -570,7 +570,7 @@ def _l1_datasets(
         _DS_APP_INFO_LIVENESS, _DS_APP_INFO_MATVIEWS,
     ]
     return {
-        vid: Dataset(identifier=vid, arn=cfg.dataset_arn(aws.DataSetId))
+        vid: Dataset(identifier=vid, arn=cfg.aws.dataset_arn(aws.DataSetId))
         for vid, aws in zip(visual_ids, aws_datasets)
     }
 
@@ -2005,7 +2005,7 @@ def _populate_daily_statement_sheet(
 
 # AR.4 — the per-app RollingDate exprs (pre-AR.4: "last 7 days off now")
 # are gone; the universal range is a 7-day DateView constructed from
-# cfg.test_generator.as_of_frame(). Strict-collapse, same as AR.2's
+# cfg.test.generator.as_of_frame(). Strict-collapse, same as AR.2's
 # balance-date — bake at deploy, no wall-clock drift between deploys,
 # no disagreement with the dataset side.
 
@@ -2785,7 +2785,7 @@ def build_l1_dashboard_app(
     L1 SHOULD-constraint visualized via the M.1a.7 invariant views.
 
     Dashboard ID convention: ``<deployment_name>-l1-dashboard`` (Z.C) —
-    ``cfg.deployment_name`` is the operator-set per-deployment namespace
+    ``cfg.aws.deployment_name`` is the operator-set per-deployment namespace
     that lets N apps (L1, PR, Exec) deploy against the same L2 instance,
     AND the same app deploy against N L2 instances, all in one QS account
     without collision. The cfg arrives fully populated (``deployment_name``
@@ -2986,7 +2986,7 @@ def build_l1_dashboard_app(
         l1_exceptions_sheet=l1_exceptions_sheet,
         transactions_sheet=transactions_sheet,
         universal_range_view=DateView(
-            frame=cfg.test_generator.as_of_frame(window_days=7),
+            frame=cfg.test.generator.as_of_frame(window_days=7),
         ),
     )
 
@@ -3011,7 +3011,7 @@ def build_l1_dashboard_app(
 
     # M.2b.4 — Daily Statement per-account-day parameter filters.
     # AR.2 — the balance-date view is constructed once from
-    # ``cfg.test_generator.as_of_frame()`` and threaded through; the
+    # ``cfg.test.generator.as_of_frame()`` and threaded through; the
     # same view's emissions drive the analysis-param default in the
     # picker AND (via ``datasets.py::_date_dataset_param``) the
     # dataset-param default. One source of truth.
@@ -3019,7 +3019,7 @@ def build_l1_dashboard_app(
         analysis,
         datasets=datasets,
         daily_statement_sheet=daily_statement_sheet,
-        balance_date_view=DateView(frame=cfg.test_generator.as_of_frame()),
+        balance_date_view=DateView(frame=cfg.test.generator.as_of_frame()),
     )
 
     # M.2b.7 — Cross-sheet drill filter groups (sentinel-pattern).

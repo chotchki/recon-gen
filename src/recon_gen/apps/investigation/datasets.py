@@ -97,7 +97,7 @@ def inv_matview_specs(
     operator can spot stale matviews against fresh ETL loads at a
     glance. Mirrors ``l1_matview_specs`` / ``l2ft_matview_specs``.
     """
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     return [
         (f"{p}_transactions", "posting"),
         (f"{p}_daily_balances", "business_day_start"),
@@ -354,12 +354,12 @@ def build_recipient_fanout_dataset(cfg: Config) -> DataSet:
     (which QS handled but App2 didn't apply). Both renderers now see
     one shape.
     """
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     # AO.1.impl — t.amount_money is BIGINT cents on the base table;
     # wrap to dollars where the dataset surfaces ``amount`` to the
     # renderer. ``WHERE t.amount_money > 0`` stays as-is (the sign
     # comparison is unit-independent at zero).
-    inflow_amount = cents_to_dollars_sql("t.amount_money", dialect=cfg.dialect)
+    inflow_amount = cents_to_dollars_sql("t.amount_money", dialect=cfg.db.dialect)
     # Two-CTE pattern instead of window: PG raises
     # "FeatureNotSupported: DISTINCT is not implemented for window
     # functions" on `COUNT(DISTINCT col) OVER (PARTITION BY ...)`.
@@ -446,7 +446,7 @@ JOIN distinct_per_recipient dpr
 WHERE dpr.distinct_senders >= <<${P_INV_FANOUT_THRESHOLD}>>"""
     return build_dataset(
         cfg,
-        cfg.prefixed("inv-recipient-fanout-dataset"),
+        cfg.aws.prefixed("inv-recipient-fanout-dataset"),
         "Investigation Recipient Fanout",
         "inv-recipient-fanout",
         sql,
@@ -495,15 +495,15 @@ def build_volume_anomalies_dataset(cfg: Config) -> DataSet:
     via ``MappedDataSetParameters`` declared on the parameter
     declaration in ``apps/investigation/app.py``.
     """
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     # AO.1.impl — window_sum / pop_mean / pop_stddev all derive from
     # SUM(amount_money) in the matview body and project as BIGINT cents.
     # z_score is dimensionless (cents-over-cents division) so it doesn't
     # need wrapping. Expand SELECT * to explicit projection so the per-
     # money-column wrap can be applied.
-    window_sum = cents_to_dollars_sql("window_sum", dialect=cfg.dialect)
-    pop_mean = cents_to_dollars_sql("pop_mean", dialect=cfg.dialect)
-    pop_stddev = cents_to_dollars_sql("pop_stddev", dialect=cfg.dialect)
+    window_sum = cents_to_dollars_sql("window_sum", dialect=cfg.db.dialect)
+    pop_mean = cents_to_dollars_sql("pop_mean", dialect=cfg.db.dialect)
+    pop_stddev = cents_to_dollars_sql("pop_stddev", dialect=cfg.db.dialect)
     sql = (
         f"SELECT recipient_account_id, recipient_account_name,"
         f" recipient_account_type,"
@@ -519,7 +519,7 @@ def build_volume_anomalies_dataset(cfg: Config) -> DataSet:
     )
     return build_dataset(
         cfg,
-        cfg.prefixed("inv-volume-anomalies-dataset"),
+        cfg.aws.prefixed("inv-volume-anomalies-dataset"),
         "Investigation Volume Anomalies",
         "inv-volume-anomalies",
         sql,
@@ -559,13 +559,13 @@ def build_volume_anomalies_distribution_dataset(cfg: Config) -> DataSet:
     Y.2 will reuse this pattern wherever a FilterGroup with
     SELECTED_VISUALS scope gets pushed to dataset SQL.
     """
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     # AO.1.impl — mirrors build_volume_anomalies_dataset's projection;
     # SELECT * expanded so window_sum / pop_mean / pop_stddev wrap into
     # dollars at the boundary. z_score stays dimensionless.
-    window_sum = cents_to_dollars_sql("window_sum", dialect=cfg.dialect)
-    pop_mean = cents_to_dollars_sql("pop_mean", dialect=cfg.dialect)
-    pop_stddev = cents_to_dollars_sql("pop_stddev", dialect=cfg.dialect)
+    window_sum = cents_to_dollars_sql("window_sum", dialect=cfg.db.dialect)
+    pop_mean = cents_to_dollars_sql("pop_mean", dialect=cfg.db.dialect)
+    pop_stddev = cents_to_dollars_sql("pop_stddev", dialect=cfg.db.dialect)
     sql = (
         f"SELECT recipient_account_id, recipient_account_name,"
         f" recipient_account_type,"
@@ -580,7 +580,7 @@ def build_volume_anomalies_distribution_dataset(cfg: Config) -> DataSet:
     )
     return build_dataset(
         cfg,
-        cfg.prefixed("inv-volume-anomalies-distribution-dataset"),
+        cfg.aws.prefixed("inv-volume-anomalies-distribution-dataset"),
         "Investigation Volume Anomalies — Distribution",
         "inv-volume-anomalies-distribution",
         sql,
@@ -634,8 +634,8 @@ def build_money_trail_dataset(cfg: Config) -> DataSet:
     ``translate_qs_dataset_params`` preprocessor in ``_sql_executor``
     rewrites ``<<$pName>>`` → ``:param_pName`` bind variables.
     """
-    p = cfg.db_table_prefix
-    base = _money_trail_base_sql(p, cfg.dialect)
+    p = cfg.db.table_prefix
+    base = _money_trail_base_sql(p, cfg.db.dialect)
     # AO.1.impl — the min-amount slider's value is in dollars (the
     # control title is "Min hop amount ($)"); under the foundation the
     # matview's hop_amount is BIGINT cents, so the WHERE comparison
@@ -651,7 +651,7 @@ def build_money_trail_dataset(cfg: Config) -> DataSet:
     )
     return build_dataset(
         cfg,
-        cfg.prefixed("inv-money-trail-dataset"),
+        cfg.aws.prefixed("inv-money-trail-dataset"),
         "Investigation Money Trail",
         "inv-money-trail",
         sql,
@@ -705,7 +705,7 @@ def build_money_trail_roots_dataset(cfg: Config) -> DataSet:
     pick IS the operator's most likely target ("show me the biggest
     money movement first").
     """
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     # Oracle rejects ``AS`` on derived-table aliases (ORA-00907 missing
     # right parenthesis — the parser expects ``AS <col>`` inside the
     # subquery's projection then trips on the alias). Bare alias is
@@ -721,7 +721,7 @@ def build_money_trail_roots_dataset(cfg: Config) -> DataSet:
     )
     return build_dataset(
         cfg,
-        cfg.prefixed("inv-money-trail-roots-dataset"),
+        cfg.aws.prefixed("inv-money-trail-roots-dataset"),
         "Investigation Money Trail — Roots",
         "inv-money-trail-roots",
         sql,
@@ -880,10 +880,10 @@ def build_account_network_dataset(cfg: Config) -> DataSet:
     """
     return build_dataset(
         cfg,
-        cfg.prefixed("inv-account-network-dataset"),
+        cfg.aws.prefixed("inv-account-network-dataset"),
         "Investigation Account Network",
         "inv-account-network",
-        _account_network_sql(cfg.db_table_prefix, cfg.dialect, direction="both"),
+        _account_network_sql(cfg.db.table_prefix, cfg.db.dialect, direction="both"),
         ACCOUNT_NETWORK_CONTRACT,
         visual_identifier=DS_INV_ACCOUNT_NETWORK,
         dataset_parameters=_account_network_dataset_parameters(),
@@ -899,10 +899,10 @@ def build_account_network_inbound_dataset(cfg: Config) -> DataSet:
     """
     return build_dataset(
         cfg,
-        cfg.prefixed("inv-account-network-inbound-dataset"),
+        cfg.aws.prefixed("inv-account-network-inbound-dataset"),
         "Investigation Account Network — Inbound",
         "inv-account-network-inbound",
-        _account_network_sql(cfg.db_table_prefix, cfg.dialect, direction="inbound"),
+        _account_network_sql(cfg.db.table_prefix, cfg.db.dialect, direction="inbound"),
         ACCOUNT_NETWORK_CONTRACT,
         visual_identifier=DS_INV_ACCOUNT_NETWORK_INBOUND,
         dataset_parameters=_account_network_dataset_parameters(),
@@ -918,10 +918,10 @@ def build_account_network_outbound_dataset(cfg: Config) -> DataSet:
     """
     return build_dataset(
         cfg,
-        cfg.prefixed("inv-account-network-outbound-dataset"),
+        cfg.aws.prefixed("inv-account-network-outbound-dataset"),
         "Investigation Account Network — Outbound",
         "inv-account-network-outbound",
-        _account_network_sql(cfg.db_table_prefix, cfg.dialect, direction="outbound"),
+        _account_network_sql(cfg.db.table_prefix, cfg.db.dialect, direction="outbound"),
         ACCOUNT_NETWORK_CONTRACT,
         visual_identifier=DS_INV_ACCOUNT_NETWORK_OUTBOUND,
         dataset_parameters=_account_network_dataset_parameters(),
@@ -944,17 +944,17 @@ def build_account_network_accounts_dataset(cfg: Config) -> DataSet:
     """
     return build_dataset(
         cfg,
-        cfg.prefixed("inv-anetwork-accounts-dataset"),
+        cfg.aws.prefixed("inv-anetwork-accounts-dataset"),
         "Investigation Account Network — Accounts",
         "inv-anetwork-accounts",
-        _anetwork_accounts_sql(cfg.db_table_prefix),
+        _anetwork_accounts_sql(cfg.db.table_prefix),
         ANETWORK_ACCOUNTS_CONTRACT,
         visual_identifier=DS_INV_ANETWORK_ACCOUNTS,
         # CQ.2.g — universe is exactly the inv_money_trail_edges
         # matview. select_expr must match the SELECT-side projection
         # in _anetwork_accounts_sql; both use account_display_expr.
         picker_matview_hint=PickerMatviewHint(
-            matview=f"{cfg.db_table_prefix}_inv_money_trail_edges",
+            matview=f"{cfg.db.table_prefix}_inv_money_trail_edges",
             select_expr=account_display_expr(
                 "source_account_name", "source_account_id",
             ),
@@ -968,11 +968,11 @@ def build_all_datasets(
     """Return every dataset Investigation's sheets reference.
 
     Z.C: ``l2_instance`` is no longer load-bearing for the prefix —
-    that comes from ``cfg.db_table_prefix`` now — but the parameter
+    that comes from ``cfg.db.table_prefix`` now — but the parameter
     stays for signature parity with the L1 / L2FT / Exec
     ``build_all_datasets`` callers.
     """
-    del l2_instance  # Z.C — prefix comes from cfg.db_table_prefix
+    del l2_instance  # Z.C — prefix comes from cfg.db.table_prefix
     return [
         build_recipient_fanout_dataset(cfg),
         build_volume_anomalies_dataset(cfg),

@@ -54,14 +54,14 @@ from recon_gen.common.tree import DateView
 # M.4.4.5 — Executives reads base tables only; no app-specific
 # matviews. V.3 — but we still surface the base tables themselves on
 # the App Info sheet so the operator can see ETL freshness at a
-# glance. Z.C — sourced from cfg.db_table_prefix (now a required cfg
+# glance. Z.C — sourced from cfg.db.table_prefix (now a required cfg
 # field; loud-fails at load time when unset).
 def exec_matview_specs(cfg: Config) -> list[tuple[str, str | None]]:
     """Tables Executives reads, paired with their date columns for
     App Info's ``latest_date`` KPI. No app-specific matviews — just
     the base tables (which is what the Executives sheets aggregate
     over)."""
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     return [
         (f"{p}_transactions", "posting"),
         (f"{p}_daily_balances", "business_day_start"),
@@ -113,12 +113,12 @@ P_EXEC_DATE_END = "pExecDateEnd"
 
 
 def _exec_universal_range_view(cfg: Config) -> DateView:
-    """AR.4 — 30-day window anchored at ``cfg.test_generator.as_of_frame()``'s
+    """AR.4 — 30-day window anchored at ``cfg.test.generator.as_of_frame()``'s
     as-of. One DateView per cfg drives both the analysis-param defaults
     (picker initial state) AND the dataset-param defaults (BM-shape
     pushdown defaults).
     """
-    return DateView(frame=cfg.test_generator.as_of_frame(window_days=30))
+    return DateView(frame=cfg.test.generator.as_of_frame(window_days=30))
 
 
 def _exec_universal_range_params(cfg: Config) -> list[DatasetParameter]:
@@ -149,7 +149,7 @@ def _exec_date_range_clause(date_column: str, cfg: Config) -> str:
         date_column,
         start_param=P_EXEC_DATE_START,
         end_param=P_EXEC_DATE_END,
-        dialect=cfg.dialect,
+        dialect=cfg.db.dialect,
     )
 
 
@@ -228,18 +228,18 @@ def build_transaction_summary_dataset(cfg: Config) -> DataSet:
     # Phase BM — single SQL form via ``<<$pExecDate*>>`` pushdown over
     # ``t.posting`` (TIMESTAMP); the helper's upper bound expands to
     # "+1 day" so same-day non-midnight rows on the end day are included.
-    p = cfg.db_table_prefix
-    posted_date_expr = to_date("MIN(t.posting)", cfg.dialect)
+    p = cfg.db.table_prefix
+    posted_date_expr = to_date("MIN(t.posting)", cfg.db.dialect)
     # AO.1.impl — per_transfer's transfer_amount / transfer_net are
     # cents (derived from t.amount_money BIGINT cents). The outer
     # SUM(...) over both stays cents-cents (integer-safe); wrap to
     # dollars at the outermost projection so the executive dashboard
     # receives dollars on the two money columns.
     gross = cents_to_dollars_sql(
-        "SUM(pt.transfer_amount)", dialect=cfg.dialect,
+        "SUM(pt.transfer_amount)", dialect=cfg.db.dialect,
     )
     net = cents_to_dollars_sql(
-        "SUM(pt.transfer_net)", dialect=cfg.dialect,
+        "SUM(pt.transfer_net)", dialect=cfg.db.dialect,
     )
     date_clause = _exec_date_range_clause("t.posting", cfg)
     # BQ.6 top-N + Other rollup. DENSE_RANK over the per-rail gross
@@ -286,7 +286,7 @@ JOIN rail_ranks rr ON pt.rail_name = rr.rail_name
 GROUP BY pt.posted_date, CASE WHEN rr.rail_rank <= 20 THEN pt.rail_name ELSE 'Other' END"""
     return build_dataset(
         cfg,
-        cfg.prefixed("exec-transaction-summary-dataset"),
+        cfg.aws.prefixed("exec-transaction-summary-dataset"),
         "Executives Transaction Summary",
         "exec-transaction-summary",
         sql,
@@ -315,13 +315,13 @@ def build_transaction_daily_dataset(cfg: Config) -> DataSet:
     `build_transaction_summary_dataset` (so multi-leg transfers are
     counted once, not once per leg).
     """
-    p = cfg.db_table_prefix
-    posted_date_expr = to_date("MIN(t.posting)", cfg.dialect)
+    p = cfg.db.table_prefix
+    posted_date_expr = to_date("MIN(t.posting)", cfg.db.dialect)
     gross = cents_to_dollars_sql(
-        "SUM(transfer_amount)", dialect=cfg.dialect,
+        "SUM(transfer_amount)", dialect=cfg.db.dialect,
     )
     net = cents_to_dollars_sql(
-        "SUM(transfer_net)", dialect=cfg.dialect,
+        "SUM(transfer_net)", dialect=cfg.db.dialect,
     )
     # Phase BM — single SQL form via ``<<$pExecDate*>>`` pushdown.
     date_clause = _exec_date_range_clause("t.posting", cfg)
@@ -346,7 +346,7 @@ FROM per_transfer
 GROUP BY posted_date"""
     return build_dataset(
         cfg,
-        cfg.prefixed("exec-transaction-daily-dataset"),
+        cfg.aws.prefixed("exec-transaction-daily-dataset"),
         "Executives Transaction Daily Rollup",
         "exec-transaction-daily",
         sql,
@@ -416,12 +416,12 @@ def build_account_summary_dataset(cfg: Config) -> DataSet:
     (output column kept as ``account_type`` so dashboard-side consumers
     don't need to follow the rename — only the SELECT does).
     """
-    p = cfg.db_table_prefix
-    template = _account_summary_sql_template(p, cfg.dialect)
+    p = cfg.db.table_prefix
+    template = _account_summary_sql_template(p, cfg.db.dialect)
     sql = template.format(date_filter="", active_only="")
     return build_dataset(
         cfg,
-        cfg.prefixed("exec-account-summary-dataset"),
+        cfg.aws.prefixed("exec-account-summary-dataset"),
         "Executives Account Summary",
         "exec-account-summary",
         sql,
@@ -447,15 +447,15 @@ def build_account_summary_active_dataset(cfg: Config) -> DataSet:
     ``t.posting`` (one SQL form across QS + App2; the day-edge quirk
     dissolves).
     """
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     date_clause = _exec_date_range_clause("t.posting", cfg)
-    sql = _account_summary_sql_template(p, cfg.dialect).format(
+    sql = _account_summary_sql_template(p, cfg.db.dialect).format(
         date_filter=f"AND {date_clause}",
         active_only="WHERE COALESCE(act.activity_count, 0) > 0",
     )
     return build_dataset(
         cfg,
-        cfg.prefixed("exec-account-summary-active-dataset"),
+        cfg.aws.prefixed("exec-account-summary-active-dataset"),
         "Executives Account Summary — Active",
         "exec-account-summary-active",
         sql,
@@ -490,10 +490,10 @@ def build_transaction_legs_dataset(cfg: Config) -> DataSet:
     """
     return build_dataset(
         cfg,
-        cfg.prefixed("exec-transaction-legs-dataset"),
+        cfg.aws.prefixed("exec-transaction-legs-dataset"),
         "Executives Transaction Legs (all statuses)",
         "exec-transaction-legs",
-        f"SELECT COUNT(*) AS leg_count FROM {cfg.db_table_prefix}_transactions",
+        f"SELECT COUNT(*) AS leg_count FROM {cfg.db.table_prefix}_transactions",
         EXEC_TRANSACTION_LEGS_CONTRACT,
         visual_identifier=DS_EXEC_TRANSACTION_LEGS,
     )
@@ -532,7 +532,7 @@ def build_program_health_dataset(cfg: Config) -> DataSet:
     expand in a follow-up when the manual Studio drive surfaces
     the next ask.
     """
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     date_clause = _exec_date_range_clause("business_day", cfg)
     sql = f"""\
 SELECT
@@ -545,7 +545,7 @@ WHERE {date_clause}
     OR (magnitude_count IS NOT NULL AND magnitude_count > 0))"""
     return build_dataset(
         cfg,
-        cfg.prefixed("exec-program-health-dataset"),
+        cfg.aws.prefixed("exec-program-health-dataset"),
         "Executives Program Health",
         "exec-program-health",
         sql,

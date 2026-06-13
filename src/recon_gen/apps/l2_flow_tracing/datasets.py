@@ -80,7 +80,7 @@ def l2ft_matview_specs(
     operator can spot stale matviews against fresh ETL loads at a
     glance. Mirrors ``l1_matview_specs`` / ``inv_matview_specs``.
     """
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     return [
         (f"{p}_transactions", "posting"),
         (f"{p}_daily_balances", "business_day_start"),
@@ -155,7 +155,7 @@ def _l2ft_date_range_clause(
         date_column,
         start_param=start_param,
         end_param=end_param,
-        dialect=cfg.dialect,
+        dialect=cfg.db.dialect,
     )
 
 
@@ -757,11 +757,11 @@ def build_postings_dataset(
     ``TimeRangeFilter`` on QS + no-narrow on App2). One SQL form
     across both renderers.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     # AO.1.impl — amount_money is BIGINT cents on the base table; wrap
     # to dollars at projection (inner subquery so the outer SELECT *
     # passes the already-dollar form through).
-    amount = cents_to_dollars_sql("amount_money", dialect=cfg.dialect)
+    amount = cents_to_dollars_sql("amount_money", dialect=cfg.db.dialect)
     date_clause = _l2ft_date_range_clause(
         "posting", P_L2FT_RAILS_DATE_START, P_L2FT_RAILS_DATE_END, cfg,
     )
@@ -791,7 +791,7 @@ def build_postings_dataset(
         # the per-key branches compare the leg's metadata against the
         # picked values. See `metadata_filter_clause` for the
         # per-dialect-safe WHERE shape.
-        f"{metadata_filter_clause(l2_instance, 'metadata', cfg.dialect)}"
+        f"{metadata_filter_clause(l2_instance, 'metadata', cfg.db.dialect)}"
         f"    AND {date_clause}\n"
         f") postings\n"
         # AA.A.3 — rail / status / bundle all pushed into SQL via the
@@ -805,7 +805,7 @@ def build_postings_dataset(
         f"  AND {_match_all_in_clause('bundle_status', 'pL2ftBundle')}\n"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l2ft-postings-dataset"),
+        cfg, cfg.aws.prefixed("l2ft-postings-dataset"),
         "L2FT Postings", "l2ft-postings",
         sql, POSTINGS_CONTRACT,
         visual_identifier=DS_POSTINGS,
@@ -886,11 +886,11 @@ def build_meta_values_dataset(
     is replaced with `WHERE FALSE` so the dataset emits valid SQL
     that returns no rows.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     keys = declared_metadata_keys(l2_instance)
     if not keys:
-        nt = typed_null("varchar(4000)", cfg.dialect)
-        df = dual_from(cfg.dialect)
+        nt = typed_null("varchar(4000)", cfg.db.dialect)
+        df = dual_from(cfg.db.dialect)
         sql = (
             f"SELECT {nt} AS metadata_key, "
             f"{nt} AS metadata_value"
@@ -905,7 +905,7 @@ def build_meta_values_dataset(
         branches: list[str] = []
         for k in keys:
             json_path = f"$.{k}"
-            jv = json_value("metadata", _sql_str(json_path), cfg.dialect)
+            jv = json_value("metadata", _sql_str(json_path), cfg.db.dialect)
             branches.append(
                 f"  SELECT {_sql_str(k)} AS metadata_key, "
                 f"{jv} AS metadata_value\n"
@@ -915,7 +915,7 @@ def build_meta_values_dataset(
             )
         sql = "\n  UNION ALL\n".join(branches)
     return build_dataset(
-        cfg, cfg.prefixed("l2ft-meta-values-dataset"),
+        cfg, cfg.aws.prefixed("l2ft-meta-values-dataset"),
         "L2FT Metadata Values", "l2ft-meta-values",
         sql, META_VALUES_CONTRACT,
         visual_identifier=DS_META_VALUES,
@@ -946,7 +946,7 @@ def build_chains_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
     ARRAY_AGG (PG-only) to keep the SQL portable. The chains table is
     small (typically tens of entries), so the cost is bounded.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     declared = _declared_chains_cte(cfg)
     sql = (
         f"WITH declared AS (\n{declared}\n),\n"
@@ -988,12 +988,12 @@ def build_chains_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
         # GREATEST clamps at 0 — child can fire more than parent in some
         # patterns (e.g., one parent triggers many children); negative
         # orphans don't read intuitively in the visual.
-        f"  {greatest('e.parent_firing_count - e.child_firing_count', '0', dialect=cfg.dialect)} "
+        f"  {greatest('e.parent_firing_count - e.child_firing_count', '0', dialect=cfg.db.dialect)} "
         f"AS orphan_count,\n"
         f"  CASE\n"
         f"    WHEN e.parent_firing_count > 0\n"
         f"      THEN CAST(\n"
-        f"        {greatest('e.parent_firing_count - e.child_firing_count', '0', dialect=cfg.dialect)} "
+        f"        {greatest('e.parent_firing_count - e.child_firing_count', '0', dialect=cfg.db.dialect)} "
         f"AS DECIMAL(20,4)\n"
         f"      ) / e.parent_firing_count\n"
         f"    ELSE 0\n"
@@ -1002,7 +1002,7 @@ def build_chains_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
         f"ORDER BY e.parent_name, e.child_name"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l2ft-chains-dataset"),
+        cfg, cfg.aws.prefixed("l2ft-chains-dataset"),
         "L2FT Chains", "l2ft-chains",
         sql, CHAINS_CONTRACT,
         visual_identifier=DS_CHAINS,
@@ -1046,12 +1046,12 @@ def build_chain_instances_dataset(
     in practice. The chains table is bounded by L2 declarations
     (typically tens of entries) so the cost stays predictable.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     # AO.1.impl — parent_amount_money flows from MAX(t.amount_money)
     # in BIGINT cents through two CTEs unchanged; wrap at the outermost
     # projection so the chain-instances dataset surfaces dollars.
     parent_amt = cents_to_dollars_sql(
-        "parent_amount_money", dialect=cfg.dialect,
+        "parent_amount_money", dialect=cfg.db.dialect,
     )
     declared = _declared_chains_cte(cfg)
     sql = (
@@ -1147,7 +1147,7 @@ def build_chain_instances_dataset(
         f"    END AS completion_status\n"
         f"  FROM firing_completion\n"
         f"  WHERE\n"
-        f"{metadata_filter_clause(l2_instance, 'parent_metadata', cfg.dialect)}\n"
+        f"{metadata_filter_clause(l2_instance, 'parent_metadata', cfg.db.dialect)}\n"
         f") chain_instances\n"
         # AA.A.3 — chain / completion SINGLE_VALUED pushdown via the
         # sentinel-guard form. Pre-AA.A.3 completion had a value-list
@@ -1163,7 +1163,7 @@ def build_chain_instances_dataset(
         f"ORDER BY parent_posting DESC"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l2ft-chain-instances-dataset"),
+        cfg, cfg.aws.prefixed("l2ft-chain-instances-dataset"),
         "L2FT Chain Instances", "l2ft-chain-instances",
         sql, CHAIN_INSTANCES_CONTRACT,
         visual_identifier=DS_CHAIN_INSTANCES,
@@ -1239,7 +1239,7 @@ def build_exc_chain_orphans_dataset(
     matview. This is production-correct: fan_in is a real structural
     property of the L2, not a demo artifact.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     declared = _declared_chains_cte(cfg)
     sql = (
         f"WITH declared AS (\n{declared}\n),\n"
@@ -1292,7 +1292,7 @@ def build_exc_chain_orphans_dataset(
         f"    e.parent_firing_count,\n"
         f"    e.child_firing_count,\n"
         f"    CASE WHEN e.fan_in = 1 THEN e.unbatched_parent_count\n"
-        f"         ELSE {greatest('e.parent_firing_count - e.child_firing_count', '0', dialect=cfg.dialect)} "
+        f"         ELSE {greatest('e.parent_firing_count - e.child_firing_count', '0', dialect=cfg.db.dialect)} "
         f"END AS orphan_count\n"
         f"  FROM edge_runtime e\n"
         f")\n"
@@ -1308,7 +1308,7 @@ def build_exc_chain_orphans_dataset(
         f"ORDER BY e.orphan_count DESC, e.parent_name, e.child_name"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l2ft-exc-chain-orphans-dataset"),
+        cfg, cfg.aws.prefixed("l2ft-exc-chain-orphans-dataset"),
         "L2 Exc — Chain Orphans", "l2ft-exc-chain-orphans",
         sql, EXC_CHAIN_ORPHANS_CONTRACT,
         visual_identifier=DS_EXC_CHAIN_ORPHANS,
@@ -1327,7 +1327,7 @@ def build_exc_unmatched_rail_name_dataset(
     Output is per-transfer-type with a count of postings carrying
     that type — the table reveals what's leaking past the L2's rails.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     declared = _declared_rail_names_cte(cfg)
     sql = (
         f"WITH declared_types AS (\n{declared}\n)\n"
@@ -1341,7 +1341,7 @@ def build_exc_unmatched_rail_name_dataset(
         f"ORDER BY posting_count DESC, t.rail_name"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l2ft-exc-unmatched-rail-name-dataset"),
+        cfg, cfg.aws.prefixed("l2ft-exc-unmatched-rail-name-dataset"),
         "L2 Exc — Unmatched Rail Name",
         "l2ft-exc-unmatched-rail-name",
         sql, EXC_UNMATCHED_RAIL_NAME_CONTRACT,
@@ -1359,8 +1359,8 @@ def build_exc_dead_rails_dataset(
     the detail table lists the dead rails so the integrator can
     decide whether to retire the declaration or fix the ETL.
     """
-    prefix = cfg.db_table_prefix
-    declared = _declared_rails_cte(l2_instance, cfg.dialect)
+    prefix = cfg.db.table_prefix
+    declared = _declared_rails_cte(l2_instance, cfg.db.dialect)
     sql = (
         f"WITH declared AS (\n{declared}\n),\n"
         f"runtime AS (\n"
@@ -1377,7 +1377,7 @@ def build_exc_dead_rails_dataset(
         f"ORDER BY d.rail_name"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l2ft-exc-dead-rails-dataset"),
+        cfg, cfg.aws.prefixed("l2ft-exc-dead-rails-dataset"),
         "L2 Exc — Dead Rails", "l2ft-exc-dead-rails",
         sql, EXC_DEAD_RAILS_CONTRACT,
         visual_identifier=DS_EXC_DEAD_RAILS,
@@ -1395,8 +1395,8 @@ def build_exc_dead_bundles_activity_dataset(
     is one (aggregating_rail, target) pair the L2 declared but the
     runtime never realized.
     """
-    prefix = cfg.db_table_prefix
-    declared = _declared_bundles_activity_cte(l2_instance, cfg.dialect)
+    prefix = cfg.db.table_prefix
+    declared = _declared_bundles_activity_cte(l2_instance, cfg.db.dialect)
     sql = (
         f"WITH declared_bundles AS (\n{declared}\n)\n"
         f"SELECT\n"
@@ -1411,7 +1411,7 @@ def build_exc_dead_bundles_activity_dataset(
         f"ORDER BY db.aggregating_rail, db.bundle_target"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l2ft-exc-dead-bundles-activity-dataset"),
+        cfg, cfg.aws.prefixed("l2ft-exc-dead-bundles-activity-dataset"),
         "L2 Exc — Dead Bundles Activity",
         "l2ft-exc-dead-bundles-activity",
         sql, EXC_DEAD_BUNDLES_ACTIVITY_CONTRACT,
@@ -1430,12 +1430,12 @@ def build_exc_dead_metadata_dataset(
     accept dynamic JSONPath arguments to ``JSON_VALUE`` — keeps the
     SQL portable per the project's no-JSONB constraint.
     """
-    prefix = cfg.db_table_prefix
-    fragments = _dead_metadata_check_fragments(l2_instance, prefix, cfg.dialect)
+    prefix = cfg.db.table_prefix
+    fragments = _dead_metadata_check_fragments(l2_instance, prefix, cfg.db.dialect)
     if not fragments:
         # No rails declare metadata_keys — empty result, valid SQL.
-        nt = typed_null("varchar(4000)", cfg.dialect)
-        df = dual_from(cfg.dialect)
+        nt = typed_null("varchar(4000)", cfg.db.dialect)
+        df = dual_from(cfg.db.dialect)
         sql = (
             f"SELECT {nt} AS rail_name, {nt} AS metadata_key{df} "
             "WHERE 1=0"
@@ -1444,7 +1444,7 @@ def build_exc_dead_metadata_dataset(
         sql = "\n  UNION ALL\n".join(fragments) + "\n"
         sql = sql + "ORDER BY rail_name, metadata_key"
     return build_dataset(
-        cfg, cfg.prefixed("l2ft-exc-dead-metadata-dataset"),
+        cfg, cfg.aws.prefixed("l2ft-exc-dead-metadata-dataset"),
         "L2 Exc — Dead Metadata Declarations",
         "l2ft-exc-dead-metadata",
         sql, EXC_DEAD_METADATA_CONTRACT,
@@ -1463,7 +1463,7 @@ def build_exc_dead_limit_schedules_dataset(
     against. NOT EXISTS over the prefixed transactions matview keeps
     the query bounded by the (small) limit-schedule count.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     declared = _declared_limit_schedules_cte(cfg)
     sql = (
         f"WITH declared_limits AS (\n{declared}\n)\n"
@@ -1482,7 +1482,7 @@ def build_exc_dead_limit_schedules_dataset(
         f"ORDER BY dl.parent_role, dl.rail_name"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l2ft-exc-dead-limit-schedules-dataset"),
+        cfg, cfg.aws.prefixed("l2ft-exc-dead-limit-schedules-dataset"),
         "L2 Exc — Dead Limit Schedules",
         "l2ft-exc-dead-limit-schedules",
         sql, EXC_DEAD_LIMIT_SCHEDULES_CONTRACT,
@@ -1509,20 +1509,20 @@ def build_unified_l2_exceptions_dataset(
     `build_exc_*` queries, just projected to the unified shape via
     CASTs + literal `check_type` labels.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     declared_chains = _declared_chains_cte(cfg)
     declared_types = _declared_rail_names_cte(cfg)
-    declared_rails = _declared_rails_cte(l2_instance, cfg.dialect)
-    declared_bundles = _declared_bundles_activity_cte(l2_instance, cfg.dialect)
+    declared_rails = _declared_rails_cte(l2_instance, cfg.db.dialect)
+    declared_bundles = _declared_bundles_activity_cte(l2_instance, cfg.db.dialect)
     declared_limits = _declared_limit_schedules_cte(cfg)
     dead_metadata_fragments = _dead_metadata_check_fragments(
-        l2_instance, prefix, cfg.dialect,
+        l2_instance, prefix, cfg.db.dialect,
     )
     if dead_metadata_fragments:
         dead_metadata_inner = "\n  UNION ALL\n".join(dead_metadata_fragments)
     else:
-        nt = typed_null("varchar(4000)", cfg.dialect)
-        df = dual_from(cfg.dialect)
+        nt = typed_null("varchar(4000)", cfg.db.dialect)
+        df = dual_from(cfg.db.dialect)
         dead_metadata_inner = (
             f"  SELECT {nt} AS rail_name, "
             f"{nt} AS metadata_key{df} WHERE 1=0"
@@ -1561,7 +1561,7 @@ def build_unified_l2_exceptions_dataset(
         f"    FROM declared d\n"
         f"  )\n"
         f"  SELECT parent_name, child_name,\n"
-        f"    {greatest('parent_firing_count - child_firing_count', '0', dialect=cfg.dialect)} "
+        f"    {greatest('parent_firing_count - child_firing_count', '0', dialect=cfg.db.dialect)} "
         f"AS orphan_count\n"
         f"  FROM edge_runtime\n"
         f"  WHERE required = 'Required'\n"
@@ -1657,7 +1657,7 @@ def build_unified_l2_exceptions_dataset(
         f"ORDER BY 5 DESC, 1, 2, 3"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l2ft-unified-exceptions-dataset"),
+        cfg, cfg.aws.prefixed("l2ft-unified-exceptions-dataset"),
         "L2 Unified Exceptions", "l2ft-unified-exceptions",
         sql, UNIFIED_L2_EXCEPTIONS_CONTRACT,
         visual_identifier=DS_UNIFIED_L2_EXCEPTIONS,
@@ -1758,7 +1758,7 @@ def _declared_chains_cte(cfg: Config) -> str:
     same SQL ships regardless of how many chains the L2 declares. The
     view's GROUP BY does the projection.
     """
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     return (
         f"  SELECT\n"
         f"    parent_name,\n"
@@ -1847,7 +1847,7 @@ def _declared_rail_names_cte(cfg: Config) -> str:
     ``name`` column under the legacy ``rail_name`` alias (Z.B.12
     deferred — ``transactions.rail_name`` is still the column).
     """
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     return f"  SELECT name AS rail_name FROM {p}_v_config_rails"
 
 
@@ -1925,7 +1925,7 @@ def _declared_limit_schedules_cte(cfg: Config) -> str:
     ``rail_name`` (Z.B.12 deferred) and downcasts ``cap`` to
     ``DECIMAL(20,2)`` for the consumers' aggregation shape.
     """
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     return (
         f"  SELECT parent_role,\n"
         f"         rail AS rail_name,\n"
@@ -2003,18 +2003,18 @@ def build_tt_instances_dataset(
 
     Parameterized on pKey + pValues for the metadata cascade.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     # AO.1.impl — internal CTE math runs in BIGINT cents (expected_net
     # was multiplied ×100 in the declared-templates CTE; actual_net is
     # SUM(amount_money) which is cents from the foundation). The
     # cents-vs-cents subtraction for ``net_diff`` is integer-safe; wrap
     # all three money columns back to dollars at the outer projection.
-    actual = cents_to_dollars_sql("actual_net", dialect=cfg.dialect)
-    expected = cents_to_dollars_sql("expected_net", dialect=cfg.dialect)
+    actual = cents_to_dollars_sql("actual_net", dialect=cfg.db.dialect)
+    expected = cents_to_dollars_sql("expected_net", dialect=cfg.db.dialect)
     netdiff = cents_to_dollars_sql(
-        "(actual_net - expected_net)", dialect=cfg.dialect,
+        "(actual_net - expected_net)", dialect=cfg.db.dialect,
     )
-    declared_tt = _declared_templates_cte(l2_instance, cfg.dialect)
+    declared_tt = _declared_templates_cte(l2_instance, cfg.db.dialect)
     declared_ch = _declared_chains_cte(cfg)
     sql = (
         f"WITH templates AS (\n{declared_tt}\n),\n"
@@ -2110,7 +2110,7 @@ def build_tt_instances_dataset(
         f"    END AS completion_status\n"
         f"  FROM firing_completion\n"
         f"  WHERE\n"
-        f"{metadata_filter_clause(l2_instance, 'parent_metadata', cfg.dialect)}\n"
+        f"{metadata_filter_clause(l2_instance, 'parent_metadata', cfg.db.dialect)}\n"
         f") tt_instances\n"
         # AA.A.3 — template / completion SINGLE_VALUED pushdown via the
         # sentinel-guard form. Pre-AA.A.3 completion had a value-list
@@ -2127,7 +2127,7 @@ def build_tt_instances_dataset(
         f"ORDER BY posting DESC, template_name, transfer_id"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l2ft-tt-instances-dataset"),
+        cfg, cfg.aws.prefixed("l2ft-tt-instances-dataset"),
         "L2FT TT Instances", "l2ft-tt-instances",
         sql, TT_INSTANCES_CONTRACT,
         visual_identifier=DS_TT_INSTANCES,
@@ -2229,14 +2229,14 @@ def build_tt_legs_dataset(
 
     Parameterized on pKey + pValues for the metadata cascade.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     # AO.1.impl — wrap money columns at the outermost UNION projection.
     # Inner CTEs run in BIGINT cents (amount_money from base table;
     # expected_net pre-multiplied ×100 in the declared-templates CTE;
     # `ABS(actual_net - expected_net) >= 1` is cents-vs-cents).
-    amount = cents_to_dollars_sql("amount_money", dialect=cfg.dialect)
-    amount_abs = cents_to_dollars_sql("amount_abs", dialect=cfg.dialect)
-    declared_tt = _declared_templates_cte(l2_instance, cfg.dialect)
+    amount = cents_to_dollars_sql("amount_money", dialect=cfg.db.dialect)
+    amount_abs = cents_to_dollars_sql("amount_abs", dialect=cfg.db.dialect)
+    declared_tt = _declared_templates_cte(l2_instance, cfg.db.dialect)
     declared_ch = _declared_chains_cte(cfg)
     sql = (
         f"WITH templates AS (\n{declared_tt}\n),\n"
@@ -2386,7 +2386,7 @@ def build_tt_legs_dataset(
         f"flow_source, flow_target, edge_kind, completion_status\n"
         f"  FROM template_legs\n"
         f"  WHERE\n"
-        f"{metadata_filter_clause(l2_instance, 'metadata', cfg.dialect)}\n"
+        f"{metadata_filter_clause(l2_instance, 'metadata', cfg.db.dialect)}\n"
         f"  UNION ALL\n"
         f"  SELECT template_name, transfer_id, posting, account_name, "
         f"account_role, "
@@ -2395,7 +2395,7 @@ def build_tt_legs_dataset(
         f"flow_source, flow_target, edge_kind, completion_status\n"
         f"  FROM chain_edges\n"
         f"  WHERE\n"
-        f"{metadata_filter_clause(l2_instance, 'metadata', cfg.dialect)}\n"
+        f"{metadata_filter_clause(l2_instance, 'metadata', cfg.db.dialect)}\n"
         f") tt_legs\n"
         # AA.A.3 — template / completion SINGLE_VALUED pushdown (mirrors
         # tt-instances so the Template / Completion dropdowns narrow the
@@ -2410,7 +2410,7 @@ def build_tt_legs_dataset(
         f"ORDER BY posting DESC, template_name, transfer_id"
     )
     return build_dataset(
-        cfg, cfg.prefixed("l2ft-tt-legs-dataset"),
+        cfg, cfg.aws.prefixed("l2ft-tt-legs-dataset"),
         "L2FT TT Legs", "l2ft-tt-legs",
         sql, TT_LEGS_CONTRACT,
         visual_identifier=DS_TT_LEGS,

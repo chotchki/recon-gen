@@ -6,7 +6,7 @@ prose on the other three. M.3.5+ populates each tab with its real
 visuals + datasets.
 
 The app is L2-instance-fed via the same M.2d.3 prefix pattern the L1
-dashboard uses: ``cfg.db_table_prefix`` is set on the cfg yaml directly
+dashboard uses: ``cfg.db.table_prefix`` is set on the cfg yaml directly
 (no auto-derivation needed), so dashboard ID, analysis ID, dataset IDs,
 and tag-based cleanup all key off the per-deploy prefix.
 
@@ -205,7 +205,7 @@ def _analysis_name(cfg: Config, l2_instance: L2Instance) -> str:
     """Title shown in QuickSight — matches L1's `Name (prefix)` shape so
     the two apps' QS asset names are visually consistent in the
     dashboard list."""
-    return f"L2 Flow Tracing ({cfg.deployment_name})"
+    return f"L2 Flow Tracing ({cfg.aws.deployment_name})"
 
 
 def build_l2_flow_tracing_app(
@@ -224,7 +224,7 @@ def build_l2_flow_tracing_app(
     the per-deploy prefix the L1 dashboard also uses, so N apps can
     deploy against the same L2 instance AND the same app can deploy
     against N L2 instances without QS resource collisions.
-    ``cfg.deployment_name`` is set on the cfg yaml directly, no
+    ``cfg.aws.deployment_name`` is set on the cfg yaml directly, no
     auto-derivation from the L2 yaml.
     """
     if l2_instance is None:
@@ -393,7 +393,7 @@ def _l2ft_datasets(
         _DS_APP_INFO_LIVENESS, _DS_APP_INFO_MATVIEWS,  # M.4.4.5; BO.5 per-app
     ]
     return {
-        vid: Dataset(identifier=vid, arn=cfg.dataset_arn(aws.DataSetId))
+        vid: Dataset(identifier=vid, arn=cfg.aws.dataset_arn(aws.DataSetId))
         for vid, aws in zip(visual_ids, aws_datasets)
     }
 

@@ -306,7 +306,7 @@ def _datasets(cfg: Config) -> dict[str, Dataset]:
         _DS_APP_INFO_MATVIEWS,
     ]
     return {
-        name: Dataset(identifier=name, arn=cfg.dataset_arn(ds.DataSetId))
+        name: Dataset(identifier=name, arn=cfg.aws.dataset_arn(ds.DataSetId))
         for name, ds in zip(names, built)
     }
 
@@ -334,7 +334,7 @@ P_EXEC_DATE_END = ParameterName(_P_EXEC_DATE_END)
 # AR.4 — Exec sheets show daily-grain summaries rather than per-leg
 # detail, so 30 days reads as one trend page (vs L1's 7-day operator
 # window). The pre-AR.4 RollingDate exprs are gone; the range is a
-# DateView constructed from cfg.test_generator.as_of_frame(window_days=30).
+# DateView constructed from cfg.test.generator.as_of_frame(window_days=30).
 
 
 def _populate_account_coverage(
@@ -847,7 +847,7 @@ def _analysis_name(cfg: Config) -> str:
     """Title shown in QuickSight — matches L1/L2FT's ``Name (deployment)``
     shape so multi-deployment runs are visually distinguishable in the
     dashboard list."""
-    return f"Executives ({cfg.deployment_name})"
+    return f"Executives ({cfg.aws.deployment_name})"
 
 
 # Sheet display order. Pre-register-all-shells pattern (mirrors
@@ -882,8 +882,8 @@ def build_executives_app(
     Per the N.2 audit, Executives is fed by the same institution YAML
     that drives L1 / L2FT / Investigation. Z.C: the deployment +
     DB-table prefixes are required cfg fields — both come from
-    ``cfg.deployment_name`` (QS-resource segment) and
-    ``cfg.db_table_prefix`` (DB table-name prefix). Defaults to the
+    ``cfg.aws.deployment_name`` (QS-resource segment) and
+    ``cfg.db.table_prefix`` (DB table-name prefix). Defaults to the
     persona-neutral ``spec_example`` L2 instance.
 
     Executives reads from ``<db_table_prefix>_transactions`` +
@@ -962,7 +962,7 @@ def build_executives_app(
         transaction_volume_sheet=sheets[SHEET_EXEC_TRANSACTION_VOLUME],
         money_moved_sheet=sheets[SHEET_EXEC_MONEY_MOVED],
         exec_range_view=DateView(
-            frame=cfg.test_generator.as_of_frame(window_days=30),
+            frame=cfg.test.generator.as_of_frame(window_days=30),
         ),
     )
 
