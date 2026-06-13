@@ -169,7 +169,9 @@ The runner's existing `_write_qs_cfg_for_thin` path (which materializes `runs/<i
 ## Open question for DE.0 spike exit
 
 - **`extends:` value shape:** string (`extends: ./base.yaml`) or list (`extends: [./base.yaml, ./tier-prod.yaml]`)? List supports composition (base + tier overlays); string is simpler. **Recommend list-only** so the loader always iterates; single-string operators write `[./base.yaml]`. Costs one bracket; gains compositional simplicity. Operator confirm at DE.0 exit.
+- Comment: I'm good with it
 - **List-merge policy:** child-replaces (current proposal) vs per-field policy? Recommend child-replaces — predictable; operators write explicit additions when they want append. Re-evaluate if a real cfg ends up needing additive lists for `principal_arns`.
+- Comment: I'm good with it
 
 ## DE.1+ unblock
 

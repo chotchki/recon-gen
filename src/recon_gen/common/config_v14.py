@@ -115,6 +115,42 @@ class AwsConfig:
     oracle_instance_id: str | None = None
     datasource: DatasourceConfig = field(default_factory=DatasourceConfig)
 
+    @property
+    def partition(self) -> str:
+        """AWS partition for synthesized ARNs.
+
+        Commercial AWS = ``aws``; GovCloud = ``aws-us-gov``;
+        China = ``aws-cn``. Hardcoding ``aws`` breaks deploys against
+        GovCloud / China where every account-bound resource ARN must
+        carry the matching partition or QS rejects the binding.
+
+        Resolution order (mirrors pre-DE ``Config.partition``):
+
+        1. If ``datasource.arn`` is set explicitly (operator supplied a
+           pre-existing datasource, e.g. ``mode=adopt``), parse partition
+           from it — that's the authoritative shape for THIS account.
+        2. Else if ``principal_arns`` is non-empty, parse from the first
+           ``arn:``-prefixed entry — the customer's user/role lives in
+           the same partition as the resources we synthesize.
+        3. Else default ``aws`` (commercial; preserves prior behavior for
+           fuzz fixtures that don't carry a principal).
+
+        Bare strings (no ``arn:`` prefix) fall through to the default.
+        Note: this is a STRING-prefix parse, not a region-based derive,
+        because operator can override the partition explicitly via the
+        ARN they supply even if region prefix would suggest otherwise.
+        Region-based partition derive is boto3's job (it picks the right
+        endpoint from region prefix); cfg-level partition is for ARN
+        SYNTHESIS in deploy emitters.
+        """
+        sources: list[str | None] = [self.datasource.arn, *self.principal_arns]
+        for source in sources:
+            if source and source.startswith("arn:"):
+                parts = source.split(":", 2)
+                if len(parts) >= 2 and parts[1]:
+                    return parts[1]
+        return "aws"
+
 
 # ---------------------------------------------------------------------------
 # DB block
@@ -512,6 +548,79 @@ def _build_test(raw: dict[str, Any]) -> TestConfig:
             seed=gen_block.get("seed"),
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# QuickSight user ARN — lazy, cached per (profile, account, region)
+# ---------------------------------------------------------------------------
+
+
+_QS_USER_ARN_CACHE: dict[tuple[str, str, str], str | None] = {}
+
+
+def resolve_qs_user_arn(cfg: Config) -> str | None:
+    """Lazy resolve the QuickSight user ARN for e2e tests.
+
+    Priority (mirrors `_dev/runner.py::_resolve_qs_user_arn` against the
+    v14 cfg paths; called by the runner just before qs_browser subprocess
+    env injection — NOT eager-on-load, because every cfg-loading unit
+    test would otherwise fire boto):
+
+    1. **Explicit override.** ``cfg.auth.aws.quicksight_user_arn`` (set
+       by CI via the ``RECON_E2E_USER_ARN`` GH secret upstream of cfg).
+    2. **Derive from profile.** ``cfg.auth.aws.profile`` named boto
+       profile + ``cfg.aws.account_id`` + ``cfg.aws.region`` →
+       ``quicksight.list_users(Namespace='default')`` → first ADMIN
+       user's ARN (falls back to first user when no ADMIN found).
+    3. **None.** Caller leaves the env unset; ``qs_driver_or_none``
+       skips QS-leg tests with the standard "QS user ARN unavailable".
+
+    Boto failure (expired creds, ListUsers denied) → None + stderr
+    breadcrumb; we don't want a transient AWS hiccup to abort the chain.
+    Cached per ``(profile, account_id, region)`` so the runner's per-cell
+    subprocess spawns share the lookup.
+    """
+    explicit = cfg.auth.aws.quicksight_user_arn
+    if explicit:
+        return explicit
+    profile = cfg.auth.aws.profile
+    if not profile:
+        return None
+    account_id = cfg.aws.account_id
+    region = cfg.aws.region
+    cache_key = (profile, account_id, region)
+    if cache_key in _QS_USER_ARN_CACHE:
+        return _QS_USER_ARN_CACHE[cache_key]
+    import sys  # noqa: PLC0415 — used by stderr breadcrumb on failure paths
+    try:
+        import boto3  # noqa: PLC0415 — lazy: only on the derive path
+        session = boto3.Session(profile_name=profile, region_name=region)
+        qs: Any = session.client("quicksight")  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]: boto3-stubs overload union confuses pyright (X.2.o.5); mirrors the wrap-in-Any pattern from _dev/runner.py:_resolve_qs_user_arn
+        users = qs.list_users(
+            AwsAccountId=account_id, Namespace="default",
+        ).get("UserList", [])
+    except Exception as exc:  # noqa: BLE001 — boto-side hiccup is a breadcrumb, not a chain-abort
+        print(
+            f"config_v14: derive QS user ARN failed via aws_profile="
+            f"{profile!r} ({type(exc).__name__}: {exc}); qs_browser will skip",
+            file=sys.stderr,
+        )
+        _QS_USER_ARN_CACHE[cache_key] = None
+        return None
+    if not users:
+        print(
+            f"config_v14: derive QS user ARN found 0 users in "
+            f"{account_id}/{region} default namespace via profile="
+            f"{profile!r}; qs_browser will skip",
+            file=sys.stderr,
+        )
+        _QS_USER_ARN_CACHE[cache_key] = None
+        return None
+    admins = [u for u in users if u.get("Role") == "ADMIN"]
+    target = admins[0] if admins else users[0]
+    arn = target.get("Arn")
+    _QS_USER_ARN_CACHE[cache_key] = arn
+    return arn
 
 
 def load_config(path: str | Path | None = None) -> Config:
