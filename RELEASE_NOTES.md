@@ -6,7 +6,113 @@
 > AI, BK, BQ, BW, CK, BV close, snapshotter pattern, runner readiness).
 > v13.14.4 below resumes the convention.
 
-## v13.15.0 — Phase DA App2/QS click-drill decoration parity + clear-button + cache-bust + row-drill MENU contract
+## v13.15.1 — Phase DB.3 followups + Phase DG CI hygiene + triage
+
+Two release-gate workflows behind this cut. Patch class — no API
+changes, no schema deltas.
+
+### Phase DB.3 followups (operator-driven 2026-06-12)
+
+- **App2 Sankey tooltip-only labels** (operator: "the combining
+  issue"). Drop the always-visible inline `<text>` labels that
+  stacked into illegible overlap at 50+ nodes (L2FT Multi-Leg
+  Flow). Mirror QS's hover-only behavior with SVG `<title>`
+  children on every node + link. Native browser tooltips; no JS
+  overlay. Currency formatting via `Intl.NumberFormat` USD.
+- **QS BarChart count() axis label fix.** `_axis_label_apply_to`
+  now mirrors BL.1's `count() → _row_one_*` field-well rewrite so
+  `ApplyTo.Column.ColumnName` matches the well. QS was silently
+  dropping the `value_label` override on mismatch (Pending Aging
+  and L2 Exceptions x-axis read `_row_one_l1_*_ds (Sum)` instead
+  of the configured label).
+- **QS embed tall-viewport** for the cold-read parity capture
+  pass (1600, 1000) → (1600, 4000). QS uses internal scroll
+  containers so `page.screenshot(full_page=True)` only captured
+  the viewport region; the tall viewport lets sheet content
+  (KPI + chart + table + below-fold prose) render in one frame.
+- **L2FT Transfer Templates sheet target** for the parity-verify
+  Sankey test — the multi-leg Sankey lives on Transfer Templates,
+  not Chains. Test slug + audit-doc cross-references updated.
+
+### Phase DG — CI database hygiene + triage (full cycle)
+
+Five-leaf phase that root-caused the multi-week CI red streak +
+shipped the four supporting fixes.
+
+- **DG.0 audit** (`docs/audits/dg_0_db_hygiene_audit.md`). The
+  red streak was POSIX `/dev/shm` saturation (per-container 64MB
+  tmpfs default) under xdist `-n 4` concurrent matview refreshes,
+  plus accumulated per-test schema debris from
+  `tests/e2e/_isolation.py:158`'s silent-swallow best-effort
+  teardown that fed on persistent CI containers across runs.
+- **DG.1 fail-loud teardown.** Drop the swallow; collect failures
+  into `_TEARDOWN_FAILURES` + surface at session-end via
+  `pytest_sessionfinish` with a clearly-marked summary block.
+  Raises `session.exitstatus` to non-zero when non-empty so CI
+  can't ignore future teardown failures.
+- **DG.2 container-boot scorched-earth sweep.** New runner step
+  before the test layers fire — discovers every `<base>_<6hex>_*`
+  object via `pg_matviews` / `pg_views` / `pg_indexes` /
+  `pg_tables` (PG) or the equivalent `user_*` catalogs (Oracle)
+  and drops with `CASCADE` in dependency-safe order. Idempotent
+  + cleans cross-run debris in O(N) per kind. DuckDB no-op.
+- **DG.3 ci-shared-pg `--shm-size=2g`** on container creation +
+  adoption-side check that recreates a reused container with the
+  64MB default. The actual root cause of the DiskFull cascade —
+  DG.2 cleans accumulated debris but doesn't reduce per-run
+  `/dev/shm` pressure from concurrent activity.
+- **DG.3 always-on hang diagnostic via stdlib faulthandler.**
+  Per `[tool.pytest.ini_options] faulthandler_timeout = 180`.
+  Any test running >180s dumps thread tracebacks to stderr +
+  continues (faulthandler reports, doesn't kill — full fixture
+  teardown preserved). The runner's per-layer post-step greps
+  stderr.log for trip count + emits
+  `[heartbeat-hit] layer=<X> — N trip(s)` so CI logs surface
+  it. Stack identifies the exact wedge location (Playwright's
+  `run_forever`, psycopg socket blocks, matview refresh stalls).
+  Always on; no opt-in flag.
+- **DG.3 test-side picker fixes.** The 12 v13.15.1-gate qs_browser
+  failures bisected as 8× DiskFull cascade (cleared by shm-size)
+  + 2× test-harness gaps + 2× pre-existing real bugs. Fix shapes:
+  - `_assert_pickable` switches `filter_options` →
+    `typeahead_filter` (virtualized MUI Autocomplete dropdowns
+    only mount ~12 alphabetical options on open; late-alphabet
+    accounts like `ZBASubAccount` / `WireSettlementSuspense`
+    silently fell out of the membership check).
+  - `wait_for_dropdown_options_present` catches inner `TimeoutError`
+    + retries so the outer 15s budget actually does what it says
+    (was a single 2s inner failure propagating).
+  - `_open_control_dropdown` does attached→scroll_into_view→
+    visible instead of single state="visible" wait. Sheets with
+    many control bar entries (Transactions has 5+) push later
+    controls into a second row that's below the initial viewport.
+  - 1s→5s search-input probe + skip the option-wait when
+    search-variant was nudged. Typeahead pickers with empty seed
+    don't surface options until something is typed; that's the
+    caller's job.
+  - **Explicit Search-button click** in
+    `narrow_dropdown_options_by_query` + `set_dropdown_value`.
+    QS's high-cardinality typeahead pickers (Transactions
+    DS_L1_TX_IDS, 8k+ rows) render an explicit "Search" button
+    instead of auto-narrowing on input change. Probe via
+    `button:has-text("Search")` inside the popover containers +
+    click if present; absent → MUI auto-narrowing variant fires
+    on input.
+  - `TreeValidator` settle-retry loop. Recipient Fanout's 3
+    `distinct_count()` KPIs lag the Table's mount under CI load;
+    single-shot diff after per-title `wait_loaded` missed them.
+    Re-poll up to 3× / 1.5s after the initial diff.
+
+### Out of scope (release-time triage)
+
+One residual `qs_browser` failure (`test_inv_drilldown.py::test_account_network_table_walk_rerenders_table[qs]`)
+xfailed strict=False — same Search-button-class typeahead picker
+shape as the Transactions-Transfer case, this one with a
+different option DOM that `_OPTION_SELECTOR` doesn't catch yet.
+Investigation lives in PLAN backlog; will surface as XPASS when
+fixed.
+
+
 
 Three operator-dogfood bug-fix themes plus a substantive new feature
 (Phase DA) collected into one release. Minor bump for the new App2
