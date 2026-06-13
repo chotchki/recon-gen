@@ -492,6 +492,17 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
 - [x] DE.3 - **Doc sweep.** README cfg-shape section + `docs/audits/y_2_gate_h_i_combined_spike.md` cfg appendix + every doc that shows a cfg snippet updated. CLAUDE.md cfg-fields section synced. Add an `extends:` example to the cfg authoring doc.
 - [x] DE.4 - **DC + DD shape coordination.** Confirm DC.1 (`app2.tls:` block) + DD.1 (`auth.oidc:` + `auth.session:` blocks) land into the DE-locked hierarchy. If DC has shipped before DE, fold its TLS block under the new structure as part of DE.2; if not, hand DC.1 the locked block shape.
 - [ ] DE.5 - **Phase exit + release (v14.0.0 major).** Sweep to PLAN_ARCHIVE.md. Major bump because cfg.yaml shape is a hard break.
+  - [x] DE.5.aws - AWS-block flat-field collapse (account_id / region / deployment_name / principal_arns / extra_tags / tagging_enabled / qs_disable_pg_ssl / pg_cluster_id / oracle_instance_id / datasource_arn → cfg.aws.*).
+  - [x] DE.5.db - DB-block flat-field collapse (db_table_prefix / demo_database_url / dialect / default_l2_instance / app2_db_pool_size → cfg.db.*).
+  - [x] DE.5.app2 - App2-block flat-field collapse (etl_hook / banner_text / app2_tls → cfg.app2.*).
+  - [x] DE.5.audit - Audit-block flat-field collapse (signing → cfg.audit.signing). `SigningConfig` gained the `passphrase()` accessor.
+  - [x] DE.5.test - Test-block flat-field collapse (test_generator → cfg.test.generator). `TestConfig` carries `__test__ = False` to opt out of pytest collection.
+  - [x] DE.5.studio_enabled - Drop `cfg.studio_enabled` entirely. `recon-gen studio` always mounts Studio; production deployments use `recon-gen dashboards` for the dashboards-only surface. Loader silently accepts the legacy yaml key for backward compat.
+  - [x] DE.5.auth - AuthConfig flat-field collapse (aws_profile / quicksight_user_arn → cfg.auth.aws.*). Loader accepts both legacy + nested yaml forms.
+  - [x] DE.5.release_notes - RELEASE_NOTES.md v14.0.0 entry with full migration table (v13 field → v14 path) + flat-yaml backward-compat note.
+  - [ ] DE.5.config_v14_consolidation - **Deferred to follow-up phase.** `config_v14.py` (canonical nested-yaml loader) still exists alongside `config.py`. Test callsites under `tests/unit/test_config_v14.py`, `tests/unit/test_auth_factories.py`, and the TYPE_CHECKING guard in `src/recon_gen/common/auth.py` still import from it. Full consolidation (delete `config_v14.py`, rename `config.py`, hard-break flat yamls) needs its own scope + per-callsite migration.
+  - [ ] DE.5.version_bump - Bump `__version__` to 14.0.0, tag, push. **Operator-gated.**
+  - [ ] DE.5.archive_sweep - Sweep Phase DE to PLAN_ARCHIVE.md.
 
 ## Phase DF - L2 Editor essentials / test-data block (draft 2026-06-12, locks 2026-06-12)
 

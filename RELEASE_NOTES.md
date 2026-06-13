@@ -6,6 +6,87 @@
 > AI, BK, BQ, BW, CK, BV close, snapshotter pattern, runner readiness).
 > v13.14.4 below resumes the convention.
 
+## v14.0.0 — Phase DE cfg.yaml structural redesign (BREAKING)
+
+**Major bump.** `Config` no longer carries 20+ flat fields — every
+operator-facing concern is now a nested block on the dataclass:
+
+- `cfg.aws` — `AwsConfig(account_id, region, deployment_name, principal_arns, extra_tags, tagging_enabled, qs_disable_pg_ssl, pg_cluster_id, oracle_instance_id, datasource)`
+- `cfg.db` — `DbConfig(dialect, url, table_prefix, default_l2_instance, app2_pool_size)`
+- `cfg.app2` — `App2Config(etl_hook, banner_text, tls)`
+- `cfg.audit` — `AuditConfig(signing)`
+- `cfg.test` — `TestConfig(generator)`
+- `cfg.auth` — `AuthConfig(aws=AuthAwsConfig(profile, quicksight_user_arn), oidc, session)`
+
+### Flat field migration table
+
+The following legacy flat fields were dropped from `Config`. Internal
+code paths and tests must read/write the nested form:
+
+| v13 field                  | v14 path                              |
+|----------------------------|---------------------------------------|
+| `cfg.aws_account_id`       | `cfg.aws.account_id`                  |
+| `cfg.aws_region`           | `cfg.aws.region`                      |
+| `cfg.deployment_name`      | `cfg.aws.deployment_name`             |
+| `cfg.principal_arns`       | `cfg.aws.principal_arns`              |
+| `cfg.extra_tags`           | `cfg.aws.extra_tags`                  |
+| `cfg.tagging_enabled`      | `cfg.aws.tagging_enabled`             |
+| `cfg.qs_disable_pg_ssl`    | `cfg.aws.qs_disable_pg_ssl`           |
+| `cfg.aws_pg_cluster_id`    | `cfg.aws.pg_cluster_id`               |
+| `cfg.aws_oracle_instance_id` | `cfg.aws.oracle_instance_id`        |
+| `cfg.datasource_arn`       | `cfg.aws.datasource.arn`              |
+| `cfg.db_table_prefix`      | `cfg.db.table_prefix`                 |
+| `cfg.demo_database_url`    | `cfg.db.url`                          |
+| `cfg.dialect`              | `cfg.db.dialect`                      |
+| `cfg.default_l2_instance`  | `cfg.db.default_l2_instance`          |
+| `cfg.app2_db_pool_size`    | `cfg.db.app2_pool_size`               |
+| `cfg.etl_hook`             | `cfg.app2.etl_hook`                   |
+| `cfg.banner_text`          | `cfg.app2.banner_text`                |
+| `cfg.app2_tls`             | `cfg.app2.tls`                        |
+| `cfg.signing`              | `cfg.audit.signing`                   |
+| `cfg.test_generator`       | `cfg.test.generator`                  |
+| `cfg.auth.aws_profile`     | `cfg.auth.aws.profile`                |
+| `cfg.auth.quicksight_user_arn` | `cfg.auth.aws.quicksight_user_arn` |
+| `cfg.studio_enabled`       | (removed — use `recon-gen dashboards` for prod) |
+
+### YAML compatibility
+
+The loader retains backward-compat for the **flat-yaml** shape during
+the v14 strangler period. Existing operator `config.yaml` files
+continue to load without changes — internal flat fields are
+translated into the nested `Config` dataclass automatically.
+
+The new **nested-yaml** shape (`aws:`, `db:`, `app2:`, `audit:`,
+`test:`, `auth:` top-level blocks per DE.0) is supported by the
+separate `config_v14.py` loader; full deprecation of the flat-yaml
+loader + a hard-break upgrade message is deferred to a future phase.
+
+### Internal API surface
+
+- `_App2View` / `_AuditView` / `_TestView` / `_AuthAwsView` proxy
+  classes deleted; every reader now reads the underlying real fields.
+- `SigningConfig` gained the `passphrase()` method (was on the
+  proxy class).
+- `TestConfig` carries `__test__ = False` so pytest doesn't try to
+  collect it.
+
+### Phase DE plan
+
+Inline strangler pattern: drop one flat field per commit, sweep
+callsites, verify pyright + unit + data/json suites green, commit.
+21 commits in the series (DE.5 steps 3-21). No incomplete intermediate
+states — every step left the build green.
+
+### What's NOT yet collapsed in v14
+
+`config_v14.py` (the canonical nested-yaml loader) still exists
+alongside `config.py`. Callsites under `tests/unit/test_config_v14.py`,
+`tests/unit/test_auth_factories.py`, and the TYPE_CHECKING guard in
+`src/recon_gen/common/auth.py` still import from it. Final
+consolidation (delete `config_v14.py`, rename `config.py` to the
+nested-only canonical form, hard-break flat yamls) is queued as a
+follow-up phase.
+
 ## v13.15.1 — Phase DB.3 followups + Phase DG CI hygiene + triage
 
 Two release-gate workflows behind this cut. Patch class — no API
