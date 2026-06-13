@@ -168,6 +168,20 @@ class TreeValidator:
         if expected_titles:
             rendered = set(self.driver.visual_titles())
             missing = expected_titles - rendered
+            # DG.3 — re-poll a couple times if titles are missing.
+            # Recipient Fanout's 3 distinct_count() KPIs lag the table's
+            # mount under load (v13.15.1-gate CI showed only the Table
+            # title in DOM at first read; the KPIs do eventually paint).
+            # Each per-title wait above swallows TimeoutError, so a
+            # 1-2s settle here gives the visuals one more shot before
+            # the missing-titles assertion fires.
+            import time as _t
+            for _ in range(3):
+                if not missing:
+                    break
+                _t.sleep(1.5)
+                rendered = set(self.driver.visual_titles())
+                missing = expected_titles - rendered
             if missing:
                 self._fail(
                     f"Sheet {sheet.name!r}",

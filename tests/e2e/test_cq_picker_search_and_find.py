@@ -123,12 +123,26 @@ def _assert_pickable(
     omission — options gate catches "picker source is too narrow",
     pick gate catches "option appears but binding rejects it" (the
     AA.E.2 display-vs-id miss shape).
+
+    DG.3 — uses ``typeahead_filter`` (not ``filter_options``) so the
+    membership check works for both static + typeahead-marked
+    pickers. For typeahead pickers like ``DS_L1_TX_IDS`` (8k+ row
+    contract), ``filter_options`` returns the EMPTY SEED PAGE
+    (typeahead pickers don't advertise options until something is
+    typed). ``typeahead_filter`` types the expected value + reads
+    the server-narrowed result on both legs; for non-typeahead
+    pickers, the App2 + QS drivers fall through to the same shape
+    as ``filter_options``. Caught by v13.15.1-gate CI failure
+    ``test_cq_4_e_l1_picker_finds_known_value[qs-Transactions-Transfer]``
+    showing ``Advertised (first 10 of 0): []`` after the prior
+    timeout-retry fix unmasked it.
     """
-    options = driver.filter_options(picker_label)
+    options = driver.typeahead_filter(picker_label, value)
     assert value in options, (
         f"{sheet_context}: picker {picker_label!r} does not advertise "
-        f"value {value!r}. Picker source narrowed too tightly, "
-        f"truncated, or the LinkedValues column binding is wrong. "
+        f"value {value!r} (queried via typeahead). Picker source "
+        f"narrowed too tightly, truncated, or the LinkedValues "
+        f"column binding is wrong. "
         f"Advertised (first 10 of {len(options)}): "
         f"{sorted(options)[:10]}..."
     )
@@ -140,7 +154,7 @@ def _assert_pickable(
     # (a binding miss would silently fail to register the pick; the
     # value should still appear in the option set since the source
     # matview/view didn't change).
-    options_after = driver.filter_options(picker_label)
+    options_after = driver.typeahead_filter(picker_label, value)
     assert value in options_after, (
         f"{sheet_context}: after picking {value!r} on picker "
         f"{picker_label!r}, the picker no longer advertises it. The "
