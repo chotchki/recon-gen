@@ -35,13 +35,17 @@ Used by DC.1 + DD.1 + DE.2 sweeps once approved.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
 
 from recon_gen.common.sql import Dialect
+
+if TYPE_CHECKING:
+    from recon_gen.common.as_of_frame import AsOfFrame
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +155,51 @@ class AwsConfig:
                     return parts[1]
         return "aws"
 
+    def prefixed(self, name: str) -> str:
+        """Return a resource ID with the configured deployment prefix.
+
+        Z.C: single-segment prefix ``<deployment_name>-<name>``."""
+        return f"{self.deployment_name}-{name}"
+
+    def tags(self) -> list[Any] | None:
+        """Return common + extra tags as the AWS Tag list format.
+
+        Two tags always emitted (when ``tagging_enabled``):
+        ``ManagedBy=recon-gen`` (cleanup eligibility gate) +
+        ``Deployment=<deployment_name>`` (per-deploy scope).
+
+        Returns ``None`` when ``tagging_enabled=False`` so the caller's
+        ``Tags=cfg.aws.tags()`` goes to the AWS API as no Tags kwarg
+        (no ``quicksight:TagResource`` permission needed).
+        """
+        if not self.tagging_enabled:
+            return None
+        from recon_gen.common.models import Tag  # noqa: PLC0415
+
+        all_tags = [
+            Tag(Key="ManagedBy", Value="recon-gen"),
+            Tag(Key="Deployment", Value=self.deployment_name),
+        ]
+        for key, value in self.extra_tags:
+            all_tags.append(Tag(Key=key, Value=value))
+        return all_tags
+
+    def dataset_arn(self, dataset_id: str) -> str:
+        """Synthesize a QuickSight dataset ARN under this aws-block's
+        partition / region / account."""
+        return (
+            f"arn:{self.partition}:quicksight:{self.region}"
+            f":{self.account_id}:dataset/{dataset_id}"
+        )
+
+    def theme_arn(self, theme_id: str) -> str:
+        """Synthesize a QuickSight theme ARN under this aws-block's
+        partition / region / account."""
+        return (
+            f"arn:{self.partition}:quicksight:{self.region}"
+            f":{self.account_id}:theme/{theme_id}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # DB block
@@ -224,6 +273,7 @@ class App2Config:
     etl_hook: str | None = None
     banner_text: str | None = None
     tls: App2TlsConfig | None = None  # populated by DC
+    db_pool_size: int = 10
 
 
 # ---------------------------------------------------------------------------
@@ -234,11 +284,27 @@ class App2Config:
 @dataclass(frozen=True)
 class AuditSigningConfig:
     """Signing material for audit PDF. Pre-DE ``signing.*`` →
-    post-DE ``audit.signing.*``."""
+    post-DE ``audit.signing.*``. ``passphrase_env`` names an env var
+    holding the key passphrase per ``[[feedback_no_credential_friction]]``;
+    secret never lives in cfg yaml."""
     key_path: str
     cert_path: str
     passphrase_env: str | None = None
     signer_name: str | None = None
+
+    def passphrase(self) -> bytes | None:
+        """Load passphrase from ``os.environ[passphrase_env]`` lazily.
+
+        Returns bytes for pyHanko's CMS signer (it takes bytes).
+        ``None`` ⇒ key is unencrypted OR env var unset (pyHanko loads
+        the unencrypted key under None)."""
+        if self.passphrase_env is None:
+            return None
+        import os  # noqa: PLC0415 — lazy: env-touch only when audit signs
+        val = os.environ.get(self.passphrase_env)  # typing-smell: ignore[envvar-bypass]: cfg-supplied env var name (audit.signing.passphrase_env) per [[feedback_no_credential_friction]]
+        if not val:
+            return None
+        return val.encode("utf-8")
 
 
 @dataclass(frozen=True)
@@ -251,12 +317,77 @@ class AuditConfig:
 # ---------------------------------------------------------------------------
 
 
+ScopeKind = Literal[
+    "full", "exceptions_only", "uncovered_rails", "only_template",
+]
+PlantKind = Literal[
+    "drift", "overdraft", "limit_breach",
+    "stuck_pending", "stuck_unbundled", "supersession",
+]
+
+
 @dataclass(frozen=True)
 class TestGeneratorConfig:
-    """Fuzz-L2 generation knobs. Operators on prod-deploy postures
-    never set this — defaults are sane for the bundled fuzz seeds."""
-    enabled: bool = False
+    """Synthetic-data overlay knobs (Step 3 of deploy pipeline).
+
+    Default ``enabled=True`` with empty plants tuple preserves
+    byte-identical-to-locked-seeds output — every field's default is
+    the no-op for ``emit_full_seed``.
+    """
+    # Class name starts with "Test" so pytest collection emits a
+    # PytestCollectionWarning. ``__test__ = False`` suppresses collection
+    # without renaming the class.
+    __test__ = False
+
+    enabled: bool = True
+    scope: "ScopeKind" = "full"
+    end_date: "date | None" = None
     seed: int | None = None
+    plants: tuple["PlantKind", ...] = ()
+    only_template: str | None = None
+    derive_balances: bool = False
+    derive_balances_account_roles: tuple[str, ...] | None = None
+    cutoff_date: "date | None" = None
+
+    def as_of_frame(
+        self,
+        *,
+        window_days: int = 0,
+        db_anchor: "date | None" = None,
+    ) -> "AsOfFrame":
+        """Resolve this cfg's scenario anchor as the owned ``AsOfFrame``.
+
+        Resolution paths (D1 contract):
+        - ``end_date == LOCKED_ANCHOR`` → locked frame (byte-identity
+          tests gate off this).
+        - ``end_date is not None`` → explicit-anchor frame.
+        - ``end_date is None`` + ``db_anchor is not None`` → pin live
+          frame at the DB-derived latest balance day.
+        - ``end_date is None`` + ``db_anchor is None`` → live frame.
+        """
+        from recon_gen.common.as_of_frame import LOCKED_ANCHOR, AsOfFrame  # noqa: PLC0415
+        from recon_gen.common.intervals import DateInterval  # noqa: PLC0415
+        if self.end_date == LOCKED_ANCHOR:
+            return AsOfFrame.locked(window_days=window_days)
+        if self.end_date is not None:
+            window = (
+                DateInterval.single_day(self.end_date)
+                if window_days <= 0
+                else DateInterval.trailing_days_ending_today(
+                    self.end_date, window_days + 1,
+                )
+            )
+            return AsOfFrame(as_of=self.end_date, window=window)
+        if db_anchor is not None:
+            window = (
+                DateInterval.single_day(db_anchor)
+                if window_days <= 0
+                else DateInterval.trailing_days_ending_today(
+                    db_anchor, window_days + 1,
+                )
+            )
+            return AsOfFrame(as_of=db_anchor, window=window)
+        return AsOfFrame.live(window_days=window_days)
 
 
 @dataclass(frozen=True)
@@ -554,10 +685,77 @@ def _build_test(raw: dict[str, Any]) -> TestConfig:
     gen_block = block.get("generator", {})
     if not isinstance(gen_block, dict):
         raise CfgError("test.generator must be a mapping when present")
+    # Full TestGeneratorConfig surface — parses scope / end_date /
+    # plants / only_template / derive_balances / etc. for the deploy
+    # pipeline's synthetic-data overlay.
+    end_date_raw = gen_block.get("end_date")
+    end_date_val: date | None = None
+    if end_date_raw is not None:
+        if isinstance(end_date_raw, date):
+            end_date_val = end_date_raw
+        elif isinstance(end_date_raw, str):
+            try:
+                end_date_val = date.fromisoformat(end_date_raw)
+            except ValueError as exc:
+                raise CfgError(
+                    f"test.generator.end_date must be ISO 8601 (YYYY-MM-DD); "
+                    f"got {end_date_raw!r}"
+                ) from exc
+        else:
+            raise CfgError(
+                f"test.generator.end_date must be a date / ISO string; "
+                f"got {type(end_date_raw).__name__}"
+            )
+    cutoff_date_raw = gen_block.get("cutoff_date")
+    cutoff_date_val: date | None = None
+    if cutoff_date_raw is not None:
+        if isinstance(cutoff_date_raw, date):
+            cutoff_date_val = cutoff_date_raw
+        elif isinstance(cutoff_date_raw, str):
+            try:
+                cutoff_date_val = date.fromisoformat(cutoff_date_raw)
+            except ValueError as exc:
+                raise CfgError(
+                    f"test.generator.cutoff_date must be ISO 8601 (YYYY-MM-DD); "
+                    f"got {cutoff_date_raw!r}"
+                ) from exc
+        else:
+            raise CfgError(
+                f"test.generator.cutoff_date must be a date / ISO string; "
+                f"got {type(cutoff_date_raw).__name__}"
+            )
+    plants_raw = gen_block.get("plants", ())
+    if not isinstance(plants_raw, (list, tuple)):
+        raise CfgError(
+            f"test.generator.plants must be a list; got {type(plants_raw).__name__}"
+        )
+    plants_tuple = tuple(str(p) for p in plants_raw)
+    drb_raw = gen_block.get("derive_balances_account_roles")
+    drb_tuple: tuple[str, ...] | None = None
+    if drb_raw is not None:
+        if not isinstance(drb_raw, (list, tuple)):
+            raise CfgError(
+                f"test.generator.derive_balances_account_roles must be a list / null; "
+                f"got {type(drb_raw).__name__}"
+            )
+        drb_tuple = tuple(str(r) for r in drb_raw)
+    scope_val = str(gen_block.get("scope", "full"))
+    if scope_val not in ("full", "exceptions_only", "uncovered_rails", "only_template"):
+        raise CfgError(
+            f"test.generator.scope must be one of full/exceptions_only/"
+            f"uncovered_rails/only_template; got {scope_val!r}"
+        )
     return TestConfig(
         generator=TestGeneratorConfig(
-            enabled=bool(gen_block.get("enabled", False)),
+            enabled=bool(gen_block.get("enabled", True)),
+            scope=scope_val,  # pyright: ignore[reportArgumentType]: validated against literal options above
+            end_date=end_date_val,
             seed=gen_block.get("seed"),
+            plants=plants_tuple,  # pyright: ignore[reportArgumentType]: PlantKind validation runs at builder consumption time per docs/audits/de_0_cfg_redesign.md (legacy did the same)
+            only_template=gen_block.get("only_template"),
+            derive_balances=bool(gen_block.get("derive_balances", False)),
+            derive_balances_account_roles=drb_tuple,
+            cutoff_date=cutoff_date_val,
         ),
     )
 
@@ -665,8 +863,32 @@ def load_config(path: str | Path | None = None) -> Config:
         path = Path(path)
     raw = _load_raw(path)
     _check_legacy_keys(raw, path)
+    _apply_env_overrides(raw)
     aws = _build_aws(raw, path)
     db = _build_db(raw, aws, path)
+    # DE.5 — datasource.arn auto-derive when mode=create + db.url is
+    # set. Mirrors pre-DE Config.__post_init__ behavior so the deploy
+    # emitters get a synthesized ARN without per-callsite logic.
+    if aws.datasource.mode == DatasourceMode.CREATE and aws.datasource.arn is None:
+        ds_id = aws.prefixed("demo-datasource")
+        derived_arn = (
+            f"arn:{aws.partition}:quicksight:{aws.region}"
+            f":{aws.account_id}:datasource/{ds_id}"
+        )
+        aws = AwsConfig(
+            account_id=aws.account_id,
+            region=aws.region,
+            deployment_name=aws.deployment_name,
+            principal_arns=aws.principal_arns,
+            extra_tags=aws.extra_tags,
+            tagging_enabled=aws.tagging_enabled,
+            qs_disable_pg_ssl=aws.qs_disable_pg_ssl,
+            pg_cluster_id=aws.pg_cluster_id,
+            oracle_instance_id=aws.oracle_instance_id,
+            datasource=DatasourceConfig(
+                mode=DatasourceMode.CREATE, arn=derived_arn,
+            ),
+        )
     return Config(
         aws=aws,
         db=db,
@@ -675,3 +897,70 @@ def load_config(path: str | Path | None = None) -> Config:
         audit=_build_audit(raw),
         test=_build_test(raw),
     )
+
+
+def _apply_env_overrides(raw: dict[str, Any]) -> None:
+    """Apply RECON_GEN_* env var overrides to the nested raw cfg dict.
+
+    Env-var overrides exist so the runner can inject per-cell values
+    (DB URL / account / region / dialect) for the test layer chain
+    without rewriting cfg.yaml per cell. Each override mutates the
+    nested raw dict in place; _build_* then sees the overridden values.
+    """
+    from recon_gen.common.env_keys import (  # noqa: PLC0415
+        RECON_GEN_APP2_DB_POOL_SIZE,
+        RECON_GEN_AWS_ACCOUNT_ID,
+        RECON_GEN_AWS_ORACLE_INSTANCE_ID,
+        RECON_GEN_AWS_PG_CLUSTER_ID,
+        RECON_GEN_AWS_REGION,
+        RECON_GEN_DATASOURCE_ARN,
+        RECON_GEN_DB_TABLE_PREFIX,
+        RECON_GEN_DEMO_DATABASE_URL,
+        RECON_GEN_DEPLOYMENT_NAME,
+        RECON_GEN_DIALECT,
+        RECON_GEN_PRINCIPAL_ARNS,
+    )
+
+    def _ensure_dict(key: str) -> dict[str, Any]:
+        block = raw.get(key)
+        if not isinstance(block, dict):
+            block = {}
+            raw[key] = block
+        return block
+
+    aws_block = _ensure_dict("aws")
+    if (v := RECON_GEN_AWS_ACCOUNT_ID.get_or_none()) is not None:
+        aws_block["account_id"] = v
+    if (v := RECON_GEN_AWS_REGION.get_or_none()) is not None:
+        aws_block["region"] = v
+    if (v := RECON_GEN_DEPLOYMENT_NAME.get_or_none()) is not None:
+        aws_block["deployment_name"] = v
+    if (v := RECON_GEN_AWS_PG_CLUSTER_ID.get_or_none()) is not None:
+        aws_block["pg_cluster_id"] = v
+    if (v := RECON_GEN_AWS_ORACLE_INSTANCE_ID.get_or_none()) is not None:
+        aws_block["oracle_instance_id"] = v
+    if (v := RECON_GEN_PRINCIPAL_ARNS.get_or_none()) is not None:
+        aws_block["principal_arns"] = [
+            s.strip() for s in v.split(",") if s.strip()
+        ]
+    if (v := RECON_GEN_DATASOURCE_ARN.get_or_none()) is not None:
+        ds_block = aws_block.setdefault("datasource", {})
+        if isinstance(ds_block, dict):
+            ds_block["mode"] = DatasourceMode.ADOPT.value
+            ds_block["arn"] = v
+
+    db_block = _ensure_dict("db")
+    if (v := RECON_GEN_DIALECT.get_or_none()) is not None:
+        db_block["dialect"] = v
+    if (v := RECON_GEN_DEMO_DATABASE_URL.get_or_none()) is not None:
+        db_block["url"] = v
+    if (v := RECON_GEN_DB_TABLE_PREFIX.get_or_none()) is not None:
+        db_block["table_prefix"] = v
+    pool_raw = RECON_GEN_APP2_DB_POOL_SIZE.get_or_none()
+    if pool_raw is not None:
+        try:
+            db_block["app2_pool_size"] = int(pool_raw)
+        except (TypeError, ValueError) as exc:
+            raise CfgError(
+                f"RECON_GEN_APP2_DB_POOL_SIZE must be int; got {pool_raw!r}"
+            ) from exc

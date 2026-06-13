@@ -145,11 +145,17 @@ db:
 
 
 def test_datasource_mode_defaults_to_create(tmp_path: Path) -> None:
-    """``aws.datasource`` block absent ⇒ mode=create, arn=None."""
+    """``aws.datasource`` block absent ⇒ mode=create. DE.5 — when
+    mode=create + db.url is set, the loader auto-derives the arn
+    (matches pre-DE Config.__post_init__ behavior so deploy emitters
+    get a synthesized ARN without per-callsite logic)."""
     p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
     cfg = load_config(p)
     assert cfg.aws.datasource.mode is DatasourceMode.CREATE
-    assert cfg.aws.datasource.arn is None
+    # Auto-derived: arn:aws:quicksight:<region>:<account>:datasource/<prefix>-demo-datasource
+    assert cfg.aws.datasource.arn == (
+        "arn:aws:quicksight:us-east-1:123456789012:datasource/test-deploy-demo-datasource"
+    )
 
 
 def test_datasource_mode_adopt_requires_arn(tmp_path: Path) -> None:
