@@ -406,13 +406,13 @@ def _make_cfg(tagging_enabled: bool = True) -> Config:
         aws=AwsConfig(
             account_id="111", region="us-east-1",
             deployment_name="qs-test",
+            tagging_enabled=tagging_enabled,
             datasource=DatasourceConfig(
                 mode="adopt",
                 arn="arn:aws:quicksight:us-east-1:111:datasource/x",
             ),
         ),
         db_table_prefix="test",
-        tagging_enabled=tagging_enabled,
     )
 
 

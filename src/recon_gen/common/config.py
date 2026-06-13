@@ -518,7 +518,8 @@ class Config:
     # ``cli/json.py`` keys "we own it" off ``cfg.aws.datasource.mode == "create"``
     # instead of the removed ``cfg.datasource_arn_was_derived`` sentinel.
     # DE.5 step 7 — principal_arns moved to aws.principal_arns.
-    extra_tags: dict[str, str] = field(default_factory=dict[str, str])
+    # DE.5 steps 8-11 — extra_tags + tagging_enabled + qs_disable_pg_ssl +
+    # aws_pg_cluster_id + aws_oracle_instance_id all moved into aws.*.
     demo_database_url: str | None = None
     # P.6.a — SQL dialect for emitted DDL + dataset SQL + demo apply.
     # ``postgres`` (default, current behavior) or ``oracle`` (Phase P).
@@ -581,7 +582,7 @@ class Config:
     # ``json clean`` falls back to ID-prefix matching against
     # ``resource_prefix`` — significantly weaker isolation. See the
     # docs reference for the loss-of-safety details before opting in.
-    tagging_enabled: bool = True
+    # DE.5 step 9 — moved to aws.tagging_enabled.
     # Phase BS.2 (D1 nav contract) — toggles the Studio surface on/off
     # in the App2 binary. When False, the Studio top-nav entries (L2
     # Editor / ETL Support / Training) hide and the `/studio/*` routes
@@ -618,18 +619,9 @@ class Config:
     # database-3); CI's per-job env injects the CI-side identifiers
     # (`recon-ci-aurora` / `recon-ci-oracle`) so the two lifecycles
     # don't step on each other (per gate.l.0 provisioning runbook).
-    # Both optional — when unset, the lifecycle commands loud-fail
-    # at the dispatch site with the env-var fallback name.
-    aws_pg_cluster_id: str | None = None
-    aws_oracle_instance_id: str | None = None
-    # CB.11.a — set to True when the QS data source's PG endpoint is a
-    # plain Docker container (or any non-TLS Postgres). Default False
-    # because RDS Postgres forces TLS; flipping False against RDS would
-    # silently downgrade. CB.11.a spike (2026-06-02) added this when
-    # the QS-to-Docker-PG forward worked but failed SSL handshake
-    # ("server does not support SSL"). Wired through
-    # `common/datasource.py::build_data_source` PG branch.
-    qs_disable_pg_ssl: bool = False
+    # DE.5 steps 10-11 — aws_pg_cluster_id / aws_oracle_instance_id /
+    # qs_disable_pg_ssl all moved to aws.* (pg_cluster_id /
+    # oracle_instance_id / qs_disable_pg_ssl).
     # X.4.g.1 — Optional shell command run as step 1 of the deploy
     # pipeline, BEFORE step 2 wipes the demo DB. Non-zero exit halts
     # the pipeline (the demo DB is never touched). When unset, step 1
@@ -791,16 +783,18 @@ class Config:
                 "aws.datasource.arn is required unless demo_database_url is set."
             )
         # DE.5 — blend caller-supplied ``aws`` fields with remaining flats.
+        # DE.5 steps 8-11 — extra_tags / tagging_enabled / qs_disable_pg_ssl /
+        # pg_cluster_id / oracle_instance_id all from caller-supplied aws.*.
         self.aws = AwsConfig(
             account_id=account_id,
             region=region,
             deployment_name=deployment_name,
             principal_arns=tuple(principal_arns_list),
-            extra_tags=tuple(sorted(self.extra_tags.items())),
-            tagging_enabled=self.tagging_enabled,
-            qs_disable_pg_ssl=self.qs_disable_pg_ssl,
-            pg_cluster_id=self.aws_pg_cluster_id,
-            oracle_instance_id=self.aws_oracle_instance_id,
+            extra_tags=self.aws.extra_tags,
+            tagging_enabled=self.aws.tagging_enabled,
+            qs_disable_pg_ssl=self.aws.qs_disable_pg_ssl,
+            pg_cluster_id=self.aws.pg_cluster_id,
+            oracle_instance_id=self.aws.oracle_instance_id,
             datasource=DatasourceConfig(mode=ds_mode, arn=ds_arn),
         )
 
@@ -875,6 +869,22 @@ class Config:
             principal_arns_out = aws_typed.get("principal_arns")
             if principal_arns_out:
                 out["principal_arns"] = list(principal_arns_out)
+            # DE.5 steps 8-11 — flatten the remaining aws-block fields.
+            tags_out = aws_typed.get("extra_tags")
+            if tags_out:
+                out["extra_tags"] = dict(tags_out)
+            tagging_enabled = aws_typed.get("tagging_enabled")
+            if tagging_enabled is not None and tagging_enabled is not True:
+                # Default is True; emit only when overridden.
+                out["tagging_enabled"] = tagging_enabled
+            qs_disable_pg_ssl = aws_typed.get("qs_disable_pg_ssl")
+            if qs_disable_pg_ssl is not None and qs_disable_pg_ssl is not False:
+                # Default is False; emit only when overridden.
+                out["qs_disable_pg_ssl"] = qs_disable_pg_ssl
+            if aws_typed.get("pg_cluster_id"):
+                out["aws_pg_cluster_id"] = aws_typed["pg_cluster_id"]
+            if aws_typed.get("oracle_instance_id"):
+                out["aws_oracle_instance_id"] = aws_typed["oracle_instance_id"]
             # DE.5 step 6 — flatten aws.datasource → datasource_arn flat key.
             # Skip when mode=create (loader re-derives on next load).
             ds_block = aws_typed.get("datasource")
@@ -1515,12 +1525,17 @@ def load_config(path: str | Path | None = None) -> Config:
     # DE.5 step 6 — datasource_arn flat field moved into aws.datasource.
     raw_ds_arn = _opt_str(values, "datasource_arn")
     return Config(
-        # DE.5 steps 3-6 — aws-block fields now in aws=AwsConfig(...).
+        # DE.5 steps 3-11 — all AWS-block fields now in aws=AwsConfig(...).
         aws=AwsConfig(
             account_id=_require_str(values, "aws_account_id"),
             region=_require_str(values, "aws_region"),
             deployment_name=_require_str(values, "deployment_name"),
             principal_arns=tuple(principal_arns),
+            extra_tags=tuple(sorted(extra_tags.items())),
+            tagging_enabled=raw_tagging,
+            qs_disable_pg_ssl=bool(values.get("qs_disable_pg_ssl", False)),
+            pg_cluster_id=_opt_str(values, "aws_pg_cluster_id"),
+            oracle_instance_id=_opt_str(values, "aws_oracle_instance_id"),
             datasource=DatasourceConfig(
                 mode=("adopt" if raw_ds_arn else "create"),
                 arn=raw_ds_arn,
@@ -1529,19 +1544,14 @@ def load_config(path: str | Path | None = None) -> Config:
         db_table_prefix=_validate_and_return_db_prefix(
             _require_str(values, "db_table_prefix")
         ),
-        extra_tags=extra_tags,
         demo_database_url=_opt_str(values, "demo_database_url"),
         dialect=dialect,
         signing=signing,
         auth=auth,
         default_l2_instance=_opt_str(values, "default_l2_instance"),
-        tagging_enabled=raw_tagging,
         studio_enabled=raw_studio_enabled,
         app2_db_pool_size=pool_size,
         app2_tls=app2_tls_cfg,
-        aws_pg_cluster_id=_opt_str(values, "aws_pg_cluster_id"),
-        aws_oracle_instance_id=_opt_str(values, "aws_oracle_instance_id"),
-        qs_disable_pg_ssl=bool(values.get("qs_disable_pg_ssl", False)),
         etl_hook=_opt_str(values, "etl_hook"),
         banner_text=_opt_str(values, "banner_text"),
         test_generator=test_generator,

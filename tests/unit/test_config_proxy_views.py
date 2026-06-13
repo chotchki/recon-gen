@@ -48,11 +48,21 @@ def _make_cfg(**overrides: object) -> Config:
     # Narrow object → iterable[str] for AwsConfig.principal_arns
     if not isinstance(principal_arns_raw, (list, tuple)):
         raise TypeError(f"principal_arns must be list/tuple; got {type(principal_arns_raw).__name__}")
+    extra_tags_raw = overrides.pop("extra_tags", {})
+    if not isinstance(extra_tags_raw, dict):
+        raise TypeError(f"extra_tags must be dict; got {type(extra_tags_raw).__name__}")
+    tagging_enabled_raw = overrides.pop("tagging_enabled", True)
+    if not isinstance(tagging_enabled_raw, bool):
+        raise TypeError(f"tagging_enabled must be bool; got {type(tagging_enabled_raw).__name__}")
     aws_kwargs: dict[str, object] = {
         "account_id": overrides.pop("aws_account_id", "123456789012"),
         "region": overrides.pop("aws_region", "us-east-1"),
         "deployment_name": overrides.pop("deployment_name", "test-deploy"),
         "principal_arns": tuple(str(p) for p in principal_arns_raw),  # type: ignore[union-attr]: isinstance check above narrows; str() per-element handles whatever the test passed
+        "extra_tags": tuple(sorted(
+            (str(k), str(v)) for k, v in extra_tags_raw.items()  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]: isinstance check above narrows
+        )),
+        "tagging_enabled": tagging_enabled_raw,
         "datasource": DatasourceConfig(
             mode=("adopt" if datasource_arn else "create"),
             arn=datasource_arn,

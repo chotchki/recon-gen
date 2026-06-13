@@ -8,7 +8,7 @@ shapes but resolve to nothing.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from recon_gen.common.config import Config
 
@@ -59,6 +59,20 @@ _TEST_DATASOURCE_ARN = (
 )
 
 
+def _normalize_extra_tags(raw: Any) -> tuple[tuple[str, str], ...]:
+    """Translate legacy ``extra_tags={"k": "v"}`` dict kwarg to the
+    ``AwsConfig.extra_tags`` tuple-of-pairs shape."""
+    if isinstance(raw, dict):
+        items = cast(dict[str, str], raw).items()
+        return tuple(sorted(items))
+    if isinstance(raw, (list, tuple)):
+        items_list = cast(list[tuple[str, str]] | tuple[tuple[str, str], ...], raw)
+        return tuple(items_list)
+    raise TypeError(
+        f"extra_tags must be dict / list / tuple; got {type(raw).__name__}"
+    )
+
+
 def make_test_config(**overrides: Any) -> Config:
     """Return a Config preloaded with the canonical placeholder values.
 
@@ -74,14 +88,20 @@ def make_test_config(**overrides: Any) -> Config:
       generated DB DDL; pin to a real prefix when it does.
     - ``dialect=Dialect.ORACLE`` — exercise the Oracle SQL branch.
     """
-    # DE.5 steps 3-7 — translate flat aws_* / deployment_name /
-    # datasource_arn / principal_arns kwargs into nested aws=AwsConfig(...).
+    # DE.5 steps 3-11 — translate every legacy AWS-block kwarg into the
+    # nested aws=AwsConfig(...) on Config. Once 100% of callers pass aws=
+    # directly, this translation can collapse.
     from recon_gen.common.config import AwsConfig, DatasourceConfig  # noqa: PLC0415
     account_id = overrides.pop("aws_account_id", _TEST_ACCOUNT)
     region = overrides.pop("aws_region", _TEST_REGION)
     deployment_name = overrides.pop("deployment_name", "recon-test")
     datasource_arn = overrides.pop("datasource_arn", None)
     principal_arns = overrides.pop("principal_arns", ())
+    extra_tags_raw = overrides.pop("extra_tags", {})
+    tagging_enabled = overrides.pop("tagging_enabled", True)
+    qs_disable_pg_ssl = overrides.pop("qs_disable_pg_ssl", False)
+    aws_pg_cluster_id = overrides.pop("aws_pg_cluster_id", None)
+    aws_oracle_instance_id = overrides.pop("aws_oracle_instance_id", None)
     if datasource_arn is None:
         if region != _TEST_REGION:
             datasource_arn = (
@@ -96,6 +116,11 @@ def make_test_config(**overrides: Any) -> Config:
             region=region,
             deployment_name=deployment_name,
             principal_arns=tuple(principal_arns),
+            extra_tags=_normalize_extra_tags(extra_tags_raw),
+            tagging_enabled=tagging_enabled,
+            qs_disable_pg_ssl=qs_disable_pg_ssl,
+            pg_cluster_id=aws_pg_cluster_id,
+            oracle_instance_id=aws_oracle_instance_id,
             datasource=DatasourceConfig(
                 mode=("adopt" if datasource_arn else "create"),
                 arn=datasource_arn,
