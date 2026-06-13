@@ -306,8 +306,7 @@ class TestValidationHooksAudit:
 
     # Z.C — deployment_name + db_table_prefix are required cfg fields.
     _CFG = _Cfg(
-        aws=AwsConfig(account_id="111122223333", region="us-west-2"),
-        deployment_name="recon-kitchen",
+        aws=AwsConfig(account_id="111122223333", region="us-west-2", deployment_name="recon-kitchen"),
         db_table_prefix="kitchen",
         datasource_arn=(
             "arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds"

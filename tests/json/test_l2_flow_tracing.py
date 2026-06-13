@@ -657,9 +657,10 @@ def test_chains_dataset_id_uses_deployment_prefix() -> None:
         build_chains_dataset,
     )
     from dataclasses import replace
+    # DE.5 step 5 — deployment_name lives on AwsConfig; replace via aws.
     cfg = replace(
         _CFG,
-        deployment_name="recon-sasq",
+        aws=replace(_CFG.aws, deployment_name="recon-sasq"),
         db_table_prefix="sasquatch_pr",
     )
     ds = build_chains_dataset(cfg, load_instance(SASQUATCH_PR_YAML))
@@ -1030,9 +1031,10 @@ def test_exc_dataset_id_uses_deployment_prefix(
     in the same QS account."""
     import recon_gen.apps.l2_flow_tracing.datasets as ds_mod
     from dataclasses import replace
+    # DE.5 step 5 — deployment_name on AwsConfig.
     cfg = replace(
         _CFG,
-        deployment_name="recon-sasq",
+        aws=replace(_CFG.aws, deployment_name="recon-sasq"),
         db_table_prefix="sasquatch_pr",
     )
     builder = getattr(ds_mod, builder_name)

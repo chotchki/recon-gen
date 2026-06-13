@@ -21,13 +21,16 @@ from recon_gen.common.config import AwsConfig, Config
 
 def _cfg(**overrides: Any) -> Config:
     """Minimal Config with one of every required field; override per test."""
-    # DE.5 steps 3+4 — translate aws_account_id / aws_region kwargs.
+    # DE.5 steps 3-5 — translate flat aws_* + deployment_name kwargs.
     region = overrides.pop("aws_region", "us-east-1")
     account_id = overrides.pop("aws_account_id", "111122223333")
+    deployment_name = overrides.pop("deployment_name", "recon-test")
     base: dict[str, Any] = dict(
-        aws=AwsConfig(account_id=account_id, region=region),
+        aws=AwsConfig(
+            account_id=account_id, region=region,
+            deployment_name=deployment_name,
+        ),
         datasource_arn=f"arn:aws:quicksight:{region}:{account_id}:datasource/x",
-        deployment_name="recon-test",
         db_table_prefix="test",
     )
     base.update(overrides)
@@ -37,9 +40,11 @@ def _cfg(**overrides: Any) -> Config:
 def test_partition_defaults_to_aws_with_no_arn_sources() -> None:
     """No principal_arns, no datasource_arn → "aws" default."""
     cfg = Config(
-        aws=AwsConfig(account_id="111122223333", region="us-east-1"),
+        aws=AwsConfig(
+            account_id="111122223333", region="us-east-1",
+            deployment_name="recon-test",
+        ),
         demo_database_url="postgresql://example",
-        deployment_name="recon-test",
         db_table_prefix="test",
     )
     assert cfg.aws.partition == "aws"
@@ -61,9 +66,11 @@ def test_partition_from_principal_arn_when_no_datasource_set() -> None:
     partition derives from the principal_arn so the synthesized
     datasource_arn lands in the right partition."""
     cfg = Config(
-        aws=AwsConfig(account_id="111122223333", region="us-gov-east-1"),
+        aws=AwsConfig(
+            account_id="111122223333", region="us-gov-east-1",
+            deployment_name="recon-test",
+        ),
         demo_database_url="postgresql://example",
-        deployment_name="recon-test",
         db_table_prefix="test",
         principal_arns=[
             "arn:aws-us-gov:iam::111122223333:user/operator",
@@ -131,9 +138,11 @@ def test_bare_string_principal_falls_through_to_default() -> None:
     """Defensive: an empty / malformed principal_arns entry doesn't
     leak through as a partition; default ``aws`` wins."""
     cfg = Config(
-        aws=AwsConfig(account_id="111122223333", region="us-east-1"),
+        aws=AwsConfig(
+            account_id="111122223333", region="us-east-1",
+            deployment_name="recon-test",
+        ),
         demo_database_url="postgresql://example",
-        deployment_name="recon-test",
         db_table_prefix="test",
         principal_arns=["not-an-arn"],
     )
@@ -144,9 +153,11 @@ def test_empty_partition_segment_falls_through() -> None:
     """An ARN like ``arn::quicksight:...`` (empty partition slot)
     shouldn't be honored; default ``aws`` wins."""
     cfg = Config(
-        aws=AwsConfig(account_id="111122223333", region="us-east-1"),
+        aws=AwsConfig(
+            account_id="111122223333", region="us-east-1",
+            deployment_name="recon-test",
+        ),
         demo_database_url="postgresql://example",
-        deployment_name="recon-test",
         db_table_prefix="test",
         principal_arns=["arn::iam::111122223333:user/operator"],
     )

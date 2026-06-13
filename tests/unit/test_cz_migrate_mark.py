@@ -544,8 +544,7 @@ def test_pre_flight_auto_marks_when_etl_hook_is_none(
     db_path = tmp_path / "cz6.duckdb"
     _seed_unstamped_db(db_path)
     cfg = Config(
-        aws=AwsConfig(account_id="111111111111", region="us-east-1"),
-        deployment_name="cz6-test",
+        aws=AwsConfig(account_id="111111111111", region="us-east-1", deployment_name="cz6-test"),
         db_table_prefix=_PREFIX,
         demo_database_url=f"duckdb:///{db_path}",
         dialect=Dialect.DUCKDB,
@@ -577,8 +576,7 @@ def test_pre_flight_refuses_auto_mark_when_etl_hook_configured(
     db_path = tmp_path / "cz6.duckdb"
     _seed_unstamped_db(db_path)
     cfg = Config(
-        aws=AwsConfig(account_id="111111111111", region="us-east-1"),
-        deployment_name="cz6-test",
+        aws=AwsConfig(account_id="111111111111", region="us-east-1", deployment_name="cz6-test"),
         db_table_prefix=_PREFIX,
         demo_database_url=f"duckdb:///{db_path}",
         dialect=Dialect.DUCKDB,
@@ -619,8 +617,7 @@ def test_pre_flight_silent_no_op_on_clean_db(tmp_path: Path) -> None:
     conn.close()
 
     cfg = Config(
-        aws=AwsConfig(account_id="111111111111", region="us-east-1"),
-        deployment_name="cz6-test",
+        aws=AwsConfig(account_id="111111111111", region="us-east-1", deployment_name="cz6-test"),
         db_table_prefix=_PREFIX,
         demo_database_url=f"duckdb:///{db_path}",
         dialect=Dialect.DUCKDB,
@@ -642,8 +639,7 @@ def test_pre_flight_silent_when_base_tables_missing(
     duckdb.connect(str(db_path)).close()
 
     cfg = Config(
-        aws=AwsConfig(account_id="111111111111", region="us-east-1"),
-        deployment_name="cz6-test",
+        aws=AwsConfig(account_id="111111111111", region="us-east-1", deployment_name="cz6-test"),
         db_table_prefix=_PREFIX,
         demo_database_url=f"duckdb:///{db_path}",
         dialect=Dialect.DUCKDB,
@@ -682,8 +678,7 @@ def _load_spec_example() -> "Any":
 def _step_2_wipe_cfg(db_path: Path, *, etl_hook: str | None) -> Config:
     """Config bound to a DuckDB tempfile + the requested etl_hook state."""
     return Config(
-        aws=AwsConfig(account_id="111111111111", region="us-east-1"),
-        deployment_name="cz6-test",
+        aws=AwsConfig(account_id="111111111111", region="us-east-1", deployment_name="cz6-test"),
         db_table_prefix=_PREFIX,
         demo_database_url=f"duckdb:///{db_path}",
         dialect=Dialect.DUCKDB,

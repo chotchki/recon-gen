@@ -34,14 +34,14 @@ from recon_gen.common.sql import Dialect
 
 def _make_cfg(**overrides: object) -> Config:
     """Build a minimal-but-complete legacy ``Config`` for proxy tests."""
-    # DE.5 steps 3+4 — aws_account_id + aws_region moved into aws=AwsConfig.
+    # DE.5 steps 3-5 — aws_account_id / aws_region / deployment_name moved.
     aws_kwargs: dict[str, object] = {
         "account_id": overrides.pop("aws_account_id", "123456789012"),
         "region": overrides.pop("aws_region", "us-east-1"),
+        "deployment_name": overrides.pop("deployment_name", "test-deploy"),
     }
     defaults: dict[str, object] = {
         "aws": AwsConfig(**aws_kwargs),  # pyright: ignore[reportArgumentType]: dict[str, object] kwarg surface
-        "deployment_name": "test-deploy",
         "db_table_prefix": "test_deploy",
         "demo_database_url": "postgresql://u:p@h:5432/d",
         "dialect": Dialect.POSTGRES,

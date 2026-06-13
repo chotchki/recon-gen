@@ -998,8 +998,7 @@ def _build_app(app_name: str) -> App:
 
     spec_example = default_l2_instance()
     cfg = Config(
-        aws=AwsConfig(account_id="000000000000", region="us-east-2"),
-        deployment_name="qs-gen",
+        aws=AwsConfig(account_id="000000000000", region="us-east-2", deployment_name="qs-gen"),
         db_table_prefix="spec_example",
         datasource_arn=(
             "arn:aws:quicksight:us-east-2:000000000000:"

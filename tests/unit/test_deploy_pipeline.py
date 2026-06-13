@@ -54,10 +54,12 @@ from recon_gen.common.sql import Dialect
 
 def _base_cfg() -> Config:
     return Config(
-        aws=AwsConfig(account_id="111122223333", region="us-east-1"),
         # Z.C — Config requires deployment_name + db_table_prefix.
         # spec_example matches the bundled L2 fixture used downstream.
-        deployment_name="recon-spec-example",
+        aws=AwsConfig(
+            account_id="111122223333", region="us-east-1",
+            deployment_name="recon-spec-example",
+        ),
         db_table_prefix=DEFAULT_PREFIX,
         datasource_arn=(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
@@ -75,10 +77,12 @@ def _duckdb_cfg(tmp_path: Path) -> Config:
     """Config bound to a fresh DuckDB tempfile for orchestrator tests."""
     db_path = tmp_path / "demo.duckdb"
     return Config(
-        aws=AwsConfig(account_id="111122223333", region="us-east-1"),
         # Z.C — Config requires deployment_name + db_table_prefix.
         # spec_example matches the bundled L2 fixture used downstream.
-        deployment_name="recon-spec-example",
+        aws=AwsConfig(
+            account_id="111122223333", region="us-east-1",
+            deployment_name="recon-spec-example",
+        ),
         db_table_prefix=DEFAULT_PREFIX,
         datasource_arn=(
             "arn:aws:quicksight:us-east-1:111122223333:datasource/x"

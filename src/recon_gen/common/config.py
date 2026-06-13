@@ -471,10 +471,9 @@ class TestGeneratorConfig:
 
 @dataclass
 class Config:
-    # DE.5 steps 3+4 — ``aws_account_id`` + ``aws_region`` flat fields
-    # dropped. Callers pass ``aws=AwsConfig(account_id="...", region="...")``;
-    # ``__post_init__`` blends with the remaining flat fields. Loader +
-    # ``make_test_config`` translate; direct callers updated.
+    # DE.5 steps 3-5 — ``aws_account_id`` + ``aws_region`` + ``deployment_name``
+    # flat fields dropped. Callers pass ``aws=AwsConfig(account_id=..., region=...,
+    # deployment_name=...)``; loader + make_test_config translate.
     # Z.C — Per-deploy QS namespace. Replaces v8.x's ``resource_prefix``
     # (defaulted ``qs-gen``) + ``l2_instance_prefix`` (stamped from the
     # L2 yaml's ``instance:`` field) — those were the same concept,
@@ -489,7 +488,7 @@ class Config:
     # ``deployment_name`` values pointing at the same L2 yaml. Operator
     # may encode multiple identity axes (CI run id, scenario, dialect)
     # into the value — that's fine; the cleanup gate is exact-match.
-    deployment_name: str
+    # DE.5 step 5 — moved to aws.deployment_name.
     # Z.C — Per-deploy DB table-name prefix. Replaces direct reads of
     # ``L2Instance.instance`` in ``common/l2/schema.py`` /
     # ``common/l2/seed.py`` / ``apps/*/datasets.py``. Used in
@@ -754,12 +753,18 @@ class Config:
                 "Config requires aws=AwsConfig(region=...). The legacy "
                 "``aws_region`` flat kwarg was dropped in DE.5 step 4."
             )
+        if not self.aws.deployment_name:
+            raise ValueError(
+                "Config requires aws=AwsConfig(deployment_name=...). The legacy "
+                "``deployment_name`` flat kwarg was dropped in DE.5 step 5."
+            )
         account_id = self.aws.account_id
         region = self.aws.region
+        deployment_name = self.aws.deployment_name
         # If demo_database_url is set but datasource_arn is not, derive it
         # — and record that we own the resulting datasource resource.
         if self.datasource_arn is None and self.demo_database_url is not None:
-            ds_id = self.prefixed("demo-datasource")
+            ds_id = f"{deployment_name}-demo-datasource"
             self.datasource_arn = (
                 f"arn:{self.partition}:quicksight:{region}"
                 f":{account_id}:datasource/{ds_id}"
@@ -773,7 +778,7 @@ class Config:
         self.aws = AwsConfig(
             account_id=account_id,
             region=region,
-            deployment_name=self.deployment_name,
+            deployment_name=deployment_name,
             principal_arns=tuple(self.principal_arns),
             extra_tags=tuple(sorted(self.extra_tags.items())),
             tagging_enabled=self.tagging_enabled,
@@ -817,59 +822,9 @@ class Config:
                     return parts[1]
         return "aws"
 
-    # Derived helpers
-    def tags(self) -> "list[Tag] | None":
-        """Return common + extra tags as the AWS Tag list format.
-
-        Two tags are always emitted (when ``tagging_enabled``):
-
-        - ``ManagedBy=recon-gen`` — gates cleanup eligibility (the
-          tool-identity signal; never varies).
-        - ``Deployment=<deployment_name>`` — per-deploy scope. ``json
-          clean`` requires both tags to match before deleting, so
-          concurrent deploys (CI + local, dev + staging) never trample
-          each other.
-
-        Returns ``None`` when ``tagging_enabled=False`` so the caller's
-        ``Tags=cfg.tags()`` field assignment goes to the dataclass's
-        ``Tags: list[Tag] | None`` field as ``None`` and ``_strip_nones``
-        drops it from the emitted JSON entirely. Net effect: the
-        ``Create*`` boto3 call carries no ``Tags`` kwarg, so the IAM
-        principal doesn't need ``quicksight:TagResource`` permission.
-        """
-        if not self.tagging_enabled:
-            return None
-        from recon_gen.common.models import Tag
-
-        all_tags = [
-            Tag(Key="ManagedBy", Value="recon-gen"),
-            Tag(Key="Deployment", Value=self.deployment_name),
-        ]
-        for key, value in self.extra_tags.items():
-            all_tags.append(Tag(Key=key, Value=value))
-        return all_tags
-
-    def dataset_arn(self, dataset_id: str) -> str:
-        return (
-            f"arn:{self.partition}:quicksight:{self.aws.region}"
-            f":{self.aws.account_id}:dataset/{dataset_id}"
-        )
-
-    def theme_arn(self, theme_id: str) -> str:
-        return (
-            f"arn:{self.partition}:quicksight:{self.aws.region}"
-            f":{self.aws.account_id}:theme/{theme_id}"
-        )
-
-    def prefixed(self, name: str) -> str:
-        """Return a resource ID with the configured deployment prefix.
-
-        Z.C: single-segment prefix replaces v8.x's
-        ``<resource_prefix>-<l2_instance_prefix>-<name>``. The
-        ``deployment_name`` is the operator's per-deployment
-        namespace, set explicitly in cfg.yaml (no default).
-        """
-        return f"{self.deployment_name}-{name}"
+    # DE.5 step 5 — legacy Config.tags() / .dataset_arn(id) /
+    # .theme_arn(id) / .prefixed(name) methods dropped. All callers were
+    # swept to cfg.aws.X by DE.2; those are real methods on AwsConfig.
 
     def to_yaml_dict(self) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload — every value is something safe_dump can write
         """Return a dict ``yaml.safe_dump`` can write that ``load_config``
@@ -902,6 +857,8 @@ class Config:
                 out["aws_account_id"] = aws_typed["account_id"]
             if aws_typed.get("region"):
                 out["aws_region"] = aws_typed["region"]
+            if aws_typed.get("deployment_name"):
+                out["deployment_name"] = aws_typed["deployment_name"]
         derived = bool(out.pop("datasource_arn_was_derived", False))
         out["dialect"] = self.dialect.value
         if derived:
@@ -1534,12 +1491,12 @@ def load_config(path: str | Path | None = None) -> Config:
             )
 
     return Config(
-        # DE.5 steps 3+4 — account_id + region now carried in aws=AwsConfig(...).
+        # DE.5 steps 3-5 — account_id + region + deployment_name now in aws.
         aws=AwsConfig(
             account_id=_require_str(values, "aws_account_id"),
             region=_require_str(values, "aws_region"),
+            deployment_name=_require_str(values, "deployment_name"),
         ),
-        deployment_name=_require_str(values, "deployment_name"),
         db_table_prefix=_validate_and_return_db_prefix(
             _require_str(values, "db_table_prefix")
         ),
