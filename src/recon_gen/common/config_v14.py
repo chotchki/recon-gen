@@ -478,10 +478,17 @@ def _build_auth(raw: dict[str, Any], path: Path) -> AuthConfig:
         profile=aws_block.get("profile"),
         quicksight_user_arn=aws_block.get("quicksight_user_arn"),
     )
-    # DD-side blocks; absent ⇒ None
+    # DD-side blocks; absent ⇒ None. Presence ⇒ required-field check
+    # so partial blocks (operator dropped the client_id) fail loudly
+    # with the field path, not a bare KeyError mid-handler.
     oidc_block = block.get("oidc")
     oidc = None
     if isinstance(oidc_block, dict):
+        for key in ("issuer_url", "client_id", "client_secret_env", "redirect_uri"):
+            if key not in oidc_block:
+                raise MissingFieldError(
+                    f"auth.oidc.{key} is required when auth.oidc block present"
+                )
         oidc = AuthOidcConfig(
             issuer_url=str(oidc_block["issuer_url"]),
             client_id=str(oidc_block["client_id"]),
@@ -492,6 +499,11 @@ def _build_auth(raw: dict[str, Any], path: Path) -> AuthConfig:
     session_block = block.get("session")
     session = None
     if isinstance(session_block, dict):
+        if "jwt_secret_env" not in session_block:
+            raise MissingFieldError(
+                "auth.session.jwt_secret_env is required when "
+                "auth.session block present"
+            )
         session = AuthSessionConfig(
             jwt_secret_env=str(session_block["jwt_secret_env"]),
         )
