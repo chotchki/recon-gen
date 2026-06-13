@@ -223,10 +223,19 @@ jobs:
             # with the tuned cmd. Probing `SHOW max_connections;` is the
             # cheapest definitive check.
             EFFECTIVE_MAX_CONN=$(docker exec ci-shared-pg psql -U postgres -tAc "SHOW max_connections;" 2>/dev/null | tr -d '[:space:]' || echo "0")
-            if [ "${EFFECTIVE_MAX_CONN}" != "300" ]; then
-              echo "ci-shared-pg has max_connections=${EFFECTIVE_MAX_CONN} (expected 300) — recreating with tuned args."
+            # DG.3 — also check /dev/shm size. Default Docker tmpfs is
+            # 64MB which saturates on concurrent matview refreshes /
+            # parallel queries and surfaces as
+            # ``psycopg.errors.DiskFull: could not resize shared memory
+            # segment ... No space left on device``. v13.15.1 release
+            # gate hit this on test_inv_filters.py recipient fanout
+            # KPIs. 2g is comfortable for the xdist -n 4 worker pool.
+            EFFECTIVE_SHM=$(docker exec ci-shared-pg sh -c "df -B1 /dev/shm | tail -1 | awk '{print \$2}'" 2>/dev/null || echo "0")
+            if [ "${EFFECTIVE_MAX_CONN}" != "300" ] || [ "${EFFECTIVE_SHM}" -lt 2000000000 ]; then
+              echo "ci-shared-pg has max_connections=${EFFECTIVE_MAX_CONN} (expected 300) or /dev/shm=${EFFECTIVE_SHM} bytes (expected ≥2GB) — recreating with tuned args."
               docker rm -f ci-shared-pg
               docker run -d --name ci-shared-pg \
+                --shm-size=2g \
                 -e POSTGRES_PASSWORD="${PG_PASSWORD}" \
                 -p 5432:5432 \
                 postgres:17-alpine \
@@ -235,10 +244,11 @@ jobs:
               echo "Waiting for retuned PG..."
               timeout 60 bash -c 'until docker exec ci-shared-pg pg_isready -U postgres -q; do sleep 2; done'
             else
-              echo "ci-shared-pg already has max_connections=300 — reusing in place."
+              echo "ci-shared-pg already has max_connections=300 + /dev/shm≥2GB — reusing in place."
             fi
           else
             docker run -d --name ci-shared-pg \
+              --shm-size=2g \
               -e POSTGRES_PASSWORD="${PG_PASSWORD}" \
               -p 5432:5432 \
               postgres:17-alpine \
