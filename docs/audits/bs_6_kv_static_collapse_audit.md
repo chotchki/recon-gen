@@ -84,8 +84,8 @@ query; `_config_kv` is per-deploy with 100s of rows max, cheap.
 
 ### `apps/executives/datasets.py` — 5 builders, all canonical
 
-**Headline:** Every Exec builder reads only `cfg.db_table_prefix` +
-`cfg.dialect` (excluded from L2-shape variation per rubric). Zero L2
+**Headline:** Every Exec builder reads only `cfg.db.table_prefix` +
+`cfg.db.dialect` (excluded from L2-shape variation per rubric). Zero L2
 fields baked. Already canonical — no conversion work.
 
 Builders: `build_transaction_summary_dataset`,
@@ -101,7 +101,7 @@ bake L2-shape into SQL. Per-L2 variation already absorbed at higher
 layers: L2-universe enumerations (rail names, account roles) get
 consumed *outside* the dataset SQL — as `ParameterDropDownControl
 .StaticValues` options in `app.py` or as dataset-parameter defaults set
-from `cfg.test_generator.as_of_frame()`.
+from `cfg.test.generator.as_of_frame()`.
 
 Cross-cutting: `l1_rail_universe_values`, `l1_account_role_values`,
 `l1_supersede_reason_values` in `app.py` DO read `l2_instance.X` — but
@@ -133,8 +133,8 @@ hypothesis framing (rubric notes app.py JSON-emit paths skip out).
 
 ### `apps/investigation/datasets.py` — 9 builders, all P2
 
-**Headline:** Same pattern as L1 — every builder reads `cfg.db_table_prefix`
-+ `cfg.dialect` only, with all per-L2 variation absorbed by the
+**Headline:** Same pattern as L1 — every builder reads `cfg.db.table_prefix`
++ `cfg.db.dialect` only, with all per-L2 variation absorbed by the
 upstream Investigation matviews (`inv_pair_rolling_anomalies`,
 `inv_money_trail_edges`). Investigation already IS the collapsed
 shape — the matview is the projection view, just realized as a

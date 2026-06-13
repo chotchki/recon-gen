@@ -199,6 +199,8 @@ python3 -m venv .venv
 
 ### Configure
 
+> **v14.0.0 cfg shape preview (DE phase).** The flat-field shape below is the **v13.x form** that loads today. v14.0.0 reshapes to concern-grouped (`aws:` / `db:` / `app2:` / `audit:` / `auth:` / `test:`) with `extends:` inheritance for base + per-env overlays. **In-process code already uses the v14 nested accessors** (`cfg.aws.account_id` / `cfg.db.url` etc.); yaml files migrate at DE.5 cut. Full spec + migration table: [`docs/audits/de_0_cfg_redesign.md`](docs/audits/de_0_cfg_redesign.md). Until v14.0.0 lands, use the legacy flat shape below.
+
 ```bash
 cp config.example.yaml config.yaml
 ```
@@ -286,17 +288,17 @@ out/
     <deployment_name>-*-app-info-*.json       # 2 App Info datasets per app (8 total)
 ```
 
-`<deployment_name>` comes from `cfg.deployment_name` (required field). Pick distinct values per environment (e.g. `recon-staging` vs `recon-prod`) so multiple deployments can coexist in the same QuickSight account without colliding.
+`<deployment_name>` comes from `cfg.aws.deployment_name` (required field). Pick distinct values per environment (e.g. `recon-staging` vs `recon-prod`) so multiple deployments can coexist in the same QuickSight account without colliding.
 
 ## Demo mode
 
-A deterministic demo generator seeds the four apps end-to-end so you can see them work without wiring up real data. Every app feeds two per-prefix base tables — `<db_table_prefix>_transactions` (every money-movement leg) and `<db_table_prefix>_daily_balances` (per-account end-of-day snapshots), where `<db_table_prefix>` is `cfg.db_table_prefix` (required).
+A deterministic demo generator seeds the four apps end-to-end so you can see them work without wiring up real data. Every app feeds two per-prefix base tables — `<db_table_prefix>_transactions` (every money-movement leg) and `<db_table_prefix>_daily_balances` (per-account end-of-day snapshots), where `<db_table_prefix>` is `cfg.db.table_prefix` (required).
 
 ```bash
 # Apply schema + seed to your demo database, then generate QuickSight JSON.
 # Requires: demo_database_url + dialect in config.yaml and the matching
 # extra installed (`[demo]` for Postgres, `[demo,demo-oracle]` for Oracle).
-# Per-prefix DDL + seed are emitted at apply time using cfg.db_table_prefix.
+# Per-prefix DDL + seed are emitted at apply time using cfg.db.table_prefix.
 recon-gen schema apply -c config.yaml --execute   # tables + matviews
 recon-gen data apply   -c config.yaml --execute   # 90-day baseline + plants
 recon-gen data refresh -c config.yaml --execute   # populate matviews
@@ -304,7 +306,7 @@ recon-gen json apply   -c config.yaml -o out/ --execute  # JSON + AWS deploy
 recon-gen audit apply  -c config.yaml --execute -o report.pdf  # regulator-ready PDF (optional)
 ```
 
-`schema apply --execute` creates the per-prefix base tables + matviews via `common/l2/schema.py::emit_schema(l2_instance, prefix=cfg.db_table_prefix)`. `data apply --execute` inserts the L2-shape seed data (90-day baseline + every L1 SHOULD-violation plant + the Investigation fanout / volume / chain plants). `data refresh --execute` refreshes every dependent matview in dependency order. `json apply --execute` writes a `datasource.json` derived from the database URL (Type=`POSTGRESQL` or `ORACLE`, dispatched off `dialect`), generates all QuickSight JSON to `out/`, and deploys to AWS. `audit apply --execute` queries the per-prefix L1 invariant matviews and writes a regulator-ready PDF reconciliation report (cover, executive summary, per-invariant violation tables, per-account-day Daily Statement walks, sign-off block, cryptographic provenance fingerprint) — see the [Audit Reconciliation Report handbook](https://chotchki.github.io/recon-gen/handbook/audit/) for the full reference. The `account_type` and `transfer_type` columns discriminate which app a row belongs to. See [`Schema_v6.md`](src/recon_gen/docs/Schema_v6.md) for the full feed contract, canonical type values, metadata key catalog, and ETL examples.
+`schema apply --execute` creates the per-prefix base tables + matviews via `common/l2/schema.py::emit_schema(l2_instance, prefix=cfg.db.table_prefix)`. `data apply --execute` inserts the L2-shape seed data (90-day baseline + every L1 SHOULD-violation plant + the Investigation fanout / volume / chain plants). `data refresh --execute` refreshes every dependent matview in dependency order. `json apply --execute` writes a `datasource.json` derived from the database URL (Type=`POSTGRESQL` or `ORACLE`, dispatched off `dialect`), generates all QuickSight JSON to `out/`, and deploys to AWS. `audit apply --execute` queries the per-prefix L1 invariant matviews and writes a regulator-ready PDF reconciliation report (cover, executive summary, per-invariant violation tables, per-account-day Daily Statement walks, sign-off block, cryptographic provenance fingerprint) — see the [Audit Reconciliation Report handbook](https://chotchki.github.io/recon-gen/handbook/audit/) for the full reference. The `account_type` and `transfer_type` columns discriminate which app a row belongs to. See [`Schema_v6.md`](src/recon_gen/docs/Schema_v6.md) for the full feed contract, canonical type values, metadata key catalog, and ETL examples.
 
 **PostgreSQL 17+, Oracle 19c+, or DuckDB required** for `schema apply --execute`. PG + Oracle support the SQL/JSON path syntax (`JSON_VALUE`, `JSON_QUERY`, `JSON_EXISTS`) the schema uses for `metadata` JSON columns; DuckDB uses `json_extract_string` for the equivalent reads (DuckDB's `JSON_VALUE` returns a quoted JSON form). The portable subset forbids the Postgres-only `->>` / `->` / `@>` / `?` operators and JSONB; on Oracle, also no named `WINDOW` clause and no `TIMESTAMP WITH TIME ZONE` in PK columns; on DuckDB, matviews emit as `CREATE TABLE … AS SELECT` (refreshed by re-CREATE). See `Schema_v6.md` → Forbidden SQL patterns for the full constraint matrix.
 

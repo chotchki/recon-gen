@@ -120,7 +120,7 @@ Oracle's tablespace headroom in `recon-gen/oracle-19c:local` is bigger than PG's
 
 3. **No `VACUUM FULL`.** Operator: "the underlying disk on the server is fine, so whatever is fastest is what I'd lean towards." The `DiskFull` error was about PG's POSIX shared memory segment (`/dev/shm` is a tmpfs constrained per-container, ~64MB default), not host disk. PG reclaims pages lazily but the concurrent-query working set is what hits the limit. Sweep DROPs the accumulated objects (so connections don't have to scan their definitions) — that's enough to keep `/dev/shm` from saturating. Skipping VACUUM keeps boot-prelude fast.
 
-4. **Don't switch to per-worker DBs.** Considered (each xdist worker gets its own `recon_worker_<n>` DB; CREATE/DROP on boot). Rejected: triples test boot time + breaks the existing `cfg.demo_database_url` contract every layer expects.
+4. **Don't switch to per-worker DBs.** Considered (each xdist worker gets its own `recon_worker_<n>` DB; CREATE/DROP on boot). Rejected: triples test boot time + breaks the existing `cfg.db.url` contract every layer expects.
 
 5. **Out-of-scope-but-noted: bump container `--shm-size`.** `.github/workflows/ci.yml:241-248` runs `docker run -d --name ci-shared-pg` without `--shm-size`, inheriting the 64MB default. A `--shm-size=2g` bump on container creation would raise the ceiling independent of the sweep work. Files as a follow-up after DG.2 ships — the sweep is the right architectural fix; shm-size is the belt-and-suspenders.
 

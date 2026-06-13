@@ -104,7 +104,7 @@ whatever the operator's last ETL run produced. The trainer page
 cloning from it gives the same determinism guarantee without a
 separate schema. Probe / Triage / Coverage / ETL Run / top-nav
 stop being "production-mode-vs-trainer-mode aware" — they just
-hit `cfg.db_table_prefix` always.
+hit `cfg.db.table_prefix` always.
 
 **There is no "trainer mode" as a runtime concept** (operator-locked).
 Studio is always Studio. The /training/ page is just a UI surface
@@ -141,7 +141,7 @@ the operator re-sync when they want.
 
 ### 1.2.2 etl_hook signature unchanged
 
-`etl_hook(cfg)` keeps writing into `cfg.db_table_prefix` as
+`etl_hook(cfg)` keeps writing into `cfg.db.table_prefix` as
 today. The trainer page reaches etl_hook **indirectly** — Session
 Start triggers the existing /etl/run flow (which calls etl_hook
 into the base prefix) as step 1 of its sequence, then clones
@@ -394,10 +394,10 @@ difference between "compose-and-wait" vs "iterate-freely."
 ### 2.1 cfg.yaml — single prefix → list of prefixes (or runtime expansion?)
 
 **Today** `Config.db_table_prefix: str` is the single source.
-`cfg.deployment_name` is similar (used for QS resource naming).
+`cfg.aws.deployment_name` is similar (used for QS resource naming).
 
 **Lock:** cfg.yaml shape unchanged. The /training/ page derives
-<L2>_v from `cfg.db_table_prefix` at runtime; the
+<L2>_v from `cfg.db.table_prefix` at runtime; the
 operator never types prefixes anywhere.
 
 **No mode at all.** Studio is always Studio. There is no
@@ -413,14 +413,14 @@ The base prefix (`<L2>_*`) is created by the existing `recon-gen
 schema apply --execute` flow as today; `<L2>_v_*` schema
 is created lazily by Session Start. Every other Studio surface
 (probe / triage / coverage / etl/run / top-nav / L2 editor)
-operates exactly as today — they hit `cfg.db_table_prefix`,
+operates exactly as today — they hit `cfg.db.table_prefix`,
 unaware that `v` exists.
 
 ### 2.2 App2 (HTMX dashboards) — the cheap renderer
 
 App2 reads `prefix` at request time from cfg or URL param. Survey:
 - `_studio_routes.py:976, 1589, 2325, 2668` — all sites read
-  `cfg.db_table_prefix` with a fall-through to `cache.path.stem`.
+  `cfg.db.table_prefix` with a fall-through to `cache.path.stem`.
 - `_db_fetcher.py` — same shape.
 - App data fetchers in `apps/<app>/datasets.py` take `prefix` as a
   function param.
@@ -430,7 +430,7 @@ App2 reads `prefix` at request time from cfg or URL param. Survey:
    routes. (Per DL.7 — `?prefix=` is first-class; the abandoned
    `?state=before|after` shim from the earlier draft is dropped.)
 2. Route handler resolves the URL param → active prefix → threads
-   through to data fetchers. Defaults to `cfg.db_table_prefix`
+   through to data fetchers. Defaults to `cfg.db.table_prefix`
    when the param is absent.
 3. Trainer's landing cards render the two Tour links per kind
    with `?prefix=<L2>` (Clean — base) and `?prefix=<L2>_v`
@@ -439,7 +439,7 @@ App2 reads `prefix` at request time from cfg or URL param. Survey:
 
 **Risk:** prefix is widely passed; one missed callsite means the
 toggle silently shows the wrong data. Mitigation: anti-drift test
-that walks every `cfg.db_table_prefix` reference + asserts each
+that walks every `cfg.db.table_prefix` reference + asserts each
 is reachable from a URL-param resolution path.
 
 **Cascading impact (App2):**
@@ -613,7 +613,7 @@ Out of scope (defer):
    handy do-it-all. No CLI subset; UI checkbox set IS the subset
    mechanism. Promoted to DL.11.
 3. **Probe / Triage / Coverage state during trainer use.**
-   RESOLVED — these always hit `cfg.db_table_prefix` (the base
+   RESOLVED — these always hit `cfg.db.table_prefix` (the base
    prefix). Top-nav routes too. The /training/ page is the ONLY
    surface that touches `v`. No mode-aware code paths
    anywhere else. DL.4 simplified.
@@ -642,7 +642,7 @@ Out of scope (defer):
 - **DL.1** — The trainer surface is App2-only. QS remains
   single-prefix for v1.
 - **DL.2** — cfg.yaml shape unchanged. `<base>_v` is
-  derived from `cfg.db_table_prefix` at runtime; never serialized
+  derived from `cfg.db.table_prefix` at runtime; never serialized
   to cfg.yaml.
 - **DL.3** — **TWO prefixes per L2**: `<L2>_*` (base — the existing
   production prefix; the Clean dashboard reads here) + `<L2>_v_*`
@@ -665,7 +665,7 @@ Out of scope (defer):
   concerns. Customer ETL hooks need zero changes.
 - **DL.4** — **No mode-awareness anywhere except the /training/ page.**
   Probe / Triage / Coverage / ETL Run / top-nav / L2 Editor ALL
-  hit `cfg.db_table_prefix` (the base) unconditionally — same as
+  hit `cfg.db.table_prefix` (the base) unconditionally — same as
   today. The /training/ page is the only surface that knows
   v overlay exists. Dashboards take `?prefix=` URL param so the
   Tour links can drive the operator's view to either prefix
@@ -682,7 +682,7 @@ Out of scope (defer):
   prove-it-to-yourself UX.
 - **DL.7** — **App2 `?prefix=` URL param is first-class.**
   Every `/dashboards/<app>/...` route accepts `?prefix=<value>`;
-  defaults to `cfg.db_table_prefix` when absent. Single deployment
+  defaults to `cfg.db.table_prefix` when absent. Single deployment
   supports multiple prefix views without re-deploying. This is
   the mechanism the Tour's two-link UX rides on.
 - **DL.8** — Landing UX: per-kind card carrying (1) title + 
@@ -797,7 +797,7 @@ Out of scope (defer):
 |---|---|---|
 | BV.4.0 | Operator confirmation on §6 design locks | 15 min |
 | BV.4.1 | /training/ page Session Start (invoke /etl/run into base; create `<L2>_v_*` schema; clone data from base; refresh v matviews); Re-clone button (skip /etl/run); Cleanup button | 1-2 d |
-| BV.4.2 | `/dashboards/*` accepts `?prefix=`; threading through; default to `cfg.db_table_prefix` when absent | 1 d |
+| BV.4.2 | `/dashboards/*` accepts `?prefix=`; threading through; default to `cfg.db.table_prefix` when absent | 1 d |
 | BV.4.3 | `/training/setup` streaming progress page (BTa.9 live-tail shape) | 0.5 d |
 | BV.4.4 | Diff-only Apply (DL.9) + Tour two-link wiring (DL.6) + landing checkbox UX (DL.8) | 1-1.5 d |
 | BV.4.5 | Per-kind failure cards (DL.12) + L2-staleness banner (DL.14) | 0.5 d |

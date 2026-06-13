@@ -227,7 +227,7 @@ Rejected alternatives:
 
 ## Lock 5 — `pyhanko`-missing: graceful degrade
 
-**Decision.** When `cfg.signing` is set but `import pyhanko` raises
+**Decision.** When `cfg.audit.signing` is set but `import pyhanko` raises
 `ImportError`, `audit apply --execute` emits an **unsigned PDF**
 plus a warning to stderr. It does NOT crash, and it does NOT skip
 the PDF write.
@@ -257,7 +257,7 @@ place(...)` call. If `pyhanko` is installed but the actual signing
 fails (bad key, expired cert), that still raises — those failures
 are operator misconfiguration that should surface loud.
 
-**No new code path when `cfg.signing` is None.** That's already the
+**No new code path when `cfg.audit.signing` is None.** That's already the
 no-op skip; unchanged.
 
 ---

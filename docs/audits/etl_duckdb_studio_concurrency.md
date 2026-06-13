@@ -34,7 +34,7 @@ Operator-facing flow:
 2. Operator clicks **Refresh Data** on the studio's ETL page →
    `POST /deploy` → `run_deploy_pipeline`.
 3. The pipeline's `step_1_etl_hook` calls
-   `asyncio.create_subprocess_exec(*shlex.split(cfg.etl_hook))`.
+   `asyncio.create_subprocess_exec(*shlex.split(cfg.app2.etl_hook))`.
 4. The subprocess imports `duckdb` and tries
    `duckdb.connect(<path>)`. DuckDB refuses:
    ```
@@ -98,7 +98,7 @@ hard DuckDB constraint.)
 the connection. The pool's open handle doesn't block them.
 
 `step_1_etl_hook` is the only step that spawns a separate process. Per
-the BS.4 architecture shift — `cfg.etl_hook` is an arbitrary shell
+the BS.4 architecture shift — `cfg.app2.etl_hook` is an arbitrary shell
 exec, written by the customer's ETL team — the design is "give the
 hook direct DuckDB access" rather than streaming data through Studio.
 That direct access is precisely what the parent-process lock blocks.
@@ -109,7 +109,7 @@ That direct access is precisely what the parent-process lock blocks.
 
 Close the pool's root DuckDB connection before `step_1_etl_hook`'s
 subprocess fires; reopen after. Per-dialect: only relevant when
-`cfg.dialect is Dialect.DUCKDB`. PG / Oracle don't have this
+`cfg.db.dialect is Dialect.DUCKDB`. PG / Oracle don't have this
 constraint.
 
 Surface changes:
@@ -212,7 +212,7 @@ summary = await run_deploy_pipeline(
 A unit test that:
 1. Builds a tiny DuckDB file (`tempfile` + `duckdb.connect`).
 2. Opens an `_AsyncDuckdbPool` against it.
-3. Drives `run_deploy_pipeline` with a fake `cfg.etl_hook = "python -c
+3. Drives `run_deploy_pipeline` with a fake `cfg.app2.etl_hook = "python -c
    <write a row>"` and the pool's close/reopen as the lock callbacks.
 4. Asserts: subprocess exit code 0 (would be 1 without the fix), row
    was inserted, pool still works after pipeline returns (reopen

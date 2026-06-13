@@ -1665,7 +1665,7 @@ Refresh Data:
 
 1. Truncate `<prefix>_transactions` + `<prefix>_daily_balances` +
    `<prefix>_training_state`.
-2. Re-run the ETL hook OR (when `cfg.etl_hook is None`) the
+2. Re-run the ETL hook OR (when `cfg.app2.etl_hook is None`) the
    bundled generator with `default_scenario_for` → `densify_scenario`
    → `add_broken_rail_plants` → `boost_inv_fanout_plants` (per
    `cli/_helpers.build_default_scenario`).
@@ -1687,7 +1687,7 @@ wipes both equally:
 No per-plant DELETE bookkeeping needed for either category.
 
 **The one L2-specific caveat for `uncovered_*` on real-hook
-deployments:** if `cfg.etl_hook` is wired and the hook is a
+deployments:** if `cfg.app2.etl_hook` is wired and the hook is a
 streaming source, it may immediately re-DELETE the restored rows
 on the next refresh cycle if upstream really doesn't have that
 rail/template firing. Same shape as the L1 caveat below. Side-
@@ -1697,7 +1697,7 @@ no `wire_transfer` rows, reset may not restore them. For a durable
 demo, plant + tour in a single session."
 
 Operator-facing implication: a real-hook deployment with
-`cfg.etl_hook` set re-runs the hook on reset. The hook had better
+`cfg.app2.etl_hook` set re-runs the hook on reset. The hook had better
 be deterministic (the same hook + same demo DB state in =
 same OUT). If the hook reads from a moving upstream feed, reset
 may produce different data than the baseline the Trainer planted
@@ -2057,7 +2057,7 @@ confirms / flips before BU.2 fires.
    **Default if no override:** truncate-on-restart for the first
    land. Persistence + validation is BU.7 polish.
 
-6. **Reset re-runs the operator's ETL hook when `cfg.etl_hook`
+6. **Reset re-runs the operator's ETL hook when `cfg.app2.etl_hook`
    is wired — acceptable or surprising?**
    §4.5 documents the implication. A real hook may pull from a
    moving upstream feed; reset re-running the hook may produce
@@ -2068,7 +2068,7 @@ confirms / flips before BU.2 fires.
    probably out of scope.
    **Default if no override:** ship reset-re-runs-hook + the
    side-panel caption that documents the behavior. Real-hook
-   deployments are rare on the Trainer surface (`cfg.etl_hook is
+   deployments are rare on the Trainer surface (`cfg.app2.etl_hook is
    None` is the canonical demo); deferred-snapshot is a follow-on
    if operators hit the moving-feed footgun.
 
@@ -2236,7 +2236,7 @@ confirms / flips before BU.2 fires.
     flips if they prefer a different shape; default stands
     until then.
 
-20. **L2FT Hygiene plants — gate on `cfg.etl_hook is None` like
+20. **L2FT Hygiene plants — gate on `cfg.app2.etl_hook is None` like
     the other `demo_etl_gaps.py` plants?**
     The existing 5 L2 plants gate on `etl_hook is None` so a
     real-deploy ETL doesn't get demo overlay corruption. The 4

@@ -6,7 +6,7 @@
 
 - L2 mutation routes (POST/PUT/DELETE on `/l2_shape/*`) — **always mounted.** Filesystem perms (the sandbox-exec profile) is the security layer.
 - `POST /deploy` — **always mounted.** Demo cfg has dummy AWS creds → fails at the AWS-push step, which is acceptable.
-- `PUT /data/knobs/etl_hook` — **gated on `cfg.etl_hook is not None`** (already the natural semantics; demo cfg omits etl_hook). NOT gated on a demo flag.
+- `PUT /data/knobs/etl_hook` — **gated on `cfg.app2.etl_hook is not None`** (already the natural semantics; demo cfg omits etl_hook). NOT gated on a demo flag.
 - Create / Edit / Delete affordances — **always visible.** Demo visitors SHOULD edit (auto-reset on restart is the contract).
 - `.studio-state.yaml` placement — **env-driven (`STUDIO_STATE_DIR`)** unconditionally. CU.2's wrapper script exports it; default falls back to `<cfg.parent>` when unset.
 
@@ -31,7 +31,7 @@ Source-of-truth: file at `96a63867`.
 
 | Line | Current shape | After CU.3 |
 | ---: | --- | --- |
-| 306–328 | `def _demo_mode_banner(demo_mode: bool) -> str:` returning hardcoded read-only banner | **Replace with `_banner(cfg)`** — reads `cfg.banner_text` (new cfg field, see §New cfg knobs). Hardcoded "Read-only demo" text was wrong (edits will work post-CU.3); demo cfg sets `banner_text: "Edits reset on restart"`. |
+| 306–328 | `def _demo_mode_banner(demo_mode: bool) -> str:` returning hardcoded read-only banner | **Replace with `_banner(cfg)`** — reads `cfg.app2.banner_text` (new cfg field, see §New cfg knobs). Hardcoded "Read-only demo" text was wrong (edits will work post-CU.3); demo cfg sets `banner_text: "Edits reset on restart"`. |
 | 332, 410, 417 | `_render_home_page(..., demo_mode=False, ...)` — `add_link = "" if demo_mode else (...)` | Drop `demo_mode` param. Always render the `+ Add` link. |
 | 498, 509, 517 | Singleton Edit affordance suppressed in demo_mode | Drop the branch; always render the Edit link. |
 | 546 | `demo_banner = _demo_mode_banner(demo_mode)` in home render | Replace with `_banner(cfg)` (read from cfg). |
@@ -44,7 +44,7 @@ Source-of-truth: file at `96a63867`.
 | 4038, 4111, 4112 | `deploy_controls = "" if demo_mode else (...)` | **Always render Deploy button.** Per CU header lock: /deploy stays mounted, fails noisily on dummy AWS creds. |
 | 4216, 4275, 4287, 4454, 4518, 4536, 4554, 4607 | `make_studio_routes(..., demo_mode=False, ...)` threading | Drop param from `make_studio_routes` signature + all call sites. |
 | 5262, 5271 | `make_editor_routes(cache, demo_mode=demo_mode, ...)` | Drop kwarg. |
-| 5571–5575 | `if not demo_mode: routes.append(Route("/data/knobs/etl_hook", ...))` | **Replace with `if cfg.etl_hook is not None:`** — already the right semantics: a PUT to invoke etl_hook is meaningless without a configured hook. Demo cfg omits etl_hook → route auto-skips. |
+| 5571–5575 | `if not demo_mode: routes.append(Route("/data/knobs/etl_hook", ...))` | **Replace with `if cfg.app2.etl_hook is not None:`** — already the right semantics: a PUT to invoke etl_hook is meaningless without a configured hook. Demo cfg omits etl_hook → route auto-skips. |
 | 5720–5721 | `if not demo_mode: routes.append(Route("/deploy", ...))` | **Always mount.** Demo cfg's dummy AWS creds let it fail at AWS-step, surface that to the visitor without breaking the route table. |
 
 ## Disposition map — `_studio_editor_routes.py`
@@ -167,7 +167,7 @@ aws_region: "us-east-1"
 deployment_name: "recon-demo-sasquatch_pr"
 db_table_prefix: "demo_sasquatch_pr"
 banner_text: "Edits reset on next restart"   # CU.3 — new field
-# NOTE: no `etl_hook:` — `cfg.etl_hook is None` → PUT route auto-skips
+# NOTE: no `etl_hook:` — `cfg.app2.etl_hook is None` → PUT route auto-skips
 # NOTE: no `principal_arns:` — /deploy will fail at AWS step regardless
 ```
 
@@ -180,7 +180,7 @@ Sandbox profile is unchanged from CU.1 (already DuckDB + STUDIO_STATE_DIR writab
 3. Click `+ Add` on Accounts → form renders → POST succeeds → account appears.
 4. Restart sasquatch launchd job → home page no longer shows the added account.
 5. Click Deploy → request fires → noisy 503 surfacing AWS-step failure with dummy creds.
-6. Verify `PUT /data/knobs/etl_hook` returns 405 (route not mounted; `cfg.etl_hook` is None).
+6. Verify `PUT /data/knobs/etl_hook` returns 405 (route not mounted; `cfg.app2.etl_hook` is None).
 7. Attempt to overshoot the `ulimit -f` cap: POST a 60MB blob's worth of accounts → server errors at file-write boundary, browser surfaces a 500. KeepAlive respawn picks up cleanly.
 
 ## Open questions / nothing held
@@ -191,7 +191,7 @@ None. Locks from the user (2026-06-09):
 - /deploy enabled (dummy AWS → noisy fail acceptable)
 - etl_hook unconfigured (cfg-driven, not flag-driven)
 - Trainer knobs unchanged (already always-enabled)
-- Banner kept (operators want it for legalese / disclaimers); driven by `cfg.banner_text`
+- Banner kept (operators want it for legalese / disclaimers); driven by `cfg.app2.banner_text`
 - Wrapper does the overlay copy (no `l2_overlay_dir` cfg knob; just `--l2` pointing at tmpdir)
 - `ulimit -f 51200` cap (~50MB per file)
 - Existing restart cadence (nightly + manual `workflow_dispatch`)

@@ -3,7 +3,7 @@
 **Status: LOCKED 2026-05-08.** Supersedes the standalone `y_2_gate_h_1_0_qs_user_arn_spike.md` (which is preserved for the join-key research; this doc is the canonical decision for both gates).
 
 **Recommendation summary:**
-- **Auth path (i.0):** Long-lived IAM-user access keys (candidate C from `i.0`'s candidate list), referenced from `~/.aws/credentials` via a named profile, with the profile name carried in `cfg.auth.aws_profile`. New IAM user `quicksight-gen-local` mirrors the existing CI role's policy + `quicksight:ListUsers` (the one extra action h.1 needs).
+- **Auth path (i.0):** Long-lived IAM-user access keys (candidate C from `i.0`'s candidate list), referenced from `~/.aws/credentials` via a named profile, with the profile name carried in `cfg.auth.aws.profile`. New IAM user `quicksight-gen-local` mirrors the existing CI role's policy + `quicksight:ListUsers` (the one extra action h.1 needs).
 - **QS user ARN derivation (h.1):** Approach A (`sts:GetCallerIdentity` → `quicksight:ListUsers` filter on `PrincipalId`) for local; explicit cfg override for CI (current GH secret stays).
 - **Config shape:** new `auth:` block in `run/config.<dialect>.yaml`. No new files.
 
@@ -54,6 +54,8 @@ The h.1.0 spike locked **A + cfg override**. Combined with the C auth path, that
 This means the IAM policy on the new local user must add **one** action beyond the CI role's policy: `quicksight:ListUsers`.
 
 ## 5. Config shape (cfg-only, no new files)
+
+> **v14.0.0 preview (DE phase).** The shape below is the **v13.x form**. v14.0.0 reshapes the auth block under concern-grouped nesting (`auth.aws.profile` / `auth.aws.quicksight_user_arn`) alongside Phase DD's new `auth.oidc:` + `auth.session:` blocks. **In-process code already reads via the v14 nested accessors** (`cfg.auth.aws.profile` / `cfg.auth.aws.quicksight_user_arn`); yaml shape migrates at DE.5 cut. Spec: `docs/audits/de_0_cfg_redesign.md`.
 
 New `auth:` block in `run/config.<dialect>.yaml`. Same nesting style as the existing `signing:` block. `run/` is gitignored and current cfg already carries DB passwords inline, so the secrecy posture is identical.
 
@@ -116,7 +118,7 @@ aws quicksight register-user \
 # 6. Grant the new QS user permissions on existing dashboards (via
 #    principal_arns in cfg or QS UI Folder permissions)
 
-# 7. Set cfg.auth.aws_profile = "quicksight-gen-local" in
+# 7. Set cfg.auth.aws.profile = "quicksight-gen-local" in
 #    run/config.{postgres,oracle}.yaml
 
 # 8. Verify
@@ -188,32 +190,32 @@ Mirror of `Github_e2e_testing/github-e2e-policy` + one new action (`quicksight:L
 ```python
 def _resolve_aws_profile(cfg: Config) -> str | None:
     """Returns the profile name to inject as AWS_PROFILE, or None for ambient."""
-    return cfg.auth.aws_profile if cfg.auth else None
+    return cfg.auth.aws.profile if cfg.auth else None
 
 
 def _derive_qs_user_arn(cfg: Config, region: str) -> str:
     """Returns the QS user ARN.
 
-    Override path (cfg.auth.quicksight_user_arn): wins, no API call.
+    Override path (cfg.auth.aws.quicksight_user_arn): wins, no API call.
     Derivation path: STS GetCallerIdentity → QS ListUsers → match
     PrincipalId == "federated/iam/<UserId>".
     """
-    if cfg.auth and cfg.auth.quicksight_user_arn:
-        return cfg.auth.quicksight_user_arn
+    if cfg.auth and cfg.auth.aws.quicksight_user_arn:
+        return cfg.auth.aws.quicksight_user_arn
     sts = boto_factory.client("sts")
     qs = boto_factory.client("quicksight", region_name=region)
     user_id = sts.get_caller_identity()["UserId"]
     target_principal = f"federated/iam/{user_id}"
     paginator = qs.get_paginator("list_users")
     for page in paginator.paginate(
-        AwsAccountId=cfg.aws_account_id, Namespace="default",
+        AwsAccountId=cfg.aws.account_id, Namespace="default",
     ):
         for u in page["UserList"]:
             if u["PrincipalId"] == target_principal:
                 return u["Arn"]
     raise OperatorError(
         f"AWS principal UserId {user_id!r} does not match any QuickSight user "
-        f"in account {cfg.aws_account_id} namespace 'default'. Either "
+        f"in account {cfg.aws.account_id} namespace 'default'. Either "
         f"authenticate as a registered QS user, or set "
         f"`auth.quicksight_user_arn:` in cfg yaml."
     )
@@ -228,7 +230,7 @@ def setup_variant(variant: str, cfg: Config) -> dict[str, str]:
     if profile:
         env_overrides["AWS_PROFILE"] = profile
     if "qs_arn" in _LAYER_DEPS.get(layer_being_dispatched, frozenset()):
-        env_overrides["QS_E2E_USER_ARN"] = _derive_qs_user_arn(cfg, cfg.aws_region)
+        env_overrides["QS_E2E_USER_ARN"] = _derive_qs_user_arn(cfg, cfg.aws.region)
     return env_overrides
 ```
 

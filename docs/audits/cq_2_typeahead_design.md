@@ -165,9 +165,9 @@ Endpoint dispatch (server.py):
 ```python
 hint = registry.picker_matview_hint(dataset_id)
 sql, binds = (
-    account_picker_search_sql_matview(hint.matview, hint.select_expr, dialect=cfg.dialect)
+    account_picker_search_sql_matview(hint.matview, hint.select_expr, dialect=cfg.db.dialect)
     if hint is not None
-    else account_picker_search_sql(base_sql, column, dialect=cfg.dialect)
+    else account_picker_search_sql(base_sql, column, dialect=cfg.db.dialect)
 )
 ```
 
