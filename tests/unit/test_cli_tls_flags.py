@@ -213,6 +213,10 @@ def test_run_html_server_omits_tls_kwargs_when_unset(
     cfg = MagicMock()
     cfg.aws.deployment_name = "test"
     cfg.db.table_prefix = "test"
+    # DE.4 — explicitly disable cfg.app2.tls fallback so this test
+    # genuinely exercises "no TLS anywhere" (MagicMock auto-vivifies
+    # cfg.app2.tls.cert_path otherwise, which would fire the fallback).
+    cfg.app2.tls = None
 
     with patch.dict("sys.modules", {"uvicorn": fake_uvicorn}):
         with patch(

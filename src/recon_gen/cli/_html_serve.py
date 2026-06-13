@@ -230,6 +230,17 @@ def run_html_server(
             f"--app {app_name} needs a real database."
         )
 
+    # DE.4 — cfg.app2.tls fallback. CLI flags win, then env vars (wired
+    # at the Click layer via envvar=), then cfg.app2.tls.{cert_path,
+    # key_path} if the operator set the block. Half-set in cfg yaml is
+    # impossible (the loader raises); half-set across cfg + CLI is
+    # operator error but the pairing check below still catches it.
+    if tls_cert is None and tls_key is None:
+        tls_cfg = getattr(getattr(cfg, "app2", None), "tls", None)
+        if tls_cfg is not None:
+            tls_cert = tls_cfg.cert_path
+            tls_key = tls_cfg.key_path
+
     # DC.1 — TLS pairing constraint. Both or neither. Half-set TLS is
     # operator error (typo in the cfg / env), not a graceful HTTP
     # fallback — the operator's intent was HTTPS, so fail loudly.

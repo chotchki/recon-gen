@@ -160,8 +160,9 @@ class _DbView:
 
 @dataclass(frozen=True)
 class _App2TlsView:
-    """``cfg.app2.tls.*`` proxy — DC.1 TLS termination paths. Absent
-    on legacy cfg until DE.4 wires cfg-fallback; always None today."""
+    """``cfg.app2.tls.*`` proxy — DC.1 TLS termination paths.
+    Populated from ``cfg.app2_tls`` when an ``app2.tls:`` block exists
+    in the cfg yaml (DE.4)."""
     cert_path: str
     key_path: str
 
@@ -232,6 +233,37 @@ class _AuthAwsView:
     quicksight_user_arn: str | None
 
 
+# DE.4 — phase DC + DD cfg block carriers on the legacy Config.
+# These mirror the v14 ``config_v14.AuthOidcConfig`` / ``AuthSessionConfig``
+# / ``App2TlsConfig`` shapes; defined here to avoid the circular import
+# config.py ↔ config_v14.py would otherwise create.
+
+
+@dataclass(frozen=True)
+class OidcConfig:
+    """``auth.oidc:`` block — Phase DD's OIDC client wiring.
+    ``client_secret_env`` names the env var holding the secret per
+    [[feedback_no_credential_friction]]; secret never lives in cfg yaml."""
+    issuer_url: str
+    client_id: str
+    client_secret_env: str
+    redirect_uri: str
+    scopes: tuple[str, ...] = ("openid", "email", "profile")
+
+
+@dataclass(frozen=True)
+class SessionConfig:
+    """``auth.session:`` block — Phase DD's JWT session signing config."""
+    jwt_secret_env: str
+
+
+@dataclass(frozen=True)
+class App2TlsConfig:
+    """``app2.tls:`` block — Phase DC's TLS termination paths."""
+    cert_path: str
+    key_path: str
+
+
 @dataclass(frozen=True)
 class AuthConfig:
     """Local-runner AWS auth + QS embed-signing identity.
@@ -254,9 +286,15 @@ class AuthConfig:
     explicitly when authed as a principal that doesn't match the desired
     QS embed user (e.g., local-root authed but want test-user; CI's per-job
     cfg with the secret value baked in).
+
+    `oidc` / `session` — Phase DD's OIDC + JWT session blocks. Loader
+    populates these when ``auth.oidc:`` / ``auth.session:`` blocks
+    appear in the cfg yaml.
     """
     aws_profile: str | None = None
     quicksight_user_arn: str | None = None
+    oidc: OidcConfig | None = None
+    session: SessionConfig | None = None
 
     @property
     def aws(self) -> _AuthAwsView:
@@ -541,6 +579,12 @@ class Config:
     # default 100 minus 3 superuser slots = ~97 budget). Oracle's
     # connection cost is higher; integrators rarely run pools >25.
     app2_db_pool_size: int = 10
+    # DE.4 — Phase DC's TLS termination paths. When set, the
+    # `recon-gen studio` / `recon-gen dashboards` CLIs fall back to
+    # these when --tls-cert / --tls-key are absent (CLI flags still
+    # win). None ⇒ HTTP-only posture (local dev / behind reverse
+    # proxy).
+    app2_tls: App2TlsConfig | None = None
     # Y.2.gate.l — RDS identifiers for the start/stop lifecycle.
     # `./run_tests.sh up aws` / `down aws` / `status` read these to
     # know which Aurora cluster + Oracle instance to act on. Local
@@ -666,14 +710,19 @@ class Config:
     def app2(self) -> _App2View:
         """``cfg.app2.*`` — App2 / Studio / Dashboards server knobs.
 
-        ``tls`` is None on legacy cfg until DE.4 wires the
-        ``app2.tls.{cert_path, key_path}`` block as cfg-fallback to
-        DC.1's CLI flags; today operators set TLS via ``--tls-cert``
-        / ``--tls-key`` directly."""
+        ``tls`` carries the DC.1 TLS termination paths when the
+        ``app2.tls:`` block was set in cfg yaml (DE.4 loader wires it);
+        CLI flags still win over the cfg fallback."""
+        tls_view = None
+        if self.app2_tls is not None:
+            tls_view = _App2TlsView(
+                cert_path=self.app2_tls.cert_path,
+                key_path=self.app2_tls.key_path,
+            )
         return _App2View(
             etl_hook=self.etl_hook,
             banner_text=self.banner_text,
-            tls=None,
+            tls=tls_view,
             db_pool_size=self.app2_db_pool_size,
         )
 
@@ -841,6 +890,12 @@ class Config:
         ):
             if out.get(opt) is None:
                 out.pop(opt, None)
+        # DE.4 — app2_tls is the IN-MEMORY field name; YAML shape is
+        # nested under app2.tls:. Reshape on emit so the round-trip
+        # holds (loader reads app2.tls: and writes back app2_tls).
+        app2_tls_out = out.pop("app2_tls", None)
+        if app2_tls_out is not None:
+            out["app2"] = {"tls": app2_tls_out}
 
         # test_generator: omit when every field is at its default
         # (loader resolves a missing key to ``TestGeneratorConfig()``).
@@ -892,6 +947,8 @@ _CONFIG_ALLOWED_KEYS: frozenset[str] = frozenset({
     "qs_disable_pg_ssl",
     # CU.3 — optional top-of-page banner text.
     "banner_text",
+    # DE.4 — Phase DC app2.tls: block (cert_path + key_path).
+    "app2",
 })
 
 # Z.C — `instance` removed: the L2 yaml no longer has an `instance:` field
@@ -1164,11 +1221,61 @@ def load_config(path: str | Path | None = None) -> Config:
         auth_dict: dict[str, object] = {
             str(k): v for k, v in auth_typed.items()
         }
-        unknown_auth = set(auth_dict) - {"aws_profile", "quicksight_user_arn"}
+        unknown_auth = set(auth_dict) - {
+            "aws_profile", "quicksight_user_arn", "oidc", "session",
+        }
         if unknown_auth:
             raise ValueError(
                 f"auth block contains unknown keys: {sorted(unknown_auth)}. "
-                f"Allowed: aws_profile, quicksight_user_arn."
+                f"Allowed: aws_profile, quicksight_user_arn, oidc, session."
+            )
+        # DE.4 — auth.oidc: block (Phase DD). All four required fields
+        # raise with field path when block present but incomplete.
+        oidc_cfg: OidcConfig | None = None
+        raw_oidc = auth_dict.get("oidc")
+        if isinstance(raw_oidc, dict):
+            oidc_typed = cast(dict[Any, Any], raw_oidc)
+            oidc_dict: dict[str, object] = {
+                str(k): v for k, v in oidc_typed.items()
+            }
+            for key in (
+                "issuer_url", "client_id", "client_secret_env", "redirect_uri",
+            ):
+                if key not in oidc_dict:
+                    raise ValueError(
+                        f"auth.oidc.{key} is required when auth.oidc block present"
+                    )
+            scopes_raw = oidc_dict.get("scopes", ["openid", "email", "profile"])
+            if isinstance(scopes_raw, (list, tuple)):
+                scopes_iter = cast(list[Any] | tuple[Any, ...], scopes_raw)
+                scopes_tuple = tuple(str(s) for s in scopes_iter)
+            else:
+                raise ValueError(
+                    f"auth.oidc.scopes must be a list of strings; "
+                    f"got {type(scopes_raw).__name__}"
+                )
+            oidc_cfg = OidcConfig(
+                issuer_url=str(oidc_dict["issuer_url"]),
+                client_id=str(oidc_dict["client_id"]),
+                client_secret_env=str(oidc_dict["client_secret_env"]),
+                redirect_uri=str(oidc_dict["redirect_uri"]),
+                scopes=scopes_tuple,
+            )
+        # DE.4 — auth.session: block (Phase DD).
+        session_cfg: SessionConfig | None = None
+        raw_session = auth_dict.get("session")
+        if isinstance(raw_session, dict):
+            session_typed = cast(dict[Any, Any], raw_session)
+            session_dict: dict[str, object] = {
+                str(k): v for k, v in session_typed.items()
+            }
+            if "jwt_secret_env" not in session_dict:
+                raise ValueError(
+                    "auth.session.jwt_secret_env is required when "
+                    "auth.session block present"
+                )
+            session_cfg = SessionConfig(
+                jwt_secret_env=str(session_dict["jwt_secret_env"]),
             )
         auth = AuthConfig(
             aws_profile=(
@@ -1181,6 +1288,8 @@ def load_config(path: str | Path | None = None) -> Config:
                 if auth_dict.get("quicksight_user_arn") is not None
                 else None
             ),
+            oidc=oidc_cfg,
+            session=session_cfg,
         )
 
     raw_tagging = values.get("tagging_enabled", True)
@@ -1360,6 +1469,36 @@ def load_config(path: str | Path | None = None) -> Config:
             f"app2_db_pool_size must be ≥ 1; got {pool_size}."
         )
 
+    # DE.4 — app2.tls: block (Phase DC). Required pair when block present.
+    app2_tls_cfg: App2TlsConfig | None = None
+    raw_app2 = values.get("app2")
+    if isinstance(raw_app2, dict):
+        app2_typed = cast(dict[Any, Any], raw_app2)
+        app2_dict: dict[str, object] = {
+            str(k): v for k, v in app2_typed.items()
+        }
+        unknown_app2 = set(app2_dict) - {"tls"}
+        if unknown_app2:
+            raise ValueError(
+                f"app2 block contains unknown keys: {sorted(unknown_app2)}. "
+                f"Allowed: tls."
+            )
+        raw_tls = app2_dict.get("tls")
+        if isinstance(raw_tls, dict):
+            tls_typed = cast(dict[Any, Any], raw_tls)
+            tls_dict: dict[str, object] = {
+                str(k): v for k, v in tls_typed.items()
+            }
+            for key in ("cert_path", "key_path"):
+                if key not in tls_dict:
+                    raise ValueError(
+                        f"app2.tls.{key} is required when app2.tls block present"
+                    )
+            app2_tls_cfg = App2TlsConfig(
+                cert_path=str(tls_dict["cert_path"]),
+                key_path=str(tls_dict["key_path"]),
+            )
+
     return Config(
         aws_account_id=_require_str(values, "aws_account_id"),
         aws_region=_require_str(values, "aws_region"),
@@ -1378,6 +1517,7 @@ def load_config(path: str | Path | None = None) -> Config:
         tagging_enabled=raw_tagging,
         studio_enabled=raw_studio_enabled,
         app2_db_pool_size=pool_size,
+        app2_tls=app2_tls_cfg,
         aws_pg_cluster_id=_opt_str(values, "aws_pg_cluster_id"),
         aws_oracle_instance_id=_opt_str(values, "aws_oracle_instance_id"),
         qs_disable_pg_ssl=bool(values.get("qs_disable_pg_ssl", False)),
