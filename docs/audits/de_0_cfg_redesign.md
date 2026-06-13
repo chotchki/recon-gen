@@ -15,6 +15,9 @@
 - **Test-only fields default to optional + collapsed.** Operators on prod-deploy postures never see them.
 - **DC + DD coordinate** — DC.1's TLS block lands as `app2.tls.*`; DD.1's OIDC + session blocks land into `auth:`.
 
+- Comment: There is an implicit choice today that based on the precence of the database_url vs qs_datasource_arn whether the qs_datasource gets created or not. I think we should make this explicit (whether the datasource is created at that name or just used). We need this toggle because we can't test the entire datasource connection path due to AWS costs.
+  - **Addressed below in "Datasource lifecycle: explicit `aws.datasource.mode`".** The implicit presence-of-key dispatch becomes an explicit enum (`create` / `adopt` / `skip`). The `skip` value covers the no-AWS-cost test path. Locked at DE.0 exit.
+
 ## Pre-DE field inventory
 
 `grep "field" src/recon_gen/common/config.py` + cfg.yaml inspection. 22 top-level fields + 3 nested blocks.
@@ -130,6 +133,38 @@ if "demo_database_url" in raw:
 ```
 
 Migration table for v14.0.0 release notes covers every legacy → new field path. The 4-6 `run/config.*.yaml` files in the repo migrate by hand as part of DE.1.
+
+## Datasource lifecycle: explicit `aws.datasource.mode`
+
+Today the runtime makes an implicit decision: presence of `datasource_arn` ⇒ adopt that ARN; absence ⇒ create-or-update from cfg + `demo_database_url`. Two problems with the implicit dispatch:
+
+1. **No way to say "use the connection metadata but skip the datasource API call entirely."** Tests that exercise the QS-deploy path pay AWS API costs (and risk test-env drift) on every run even when they don't actually need the datasource — they just need the cfg shape to validate.
+2. **The dispatch is opaque.** Reading the cfg, you can't tell whether `datasource_arn` absence means "create me one" or "the operator forgot to fill it in."
+
+Lock at DE.0 exit:
+
+```yaml
+aws:
+  datasource:
+    mode: create   # | adopt | skip
+    arn: arn:aws:...   # required iff mode=adopt; ignored otherwise
+    # name + connection metadata stay implicit from cfg.deployment_name +
+    # db.url; only the lifecycle differs by mode.
+```
+
+- **`create`** (default for prod-deploy postures): generator creates the QS datasource if absent, updates if present. Today's no-arn behavior.
+- **`adopt`**: generator reads the explicit `arn` from cfg + uses it as-is. Today's with-arn behavior. Useful when the operator pre-provisioned the datasource (e.g. a shared one across deployments).
+- **`skip`**: generator does NOT call the QS datasource API. Tests that only exercise dataset / analysis / dashboard generation (the bulk of the test surface) set this to avoid the API cost. The dataset emission still needs a placeholder ARN to bind to; the runner stamps a fake ARN in `runs/<id>/cfg/qs.yaml` for the skip case.
+
+Migration mapping for v14.0.0:
+
+| Pre-DE | Post-DE |
+|---|---|
+| no `datasource_arn` (implicit create) | `aws.datasource.mode: create` |
+| `datasource_arn: arn:...` (implicit adopt) | `aws.datasource.mode: adopt` + `aws.datasource.arn: arn:...` |
+| (no equivalent) | `aws.datasource.mode: skip` (new option) |
+
+The runner's existing `_write_qs_cfg_for_thin` path (which materializes `runs/<id>/cfg/qs.yaml` per `[[project_cb10_qs_to_docker_pg_constraints]]`) is the natural place to stamp `mode: skip` for tests that don't need the datasource API exercise.
 
 ## Open question for DE.0 spike exit
 

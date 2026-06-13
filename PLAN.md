@@ -531,7 +531,7 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
 - [x] DG.0 - **Audit + lock fix shape.** Output: `docs/audits/dg_0_db_hygiene_audit.md`. Per `[[feedback_no_silent_defer]]` + `[[feedback_cheapest_validation_must_fire]]`: measure the per-cell schema accumulation in a fresh-container baseline, propose the loud-fail + scorched-earth-at-boot pattern, lock the PG and Oracle SQL. Per `[[feedback_spike_before_locking_implementation]]` — prototype the boot sweep against a stale container before committing.
 - [x] DG.1 - **Fail-loud teardown.** `tests/e2e/_isolation.py::isolated_cfg` teardown re-raises (or collects + reports at session end) instead of `print + swallow`. Per `[[feedback_no_xfail_to_sweep_under_rug]]` — no more silent skips on the bookkeeping path.
 - [x] DG.2 - **Container-boot scorched-earth sweep.** Runner step that drops every `_<suffix>` schema (PG) + every `recon_*` user (Oracle) before the test layer fires. Idempotent; safe to re-run.
-- [ ] DG.3 - **Triage the 12 v13.15.1 failures.** With hygiene fixed, re-evaluate which of the 12 cells were genuine bugs vs DiskFull-cascade. Particular focus on `test_bo_1_daily_statement_picks_reconcile_per_role[qs]` (ZBASubAccount / WireSettlementSuspense dropdown miss) + `test_inv_dashboard_structure_matches_tree[qs]` (Recipient Fanout tree mismatch) — those look pre-existing-real, not cascade.
+- [x] DG.3 - **Triage the 12 v13.15.1 failures.** With hygiene fixed, re-evaluate which of the 12 cells were genuine bugs vs DiskFull-cascade. Particular focus on `test_bo_1_daily_statement_picks_reconcile_per_role[qs]` (ZBASubAccount / WireSettlementSuspense dropdown miss) + `test_inv_dashboard_structure_matches_tree[qs]` (Recipient Fanout tree mismatch) — those look pre-existing-real, not cascade.
 - [ ] DG.4 - **Phase exit + release.** Sweep to PLAN_ARCHIVE.md. CI green is the exit gate.
 
 ## Phase DH - QuickSight resource hygiene — dataset title-prefix + full-coverage cleanup (draft 2026-06-13)
@@ -560,4 +560,4 @@ These are related concerns — both about end-to-end resource lifecycle hygiene 
 ## Backlog (not yet phased)
 
 - **date-model.plant-days_ago-bounded — replace plant days_ago: int with days_into_window bounded type** — added 2026-06-12.
-- **QS Anchor account picker option DOM shape not matched by _OPTION_SELECTOR** — added 2026-06-13.
+- **QS Anchor account picker MUI Autocomplete shows noOptions despite 139 options known** — added 2026-06-13.

@@ -2289,8 +2289,23 @@ def set_dropdown_value(
         # ``[role="listbox"]`` — waiting only on the listbox path
         # timed out even though the option was visible in the DOM (per
         # the failure screenshot in tests/e2e/screenshots/_failures/).
-        search_input.fill(value, timeout=timeout_ms)
-        # DG.3 — same explicit-Search-button path
+        # DG.3 followup — type the NAME portion of the typed
+        # ``<name> (<id>)`` label, not the full string. QS's
+        # MUI Autocomplete behaves differently on different pickers:
+        # some auto-narrow on the full label (Drift Account picker);
+        # others (Account Network's Anchor account picker, 139
+        # accounts) return ``MuiAutocomplete-noOptions`` for the full
+        # string but match correctly when only the name prefix is
+        # typed. Splitting at the first `` (`` covers both cases:
+        # values without parens get typed verbatim; values shaped
+        # ``<name> (<id>)`` get just the name portion. The
+        # ``_OPTION_SELECTOR`` wait then locates the FULL label among
+        # the narrowed options (the BO.1 exact-text-match locator at
+        # the click site picks the right one even with sibling
+        # prefixes per the L1 Drift Account picker pattern).
+        narrow_query = value.split(" (", 1)[0]
+        search_input.fill(narrow_query, timeout=timeout_ms)
+        # DG.3 — explicit-Search-button path
         # ``narrow_dropdown_options_by_query`` uses. Some QS picker
         # popovers (Transactions DS_L1_TX_IDS Transfer with its 8k+
         # row universe) render a "Search" button instead of

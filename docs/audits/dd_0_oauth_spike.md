@@ -48,6 +48,16 @@ Per `[[project_cb10_qs_to_docker_pg_constraints]]`:
 
 The `5556` value chosen because it's Dex's documented default + doesn't collide with existing forwards (5433 PG, 1522 Oracle, 8765 Studio).
 
+- Comment: I've setup hotchkiss.io:5556 to point to CI and hotchkiss.io:5557 to point to the local dev box.
+  - **Acknowledged.** Two-port split is cleaner than co-tenancy. CI runs go through `:5556` (talks to the WSL2 self-hosted runner's Dex); local-dev iteration through `:5557` (talks to the dev-machine's Dex). `auth.oidc.issuer_url` differs by posture — `cfg.local.yaml` carries `https://hotchkiss.io:5557/dex`, `cfg.ci.yaml` (or the runner-materialized `runs/<id>/cfg/qs.yaml`) carries `:5556`. DD.4 wires this into the runner's per-tier cfg materialization the same way it already handles QS DataSource URLs (per `[[project_cb10_qs_to_docker_pg_constraints]]`).
+- Comment: The credentials against Dex MUST be scrambled on each run.
+  - **Acknowledged + locked.** Mirrors the existing `BX.248` pattern for PG + Oracle passwords (random per-`workflow_run`; CI step generates with `openssl rand -hex 14`; in-container password reset after container adoption). Same 4-step Dex pattern for DD.4:
+    1. CI step generates random hex for `DEX_CLIENT_SECRET` + `DEX_USER_PASSWORD` + `DEX_STATIC_USER_HASH` (bcrypted from the password).
+    2. Dex container started/adopted with those env vars (Dex supports env-var substitution in its yaml config via `$ENV_VAR`).
+    3. Force-reset the container's client secret + user via `dex` admin commands (or yaml-rewrite) if adopted.
+    4. The runner writes the same secret into the per-run cfg (`auth.oidc.client_secret_env` → `RECON_GEN_OIDC_CLIENT_SECRET`) so App2 dials in with the matching credential.
+  Operators run with persistent IdPs (Okta, Entra) where this doesn't apply — the scrambling is CI-test-fixture-specific.
+
 ## Cfg shape (post-DD.1, pre-DE.4 rename)
 
 ```yaml

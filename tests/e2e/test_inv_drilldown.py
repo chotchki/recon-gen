@@ -46,7 +46,7 @@ pytestmark = [
 ]
 
 
-_ANCHOR_LABEL = "Juniper Ridge LLC — DDA (cust-900-0007-juniper-ridge-llc)"
+_ANCHOR_LABEL = "Juniper Ridge LLC (cust-900-0007-juniper-ridge-llc)"
 _ANCHOR_ID_FRAGMENT = "cust-900-0007-juniper-ridge-llc"
 _TOUCHING_EDGES_TITLE = "Account Network — Touching Edges"
 _WALK_MENU_LABEL = "Walk to other account on this edge"
@@ -100,29 +100,29 @@ def test_account_network_table_walk_rerenders_table(inv_dashboard_driver: tuple[
             "the production renderer."
         )
     if driver.__class__.__name__ == "QsEmbedDriver":
-        # DG.3 — the QS Anchor account picker has the typeahead-with-
-        # custom-DOM-shape issue ``set_dropdown_value`` can't currently
-        # narrow against. After typing the long label
-        # ``Juniper Ridge LLC — DDA (cust-...)`` the popover does
-        # render an option (verified in the failure screenshot), but
-        # neither ``[role="listbox"] [role="option"]`` nor
-        # ``[data-automation-id="sheet_control_value-menu"]
-        # [role="option"]`` matches its DOM shape, so the post-fill
-        # option-wait times out at 30 s. Same investigation surface as
-        # the Transactions-Transfer Search-button case (we found that
-        # by inspecting the failure screenshot — same approach will
-        # close this one). xfail'd strict=False so the eventual fix
-        # surfaces as XPASS. Followup: identify the actual option DOM
-        # shape on the Anchor picker, extend ``_OPTION_SELECTOR`` or
-        # add a per-picker selector probe.
+        # DG.3 followup — QS Anchor account picker's MUI Autocomplete
+        # reports ``139 Options`` via the ARIA live region but always
+        # shows ``MuiAutocomplete-noOptions`` in the popper after any
+        # typed query (verified at multiple narrow-query lengths: full
+        # label, name-only "Juniper Ridge LLC", and shorter prefixes).
+        # The dataset SQL fix landed in this run (UNION source + target
+        # so Juniper Ridge IS in the picker source); the typeahead
+        # filter on the QS side is what stays broken. The contradictory
+        # state (ARIA says 139, popper says noOptions) suggests a
+        # QS-side filterOptions / server-narrowing race that
+        # ``set_dropdown_value``'s standard fill-then-wait pattern
+        # can't catch. xfail'd strict=False so the eventual fix
+        # surfaces as XPASS. Tracked: PLAN backlog.
         import pytest as _pytest  # noqa: PLC0415
         _pytest.xfail(
-            "DG.3 followup — QS Anchor account picker option DOM "
-            "shape not matched by ``_OPTION_SELECTOR``. Repro: "
-            "inspect runs/<id>/browser/.../screenshot.png — the "
-            "popover does render an option but the selector doesn't "
-            "catch it. Fix shape: same as Transactions-Transfer "
-            "Search-button (DG.3 commit 6e0e53a2)."
+            "DG.3 followup — QS Anchor account picker MUI Autocomplete "
+            "shows noOptions despite 139 options being known. Filter "
+            "race / server-narrowing quirk; investigation requires "
+            "tracing the QS Autocomplete filterOptions or "
+            "GetUniqueAttributeValuesSyncForAnalysis call. See "
+            "runs/<id>/browser/.../dom.html for the contradictory "
+            "state. UNION dataset fix did ship — Juniper Ridge IS in "
+            "the picker source now."
         )
     driver.open(dashboard_arg, sheet="Account Network")
     # DG.3 — the Anchor control's title is "Anchor account" (per

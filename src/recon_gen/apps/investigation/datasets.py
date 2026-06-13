@@ -293,17 +293,33 @@ def _anetwork_accounts_sql(prefix: str) -> str:
     #
     # Oracle quirk: ``AS`` on a derived-table alias raises ORA-00907.
     # The bare ``) ranked`` form is portable.
+    # DG.3 followup — the picker source must UNION source-side AND
+    # target-side accounts. Pre-DG.3 this SELECT only emitted
+    # ``source_account_*`` rows, so convergence-anchor accounts
+    # (Juniper Ridge LLC in sasquatch_pr) never appeared — operators
+    # couldn't pick the very accounts they were investigating. The
+    # column stays ``source_display`` for the LinkedValues column
+    # binding's sake; the UNION just widens the value universe.
     source_disp = account_display_expr(
         "source_account_name", "source_account_id",
+    )
+    target_disp = account_display_expr(
+        "target_account_name", "target_account_id",
     )
     return (
         f"SELECT source_display\n"
         f"FROM (\n"
         f"    SELECT\n"
-        f"        {source_disp} AS source_display,\n"
+        f"        display AS source_display,\n"
         f"        SUM(hop_amount) AS network_total\n"
-        f"    FROM {prefix}_inv_money_trail_edges\n"
-        f"    GROUP BY {source_disp}\n"
+        f"    FROM (\n"
+        f"        SELECT {source_disp} AS display, hop_amount\n"
+        f"        FROM {prefix}_inv_money_trail_edges\n"
+        f"        UNION ALL\n"
+        f"        SELECT {target_disp} AS display, hop_amount\n"
+        f"        FROM {prefix}_inv_money_trail_edges\n"
+        f"    ) all_sides\n"
+        f"    GROUP BY display\n"
         f"    ORDER BY SUM(hop_amount) DESC\n"
         f") ranked\n"
     )
