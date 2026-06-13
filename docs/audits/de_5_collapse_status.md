@@ -1,15 +1,35 @@
-# DE.5 — collapse status (paused for operator decision)
+# DE.5 — collapse status (strangler pattern in progress)
 
 **Date:** 2026-06-13
-**Phase:** DE.5 (paused at "ready to swap" boundary)
-**Status:** Augmented `config_v14.py` to full parity with legacy; example yaml rewritten to v14; remaining yaml + Python migrations sized + waiting on operator direction.
+**Phase:** DE.5 (strangler steps 1-2 landed; per-field drops are the next iterations)
+**Status:** Operator chose path 1 + clarified the strangler pattern: drop a flat field, see what screams, fix, repeat. Field-by-field is mechanical + parallelizable. Two strangler steps shipped to main + green; remaining per-field drops follow the same pattern.
+
+## Operator's pattern (locked 2026-06-13)
+
+> "could we just break each proxy field by field, see what screams, migrate that
+> (cleaning up structure if needed) and we know we're done when the proxies are gone
+> and can delete them?"
+>
+> "scream == complain loudly but keep working, until the end when we drop it"
+>
+> "the old loader could take the same path, keep old until nothing calls it"
+
+The mechanic each iteration:
+1. Drop ONE flat field (or one block's worth of flats) from `Config`.
+2. Pyright + tests scream at construction sites + missed reads.
+3. Fix the screams (update loader, `make_test_config` translation, direct callers).
+4. Green → push → next field.
+
+Decouples in-memory collapse from yaml hard-break: legacy loader keeps parsing flat yaml + materializes the nested Config. Operator yamls + test fixtures don't need migration. Yaml hard-break (v15.0.0?) can come later when ready.
 
 ## What landed
 
 | Commit | What |
 |---|---|
 | `c542e0c1` (DE.5 sub-A) | Augmented `config_v14` toward parity: AwsConfig gains `prefixed`/`tags`/`dataset_arn`/`theme_arn` methods; AuditSigningConfig gains lazy env-loaded `passphrase()`; TestGeneratorConfig expanded to full 15-field surface + `as_of_frame`; App2Config gains `db_pool_size`; loader gains `_apply_env_overrides` (RECON_GEN_* env vars on nested dict) + auto-derives `datasource.arn` when `mode=create`. |
-| (uncommitted) | `config.example.yaml` rewritten to v14 nested shape with `extends:`/auth/audit/app2/test block examples + comments documenting the v13→v14 migration. |
+| `b297e42f` (DE.5 sub-B preview) | `config.example.yaml` rewritten to v14 nested shape with `extends:`/auth/audit/app2/test block examples. |
+| `dd225a70` (DE.5 strangler step 1) | `Config.aws` promoted from `@property` to a real `aws: AwsConfig` field populated by `__post_init__` from the legacy flat fields. No behavior change; pyright now sees it as a real field. |
+| `00aab99f` (DE.5 strangler step 2) | Sweep extension: rename `_TEST_CFG.deployment_name` / `peek_cfg.aws_account_id` / etc. → `.aws.X` across non-`cfg`-named Config instances. The DE.2 sweep tool matched only `cfg\.X`; this one matches any identifier with skip-list for nested block names. 5 false-positive files (where `.partition()` / `.tags()` / etc. were unrelated string-method calls) restored from git. |
 
 ## What's blocked
 
@@ -34,7 +54,34 @@ Mechanical sweep would TRY but each layer has structural rewrites (not pure text
 
 **Total estimated wall time:** 4-6 hours autonomous, with substantial unknown-unknowns in the make_test_config sweep + runner fix-ups.
 
-## Three paths for operator decision
+## Per-field iteration plan (the remaining DE.5 work)
+
+Each iteration is ONE commit + push + pre-push db-layer validation. Operator's "scream + fix" pattern:
+
+| Step | Drop | Expected screams |
+|---|---|---|
+| 3 | `aws_account_id: str` flat field on Config | `make_test_config(aws_account_id=...)` callsites; loader `Config(aws_account_id=...)` |
+| 4 | `aws_region: str` | same |
+| 5 | `deployment_name: str` | same |
+| 6 | `datasource_arn: str \| None` + `datasource_arn_was_derived` | `cli/json.py:101` reads `cfg.datasource_arn_was_derived` — translate to `cfg.aws.datasource.mode == "create"` |
+| 7 | `principal_arns: list[str]` | tests using legacy list mutation; the tuple form is enforced |
+| 8 | `extra_tags: dict[str, str]` | same |
+| 9 | `tagging_enabled: bool` | low — mostly settled via DE.2 sweep |
+| 10 | `qs_disable_pg_ssl: bool` | low |
+| 11 | `aws_pg_cluster_id: str \| None` + `aws_oracle_instance_id: str \| None` | low |
+| 12 | DB-block flat fields (`db_table_prefix`, `demo_database_url`, `dialect`, `default_l2_instance`, `app2_db_pool_size`) | same shape as AWS block |
+| 13 | App2-block flat fields (`etl_hook`, `banner_text`, `app2_tls`) | same |
+| 14 | Audit-block flat fields (`signing`) | same |
+| 15 | Test-block flat field (`test_generator`) | same |
+| 16 | `studio_enabled` drop entirely (DE.0: absence of app2: block = studio off) | callsites in cli/studio.py + common/html/render.py + test_config_loader.py |
+| 17 | Drop legacy `partition` / `tags` / `dataset_arn` / `theme_arn` / `prefixed` methods on Config (already unused per DE.2) | none expected |
+| 18 | Delete `config_v14.py` + sweep its imports to `from recon_gen.common.config import` | 4 import statements |
+| 19 | RELEASE_NOTES.md v14.0.0 entry + PLAN.md → PLAN_ARCHIVE.md sweep | none |
+| 20 | Version bump + tag `v14.0.0` + push | **OPERATOR-GATED** |
+
+Per the operator's "parallelizable" note: steps 3-11 are independent of each other (different fields, different callers). Once an agent confirms the pattern works for step 3, steps 4-11 can run concurrently in separate worktrees with the same mechanic — each touches a tiny subset of the codebase + commits independently.
+
+## Three paths for operator decision (HISTORICAL — operator chose path 1 + clarified strangler)
 
 ### 1. Hard v14.0.0 — push through all of DE.5 now
 
