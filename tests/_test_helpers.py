@@ -74,8 +74,15 @@ def make_test_config(**overrides: Any) -> Config:
       generated DB DDL; pin to a real prefix when it does.
     - ``dialect=Dialect.ORACLE`` — exercise the Oracle SQL branch.
     """
+    # DE.5 step 3 — translate legacy ``aws_account_id`` kwarg → nested
+    # ``aws=AwsConfig(account_id=...)``. Subsequent steps will do the
+    # same for aws_region / deployment_name / etc. as those flats are
+    # dropped from Config.
+    from recon_gen.common.config import AwsConfig  # noqa: PLC0415
+    account_id = overrides.pop("aws_account_id", _TEST_ACCOUNT)
+
     base: dict[str, Any] = {
-        "aws_account_id": _TEST_ACCOUNT,
+        "aws": AwsConfig(account_id=account_id),
         "aws_region": _TEST_REGION,
         # Z.C: required Config fields. Tests that don't assert on
         # rendered resource IDs / DB DDL accept these as no-op defaults.
@@ -88,7 +95,7 @@ def make_test_config(**overrides: Any) -> Config:
     if "aws_region" in overrides and "datasource_arn" not in overrides:
         region = overrides["aws_region"]
         base["datasource_arn"] = (
-            f"arn:aws:quicksight:{region}:{_TEST_ACCOUNT}:datasource/test-ds"
+            f"arn:aws:quicksight:{region}:{account_id}:datasource/test-ds"
         )
     base.update(overrides)
     return Config(**base)

@@ -24,6 +24,7 @@ from recon_gen.common.cleanup import (
 )
 from recon_gen.common.config import (
     AuthConfig,
+    AwsConfig,
     Config,
     SigningConfig,
     TestGeneratorConfig,
@@ -33,8 +34,12 @@ from recon_gen.common.sql import Dialect
 
 def _make_cfg(**overrides: object) -> Config:
     """Build a minimal-but-complete legacy ``Config`` for proxy tests."""
+    # DE.5 step 3 — aws_account_id moved into aws=AwsConfig(account_id=...).
+    aws_kwargs: dict[str, object] = {
+        "account_id": overrides.pop("aws_account_id", "123456789012"),
+    }
     defaults: dict[str, object] = {
-        "aws_account_id": "123456789012",
+        "aws": AwsConfig(**aws_kwargs),  # pyright: ignore[reportArgumentType]: dict[str, object] kwarg surface
         "aws_region": "us-east-1",
         "deployment_name": "test-deploy",
         "db_table_prefix": "test_deploy",

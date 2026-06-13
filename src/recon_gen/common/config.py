@@ -64,19 +64,27 @@ class DatasourceConfig:
 
 @dataclass(frozen=True)
 class AwsConfig:
-    """``cfg.aws.*`` proxy — AWS deploy / QS deploy / cleanup fields.
+    """``cfg.aws.*`` — AWS deploy / QS deploy / cleanup fields.
     Carries the ARN-synthesis helpers that depend solely on AWS fields
-    (partition, account_id, region, deployment_name)."""
-    account_id: str
-    region: str
-    deployment_name: str
-    principal_arns: tuple[str, ...]
-    extra_tags: tuple[tuple[str, str], ...]
-    tagging_enabled: bool
-    qs_disable_pg_ssl: bool
-    pg_cluster_id: str | None
-    oracle_instance_id: str | None
-    datasource: DatasourceConfig
+    (partition, account_id, region, deployment_name).
+
+    DE.5 — every field has a default so partial construction
+    (``AwsConfig(account_id=X)``) is legal during the strangler
+    period. ``Config.__post_init__`` blends partial AwsConfigs the
+    caller supplies with the legacy flat fields that are still
+    backing the remaining attrs."""
+    account_id: str = ""
+    region: str = ""
+    deployment_name: str = ""
+    principal_arns: tuple[str, ...] = ()
+    extra_tags: tuple[tuple[str, str], ...] = ()
+    tagging_enabled: bool = True
+    qs_disable_pg_ssl: bool = False
+    pg_cluster_id: str | None = None
+    oracle_instance_id: str | None = None
+    datasource: DatasourceConfig = field(
+        default_factory=lambda: DatasourceConfig(mode="create", arn=None),
+    )
 
     @property
     def partition(self) -> str:
@@ -463,7 +471,10 @@ class TestGeneratorConfig:
 
 @dataclass
 class Config:
-    aws_account_id: str
+    # DE.5 step 3 — ``aws_account_id`` flat field dropped. Callers pass
+    # ``aws=AwsConfig(account_id="...")``; ``__post_init__`` blends with
+    # the remaining flat fields. Loader + ``make_test_config`` already
+    # translate. Direct ``Config(aws_account_id=...)`` callers updated.
     aws_region: str
     # Z.C — Per-deploy QS namespace. Replaces v8.x's ``resource_prefix``
     # (defaulted ``qs-gen``) + ``l2_instance_prefix`` (stamped from the
@@ -523,20 +534,14 @@ class Config:
     # cfg.auth.aws_profile is not None`` reduce cleanly to
     # ``cfg.auth.aws.profile is not None`` post-sweep.
     auth: AuthConfig = field(default_factory=AuthConfig)
-    # DE.5 — ``aws`` is now a real ``AwsConfig`` field, not a @property
-    # rebuilt every access. ``init=False`` so callers don't pass it
-    # directly yet (legacy flat fields still drive construction; the
-    # __post_init__ derives this from them). Operator's strangler
-    # pattern: real field today, callers migrate to construct via
-    # ``aws=AwsConfig(...)`` over subsequent commits, flat fields shrink
-    # to nothing + get dropped.
-    aws: AwsConfig = field(init=False, default_factory=lambda: AwsConfig(
-        account_id="", region="", deployment_name="",
-        principal_arns=(), extra_tags=(),
-        tagging_enabled=False, qs_disable_pg_ssl=False,
-        pg_cluster_id=None, oracle_instance_id=None,
-        datasource=DatasourceConfig(mode="create", arn=None),
-    ))
+    # DE.5 step 3 — ``aws`` is now ``init=True``. Callers pass
+    # ``aws=AwsConfig(account_id="...")``; ``__post_init__`` blends in
+    # the remaining flat fields (aws_region / deployment_name / etc.)
+    # until those flats get dropped in subsequent steps. When the
+    # caller doesn't pass ``aws=`` explicitly, the default empty
+    # AwsConfig fires + __post_init__ raises (account_id="" is the
+    # "not provided" sentinel).
+    aws: AwsConfig = field(default_factory=AwsConfig)
     # Set by ``__post_init__``: True iff ``datasource_arn`` was *derived*
     # from ``demo_database_url`` (we own the QS datasource resource and
     # emit ``out/datasource.json``), False iff the operator supplied an
@@ -738,28 +743,32 @@ class Config:
         return _TestView(generator=self.test_generator)
 
     def __post_init__(self) -> None:
+        # DE.5 step 3 — account_id no longer has a flat field; it MUST
+        # come from caller-supplied aws=AwsConfig(account_id=...).
+        if not self.aws.account_id:
+            raise ValueError(
+                "Config requires aws=AwsConfig(account_id=...). The legacy "
+                "``aws_account_id`` flat kwarg was dropped in DE.5 step 3."
+            )
+        account_id = self.aws.account_id
         # If demo_database_url is set but datasource_arn is not, derive it
         # — and record that we own the resulting datasource resource.
         if self.datasource_arn is None and self.demo_database_url is not None:
             ds_id = self.prefixed("demo-datasource")
             self.datasource_arn = (
                 f"arn:{self.partition}:quicksight:{self.aws_region}"
-                f":{self.aws_account_id}:datasource/{ds_id}"
+                f":{account_id}:datasource/{ds_id}"
             )
             self.datasource_arn_was_derived = True
         if self.datasource_arn is None:
             raise ValueError(
                 "datasource_arn is required unless demo_database_url is set."
             )
-        # DE.5 — populate the ``aws`` real field from the legacy flat
-        # fields. The old @property def aws rebuilt on every access;
-        # caching as a field doesn't change behavior but makes the
-        # field-by-field migration tractable (callers can pass
-        # aws=AwsConfig(...) explicitly later; once nobody depends on
-        # the flat-field path, the flats get dropped and __post_init__
-        # stops syncing).
+        # DE.5 step 3 — blend caller-supplied ``aws.account_id`` with the
+        # still-legacy flat fields (region / deployment_name / etc.).
+        # Subsequent steps drop more flats; this overlay logic shrinks.
         self.aws = AwsConfig(
-            account_id=self.aws_account_id,
+            account_id=account_id,
             region=self.aws_region,
             deployment_name=self.deployment_name,
             principal_arns=tuple(self.principal_arns),
@@ -840,13 +849,13 @@ class Config:
     def dataset_arn(self, dataset_id: str) -> str:
         return (
             f"arn:{self.partition}:quicksight:{self.aws_region}"
-            f":{self.aws_account_id}:dataset/{dataset_id}"
+            f":{self.aws.account_id}:dataset/{dataset_id}"
         )
 
     def theme_arn(self, theme_id: str) -> str:
         return (
             f"arn:{self.partition}:quicksight:{self.aws_region}"
-            f":{self.aws_account_id}:theme/{theme_id}"
+            f":{self.aws.account_id}:theme/{theme_id}"
         )
 
     def prefixed(self, name: str) -> str:
@@ -878,11 +887,16 @@ class Config:
         the operator supplied it.
         """
         out: dict[str, Any] = asdict(self)  # typing-smell: ignore[explicit-any]: asdict returns dict[str, Any]
-        # DE.5 — `aws` is a derived field (built from flats in __post_init__).
-        # Strip it so the emitted yaml stays in the legacy flat shape that
-        # the loader knows how to parse; the round-trip rebuilds aws in
-        # __post_init__ from the flats.
-        out.pop("aws", None)
+        # DE.5 step 3 — `aws` carries the only-caller-provided fields
+        # (currently just `account_id`); emit those back to flat-yaml
+        # keys for round-trip compatibility with the legacy loader.
+        # As steps 4+ migrate more fields into aws, more entries shift
+        # from out["aws_X"] to out["aws"]["X"] on emit.
+        aws_out = out.pop("aws", None)
+        if isinstance(aws_out, dict):
+            aws_typed = cast(dict[str, Any], aws_out)
+            if aws_typed.get("account_id"):
+                out["aws_account_id"] = aws_typed["account_id"]
         derived = bool(out.pop("datasource_arn_was_derived", False))
         out["dialect"] = self.dialect.value
         if derived:
@@ -1515,7 +1529,10 @@ def load_config(path: str | Path | None = None) -> Config:
             )
 
     return Config(
-        aws_account_id=_require_str(values, "aws_account_id"),
+        # DE.5 step 3 — account_id now carried in aws=AwsConfig(...).
+        # Other aws_* flats are still flat fields on Config until their
+        # respective step-by-step drops.
+        aws=AwsConfig(account_id=_require_str(values, "aws_account_id")),
         aws_region=_require_str(values, "aws_region"),
         deployment_name=_require_str(values, "deployment_name"),
         db_table_prefix=_validate_and_return_db_prefix(

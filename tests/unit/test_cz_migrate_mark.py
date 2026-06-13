@@ -31,7 +31,7 @@ import pytest
 from click.testing import CliRunner
 
 from recon_gen.cli import main
-from recon_gen.common.config import Config
+from recon_gen.common.config import AwsConfig, Config
 from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.migrate_mark import (
@@ -544,7 +544,7 @@ def test_pre_flight_auto_marks_when_etl_hook_is_none(
     db_path = tmp_path / "cz6.duckdb"
     _seed_unstamped_db(db_path)
     cfg = Config(
-        aws_account_id="111111111111",
+        aws=AwsConfig(account_id="111111111111"),
         aws_region="us-east-1",
         deployment_name="cz6-test",
         db_table_prefix=_PREFIX,
@@ -578,7 +578,7 @@ def test_pre_flight_refuses_auto_mark_when_etl_hook_configured(
     db_path = tmp_path / "cz6.duckdb"
     _seed_unstamped_db(db_path)
     cfg = Config(
-        aws_account_id="111111111111",
+        aws=AwsConfig(account_id="111111111111"),
         aws_region="us-east-1",
         deployment_name="cz6-test",
         db_table_prefix=_PREFIX,
@@ -621,7 +621,7 @@ def test_pre_flight_silent_no_op_on_clean_db(tmp_path: Path) -> None:
     conn.close()
 
     cfg = Config(
-        aws_account_id="111111111111",
+        aws=AwsConfig(account_id="111111111111"),
         aws_region="us-east-1",
         deployment_name="cz6-test",
         db_table_prefix=_PREFIX,
@@ -645,7 +645,7 @@ def test_pre_flight_silent_when_base_tables_missing(
     duckdb.connect(str(db_path)).close()
 
     cfg = Config(
-        aws_account_id="111111111111",
+        aws=AwsConfig(account_id="111111111111"),
         aws_region="us-east-1",
         deployment_name="cz6-test",
         db_table_prefix=_PREFIX,
@@ -686,7 +686,7 @@ def _load_spec_example() -> "Any":
 def _step_2_wipe_cfg(db_path: Path, *, etl_hook: str | None) -> Config:
     """Config bound to a DuckDB tempfile + the requested etl_hook state."""
     return Config(
-        aws_account_id="111111111111",
+        aws=AwsConfig(account_id="111111111111"),
         aws_region="us-east-1",
         deployment_name="cz6-test",
         db_table_prefix=_PREFIX,

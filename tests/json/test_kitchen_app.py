@@ -284,7 +284,7 @@ class TestEmissionRoundTrip:
 # L.1.12 — Validation hooks audit
 # ---------------------------------------------------------------------------
 
-from recon_gen.common.config import Config as _Cfg
+from recon_gen.common.config import AwsConfig, Config as _Cfg
 from recon_gen.common.tree import (
     Analysis as _An,
     App as _A,
@@ -306,7 +306,7 @@ class TestValidationHooksAudit:
 
     # Z.C — deployment_name + db_table_prefix are required cfg fields.
     _CFG = _Cfg(
-        aws_account_id="111122223333",
+        aws=AwsConfig(account_id="111122223333"),
         aws_region="us-west-2",
         deployment_name="recon-kitchen",
         db_table_prefix="kitchen",

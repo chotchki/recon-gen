@@ -32,7 +32,7 @@ from recon_gen.common.cleanup import (  # pyright: ignore[reportUnknownVariableT
     _collect_stale,
     _read_managed_tags,
 )
-from recon_gen.common.config import Config
+from recon_gen.common.config import AwsConfig, Config
 
 
 # -- A minimal stub that mimics the QuickSight client surface ----------------
@@ -402,7 +402,7 @@ def _patched_boto3_client(monkeypatch: pytest.MonkeyPatch, stub: Any) -> None:
 def _make_cfg(tagging_enabled: bool = True) -> Config:
     # Z.C — deployment_name + db_table_prefix are now required cfg fields.
     return Config(
-        aws_account_id="111",
+        aws=AwsConfig(account_id="111"),
         aws_region="us-east-1",
         deployment_name="qs-test",
         db_table_prefix="test",

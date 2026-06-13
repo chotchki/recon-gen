@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Callable, cast
 
-from recon_gen.common.config import Config
+from recon_gen.common.config import AwsConfig, Config
 from recon_gen.common.sql.dialect import Dialect
 from tests._marks import Tier, tier
 
@@ -33,7 +33,7 @@ def _minimal_cfg(dialect: Dialect, *, demo_url: str | None = None) -> Config:
     the bridge never touches.
     """
     return Config(
-        aws_account_id="000000000000",
+        aws=AwsConfig(account_id="000000000000"),
         aws_region="us-east-1",
         deployment_name="recon-test",
         db_table_prefix="recon_test",

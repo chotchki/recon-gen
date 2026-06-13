@@ -993,12 +993,12 @@ def _build_app(app_name: str) -> App:
     Used for ``render_dataflow`` — only needs the analysis structure
     (sheets + visuals + dataset refs), not a real datasource.
     """
-    from recon_gen.common.config import Config
+    from recon_gen.common.config import AwsConfig, Config
     from recon_gen.common.l2 import default_l2_instance
 
     spec_example = default_l2_instance()
     cfg = Config(
-        aws_account_id="000000000000",
+        aws=AwsConfig(account_id="000000000000"),
         aws_region="us-east-2",
         deployment_name="qs-gen",
         db_table_prefix="spec_example",

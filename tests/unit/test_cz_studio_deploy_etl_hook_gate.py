@@ -37,7 +37,7 @@ import pytest
 starlette = pytest.importorskip("starlette")
 TestClient = pytest.importorskip("starlette.testclient").TestClient
 
-from recon_gen.common.config import Config
+from recon_gen.common.config import AwsConfig, Config
 from recon_gen.common.db import (
     connect_demo_db,
     execute_script,
@@ -70,7 +70,7 @@ def writable_l2_yaml(tmp_path: Path) -> Iterator[Path]:
 def _duckdb_cfg(tmp_path: Path, **overrides: object) -> Config:
     db_path = tmp_path / "demo.duckdb"
     base = Config(
-        aws_account_id="111122223333",
+        aws=AwsConfig(account_id="111122223333"),
         aws_region="us-east-1",
         deployment_name="recon-test",
         db_table_prefix="test",

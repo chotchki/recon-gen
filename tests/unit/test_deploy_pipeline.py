@@ -25,9 +25,10 @@ from typing import Any
 
 import pytest
 
-from recon_gen.common.config import Config
+from recon_gen.common.config import AwsConfig, Config
 from recon_gen.common.db import connect_demo_db, duckdb_path, execute_script, fetch_one_required, make_demo_database_url
 from recon_gen.common.config import (
+    AwsConfig,
     TestGeneratorConfig,
 )
 from recon_gen.common.l2.deploy_pipeline import (
@@ -53,7 +54,7 @@ from recon_gen.common.sql import Dialect
 
 def _base_cfg() -> Config:
     return Config(
-        aws_account_id="111122223333",
+        aws=AwsConfig(account_id="111122223333"),
         aws_region="us-east-1",
         # Z.C — Config requires deployment_name + db_table_prefix.
         # spec_example matches the bundled L2 fixture used downstream.
@@ -75,7 +76,7 @@ def _duckdb_cfg(tmp_path: Path) -> Config:
     """Config bound to a fresh DuckDB tempfile for orchestrator tests."""
     db_path = tmp_path / "demo.duckdb"
     return Config(
-        aws_account_id="111122223333",
+        aws=AwsConfig(account_id="111122223333"),
         aws_region="us-east-1",
         # Z.C — Config requires deployment_name + db_table_prefix.
         # spec_example matches the bundled L2 fixture used downstream.

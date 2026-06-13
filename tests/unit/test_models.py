@@ -60,7 +60,7 @@ from recon_gen.common.cleanup import (
     MANAGED_TAG_KEY,
     MANAGED_TAG_VALUE,
 )
-from recon_gen.common.config import Config
+from recon_gen.common.config import AwsConfig, Config
 from tests._test_helpers import make_test_config
 from recon_gen.common.datasource import build_datasource
 
@@ -634,7 +634,7 @@ class TestBuildDatasourceOracle:
 class TestConfigDatasourceArnDerivation:
     def test_derived_from_demo_url(self):
         cfg = Config(
-            aws_account_id="111122223333",
+            aws=AwsConfig(account_id="111122223333"),
             aws_region="us-west-2",
             # Z.C — required cfg fields.
             deployment_name="recon-derived",
@@ -648,7 +648,7 @@ class TestConfigDatasourceArnDerivation:
 
     def test_explicit_arn_takes_precedence(self):
         cfg = Config(
-            aws_account_id="111122223333",
+            aws=AwsConfig(account_id="111122223333"),
             aws_region="us-west-2",
             deployment_name="recon-explicit",
             db_table_prefix="explicit",
@@ -662,7 +662,7 @@ class TestConfigDatasourceArnDerivation:
         import pytest
         with pytest.raises(ValueError, match="datasource_arn"):
             Config(
-                aws_account_id="123",
+                aws=AwsConfig(account_id="123"),
                 aws_region="us-east-1",
                 deployment_name="recon-fail-test",
                 db_table_prefix="fail_test",
