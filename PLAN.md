@@ -414,7 +414,7 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
   - [x] DB.1.3 - KPI Sparkline `Visibility=HIDDEN` (don't plumb data source yet — operator-locked 2026-06-12; tree's hardcoded VISIBLE was schema-validation appeasement only, no actual trend data wired. Future enhancement: App2 ⊇ QS richer KPI graphics with TrendGroups + trend renderer.)
   - [x] DB.1.4 - DB.1.4 LineChart Type=AREA/STACKED_AREA parity
 - [x] DB.2 - **Completeness gate.** At `App` (or `Analysis`) construction, walk every Visual + cross-check emitted-attribute set against a registry of "App2-consumed attribute keys". Mismatch raises `ValueError` with the offending Visual / attribute / path. The registry is the typed source of truth; adding a Visual attribute later forces the author to add a registry entry (so the gap can't sneak back in).
-- [ ] DB.3 - **Cold-read v5 parity verify.** Visual side-by-side (QS embed + App2) of every Visual kind across 4 apps; confirm no divergence beyond the ENHANCEMENT set in `PARITY_BREAKS`. Output: `docs/audits/db_3_parity_verify.md`.
+- [x] DB.3 - **Cold-read v5 parity verify.** Visual side-by-side (QS embed + App2) of every Visual kind across 4 apps; confirm no divergence beyond the ENHANCEMENT set in `PARITY_BREAKS`. Output: `docs/audits/db_3_parity_verify.md`.
 - [ ] DB.4 - **Phase exit + v13.16.x release cut.** Bundle DB into one release notes entry. Bump 13.15.x → 13.16.0 (minor if any user-visible visual rendering changes; patch if only the gate lands without behavior change). Operator authorize-at-cut per `[[feedback_always_ask_before_release_cut]]`. Sweep DB to PLAN_ARCHIVE.md.
 
 ## Phase DC - HTTPS support for studio / dashboards (draft 2026-06-12)
