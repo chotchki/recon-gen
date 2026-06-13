@@ -2094,6 +2094,17 @@ def _open_control_dropdown(page: Page, control_title: str, timeout_ms: int) -> N
         f'[data-automation-id="sheet_control"]'
         f'[data-automation-context="{control_title}"]'
     )
+    # DG.3 — two-stage wait so controls in a wrapped/below-viewport
+    # row reach visible state. Sheets with many controls (Transactions
+    # has 5+ — Account, Transfer, Status, Origin, Transfer Type) push
+    # the later controls into a second row that sits below the initial
+    # viewport scroll position. The prior single ``state="visible"``
+    # wait timed out at 15 s because the control was attached but not
+    # in the viewport. Wait for ``attached`` (cheap; DOM presence),
+    # scroll into view, then ``visible`` (still required — QS lazy-
+    # paints controls until they're in view).
+    page.wait_for_selector(card_selector, timeout=timeout_ms, state="attached")
+    page.locator(card_selector).first.scroll_into_view_if_needed(timeout=timeout_ms)
     page.wait_for_selector(card_selector, timeout=timeout_ms, state="visible")
     # Dispatch on whichever trigger this control rendered (small option
     # universe vs large + search-enabled). Both render the popover
@@ -2150,21 +2161,49 @@ def _open_control_dropdown(page: Page, control_title: str, timeout_ms: int) -> N
         '[data-automation-id="sheet_control_search_results_dropdown-menu"] input',
         '[data-automation-id="dropdown-search_search_input"] input',
     )
+    # DG.3 — bumped 1_000ms → 5_000ms. Transactions' 8k+ transfer_id
+    # picker takes >1 s to mount its MUI Autocomplete search input on
+    # cold deploy (specifically the legacy-vs-modern dispatch races
+    # with QS's first-load delay; without the nudge below the listbox
+    # never lazy-mounts and the option-wait at the end of this
+    # function times out at 15 s). 5 s is still cheap for the
+    # SIMPLE-variant short-circuit case (no search input mounts at
+    # all there; we waste 5 s on each probe before falling through to
+    # the no-nudge path, but SIMPLE variants are the small option
+    # universe so the option-wait succeeds without the nudge anyway).
+    saw_search_input = False
     for search_input_selector in search_input_selectors:
         try:
             page.wait_for_selector(
-                search_input_selector, timeout=1_000, state="visible",
+                search_input_selector, timeout=5_000, state="visible",
             )
             page.locator(search_input_selector).first.click(timeout=timeout_ms)
             page.keyboard.press("ArrowDown")
+            saw_search_input = True
             break
         except _PWTimeout:
             continue  # Try the next selector; fall through if neither matches.
-    # Wait for at least one ``[role="option"]`` under either popover
-    # shape OR loose in a ``[role="listbox"]`` (some controls put
-    # options directly under the popover without listbox role). The
-    # global ``[role="listbox"]`` clause is the safety net when the
-    # popover container omits ``data-automation-context``.
+    # DG.3 — for search-variant pickers with an empty-seed typeahead
+    # (e.g. Transactions' DS_L1_TX_IDS Transfer picker — 8k+
+    # transfer_id options, no seed-page shown until something is
+    # typed), the listbox stays empty after click+ArrowDown. The
+    # subsequent ``narrow_dropdown_options_by_query`` call fills the
+    # search input — THAT'S when options appear. The
+    # ``_open_control_dropdown`` contract is "popover is open + ready
+    # for input"; option-presence is the CALLER's responsibility
+    # (``read_dropdown_options`` / ``narrow_dropdown_options_by_query``
+    # already have their own waits + try/except for the typed-narrow
+    # path). Skip the option wait when we successfully nudged a
+    # search input; keep it for SIMPLE-variant (no search input,
+    # options must be present on open).
+    if saw_search_input:
+        return
+    # SIMPLE-variant only: wait for at least one ``[role="option"]``
+    # under either popover shape OR loose in a ``[role="listbox"]``
+    # (some controls put options directly under the popover without
+    # listbox role). The global ``[role="listbox"]`` clause is the
+    # safety net when the popover container omits
+    # ``data-automation-context``.
     #
     # AA.H.10.followon — also accept the MUI Autocomplete's
     # ``.MuiAutocomplete-noOptions`` empty-state element. An empty
@@ -2251,6 +2290,19 @@ def set_dropdown_value(
         # timed out even though the option was visible in the DOM (per
         # the failure screenshot in tests/e2e/screenshots/_failures/).
         search_input.fill(value, timeout=timeout_ms)
+        # DG.3 — same explicit-Search-button path
+        # ``narrow_dropdown_options_by_query`` uses. Some QS picker
+        # popovers (Transactions DS_L1_TX_IDS Transfer with its 8k+
+        # row universe) render a "Search" button instead of
+        # auto-narrowing on input change. Probe + click if present;
+        # absent → MUI Autocomplete auto-narrows and the wait below
+        # catches the repainted listbox.
+        search_button = page.locator(
+            '[data-automation-id="sheet_control_value-menu"] button:has-text("Search"), '
+            '[data-automation-id="sheet_control_search_results_dropdown-menu"] button:has-text("Search")'
+        ).first
+        if search_button.count() > 0:
+            search_button.click(timeout=timeout_ms)
         page.wait_for_selector(
             _OPTION_SELECTOR,
             timeout=timeout_ms, state="visible",
@@ -2383,6 +2435,26 @@ def narrow_dropdown_options_by_query(
         # rather than any ``[role="option"]`` — wait on either so
         # the empty-result path doesn't time out.
         search_input.fill(query, timeout=timeout_ms)
+        # DG.3 — some QS picker popovers (e.g. Transactions
+        # DS_L1_TX_IDS Transfer with its 8k+ row universe) render an
+        # explicit "Search" button instead of auto-narrowing on input.
+        # The fill above puts the query in the input but the
+        # server-narrowed values fetch never fires until the operator
+        # clicks Search. Probe for the button + click if present;
+        # absent → auto-narrowing variant which fires on input change
+        # (Enter keypress would also work for that variant, but the
+        # button-click handles both because clicking a non-existent
+        # element is a no-op via locator.count()).
+        # Scope the button query to the popover containers so we
+        # don't grab some unrelated "Search" button elsewhere on the
+        # page. Both simple + search variants get probed; whichever
+        # popover the picker rendered will host the button.
+        search_button = page.locator(
+            '[data-automation-id="sheet_control_value-menu"] button:has-text("Search"), '
+            '[data-automation-id="sheet_control_search_results_dropdown-menu"] button:has-text("Search")'
+        ).first
+        if search_button.count() > 0:
+            search_button.click(timeout=timeout_ms)
         from playwright.sync_api import TimeoutError as _PWTimeout
         try:
             page.wait_for_selector(
