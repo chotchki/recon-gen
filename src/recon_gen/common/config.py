@@ -189,41 +189,15 @@ class App2Config:
 
 
 @dataclass(frozen=True)
-class _AuditSigningView:
-    """``cfg.audit.signing.*`` proxy — PDF signing material.
+class AuditConfig:
+    """``cfg.audit.*`` — audit PDF concerns.
 
-    ``passphrase`` is the lazy env-loaded passphrase (per
-    [[feedback_no_credential_friction]] — cfg names the env var, secret
-    lives in env). ``None`` when ``passphrase_env`` is unset OR the env
-    var is unset/empty. Symmetric with the OIDC / JWT env-var-name
-    pattern per operator's DE.2 comment.
+    DE.5 step 18 — promoted to real field with a ``signing`` slot;
+    ``signing`` is None when the operator hasn't configured PDF
+    auto-signing material (the default). ``SigningConfig`` itself
+    is the public class (declared further down).
     """
-    key_path: str
-    cert_path: str
-    passphrase_env: str | None
-    signer_name: str | None
-
-    def passphrase(self) -> bytes | None:
-        """Load passphrase from ``os.environ[passphrase_env]`` lazily.
-
-        Returns bytes for pyHanko consumption (its CMS signer takes
-        bytes for the passphrase). ``None`` means the key is
-        unencrypted OR the operator hasn't set the env var. pyHanko
-        loads the unencrypted key when passphrase=None.
-        """
-        if self.passphrase_env is None:
-            return None
-        import os  # noqa: PLC0415 — lazy: env-touch only when audit signs
-        val = os.environ.get(self.passphrase_env)  # typing-smell: ignore[envvar-bypass]: cfg-supplied env var name (audit.signing.passphrase_env) per [[feedback_no_credential_friction]]
-        if not val:
-            return None
-        return val.encode("utf-8")
-
-
-@dataclass(frozen=True)
-class _AuditView:
-    """``cfg.audit.*`` proxy — audit PDF concerns."""
-    signing: _AuditSigningView | None
+    signing: "SigningConfig | None" = None
 
 
 @dataclass(frozen=True)
@@ -342,6 +316,22 @@ class SigningConfig:
     cert_path: str
     passphrase_env: str | None = None
     signer_name: str | None = None
+
+    def passphrase(self) -> bytes | None:
+        """Load passphrase from ``os.environ[passphrase_env]`` lazily.
+
+        Returns bytes for pyHanko consumption (its CMS signer takes
+        bytes for the passphrase). ``None`` means the key is
+        unencrypted OR the operator hasn't set the env var. pyHanko
+        loads the unencrypted key when passphrase=None.
+        """
+        if self.passphrase_env is None:
+            return None
+        import os  # noqa: PLC0415 — lazy: env-touch only when audit signs
+        val = os.environ.get(self.passphrase_env)  # typing-smell: ignore[envvar-bypass]: cfg-supplied env var name (audit.signing.passphrase_env) per [[feedback_no_credential_friction]]
+        if not val:
+            return None
+        return val.encode("utf-8")
 
 
 # BS.4 (2026-05-29) removed EtlDatasourceConfig + the
@@ -525,11 +515,7 @@ class Config:
     # aws_pg_cluster_id + aws_oracle_instance_id all moved into aws.*.
     # DE.5 steps 12-13 — db_table_prefix + demo_database_url moved to db.*.
     # DE.5 step 14 — dialect moved to db.dialect.
-    # U.7.b — Optional digital signing material for the audit PDF.
-    # When set, ``audit apply --execute`` runs the rendered PDF
-    # through pyHanko to apply a CMS signature. Absent = ship the
-    # PDF unsigned (current behavior).
-    signing: SigningConfig | None = None
+    # DE.5 step 18 — signing moved to audit.signing.
     # Y.2.gate.h+i.0 — Local-runner AWS auth + QS embed-signing identity.
     # When set, the test-layer-chain runner injects ``AWS_PROFILE`` into
     # subprocess envs (per ``cfg.auth.aws_profile``) and auto-derives
@@ -562,6 +548,9 @@ class Config:
     # DE.5 step 17 — ``app2`` is the real App2Config field. Strangler
     # period accepts both bare flat kwargs and ``app2=App2Config(...)``.
     app2: App2Config = field(default_factory=App2Config)
+    # DE.5 step 18 — ``audit`` is the real AuditConfig field; carries
+    # ``signing: SigningConfig | None`` (None = ship PDF unsigned).
+    audit: AuditConfig = field(default_factory=AuditConfig)
     # DE.5 step 6 — ``datasource_arn_was_derived`` sentinel removed.
     # Use ``cfg.aws.datasource.mode == "create"`` (the "we own it" case
     # post-DE.0 lock 3).
@@ -681,23 +670,7 @@ class Config:
     # flats during the strangler; future steps drop those flats.
 
     # DE.5 step 17 — ``cfg.app2`` is now a real ``App2Config`` field.
-
-    @property
-    def audit(self) -> _AuditView:
-        """``cfg.audit.*`` — audit PDF concerns. ``signing`` carries
-        the env-loaded passphrase accessor per
-        [[feedback_no_credential_friction]] symmetry (operator's
-        DE.2 comment)."""
-        if self.signing is None:
-            return _AuditView(signing=None)
-        return _AuditView(
-            signing=_AuditSigningView(
-                key_path=self.signing.key_path,
-                cert_path=self.signing.cert_path,
-                passphrase_env=self.signing.passphrase_env,
-                signer_name=self.signing.signer_name,
-            ),
-        )
+    # DE.5 step 18 — ``cfg.audit`` is now a real ``AuditConfig`` field.
 
     @property
     def test(self) -> _TestView:
@@ -888,6 +861,14 @@ class Config:
 
         # Drop empty / None / default-equivalent optionals so the
         # emitted YAML stays close to a minimal operator-edited file.
+        # DE.5 step 18 — audit block is the new home for signing; flatten
+        # AuditConfig.signing into top-level signing for legacy yaml shape.
+        audit_out = out.pop("audit", None)
+        if isinstance(audit_out, dict):
+            audit_typed = cast(dict[str, Any], audit_out)
+            signing_out = audit_typed.get("signing")
+            if signing_out is not None:
+                out["signing"] = signing_out
         if out.get("signing") is None:
             out.pop("signing", None)
         if out.get("auth") is None:
@@ -1563,7 +1544,8 @@ def load_config(path: str | Path | None = None) -> Config:
             default_l2_instance=_opt_str(values, "default_l2_instance"),
             app2_pool_size=pool_size,
         ),
-        signing=signing,
+        # DE.5 step 18 — signing now on AuditConfig.
+        audit=AuditConfig(signing=signing),
         auth=auth,
         studio_enabled=raw_studio_enabled,
         # DE.5 step 17 — etl_hook + banner_text + app2_tls now on App2Config.

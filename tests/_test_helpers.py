@@ -88,10 +88,10 @@ def make_test_config(**overrides: Any) -> Config:
       generated DB DDL; pin to a real prefix when it does.
     - ``dialect=Dialect.ORACLE`` — exercise the Oracle SQL branch.
     """
-    # DE.5 steps 3-17 — translate every legacy AWS + DB-block + App2-block kwarg
-    # into the nested aws=AwsConfig(...) + db=DbConfig(...) + app2=App2Config(...) on Config.
+    # DE.5 steps 3-18 — translate every legacy flat kwarg into the nested
+    # aws/db/app2/audit blocks on Config.
     from recon_gen.common.config import (  # noqa: PLC0415
-        App2Config, AwsConfig, DatasourceConfig, DbConfig, Dialect,
+        App2Config, AuditConfig, AwsConfig, DatasourceConfig, DbConfig, Dialect,
     )
     account_id = overrides.pop("aws_account_id", _TEST_ACCOUNT)
     region = overrides.pop("aws_region", _TEST_REGION)
@@ -113,6 +113,8 @@ def make_test_config(**overrides: Any) -> Config:
     etl_hook = overrides.pop("etl_hook", None)
     banner_text = overrides.pop("banner_text", None)
     app2_tls = overrides.pop("app2_tls", None)
+    # Audit-block legacy kwargs
+    signing = overrides.pop("signing", None)
     if datasource_arn is None:
         if region != _TEST_REGION:
             datasource_arn = (
@@ -149,6 +151,7 @@ def make_test_config(**overrides: Any) -> Config:
             banner_text=banner_text,
             tls=app2_tls,
         ),
+        "audit": AuditConfig(signing=signing),
     }
     # If caller passed `db=DbConfig(...)` AND legacy DB-block kwargs, merge
     # them — the explicit DbConfig's set fields win, but anything it didn't

@@ -1488,10 +1488,10 @@ def audit_apply(
         # ImportError surfaces when we CALL the signer — wrap both the
         # import + call, not just the import. See
         # ``docs/audits/cw_0_audit_pdf_perf_locks.md`` Lock 5.
-        if _cfg.signing is not None:
+        if _cfg.audit.signing is not None:
             from recon_gen.common.pdf.signing import sign_pdf_in_place
             try:
-                sign_pdf_in_place(out_path, _cfg.signing)
+                sign_pdf_in_place(out_path, _cfg.audit.signing)
             except ImportError as exc:
                 click.echo(
                     f"audit: signing skipped — pyhanko not installed "
@@ -1503,7 +1503,7 @@ def audit_apply(
             else:
                 click.echo(
                     f"Applied digital signature "
-                    f"({_cfg.signing.signer_name or 'cert CN'}) to {out_path}.",
+                    f"({_cfg.audit.signing.signer_name or 'cert CN'}) to {out_path}.",
                     err=True,
                 )
         click.echo(

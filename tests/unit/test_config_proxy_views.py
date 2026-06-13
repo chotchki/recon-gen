@@ -69,10 +69,17 @@ def _make_cfg(**overrides: object) -> Config:
         ),
     }
     from recon_gen.common.config import App2Config as _App2Config  # noqa: PLC0415
+    from recon_gen.common.config import AuditConfig as _AuditConfig  # noqa: PLC0415
     from recon_gen.common.config import DbConfig as _DbConfig  # noqa: PLC0415
+    from recon_gen.common.config import SigningConfig as _SigningConfig  # noqa: PLC0415
     # DE.5 step 17 — etl_hook + banner_text moved to App2Config.
     etl_hook_raw = overrides.pop("etl_hook", None)
     banner_text_raw = overrides.pop("banner_text", None)
+    # DE.5 step 18 — signing moved to AuditConfig.
+    signing_raw = overrides.pop("signing", None)
+    signing_obj: _SigningConfig | None = (
+        signing_raw if isinstance(signing_raw, _SigningConfig) else None
+    )
     defaults: dict[str, object] = {
         "aws": AwsConfig(**aws_kwargs),  # pyright: ignore[reportArgumentType]: dict[str, object] kwarg surface
         "db": _DbConfig(
@@ -80,6 +87,7 @@ def _make_cfg(**overrides: object) -> Config:
             url="postgresql://u:p@h:5432/d",
             dialect=Dialect.POSTGRES,
         ),
+        "audit": _AuditConfig(signing=signing_obj),
         "app2": _App2Config(
             etl_hook=str(etl_hook_raw) if etl_hook_raw is not None else None,
             banner_text=str(banner_text_raw) if banner_text_raw is not None else None,
