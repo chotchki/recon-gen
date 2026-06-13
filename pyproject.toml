@@ -362,6 +362,20 @@ markers = [
     "browser: browser-based e2e tests (requires Playwright)",
 ]
 
+# DG.3 — always-on hang diagnostic. Pytest arms a faulthandler timer
+# per test; any test running longer than this dumps stack traces of
+# every Python thread to stderr + continues running (faulthandler
+# reports, doesn't kill). Stdlib + pytest-core; no plugin, no
+# dependency. The dump tells you exactly where a wedge is happening
+# — Playwright in `run_forever`, psycopg blocked on socket recv,
+# matview refresh stuck on a lock, etc.
+#
+# Tuned 180s = above the slowest legitimate test on local cold-spun
+# Oracle (BV.3.3 trainer dogfood Session Start). If a regression
+# adds a slower test, bump this rather than disabling the
+# diagnostic.
+faulthandler_timeout = 180
+
 # W.8b — coverage config. ``source = ["recon_gen"]`` scopes
 # coverage to the package; without it, ``coverage report`` lumps in
 # the stdlib / third-party files that happened to execute. The CI

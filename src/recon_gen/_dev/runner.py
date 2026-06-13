@@ -1157,6 +1157,31 @@ def dispatch_layer(
     # ensure-dir handles the race window (see _ensure_dir comment).
     cmd_meta["exit_code"] = returncode
     cmd_meta["duration_seconds"] = duration
+
+    # DG.3 — heartbeat-hit detection. The stdlib faulthandler dumps a
+    # stack trace to stderr whenever a test exceeds
+    # ``faulthandler_timeout`` (pyproject.toml). Surface the count
+    # here so the operator sees "1 test wedged for >180s on this
+    # layer" without grepping logs. Pattern is "Timeout (HH:MM:SS)!"
+    # at line start — faulthandler's exact format. The trace itself
+    # stays in stderr.log for triage.
+    fh_hits = 0
+    try:
+        for line in stderr_path.read_text().splitlines():
+            if line.startswith("Timeout (") and line.endswith("!"):
+                fh_hits += 1
+    except OSError:
+        # stderr.log not written (subprocess never started cleanly).
+        pass
+    cmd_meta["faulthandler_hits"] = fh_hits
+    if fh_hits > 0:
+        print(
+            f"{terminal_prefix}runner: [heartbeat-hit] layer={layer} "
+            f"— {fh_hits} faulthandler trip(s) logged "
+            f"(see {stderr_path.relative_to(REPO_ROOT)} — grep "
+            f"'^Timeout (' for stack traces)"
+        )
+
     _ensure_dir()
     cmd_path.write_text(json.dumps(cmd_meta, indent=2) + "\n")
 
