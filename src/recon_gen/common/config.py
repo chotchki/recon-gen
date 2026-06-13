@@ -219,12 +219,11 @@ class TestConfig:
 
 
 @dataclass(frozen=True)
-class _AuthAwsView:
-    """``cfg.auth.aws.*`` proxy — AWS-side auth (was top-level
-    ``auth:`` block pre-DE). DD-side ``auth.oidc.*`` + ``auth.session.*``
-    will land here too once DD.3 wires the consumption path."""
-    profile: str | None
-    quicksight_user_arn: str | None
+class AuthAwsConfig:
+    """``cfg.auth.aws.*`` — AWS-side auth. DE.5 step 21 — promoted to
+    real field with defaults so partial construction is legal."""
+    profile: str | None = None
+    quicksight_user_arn: str | None = None
 
 
 # DE.4 — phase DC + DD cfg block carriers on the legacy Config.
@@ -285,18 +284,10 @@ class AuthConfig:
     populates these when ``auth.oidc:`` / ``auth.session:`` blocks
     appear in the cfg yaml.
     """
-    aws_profile: str | None = None
-    quicksight_user_arn: str | None = None
+    # DE.5 step 21 — aws_profile + quicksight_user_arn moved to aws.{profile, quicksight_user_arn}.
+    aws: AuthAwsConfig = field(default_factory=AuthAwsConfig)
     oidc: OidcConfig | None = None
     session: SessionConfig | None = None
-
-    @property
-    def aws(self) -> _AuthAwsView:
-        """``cfg.auth.aws.*`` proxy — DE.2 nesting bridge."""
-        return _AuthAwsView(
-            profile=self.aws_profile,
-            quicksight_user_arn=self.quicksight_user_arn,
-        )
 
 
 @dataclass(frozen=True)
@@ -1225,12 +1216,12 @@ def load_config(path: str | Path | None = None) -> Config:
             str(k): v for k, v in auth_typed.items()
         }
         unknown_auth = set(auth_dict) - {
-            "aws_profile", "quicksight_user_arn", "oidc", "session",
+            "aws_profile", "quicksight_user_arn", "aws", "oidc", "session",
         }
         if unknown_auth:
             raise ValueError(
                 f"auth block contains unknown keys: {sorted(unknown_auth)}. "
-                f"Allowed: aws_profile, quicksight_user_arn, oidc, session."
+                f"Allowed: aws_profile, quicksight_user_arn, aws, oidc, session."
             )
         # DE.4 — auth.oidc: block (Phase DD). All four required fields
         # raise with field path when block present but incomplete.
@@ -1280,17 +1271,38 @@ def load_config(path: str | Path | None = None) -> Config:
             session_cfg = SessionConfig(
                 jwt_secret_env=str(session_dict["jwt_secret_env"]),
             )
+        # DE.5 step 21 — flat aws_profile/quicksight_user_arn fields wrapped
+        # in AuthAwsConfig. Loader still reads the legacy top-level yaml
+        # keys; production yamls can also nest under `auth.aws:` (DE.0).
+        raw_auth_aws = auth_dict.get("aws")
+        if isinstance(raw_auth_aws, dict):
+            aws_typed = cast(dict[Any, Any], raw_auth_aws)
+            aws_inner: dict[str, object] = {
+                str(k): v for k, v in aws_typed.items()
+            }
+            auth_aws_cfg = AuthAwsConfig(
+                profile=(
+                    str(aws_inner["profile"])
+                    if aws_inner.get("profile") is not None else None
+                ),
+                quicksight_user_arn=(
+                    str(aws_inner["quicksight_user_arn"])
+                    if aws_inner.get("quicksight_user_arn") is not None else None
+                ),
+            )
+        else:
+            auth_aws_cfg = AuthAwsConfig(
+                profile=(
+                    str(auth_dict["aws_profile"])
+                    if auth_dict.get("aws_profile") is not None else None
+                ),
+                quicksight_user_arn=(
+                    str(auth_dict["quicksight_user_arn"])
+                    if auth_dict.get("quicksight_user_arn") is not None else None
+                ),
+            )
         auth = AuthConfig(
-            aws_profile=(
-                str(auth_dict["aws_profile"])
-                if auth_dict.get("aws_profile") is not None
-                else None
-            ),
-            quicksight_user_arn=(
-                str(auth_dict["quicksight_user_arn"])
-                if auth_dict.get("quicksight_user_arn") is not None
-                else None
-            ),
+            aws=auth_aws_cfg,
             oidc=oidc_cfg,
             session=session_cfg,
         )

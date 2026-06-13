@@ -3079,8 +3079,8 @@ def cmd_up_to(args: argparse.Namespace) -> int:
             # SSO default-profile path that LoginRefreshRequired'd on
             # an earlier thin run). Mirrors _run_one_variant's h+i.0 path.
             # DE.2 commit A — cfg.auth is now always-present (default-factory).
-            if peek_cfg.auth.aws_profile is not None:
-                runner_variant_env["AWS_PROFILE"] = peek_cfg.auth.aws_profile
+            if peek_cfg.auth.aws.profile is not None:
+                runner_variant_env["AWS_PROFILE"] = peek_cfg.auth.aws.profile
             # Y.2.gate.h.1 — derive RECON_E2E_USER_ARN via STS+ListUsers
             # so the qs_browser layer's embed URL minting works without
             # the operator pre-exporting the ARN. Priority: explicit

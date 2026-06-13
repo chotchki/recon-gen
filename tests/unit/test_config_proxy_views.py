@@ -367,10 +367,13 @@ def test_auth_view_default_when_block_absent() -> None:
 
 
 def test_auth_view_carries_profile_when_set() -> None:
+    from recon_gen.common.config import AuthAwsConfig  # noqa: PLC0415
     cfg = _make_cfg(
         auth=AuthConfig(
-            aws_profile="recon-gen-local",
-            quicksight_user_arn="arn:aws:quicksight:us-east-1:123:user/default/test",
+            aws=AuthAwsConfig(
+                profile="recon-gen-local",
+                quicksight_user_arn="arn:aws:quicksight:us-east-1:123:user/default/test",
+            ),
         ),
     )
     assert cfg.auth.aws.profile == "recon-gen-local"
