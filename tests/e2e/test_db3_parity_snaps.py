@@ -163,25 +163,56 @@ def test_db3_snap_exec_money_moved(
 # ---------------------------------------------------------------------------
 
 
+def _pick_first_non_all(driver: "DashboardDriver", label: str) -> bool:
+    """Pick the first non-"All" option from the named dropdown. Both
+    Investigation Sankey sheets default to "All" which renders empty
+    — for parity verification we need an actual anchor selected."""
+    try:
+        options = driver.filter_options(label)
+    except Exception:  # noqa: BLE001 — picker discovery failure shouldn't abort capture
+        return False
+    candidates = [o for o in options if o and o.strip().lower() not in {"all", "__all__"}]
+    if not candidates:
+        return False
+    try:
+        driver.pick_filter(label, [candidates[0]])
+    except Exception:  # noqa: BLE001 — same rationale as above
+        return False
+    return True
+
+
 def test_db3_snap_inv_money_trail_sankey(
     inv_dashboard_driver: "tuple[DashboardDriver, str]",
 ) -> None:
     """Investigation Money Trail — Sankey with items_limit cap. QS
     caps + rolls into (others); pre-DB.1.2 App2 showed the full
-    universe, which made dense-instance dashboards unreadable."""
+    universe, which made dense-instance dashboards unreadable.
+
+    The Money Trail Sankey only renders when a chain root transfer is
+    selected — defaults to "All" → empty Sankey. Pick the first
+    available chain root before snapping."""
     driver, dashboard_id = inv_dashboard_driver
     driver.open(dashboard_id, sheet="Money Trail")
-    _wait_or_snap(driver, "inv-money-trail-sankey", dashboard_id, "Money Trail — Chain Sankey", "Money Trail")
+    _pick_first_non_all(driver, "Chain root transfer")
+    _wait_or_snap(
+        driver, "inv-money-trail-sankey", dashboard_id,
+        "Money Trail — Chain Sankey", "Money Trail",
+    )
 
 
 def test_db3_snap_inv_account_network_sankey(
     inv_dashboard_driver: "tuple[DashboardDriver, str]",
 ) -> None:
-    """Investigation Account Network — two directional Sankeys + the
-    touching-edges table. Both sankeys carry items_limit."""
+    """Investigation Account Network — touching-edges table + Sankeys
+    underneath. Both sankeys carry items_limit but only render when
+    an anchor account is picked (defaults to "All" → empty)."""
     driver, dashboard_id = inv_dashboard_driver
     driver.open(dashboard_id, sheet="Account Network")
-    _wait_or_snap(driver, "inv-account-network-sankey", dashboard_id, "Account Network — Touching Edges", "Account Network")
+    _pick_first_non_all(driver, "Anchor account")
+    _wait_or_snap(
+        driver, "inv-account-network-sankey", dashboard_id,
+        "Account Network — Touching Edges", "Account Network",
+    )
 
 
 # ---------------------------------------------------------------------------
