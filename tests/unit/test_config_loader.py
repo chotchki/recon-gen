@@ -613,9 +613,9 @@ def test_to_yaml_dict_round_trips_through_load_config(tmp_path: Path) -> None:
     assert cfg2.aws.extra_tags == cfg.aws.extra_tags
     assert cfg2.db.url == cfg.db.url
     assert cfg2.auth == cfg.auth
-    assert cfg2.test_generator.seed == cfg.test.generator.seed
-    assert cfg2.test_generator.plants == cfg.test.generator.plants
-    assert cfg2.test_generator.end_date == cfg.test.generator.end_date
+    assert cfg2.test.generator.seed == cfg.test.generator.seed
+    assert cfg2.test.generator.plants == cfg.test.generator.plants
+    assert cfg2.test.generator.end_date == cfg.test.generator.end_date
 
 
 def test_to_yaml_dict_omits_derived_datasource_arn(tmp_path: Path) -> None:

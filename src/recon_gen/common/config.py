@@ -201,13 +201,21 @@ class AuditConfig:
 
 
 @dataclass(frozen=True)
-class _TestView:
-    """``cfg.test.*`` proxy — test/fuzz/synthetic-data scope. The
-    ``generator`` field returns the underlying legacy
-    ``TestGeneratorConfig`` directly (same shape + ``as_of_frame``
-    method already present); the v14 nesting bridge is just the
-    ``test`` property hop, no field-by-field copy needed."""
-    generator: "TestGeneratorConfig"
+class TestConfig:
+    """``cfg.test.*`` — test/fuzz/synthetic-data scope.
+
+    DE.5 step 19 — promoted to real field. ``generator`` is a
+    ``TestGeneratorConfig`` (same shape + ``as_of_frame`` method
+    already present); the v14 nesting is just the ``test`` field
+    hop, no field-by-field copy needed.
+    """
+    # __test__ = False stops pytest from collecting this dataclass as a
+    # test class (name starts with "Test"). It's a real config block,
+    # not a test fixture.
+    __test__ = False
+    generator: "TestGeneratorConfig" = field(
+        default_factory=lambda: TestGeneratorConfig(),
+    )
 
 
 @dataclass(frozen=True)
@@ -644,13 +652,8 @@ class Config:
     # contract and ``recon-gen data etl-example`` for canonical
     # per-table INSERT patterns.
     # DE.5 step 17 — etl_hook + banner_text moved to app2.*.
-    # X.4.g.3 — Step 3 (synthetic data overlay) knobs. Non-Optional
-    # default-factory so the pipeline never None-checks; an absent
-    # block in the cfg yaml resolves to `TestGeneratorConfig()`
-    # (byte-identical-to-locked-seeds output).
-    test_generator: TestGeneratorConfig = field(
-        default_factory=TestGeneratorConfig,
-    )
+    # DE.5 step 19 — test_generator moved to test.generator (TestConfig).
+    test: TestConfig = field(default_factory=TestConfig)
 
     # -------------------------------------------------------------------
     # DE.2 commit A — v14 proxy properties. Read-only views over the
@@ -671,13 +674,7 @@ class Config:
 
     # DE.5 step 17 — ``cfg.app2`` is now a real ``App2Config`` field.
     # DE.5 step 18 — ``cfg.audit`` is now a real ``AuditConfig`` field.
-
-    @property
-    def test(self) -> _TestView:
-        """``cfg.test.*`` — fuzz / synthetic-data scope.
-        ``generator`` returns the underlying ``TestGeneratorConfig``
-        directly (its surface + ``as_of_frame`` already match v14)."""
-        return _TestView(generator=self.test_generator)
+    # DE.5 step 19 — ``cfg.test`` is now a real ``TestConfig`` field.
 
     def __post_init__(self) -> None:
         # DE.5 steps 3+4 — account_id + region come from caller-supplied
@@ -900,6 +897,13 @@ class Config:
             if app2_yaml:
                 out["app2"] = app2_yaml
 
+        # DE.5 step 19 — flatten test.generator → test_generator for legacy yaml.
+        test_out = out.pop("test", None)
+        if isinstance(test_out, dict):
+            test_typed = cast(dict[str, Any], test_out)
+            tgen_inner = test_typed.get("generator")
+            if tgen_inner is not None:
+                out["test_generator"] = tgen_inner
         # test_generator: omit when every field is at its default
         # (loader resolves a missing key to ``TestGeneratorConfig()``).
         # Otherwise coerce ``plants`` tuple → list for stable YAML.
@@ -1554,5 +1558,6 @@ def load_config(path: str | Path | None = None) -> Config:
             banner_text=app2_banner_text,
             tls=app2_tls_cfg,
         ),
-        test_generator=test_generator,
+        # DE.5 step 19 — test_generator moved to test.generator (TestConfig).
+        test=TestConfig(generator=test_generator),
     )

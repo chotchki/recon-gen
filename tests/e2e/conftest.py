@@ -324,7 +324,7 @@ def _pin_cfg_to_kv_as_of(cfg: Config) -> Config:
             pass
 
     pinned_tg = dataclasses.replace(cfg.test.generator, end_date=as_of.date())
-    return dataclasses.replace(cfg, test_generator=pinned_tg)
+    return dataclasses.replace(cfg, test=dataclasses.replace(cfg.test, generator=pinned_tg))
 
 
 @pytest.fixture(scope="session")

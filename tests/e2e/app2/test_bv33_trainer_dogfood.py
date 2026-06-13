@@ -257,9 +257,10 @@ def trainer_ready_session(
         base_dir, dialect=dialect, demo_database_url=demo_url,
     )
 
-    base_cfg.test_generator = dataclasses.replace(
-        base_cfg.test_generator, end_date=_TRAINER_ANCHOR,
-    )
+    object.__setattr__(base_cfg, "test", dataclasses.replace(
+        base_cfg.test,
+        generator=dataclasses.replace(base_cfg.test.generator, end_date=_TRAINER_ANCHOR),
+    ))
 
     # Stable per-(worker, dialect) suffix — drops the nodeid component
     # that the per-test `isolated_studio_cfg` includes, so all tests

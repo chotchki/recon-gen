@@ -367,6 +367,6 @@ class TestGeneratorCache:
         )
         return dataclasses.replace(
             cfg,
-            test_generator=resolved,
+            test=dataclasses.replace(cfg.test, generator=resolved),
             app2=dataclasses.replace(cfg.app2, etl_hook=new_etl_hook),
         )

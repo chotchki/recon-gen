@@ -223,13 +223,13 @@ def test_balance_date_view_required_coverage_is_satisfied_by_locked_seed() -> No
     # window, this fires BEFORE the dashboard goes blank in production.
     from pathlib import Path
     from recon_gen.cli._helpers import build_full_seed_sql
-    from recon_gen.common.config import DbConfig, TestGeneratorConfig
+    from recon_gen.common.config import DbConfig, TestConfig, TestGeneratorConfig
     from recon_gen.common.l2 import load_instance
     from tests._test_helpers import make_test_config
 
     cfg = make_test_config(
         db=DbConfig(table_prefix=DEFAULT_PREFIX),
-        test_generator=TestGeneratorConfig(end_date=LOCKED_ANCHOR),
+        test=TestConfig(generator=TestGeneratorConfig(end_date=LOCKED_ANCHOR)),
     )
     instance = load_instance(
         str(Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"),

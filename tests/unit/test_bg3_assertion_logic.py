@@ -326,7 +326,7 @@ def test_bg3_kv_pin_anchors_test_to_deploy_day_across_midnight(
     )
 
     unpinned = cfg.test.generator.as_of_frame(window_days=7).as_of
-    pinned = _pin_cfg_to_kv_as_of(cfg).test_generator.as_of_frame(
+    pinned = _pin_cfg_to_kv_as_of(cfg).test.generator.as_of_frame(
         window_days=7,
     ).as_of
 

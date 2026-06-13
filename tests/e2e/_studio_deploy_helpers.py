@@ -43,6 +43,7 @@ from recon_gen.common.config import (
     Config,
     DatasourceConfig,
     DbConfig,
+    TestConfig,
     TestGeneratorConfig,
 )
 from recon_gen.common.db import (
@@ -198,7 +199,7 @@ def make_studio_cfg(
             ),
         ),
         db=DbConfig(table_prefix="sasquatch_pr", url=resolved_url, dialect=dialect),
-        test_generator=TestGeneratorConfig(scope="full"),
+        test=TestConfig(generator=TestGeneratorConfig(scope="full")),
         app2=App2Config(etl_hook=str(etl_hook) if etl_hook is not None else None),
     )
     return cfg, db_path

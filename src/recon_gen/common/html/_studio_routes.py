@@ -5035,9 +5035,9 @@ def make_studio_routes(
                 patched_cfg = cfg
             else:
                 patched_cfg = dataclass_replace(
-                    cfg, test_generator=dataclass_replace(
+                    cfg, test=dataclass_replace(cfg.test, generator=dataclass_replace(
                         cfg.test.generator, enabled=False,
-                    ),
+                    )),
                 )
             _etl_run_state["started_at"] = datetime.now()  # typing-smell: ignore[no-datetime-now]: BTa.9 wall-clock anchor for "running for Ns" + elapsed-time display
             task = asyncio.create_task(_run_pipeline_async(patched_cfg))

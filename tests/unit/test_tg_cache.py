@@ -21,6 +21,7 @@ from pathlib import Path
 from recon_gen.common.intervals import DateInterval
 from recon_gen.common.config import (
     PlantKind,
+    TestConfig,
     TestGeneratorConfig,
 )
 from recon_gen.common.l2.studio_state import (
@@ -103,7 +104,7 @@ def test_patched_config_returns_fresh_clone() -> None:
     cache.update(plants=("drift",))
     patched = cache.patched_config(cfg)
     # Patched gets the new TG state.
-    assert patched.test_generator.plants == ("drift",)
+    assert patched.test.generator.plants == ("drift",)
     # Startup cfg is unchanged.
     assert cfg.test.generator is original_tg
     assert cfg.test.generator.plants == ()
@@ -198,7 +199,7 @@ def test_from_cfg_with_state_no_sidefile_uses_cfg_defaults(
 ) -> None:
     """First-run: no sidefile yet ⇒ cache state matches cfg.test.generator."""
     cfg = make_test_config(
-        test_generator=TestGeneratorConfig(scope="full", seed=42),
+        test=TestConfig(generator=TestGeneratorConfig(scope="full", seed=42)),
     )
     cfg_path = tmp_path / "config.yaml"
     cache = TestGeneratorCache.from_cfg_with_state(cfg, cfg_path)
@@ -209,7 +210,7 @@ def test_from_cfg_with_state_no_sidefile_uses_cfg_defaults(
 def test_from_cfg_with_state_sidefile_overrides_cfg(tmp_path: Path) -> None:
     """Sidefile field set ⇒ wins over cfg.test.generator."""
     cfg = make_test_config(
-        test_generator=TestGeneratorConfig(scope="full", seed=42),
+        test=TestConfig(generator=TestGeneratorConfig(scope="full", seed=42)),
     )
     cfg_path = tmp_path / "config.yaml"
     sidefile = tmp_path / SIDEFILE_NAME
@@ -320,7 +321,7 @@ def test_full_round_trip_via_two_cache_instances(tmp_path: Path) -> None:
     same cfg + path → the second cache reflects the persisted state.
     Simulates a Studio restart."""
     cfg = make_test_config(
-        test_generator=TestGeneratorConfig(scope="full"),
+        test=TestConfig(generator=TestGeneratorConfig(scope="full")),
     )
     cfg_path = tmp_path / "config.yaml"
     cache_a = TestGeneratorCache.from_cfg_with_state(cfg, cfg_path)

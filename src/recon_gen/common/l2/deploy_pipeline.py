@@ -1068,9 +1068,9 @@ async def run_deploy_pipeline(
         if not has_l1 and cfg.test.generator.scope == "full":
             from dataclasses import replace as _dr  # noqa: PLC0415
             pipeline_cfg = _dr(
-                cfg, test_generator=_dr(
+                cfg, test=_dr(cfg.test, generator=_dr(
                     cfg.test.generator, scope="uncovered_rails",
-                ),
+                )),
             )
         # Non-L1 overlays apply AFTER the pipeline's baseline + step 3.5.
         post_pipeline_overlays = tuple(
@@ -1081,7 +1081,7 @@ async def run_deploy_pipeline(
             "event": "deploy:overlays:declared",
             "overlay_names": list(overlays.names()),
             "scope_override": (
-                pipeline_cfg.test_generator.scope
+                pipeline_cfg.test.generator.scope
                 if pipeline_cfg is not cfg else None
             ),
         })

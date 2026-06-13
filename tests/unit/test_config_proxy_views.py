@@ -72,6 +72,8 @@ def _make_cfg(**overrides: object) -> Config:
     from recon_gen.common.config import AuditConfig as _AuditConfig  # noqa: PLC0415
     from recon_gen.common.config import DbConfig as _DbConfig  # noqa: PLC0415
     from recon_gen.common.config import SigningConfig as _SigningConfig  # noqa: PLC0415
+    from recon_gen.common.config import TestConfig as _TestConfig  # noqa: PLC0415
+    from recon_gen.common.config import TestGeneratorConfig as _TestGeneratorConfig  # noqa: PLC0415
     # DE.5 step 17 — etl_hook + banner_text moved to App2Config.
     etl_hook_raw = overrides.pop("etl_hook", None)
     banner_text_raw = overrides.pop("banner_text", None)
@@ -79,6 +81,12 @@ def _make_cfg(**overrides: object) -> Config:
     signing_raw = overrides.pop("signing", None)
     signing_obj: _SigningConfig | None = (
         signing_raw if isinstance(signing_raw, _SigningConfig) else None
+    )
+    # DE.5 step 19 — test_generator moved to TestConfig.
+    tgen_raw = overrides.pop("test_generator", None)
+    tgen_obj = (
+        tgen_raw if isinstance(tgen_raw, _TestGeneratorConfig)
+        else _TestGeneratorConfig()
     )
     defaults: dict[str, object] = {
         "aws": AwsConfig(**aws_kwargs),  # pyright: ignore[reportArgumentType]: dict[str, object] kwarg surface
@@ -88,6 +96,7 @@ def _make_cfg(**overrides: object) -> Config:
             dialect=Dialect.POSTGRES,
         ),
         "audit": _AuditConfig(signing=signing_obj),
+        "test": _TestConfig(generator=tgen_obj),
         "app2": _App2Config(
             etl_hook=str(etl_hook_raw) if etl_hook_raw is not None else None,
             banner_text=str(banner_text_raw) if banner_text_raw is not None else None,

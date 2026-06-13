@@ -29,6 +29,7 @@ from recon_gen.common.config import AwsConfig, Config, DatasourceConfig, DbConfi
 from recon_gen.common.db import connect_demo_db, duckdb_path, execute_script, fetch_one_required, make_demo_database_url
 from recon_gen.common.config import (
     AwsConfig,
+    TestConfig,
     TestGeneratorConfig,
 )
 from recon_gen.common.l2.deploy_pipeline import (
@@ -514,7 +515,7 @@ def test_step_3_generator_skip_when_disabled(
 ) -> None:
     cfg = replace(
         _duckdb_cfg(tmp_path),
-        test_generator=TestGeneratorConfig(enabled=False),
+        test=TestConfig(generator=TestGeneratorConfig(enabled=False)),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
     sink = _EventCollector()
@@ -540,7 +541,7 @@ def test_step_3_generator_full_writes_rows(
     from datetime import date
     cfg = replace(
         _duckdb_cfg(tmp_path),
-        test_generator=TestGeneratorConfig(end_date=date(2030, 1, 1)),
+        test=TestConfig(generator=TestGeneratorConfig(end_date=date(2030, 1, 1))),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
     sink = _EventCollector()
@@ -559,9 +560,9 @@ def test_step_3_generator_full_emits_start_then_done(
     from datetime import date
     cfg = replace(
         _duckdb_cfg(tmp_path),
-        test_generator=TestGeneratorConfig(
+        test=TestConfig(generator=TestGeneratorConfig(
             end_date=date(2030, 1, 1), seed=12345,
-        ),
+        )),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
     sink = _EventCollector()
@@ -603,14 +604,14 @@ def test_step_3_generator_full_with_cutoff_truncates_emission(
     with_cutoff_dir.mkdir()
     cfg_no_cutoff = replace(
         _duckdb_cfg(no_cutoff_dir),
-        test_generator=TestGeneratorConfig(end_date=date(2030, 1, 31)),
+        test=TestConfig(generator=TestGeneratorConfig(end_date=date(2030, 1, 31))),
     )
     cfg_with_cutoff = replace(
         _duckdb_cfg(with_cutoff_dir),
-        test_generator=TestGeneratorConfig(
+        test=TestConfig(generator=TestGeneratorConfig(
             end_date=date(2030, 1, 31),
             cutoff_date=date(2030, 1, 15),  # truncate mid-month
-        ),
+        )),
     )
     _apply_demo_schema_only(cfg_no_cutoff, spec_example_instance)
     _apply_demo_schema_only(cfg_with_cutoff, spec_example_instance)
@@ -646,10 +647,10 @@ def test_step_3_generator_no_cutoff_emits_unchanged(
     from datetime import date
     cfg = replace(
         _duckdb_cfg(tmp_path),
-        test_generator=TestGeneratorConfig(
+        test=TestConfig(generator=TestGeneratorConfig(
             end_date=date(2030, 1, 31),
             cutoff_date=None,  # explicit — test the None path
-        ),
+        )),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
     tx, bal = asyncio.run(
@@ -673,7 +674,7 @@ def test_step_3_generator_full_anchor_determinism(
         sub.mkdir()
         cfg = replace(
             _duckdb_cfg(sub),
-            test_generator=TestGeneratorConfig(end_date=date(2030, 1, 1)),
+            test=TestConfig(generator=TestGeneratorConfig(end_date=date(2030, 1, 1))),
         )
         _apply_demo_schema_only(cfg, spec_example_instance)
         return asyncio.run(
@@ -701,10 +702,10 @@ def test_step_3_generator_exceptions_only_writes_fewer_than_full(
         sub.mkdir()
         cfg = replace(
             _duckdb_cfg(sub),
-            test_generator=TestGeneratorConfig(
+            test=TestConfig(generator=TestGeneratorConfig(
                 scope=scope,  # pyright: ignore[reportArgumentType]  # WHY: parametrized over Literal at the call site
                 end_date=date(2030, 1, 1),
-            ),
+            )),
         )
         _apply_demo_schema_only(cfg, spec_example_instance)
         return asyncio.run(
@@ -731,7 +732,7 @@ def test_step_3_generator_exceptions_only_emits_lifecycle_events(
 ) -> None:
     cfg = replace(
         _duckdb_cfg(tmp_path),
-        test_generator=TestGeneratorConfig(scope="exceptions_only"),
+        test=TestConfig(generator=TestGeneratorConfig(scope="exceptions_only")),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
     sink = _EventCollector()
@@ -754,9 +755,9 @@ def test_step_3_generator_uncovered_rails_empty_db_full_baseline(
     from datetime import date
     cfg = replace(
         _duckdb_cfg(tmp_path),
-        test_generator=TestGeneratorConfig(
+        test=TestConfig(generator=TestGeneratorConfig(
             scope="uncovered_rails", end_date=date(2030, 1, 1),
-        ),
+        )),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
     tx, bal = asyncio.run(
@@ -782,9 +783,9 @@ def test_step_3_generator_uncovered_rails_skips_covered(
         sub.mkdir()
         cfg = replace(
             _duckdb_cfg(sub),
-            test_generator=TestGeneratorConfig(
+            test=TestConfig(generator=TestGeneratorConfig(
                 scope="uncovered_rails", end_date=date(2030, 1, 1),
-            ),
+            )),
         )
         _apply_demo_schema_only(cfg, spec_example_instance)
         tx, _bal = asyncio.run(
@@ -799,9 +800,9 @@ def test_step_3_generator_uncovered_rails_skips_covered(
     sub.mkdir()
     cfg = replace(
         _duckdb_cfg(sub),
-        test_generator=TestGeneratorConfig(
+        test=TestConfig(generator=TestGeneratorConfig(
             scope="uncovered_rails", end_date=date(2030, 1, 1),
-        ),
+        )),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
     # Pick the first rail in the L2 to "cover" — its baseline should
@@ -890,7 +891,7 @@ def test_step_3_generator_full_adds_to_existing_rows(
     from datetime import date
     cfg = replace(
         _duckdb_cfg(tmp_path),
-        test_generator=TestGeneratorConfig(end_date=date(2030, 1, 1)),
+        test=TestConfig(generator=TestGeneratorConfig(end_date=date(2030, 1, 1))),
     )
     _apply_schema_and_plant_two_rows(cfg, spec_example_instance)
     pre_tx, pre_bal = _row_counts(cfg, spec_example_instance)
@@ -943,10 +944,10 @@ def test_step_3_generator_only_template_requires_template_name(
     from datetime import date
     cfg = replace(
         _duckdb_cfg(tmp_path),
-        test_generator=TestGeneratorConfig(
+        test=TestConfig(generator=TestGeneratorConfig(
             scope="only_template", end_date=date(2030, 1, 1),
             only_template=None,
-        ),
+        )),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
     with pytest.raises(ValueError, match="only_template"):
@@ -967,10 +968,10 @@ def test_step_3_generator_only_template_emits_closure_baseline(
     from datetime import date
     cfg = replace(
         _duckdb_cfg(tmp_path),
-        test_generator=TestGeneratorConfig(
+        test=TestConfig(generator=TestGeneratorConfig(
             scope="only_template", end_date=date(2030, 1, 1),
             only_template="MerchantSettlementCycle",
-        ),
+        )),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
     tx, _bal = asyncio.run(
@@ -1018,11 +1019,11 @@ def test_step_3_generator_only_template_writes_strictly_fewer_than_full(
         sub.mkdir()
         cfg = replace(
             _duckdb_cfg(sub),
-            test_generator=TestGeneratorConfig(
+            test=TestConfig(generator=TestGeneratorConfig(
                 scope=scope,  # pyright: ignore[reportArgumentType]  # WHY: parametrized over Literal at the call site
                 end_date=date(2030, 1, 1),
                 only_template=only_template,
-            ),
+            )),
         )
         _apply_demo_schema_only(cfg, spec_example_instance)
         tx, _bal = asyncio.run(
@@ -1112,7 +1113,7 @@ def test_derive_balances_no_op_when_disabled(
     0 and writes nothing."""
     cfg = replace(
         _duckdb_cfg(tmp_path),
-        test_generator=TestGeneratorConfig(derive_balances=False),
+        test=TestConfig(generator=TestGeneratorConfig(derive_balances=False)),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
     _seed_two_account_roles_with_transactions(
@@ -1136,7 +1137,7 @@ def test_derive_balances_default_account_roles_writes_control_only(
     transactions are NOT derived into balances."""
     cfg = replace(
         _duckdb_cfg(tmp_path),
-        test_generator=TestGeneratorConfig(derive_balances=True),
+        test=TestConfig(generator=TestGeneratorConfig(derive_balances=True)),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
     _seed_two_account_roles_with_transactions(
@@ -1179,10 +1180,10 @@ def test_derive_balances_account_roles_override_widens_set(
     control AND DDA rows get derived."""
     cfg = replace(
         _duckdb_cfg(tmp_path),
-        test_generator=TestGeneratorConfig(
+        test=TestConfig(generator=TestGeneratorConfig(
             derive_balances=True,
             derive_balances_account_roles=("gl_control", "dda"),
-        ),
+        )),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
     _seed_two_account_roles_with_transactions(
@@ -1218,7 +1219,7 @@ def test_derive_balances_failed_transactions_excluded(
     balances — they never posted."""
     cfg = replace(
         _duckdb_cfg(tmp_path),
-        test_generator=TestGeneratorConfig(derive_balances=True),
+        test=TestConfig(generator=TestGeneratorConfig(derive_balances=True)),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
     p = cfg.db.table_prefix
@@ -1275,7 +1276,7 @@ def test_derive_balances_overwrites_existing_rows(
     the same (account, business_day) — operator can iteratively scrub."""
     cfg = replace(
         _duckdb_cfg(tmp_path),
-        test_generator=TestGeneratorConfig(derive_balances=True),
+        test=TestConfig(generator=TestGeneratorConfig(derive_balances=True)),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
     _seed_two_account_roles_with_transactions(
@@ -1337,10 +1338,10 @@ def test_derive_balances_emits_lifecycle_events(
     account_roles in the payload for visibility."""
     cfg = replace(
         _duckdb_cfg(tmp_path),
-        test_generator=TestGeneratorConfig(
+        test=TestConfig(generator=TestGeneratorConfig(
             derive_balances=True,
             derive_balances_account_roles=("gl_control",),
-        ),
+        )),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
     _seed_two_account_roles_with_transactions(
@@ -1427,7 +1428,7 @@ def test_step_4_matviews_picks_up_new_rows(
     from datetime import date
     cfg = replace(
         _duckdb_cfg(tmp_path),
-        test_generator=TestGeneratorConfig(end_date=date(2030, 1, 1)),
+        test=TestConfig(generator=TestGeneratorConfig(end_date=date(2030, 1, 1))),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
     asyncio.run(
@@ -2289,10 +2290,10 @@ def test_build_generator_sql_cutoff_uses_date_literal_across_dialects(
         cfg = _replace(
             base,
             db=_replace(base.db, dialect=dialect),
-            test_generator=TestGeneratorConfig(
+            test=TestConfig(generator=TestGeneratorConfig(
                 end_date=date(2030, 1, 31),
                 cutoff_date=date(2030, 1, 15),
-            ),
+            )),
         )
         sql = _build_generator_sql(cfg, spec_example_instance)
         # cutoff_date + 1 = 2030-01-16 — the half-open upper bound.
