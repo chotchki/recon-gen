@@ -59,7 +59,7 @@ Four checks today, all extensible — drop a new ``Check`` into
   ``qs-gen-prefix`` — renamed at AC.B.1) — hardcoded
   ``"recon-<env>-..."`` deployment-prefix string literals in src
   code outside ``common/config.py``. Resource IDs flow through
-  ``cfg.prefixed(name)`` which weaves in the operator's
+  ``cfg.aws.prefixed(name)`` which weaves in the operator's
   ``deployment_name``; bypassing it (``f"recon-prod-foo"`` direct)
   defeats multi-tenant scoping. Bare ``recon-gen`` (package /
   CLI binary mentions) is allowed — the regex requires
@@ -693,7 +693,7 @@ class _ReconPrefixVisitor(ast.NodeVisitor):
                 checker="recon-prefix",
                 message=(
                     f"hardcoded ``recon-<env>-`` deployment-prefix string "
-                    f"({node.value!r}) — use ``cfg.prefixed(<name>)`` "
+                    f"({node.value!r}) — use ``cfg.aws.prefixed(<name>)`` "
                     f"so the operator's deployment_name is woven in. "
                     f"Direct ``f\"recon-prod-foo\"`` defeats multi-tenant "
                     f"scoping. Suppress with ``# typing-smell: ignore"
@@ -2610,7 +2610,7 @@ def _build_checks() -> list[Check]:
             name="recon-prefix",
             description=(
                 "hardcoded ``recon-<env>-...`` deployment-prefix literal "
-                "in src code — use ``cfg.prefixed(<name>)`` so the "
+                "in src code — use ``cfg.aws.prefixed(<name>)`` so the "
                 "operator's deployment_name is woven in (multi-tenant "
                 "scoping). Bare ``recon-gen`` (package/CLI) is allowed."
             ),

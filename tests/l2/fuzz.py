@@ -178,7 +178,7 @@ def _build_instance(rng: Random, plan: FuzzPlan) -> dict[str, Any]:
     state = _BuildState(plan=plan)
 
     # Z.C (2026-05-15) — the legacy `instance:` YAML key is gone; the
-    # DB-table prefix lives on cfg.db_table_prefix. The seed-derived
+    # DB-table prefix lives on cfg.db.table_prefix. The seed-derived
     # identity (when needed for triage) lives in the YAML *filename*
     # written by the caller, not inside the YAML body.
 

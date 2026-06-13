@@ -163,7 +163,7 @@ def test_apply_demo_database_url_auto_emits_datasource_json(
     value (``tests/audit/test_dashboard_extract.py`` sets one via
     module-level ``os.environ.setdefault``, and pytest collects that
     module before this one in a full run) would leak into the loader's
-    env-override path, populate ``cfg.datasource_arn`` from the env, and
+    env-override path, populate ``cfg.aws.datasource.arn`` from the env, and
     flip ``datasource_arn_was_derived`` to False — so the auto-emit gate
     wouldn't fire and the file wouldn't land. Same defensive pattern as
     ``test_apply_no_demo_database_url_skips_datasource_emit`` below."""
@@ -196,7 +196,7 @@ def test_apply_no_demo_database_url_skips_datasource_emit(
     # demo_database_url is what actually drives the test. Otherwise
     # an ambient RECON_GEN_DEMO_DATABASE_URL (e.g. set by the runner in
     # CI mode for the db layer) leaks into the loader's env-fallback
-    # path and quietly populates cfg.demo_database_url.
+    # path and quietly populates cfg.db.url.
     from recon_gen.common.env_keys import RECON_GEN_DEMO_DATABASE_URL
     monkeypatch.delenv(RECON_GEN_DEMO_DATABASE_URL.name, raising=False)
 

@@ -148,7 +148,7 @@ def test_build_signature_l2_instance_is_kwarg_only() -> None:
 
 
 def test_analysis_registered_with_deployment_aware_name() -> None:
-    """Z.C — the Analysis title surfaces ``cfg.deployment_name`` so
+    """Z.C — the Analysis title surfaces ``cfg.aws.deployment_name`` so
     multi-deploy QS accounts are distinguishable in the UI. Replaces
     the prior L2-prefix-derived name (which was auto-stamped from the
     L2 yaml's `instance:` field, dropped in Z.C)."""

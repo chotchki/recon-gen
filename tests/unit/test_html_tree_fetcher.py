@@ -318,14 +318,14 @@ def test_make_tree_db_fetcher_retargets_to_alt_prefix(
     """BV.4.8.P1.1 — ``?prefix=<alt>`` URL param re-targets the SQL at
     an alternate table prefix (the dual-prefix Trainer's Violation
     Tour link writes ``?prefix=<base>_v``). The pre-resolved SQL has
-    ``cfg.db_table_prefix`` baked in; the fetcher substitutes the
+    ``cfg.db.table_prefix`` baked in; the fetcher substitutes the
     leading ``<base>_`` token at request time. Without this, Clean
     and Violation Tour links render identical data — the operator's
     teaching comparison teaches nothing."""
 
     db_path = tmp_path / "alt_prefix.sqlite"
     conn = duckdb.connect(str(db_path))
-    # ``cfg.db_table_prefix == "test"`` (see make_test_config). Two
+    # ``cfg.db.table_prefix == "test"`` (see make_test_config). Two
     # tables: "test_t" (the cfg-bound base) holds the clean rows;
     # "test_v_t" (the v overlay) holds the planted-violation rows.
     conn.execute("CREATE TABLE test_t (status TEXT, amount INTEGER)")

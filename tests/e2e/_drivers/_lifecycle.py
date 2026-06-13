@@ -49,7 +49,7 @@ def qs_driver_or_none(
     failure-capture hook iff a driver was yielded.
 
     "QS available" = ``get_user_arn()`` resolves a QuickSight user ARN
-    (either from cfg.auth.aws_profile derivation or the explicit
+    (either from cfg.auth.aws.profile derivation or the explicit
     ``RECON_E2E_USER_ARN`` env override). When unavailable, yields
     ``None`` — the caller decides whether to ``pytest.skip`` or run
     with reduced renderer coverage. (The per-renderer agreement

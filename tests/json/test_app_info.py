@@ -185,7 +185,7 @@ def test_matview_status_sql_omits_postgres_only_casts() -> None:
 @pytest.mark.parametrize("builder", SHIPPED_APP_BUILDERS)
 def test_app_info_deploy_stamp_reads_dialect_and_prefix_from_cfg(builder: _AppBuilder) -> None:
     """AO.C1 lock — the App Info deploy-stamp TextBox must render
-    ``dialect: <cfg.dialect>`` + ``prefix: <cfg.deployment_name>``,
+    ``dialect: <cfg.db.dialect>`` + ``prefix: <cfg.aws.deployment_name>``,
     NOT the literals "sqlite" / "dev" / any other hardcoded value.
 
     Background (cold-read feedback #10): a judge looking at the dev
@@ -230,15 +230,15 @@ def test_app_info_deploy_stamp_reads_dialect_and_prefix_from_cfg(builder: _AppBu
             f"`app-info-deploy-stamp` TextBox"
         )
         # Lock the cfg-driven shape: stamp content includes the literal
-        # cfg.dialect.value and cfg.deployment_name strings.
-        assert f"dialect: {cfg.dialect.value}" in deploy_stamp_text, (
+        # cfg.db.dialect.value and cfg.aws.deployment_name strings.
+        assert f"dialect: {cfg.db.dialect.value}" in deploy_stamp_text, (
             f"{builder.__name__}: deploy stamp must read "
-            f"`dialect: {cfg.dialect.value}` (got hardcode or wrong "
+            f"`dialect: {cfg.db.dialect.value}` (got hardcode or wrong "
             f"dialect)"
         )
-        assert f"prefix: {cfg.deployment_name}" in deploy_stamp_text, (
+        assert f"prefix: {cfg.aws.deployment_name}" in deploy_stamp_text, (
             f"{builder.__name__}: deploy stamp must read "
-            f"`prefix: {cfg.deployment_name}` (got hardcode or wrong "
+            f"`prefix: {cfg.aws.deployment_name}` (got hardcode or wrong "
             f"prefix)"
         )
 

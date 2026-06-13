@@ -78,7 +78,7 @@ def apply_db_seed(
 
     Args:
       prefix (Z.C): the table-prefix the schema/seed/refresh SQL keys
-        off (pass ``cfg.db_table_prefix``). The L2 yaml no longer
+        off (pass ``cfg.db.table_prefix``). The L2 yaml no longer
         carries an ``instance:`` field, so the prefix is a required
         kwarg.
       today (legacy, BC.4 superseded by `plant_window`): the reference

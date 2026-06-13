@@ -9,7 +9,7 @@ floor. Cells:
   `?prefill_name=…`; gap-card CTA appends `prefill_name` for
   applicable kinds.
 - BTb.3 — Triage page emits a demo-plant disclosure banner when
-  `cfg.etl_hook is None`.
+  `cfg.app2.etl_hook is None`.
 - BTb.4 — Cancel button mid-run carries explanatory copy + tooltip.
 """
 
@@ -173,7 +173,7 @@ def test_editor_new_form_no_prefill_when_param_absent(
 def test_triage_page_shows_demo_plant_banner_when_no_etl_hook(
     writable_l2_yaml: Path,
 ) -> None:
-    """BTb.3: with `cfg.etl_hook is None` (bundled-demo path), the
+    """BTb.3: with `cfg.app2.etl_hook is None` (bundled-demo path), the
     Triage page banner echoes the Run-page demo-overlay disclosure
     so 4,400 `Missing LimitSchedule` rows don't read as real bugs."""
     import asyncio
@@ -183,7 +183,7 @@ def test_triage_page_shows_demo_plant_banner_when_no_etl_hook(
     )
     cache = L2InstanceCache.from_path(writable_l2_yaml)
     cfg = make_test_config()  # etl_hook defaults to None
-    assert cfg.etl_hook is None
+    assert cfg.app2.etl_hook is None
     body = asyncio.run(_render_etl_triage_page(
         cache, dev_log=False,
         db_pool=None, dialect=None,

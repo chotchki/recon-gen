@@ -87,8 +87,8 @@ def l2_yaml_for_test() -> Path:
     ``RECON_GEN_TEST_L2_INSTANCE`` to a per-cell synthesized yaml whose
     dropped ``instance`` field encoded the cell code (e.g.,
     ``sp_pg_aw``). With the field gone, the DB-table prefix lives on
-    cfg.db_table_prefix and the QS-resource prefix lives on
-    cfg.deployment_name; this resolver only resolves the L2 yaml
+    cfg.db.table_prefix and the QS-resource prefix lives on
+    cfg.aws.deployment_name; this resolver only resolves the L2 yaml
     itself.
     """
     from recon_gen.common.env_keys import RECON_GEN_TEST_L2_INSTANCE

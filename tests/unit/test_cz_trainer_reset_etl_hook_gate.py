@@ -1,6 +1,6 @@
 """CZ.3 — Trainer reset etl_hook gate + DELETE-synthetic-only path.
 
-Phase CZ's threat model: the customer turns off ``cfg.etl_hook`` (e.g.
+Phase CZ's threat model: the customer turns off ``cfg.app2.etl_hook`` (e.g.
 after their real ETL backfill populated the demo DB with real
 transactions / balances). The Trainer reset button still TRUNCATEs
 + reseeds — silently wiping real data with no next-cycle refill to
@@ -15,10 +15,10 @@ and survive.
 
 This file pins three contracts:
 
-1. ``cfg.etl_hook`` configured → ``run_deploy_pipeline`` is invoked
+1. ``cfg.app2.etl_hook`` configured → ``run_deploy_pipeline`` is invoked
    with ``synthetic_only_wipe=False`` (legacy full-TRUNCATE path,
    matches pre-CZ behavior).
-2. ``cfg.etl_hook is None`` → ``run_deploy_pipeline`` is invoked with
+2. ``cfg.app2.etl_hook is None`` → ``run_deploy_pipeline`` is invoked with
    ``synthetic_only_wipe=True`` (DELETE-synthetic-only path).
 3. The DELETE-synthetic-only SQL preserves rows where
    ``metadata.source`` is not ``'training'`` — the load-bearing
@@ -105,13 +105,13 @@ def _duckdb_cfg(tmp_path: Path, **overrides: object) -> Config:
 
 def _apply_schema(cfg: Config, instance: L2Instance) -> None:
     schema_sql = emit_schema(
-        instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+        instance, prefix=cfg.db.table_prefix, dialect=cfg.db.dialect,
     )
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
         try:
-            execute_script(cur, schema_sql, dialect=cfg.dialect)
+            execute_script(cur, schema_sql, dialect=cfg.db.dialect)
             conn.commit()
         finally:
             cur.close()
@@ -221,7 +221,7 @@ def _plant_tagged_rows(cfg: Config) -> None:
     and SQL NULL. Each behaves correctly under SQL/JSON-standard
     ``JSON_VALUE`` returning NULL on missing path / NULL input.
     """
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     tx_inserts = [
         # t1: synthetic — should be wiped
         f"""INSERT INTO {p}_transactions (
@@ -303,7 +303,7 @@ def _plant_tagged_rows(cfg: Config) -> None:
         cur = conn.cursor()
         try:
             for stmt in tx_inserts + bal_inserts:
-                execute_script(cur, stmt, dialect=cfg.dialect)
+                execute_script(cur, stmt, dialect=cfg.db.dialect)
             conn.commit()
         finally:
             cur.close()
@@ -312,7 +312,7 @@ def _plant_tagged_rows(cfg: Config) -> None:
 
 
 def _read_transaction_ids(cfg: Config) -> list[str]:
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -326,7 +326,7 @@ def _read_transaction_ids(cfg: Config) -> list[str]:
 
 
 def _read_balance_account_ids(cfg: Config) -> list[str]:
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -342,7 +342,7 @@ def _read_balance_account_ids(cfg: Config) -> list[str]:
 
 
 def _row_counts(cfg: Config) -> tuple[int, int]:
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -399,7 +399,7 @@ def test_step_2_wipe_default_path_deletes_all_rows(
     """The default (ETL-mode) path keeps the full-TRUNCATE semantics —
     every row goes, regardless of metadata stamp. Sanity that CZ.3's
     new synthetic_only param doesn't accidentally fire on the
-    ``cfg.etl_hook`` configured path."""
+    ``cfg.app2.etl_hook`` configured path."""
     cfg = _duckdb_cfg(tmp_path)
     _apply_schema(cfg, spec_example_instance)
     _plant_tagged_rows(cfg)
@@ -472,10 +472,10 @@ def test_training_reset_etl_hook_none_runs_synthetic_only_wipe(
     writable_l2_yaml: Path, tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``cfg.etl_hook is None`` (standalone-mode) → the route invokes
+    """``cfg.app2.etl_hook is None`` (standalone-mode) → the route invokes
     ``run_deploy_pipeline(..., synthetic_only_wipe=True)``."""
     cfg = _duckdb_cfg(tmp_path)
-    assert cfg.etl_hook is None  # sanity — the standalone scenario
+    assert cfg.app2.etl_hook is None  # sanity — the standalone scenario
 
     calls, spy = _spy_pipeline_factory()
     monkeypatch.setattr(
@@ -494,12 +494,12 @@ def test_training_reset_etl_hook_configured_runs_full_truncate(
     writable_l2_yaml: Path, tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``cfg.etl_hook = "true"`` (ETL-mode) → the route invokes
+    """``cfg.app2.etl_hook = "true"`` (ETL-mode) → the route invokes
     ``run_deploy_pipeline(..., synthetic_only_wipe=False)`` (legacy
     full-TRUNCATE). Next ETL cycle refills, so wiping everything is
     safe."""
     cfg = _duckdb_cfg(tmp_path, etl_hook="true")
-    assert cfg.etl_hook == "true"
+    assert cfg.app2.etl_hook == "true"
 
     calls, spy = _spy_pipeline_factory()
     monkeypatch.setattr(

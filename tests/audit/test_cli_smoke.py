@@ -339,10 +339,10 @@ def test_audit_apply_signing_block_loads_into_config(
     """``signing:`` in config.yaml round-trips into ``Config.signing``."""
     from recon_gen.common.config import load_config, SigningConfig
     cfg = load_config(signed_config)
-    assert isinstance(cfg.signing, SigningConfig)
-    assert cfg.signing.signer_name == "pytest signer"
-    assert Path(cfg.signing.key_path).is_file()
-    assert Path(cfg.signing.cert_path).is_file()
+    assert isinstance(cfg.audit.signing, SigningConfig)
+    assert cfg.audit.signing.signer_name == "pytest signer"
+    assert Path(cfg.audit.signing.key_path).is_file()
+    assert Path(cfg.audit.signing.cert_path).is_file()
 
 
 def test_audit_apply_signing_block_missing_field_errors(tmp_path: Path):

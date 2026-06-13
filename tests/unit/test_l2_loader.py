@@ -210,7 +210,7 @@ def test_money_rejects_non_numeric(tmp_path: Path) -> None:
 
 # -- F5 InstancePrefix regex + length cap -------------------------------------
 #
-# The F5 regex + 30-char cap moved to ``cfg.db_table_prefix`` (Z.C,
+# The F5 regex + 30-char cap moved to ``cfg.db.table_prefix`` (Z.C,
 # 2026-05-15). Coverage lives in ``tests/unit/test_config_loader.py``.
 # The L2 yaml side no longer carries an ``instance:`` field at all —
 # loader rejection coverage lives in ``test_legacy_instance_key_rejected``.

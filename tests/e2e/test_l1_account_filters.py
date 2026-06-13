@@ -612,7 +612,7 @@ def _independent_net_flow_for(
     """
     from datetime import date, timedelta
 
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     day = date.fromisoformat(day_iso)
     next_day = day + timedelta(days=1)
     sql = (

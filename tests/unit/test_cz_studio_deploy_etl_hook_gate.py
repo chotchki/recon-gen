@@ -1,10 +1,10 @@
 """CZ.4 — Studio POST /deploy etl_hook gate tests.
 
-Refuse outright (HTTP 409 + structured JSON) when ``cfg.etl_hook is
+Refuse outright (HTTP 409 + structured JSON) when ``cfg.app2.etl_hook is
 None`` — standalone-mode means no ETL cycle will re-populate the
 demo DB after Deploy's wipe-and-reseed step, so any unmarked row in
 the DB might be real customer data. No click-through; the operator
-must either configure ``cfg.etl_hook`` (the supported integration
+must either configure ``cfg.app2.etl_hook`` (the supported integration
 path) or drop to the CLI (``recon-gen data apply --execute``) for
 the documented escape hatch. The Trainer button (BU.1.6) remains
 available in standalone-mode with DELETE-synthetic-only semantics —
@@ -13,14 +13,14 @@ Phase CZ + the repo CLAUDE.md.
 
 This file pins the route-level contract:
 
-- ``cfg.etl_hook = "true"`` (or any configured value) → existing
+- ``cfg.app2.etl_hook = "true"`` (or any configured value) → existing
   behavior. POST /deploy runs the pipeline + returns the usual
   ``DeploySummary`` JSON (200 success / 503 halted). Already covered
   by ``test_studio_deploy_route.py`` post-CZ.4; mirrored here so the
   CZ.4 test file documents the full contract.
-- ``cfg.etl_hook = None`` → refuse with 409. Response body carries
+- ``cfg.app2.etl_hook = None`` → refuse with 409. Response body carries
   ``halted: True`` + ``halt_reason: "standalone-mode"`` + a ``message``
-  string that explains WHY (cfg.etl_hook is None means we cannot
+  string that explains WHY (cfg.app2.etl_hook is None means we cannot
   prove unmarked rows are synthetic) and WHAT the operator can do
   (configure etl_hook, use the Trainer button, or use the CLI).
   ``run_deploy_pipeline`` is NOT invoked.
@@ -88,13 +88,13 @@ def _duckdb_cfg(tmp_path: Path, **overrides: object) -> Config:
 def _apply_schema(cfg: Config, yaml_path: Path) -> None:
     instance = load_instance(yaml_path)
     schema_sql = emit_schema(
-        instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+        instance, prefix=cfg.db.table_prefix, dialect=cfg.db.dialect,
     )
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
         try:
-            execute_script(cur, schema_sql, dialect=cfg.dialect)
+            execute_script(cur, schema_sql, dialect=cfg.db.dialect)
             conn.commit()
         finally:
             cur.close()
@@ -122,12 +122,12 @@ def _build_app(yaml_path: Path, cfg: Config | None) -> object:
 def test_post_deploy_refuses_when_etl_hook_is_none(
     writable_l2_yaml: Path, tmp_path: Path,
 ) -> None:
-    """CZ.4 — ``cfg.etl_hook is None`` triggers the standalone-mode
+    """CZ.4 — ``cfg.app2.etl_hook is None`` triggers the standalone-mode
     refuse path. Response is 409 Conflict + structured JSON; the
     pipeline is NOT invoked.
     """
     cfg = _duckdb_cfg(tmp_path)
-    assert cfg.etl_hook is None  # sanity — this is the refuse scenario
+    assert cfg.app2.etl_hook is None  # sanity — this is the refuse scenario
     _apply_schema(cfg, writable_l2_yaml)
     app = _build_app(writable_l2_yaml, cfg)
     with TestClient(app) as c:  # type: ignore[arg-type]: TestClient accepts ASGI apps but make_app returns Any
@@ -162,7 +162,7 @@ def test_post_deploy_refuse_does_not_invoke_pipeline(
     not via DB observation (which can lag or be order-dependent).
     """
     cfg = _duckdb_cfg(tmp_path)
-    assert cfg.etl_hook is None
+    assert cfg.app2.etl_hook is None
     _apply_schema(cfg, writable_l2_yaml)
 
     pipeline_calls: list[object] = []
@@ -194,7 +194,7 @@ def test_post_deploy_refuse_does_not_invoke_pipeline(
 def test_post_deploy_proceeds_when_etl_hook_configured(
     writable_l2_yaml: Path, tmp_path: Path,
 ) -> None:
-    """``cfg.etl_hook`` configured → existing behavior. Pipeline runs
+    """``cfg.app2.etl_hook`` configured → existing behavior. Pipeline runs
     + returns ``DeploySummary`` JSON. Uses ``true`` (the shell builtin)
     as a no-op hook that exits 0 so step 1 succeeds and steps 2-5
     proceed. Mirrors the post-CZ.4 contract in

@@ -133,8 +133,8 @@ def _derive_env_from_cfg() -> None:
 
     Promotes three values from the operator cfg into process env:
     - ``RECON_GEN_CONFIG`` — the resolved cfg path (when not pre-set)
-    - ``AWS_PROFILE`` — from ``cfg.auth.aws_profile``
-    - ``RECON_GEN_TEST_L2_INSTANCE`` — from ``cfg.default_l2_instance``
+    - ``AWS_PROFILE`` — from ``cfg.auth.aws.profile``
+    - ``RECON_GEN_TEST_L2_INSTANCE`` — from ``cfg.db.default_l2_instance``
 
     Pre-existing env wins (operator overrides cfg). Mirrors the runner's
     ``cmd_up_to`` env-derivation block — the runner still calls

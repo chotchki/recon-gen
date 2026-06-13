@@ -98,7 +98,7 @@ def query_db_via_cfg(
     dataset_parameters: Sequence[DatasetParameter] = (),
 ) -> list[dict[str, Any]]:  # typing-smell: ignore[explicit-any]: cell values are heterogeneous per-column — coercion happens at the assert site
     """BG.1 — ground-truth direct-SQL helper shared by both
-    ``DashboardDriver`` impls. Runs ``sql`` against ``cfg.demo_database_url``
+    ``DashboardDriver`` impls. Runs ``sql`` against ``cfg.db.url``
     (the same DB the deployed dashboard reads), with ``binds`` substituted
     via the same ``_sql_executor`` pipeline App2 uses, and returns rows
     as ``{column: value}`` dicts.
@@ -121,7 +121,7 @@ def query_db_via_cfg(
         lambda: connect_demo_db(cfg),
         sql,
         url_params,
-        dialect=cfg.dialect,
+        dialect=cfg.db.dialect,
         dataset_parameters=list(dataset_parameters),
     )
     return [dict(zip(columns, row, strict=True)) for row in rows]
@@ -293,7 +293,7 @@ class DashboardDriver(Protocol):
         """BG.1 — direct-SQL ground truth for honest-gate assertions.
 
         Runs ``sql`` against the same DB the deployed dashboard reads
-        (``cfg.demo_database_url`` stored on the driver at factory time),
+        (``cfg.db.url`` stored on the driver at factory time),
         with ``binds`` substituted via the same ``_sql_executor``
         pipeline App2 uses, and returns rows as ``{column: value}``
         dicts. Both impls delegate to the shared

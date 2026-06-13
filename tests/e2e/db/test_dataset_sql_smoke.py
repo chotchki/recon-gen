@@ -179,7 +179,7 @@ def _smoke_one(conn: Any, ds: DataSet) -> tuple[bool, str]:
 
 def _build_all_datasets(cfg: Config, l2: L2Instance) -> list[DataSet]:
     """Every dataset across all 4 apps. Z.C — the DB-table prefix lives
-    on cfg.db_table_prefix (was previously stamped from L2Instance.instance);
+    on cfg.db.table_prefix (was previously stamped from L2Instance.instance);
     the cfg the operator points at the test e2e DB already carries the
     matching prefix, so dataset SQL renders the right matview names without
     further plumbing.

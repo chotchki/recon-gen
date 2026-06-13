@@ -179,7 +179,7 @@ def test_build_signature_l2_instance_is_kwarg_only() -> None:
 
 
 def test_analysis_registered_with_deployment_aware_name() -> None:
-    """Z.C — the Analysis title surfaces ``cfg.deployment_name`` so
+    """Z.C — the Analysis title surfaces ``cfg.aws.deployment_name`` so
     multi-deploy QS accounts are distinguishable in the UI."""
     app = build_l2_flow_tracing_app(_CFG)
     assert app.analysis is not None
@@ -502,7 +502,7 @@ def _chains_dataset_sql_against(yaml_path: Path) -> str:
     empty-chains CTE path is exercised separately with a synthesized
     chains-stripped instance.
 
-    Z.C — the dataset SQL's matview names come from cfg.db_table_prefix
+    Z.C — the dataset SQL's matview names come from cfg.db.table_prefix
     (was previously stamped from the L2's `instance` field). Pin the
     cfg's prefix to the yaml stem so the assertions still find
     `<yaml_stem>_current_transactions` in the rendered SQL.
@@ -650,7 +650,7 @@ def test_chains_dataset_emits_same_sql_regardless_of_l2_chain_count() -> None:
 
 
 def test_chains_dataset_id_uses_deployment_prefix() -> None:
-    """Z.C — dataset ID is prefixed by `cfg.deployment_name`. Was
+    """Z.C — dataset ID is prefixed by `cfg.aws.deployment_name`. Was
     previously the M.2d.3 two-segment shape with the L2 instance
     prefix as the middle segment; now collapsed to one prefix."""
     from recon_gen.apps.l2_flow_tracing.datasets import (
@@ -996,7 +996,7 @@ _EXC_DATASETS = (
 
 
 def _exc_dataset_sql(builder_name: str, yaml_path: Path) -> str:
-    """Z.C — pin cfg.db_table_prefix to the yaml stem so the rendered
+    """Z.C — pin cfg.db.table_prefix to the yaml stem so the rendered
     SQL references `<yaml_stem>_current_transactions`."""
     import recon_gen.apps.l2_flow_tracing.datasets as ds_mod
     from dataclasses import replace
@@ -1026,7 +1026,7 @@ def test_exc_dataset_id_uses_deployment_prefix(
     ds_id: str, builder_name: str,
 ) -> None:
     """Z.C — every exception dataset's ID is prefixed by
-    ``cfg.deployment_name`` so multi-deploy collisions don't happen
+    ``cfg.aws.deployment_name`` so multi-deploy collisions don't happen
     in the same QS account."""
     import recon_gen.apps.l2_flow_tracing.datasets as ds_mod
     from dataclasses import replace
@@ -1337,7 +1337,7 @@ def test_declared_metadata_keys_walks_union_across_rails() -> None:
 
 def test_postings_dataset_targets_prefixed_current_transactions() -> None:
     """Postings reads from `<prefix>_current_transactions` (Z.C —
-    where prefix = cfg.db_table_prefix)."""
+    where prefix = cfg.db.table_prefix)."""
     from recon_gen.apps.l2_flow_tracing.datasets import (
         build_postings_dataset,
     )

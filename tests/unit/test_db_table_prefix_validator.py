@@ -1,4 +1,4 @@
-"""CR.4 — ``cfg.db_table_prefix`` validation.
+"""CR.4 — ``cfg.db.table_prefix`` validation.
 
 Pre-CR.4 the env-var description claimed "snake_case, ≤30 chars" and
 primitives.py claimed config.py enforced it — neither did. A long

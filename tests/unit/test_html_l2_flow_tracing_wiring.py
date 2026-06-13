@@ -40,7 +40,7 @@ from tests._test_helpers import make_test_config
 
 
 # L2FT's build_all_l2_flow_tracing_datasets needs both cfg + L2 instance
-# (the App Info matview names use cfg.db_table_prefix; the
+# (the App Info matview names use cfg.db.table_prefix; the
 # Rails/Chains/Templates pushdown params' declared-value defaults are
 # L2-derived).
 _TEST_INSTANCE = default_l2_instance()

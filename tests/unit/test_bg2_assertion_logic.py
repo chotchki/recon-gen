@@ -97,8 +97,7 @@ def planted_sqlite() -> Iterator["Config"]:
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
-    cfg.db_table_prefix = "pfx"
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path, db_table_prefix="pfx")
     try:
         yield cfg
     finally:
@@ -238,8 +237,8 @@ def test_bg2_narrative_formula_against_independent_truth_catches_matview_net_flo
        diverges from independent_sum.
     """
     cfg = planted_sqlite
-    assert cfg.demo_database_url is not None
-    conn = duckdb.connect(cfg.demo_database_url)
+    assert cfg.db.url is not None
+    conn = duckdb.connect(cfg.db.url)
     # Plant a base-transactions table mirroring the matview's input
     # shape. In v6 amount_money is signed: Credit positive, Debit
     # negative.

@@ -275,12 +275,12 @@ async def _pool_and_snap(
     (``test_snapshotter_oracle.py``), which already builds the pool +
     snapshotter inside the single ``_round_trip`` coroutine.
 
-    Threads ``cfg.db_table_prefix`` through to the snapshotter so the
+    Threads ``cfg.db.table_prefix`` through to the snapshotter so the
     per-worker prefix from ``pg_cfg`` is honored (BV.3.3.f).
     """
     pool = await make_connection_pool(cfg)
     snap = PostgresSchemaSnapshotter(
-        pool=pool, base_prefix=cfg.db_table_prefix, l2_instance=l2_instance,
+        pool=pool, base_prefix=cfg.db.table_prefix, l2_instance=l2_instance,
     )
     try:
         yield pool, snap

@@ -219,11 +219,11 @@ def test_bg5_account_summary_kpis_match_dataset_counts(
     active_rows = driver.query_db(active_sql, dataset_parameters=active_params)
 
     # Window-narrow Active accounts per the dashboard's 30-day scope
-    # (cfg.test_generator.as_of_frame(window_days=30); see exec/app.py:869). Total
+    # (cfg.test.generator.as_of_frame(window_days=30); see exec/app.py:869). Total
     # Open uses null_option=ALL_VALUES (FilterGroup keeps every
     # account regardless of last_activity_date), so its KPI count
     # matches the full dataset's row count without window narrowing.
-    frame = cfg.test_generator.as_of_frame(window_days=30)
+    frame = cfg.test.generator.as_of_frame(window_days=30)
     active_in_window = [
         r for r in active_rows
         if r.get("last_activity_date") is not None

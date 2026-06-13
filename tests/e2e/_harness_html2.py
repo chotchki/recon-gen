@@ -346,7 +346,7 @@ def make_live_db_fetchers_for_app(
         pool = cached.get("pool")
         if pool is None:
             pool = await make_connection_pool(
-                cfg, max_size=cfg.app2_db_pool_size,
+                cfg, max_size=cfg.db.app2_pool_size,
             )
             cached["pool"] = pool
         return pool

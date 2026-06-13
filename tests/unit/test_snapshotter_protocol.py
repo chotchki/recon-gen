@@ -1,7 +1,7 @@
 """BV.3.3 snapshot foundation — Protocol + factory unit tests.
 
 Asserts the Snapshotter surface (take / restore / drop / aclose),
-the factory dispatches by ``cfg.dialect`` (every dialect currently
+the factory dispatches by ``cfg.db.dialect`` (every dialect currently
 returns the NotImplemented stub until phase 2 lands), and the stub
 raises ``NotImplementedError`` on each non-aclose verb with an
 actionable message.
@@ -152,7 +152,7 @@ class TestMakeSnapshotter:
             make_snapshotter(
                 cfg,
                 _DummyPool(),  # type: ignore[arg-type]: dummy structural pool — factory holds ref only
-                base_prefix=cfg.db_table_prefix,
+                base_prefix=cfg.db.table_prefix,
                 l2_instance=_empty_l2(),
             ),
         )
@@ -176,7 +176,7 @@ class TestMakeSnapshotter:
             make_snapshotter(
                 cfg,
                 _DummyPool(),  # type: ignore[arg-type]: dummy structural pool — factory holds ref only
-                base_prefix=cfg.db_table_prefix,
+                base_prefix=cfg.db.table_prefix,
                 l2_instance=_empty_l2(),
             ),
         )
@@ -208,7 +208,7 @@ class TestMakeSnapshotter:
                 snap = await make_snapshotter(
                     cfg,
                     pool,
-                    base_prefix=cfg.db_table_prefix,
+                    base_prefix=cfg.db.table_prefix,
                     l2_instance=_empty_l2(),
                 )
                 assert isinstance(snap, DuckDBFileSnapshotter)
@@ -229,7 +229,7 @@ class TestMakeSnapshotter:
                 make_snapshotter(
                     cfg,
                     _DummyPool(),  # type: ignore[arg-type]: same dummy carrier
-                    base_prefix=cfg.db_table_prefix,
+                    base_prefix=cfg.db.table_prefix,
                     l2_instance=_empty_l2(),
                 ),
             )

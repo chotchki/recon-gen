@@ -327,7 +327,7 @@ def _select_probe_state(cfg: Any) -> dict[str, list[tuple[Any, ...]]]:
     the LOB to a plain ``str`` before tupling so equality compares
     content, not handle.
     """
-    base_prefix = cfg.db_table_prefix
+    base_prefix = cfg.db.table_prefix
     v_prefix = v_overlay_prefix(base_prefix)
     state: dict[str, list[tuple[Any, ...]]] = {}
     conn = connect_demo_db(cfg)
@@ -390,7 +390,7 @@ def test_round_trip_take_mutate_restore(
     take-time, regardless of any DML between them.
     """
     cfg = seeded_v_overlay
-    base_prefix = cfg.db_table_prefix
+    base_prefix = cfg.db.table_prefix
     v_prefix = v_overlay_prefix(base_prefix)
     baseline = _select_probe_state(cfg)
 
@@ -438,7 +438,7 @@ def test_multi_snapshot_independence(
       restore("b") — assert rows are {tx-002}
     """
     cfg = seeded_v_overlay
-    base_prefix = cfg.db_table_prefix
+    base_prefix = cfg.db.table_prefix
     v_prefix = v_overlay_prefix(base_prefix)
     baseline = _select_probe_state(cfg)
     assert len(baseline["transactions"]) == 2, (
@@ -501,7 +501,7 @@ def test_restore_latency_under_sla(
     is 6× faster).
     """
     cfg = seeded_v_overlay
-    base_prefix = cfg.db_table_prefix
+    base_prefix = cfg.db.table_prefix
 
     async def _measure() -> float:
         pool = await make_connection_pool(cfg, max_size=2)
@@ -540,7 +540,7 @@ def test_restore_without_take_raises(
     """Calling restore() before any take() surfaces a typed error
     rather than ORA-00942 confusion."""
     cfg = seeded_v_overlay
-    base_prefix = cfg.db_table_prefix
+    base_prefix = cfg.db.table_prefix
 
     async def _no_take() -> None:
         pool = await make_connection_pool(cfg, max_size=2)
@@ -580,7 +580,7 @@ def test_aclose_sweeps_undropped_snapshots(
       USER_TABLES post-aclose: zero gold tables under our prefix.
     """
     cfg = seeded_v_overlay
-    base_prefix = cfg.db_table_prefix
+    base_prefix = cfg.db.table_prefix
     upper_prefix = v_overlay_prefix(base_prefix).upper()
 
     async def _sweep_check() -> tuple[int, int]:

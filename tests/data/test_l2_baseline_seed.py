@@ -534,7 +534,7 @@ class TestEmitFullSeed:
 class TestBaseSeedKnob:
     """X.4.h.0.b — `base_seed` flows through emit_full_seed → emit_baseline_seed.
 
-    Studio's data-shaping panel writes ``cfg.test_generator.seed`` into
+    Studio's data-shaping panel writes ``cfg.test.generator.seed`` into
     this knob. ``None`` (default) preserves byte-identity with the
     locked seeds; non-None reseeds the baseline so plant positions
     rotate across the 90-day window.

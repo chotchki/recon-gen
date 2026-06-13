@@ -81,7 +81,7 @@ def _build_money_trail_generator(
         anchor_day=anchor_day,
         instance=_INSTANCE,
     )
-    gen.prefix = cfg.db_table_prefix
+    gen.prefix = cfg.db.table_prefix
     return gen
 
 

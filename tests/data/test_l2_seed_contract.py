@@ -515,7 +515,7 @@ _INFRA_METADATA_KEYS = {
     "scenario_id", "generator",
     # CZ.2 — synthetic-row predicate. Every seed-pipeline writer stamps
     # ``source='training'`` so Phase CZ's standalone-mode cleanup gate
-    # (``cfg.etl_hook is None`` ⇒ DELETE WHERE
+    # (``cfg.app2.etl_hook is None`` ⇒ DELETE WHERE
     # ``JSON_VALUE(metadata, '$.source') = 'training'``) catches them.
     "source",
 }

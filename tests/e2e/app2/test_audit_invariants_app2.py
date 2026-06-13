@@ -96,7 +96,7 @@ def seeded_db(
     try:
         scenario = apply_db_seed(
             conn, instance,
-            prefix=cfg.db_table_prefix,
+            prefix=cfg.db.table_prefix,
             mode="l1_invariants",
             today=_TODAY,
             plant_window=_PERIOD,

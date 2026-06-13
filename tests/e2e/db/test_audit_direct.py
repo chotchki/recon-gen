@@ -149,7 +149,7 @@ def seeded_db(
     try:
         scenario = apply_db_seed(
             conn, instance,
-            prefix=cfg.db_table_prefix,
+            prefix=cfg.db.table_prefix,
             mode="l1_invariants",
             today=_TODAY,
             plant_window=_PERIOD,
@@ -190,8 +190,8 @@ def audit_pdf(
             "--execute",
         ],
         env={
-            "RECON_GEN_DB_TABLE_PREFIX": cfg.db_table_prefix,
-            "RECON_GEN_DEPLOYMENT_NAME": cfg.deployment_name,
+            "RECON_GEN_DB_TABLE_PREFIX": cfg.db.table_prefix,
+            "RECON_GEN_DEPLOYMENT_NAME": cfg.aws.deployment_name,
         },
     )
     assert result.exit_code == 0, result.output
@@ -267,7 +267,7 @@ def test_l1_invariant_direct_extract(
     expected_obj = expected_audit_counts(seeded_db, _PERIOD)
     expected: int = getattr(expected_obj, f"{invariant}_count")
     is_flat = invariant in FLAT_SHAPE_INVARIANTS
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
 
     direct_count: int | None = None
     direct_keys: set[tuple[Any, ...]] = set()

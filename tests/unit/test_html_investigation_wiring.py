@@ -38,7 +38,7 @@ from tests._test_helpers import make_test_config
 
 
 # Investigation's build_all_datasets needs both cfg + L2 instance —
-# the App Info matview names are derived from cfg.db_table_prefix.
+# the App Info matview names are derived from cfg.db.table_prefix.
 _TEST_INSTANCE = default_l2_instance()
 _TEST_CFG = make_test_config(db_table_prefix=DEFAULT_PREFIX)
 

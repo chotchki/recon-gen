@@ -96,8 +96,7 @@ def planted_inv_sqlite() -> Iterator["Config"]:
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
-    cfg.db_table_prefix = "pfx"
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path, db_table_prefix="pfx")
     try:
         yield cfg
     finally:

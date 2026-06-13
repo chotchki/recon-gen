@@ -183,7 +183,7 @@ def _substitute_container_url(  # pyright: ignore[reportUnusedFunction]: re-expo
     loaded: Config,
     request: pytest.FixtureRequest,
 ) -> Config:
-    """CB.17.d — swap ``cfg.demo_database_url`` for the matching
+    """CB.17.d — swap ``cfg.db.url`` for the matching
     session-scoped container URL.
 
     Honors the legacy ``cmd_up_to`` cell-loop path: when
@@ -262,7 +262,7 @@ def cfg_with_container_url(
     """Yield `cfg` with `demo_database_url` swapped for the matching
     shared-container fixture's URL.
 
-    Dispatch by ``cfg.dialect``: POSTGRES → pg_container_url; ORACLE →
+    Dispatch by ``cfg.db.dialect``: POSTGRES → pg_container_url; ORACLE →
     oracle_container_url; DUCKDB → passthrough (file-based; the yaml URL
     is authoritative).
 
@@ -275,16 +275,16 @@ def cfg_with_container_url(
 
     from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
 
-    if cfg.dialect is Dialect.POSTGRES:
+    if cfg.db.dialect is Dialect.POSTGRES:
         return dataclasses.replace(cfg, demo_database_url=pg_container_url)
-    if cfg.dialect is Dialect.ORACLE:
+    if cfg.db.dialect is Dialect.ORACLE:
         return dataclasses.replace(cfg, demo_database_url=oracle_container_url)
     # DuckDB falls through; the yaml-loaded URL is the source.
     return cfg
 
 
 def _pin_cfg_to_kv_as_of(cfg: Config) -> Config:
-    """Pin ``cfg.test_generator.end_date`` to the demo DB's kv ``as_of``
+    """Pin ``cfg.test.generator.end_date`` to the demo DB's kv ``as_of``
     row when reachable. See ``cfg`` fixture docstring for the why.
 
     Idempotent: already-pinned ``end_date`` round-trips unchanged when
@@ -302,18 +302,18 @@ def _pin_cfg_to_kv_as_of(cfg: Config) -> Config:
     except Exception as exc:
         print(
             f"[cfg.pin_to_kv_as_of] DB unreachable ({exc!r}); falling "
-            f"through to cfg.test_generator.end_date={cfg.test_generator.end_date!r}",
+            f"through to cfg.test.generator.end_date={cfg.test.generator.end_date!r}",
             file=sys.stderr,
         )
         return cfg
 
     try:
-        as_of = get_as_of(conn, prefix=cfg.db_table_prefix)
+        as_of = get_as_of(conn, prefix=cfg.db.table_prefix)
     except Exception as exc:
         print(
             f"[cfg.pin_to_kv_as_of] kv.as_of read failed ({exc!r}); "
-            f"falling through to cfg.test_generator.end_date="
-            f"{cfg.test_generator.end_date!r}",
+            f"falling through to cfg.test.generator.end_date="
+            f"{cfg.test.generator.end_date!r}",
             file=sys.stderr,
         )
         return cfg
@@ -323,25 +323,25 @@ def _pin_cfg_to_kv_as_of(cfg: Config) -> Config:
         except Exception:
             pass
 
-    pinned_tg = dataclasses.replace(cfg.test_generator, end_date=as_of.date())
+    pinned_tg = dataclasses.replace(cfg.test.generator, end_date=as_of.date())
     return dataclasses.replace(cfg, test_generator=pinned_tg)
 
 
 @pytest.fixture(scope="session")
 def account_id(cfg: Config) -> str:
-    return cfg.aws_account_id
+    return cfg.aws.account_id
 
 
 @pytest.fixture(scope="session")
 def region(cfg: Config) -> str:
-    return cfg.aws_region
+    return cfg.aws.region
 
 
 @pytest.fixture(scope="session")
 def deployment_name(cfg: Config) -> str:
     """Z.C — replaces the prior ``resource_prefix`` fixture; the
     deployment_name IS the single per-deploy QS-resource-ID prefix."""
-    return cfg.deployment_name
+    return cfg.aws.deployment_name
 
 
 @pytest.fixture(scope="session")
@@ -371,7 +371,7 @@ def qs_driver(
     e2e tests that drive a deployed QuickSight dashboard through the
     ``DashboardDriver`` protocol (``open(dashboard_id)`` mints the embed
     URL). Skips cleanly when ``RECON_E2E_USER_ARN`` is unset (the runner
-    derives it from ``cfg.auth.aws_profile``; export it for a direct
+    derives it from ``cfg.auth.aws.profile``; export it for a direct
     ``pytest`` run). Function-scoped — embed URLs are single-use.
 
     AA.H.12 — thin wrapper around ``qs_driver_or_none`` (the shared
@@ -489,14 +489,14 @@ def _refresh_matviews_once_per_session(  # pyright: ignore[reportUnusedFunction]
         return
     try:
         sql = refresh_matviews_sql(
-            l2, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+            l2, prefix=cfg.db.table_prefix, dialect=cfg.db.dialect,
         )
         with conn.cursor() as cur:
-            execute_script(cur, sql, dialect=cfg.dialect)
+            execute_script(cur, sql, dialect=cfg.db.dialect)
         conn.commit()
         print(
             f"runner: matview-refresh fixture refreshed "
-            f"{cfg.db_table_prefix}_* matviews on {cfg.dialect.name}"
+            f"{cfg.db.table_prefix}_* matviews on {cfg.db.dialect.name}"
         )
     except Exception as exc:
         print(f"runner: matview-refresh fixture FAILED ({exc!r}) — continuing")
@@ -696,7 +696,7 @@ def _qs_pre_warm_dashboards(  # pyright: ignore[reportUnusedFunction]: pytest au
     qs_client = cast("QuickSightClient", request.getfixturevalue("qs_client"))
     account_id = cast(str, request.getfixturevalue("account_id"))
     deployment_name = cast(str, request.getfixturevalue("deployment_name"))
-    if not cfg.aws_account_id or not account_id:
+    if not cfg.aws.account_id or not account_id:
         return
     dashboard_ids = (
         ("l1", f"{deployment_name}-l1-dashboard"),
@@ -812,10 +812,10 @@ def l2ft_app(cfg: Config) -> "App":
 #     the deployed dashboard ID. Skips when `RECON_E2E_USER_ARN` is unset
 #     (no embed signer) or the dashboard isn't deployed.
 #   - `app2` — drives a *locally-spun* App 2 server built from the same
-#     `<app>_app` tree, reading the same DB (`cfg.demo_database_url`) via
+#     `<app>_app` tree, reading the same DB (`cfg.db.url`) via
 #     `make_live_db_fetcher_for_app` — the "output" slot of the
 #     `scenario → DB → output` pipeline. `dashboard_arg` is the local
-#     slug. Skips when `cfg.demo_database_url` is unset.
+#     slug. Skips when `cfg.db.url` is unset.
 #
 # Function-scoped: the QS embed URL is single-use; the App 2 server spins
 # in ~1–2 s, acceptable. See docs/audits/x_2_u_parametrized_driver_spike.md.
@@ -878,7 +878,7 @@ def _parametrized_dashboard_driver(
     else:  # app2
         if not getattr(cfg, "demo_database_url", None):
             pytest.skip(
-                "no cfg.demo_database_url — the app2 leg reads the same DB "
+                "no cfg.db.url — the app2 leg reads the same DB "
                 "the deployed dashboard does"
             )
         from tests.e2e._drivers import App2Driver
@@ -1012,14 +1012,14 @@ _WARMUP_QUERIES = (
 @pytest.fixture(scope="session", autouse=True)
 def warm_aurora(cfg: Config) -> None:
     """Pre-warm Aurora before any e2e visual hits the dashboard."""
-    if not cfg.demo_database_url:
+    if not cfg.db.url:
         return
     try:
         import psycopg
     except ImportError:
         return
     try:
-        conn = psycopg.connect(cfg.demo_database_url, connect_timeout=60)
+        conn = psycopg.connect(cfg.db.url, connect_timeout=60)
     except Exception:
         return
     try:
@@ -1056,12 +1056,12 @@ def capture_top_queries(
     """Session-end perf-snapshot hook.
 
     CB.17.j — snapshots EACH dialect-container that the session
-    actually touched, not just the one matching cfg.dialect. The
+    actually touched, not just the one matching cfg.db.dialect. The
     ``pg_container_url`` / ``oracle_container_url`` fixtures set
     ``RECON_GEN_DEMO_DATABASE_URL_PG`` / ``_OR`` to the yielded URL
     when they fire; teardown iterates those env vars and writes a
     per-container ``$RECON_GEN_RUN_DIR/db/<dialect>/top-queries.md``.
-    Falls back to the cfg.dialect path when neither env var is set
+    Falls back to the cfg.db.dialect path when neither env var is set
     (DuckDB-only or no-container session).
     """
     yield
@@ -1093,7 +1093,7 @@ def capture_top_queries(
     import dataclasses as _dc  # noqa: PLC0415
 
     # ``like_pattern`` narrows the stats-view scan to OUR queries.
-    # cfg.db_table_prefix is the canonical root every isolated test
+    # cfg.db.table_prefix is the canonical root every isolated test
     # suffixes (`qsgen_postgres_<hash>`), so a LIKE on the bare prefix
     # matches both the base AND every isolated-test variant.
     #
@@ -1105,7 +1105,7 @@ def capture_top_queries(
     # used `_or`-suffixed names). Swap the trailing dialect suffix
     # per-container below; non-CI patterns (e.g. local `spec_example`)
     # pass through unchanged.
-    base_pattern = cfg.db_table_prefix or "spec_example"
+    base_pattern = cfg.db.table_prefix or "spec_example"
 
     def _swap_dialect_suffix(pattern: str, dialect: Dialect) -> str:
         target_suffix = {
@@ -1194,8 +1194,8 @@ def capture_top_queries(
         return
 
     # Fallback: neither container fixture was used. Keep the legacy
-    # cfg.dialect-only path for DuckDB-only or no-container sessions.
-    if not cfg.demo_database_url:
+    # cfg.db.dialect-only path for DuckDB-only or no-container sessions.
+    if not cfg.db.url:
         return
 
     from recon_gen._dev.perf import (
@@ -1207,13 +1207,13 @@ def capture_top_queries(
     from recon_gen.common.db import connect_demo_db
     from recon_gen.common.sql import Dialect
 
-    dialect_str = dialect_name(cfg.dialect)
+    dialect_str = dialect_name(cfg.db.dialect)
     target_dir = Path(run_dir) / "db" / dialect_str
     target = target_dir / "top-queries.md"
     title = f"Top expensive queries ({dialect_str})"
 
     # SQLite has no stats view — write a clean skipped marker and stop.
-    if cfg.dialect is Dialect.DUCKDB:
+    if cfg.db.dialect is Dialect.DUCKDB:
         try:
             target_dir.mkdir(parents=True, exist_ok=True)
             target.write_text(
@@ -1227,10 +1227,10 @@ def capture_top_queries(
             pass
         return
 
-    # Z.C — the substring filter is just cfg.db_table_prefix (the DB-
+    # Z.C — the substring filter is just cfg.db.table_prefix (the DB-
     # table-name prefix every emitted matview / table carries). Falls
     # back to the demo prefix only if cfg somehow has no value.
-    like_pattern = cfg.db_table_prefix or "spec_example"
+    like_pattern = cfg.db.table_prefix or "spec_example"
 
     try:
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -1255,7 +1255,7 @@ def capture_top_queries(
     try:
         try:
             rows = fetch_top_queries(
-                conn, cfg.dialect, like_pattern=like_pattern, top=50,
+                conn, cfg.db.dialect, like_pattern=like_pattern, top=50,
             )
         except Exception as exc:
             try:

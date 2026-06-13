@@ -117,8 +117,8 @@ def _isolated_cfg_key(
         getattr(request_any.node, "nodeid", None)
         or request_any.module.__name__,
     )
-    l2 = cfg.default_l2_instance or "no-l2"
-    dialect = cfg.dialect.value
+    l2 = cfg.db.default_l2_instance or "no-l2"
+    dialect = cfg.db.dialect.value
     key = f"{nodeid}|{l2}|{dialect}|{worker_id}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:6]
 
@@ -139,7 +139,7 @@ def _isolate_cfg(
     """
     from recon_gen.common.sql import Dialect
 
-    if cfg.dialect is Dialect.DUCKDB:
+    if cfg.db.dialect is Dialect.DUCKDB:
         worker_db_dir = tmp_path_factory.mktemp(f"iso_{suffix}")
         from recon_gen.common.db import make_demo_database_url
         worker_url = make_demo_database_url(
@@ -148,8 +148,8 @@ def _isolate_cfg(
         return dataclasses.replace(cfg, demo_database_url=worker_url)
     return dataclasses.replace(
         cfg,
-        db_table_prefix=f"{cfg.db_table_prefix}_{suffix}",
-        deployment_name=f"{cfg.deployment_name}-{suffix}",
+        db_table_prefix=f"{cfg.db.table_prefix}_{suffix}",
+        deployment_name=f"{cfg.aws.deployment_name}-{suffix}",
     )
 
 

@@ -41,7 +41,7 @@ def test_partition_defaults_to_aws_with_no_arn_sources() -> None:
         deployment_name="recon-test",
         db_table_prefix="test",
     )
-    assert cfg.partition == "aws"
+    assert cfg.aws.partition == "aws"
 
 
 def test_partition_from_explicit_datasource_arn() -> None:
@@ -52,7 +52,7 @@ def test_partition_from_explicit_datasource_arn() -> None:
             ":111122223333:datasource/x"
         ),
     )
-    assert cfg.partition == "aws-us-gov"
+    assert cfg.aws.partition == "aws-us-gov"
 
 
 def test_partition_from_principal_arn_when_no_datasource_set() -> None:
@@ -69,10 +69,10 @@ def test_partition_from_principal_arn_when_no_datasource_set() -> None:
             "arn:aws-us-gov:iam::111122223333:user/operator",
         ],
     )
-    assert cfg.partition == "aws-us-gov"
+    assert cfg.aws.partition == "aws-us-gov"
     # And the synthesized datasource_arn picks it up:
-    assert cfg.datasource_arn is not None
-    assert cfg.datasource_arn.startswith("arn:aws-us-gov:quicksight:")
+    assert cfg.aws.datasource.arn is not None
+    assert cfg.aws.datasource.arn.startswith("arn:aws-us-gov:quicksight:")
 
 
 def test_partition_china_partition() -> None:
@@ -81,7 +81,7 @@ def test_partition_china_partition() -> None:
             "arn:aws-cn:quicksight:cn-north-1:111122223333:datasource/x"
         ),
     )
-    assert cfg.partition == "aws-cn"
+    assert cfg.aws.partition == "aws-cn"
 
 
 def test_dataset_arn_uses_partition() -> None:
@@ -92,7 +92,7 @@ def test_dataset_arn_uses_partition() -> None:
             ":111122223333:datasource/x"
         ),
     )
-    arn = cfg.dataset_arn("my-dataset")
+    arn = cfg.aws.dataset_arn("my-dataset")
     assert arn == (
         "arn:aws-us-gov:quicksight:us-gov-east-1"
         ":111122223333:dataset/my-dataset"
@@ -107,7 +107,7 @@ def test_theme_arn_uses_partition() -> None:
             ":111122223333:datasource/x"
         ),
     )
-    arn = cfg.theme_arn("my-theme")
+    arn = cfg.aws.theme_arn("my-theme")
     assert arn == (
         "arn:aws-us-gov:quicksight:us-gov-east-1"
         ":111122223333:theme/my-theme"
@@ -124,7 +124,7 @@ def test_datasource_arn_explicit_wins_over_principal() -> None:
         # the resource ARN over the principal).
         principal_arns=["arn:aws-us-gov:iam::111122223333:user/operator"],
     )
-    assert cfg.partition == "aws"
+    assert cfg.aws.partition == "aws"
 
 
 def test_bare_string_principal_falls_through_to_default() -> None:
@@ -138,7 +138,7 @@ def test_bare_string_principal_falls_through_to_default() -> None:
         db_table_prefix="test",
         principal_arns=["not-an-arn"],
     )
-    assert cfg.partition == "aws"
+    assert cfg.aws.partition == "aws"
 
 
 def test_empty_partition_segment_falls_through() -> None:
@@ -152,7 +152,7 @@ def test_empty_partition_segment_falls_through() -> None:
         db_table_prefix="test",
         principal_arns=["arn::iam::111122223333:user/operator"],
     )
-    assert cfg.partition == "aws"
+    assert cfg.aws.partition == "aws"
 
 
 def test_commercial_partition_unchanged_when_explicit() -> None:
@@ -160,6 +160,6 @@ def test_commercial_partition_unchanged_when_explicit() -> None:
     cfg = _cfg(
         datasource_arn="arn:aws:quicksight:us-east-1:111122223333:datasource/x",
     )
-    assert cfg.partition == "aws"
-    assert cfg.dataset_arn("d").startswith("arn:aws:quicksight:")
-    assert cfg.theme_arn("t").startswith("arn:aws:quicksight:")
+    assert cfg.aws.partition == "aws"
+    assert cfg.aws.dataset_arn("d").startswith("arn:aws:quicksight:")
+    assert cfg.aws.theme_arn("t").startswith("arn:aws:quicksight:")

@@ -89,7 +89,7 @@ def test_analysis_name_is_executives(exec_analysis: "_ModelsAnalysis") -> None:
     # ``Name (deployment_name)`` shape so multi-deploy QS accounts are
     # visually distinguishable in the dashboard list. Replaces the
     # prior ``(instance)`` shape (instance was auto-stamped from the
-    # L2 yaml; now lives on cfg.deployment_name).
+    # L2 yaml; now lives on cfg.aws.deployment_name).
     assert exec_analysis.Name == f"Executives ({_TEST_CFG.deployment_name})"
 
 

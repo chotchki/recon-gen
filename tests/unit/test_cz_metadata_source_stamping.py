@@ -2,7 +2,7 @@
 
 The Phase CZ design lock:
 
-- ``cfg.etl_hook`` is the gate signal. Configured ⇒ ETL-mode (TRUNCATE
+- ``cfg.app2.etl_hook`` is the gate signal. Configured ⇒ ETL-mode (TRUNCATE
   + reseed safe). Unset ⇒ standalone-mode; the Trainer reset and
   Studio Deploy-changes paths must DELETE only provably-synthetic
   rows so they don't wipe real ETL-loaded customer data.

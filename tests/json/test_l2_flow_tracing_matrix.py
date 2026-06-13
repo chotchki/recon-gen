@@ -141,7 +141,7 @@ def test_dataset_count_is_thirteen_per_instance(
 def test_every_dataset_id_carries_deployment_prefix(
     l2_instance: L2Instance,
 ) -> None:
-    """Z.C — every dataset ID is prefixed by ``cfg.deployment_name``
+    """Z.C — every dataset ID is prefixed by ``cfg.aws.deployment_name``
     so multiple deploys (dev/staging/prod, or co-tenanted L2s with
     distinct cfg.yaml) don't collide in the same QS account. Mirrors
     `test_l1_dashboard_structure.py`'s prefix check."""
@@ -235,7 +235,7 @@ def test_deployments_produce_different_dataset_id_namespaces() -> None:
     ``deployment_name``) produces non-overlapping dataset ID sets — so a
     multi-deploy QuickSight account can host both without collision.
 
-    Z.C — the per-deployment namespace lives on cfg.deployment_name (was
+    Z.C — the per-deployment namespace lives on cfg.aws.deployment_name (was
     previously auto-stamped from ``L2Instance.instance``), so the test
     swaps the cfg per build, not the L2 instance. Two integrators
     pointing at the same L2 yaml MUST still get isolated namespaces by

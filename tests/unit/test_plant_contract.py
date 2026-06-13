@@ -136,35 +136,35 @@ def fresh_v_overlay(tmp_path: Path) -> Iterator[tuple[Config, Path]]:
     cache = L2InstanceCache.from_path(yaml_path)
     instance = cache.get()
 
-    base_prefix = cfg.db_table_prefix
+    base_prefix = cfg.db.table_prefix
     scenarios = default_scenario_for(instance).scenario
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
         try:
             execute_script(
-                cur, emit_schema(instance, prefix=base_prefix, dialect=cfg.dialect),
-                dialect=cfg.dialect,
+                cur, emit_schema(instance, prefix=base_prefix, dialect=cfg.db.dialect),
+                dialect=cfg.db.dialect,
             )
             execute_script(
                 cur,
                 emit_full_seed(
                     instance, scenarios,
-                    prefix=base_prefix, dialect=cfg.dialect,
+                    prefix=base_prefix, dialect=cfg.db.dialect,
                 ),
-                dialect=cfg.dialect,
+                dialect=cfg.db.dialect,
             )
             execute_script(
                 cur,
                 create_v_overlay_sql(
-                    instance, base_prefix=base_prefix, dialect=cfg.dialect,
+                    instance, base_prefix=base_prefix, dialect=cfg.db.dialect,
                 ),
-                dialect=cfg.dialect,
+                dialect=cfg.db.dialect,
             )
             execute_script(
                 cur,
-                clone_base_to_v_sql(base_prefix, dialect=cfg.dialect),
-                dialect=cfg.dialect,
+                clone_base_to_v_sql(base_prefix, dialect=cfg.db.dialect),
+                dialect=cfg.db.dialect,
             )
             # DI.1 — DuckDB CTAS clone drops the v entry-column DEFAULT;
             # realign so subsequent plant INSERTs work.
@@ -172,9 +172,9 @@ def fresh_v_overlay(tmp_path: Path) -> Iterator[tuple[Config, Path]]:
             execute_script(
                 cur,
                 refresh_v_overlay_matviews_sql(
-                    instance, base_prefix=base_prefix, dialect=cfg.dialect,
+                    instance, base_prefix=base_prefix, dialect=cfg.db.dialect,
                 ),
-                dialect=cfg.dialect,
+                dialect=cfg.db.dialect,
             )
             conn.commit()
         finally:

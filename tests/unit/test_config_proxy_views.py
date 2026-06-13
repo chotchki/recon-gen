@@ -52,10 +52,13 @@ def _make_cfg(**overrides: object) -> Config:
 
 
 def test_aws_view_carries_flat_fields() -> None:
+    """Proxy reads underlying flat fields. RHS uses the LEGACY field
+    names so this test catches a bridge-break (e.g., if cfg.aws.region
+    accidentally reads cfg.deployment_name)."""
     cfg = _make_cfg()
-    assert cfg.aws.account_id == cfg.aws_account_id
-    assert cfg.aws.region == cfg.aws_region
-    assert cfg.aws.deployment_name == cfg.deployment_name
+    assert cfg.aws.account_id == cfg.aws_account_id  # type: ignore[attr-defined]: legacy flat field; surviving through DE.5 collapse
+    assert cfg.aws.region == cfg.aws_region  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
+    assert cfg.aws.deployment_name == cfg.deployment_name  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
     assert cfg.aws.principal_arns == ("arn:aws:iam::123456789012:role/TestRole",)
 
 
@@ -145,12 +148,13 @@ def test_aws_view_datasource_mode_create_when_arn_derived() -> None:
 
 
 def test_db_view_carries_flat_fields() -> None:
+    """Proxy reads underlying flat fields; RHS uses legacy names."""
     cfg = _make_cfg()
-    assert cfg.db.dialect == cfg.dialect
-    assert cfg.db.url == cfg.demo_database_url
-    assert cfg.db.table_prefix == cfg.db_table_prefix
-    assert cfg.db.default_l2_instance == cfg.default_l2_instance
-    assert cfg.db.app2_pool_size == cfg.app2_db_pool_size
+    assert cfg.db.dialect == cfg.dialect  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
+    assert cfg.db.url == cfg.demo_database_url  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
+    assert cfg.db.table_prefix == cfg.db_table_prefix  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
+    assert cfg.db.default_l2_instance == cfg.default_l2_instance  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
+    assert cfg.db.app2_pool_size == cfg.app2_db_pool_size  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +166,7 @@ def test_app2_view_carries_flat_fields() -> None:
     cfg = _make_cfg(etl_hook="./bin/etl.sh", banner_text="Demo mode")
     assert cfg.app2.etl_hook == "./bin/etl.sh"
     assert cfg.app2.banner_text == "Demo mode"
-    assert cfg.app2.db_pool_size == cfg.app2_db_pool_size
+    assert cfg.app2.db_pool_size == cfg.app2_db_pool_size  # type: ignore[attr-defined]: legacy flat field
 
 
 def test_app2_view_tls_is_none_on_legacy_cfg() -> None:

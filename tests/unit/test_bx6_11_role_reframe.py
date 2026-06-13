@@ -450,7 +450,7 @@ def test_instance_count_by_role_returns_count_from_seeded_fixture(
     to seed a fixture without spinning a DuckDB/PG container.
     """
     cfg = make_test_config()
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
 
     conn = sqlite3.connect(":memory:")
     try:

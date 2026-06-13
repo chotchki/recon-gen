@@ -13,7 +13,7 @@ Catches the failure modes that don't surface with a stub:
 
 **Dialect coverage** — this file is dialect-agnostic. The fixture goes
 through ``connect_demo_db(cfg)``, which returns whichever DB the
-operator's cfg points at; ``cfg.dialect`` drives placeholder rewriting
+operator's cfg points at; ``cfg.db.dialect`` drives placeholder rewriting
 in ``_sql_executor`` (``%(name)s`` for PG, ``:name`` for Oracle and
 SQLite). CI runs the same file in both ``e2e-pg-api`` and
 ``e2e-oracle-api`` jobs (.github/workflows/e2e.yml); SQLite is
@@ -31,7 +31,7 @@ than clarify.
 Gates:
 
 - ``RECON_GEN_E2E=1`` — same as every other tests/e2e/ file
-- A reachable DB (cfg.demo_database_url + driver installed)
+- A reachable DB (cfg.db.url + driver installed)
 - ``RECON_GEN_TEST_L2_INSTANCE=<path>`` — points at the L2 YAML that
   matches the seeded DB. Defaults to ``spec_example`` (rarely what you
   want for a live DB run; sasquatch_pr is the canonical demo).
@@ -109,7 +109,7 @@ def live_db_exec_driver(cfg: Any) -> Iterator[_LiveDriver]:
     assert on (e.g. find every date-sensitive KPI).
 
     Skips when no DB is reachable — operator opts in by configuring
-    cfg.demo_database_url + having a populated DB.
+    cfg.db.url + having a populated DB.
     """
     # Hard gate on RECON_GEN_TEST_L2_INSTANCE — without it, the test would
     # fall back to spec_example (the bundled default) which almost

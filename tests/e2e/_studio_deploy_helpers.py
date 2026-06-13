@@ -92,13 +92,13 @@ def apply_schema_to(cfg: Config) -> None:
     handles re-runs."""
     instance = load_instance(SASQUATCH_YAML)
     schema_sql = emit_schema(
-        instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+        instance, prefix=cfg.db.table_prefix, dialect=cfg.db.dialect,
     )
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
         try:
-            execute_script(cur, schema_sql, dialect=cfg.dialect)
+            execute_script(cur, schema_sql, dialect=cfg.db.dialect)
             conn.commit()
         finally:
             cur.close()
@@ -222,14 +222,14 @@ def build_studio_app(
         )
 
     # Z.C — make_studio_routes' prefix_override is the legacy L2-segment
-    # override. Pass cfg.db_table_prefix so SQL emitters key off the
+    # override. Pass cfg.db.table_prefix so SQL emitters key off the
     # right tables; the override path itself is being phased out.
     studio_routes = make_studio_routes(
         cache,
         dev_log=False,
         db_pool=pool,
-        dialect=cfg.dialect,
-        prefix_override=cfg.db_table_prefix,
+        dialect=cfg.db.dialect,
+        prefix_override=cfg.db.table_prefix,
         cfg=cfg,
     )
     return make_app(dashboards=dashboards, studio_routes=studio_routes)

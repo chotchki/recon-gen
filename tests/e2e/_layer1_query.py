@@ -201,7 +201,7 @@ def assert_account_in_matview(
 
         assert_account_in_matview(
             harness_db_conn, f"{prefix}_drift", "cust-0001-snb",
-            dialect=cfg.dialect,
+            dialect=cfg.db.dialect,
         )
         # ... then drive the dashboard render assertion ...
     """

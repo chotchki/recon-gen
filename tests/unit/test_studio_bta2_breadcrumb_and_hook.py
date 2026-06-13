@@ -109,7 +109,7 @@ def test_format_hook_attribution_with_command_renders_code_tag() -> None:
 
 
 def test_format_hook_attribution_escapes_html_in_command() -> None:
-    """Defensive: cfg.etl_hook is operator-controlled, never trust it."""
+    """Defensive: cfg.app2.etl_hook is operator-controlled, never trust it."""
     html = _format_hook_attribution("<script>alert('x')</script>")
     assert "<script>" not in html
     assert "&lt;script&gt;" in html

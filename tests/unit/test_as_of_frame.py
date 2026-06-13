@@ -159,7 +159,7 @@ def test_locked_binding_emits_byte_identical_seed_twice_via_frame() -> None:
     )
     instance = load_instance(_spec_example_path())
 
-    anchor = cfg.test_generator.as_of_frame().as_of
+    anchor = cfg.test.generator.as_of_frame().as_of
     assert anchor == LOCKED_ANCHOR  # locked binding resolved through frame
     a: str = build_full_seed_sql(cfg, instance, anchor=anchor)
     b: str = build_full_seed_sql(cfg, instance, anchor=anchor)
@@ -182,7 +182,7 @@ def test_live_binding_emits_seed_ending_at_today_via_frame() -> None:
     )
     instance = load_instance(_spec_example_path())
 
-    anchor = cfg.test_generator.as_of_frame().as_of
+    anchor = cfg.test.generator.as_of_frame().as_of
     assert anchor == date.today()  # live binding resolved through frame
     sql: str = build_full_seed_sql(cfg, instance, anchor=anchor)
     assert anchor.isoformat() in sql, (

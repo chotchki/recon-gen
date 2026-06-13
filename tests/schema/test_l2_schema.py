@@ -1551,7 +1551,7 @@ def test_refresh_matviews_sql_dependency_order() -> None:
 
 
 def test_refresh_matviews_sql_uses_instance_prefix() -> None:
-    """Prefix is per-deployment (Z.C — cfg.db_table_prefix); switching prefixes switches table names."""
+    """Prefix is per-deployment (Z.C — cfg.db.table_prefix); switching prefixes switches table names."""
     inst = L2Instance(
         accounts=(), account_templates=(),
         rails=(), transfer_templates=(), chains=(), limit_schedules=(),

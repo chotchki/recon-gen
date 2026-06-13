@@ -303,15 +303,15 @@ def _seed_demo_db(cfg: Config) -> None:
     rows + refreshes matviews; nothing to regenerate)."""
     instance = load_instance(SASQUATCH_YAML)
     scenarios = default_scenario_for(instance).scenario
-    base_prefix = cfg.db_table_prefix
+    base_prefix = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
         try:
             execute_script(
                 cur,
-                emit_schema(instance, prefix=base_prefix, dialect=cfg.dialect),
-                dialect=cfg.dialect,
+                emit_schema(instance, prefix=base_prefix, dialect=cfg.db.dialect),
+                dialect=cfg.db.dialect,
             )
             # Populate config_kv from the L2 declaration so cap-joining
             # matviews (limit_breach, stuck_pending, etc.) can resolve
@@ -321,23 +321,23 @@ def _seed_demo_db(cfg: Config) -> None:
             execute_script(
                 cur,
                 build_config_populate_sql(cfg, instance, anchor=_TRAINER_ANCHOR),
-                dialect=cfg.dialect,
+                dialect=cfg.db.dialect,
             )
             execute_script(
                 cur,
                 emit_full_seed(
                     instance, scenarios,
-                    prefix=base_prefix, dialect=cfg.dialect,
+                    prefix=base_prefix, dialect=cfg.db.dialect,
                     anchor=_TRAINER_ANCHOR,
                 ),
-                dialect=cfg.dialect,
+                dialect=cfg.db.dialect,
             )
             execute_script(
                 cur,
                 refresh_matviews_sql(
-                    instance, prefix=base_prefix, dialect=cfg.dialect,
+                    instance, prefix=base_prefix, dialect=cfg.db.dialect,
                 ),
-                dialect=cfg.dialect,
+                dialect=cfg.db.dialect,
             )
             conn.commit()
         finally:
@@ -655,7 +655,7 @@ def test_bv33a_limit_breach_outbound_trainer_dogfood(
     cfg, base_url = trainer_ready_session
 
     entry = _pick_kind("limit_breach_outbound")
-    v_matview = f"{cfg.db_table_prefix}_v_limit_breach"
+    v_matview = f"{cfg.db.table_prefix}_v_limit_breach"
 
     with App2Driver.attached_to(
         base_url=base_url, cfg=cfg,
@@ -670,7 +670,7 @@ def test_bv33a_limit_breach_outbound_trainer_dogfood(
         after = _v_matview_account_ids(cfg, v_matview)
         new_accounts = after - before
         if not new_accounts:
-            diag = _diagnose_v_state(cfg, cfg.db_table_prefix)
+            diag = _diagnose_v_state(cfg, cfg.db.table_prefix)
             pytest.fail(
                 f"{entry.kind} plant didn't add a row to the v overlay's "
                 f"{v_matview}. before={sorted(before)} after={sorted(after)}. "
@@ -773,7 +773,7 @@ def test_trainer_dogfood_per_kind(
 
     matview = entry.dashboard_check.matview_name
     assert matview is not None  # _browser_walkable_kinds() guarantees this
-    v_matview = f"{cfg.db_table_prefix}_v_{matview}"
+    v_matview = f"{cfg.db.table_prefix}_v_{matview}"
 
     with App2Driver.attached_to(
         base_url=base_url, cfg=cfg,
@@ -788,7 +788,7 @@ def test_trainer_dogfood_per_kind(
         after = _v_matview_signatures(cfg, v_matview, matview)
         new_signatures = after - before
         if not new_signatures:
-            diag = _diagnose_v_state(cfg, cfg.db_table_prefix)
+            diag = _diagnose_v_state(cfg, cfg.db.table_prefix)
             pytest.fail(
                 f"{entry.kind} plant didn't add a row to {v_matview}. "
                 f"diag: {diag}"

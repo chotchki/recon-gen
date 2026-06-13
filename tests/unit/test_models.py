@@ -400,7 +400,7 @@ class TestConfigTags:
         the v8.4.0 two-tag scheme (ManagedBy + ResourcePrefix +
         optional L2Instance) with a single Deployment tag."""
         cfg = make_test_config()
-        tags_by_key = {t.Key: t.Value for t in cfg.tags()}
+        tags_by_key = {t.Key: t.Value for t in cfg.aws.tags()}
         assert tags_by_key == {
             MANAGED_TAG_KEY: MANAGED_TAG_VALUE,
             DEPLOYMENT_TAG_KEY: "recon-test",
@@ -410,7 +410,7 @@ class TestConfigTags:
         cfg = make_test_config(
             extra_tags={"Environment": "prod", "Team": "finance"},
         )
-        tags = cfg.tags()
+        tags = cfg.aws.tags()
         assert tags is not None
         # ManagedBy + Deployment (always emitted) + Environment + Team
         assert len(tags) == 4
@@ -422,25 +422,25 @@ class TestConfigTags:
 
     def test_common_tag_always_first(self):
         cfg = make_test_config(extra_tags={"Foo": "bar"})
-        tags = cfg.tags()
+        tags = cfg.aws.tags()
         assert tags is not None
         assert tags[0].Key == MANAGED_TAG_KEY
 
     def test_deployment_tag_carries_cfg_value(self):
-        """Z.C — Deployment tag value mirrors cfg.deployment_name so
+        """Z.C — Deployment tag value mirrors cfg.aws.deployment_name so
         cleanup's per-deploy filter has something to match against."""
         cfg = make_test_config(deployment_name="qs-ci-12345-pg")
-        tags_by_key = {t.Key: t.Value for t in cfg.tags()}
+        tags_by_key = {t.Key: t.Value for t in cfg.aws.tags()}
         assert tags_by_key[DEPLOYMENT_TAG_KEY] == "qs-ci-12345-pg"
 
 
 class TestConfigPrefixed:
-    """Z.C — cfg.prefixed() uses deployment_name as the single prefix
+    """Z.C — cfg.aws.prefixed() uses deployment_name as the single prefix
     segment (replaces v8.x's <resource_prefix>-<l2_instance_prefix>-...)."""
 
     def test_prefixed_uses_deployment_name(self):
         cfg = make_test_config(deployment_name="recon-prod")
-        assert cfg.prefixed("l1-dashboard") == "recon-prod-l1-dashboard"
+        assert cfg.aws.prefixed("l1-dashboard") == "recon-prod-l1-dashboard"
 
     def test_prefixed_lets_two_deployments_coexist(self):
         """The headline use case: same dashboard kind, different deployment."""
@@ -641,9 +641,9 @@ class TestConfigDatasourceArnDerivation:
             db_table_prefix="derived",
             demo_database_url="postgresql://u:p@h:5432/db",
         )
-        assert cfg.datasource_arn == (
+        assert cfg.aws.datasource.arn == (
             "arn:aws:quicksight:us-west-2:111122223333:datasource/"
-            f"{cfg.deployment_name}-demo-datasource"
+            f"{cfg.aws.deployment_name}-demo-datasource"
         )
 
     def test_explicit_arn_takes_precedence(self):
@@ -655,8 +655,8 @@ class TestConfigDatasourceArnDerivation:
             datasource_arn="arn:aws:quicksight:us-west-2:111122223333:datasource/custom",
             demo_database_url="postgresql://u:p@h:5432/db",
         )
-        assert cfg.datasource_arn is not None
-        assert "custom" in cfg.datasource_arn
+        assert cfg.aws.datasource.arn is not None
+        assert "custom" in cfg.aws.datasource.arn
 
     def test_raises_without_arn_or_demo_url(self):
         import pytest

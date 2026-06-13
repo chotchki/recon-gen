@@ -1,6 +1,6 @@
 """BU.1.8 — Typed pipeline overlay primitive tests.
 
-Pins the surface that replaces the `cfg.test_generator.scope =
+Pins the surface that replaces the `cfg.test.generator.scope =
 "uncovered_rails"` indirection: typed `OverlayLayer` + named
 `PipelineOverlays` flows (ETL_DEBUG / TRAINER_CLEAN / LOCKED_SEED).
 """

@@ -125,8 +125,7 @@ def planted_drift_sqlite() -> Iterator["Config"]:
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
-    cfg.db_table_prefix = "pfx"
+    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path, db_table_prefix="pfx")
     try:
         yield cfg
     finally:
@@ -268,7 +267,7 @@ def test_bg3_overdraft_count_trips_when_kpi_underflows_vs_table(
 #
 # Fix: tests/e2e/conftest.py::_pin_cfg_to_kv_as_of reads the demo DB's
 # <prefix>_config_kv key='as_of' row (stamped at data apply time) and
-# pins cfg.test_generator.end_date to that day. Both deploy and test
+# pins cfg.test.generator.end_date to that day. Both deploy and test
 # now land on the same anchor.
 
 
@@ -326,7 +325,7 @@ def test_bg3_kv_pin_anchors_test_to_deploy_day_across_midnight(
         demo_database_url=make_demo_database_url(Dialect.DUCKDB, db_path),
     )
 
-    unpinned = cfg.test_generator.as_of_frame(window_days=7).as_of
+    unpinned = cfg.test.generator.as_of_frame(window_days=7).as_of
     pinned = _pin_cfg_to_kv_as_of(cfg).test_generator.as_of_frame(
         window_days=7,
     ).as_of

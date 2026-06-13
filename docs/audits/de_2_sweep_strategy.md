@@ -103,12 +103,14 @@ The sweep is naturally chunkable. Each commit (A through E) leaves CI green; ope
   3. For each, write 1-3 unit tests exercising the proxy-accessor paths the sweep introduces (e.g., a test that `deploy.py` reads `cfg.aws.account_id` / `cfg.aws.region` correctly via the new path).
   4. Land coverage tests + sweep in the same commit.
   Raises the floor + ensures DE.2 isn't a silent regression vector for low-coverage code.
-  - **Commit B coverage snapshot (2026-06-13).** Bottom 5 in `common/`:
+  - **Commit B coverage snapshot (2026-06-13).** Bottom 5 in `common/` (unit-only):
     - `common/deploy.py` (0%, 454 LoC) — needs boto-mocked tests; a real coverage push here is its OWN multi-hour effort, not a sweep side-quest.
     - `common/pdf/audit_chrome.py` (0%) + `common/pdf/signing.py` (0%) — not touched by sweep.
     - `common/probe.py` (0%) — not touched by sweep.
     - `common/cleanup.py` (11%, 376 LoC) — same boto-mocking shape as deploy.py.
     Decision: NOT folding deploy.py / cleanup.py coverage into the sweep commits. The sweep doesn't regress coverage (same code paths run via proxy); the gap pre-existed. Filed as a follow-up task — boto-mocking effort warrants its own audit. Sweep commits B-E focus on landing the nesting + keeping CI green.
+  - **Operator clarification 2026-06-13 (CI run 27471909951).** Unit-only coverage is misleading for deploy.py / cleanup.py — integration tests at db/app2/deploy/qs_api/qs_browser layers exercise the happy-path AWS calls. **Whole-system coverage is what matters**, not unit %.
+  - **Operator clarification 2026-06-13 (mock balance).** Mocks DO have value for error-case coverage — integration tests can't easily simulate boto failure modes (ResourceNotFoundException, throttling, partial-state cleanup recovery). When a real coverage push for deploy.py / cleanup.py lands later, the target is **error-case mocks** (failure shapes integration can't reproduce), NOT happy-path duplication of what integration already covers. Balance: integration-coverage by default, mocks where errors are otherwise unreachable.
 
 ## Operator decision needed
 

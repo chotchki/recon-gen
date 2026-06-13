@@ -144,7 +144,7 @@ class SheetAnchorSpec:
 
     ``anchor_where_template`` (optional) is an extra ``WHERE`` clause
     appended to the anchor-row SELECT, formatted with
-    ``{prefix}=cfg.db_table_prefix`` at fetch time. AA.A.993 — needed
+    ``{prefix}=cfg.db.table_prefix`` at fetch time. AA.A.993 — needed
     when the dataset's universe is wider than a picker's dropdown
     universe. The Transactions dataset, for instance, queries
     ``<prefix>_current_transactions`` which includes internal control
@@ -170,7 +170,7 @@ class SheetAnchorSpec:
 def fetch_anchor_row(
     cfg: Config, l2: L2Instance, spec: SheetAnchorSpec,
 ) -> Mapping[str, Any]:
-    """Run ``spec.dataset_builder``'s SQL against ``cfg.demo_database_url``
+    """Run ``spec.dataset_builder``'s SQL against ``cfg.db.url``
     (with declared param defaults applied) and return the first row as a
     column→value dict.
 
@@ -197,13 +197,13 @@ def fetch_anchor_row(
     Only Postgres + Oracle are wired; the AW-target browser e2e cells
     only run against those two dialects.
     """
-    if cfg.dialect not in (Dialect.POSTGRES, Dialect.ORACLE):
+    if cfg.db.dialect not in (Dialect.POSTGRES, Dialect.ORACLE):
         raise RuntimeError(
-            f"fetch_anchor_row: unsupported dialect {cfg.dialect!r} — "
+            f"fetch_anchor_row: unsupported dialect {cfg.db.dialect!r} — "
             f"only Postgres + Oracle wired"
         )
-    if not cfg.demo_database_url:
-        raise RuntimeError("fetch_anchor_row: cfg.demo_database_url is unset")
+    if not cfg.db.url:
+        raise RuntimeError("fetch_anchor_row: cfg.db.url is unset")
 
     ds = spec.dataset_builder(cfg, l2)
     if not ds.PhysicalTableMap:
@@ -224,7 +224,7 @@ def fetch_anchor_row(
     )
     order_clause = f"ORDER BY {spec.anchor_order} " if spec.anchor_order else ""
     limit_clause = (
-        "LIMIT 1" if cfg.dialect is Dialect.POSTGRES else "FETCH FIRST 1 ROWS ONLY"
+        "LIMIT 1" if cfg.db.dialect is Dialect.POSTGRES else "FETCH FIRST 1 ROWS ONLY"
     )
     # AA.A.993 — anchor_where_template intersects the anchor universe
     # with a narrower dropdown universe when the dataset's own SQL
@@ -232,13 +232,13 @@ def fetch_anchor_row(
     # doesn't advertise. ``{prefix}`` is the only substitution; bare
     # ``str.format`` keeps the spec authoring shape one-liner-simple.
     where_clause = (
-        f"WHERE {spec.anchor_where_template.format(prefix=cfg.db_table_prefix)} "
+        f"WHERE {spec.anchor_where_template.format(prefix=cfg.db.table_prefix)} "
         if spec.anchor_where_template
         else ""
     )
     wrapped = f"SELECT * FROM ({resolved}) sub {where_clause}{order_clause}{limit_clause}"
 
-    with psycopg.connect(cfg.demo_database_url, connect_timeout=60) as conn:
+    with psycopg.connect(cfg.db.url, connect_timeout=60) as conn:
         with conn.cursor() as cur:
             cur.execute(wrapped)  # pyright: ignore[reportCallIssue, reportArgumentType]: psycopg.execute overload tolerance
             row = cur.fetchone()

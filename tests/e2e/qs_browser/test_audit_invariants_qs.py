@@ -83,7 +83,7 @@ def qs_dashboard_id(
     """L1 dashboard ID under this dialect's deployment_name prefix
     (Z.C: `<deployment_name>-l1-dashboard`)."""
     cfg, _, _ = dialect_cfg
-    return cfg.prefixed("l1-dashboard")
+    return cfg.aws.prefixed("l1-dashboard")
 
 
 @pytest.fixture(scope="module")
@@ -103,7 +103,7 @@ def dialect_qs_client(
     import boto3
     cfg, _, _ = dialect_cfg
     return boto3.client(  # pyright: ignore[reportUnknownMemberType]: boto3.client dynamic service overload
-        "quicksight", region_name=cfg.aws_region,
+        "quicksight", region_name=cfg.aws.region,
     )
 
 
@@ -121,7 +121,7 @@ def qs_driver(
     cfg, _, _ = dialect_cfg
     try:
         dialect_qs_client.describe_dashboard(
-            AwsAccountId=cfg.aws_account_id,
+            AwsAccountId=cfg.aws.account_id,
             DashboardId=qs_dashboard_id,
         )
     except dialect_qs_client.exceptions.ResourceNotFoundException:
@@ -132,8 +132,8 @@ def qs_driver(
     with qs_driver_or_none(
         request,
         cfg=cfg,
-        account_id=cfg.aws_account_id,
-        region=cfg.aws_region,
+        account_id=cfg.aws.account_id,
+        region=cfg.aws.region,
         viewport=(1600, 4000),
     ) as driver:
         yield driver

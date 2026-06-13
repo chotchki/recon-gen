@@ -110,7 +110,7 @@ class PickerSearchSpec:
 
     def expected_value(self, cfg: Config) -> str:
         return _fetch_one(cfg, self.value_sql_template.format(
-            prefix=cfg.db_table_prefix,
+            prefix=cfg.db.table_prefix,
         ))
 
 
@@ -177,7 +177,7 @@ class DsAccountClass:
 
     def expected_value(self, cfg: Config) -> str:
         return _fetch_one(cfg, self.value_sql_template.format(
-            prefix=cfg.db_table_prefix,
+            prefix=cfg.db.table_prefix,
         ))
 
 

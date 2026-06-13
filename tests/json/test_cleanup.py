@@ -3,7 +3,7 @@
 The cleanup module talks to boto3, so these tests stub the QuickSight
 client. The unit-level surface here is the per-deploy scoping (Z.C
 collapsed M.2d.3's per-instance scope and v8.4.0's per-deploy scope
-into a single ``Deployment`` tag keyed off ``cfg.deployment_name``):
+into a single ``Deployment`` tag keyed off ``cfg.aws.deployment_name``):
 
 - ``_read_managed_tags`` returns the full tag map for ManagedBy
   resources (None for unmanaged).

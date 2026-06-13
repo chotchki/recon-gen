@@ -214,7 +214,7 @@ def _extract_balance_days(sql: str, anchor_year: int) -> list[date]:
 
 def test_balance_date_view_required_coverage_is_satisfied_by_locked_seed() -> None:
     # The L1 balance-date view (constructed in `apps/l1_dashboard/datasets.py`
-    # via `cfg.test_generator.as_of_frame()`) must have its
+    # via `cfg.test.generator.as_of_frame()`) must have its
     # `required_coverage` actually satisfied by the locked seed. Today
     # that's trivial — a single-date LATEST_ON_EMPTY view accepts any day
     # ≤ anchor, and the 90-day baseline gives plenty. The TEST guards
@@ -234,7 +234,7 @@ def test_balance_date_view_required_coverage_is_satisfied_by_locked_seed() -> No
     instance = load_instance(
         str(Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"),
     )
-    view = DateView(frame=cfg.test_generator.as_of_frame())
+    view = DateView(frame=cfg.test.generator.as_of_frame())
 
     sql: str = build_full_seed_sql(cfg, instance, anchor=view.anchor_day)
     days = _extract_balance_days(sql, LOCKED_ANCHOR.year)

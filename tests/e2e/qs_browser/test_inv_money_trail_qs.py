@@ -58,10 +58,10 @@ def qs_inv_driver(
 ) -> "Iterator[QsEmbedDriver | None]":
     import boto3
 
-    qs = boto3.client("quicksight", region_name=cfg.aws_region)  # pyright: ignore[reportUnknownMemberType]: boto3.client dynamic service-name overload
+    qs = boto3.client("quicksight", region_name=cfg.aws.region)  # pyright: ignore[reportUnknownMemberType]: boto3.client dynamic service-name overload
     try:
         qs.describe_dashboard(
-            AwsAccountId=cfg.aws_account_id,
+            AwsAccountId=cfg.aws.account_id,
             DashboardId=inv_dashboard_id,
         )
     except qs.exceptions.ResourceNotFoundException:
@@ -72,8 +72,8 @@ def qs_inv_driver(
     with qs_driver_or_none(
         request,
         cfg=cfg,
-        account_id=cfg.aws_account_id,
-        region=cfg.aws_region,
+        account_id=cfg.aws.account_id,
+        region=cfg.aws.region,
         viewport=(1600, 3000),
     ) as driver:
         yield driver

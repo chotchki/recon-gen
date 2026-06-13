@@ -2,7 +2,7 @@
 
 Locks the contract for Studio's data-shaping knob cache:
 
-- Initialized from cfg.test_generator (Snapshot, not pin); cfg-side
+- Initialized from cfg.test.generator (Snapshot, not pin); cfg-side
   mutation does NOT leak into the cache (the dataclass is frozen on
   the cfg side).
 - Partial update preserves None-valued fields (``end_date=None`` is a
@@ -36,8 +36,8 @@ from tests._test_helpers import make_test_config
 def test_from_config_snapshots_cfg_test_generator() -> None:
     cfg = make_test_config()
     cache = TestGeneratorCache.from_config(cfg)
-    assert cache.get() == cfg.test_generator
-    assert cache.get() is cfg.test_generator  # frozen, so reuse is safe
+    assert cache.get() == cfg.test.generator
+    assert cache.get() is cfg.test.generator  # frozen, so reuse is safe
 
 
 def test_get_returns_current_state() -> None:
@@ -98,20 +98,20 @@ def test_patched_config_returns_fresh_clone() -> None:
     """patched_config must produce a new Config without mutating the
     startup one — that's the contract the deploy route depends on."""
     cfg = make_test_config()
-    original_tg = cfg.test_generator
+    original_tg = cfg.test.generator
     cache = TestGeneratorCache.from_config(cfg)
     cache.update(plants=("drift",))
     patched = cache.patched_config(cfg)
     # Patched gets the new TG state.
     assert patched.test_generator.plants == ("drift",)
     # Startup cfg is unchanged.
-    assert cfg.test_generator is original_tg
-    assert cfg.test_generator.plants == ()
+    assert cfg.test.generator is original_tg
+    assert cfg.test.generator.plants == ()
     # Patched is a *clone*, not the same object.
     assert patched is not cfg
     # Other cfg fields propagate.
-    assert patched.aws_account_id == cfg.aws_account_id
-    assert patched.aws_region == cfg.aws_region
+    assert patched.aws_account_id == cfg.aws.account_id
+    assert patched.aws_region == cfg.aws.region
 
 
 def test_multiple_updates_compose() -> None:
@@ -150,7 +150,7 @@ def test_init_kwarg_seeds_etl_hook_state() -> None:
 
 
 def test_patched_config_keeps_etl_hook_when_enabled() -> None:
-    """When the toggle is on, cfg.etl_hook flows through unchanged.
+    """When the toggle is on, cfg.app2.etl_hook flows through unchanged.
 
     BS.4 (2026-05-29): the legacy etl_datasource pair was deleted —
     etl_hook is the only ETL knob now (it writes directly to demo_db,
@@ -165,7 +165,7 @@ def test_patched_config_keeps_etl_hook_when_enabled() -> None:
 
 
 def test_patched_config_clears_etl_hook_when_disabled() -> None:
-    """When the toggle is off, cfg.etl_hook gets nuked on the patched
+    """When the toggle is off, cfg.app2.etl_hook gets nuked on the patched
     cfg — step 1 (etl_hook subprocess) no-ops for that deploy. Original
     cfg's stored field is untouched (re-enable + re-deploy restores)."""
     cfg = make_test_config(
@@ -176,14 +176,14 @@ def test_patched_config_clears_etl_hook_when_disabled() -> None:
     patched = cache.patched_config(cfg)
     assert patched.etl_hook is None
     # Original cfg's field preserved (no mutation).
-    assert cfg.etl_hook == "echo upstream-pull"
+    assert cfg.app2.etl_hook == "echo upstream-pull"
 
 
 def test_patched_config_disable_with_no_hook_is_noop() -> None:
     """When etl_hook is not configured, the toggle's disabled-arm
     still produces None — no spurious churn."""
     cfg = make_test_config()
-    assert cfg.etl_hook is None
+    assert cfg.app2.etl_hook is None
     cache = TestGeneratorCache.from_config(cfg)
     cache.set_etl_hook_enabled(False)
     patched = cache.patched_config(cfg)
@@ -196,18 +196,18 @@ def test_patched_config_disable_with_no_hook_is_noop() -> None:
 def test_from_cfg_with_state_no_sidefile_uses_cfg_defaults(
     tmp_path: Path,
 ) -> None:
-    """First-run: no sidefile yet ⇒ cache state matches cfg.test_generator."""
+    """First-run: no sidefile yet ⇒ cache state matches cfg.test.generator."""
     cfg = make_test_config(
         test_generator=TestGeneratorConfig(scope="full", seed=42),
     )
     cfg_path = tmp_path / "config.yaml"
     cache = TestGeneratorCache.from_cfg_with_state(cfg, cfg_path)
-    assert cache.get() == cfg.test_generator
+    assert cache.get() == cfg.test.generator
     assert cache.is_etl_hook_enabled() is True
 
 
 def test_from_cfg_with_state_sidefile_overrides_cfg(tmp_path: Path) -> None:
-    """Sidefile field set ⇒ wins over cfg.test_generator."""
+    """Sidefile field set ⇒ wins over cfg.test.generator."""
     cfg = make_test_config(
         test_generator=TestGeneratorConfig(scope="full", seed=42),
     )

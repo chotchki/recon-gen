@@ -150,8 +150,8 @@ def test_run_html_server_passes_tls_kwargs_to_uvicorn(
     # shape — give it the legacy Mock and let the smoke-app builder
     # error if it touches fields; smoke is our cleanest fast-path here.
     cfg = MagicMock()
-    cfg.deployment_name = "test"
-    cfg.db_table_prefix = "test"
+    cfg.aws.deployment_name = "test"
+    cfg.db.table_prefix = "test"
 
     # Patch uvicorn inside the function's lazy-import scope.
     with patch.dict("sys.modules", {"uvicorn": fake_uvicorn}):
@@ -211,8 +211,8 @@ def test_run_html_server_omits_tls_kwargs_when_unset(
     fake_uvicorn.Server = _FakeServer
 
     cfg = MagicMock()
-    cfg.deployment_name = "test"
-    cfg.db_table_prefix = "test"
+    cfg.aws.deployment_name = "test"
+    cfg.db.table_prefix = "test"
 
     with patch.dict("sys.modules", {"uvicorn": fake_uvicorn}):
         with patch(

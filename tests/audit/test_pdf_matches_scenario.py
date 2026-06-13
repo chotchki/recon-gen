@@ -117,7 +117,7 @@ def db_cfg() -> Config:
         if candidate.exists():
             cfg = load_config(str(candidate))
             break
-    if cfg is None or cfg.demo_database_url is None:
+    if cfg is None or cfg.db.url is None:
         pytest.skip(
             "No demo_database_url configured — set "
             "RECON_GEN_DEMO_DATABASE_URL or point RECON_GEN_CONFIG at "

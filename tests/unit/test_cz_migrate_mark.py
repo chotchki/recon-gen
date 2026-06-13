@@ -533,7 +533,7 @@ def test_cli_migrate_mark_no_op_on_clean_db(tmp_path: Path) -> None:
 def test_pre_flight_auto_marks_when_etl_hook_is_none(
     tmp_path: Path,
 ) -> None:
-    """Standalone-mode (``cfg.etl_hook is None``): pre-flight auto-
+    """Standalone-mode (``cfg.app2.etl_hook is None``): pre-flight auto-
     marks pre-CZ rows with ``training`` before continuing the apply.
 
     Tests the helper directly via ``_cz6_pre_flight_migrate_mark`` —
@@ -569,7 +569,7 @@ def test_pre_flight_auto_marks_when_etl_hook_is_none(
 def test_pre_flight_refuses_auto_mark_when_etl_hook_configured(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """ETL mode (``cfg.etl_hook is not None``): pre-flight detects the
+    """ETL mode (``cfg.app2.etl_hook is not None``): pre-flight detects the
     pre-CZ rows, logs a hint, but does NOT auto-mark. Those rows might
     be real customer data — the operator must run the explicit verb
     to choose ``--source=training`` (synthetic) or ``--source=real``
@@ -669,7 +669,7 @@ def test_pre_flight_silent_when_base_tables_missing(
 # synthetic_only wipe correctly DELETEs the now-stamped rows (the
 # WHERE narrows to ``metadata.source='training'``).
 #
-# Gated on ``cfg.etl_hook is None`` per the CZ.0 REPLAN locked
+# Gated on ``cfg.app2.etl_hook is None`` per the CZ.0 REPLAN locked
 # decision: in ETL mode the unstamped rows may be real customer data;
 # operator must run the explicit verb to choose --source.
 #
@@ -750,7 +750,7 @@ def test_step_2_wipe_auto_marks_when_etl_hook_is_none(
 def test_step_2_wipe_skips_auto_mark_when_etl_hook_configured(
     tmp_path: Path,
 ) -> None:
-    """ETL mode (``cfg.etl_hook is not None``) → step_2_wipe does NOT
+    """ETL mode (``cfg.app2.etl_hook is not None``) → step_2_wipe does NOT
     auto-mark pre-CZ rows + emits no migrate_mark event.
 
     Those rows may be real customer data that the integrator's etl_hook

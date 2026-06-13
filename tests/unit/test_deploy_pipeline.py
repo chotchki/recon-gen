@@ -99,15 +99,15 @@ def _apply_schema_and_plant_two_rows(
 
     CZ.6.1 — rows carry ``metadata.source='training'`` (the CZ.2 stamp
     every post-CZ seed-pipeline writer attaches) so the step_2_wipe
-    auto-mark in standalone mode (``cfg.etl_hook is None``) treats
+    auto-mark in standalone mode (``cfg.app2.etl_hook is None``) treats
     them as post-CZ rows and skips the migrate_mark event. Tests that
     specifically want pre-CZ unstamped rows are in
     ``test_cz_migrate_mark.py``.
     """
     schema_sql = emit_schema(
-        instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+        instance, prefix=cfg.db.table_prefix, dialect=cfg.db.dialect,
     )
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     plant_tx = (
         f"INSERT INTO {p}_transactions ("
         "id, account_id, account_scope, "
@@ -133,9 +133,9 @@ def _apply_schema_and_plant_two_rows(
     try:
         cur = conn.cursor()
         try:
-            execute_script(cur, schema_sql, dialect=cfg.dialect)
+            execute_script(cur, schema_sql, dialect=cfg.db.dialect)
             execute_script(
-                cur, plant_tx + "\n" + plant_bal, dialect=cfg.dialect,
+                cur, plant_tx + "\n" + plant_bal, dialect=cfg.db.dialect,
             )
             conn.commit()
         finally:
@@ -145,7 +145,7 @@ def _apply_schema_and_plant_two_rows(
 
 
 def _row_counts(cfg: Config, instance: L2Instance) -> tuple[int, int]:
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -168,13 +168,13 @@ def _apply_demo_schema_only(cfg: Config, instance: L2Instance) -> None:
     tests still need to bootstrap an empty demo DB before running the
     pipeline.)"""
     schema_sql = emit_schema(
-        instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+        instance, prefix=cfg.db.table_prefix, dialect=cfg.db.dialect,
     )
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
         try:
-            execute_script(cur, schema_sql, dialect=cfg.dialect)
+            execute_script(cur, schema_sql, dialect=cfg.db.dialect)
             conn.commit()
         finally:
             cur.close()
@@ -206,7 +206,7 @@ def _run_step_1(cfg: Config, sink: _EventCollector | None) -> int:
 
 def test_etl_hook_unset_returns_zero_and_emits_skip() -> None:
     cfg = _base_cfg()
-    assert cfg.etl_hook is None
+    assert cfg.app2.etl_hook is None
     sink = _EventCollector()
     assert _run_step_1(cfg, sink) == 0
     assert sink.kinds() == ["deploy:step1:skip"]
@@ -408,7 +408,7 @@ def test_step_2_wipe_emits_start_then_done_events(
         "deploy:step2:wipe:done",
     ]
     start = sink.by_kind("deploy:step2:wipe:start")[0]
-    assert start["db_table_prefix"] == cfg.db_table_prefix
+    assert start["db_table_prefix"] == cfg.db.table_prefix
     assert start["dialect"] == "duckdb"
     done = sink.by_kind("deploy:step2:wipe:done")[0]
     assert done["transactions_deleted"] == 1
@@ -580,7 +580,7 @@ def test_step_3_generator_full_emits_start_then_done(
 def test_step_3_generator_full_with_cutoff_truncates_emission(
     tmp_path: Path, spec_example_instance: L2Instance,
 ) -> None:
-    """X.4.h trainer cutoff — when cfg.test_generator.cutoff_date is
+    """X.4.h trainer cutoff — when cfg.test.generator.cutoff_date is
     set, deploy emits the full scenario then DELETEs rows past cutoff.
     Plants land at fixed calendar positions (anchor=end_date), the
     cutoff just truncates the deployed dataset.
@@ -802,7 +802,7 @@ def test_step_3_generator_uncovered_rails_skips_covered(
     # Pick the first rail in the L2 to "cover" — its baseline should
     # be skipped on the next emit.
     covered_rail_name = str(spec_example_instance.rails[0].name)
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -849,7 +849,7 @@ def test_covered_rail_names_distinct_set(
     # Empty table → empty set.
     assert _covered_rail_names(cfg, spec_example_instance) == frozenset()
     # Plant 3 rows with 2 distinct rail_names.
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -933,7 +933,7 @@ def test_only_template_rails_unknown_name_loud_fails(
 def test_step_3_generator_only_template_requires_template_name(
     tmp_path: Path, spec_example_instance: L2Instance,
 ) -> None:
-    """scope='only_template' with cfg.test_generator.only_template unset
+    """scope='only_template' with cfg.test.generator.only_template unset
     must loud-fail rather than silently degrade to scope=full."""
     from datetime import date
     cfg = replace(
@@ -973,7 +973,7 @@ def test_step_3_generator_only_template_emits_closure_baseline(
     )
     assert tx > 0, "only_template should emit baseline for the closure rail"
     # Closure rail must be present.
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1073,7 +1073,7 @@ def _seed_two_account_roles_with_transactions(
     """Populate <prefix>_transactions with rows for ONE control account
     (gl_control) AND one DDA so we can assert the derive narrows to
     control-by-default."""
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1103,7 +1103,7 @@ def _seed_two_account_roles_with_transactions(
 def test_derive_balances_no_op_when_disabled(
     tmp_path: Path, spec_example_instance: L2Instance,
 ) -> None:
-    """When cfg.test_generator.derive_balances=False, the pass returns
+    """When cfg.test.generator.derive_balances=False, the pass returns
     0 and writes nothing."""
     cfg = replace(
         _duckdb_cfg(tmp_path),
@@ -1144,7 +1144,7 @@ def test_derive_balances_default_account_roles_writes_control_only(
     )
     # 1 (gl-1, 2030-01-01) row written; the DDA's row was skipped.
     assert rows == 1
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1189,7 +1189,7 @@ def test_derive_balances_account_roles_override_widens_set(
         ),
     )
     assert rows == 2  # gl-1 + dda-1
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1216,7 +1216,7 @@ def test_derive_balances_failed_transactions_excluded(
         test_generator=TestGeneratorConfig(derive_balances=True),
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1283,7 +1283,7 @@ def test_derive_balances_overwrites_existing_rows(
         ),
     )
     # Add another posted control transaction the same day.
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1378,8 +1378,8 @@ def test_step_4_matviews_refresh_emits_lifecycle_events(
         "deploy:step4:matviews:done",
     ]
     start = sink.by_kind("deploy:step4:matviews:start")[0]
-    assert start["db_table_prefix"] == cfg.db_table_prefix
-    assert start["dialect"] == cfg.dialect.value
+    assert start["db_table_prefix"] == cfg.db.table_prefix
+    assert start["dialect"] == cfg.db.dialect.value
 
 
 def test_step_4_matviews_idempotent_on_empty_db(
@@ -1398,7 +1398,7 @@ def test_step_4_matviews_idempotent_on_empty_db(
         step_4_matviews(cfg, spec_example_instance, dev_log=None),
     )
     # And every matview still exists (and is empty).
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1431,7 +1431,7 @@ def test_step_4_matviews_picks_up_new_rows(
     asyncio.run(
         step_4_matviews(cfg, spec_example_instance, dev_log=None),
     )
-    p = cfg.db_table_prefix
+    p = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1634,7 +1634,7 @@ def test_orchestration_no_etl_hook_path(
     generator populates demo_db on its own. Default cfg path — the
     pre-BS.4 "etl-free" mode is now the canonical mode."""
     cfg = _duckdb_cfg(tmp_path)
-    assert cfg.etl_hook is None
+    assert cfg.app2.etl_hook is None
     _apply_demo_schema_only(cfg, spec_example_instance)
     summary = asyncio.run(
         run_deploy_pipeline(cfg, spec_example_instance, dev_log=None),
@@ -1653,7 +1653,7 @@ def test_orchestration_no_etl_hook_path(
 # The `_AsyncDuckdbPool` (run by Studio's `recon-gen studio` process)
 # holds DuckDB's process-level write lock for the lifetime of the
 # Studio process. When the operator triggers Refresh Data → POST
-# /deploy → `step_1_etl_hook`, the customer's `cfg.etl_hook` script
+# /deploy → `step_1_etl_hook`, the customer's `cfg.app2.etl_hook` script
 # runs as a SUBPROCESS via `asyncio.create_subprocess_exec`. That
 # subprocess tries `duckdb.connect(path)` and gets
 # `IO Error: Could not set lock on file`. Direct repro probe is in
@@ -1673,7 +1673,7 @@ from recon_gen.common.db import _AsyncDuckdbPool
 
 
 def _etl_hook_writes_one_row(cfg: Config, scratch_dir: Path) -> str:
-    """Build a `cfg.etl_hook` shell-command that opens DuckDB,
+    """Build a `cfg.app2.etl_hook` shell-command that opens DuckDB,
     inserts a tagged row into <prefix>_transactions, and exits 0.
 
     Writes the Python script to a tempfile + invokes ``sys.executable
@@ -1681,7 +1681,7 @@ def _etl_hook_writes_one_row(cfg: Config, scratch_dir: Path) -> str:
     interpolation in the inline form runs afoul of shlex.split (the
     SQL literal has both single + double quotes); the script-on-disk
     form sidesteps that entirely + matches what a real customer's
-    cfg.etl_hook would look like.
+    cfg.app2.etl_hook would look like.
 
     Uses sys.executable so the subprocess is the same interpreter
     (no PATH skew across local dev / CI). The inserted row carries
@@ -1689,9 +1689,9 @@ def _etl_hook_writes_one_row(cfg: Config, scratch_dir: Path) -> str:
     assert it survived the pipeline.
     """
     import shlex  # noqa: PLC0415
-    assert cfg.demo_database_url is not None
-    path = duckdb_path(cfg.demo_database_url)
-    prefix = cfg.db_table_prefix
+    assert cfg.db.url is not None
+    path = duckdb_path(cfg.db.url)
+    prefix = cfg.db.table_prefix
     script = scratch_dir / "etl_hook_writer.py"
     script.write_text(
         "import duckdb\n"
@@ -1743,8 +1743,8 @@ def test_run_deploy_pipeline_releases_pool_lock_for_etl_hook_subprocess(
     # `recon-gen schema apply`). Lifetime spans the pipeline so the
     # released_for_subprocess bracket has something to surrender +
     # restore.
-    assert cfg.demo_database_url is not None
-    pool = _AsyncDuckdbPool(duckdb_path(cfg.demo_database_url))
+    assert cfg.db.url is not None
+    pool = _AsyncDuckdbPool(duckdb_path(cfg.db.url))
     sink = _EventCollector()
     try:
         summary = asyncio.run(
@@ -1766,7 +1766,7 @@ def test_run_deploy_pipeline_releases_pool_lock_for_etl_hook_subprocess(
         async def _verify_via_original_pool() -> int:
             async with pool.acquire() as conn:
                 cur = await conn.execute(
-                    f"SELECT COUNT(*) FROM {cfg.db_table_prefix}"
+                    f"SELECT COUNT(*) FROM {cfg.db.table_prefix}"
                     f"_transactions WHERE origin = ?",
                     ("etl_hook_marker",),
                 )
@@ -1807,8 +1807,8 @@ def test_run_deploy_pipeline_reopens_pool_on_etl_hook_failure(
     cfg = _duckdb_cfg(tmp_path)
     cfg = replace(cfg, etl_hook="false")  # exit 1
     _apply_demo_schema_only(cfg, spec_example_instance)
-    assert cfg.demo_database_url is not None
-    pool = _AsyncDuckdbPool(duckdb_path(cfg.demo_database_url))
+    assert cfg.db.url is not None
+    pool = _AsyncDuckdbPool(duckdb_path(cfg.db.url))
     sink = _EventCollector()
     try:
         summary = asyncio.run(
@@ -1949,8 +1949,8 @@ def test_session_start_passes_bracket_to_run_deploy_pipeline(
     cfg = _duckdb_cfg(tmp_path)
     cfg = replace(cfg, etl_hook=None)  # step_1 skip path
     _apply_demo_schema_only(cfg, spec_example_instance)
-    assert cfg.demo_database_url is not None
-    pool = _AsyncDuckdbPool(duckdb_path(cfg.demo_database_url))
+    assert cfg.db.url is not None
+    pool = _AsyncDuckdbPool(duckdb_path(cfg.db.url))
     bracket_uses = 0
 
     @asynccontextmanager

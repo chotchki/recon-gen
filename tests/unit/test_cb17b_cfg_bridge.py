@@ -1,8 +1,8 @@
 """CB.17.b — Smoke tests for the cfg→container_url bridge.
 
 `tests/e2e/conftest.py::cfg_with_container_url` swaps
-`cfg.demo_database_url` for the matching shared-container fixture URL
-based on `cfg.dialect`. These tests exercise the dispatch logic
+`cfg.db.url` for the matching shared-container fixture URL
+based on `cfg.db.dialect`. These tests exercise the dispatch logic
 directly by building minimal `Config` instances and calling the
 fixture body via its underlying function.
 
@@ -101,9 +101,9 @@ def test_other_cfg_fields_preserved_on_swap() -> None:
     """
     cfg = _minimal_cfg(Dialect.POSTGRES, demo_url="old")
     out = _call_bridge(cfg, pg_url="new")
-    assert out.aws_account_id == cfg.aws_account_id
-    assert out.aws_region == cfg.aws_region
-    assert out.deployment_name == cfg.deployment_name
-    assert out.db_table_prefix == cfg.db_table_prefix
+    assert out.aws_account_id == cfg.aws.account_id
+    assert out.aws_region == cfg.aws.region
+    assert out.deployment_name == cfg.aws.deployment_name
+    assert out.db_table_prefix == cfg.db.table_prefix
     # And the swap actually happened.
-    assert out.demo_database_url != cfg.demo_database_url
+    assert out.demo_database_url != cfg.db.url

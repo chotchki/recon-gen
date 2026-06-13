@@ -2,7 +2,7 @@
 
 Pins the operator-locked design (REPLAN, 2026-06-09):
 
-- ``cfg.etl_hook is None`` is the gate signal. The Trainer reset +
+- ``cfg.app2.etl_hook is None`` is the gate signal. The Trainer reset +
   Studio Deploy-changes paths will only DELETE rows tagged
   ``metadata.source = 'training'``; any unmarked rows are presumed
   real customer data and survive.
@@ -13,7 +13,7 @@ Pins the operator-locked design (REPLAN, 2026-06-09):
   "Clear synthetic rows and re-seed" copy, and a visually-disabled
   Studio Deploy-changes button with a tooltip explanation.
 
-- When ``cfg.etl_hook`` IS configured (ETL-mode), the banner is
+- When ``cfg.app2.etl_hook`` IS configured (ETL-mode), the banner is
   absent, button labels are unchanged, and Deploy-changes is the
   full clickable button — TRUNCATE + reseed is safe because the
   next ETL cycle refills.
@@ -74,7 +74,7 @@ def test_standalone_banner_renders_locked_copy_when_etl_hook_is_none() -> None:
     from html import escape
 
     cfg = make_test_config()  # etl_hook defaults to None
-    assert cfg.etl_hook is None
+    assert cfg.app2.etl_hook is None
 
     html = _standalone_mode_banner(cfg)
 
@@ -104,7 +104,7 @@ def test_standalone_banner_absent_when_embed() -> None:
     """Embedded iframe surfaces suppress chrome (mirrors the CU.3
     banner's embed=True behavior)."""
     cfg = make_test_config()
-    assert cfg.etl_hook is None
+    assert cfg.app2.etl_hook is None
 
     html = _standalone_mode_banner(cfg, embed=True)
     assert html == ""
@@ -254,12 +254,12 @@ def test_studio_deploy_button_disabled_in_standalone_mode(
     l2_yaml: Path,
 ) -> None:
     """The Studio data-shape page's Deploy-changes button is rendered
-    visually disabled with a tooltip when ``cfg.etl_hook is None``.
+    visually disabled with a tooltip when ``cfg.app2.etl_hook is None``.
     Couples with the persistent banner: the operator sees the
     protection before they click."""
     cache = L2InstanceCache.from_path(l2_yaml)
     cfg = make_test_config()
-    assert cfg.etl_hook is None
+    assert cfg.app2.etl_hook is None
 
     html = _render_data_page(cache, dev_log=False, cfg=cfg)
 
@@ -300,7 +300,7 @@ def test_studio_deploy_disabled_tooltip_carries_locked_copy(
     hover + banner read consistently."""
     cache = L2InstanceCache.from_path(l2_yaml)
     cfg = make_test_config()
-    assert cfg.etl_hook is None
+    assert cfg.app2.etl_hook is None
 
     html = _render_data_page(cache, dev_log=False, cfg=cfg)
 

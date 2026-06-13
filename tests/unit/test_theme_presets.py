@@ -35,7 +35,7 @@ class TestDefaultPreset:
         assert len(DEFAULT_PRESET.data_colors) == 8
 
     def test_serializes_to_valid_theme(self):
-        # Z.C — build_theme uses cfg.deployment_name as the single
+        # Z.C — build_theme uses cfg.aws.deployment_name as the single
         # prefix segment so the theme id matches the dashboard's
         # ThemeArn (no separate L2 segment any more).
         cfg = make_test_config(deployment_name="recon-test-l2")

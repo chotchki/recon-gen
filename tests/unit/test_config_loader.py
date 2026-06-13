@@ -60,9 +60,9 @@ def _write_yaml(tmp_path: Path, body: dict) -> Path:  # pyright: ignore[reportUn
 
 def test_minimal_valid_config_loads(tmp_path: Path) -> None:
     cfg = load_config(_write_yaml(tmp_path, _required_yaml()))
-    assert cfg.aws_account_id == "111122223333"
-    assert cfg.deployment_name == "recon-test"
-    assert cfg.db_table_prefix == "test"
+    assert cfg.aws.account_id == "111122223333"
+    assert cfg.aws.deployment_name == "recon-test"
+    assert cfg.db.table_prefix == "test"
 
 
 def test_full_valid_config_loads(tmp_path: Path) -> None:
@@ -84,39 +84,39 @@ def test_full_valid_config_loads(tmp_path: Path) -> None:
         "tagging_enabled": False,
     }))
     cfg = load_config(p)
-    assert cfg.signing is not None
-    assert cfg.dialect.value == "postgres"
-    assert cfg.tagging_enabled is False
-    assert cfg.deployment_name == "recon-test-full"
-    assert cfg.db_table_prefix == "test_full"
+    assert cfg.audit.signing is not None
+    assert cfg.db.dialect.value == "postgres"
+    assert cfg.aws.tagging_enabled is False
+    assert cfg.aws.deployment_name == "recon-test-full"
+    assert cfg.db.table_prefix == "test_full"
 
 
 def test_tagging_enabled_defaults_to_true(tmp_path: Path) -> None:
     """The override is opt-in. Omitting it leaves cleanup's
     fail-CLOSED tag-based isolation intact."""
     cfg = load_config(_write_yaml(tmp_path, _required_yaml()))
-    assert cfg.tagging_enabled is True
+    assert cfg.aws.tagging_enabled is True
 
 
 def test_tagging_enabled_false_omits_tags_kwarg(tmp_path: Path) -> None:
-    """``cfg.tags()`` returns ``None`` when tagging is disabled —
+    """``cfg.aws.tags()`` returns ``None`` when tagging is disabled —
     ``_strip_nones`` then drops the ``Tags`` field from the AWS JSON
     so the boto3 ``Create*`` call carries no ``Tags`` kwarg, keeping
     the IAM principal off ``quicksight:TagResource``."""
     cfg = load_config(_write_yaml(tmp_path, _required_yaml({
         "tagging_enabled": False,
     })))
-    assert cfg.tags() is None
+    assert cfg.aws.tags() is None
 
 
 def test_tagging_enabled_true_populates_tags_kwarg(tmp_path: Path) -> None:
-    """Z.C: cfg.tags() emits a single ``Deployment=<name>`` tag instead of
+    """Z.C: cfg.aws.tags() emits a single ``Deployment=<name>`` tag instead of
     the v8.x two-tag (ResourcePrefix + L2Instance) pair."""
     cfg = load_config(_write_yaml(tmp_path, _required_yaml({
         "deployment_name": "recon-customprefix",
         "extra_tags": {"Owner": "team"},
     })))
-    tags = cfg.tags()
+    tags = cfg.aws.tags()
     assert tags is not None
     keys = {tag.Key for tag in tags}
     assert {MANAGED_TAG_KEY, DEPLOYMENT_TAG_KEY, "Owner"} <= keys
@@ -173,8 +173,8 @@ def test_l2_only_key_in_config_yaml_rejects(
     common misedit. Each one must error with a pointer at the L2 YAML.
 
     Z.C: ``instance`` removed from this list — the L2 yaml's
-    ``instance:`` field is gone entirely (replaced by cfg.deployment_name
-    + cfg.db_table_prefix). It now lands in the legacy-key migration
+    ``instance:`` field is gone entirely (replaced by cfg.aws.deployment_name
+    + cfg.db.table_prefix). It now lands in the legacy-key migration
     path, not the L2-only-leak path. See
     ``test_legacy_keys_in_config_yaml_reject_with_migration_pointer``.
     """
@@ -224,7 +224,10 @@ def test_legacy_principal_arn_singular_still_works(tmp_path: Path) -> None:
         "principal_arn": "arn:aws:iam::111122223333:user/legacy",
     }))
     cfg = load_config(p)
-    assert cfg.principal_arns == ["arn:aws:iam::111122223333:user/legacy"]
+    # DE.2 — _AwsView.principal_arns is a tuple (v14 shape); legacy
+    # flat field is list. Assert tuple here since the sweep moved
+    # callers to the v14 nested accessor.
+    assert cfg.aws.principal_arns == ("arn:aws:iam::111122223333:user/legacy",)
 
 
 def test_run_postgres_config_still_loads() -> None:
@@ -234,7 +237,7 @@ def test_run_postgres_config_still_loads() -> None:
     if not p.exists():
         pytest.skip(f"{p} not present")
     cfg = load_config(p)
-    assert cfg.dialect.value == "postgres"
+    assert cfg.db.dialect.value == "postgres"
 
 
 def test_run_oracle_config_still_loads() -> None:
@@ -242,7 +245,7 @@ def test_run_oracle_config_still_loads() -> None:
     if not p.exists():
         pytest.skip(f"{p} not present")
     cfg = load_config(p)
-    assert cfg.dialect.value == "oracle"
+    assert cfg.db.dialect.value == "oracle"
 
 
 # --- Y.2.gate.h.5 — loud failure on missing required config ---
@@ -320,8 +323,8 @@ def test_demo_database_url_satisfies_datasource_arn_requirement(
     body["dialect"] = "postgres"
     cfg = load_config(_write_yaml(tmp_path, body))
     # __post_init__ derives the datasource_arn from the URL.
-    assert cfg.datasource_arn is not None
-    assert "datasource/" in cfg.datasource_arn
+    assert cfg.aws.datasource.arn is not None
+    assert "datasource/" in cfg.aws.datasource.arn
     # ...and records that we own the datasource resource → cli/json.py
     # emits out/datasource.json.
     assert cfg.datasource_arn_was_derived is True
@@ -437,22 +440,22 @@ def test_zc_field_env_overrides_yaml(
     body["deployment_name"] = "recon-from-yaml"
     body["db_table_prefix"] = "from_yaml"
     cfg = load_config(_write_yaml(tmp_path, body))
-    assert cfg.deployment_name == "recon-from-env"
-    assert cfg.db_table_prefix == "from_env"
+    assert cfg.aws.deployment_name == "recon-from-env"
+    assert cfg.db.table_prefix == "from_env"
     # And cfg.prefixed picks the env value up.
-    assert cfg.prefixed("foo") == "recon-from-env-foo"
+    assert cfg.aws.prefixed("foo") == "recon-from-env-foo"
 
 
 def test_etl_hook_defaults_none(tmp_path: Path) -> None:
     cfg = load_config(_write_yaml(tmp_path, _base_cfg({})))
-    assert cfg.etl_hook is None
+    assert cfg.app2.etl_hook is None
 
 
 def test_etl_hook_passthrough(tmp_path: Path) -> None:
     cfg = load_config(_write_yaml(tmp_path, _base_cfg({
         "etl_hook": "/usr/local/bin/refresh-demo --etl-only",
     })))
-    assert cfg.etl_hook == "/usr/local/bin/refresh-demo --etl-only"
+    assert cfg.app2.etl_hook == "/usr/local/bin/refresh-demo --etl-only"
 
 
 def test_etl_datasource_key_rejects_post_bs4(tmp_path: Path) -> None:
@@ -474,13 +477,13 @@ def test_test_generator_defaults_to_empty_block(tmp_path: Path) -> None:
     """Absent block resolves to TestGeneratorConfig() — byte-identical
     to today's locked-seed output. The pipeline never None-checks."""
     cfg = load_config(_write_yaml(tmp_path, _base_cfg({})))
-    assert cfg.test_generator.enabled is True
-    assert cfg.test_generator.scope == "full"
-    assert cfg.test_generator.end_date is None
-    assert cfg.test_generator.seed is None
-    assert cfg.test_generator.plants == ()
-    assert cfg.test_generator.only_template is None
-    assert cfg.test_generator.derive_balances is False
+    assert cfg.test.generator.enabled is True
+    assert cfg.test.generator.scope == "full"
+    assert cfg.test.generator.end_date is None
+    assert cfg.test.generator.seed is None
+    assert cfg.test.generator.plants == ()
+    assert cfg.test.generator.only_template is None
+    assert cfg.test.generator.derive_balances is False
 
 
 def test_test_generator_full_block_loads(tmp_path: Path) -> None:
@@ -495,7 +498,7 @@ def test_test_generator_full_block_loads(tmp_path: Path) -> None:
             "derive_balances": True,
         },
     })))
-    tg = cfg.test_generator
+    tg = cfg.test.generator
     assert tg.enabled is True
     assert tg.scope == "exceptions_only"
     assert tg.end_date == date(2030, 6, 15)
@@ -513,7 +516,7 @@ def test_test_generator_native_yaml_date(tmp_path: Path) -> None:
     p = tmp_path / "config.yaml"
     p.write_text(yaml.safe_dump(body), encoding="utf-8")
     cfg = load_config(p)
-    assert cfg.test_generator.end_date == date(2030, 1, 1)
+    assert cfg.test.generator.end_date == date(2030, 1, 1)
 
 
 def test_test_generator_unknown_subkey_rejects(tmp_path: Path) -> None:
@@ -572,8 +575,8 @@ def test_v1b_allowlist_includes_pipeline_keys(tmp_path: Path) -> None:
         "etl_hook": "./etl.sh",
         "test_generator": {"scope": "full"},
     })))
-    assert cfg.etl_hook == "./etl.sh"
-    assert cfg.test_generator.scope == "full"
+    assert cfg.app2.etl_hook == "./etl.sh"
+    assert cfg.test.generator.scope == "full"
 
 
 def test_to_yaml_dict_round_trips_through_load_config(tmp_path: Path) -> None:
@@ -601,16 +604,18 @@ def test_to_yaml_dict_round_trips_through_load_config(tmp_path: Path) -> None:
     out_path = tmp_path / "round_trip.yaml"
     cfg.write_yaml(out_path)
     cfg2 = load_config(out_path)
-    assert cfg2.aws_account_id == cfg.aws_account_id
-    assert cfg2.deployment_name == cfg.deployment_name
-    assert cfg2.dialect == cfg.dialect
-    assert cfg2.principal_arns == cfg.principal_arns
-    assert cfg2.extra_tags == cfg.extra_tags
-    assert cfg2.demo_database_url == cfg.demo_database_url
+    assert cfg2.aws_account_id == cfg.aws.account_id
+    assert cfg2.deployment_name == cfg.aws.deployment_name
+    assert cfg2.dialect == cfg.db.dialect
+    # DE.2 — _AwsView normalizes to tuples; compare via proxy on both
+    # sides so the list/tuple type-mismatch doesn't false-positive.
+    assert cfg2.aws.principal_arns == cfg.aws.principal_arns
+    assert cfg2.aws.extra_tags == cfg.aws.extra_tags
+    assert cfg2.demo_database_url == cfg.db.url
     assert cfg2.auth == cfg.auth
-    assert cfg2.test_generator.seed == cfg.test_generator.seed
-    assert cfg2.test_generator.plants == cfg.test_generator.plants
-    assert cfg2.test_generator.end_date == cfg.test_generator.end_date
+    assert cfg2.test_generator.seed == cfg.test.generator.seed
+    assert cfg2.test_generator.plants == cfg.test.generator.plants
+    assert cfg2.test_generator.end_date == cfg.test.generator.end_date
 
 
 def test_to_yaml_dict_omits_derived_datasource_arn(tmp_path: Path) -> None:

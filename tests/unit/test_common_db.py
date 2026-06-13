@@ -383,8 +383,8 @@ class TestMakeConnectionPool:
         # validates via Literal so we use MagicMock instead of fighting
         # the type system.
         cfg = MagicMock()
-        cfg.demo_database_url = ":memory:"
-        cfg.dialect = "snowflake"  # not in the Dialect enum
+        cfg.db.url = ":memory:"
+        cfg.db.dialect = "snowflake"  # not in the Dialect enum
         with pytest.raises(ValueError, match="Unknown dialect"):
             asyncio.run(make_connection_pool(cfg))
 

@@ -58,17 +58,17 @@ def find_two_days_for_same_account(
     account in the matching role has ≥2 distinct days of data — typically
     a thin local seed.
     """
-    if cfg.dialect not in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.DUCKDB):
+    if cfg.db.dialect not in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.DUCKDB):
         raise RuntimeError(
             f"find_two_days_for_same_account: unsupported dialect "
-            f"{cfg.dialect!r}"
+            f"{cfg.db.dialect!r}"
         )
-    if not cfg.demo_database_url:
+    if not cfg.db.url:
         raise RuntimeError(
-            "find_two_days_for_same_account: cfg.demo_database_url is unset"
+            "find_two_days_for_same_account: cfg.db.url is unset"
         )
-    bday_expr = date_trunc_day("posting", cfg.dialect)
-    prefix = cfg.db_table_prefix
+    bday_expr = date_trunc_day("posting", cfg.db.dialect)
+    prefix = cfg.db.table_prefix
     # Find the lowest-id account (by the dropdown-window rationale in
     # find_account_day_with_data) WITH ≥2 distinct days, within the
     # alphabetically-first role. Returns one row carrying both days.
@@ -132,7 +132,7 @@ def find_two_days_for_same_account(
 def find_account_day_with_data(cfg: Config) -> tuple[str, str, str]:
     """Return ``(account_display, account_role, business_day_iso)`` for
     a known-good Daily Statement filter combination in the deployed
-    ``<cfg.db_table_prefix>_transactions`` table.
+    ``<cfg.db.table_prefix>_transactions`` table.
 
     ``account_display`` matches the ``"Name (id)"`` shape AA.E.2 wired
     into the Account dropdown's ``LinkedValues.from_column(...
@@ -154,17 +154,17 @@ def find_account_day_with_data(cfg: Config) -> tuple[str, str, str]:
     (deploy step skipped? wrong cfg? wrong prefix?) — refusing to
     silently return a useless tuple.
     """
-    if cfg.dialect not in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.DUCKDB):
+    if cfg.db.dialect not in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.DUCKDB):
         raise RuntimeError(
             f"find_account_day_with_data: unsupported dialect "
-            f"{cfg.dialect!r}"
+            f"{cfg.db.dialect!r}"
         )
-    if not cfg.demo_database_url:
+    if not cfg.db.url:
         raise RuntimeError(
-            "find_account_day_with_data: cfg.demo_database_url is unset"
+            "find_account_day_with_data: cfg.db.url is unset"
         )
-    bday_expr = date_trunc_day("posting", cfg.dialect)
-    prefix = cfg.db_table_prefix
+    bday_expr = date_trunc_day("posting", cfg.db.dialect)
+    prefix = cfg.db.table_prefix
     # Group by (account, day); bias the pick toward low ``account_id`` so
     # the resulting account lands in QS's MUI Autocomplete first-visible
     # window (the Account dropdown virtualizes options at ~14 items —
@@ -208,7 +208,7 @@ def find_account_day_with_data(cfg: Config) -> tuple[str, str, str]:
         f"ORDER BY (COALESCE(p.account_name, p.account_id) || ' ('"
         f"          || p.account_id || ')') ASC, bday DESC, n DESC "
     )
-    if cfg.dialect is Dialect.ORACLE:
+    if cfg.db.dialect is Dialect.ORACLE:
         sql += "FETCH FIRST 1 ROWS ONLY"
     else:
         # Postgres + SQLite both speak LIMIT.
@@ -276,18 +276,18 @@ def find_one_account_day_per_role(
     Raises ``RuntimeError`` if no role has rows — the seed state is
     broken upstream and the test would be useless either way.
     """
-    if cfg.dialect not in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.DUCKDB):
+    if cfg.db.dialect not in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.DUCKDB):
         raise RuntimeError(
             f"find_one_account_day_per_role: unsupported dialect "
-            f"{cfg.dialect!r}"
+            f"{cfg.db.dialect!r}"
         )
-    if not cfg.demo_database_url:
+    if not cfg.db.url:
         raise RuntimeError(
-            "find_one_account_day_per_role: cfg.demo_database_url unset"
+            "find_one_account_day_per_role: cfg.db.url unset"
         )
 
-    bday_expr = date_trunc_day("posting", cfg.dialect)
-    prefix = cfg.db_table_prefix
+    bday_expr = date_trunc_day("posting", cfg.db.dialect)
+    prefix = cfg.db.table_prefix
 
     # 1) Enumerate roles that have ≥1 row in current_daily_balances —
     #    that's the universe BO.1 narrows the picker source to.
@@ -351,7 +351,7 @@ def find_one_account_day_per_role(
                 )
                 per_role_sql += (
                     "FETCH FIRST 1 ROWS ONLY"
-                    if cfg.dialect is Dialect.ORACLE else "LIMIT 1"
+                    if cfg.db.dialect is Dialect.ORACLE else "LIMIT 1"
                 )
                 cur.execute(per_role_sql)
                 row = cur.fetchone()

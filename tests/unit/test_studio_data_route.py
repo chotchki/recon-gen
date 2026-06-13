@@ -232,7 +232,7 @@ def test_diagram_chrome_omits_data_link_in_embed_mode(
 def test_plants_strip_renders_six_checkboxes_all_checked_by_default(
     writable_l2_yaml: Path,
 ) -> None:
-    """Empty cfg.test_generator.plants ⇒ "all kinds" per SPEC; every
+    """Empty cfg.test.generator.plants ⇒ "all kinds" per SPEC; every
     checkbox renders pre-checked. Verifies the SPEC default round-trips
     through the cache + renderer."""
     tg_cache = TestGeneratorCache(TestGeneratorConfig(plants=()))
@@ -410,7 +410,7 @@ def test_put_plants_preserves_kind_order(
 def test_end_date_strip_renders_blank_input_when_none(
     writable_l2_yaml: Path,
 ) -> None:
-    """Default cfg.test_generator.end_date = None ⇒ the date input
+    """Default cfg.test.generator.end_date = None ⇒ the date input
     renders empty (blank value) and the trailing current-value chip
     shows '(default)'."""
     tg_cache = TestGeneratorCache(TestGeneratorConfig(end_date=None))
@@ -641,7 +641,7 @@ def test_put_end_date_delta_wins_over_end_date(
 def test_seed_strip_renders_blank_input_when_none(
     writable_l2_yaml: Path,
 ) -> None:
-    """Default cfg.test_generator.seed = None ⇒ the number input renders
+    """Default cfg.test.generator.seed = None ⇒ the number input renders
     blank (with placeholder) and the chip shows '(default)'."""
     tg_cache = TestGeneratorCache(TestGeneratorConfig(seed=None))
     app = _build_app(writable_l2_yaml, tg_cache=tg_cache)
@@ -809,7 +809,7 @@ def test_put_seed_route_absent_without_cache(
 def test_scope_strip_renders_four_radios_full_default(
     writable_l2_yaml: Path,
 ) -> None:
-    """Default cfg.test_generator.scope = 'full' ⇒ that radio renders
+    """Default cfg.test.generator.scope = 'full' ⇒ that radio renders
     pre-checked; the other three unchecked. Renders all four so the
     operator can switch without a dropdown click. (X.4.i.1 added
     'only_template' as the fourth scope.)"""
@@ -1300,7 +1300,7 @@ def test_etl_hook_strip_renders_not_configured_without_cfg(
 def test_etl_hook_strip_renders_command_when_configured(
     writable_l2_yaml: Path,
 ) -> None:
-    """With cfg.etl_hook set + toggle enabled (default), the strip
+    """With cfg.app2.etl_hook set + toggle enabled (default), the strip
     surfaces the command in a <code> + a checked checkbox."""
     cfg = make_test_config(etl_hook="echo upstream-pull && sync")
     tg_cache = TestGeneratorCache(TestGeneratorConfig())
@@ -1325,7 +1325,7 @@ def test_etl_hook_strip_renders_command_when_configured(
 def test_etl_hook_strip_renders_disabled_state(
     writable_l2_yaml: Path,
 ) -> None:
-    """When the cache flag is off but cfg.etl_hook is set, the
+    """When the cache flag is off but cfg.app2.etl_hook is set, the
     checkbox renders unchecked + the command shows greyed out
     (line-through). The command isn't erased — the toggle is the only
     thing that changes."""

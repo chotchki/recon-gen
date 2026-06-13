@@ -136,8 +136,8 @@ def planted_l1_exceptions_duckdb() -> Iterator["Config"]:
     conn.close()
     cfg = make_test_config(
         dialect=Dialect.DUCKDB, demo_database_url=path,
+        db_table_prefix=_PREFIX,
     )
-    cfg.db_table_prefix = _PREFIX
     try:
         yield cfg
     finally:
@@ -186,7 +186,7 @@ def test_c7_guard_keeps_money_keyed_actionable_row(
     """
     cfg = planted_l1_exceptions_duckdb
     sql = _substitute_default_params(_extract_sql(cfg))
-    db_url = cfg.demo_database_url
+    db_url = cfg.db.url
     assert db_url is not None
     conn = duckdb.connect(db_url)
     try:
@@ -210,7 +210,7 @@ def test_c7_guard_drops_money_keyed_degenerate_row(
     """
     cfg = planted_l1_exceptions_duckdb
     sql = _substitute_default_params(_extract_sql(cfg))
-    db_url = cfg.demo_database_url
+    db_url = cfg.db.url
     assert db_url is not None
     conn = duckdb.connect(db_url)
     try:
@@ -236,7 +236,7 @@ def test_c7_guard_keeps_transfer_keyed_missed_violation(
     """
     cfg = planted_l1_exceptions_duckdb
     sql = _substitute_default_params(_extract_sql(cfg))
-    db_url = cfg.demo_database_url
+    db_url = cfg.db.url
     assert db_url is not None
     conn = duckdb.connect(db_url)
     try:
@@ -261,7 +261,7 @@ def test_c7_guard_keeps_transfer_keyed_overlap_violation(
     """
     cfg = planted_l1_exceptions_duckdb
     sql = _substitute_default_params(_extract_sql(cfg))
-    db_url = cfg.demo_database_url
+    db_url = cfg.db.url
     assert db_url is not None
     conn = duckdb.connect(db_url)
     try:

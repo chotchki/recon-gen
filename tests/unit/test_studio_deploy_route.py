@@ -67,12 +67,12 @@ def _duckdb_cfg(tmp_path: Path, **overrides: object) -> Config:
 
 def _apply_schema(cfg: Config, yaml_path: Path) -> None:
     instance = load_instance(yaml_path)
-    schema_sql = emit_schema(instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect)
+    schema_sql = emit_schema(instance, prefix=cfg.db.table_prefix, dialect=cfg.db.dialect)
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
         try:
-            execute_script(cur, schema_sql, dialect=cfg.dialect)
+            execute_script(cur, schema_sql, dialect=cfg.db.dialect)
             conn.commit()
         finally:
             cur.close()
@@ -104,7 +104,7 @@ def test_post_deploy_runs_pipeline_returns_summary(
     1-5 against the demo DB; returns 200 + the DeploySummary JSON.
 
     CZ.4 added a standalone-mode gate that refuses with 409 when
-    ``cfg.etl_hook is None`` — so the success path now requires a
+    ``cfg.app2.etl_hook is None`` — so the success path now requires a
     no-op hook (``true`` exits 0) for the pipeline to proceed.
     """
     cfg = _duckdb_cfg(tmp_path, etl_hook="true")
