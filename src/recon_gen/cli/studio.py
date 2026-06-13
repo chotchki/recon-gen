@@ -90,6 +90,29 @@ from recon_gen.cli._html_serve import run_html_server
         "when mkdocs isn't installed (`pip install recon-gen[docs]`)."
     ),
 )
+@click.option(
+    "--tls-cert",
+    "tls_cert",
+    envvar="RECON_GEN_TLS_CERT",
+    default=None,
+    help=(
+        "Path to a PEM-encoded TLS cert. When set together with "
+        "``--tls-key`` the server listens HTTPS via uvicorn's "
+        "ssl_certfile. Half-set raises UsageError. Env: "
+        "``RECON_GEN_TLS_CERT``. DC.1; cfg fallback "
+        "(``cfg.app2.tls.cert_path``) wires in DE.2."
+    ),
+)
+@click.option(
+    "--tls-key",
+    "tls_key",
+    envvar="RECON_GEN_TLS_KEY",
+    default=None,
+    help=(
+        "Path to a PEM-encoded TLS private key (paired with "
+        "``--tls-cert``). Env: ``RECON_GEN_TLS_KEY``."
+    ),
+)
 def studio(
     config: str,
     l2_instance_path: str | None,
@@ -98,6 +121,8 @@ def studio(
     dev_log: bool,
     app_name: str,
     embed_docs: bool,
+    tls_cert: str | None,
+    tls_key: str | None,
 ) -> None:
     """Start Studio — the implementation-tools surface for the integrator,
     trainer, and ETL engineer.
@@ -174,4 +199,5 @@ def studio(
         stub=False,            # Studio always reads the real DB.
         embed_docs=embed_docs,
         studio_routes_factory=studio_factory,
+        tls_cert=tls_cert, tls_key=tls_key,
     )

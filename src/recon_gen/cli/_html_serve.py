@@ -194,6 +194,8 @@ def run_html_server(
     stub: bool,
     embed_docs: bool,
     studio_routes_factory: StudioRoutesFactory | None = None,
+    tls_cert: str | None = None,
+    tls_key: str | None = None,
 ) -> None:
     """Boot the Starlette + uvicorn HTML server (dashboards or studio).
 
@@ -227,6 +229,17 @@ def run_html_server(
             f"--stub only applies to --app smoke (the DB-free fixture); "
             f"--app {app_name} needs a real database."
         )
+
+    # DC.1 — TLS pairing constraint. Both or neither. Half-set TLS is
+    # operator error (typo in the cfg / env), not a graceful HTTP
+    # fallback — the operator's intent was HTTPS, so fail loudly.
+    if bool(tls_cert) ^ bool(tls_key):
+        raise click.UsageError(
+            "--tls-cert and --tls-key must be set together (got "
+            f"cert={tls_cert!r} key={tls_key!r}). Set both to enable "
+            "HTTPS, or omit both for HTTP."
+        )
+    tls_enabled = bool(tls_cert and tls_key)
 
     theme = resolve_l2_theme(instance)
     if theme is not None:
@@ -374,21 +387,28 @@ def run_html_server(
                 studio_routes=studio_routes,
                 banner_text=getattr(cfg, "banner_text", None),
             )
-            click.echo(f"server: http://{host}:{port}/")
+            scheme = "https" if tls_enabled else "http"
+            click.echo(f"server: {scheme}://{host}:{port}/")
             if studio_routes is not None:
-                click.echo(f"  → http://{host}:{port}/ — Studio")
+                click.echo(f"  → {scheme}://{host}:{port}/ — Studio")
             if len(dashboards) > 1:
                 click.echo(
-                    f"  → http://{host}:{port}/dashboards lists "
+                    f"  → {scheme}://{host}:{port}/dashboards lists "
                     f"{len(dashboards)} dashboards"
                 )
             if docs_dir is not None:
-                click.echo(f"  → http://{host}:{port}/docs/ — embedded handbook")
+                click.echo(f"  → {scheme}://{host}:{port}/docs/ — embedded handbook")
             if dev_log:
                 click.echo("dev-log: on (events forwarded to stderr)")
-            uv_config = uvicorn.Config(
-                asgi_app, host=host, port=port, log_level="info",
+            if tls_enabled:
+                click.echo(f"tls: cert={tls_cert} key={tls_key}")
+            uv_kwargs: dict[str, Any] = dict(
+                host=host, port=port, log_level="info",
             )
+            if tls_enabled:
+                uv_kwargs["ssl_certfile"] = tls_cert
+                uv_kwargs["ssl_keyfile"] = tls_key
+            uv_config = uvicorn.Config(asgi_app, **uv_kwargs)
             server = uvicorn.Server(uv_config)
             await server.serve()
         finally:
