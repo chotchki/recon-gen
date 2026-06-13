@@ -76,6 +76,33 @@ Diagnosis pending live QS data. The Table renders + the 3 KPIs share the same da
 
 Deferring until the local run completes — if #12 reproduces locally cleanly, it's a real render-pace issue we can fix with a longer per-visual wait. If it only fails on CI, it's a CI-specific flake to quarantine + investigate as a follow-up.
 
-## Pending — local-run failure summary
+## CI validation — sha `4498e147` (#9 + #11 fixes) results
 
-Local `./run_tests.sh up_to=qs_browser --allow-dirty-deploy` running in background. Will diff against the 12-failure baseline once it completes.
+`gh run 27456975113` ran the full chain. 12 failures vs the v13.15.1 baseline:
+
+| # | Test | Was | Now | Verdict |
+|---|---|---|---|---|
+| 1 | `test_bg4_recipient_fanout[qs]` | DiskFull | DiskFull | DG.2 sweep wasn't enough — need shm-size bump (root cause: POSIX `/dev/shm`, not host disk) |
+| 2 | `test_bg4_recipient_fanout[app2]` | DiskFull | DiskFull | Same |
+| — | (cascade tests from baseline 3-8, 10) | various timeouts | some passed, some cascading still | Mixed — DiskFull still drives some |
+| 9 | `test_cq_4_e[qs-Transactions-Transfer]` | 2 s TimeoutError | `Advertised (first 10 of 0): []` | **Fix worked** — wait retries through TimeoutError; the empty-picker is a separate bug |
+| 11 | `test_bo_1[qs]` | ZBA/WireSusp missing | (gone from failure list) | **Fix worked** — typeahead membership check passes |
+| 12 | `test_inv_dashboard_structure_matches_tree[qs]` | 3 KPIs missing | 3 KPIs missing | Still pre-existing real — needs separate investigation |
+
+**Key findings:**
+
+1. **#11 fix shipped clean on QS leg.** Typeahead-based membership check correctly handles MUI Autocomplete's virtualized window.
+2. **#9 fix changed the failure shape but unmasked a deeper bug.** The retry contract now works; the picker is genuinely returning zero options. Separate root cause: typeahead seed query is empty post-deploy. File as follow-up (`BX backlog — DS_L1_TX_IDS typeahead seed empty post-deploy`).
+3. **DG.2 boot sweep alone wasn't enough.** DiskFull is POSIX shared-memory segment exhaustion (per-container `/dev/shm` tmpfs, 64MB default), not host disk accumulation. The sweep cleans cross-run debris but doesn't address per-run pressure from xdist concurrent matview refreshes.
+4. **Several pre-existing test failures unmasked.** Some baseline cascade items still fail; some are likely real bugs that DiskFull was hiding.
+
+## CI validation — sha `f8e45b5b` (shm-size=2g) in progress
+
+Adds `--shm-size=2g` to both `ci-shared-pg` `docker run` invocations + an adoption-side check that recreates the container if a reused one has the 64MB default. Validates whether DiskFull (#1, #2) clears and whether cascade tests (#3-#8, #10) recover.
+
+If `f8e45b5b` is green minus #12 (Recipient Fanout 3 KPIs) + the empty-picker (now flagged as separate bug):
+- DG.3 fixes complete
+- DG.4 phase exit + release
+
+If `f8e45b5b` still red on DiskFull/cascade:
+- Increase shm-size further (4g) OR investigate matview refresh concurrency (drop xdist parallelism on db-pressure tests)
