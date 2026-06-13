@@ -349,6 +349,75 @@ def _probe_docker() -> ProbeFailure | None:
     )
 
 
+def _resolve_qs_user_arn(cfg: Any) -> str | None:  # typing-smell: ignore[explicit-any]: cfg comes from load_config; full type would force a tree → _dev dependency we avoid in this layer
+    """Y.2.gate.h.1 — resolve the QuickSight user ARN the runner should
+    inject as ``RECON_E2E_USER_ARN`` into qs_browser subprocess env.
+
+    Priority order:
+
+    1. **Explicit override.** ``cfg.auth.quicksight_user_arn`` (set by
+       CI via the ``RECON_E2E_USER_ARN`` GH secret). Wins so CI's path
+       stays byte-identical.
+    2. **Derive from aws_profile.** ``cfg.auth.aws_profile`` named
+       boto profile + ``cfg.aws_account_id`` + ``cfg.aws_region`` →
+       ``quicksight.list_users(Namespace='default')`` → first ADMIN
+       user's ARN (falls back to first user). This is the "operator's
+       local cfg with just ``aws_profile`` works" path the spec
+       (docs/audits/y_2_gate_h_i_combined_spike.md §6) promised but
+       hadn't shipped.
+    3. **None.** Caller leaves the env unset; ``qs_driver_or_none``
+       skips QS-leg tests with the standard "QS user ARN unavailable"
+       message.
+
+    Boto failure (expired creds, ListUsers permission denied) → None
+    + stderr breadcrumb. The qs_browser layer still dispatches and
+    skips cleanly; we don't want a transient AWS hiccup to abort the
+    full chain.
+    """
+    if cfg is None or cfg.auth is None:
+        return None
+    explicit = cfg.auth.quicksight_user_arn
+    if explicit is not None and isinstance(explicit, str) and explicit:
+        return explicit
+    aws_profile = cfg.auth.aws_profile
+    if aws_profile is None or not isinstance(aws_profile, str):
+        return None
+    account_id = getattr(cfg, "aws_account_id", None)
+    region = getattr(cfg, "aws_region", None)
+    if not account_id or not region:
+        return None
+    try:
+        import boto3  # noqa: PLC0415 — lazy: only imported on the local-derive path
+        session = boto3.Session(profile_name=aws_profile, region_name=str(region))
+        # boto3-stubs huge overload union confuses pyright (X.2.o.5);
+        # mirror the sweep-side pattern that wraps in Any.
+        qs: Any = session.client("quicksight")  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]: boto3-stubs overload union confuses pyright (X.2.o.5)
+        users = qs.list_users(
+            AwsAccountId=str(account_id), Namespace="default",
+        ).get("UserList", [])
+    except Exception as exc:  # noqa: BLE001 — boto-side hiccup is a breadcrumb, not a chain-abort
+        print(
+            f"runner: derive RECON_E2E_USER_ARN failed via aws_profile="
+            f"{aws_profile!r} ({type(exc).__name__}: {exc}); qs_browser "
+            f"layer will skip",
+            file=sys.stderr,
+        )
+        return None
+    if not users:
+        print(
+            f"runner: derive RECON_E2E_USER_ARN found 0 QS users in "
+            f"{account_id}/{region} default namespace via profile="
+            f"{aws_profile!r}; qs_browser layer will skip",
+            file=sys.stderr,
+        )
+        return None
+    # Prefer ADMIN; otherwise first user. The QS embed URL works for
+    # any active user; ADMIN is just the canonical sign-as identity.
+    admin = next((u for u in users if u.get("Role") == "ADMIN"), None)
+    chosen = admin if admin is not None else users[0]
+    return str(chosen.get("Arn", ""))
+
+
 def _probe_qs_e2e_user_arn() -> ProbeFailure | None:
     """Check that the runner can satisfy ``RECON_E2E_USER_ARN``.
 
@@ -2830,6 +2899,16 @@ def cmd_up_to(args: argparse.Namespace) -> int:
             # an earlier thin run). Mirrors _run_one_variant's h+i.0 path.
             if peek_cfg.auth is not None and peek_cfg.auth.aws_profile is not None:
                 runner_variant_env["AWS_PROFILE"] = peek_cfg.auth.aws_profile
+            # Y.2.gate.h.1 — derive RECON_E2E_USER_ARN via STS+ListUsers
+            # so the qs_browser layer's embed URL minting works without
+            # the operator pre-exporting the ARN. Priority: explicit
+            # cfg.auth.quicksight_user_arn (CI path) → derived from
+            # aws_profile (local path) → leave unset (probe should
+            # already have flagged this).
+            if RECON_E2E_USER_ARN.name not in runner_variant_env:
+                arn = _resolve_qs_user_arn(peek_cfg)
+                if arn is not None:
+                    runner_variant_env[RECON_E2E_USER_ARN.name] = arn
         except Exception as exc:  # noqa: BLE001 — peek failure shouldn't gate the run
             print(f"runner: cfg peek for L2 discovery failed ({exc!r}); continuing")
     else:
