@@ -873,7 +873,7 @@ def _layer_command(
                 from recon_gen.common.config import load_config  # noqa: PLC0415 — lazy
                 from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
                 cfg_peek = load_config(cfg_path_str)
-                if cfg_peek.dialect is Dialect.ORACLE:
+                if cfg_peek.db.dialect is Dialect.ORACLE:
                     nworkers = "2"
             except Exception:  # noqa: BLE001 — peek failure shouldn't gate the layer
                 pass
@@ -1481,7 +1481,7 @@ def is_layer_cached_green(layer: str, *, variant: str = "default") -> bool:
 # 3-axis cells `scenario × dialect × target` (`common/variant.py`);
 # operators narrow the matrix via `--scenarios` / `--dialects` /
 # `--targets` (or pin a single cell via `--variants=<sc>_<di>_<ta>`).
-# `setup_variant` dispatches on `(spec.dialect, spec.target)` to
+# `setup_variant` dispatches on `(spec.db.dialect, spec.target)` to
 # spin up local testcontainers (`lo`) or wire the operator's external
 # Aurora/Oracle (`aw`).
 
@@ -1914,7 +1914,7 @@ def _start_thin_container(
     # *eager* pre-spin doesn't fight CI's shared-container step.
     # ``_DuckdbHandle`` / ``_PersistentContainerHandle`` stops are no-ops
     # so the handle is also unneeded — return None for the handle.
-    if peek_cfg.dialect is Dialect.POSTGRES:
+    if peek_cfg.db.dialect is Dialect.POSTGRES:
         pre_set = RECON_GEN_DEMO_DATABASE_URL_PG.get_or_none()
         if pre_set:
             url = _normalize_pg_url(pre_set)
@@ -1925,7 +1925,7 @@ def _start_thin_container(
                 },
                 None,
             )
-    elif peek_cfg.dialect is Dialect.ORACLE:
+    elif peek_cfg.db.dialect is Dialect.ORACLE:
         pre_set = RECON_GEN_DEMO_DATABASE_URL_OR.get_or_none()
         if pre_set:
             return (
@@ -1936,7 +1936,7 @@ def _start_thin_container(
                 None,
             )
 
-    if peek_cfg.dialect is Dialect.POSTGRES:
+    if peek_cfg.db.dialect is Dialect.POSTGRES:
         from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs  # noqa: PLC0415
 
         # Bind container's 5432 to host's _LOCAL_PG_HOST_PORT (5433) so the
@@ -1966,7 +1966,7 @@ def _start_thin_container(
         }
         return env, container
 
-    if peek_cfg.dialect is Dialect.ORACLE:
+    if peek_cfg.db.dialect is Dialect.ORACLE:
         # Adopt-or-create; stable name so subsequent thin runs reuse.
         url, handle = _get_or_start_oracle_container(
             "recon-gen-thin-oracle", generate_db_password(),  # typing-smell: ignore[recon-prefix]: Docker container name (not a cfg-prefixed AWS / DB resource ID) — stable across thin-path runs so adopt-or-create can find the persistent container; not multi-tenant
@@ -1977,14 +1977,14 @@ def _start_thin_container(
         }
         return env, handle
 
-    if peek_cfg.dialect is Dialect.DUCKDB:
+    if peek_cfg.db.dialect is Dialect.DUCKDB:
         # _setup_local_duckdb already sets RECON_GEN_DEMO_DATABASE_URL +
         # RECON_GEN_CONFIG; no `_PG` / `_OR` suffix needed (the container
         # fixtures only check those).
         return _setup_local_duckdb()
 
     raise ValueError(
-        f"_start_thin_container: unhandled dialect={peek_cfg.dialect!r}"
+        f"_start_thin_container: unhandled dialect={peek_cfg.db.dialect!r}"
     )
 
 
@@ -2011,7 +2011,7 @@ def _write_qs_cfg_for_thin(
     from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
 
     peek_cfg = load_config(str(base_cfg_path))
-    if peek_cfg.dialect is Dialect.DUCKDB:
+    if peek_cfg.db.dialect is Dialect.DUCKDB:
         return None
 
     with base_cfg_path.open() as f:
@@ -2022,7 +2022,7 @@ def _write_qs_cfg_for_thin(
             f"parse as a mapping (got {type(raw).__name__})"
         )
 
-    if peek_cfg.dialect is Dialect.POSTGRES:
+    if peek_cfg.db.dialect is Dialect.POSTGRES:
         # CB.17.h followup — port preserved from the source URL so
         # CI's shared PG on 5432 routes through hotchkiss.io:5432 and
         # local's testcontainer on 5433 routes through hotchkiss.io:5433.
@@ -2030,7 +2030,7 @@ def _write_qs_cfg_for_thin(
         new_url = _swap_url_host(local_url, _QS_FORWARD_HOST)
         raw["demo_database_url"] = new_url
         raw["qs_disable_pg_ssl"] = True
-    elif peek_cfg.dialect is Dialect.ORACLE:
+    elif peek_cfg.db.dialect is Dialect.ORACLE:
         new_url = _swap_url_host(local_url, _QS_FORWARD_HOST)
         raw["demo_database_url"] = new_url
         # Oracle datasource already hardcodes DisableSsl=True (common/datasource.py).
@@ -2136,7 +2136,7 @@ def _sweep_test_prefixes(
     # pointed at on disk.
     url_override = container_env.get(RECON_GEN_DEMO_DATABASE_URL.name)
     cfg_for_connect: Config = (
-        dataclasses_replace(cfg, demo_database_url=url_override)
+        dataclasses_replace(cfg, db=dataclasses_replace(cfg.db, url=url_override))
         if url_override is not None else cfg
     )
 

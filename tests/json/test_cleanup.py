@@ -32,7 +32,7 @@ from recon_gen.common.cleanup import (  # pyright: ignore[reportUnknownVariableT
     _collect_stale,
     _read_managed_tags,
 )
-from recon_gen.common.config import AwsConfig, Config
+from recon_gen.common.config import AwsConfig, Config, DbConfig
 
 
 # -- A minimal stub that mimics the QuickSight client surface ----------------
@@ -412,7 +412,7 @@ def _make_cfg(tagging_enabled: bool = True) -> Config:
                 arn="arn:aws:quicksight:us-east-1:111:datasource/x",
             ),
         ),
-        db_table_prefix="test",
+        db=DbConfig(table_prefix="test"),
     )
 
 

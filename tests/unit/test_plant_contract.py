@@ -32,7 +32,7 @@ from pathlib import Path
 
 import pytest
 
-from recon_gen.common.config import Config
+from recon_gen.common.config import Config, DbConfig
 from recon_gen.common.db import connect_demo_db, execute_script
 from recon_gen.common.l2.auto_scenario import default_scenario_for
 from recon_gen.common.l2.cache import L2InstanceCache
@@ -126,9 +126,11 @@ def fresh_v_overlay(tmp_path: Path) -> Iterator[tuple[Config, Path]]:
     gate fires on a widened plant before the v overlay gets touched."""
     db_path = tmp_path / "plant_contract.duckdb"
     cfg = make_test_config(
-        dialect=Dialect.DUCKDB,
-        demo_database_url=str(db_path),
-        db_table_prefix="plant_contract",
+        db=DbConfig(
+            dialect=Dialect.DUCKDB,
+            url=str(db_path),
+            table_prefix="plant_contract",
+        ),
     )
 
     fixtures_root = Path(__file__).resolve().parent.parent / "l2"

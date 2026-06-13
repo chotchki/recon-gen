@@ -88,10 +88,11 @@ def make_test_config(**overrides: Any) -> Config:
       generated DB DDL; pin to a real prefix when it does.
     - ``dialect=Dialect.ORACLE`` — exercise the Oracle SQL branch.
     """
-    # DE.5 steps 3-11 — translate every legacy AWS-block kwarg into the
-    # nested aws=AwsConfig(...) on Config. Once 100% of callers pass aws=
-    # directly, this translation can collapse.
-    from recon_gen.common.config import AwsConfig, DatasourceConfig  # noqa: PLC0415
+    # DE.5 steps 3-16 — translate every legacy AWS + DB-block kwarg into
+    # the nested aws=AwsConfig(...) + db=DbConfig(...) on Config.
+    from recon_gen.common.config import (  # noqa: PLC0415
+        AwsConfig, DatasourceConfig, DbConfig, Dialect,
+    )
     account_id = overrides.pop("aws_account_id", _TEST_ACCOUNT)
     region = overrides.pop("aws_region", _TEST_REGION)
     deployment_name = overrides.pop("deployment_name", "recon-test")
@@ -102,6 +103,12 @@ def make_test_config(**overrides: Any) -> Config:
     qs_disable_pg_ssl = overrides.pop("qs_disable_pg_ssl", False)
     aws_pg_cluster_id = overrides.pop("aws_pg_cluster_id", None)
     aws_oracle_instance_id = overrides.pop("aws_oracle_instance_id", None)
+    # DB-block legacy kwargs
+    db_table_prefix = overrides.pop("db_table_prefix", "test")
+    demo_database_url = overrides.pop("demo_database_url", None)
+    dialect = overrides.pop("dialect", Dialect.POSTGRES)
+    default_l2_instance = overrides.pop("default_l2_instance", None)
+    app2_db_pool_size = overrides.pop("app2_db_pool_size", 10)
     if datasource_arn is None:
         if region != _TEST_REGION:
             datasource_arn = (
@@ -126,7 +133,28 @@ def make_test_config(**overrides: Any) -> Config:
                 arn=datasource_arn,
             ),
         ),
-        "db_table_prefix": "test",
+        "db": DbConfig(
+            dialect=dialect,
+            url=demo_database_url,
+            table_prefix=db_table_prefix,
+            default_l2_instance=default_l2_instance,
+            app2_pool_size=app2_db_pool_size,
+        ),
     }
+    # If caller passed `db=DbConfig(...)` AND legacy DB-block kwargs, merge
+    # them — the explicit DbConfig's set fields win, but anything it didn't
+    # touch comes from the legacy-kwarg-built default. Without this, callers
+    # who pass both lose their legacy values to the bare override.
+    db_override = overrides.pop("db", None)
+    if isinstance(db_override, DbConfig):
+        import dataclasses as _dc  # noqa: PLC0415
+        merged: dict[str, Any] = {}
+        for f in _dc.fields(DbConfig):
+            ov = getattr(db_override, f.name)
+            default = f.default if f.default is not _dc.MISSING else (
+                f.default_factory() if f.default_factory is not _dc.MISSING else None
+            )
+            merged[f.name] = ov if ov != default else getattr(base["db"], f.name)
+        base["db"] = DbConfig(**merged)
     base.update(overrides)
     return Config(**base)

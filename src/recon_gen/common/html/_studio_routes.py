@@ -5438,23 +5438,23 @@ def make_studio_routes(
 
             def _do_plant() -> None:
                 sql = entry.plant_function(
-                    prefix=plant_cfg.db_table_prefix,
-                    dialect=plant_cfg.dialect,
+                    prefix=plant_cfg.db.table_prefix,
+                    dialect=plant_cfg.db.dialect,
                     anchor=now_anchor(),
                     instance=plant_instance,
                     **kwargs,
                 )
                 refresh_sql = refresh_matviews_sql(
                     plant_instance,
-                    prefix=plant_cfg.db_table_prefix,
-                    dialect=plant_cfg.dialect,
+                    prefix=plant_cfg.db.table_prefix,
+                    dialect=plant_cfg.db.dialect,
                 )
                 conn = connect_demo_db(plant_cfg)
                 try:
                     cur = conn.cursor()
                     try:
-                        execute_script(cur, sql, dialect=plant_cfg.dialect)
-                        execute_script(cur, refresh_sql, dialect=plant_cfg.dialect)
+                        execute_script(cur, sql, dialect=plant_cfg.db.dialect)
+                        execute_script(cur, refresh_sql, dialect=plant_cfg.db.dialect)
                         conn.commit()
                     finally:
                         cur.close()

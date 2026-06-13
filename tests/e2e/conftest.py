@@ -190,7 +190,7 @@ def _substitute_container_url(  # pyright: ignore[reportUnusedFunction]: re-expo
     ``RECON_GEN_DEMO_DATABASE_URL`` env is set (the runner's
     ``setup_variant`` injected the per-cell URL), ``Config``'s
     env-override has already substituted the cell URL into
-    ``loaded.demo_database_url`` — return unchanged. When unset
+    ``loaded.db.url`` — return unchanged. When unset
     (thin path), substitute the container URL by dialect.
 
     Container fixtures are resolved via ``request.getfixturevalue``
@@ -210,12 +210,12 @@ def _substitute_container_url(  # pyright: ignore[reportUnusedFunction]: re-expo
 
     if RECON_GEN_DEMO_DATABASE_URL.get_or_none():
         return loaded
-    if loaded.dialect is Dialect.POSTGRES:
+    if loaded.db.dialect is Dialect.POSTGRES:
         pg_url = cast(str, request.getfixturevalue("pg_container_url"))
-        return dataclasses.replace(loaded, demo_database_url=pg_url)
-    if loaded.dialect is Dialect.ORACLE:
+        return dataclasses.replace(loaded, db=dataclasses.replace(loaded.db, url=pg_url))
+    if loaded.db.dialect is Dialect.ORACLE:
         oracle_url = cast(str, request.getfixturevalue("oracle_container_url"))
-        return dataclasses.replace(loaded, demo_database_url=oracle_url)
+        return dataclasses.replace(loaded, db=dataclasses.replace(loaded.db, url=oracle_url))
     return loaded
 
 
@@ -276,9 +276,9 @@ def cfg_with_container_url(
     from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
 
     if cfg.db.dialect is Dialect.POSTGRES:
-        return dataclasses.replace(cfg, demo_database_url=pg_container_url)
+        return dataclasses.replace(cfg, db=dataclasses.replace(cfg.db, url=pg_container_url))
     if cfg.db.dialect is Dialect.ORACLE:
-        return dataclasses.replace(cfg, demo_database_url=oracle_container_url)
+        return dataclasses.replace(cfg, db=dataclasses.replace(cfg.db, url=oracle_container_url))
     # DuckDB falls through; the yaml-loaded URL is the source.
     return cfg
 
@@ -1126,7 +1126,7 @@ def capture_top_queries(
         title = f"Top expensive queries ({dialect.value})"
         like_pattern = _swap_dialect_suffix(base_pattern, dialect)
         # Build a minimal cfg pointing at this container.
-        cfg_snap = _dc.replace(cfg, demo_database_url=url, dialect=dialect)
+        cfg_snap = _dc.replace(cfg, db=_dc.replace(cfg.db, url=url, dialect=dialect))
         try:
             conn = connect_demo_db(cfg_snap)
         except Exception as exc:

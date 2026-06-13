@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 import pytest
 
-from recon_gen.common.config import Config
+from recon_gen.common.config import Config, DbConfig
 from tests._test_helpers import make_test_config
 from recon_gen.common.dataset_contract import ColumnSpec, DatasetContract
 from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
@@ -29,7 +29,7 @@ def cfg() -> Config:
     # builders default to that L2 fixture.
     return make_test_config(
         aws_region="us-east-2",
-        db_table_prefix=DEFAULT_PREFIX,
+        db=DbConfig(table_prefix=DEFAULT_PREFIX),
     )
 
 
@@ -112,14 +112,13 @@ class TestOracleLowercaseAliasWrapper:
         from recon_gen.common.sql import Dialect
         return make_test_config(
             aws_region="us-east-2",
-            db_table_prefix=DEFAULT_PREFIX,
-            dialect=Dialect.ORACLE,
+            db=DbConfig(table_prefix=DEFAULT_PREFIX, dialect=Dialect.ORACLE),
         )
 
     def _pg_cfg(self) -> Config:
         return make_test_config(
             aws_region="us-east-2",
-            db_table_prefix=DEFAULT_PREFIX,
+            db=DbConfig(table_prefix=DEFAULT_PREFIX),
         )
 
     def _build(self, cfg: Config, sql: str) -> str:

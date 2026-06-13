@@ -138,8 +138,8 @@ def test_liveness_sql_resolves_per_dialect() -> None:
     from recon_gen.common.sql import Dialect
     import dataclasses
 
-    pg_cfg = dataclasses.replace(_CFG, dialect=Dialect.POSTGRES)
-    oracle_cfg = dataclasses.replace(_CFG, dialect=Dialect.ORACLE)
+    pg_cfg = dataclasses.replace(_CFG, db=dataclasses.replace(_CFG.db, dialect=Dialect.POSTGRES))
+    oracle_cfg = dataclasses.replace(_CFG, db=dataclasses.replace(_CFG.db, dialect=Dialect.ORACLE))
 
     pg = build_liveness_dataset(pg_cfg, app_segment="l1")
     oracle = build_liveness_dataset(oracle_cfg, app_segment="l1")

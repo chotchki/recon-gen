@@ -606,12 +606,12 @@ def test_to_yaml_dict_round_trips_through_load_config(tmp_path: Path) -> None:
     cfg2 = load_config(out_path)
     assert cfg2.aws.account_id == cfg.aws.account_id
     assert cfg2.aws.deployment_name == cfg.aws.deployment_name
-    assert cfg2.dialect == cfg.db.dialect
+    assert cfg2.db.dialect == cfg.db.dialect
     # DE.2 — _AwsView normalizes to tuples; compare via proxy on both
     # sides so the list/tuple type-mismatch doesn't false-positive.
     assert cfg2.aws.principal_arns == cfg.aws.principal_arns
     assert cfg2.aws.extra_tags == cfg.aws.extra_tags
-    assert cfg2.demo_database_url == cfg.db.url
+    assert cfg2.db.url == cfg.db.url
     assert cfg2.auth == cfg.auth
     assert cfg2.test_generator.seed == cfg.test.generator.seed
     assert cfg2.test_generator.plants == cfg.test.generator.plants

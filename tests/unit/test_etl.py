@@ -495,7 +495,8 @@ def duckdb_cfg() -> object:
 
 
 def _duckdb_path_of(cfg: object) -> str:
-    raw = getattr(cfg, "demo_database_url")  # noqa: B009 — explicit getattr for pyright; cfg typed as object
+    db_block = getattr(cfg, "db")  # noqa: B009 — explicit getattr for pyright; cfg typed as object
+    raw = getattr(db_block, "url")  # noqa: B009 — explicit getattr for pyright; cfg typed as object
     assert isinstance(raw, str)
     from recon_gen.common.db import duckdb_path
     return duckdb_path(raw)

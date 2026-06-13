@@ -255,9 +255,9 @@ def seeded_cfg(isolated_cfg: "Config") -> Iterator["Config"]:
         apply_db_seed(
             conn,
             instance,
-            prefix=isolated_cfg.db_table_prefix,
+            prefix=isolated_cfg.db.table_prefix,
             mode="l1_plus_broad",
-            dialect=isolated_cfg.dialect,
+            dialect=isolated_cfg.db.dialect,
             include_baseline=True,
         )
     finally:

@@ -168,14 +168,14 @@ def seeded_pdf(
     # 1. Apply schema + seed + matview refresh against the live DB.
     dialect = (
         Dialect.ORACLE
-        if (db_cfg.dialect or "").lower() == "oracle"
+        if (db_cfg.db.dialect or "").lower() == "oracle"
         else Dialect.POSTGRES
     )
     conn = connect_demo_db(db_cfg)
     try:
         scenario = apply_db_seed(
             conn, instance,
-            prefix=db_cfg.db_table_prefix,
+            prefix=db_cfg.db.table_prefix,
             mode="l1_invariants",
             today=_TODAY,
             dialect=dialect,
@@ -290,11 +290,11 @@ def test_audit_verify_pins_to_embedded_hwm_against_newer_rows(
     """
     pdf_path, _ = seeded_pdf
     # Z.C — db_table_prefix lives on cfg now (was l2_instance.instance).
-    prefix = db_cfg.db_table_prefix
+    prefix = db_cfg.db.table_prefix
     sentinel_id = "verify-test-pinning-row"
     dialect = (
         Dialect.ORACLE
-        if (db_cfg.dialect or "").lower() == "oracle"
+        if (db_cfg.db.dialect or "").lower() == "oracle"
         else Dialect.POSTGRES
     )
     limit_clause = (

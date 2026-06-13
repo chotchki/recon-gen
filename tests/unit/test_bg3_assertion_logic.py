@@ -318,11 +318,11 @@ def test_bg3_kv_pin_anchors_test_to_deploy_day_across_midnight(
     monkeypatch.setattr(af_mod, "date", _Date_2026_05_29)
 
     # 3) Build a cfg pointed at the stamped DuckDB.
+    from recon_gen.common.config import DbConfig  # noqa: PLC0415
     from recon_gen.common.db import make_demo_database_url
     cfg = make_test_config(
         dialect=Dialect.DUCKDB,
-        db_table_prefix=prefix,
-        demo_database_url=make_demo_database_url(Dialect.DUCKDB, db_path),
+        db=DbConfig(table_prefix=prefix, url=make_demo_database_url(Dialect.DUCKDB, db_path)),
     )
 
     unpinned = cfg.test.generator.as_of_frame(window_days=7).as_of

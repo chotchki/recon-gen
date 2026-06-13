@@ -145,11 +145,17 @@ def _isolate_cfg(
         worker_url = make_demo_database_url(
             Dialect.DUCKDB, worker_db_dir / "demo.duckdb",
         )
-        return dataclasses.replace(cfg, demo_database_url=worker_url)
+        return dataclasses.replace(
+            cfg, db=dataclasses.replace(cfg.db, url=worker_url),
+        )
     return dataclasses.replace(
         cfg,
-        db_table_prefix=f"{cfg.db.table_prefix}_{suffix}",
-        deployment_name=f"{cfg.aws.deployment_name}-{suffix}",
+        db=dataclasses.replace(
+            cfg.db, table_prefix=f"{cfg.db.table_prefix}_{suffix}",
+        ),
+        aws=dataclasses.replace(
+            cfg.aws, deployment_name=f"{cfg.aws.deployment_name}-{suffix}",
+        ),
     )
 
 
@@ -182,7 +188,7 @@ def isolated_cfg(
     isolated = _isolate_cfg(cfg, suffix=suffix, tmp_path_factory=tmp_path_factory)
     yield isolated
 
-    if isolated.dialect is Dialect.DUCKDB:
+    if isolated.db.dialect is Dialect.DUCKDB:
         return
     try:
         from recon_gen.common.db import connect_demo_db, execute_script
@@ -193,11 +199,11 @@ def isolated_cfg(
         try:
             clean_sql = emit_schema_drop_sql(
                 instance,
-                prefix=isolated.db_table_prefix,
-                dialect=isolated.dialect,
+                prefix=isolated.db.table_prefix,
+                dialect=isolated.db.dialect,
             )
             with teardown_conn.cursor() as cur:
-                execute_script(cur, clean_sql, dialect=isolated.dialect)
+                execute_script(cur, clean_sql, dialect=isolated.db.dialect)
             teardown_conn.commit()
         finally:
             teardown_conn.close()
@@ -212,8 +218,8 @@ def isolated_cfg(
         # to non-zero after the regular test report renders.
         _TEARDOWN_FAILURES.append(_TeardownFailure(
             suffix=suffix,
-            dialect=isolated.dialect.value,
-            db_table_prefix=isolated.db_table_prefix,
+            dialect=isolated.db.dialect.value,
+            db_table_prefix=isolated.db.table_prefix,
             exc_repr=repr(exc),
             traceback=_tb.format_exc(),
         ))
@@ -299,7 +305,7 @@ def db_conn(
             and len(scope_marker.args) >= 2
             and scope_marker.args[1] == "consumer"
         ):
-            enforce_readonly(conn, isolated_cfg.dialect)
+            enforce_readonly(conn, isolated_cfg.db.dialect)
         yield conn
     finally:
         conn.close()

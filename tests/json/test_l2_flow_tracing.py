@@ -512,7 +512,7 @@ def _chains_dataset_sql_against(yaml_path: Path) -> str:
     )
     from dataclasses import replace
     inst = load_instance(yaml_path)
-    cfg = replace(_CFG, db_table_prefix=yaml_path.stem)
+    cfg = replace(_CFG, db=replace(_CFG.db, table_prefix=yaml_path.stem))
     aws_ds = build_chains_dataset(cfg, inst)
     table = list(aws_ds.PhysicalTableMap.values())[0]
     assert table.CustomSql is not None
@@ -661,7 +661,7 @@ def test_chains_dataset_id_uses_deployment_prefix() -> None:
     cfg = replace(
         _CFG,
         aws=replace(_CFG.aws, deployment_name="recon-sasq"),
-        db_table_prefix="sasquatch_pr",
+        db=replace(_CFG.db, table_prefix="sasquatch_pr"),
     )
     ds = build_chains_dataset(cfg, load_instance(SASQUATCH_PR_YAML))
     assert ds.DataSetId == "recon-sasq-l2ft-chains-dataset"
@@ -1002,7 +1002,7 @@ def _exc_dataset_sql(builder_name: str, yaml_path: Path) -> str:
     import recon_gen.apps.l2_flow_tracing.datasets as ds_mod
     from dataclasses import replace
     inst = load_instance(yaml_path)
-    cfg = replace(_CFG, db_table_prefix=yaml_path.stem)
+    cfg = replace(_CFG, db=replace(_CFG.db, table_prefix=yaml_path.stem))
     builder = getattr(ds_mod, builder_name)
     aws_ds: DataSet = builder(cfg, inst)
     return _ds_sql(aws_ds)
@@ -1035,7 +1035,7 @@ def test_exc_dataset_id_uses_deployment_prefix(
     cfg = replace(
         _CFG,
         aws=replace(_CFG.aws, deployment_name="recon-sasq"),
-        db_table_prefix="sasquatch_pr",
+        db=replace(_CFG.db, table_prefix="sasquatch_pr"),
     )
     builder = getattr(ds_mod, builder_name)
     aws_ds = builder(cfg, load_instance(SASQUATCH_PR_YAML))
@@ -1345,7 +1345,7 @@ def test_postings_dataset_targets_prefixed_current_transactions() -> None:
     )
     from dataclasses import replace
     inst = load_instance(SASQUATCH_PR_YAML)
-    cfg = replace(_CFG, db_table_prefix="sasquatch_pr")
+    cfg = replace(_CFG, db=replace(_CFG.db, table_prefix="sasquatch_pr"))
     aws_ds = build_postings_dataset(cfg, inst)
     sql = _ds_sql(aws_ds)
     assert "FROM sasquatch_pr_current_transactions" in sql
@@ -1600,8 +1600,8 @@ def test_unified_l2_exceptions_empty_metadata_branch_is_dialect_aware() -> None:
         rails=(), transfer_templates=(), chains=(),
         limit_schedules=(),
     )
-    cfg_pg = replace(_CFG, dialect=Dialect.POSTGRES)
-    cfg_or = replace(_CFG, dialect=Dialect.ORACLE)
+    cfg_pg = replace(_CFG, db=replace(_CFG.db, dialect=Dialect.POSTGRES))
+    cfg_or = replace(_CFG, db=replace(_CFG.db, dialect=Dialect.ORACLE))
 
     sql_pg = _ds_sql(build_unified_l2_exceptions_dataset(cfg_pg, empty))
     sql_or = _ds_sql(build_unified_l2_exceptions_dataset(cfg_or, empty))

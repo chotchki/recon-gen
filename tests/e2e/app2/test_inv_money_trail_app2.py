@@ -95,10 +95,10 @@ def seeded_l2_db(isolated_cfg: "Config") -> None:
     try:
         apply_db_seed(
             conn, _INSTANCE,
-            prefix=isolated_cfg.db_table_prefix,
+            prefix=isolated_cfg.db.table_prefix,
             mode="l1_plus_broad",
             today=_TODAY,
-            dialect=isolated_cfg.dialect,
+            dialect=isolated_cfg.db.dialect,
             include_baseline=False,
         )
         anchor = _plant_anchor_day()
@@ -115,12 +115,12 @@ def seeded_l2_db(isolated_cfg: "Config") -> None:
         conn.commit()
         refresh_sql = refresh_matviews_sql(
             _INSTANCE,
-            prefix=isolated_cfg.db_table_prefix,
-            dialect=isolated_cfg.dialect,
+            prefix=isolated_cfg.db.table_prefix,
+            dialect=isolated_cfg.db.dialect,
         )
         with conn.cursor() as cur:
             execute_script(
-                cur, refresh_sql, dialect=isolated_cfg.dialect,
+                cur, refresh_sql, dialect=isolated_cfg.db.dialect,
             )
         conn.commit()
     finally:

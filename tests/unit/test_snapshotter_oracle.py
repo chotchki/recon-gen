@@ -36,6 +36,7 @@ from recon_gen.common.db import (
     execute_script,
     make_connection_pool,
 )
+from recon_gen.common.config import DbConfig
 from recon_gen.common.l2 import L2Instance, load_instance
 from recon_gen.common.l2.schema import emit_schema
 from recon_gen.common.l2.v_overlay import (
@@ -130,7 +131,7 @@ def oracle_cfg(
     return make_test_config(
         dialect=Dialect.ORACLE,
         demo_database_url=snapshotter_oracle_container_url,
-        db_table_prefix=f"snap_or_{worker_id}",
+        db=DbConfig(table_prefix=f"snap_or_{worker_id}"),
     )
 
 
@@ -149,7 +150,7 @@ def seeded_v_overlay(
     Returns the same ``Config`` — fixture is the side-effecting
     setup; ``oracle_cfg`` is the carrier.
     """
-    base_prefix = oracle_cfg.db_table_prefix
+    base_prefix = oracle_cfg.db.table_prefix
     v_prefix = v_overlay_prefix(base_prefix)
 
     def _do_setup() -> None:

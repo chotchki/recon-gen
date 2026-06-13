@@ -488,9 +488,9 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
 
 - [ ] DE.0 - **Audit + redesign spike + inheritance prototype.** Output: `docs/audits/de_0_cfg_redesign.md`. Inventory every field across `common/config.py` + every `cfg.<field>` callsite + every yaml in `run/`. Group into the locked concern blocks. Build a minimal `extends:` loader prototype — base + 1-2 overlays, demonstrate deep-merge semantics + the derive-or-raise required-field error path. Pick the `extends:` value shape (path string / list of paths / named lookup?) + lock list-merge policy (replace, append, or per-field policy?). Operator-confirm at exit.
 - [x] DE.1 - **New cfg shape + loader + extends:.** Implement the locked shape in `common/config.py` with `extends:` merge + derive-or-raise loader. All existing `run/` yamls migrated by hand to base+overlay form. Per-field tests on the new shape; merge tests for extends-cascade behavior.
-- [ ] DE.2 - **Cross-codebase callsite sweep.** Every `cfg.<old_field>` access updated to the new path. Pyright catches most; rest grep-able. Tests + CI green.
-- [ ] DE.3 - **Doc sweep.** README cfg-shape section + `docs/audits/y_2_gate_h_i_combined_spike.md` cfg appendix + every doc that shows a cfg snippet updated. CLAUDE.md cfg-fields section synced. Add an `extends:` example to the cfg authoring doc.
-- [ ] DE.4 - **DC + DD shape coordination.** Confirm DC.1 (`app2.tls:` block) + DD.1 (`auth.oidc:` + `auth.session:` blocks) land into the DE-locked hierarchy. If DC has shipped before DE, fold its TLS block under the new structure as part of DE.2; if not, hand DC.1 the locked block shape.
+- [x] DE.2 - **Cross-codebase callsite sweep.** Every `cfg.<old_field>` access updated to the new path. Pyright catches most; rest grep-able. Tests + CI green.
+- [x] DE.3 - **Doc sweep.** README cfg-shape section + `docs/audits/y_2_gate_h_i_combined_spike.md` cfg appendix + every doc that shows a cfg snippet updated. CLAUDE.md cfg-fields section synced. Add an `extends:` example to the cfg authoring doc.
+- [x] DE.4 - **DC + DD shape coordination.** Confirm DC.1 (`app2.tls:` block) + DD.1 (`auth.oidc:` + `auth.session:` blocks) land into the DE-locked hierarchy. If DC has shipped before DE, fold its TLS block under the new structure as part of DE.2; if not, hand DC.1 the locked block shape.
 - [ ] DE.5 - **Phase exit + release (v14.0.0 major).** Sweep to PLAN_ARCHIVE.md. Major bump because cfg.yaml shape is a hard break.
 
 ## Phase DF - L2 Editor essentials / test-data block (draft 2026-06-12, locks 2026-06-12)

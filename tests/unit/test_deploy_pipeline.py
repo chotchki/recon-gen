@@ -25,7 +25,7 @@ from typing import Any
 
 import pytest
 
-from recon_gen.common.config import AwsConfig, Config, DatasourceConfig
+from recon_gen.common.config import AwsConfig, Config, DatasourceConfig, DbConfig
 from recon_gen.common.db import connect_demo_db, duckdb_path, execute_script, fetch_one_required, make_demo_database_url
 from recon_gen.common.config import (
     AwsConfig,
@@ -64,7 +64,7 @@ def _base_cfg() -> Config:
                 arn="arn:aws:quicksight:us-east-1:111122223333:datasource/x",
             ),
         ),
-        db_table_prefix=DEFAULT_PREFIX,
+        db=DbConfig(table_prefix=DEFAULT_PREFIX),
     )
 
 
@@ -88,9 +88,7 @@ def _duckdb_cfg(tmp_path: Path) -> Config:
                 arn="arn:aws:quicksight:us-east-1:111122223333:datasource/x",
             ),
         ),
-        db_table_prefix=DEFAULT_PREFIX,
-        demo_database_url=make_demo_database_url(Dialect.DUCKDB, db_path),
-        dialect=Dialect.DUCKDB,
+        db=DbConfig(table_prefix=DEFAULT_PREFIX, url=make_demo_database_url(Dialect.DUCKDB, db_path), dialect=Dialect.DUCKDB),
     )
 
 
@@ -2286,7 +2284,7 @@ def test_build_generator_sql_cutoff_uses_date_literal_across_dialects(
     for dialect in (Dialect.ORACLE, Dialect.POSTGRES, Dialect.DUCKDB):
         cfg = _replace(
             base,
-            dialect=dialect,
+            db=_replace(base.db, dialect=dialect),
             test_generator=TestGeneratorConfig(
                 end_date=date(2030, 1, 31),
                 cutoff_date=date(2030, 1, 15),

@@ -223,7 +223,11 @@ class TestMakeSnapshotter:
         # through __dict__ — emulates the way ``make_connection_pool``
         # surfaces a corrupt cfg.yaml (same loud-fail philosophy).
         cfg = make_test_config(dialect=Dialect.POSTGRES)
-        object.__setattr__(cfg, "dialect", "mysql")  # type: ignore[arg-type]: intentional bad value to trigger the guard
+        # DE.5 step 12 — dialect now lives on cfg.db; mutate the cached
+        # nested copy. (Snapshotter reads cfg.db.dialect; the legacy
+        # flat ``cfg.db.dialect`` is unused after the DE.2 sweep.)
+        from dataclasses import replace as _replace
+        object.__setattr__(cfg, "db", _replace(cfg.db, dialect="mysql"))  # type: ignore[arg-type]: intentional bad value to trigger the guard
         with pytest.raises(ValueError, match="Unknown dialect"):
             asyncio.run(
                 make_snapshotter(

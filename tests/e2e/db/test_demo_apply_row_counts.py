@@ -68,7 +68,7 @@ def test_matview_has_at_least_one_row(
     this matview against the live DB. Either the seed flow skipped the
     scenario, or the matview's source query produced zero rows.
     """
-    table = f"{seeded_cfg.db_table_prefix}_{suffix}"
+    table = f"{seeded_cfg.db.table_prefix}_{suffix}"
     cur = smoke_conn.cursor()
     try:
         try:

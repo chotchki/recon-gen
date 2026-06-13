@@ -191,10 +191,10 @@ def seeded_l2_db(isolated_cfg: "Config") -> None:
     try:
         apply_db_seed(
             conn, _INSTANCE,
-            prefix=isolated_cfg.db_table_prefix,
+            prefix=isolated_cfg.db.table_prefix,
             mode="l1_plus_broad",
             today=_TODAY,
-            dialect=isolated_cfg.dialect,
+            dialect=isolated_cfg.db.dialect,
             include_baseline=False,
         )
         anchor = _plant_anchor_day()
@@ -205,12 +205,12 @@ def seeded_l2_db(isolated_cfg: "Config") -> None:
         conn.commit()
         refresh_sql = refresh_matviews_sql(
             _INSTANCE,
-            prefix=isolated_cfg.db_table_prefix,
-            dialect=isolated_cfg.dialect,
+            prefix=isolated_cfg.db.table_prefix,
+            dialect=isolated_cfg.db.dialect,
         )
         with conn.cursor() as cur:
             execute_script(
-                cur, refresh_sql, dialect=isolated_cfg.dialect,
+                cur, refresh_sql, dialect=isolated_cfg.db.dialect,
             )
         conn.commit()
     finally:
@@ -279,7 +279,7 @@ def test_anomaly_direct_extract(
     matview SELECT to mirror the dashboard's WHERE-clause pushdown.
     """
     _ = seeded_l2_db
-    prefix = isolated_cfg.db_table_prefix
+    prefix = isolated_cfg.db.table_prefix
     anchor = _plant_anchor_day()
     gen = _build_anomaly_generator(isolated_cfg, anchor)
     expected_anomaly_keys: tuple[tuple[str, str, date], ...] = (
@@ -372,7 +372,7 @@ def test_money_trail_direct_extract(
     time per the analyst's root pick.
     """
     _ = seeded_l2_db
-    prefix = isolated_cfg.db_table_prefix
+    prefix = isolated_cfg.db.table_prefix
 
     roots = distinct_money_trail_roots(db_conn, prefix)
     assert _PLANTED_CHAIN_ROOT in roots, (

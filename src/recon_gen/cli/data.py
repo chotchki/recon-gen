@@ -274,7 +274,7 @@ def _build_fresh_semantic_lock(
 
     The VIOLATION set is dialect-invariant (BZ.4 + CA.0 audit
     confirmed byte-equivalence across all matview engines), so the
-    on-disk lock files differ ONLY in the `scenario_fingerprint.dialect`
+    on-disk lock files differ ONLY in the `scenario_fingerprint.db.dialect`
     field. Per-dialect files exist for symmetry with the runner's
     dialect-tagged tracking; CA.9 may collapse them once SQLite is
     fully gone.
@@ -460,7 +460,7 @@ def data_semantic_lock(
     # SQLite arm stays alive until CA.8 deletes Dialect.DUCKDB; both
     # files are kept on disk so the CI gate can be flipped without
     # losing the recoverable point. Violation set is dialect-invariant
-    # (BZ.4 + CA.0 audit), only `scenario_fingerprint.dialect` differs.
+    # (BZ.4 + CA.0 audit), only `scenario_fingerprint.db.dialect` differs.
     fresh = _build_fresh_semantic_lock(
         instance, LOCKED_ANCHOR, prefix=instance_name,
         dialect=_Dialect.DUCKDB,

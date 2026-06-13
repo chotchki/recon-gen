@@ -284,7 +284,7 @@ class TestEmissionRoundTrip:
 # L.1.12 — Validation hooks audit
 # ---------------------------------------------------------------------------
 
-from recon_gen.common.config import AwsConfig, DatasourceConfig, Config as _Cfg
+from recon_gen.common.config import AwsConfig, DatasourceConfig, Config as _Cfg, DbConfig
 from recon_gen.common.tree import (
     Analysis as _An,
     App as _A,
@@ -314,7 +314,7 @@ class TestValidationHooksAudit:
                 arn="arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds",
             ),
         ),
-        db_table_prefix="kitchen",
+        db=DbConfig(table_prefix="kitchen"),
     )
     _DS_X = _DS(identifier="ds-x", arn="arn:aws:quicksight:::dataset/x")
 

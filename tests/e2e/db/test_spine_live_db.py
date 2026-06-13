@@ -109,7 +109,7 @@ def _direct_matview_keys(
 
 
 def test_drift_invariant_agrees_with_direct_matview(seeded_cfg: Config) -> None:
-    prefix = seeded_cfg.db_table_prefix
+    prefix = seeded_cfg.db.table_prefix
     inv = DriftInvariant(prefix=prefix)
     conn = connect_demo_db(seeded_cfg)
     try:
@@ -126,7 +126,7 @@ def test_drift_invariant_agrees_with_direct_matview(seeded_cfg: Config) -> None:
 
 
 def test_ledger_drift_invariant_agrees_with_direct_matview(seeded_cfg: Config) -> None:
-    prefix = seeded_cfg.db_table_prefix
+    prefix = seeded_cfg.db.table_prefix
     inv = LedgerDriftInvariant(prefix=prefix)
     conn = connect_demo_db(seeded_cfg)
     try:
@@ -228,7 +228,7 @@ def test_anomaly_invariant_agrees_with_direct_matview(seeded_cfg: Config) -> Non
     `WHERE z_bucket IN (...)` filter); a direct unfiltered SELECT
     should match exactly. The View slice happens DOWNSTREAM and is
     not part of this gate."""
-    prefix = seeded_cfg.db_table_prefix
+    prefix = seeded_cfg.db.table_prefix
     inv = AnomalyInvariant(prefix=prefix)
     conn = connect_demo_db(seeded_cfg)
     try:
@@ -252,7 +252,7 @@ def test_money_trail_invariant_agrees_with_direct_matview(seeded_cfg: Config) ->
     """AT.5.a — money_trail detector returns every edge (root + every
     descendant); a direct unfiltered SELECT should match exactly. The
     `MoneyTrailView` depth-threshold slice is downstream."""
-    prefix = seeded_cfg.db_table_prefix
+    prefix = seeded_cfg.db.table_prefix
     inv = MoneyTrailInvariant(prefix=prefix)
     conn = connect_demo_db(seeded_cfg)
     try:

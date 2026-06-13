@@ -29,6 +29,7 @@ from recon_gen.common.l2.v_overlay import (
     _base_schema_exists,
     session_start,
 )
+from recon_gen.common.config import DbConfig
 from recon_gen.common.sql.dialect import Dialect
 from tests._test_helpers import make_test_config
 
@@ -37,7 +38,7 @@ def _make_duckdb_cfg(db_path: Path) -> object:
     return make_test_config(
         dialect=Dialect.DUCKDB,
         demo_database_url=f"duckdb:///{db_path}",
-        db_table_prefix="cs13_probe",
+        db=DbConfig(table_prefix="cs13_probe"),
     )
 
 

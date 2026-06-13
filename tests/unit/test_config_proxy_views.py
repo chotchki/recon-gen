@@ -68,11 +68,14 @@ def _make_cfg(**overrides: object) -> Config:
             arn=datasource_arn,
         ),
     }
+    from recon_gen.common.config import DbConfig as _DbConfig  # noqa: PLC0415
     defaults: dict[str, object] = {
         "aws": AwsConfig(**aws_kwargs),  # pyright: ignore[reportArgumentType]: dict[str, object] kwarg surface
-        "db_table_prefix": "test_deploy",
-        "demo_database_url": "postgresql://u:p@h:5432/d",
-        "dialect": Dialect.POSTGRES,
+        "db": _DbConfig(
+            table_prefix="test_deploy",
+            url="postgresql://u:p@h:5432/d",
+            dialect=Dialect.POSTGRES,
+        ),
     }
     defaults.update(overrides)
     return Config(**defaults)  # type: ignore[arg-type]: dict[str, object] is the dataclass kwarg surface; pyright can't narrow per-key
@@ -182,11 +185,11 @@ def test_aws_view_datasource_mode_create_when_arn_derived() -> None:
 def test_db_view_carries_flat_fields() -> None:
     """Proxy reads underlying flat fields; RHS uses legacy names."""
     cfg = _make_cfg()
-    assert cfg.db.dialect == cfg.dialect  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
-    assert cfg.db.url == cfg.demo_database_url  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
-    assert cfg.db.table_prefix == cfg.db_table_prefix  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
-    assert cfg.db.default_l2_instance == cfg.default_l2_instance  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
-    assert cfg.db.app2_pool_size == cfg.app2_db_pool_size  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
+    assert cfg.db.dialect == cfg.db.dialect  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
+    assert cfg.db.url == cfg.db.url  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
+    assert cfg.db.table_prefix == cfg.db.table_prefix  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
+    assert cfg.db.default_l2_instance == cfg.db.default_l2_instance  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
+    assert cfg.db.app2_pool_size == cfg.db.app2_pool_size  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +201,7 @@ def test_app2_view_carries_flat_fields() -> None:
     cfg = _make_cfg(etl_hook="./bin/etl.sh", banner_text="Demo mode")
     assert cfg.app2.etl_hook == "./bin/etl.sh"
     assert cfg.app2.banner_text == "Demo mode"
-    assert cfg.app2.db_pool_size == cfg.app2_db_pool_size  # type: ignore[attr-defined]: legacy flat field
+    assert cfg.app2.db_pool_size == cfg.db.app2_pool_size  # type: ignore[attr-defined]: legacy flat field
 
 
 def test_app2_view_tls_is_none_on_legacy_cfg() -> None:

@@ -60,7 +60,7 @@ from recon_gen.common.cleanup import (
     MANAGED_TAG_KEY,
     MANAGED_TAG_VALUE,
 )
-from recon_gen.common.config import AwsConfig, Config
+from recon_gen.common.config import AwsConfig, Config, DbConfig
 from tests._test_helpers import make_test_config
 from recon_gen.common.datasource import build_datasource
 
@@ -639,8 +639,7 @@ class TestConfigDatasourceArnDerivation:
                 account_id="111122223333", region="us-west-2",
                 deployment_name="recon-derived",
             ),
-            db_table_prefix="derived",
-            demo_database_url="postgresql://u:p@h:5432/db",
+            db=DbConfig(table_prefix="derived", url="postgresql://u:p@h:5432/db"),
         )
         assert cfg.aws.datasource.arn == (
             "arn:aws:quicksight:us-west-2:111122223333:datasource/"
@@ -658,8 +657,7 @@ class TestConfigDatasourceArnDerivation:
                     arn="arn:aws:quicksight:us-west-2:111122223333:datasource/custom",
                 ),
             ),
-            db_table_prefix="explicit",
-            demo_database_url="postgresql://u:p@h:5432/db",
+            db=DbConfig(table_prefix="explicit", url="postgresql://u:p@h:5432/db"),
         )
         assert cfg.aws.datasource.arn is not None
         assert "custom" in cfg.aws.datasource.arn
@@ -669,5 +667,5 @@ class TestConfigDatasourceArnDerivation:
         with pytest.raises(ValueError, match="aws.datasource.arn"):
             Config(
                 aws=AwsConfig(account_id="123", region="us-east-1", deployment_name="recon-fail-test"),
-                db_table_prefix="fail_test",
+                db=DbConfig(table_prefix="fail_test"),
             )

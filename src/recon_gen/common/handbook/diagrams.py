@@ -997,6 +997,7 @@ def _build_app(app_name: str) -> App:
     from recon_gen.common.l2 import default_l2_instance
 
     spec_example = default_l2_instance()
+    from recon_gen.common.config import DbConfig
     cfg = Config(
         aws=AwsConfig(
             account_id="000000000000", region="us-east-2",
@@ -1012,7 +1013,7 @@ def _build_app(app_name: str) -> App:
                 ),
             ),
         ),
-        db_table_prefix="spec_example",
+        db=DbConfig(table_prefix="spec_example"),
     )
     return _APP_BUILDERS[app_name](cfg, l2_instance=spec_example)
 

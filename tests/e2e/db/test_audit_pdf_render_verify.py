@@ -124,7 +124,7 @@ def _seeded_cli_env(seeded_cfg: Config) -> dict[str, str]:
     """
     return {
         **os.environ,
-        RECON_GEN_DB_TABLE_PREFIX.name: seeded_cfg.db_table_prefix,
+        RECON_GEN_DB_TABLE_PREFIX.name: seeded_cfg.db.table_prefix,
         RECON_GEN_DEPLOYMENT_NAME.name: seeded_cfg.aws.deployment_name,
     }
 
@@ -133,7 +133,7 @@ def test_audit_apply_renders_pdf(tmp_path: Path, seeded_cfg: Config) -> None:
     """``audit apply --execute -o <pdf>`` produces a non-empty PDF.
 
     The render path queries every L1 invariant matview that the
-    fixture seeded against ``seeded_cfg.db_table_prefix``. Failure at
+    fixture seeded against ``seeded_cfg.db.table_prefix``. Failure at
     this step usually means a SQL bug, an empty matview, or a
     reportlab regression.
     """

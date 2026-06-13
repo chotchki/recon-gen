@@ -190,7 +190,7 @@ def load_dialect_cfg(dialect_name: str) -> "tuple[Config, Path, Dialect]":
                 env_loaded = None
             if (
                 env_loaded is not None
-                and env_loaded.dialect.value == dialect_name
+                and env_loaded.db.dialect.value == dialect_name
             ):
                 cfg_path = env_cfg_path_p
     if cfg_path is None:
@@ -202,7 +202,7 @@ def load_dialect_cfg(dialect_name: str) -> "tuple[Config, Path, Dialect]":
             f"dialect cell with its own `-c run/config.{dialect_name}.yaml`."
         )
     loaded = load_config(str(cfg_path))
-    if loaded.demo_database_url is None:
+    if loaded.db.url is None:
         pytest.skip(
             f"{cfg_path} has no demo_database_url — {dialect_name} "
             f"dialect cell skipped. Agreement tests need a seedable DB."
@@ -210,9 +210,9 @@ def load_dialect_cfg(dialect_name: str) -> "tuple[Config, Path, Dialect]":
     dialect_enum = (
         Dialect.ORACLE if dialect_name == "oracle" else Dialect.POSTGRES
     )
-    if loaded.dialect is not dialect_enum:
+    if loaded.db.dialect is not dialect_enum:
         pytest.skip(
-            f"{cfg_path} declares dialect={loaded.dialect.value} but "
+            f"{cfg_path} declares dialect={loaded.db.dialect.value} but "
             f"the matrix expects dialect={dialect_name}. Fix the YAML "
             f"or rename the file so the matrix loads it under the "
             f"right cell."

@@ -294,7 +294,7 @@ def test_drift_dataset_sql_targets_prefixed_l1_views() -> None:
     )
 
     instance = default_l2_instance()
-    prefix = _CFG.db_table_prefix  # Z.C — was instance.instance
+    prefix = _CFG.db.table_prefix  # Z.C — was instance.instance
 
     drift_ds = build_drift_dataset(_CFG, instance)
     ledger_ds = build_ledger_drift_dataset(_CFG, instance)
@@ -458,7 +458,7 @@ def test_drift_timeline_datasets_registered_and_aggregate_in_sql() -> None:
     assert DS_LEDGER_DRIFT_TIMELINE in registered_ids
 
     instance = default_l2_instance()
-    prefix = _CFG.db_table_prefix  # Z.C — was instance.instance
+    prefix = _CFG.db.table_prefix  # Z.C — was instance.instance
 
     drift_tl_ds = build_drift_timeline_dataset(_CFG, instance)
     ledger_tl_ds = build_ledger_drift_timeline_dataset(_CFG, instance)
@@ -522,7 +522,7 @@ def test_overdraft_dataset_registered_and_targets_l1_view() -> None:
     # Y.2.g — SQL also carries the Account / Account-Role pushdown WHERE.
     # AO.1.impl — SELECT * expanded to wrap stored_balance cents → dollars.
     assert sql.SqlQuery.startswith("SELECT account_id")
-    assert f"FROM {_CFG.db_table_prefix}_overdraft" in sql.SqlQuery
+    assert f"FROM {_CFG.db.table_prefix}_overdraft" in sql.SqlQuery
 
 
 # -- Limit Breach sheet (M.2a.5) ---------------------------------------------
@@ -566,7 +566,7 @@ def test_limit_breach_dataset_registered_and_targets_l1_view() -> None:
     assert sql is not None
     # AO.1.impl — SELECT * expanded to wrap outbound_total + cap cents → dollars.
     assert sql.SqlQuery.startswith("SELECT account_id")
-    assert f"FROM {_CFG.db_table_prefix}_limit_breach" in sql.SqlQuery
+    assert f"FROM {_CFG.db.table_prefix}_limit_breach" in sql.SqlQuery
 
 
 # -- L1 Exceptions sheet (M.2a.6) ---------------------------------------
@@ -616,7 +616,7 @@ def test_l1_exceptions_dataset_reads_matview() -> None:
     # SQL wraps the prefixed matview. AO.1.impl — SELECT * expanded to
     # wrap the ``magnitude`` column cents → dollars.
     assert sql.startswith("SELECT check_type")
-    assert f"FROM {_CFG.db_table_prefix}_l1_exceptions" in sql
+    assert f"FROM {_CFG.db.table_prefix}_l1_exceptions" in sql
 
 
 # -- Transactions sheet (M.2b.5) ---------------------------------------------
@@ -656,7 +656,7 @@ def test_transactions_dataset_registered_and_targets_matview() -> None:
     sql_obj = next(iter(tx_ds.PhysicalTableMap.values())).CustomSql
     assert sql_obj is not None
     assert (
-        f"FROM {_CFG.db_table_prefix}_current_transactions"
+        f"FROM {_CFG.db.table_prefix}_current_transactions"
         in sql_obj.SqlQuery
     )
 
@@ -796,10 +796,10 @@ def test_daily_statement_datasets_registered() -> None:
     # wrap cents → dollars at the dataset boundary.
     assert summary_sql.SqlQuery.startswith("SELECT account_id")
     assert (
-        f"FROM {_CFG.db_table_prefix}_daily_statement_summary"
+        f"FROM {_CFG.db.table_prefix}_daily_statement_summary"
         in summary_sql.SqlQuery
     )
-    assert f"FROM {_CFG.db_table_prefix}_current_transactions" in txn_sql.SqlQuery
+    assert f"FROM {_CFG.db.table_prefix}_current_transactions" in txn_sql.SqlQuery
 
 
 def test_daily_statement_transactions_business_day_is_dialect_aware() -> None:
@@ -815,8 +815,8 @@ def test_daily_statement_transactions_business_day_is_dialect_aware() -> None:
     from recon_gen.common.sql import Dialect
 
     instance = default_l2_instance()
-    cfg_pg = replace(_CFG, dialect=Dialect.POSTGRES)
-    cfg_or = replace(_CFG, dialect=Dialect.ORACLE)
+    cfg_pg = replace(_CFG, db=replace(_CFG.db, dialect=Dialect.POSTGRES))
+    cfg_or = replace(_CFG, db=replace(_CFG.db, dialect=Dialect.ORACLE))
 
     pg_cs = next(iter(
         build_daily_statement_transactions_dataset(cfg_pg, instance)
@@ -873,7 +873,7 @@ def test_daily_statement_balance_date_narrow_renders_a_portable_day_string() -> 
         Dialect.DUCKDB: f"strftime('%Y-%m-%d', CAST({param} AS DATE))",
     }
     for dialect, expected_fn in expected_per_dialect.items():
-        cfg = replace(_CFG, dialect=dialect)
+        cfg = replace(_CFG, db=replace(_CFG.db, dialect=dialect))
         for build in (
             build_daily_statement_summary_dataset,
             build_daily_statement_transactions_dataset,
@@ -1445,7 +1445,7 @@ def test_pending_aging_dataset_registered() -> None:
     sql = sql_obj.SqlQuery
     # AO.1.impl — SELECT t.* expanded to wrap amount_money cents → dollars.
     assert sql.startswith("SELECT t.transaction_id")
-    assert f"FROM {_CFG.db_table_prefix}_stuck_pending t" in sql
+    assert f"FROM {_CFG.db.table_prefix}_stuck_pending t" in sql
     assert "<<$pL1PendingType>>" in sql and "<<$pL1PendingRail>>" in sql
     assert sp_ds.DatasetParameters  # the pushdown dataset params are wired
 
@@ -1543,7 +1543,7 @@ def test_unbundled_aging_dataset_registered() -> None:
     sql = sql_obj.SqlQuery
     # AO.1.impl — SELECT t.* expanded to wrap amount_money cents → dollars.
     assert sql.startswith("SELECT t.transaction_id")
-    assert f"FROM {_CFG.db_table_prefix}_stuck_unbundled t" in sql
+    assert f"FROM {_CFG.db.table_prefix}_stuck_unbundled t" in sql
     assert "<<$pL1UnbundledType>>" in sql and "<<$pL1UnbundledRail>>" in sql
     assert su_ds.DatasetParameters
 
@@ -1594,7 +1594,7 @@ def test_supersession_datasets_registered_and_target_base_tables() -> None:
     assert DS_SUPERSESSION_DAILY_BALANCES in registered_ids
 
     instance = default_l2_instance()
-    prefix = _CFG.db_table_prefix  # Z.C — was instance.instance
+    prefix = _CFG.db.table_prefix  # Z.C — was instance.instance
 
     tx_ds = build_supersession_transactions_dataset(_CFG, instance)
     db_ds = build_supersession_daily_balances_dataset(_CFG, instance)
@@ -2185,7 +2185,7 @@ def test_bo_1_daily_statement_account_picker_sources_balance_only() -> None:
     assert "SELECT DISTINCT account_id, account_role" in sql
     # Must source from current_daily_balances ONLY — no UNION across
     # the wider universe.
-    assert f"FROM {_CFG.db_table_prefix}_current_daily_balances" in sql, (
+    assert f"FROM {_CFG.db.table_prefix}_current_daily_balances" in sql, (
         f"DS_L1_DS_ACCOUNTS must source from current_daily_balances "
         f"only (BO.1). SQL is:\n{sql}"
     )

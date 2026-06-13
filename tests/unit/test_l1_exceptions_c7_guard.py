@@ -134,9 +134,10 @@ def planted_l1_exceptions_duckdb() -> Iterator["Config"]:
     )
     conn.commit()
     conn.close()
+    from recon_gen.common.config import DbConfig  # noqa: PLC0415
     cfg = make_test_config(
         dialect=Dialect.DUCKDB, demo_database_url=path,
-        db_table_prefix=_PREFIX,
+        db=DbConfig(table_prefix=_PREFIX),
     )
     try:
         yield cfg

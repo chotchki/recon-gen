@@ -36,6 +36,7 @@ from typing import Any
 
 import pytest
 
+from recon_gen.common.config import DbConfig
 from recon_gen.common.db import (
     AsyncConnectionPool, execute_script,
     make_connection_pool,
@@ -116,8 +117,7 @@ def _build_seeded_sqlite(
     # `db_table_prefix` + `dialect` off it.
     cfg = make_test_config(
         deployment_name="recon-bv31",
-        db_table_prefix=_PREFIX,
-        dialect=Dialect.DUCKDB,
+        db=DbConfig(table_prefix=_PREFIX, dialect=Dialect.DUCKDB),
     )
     config_sql = build_config_populate_sql(cfg, inst, anchor=date(2026, 5, 30))
     execute_script(cur, config_sql, dialect=Dialect.DUCKDB)
@@ -170,9 +170,7 @@ def _signal_etl_triage(
     inst = load_instance(l2_path)
     cfg = make_test_config(
         deployment_name="recon-bv31",
-        db_table_prefix=_PREFIX,
-        dialect=Dialect.DUCKDB,
-        demo_database_url=db_path,
+        db=DbConfig(table_prefix=_PREFIX, dialect=Dialect.DUCKDB, url=db_path),
     )
 
     async def _go() -> int:
@@ -203,9 +201,7 @@ def _signal_etl_run_coverage(
     inst = load_instance(l2_path)
     cfg = make_test_config(
         deployment_name="recon-bv31",
-        db_table_prefix=_PREFIX,
-        dialect=Dialect.DUCKDB,
-        demo_database_url=db_path,
+        db=DbConfig(table_prefix=_PREFIX, dialect=Dialect.DUCKDB, url=db_path),
     )
 
     async def _go() -> int:

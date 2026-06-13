@@ -37,7 +37,7 @@ import pytest
 starlette = pytest.importorskip("starlette")
 TestClient = pytest.importorskip("starlette.testclient").TestClient
 
-from recon_gen.common.config import AwsConfig, Config
+from recon_gen.common.config import AwsConfig, Config, DbConfig
 from recon_gen.common.db import (
     connect_demo_db,
     execute_script,
@@ -79,9 +79,7 @@ def _duckdb_cfg(tmp_path: Path, **overrides: object) -> Config:
                 arn="arn:aws:quicksight:us-east-1:111122223333:datasource/x",
             ),
         ),
-        db_table_prefix="test",
-        demo_database_url=make_demo_database_url(Dialect.DUCKDB, db_path),
-        dialect=Dialect.DUCKDB,
+        db=DbConfig(table_prefix="test", url=make_demo_database_url(Dialect.DUCKDB, db_path), dialect=Dialect.DUCKDB),
     )
     if overrides:
         base = replace(base, **overrides)  # type: ignore[arg-type]: replace's overload erases the per-field types

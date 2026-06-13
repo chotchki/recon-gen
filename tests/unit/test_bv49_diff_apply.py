@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from recon_gen.common.config import Config
+from recon_gen.common.config import Config, DbConfig
 from recon_gen.common.db import connect_demo_db, execute_script
 from recon_gen.common.l2.schema import emit_schema
 from recon_gen.common.l2.seed import emit_full_seed
@@ -119,7 +119,7 @@ def fresh_v_overlay(tmp_path: Path) -> Iterator[tuple[Config, Path]]:
     cfg = make_test_config(
         dialect=Dialect.DUCKDB,
         demo_database_url=str(db_path),
-        db_table_prefix="bv49",
+        db=DbConfig(table_prefix="bv49"),
     )
 
     fixtures_root = Path(__file__).resolve().parent.parent / "l2"

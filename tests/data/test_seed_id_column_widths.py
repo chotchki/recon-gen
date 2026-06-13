@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 
 from recon_gen.cli._helpers import build_full_seed_sql
-from recon_gen.common.config import AwsConfig, Config
+from recon_gen.common.config import AwsConfig, Config, DbConfig
 from recon_gen.common.l2 import load_instance
 from recon_gen.common.sql import Dialect
 
@@ -79,11 +79,12 @@ def _cfg_for_test(prefix: str) -> Config:
             deployment_name=prefix,
             principal_arns=(),
         ),
-        db_table_prefix=prefix,
-        dialect=Dialect.POSTGRES,
         # demo_database_url required so Config skips the datasource_arn
         # gate; we never actually connect.
-        demo_database_url=f"postgresql://noconn:noconn@localhost:1/{prefix}",
+        db=DbConfig(
+            table_prefix=prefix, dialect=Dialect.POSTGRES,
+            url=f"postgresql://noconn:noconn@localhost:1/{prefix}",
+        ),
     )
 
 

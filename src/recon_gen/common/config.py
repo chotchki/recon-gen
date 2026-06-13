@@ -156,14 +156,19 @@ class AwsConfig:
 
 
 @dataclass(frozen=True)
-class _DbView:
-    """``cfg.db.*`` proxy — database connection + dialect + L2 default.
-    ``url`` is the rename of pre-DE ``demo_database_url``."""
-    dialect: Dialect
-    url: str | None
-    table_prefix: str
-    default_l2_instance: str | None
-    app2_pool_size: int
+class DbConfig:
+    """``cfg.db.*`` — database connection + dialect + L2 default.
+    ``url`` is the rename of pre-DE ``demo_database_url``.
+
+    DE.5 — every field has a default so partial construction
+    (``DbConfig(table_prefix=X)``) is legal during the strangler period.
+    ``Config.__post_init__`` blends caller-supplied DbConfig fields
+    with the remaining legacy flat fields."""
+    dialect: Dialect = Dialect.POSTGRES
+    url: str | None = None
+    table_prefix: str = ""
+    default_l2_instance: str | None = None
+    app2_pool_size: int = 10
 
 
 @dataclass(frozen=True)
@@ -512,7 +517,6 @@ class Config:
     # their QS naming. Required (loud-fail when unset). An advanced
     # user MAY set this equal to ``deployment_name`` (lower-case +
     # hyphens-to-underscores).
-    db_table_prefix: str
     # DE.5 step 6 — datasource_arn + datasource_arn_was_derived dropped.
     # Use ``aws=AwsConfig(datasource=DatasourceConfig(mode=..., arn=...))``;
     # ``cli/json.py`` keys "we own it" off ``cfg.aws.datasource.mode == "create"``
@@ -520,14 +524,8 @@ class Config:
     # DE.5 step 7 — principal_arns moved to aws.principal_arns.
     # DE.5 steps 8-11 — extra_tags + tagging_enabled + qs_disable_pg_ssl +
     # aws_pg_cluster_id + aws_oracle_instance_id all moved into aws.*.
-    demo_database_url: str | None = None
-    # P.6.a — SQL dialect for emitted DDL + dataset SQL + demo apply.
-    # ``postgres`` (default, current behavior) or ``oracle`` (Phase P).
-    # The dialect is tied to the datasource: a Postgres datasource_arn
-    # cannot serve Oracle SQL and vice versa; in practice integrators
-    # carry separate config files (config-postgres.yaml +
-    # config-oracle.yaml) keyed off this field.
-    dialect: Dialect = Dialect.POSTGRES
+    # DE.5 steps 12-13 — db_table_prefix + demo_database_url moved to db.*.
+    # DE.5 step 14 — dialect moved to db.dialect.
     # U.7.b — Optional digital signing material for the audit PDF.
     # When set, ``audit apply --execute`` runs the rendered PDF
     # through pyHanko to apply a CMS signature. Absent = ship the
@@ -557,6 +555,11 @@ class Config:
     # AwsConfig fires + __post_init__ raises (account_id="" is the
     # "not provided" sentinel).
     aws: AwsConfig = field(default_factory=AwsConfig)
+    # DE.5 step 12 — ``db`` is the real DbConfig field. Same strangler
+    # shape: callers may pass db=DbConfig(...) directly OR continue to
+    # pass legacy flat kwargs (db_table_prefix / demo_database_url /
+    # dialect / etc.). __post_init__ blends.
+    db: DbConfig = field(default_factory=DbConfig)
     # DE.5 step 6 — ``datasource_arn_was_derived`` sentinel removed.
     # Use ``cfg.aws.datasource.mode == "create"`` (the "we own it" case
     # post-DE.0 lock 3).
@@ -572,7 +575,7 @@ class Config:
     # / local-oracle / local-sqlite) but mismatches the operator's external
     # Aurora when they've seeded a different L2 (e.g., sasquatch_pr).
     # Relative paths resolve from the repo root.
-    default_l2_instance: str | None = None
+    # DE.5 step 15 — moved to db.default_l2_instance.
     # v8.6.11 — When True (default), every Create* boto3 call passes
     # ``Tags=[ManagedBy, ResourcePrefix, L2Instance, *extra_tags]`` so
     # ``json clean`` can fail-CLOSED scope deletion to ourselves. Set
@@ -605,7 +608,7 @@ class Config:
     # set it ≤ ``PG max_connections - reserved_connections`` (PG's
     # default 100 minus 3 superuser slots = ~97 budget). Oracle's
     # connection cost is higher; integrators rarely run pools >25.
-    app2_db_pool_size: int = 10
+    # DE.5 step 16 — moved to db.app2_pool_size.
     # DE.4 — Phase DC's TLS termination paths. When set, the
     # `recon-gen studio` / `recon-gen dashboards` CLIs fall back to
     # these when --tls-cert / --tls-key are absent (CLI flags still
@@ -686,16 +689,9 @@ class Config:
     # by __post_init__ from the legacy flat fields. The @property form
     # rebuilt the AwsConfig every access; the field caches it.
 
-    @property
-    def db(self) -> _DbView:
-        """``cfg.db.*`` — database connection + dialect + L2 default."""
-        return _DbView(
-            dialect=self.dialect,
-            url=self.demo_database_url,
-            table_prefix=self.db_table_prefix,
-            default_l2_instance=self.default_l2_instance,
-            app2_pool_size=self.app2_db_pool_size,
-        )
+    # DE.5 — ``cfg.db`` is now a real ``DbConfig`` field (declared below
+    # alongside ``aws``). Populated by __post_init__ from the legacy
+    # flats during the strangler; future steps drop those flats.
 
     @property
     def app2(self) -> _App2View:
@@ -714,7 +710,7 @@ class Config:
             etl_hook=self.etl_hook,
             banner_text=self.banner_text,
             tls=tls_view,
-            db_pool_size=self.app2_db_pool_size,
+            db_pool_size=self.db.app2_pool_size,
         )
 
     @property
@@ -770,7 +766,7 @@ class Config:
         ds_mode = self.aws.datasource.mode
         # DE.5 step 7 — principal_arns now from caller-supplied aws.principal_arns.
         principal_arns_list = list(self.aws.principal_arns)
-        if ds_arn is None and self.demo_database_url is not None:
+        if ds_arn is None and self.db.url is not None:
             ds_id = f"{deployment_name}-demo-datasource"
             partition = _partition_from_arns(ds_arn, principal_arns_list)
             ds_arn = (
@@ -797,6 +793,14 @@ class Config:
             oracle_instance_id=self.aws.oracle_instance_id,
             datasource=DatasourceConfig(mode=ds_mode, arn=ds_arn),
         )
+        # DE.5 steps 12-16 — DB-block flats dropped. cfg.db is now
+        # caller-supplied (loader or test helper); table_prefix is
+        # required (loud-fail when empty).
+        if not self.db.table_prefix:
+            raise ValueError(
+                "Config requires db=DbConfig(table_prefix=...). The legacy "
+                "``db_table_prefix`` flat kwarg was dropped in DE.5 step 12."
+            )
 
     @property
     def partition(self) -> str:
@@ -856,6 +860,22 @@ class Config:
         # keys for round-trip compatibility with the legacy loader.
         # As steps 4+ migrate more fields into aws, more entries shift
         # from out["aws_X"] to out["aws"]["X"] on emit.
+        # DE.5 steps 12-16 — flatten db block back to legacy yaml keys.
+        db_out = out.pop("db", None)
+        if isinstance(db_out, dict):
+            db_typed = cast(dict[str, Any], db_out)
+            if db_typed.get("table_prefix"):
+                out["db_table_prefix"] = db_typed["table_prefix"]
+            if db_typed.get("url"):
+                out["demo_database_url"] = db_typed["url"]
+            if db_typed.get("dialect"):
+                # dialect is a Dialect enum; coerce to .value below
+                out["dialect"] = db_typed["dialect"]
+            if db_typed.get("default_l2_instance"):
+                out["default_l2_instance"] = db_typed["default_l2_instance"]
+            pool_size_out = db_typed.get("app2_pool_size")
+            if pool_size_out is not None and pool_size_out != 10:
+                out["app2_db_pool_size"] = pool_size_out
         aws_out = out.pop("aws", None)
         if isinstance(aws_out, dict):
             aws_typed = cast(dict[str, Any], aws_out)
@@ -894,7 +914,8 @@ class Config:
                 ds_arn = ds_typed.get("arn")
                 if ds_arn and ds_mode != "create":
                     out["datasource_arn"] = ds_arn
-        out["dialect"] = self.dialect.value
+        # DE.5 step 14 — dialect coerced from .value (was self.dialect.value).
+        out["dialect"] = self.db.dialect.value
 
         # Drop empty / None / default-equivalent optionals so the
         # emitted YAML stays close to a minimal operator-edited file.
@@ -1541,16 +1562,19 @@ def load_config(path: str | Path | None = None) -> Config:
                 arn=raw_ds_arn,
             ),
         ),
-        db_table_prefix=_validate_and_return_db_prefix(
-            _require_str(values, "db_table_prefix")
+        # DE.5 steps 12-16 — all DB-block fields now in db=DbConfig(...).
+        db=DbConfig(
+            dialect=dialect,
+            url=_opt_str(values, "demo_database_url"),
+            table_prefix=_validate_and_return_db_prefix(
+                _require_str(values, "db_table_prefix")
+            ),
+            default_l2_instance=_opt_str(values, "default_l2_instance"),
+            app2_pool_size=pool_size,
         ),
-        demo_database_url=_opt_str(values, "demo_database_url"),
-        dialect=dialect,
         signing=signing,
         auth=auth,
-        default_l2_instance=_opt_str(values, "default_l2_instance"),
         studio_enabled=raw_studio_enabled,
-        app2_db_pool_size=pool_size,
         app2_tls=app2_tls_cfg,
         etl_hook=_opt_str(values, "etl_hook"),
         banner_text=_opt_str(values, "banner_text"),

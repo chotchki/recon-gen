@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from recon_gen.common.config import AwsConfig, Config, DatasourceConfig
+from recon_gen.common.config import AwsConfig, Config, DatasourceConfig, DbConfig
 
 
 def _cfg(**overrides: Any) -> Config:
@@ -41,7 +41,7 @@ def _cfg(**overrides: Any) -> Config:
                 arn=datasource_arn,
             ),
         ),
-        db_table_prefix="test",
+        db=DbConfig(table_prefix="test"),
     )
     base.update(overrides)
     return Config(**base)
@@ -54,8 +54,7 @@ def test_partition_defaults_to_aws_with_no_arn_sources() -> None:
             account_id="111122223333", region="us-east-1",
             deployment_name="recon-test",
         ),
-        demo_database_url="postgresql://example",
-        db_table_prefix="test",
+        db=DbConfig(table_prefix="test", url="postgresql://example"),
     )
     assert cfg.aws.partition == "aws"
 
@@ -83,8 +82,7 @@ def test_partition_from_principal_arn_when_no_datasource_set() -> None:
                 "arn:aws-us-gov:iam::111122223333:user/operator",
             ),
         ),
-        demo_database_url="postgresql://example",
-        db_table_prefix="test",
+        db=DbConfig(table_prefix="test", url="postgresql://example"),
     )
     assert cfg.aws.partition == "aws-us-gov"
     # And the synthesized datasource_arn picks it up:
@@ -153,8 +151,7 @@ def test_bare_string_principal_falls_through_to_default() -> None:
             deployment_name="recon-test",
             principal_arns=("not-an-arn",),
         ),
-        demo_database_url="postgresql://example",
-        db_table_prefix="test",
+        db=DbConfig(table_prefix="test", url="postgresql://example"),
     )
     assert cfg.aws.partition == "aws"
 
@@ -168,8 +165,7 @@ def test_empty_partition_segment_falls_through() -> None:
             deployment_name="recon-test",
             principal_arns=("arn::iam::111122223333:user/operator",),
         ),
-        demo_database_url="postgresql://example",
-        db_table_prefix="test",
+        db=DbConfig(table_prefix="test", url="postgresql://example"),
     )
     assert cfg.aws.partition == "aws"
 

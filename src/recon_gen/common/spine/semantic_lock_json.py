@@ -108,7 +108,7 @@ def lock_to_json(
         lands in `scenario_fingerprint.instance` for mismatch
         detection.
       dialect: the SQL dialect — lands in
-        `scenario_fingerprint.dialect`.
+        `scenario_fingerprint.db.dialect`.
       canonical_anchor: the canonical lock date — lands in
         `scenario_fingerprint.canonical_anchor`.
 

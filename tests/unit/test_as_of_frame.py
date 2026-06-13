@@ -149,12 +149,12 @@ def test_locked_binding_emits_byte_identical_seed_twice_via_frame() -> None:
     # is the AP.0 spike's `locked()` determinism claim made end-to-end:
     # locked ⇒ same SQL string across runs, regardless of when run.
     from recon_gen.cli._helpers import build_full_seed_sql
-    from recon_gen.common.config import TestGeneratorConfig
+    from recon_gen.common.config import DbConfig, TestGeneratorConfig
     from recon_gen.common.l2 import load_instance
     from tests._test_helpers import make_test_config
 
     cfg = make_test_config(
-        db_table_prefix=DEFAULT_PREFIX,
+        db=DbConfig(table_prefix=DEFAULT_PREFIX),
         test_generator=TestGeneratorConfig(end_date=LOCKED_ANCHOR),
     )
     instance = load_instance(_spec_example_path())
@@ -172,12 +172,12 @@ def test_live_binding_emits_seed_ending_at_today_via_frame() -> None:
     # differs (= today). The emission carries that anchor through; today's
     # ISO date string appears in the output. Same code path as locked.
     from recon_gen.cli._helpers import build_full_seed_sql
-    from recon_gen.common.config import TestGeneratorConfig
+    from recon_gen.common.config import DbConfig, TestGeneratorConfig
     from recon_gen.common.l2 import load_instance
     from tests._test_helpers import make_test_config
 
     cfg = make_test_config(
-        db_table_prefix=DEFAULT_PREFIX,
+        db=DbConfig(table_prefix=DEFAULT_PREFIX),
         test_generator=TestGeneratorConfig(),  # no end_date → live
     )
     instance = load_instance(_spec_example_path())

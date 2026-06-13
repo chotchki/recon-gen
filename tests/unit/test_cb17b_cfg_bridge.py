@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Callable, cast
 
-from recon_gen.common.config import AwsConfig, Config
+from recon_gen.common.config import AwsConfig, Config, DbConfig
 from recon_gen.common.sql.dialect import Dialect
 from tests._marks import Tier, tier
 
@@ -34,9 +34,7 @@ def _minimal_cfg(dialect: Dialect, *, demo_url: str | None = None) -> Config:
     """
     return Config(
         aws=AwsConfig(account_id="000000000000", region="us-east-1", deployment_name="recon-test"),
-        db_table_prefix="recon_test",
-        demo_database_url=demo_url,
-        dialect=dialect,
+        db=DbConfig(table_prefix="recon_test", url=demo_url, dialect=dialect),
     )
 
 
@@ -60,10 +58,10 @@ def test_postgres_dialect_swaps_to_pg_url() -> None:
     """POSTGRES cfg → demo_database_url becomes the PG container URL."""
     cfg = _minimal_cfg(Dialect.POSTGRES, demo_url="cfg-loaded-url")
     out = _call_bridge(cfg, pg_url="postgresql://container:5432/x")
-    assert out.demo_database_url == "postgresql://container:5432/x"
+    assert out.db.url == "postgresql://container:5432/x"
     # Other fields preserved by `dataclasses.replace`.
     assert out.aws.deployment_name == "recon-test"
-    assert out.dialect is Dialect.POSTGRES
+    assert out.db.dialect is Dialect.POSTGRES
 
 
 def test_oracle_dialect_swaps_to_oracle_url() -> None:
@@ -72,10 +70,10 @@ def test_oracle_dialect_swaps_to_oracle_url() -> None:
     out = _call_bridge(
         cfg, oracle_url="oracle://container:1521/?service_name=FREEPDB1",
     )
-    assert out.demo_database_url == (
+    assert out.db.url == (
         "oracle://container:1521/?service_name=FREEPDB1"
     )
-    assert out.dialect is Dialect.ORACLE
+    assert out.db.dialect is Dialect.ORACLE
 
 
 def test_duckdb_dialect_passes_through_unchanged() -> None:
@@ -87,7 +85,7 @@ def test_duckdb_dialect_passes_through_unchanged() -> None:
     cfg = _minimal_cfg(Dialect.DUCKDB, demo_url="duckdb:///tmp/foo.duckdb")
     out = _call_bridge(cfg)
     assert out is cfg
-    assert out.demo_database_url == "duckdb:///tmp/foo.duckdb"
+    assert out.db.url == "duckdb:///tmp/foo.duckdb"
 
 
 def test_other_cfg_fields_preserved_on_swap() -> None:
@@ -102,6 +100,6 @@ def test_other_cfg_fields_preserved_on_swap() -> None:
     assert out.aws.account_id == cfg.aws.account_id
     assert out.aws.region == cfg.aws.region
     assert out.aws.deployment_name == cfg.aws.deployment_name
-    assert out.db_table_prefix == cfg.db.table_prefix
+    assert out.db.table_prefix == cfg.db.table_prefix
     # And the swap actually happened.
-    assert out.demo_database_url != cfg.db.url
+    assert out.db.url != cfg.db.url

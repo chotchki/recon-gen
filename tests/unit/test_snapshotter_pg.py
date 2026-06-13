@@ -50,7 +50,7 @@ from typing import Any
 
 import pytest
 
-from recon_gen.common.config import Config
+from recon_gen.common.config import Config, DbConfig
 from recon_gen.common.db import (
     AsyncConnectionPool,
     connect_demo_db,
@@ -125,9 +125,9 @@ def pg_cfg(snapshotter_pg_container_url: str, worker_id: str) -> Config:
 
     base = make_test_config(
         dialect=Dialect.POSTGRES,
-        db_table_prefix=f"{_BASE_PREFIX}_{worker_id}",
+        db=DbConfig(table_prefix=f"{_BASE_PREFIX}_{worker_id}"),
     )
-    return replace(base, demo_database_url=snapshotter_pg_container_url)
+    return replace(base, db=replace(base.db, url=snapshotter_pg_container_url))
 
 
 @pytest.fixture(scope="module")
@@ -171,7 +171,7 @@ def v_overlay_seeded(
     """
     from recon_gen.common.l2.schema import emit_schema_drop_sql
 
-    base_prefix = pg_cfg.db_table_prefix
+    base_prefix = pg_cfg.db.table_prefix
 
     conn = connect_demo_db(pg_cfg)
     try:
@@ -180,35 +180,35 @@ def v_overlay_seeded(
             # Best-effort drop of any prior schema/v-overlay debris.
             for drop in (
                 drop_v_overlay_sql(
-                    l2_instance_fixture, base_prefix=base_prefix, dialect=pg_cfg.dialect,
+                    l2_instance_fixture, base_prefix=base_prefix, dialect=pg_cfg.db.dialect,
                 ),
                 emit_schema_drop_sql(
-                    l2_instance_fixture, prefix=base_prefix, dialect=pg_cfg.dialect,
+                    l2_instance_fixture, prefix=base_prefix, dialect=pg_cfg.db.dialect,
                 ),
             ):
                 try:
-                    execute_script(cur, drop, dialect=pg_cfg.dialect)
+                    execute_script(cur, drop, dialect=pg_cfg.db.dialect)
                 except Exception:  # noqa: BLE001 — schema may not exist
                     conn.rollback()
             # Base schema + v overlay + clone + matview refresh.
             execute_script(
                 cur,
                 emit_schema(
-                    l2_instance_fixture, prefix=base_prefix, dialect=pg_cfg.dialect,
+                    l2_instance_fixture, prefix=base_prefix, dialect=pg_cfg.db.dialect,
                 ),
-                dialect=pg_cfg.dialect,
+                dialect=pg_cfg.db.dialect,
             )
             execute_script(
                 cur,
                 create_v_overlay_sql(
-                    l2_instance_fixture, base_prefix=base_prefix, dialect=pg_cfg.dialect,
+                    l2_instance_fixture, base_prefix=base_prefix, dialect=pg_cfg.db.dialect,
                 ),
-                dialect=pg_cfg.dialect,
+                dialect=pg_cfg.db.dialect,
             )
             execute_script(
                 cur,
-                clone_base_to_v_sql(base_prefix, dialect=pg_cfg.dialect),
-                dialect=pg_cfg.dialect,
+                clone_base_to_v_sql(base_prefix, dialect=pg_cfg.db.dialect),
+                dialect=pg_cfg.db.dialect,
             )
             conn.commit()
             # NB — matview refresh is deliberately skipped in fixture
@@ -238,14 +238,14 @@ def v_overlay_seeded(
         try:
             for drop in (
                 drop_v_overlay_sql(
-                    l2_instance_fixture, base_prefix=base_prefix, dialect=pg_cfg.dialect,
+                    l2_instance_fixture, base_prefix=base_prefix, dialect=pg_cfg.db.dialect,
                 ),
                 emit_schema_drop_sql(
-                    l2_instance_fixture, prefix=base_prefix, dialect=pg_cfg.dialect,
+                    l2_instance_fixture, prefix=base_prefix, dialect=pg_cfg.db.dialect,
                 ),
             ):
                 try:
-                    execute_script(cur, drop, dialect=pg_cfg.dialect)
+                    execute_script(cur, drop, dialect=pg_cfg.db.dialect)
                     conn.commit()
                 except Exception:  # noqa: BLE001
                     conn.rollback()
@@ -356,7 +356,7 @@ class TestRoundTrip:
         v_overlay_seeded: Config,
         l2_instance_fixture: L2Instance,
     ) -> None:
-        base_prefix = v_overlay_seeded.db_table_prefix
+        base_prefix = v_overlay_seeded.db.table_prefix
 
         async def _run() -> None:
             async with _pool_and_snap(
@@ -402,7 +402,7 @@ class TestMultiSnapshot:
         v_overlay_seeded: Config,
         l2_instance_fixture: L2Instance,
     ) -> None:
-        base_prefix = v_overlay_seeded.db_table_prefix
+        base_prefix = v_overlay_seeded.db.table_prefix
 
         async def _run() -> None:
             async with _pool_and_snap(
@@ -564,7 +564,7 @@ class TestAcloseSweepsLeftoverSchemas:
         v_overlay_seeded: Config,
         l2_instance_fixture: L2Instance,
     ) -> None:
-        base_prefix = v_overlay_seeded.db_table_prefix
+        base_prefix = v_overlay_seeded.db.table_prefix
 
         async def _run() -> None:
             # Build a fresh pool + snapshotter inline; we want to call

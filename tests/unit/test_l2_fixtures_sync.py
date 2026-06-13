@@ -46,7 +46,7 @@ def test_docs_reference_fixture_matches_tests_l2_source() -> None:
     This guards the LAST remaining packaged copy after AJ.4a collapsed
     the 4-copy sprawl: ``apps/l1_dashboard/_default_l2.yaml`` was deleted
     (all ``src/`` code now loads the single ``_l2_fixtures`` copy via
-    ``common.l2.default_l2_instance``); only the docs-served reference
+    ``common.l2.db.default_l2_instance``); only the docs-served reference
     file lives apart, because mkdocs links to it from inside ``docs/``.
     Only ``spec_example`` ships as a docs reference — the persona demo
     ``sasquatch_pr`` doesn't.

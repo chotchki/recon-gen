@@ -41,6 +41,7 @@ from recon_gen.common.config import (
     AwsConfig,
     Config,
     DatasourceConfig,
+    DbConfig,
     TestGeneratorConfig,
 )
 from recon_gen.common.db import (
@@ -135,9 +136,7 @@ def write_pg_etl_cfg(pg_url: str, tmp_path: Path) -> tuple[Config, Path]:
                 arn="arn:aws:quicksight:us-east-1:111122223333:datasource/x",
             ),
         ),
-        db_table_prefix="sasquatch_pr",
-        demo_database_url=pg_url,
-        dialect=Dialect.POSTGRES,
+        db=DbConfig(table_prefix="sasquatch_pr", url=pg_url, dialect=Dialect.POSTGRES),
     )
     return cfg, pg_cfg_path
 
@@ -197,9 +196,7 @@ def make_studio_cfg(
                 arn="arn:aws:quicksight:us-east-1:111122223333:datasource/x",
             ),
         ),
-        db_table_prefix="sasquatch_pr",
-        demo_database_url=resolved_url,
-        dialect=dialect,
+        db=DbConfig(table_prefix="sasquatch_pr", url=resolved_url, dialect=dialect),
         test_generator=TestGeneratorConfig(scope="full"),
         etl_hook=str(etl_hook) if etl_hook is not None else None,
     )
