@@ -1,4 +1,4 @@
-# QuickSight Generator Configuration
+# Recon Generator Configuration (v14.0.0 nested shape)
 #
 # config.yaml is environment-only — AWS account, region, dialect, DB
 # connection, signing material. Institution shape (theme, persona,
@@ -9,54 +9,122 @@
 #
 # Copy this file to config.yaml and fill in your values. All values
 # can also be set via environment variables with a RECON_GEN_ prefix.
+#
+# DE phase (v14.0.0) — config is now concern-grouped under nested blocks
+# (aws: / db: / app2: / audit: / auth: / test:) with optional `extends:`
+# inheritance. The v13.x flat shape (aws_account_id: / deployment_name:
+# / ...) is no longer accepted — the loader raises with a migration hint
+# on the legacy keys. See docs/audits/de_0_cfg_redesign.md for the full
+# migration table.
 
-aws_account_id: "123456789012"
-aws_region: "us-east-1"
+# Optional — inherit from a base cfg + override only the deltas.
+# Paths are relative to this cfg's directory. Chains are unbounded;
+# cycles are detected. Lists replace (not append).
+# extends: [./base.yaml]
 
-# ARN of the pre-existing QuickSight datasource to query against.
-# Not required when demo_database_url is set (auto-derived from account/region/deployment_name).
-datasource_arn: "arn:aws:quicksight:us-east-1:123456789012:datasource/your-datasource-id"
+aws:
+  account_id: "123456789012"
+  region: "us-east-1"
 
-# Z.C — Deployment identity (both required, no defaults, loud-fail at load).
-# `deployment_name` prefixes every QS resource ID; `db_table_prefix`
-# prefixes every emitted DB table / matview / dataset name.
-deployment_name: "recon-prod"
-db_table_prefix: "recon_prod"
+  # Z.C — Per-deploy QS namespace. Prefixes every QS resource ID;
+  # also stamped as the Deployment tag for `json clean` scope.
+  # Required (loud-fail when absent).
+  deployment_name: "recon-prod"
 
-# Theme: declared on the L2 institution YAML's inline `theme:` block,
-# NOT here. Each institution carries its own brand palette so swapping
-# the L2 swaps the look. Omit `theme:` on the L2 to fall back to the
-# generator's default preset (deploy may also fall through to AWS
-# QuickSight CLASSIC).
+  # IAM principal ARNs to grant permissions on generated resources
+  # (optional). One ResourcePermission emitted per ARN.
+  # principal_arns:
+  #   - "arn:aws:quicksight:us-east-1:123456789012:user/default/admin"
+  #   - "arn:aws:iam::123456789012:user/analyst"
 
-# IAM principal ARNs to grant permissions on generated resources (optional).
-# Accepts a single string or a list; one ResourcePermission is emitted per ARN.
-# principal_arns:
-#   - "arn:aws:quicksight:us-east-1:123456789012:user/default/admin"
-#   - "arn:aws:iam::123456789012:user/analyst"
+  # Additional tags on every generated resource (optional).
+  # extra_tags:
+  #   Environment: production
+  #   Team: finance
 
-# SQL dialect for the deployed datasource (default: postgres). Must
-# match the datasource type — a Postgres datasource_arn cannot serve
-# Oracle-rendered SQL and vice versa. Operators typically carry two
-# config files (config-postgres.yaml + config-oracle.yaml). For local
-# integrator iteration use `sqlite` — runs against a single-file or
-# in-memory database without a server (X.3); not deployable to
-# QuickSight (`json apply --execute` and `build_datasource` reject it).
-# dialect: "postgres"
+  # QuickSight datasource lifecycle (DE.0 lock). Three modes:
+  #   create — generator creates the QS datasource if absent, updates if present (default for prod-deploy)
+  #   adopt  — use the explicit `arn` below as-is; don't try to create
+  #   skip   — don't touch the QS datasource API at all (test-mode escape)
+  # When omitted, defaults to mode=create. When mode=create, `arn` is
+  # auto-derived from account_id + region + deployment_name (matches
+  # the v13.x implicit-derive behavior).
+  datasource:
+    mode: create
+    # arn: "arn:aws:quicksight:us-east-1:123456789012:datasource/preexisting"  # required iff mode=adopt
 
-# Database connection URL for the demo apply command (optional).
-# Required for: `data apply --execute`, `audit apply --execute`.
-# When set, datasource_arn auto-derives from account/region/deployment_name
-# (Postgres + Oracle only — SQLite rejects datasource derivation).
-# demo_database_url: "postgresql://user:pass@localhost:5432/quicksight_demo"
-# demo_database_url: "oracle+oracledb://user:pass@host:1521/?service_name=ORCL"
-# demo_database_url: "sqlite:///tmp/quicksight_demo.sqlite"  # X.3 local-loop
+db:
+  # SQL dialect (required). One of: postgres, oracle, duckdb.
+  # Must match the datasource type. Postgres + Oracle are deploy-target
+  # dialects; DuckDB is the local-iteration / Studio default (X.3+).
+  dialect: "postgres"
 
-# U.7.b — Audit PDF auto-sign material (optional). PEM RSA key + cert.
-# When present, `audit apply --execute` runs the rendered PDF through
-# pyHanko to apply a CMS signature. Absent = ship the PDF unsigned.
-# signing:
-#   key_path: "ops/signing-key.pem"
-#   cert_path: "ops/signing-cert.pem"
-#   passphrase_env: "SIGNING_KEY_PASSPHRASE"  # optional, for encrypted keys
-#   signer_name: "Audit Signing Authority"    # optional
+  # Database connection URL (required for `data apply --execute`,
+  # `audit apply --execute`, Studio + Dashboards, app2/db/deploy/
+  # qs_api/qs_browser test layers).
+  url: "postgresql://user:pass@localhost:5432/quicksight_demo"
+  # url: "oracle+oracledb://user:pass@host:1521/?service_name=ORCL"
+  # url: "duckdb:///tmp/quicksight_demo.duckdb"
+
+  # DB table prefix (optional — defaults to deployment_name with
+  # `-` → `_`). Override only when integrators have established
+  # pre-existing table-prefix conventions.
+  # table_prefix: "recon_prod"
+
+# audit:
+#   # U.7.b — Audit PDF auto-sign material (optional). PEM RSA key + cert.
+#   # When present, `audit apply --execute` runs the rendered PDF through
+#   # pyHanko to apply a CMS signature. Absent = ship the PDF unsigned.
+#   signing:
+#     key_path: "ops/signing-key.pem"
+#     cert_path: "ops/signing-cert.pem"
+#     passphrase_env: "SIGNING_KEY_PASSPHRASE"  # optional; bytes loaded from env per [[feedback_no_credential_friction]]
+#     signer_name: "Audit Signing Authority"    # optional
+
+# auth:
+#   # AWS auth (Y.2.gate.h+i) — local-runner AWS profile + QS embed-signing.
+#   aws:
+#     profile: "recon-gen-local"
+#     # quicksight_user_arn auto-derives via list_users when absent
+#
+#   # OIDC client for Studio + Dashboards (Phase DD).
+#   oidc:
+#     issuer_url: "https://idp.example.com"
+#     client_id: "recon-gen-app2"
+#     client_secret_env: "RECON_GEN_OIDC_CLIENT_SECRET"  # secret in env, never cfg
+#     redirect_uri: "https://localhost:8765/auth/callback"
+#     scopes:
+#       - openid
+#       - email
+#       - profile
+#
+#   # JWT session signing for Studio + Dashboards (Phase DD).
+#   session:
+#     jwt_secret_env: "RECON_GEN_JWT_SECRET"  # 32+ byte secret in env
+
+# app2:
+#   # ETL hook — step 1 of the deploy pipeline. Shell command run as
+#   # `shlex.split`. Unset = step 1 is a no-op.
+#   # etl_hook: "./bin/refresh-demo.sh"
+#
+#   # Studio + Dashboards page banner text (optional).
+#   # banner_text: "Edits reset on next restart"
+#
+#   # TLS termination paths for `recon-gen studio` / `recon-gen dashboards`.
+#   # Falls back to --tls-cert / --tls-key CLI flags when block absent.
+#   # tls:
+#   #   cert_path: "/etc/ssl/cert.pem"
+#   #   key_path: "/etc/ssl/key.pem"
+#
+#   # App2 server's async DB pool size (optional, default 10).
+#   # db_pool_size: 30
+
+# test:
+#   # Synthetic-data overlay knobs (deploy pipeline step 3).
+#   # Defaults preserve byte-identical-to-locked-seeds output.
+#   generator:
+#     enabled: true
+#     scope: "full"      # | exceptions_only | uncovered_rails | only_template
+#     # plants: [drift, overdraft, limit_breach, stuck_pending, ...]
+#     # seed: 42
+#     # end_date: "2030-01-01"
