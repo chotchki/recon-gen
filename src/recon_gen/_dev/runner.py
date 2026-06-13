@@ -240,7 +240,9 @@ def _probe_aws() -> ProbeFailure | None:
             cfg = load_config(str(cfg_path))
         except Exception:  # noqa: BLE001 — bad cfg surfaces elsewhere; here we just want a yes/no
             cfg = None
-        if cfg is not None and cfg.auth is not None and cfg.auth.aws_profile is not None:
+        # DE.2 commit A — cfg.auth is now always-present (default-factory).
+        # The auth-None check that lived here pre-sweep is unnecessary.
+        if cfg is not None and cfg.auth.aws_profile is not None:
             env_overrides = {"AWS_PROFILE": cfg.auth.aws_profile}
     result = _run_probe_subprocess(
         ["aws", "sts", "get-caller-identity"], env_overrides=env_overrides,
@@ -374,8 +376,9 @@ def _resolve_qs_user_arn(cfg: Any) -> str | None:  # typing-smell: ignore[explic
     skips cleanly; we don't want a transient AWS hiccup to abort the
     full chain.
     """
-    if cfg is None or cfg.auth is None:
+    if cfg is None:
         return None
+    # DE.2 commit A — cfg.auth is now always-present (default-factory).
     explicit = cfg.auth.quicksight_user_arn
     if explicit is not None and isinstance(explicit, str) and explicit:
         return explicit
@@ -447,7 +450,8 @@ def _probe_qs_e2e_user_arn() -> ProbeFailure | None:
             cfg = load_config(str(cfg_path))
         except Exception:  # noqa: BLE001 — bad cfg surfaces elsewhere; here we just want a yes/no
             cfg = None
-        if cfg is not None and cfg.auth is not None and (
+        # DE.2 commit A — cfg.auth is now always-present (default-factory).
+        if cfg is not None and (
             cfg.auth.quicksight_user_arn is not None
             or cfg.auth.aws_profile is not None
         ):
@@ -3074,7 +3078,8 @@ def cmd_up_to(args: argparse.Namespace) -> int:
             # subprocesses see the long-lived IAM-user creds (avoids the
             # SSO default-profile path that LoginRefreshRequired'd on
             # an earlier thin run). Mirrors _run_one_variant's h+i.0 path.
-            if peek_cfg.auth is not None and peek_cfg.auth.aws_profile is not None:
+            # DE.2 commit A — cfg.auth is now always-present (default-factory).
+            if peek_cfg.auth.aws_profile is not None:
                 runner_variant_env["AWS_PROFILE"] = peek_cfg.auth.aws_profile
             # Y.2.gate.h.1 — derive RECON_E2E_USER_ARN via STS+ListUsers
             # so the qs_browser layer's embed URL minting works without

@@ -34,6 +34,249 @@ if TYPE_CHECKING:
     from recon_gen.common.models import Tag
 
 
+# ---------------------------------------------------------------------------
+# DE.2 commit A — proxy view dataclasses
+# ---------------------------------------------------------------------------
+#
+# The legacy ``Config`` keeps flat fields (``aws_account_id``, ``dialect``,
+# etc.) for backward compatibility through the sweep. The proxy ``aws`` /
+# ``db`` / ``app2`` / ``audit`` / ``test`` properties below return view
+# dataclasses exposing the **v14-locked nested shape** (per DE.0 +
+# ``docs/audits/de_2_sweep_strategy.md``). Callsite sweep migrates
+# ``cfg.aws_account_id`` → ``cfg.aws.account_id`` etc. Once 100% swept
+# (DE.5), flat fields are dropped + ``config_v14.py`` collapses into here.
+#
+# Views are ``frozen=True`` dataclasses (cheap to construct, hashable,
+# immutable) — built fresh each property access. Per-access cost is
+# trivial; the GC reclaims them promptly. Methods (``partition`` /
+# ``tags()`` / ``dataset_arn()`` / ``theme_arn()`` / ``prefixed()``)
+# live on the view classes they conceptually belong to (AWS-side on
+# ``_AwsView``).
+
+
+@dataclass(frozen=True)
+class _DatasourceView:
+    """``cfg.aws.datasource`` per DE.0 lock — explicit mode enum replaces
+    the implicit dispatch on ``datasource_arn`` presence."""
+    mode: Literal["create", "adopt", "skip"]
+    arn: str | None
+
+
+@dataclass(frozen=True)
+class _AwsView:
+    """``cfg.aws.*`` proxy — AWS deploy / QS deploy / cleanup fields.
+    Carries the ARN-synthesis helpers that depend solely on AWS fields
+    (partition, account_id, region, deployment_name)."""
+    account_id: str
+    region: str
+    deployment_name: str
+    principal_arns: tuple[str, ...]
+    extra_tags: tuple[tuple[str, str], ...]
+    tagging_enabled: bool
+    qs_disable_pg_ssl: bool
+    pg_cluster_id: str | None
+    oracle_instance_id: str | None
+    datasource: _DatasourceView
+
+    @property
+    def partition(self) -> str:
+        """AWS partition for synthesized ARNs.
+
+        Commercial AWS = ``aws``; GovCloud = ``aws-us-gov``;
+        China = ``aws-cn``. Resolution order: ``datasource.arn`` first,
+        else first ``arn:``-prefixed ``principal_arns`` entry, else
+        default ``aws``. Mirrors the pre-DE ``Config.partition``
+        property; full rationale at ``config_v14.AwsConfig.partition``.
+        """
+        sources: list[str | None] = [self.datasource.arn, *self.principal_arns]
+        for source in sources:
+            if source and source.startswith("arn:"):
+                parts = source.split(":", 2)
+                if len(parts) >= 2 and parts[1]:
+                    return parts[1]
+        return "aws"
+
+    def prefixed(self, name: str) -> str:
+        """Return a resource ID with the configured deployment prefix.
+
+        Z.C: single-segment prefix ``<deployment_name>-<name>``. The
+        ``deployment_name`` is the operator's per-deployment namespace,
+        set explicitly in cfg.yaml (no default).
+        """
+        return f"{self.deployment_name}-{name}"
+
+    def tags(self) -> "list[Tag] | None":
+        """Return common + extra tags as the AWS Tag list format.
+
+        Two tags are always emitted (when ``tagging_enabled``):
+
+        - ``ManagedBy=recon-gen`` — gates cleanup eligibility (the
+          tool-identity signal; never varies).
+        - ``Deployment=<deployment_name>`` — per-deploy scope. ``json
+          clean`` requires both tags to match before deleting.
+
+        Returns ``None`` when ``tagging_enabled=False`` so the caller's
+        ``Tags=cfg.aws.tags()`` field assignment goes to the dataclass's
+        ``Tags: list[Tag] | None`` field as ``None`` and ``_strip_nones``
+        drops it from the emitted JSON entirely. Net effect: the
+        ``Create*`` boto3 call carries no ``Tags`` kwarg, so the IAM
+        principal doesn't need ``quicksight:TagResource`` permission.
+        """
+        if not self.tagging_enabled:
+            return None
+        from recon_gen.common.models import Tag  # noqa: PLC0415
+
+        all_tags = [
+            Tag(Key="ManagedBy", Value="recon-gen"),
+            Tag(Key="Deployment", Value=self.deployment_name),
+        ]
+        for key, value in self.extra_tags:
+            all_tags.append(Tag(Key=key, Value=value))
+        return all_tags
+
+    def dataset_arn(self, dataset_id: str) -> str:
+        return (
+            f"arn:{self.partition}:quicksight:{self.region}"
+            f":{self.account_id}:dataset/{dataset_id}"
+        )
+
+    def theme_arn(self, theme_id: str) -> str:
+        return (
+            f"arn:{self.partition}:quicksight:{self.region}"
+            f":{self.account_id}:theme/{theme_id}"
+        )
+
+
+@dataclass(frozen=True)
+class _DbView:
+    """``cfg.db.*`` proxy — database connection + dialect + L2 default.
+    ``url`` is the rename of pre-DE ``demo_database_url``."""
+    dialect: Dialect
+    url: str | None
+    table_prefix: str
+    default_l2_instance: str | None
+    app2_pool_size: int
+
+
+@dataclass(frozen=True)
+class _App2TlsView:
+    """``cfg.app2.tls.*`` proxy — DC.1 TLS termination paths. Absent
+    on legacy cfg until DE.4 wires cfg-fallback; always None today."""
+    cert_path: str
+    key_path: str
+
+
+@dataclass(frozen=True)
+class _App2View:
+    """``cfg.app2.*`` proxy — App2 / Studio / Dashboards server knobs."""
+    etl_hook: str | None
+    banner_text: str | None
+    tls: _App2TlsView | None
+    db_pool_size: int
+
+
+@dataclass(frozen=True)
+class _AuditSigningView:
+    """``cfg.audit.signing.*`` proxy — PDF signing material.
+
+    ``passphrase`` is the lazy env-loaded passphrase (per
+    [[feedback_no_credential_friction]] — cfg names the env var, secret
+    lives in env). ``None`` when ``passphrase_env`` is unset OR the env
+    var is unset/empty. Symmetric with the OIDC / JWT env-var-name
+    pattern per operator's DE.2 comment.
+    """
+    key_path: str
+    cert_path: str
+    passphrase_env: str | None
+    signer_name: str | None
+
+    def passphrase(self) -> bytes | None:
+        """Load passphrase from ``os.environ[passphrase_env]`` lazily.
+
+        Returns bytes for pyHanko consumption (its CMS signer takes
+        bytes for the passphrase). ``None`` means the key is
+        unencrypted OR the operator hasn't set the env var. pyHanko
+        loads the unencrypted key when passphrase=None.
+        """
+        if self.passphrase_env is None:
+            return None
+        import os  # noqa: PLC0415 — lazy: env-touch only when audit signs
+        val = os.environ.get(self.passphrase_env)  # typing-smell: ignore[envvar-bypass]: cfg-supplied env var name (audit.signing.passphrase_env) per [[feedback_no_credential_friction]]
+        if not val:
+            return None
+        return val.encode("utf-8")
+
+
+@dataclass(frozen=True)
+class _AuditView:
+    """``cfg.audit.*`` proxy — audit PDF concerns."""
+    signing: _AuditSigningView | None
+
+
+@dataclass(frozen=True)
+class _TestGeneratorView:
+    """``cfg.test.generator.*`` proxy — fuzz / synthetic-data overlay
+    knobs. Full field surface mirrors the legacy ``TestGeneratorConfig``
+    so existing callers find the same fields. ``as_of_frame`` carried
+    over as the canonical AsOfFrame factory."""
+    enabled: bool
+    scope: "ScopeKind"
+    end_date: date | None
+    seed: int | None
+    plants: tuple["PlantKind", ...]
+    only_template: str | None
+    derive_balances: bool
+    derive_balances_account_roles: tuple[str, ...] | None
+    cutoff_date: date | None
+
+    def as_of_frame(
+        self,
+        *,
+        window_days: int = 0,
+        db_anchor: date | None = None,
+    ) -> AsOfFrame:
+        """Resolve this cfg's scenario anchor as the owned ``AsOfFrame``
+        (D1; mirrors legacy ``TestGeneratorConfig.as_of_frame`` so the
+        callsite sweep is a pure rename, no behavior change)."""
+        from recon_gen.common.intervals import DateInterval  # noqa: PLC0415
+        if self.end_date == LOCKED_ANCHOR:
+            return AsOfFrame.locked(window_days=window_days)
+        if self.end_date is not None:
+            window = (
+                DateInterval.single_day(self.end_date)
+                if window_days <= 0
+                else DateInterval.trailing_days_ending_today(
+                    self.end_date, window_days + 1,
+                )
+            )
+            return AsOfFrame(as_of=self.end_date, window=window)
+        if db_anchor is not None:
+            window = (
+                DateInterval.single_day(db_anchor)
+                if window_days <= 0
+                else DateInterval.trailing_days_ending_today(
+                    db_anchor, window_days + 1,
+                )
+            )
+            return AsOfFrame(as_of=db_anchor, window=window)
+        return AsOfFrame.live(window_days=window_days)
+
+
+@dataclass(frozen=True)
+class _TestView:
+    """``cfg.test.*`` proxy — test/fuzz/synthetic-data scope."""
+    generator: _TestGeneratorView
+
+
+@dataclass(frozen=True)
+class _AuthAwsView:
+    """``cfg.auth.aws.*`` proxy — AWS-side auth (was top-level
+    ``auth:`` block pre-DE). DD-side ``auth.oidc.*`` + ``auth.session.*``
+    will land here too once DD.3 wires the consumption path."""
+    profile: str | None
+    quicksight_user_arn: str | None
+
+
 @dataclass(frozen=True)
 class AuthConfig:
     """Local-runner AWS auth + QS embed-signing identity.
@@ -59,6 +302,14 @@ class AuthConfig:
     """
     aws_profile: str | None = None
     quicksight_user_arn: str | None = None
+
+    @property
+    def aws(self) -> _AuthAwsView:
+        """``cfg.auth.aws.*`` proxy — DE.2 nesting bridge."""
+        return _AuthAwsView(
+            profile=self.aws_profile,
+            quicksight_user_arn=self.quicksight_user_arn,
+        )
 
 
 @dataclass(frozen=True)
@@ -271,7 +522,14 @@ class Config:
     # operator manages auth via ambient env vars (legacy behavior; CI
     # also uses ambient via OIDC). See combined spike for the full
     # decision + IAM runbook.
-    auth: AuthConfig | None = None
+    # DE.2 commit A — auth is now ALWAYS present (default-factory
+    # empty AuthConfig). Legacy ``auth: AuthConfig | None = None`` required
+    # callers to None-check before reading; v14 nested shape
+    # (``cfg.auth.aws.profile``) needs ``cfg.auth`` to always exist.
+    # The four legacy callsites that did ``cfg.auth is not None AND
+    # cfg.auth.aws_profile is not None`` reduce cleanly to
+    # ``cfg.auth.aws.profile is not None`` post-sweep.
+    auth: AuthConfig = field(default_factory=AuthConfig)
     # Set by ``__post_init__``: True iff ``datasource_arn`` was *derived*
     # from ``demo_database_url`` (we own the QS datasource resource and
     # emit ``out/datasource.json``), False iff the operator supplied an
@@ -397,6 +655,109 @@ class Config:
     test_generator: TestGeneratorConfig = field(
         default_factory=TestGeneratorConfig,
     )
+
+    # -------------------------------------------------------------------
+    # DE.2 commit A — v14 proxy properties. Read-only views over the
+    # legacy flat fields exposing the nested ``aws / db / app2 / audit /
+    # test / auth`` shape locked in DE.0. Sweep callsites:
+    # ``cfg.<flat>`` → ``cfg.<nested>.<flat>``. DE.5 drops the flat
+    # fields when 100% swept. Per-access cost is one frozen dataclass
+    # ctor; trivial vs network / DB / pyright time.
+    # -------------------------------------------------------------------
+
+    @property
+    def aws(self) -> _AwsView:
+        """``cfg.aws.*`` — AWS deploy / QS deploy / cleanup fields.
+
+        Carries ``partition`` (str-prefix parse of datasource.arn /
+        principal ARNs), ``prefixed(name)``, ``tags()``,
+        ``dataset_arn(id)``, ``theme_arn(id)``. These were on the
+        legacy ``Config`` before DE.2; moved here to keep the v14
+        nested shape coherent (every method synthesizes from AWS-only
+        fields)."""
+        return _AwsView(
+            account_id=self.aws_account_id,
+            region=self.aws_region,
+            deployment_name=self.deployment_name,
+            principal_arns=tuple(self.principal_arns),
+            extra_tags=tuple(sorted(self.extra_tags.items())),
+            tagging_enabled=self.tagging_enabled,
+            qs_disable_pg_ssl=self.qs_disable_pg_ssl,
+            pg_cluster_id=self.aws_pg_cluster_id,
+            oracle_instance_id=self.aws_oracle_instance_id,
+            datasource=_DatasourceView(
+                # Legacy presence-of-key dispatch maps to mode=adopt
+                # when an ARN is set; absent ⇒ mode=create. The skip
+                # mode (no-AWS-cost test escape per DE.0 operator
+                # comment) is only reachable via v14 cfg yaml today;
+                # DE.4 wires the legacy loader to honor it.
+                mode=("adopt" if self.datasource_arn else "create"),
+                arn=self.datasource_arn,
+            ),
+        )
+
+    @property
+    def db(self) -> _DbView:
+        """``cfg.db.*`` — database connection + dialect + L2 default."""
+        return _DbView(
+            dialect=self.dialect,
+            url=self.demo_database_url,
+            table_prefix=self.db_table_prefix,
+            default_l2_instance=self.default_l2_instance,
+            app2_pool_size=self.app2_db_pool_size,
+        )
+
+    @property
+    def app2(self) -> _App2View:
+        """``cfg.app2.*`` — App2 / Studio / Dashboards server knobs.
+
+        ``tls`` is None on legacy cfg until DE.4 wires the
+        ``app2.tls.{cert_path, key_path}`` block as cfg-fallback to
+        DC.1's CLI flags; today operators set TLS via ``--tls-cert``
+        / ``--tls-key`` directly."""
+        return _App2View(
+            etl_hook=self.etl_hook,
+            banner_text=self.banner_text,
+            tls=None,
+            db_pool_size=self.app2_db_pool_size,
+        )
+
+    @property
+    def audit(self) -> _AuditView:
+        """``cfg.audit.*`` — audit PDF concerns. ``signing`` carries
+        the env-loaded passphrase accessor per
+        [[feedback_no_credential_friction]] symmetry (operator's
+        DE.2 comment)."""
+        if self.signing is None:
+            return _AuditView(signing=None)
+        return _AuditView(
+            signing=_AuditSigningView(
+                key_path=self.signing.key_path,
+                cert_path=self.signing.cert_path,
+                passphrase_env=self.signing.passphrase_env,
+                signer_name=self.signing.signer_name,
+            ),
+        )
+
+    @property
+    def test(self) -> _TestView:
+        """``cfg.test.*`` — fuzz / synthetic-data scope.
+        ``generator`` mirrors the legacy ``TestGeneratorConfig`` shape
+        + carries ``as_of_frame()``."""
+        tg = self.test_generator
+        return _TestView(
+            generator=_TestGeneratorView(
+                enabled=tg.enabled,
+                scope=tg.scope,
+                end_date=tg.end_date,
+                seed=tg.seed,
+                plants=tg.plants,
+                only_template=tg.only_template,
+                derive_balances=tg.derive_balances,
+                derive_balances_account_roles=tg.derive_balances_account_roles,
+                cutoff_date=tg.cutoff_date,
+            ),
+        )
 
     def __post_init__(self) -> None:
         # If demo_database_url is set but datasource_arn is not, derive it
@@ -851,9 +1212,11 @@ def load_config(path: str | Path | None = None) -> Config:
                 f"Need both 'key_path' and 'cert_path'."
             ) from exc
 
-    # Y.2.gate.h+i.0 — optional auth block.
+    # Y.2.gate.h+i.0 — optional auth block. DE.2 commit A — default
+    # to empty AuthConfig() when block absent so cfg.auth is always
+    # present + cfg.auth.aws.profile is always reachable.
     raw_auth = values.get("auth")
-    auth: AuthConfig | None = None
+    auth: AuthConfig = AuthConfig()
     if isinstance(raw_auth, dict):
         auth_typed = cast(dict[Any, Any], raw_auth)
         auth_dict: dict[str, object] = {
