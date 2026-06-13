@@ -51,11 +51,11 @@ if TYPE_CHECKING:
 # trivial; the GC reclaims them promptly. Methods (``partition`` /
 # ``tags()`` / ``dataset_arn()`` / ``theme_arn()`` / ``prefixed()``)
 # live on the view classes they conceptually belong to (AWS-side on
-# ``_AwsView``).
+# ``AwsConfig``).
 
 
 @dataclass(frozen=True)
-class _DatasourceView:
+class DatasourceConfig:
     """``cfg.aws.datasource`` per DE.0 lock — explicit mode enum replaces
     the implicit dispatch on ``datasource_arn`` presence."""
     mode: Literal["create", "adopt", "skip"]
@@ -63,7 +63,7 @@ class _DatasourceView:
 
 
 @dataclass(frozen=True)
-class _AwsView:
+class AwsConfig:
     """``cfg.aws.*`` proxy — AWS deploy / QS deploy / cleanup fields.
     Carries the ARN-synthesis helpers that depend solely on AWS fields
     (partition, account_id, region, deployment_name)."""
@@ -76,7 +76,7 @@ class _AwsView:
     qs_disable_pg_ssl: bool
     pg_cluster_id: str | None
     oracle_instance_id: str | None
-    datasource: _DatasourceView
+    datasource: DatasourceConfig
 
     @property
     def partition(self) -> str:
@@ -523,6 +523,20 @@ class Config:
     # cfg.auth.aws_profile is not None`` reduce cleanly to
     # ``cfg.auth.aws.profile is not None`` post-sweep.
     auth: AuthConfig = field(default_factory=AuthConfig)
+    # DE.5 — ``aws`` is now a real ``AwsConfig`` field, not a @property
+    # rebuilt every access. ``init=False`` so callers don't pass it
+    # directly yet (legacy flat fields still drive construction; the
+    # __post_init__ derives this from them). Operator's strangler
+    # pattern: real field today, callers migrate to construct via
+    # ``aws=AwsConfig(...)`` over subsequent commits, flat fields shrink
+    # to nothing + get dropped.
+    aws: AwsConfig = field(init=False, default_factory=lambda: AwsConfig(
+        account_id="", region="", deployment_name="",
+        principal_arns=(), extra_tags=(),
+        tagging_enabled=False, qs_disable_pg_ssl=False,
+        pg_cluster_id=None, oracle_instance_id=None,
+        datasource=DatasourceConfig(mode="create", arn=None),
+    ))
     # Set by ``__post_init__``: True iff ``datasource_arn`` was *derived*
     # from ``demo_database_url`` (we own the QS datasource resource and
     # emit ``out/datasource.json``), False iff the operator supplied an
@@ -664,36 +678,9 @@ class Config:
     # ctor; trivial vs network / DB / pyright time.
     # -------------------------------------------------------------------
 
-    @property
-    def aws(self) -> _AwsView:
-        """``cfg.aws.*`` — AWS deploy / QS deploy / cleanup fields.
-
-        Carries ``partition`` (str-prefix parse of datasource.arn /
-        principal ARNs), ``prefixed(name)``, ``tags()``,
-        ``dataset_arn(id)``, ``theme_arn(id)``. These were on the
-        legacy ``Config`` before DE.2; moved here to keep the v14
-        nested shape coherent (every method synthesizes from AWS-only
-        fields)."""
-        return _AwsView(
-            account_id=self.aws_account_id,
-            region=self.aws_region,
-            deployment_name=self.deployment_name,
-            principal_arns=tuple(self.principal_arns),
-            extra_tags=tuple(sorted(self.extra_tags.items())),
-            tagging_enabled=self.tagging_enabled,
-            qs_disable_pg_ssl=self.qs_disable_pg_ssl,
-            pg_cluster_id=self.aws_pg_cluster_id,
-            oracle_instance_id=self.aws_oracle_instance_id,
-            datasource=_DatasourceView(
-                # Legacy presence-of-key dispatch maps to mode=adopt
-                # when an ARN is set; absent ⇒ mode=create. The skip
-                # mode (no-AWS-cost test escape per DE.0 operator
-                # comment) is only reachable via v14 cfg yaml today;
-                # DE.4 wires the legacy loader to honor it.
-                mode=("adopt" if self.datasource_arn else "create"),
-                arn=self.datasource_arn,
-            ),
-        )
+    # DE.5 — ``aws`` is now a real field (declared above), populated
+    # by __post_init__ from the legacy flat fields. The @property form
+    # rebuilt the AwsConfig every access; the field caches it.
 
     @property
     def db(self) -> _DbView:
@@ -764,6 +751,29 @@ class Config:
             raise ValueError(
                 "datasource_arn is required unless demo_database_url is set."
             )
+        # DE.5 — populate the ``aws`` real field from the legacy flat
+        # fields. The old @property def aws rebuilt on every access;
+        # caching as a field doesn't change behavior but makes the
+        # field-by-field migration tractable (callers can pass
+        # aws=AwsConfig(...) explicitly later; once nobody depends on
+        # the flat-field path, the flats get dropped and __post_init__
+        # stops syncing).
+        self.aws = AwsConfig(
+            account_id=self.aws_account_id,
+            region=self.aws_region,
+            deployment_name=self.deployment_name,
+            principal_arns=tuple(self.principal_arns),
+            extra_tags=tuple(sorted(self.extra_tags.items())),
+            tagging_enabled=self.tagging_enabled,
+            qs_disable_pg_ssl=self.qs_disable_pg_ssl,
+            pg_cluster_id=self.aws_pg_cluster_id,
+            oracle_instance_id=self.aws_oracle_instance_id,
+            datasource=DatasourceConfig(
+                mode=("adopt" if self.datasource_arn_was_derived is False
+                      and self.datasource_arn else "create"),
+                arn=self.datasource_arn,
+            ),
+        )
 
     @property
     def partition(self) -> str:
@@ -868,6 +878,11 @@ class Config:
         the operator supplied it.
         """
         out: dict[str, Any] = asdict(self)  # typing-smell: ignore[explicit-any]: asdict returns dict[str, Any]
+        # DE.5 — `aws` is a derived field (built from flats in __post_init__).
+        # Strip it so the emitted yaml stays in the legacy flat shape that
+        # the loader knows how to parse; the round-trip rebuilds aws in
+        # __post_init__ from the flats.
+        out.pop("aws", None)
         derived = bool(out.pop("datasource_arn_was_derived", False))
         out["dialect"] = self.dialect.value
         if derived:
