@@ -164,11 +164,20 @@ def test_bo_1_daily_statement_picks_reconcile_per_role(
         # account directly; no Role pick step. The contract is still
         # "this role's accounts are pickable" — that requires the
         # account to be in the dropdown at all.
-        account_opts = driver.filter_options("Account")
+        #
+        # DG.3 — the bare ``filter_options("Account")`` only mounts
+        # MUI Autocomplete's virtualized window (~12 alphabetical
+        # options), so accounts deep in the alphabet (ZBA*, Wire*)
+        # silently fell out of the membership check even though they
+        # WERE picker-reachable via the operator's typeahead flow.
+        # Switch to ``typeahead_filter`` which types the account
+        # display string + reads the server-narrowed result — same
+        # shape an operator hits.
+        account_opts = driver.typeahead_filter("Account", account_display)
         if account_display not in account_opts:
             failures.append(
                 f"role {role!r}: account {account_display!r} not in "
-                f"Account dropdown. Advertised (first 5): "
+                f"Account dropdown after typeahead. Got: "
                 f"{sorted(account_opts)[:5]}... — picker source "
                 f"narrowed too tightly or this role has no internal-"
                 f"scope account with a balance row."

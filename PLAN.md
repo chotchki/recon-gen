@@ -534,6 +534,29 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
 - [ ] DG.3 - **Triage the 12 v13.15.1 failures.** With hygiene fixed, re-evaluate which of the 12 cells were genuine bugs vs DiskFull-cascade. Particular focus on `test_bo_1_daily_statement_picks_reconcile_per_role[qs]` (ZBASubAccount / WireSettlementSuspense dropdown miss) + `test_inv_dashboard_structure_matches_tree[qs]` (Recipient Fanout tree mismatch) — those look pre-existing-real, not cascade.
 - [ ] DG.4 - **Phase exit + release.** Sweep to PLAN_ARCHIVE.md. CI green is the exit gate.
 
+## Phase DH - QuickSight resource hygiene — dataset title-prefix + full-coverage cleanup (draft 2026-06-13)
+
+**Why:** Operator-flagged 2026-06-13 while logged into the QS console to inspect Sankey hover behavior. Two related QS-resource-hygiene gaps surfaced:
+
+1. **Datasets don't carry the `(<deployment>)` suffix in their Name.** Analyses + dashboards already do — e.g. analysis Name is `"L1 Reconciliation Dashboard (qsgen-postgres)"`, dashboard Name is `"L1 Reconciliation Dashboard (qsgen-postgres)"`. But all 53 datasets emit with names like `"Executives Account Summary"`, `"App Info -- Liveness"`, `"Executives Program Health"` — no deployment suffix anywhere. When the operator views the QS datasets list with multiple deployments present (e.g. `qsgen-postgres` + `qsgen-oracle` + an ephemeral CI deployment), the list shows N copies of the same dataset Name with no human-visible way to map each row to its deployment without clicking through.
+
+2. **`recon-gen json clean` only iterates 5 QS resource kinds: dashboards, analyses, datasets, themes, datasources.** Per `src/recon_gen/common/cleanup.py` paginator inventory (lines 110-161). Resources known to exist but NOT swept: **folders** (QS organizational containers), **refresh schedules** (dataset-attached, may orphan when datasets recreate), **templates** (we don't use them today, but unmanaged-template debris from operator experiments could accumulate), **topics** (Q-feature; unused but reachable), **groups** + **users** (out of scope — managed by IAM). Operator observation: "our aws clean up isn't nuking everything in quicksight."
+
+These are related concerns — both about end-to-end resource lifecycle hygiene — distinct enough that DH has two parallel sub-tracks (DH.1 title prefix, DH.2 cleanup coverage audit + sweep).
+
+**Open questions (locks at DH.0 exit):**
+- **Title-prefix suffix format.** Match the analysis/dashboard convention exactly: `"<base name> (<deployment_name>)"`? Or operator-visible different (e.g. leading `[<deployment>]` prefix for grouping)? Match-existing is the safest default.
+- **Cleanup coverage scope.** DH.2 audits the full QS API surface, but does the sweep IMPLEMENT every kind, or just inventory what's leaking + fix the highest-impact one (likely folders + refresh schedules)? Recommend inventory + prioritize on impact.
+- **Folders ownership.** Do we currently create QS folders anywhere? If not, the cleanup gap is about debris from operator manual creation, not the generator. Different fix — maybe out of scope for DH.
+- **Refresh schedules.** Datasets in the recon-gen tree use Direct Query (no SPICE per `[[project_direct_query]]`), so refresh schedules shouldn't exist on our datasets. If they DO exist, it means someone is attaching them outside the generator — also a debris-from-manual-action case.
+- **Tag-filter strictness.** The cleanup tag filter is `ManagedBy: recon-gen` + `Deployment: <name>`. Are there resource kinds where these tags don't propagate from the resource we created (e.g. refresh schedules inherit parent dataset's tags but the list_tags_for_resource call may not work on them)?
+- **DG dependency.** DH is independent of DG; can land anytime after the active DG.3 triage settles.
+
+- [ ] DH.0 - **Audit + lock fixes.** Output: `docs/audits/dh_0_qs_resource_hygiene.md`. Inventory every QS API list_* paginator vs every kind we touch. Confirm dataset title-suffix is the only Name-side gap (or surface other asymmetric kinds). Lock title format + cleanup-coverage scope. Operator-confirm before DH.1.
+- [ ] DH.1 - **Dataset Name `(<deployment>)` suffix.** Apply the locked title format to every dataset emit site. Per-app `apps/<app>/datasets.py` already constructs the Name from app + dataset-kind; add the suffix at the model level (`DataSet` / `DataSetSummary` emit) so every emit path inherits it. Unit test: every dataset JSON in `out/datasets/` carries the suffix. Drift gate against a fixture if needed.
+- [ ] DH.2 - **Cleanup coverage sweep.** Per DH.0 scope: add `list_folders` / `list_refresh_schedules` / etc. paginators to `cleanup.py`, filter on `ManagedBy: recon-gen` + `Deployment: <name>`, delete the stale set. Add per-kind tests against a mocked QS client (similar shape to existing cleanup tests).
+- [ ] DH.3 - **Phase exit + release.** Sweep to PLAN_ARCHIVE.md.
+
 ## Backlog (not yet phased)
 
 - **date-model.plant-days_ago-bounded — replace plant days_ago: int with days_into_window bounded type** — added 2026-06-12.

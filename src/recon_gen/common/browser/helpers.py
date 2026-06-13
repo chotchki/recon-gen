@@ -1903,11 +1903,23 @@ def wait_for_dropdown_options_present(
     between reads, so this is a Python-side retry loop rather than a
     ``page.wait_for_function`` JS poll. Fail-fasts on a real "options
     never populate" regression; tight on the happy path.
+
+    DG.3 — the inner ``read_dropdown_options`` call uses a 2s
+    per-attempt budget; before DG.3 a single 2s ``TimeoutError`` from
+    that inner call propagated out of this helper without retry,
+    making the outer ``timeout_ms`` illusory. Caught + retry the
+    TimeoutError so the outer budget actually does what it says —
+    matters especially for typeahead pickers like ``DS_L1_TX_IDS``
+    (8k+ rows; cold-load can exceed 2s on the first attempt).
     """
+    from playwright.sync_api import TimeoutError as _PWTimeout  # noqa: PLC0415 — lazy: avoid import-time cost when only sync helpers fire
     deadline = time.monotonic() + timeout_ms / 1000.0
     last: list[str] = []
     while time.monotonic() < deadline:
-        last = read_dropdown_options(page, dropdown_title, timeout_ms=2_000)
+        try:
+            last = read_dropdown_options(page, dropdown_title, timeout_ms=2_000)
+        except _PWTimeout:
+            last = []
         if last:
             return last
         time.sleep(0.25)  # typing-smell: ignore[no-sleep]: 250ms inter-poll backoff inside a bounded retry loop with overall timeout
