@@ -335,10 +335,11 @@ class EnvVar[T]:
 # Patterns (used by validators below)
 
 
-# IAM ARN format — ``arn:aws:<service>:<region>:<account>:<resource>``.
+# IAM ARN format — ``arn:<partition>:<service>:<region>:<account>:<resource>``.
+# Partition: ``aws`` (commercial) / ``aws-us-gov`` (GovCloud) / ``aws-cn`` (China).
 # Fairly permissive on resource part (QS resource paths use slashes).
 _IAM_ARN_RE: Final = re.compile(
-    r"arn:aws:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:.+",
+    r"arn:aws(?:-us-gov|-cn)?:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:.+",
 )
 
 

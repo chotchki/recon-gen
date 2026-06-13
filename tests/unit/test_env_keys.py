@@ -310,6 +310,37 @@ def test_user_arn_validator_accepts_real_arn(monkeypatch: Any) -> None:
     assert "test-user" in RECON_E2E_USER_ARN.require()
 
 
+def test_user_arn_validator_accepts_govcloud_arn(monkeypatch: Any) -> None:
+    """GovCloud ARNs (partition ``aws-us-gov``) must validate — financial
+    institution deploys against GovCloud are a real target shape."""
+    monkeypatch.setenv(
+        RECON_E2E_USER_ARN.name,
+        "arn:aws-us-gov:quicksight:us-gov-east-1:470656905821:user/default/test-user",
+    )
+    assert "test-user" in RECON_E2E_USER_ARN.require()
+
+
+def test_user_arn_validator_accepts_china_arn(monkeypatch: Any) -> None:
+    """China partition ARNs (``aws-cn``) validate; pre-DE.1 sub-B the
+    regex was commercial-only + would reject these."""
+    monkeypatch.setenv(
+        RECON_E2E_USER_ARN.name,
+        "arn:aws-cn:quicksight:cn-north-1:470656905821:user/default/test-user",
+    )
+    assert "test-user" in RECON_E2E_USER_ARN.require()
+
+
+def test_user_arn_validator_rejects_unknown_partition(monkeypatch: Any) -> None:
+    """Unknown partition strings (``aws-iso`` / etc.) still reject —
+    only commercial / govcloud / china are real."""
+    monkeypatch.setenv(
+        RECON_E2E_USER_ARN.name,
+        "arn:aws-iso:quicksight:us-iso-east-1:470656905821:user/default/test-user",
+    )
+    with pytest.raises(EnvVarInvalid, match="does not match"):
+        RECON_E2E_USER_ARN.require()
+
+
 def test_identity_region_rejects_non_region(monkeypatch: Any) -> None:
     monkeypatch.setenv(RECON_E2E_IDENTITY_REGION.name, "USEAST1")
     with pytest.raises(EnvVarInvalid, match="does not match"):
