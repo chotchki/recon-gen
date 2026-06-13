@@ -94,7 +94,7 @@ def test_standalone_banner_absent_when_etl_hook_configured() -> None:
     """Real-hook deployments don't get the banner — they're not in
     the protection regime."""
     cfg = make_test_config()
-    cfg_with_hook = dataclass_replace(cfg, etl_hook="./bin/my_etl.py")
+    cfg_with_hook = dataclass_replace(cfg, app2=dataclass_replace(cfg.app2, etl_hook="./bin/my_etl.py"))
 
     html = _standalone_mode_banner(cfg_with_hook)
     assert html == ""
@@ -281,7 +281,7 @@ def test_studio_deploy_button_enabled_when_hook_configured(
     reseed is safe because the next ETL cycle refills."""
     cache = L2InstanceCache.from_path(l2_yaml)
     cfg = make_test_config()
-    cfg_with_hook = dataclass_replace(cfg, etl_hook="./bin/my_etl.py")
+    cfg_with_hook = dataclass_replace(cfg, app2=dataclass_replace(cfg.app2, etl_hook="./bin/my_etl.py"))
 
     html = _render_data_page(cache, dev_log=False, cfg=cfg_with_hook)
 

@@ -48,8 +48,10 @@ def writable_l2_yaml(tmp_path: Path) -> Iterator[Path]:
 
 
 def _duckdb_cfg(tmp_path: Path, **overrides: object) -> Config:
-    from recon_gen.common.config import DatasourceConfig
+    from recon_gen.common.config import App2Config, DatasourceConfig
     db_path = tmp_path / "demo.duckdb"
+    # DE.5 step 17 — etl_hook lives on App2Config.
+    etl_hook = overrides.pop("etl_hook", None)
     base = Config(
         aws=AwsConfig(
             account_id="111122223333", region="us-east-1",
@@ -60,6 +62,7 @@ def _duckdb_cfg(tmp_path: Path, **overrides: object) -> Config:
             ),
         ),
         db=DbConfig(table_prefix="test", url=make_demo_database_url(Dialect.DUCKDB, db_path), dialect=Dialect.DUCKDB),
+        app2=App2Config(etl_hook=str(etl_hook) if etl_hook is not None else None),
     )
     if overrides:
         base = replace(base, **overrides)  # type: ignore[arg-type]: replace's overload erases the per-field types

@@ -31,7 +31,7 @@ import pytest
 from click.testing import CliRunner
 
 from recon_gen.cli import main
-from recon_gen.common.config import AwsConfig, Config, DbConfig
+from recon_gen.common.config import App2Config, AwsConfig, Config, DbConfig
 from recon_gen.common.db import execute_script
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.migrate_mark import (
@@ -546,7 +546,7 @@ def test_pre_flight_auto_marks_when_etl_hook_is_none(
     cfg = Config(
         aws=AwsConfig(account_id="111111111111", region="us-east-1", deployment_name="cz6-test"),
         db=DbConfig(table_prefix=_PREFIX, url=f"duckdb:///{db_path}", dialect=Dialect.DUCKDB),
-        etl_hook=None,  # standalone mode
+        app2=App2Config(etl_hook=None),  # standalone mode
     )
     _cz6_pre_flight_migrate_mark(cfg)
 
@@ -576,7 +576,7 @@ def test_pre_flight_refuses_auto_mark_when_etl_hook_configured(
     cfg = Config(
         aws=AwsConfig(account_id="111111111111", region="us-east-1", deployment_name="cz6-test"),
         db=DbConfig(table_prefix=_PREFIX, url=f"duckdb:///{db_path}", dialect=Dialect.DUCKDB),
-        etl_hook="/bin/true",  # ETL mode (configured)
+        app2=App2Config(etl_hook="/bin/true"),  # ETL mode (configured)
     )
     _cz6_pre_flight_migrate_mark(cfg)
     captured = capsys.readouterr()
@@ -615,7 +615,7 @@ def test_pre_flight_silent_no_op_on_clean_db(tmp_path: Path) -> None:
     cfg = Config(
         aws=AwsConfig(account_id="111111111111", region="us-east-1", deployment_name="cz6-test"),
         db=DbConfig(table_prefix=_PREFIX, url=f"duckdb:///{db_path}", dialect=Dialect.DUCKDB),
-        etl_hook=None,
+        app2=App2Config(etl_hook=None),
     )
     # Should not raise; should not change anything.
     _cz6_pre_flight_migrate_mark(cfg)
@@ -635,7 +635,7 @@ def test_pre_flight_silent_when_base_tables_missing(
     cfg = Config(
         aws=AwsConfig(account_id="111111111111", region="us-east-1", deployment_name="cz6-test"),
         db=DbConfig(table_prefix=_PREFIX, url=f"duckdb:///{db_path}", dialect=Dialect.DUCKDB),
-        etl_hook=None,
+        app2=App2Config(etl_hook=None),
     )
     # Should not raise.
     _cz6_pre_flight_migrate_mark(cfg)
@@ -672,7 +672,7 @@ def _step_2_wipe_cfg(db_path: Path, *, etl_hook: str | None) -> Config:
     return Config(
         aws=AwsConfig(account_id="111111111111", region="us-east-1", deployment_name="cz6-test"),
         db=DbConfig(table_prefix=_PREFIX, url=f"duckdb:///{db_path}", dialect=Dialect.DUCKDB),
-        etl_hook=etl_hook,
+        app2=App2Config(etl_hook=etl_hook),
     )
 
 

@@ -218,7 +218,7 @@ def test_etl_hook_unset_returns_zero_and_emits_skip() -> None:
 
 def test_etl_hook_whitespace_only_skips() -> None:
     """Empty / whitespace shlex result is treated as no-op (not error)."""
-    cfg = replace(_base_cfg(), etl_hook="   ")
+    cfg = replace(_base_cfg(), app2=replace(_base_cfg().app2, etl_hook="   "))
     sink = _EventCollector()
     assert _run_step_1(cfg, sink) == 0
     assert sink.kinds() == ["deploy:step1:skip"]
@@ -228,7 +228,7 @@ def test_etl_hook_whitespace_only_skips() -> None:
 # ---------- exit code propagation ----------
 
 def test_etl_hook_zero_exit_returns_zero() -> None:
-    cfg = replace(_base_cfg(), etl_hook="sh -c 'exit 0'")
+    cfg = replace(_base_cfg(), app2=replace(_base_cfg().app2, etl_hook="sh -c 'exit 0'"))
     sink = _EventCollector()
     assert _run_step_1(cfg, sink) == 0
     assert "deploy:step1:done" in sink.kinds()
@@ -237,7 +237,7 @@ def test_etl_hook_zero_exit_returns_zero() -> None:
 
 def test_etl_hook_nonzero_exit_propagates() -> None:
     """Halt contract: caller checks rc != 0 and skips step 2."""
-    cfg = replace(_base_cfg(), etl_hook="sh -c 'exit 7'")
+    cfg = replace(_base_cfg(), app2=replace(_base_cfg().app2, etl_hook="sh -c 'exit 7'"))
     sink = _EventCollector()
     assert _run_step_1(cfg, sink) == 7
     assert sink.by_kind("deploy:step1:done")[0]["exit_code"] == 7
@@ -246,7 +246,7 @@ def test_etl_hook_nonzero_exit_propagates() -> None:
 # ---------- streaming ----------
 
 def test_etl_hook_stdout_streams_line_by_line() -> None:
-    cfg = replace(_base_cfg(), etl_hook="sh -c 'echo first; echo second'")
+    cfg = replace(_base_cfg(), app2=replace(_base_cfg().app2, etl_hook="sh -c 'echo first; echo second'"))
     sink = _EventCollector()
     _run_step_1(cfg, sink)
     stdout_lines = [
@@ -256,9 +256,10 @@ def test_etl_hook_stdout_streams_line_by_line() -> None:
 
 
 def test_etl_hook_stderr_streams_separately() -> None:
-    cfg = replace(_base_cfg(), etl_hook=(
+    base = _base_cfg()
+    cfg = replace(base, app2=replace(base.app2, etl_hook=(
         "sh -c 'echo to-stdout; echo to-stderr 1>&2'"
-    ))
+    )))
     sink = _EventCollector()
     _run_step_1(cfg, sink)
     assert [e["line"] for e in sink.by_kind("deploy:step1:stdout")] == [
@@ -272,7 +273,7 @@ def test_etl_hook_stderr_streams_separately() -> None:
 def test_etl_hook_event_order_start_then_streams_then_done() -> None:
     """The full lifecycle in order; pipeline orchestration relies on
     this so it can render progress incrementally."""
-    cfg = replace(_base_cfg(), etl_hook="sh -c 'echo go; exit 3'")
+    cfg = replace(_base_cfg(), app2=replace(_base_cfg().app2, etl_hook="sh -c 'echo go; exit 3'"))
     sink = _EventCollector()
     assert _run_step_1(cfg, sink) == 3
     kinds = sink.kinds()
@@ -285,7 +286,7 @@ def test_etl_hook_event_order_start_then_streams_then_done() -> None:
 
 def test_etl_hook_dev_log_none_does_not_crash() -> None:
     """Pipeline callers may opt out of streaming (e.g. CLI's --quiet)."""
-    cfg = replace(_base_cfg(), etl_hook="sh -c 'exit 0'")
+    cfg = replace(_base_cfg(), app2=replace(_base_cfg().app2, etl_hook="sh -c 'exit 0'"))
     assert _run_step_1(cfg, None) == 0
 
 
@@ -294,9 +295,10 @@ def test_etl_hook_dev_log_none_does_not_crash() -> None:
 def test_etl_hook_missing_binary_propagates() -> None:
     """A missing binary is operator-actionable, NOT a silent skip.
     Whole point of declaring etl_hook is that it MUST run."""
+    base = _base_cfg()
     cfg = replace(
-        _base_cfg(),
-        etl_hook="/nonexistent/binary/that/does-not-exist arg1",
+        base,
+        app2=replace(base.app2, etl_hook="/nonexistent/binary/that/does-not-exist arg1"),
     )
     sink = _EventCollector()
     with pytest.raises(FileNotFoundError):
@@ -318,7 +320,7 @@ def test_etl_hook_timeout_terminates_and_returns_124(
     # 1-second cap; `sleep 60` is well past it but small enough that
     # a wedged test doesn't hang CI.
     monkeypatch.setenv("RECON_GEN_STUDIO_ETL_HOOK_TIMEOUT_SECS", "1")  # typing-smell: ignore[envvar-bypass]: testing the env override — needs raw set
-    cfg = replace(_base_cfg(), etl_hook="sh -c 'sleep 60'")
+    cfg = replace(_base_cfg(), app2=replace(_base_cfg().app2, etl_hook="sh -c 'sleep 60'"))
     sink = _EventCollector()
     rc = _run_step_1(cfg, sink)
     assert rc == 124, (
@@ -1534,9 +1536,10 @@ def test_run_deploy_pipeline_halts_on_etl_failure(
     The pre-BS.4 "demo DB not touched on etl_hook failure" property
     is gone (the test below now confirms the wipe RAN, not that it
     was skipped)."""
+    base = _duckdb_cfg(tmp_path)
     cfg = replace(
-        _duckdb_cfg(tmp_path),
-        etl_hook="false",  # POSIX `false` exits 1 — universally available
+        base,
+        app2=replace(base.app2, etl_hook="false"),  # POSIX `false` exits 1 — universally available
     )
     _apply_schema_and_plant_two_rows(cfg, spec_example_instance)
     pre_tx, pre_bal = _row_counts(cfg, spec_example_instance)
@@ -1607,9 +1610,10 @@ def test_orchestration_etl_hook_path(
     BS.4 (2026-05-29): the legacy etl_datasource branch is gone — the
     only ETL contract is the etl_hook subprocess writing directly to
     demo_db (no upstream copy)."""
+    base = _duckdb_cfg(tmp_path)
     cfg = replace(
-        _duckdb_cfg(tmp_path),
-        etl_hook="true",  # POSIX `true` exits 0
+        base,
+        app2=replace(base.app2, etl_hook="true"),  # POSIX `true` exits 0
     )
     _apply_demo_schema_only(cfg, spec_example_instance)
     sink = _EventCollector()
@@ -1737,7 +1741,7 @@ def test_run_deploy_pipeline_releases_pool_lock_for_etl_hook_subprocess(
     dashboards queries).
     """
     cfg = _duckdb_cfg(tmp_path)
-    cfg = replace(cfg, etl_hook=_etl_hook_writes_one_row(cfg, tmp_path))
+    cfg = replace(cfg, app2=replace(cfg.app2, etl_hook=_etl_hook_writes_one_row(cfg, tmp_path)))
     _apply_demo_schema_only(cfg, spec_example_instance)
 
     # Mirror Studio's runtime: the pool is constructed AFTER schema
@@ -1808,7 +1812,7 @@ def test_run_deploy_pipeline_reopens_pool_on_etl_hook_failure(
     dashboards would 500 until the Studio process restarted.
     """
     cfg = _duckdb_cfg(tmp_path)
-    cfg = replace(cfg, etl_hook="false")  # exit 1
+    cfg = replace(cfg, app2=replace(cfg.app2, etl_hook="false"))  # exit 1
     _apply_demo_schema_only(cfg, spec_example_instance)
     assert cfg.db.url is not None
     pool = _AsyncDuckdbPool(duckdb_path(cfg.db.url))
@@ -1950,7 +1954,7 @@ def test_session_start_passes_bracket_to_run_deploy_pipeline(
     from recon_gen.common.l2.v_overlay import session_start  # noqa: PLC0415
 
     cfg = _duckdb_cfg(tmp_path)
-    cfg = replace(cfg, etl_hook=None)  # step_1 skip path
+    cfg = replace(cfg, app2=replace(cfg.app2, etl_hook=None))  # step_1 skip path
     _apply_demo_schema_only(cfg, spec_example_instance)
     assert cfg.db.url is not None
     pool = _AsyncDuckdbPool(duckdb_path(cfg.db.url))
@@ -2238,7 +2242,7 @@ def test_step_1_etl_hook_terminates_subprocess_on_cancel(
     # ensures the terminate path (not a clean exit) is the only way
     # the subprocess goes down.
     sleep_cmd = f"{shlex.quote(_sys.executable)} -c 'import time; time.sleep(60)'"
-    cfg = replace(cfg, etl_hook=sleep_cmd)
+    cfg = replace(cfg, app2=replace(cfg.app2, etl_hook=sleep_cmd))
     sink = _EventCollector()
 
     async def _orchestrate() -> None:

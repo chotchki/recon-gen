@@ -161,7 +161,7 @@ def test_patched_config_keeps_etl_hook_when_enabled() -> None:
     cache = TestGeneratorCache.from_config(cfg)
     assert cache.is_etl_hook_enabled() is True
     patched = cache.patched_config(cfg)
-    assert patched.etl_hook == "echo upstream-pull"
+    assert patched.app2.etl_hook == "echo upstream-pull"
 
 
 def test_patched_config_clears_etl_hook_when_disabled() -> None:
@@ -174,7 +174,7 @@ def test_patched_config_clears_etl_hook_when_disabled() -> None:
     cache = TestGeneratorCache.from_config(cfg)
     cache.set_etl_hook_enabled(False)
     patched = cache.patched_config(cfg)
-    assert patched.etl_hook is None
+    assert patched.app2.etl_hook is None
     # Original cfg's field preserved (no mutation).
     assert cfg.app2.etl_hook == "echo upstream-pull"
 
@@ -187,7 +187,7 @@ def test_patched_config_disable_with_no_hook_is_noop() -> None:
     cache = TestGeneratorCache.from_config(cfg)
     cache.set_etl_hook_enabled(False)
     patched = cache.patched_config(cfg)
-    assert patched.etl_hook is None
+    assert patched.app2.etl_hook is None
 
 
 # ----- X.4.h.7 — sidefile persistence wiring -----

@@ -68,13 +68,21 @@ def _make_cfg(**overrides: object) -> Config:
             arn=datasource_arn,
         ),
     }
+    from recon_gen.common.config import App2Config as _App2Config  # noqa: PLC0415
     from recon_gen.common.config import DbConfig as _DbConfig  # noqa: PLC0415
+    # DE.5 step 17 — etl_hook + banner_text moved to App2Config.
+    etl_hook_raw = overrides.pop("etl_hook", None)
+    banner_text_raw = overrides.pop("banner_text", None)
     defaults: dict[str, object] = {
         "aws": AwsConfig(**aws_kwargs),  # pyright: ignore[reportArgumentType]: dict[str, object] kwarg surface
         "db": _DbConfig(
             table_prefix="test_deploy",
             url="postgresql://u:p@h:5432/d",
             dialect=Dialect.POSTGRES,
+        ),
+        "app2": _App2Config(
+            etl_hook=str(etl_hook_raw) if etl_hook_raw is not None else None,
+            banner_text=str(banner_text_raw) if banner_text_raw is not None else None,
         ),
     }
     defaults.update(overrides)
@@ -201,7 +209,8 @@ def test_app2_view_carries_flat_fields() -> None:
     cfg = _make_cfg(etl_hook="./bin/etl.sh", banner_text="Demo mode")
     assert cfg.app2.etl_hook == "./bin/etl.sh"
     assert cfg.app2.banner_text == "Demo mode"
-    assert cfg.app2.db_pool_size == cfg.db.app2_pool_size  # type: ignore[attr-defined]: legacy flat field
+    # DE.5 step 17 — db_pool_size lives on cfg.db.app2_pool_size only.
+    assert cfg.db.app2_pool_size == 10
 
 
 def test_app2_view_tls_is_none_on_legacy_cfg() -> None:

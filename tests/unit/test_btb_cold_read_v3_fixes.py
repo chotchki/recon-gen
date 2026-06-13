@@ -213,7 +213,7 @@ def test_triage_page_omits_demo_plant_banner_when_hook_configured(
     )
     cache = L2InstanceCache.from_path(writable_l2_yaml)
     cfg = make_test_config()
-    cfg_with_hook = dataclass_replace(cfg, etl_hook="./bin/my_etl.py")
+    cfg_with_hook = dataclass_replace(cfg, app2=dataclass_replace(cfg.app2, etl_hook="./bin/my_etl.py"))
     body = asyncio.run(_render_etl_triage_page(
         cache, dev_log=False,
         db_pool=None, dialect=None,

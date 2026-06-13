@@ -38,6 +38,7 @@ from recon_gen.cli._html_serve import (
     build_real_app,
 )
 from recon_gen.common.config import (
+    App2Config,
     AwsConfig,
     Config,
     DatasourceConfig,
@@ -198,7 +199,7 @@ def make_studio_cfg(
         ),
         db=DbConfig(table_prefix="sasquatch_pr", url=resolved_url, dialect=dialect),
         test_generator=TestGeneratorConfig(scope="full"),
-        etl_hook=str(etl_hook) if etl_hook is not None else None,
+        app2=App2Config(etl_hook=str(etl_hook) if etl_hook is not None else None),
     )
     return cfg, db_path
 

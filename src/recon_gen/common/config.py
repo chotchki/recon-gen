@@ -172,21 +172,20 @@ class DbConfig:
 
 
 @dataclass(frozen=True)
-class _App2TlsView:
-    """``cfg.app2.tls.*`` proxy — DC.1 TLS termination paths.
-    Populated from ``cfg.app2_tls`` when an ``app2.tls:`` block exists
-    in the cfg yaml (DE.4)."""
-    cert_path: str
-    key_path: str
+class App2Config:
+    """``cfg.app2.*`` — App2 / Studio / Dashboards server knobs.
 
+    DE.5 step 17 — promoted to real field with defaults so partial
+    construction (``App2Config(etl_hook="hook.py")``) is legal during
+    the strangler period. ``Config.__post_init__`` blends caller-
+    supplied App2Config fields with the remaining legacy flat fields.
 
-@dataclass(frozen=True)
-class _App2View:
-    """``cfg.app2.*`` proxy — App2 / Studio / Dashboards server knobs."""
-    etl_hook: str | None
-    banner_text: str | None
-    tls: _App2TlsView | None
-    db_pool_size: int
+    Note: ``db_pool_size`` lives at ``cfg.db.app2_pool_size`` (DE.5
+    step 16) — App2Config carries only the truly App2-specific knobs.
+    """
+    etl_hook: str | None = None
+    banner_text: str | None = None
+    tls: "App2TlsConfig | None" = None
 
 
 @dataclass(frozen=True)
@@ -560,6 +559,9 @@ class Config:
     # pass legacy flat kwargs (db_table_prefix / demo_database_url /
     # dialect / etc.). __post_init__ blends.
     db: DbConfig = field(default_factory=DbConfig)
+    # DE.5 step 17 — ``app2`` is the real App2Config field. Strangler
+    # period accepts both bare flat kwargs and ``app2=App2Config(...)``.
+    app2: App2Config = field(default_factory=App2Config)
     # DE.5 step 6 — ``datasource_arn_was_derived`` sentinel removed.
     # Use ``cfg.aws.datasource.mode == "create"`` (the "we own it" case
     # post-DE.0 lock 3).
@@ -609,12 +611,7 @@ class Config:
     # default 100 minus 3 superuser slots = ~97 budget). Oracle's
     # connection cost is higher; integrators rarely run pools >25.
     # DE.5 step 16 — moved to db.app2_pool_size.
-    # DE.4 — Phase DC's TLS termination paths. When set, the
-    # `recon-gen studio` / `recon-gen dashboards` CLIs fall back to
-    # these when --tls-cert / --tls-key are absent (CLI flags still
-    # win). None ⇒ HTTP-only posture (local dev / behind reverse
-    # proxy).
-    app2_tls: App2TlsConfig | None = None
+    # DE.5 step 17 — app2_tls moved to app2.tls.
     # Y.2.gate.l — RDS identifiers for the start/stop lifecycle.
     # `./run_tests.sh up aws` / `down aws` / `status` read these to
     # know which Aurora cluster + Oracle instance to act on. Local
@@ -657,17 +654,7 @@ class Config:
     # See ``src/recon_gen/docs/Schema_v6.md`` for the full column
     # contract and ``recon-gen data etl-example`` for canonical
     # per-table INSERT patterns.
-    etl_hook: str | None = None
-    # CU.3 — optional top-of-page banner text. When set, every Studio /
-    # Dashboards page renders a sticky banner above the content with
-    # this text + a "Learn more" link. Demo installs set it to e.g.
-    # ``"Edits reset on next restart"``; production cfgs leave it None
-    # (no banner). Operators can also use it for legalese / disclaimer
-    # text on production deployments — the field is intentionally
-    # framed as general server-banner, not demo-specific. Replaces the
-    # hardcoded ``_demo_mode_banner`` block that pre-CU.3 rendered an
-    # incorrect "Read-only demo" message even when CU.3+ enables edits.
-    banner_text: str | None = None
+    # DE.5 step 17 — etl_hook + banner_text moved to app2.*.
     # X.4.g.3 — Step 3 (synthetic data overlay) knobs. Non-Optional
     # default-factory so the pipeline never None-checks; an absent
     # block in the cfg yaml resolves to `TestGeneratorConfig()`
@@ -693,25 +680,7 @@ class Config:
     # alongside ``aws``). Populated by __post_init__ from the legacy
     # flats during the strangler; future steps drop those flats.
 
-    @property
-    def app2(self) -> _App2View:
-        """``cfg.app2.*`` — App2 / Studio / Dashboards server knobs.
-
-        ``tls`` carries the DC.1 TLS termination paths when the
-        ``app2.tls:`` block was set in cfg yaml (DE.4 loader wires it);
-        CLI flags still win over the cfg fallback."""
-        tls_view = None
-        if self.app2_tls is not None:
-            tls_view = _App2TlsView(
-                cert_path=self.app2_tls.cert_path,
-                key_path=self.app2_tls.key_path,
-            )
-        return _App2View(
-            etl_hook=self.etl_hook,
-            banner_text=self.banner_text,
-            tls=tls_view,
-            db_pool_size=self.db.app2_pool_size,
-        )
+    # DE.5 step 17 — ``cfg.app2`` is now a real ``App2Config`` field.
 
     @property
     def audit(self) -> _AuditView:
@@ -934,12 +903,21 @@ class Config:
         ):
             if out.get(opt) is None:
                 out.pop(opt, None)
-        # DE.4 — app2_tls is the IN-MEMORY field name; YAML shape is
-        # nested under app2.tls:. Reshape on emit so the round-trip
-        # holds (loader reads app2.tls: and writes back app2_tls).
-        app2_tls_out = out.pop("app2_tls", None)
-        if app2_tls_out is not None:
-            out["app2"] = {"tls": app2_tls_out}
+        # DE.5 step 17 — emit app2 nested block from the new App2Config
+        # field. Loader reads ``app2.tls:`` / ``app2.etl_hook`` / etc.
+        app2_out = out.pop("app2", None)
+        if isinstance(app2_out, dict):
+            app2_typed = cast(dict[str, Any], app2_out)
+            app2_yaml: dict[str, Any] = {}  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload — every value is something safe_dump can write
+            if app2_typed.get("etl_hook"):
+                app2_yaml["etl_hook"] = app2_typed["etl_hook"]
+            if app2_typed.get("banner_text"):
+                app2_yaml["banner_text"] = app2_typed["banner_text"]
+            tls_block = app2_typed.get("tls")
+            if isinstance(tls_block, dict) and tls_block:
+                app2_yaml["tls"] = tls_block
+            if app2_yaml:
+                out["app2"] = app2_yaml
 
         # test_generator: omit when every field is at its default
         # (loader resolves a missing key to ``TestGeneratorConfig()``).
@@ -1514,18 +1492,22 @@ def load_config(path: str | Path | None = None) -> Config:
         )
 
     # DE.4 — app2.tls: block (Phase DC). Required pair when block present.
+    # DE.5 step 17 — app2.{etl_hook,banner_text} promoted out of flat fields;
+    # block reads tls / etl_hook / banner_text; flat-key fallback retained.
     app2_tls_cfg: App2TlsConfig | None = None
+    app2_etl_hook: str | None = None
+    app2_banner_text: str | None = None
     raw_app2 = values.get("app2")
     if isinstance(raw_app2, dict):
         app2_typed = cast(dict[Any, Any], raw_app2)
         app2_dict: dict[str, object] = {
             str(k): v for k, v in app2_typed.items()
         }
-        unknown_app2 = set(app2_dict) - {"tls"}
+        unknown_app2 = set(app2_dict) - {"tls", "etl_hook", "banner_text"}
         if unknown_app2:
             raise ValueError(
                 f"app2 block contains unknown keys: {sorted(unknown_app2)}. "
-                f"Allowed: tls."
+                f"Allowed: tls, etl_hook, banner_text."
             )
         raw_tls = app2_dict.get("tls")
         if isinstance(raw_tls, dict):
@@ -1542,6 +1524,15 @@ def load_config(path: str | Path | None = None) -> Config:
                 cert_path=str(tls_dict["cert_path"]),
                 key_path=str(tls_dict["key_path"]),
             )
+        if "etl_hook" in app2_dict and app2_dict["etl_hook"] is not None:
+            app2_etl_hook = str(app2_dict["etl_hook"])
+        if "banner_text" in app2_dict and app2_dict["banner_text"] is not None:
+            app2_banner_text = str(app2_dict["banner_text"])
+    # Flat-field fallback so legacy cfg yamls keep loading during strangler.
+    if app2_etl_hook is None:
+        app2_etl_hook = _opt_str(values, "etl_hook")
+    if app2_banner_text is None:
+        app2_banner_text = _opt_str(values, "banner_text")
 
     # DE.5 step 6 — datasource_arn flat field moved into aws.datasource.
     raw_ds_arn = _opt_str(values, "datasource_arn")
@@ -1575,8 +1566,11 @@ def load_config(path: str | Path | None = None) -> Config:
         signing=signing,
         auth=auth,
         studio_enabled=raw_studio_enabled,
-        app2_tls=app2_tls_cfg,
-        etl_hook=_opt_str(values, "etl_hook"),
-        banner_text=_opt_str(values, "banner_text"),
+        # DE.5 step 17 — etl_hook + banner_text + app2_tls now on App2Config.
+        app2=App2Config(
+            etl_hook=app2_etl_hook,
+            banner_text=app2_banner_text,
+            tls=app2_tls_cfg,
+        ),
         test_generator=test_generator,
     )

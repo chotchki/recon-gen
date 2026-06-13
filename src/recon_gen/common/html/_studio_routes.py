@@ -4961,7 +4961,7 @@ def make_studio_routes(
         # their data is the source of truth. Use LOCKED_SEED
         # (baseline + L1 plants only) so the L1 dashboards still
         # have demo content but the L2 overlay stays off.
-        overlays = ETL_DEBUG if patched_cfg.etl_hook is None else LOCKED_SEED
+        overlays = ETL_DEBUG if patched_cfg.app2.etl_hook is None else LOCKED_SEED
         subprocess_lock_bracket = _duckdb_pool_subprocess_bracket(db_pool)
         try:
             summary = await run_deploy_pipeline(
@@ -6500,7 +6500,7 @@ def make_studio_routes(
             # (DELETE-synthetic-only); operators who want the full reset
             # configure ``cfg.app2.etl_hook`` or drop to ``recon-gen data
             # apply --execute`` (the CLI escape hatch documented in CZ).
-            if effective_cfg.etl_hook is None:
+            if effective_cfg.app2.etl_hook is None:
                 return JSONResponse(
                     {
                         "halted": True,

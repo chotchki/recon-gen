@@ -58,11 +58,7 @@ app2:
     key_path: /etc/ssl/key.pem
 """
     cfg = load_config(_write(tmp_path, cfg_text))
-    assert isinstance(cfg.app2_tls, App2TlsConfig)
-    assert cfg.app2_tls.cert_path == "/etc/ssl/cert.pem"
-    assert cfg.app2_tls.key_path == "/etc/ssl/key.pem"
-    # Proxy view exposes the same paths via v14 nested accessor
-    assert cfg.app2.tls is not None
+    assert isinstance(cfg.app2.tls, App2TlsConfig)
     assert cfg.app2.tls.cert_path == "/etc/ssl/cert.pem"
     assert cfg.app2.tls.key_path == "/etc/ssl/key.pem"
 
@@ -81,7 +77,6 @@ app2:
 def test_app2_tls_absent_yields_none(tmp_path: Path) -> None:
     """No app2.tls: block ⇒ cfg.app2.tls is None (HTTP-only posture)."""
     cfg = load_config(_write(tmp_path, _MIN_YAML))
-    assert cfg.app2_tls is None
     assert cfg.app2.tls is None
 
 

@@ -88,10 +88,10 @@ def make_test_config(**overrides: Any) -> Config:
       generated DB DDL; pin to a real prefix when it does.
     - ``dialect=Dialect.ORACLE`` — exercise the Oracle SQL branch.
     """
-    # DE.5 steps 3-16 — translate every legacy AWS + DB-block kwarg into
-    # the nested aws=AwsConfig(...) + db=DbConfig(...) on Config.
+    # DE.5 steps 3-17 — translate every legacy AWS + DB-block + App2-block kwarg
+    # into the nested aws=AwsConfig(...) + db=DbConfig(...) + app2=App2Config(...) on Config.
     from recon_gen.common.config import (  # noqa: PLC0415
-        AwsConfig, DatasourceConfig, DbConfig, Dialect,
+        App2Config, AwsConfig, DatasourceConfig, DbConfig, Dialect,
     )
     account_id = overrides.pop("aws_account_id", _TEST_ACCOUNT)
     region = overrides.pop("aws_region", _TEST_REGION)
@@ -109,6 +109,10 @@ def make_test_config(**overrides: Any) -> Config:
     dialect = overrides.pop("dialect", Dialect.POSTGRES)
     default_l2_instance = overrides.pop("default_l2_instance", None)
     app2_db_pool_size = overrides.pop("app2_db_pool_size", 10)
+    # App2-block legacy kwargs
+    etl_hook = overrides.pop("etl_hook", None)
+    banner_text = overrides.pop("banner_text", None)
+    app2_tls = overrides.pop("app2_tls", None)
     if datasource_arn is None:
         if region != _TEST_REGION:
             datasource_arn = (
@@ -140,21 +144,31 @@ def make_test_config(**overrides: Any) -> Config:
             default_l2_instance=default_l2_instance,
             app2_pool_size=app2_db_pool_size,
         ),
+        "app2": App2Config(
+            etl_hook=etl_hook,
+            banner_text=banner_text,
+            tls=app2_tls,
+        ),
     }
     # If caller passed `db=DbConfig(...)` AND legacy DB-block kwargs, merge
     # them — the explicit DbConfig's set fields win, but anything it didn't
     # touch comes from the legacy-kwarg-built default. Without this, callers
     # who pass both lose their legacy values to the bare override.
-    db_override = overrides.pop("db", None)
-    if isinstance(db_override, DbConfig):
-        import dataclasses as _dc  # noqa: PLC0415
-        merged: dict[str, Any] = {}
-        for f in _dc.fields(DbConfig):
-            ov = getattr(db_override, f.name)
-            default = f.default if f.default is not _dc.MISSING else (
-                f.default_factory() if f.default_factory is not _dc.MISSING else None
-            )
-            merged[f.name] = ov if ov != default else getattr(base["db"], f.name)
-        base["db"] = DbConfig(**merged)
+    import dataclasses as _dc  # noqa: PLC0415
+
+    def _merge(block_name: str, block_cls: type[Any]) -> None:
+        override = overrides.pop(block_name, None)
+        if isinstance(override, block_cls):
+            merged: dict[str, Any] = {}
+            for f in _dc.fields(block_cls):
+                ov = getattr(override, f.name)
+                default = f.default if f.default is not _dc.MISSING else (
+                    f.default_factory() if f.default_factory is not _dc.MISSING else None
+                )
+                merged[f.name] = ov if ov != default else getattr(base[block_name], f.name)
+            base[block_name] = block_cls(**merged)
+
+    _merge("db", DbConfig)
+    _merge("app2", App2Config)
     base.update(overrides)
     return Config(**base)
