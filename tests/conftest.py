@@ -195,31 +195,65 @@ def _derive_env_from_cfg() -> None:
 # don't drop debris everywhere).
 
 def pytest_sessionfinish(session: Any, exitstatus: int) -> None:  # typing-smell: ignore[explicit-any]: pytest.Session is late-imported (test conftest avoids src/ pulls at module scope) — same pattern as `pytest_runtest_setup` above
-    """Write this pytest process's EnvVar access log to disk if requested.
+    """Two end-of-session jobs:
 
-    The runner sets ``RECON_GEN_ENV_LOG_DIR`` per subprocess; absent
-    that env, this hook is a no-op (we don't want bare ``pytest``
-    invocations to leave files everywhere).
+    1. Write this pytest process's EnvVar access log to disk if the
+       runner set ``RECON_GEN_ENV_LOG_DIR`` (per-subprocess opt-in).
+    2. DG.1 — report any per-(module, worker) ``isolated_cfg``
+       teardown failures collected during the run. If non-empty:
+       print a clear summary AND raise ``session.exitstatus`` to a
+       non-zero code so the run fails. Per operator lock 2026-06-13
+       (DG.0): "still needs to be a failure so it doesn't get
+       ignored and blow up the next run."
     """
+    # 1. EnvVar access log (pre-DG.1 behavior, unchanged).
     from recon_gen.common.env_keys import RECON_GEN_ENV_LOG_DIR  # noqa: PLC0415 — lazy
-    del session, exitstatus  # unused
     log_dir_raw = RECON_GEN_ENV_LOG_DIR.get_or_none()
-    if not log_dir_raw:
+    if log_dir_raw:
+        log_dir = Path(log_dir_raw)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        events = dump_env_access()
+        summary: dict[str, dict[str, int]] = {}
+        for name, op in events:
+            bucket = summary.setdefault(
+                name, {"read_hit": 0, "read_miss": 0, "write": 0},
+            )
+            bucket[op] = bucket.get(op, 0) + 1
+        # PID + 12-char random suffix → unique per worker even under
+        # heavy xdist parallelism + identical PID reuse across runs.
+        fname = f"pytest-{os.getpid()}-{secrets.token_hex(6)}.json"
+        payload = {"by_name": summary, "events": events, "pid": os.getpid()}
+        (log_dir / fname).write_text(json.dumps(payload, indent=2, sort_keys=True))
+
+    # 2. DG.1 — isolated_cfg teardown failure report.
+    try:
+        from tests.e2e._isolation import teardown_failures  # noqa: PLC0415 — lazy: tests/conftest.py runs before tests/e2e collection
+    except ImportError:
+        # Bare-pytest invocation that doesn't load tests/e2e/ at all.
         return
-    log_dir = Path(log_dir_raw)
-    log_dir.mkdir(parents=True, exist_ok=True)
-    events = dump_env_access()
-    summary: dict[str, dict[str, int]] = {}
-    for name, op in events:
-        bucket = summary.setdefault(
-            name, {"read_hit": 0, "read_miss": 0, "write": 0},
-        )
-        bucket[op] = bucket.get(op, 0) + 1
-    # PID + 12-char random suffix → unique per worker even under
-    # heavy xdist parallelism + identical PID reuse across runs.
-    fname = f"pytest-{os.getpid()}-{secrets.token_hex(6)}.json"
-    payload = {"by_name": summary, "events": events, "pid": os.getpid()}
-    (log_dir / fname).write_text(json.dumps(payload, indent=2, sort_keys=True))
+    failures = teardown_failures()
+    if not failures:
+        return
+    # Print a clearly-marked section so operators can grep it out of
+    # the failure log even when N other test failures are above it.
+    print("\n\n========== DG.1 — isolated_cfg teardown failures ==========")
+    print(
+        f"{len(failures)} per-(module, worker) schema-drop failure(s) "
+        "during this run. Without DG.2's boot sweep these would "
+        "accumulate across CI runs until /dev/shm exhausts — see "
+        "docs/audits/dg_0_db_hygiene_audit.md."
+    )
+    for i, f in enumerate(failures, 1):
+        print(f"\n  [{i}/{len(failures)}] suffix={f.suffix!r} dialect={f.dialect} prefix={f.db_table_prefix!r}")
+        print(f"    exc: {f.exc_repr}")
+        # Indent the traceback so it's visually nested under the failure header.
+        for line in f.traceback.splitlines():
+            print(f"      {line}")
+    print("\n========== end DG.1 teardown failures ==========\n")
+    # Raise the run's exit code to a non-zero value if pytest itself
+    # ran clean. If pytest already failed, leave its code in place.
+    if exitstatus == 0:
+        session.exitstatus = 1
 
 
 # ---------------------------------------------------------------------------

@@ -41,7 +41,7 @@ import threading
 import time
 from collections.abc import Callable, Sequence
 from io import TextIOWrapper
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclasses_replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Final, cast
@@ -2019,6 +2019,158 @@ def _write_qs_cfg_for_thin(
     return qs_cfg_path
 
 
+def _sweep_test_prefixes(
+    cfg_path: Path,
+    container_env: dict[str, str],
+    run_dir: Path,
+) -> int:
+    """DG.2 — scorched-earth sweep of stale per-test prefixed objects
+    at container boot.
+
+    Discovery: `tests/e2e/_isolation.py::_isolate_cfg` stamps each
+    per-(module, worker) cfg with ``db_table_prefix = "<base>_<6hex>"``.
+    Objects created under that prefix all start with that string —
+    every base table, matview, view, index. Find them via
+    ``pg_tables`` / ``pg_matviews`` / ``pg_views`` / ``pg_indexes``
+    (PG) or ``user_tables`` / ``user_mviews`` / ``user_views`` /
+    ``user_indexes`` (Oracle), filtering on the ``<base>_[0-9a-f]{6}_``
+    pattern.
+
+    Drop with ``CASCADE`` per kind, in dependency order: indexes →
+    views → matviews → tables. Drops are idempotent (``IF EXISTS``);
+    safe to re-run.
+
+    Pre-DG.2, ``tests/e2e/_isolation.py:158`` swallowed teardown
+    failures silently. Across N persistent-container CI runs the
+    cumulative debris exceeded PG's ``/dev/shm`` segment + tipped
+    over with ``psycopg.errors.DiskFull``. DG.1's fail-loud teardown
+    prevents NEW debris from going silent; DG.2's boot sweep cleans
+    up debris that already exists from before the fix shipped. See
+    ``docs/audits/dg_0_db_hygiene_audit.md``.
+
+    Returns 0 on success; non-zero on connection failure (sweep is a
+    prerequisite for clean seeding — fail loud, don't continue).
+
+    No-op for DuckDB (per-worker fresh `.duckdb` file, no shared
+    state). Returns 0.
+    """
+    from recon_gen.common.config import Config, load_config
+
+    sweep_dir = run_dir / "sweep"
+    sweep_dir.mkdir(parents=True, exist_ok=True)
+    log_path = sweep_dir / "sweep.log"
+
+    try:
+        # cfg parsing — same path the seed step takes. The
+        # container_env override (RECON_GEN_DEMO_DATABASE_URL) is
+        # applied during the connect call below.
+        cfg = load_config(cfg_path)
+    except Exception as exc:  # noqa: BLE001 — surface as triage signal
+        msg = f"DG.2 sweep: failed to load cfg from {cfg_path}: {exc!r}\n"
+        log_path.write_text(msg)
+        print(f"runner: DG.2 sweep cfg-load failed ({exc!r})", file=sys.stderr)
+        return 1
+
+    from recon_gen.common.sql import Dialect
+    if cfg.dialect is Dialect.DUCKDB:
+        log_path.write_text(
+            "DG.2 sweep: DuckDB no-op (per-worker fresh files have no shared state).\n"
+        )
+        return 0
+
+    # Pattern: `<base>_<6hex>_` — the suffix shape `_isolated_cfg_key`
+    # produces (sha256 of the cfg-coordinates truncated to 6 hex chars).
+    base = cfg.db_table_prefix
+    if cfg.dialect is Dialect.POSTGRES:
+        pattern_sql = f"^{base}_[0-9a-f]{{6}}_"
+        discoveries: list[tuple[str, str, str]] = [
+            ("matview",  "SELECT matviewname FROM pg_matviews WHERE matviewname ~ %s",  "DROP MATERIALIZED VIEW IF EXISTS {q} CASCADE"),
+            ("view",     "SELECT viewname    FROM pg_views    WHERE viewname    ~ %s",  "DROP VIEW IF EXISTS {q} CASCADE"),
+            ("index",    "SELECT indexname   FROM pg_indexes  WHERE indexname   ~ %s",  "DROP INDEX IF EXISTS {q} CASCADE"),
+            ("table",    "SELECT tablename   FROM pg_tables   WHERE tablename   ~ %s",  "DROP TABLE IF EXISTS {q} CASCADE"),
+        ]
+    elif cfg.dialect is Dialect.ORACLE:
+        # Oracle case-folds; user_* views return uppercase names.
+        pattern_sql = f"^{base.upper()}_[0-9A-F]{{6}}_"
+        discoveries = [
+            ("matview", "SELECT mview_name FROM user_mviews  WHERE REGEXP_LIKE(mview_name, :p)", "DROP MATERIALIZED VIEW {q}"),
+            ("view",    "SELECT view_name  FROM user_views   WHERE REGEXP_LIKE(view_name,  :p)", "DROP VIEW {q}"),
+            ("index",   "SELECT index_name FROM user_indexes WHERE REGEXP_LIKE(index_name, :p)", "DROP INDEX {q}"),
+            ("table",   "SELECT table_name FROM user_tables  WHERE REGEXP_LIKE(table_name, :p)", "DROP TABLE {q} CASCADE CONSTRAINTS"),
+        ]
+    else:
+        log_path.write_text(f"DG.2 sweep: unhandled dialect {cfg.dialect!r}; no-op.\n")
+        return 0
+
+    # Apply the container_env URL override so we connect to the
+    # runner-spun container, not whatever cfg.demo_database_url
+    # pointed at on disk.
+    url_override = container_env.get(RECON_GEN_DEMO_DATABASE_URL.name)
+    cfg_for_connect: Config = (
+        dataclasses_replace(cfg, demo_database_url=url_override)
+        if url_override is not None else cfg
+    )
+
+    from recon_gen.common.db import connect_demo_db
+
+    log_lines: list[str] = [f"DG.2 sweep on {cfg.dialect.value} (base prefix={base!r}):"]
+    total_dropped = 0
+    try:
+        conn = connect_demo_db(cfg_for_connect)
+        try:
+            cur = conn.cursor()
+            try:
+                for kind, discovery_sql, drop_tmpl in discoveries:
+                    # PG psycopg2 uses %s; oracledb uses :p — both already
+                    # baked into the discovery_sql per dialect above. The
+                    # bound param shape is positional/dict accordingly.
+                    if cfg.dialect is Dialect.POSTGRES:
+                        cur.execute(discovery_sql, (pattern_sql,))
+                    else:
+                        cur.execute(discovery_sql, {"p": pattern_sql})
+                    names = [row[0] for row in cur.fetchall()]
+                    if not names:
+                        log_lines.append(f"  {kind}: 0 stale objects")
+                        continue
+                    for name in names:
+                        # Identifiers come from the DB catalog — safe to
+                        # interpolate (not user input). PG quotes via "...".
+                        if cfg.dialect is Dialect.POSTGRES:
+                            quoted = f'"{name}"'
+                        else:
+                            quoted = f'"{name}"'  # Oracle also accepts "..."
+                        try:
+                            cur.execute(drop_tmpl.format(q=quoted))
+                        except Exception as drop_exc:  # noqa: BLE001
+                            log_lines.append(
+                                f"  {kind} DROP failed for {name!r}: {drop_exc!r}"
+                            )
+                            continue
+                        total_dropped += 1
+                    log_lines.append(f"  {kind}: {len(names)} stale objects swept")
+                conn.commit()
+            finally:
+                cur.close()
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 — sweep failure is operator-actionable
+        msg = (
+            f"DG.2 sweep: DB error against {cfg.dialect.value}: {exc!r}\n"
+        )
+        log_lines.append(msg)
+        log_path.write_text("\n".join(log_lines))
+        print(f"runner: DG.2 sweep failed ({exc!r})", file=sys.stderr)
+        return 1
+
+    log_lines.append(f"DG.2 sweep complete: {total_dropped} object(s) dropped.")
+    log_path.write_text("\n".join(log_lines) + "\n")
+    print(
+        f"runner: DG.2 sweep complete on {cfg.dialect.value} — "
+        f"{total_dropped} stale object(s) dropped"
+    )
+    return 0
+
+
 def _seed_thin_container(
     cfg_path: Path,
     l2_path: Path,
@@ -2997,6 +3149,40 @@ def cmd_up_to(args: argparse.Namespace) -> int:
                     duration_seconds=0.0,
                 )],
                 EXIT_NEEDS_OPERATOR,
+            )
+
+    # DG.2 — scorched-earth sweep of stale per-test prefixed objects
+    # before any seed runs. Pre-DG.2, `tests/e2e/_isolation.py:158`
+    # swallowed teardown failures silently; cumulative debris across
+    # persistent-container CI runs eventually exhausted PG's /dev/shm
+    # segment with `psycopg.errors.DiskFull`. DG.1 prevents NEW debris
+    # going silent; DG.2 cleans up what's already there from before
+    # the fix shipped + from any teardown that legitimately couldn't
+    # fire (e.g. test process killed mid-run). See
+    # `docs/audits/dg_0_db_hygiene_audit.md`.
+    if container_env and cfg_path is not None:
+        sweep_rc = _sweep_test_prefixes(cfg_path, container_env, run_dir)
+        if sweep_rc != 0:
+            print(
+                f"runner: DG.2 sweep failed rc={sweep_rc}; aborting chain "
+                f"(see runs/<id>/sweep/ for triage)",
+                file=sys.stderr,
+            )
+            if container_handle is not None:
+                try:
+                    container_handle.stop()  # type: ignore[attr-defined]: duck-typed teardown contract — testcontainers Container, _DuckdbHandle, _PersistentContainerHandle all expose .stop() but share no nominal parent
+                except Exception:  # noqa: BLE001 — teardown is best-effort
+                    pass
+            return _finalize_run(
+                run_dir,
+                LayerResult(
+                    layer="unit", exit_code=EXIT_SUCCESS,
+                    duration_seconds=0.0, skipped=True,
+                ),
+                [LayerResult(
+                    layer="sweep", exit_code=sweep_rc, duration_seconds=0.0,
+                )],
+                sweep_rc,
             )
 
     # CB.17.d — seed the PLAIN cfg prefix transitionally. db-tier smoke

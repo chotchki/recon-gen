@@ -14,6 +14,17 @@ Public API:
   (e.g. `test_audit_invariants_direct.py`) call this directly because
   pytest's fixture caching can't compose with parametrize indirection.
 
+- `teardown_failures()` — process-local list of `(suffix, dialect, exc)`
+  tuples accumulated by `isolated_cfg`'s teardown when a per-(module,
+  worker) schema-drop fails. The DG.1 fail-loud contract: failures are
+  NOT swallowed silently anymore. The root `tests/conftest.py`'s
+  `pytest_sessionfinish` reads this list + reports each failure
+  loudly + sets `session.exitstatus` non-zero so the failure can't be
+  ignored (per operator lock 2026-06-13: "still needs to be a failure
+  so it doesn't get ignored and blow up the next run"). The DG.2 boot
+  sweep is a complementary belt-and-suspenders — even if a teardown
+  fails today, tomorrow's sweep catches the debris.
+
 The fixture and helpers live in `tests/e2e/_isolation.py` so all tiers
 (`tests/e2e/db/`, `tests/e2e/app2/`, `tests/e2e/qs_browser/`) can
 import + re-export. Putting it in `tests/e2e/conftest.py` directly
@@ -26,12 +37,40 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import os
+import traceback as _tb
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Iterator
 
 import pytest
 
 if TYPE_CHECKING:
     from recon_gen.common.config import Config
+
+
+@dataclass(frozen=True)
+class _TeardownFailure:
+    """One ``isolated_cfg`` teardown that didn't fully drop its prefix.
+
+    Collected per-worker process; the root conftest's
+    ``pytest_sessionfinish`` reports + fails the run on any non-empty
+    list. The DG.2 boot sweep cleans up regardless on the next run."""
+    suffix: str
+    dialect: str
+    db_table_prefix: str
+    exc_repr: str
+    traceback: str
+
+
+_TEARDOWN_FAILURES: list[_TeardownFailure] = []
+
+
+def teardown_failures() -> list[_TeardownFailure]:
+    """Return the accumulated teardown failures for this worker process.
+
+    Read by ``tests/conftest.py::pytest_sessionfinish`` to surface +
+    fail-the-run. Tests + the boot sweep don't read this — they're
+    just for the operator-visible end-of-run summary."""
+    return list(_TEARDOWN_FAILURES)
 
 
 def _resolve_isolation_suffix(
@@ -126,9 +165,16 @@ def isolated_cfg(
     hash. Cross-tier sharing dropped — tiers communicate via JSON
     artifacts on disk, not shared DB prefixes.
 
-    Teardown (best-effort): drop the worker's prefixed schema so
-    repeated runs don't accumulate `_<suffix>` debris. Failures
-    don't break the session — the next run's writer will DROP+CREATE.
+    Teardown (DG.1 fail-loud, was best-effort silent pre-DG):
+    drop the worker's prefixed schema so repeated runs don't
+    accumulate `_<suffix>` debris. Failures append to
+    ``_TEARDOWN_FAILURES``; the root conftest's
+    ``pytest_sessionfinish`` reports each + sets
+    ``session.exitstatus`` non-zero. Pre-DG, the same drop was
+    wrapped in ``except Exception: print(...)`` and silently
+    swallowed — accumulated debris across CI runs eventually
+    exhausted PG's ``/dev/shm`` segment with
+    ``psycopg.errors.DiskFull``. See ``docs/audits/dg_0_db_hygiene_audit.md``.
     """
     from recon_gen.common.sql import Dialect
 
@@ -156,10 +202,21 @@ def isolated_cfg(
         finally:
             teardown_conn.close()
     except Exception as exc:  # noqa: BLE001
-        print(
-            f"isolated_cfg teardown[{suffix}]: best-effort drop failed: "
-            f"{exc!r}"
-        )
+        # DG.1 — fail-loud: collect the failure for the session-end
+        # report instead of swallowing. Per operator lock 2026-06-13:
+        # "still needs to be a failure so it doesn't get ignored and
+        # blow up the next run." We don't re-raise IMMEDIATELY because
+        # raising during pytest teardown buries real test failures
+        # above this point — the root conftest's
+        # ``pytest_sessionfinish`` raises the run's overall exit code
+        # to non-zero after the regular test report renders.
+        _TEARDOWN_FAILURES.append(_TeardownFailure(
+            suffix=suffix,
+            dialect=isolated.dialect.value,
+            db_table_prefix=isolated.db_table_prefix,
+            exc_repr=repr(exc),
+            traceback=_tb.format_exc(),
+        ))
 
 
 def enforce_readonly(conn: Any, dialect: Any) -> None:  # typing-smell: ignore[explicit-any]: DBAPI conn protocol + Dialect enum, late import
