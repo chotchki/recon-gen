@@ -560,3 +560,4 @@ These are related concerns — both about end-to-end resource lifecycle hygiene 
 ## Backlog (not yet phased)
 
 - **date-model.plant-days_ago-bounded — replace plant days_ago: int with days_into_window bounded type** — added 2026-06-12.
+- **QS Anchor account picker option DOM shape not matched by _OPTION_SELECTOR** — added 2026-06-13.
