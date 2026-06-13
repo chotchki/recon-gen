@@ -208,7 +208,7 @@ def _institution_name(instance: L2Instance, cfg: Config) -> str:
     """
     if instance.institution_name is not None:
         return instance.institution_name
-    return str(cfg.deployment_name)
+    return str(cfg.aws.deployment_name)
 
 
 def _singleton_account_ids(instance: L2Instance) -> set[str]:
@@ -279,7 +279,7 @@ def _query_executive_summary(
 ) -> ExecSummary | None:
     """Aggregate the executive-summary totals against the demo DB.
 
-    Returns None when ``cfg.demo_database_url`` is unset — the
+    Returns None when ``cfg.db.url`` is unset — the
     renderers fall back to "—" placeholders so the layout stays
     previewable without a live connection.
 
@@ -292,14 +292,14 @@ def _query_executive_summary(
     enforced via ``< end + 1 day`` so end-of-period TIMESTAMPs are
     caught.
     """
-    if cfg.demo_database_url is None:
+    if cfg.db.url is None:
         return None
 
     from recon_gen.common.db import connect_demo_db, fetch_one_required
 
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     posting_range = range_clause(
-        frame.window, dialect=cfg.dialect, column="posting",
+        frame.window, dialect=cfg.db.dialect, column="posting",
     )
 
     conn = connect_demo_db(cfg)
@@ -339,7 +339,7 @@ def _query_executive_summary(
             else:
                 sql = (
                     f"SELECT COUNT(*) FROM {prefix}_{suffix}"
-                    f" WHERE {range_clause(frame.window, dialect=cfg.dialect, column=date_col)}"
+                    f" WHERE {range_clause(frame.window, dialect=cfg.db.dialect, column=date_col)}"
                 )
             cur.execute(sql)
             (count,) = fetch_one_required(cur)
@@ -414,14 +414,14 @@ def _query_drift_violations(
     account_id for stable order. Auditor wants to see the freshest
     + biggest discrepancies on top.
     """
-    if cfg.demo_database_url is None:
+    if cfg.db.url is None:
         return None
 
     from recon_gen.common.db import connect_demo_db
 
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     period_clause = range_clause(
-        frame.window, dialect=cfg.dialect, column="business_day_start",
+        frame.window, dialect=cfg.db.dialect, column="business_day_start",
     )
 
     conn = connect_demo_db(cfg)
@@ -489,14 +489,14 @@ def _query_overdraft_violations(
     Sort: most-recent day first, then biggest absolute balance
     (i.e. deepest underwater), then account_id.
     """
-    if cfg.demo_database_url is None:
+    if cfg.db.url is None:
         return None
 
     from recon_gen.common.db import connect_demo_db
 
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     period_clause = range_clause(
-        frame.window, dialect=cfg.dialect, column="business_day_start",
+        frame.window, dialect=cfg.db.dialect, column="business_day_start",
     )
 
     conn = connect_demo_db(cfg)
@@ -628,14 +628,14 @@ def _query_limit_breach_violations(
     Sort: most-recent day first, then biggest overshoot, then
     account_id — auditor sees the freshest + biggest cap-busts first.
     """
-    if cfg.demo_database_url is None:
+    if cfg.db.url is None:
         return None
 
     from recon_gen.common.db import connect_demo_db
 
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     period_clause = range_clause(
-        frame.window, dialect=cfg.dialect, column="business_day",
+        frame.window, dialect=cfg.db.dialect, column="business_day",
     )
 
     conn = connect_demo_db(cfg)
@@ -773,12 +773,12 @@ def _query_stuck_pending_violations(
     stuck in Pending past its aging cap, regardless of when posted.
     Sort: oldest stuck first (biggest age_seconds), then account_id.
     """
-    if cfg.demo_database_url is None:
+    if cfg.db.url is None:
         return None
 
     from recon_gen.common.db import connect_demo_db
 
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -915,12 +915,12 @@ def _query_stuck_unbundled_violations(
     show every Posted transaction past its bundling cap regardless
     of when posted.
     """
-    if cfg.demo_database_url is None:
+    if cfg.db.url is None:
         return None
 
     from recon_gen.common.db import connect_demo_db
 
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1063,17 +1063,17 @@ def _query_supersession(
     audit page stays bounded in size while still surfacing every
     correcting entry the auditor needs to investigate this period.
     """
-    if cfg.demo_database_url is None:
+    if cfg.db.url is None:
         return None
 
     from recon_gen.common.db import connect_demo_db
 
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     posting_range = range_clause(
-        frame.window, dialect=cfg.dialect, column="posting",
+        frame.window, dialect=cfg.db.dialect, column="posting",
     )
     bds_range = range_clause(
-        frame.window, dialect=cfg.dialect, column="business_day_start",
+        frame.window, dialect=cfg.db.dialect, column="business_day_start",
     )
 
     conn = connect_demo_db(cfg)
@@ -1085,7 +1085,7 @@ def _query_supersession(
             ("daily_balances", "business_day_start"),
         ):
             date_col_range = range_clause(
-                frame.window, dialect=cfg.dialect, column=date_col,
+                frame.window, dialect=cfg.db.dialect, column=date_col,
             )
             cur.execute(
                 f"SELECT supersedes, COUNT(*) AS total,"
@@ -1227,14 +1227,14 @@ def _query_daily_statement_walks(
     first (so drifted rows sort ahead of clean parents within a day),
     then account_id.
     """
-    if cfg.demo_database_url is None:
+    if cfg.db.url is None:
         return None
 
     from recon_gen.common.db import connect_demo_db
 
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     period_clause = range_clause(
-        frame.window, dialect=cfg.dialect, column="business_day_start",
+        frame.window, dialect=cfg.db.dialect, column="business_day_start",
     )
 
     conn = connect_demo_db(cfg)
@@ -1298,10 +1298,10 @@ def _query_daily_statement_walks(
             # never appears at the callsite.
             day_window = DateInterval.single_day(day_start_date)
             day_start_lit = date_literal(
-                day_start_date.isoformat(), cfg.dialect,
+                day_start_date.isoformat(), cfg.db.dialect,
             )
             day_posting_range = range_clause(
-                day_window, dialect=cfg.dialect, column="posting",
+                day_window, dialect=cfg.db.dialect, column="posting",
             )
 
             # 2) Daily statement summary: 5 KPIs precomputed.
@@ -1651,7 +1651,7 @@ def audit_verify(
 
     # L2 instance not consumed by verify — only DB hash recompute matters.
     cfg, _instance = resolve_l2_for_demo(config, l2_instance_path)
-    if cfg.demo_database_url is None:
+    if cfg.db.url is None:
         raise click.ClickException(
             "audit verify needs --config with demo_database_url set "
             "to recompute table hashes against the live DB."
@@ -1659,7 +1659,7 @@ def audit_verify(
 
     from recon_gen.common.db import connect_demo_db, fetch_one_required
 
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -1714,12 +1714,12 @@ def audit_verify(
             tx_sha_now = hash_table_rows(
                 cur, table=f"{prefix}_transactions",
                 hwm=embedded.transactions_hwm,
-                dialect=cfg.dialect,
+                dialect=cfg.db.dialect,
             )
             bal_sha_now = hash_table_rows(
                 cur, table=f"{prefix}_daily_balances",
                 hwm=embedded.balances_hwm,
-                dialect=cfg.dialect,
+                dialect=cfg.db.dialect,
             )
         else:
             raise click.ClickException(

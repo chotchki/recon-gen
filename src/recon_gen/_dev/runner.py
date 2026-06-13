@@ -225,7 +225,7 @@ def _probe_aws() -> ProbeFailure | None:
     a ``ProbeFailure`` whose message tells the operator exactly what to type
     (`! aws sso login`); we **never** auto-invoke the SSO browser flow.
 
-    Y.2.gate.h+i.0 — honors ``cfg.auth.aws_profile`` if discoverable. The
+    Y.2.gate.h+i.0 — honors ``cfg.auth.aws.profile`` if discoverable. The
     runner injects `AWS_PROFILE` into subprocess env_overrides at variant
     setup, but the probe runs BEFORE that — so without this lookup, a probe
     running on an expired SSO ambient session would fail even when the cfg
@@ -242,8 +242,8 @@ def _probe_aws() -> ProbeFailure | None:
             cfg = None
         # DE.2 commit A — cfg.auth is now always-present (default-factory).
         # The auth-None check that lived here pre-sweep is unnecessary.
-        if cfg is not None and cfg.auth.aws_profile is not None:
-            env_overrides = {"AWS_PROFILE": cfg.auth.aws_profile}
+        if cfg is not None and cfg.auth.aws.profile is not None:
+            env_overrides = {"AWS_PROFILE": cfg.auth.aws.profile}
     result = _run_probe_subprocess(
         ["aws", "sts", "get-caller-identity"], env_overrides=env_overrides,
     )
@@ -357,11 +357,11 @@ def _resolve_qs_user_arn(cfg: Any) -> str | None:  # typing-smell: ignore[explic
 
     Priority order:
 
-    1. **Explicit override.** ``cfg.auth.quicksight_user_arn`` (set by
+    1. **Explicit override.** ``cfg.auth.aws.quicksight_user_arn`` (set by
        CI via the ``RECON_E2E_USER_ARN`` GH secret). Wins so CI's path
        stays byte-identical.
-    2. **Derive from aws_profile.** ``cfg.auth.aws_profile`` named
-       boto profile + ``cfg.aws_account_id`` + ``cfg.aws_region`` →
+    2. **Derive from aws_profile.** ``cfg.auth.aws.profile`` named
+       boto profile + ``cfg.aws.account_id`` + ``cfg.aws.region`` →
        ``quicksight.list_users(Namespace='default')`` → first ADMIN
        user's ARN (falls back to first user). This is the "operator's
        local cfg with just ``aws_profile`` works" path the spec
@@ -379,10 +379,10 @@ def _resolve_qs_user_arn(cfg: Any) -> str | None:  # typing-smell: ignore[explic
     if cfg is None:
         return None
     # DE.2 commit A — cfg.auth is now always-present (default-factory).
-    explicit = cfg.auth.quicksight_user_arn
+    explicit = cfg.auth.aws.quicksight_user_arn
     if explicit is not None and isinstance(explicit, str) and explicit:
         return explicit
-    aws_profile = cfg.auth.aws_profile
+    aws_profile = cfg.auth.aws.profile
     if aws_profile is None or not isinstance(aws_profile, str):
         return None
     account_id = getattr(cfg, "aws_account_id", None)
@@ -452,8 +452,8 @@ def _probe_qs_e2e_user_arn() -> ProbeFailure | None:
             cfg = None
         # DE.2 commit A — cfg.auth is now always-present (default-factory).
         if cfg is not None and (
-            cfg.auth.quicksight_user_arn is not None
-            or cfg.auth.aws_profile is not None
+            cfg.auth.aws.quicksight_user_arn is not None
+            or cfg.auth.aws.profile is not None
         ):
             return None
     return ProbeFailure(
@@ -777,7 +777,7 @@ def _layer_command(
         # (2) Fall back to `_resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)`
         #     so the default variant still finds run/config.{postgres,oracle}.yaml.
         # L2 path (`RECON_GEN_TEST_L2_INSTANCE`) is always set by `_run_one_variant`
-        # when cfg.default_l2_instance is configured (h.6); when it isn't we
+        # when cfg.db.default_l2_instance is configured (h.6); when it isn't we
         # genuinely can't deploy and fall through to the dispatch-skip path
         # with an actionable error.
         ve = variant_env or {}
@@ -792,7 +792,7 @@ def _layer_command(
         l2_str = ve.get(RECON_GEN_TEST_L2_INSTANCE.name)
         if cfg_str is None or l2_str is None:
             # Caller's dispatch_layer will print `dispatch-skip` — operator
-            # gets a clear "set cfg.default_l2_instance:" pointer because
+            # gets a clear "set cfg.db.default_l2_instance:" pointer because
             # without both we genuinely cannot construct the command.
             return None
         out_dir = run_dir / "deploy" / "out"
@@ -1515,15 +1515,15 @@ ORACLE_REUSE_CONTAINER_PREFIX: Final = "quicksight-test-oracle-"
 # fixture does adopt-or-create against this name. Mirrored from
 # `tests/conftest.py::_SHARED_PG_CONTAINER_NAME`; kept as a separate
 # constant here so `_cmd_down_local` doesn't reach into the test tree.
-PG_SHARED_CONTAINER_NAME: Final = "recon-gen-test-pg"  # typing-smell: ignore[recon-prefix]: Docker container name for the CB.17.k xdist-shared PG test fixture (not a cfg-prefixed AWS / DB resource ID) — stable across `pytest -n auto` workers so conftest's `pg_container_url` fixture can adopt-or-create against a single shared container; not multi-tenant and intentionally does not flow through `cfg.prefixed()`
+PG_SHARED_CONTAINER_NAME: Final = "recon-gen-test-pg"  # typing-smell: ignore[recon-prefix]: Docker container name for the CB.17.k xdist-shared PG test fixture (not a cfg-prefixed AWS / DB resource ID) — stable across `pytest -n auto` workers so conftest's `pg_container_url` fixture can adopt-or-create against a single shared container; not multi-tenant and intentionally does not flow through `cfg.aws.prefixed()`
 # BV.3.3 — dedicated Snapshotter-unit-test containers. Same shape as
 # the shared CB.17.k pair above but a separate name family so the
 # snapshotter tests (heavy schema-create / drop / CTAS+REFRESH ops)
 # don't fight the shared db-tier matrix or the bv33 trainer dogfood
 # walk. Mirrored from `tests/conftest.py::_SHARED_SNAP_*_CONTAINER_NAME`
 # so `_cmd_down_local` doesn't reach into the test tree.
-SNAP_PG_SHARED_CONTAINER_NAME: Final = "recon-gen-snap-test-pg"  # typing-smell: ignore[recon-prefix]: Docker container name for the BV.3.3 snapshotter-unit-test PG fixture (not a cfg-prefixed AWS / DB resource ID) — stable across `pytest -n auto` workers so conftest's `snapshotter_pg_container_url` fixture can adopt-or-create against a single shared container; not multi-tenant and intentionally does not flow through `cfg.prefixed()`
-SNAP_ORACLE_SHARED_CONTAINER_NAME: Final = "recon-gen-snap-test-oracle"  # typing-smell: ignore[recon-prefix]: Docker container name for the BV.3.3 snapshotter-unit-test Oracle fixture (not a cfg-prefixed AWS / DB resource ID) — stable across `pytest -n auto` workers so conftest's `snapshotter_oracle_container_url` fixture can adopt-or-create against a single shared container; not multi-tenant and intentionally does not flow through `cfg.prefixed()`
+SNAP_PG_SHARED_CONTAINER_NAME: Final = "recon-gen-snap-test-pg"  # typing-smell: ignore[recon-prefix]: Docker container name for the BV.3.3 snapshotter-unit-test PG fixture (not a cfg-prefixed AWS / DB resource ID) — stable across `pytest -n auto` workers so conftest's `snapshotter_pg_container_url` fixture can adopt-or-create against a single shared container; not multi-tenant and intentionally does not flow through `cfg.aws.prefixed()`
+SNAP_ORACLE_SHARED_CONTAINER_NAME: Final = "recon-gen-snap-test-oracle"  # typing-smell: ignore[recon-prefix]: Docker container name for the BV.3.3 snapshotter-unit-test Oracle fixture (not a cfg-prefixed AWS / DB resource ID) — stable across `pytest -n auto` workers so conftest's `snapshotter_oracle_container_url` fixture can adopt-or-create against a single shared container; not multi-tenant and intentionally does not flow through `cfg.aws.prefixed()`
 # Pinned password matches the testcontainers `OracleDbContainer`
 # behavior when `oracle_password` is explicitly set. Without pinning,
 # testcontainers randomizes per invocation (`hex(randbits(24))`) and
@@ -1889,7 +1889,7 @@ def _start_thin_container(
     fixtures' env-URL fast-path kicks in (they yield the runner-provided
     URL and don't re-spin). Same singleton, two consumers.
 
-    Dispatch by ``cfg.dialect``:
+    Dispatch by ``cfg.db.dialect``:
 
     - POSTGRES: ``postgres:17-alpine`` testcontainer, container takes
       ~10-15s to start. ``.stop()`` tears down at end. No fixed host
@@ -2101,7 +2101,7 @@ def _sweep_test_prefixes(
         return 1
 
     from recon_gen.common.sql import Dialect
-    if cfg.dialect is Dialect.DUCKDB:
+    if cfg.db.dialect is Dialect.DUCKDB:
         log_path.write_text(
             "DG.2 sweep: DuckDB no-op (per-worker fresh files have no shared state).\n"
         )
@@ -2109,8 +2109,8 @@ def _sweep_test_prefixes(
 
     # Pattern: `<base>_<6hex>_` — the suffix shape `_isolated_cfg_key`
     # produces (sha256 of the cfg-coordinates truncated to 6 hex chars).
-    base = cfg.db_table_prefix
-    if cfg.dialect is Dialect.POSTGRES:
+    base = cfg.db.table_prefix
+    if cfg.db.dialect is Dialect.POSTGRES:
         pattern_sql = f"^{base}_[0-9a-f]{{6}}_"
         discoveries: list[tuple[str, str, str]] = [
             ("matview",  "SELECT matviewname FROM pg_matviews WHERE matviewname ~ %s",  "DROP MATERIALIZED VIEW IF EXISTS {q} CASCADE"),
@@ -2118,7 +2118,7 @@ def _sweep_test_prefixes(
             ("index",    "SELECT indexname   FROM pg_indexes  WHERE indexname   ~ %s",  "DROP INDEX IF EXISTS {q} CASCADE"),
             ("table",    "SELECT tablename   FROM pg_tables   WHERE tablename   ~ %s",  "DROP TABLE IF EXISTS {q} CASCADE"),
         ]
-    elif cfg.dialect is Dialect.ORACLE:
+    elif cfg.db.dialect is Dialect.ORACLE:
         # Oracle case-folds; user_* views return uppercase names.
         pattern_sql = f"^{base.upper()}_[0-9A-F]{{6}}_"
         discoveries = [
@@ -2128,11 +2128,11 @@ def _sweep_test_prefixes(
             ("table",   "SELECT table_name FROM user_tables  WHERE REGEXP_LIKE(table_name, :p)", "DROP TABLE {q} CASCADE CONSTRAINTS"),
         ]
     else:
-        log_path.write_text(f"DG.2 sweep: unhandled dialect {cfg.dialect!r}; no-op.\n")
+        log_path.write_text(f"DG.2 sweep: unhandled dialect {cfg.db.dialect!r}; no-op.\n")
         return 0
 
     # Apply the container_env URL override so we connect to the
-    # runner-spun container, not whatever cfg.demo_database_url
+    # runner-spun container, not whatever cfg.db.url
     # pointed at on disk.
     url_override = container_env.get(RECON_GEN_DEMO_DATABASE_URL.name)
     cfg_for_connect: Config = (
@@ -2142,7 +2142,7 @@ def _sweep_test_prefixes(
 
     from recon_gen.common.db import connect_demo_db
 
-    log_lines: list[str] = [f"DG.2 sweep on {cfg.dialect.value} (base prefix={base!r}):"]
+    log_lines: list[str] = [f"DG.2 sweep on {cfg.db.dialect.value} (base prefix={base!r}):"]
     total_dropped = 0
     try:
         conn = connect_demo_db(cfg_for_connect)
@@ -2153,7 +2153,7 @@ def _sweep_test_prefixes(
                     # PG psycopg2 uses %s; oracledb uses :p — both already
                     # baked into the discovery_sql per dialect above. The
                     # bound param shape is positional/dict accordingly.
-                    if cfg.dialect is Dialect.POSTGRES:
+                    if cfg.db.dialect is Dialect.POSTGRES:
                         cur.execute(discovery_sql, (pattern_sql,))
                     else:
                         cur.execute(discovery_sql, {"p": pattern_sql})
@@ -2164,7 +2164,7 @@ def _sweep_test_prefixes(
                     for name in names:
                         # Identifiers come from the DB catalog — safe to
                         # interpolate (not user input). PG quotes via "...".
-                        if cfg.dialect is Dialect.POSTGRES:
+                        if cfg.db.dialect is Dialect.POSTGRES:
                             quoted = f'"{name}"'
                         else:
                             quoted = f'"{name}"'  # Oracle also accepts "..."
@@ -2184,7 +2184,7 @@ def _sweep_test_prefixes(
             conn.close()
     except Exception as exc:  # noqa: BLE001 — sweep failure is operator-actionable
         msg = (
-            f"DG.2 sweep: DB error against {cfg.dialect.value}: {exc!r}\n"
+            f"DG.2 sweep: DB error against {cfg.db.dialect.value}: {exc!r}\n"
         )
         log_lines.append(msg)
         log_path.write_text("\n".join(log_lines))
@@ -2194,7 +2194,7 @@ def _sweep_test_prefixes(
     log_lines.append(f"DG.2 sweep complete: {total_dropped} object(s) dropped.")
     log_path.write_text("\n".join(log_lines) + "\n")
     print(
-        f"runner: DG.2 sweep complete on {cfg.dialect.value} — "
+        f"runner: DG.2 sweep complete on {cfg.db.dialect.value} — "
         f"{total_dropped} stale object(s) dropped"
     )
     return 0
@@ -2206,7 +2206,7 @@ def _seed_thin_container(
     container_env: dict[str, str],
     run_dir: Path,
 ) -> int:
-    """CB.17.d — seed the runner-spun container's PLAIN cfg.db_table_prefix
+    """CB.17.d — seed the runner-spun container's PLAIN cfg.db.table_prefix
     before any pytest layer.
 
     Restored transitionally — db-tier smoke tests migrated to
@@ -3014,7 +3014,7 @@ def cmd_up_to(args: argparse.Namespace) -> int:
 
     Cfg discovery: ``RECON_GEN_CONFIG`` env override →
     ``_DEFAULT_RUNNER_CFG_CANDIDATES``. L2 path comes from
-    ``cfg.default_l2_instance`` (h.6) when present; missing →
+    ``cfg.db.default_l2_instance`` (h.6) when present; missing →
     ``deploy``/``qs_api``/``qs_browser`` layers' ``_layer_command``
     returns None and dispatch prints ``dispatch-skip``.
 
@@ -3070,7 +3070,7 @@ def cmd_up_to(args: argparse.Namespace) -> int:
                     runner_variant_env[RECON_GEN_TEST_L2_INSTANCE.name] = str(l2_path)
                 else:
                     print(
-                        f"runner: cfg.default_l2_instance={l2_default!r} not found on disk; "
+                        f"runner: cfg.db.default_l2_instance={l2_default!r} not found on disk; "
                         f"deploy/qs_* layers will dispatch-skip",
                         file=sys.stderr,
                     )
@@ -3084,7 +3084,7 @@ def cmd_up_to(args: argparse.Namespace) -> int:
             # Y.2.gate.h.1 — derive RECON_E2E_USER_ARN via STS+ListUsers
             # so the qs_browser layer's embed URL minting works without
             # the operator pre-exporting the ARN. Priority: explicit
-            # cfg.auth.quicksight_user_arn (CI path) → derived from
+            # cfg.auth.aws.quicksight_user_arn (CI path) → derived from
             # aws_profile (local path) → leave unset (probe should
             # already have flagged this).
             if RECON_E2E_USER_ARN.name not in runner_variant_env:
@@ -3863,7 +3863,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     # boto3-stubs's huge per-service overload union confuses pyright
     # — Unknown branches leak through on most-cases. Suppress narrowly.
     client: Any = boto3.client(  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]: boto3-stubs huge overload union confuses pyright (X.2.o.5)
-        "quicksight", region_name=cfg.aws_region,
+        "quicksight", region_name=cfg.aws.region,
     )
 
     confirm = bool(args.yes) or bool(RECON_GEN_RUNNER_YES.get_or_none())
@@ -3874,7 +3874,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
         # scripts/sweep_harness_orphans.py without --confirm.
         try:
             raw_matched = _collect_resources_matching_tag(
-                client, cfg.aws_account_id,
+                client, cfg.aws.account_id,
                 tag_key=tag_key, tag_value=tag_value,
             )
         except Exception as exc:  # noqa: BLE001
@@ -3888,7 +3888,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
         matched = raw_matched
         print(
             f"runner: sweep DRY-RUN — would delete resources tagged "
-            f"{tag_key}={tag_value} in {cfg.aws_region}:"
+            f"{tag_key}={tag_value} in {cfg.aws.region}:"
         )
         total = 0
         for kind, items in matched.items():
@@ -3903,11 +3903,11 @@ def cmd_sweep(args: argparse.Namespace) -> int:
 
     print(
         f"runner: sweep --yes — deleting resources tagged "
-        f"{tag_key}={tag_value} in {cfg.aws_region}"
+        f"{tag_key}={tag_value} in {cfg.aws.region}"
     )
     try:
         raw_counts = sweep_qs_resources_by_tag(
-            client, cfg.aws_account_id,
+            client, cfg.aws.account_id,
             tag_key=tag_key, tag_value=tag_value,
         )
     except Exception as exc:  # noqa: BLE001

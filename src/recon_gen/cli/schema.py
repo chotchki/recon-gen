@@ -59,7 +59,7 @@ def schema_apply(
 
     cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
     schema_sql = emit_schema(
-        instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+        instance, prefix=cfg.db.table_prefix, dialect=cfg.db.dialect,
     )
     # BC.7 + BC.12: schema apply IS the L2-deploy event. After DDL,
     # populate <prefix>_config_kv from the operator-passed L2 yaml.
@@ -100,7 +100,7 @@ def schema_clean(
 
     cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
     sql = emit_schema_drop_sql(
-        instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+        instance, prefix=cfg.db.table_prefix, dialect=cfg.db.dialect,
     )
 
     if execute:
@@ -131,7 +131,7 @@ def schema_migrate_mark(
 ) -> None:
     """CZ.6 — stamp ``metadata.source`` on every pre-CZ row.
 
-    Phase CZ's standalone-mode cleanup gate (`cfg.etl_hook is None` ⇒
+    Phase CZ's standalone-mode cleanup gate (`cfg.app2.etl_hook is None` ⇒
     DELETE-only-synthetic on Trainer reset / Studio Deploy-changes)
     keys on ``JSON_VALUE(metadata, '$.source') = 'training'`` as the
     synthetic-row predicate. CZ.2 stamps new writes; CZ.6 fills in pre-
@@ -150,7 +150,7 @@ def schema_migrate_mark(
     )
 
     cfg, _instance = resolve_l2_for_demo(config, l2_instance_path)
-    if not cfg.demo_database_url:
+    if not cfg.db.url:
         raise click.ClickException(
             "demo_database_url is required. "
             "Set it in your config YAML or via RECON_GEN_DEMO_DATABASE_URL."
@@ -159,7 +159,7 @@ def schema_migrate_mark(
     from recon_gen.common.db import connect_demo_db
 
     click.echo(
-        f"Connecting to {cfg.demo_database_url.split('@')[-1]}...",
+        f"Connecting to {cfg.db.url.split('@')[-1]}...",
         err=True,
     )
     try:
@@ -168,12 +168,12 @@ def schema_migrate_mark(
         raise click.ClickException(str(e)) from e
     try:
         tx_unstamped, bal_unstamped = count_unstamped_rows(
-            conn, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+            conn, prefix=cfg.db.table_prefix, dialect=cfg.db.dialect,
         )
         click.echo(
-            f"  found {tx_unstamped:,} unstamped {cfg.db_table_prefix}"
+            f"  found {tx_unstamped:,} unstamped {cfg.db.table_prefix}"
             f"_transactions rows, {bal_unstamped:,} unstamped "
-            f"{cfg.db_table_prefix}_daily_balances rows",
+            f"{cfg.db.table_prefix}_daily_balances rows",
             err=True,
         )
         if tx_unstamped == 0 and bal_unstamped == 0:
@@ -193,8 +193,8 @@ def schema_migrate_mark(
             return
         tx_updated, bal_updated = stamp_unstamped_rows(
             conn,
-            prefix=cfg.db_table_prefix,
-            dialect=cfg.dialect,
+            prefix=cfg.db.table_prefix,
+            dialect=cfg.db.dialect,
             source=source_value,
         )
         conn.commit()

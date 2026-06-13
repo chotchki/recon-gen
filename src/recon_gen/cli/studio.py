@@ -161,7 +161,7 @@ def studio(
         )
     # X.4.h.2 — instantiate the data-shaping panel's knob cache here
     # (cfg is in scope; the factory just gets a kwarg). Initial state =
-    # cfg.test_generator snapshot merged with sidefile overrides
+    # cfg.test.generator snapshot merged with sidefile overrides
     # (X.4.h.7 — `<cfg.parent>/.studio-state.yaml` survives Studio
     # restarts without polluting the operator-authored cfg.yaml).
     #
@@ -174,7 +174,7 @@ def studio(
     studio_state_dir_env = os.environ.get("STUDIO_STATE_DIR")
     if studio_state_dir_env:
         tg_cache = TestGeneratorCache(
-            cfg.test_generator,
+            cfg.test.generator,
             state_path=_Path(studio_state_dir_env) / ".studio-state.yaml",
         )
     else:
@@ -184,8 +184,8 @@ def studio(
     # would couple Studio internals to a Studio-ignorant module).
     studio_factory = functools.partial(
         make_studio_routes,
-        dialect=cfg.dialect,
-        prefix_override=cfg.db_table_prefix,
+        dialect=cfg.db.dialect,
+        prefix_override=cfg.db.table_prefix,
         cfg=cfg,
         tg_cache=tg_cache,
     )

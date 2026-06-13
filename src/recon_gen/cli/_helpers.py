@@ -81,8 +81,8 @@ def resolve_l2_for_demo(
     Returns ``(cfg, instance)``. Mirrors the prelude every ``apply``
     operation needs: load YAML, resolve to either the bundled
     spec_example or the integrator's own L2. Z.C — cfg already carries
-    ``cfg.deployment_name`` (QS resource-ID prefix) +
-    ``cfg.db_table_prefix`` (DB-table prefix); no auto-stamping needed.
+    ``cfg.aws.deployment_name`` (QS resource-ID prefix) +
+    ``cfg.db.table_prefix`` (DB-table prefix); no auto-stamping needed.
     """
     from recon_gen.common.l2 import default_l2_instance
 
@@ -180,7 +180,7 @@ def build_full_seed_sql(
     ``base_seed`` (X.4.h.0.b) — root RNG seed for the baseline emitter.
     ``None`` (default) preserves byte-identity with the locked seeds
     (uses ``_BASELINE_BASE_SEED = 42``). Studio's data-shaping panel
-    writes ``cfg.test_generator.seed`` here when the trainer scrubs
+    writes ``cfg.test.generator.seed`` here when the trainer scrubs
     to a different layout.
 
     See ``build_default_scenario`` for the scenario construction +
@@ -200,7 +200,7 @@ def build_full_seed_sql(
         instance, anchor=anchor, density=density, plants=plants,
     )
     return emit_full_seed(
-        instance, final, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+        instance, final, prefix=cfg.db.table_prefix, dialect=cfg.db.dialect,
         anchor=anchor, base_seed=base_seed,
     )
 
@@ -249,11 +249,11 @@ def build_config_populate_sql(
         live = AsOfFrame.live().as_of
         as_of_dt = datetime(live.year, live.month, live.day, 12, 0, 0)
     return emit_config_populate_sql(
-        prefix=cfg.db_table_prefix,
+        prefix=cfg.db.table_prefix,
         cfg_json=cfg_json,
         l2_json=l2_json,
         as_of=as_of_dt,
-        dialect=cfg.dialect,
+        dialect=cfg.db.dialect,
     )
 
 
@@ -295,13 +295,13 @@ def connect_and_apply(
     PEP 249 conformance level.
     """
     from recon_gen.common.db import connect_demo_db, execute_script
-    if not cfg.demo_database_url:
+    if not cfg.db.url:
         raise click.ClickException(
             "demo_database_url is required. "
             "Set it in your config YAML or via RECON_GEN_DEMO_DATABASE_URL."
         )
 
-    click.echo(f"Connecting to {cfg.demo_database_url.split('@')[-1]}...")
+    click.echo(f"Connecting to {cfg.db.url.split('@')[-1]}...")
     try:
         conn = connect_demo_db(cfg)
     except ImportError as e:
@@ -309,7 +309,7 @@ def connect_and_apply(
     try:
         click.echo(f"  Applying {label}...")
         with conn.cursor() as cur:
-            execute_script(cur, sql, dialect=cfg.dialect)
+            execute_script(cur, sql, dialect=cfg.db.dialect)
         conn.commit()
         click.echo(f"  {label.capitalize()} applied.")
     except Exception:

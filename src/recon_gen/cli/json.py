@@ -239,8 +239,8 @@ def json_probe(config: str, output_dir: str) -> None:
             f"opens headless browser, ~30-90s/dashboard"
         )
         results = probe_dashboard(
-            aws_account_id=cfg.aws_account_id,
-            aws_region=cfg.aws_region,
+            aws_account_id=cfg.aws.account_id,
+            aws_region=cfg.aws.region,
             dashboard_id=did,
         )
         click.echo(format_report(did, results))

@@ -303,7 +303,7 @@ def run_html_server(
         cache = L2InstanceCache.from_path(l2_instance_path)
         click.echo(
             f"studio: cached L2 instance for deployment "
-            f"{cfg.deployment_name!s} from {cache.path}"
+            f"{cfg.aws.deployment_name!s} from {cache.path}"
         )
 
     async def _serve() -> None:
@@ -325,8 +325,8 @@ def run_html_server(
             else:
                 fetcher = make_db_fetcher(cfg, instance)
                 click.echo(
-                    f"data: DB-backed ({cfg.dialect.value}) → "
-                    f"{cfg.db_table_prefix}"
+                    f"data: DB-backed ({cfg.db.dialect.value}) → "
+                    f"{cfg.db.table_prefix}"
                     f"_inv_money_trail_edges"
                 )
             dashboards["smoke"] = ServedDashboard(
@@ -339,7 +339,7 @@ def run_html_server(
                 make_connection_pool,
             )
             pool = await make_connection_pool(
-                cfg, max_size=cfg.app2_db_pool_size,
+                cfg, max_size=cfg.db.app2_pool_size,
             )
             # X.2.u.4.b — build via the shared helper so the data fetcher
             # AND the dataset-backed-control options fetcher are both
@@ -350,9 +350,9 @@ def run_html_server(
                 build_real_dashboards(real_apps, cfg, pool=pool, theme=theme),
             )
             click.echo(
-                f"data: DB-backed ({cfg.dialect.value}) → {len(real_apps)} "
+                f"data: DB-backed ({cfg.db.dialect.value}) → {len(real_apps)} "
                 f"app(s) [{', '.join(n for n, _, _ in real_apps)}] "
-                f"(prefix={cfg.db_table_prefix})"
+                f"(prefix={cfg.db.table_prefix})"
             )
         # X.4.c.5.b — build studio_routes here, after the pool exists,
         # so the diagram chrome can light up the Coverage toggle. None

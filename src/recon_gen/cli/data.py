@@ -117,12 +117,12 @@ def _cz6_pre_flight_migrate_mark(cfg: "Config") -> None:
     (pre-CZ rows). Three outcomes:
 
       * No unstamped rows → silent no-op (the common steady-state path).
-      * Unstamped rows + ``cfg.etl_hook is None`` (standalone mode) →
+      * Unstamped rows + ``cfg.app2.etl_hook is None`` (standalone mode) →
         auto-mark with ``source='training'`` and continue. Locked-
         decision rationale: pre-CZ DBs in standalone mode were
         demonstrably running through the training/seed path (etl_hook
         is new in BS.4 + CZ; absent ⇒ no real-data integrator existed).
-      * Unstamped rows + ``cfg.etl_hook is not None`` (ETL mode) → log
+      * Unstamped rows + ``cfg.app2.etl_hook is not None`` (ETL mode) → log
         a one-line hint and continue without auto-marking. The
         integrator may have loaded real rows before CZ landed; the
         explicit ``recon-gen schema migrate-mark`` verb lets them
@@ -142,7 +142,7 @@ def _cz6_pre_flight_migrate_mark(cfg: "Config") -> None:
     from recon_gen.common.l2.migrate_mark import (
         count_unstamped_rows, stamp_unstamped_rows,
     )
-    if not cfg.demo_database_url:
+    if not cfg.db.url:
         return
     try:
         conn = connect_demo_db(cfg)
@@ -153,7 +153,7 @@ def _cz6_pre_flight_migrate_mark(cfg: "Config") -> None:
     try:
         try:
             tx_unstamped, bal_unstamped = count_unstamped_rows(
-                conn, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+                conn, prefix=cfg.db.table_prefix, dialect=cfg.db.dialect,
             )
         except Exception:  # noqa: BLE001 — dialect-specific catalog errors are not a shared exception base
             # Base tables likely don't exist on this DB yet; nothing
@@ -162,7 +162,7 @@ def _cz6_pre_flight_migrate_mark(cfg: "Config") -> None:
         total = tx_unstamped + bal_unstamped
         if total == 0:
             return
-        if cfg.etl_hook is not None:
+        if cfg.app2.etl_hook is not None:
             click.echo(
                 f"  [cz6] found {total:,} pre-CZ row(s) "
                 f"({tx_unstamped:,} transactions, "
@@ -179,14 +179,14 @@ def _cz6_pre_flight_migrate_mark(cfg: "Config") -> None:
             f"({tx_unstamped:,} transactions, "
             f"{bal_unstamped:,} daily_balances): "
             f"stamping metadata.source='training' "
-            f"(cfg.etl_hook is None ⇒ standalone-mode default).",
+            f"(cfg.app2.etl_hook is None ⇒ standalone-mode default).",
             err=True,
         )
         try:
             stamp_unstamped_rows(
                 conn,
-                prefix=cfg.db_table_prefix,
-                dialect=cfg.dialect,
+                prefix=cfg.db.table_prefix,
+                dialect=cfg.db.dialect,
                 source="training",
             )
             conn.commit()
@@ -220,7 +220,7 @@ def data_refresh(
 
     cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
     sql = refresh_matviews_sql(
-        instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+        instance, prefix=cfg.db.table_prefix, dialect=cfg.db.dialect,
     )
 
     if execute:
@@ -253,7 +253,7 @@ def data_clean(
 
     cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
     sql = emit_truncate_sql(
-        instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect,
+        instance, prefix=cfg.db.table_prefix, dialect=cfg.db.dialect,
     )
 
     if execute:

@@ -165,7 +165,7 @@ def format_skipped(*, title: str, dialect: str, reason: str) -> str:
 def dialect_name(dialect: Dialect) -> str:
     """Stable string representation for path/filename use.
 
-    Mirrors the script's ``"postgres" if cfg.dialect is POSTGRES else
+    Mirrors the script's ``"postgres" if cfg.db.dialect is POSTGRES else
     "oracle"`` shape but covers SQLite explicitly. Used for
     ``$RECON_GEN_RUN_DIR/db/<dialect>/top-queries.md`` paths.
     """

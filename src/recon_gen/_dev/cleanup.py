@@ -14,7 +14,7 @@ Two surfaces:
 1. ``sweep_qs_resources_by_tag(client, account_id, tag_key, tag_value)``
    — list every QuickSight resource (dashboard / analysis / dataset /
    theme / datasource), filter by an `(extra_tag_key, extra_tag_value)`
-   pair the test fixture injects via ``cfg.extra_tags``, and delete in
+   pair the test fixture injects via ``cfg.aws.extra_tags``, and delete in
    dependency order. Returns a count of deletions for triage.
 
 2. ``_collect_resources_matching_tag`` — same walk without the delete,

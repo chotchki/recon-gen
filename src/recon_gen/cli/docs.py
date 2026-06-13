@@ -775,12 +775,12 @@ def docs_screenshot(
     )
 
     cfg = load_config(config_path)
-    if not cfg.aws_account_id or not cfg.aws_region:
+    if not cfg.aws.account_id or not cfg.aws.region:
         raise click.ClickException(
             "Config missing aws_account_id or aws_region — "
             "screenshots need them to generate an embed URL."
         )
-    if not skip_warmup and not cfg.demo_database_url:
+    if not skip_warmup and not cfg.db.url:
         raise click.ClickException(
             "demo_database_url not set; pass --skip-warmup to bypass "
             "the cluster warmup step."
@@ -813,12 +813,12 @@ def docs_screenshot(
     if not skip_warmup:
         # Demo URL is guaranteed non-None here — the guard above raises
         # ClickException when skip_warmup is False AND demo_database_url is unset.
-        assert cfg.demo_database_url is not None
+        assert cfg.db.url is not None
         click.echo(
-            f"-> Warming DB ({cfg.demo_database_url.split('@')[-1]}, "
+            f"-> Warming DB ({cfg.db.url.split('@')[-1]}, "
             f"SELECT 1)...", nl=False,
         )
-        _warm_db_for_screenshots(cfg.demo_database_url)
+        _warm_db_for_screenshots(cfg.db.url)
         click.echo(" OK")
 
     from recon_gen.common.browser.helpers import (
@@ -833,17 +833,17 @@ def docs_screenshot(
     for slug in apps_to_capture:
         click.echo(f"== {slug} ==")
         app_obj = _build_app_for_screenshots(slug, cfg, l2_instance)
-        # Dashboard ID convention: cfg.prefixed(<dashboard_id_suffix>) —
-        # Z.C: the cfg arrives fully-populated with cfg.deployment_name,
+        # Dashboard ID convention: cfg.aws.prefixed(<dashboard_id_suffix>) —
+        # Z.C: the cfg arrives fully-populated with cfg.aws.deployment_name,
         # so app_obj.cfg and the outer cfg agree on the namespace.
         dashboard_suffix = app_obj.dashboard.dashboard_id_suffix
-        dashboard_id = app_obj.cfg.prefixed(dashboard_suffix)
+        dashboard_id = app_obj.cfg.aws.prefixed(dashboard_suffix)
         click.echo(
             f"-> embed URL for {dashboard_id}...", nl=False,
         )
         url = generate_dashboard_embed_url(
-            aws_account_id=cfg.aws_account_id,
-            aws_region=cfg.aws_region,
+            aws_account_id=cfg.aws.account_id,
+            aws_region=cfg.aws.region,
             dashboard_id=dashboard_id,
         )
         click.echo(" OK")

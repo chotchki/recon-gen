@@ -145,8 +145,8 @@ def _generate_investigation(
     l2_instance = _resolve_l2(l2_instance_path)
 
     click.echo(
-        f"Investigation: account={cfg.aws_account_id}, "
-        f"region={cfg.aws_region}, deployment={cfg.deployment_name}"
+        f"Investigation: account={cfg.aws.account_id}, "
+        f"region={cfg.aws.region}, deployment={cfg.aws.deployment_name}"
     )
 
     theme = build_theme(cfg, resolve_l2_theme(l2_instance))
@@ -192,8 +192,8 @@ def _generate_executives(
     l2_instance = _resolve_l2(l2_instance_path)
 
     click.echo(
-        f"Executives: account={cfg.aws_account_id}, "
-        f"region={cfg.aws_region}, deployment={cfg.deployment_name}"
+        f"Executives: account={cfg.aws.account_id}, "
+        f"region={cfg.aws.region}, deployment={cfg.aws.deployment_name}"
     )
 
     theme = build_theme(cfg, resolve_l2_theme(l2_instance))
@@ -241,8 +241,8 @@ def _generate_l1_dashboard(
     l2_instance = _resolve_l2(l2_instance_path)
 
     click.echo(
-        f"L1 Dashboard: account={cfg.aws_account_id}, "
-        f"region={cfg.aws_region}, deployment={cfg.deployment_name}"
+        f"L1 Dashboard: account={cfg.aws.account_id}, "
+        f"region={cfg.aws.region}, deployment={cfg.aws.deployment_name}"
     )
 
     theme = build_theme(cfg, resolve_l2_theme(l2_instance))
@@ -290,8 +290,8 @@ def _generate_l2_flow_tracing(
     l2_instance = _resolve_l2(l2_instance_path)
 
     click.echo(
-        f"L2 Flow Tracing: account={cfg.aws_account_id}, "
-        f"region={cfg.aws_region}, deployment={cfg.deployment_name}"
+        f"L2 Flow Tracing: account={cfg.aws.account_id}, "
+        f"region={cfg.aws.region}, deployment={cfg.aws.deployment_name}"
     )
 
     theme = build_theme(cfg, resolve_l2_theme(l2_instance))
