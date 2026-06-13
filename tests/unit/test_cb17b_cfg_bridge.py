@@ -33,8 +33,7 @@ def _minimal_cfg(dialect: Dialect, *, demo_url: str | None = None) -> Config:
     the bridge never touches.
     """
     return Config(
-        aws=AwsConfig(account_id="000000000000"),
-        aws_region="us-east-1",
+        aws=AwsConfig(account_id="000000000000", region="us-east-1"),
         deployment_name="recon-test",
         db_table_prefix="recon_test",
         demo_database_url=demo_url,

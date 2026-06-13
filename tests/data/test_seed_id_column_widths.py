@@ -74,8 +74,7 @@ def _cfg_for_test(prefix: str) -> Config:
     """A minimal Config the seed emitter accepts. The actual values
     don't matter — we only walk the emitted SQL, never connect."""
     return Config(
-        aws=AwsConfig(account_id="000000000000"),
-        aws_region="us-east-1",
+        aws=AwsConfig(account_id="000000000000", region="us-east-1"),
         deployment_name=prefix,
         db_table_prefix=prefix,
         dialect=Dialect.POSTGRES,

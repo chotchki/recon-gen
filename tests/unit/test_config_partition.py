@@ -21,10 +21,12 @@ from recon_gen.common.config import AwsConfig, Config
 
 def _cfg(**overrides: Any) -> Config:
     """Minimal Config with one of every required field; override per test."""
+    # DE.5 steps 3+4 — translate aws_account_id / aws_region kwargs.
+    region = overrides.pop("aws_region", "us-east-1")
+    account_id = overrides.pop("aws_account_id", "111122223333")
     base: dict[str, Any] = dict(
-        aws=AwsConfig(account_id="111122223333"),
-        aws_region="us-east-1",
-        datasource_arn="arn:aws:quicksight:us-east-1:111122223333:datasource/x",
+        aws=AwsConfig(account_id=account_id, region=region),
+        datasource_arn=f"arn:aws:quicksight:{region}:{account_id}:datasource/x",
         deployment_name="recon-test",
         db_table_prefix="test",
     )
@@ -35,8 +37,7 @@ def _cfg(**overrides: Any) -> Config:
 def test_partition_defaults_to_aws_with_no_arn_sources() -> None:
     """No principal_arns, no datasource_arn → "aws" default."""
     cfg = Config(
-        aws=AwsConfig(account_id="111122223333"),
-        aws_region="us-east-1",
+        aws=AwsConfig(account_id="111122223333", region="us-east-1"),
         demo_database_url="postgresql://example",
         deployment_name="recon-test",
         db_table_prefix="test",
@@ -60,8 +61,7 @@ def test_partition_from_principal_arn_when_no_datasource_set() -> None:
     partition derives from the principal_arn so the synthesized
     datasource_arn lands in the right partition."""
     cfg = Config(
-        aws=AwsConfig(account_id="111122223333"),
-        aws_region="us-gov-east-1",
+        aws=AwsConfig(account_id="111122223333", region="us-gov-east-1"),
         demo_database_url="postgresql://example",
         deployment_name="recon-test",
         db_table_prefix="test",
@@ -131,8 +131,7 @@ def test_bare_string_principal_falls_through_to_default() -> None:
     """Defensive: an empty / malformed principal_arns entry doesn't
     leak through as a partition; default ``aws`` wins."""
     cfg = Config(
-        aws=AwsConfig(account_id="111122223333"),
-        aws_region="us-east-1",
+        aws=AwsConfig(account_id="111122223333", region="us-east-1"),
         demo_database_url="postgresql://example",
         deployment_name="recon-test",
         db_table_prefix="test",
@@ -145,8 +144,7 @@ def test_empty_partition_segment_falls_through() -> None:
     """An ARN like ``arn::quicksight:...`` (empty partition slot)
     shouldn't be honored; default ``aws`` wins."""
     cfg = Config(
-        aws=AwsConfig(account_id="111122223333"),
-        aws_region="us-east-1",
+        aws=AwsConfig(account_id="111122223333", region="us-east-1"),
         demo_database_url="postgresql://example",
         deployment_name="recon-test",
         db_table_prefix="test",

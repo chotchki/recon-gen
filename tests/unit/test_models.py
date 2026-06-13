@@ -634,8 +634,7 @@ class TestBuildDatasourceOracle:
 class TestConfigDatasourceArnDerivation:
     def test_derived_from_demo_url(self):
         cfg = Config(
-            aws=AwsConfig(account_id="111122223333"),
-            aws_region="us-west-2",
+            aws=AwsConfig(account_id="111122223333", region="us-west-2"),
             # Z.C — required cfg fields.
             deployment_name="recon-derived",
             db_table_prefix="derived",
@@ -648,8 +647,7 @@ class TestConfigDatasourceArnDerivation:
 
     def test_explicit_arn_takes_precedence(self):
         cfg = Config(
-            aws=AwsConfig(account_id="111122223333"),
-            aws_region="us-west-2",
+            aws=AwsConfig(account_id="111122223333", region="us-west-2"),
             deployment_name="recon-explicit",
             db_table_prefix="explicit",
             datasource_arn="arn:aws:quicksight:us-west-2:111122223333:datasource/custom",
@@ -662,8 +660,7 @@ class TestConfigDatasourceArnDerivation:
         import pytest
         with pytest.raises(ValueError, match="datasource_arn"):
             Config(
-                aws=AwsConfig(account_id="123"),
-                aws_region="us-east-1",
+                aws=AwsConfig(account_id="123", region="us-east-1"),
                 deployment_name="recon-fail-test",
                 db_table_prefix="fail_test",
             )

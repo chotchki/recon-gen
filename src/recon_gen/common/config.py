@@ -471,11 +471,10 @@ class TestGeneratorConfig:
 
 @dataclass
 class Config:
-    # DE.5 step 3 — ``aws_account_id`` flat field dropped. Callers pass
-    # ``aws=AwsConfig(account_id="...")``; ``__post_init__`` blends with
-    # the remaining flat fields. Loader + ``make_test_config`` already
-    # translate. Direct ``Config(aws_account_id=...)`` callers updated.
-    aws_region: str
+    # DE.5 steps 3+4 — ``aws_account_id`` + ``aws_region`` flat fields
+    # dropped. Callers pass ``aws=AwsConfig(account_id="...", region="...")``;
+    # ``__post_init__`` blends with the remaining flat fields. Loader +
+    # ``make_test_config`` translate; direct callers updated.
     # Z.C — Per-deploy QS namespace. Replaces v8.x's ``resource_prefix``
     # (defaulted ``qs-gen``) + ``l2_instance_prefix`` (stamped from the
     # L2 yaml's ``instance:`` field) — those were the same concept,
@@ -743,20 +742,26 @@ class Config:
         return _TestView(generator=self.test_generator)
 
     def __post_init__(self) -> None:
-        # DE.5 step 3 — account_id no longer has a flat field; it MUST
-        # come from caller-supplied aws=AwsConfig(account_id=...).
+        # DE.5 steps 3+4 — account_id + region come from caller-supplied
+        # aws=AwsConfig(account_id=..., region=...).
         if not self.aws.account_id:
             raise ValueError(
                 "Config requires aws=AwsConfig(account_id=...). The legacy "
                 "``aws_account_id`` flat kwarg was dropped in DE.5 step 3."
             )
+        if not self.aws.region:
+            raise ValueError(
+                "Config requires aws=AwsConfig(region=...). The legacy "
+                "``aws_region`` flat kwarg was dropped in DE.5 step 4."
+            )
         account_id = self.aws.account_id
+        region = self.aws.region
         # If demo_database_url is set but datasource_arn is not, derive it
         # — and record that we own the resulting datasource resource.
         if self.datasource_arn is None and self.demo_database_url is not None:
             ds_id = self.prefixed("demo-datasource")
             self.datasource_arn = (
-                f"arn:{self.partition}:quicksight:{self.aws_region}"
+                f"arn:{self.partition}:quicksight:{region}"
                 f":{account_id}:datasource/{ds_id}"
             )
             self.datasource_arn_was_derived = True
@@ -764,12 +769,10 @@ class Config:
             raise ValueError(
                 "datasource_arn is required unless demo_database_url is set."
             )
-        # DE.5 step 3 — blend caller-supplied ``aws.account_id`` with the
-        # still-legacy flat fields (region / deployment_name / etc.).
-        # Subsequent steps drop more flats; this overlay logic shrinks.
+        # DE.5 — blend caller-supplied ``aws`` fields with remaining flats.
         self.aws = AwsConfig(
             account_id=account_id,
-            region=self.aws_region,
+            region=region,
             deployment_name=self.deployment_name,
             principal_arns=tuple(self.principal_arns),
             extra_tags=tuple(sorted(self.extra_tags.items())),
@@ -848,13 +851,13 @@ class Config:
 
     def dataset_arn(self, dataset_id: str) -> str:
         return (
-            f"arn:{self.partition}:quicksight:{self.aws_region}"
+            f"arn:{self.partition}:quicksight:{self.aws.region}"
             f":{self.aws.account_id}:dataset/{dataset_id}"
         )
 
     def theme_arn(self, theme_id: str) -> str:
         return (
-            f"arn:{self.partition}:quicksight:{self.aws_region}"
+            f"arn:{self.partition}:quicksight:{self.aws.region}"
             f":{self.aws.account_id}:theme/{theme_id}"
         )
 
@@ -897,6 +900,8 @@ class Config:
             aws_typed = cast(dict[str, Any], aws_out)
             if aws_typed.get("account_id"):
                 out["aws_account_id"] = aws_typed["account_id"]
+            if aws_typed.get("region"):
+                out["aws_region"] = aws_typed["region"]
         derived = bool(out.pop("datasource_arn_was_derived", False))
         out["dialect"] = self.dialect.value
         if derived:
@@ -1529,11 +1534,11 @@ def load_config(path: str | Path | None = None) -> Config:
             )
 
     return Config(
-        # DE.5 step 3 — account_id now carried in aws=AwsConfig(...).
-        # Other aws_* flats are still flat fields on Config until their
-        # respective step-by-step drops.
-        aws=AwsConfig(account_id=_require_str(values, "aws_account_id")),
-        aws_region=_require_str(values, "aws_region"),
+        # DE.5 steps 3+4 — account_id + region now carried in aws=AwsConfig(...).
+        aws=AwsConfig(
+            account_id=_require_str(values, "aws_account_id"),
+            region=_require_str(values, "aws_region"),
+        ),
         deployment_name=_require_str(values, "deployment_name"),
         db_table_prefix=_validate_and_return_db_prefix(
             _require_str(values, "db_table_prefix")

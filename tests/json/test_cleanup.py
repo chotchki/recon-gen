@@ -402,8 +402,7 @@ def _patched_boto3_client(monkeypatch: pytest.MonkeyPatch, stub: Any) -> None:
 def _make_cfg(tagging_enabled: bool = True) -> Config:
     # Z.C — deployment_name + db_table_prefix are now required cfg fields.
     return Config(
-        aws=AwsConfig(account_id="111"),
-        aws_region="us-east-1",
+        aws=AwsConfig(account_id="111", region="us-east-1"),
         deployment_name="qs-test",
         db_table_prefix="test",
         datasource_arn="arn:aws:quicksight:us-east-1:111:datasource/x",
