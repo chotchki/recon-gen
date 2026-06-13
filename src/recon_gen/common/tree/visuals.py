@@ -667,7 +667,15 @@ class KPI:
                         SecondaryValueFontConfiguration={
                             "FontSize": {"Relative": "EXTRA_LARGE"},
                         },
-                        Sparkline={"Visibility": "HIDDEN"},
+                        # ``Type`` stays "AREA" even though Visibility
+                        # is HIDDEN — botocore's QS schema requires Type
+                        # on the Sparkline block regardless of
+                        # visibility (caught in CI 20260613T000231Z: 5
+                        # KPIs failed CreateAnalysis with "Missing
+                        # required parameter in
+                        # KPIOptions.Sparkline: 'Type'"). The block stays
+                        # inert at render time since Visibility=HIDDEN.
+                        Sparkline={"Visibility": "HIDDEN", "Type": "AREA"},
                         VisualLayoutOptions={
                             "StandardLayout": {"Type": "VERTICAL"},
                         },
