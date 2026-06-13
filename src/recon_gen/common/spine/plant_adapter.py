@@ -159,7 +159,7 @@ def scenario_to_generators(
 
     `prefix` defaults to "spec_example" (the in-process test harness
     shape). Production callers (AY.4.d `build_full_seed_sql`) pass
-    `cfg.db_table_prefix`; every constructed generator inherits
+    `cfg.db.table_prefix`; every constructed generator inherits
     `self.prefix = prefix` so `insert_tx` / `insert_balance` writes
     to the correctly-prefixed tables.
     """
@@ -282,7 +282,7 @@ def scenario_to_generators(
     # spine generator carries a `prefix: str = "spec_example"` field;
     # the adapter helpers build with that default to keep their
     # construction signatures narrow. Production callers thread
-    # `cfg.db_table_prefix` here so the emit writes to the
+    # `cfg.db.table_prefix` here so the emit writes to the
     # correctly-prefixed tables.
     if prefix != "spec_example":
         for gen in out:

@@ -42,7 +42,7 @@ def _read_managed_tags(
 
     Returns None if the resource is not ours (or we can't read its tags).
     Caller uses the returned map to additionally filter on ``Deployment``
-    when ``cfg.deployment_name`` is set (Z.C — collapsed from the prior
+    when ``cfg.aws.deployment_name`` is set (Z.C — collapsed from the prior
     ``ResourcePrefix`` + ``L2Instance`` two-tag scope).
     """
     from botocore.exceptions import ClientError  # noqa: PLC0415 — lazy
@@ -74,8 +74,8 @@ def _expected_ids_from_out(out_dir: Path, cfg: Config) -> dict[str, set[str]]:
         "datasource": set(),
     }
 
-    if cfg.datasource_arn:
-        expected["datasource"].add(cfg.datasource_arn.rsplit("/", 1)[-1])
+    if cfg.aws.datasource.arn:
+        expected["datasource"].add(cfg.aws.datasource.arn.rsplit("/", 1)[-1])
 
     if not out_dir.exists():
         return expected
@@ -314,12 +314,12 @@ def run_cleanup(
     # BF.1.S2: boto3.client returns the right per-service stub at runtime
     # but pyright sees the umbrella overload; anchor to QuickSightClient.
     client: QuickSightClient = boto3.client(  # pyright: ignore[reportUnknownMemberType]: boto3.client overloaded union; QuickSightClient annotation anchors the right stub
-        "quicksight", region_name=cfg.aws_region,
+        "quicksight", region_name=cfg.aws.region,
     )
-    account_id = cfg.aws_account_id
+    account_id = cfg.aws.account_id
 
-    scope_label = f" scoped to Deployment={cfg.deployment_name!r}"
-    if not cfg.tagging_enabled:
+    scope_label = f" scoped to Deployment={cfg.aws.deployment_name!r}"
+    if not cfg.aws.tagging_enabled:
         scope_label += (
             " (tagging disabled — matching by ID prefix only; weaker"
             " isolation, see docs reference)"
@@ -331,7 +331,7 @@ def run_cleanup(
         )
     click.echo(
         f"Scanning QuickSight resources in {account_id} "
-        f"({cfg.aws_region}){scope_label}..."
+        f"({cfg.aws.region}){scope_label}..."
     )
     expected: dict[str, set[str]] = (
         # Empty carve-out = every matching resource is stale.
@@ -343,8 +343,8 @@ def run_cleanup(
     )
     stale = _collect_stale(
         client, account_id, expected,
-        deployment_name=cfg.deployment_name,
-        tagging_enabled=cfg.tagging_enabled,
+        deployment_name=cfg.aws.deployment_name,
+        tagging_enabled=cfg.aws.tagging_enabled,
     )
 
     total = sum(len(items) for items in stale.values())

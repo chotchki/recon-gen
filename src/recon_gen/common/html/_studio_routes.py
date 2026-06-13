@@ -192,7 +192,7 @@ _WASM_GRAPHVIZ_DIR = (
 )
 
 # CZ.4 — refuse banner shown when Studio's POST /deploy fires with
-# ``cfg.etl_hook is None`` (standalone-mode). The deploy pipeline would
+# ``cfg.app2.etl_hook is None`` (standalone-mode). The deploy pipeline would
 # wipe-and-reseed; without an ETL hook the wipe is not followed by a
 # real-data reload, so any unmarked row in the demo DB might be customer
 # data. The message names the two correct unblock paths so the refusal
@@ -200,12 +200,12 @@ _WASM_GRAPHVIZ_DIR = (
 _CZ_STANDALONE_MODE_REFUSE_MESSAGE = (
     "Standalone mode — Deploy-changes refused.\n"
     "\n"
-    "Your configuration does not declare an ETL hook (cfg.etl_hook is "
+    "Your configuration does not declare an ETL hook (cfg.app2.etl_hook is "
     "empty). In this mode, Deploy-changes would wipe rows we cannot "
     "prove are synthetic, which may delete real customer data.\n"
     "\n"
     "To deploy changes safely, either:\n"
-    "  1. Configure cfg.etl_hook in your config.yaml so the next ETL "
+    "  1. Configure cfg.app2.etl_hook in your config.yaml so the next ETL "
     "cycle re-populates the demo DB, or\n"
     "  2. Use the Trainer 'Clear synthetic rows and re-seed' button, "
     "which removes only rows tagged metadata.source='training' and "
@@ -229,7 +229,7 @@ def _duckdb_pool_subprocess_bracket(
     around ``step_1_etl_hook``'s subprocess is unnecessary on those
     dialects — we return ``None`` and the pipeline no-ops the bracket
     via ``nullcontext``. DuckDB's process-level write lock would
-    otherwise block the operator's ``cfg.etl_hook`` subprocess from
+    otherwise block the operator's ``cfg.app2.etl_hook`` subprocess from
     acquiring a write handle on the same ``.duckdb`` file, per the
     ``etl_duckdb_studio_concurrency`` audit.
 
@@ -367,22 +367,22 @@ _HOME_SINGLETONS: tuple[tuple[str, str, str], ...] = (
 
 
 def _banner(cfg: Config | None, *, embed: bool = False) -> str:
-    """CU.3 — top-of-page banner driven by ``cfg.banner_text``.
+    """CU.3 — top-of-page banner driven by ``cfg.app2.banner_text``.
 
     Replaces the AH.4 demo-mode banner. Returns empty string when
-    ``cfg`` is None, when ``cfg.banner_text`` is None / empty, or when
+    ``cfg`` is None, when ``cfg.app2.banner_text`` is None / empty, or when
     ``embed=True`` (embedded iframe surfaces suppress chrome). Demo
     installs set ``banner_text`` to a short disclaimer (e.g. "Edits
     reset on next restart"); production cfgs leave it None. Inline-
     styled so it needs no stylesheet / Tailwind-utility rebuild.
     """
-    if embed or cfg is None or not cfg.banner_text:
+    if embed or cfg is None or not cfg.app2.banner_text:
         return ""
     return (
         '<div class="server-banner" role="status" '
         'style="background:#fff3cd;border-bottom:1px solid #ffe69c;'
         'color:#664d03;padding:0.6rem 1rem;font-size:0.9rem;text-align:center">'
-        f"{escape(cfg.banner_text)} "
+        f"{escape(cfg.app2.banner_text)} "
         '<a href="https://chotchki.github.io/recon-gen/" target="_blank" '
         'rel="noopener" style="color:#664d03;text-decoration:underline">'
         "Learn more</a>."
@@ -391,7 +391,7 @@ def _banner(cfg: Config | None, *, embed: bool = False) -> str:
 
 
 # CZ.5 — locked operator copy (REPLAN, 2026-06-09). Standalone-mode
-# kicks in when ``cfg.etl_hook is None``: Trainer reset + Studio
+# kicks in when ``cfg.app2.etl_hook is None``: Trainer reset + Studio
 # Deploy-changes will only DELETE rows tagged
 # ``metadata.source = 'training'``; unmarked rows are presumed real
 # customer data and survive. The banner makes the protection visible
@@ -401,7 +401,7 @@ STANDALONE_MODE_BANNER_TEXT = (
     "Reset and Deploy-changes will only remove rows tagged "
     "metadata.source='training'. Any unmarked rows are presumed to be "
     "real customer data and will be preserved. To configure an ETL "
-    "hook, edit cfg.etl_hook in your config.yaml."
+    "hook, edit cfg.app2.etl_hook in your config.yaml."
 )
 
 # REPLAN-locked Trainer reset button label on standalone-mode.
@@ -411,19 +411,19 @@ STANDALONE_RESET_BUTTON_LABEL = "Clear synthetic rows and re-seed"
 # disables it. Mirrors the banner-copy framing so the hover hint and
 # the page banner stay aligned.
 STANDALONE_DEPLOY_DISABLED_TOOLTIP = (
-    "Standalone mode (cfg.etl_hook is None) — Deploy-changes is "
+    "Standalone mode (cfg.app2.etl_hook is None) — Deploy-changes is "
     "disabled because it would TRUNCATE + reseed the demo DB. "
-    "Configure cfg.etl_hook in your config.yaml to re-enable."
+    "Configure cfg.app2.etl_hook in your config.yaml to re-enable."
 )
 
 
 def _standalone_mode_banner(cfg: Config | None, *, embed: bool = False) -> str:
-    """CZ.5 — standalone-mode banner driven by ``cfg.etl_hook``.
+    """CZ.5 — standalone-mode banner driven by ``cfg.app2.etl_hook``.
 
-    Renders when ``cfg.etl_hook is None`` (the gate signal — no ETL
+    Renders when ``cfg.app2.etl_hook is None`` (the gate signal — no ETL
     integrator wired, so Trainer-reset / Deploy-changes default to
     DELETE-only-synthetic to protect any real rows in the DB). Returns
-    empty string when ``cfg`` is None, when ``cfg.etl_hook`` is
+    empty string when ``cfg`` is None, when ``cfg.app2.etl_hook`` is
     configured, or when ``embed=True``.
 
     Inline-styled with a distinct color from the CU.3 demo banner
@@ -432,7 +432,7 @@ def _standalone_mode_banner(cfg: Config | None, *, embed: bool = False) -> str:
     survive restart"; this banner means "automated deletes will be
     cautious".
     """
-    if embed or cfg is None or cfg.etl_hook is not None:
+    if embed or cfg is None or cfg.app2.etl_hook is not None:
         return ""
     return (
         '<div class="server-banner" role="status" '
@@ -701,7 +701,7 @@ def _render_home_page(
     bumps ``iframe.src = iframe.src`` to force a reload.
     """
     instance = cache.get()
-    prefix = escape(cfg.deployment_name if cfg is not None else cache.path.stem)
+    prefix = escape(cfg.aws.deployment_name if cfg is not None else cache.path.stem)
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
 
     # CF.4.d — home URL carries kind-namespaced toolbar state. Each
@@ -1249,7 +1249,7 @@ def _render_etl_landing_page(
     cards_with_arrows = f"\n    {arrow_html}\n    ".join(card_blocks)
 
     tutorial_banner = _render_tutorial_banner(
-        cfg.deployment_name if cfg is not None else cache.path.stem,
+        cfg.aws.deployment_name if cfg is not None else cache.path.stem,
     )
 
     return f"""<!doctype html>
@@ -1332,7 +1332,7 @@ async def _render_etl_probe_page(
     prefix = (
         prefix_override
         if prefix_override is not None
-        else (cfg.db_table_prefix if cfg is not None else cache.path.stem)
+        else (cfg.db.table_prefix if cfg is not None else cache.path.stem)
     )
 
     qp = request.query_params
@@ -1951,16 +1951,16 @@ async def _render_etl_run_page(
     prefix = (
         prefix_override
         if prefix_override is not None
-        else (cfg.db_table_prefix if cfg is not None else cache.path.stem)
+        else (cfg.db.table_prefix if cfg is not None else cache.path.stem)
     )
 
     run_form_html = _render_etl_run_form(
         last_summary=last_summary,
         last_run_at=last_run_at,
-        etl_hook_command=cfg.etl_hook if cfg is not None else None,
-        deployment_name=cfg.deployment_name if cfg is not None else None,
-        dialect_label=cfg.dialect.value if cfg is not None else None,
-        demo_gaps_planted=cfg is not None and cfg.etl_hook is None,
+        etl_hook_command=cfg.app2.etl_hook if cfg is not None else None,
+        deployment_name=cfg.aws.deployment_name if cfg is not None else None,
+        dialect_label=cfg.db.dialect.value if cfg is not None else None,
+        demo_gaps_planted=cfg is not None and cfg.app2.etl_hook is None,
         is_running=is_running,
     )
     log_html = _render_etl_run_log(last_summary)
@@ -2043,7 +2043,7 @@ def _render_etl_run_form(
     (the command that ran + bundled-demo distinction + exit code)
     so first-time operators can tell whether THEIR hook ran or
     the bundled demo placeholder. ``etl_hook_command`` is
-    ``cfg.etl_hook`` (None → bundled demo hook ran).
+    ``cfg.app2.etl_hook`` (None → bundled demo hook ran).
 
     BTa.8 cold-read v3 — ``deployment_name`` + ``dialect_label`` +
     ``demo_gaps_planted`` feed a "What clicking Refresh Data will
@@ -2312,7 +2312,7 @@ def _format_live_event_line(event: Mapping[str, object]) -> str:
 def _format_hook_attribution(etl_hook_command: str | None) -> str:
     """Hook label for the last-run status banner.
 
-    When the operator hasn't configured ``cfg.etl_hook``, the
+    When the operator hasn't configured ``cfg.app2.etl_hook``, the
     deploy ran the bundled demo regen — make that visible so
     "I ran ETL but my data isn't here" gets a faster diagnosis.
     """
@@ -2693,7 +2693,7 @@ async def _render_etl_triage_page(
     prefix = (
         prefix_override
         if prefix_override is not None
-        else (cfg.db_table_prefix if cfg is not None else cache.path.stem)
+        else (cfg.db.table_prefix if cfg is not None else cache.path.stem)
     )
 
     if db_pool is None or dialect is None:
@@ -2725,14 +2725,14 @@ async def _render_etl_triage_page(
     # doesn't panic at 4,400 "Missing LimitSchedule" rows + decide
     # the L2 is broken. Real-hook deployments skip this banner.
     demo_plant_banner = ""
-    if cfg is not None and cfg.etl_hook is None:
+    if cfg is not None and cfg.app2.etl_hook is None:
         demo_plant_banner = """
   <aside class="mx-8 mt-6 mb-2 bg-accent/5 border border-accent/30 rounded-md px-4 py-3 text-sm"
          data-test-triage-demo-plant-banner role="status">
     <strong class="text-accent">ⓘ Bundled-demo data.</strong>
     Some gaps below are intentional demo plants (rows tagged
     <code>__demo_gap_*</code>) so this page has content to demo.
-    With a real ETL hook configured (set <code>cfg.etl_hook</code>),
+    With a real ETL hook configured (set <code>cfg.app2.etl_hook</code>),
     only your real gaps surface.
   </aside>
 """
@@ -3123,11 +3123,11 @@ def _render_diagram_page(
     """
     instance = cache.get()
     # Z.C — topology helpers require db_table_prefix as a keyword. Use
-    # cfg.db_table_prefix when available; fall back to the deployment
+    # cfg.db.table_prefix when available; fall back to the deployment
     # name (or `"unbound"` sentinel) when the studio is rendering
     # topology without an attached cfg.
     db_prefix = (
-        cfg.db_table_prefix if cfg is not None else "unbound"
+        cfg.db.table_prefix if cfg is not None else "unbound"
     )
     # CF.3.k — cache the digraph build (the expensive step) keyed by
     # (instance, prefix, focus, layer, hide_singleleg). Layout time
@@ -3147,7 +3147,7 @@ def _render_diagram_page(
     # Counts for the chrome (uses the typed projection so they reflect
     # the underlying L2 shape, not the rendered subgraph).
     typed = topology_graph_for(instance, db_table_prefix=db_prefix)
-    prefix = escape(cfg.deployment_name if cfg is not None else cache.path.stem)
+    prefix = escape(cfg.aws.deployment_name if cfg is not None else cache.path.stem)
     n_role_internal = sum(
         1 for n in typed.nodes
         if n.kind == "role" and n.scope == "internal"
@@ -3755,7 +3755,7 @@ def render_mini_diagram_html(
 
     # Cfg-or-fallback prefix, matching `_render_diagram_page`.
     db_prefix = (
-        cfg.db_table_prefix if cfg is not None else "unbound"
+        cfg.db.table_prefix if cfg is not None else "unbound"
     )
     # Layer 3 keeps templates + chains visible — operator Q6 lock:
     # "show more" on the mini even if the operator's last full-diagram
@@ -3995,7 +3995,7 @@ def _render_plants_strip(
 ) -> str:
     """X.4.h.2 — render the plant-toggle checkbox strip.
 
-    ``selected`` is the current ``cfg.test_generator.plants``. Empty
+    ``selected`` is the current ``cfg.test.generator.plants``. Empty
     tuple = "all kinds" per the SPEC (matches the
     ``filter_scenario_plants(plants=None or ())`` short-circuit), so
     every checkbox renders checked when the tuple is empty.
@@ -4035,7 +4035,7 @@ def _render_etl_hook_strip(
 ) -> str:
     """X.4.h.etl-toggle — render the etl-hook enable/disable strip.
 
-    Surfaces ``cfg.etl_hook`` (the shell command). The toggle disables
+    Surfaces ``cfg.app2.etl_hook`` (the shell command). The toggle disables
     the hook for the next Deploy without erasing the cfg field — flip
     back on later to restore it. BS.4 (2026-05-29) dropped the legacy
     ``etl_datasource`` half of the pair; the etl_hook is the sole ETL
@@ -4287,9 +4287,9 @@ def _render_scope_strip(selected: ScopeKind) -> str:
 
 
 def _render_only_template_strip(selected: str | None) -> str:
-    """X.4.i.3 — text input for ``cfg.test_generator.only_template``.
+    """X.4.i.3 — text input for ``cfg.test.generator.only_template``.
 
-    Wires ``cfg.test_generator.scope = "only_template"`` to a concrete
+    Wires ``cfg.test.generator.scope = "only_template"`` to a concrete
     TransferTemplate name. Operator types the template name into the
     input; commit-on-change PUTs the value. Empty string clears to None
     (which the only_template scope arm rejects with a loud-fail at
@@ -4639,7 +4639,7 @@ def _render_data_page(
     ``quicksightDeploy()`` JS helper bound to the button's onclick.
     """
     instance = cache.get()
-    prefix = escape(cfg.deployment_name if cfg is not None else cache.path.stem)
+    prefix = escape(cfg.aws.deployment_name if cfg is not None else cache.path.stem)
     devlog_meta, devlog_script = _dev_log_head_snippets(dev_log)
     selected_plants = (
         tg_cache.get().plants if tg_cache is not None else ()
@@ -4697,12 +4697,12 @@ def _render_data_page(
     # dummy AWS creds so /deploy fails noisily at the AWS-push step;
     # the visible visitor effect is the local DB rebuild.
     #
-    # CZ.5 — standalone-mode (cfg.etl_hook is None) visually disables
+    # CZ.5 — standalone-mode (cfg.app2.etl_hook is None) visually disables
     # the button + carries a tooltip explaining the protection so the
     # operator sees the gate BEFORE the click instead of bouncing off
     # CZ.4's server-side refuse. Couples with the standalone banner +
     # the Trainer reset label change for a single coherent signal.
-    standalone_mode = cfg is not None and cfg.etl_hook is None
+    standalone_mode = cfg is not None and cfg.app2.etl_hook is None
     if standalone_mode:
         deploy_controls = (
             '<button id="deploy-btn" '
@@ -4852,14 +4852,14 @@ def make_studio_routes(
             ``column_name(...)``). When ``db_pool`` is None, this is
             ignored.
         prefix_override: Optional override for the ``<prefix>_transactions``
-            schema prefix; usually omitted (defaults to ``cfg.db_table_prefix``).
+            schema prefix; usually omitted (defaults to ``cfg.db.table_prefix``).
             When ``cfg`` is also None and the override is omitted, the
             coverage route's prefix-resolve raises — that combination
             is only valid for the unit-test surface that doesn't mount
             the coverage route (``db_pool=None``).
         cfg: Full Config dataclass; required for the X.4.g.13
             ``POST /deploy`` route (the deploy pipeline reads
-            ``cfg.etl_hook`` / ``cfg.test_generator`` plus DB
+            ``cfg.app2.etl_hook`` / ``cfg.test.generator`` plus DB
             connection knobs). None ⇒ POST /deploy is silently
             omitted (unit-test surface that doesn't exercise the
             pipeline).
@@ -4993,7 +4993,7 @@ def make_studio_routes(
         # BU.1.8 — the BTa.8 inline overlay block previously here
         # moved INTO run_deploy_pipeline via the L2_DEMO_GAP_OVERLAY
         # typed layer (selected via overlays=ETL_DEBUG above when
-        # cfg.etl_hook is None). Matview refresh now sees the
+        # cfg.app2.etl_hook is None). Matview refresh now sees the
         # overlay'd state cleanly.
 
         _etl_run_state["summary"] = summary
@@ -5005,7 +5005,7 @@ def make_studio_routes(
 
         POST disables ``test_generator`` per BT.0 lock 1 (pure-ETL
         runs; generator overlay stays a Training-mode opt-in) — BUT
-        only when ``cfg.etl_hook`` is configured. With no hook the
+        only when ``cfg.app2.etl_hook`` is configured. With no hook the
         pipeline would otherwise be wipe → no-op → empty DB; the
         operator's "Refresh Data" click would dutifully wipe their
         data with nothing to repopulate. Leaving the generator on
@@ -5031,12 +5031,12 @@ def make_studio_routes(
                 return RedirectResponse(url="/etl/run", status_code=303)
             # Bundled-demo path: no hook ⇒ keep generator enabled
             # so Refresh Data actually reloads the demo seed.
-            if cfg.etl_hook is None:
+            if cfg.app2.etl_hook is None:
                 patched_cfg = cfg
             else:
                 patched_cfg = dataclass_replace(
                     cfg, test_generator=dataclass_replace(
-                        cfg.test_generator, enabled=False,
+                        cfg.test.generator, enabled=False,
                     ),
                 )
             _etl_run_state["started_at"] = datetime.now()  # typing-smell: ignore[no-datetime-now]: BTa.9 wall-clock anchor for "running for Ns" + elapsed-time display
@@ -5151,7 +5151,7 @@ def make_studio_routes(
         # picks up wherever the operator left off in this session).
         if tg_cache is not None:
             _apply_state_url_to_cache(request, tg_cache)
-        etl_hook_command = cfg.etl_hook if cfg is not None else None
+        etl_hook_command = cfg.app2.etl_hook if cfg is not None else None
         return HTMLResponse(_render_data_page(
             cache, dev_log,
             tg_cache=tg_cache,
@@ -5236,7 +5236,7 @@ def make_studio_routes(
             session_metadata_session_start_key,
         )
         instance = cache.get()
-        base_prefix = cfg.db_table_prefix if cfg is not None else cache.path.stem
+        base_prefix = cfg.db.table_prefix if cfg is not None else cache.path.stem
         v_overlay_exists = await _v_overlay_exists(
             cfg, instance, base_prefix,
         )
@@ -5310,7 +5310,7 @@ def make_studio_routes(
         # HTML through (kwargs added in v3.py) so the chrome-level banner
         # uses the same shape as every other Studio page. The prior inline
         # rounded-box variant in v3 looked alien against the rest of Studio.
-        standalone_mode = cfg is not None and cfg.etl_hook is None
+        standalone_mode = cfg is not None and cfg.app2.etl_hook is None
         demo_banner_html = _banner(cfg)
         standalone_banner_html = _standalone_mode_banner(cfg)
         return HTMLResponse(render_training_v3_landing(
@@ -5507,7 +5507,7 @@ def make_studio_routes(
         # (etl_hook configured) → full-TRUNCATE (next ETL cycle refills,
         # so wiping everything is safe). Matview refresh still runs on
         # both paths per CZ.3's matview_refresh_decision lock.
-        synthetic_only_wipe = cfg.etl_hook is None
+        synthetic_only_wipe = cfg.app2.etl_hook is None
         await run_deploy_pipeline(
             cfg, cache.get(), dev_log=None, overlays=TRAINER_CLEAN,
             subprocess_lock_bracket=subprocess_lock_bracket,
@@ -5860,7 +5860,7 @@ def make_studio_routes(
         snap = await make_snapshotter(
             cfg,
             db_pool,
-            base_prefix=prefix_override or cfg.db_table_prefix,
+            base_prefix=prefix_override or cfg.db.table_prefix,
             l2_instance=cache.get(),
         )
         _snapshotter_state["instance"] = snap
@@ -6331,7 +6331,7 @@ def make_studio_routes(
                 - ``enabled=on`` (HTML form default for checked
                   checkboxes) → enable. Absence → disable.
 
-            The toggle is meaningful even when ``cfg.etl_hook is None``
+            The toggle is meaningful even when ``cfg.app2.etl_hook is None``
             (the renderer surfaces it as disabled + "(not configured)"),
             but the cache flag is still respected — Deploy ignores it
             because the cfg field is None either way.
@@ -6343,7 +6343,7 @@ def make_studio_routes(
             )
             bound_tg.set_etl_hook_enabled(new_enabled)
             etl_hook_command = (
-                cfg.etl_hook if cfg is not None else None
+                cfg.app2.etl_hook if cfg is not None else None
             )
             return HTMLResponse(
                 _render_etl_hook_strip(etl_hook_command, new_enabled),
@@ -6354,11 +6354,11 @@ def make_studio_routes(
             )
 
         # CU.3 — etl_hook PUT triggers the operator's shell command
-        # (cfg.etl_hook). Gating on cfg presence (rather than the old
+        # (cfg.app2.etl_hook). Gating on cfg presence (rather than the old
         # `--demo-mode` flag) matches the natural semantics: a PUT to
         # invoke etl_hook is meaningless without a configured hook.
         # Demo cfgs omit `etl_hook:` → route auto-skips.
-        if cfg is not None and cfg.etl_hook is not None:
+        if cfg is not None and cfg.app2.etl_hook is not None:
             routes.append(
                 Route("/data/knobs/etl_hook", put_etl_hook, methods=["PUT"]),
             )
@@ -6457,12 +6457,12 @@ def make_studio_routes(
             instance = cache.get()
             # Z.C — prefix resolution order:
             # 1) explicit prefix_override (operator wires per-call)
-            # 2) cfg.db_table_prefix (cfg-bound studio session)
+            # 2) cfg.db.table_prefix (cfg-bound studio session)
             # 3) cache.path.stem (yaml file basename — fallback for
             #    studio sessions wired without a cfg, e.g. unit tests)
             prefix = (
                 bound_prefix_override
-                or (cfg.db_table_prefix if cfg is not None else None)
+                or (cfg.db.table_prefix if cfg is not None else None)
                 or cache.path.stem
             )
             cov = await coverage_for(
@@ -6480,7 +6480,7 @@ def make_studio_routes(
         bound_cfg = cfg
         # X.4.h.2 — if a TestGeneratorCache is wired, patch each deploy
         # invocation with the latest knob state. Absent cache (unit
-        # surface) ⇒ deploy reads the startup-time cfg.test_generator
+        # surface) ⇒ deploy reads the startup-time cfg.test.generator
         # unchanged, preserving today's behavior.
         bound_tg_for_deploy = tg_cache
 
@@ -6491,14 +6491,14 @@ def make_studio_routes(
                 if bound_tg_for_deploy is not None
                 else bound_cfg
             )
-            # CZ.4 — standalone-mode gate. ``cfg.etl_hook is None`` means
+            # CZ.4 — standalone-mode gate. ``cfg.app2.etl_hook is None`` means
             # the next ETL cycle will NOT re-populate the demo DB after
             # we wipe it, so any unmarked row in the DB might be real
             # customer data. Refuse outright (HTTP 409) — no click-through.
             # Operators who genuinely want demo-data-wipe semantics use
             # the Trainer "Clear synthetic rows and re-seed" button
             # (DELETE-synthetic-only); operators who want the full reset
-            # configure ``cfg.etl_hook`` or drop to ``recon-gen data
+            # configure ``cfg.app2.etl_hook`` or drop to ``recon-gen data
             # apply --execute`` (the CLI escape hatch documented in CZ).
             if effective_cfg.etl_hook is None:
                 return JSONResponse(

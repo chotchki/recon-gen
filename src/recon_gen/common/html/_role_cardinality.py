@@ -175,7 +175,7 @@ def instance_count_by_role(
         failure (broad-catch is intentional — this is a *cosmetic*
         badge, never a correctness gate).
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     # Compose the table name (NOT a bound param — prefix comes from
     # cfg, not user input — same shape as `_query_money_trail_edges`
     # in `_db_fetcher.py`). The role filter IS bound (DB-API 2.0

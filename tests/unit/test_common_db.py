@@ -126,7 +126,7 @@ def _cfg(*, dialect: Dialect, url: str | None) -> Config:
 
 class TestConnectDemoDb:
     def test_raises_when_demo_database_url_unset(self) -> None:
-        with pytest.raises(ValueError, match="demo_database_url is unset"):
+        with pytest.raises(ValueError, match="cfg.db.url is unset"):
             connect_demo_db(_cfg(dialect=Dialect.POSTGRES, url=None))
 
     def test_postgres_branch_invokes_psycopg(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -372,7 +372,7 @@ class TestMakeConnectionPool:
             dialect=Dialect.DUCKDB,
             demo_database_url=None,
         )
-        with pytest.raises(ValueError, match="demo_database_url is unset"):
+        with pytest.raises(ValueError, match="cfg.db.url is unset"):
             asyncio.run(make_connection_pool(cfg))
 
     def test_make_pool_raises_on_unknown_dialect(self) -> None:

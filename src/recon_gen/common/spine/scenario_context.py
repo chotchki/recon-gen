@@ -211,7 +211,7 @@ def scenario_metadata(
 
     CZ.2: every emitted row carries ``source='training'`` by default —
     this is the synthetic-row predicate Phase CZ's standalone-mode
-    cleanup gates on (``cfg.etl_hook is None`` ⇒ DELETE WHERE
+    cleanup gates on (``cfg.app2.etl_hook is None`` ⇒ DELETE WHERE
     ``JSON_VALUE(metadata, '$.source') = 'training'``). Callers can
     override via ``source=...`` in ``**extra`` (none currently do; the
     ETL-hook public API in ``common/etl.py`` deliberately does NOT
@@ -343,7 +343,7 @@ class ScenarioContext:
     PER ROW on both tables and drops the sidecar entirely.
 
     ``prefix`` is the deployment's table prefix (matches
-    ``cfg.db_table_prefix``). ``dialect`` selects the SQL JSON path
+    ``cfg.db.table_prefix``). ``dialect`` selects the SQL JSON path
     helper. Defaults match the in-process SQLite test harness — every
     AS/AT/AU unit test that builds a generator + composes via
     ScenarioContext can pass nothing.

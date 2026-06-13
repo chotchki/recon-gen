@@ -743,7 +743,7 @@ def emit_seed(
     the simpler portability choice and the perf cost is negligible
     for the demo's ~few-hundred-row scale.
 
-    Z.C — ``prefix`` is the cfg.db_table_prefix.
+    Z.C — ``prefix`` is the cfg.db.table_prefix.
     """
     # AY.6 — emit_seed is now a thin wrapper over the spine plant
     # adapter (was: 327 lines of per-plant-kind dispatch + 20 dead
@@ -982,7 +982,7 @@ def emit_baseline_seed(
         ``None`` (default) uses ``_BASELINE_BASE_SEED = 42`` — the
         legacy constant the locked seeds were generated against, so
         the absent-arg case stays byte-identical. Studio's data-shaping
-        panel writes ``cfg.test_generator.seed`` here when the trainer
+        panel writes ``cfg.test.generator.seed`` here when the trainer
         scrubs to a different layout (different seed → different plant
         positions across days, same seed → byte-identical output).
         Per-rail RNGs derive from this via the existing
@@ -1238,7 +1238,7 @@ def emit_truncate_sql(
     Returns one SQL string. Idempotent — TRUNCATE on an empty table
     is a no-op. Use ``data clean -o FILE`` for the CLI surface.
 
-    Z.C — ``prefix`` is the cfg.db_table_prefix.
+    Z.C — ``prefix`` is the cfg.db.table_prefix.
     """
     p = prefix
     if dialect is Dialect.POSTGRES:
@@ -2665,7 +2665,7 @@ def _baseline_metadata(
     override per-firing.
 
     CZ.2: every baseline row carries ``source='training'`` so Phase
-    CZ's standalone-mode cleanup (``cfg.etl_hook is None`` ⇒ DELETE
+    CZ's standalone-mode cleanup (``cfg.app2.etl_hook is None`` ⇒ DELETE
     WHERE ``JSON_VALUE(metadata, '$.source') = 'training'``) catches
     the 90-day baseline noise. The stamp is added last so a rail that
     declares ``source`` as a metadata_key would NOT shadow it — but

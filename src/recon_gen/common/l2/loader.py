@@ -88,8 +88,8 @@ class L2LoaderError(ValueError):
 #
 # The legacy ``instance:`` YAML key — formerly the InstancePrefix per SPEC
 # F5 — has been retired. The DB-table prefix lives on the cfg as
-# ``cfg.db_table_prefix``; the QS-resource-ID prefix lives as
-# ``cfg.deployment_name``. The loader hard-fails on any L2 YAML that
+# ``cfg.db.table_prefix``; the QS-resource-ID prefix lives as
+# ``cfg.aws.deployment_name``. The loader hard-fails on any L2 YAML that
 # carries a top-level ``instance:`` key so legacy fixtures get an
 # actionable migration pointer instead of silently degrading.
 
@@ -1367,8 +1367,8 @@ def load_instance(path: Path | str, *, validate: bool = True) -> L2Instance:
     raw_d = _as_mapping(raw, path=str(yaml_path), what="top-level")
 
     # Z.C — the legacy ``instance:`` YAML key has been retired. The
-    # DB-table prefix lives on the cfg yaml as ``cfg.db_table_prefix``;
-    # the QS-resource-ID prefix lives as ``cfg.deployment_name``. Reject
+    # DB-table prefix lives on the cfg yaml as ``cfg.db.table_prefix``;
+    # the QS-resource-ID prefix lives as ``cfg.aws.deployment_name``. Reject
     # any L2 yaml that still carries an ``instance:`` key with an
     # actionable migration pointer rather than silently ignoring it.
     if "instance" in raw_d:

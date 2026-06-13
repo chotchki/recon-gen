@@ -763,7 +763,7 @@ def _capture_failure_db_counts(
 
     Format: ``<table_name>: <count>`` per line, sorted by name. Tables
     enumerated by querying the dialect's catalog for objects (tables +
-    views + matviews) starting with ``<cfg.db_table_prefix>_``. Empty
+    views + matviews) starting with ``<cfg.db.table_prefix>_``. Empty
     file is a signal — either prefix is wrong or schema was never
     applied (the very thing this is meant to surface).
 
@@ -778,11 +778,13 @@ def _capture_failure_db_counts(
         path = _capture_path("db_counts.txt", test_id)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        prefix = str(getattr(cfg, "db_table_prefix", "") or "")
-        dialect = getattr(cfg, "dialect", None)
+        # DE.2 — v14 nested shape: cfg.db.{table_prefix, dialect}
+        db_proxy = getattr(cfg, "db", None)
+        prefix = str(getattr(db_proxy, "table_prefix", "") or "") if db_proxy is not None else ""
+        dialect = getattr(db_proxy, "dialect", None) if db_proxy is not None else None
         if not prefix or dialect is None:
             path.write_text(
-                f"# capture skipped: cfg missing db_table_prefix or dialect\n"
+                f"# capture skipped: cfg missing db.table_prefix or db.dialect\n"
                 f"# prefix={prefix!r} dialect={dialect!r}\n",
                 encoding="utf-8",
             )

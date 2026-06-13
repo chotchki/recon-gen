@@ -3,7 +3,7 @@
 X.4.h.2 introduces this cache as the in-memory authority for the
 trainer's knob state (plants / scope / end_date / seed). Mirrors the
 ``L2InstanceCache`` shape: constructed once at Studio startup from
-``cfg.test_generator``; mutated in-place by the ``/data/knobs/*`` PUT
+``cfg.test.generator``; mutated in-place by the ``/data/knobs/*`` PUT
 routes (h.2-h.5); read by the Studio ``/deploy`` route which patches a
 fresh ``Config`` clone with ``cache.get()`` before calling
 ``run_deploy_pipeline``.
@@ -105,7 +105,7 @@ class TestGeneratorCache:
         self._state = state
         self._window = window
         # X.4.h.etl-toggle — when False, patched_config nukes
-        # cfg.etl_hook for that deploy without erasing the configured
+        # cfg.app2.etl_hook for that deploy without erasing the configured
         # command. Lets the trainer skip the upstream re-seed step on
         # iterative deploys (faster) while preserving the YAML config
         # for the next "fresh start" deploy.
@@ -119,7 +119,7 @@ class TestGeneratorCache:
 
     @classmethod
     def from_config(cls, cfg: Config) -> TestGeneratorCache:
-        """Snapshot ``cfg.test_generator`` + materialize default window.
+        """Snapshot ``cfg.test.generator`` + materialize default window.
 
         Window default = ``[today - (DEFAULT_BASELINE_WINDOW_DAYS - 1),
         today]`` — the last 90 days. Trainer-mode UI is not a
@@ -128,14 +128,14 @@ class TestGeneratorCache:
         No sidefile persistence — see ``from_cfg_with_state`` for the
         Studio-CLI flow that loads + saves to disk.
         """
-        return cls(cfg.test_generator)
+        return cls(cfg.test.generator)
 
     @classmethod
     def from_cfg_with_state(
         cls, cfg: Config, cfg_path: Path | str,
     ) -> TestGeneratorCache:
         """X.4.h.7 — Studio-CLI factory. Load the sidefile if present,
-        merge its overrides on top of cfg.test_generator defaults, wire
+        merge its overrides on top of cfg.test.generator defaults, wire
         the cache to write to that sidefile on every mutation.
 
         Sidefile path is ``<cfg_path.parent>/.studio-state.yaml``
@@ -145,7 +145,7 @@ class TestGeneratorCache:
         """
         path = sidefile_path_for(cfg_path)
         sidefile = load_studio_state(path)
-        merged = merge_into_test_generator(cfg.test_generator, sidefile)
+        merged = merge_into_test_generator(cfg.test.generator, sidefile)
         if sidefile is None:
             return cls(merged, state_path=path)
         return cls(
@@ -192,9 +192,9 @@ class TestGeneratorCache:
         return self._window
 
     def is_etl_hook_enabled(self) -> bool:
-        """Return whether ``cfg.etl_hook`` will run on the next Deploy.
+        """Return whether ``cfg.app2.etl_hook`` will run on the next Deploy.
 
-        True (default) ⇒ ``patched_config`` keeps ``cfg.etl_hook`` as
+        True (default) ⇒ ``patched_config`` keeps ``cfg.app2.etl_hook`` as
         configured. False ⇒ ``patched_config`` clears it to None for
         that deploy (the cfg's stored command is unaffected — the
         operator can flip the toggle back on without re-typing).
@@ -202,7 +202,7 @@ class TestGeneratorCache:
         return self._etl_hook_enabled
 
     def set_etl_hook_enabled(self, enabled: bool) -> None:
-        """Toggle ``cfg.etl_hook`` execution on the next Deploy."""
+        """Toggle ``cfg.app2.etl_hook`` execution on the next Deploy."""
         self._etl_hook_enabled = enabled
         self._persist()
 
@@ -339,7 +339,7 @@ class TestGeneratorCache:
         mental model end-to-end.
 
         CLI invocations of ``data apply`` don't go through this
-        method — they read ``cfg.test_generator`` directly, where
+        method — they read ``cfg.test.generator`` directly, where
         ``end_date`` keeps its legacy "anchor" meaning and
         ``cutoff_date`` defaults to None (no truncation, current
         byte-identical-to-locked-seeds behavior).
@@ -363,7 +363,7 @@ class TestGeneratorCache:
         # etl_hook=None, so step 1 (etl_hook subprocess) no-ops; the
         # wipe + generator + matview steps still run.
         new_etl_hook = (
-            cfg.etl_hook if self._etl_hook_enabled else None
+            cfg.app2.etl_hook if self._etl_hook_enabled else None
         )
         return dataclasses.replace(
             cfg,

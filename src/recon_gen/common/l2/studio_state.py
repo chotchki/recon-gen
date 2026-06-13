@@ -23,7 +23,7 @@ while still giving Studio a place to persist its session state.
   (``scope`` / ``end_date`` / ``seed`` / ``plants`` / ``only_template``
   / ``derive_balances``) plus the trainer's scenario ``window`` (start
   + end) and the ``etl_hook.enabled`` toggle.
-- Missing file ⇒ "use ``cfg.test_generator`` defaults" (no error,
+- Missing file ⇒ "use ``cfg.test.generator`` defaults" (no error,
   silent first-run).
 - Malformed file ⇒ same fallback, with a warning to stderr — operator
   can delete the file to reset.
@@ -79,7 +79,7 @@ class StudioState:
     """
 
     # TestGeneratorConfig fields the trainer mutates. All Optional —
-    # None means "the sidefile didn't override; cfg.test_generator's
+    # None means "the sidefile didn't override; cfg.test.generator's
     # value wins."
     scope: ScopeKind | None = None
     end_date: date | None = None
@@ -125,7 +125,7 @@ def load_studio_state(path: Path | str) -> StudioState | None:
     except (OSError, yaml.YAMLError) as exc:
         print(
             f"warning: studio sidefile {p} unreadable ({type(exc).__name__}: "
-            f"{exc}); falling back to cfg.test_generator defaults",
+            f"{exc}); falling back to cfg.test.generator defaults",
             file=sys.stderr,
         )
         return None
@@ -134,7 +134,7 @@ def load_studio_state(path: Path | str) -> StudioState | None:
     if not isinstance(raw, dict):
         print(
             f"warning: studio sidefile {p} top-level is {type(raw).__name__} "
-            f"(expected dict); falling back to cfg.test_generator defaults",
+            f"(expected dict); falling back to cfg.test.generator defaults",
             file=sys.stderr,
         )
         return None
@@ -283,7 +283,7 @@ def merge_into_test_generator(
     cfg_tgen: TestGeneratorConfig,
     state: StudioState | None,
 ) -> TestGeneratorConfig:
-    """Apply the sidefile's overrides on top of cfg.test_generator.
+    """Apply the sidefile's overrides on top of cfg.test.generator.
 
     Sidefile fields that are None mean "use the cfg value." Returns a
     new ``TestGeneratorConfig`` with the merged result. Used by

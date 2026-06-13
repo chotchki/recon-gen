@@ -87,7 +87,7 @@ def test_standalone_banner_renders_locked_copy_when_etl_hook_is_none() -> None:
     # without bumping the test.
     assert "Standalone mode" in html
     assert "metadata.source=" in html  # escape() may transform the quote
-    assert "cfg.etl_hook" in html
+    assert "cfg.app2.etl_hook" in html
 
 
 def test_standalone_banner_absent_when_etl_hook_configured() -> None:
@@ -311,7 +311,7 @@ def test_studio_deploy_disabled_tooltip_carries_locked_copy(
     assert "Deploy-changes is " in STANDALONE_DEPLOY_DISABLED_TOOLTIP
     # The HTML rendering escapes apostrophes; check the key
     # operator-facing phrase made it into the page.
-    assert "cfg.etl_hook" in html
+    assert "cfg.app2.etl_hook" in html
 
 
 # -- v2 plant page surface (orphaned but pinned) -------------------------

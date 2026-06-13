@@ -385,7 +385,7 @@ def isolated_dataset_registries() -> Generator[None, None, None]:
     Production has exactly one ``cfg`` per process — the module-level
     ``_SQL_REGISTRY`` / ``_DSP_REGISTRY`` / ``_CONTRACT_REGISTRY`` are
     fine in that mode. Tests that build a second app tree with a
-    non-canonical ``cfg.db_table_prefix`` in the same process (e.g.
+    non-canonical ``cfg.db.table_prefix`` in the same process (e.g.
     the per-renderer agreement producers under ``tests/e2e/qs_browser/``
     and ``tests/e2e/app2/`` that build an `iagree`-prefixed Investigation
     clone) overwrite the canonical entries on a shared key — downstream
@@ -438,11 +438,11 @@ DATASET_ACTIONS = [
 
 
 def dataset_permissions(cfg: Config) -> list[ResourcePermission] | None:
-    if not cfg.principal_arns:
+    if not cfg.aws.principal_arns:
         return None
     return [
         ResourcePermission(Principal=arn, Actions=DATASET_ACTIONS)
-        for arn in cfg.principal_arns
+        for arn in cfg.aws.principal_arns
     ]
 
 
@@ -471,7 +471,7 @@ def _oracle_lowercase_alias_wrapper(
     """
     from recon_gen.common.sql import Dialect
 
-    if cfg.dialect is not Dialect.ORACLE:
+    if cfg.db.dialect is not Dialect.ORACLE:
         return sql
     aliases = ", ".join(
         f'qs_inner."{c.name.upper()}" AS "{c.name}"' for c in contract.columns
@@ -584,12 +584,12 @@ def build_dataset(
     # post-construction (raises if neither it nor demo_database_url
     # is provided). The dataclass default is None for ergonomics, but
     # by the time build_dataset runs the value is a real ARN string.
-    assert cfg.datasource_arn is not None
+    assert cfg.aws.datasource.arn is not None
     physical = {
         table_key: PhysicalTable(
             CustomSql=CustomSql(
                 Name=name,
-                DataSourceArn=cfg.datasource_arn,
+                DataSourceArn=cfg.aws.datasource.arn,
                 SqlQuery=sql,
                 Columns=columns,
             )
@@ -603,7 +603,7 @@ def build_dataset(
     }
     register_contract(visual_identifier, contract)
     return DataSet(
-        AwsAccountId=cfg.aws_account_id,
+        AwsAccountId=cfg.aws.account_id,
         DataSetId=dataset_id,
         Name=name,
         PhysicalTableMap=physical,
@@ -611,6 +611,6 @@ def build_dataset(
         ImportMode="DIRECT_QUERY",
         DataSetUsageConfiguration=DataSetUsageConfiguration(),
         Permissions=dataset_permissions(cfg),
-        Tags=cfg.tags(),
+        Tags=cfg.aws.tags(),
         DatasetParameters=params,
     )

@@ -109,7 +109,7 @@ GLOSSARY: dict[str, str] = {
         "data + writes rows to `<prefix>_transactions` + "
         "`<prefix>_daily_balances`. Studio's Refresh Data button wipes "
         "the two tables, invokes the hook, then refreshes matviews. "
-        "Set `cfg.etl_hook` in the YAML or env."
+        "Set `cfg.app2.etl_hook` in the YAML or env."
     ),
     "matview": (
         "**Matview** = materialized view. Pre-computed query result "
@@ -438,7 +438,7 @@ SURFACES_AS: dict[str, str] = {
         "- the **Investigation app** landing prose\n"
         "- the **handbook** intro paragraph (mkdocs substitution)\n"
         "- the **Studio top-nav** title chip\n\n"
-        "Falls back to `cfg.deployment_name` when blank; regex-"
+        "Falls back to `cfg.aws.deployment_name` when blank; regex-"
         "extracted from the Description below when both are blank."
     ),
     "institution-description": (
@@ -456,7 +456,7 @@ SURFACES_AS: dict[str, str] = {
         "- the **QuickSight Theme resource** in your AWS account (visible in the QS console)\n"
         "- the **audit PDF cover** as the build-stamp identifier\n"
         "- the **Studio L2 Editor** Theme read card\n"
-        "- `cfg.prefixed(theme_name)` for the deployed QS resource ID\n\n"
+        "- `cfg.aws.prefixed(theme_name)` for the deployed QS resource ID\n\n"
         "Short identifier — letters / digits / dashes only."
     ),
     "theme-version-description": (

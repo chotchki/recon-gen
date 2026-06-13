@@ -112,9 +112,9 @@ def _parse_oracle_url(url: str) -> _ConnInfo:
 
 
 def build_datasource(cfg: Config) -> DataSource:
-    """Build a QuickSight DataSource from ``cfg.demo_database_url``.
+    """Build a QuickSight DataSource from ``cfg.db.url``.
 
-    Dispatches on ``cfg.dialect``:
+    Dispatches on ``cfg.db.dialect``:
 
     - Postgres: ``Type="POSTGRESQL"`` + ``PostgreSqlParameters`` (port
       defaults 5432, database defaults ``postgres``).
@@ -129,22 +129,22 @@ def build_datasource(cfg: Config) -> DataSource:
       config raises ``ValueError`` with a pointer to the local-loop
       docs.
 
-    The DataSource ID derives from ``cfg.prefixed("demo-datasource")``
+    The DataSource ID derives from ``cfg.aws.prefixed("demo-datasource")``
     (i.e. ``<deployment_name>-demo-datasource``) so each per-deploy
     ``deployment_name`` gets its own unique ID — per-test harness +
     multi-tenant deploys are isolated. Credentials come from the
     parsed URL; SSL is enabled by default; principal_arns from cfg
     become QS Permissions.
 
-    Raises ValueError if ``cfg.demo_database_url`` is unset, or if the
+    Raises ValueError if ``cfg.db.url`` is unset, or if the
     dialect is SQLite (QuickSight has no SQLite datasource type).
     """
-    if not cfg.demo_database_url:
+    if not cfg.db.url:
         raise ValueError("demo_database_url is required to build a datasource")
 
 
-    if cfg.dialect is Dialect.ORACLE:
-        info = _parse_oracle_url(cfg.demo_database_url)
+    if cfg.db.dialect is Dialect.ORACLE:
+        info = _parse_oracle_url(cfg.db.url)
         ds_type = "ORACLE"
         params = DataSourceParameters(
             OracleParameters=OracleParameters(
@@ -157,31 +157,31 @@ def build_datasource(cfg: Config) -> DataSource:
         # works.
         ssl = SslProperties(DisableSsl=True)
     else:
-        info = _parse_pg_url(cfg.demo_database_url)
+        info = _parse_pg_url(cfg.db.url)
         ds_type = "POSTGRESQL"
         params = DataSourceParameters(
             PostgreSqlParameters=PostgreSqlParameters(
                 Host=info.host, Port=info.port, Database=info.database,
             ),
         )
-        # CB.11.a — cfg.qs_disable_pg_ssl flips this to True when the
+        # CB.11.a — cfg.aws.qs_disable_pg_ssl flips this to True when the
         # QS endpoint is a Docker Postgres without TLS configured.
         # Default False preserves the RDS-forces-SSL contract.
-        ssl = SslProperties(DisableSsl=cfg.qs_disable_pg_ssl)
+        ssl = SslProperties(DisableSsl=cfg.aws.qs_disable_pg_ssl)
 
-    ds_id = cfg.prefixed("demo-datasource")
+    ds_id = cfg.aws.prefixed("demo-datasource")
 
     permissions = None
-    if cfg.principal_arns:
+    if cfg.aws.principal_arns:
         permissions = [
             ResourcePermission(Principal=arn, Actions=_DATASOURCE_ACTIONS)
-            for arn in cfg.principal_arns
+            for arn in cfg.aws.principal_arns
         ]
 
     return DataSource(
-        AwsAccountId=cfg.aws_account_id,
+        AwsAccountId=cfg.aws.account_id,
         DataSourceId=ds_id,
-        Name=f"{cfg.deployment_name} Demo DataSource",
+        Name=f"{cfg.aws.deployment_name} Demo DataSource",
         Type=ds_type,
         DataSourceParameters=params,
         Credentials=DataSourceCredentials(
@@ -191,5 +191,5 @@ def build_datasource(cfg: Config) -> DataSource:
         ),
         SslProperties=ssl,
         Permissions=permissions,
-        Tags=cfg.tags(),
+        Tags=cfg.aws.tags(),
     )

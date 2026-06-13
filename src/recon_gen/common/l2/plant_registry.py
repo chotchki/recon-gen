@@ -1486,7 +1486,7 @@ PLANT_REGISTRY: Final[tuple[PlantKindEntry, ...]] = (
     # BU.2b stage 2 — L1 invariant kinds. Pattern: dashboard_check uses
     # the un-prefixed matview-suffix name (e.g. ``"drift"`` not
     # ``"<prefix>_drift"``); the parameterized e2e prefixes at runtime
-    # using cfg.db_table_prefix. Same convention all L1 entries below
+    # using cfg.db.table_prefix. Same convention all L1 entries below
     # follow — keeps the registry portable across prefixes (sasquatch_pr
     # / spec_example / fuzz seeds) and means moving a deployment to a
     # new prefix doesn't require touching this file.

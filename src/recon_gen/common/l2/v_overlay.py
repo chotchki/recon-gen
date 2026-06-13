@@ -14,7 +14,7 @@ plant set. Per `docs/audits/bv_5_dual_prefix_spike.md`:
   diff-only Apply lands in BV.4.4.
 - **Cleanup** (`drop_v_overlay`): drops the v schema entirely.
 
-The v-overlay's prefix is always ``<cfg.db_table_prefix>_v`` —
+The v-overlay's prefix is always ``<cfg.db.table_prefix>_v`` —
 derived at runtime, not configured.
 """
 
@@ -82,7 +82,7 @@ def _base_schema_exists(cfg: "Config") -> bool:
     BaseSchemaMissingError that follows surfaces the actionable
     remedy regardless of which dialect's error shape fired.
     """
-    base_prefix = cfg.db_table_prefix
+    base_prefix = cfg.db.table_prefix
     try:
         conn = connect_demo_db(cfg)
     except Exception:  # noqa: BLE001 — connection failures are operator-actionable as "schema not applied"
@@ -259,7 +259,7 @@ def _realign_v_overlay_entry_sequences(
     """
     from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
 
-    if cfg.dialect is not Dialect.DUCKDB:
+    if cfg.db.dialect is not Dialect.DUCKDB:
         return
     v = v_overlay_prefix(base_prefix)
 
@@ -281,7 +281,7 @@ def _realign_v_overlay_entry_sequences(
         max_tx_entry=max_tx_entry,
         max_db_entry=max_db_entry,
     )
-    execute_script(cur, realign_sql, dialect=cfg.dialect)
+    execute_script(cur, realign_sql, dialect=cfg.db.dialect)
 
 
 def refresh_v_overlay_matviews_sql(
@@ -346,13 +346,13 @@ async def session_start(
         await _emit(
             "session_start:error",
             error_kind="base_schema_missing",
-            base_prefix=cfg.db_table_prefix,
+            base_prefix=cfg.db.table_prefix,
             remedy=(
                 "Run `recon-gen schema apply --execute` against your demo DB, "
                 "then click Session Start again."
             ),
         )
-        raise BaseSchemaMissingError(cfg.db_table_prefix)
+        raise BaseSchemaMissingError(cfg.db.table_prefix)
     if refresh_base:
         from recon_gen.common.l2.deploy_pipeline import (  # noqa: PLC0415
             run_deploy_pipeline,
@@ -367,7 +367,7 @@ async def session_start(
         )
         await _emit("session_start:etl_done")
 
-    base_prefix = cfg.db_table_prefix
+    base_prefix = cfg.db.table_prefix
     # DL.14 — capture L2 yaml mtime + clone time so the landing render
     # can flag staleness when the operator edits the yaml mid-session.
     import os  # noqa: PLC0415
@@ -396,9 +396,9 @@ async def session_start(
                 try:
                     drop_sql = drop_v_overlay_sql(
                         instance, base_prefix=base_prefix,
-                        dialect=cfg.dialect,
+                        dialect=cfg.db.dialect,
                     )
-                    execute_script(cur, drop_sql, dialect=cfg.dialect)
+                    execute_script(cur, drop_sql, dialect=cfg.db.dialect)
                     step_log.append(("session_start:drop_v_done", {}))
                 except Exception as exc:  # noqa: BLE001 — schema may not exist; that's fine
                     step_log.append((
@@ -407,15 +407,15 @@ async def session_start(
                     ))
 
                 create_sql = create_v_overlay_sql(
-                    instance, base_prefix=base_prefix, dialect=cfg.dialect,
+                    instance, base_prefix=base_prefix, dialect=cfg.db.dialect,
                 )
-                execute_script(cur, create_sql, dialect=cfg.dialect)
+                execute_script(cur, create_sql, dialect=cfg.db.dialect)
                 step_log.append(("session_start:create_v_done", {}))
 
                 clone_sql = clone_base_to_v_sql(
-                    base_prefix, dialect=cfg.dialect,
+                    base_prefix, dialect=cfg.db.dialect,
                 )
-                execute_script(cur, clone_sql, dialect=cfg.dialect)
+                execute_script(cur, clone_sql, dialect=cfg.db.dialect)
                 # DI.1 — DuckDB CTAS clone drops the v overlay tables'
                 # entry-column DEFAULT (the nextval('<v>_X_entry_seq')
                 # reference). Re-attach via realign so plant INSERTs
@@ -426,9 +426,9 @@ async def session_start(
                 step_log.append(("session_start:clone_done", {}))
 
                 refresh_sql = refresh_v_overlay_matviews_sql(
-                    instance, base_prefix=base_prefix, dialect=cfg.dialect,
+                    instance, base_prefix=base_prefix, dialect=cfg.db.dialect,
                 )
-                execute_script(cur, refresh_sql, dialect=cfg.dialect)
+                execute_script(cur, refresh_sql, dialect=cfg.db.dialect)
                 step_log.append(("session_start:refresh_matviews_done", {}))
 
                 # DL.14 — record session-start metadata so the
@@ -440,7 +440,7 @@ async def session_start(
                         base_prefix, _SESSION_START_KEY,
                         session_start_str, "__bv_session_start__",
                     ),
-                    dialect=cfg.dialect,
+                    dialect=cfg.db.dialect,
                 )
                 if l2_mtime_str:
                     execute_script(
@@ -449,7 +449,7 @@ async def session_start(
                             base_prefix, _L2_YAML_MTIME_KEY,
                             l2_mtime_str, "__bv_l2_mtime__",
                         ),
-                        dialect=cfg.dialect,
+                        dialect=cfg.db.dialect,
                     )
 
                 # Wipe stale applied / failed state from any prior
@@ -460,7 +460,7 @@ async def session_start(
                         base_prefix, _APPLIED_STATE_KEY, "{}",
                         "__bv_applied__",
                     ),
-                    dialect=cfg.dialect,
+                    dialect=cfg.db.dialect,
                 )
                 execute_script(
                     cur,
@@ -468,7 +468,7 @@ async def session_start(
                         base_prefix, _FAILED_STATE_KEY, "{}",
                         "__bv_failed__",
                     ),
-                    dialect=cfg.dialect,
+                    dialect=cfg.db.dialect,
                 )
                 # CF.1 — wipe last-Apply banner state too so a fresh
                 # Session Start (incl. reclone via refresh_base=False)
@@ -479,7 +479,7 @@ async def session_start(
                         base_prefix, _LAST_APPLY_KEY, "{}",
                         "__bv_last_apply__",
                     ),
-                    dialect=cfg.dialect,
+                    dialect=cfg.db.dialect,
                 )
 
                 conn.commit()
@@ -498,7 +498,7 @@ async def cleanup(
     cfg: "Config", instance: "L2Instance",
 ) -> None:
     """Drop the v overlay schema. Base prefix untouched."""
-    base_prefix = cfg.db_table_prefix
+    base_prefix = cfg.db.table_prefix
 
     def _run() -> None:
         conn = connect_demo_db(cfg)
@@ -506,9 +506,9 @@ async def cleanup(
             cur = conn.cursor()
             try:
                 drop_sql = drop_v_overlay_sql(
-                    instance, base_prefix=base_prefix, dialect=cfg.dialect,
+                    instance, base_prefix=base_prefix, dialect=cfg.db.dialect,
                 )
-                execute_script(cur, drop_sql, dialect=cfg.dialect)
+                execute_script(cur, drop_sql, dialect=cfg.db.dialect)
                 conn.commit()
             finally:
                 cur.close()
@@ -595,7 +595,7 @@ async def apply_plants(
         payload = {"event": event, "ts_unix": _time.time(), **fields}
         await dev_log(payload)  # type: ignore[misc]: dev_log is DevLogWriter | None; None-guarded above
 
-    base_prefix = cfg.db_table_prefix
+    base_prefix = cfg.db.table_prefix
     v_prefix = v_overlay_prefix(base_prefix)
     anchor_dt = anchor or datetime(2026, 5, 30, 12, 0, 0)
     plants_list = list(enabled_plants)
@@ -643,9 +643,9 @@ async def apply_plants(
                     # change — the cloned baseline no longer carries
                     # their planted rows).
                     clone_sql = clone_base_to_v_sql(
-                        base_prefix, dialect=cfg.dialect,
+                        base_prefix, dialect=cfg.db.dialect,
                     )
-                    execute_script(cur, clone_sql, dialect=cfg.dialect)
+                    execute_script(cur, clone_sql, dialect=cfg.db.dialect)
                     # DI.1 — DuckDB CTAS path drops the v overlay
                     # tables' entry-column DEFAULT; realign so the
                     # plant INSERTs below pick up nextval() again.
@@ -695,14 +695,14 @@ async def apply_plants(
                     try:
                         plant_sql = entry.plant_function(
                             prefix=v_prefix,
-                            dialect=cfg.dialect,
+                            dialect=cfg.db.dialect,
                             anchor=anchor_dt,
                             instance=instance,
                             **kwargs,
                         )
                         if plant_sql:
                             execute_script(
-                                cur, plant_sql, dialect=cfg.dialect,
+                                cur, plant_sql, dialect=cfg.db.dialect,
                             )
                         succeeded[entry.kind] = {
                             k: str(v) for k, v in kwargs.items()
@@ -724,23 +724,23 @@ async def apply_plants(
                 # Always runs — even the fast path mutated v's base
                 # tables, so matviews must be re-derived.
                 refresh_sql = refresh_v_overlay_matviews_sql(
-                    instance, base_prefix=base_prefix, dialect=cfg.dialect,
+                    instance, base_prefix=base_prefix, dialect=cfg.db.dialect,
                 )
-                execute_script(cur, refresh_sql, dialect=cfg.dialect)
+                execute_script(cur, refresh_sql, dialect=cfg.db.dialect)
                 step_log.append(("apply:refresh_matviews_done", {}))
 
                 state_sql = applied_state_write_sql(
                     base_prefix,
                     json.dumps(succeeded, separators=(",", ":")),
                 )
-                execute_script(cur, state_sql, dialect=cfg.dialect)
+                execute_script(cur, state_sql, dialect=cfg.db.dialect)
 
                 failed_sql = _kv_write_sql(
                     base_prefix, _FAILED_STATE_KEY,
                     json.dumps(failures, separators=(",", ":")),
                     "__bv_failed__",
                 )
-                execute_script(cur, failed_sql, dialect=cfg.dialect)
+                execute_script(cur, failed_sql, dialect=cfg.db.dialect)
 
                 # CF.1 — record last-Apply outcome in one atomic
                 # row so the v3 landing's banner can render
@@ -767,7 +767,7 @@ async def apply_plants(
                     json.dumps(last_apply_payload, separators=(",", ":")),
                     "__bv_last_apply__",
                 )
-                execute_script(cur, last_apply_sql, dialect=cfg.dialect)
+                execute_script(cur, last_apply_sql, dialect=cfg.db.dialect)
 
                 conn.commit()
             finally:
@@ -847,7 +847,7 @@ async def read_failed_kinds(cfg: "Config") -> dict[str, str]:
     import json  # noqa: PLC0415
     from typing import cast  # noqa: PLC0415
 
-    base_prefix = cfg.db_table_prefix
+    base_prefix = cfg.db.table_prefix
 
     def _run() -> dict[str, str]:
         try:
@@ -901,7 +901,7 @@ async def read_last_apply(cfg: "Config") -> dict[str, object] | None:
     """
     import json  # noqa: PLC0415
 
-    base_prefix = cfg.db_table_prefix
+    base_prefix = cfg.db.table_prefix
 
     def _run() -> dict[str, object] | None:
         try:
@@ -941,7 +941,7 @@ async def read_session_metadata(cfg: "Config") -> dict[str, str]:
     """Session-start timestamp + L2 yaml mtime captured at Session
     Start (DL.14 staleness banner). Empty when no Session Start has
     fired."""
-    base_prefix = cfg.db_table_prefix
+    base_prefix = cfg.db.table_prefix
 
     def _run() -> dict[str, str]:
         try:
@@ -986,7 +986,7 @@ async def read_applied_state(
     row is absent (no Apply has ever fired)."""
     import json  # noqa: PLC0415
 
-    base_prefix = cfg.db_table_prefix
+    base_prefix = cfg.db.table_prefix
 
     def _run() -> dict[str, dict[str, str]]:
         try:

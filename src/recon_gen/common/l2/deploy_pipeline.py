@@ -6,13 +6,13 @@ against the new shape:
 
 1. **wipe** — TRUNCATE `<prefix>_transactions` + `<prefix>_daily_balances`
    so step 2's etl_hook + step 3's generator both write into clean state.
-2. **etl_hook** — run `cfg.etl_hook` as a subprocess. The hook is
+2. **etl_hook** — run `cfg.app2.etl_hook` as a subprocess. The hook is
    expected to write directly to demo_db (the BS.4 contract — see
    `docs/audits/_archive/bs_4_arch_shift_spike.md`). Non-zero exit halts the
    pipeline before steps 3-5 run; demo_db is left in whatever partial
    state the hook produced (operator re-runs after fixing the hook).
 3. **generator** — `emit_full_seed` against the current
-   `cfg.test_generator` knobs; always additive overlay on top of the
+   `cfg.test.generator` knobs; always additive overlay on top of the
    etl_hook's rows.
 4. **matview refresh** — existing `refresh_matviews_sql(instance)`.
 5. **reload** — bump `data_generation_id`; Dashboards' open page
@@ -97,9 +97,9 @@ async def step_1_etl_hook(
     *,
     dev_log: DevLogWriter | None = None,
 ) -> int:
-    """Run ``cfg.etl_hook`` as a subprocess; stream output to ``dev_log``.
+    """Run ``cfg.app2.etl_hook`` as a subprocess; stream output to ``dev_log``.
 
-    Returns the subprocess exit code, OR 0 when ``cfg.etl_hook`` is
+    Returns the subprocess exit code, OR 0 when ``cfg.app2.etl_hook`` is
     unset / empty (no-op skip). Caller checks the return value and
     halts the pipeline if non-zero — steps 3-5 (generator overlay,
     matview refresh, reload) MUST NOT run when the operator's ETL
@@ -124,13 +124,13 @@ async def step_1_etl_hook(
     as an actionable error, NOT a silent skip. The whole point of
     declaring an ``etl_hook`` is that it MUST run.
     """
-    if cfg.etl_hook is None:
+    if cfg.app2.etl_hook is None:
         await _emit(dev_log, {
             "event": "deploy:step1:skip",
             "reason": "etl_hook not configured",
         })
         return 0
-    cmd = shlex.split(cfg.etl_hook)
+    cmd = shlex.split(cfg.app2.etl_hook)
     if not cmd:
         await _emit(dev_log, {
             "event": "deploy:step1:skip",
@@ -277,7 +277,7 @@ async def step_2_wipe(
 
     CZ.3 — ``synthetic_only`` plumbs the standalone-mode safety gate
     through to ``wipe_demo_data_sql``. When True (Trainer reset with
-    ``cfg.etl_hook is None``), only rows stamped via CZ.2
+    ``cfg.app2.etl_hook is None``), only rows stamped via CZ.2
     (``metadata.source='training'``) are deleted; unmarked rows are
     presumed real customer data and survive. The counted return is the
     pre-DELETE row count of EACH table — in standalone-mode this
@@ -290,14 +290,14 @@ async def step_2_wipe(
     """
     sql = wipe_demo_data_sql(
         instance,
-        prefix=cfg.db_table_prefix,
-        dialect=cfg.dialect,
+        prefix=cfg.db.table_prefix,
+        dialect=cfg.db.dialect,
         synthetic_only=synthetic_only,
     )
     await _emit(dev_log, {
         "event": "deploy:step2:wipe:start",
-        "db_table_prefix": cfg.db_table_prefix,
-        "dialect": cfg.dialect.value,
+        "db_table_prefix": cfg.db.table_prefix,
+        "dialect": cfg.db.dialect.value,
         "synthetic_only": synthetic_only,
     })
 
@@ -319,7 +319,7 @@ async def step_2_wipe(
     # (the WHERE narrows to ``metadata.source='training'``), so those
     # rows pollute every subsequent invariant check. Auto-mark fires
     # after the schema-emit probe but BEFORE the wipe SQL so the
-    # narrowed DELETE catches them. Gated on ``cfg.etl_hook is None``
+    # narrowed DELETE catches them. Gated on ``cfg.app2.etl_hook is None``
     # (standalone-mode default per the CZ.0 REPLAN locked decision —
     # in ETL mode the unstamped rows may be real customer data; the
     # operator must run the explicit verb to choose --source).
@@ -331,7 +331,7 @@ async def step_2_wipe(
         try:
             cur = conn.cursor()
             try:
-                p = cfg.db_table_prefix  # Z.C — was instance.instance
+                p = cfg.db.table_prefix  # Z.C — was instance.instance
                 try:
                     # Cheap probe: SELECT * FROM ... WHERE 1=0 returns
                     # zero rows on every dialect we target but raises a
@@ -343,9 +343,9 @@ async def step_2_wipe(
                     schema_sql = emit_schema(
                         instance,
                         prefix=p,
-                        dialect=cfg.dialect,
+                        dialect=cfg.db.dialect,
                     )
-                    execute_script(cur, schema_sql, dialect=cfg.dialect)
+                    execute_script(cur, schema_sql, dialect=cfg.db.dialect)
                     conn.commit()
                     schema_emitted = True
                 # CZ.6.1 — auto-mark pre-CZ rows before the wipe (see
@@ -353,10 +353,10 @@ async def step_2_wipe(
                 # on a freshly-emitted schema OR an already-stamped DB,
                 # ``count_unstamped_rows`` returns (0, 0) and we skip
                 # the UPDATE + the dev_log event entirely.
-                if cfg.etl_hook is None:
+                if cfg.app2.etl_hook is None:
                     try:
                         tx_unstamped, bal_unstamped = count_unstamped_rows(
-                            conn, prefix=p, dialect=cfg.dialect,
+                            conn, prefix=p, dialect=cfg.db.dialect,
                         )
                     except Exception:  # noqa: BLE001 — dialect-specific catalog errors; defensive — schema_emitted path already created the tables, but a partial-schema state could still raise
                         tx_unstamped, bal_unstamped = 0, 0
@@ -364,7 +364,7 @@ async def step_2_wipe(
                         stamp_unstamped_rows(
                             conn,
                             prefix=p,
-                            dialect=cfg.dialect,
+                            dialect=cfg.db.dialect,
                             source="training",
                         )
                         conn.commit()
@@ -374,7 +374,7 @@ async def step_2_wipe(
                 tx_count = int(fetch_one_required(cur)[0])
                 cur.execute(f"SELECT COUNT(*) FROM {p}_daily_balances")
                 bal_count = int(fetch_one_required(cur)[0])
-                execute_script(cur, sql, dialect=cfg.dialect)
+                execute_script(cur, sql, dialect=cfg.db.dialect)
                 conn.commit()
                 return tx_count, bal_count
             finally:
@@ -396,7 +396,7 @@ async def step_2_wipe(
             "source": "training",
             "reason": (
                 "pre-CZ rows lacked metadata.source; auto-marked "
-                "(cfg.etl_hook is None ⇒ standalone-mode default)."
+                "(cfg.app2.etl_hook is None ⇒ standalone-mode default)."
             ),
         })
     await _emit(dev_log, {
@@ -425,7 +425,7 @@ async def step_3_generator(
     """Run the synthetic-data generator, execute its SQL against the
     demo DB, return per-base-table row counts.
 
-    X.4.g.7 — scaffolding. Honors ``cfg.test_generator``:
+    X.4.g.7 — scaffolding. Honors ``cfg.test.generator``:
       - ``enabled = False`` ⇒ skip event + return ``(0, 0)``.
       - ``scope = "full"`` ⇒ X.4.g.8 — `build_full_seed_sql` (today's
         behavior). Byte-identical to the locked seeds when ``etl_hook``
@@ -439,7 +439,7 @@ async def step_3_generator(
     (not the delta), so the deploy summary can report "ended with
     12,345 transactions".
     """
-    tg = cfg.test_generator
+    tg = cfg.test.generator
     if not tg.enabled:
         await _emit(dev_log, {
             "event": "deploy:step3:generator:skip",
@@ -461,9 +461,9 @@ async def step_3_generator(
         try:
             cur = conn.cursor()
             try:
-                execute_script(cur, sql, dialect=cfg.dialect)
+                execute_script(cur, sql, dialect=cfg.db.dialect)
                 conn.commit()
-                p = cfg.db_table_prefix  # Z.C — was instance.instance
+                p = cfg.db.table_prefix  # Z.C — was instance.instance
                 cur.execute(f"SELECT COUNT(*) FROM {p}_transactions")
                 tx = int(fetch_one_required(cur)[0])
                 cur.execute(f"SELECT COUNT(*) FROM {p}_daily_balances")
@@ -484,12 +484,12 @@ async def step_3_generator(
 
 
 def _build_generator_sql(cfg: Config, instance: L2Instance) -> str:
-    """Pick the SQL builder for ``cfg.test_generator.scope``.
+    """Pick the SQL builder for ``cfg.test.generator.scope``.
 
     Split out so unit tests can exercise the dispatch + the NotImplemented
     fences without going through ``connect_demo_db``.
 
-    When ``cfg.test_generator.cutoff_date`` is set (Studio trainer mode
+    When ``cfg.test.generator.cutoff_date`` is set (Studio trainer mode
     via ``cache.patched_config``), append DELETE statements after the
     generator's emit so rows past the cutoff get pruned. Lets the
     trainer scrub a cutoff inside a fixed scenario window without
@@ -498,7 +498,7 @@ def _build_generator_sql(cfg: Config, instance: L2Instance) -> str:
     to legacy emit.
     """
     sql = _emit_scope_sql(cfg, instance)
-    cutoff = cfg.test_generator.cutoff_date
+    cutoff = cfg.test.generator.cutoff_date
     if cutoff is not None:
         # Trim to date <= cutoff. transactions.posting is TIMESTAMP,
         # daily_balances.business_day_start is TIMESTAMP — both compared
@@ -507,9 +507,9 @@ def _build_generator_sql(cfg: Config, instance: L2Instance) -> str:
         # strings hit ORA-01843 on TIMESTAMP columns; PG + DuckDB
         # accept the same typed literal).
         from recon_gen.common.sql.dialect import date_literal  # noqa: PLC0415
-        prefix = cfg.db_table_prefix
+        prefix = cfg.db.table_prefix
         next_day = (cutoff + timedelta(days=1)).isoformat()
-        next_day_lit = date_literal(next_day, cfg.dialect)
+        next_day_lit = date_literal(next_day, cfg.db.dialect)
         sql += (
             f"\n-- X.4.h trainer cutoff: prune rows past {cutoff.isoformat()}\n"
             f"DELETE FROM {prefix}_transactions "
@@ -525,7 +525,7 @@ def _emit_scope_sql(cfg: Config, instance: L2Instance) -> str:
     cutoff post-processing. Split from ``_build_generator_sql`` so the
     cutoff truncation lives in exactly one place regardless of scope.
     """
-    scope = cfg.test_generator.scope
+    scope = cfg.test.generator.scope
     if scope == "full":
         # X.4.g.8 — full scope. ``build_full_seed_sql`` is the same
         # entry point ``data apply --execute`` already uses, so the
@@ -539,9 +539,9 @@ def _emit_scope_sql(cfg: Config, instance: L2Instance) -> str:
         from recon_gen.cli._helpers import build_full_seed_sql  # pyright: ignore[reportUnknownVariableType]  # WHY: helper has pending untyped-def waiver in cli/_helpers.py
         return build_full_seed_sql(  # pyright: ignore[reportUnknownVariableType]  # WHY: same helper-untyped waiver propagates to the call expression
             cfg, instance,
-            anchor=cfg.test_generator.end_date,
-            plants=cfg.test_generator.plants or None,  # X.4.h.0.a — None ⇒ all kinds (locked-seed default)
-            base_seed=cfg.test_generator.seed,  # X.4.h.0.b — None ⇒ _BASELINE_BASE_SEED (locked-seed default)
+            anchor=cfg.test.generator.end_date,
+            plants=cfg.test.generator.plants or None,  # X.4.h.0.a — None ⇒ all kinds (locked-seed default)
+            base_seed=cfg.test.generator.seed,  # X.4.h.0.b — None ⇒ _BASELINE_BASE_SEED (locked-seed default)
         )
     if scope == "exceptions_only":
         # X.4.g.9 — plants only, no baseline. The integrator's data
@@ -555,10 +555,10 @@ def _emit_scope_sql(cfg: Config, instance: L2Instance) -> str:
         from recon_gen.common.l2.seed import emit_seed
         scenario = build_default_scenario(  # pyright: ignore[reportUnknownVariableType]  # WHY: same helper-untyped waiver propagates to the call expression
             instance,
-            anchor=cfg.test_generator.end_date,
-            plants=cfg.test_generator.plants or None,  # X.4.h.0.a — None ⇒ all kinds
+            anchor=cfg.test.generator.end_date,
+            plants=cfg.test.generator.plants or None,  # X.4.h.0.a — None ⇒ all kinds
         )
-        return emit_seed(instance, scenario, prefix=cfg.db_table_prefix, dialect=cfg.dialect)  # pyright: ignore[reportUnknownArgumentType]  # WHY: build_default_scenario returns untyped-def ScenarioPlant per the same waiver
+        return emit_seed(instance, scenario, prefix=cfg.db.table_prefix, dialect=cfg.db.dialect)  # pyright: ignore[reportUnknownArgumentType]  # WHY: build_default_scenario returns untyped-def ScenarioPlant per the same waiver
     if scope == "uncovered_rails":
         # X.4.g.10 — fill baseline only for rails the operator's
         # external DB hasn't already populated (via step 2's pull).
@@ -570,43 +570,43 @@ def _emit_scope_sql(cfg: Config, instance: L2Instance) -> str:
         covered = _covered_rail_names(cfg, instance)
         return emit_baseline_seed(
             instance,
-            prefix=cfg.db_table_prefix,
-            anchor=cfg.test_generator.end_date,
-            dialect=cfg.dialect,
+            prefix=cfg.db.table_prefix,
+            anchor=cfg.test.generator.end_date,
+            dialect=cfg.db.dialect,
             skip_rails=covered,
-            base_seed=cfg.test_generator.seed,  # X.4.h.0.b — None ⇒ _BASELINE_BASE_SEED
+            base_seed=cfg.test.generator.seed,  # X.4.h.0.b — None ⇒ _BASELINE_BASE_SEED
         )
     if scope == "only_template":
         # X.4.i.1 — emit baseline restricted to a single TransferTemplate's
         # leg-rails dependency closure. Per the closure-scope decision:
         # closure = template.leg_rails (no LimitSchedule pull-in, no Chain
-        # pull-in). Template name comes from cfg.test_generator.only_template
+        # pull-in). Template name comes from cfg.test.generator.only_template
         # — required field for this scope; loud-fail when missing.
         from recon_gen.common.l2.seed import emit_baseline_seed
-        template_name = cfg.test_generator.only_template
+        template_name = cfg.test.generator.only_template
         if not template_name:
             raise ValueError(
                 "scope='only_template' requires "
-                "cfg.test_generator.only_template to name a TransferTemplate "
+                "cfg.test.generator.only_template to name a TransferTemplate "
                 "in the L2 instance.",
             )
         only_rails = _only_template_rails(template_name, instance, cfg=cfg)
         baseline = emit_baseline_seed(
             instance,
-            prefix=cfg.db_table_prefix,
-            anchor=cfg.test_generator.end_date,
-            dialect=cfg.dialect,
+            prefix=cfg.db.table_prefix,
+            anchor=cfg.test.generator.end_date,
+            dialect=cfg.db.dialect,
             only_rails=only_rails,
-            base_seed=cfg.test_generator.seed,
+            base_seed=cfg.test.generator.seed,
         )
-        # Plants: respect cfg.test_generator.plants (operator-set tuple).
+        # Plants: respect cfg.test.generator.plants (operator-set tuple).
         # Default `()` → no plants (preserves locked-seed determinism on
         # a fresh only_template deploy). When the trainer flips plants on,
         # the scenario primitive plants for ALL kinds (filtered by the
         # tuple) but the SCENARIO's per-plant rail_name lookup naturally
         # narrows to in-closure plants — out-of-closure rails won't have
         # baseline rows for the planted scenario to attach to.
-        plants_tuple = cfg.test_generator.plants
+        plants_tuple = cfg.test.generator.plants
         if not plants_tuple:
             return baseline
         # Compose: baseline closure + plants. emit_seed appends to the
@@ -616,10 +616,10 @@ def _emit_scope_sql(cfg: Config, instance: L2Instance) -> str:
         from recon_gen.common.l2.seed import emit_seed
         scenario = build_default_scenario(  # pyright: ignore[reportUnknownVariableType]  # WHY: same helper-untyped waiver propagates to the call expression
             instance,
-            anchor=cfg.test_generator.end_date,
+            anchor=cfg.test.generator.end_date,
             plants=plants_tuple,
         )
-        plants_sql = emit_seed(instance, scenario, prefix=cfg.db_table_prefix, dialect=cfg.dialect)  # pyright: ignore[reportUnknownArgumentType]  # WHY: build_default_scenario returns untyped-def ScenarioPlant per the same waiver
+        plants_sql = emit_seed(instance, scenario, prefix=cfg.db.table_prefix, dialect=cfg.db.dialect)  # pyright: ignore[reportUnknownArgumentType]  # WHY: build_default_scenario returns untyped-def ScenarioPlant per the same waiver
         return baseline + "\n" + plants_sql
     # Defensive — Literal[ScopeKind] should make this unreachable.
     raise ValueError(f"Unknown test_generator.scope: {scope!r}")
@@ -647,7 +647,7 @@ def _only_template_rails(
         declared = sorted(str(t.name) for t in instance.transfer_templates)
         raise ValueError(
             f"only_template={template_name!r} not found in L2 instance "
-            f"(db_table_prefix={cfg.db_table_prefix!r}). "
+            f"(db_table_prefix={cfg.db.table_prefix!r}). "
             f"Declared TransferTemplates: {declared}",
         )
     return frozenset(template.leg_rails)
@@ -664,7 +664,7 @@ def _covered_rail_names(
     populated this rail directly into demo_db"; uncovered = "no rows
     yet, fill the gap with baseline".
     """
-    p = cfg.db_table_prefix  # Z.C — was instance.instance
+    p = cfg.db.table_prefix  # Z.C — was instance.instance
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -702,10 +702,10 @@ async def step_3_5_derive_balances(
     """X.4.i.2 — re-derive ``<prefix>_daily_balances`` from
     ``<prefix>_transactions`` for the configured account roles.
 
-    No-op when ``cfg.test_generator.derive_balances`` is False (the default).
+    No-op when ``cfg.test.generator.derive_balances`` is False (the default).
     When enabled, computes ``money = SUM(amount_money)`` per
     (account_id, business_day_end) for accounts whose ``account_role``
-    matches ``cfg.test_generator.derive_balances_account_roles`` (or the
+    matches ``cfg.test.generator.derive_balances_account_roles`` (or the
     default control-account set when None) and UPSERTs into the
     daily_balances table. Existing rows for those roles are overwritten
     in-place; rows for other roles are untouched.
@@ -723,13 +723,13 @@ async def step_3_5_derive_balances(
     ``deploy:step3_5:derive:start`` and ``deploy:step3_5:derive:done``
     (with ``rows`` count + ``account_roles`` for visibility).
     """
-    if not cfg.test_generator.derive_balances:
+    if not cfg.test.generator.derive_balances:
         return 0
 
-    p = cfg.db_table_prefix  # Z.C — was instance.instance
+    p = cfg.db.table_prefix  # Z.C — was instance.instance
     account_roles = (
-        cfg.test_generator.derive_balances_account_roles
-        if cfg.test_generator.derive_balances_account_roles is not None
+        cfg.test.generator.derive_balances_account_roles
+        if cfg.test.generator.derive_balances_account_roles is not None
         else tuple(sorted(_DERIVE_BALANCES_DEFAULT_ACCOUNT_ROLES))
     )
     await _emit(dev_log, {
@@ -750,7 +750,7 @@ async def step_3_5_derive_balances(
     date_expr = "CAST(posting AS DATE)"
     bday_start = "CAST(CAST(posting AS DATE) AS TIMESTAMP)"
     # +1 day for the half-open business-day window.
-    if cfg.dialect == Dialect.ORACLE:
+    if cfg.db.dialect == Dialect.ORACLE:
         bday_end = "CAST(CAST(posting AS DATE) AS TIMESTAMP) + INTERVAL '1' DAY"
     else:
         bday_end = "CAST(CAST(posting AS DATE) AS TIMESTAMP) + INTERVAL '1 day'"
@@ -800,7 +800,7 @@ async def step_3_5_derive_balances(
                 f"  AND status <> 'failed' "
                 f"GROUP BY account_id, {date_expr}",
             )
-            if cfg.dialect is Dialect.DUCKDB:
+            if cfg.db.dialect is Dialect.DUCKDB:
                 # DuckDB returns -1 for cur.rowcount on INSERT-FROM-SELECT;
                 # re-query the row set we just wrote to get the actual count.
                 cur.execute(
@@ -833,7 +833,7 @@ async def step_4_matviews(
     *,
     dev_log: DevLogWriter | None = None,
 ) -> None:
-    """Run ``refresh_matviews_sql(instance, dialect=cfg.dialect)`` against
+    """Run ``refresh_matviews_sql(instance, dialect=cfg.db.dialect)`` against
     the demo DB.
 
     The schema helper picks the right shape per dialect:
@@ -847,11 +847,11 @@ async def step_4_matviews(
     duration (matview refresh is the slowest pipeline step on a
     multi-million-row demo).
     """
-    sql = refresh_matviews_sql(instance, prefix=cfg.db_table_prefix, dialect=cfg.dialect)
+    sql = refresh_matviews_sql(instance, prefix=cfg.db.table_prefix, dialect=cfg.db.dialect)
     await _emit(dev_log, {
         "event": "deploy:step4:matviews:start",
-        "db_table_prefix": cfg.db_table_prefix,
-        "dialect": cfg.dialect.value,
+        "db_table_prefix": cfg.db.table_prefix,
+        "dialect": cfg.db.dialect.value,
     })
 
     def _run_refresh() -> None:
@@ -869,7 +869,7 @@ async def step_4_matviews(
             # autocommit-per-cursor by default (see open_demo_db's
             # transaction-semantics caveat).
             prior_autocommit: bool | None = None
-            if cfg.dialect is Dialect.POSTGRES:
+            if cfg.db.dialect is Dialect.POSTGRES:
                 # psycopg attribute; for non-psycopg PG drivers this
                 # raises AttributeError loudly rather than silently
                 # leaving the txn-wrapped path that breaks CONCURRENTLY.
@@ -877,12 +877,12 @@ async def step_4_matviews(
                 conn.autocommit = True  # pyright: ignore[reportAttributeAccessIssue]: same psycopg-specific attribute, write side
             cur = conn.cursor()
             try:
-                execute_script(cur, sql, dialect=cfg.dialect)
-                if cfg.dialect is not Dialect.POSTGRES:
+                execute_script(cur, sql, dialect=cfg.db.dialect)
+                if cfg.db.dialect is not Dialect.POSTGRES:
                     conn.commit()
             finally:
                 cur.close()
-                if cfg.dialect is Dialect.POSTGRES and prior_autocommit is not None:
+                if cfg.db.dialect is Dialect.POSTGRES and prior_autocommit is not None:
                     conn.autocommit = prior_autocommit  # pyright: ignore[reportAttributeAccessIssue]: psycopg-specific attribute restore (per-call autocommit per BV.6-6)
         finally:
             conn.close()
@@ -1010,13 +1010,13 @@ async def run_deploy_pipeline(
     upstream); pull is gone.
 
     BU.1.8 — ``overlays`` is the typed surface for post-baseline plant
-    layers (replaces the round-1 ``cfg.test_generator.scope = "uncovered_rails"``
+    layers (replaces the round-1 ``cfg.test.generator.scope = "uncovered_rails"``
     indirection). When ``None``, defaults are dialect-aware: ETL_DEBUG
     (full noise) for studio Refresh Data callers, TRAINER_CLEAN for
     Trainer reset, LOCKED_SEED for tests. See
     ``common/l2/pipeline_overlays.py`` for the named flows.
 
-    When ``overlays`` is provided AND ``cfg.test_generator.scope`` is
+    When ``overlays`` is provided AND ``cfg.test.generator.scope`` is
     the default ``"full"``, the generator step emits the BASELINE-only
     SQL (`emit_baseline_seed`) + each overlay layer applies after.
     This separates baseline-vs-plants so the Trainer can plant on a
@@ -1051,7 +1051,7 @@ async def run_deploy_pipeline(
         if dev_log is not None:
             await dev_log(payload)
 
-    # BU.1.8 — when typed overlays are supplied, patch cfg.test_generator.scope
+    # BU.1.8 — when typed overlays are supplied, patch cfg.test.generator.scope
     # so the step-3 generator emits baseline-only IFF the L1 plants overlay
     # is NOT in the list. L1_INVARIANT_PLANTS as an overlay is implemented
     # by the scope="full" path (preserves locked-seed bytes); other overlay
@@ -1065,11 +1065,11 @@ async def run_deploy_pipeline(
             layer.name == L1_INVARIANT_PLANTS.name
             for layer in overlays.layers
         )
-        if not has_l1 and cfg.test_generator.scope == "full":
+        if not has_l1 and cfg.test.generator.scope == "full":
             from dataclasses import replace as _dr  # noqa: PLC0415
             pipeline_cfg = _dr(
                 cfg, test_generator=_dr(
-                    cfg.test_generator, scope="uncovered_rails",
+                    cfg.test.generator, scope="uncovered_rails",
                 ),
             )
         # Non-L1 overlays apply AFTER the pipeline's baseline + step 3.5.
@@ -1088,7 +1088,7 @@ async def run_deploy_pipeline(
 
     # BS.4: wipe FIRST so etl_hook + generator write into clean state.
     # CZ.3: ``synthetic_only_wipe`` plumbs the standalone-mode safety gate
-    # through — Trainer reset with ``cfg.etl_hook is None`` passes True so
+    # through — Trainer reset with ``cfg.app2.etl_hook is None`` passes True so
     # the wipe narrows to ``metadata.source='training'`` (CZ.2 stamp);
     # unmarked rows (presumed real customer data) survive. Default False
     # preserves the ETL-mode full-TRUNCATE semantics.
@@ -1100,7 +1100,7 @@ async def run_deploy_pipeline(
     )
 
     # CO.x — release the dashboards' pool lock around step_1_etl_hook so
-    # the operator's cfg.etl_hook subprocess can acquire the DuckDB
+    # the operator's cfg.app2.etl_hook subprocess can acquire the DuckDB
     # write lock. PG / Oracle pools don't need this (concurrent writers
     # are fine on those engines); the caller passes None and the bracket
     # no-ops via nullcontext. The pool's released_for_subprocess context

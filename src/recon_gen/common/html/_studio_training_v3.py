@@ -69,7 +69,7 @@ def render_training_v3_landing(
     """The /training/ landing.
 
     Args:
-      base_prefix: ``cfg.db_table_prefix`` — the production prefix.
+      base_prefix: ``cfg.db.table_prefix`` — the production prefix.
         Clean dashboard link points here.
       v_overlay_exists: ``True`` when ``<base>_v_*`` tables are
         present (Session Start has run). Drives enable/disable of
@@ -623,7 +623,7 @@ def _render_session_controls(
         )
         rebuild_label = f"↻ {STANDALONE_RESET_BUTTON_LABEL}"
         rebuild_title = (
-            "Standalone mode (cfg.etl_hook is None) — only rows tagged "
+            "Standalone mode (cfg.app2.etl_hook is None) — only rows tagged "
             "metadata.source='training' will be removed. Any unmarked "
             "rows are presumed real customer data and survive."
         )

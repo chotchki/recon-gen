@@ -87,10 +87,10 @@ def _build_rails_dataset(cfg: Config) -> DataSet:
     ``_v_config_rails_universe`` UNION view can be added without
     touching this dataset's consumers.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     sql = f"SELECT name FROM {prefix}_v_config_rails"
     return build_dataset(
-        cfg, cfg.prefixed("v-config-rails-dataset"),
+        cfg, cfg.aws.prefixed("v-config-rails-dataset"),
         "Picker — Rails", "v-config-rails",
         sql, _RAILS_CONTRACT,
         visual_identifier=DS_RAILS,
@@ -107,10 +107,10 @@ def _build_templates_dataset(cfg: Config) -> DataSet:
     Source: ``<prefix>_v_config_transfer_templates.name``. Drives the
     L2FT Template dropdown.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     sql = f"SELECT name FROM {prefix}_v_config_transfer_templates"
     return build_dataset(
-        cfg, cfg.prefixed("v-config-transfer-templates-dataset"),
+        cfg, cfg.aws.prefixed("v-config-transfer-templates-dataset"),
         "Picker — Transfer Templates", "v-config-transfer-templates",
         sql, _TEMPLATES_CONTRACT,
         visual_identifier=DS_TEMPLATES,
@@ -129,10 +129,10 @@ def _build_account_roles_dataset(cfg: Config) -> DataSet:
     DISTINCT inside the view body). Drives the L1 Account-Role
     dropdowns (Drift / Drift Timelines / Overdraft).
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     sql = f"SELECT account_role FROM {prefix}_v_config_account_roles"
     return build_dataset(
-        cfg, cfg.prefixed("v-config-account-roles-dataset"),
+        cfg, cfg.aws.prefixed("v-config-account-roles-dataset"),
         "Picker — Account Roles", "v-config-account-roles",
         sql, _ACCOUNT_ROLES_CONTRACT,
         visual_identifier=DS_ACCOUNT_ROLES,
@@ -155,13 +155,13 @@ def _build_metadata_keys_dataset(cfg: Config) -> DataSet:
     Drives the L2FT Metadata Key dropdowns (Rails / Chains / Transfer
     Templates sheets).
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     sql = (
         f"SELECT DISTINCT metadata_key "
         f"FROM {prefix}_v_config_rail_metadata_keys"
     )
     return build_dataset(
-        cfg, cfg.prefixed("v-config-metadata-keys-dataset"),
+        cfg, cfg.aws.prefixed("v-config-metadata-keys-dataset"),
         "Picker — Metadata Keys", "v-config-metadata-keys",
         sql, _METADATA_KEYS_CONTRACT,
         visual_identifier=DS_METADATA_KEYS,
@@ -180,13 +180,13 @@ def _build_chain_parents_dataset(cfg: Config) -> DataSet:
     per declared ChainChildSpec, parent_name repeats across each
     child). Drives the L2FT Chains sheet's Chain dropdown.
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     sql = (
         f"SELECT DISTINCT parent_name "
         f"FROM {prefix}_v_config_chain_children"
     )
     return build_dataset(
-        cfg, cfg.prefixed("v-config-chain-parents-dataset"),
+        cfg, cfg.aws.prefixed("v-config-chain-parents-dataset"),
         "Picker — Chain Parents", "v-config-chain-parents",
         sql, _CHAIN_PARENTS_CONTRACT,
         visual_identifier=DS_CHAIN_PARENTS,

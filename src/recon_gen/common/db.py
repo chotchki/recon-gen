@@ -5,7 +5,7 @@ need to:
 
   - Open a DB-API 2.0 connection against Postgres (psycopg2), Oracle
     (oracledb), or DuckDB (in-process ``duckdb`` wheel), keyed off
-    ``cfg.dialect``.
+    ``cfg.db.dialect``.
   - Run multi-statement DDL/DML scripts. psycopg2 accepts the whole
     script in one ``cursor.execute`` call; oracledb requires per-
     statement execution and treats PL/SQL blocks (``BEGIN…END;``) as
@@ -125,9 +125,9 @@ def duckdb_path(url: str) -> str:
 
 
 def connect_demo_db(cfg: Config) -> "SyncConnection":  # CB.16 — replaces the `-> Any` escape hatch with the structural Protocol defined below. Per-driver concrete types (psycopg.Connection / oracledb.Connection / duckdb.DuckDBPyConnection) all match SyncConnection structurally, so callers downcast at the boundary if they need driver-specific features.
-    """Open a DB-API 2.0 connection to ``cfg.demo_database_url``.
+    """Open a DB-API 2.0 connection to ``cfg.db.url``.
 
-    Branches on ``cfg.dialect``:
+    Branches on ``cfg.db.dialect``:
       - Postgres: psycopg (v3, from the ``[prod]`` extra).
       - Oracle: oracledb thin client (from the ``[prod]`` extra).
       - DuckDB: in-process ``duckdb`` wheel (core dependency, no extra).
@@ -136,15 +136,15 @@ def connect_demo_db(cfg: Config) -> "SyncConnection":  # CB.16 — replaces the 
       ImportError: if the matching driver isn't installed (PG / Oracle
         only — DuckDB is a core dependency). The error message names the
         extras-install command.
-      ValueError: if ``cfg.demo_database_url`` is unset or
-        ``cfg.dialect`` isn't recognized.
+      ValueError: if ``cfg.db.url`` is unset or
+        ``cfg.db.dialect`` isn't recognized.
     """
-    if cfg.demo_database_url is None:
+    if cfg.db.url is None:
         raise ValueError(
-            "cfg.demo_database_url is unset; set it in your config YAML "
+            "cfg.db.url is unset; set it in your config YAML "
             "or via RECON_GEN_DEMO_DATABASE_URL."
         )
-    if cfg.dialect is Dialect.POSTGRES:
+    if cfg.db.dialect is Dialect.POSTGRES:
         try:
             import psycopg
         except ImportError as e:
@@ -152,8 +152,8 @@ def connect_demo_db(cfg: Config) -> "SyncConnection":  # CB.16 — replaces the 
                 "psycopg is required for Postgres connections. "
                 "Install it with: pip install 'recon-gen[prod]'"
             ) from e
-        return cast("SyncConnection", psycopg.connect(cfg.demo_database_url))  # psycopg.Connection.cursor accepts an optional `scrollable` kwarg; structurally compatible at the call shape we use, but pyright needs the cast
-    if cfg.dialect is Dialect.ORACLE:
+        return cast("SyncConnection", psycopg.connect(cfg.db.url))  # psycopg.Connection.cursor accepts an optional `scrollable` kwarg; structurally compatible at the call shape we use, but pyright needs the cast
+    if cfg.db.dialect is Dialect.ORACLE:
         try:
             import oracledb  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
         except ImportError as e:
@@ -161,7 +161,7 @@ def connect_demo_db(cfg: Config) -> "SyncConnection":  # CB.16 — replaces the 
                 "oracledb is required for Oracle connections. "
                 "Install it with: pip install 'recon-gen[prod]'"
             ) from e
-        conn = oracledb.connect(oracle_dsn(cfg.demo_database_url))
+        conn = oracledb.connect(oracle_dsn(cfg.db.url))
         # CB.14 — pin session NLS to ISO so string-shaped date literals
         # (e.g. spine generators emitting "2026-01-15") parse without
         # ORA-01843. Oracle's default NLS_DATE_FORMAT (DD-MON-YY) made
@@ -177,7 +177,7 @@ def connect_demo_db(cfg: Config) -> "SyncConnection":  # CB.16 — replaces the 
         finally:
             nls_cur.close()
         return cast("SyncConnection", conn)  # oracledb.Connection.cursor accepts an optional `scrollable` kwarg; same shape as psycopg above
-    if cfg.dialect is Dialect.DUCKDB:
+    if cfg.db.dialect is Dialect.DUCKDB:
         # CA.3 — DuckDB is a core dialect (in `[project.dependencies]`,
         # not extras). Pure-Python wheel, no extra install friction.
         # `STDDEV_SAMP` ships natively (the inv_pair_rolling_anomalies
@@ -197,11 +197,11 @@ def connect_demo_db(cfg: Config) -> "SyncConnection":  # CB.16 — replaces the 
         # open read-write.
         import duckdb
         from recon_gen.common.env_keys import RECON_GEN_DB_READ_ONLY
-        path = duckdb_path(cfg.demo_database_url)
+        path = duckdb_path(cfg.db.url)
         read_only = bool(RECON_GEN_DB_READ_ONLY.get_or_none())
         return cast("SyncConnection", duckdb.connect(path, read_only=read_only))  # DuckDBPyConnection.commit returns self for chaining; SyncConnection.commit returns None per PEP 249. The two-arg `cur.execute(sql, params)` shape callers use works on both
     raise ValueError(
-        f"Unknown dialect {cfg.dialect!r}. "
+        f"Unknown dialect {cfg.db.dialect!r}. "
         "Set 'dialect: postgres', 'dialect: oracle', or 'dialect: duckdb' "
         "in your config."
     )
@@ -241,7 +241,7 @@ def open_demo_db(cfg: Config) -> Generator["SyncConnection"]:
             cur = conn.cursor()
             try:
                 for row in feed:
-                    write_daily_balance(cur, cfg.dialect, ...)
+                    write_daily_balance(cur, cfg.db.dialect, ...)
             finally:
                 cur.close()
 
@@ -1667,7 +1667,7 @@ class _AsyncDuckdbPool:
        Conflicting lock is held in <other_pid>``. Even a parent
        ``read_only=True`` handle blocks subprocess WRITE (subprocess
        READ succeeds). This is the constraint that makes
-       ``cfg.etl_hook`` (a subprocess) collide with the Studio
+       ``cfg.app2.etl_hook`` (a subprocess) collide with the Studio
        process's long-lived pool — and the reason this class exposes
        :meth:`released_for_subprocess` so the deploy pipeline can
        surrender the lock around the subprocess and reacquire it
@@ -1881,9 +1881,9 @@ class _AsyncDuckdbPool:
 async def make_connection_pool(
     cfg: Config, *, max_size: int = 10,
 ) -> AsyncConnectionPool:
-    """Open an ``AsyncConnectionPool`` against ``cfg.demo_database_url``.
+    """Open an ``AsyncConnectionPool`` against ``cfg.db.url``.
 
-    Branches on ``cfg.dialect`` (mirrors ``connect_demo_db``):
+    Branches on ``cfg.db.dialect`` (mirrors ``connect_demo_db``):
       - Postgres: ``psycopg_pool.AsyncConnectionPool`` with
         ``min_size=1``, ``max_size=N``. Pre-opens so connection
         failures surface here.
@@ -1891,7 +1891,7 @@ async def make_connection_pool(
       - SQLite: thin ``aiosqlite``-per-acquire wrapper (no real pool).
 
     Args:
-      cfg: Loaded Config; ``cfg.demo_database_url`` and ``cfg.dialect``
+      cfg: Loaded Config; ``cfg.db.url`` and ``cfg.db.dialect``
         drive both URL parsing and driver selection.
       max_size: Pool size cap. Defaults to 10 — enough for a typical
         sheet's visuals to fetch concurrently without queueing. Tune
@@ -1902,15 +1902,15 @@ async def make_connection_pool(
         (``psycopg[binary,pool]`` for PG, ``oracledb`` for Oracle,
         ``aiosqlite`` for SQLite). Each ImportError names the
         extras-install command.
-      ValueError: ``cfg.demo_database_url`` unset or
-        ``cfg.dialect`` unrecognized.
+      ValueError: ``cfg.db.url`` unset or
+        ``cfg.db.dialect`` unrecognized.
     """
-    if cfg.demo_database_url is None:
+    if cfg.db.url is None:
         raise ValueError(
-            "cfg.demo_database_url is unset; set it in your config YAML "
+            "cfg.db.url is unset; set it in your config YAML "
             "or via RECON_GEN_DEMO_DATABASE_URL."
         )
-    if cfg.dialect is Dialect.POSTGRES:
+    if cfg.db.dialect is Dialect.POSTGRES:
         try:
             from psycopg_pool import AsyncConnectionPool as _PgAsyncPool
         except ImportError as e:
@@ -1923,11 +1923,11 @@ async def make_connection_pool(
         # / unreachable hosts at server-startup time instead of inside
         # the first request handler.
         pool = _PgAsyncPool(
-            cfg.demo_database_url, min_size=1, max_size=max_size, open=False,
+            cfg.db.url, min_size=1, max_size=max_size, open=False,
         )
         await pool.open()
         return _AsyncPgPool(pool)
-    if cfg.dialect is Dialect.ORACLE:
+    if cfg.db.dialect is Dialect.ORACLE:
         try:
             import oracledb  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
         except ImportError as e:
@@ -1938,10 +1938,10 @@ async def make_connection_pool(
         # oracledb's async pool factory is sync (it returns the pool
         # object; connection acquisition is the async part).
         pool = oracledb.create_pool_async(
-            dsn=oracle_dsn(cfg.demo_database_url), min=1, max=max_size,
+            dsn=oracle_dsn(cfg.db.url), min=1, max=max_size,
         )
         return _AsyncOraclePool(pool)
-    if cfg.dialect is Dialect.DUCKDB:
+    if cfg.db.dialect is Dialect.DUCKDB:
         # CA.4 — core dep, no extras-install gate. Probe to surface a
         # missing wheel at pool-construction time so Studio's startup
         # fails loudly rather than at first request.
@@ -1954,10 +1954,10 @@ async def make_connection_pool(
             ) from e
         del _duckdb_probe
         return _AsyncDuckdbPool(
-            duckdb_path(cfg.demo_database_url), max_size=max_size,
+            duckdb_path(cfg.db.url), max_size=max_size,
         )
     raise ValueError(
-        f"Unknown dialect {cfg.dialect!r}. "
+        f"Unknown dialect {cfg.db.dialect!r}. "
         "Set 'dialect: postgres', 'dialect: oracle', or 'dialect: duckdb' "
         "in your config."
     )

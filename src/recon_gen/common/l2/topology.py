@@ -607,7 +607,7 @@ def topology_graph_for(
     declaration order) so the graphviz renderer that consumes it
     produces the same DOT shape it always did.
 
-    Z.C — ``db_table_prefix`` is the cfg.db_table_prefix (formerly read
+    Z.C — ``db_table_prefix`` is the cfg.db.table_prefix (formerly read
     off the dropped ``L2Instance.instance`` field) and surfaces as
     ``TopologyGraph.instance_name`` so the rendered diagram still
     carries the operator-facing prefix label.

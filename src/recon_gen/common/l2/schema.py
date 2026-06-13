@@ -123,7 +123,7 @@ def emit_schema(
     enum value plus per-helper Oracle/Postgres-style branches in
     ``common.sql.dialect``.
 
-    Z.C — ``prefix`` is the cfg.db_table_prefix (formerly read off
+    Z.C — ``prefix`` is the cfg.db.table_prefix (formerly read off
     the dropped ``L2Instance.instance`` field).
     """
     p = prefix
@@ -202,7 +202,7 @@ def emit_schema_drop_sql(
     ``IF EXISTS`` (or a swallow-already-gone PL/SQL block on Oracle).
     Use ``schema clean -o FILE`` for the CLI surface.
 
-    Z.C — ``prefix`` is the cfg.db_table_prefix.
+    Z.C — ``prefix`` is the cfg.db.table_prefix.
     """
     p = prefix
     l1_drops = _emit_l1_invariant_drops(p, dialect)
@@ -280,10 +280,10 @@ def wipe_demo_data_sql(
     No FK between the two base tables (per Schema_v6), so order is
     irrelevant; daily_balances first matches the schema-emit order.
 
-    Z.C — ``prefix`` is the cfg.db_table_prefix.
+    Z.C — ``prefix`` is the cfg.db.table_prefix.
 
     CZ.3 — ``synthetic_only`` toggles the standalone-mode safety path.
-    When True (Trainer reset in standalone-mode, i.e. ``cfg.etl_hook is
+    When True (Trainer reset in standalone-mode, i.e. ``cfg.app2.etl_hook is
     None``), the DELETE narrows to rows where
     ``metadata.source = 'training'`` — the CZ.2 stamp every seed-pipeline
     writer attaches to synthetic rows. Rows without the stamp (presumed
@@ -309,7 +309,7 @@ def wipe_demo_data_sql(
         src_bal = json_value("metadata", "'$.source'", dialect)
         return (
             header
-            + f"-- Standalone-mode (cfg.etl_hook is None): DELETE only rows where\n"
+            + f"-- Standalone-mode (cfg.app2.etl_hook is None): DELETE only rows where\n"
             + f"-- metadata.source='training' (CZ.3 safety gate). Real rows survive.\n"
             + f"-- Matviews are re-derived in step 4 (refresh_matviews_sql).\n"
             + f"-- =====================================================================\n"
@@ -353,7 +353,7 @@ def refresh_matviews_sql(
     multiple statements separated by `;` reliably; the verify script
     splits on `;\\n` and runs each per-statement).
 
-    Z.C — ``prefix`` is the cfg.db_table_prefix.
+    Z.C — ``prefix`` is the cfg.db.table_prefix.
     """
     p = prefix
     names = [
@@ -492,7 +492,7 @@ def _emit_table_based_matview_refresh(
     Returns one SQL string. ANALYZE follows the rebuild so the
     planner picks up post-refresh row counts.
 
-    Z.C — ``prefix`` is the cfg.db_table_prefix.
+    Z.C — ``prefix`` is the cfg.db.table_prefix.
     """
     assert dialect in (Dialect.DUCKDB), (
         f"_emit_table_based_matview_refresh expects DuckDB, "
@@ -1457,7 +1457,7 @@ def _emit_inv_views(
     ``DBMS_MVIEW.REFRESH`` (Oracle, via ``refresh_matview`` helper)
     after seed inserts.
 
-    Z.C — ``prefix`` is the cfg.db_table_prefix.
+    Z.C — ``prefix`` is the cfg.db.table_prefix.
     """
     p = prefix
     # Inline the rolling-2-day window definition. Oracle 19c doesn't

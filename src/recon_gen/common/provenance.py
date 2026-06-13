@@ -493,12 +493,12 @@ def compute_provenance(
     everything into a ``ProvenanceFingerprint`` whose ``composite_sha``
     binds the artifact to its inputs.
     """
-    if cfg.demo_database_url is None:
+    if cfg.db.url is None:
         return None
 
     from recon_gen.common.db import connect_demo_db, fetch_one_required
 
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         cur = conn.cursor()
@@ -508,11 +508,11 @@ def compute_provenance(
         bal_hwm = int(fetch_one_required(cur)[0] or 0)
         tx_sha = hash_table_rows(
             cur, table=f"{prefix}_transactions", hwm=tx_hwm,
-            dialect=cfg.dialect,
+            dialect=cfg.db.dialect,
         )
         bal_sha = hash_table_rows(
             cur, table=f"{prefix}_daily_balances", hwm=bal_hwm,
-            dialect=cfg.dialect,
+            dialect=cfg.db.dialect,
         )
     finally:
         conn.close()

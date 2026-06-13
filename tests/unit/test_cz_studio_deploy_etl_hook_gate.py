@@ -143,7 +143,7 @@ def test_post_deploy_refuses_when_etl_hook_is_none(
     # redirect to the correct path, not a dead-end.
     message = body["message"]
     assert "Standalone mode" in message
-    assert "cfg.etl_hook" in message
+    assert "cfg.app2.etl_hook" in message
     assert "Trainer" in message
     assert "recon-gen data apply --execute" in message
 

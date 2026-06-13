@@ -392,13 +392,13 @@ def deploy(cfg: Config, out_dir: Path, app_names: list[str]) -> int:
     # suppression covers the call expression itself; the annotation pins
     # the var.
     client: QuickSightClient = boto3.client(  # pyright: ignore[reportUnknownMemberType]: boto3.client overloaded union; QuickSightClient annotation anchors the right stub
-        "quicksight", region_name=cfg.aws_region,
+        "quicksight", region_name=cfg.aws.region,
     )
-    account_id = cfg.aws_account_id
+    account_id = cfg.aws.account_id
 
     click.echo(f"Deploying QuickSight resources from {out_dir}")
     click.echo(f"  Account: {account_id}")
-    click.echo(f"  Region:  {cfg.aws_region}\n")
+    click.echo(f"  Region:  {cfg.aws.region}\n")
 
     apps: list[AppFiles] = []
     for name in app_names:
@@ -450,5 +450,5 @@ def deploy(cfg: Config, out_dir: Path, app_names: list[str]) -> int:
     if failures > 0:
         click.echo(f"Done with {failures} FAILURE(s). Check errors above.")
         return 1
-    click.echo(f"Done. All resources deployed to {account_id} in {cfg.aws_region}.")
+    click.echo(f"Done. All resources deployed to {account_id} in {cfg.aws.region}.")
     return 0

@@ -42,7 +42,7 @@ from recon_gen.common.l2.topology import (
 # that forgets to wire a badge fails pyright at the ``_bump`` call site.
 # NOTE: a superset of ``config.PlantKind`` (the 6 operator-TOGGLEABLE L1
 # kinds) — the extra kinds are badge/timeline-visible but not gated by
-# ``cfg.test_generator.plants``.
+# ``cfg.test.generator.plants``.
 PlantKind = Literal[
     # Original 9 (M-phase).
     "drift", "overdraft", "limit_breach", "stuck_pending", "stuck_unbundled",

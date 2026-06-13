@@ -138,7 +138,7 @@ class ExpectedEodBalanceGenerator:
     anchor_day: date
     expected: float
     variance: float
-    # AY.4.d — production callers thread cfg.db_table_prefix here.
+    # AY.4.d — production callers thread cfg.db.table_prefix here.
     prefix: str = "spec_example"
 
     @property

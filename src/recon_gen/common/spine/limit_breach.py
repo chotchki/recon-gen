@@ -170,7 +170,7 @@ class LimitBreachGenerator:
     cap: float
     overshoot: float
     anchor_day: date
-    # AY.4.d — production callers thread cfg.db_table_prefix here.
+    # AY.4.d — production callers thread cfg.db.table_prefix here.
     prefix: str = "spec_example"
 
     @property

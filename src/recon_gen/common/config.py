@@ -214,58 +214,13 @@ class _AuditView:
 
 
 @dataclass(frozen=True)
-class _TestGeneratorView:
-    """``cfg.test.generator.*`` proxy — fuzz / synthetic-data overlay
-    knobs. Full field surface mirrors the legacy ``TestGeneratorConfig``
-    so existing callers find the same fields. ``as_of_frame`` carried
-    over as the canonical AsOfFrame factory."""
-    enabled: bool
-    scope: "ScopeKind"
-    end_date: date | None
-    seed: int | None
-    plants: tuple["PlantKind", ...]
-    only_template: str | None
-    derive_balances: bool
-    derive_balances_account_roles: tuple[str, ...] | None
-    cutoff_date: date | None
-
-    def as_of_frame(
-        self,
-        *,
-        window_days: int = 0,
-        db_anchor: date | None = None,
-    ) -> AsOfFrame:
-        """Resolve this cfg's scenario anchor as the owned ``AsOfFrame``
-        (D1; mirrors legacy ``TestGeneratorConfig.as_of_frame`` so the
-        callsite sweep is a pure rename, no behavior change)."""
-        from recon_gen.common.intervals import DateInterval  # noqa: PLC0415
-        if self.end_date == LOCKED_ANCHOR:
-            return AsOfFrame.locked(window_days=window_days)
-        if self.end_date is not None:
-            window = (
-                DateInterval.single_day(self.end_date)
-                if window_days <= 0
-                else DateInterval.trailing_days_ending_today(
-                    self.end_date, window_days + 1,
-                )
-            )
-            return AsOfFrame(as_of=self.end_date, window=window)
-        if db_anchor is not None:
-            window = (
-                DateInterval.single_day(db_anchor)
-                if window_days <= 0
-                else DateInterval.trailing_days_ending_today(
-                    db_anchor, window_days + 1,
-                )
-            )
-            return AsOfFrame(as_of=db_anchor, window=window)
-        return AsOfFrame.live(window_days=window_days)
-
-
-@dataclass(frozen=True)
 class _TestView:
-    """``cfg.test.*`` proxy — test/fuzz/synthetic-data scope."""
-    generator: _TestGeneratorView
+    """``cfg.test.*`` proxy — test/fuzz/synthetic-data scope. The
+    ``generator`` field returns the underlying legacy
+    ``TestGeneratorConfig`` directly (same shape + ``as_of_frame``
+    method already present); the v14 nesting bridge is just the
+    ``test`` property hop, no field-by-field copy needed."""
+    generator: "TestGeneratorConfig"
 
 
 @dataclass(frozen=True)
@@ -742,22 +697,9 @@ class Config:
     @property
     def test(self) -> _TestView:
         """``cfg.test.*`` — fuzz / synthetic-data scope.
-        ``generator`` mirrors the legacy ``TestGeneratorConfig`` shape
-        + carries ``as_of_frame()``."""
-        tg = self.test_generator
-        return _TestView(
-            generator=_TestGeneratorView(
-                enabled=tg.enabled,
-                scope=tg.scope,
-                end_date=tg.end_date,
-                seed=tg.seed,
-                plants=tg.plants,
-                only_template=tg.only_template,
-                derive_balances=tg.derive_balances,
-                derive_balances_account_roles=tg.derive_balances_account_roles,
-                cutoff_date=tg.cutoff_date,
-            ),
-        )
+        ``generator`` returns the underlying ``TestGeneratorConfig``
+        directly (its surface + ``as_of_frame`` already match v14)."""
+        return _TestView(generator=self.test_generator)
 
     def __post_init__(self) -> None:
         # If demo_database_url is set but datasource_arn is not, derive it

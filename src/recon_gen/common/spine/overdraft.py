@@ -159,7 +159,7 @@ class OverdraftGenerator:
     account_parent_role: str | None
     anchor_day: date
     magnitude: float
-    # AY.4.d — production callers thread cfg.db_table_prefix here so
+    # AY.4.d — production callers thread cfg.db.table_prefix here so
     # the emitted row lands on the right deployment's table; default
     # matches the in-process test harness shape.
     prefix: str = "spec_example"

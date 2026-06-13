@@ -433,7 +433,7 @@ RECON_GEN_DEMO_DATABASE_URL: Final = EnvVar(
     description=(
         "DB connection URL override for demo / test runs. Set by the "
         "runner for non-default variants (local-pg / local-oracle). "
-        "Falls back to cfg.demo_database_url when absent."
+        "Falls back to cfg.db.url when absent."
     ),
     coercer=str,
     optional=True,
@@ -712,7 +712,7 @@ RECON_GEN_PRINCIPAL_ARNS: Final = EnvVar(
     legacy_name="QS_GEN_PRINCIPAL_ARNS",
     description=(
         "Comma-separated IAM principal ARNs to grant permissions on "
-        "generated resources. Overrides cfg.principal_arns."
+        "generated resources. Overrides cfg.aws.principal_arns."
     ),
     coercer=str,
     optional=True,
@@ -783,7 +783,7 @@ RECON_GEN_DB_TESTS: Final = EnvVar(
 RECON_GEN_AWS_ACCOUNT_ID: Final = EnvVar(
     name="RECON_GEN_AWS_ACCOUNT_ID",
     legacy_name="QS_GEN_AWS_ACCOUNT_ID",
-    description="AWS account ID — overrides cfg.aws_account_id.",
+    description="AWS account ID — overrides cfg.aws.account_id.",
     coercer=str,
     optional=True,
     validator=matches(re.compile(r"\d{12}")),
@@ -792,7 +792,7 @@ RECON_GEN_AWS_ACCOUNT_ID: Final = EnvVar(
 RECON_GEN_AWS_REGION: Final = EnvVar(
     name="RECON_GEN_AWS_REGION",
     legacy_name="QS_GEN_AWS_REGION",
-    description="AWS region (us-east-1 shape) — overrides cfg.aws_region.",
+    description="AWS region (us-east-1 shape) — overrides cfg.aws.region.",
     coercer=str,
     optional=True,
     validator=matches(_AWS_REGION_RE),
@@ -802,7 +802,7 @@ RECON_GEN_DATASOURCE_ARN: Final = EnvVar(
     name="RECON_GEN_DATASOURCE_ARN",
     legacy_name="QS_GEN_DATASOURCE_ARN",
     description=(
-        "QuickSight datasource ARN — overrides cfg.datasource_arn. "
+        "QuickSight datasource ARN — overrides cfg.aws.datasource.arn. "
         "Required only when cfg has no demo_database_url."
     ),
     coercer=str,
@@ -815,7 +815,7 @@ RECON_GEN_DEPLOYMENT_NAME: Final = EnvVar(
     legacy_name="QS_GEN_DEPLOYMENT_NAME",
     description=(
         "Per-deploy QS namespace (kebab-case) — overrides "
-        "cfg.deployment_name. Z.C: replaces v8.x's RECON_GEN_RESOURCE_PREFIX "
+        "cfg.aws.deployment_name. Z.C: replaces v8.x's RECON_GEN_RESOURCE_PREFIX "
         "+ RECON_GEN_L2_INSTANCE_PREFIX (those collapsed into one field). "
         "Used by the Y.2.gate.m runner to namespace per-cell aw-target "
         "deploys so sister cells (e.g., sp_pg_aw + sp_or_aw) don't "
@@ -846,7 +846,7 @@ _LONGEST_KNOWN_SUFFIX = "_v_config_transfer_templates"
 
 
 def validate_db_table_prefix(value: str) -> None:
-    """CR.4 — snake_case + ≤ 30 chars on ``cfg.db_table_prefix``.
+    """CR.4 — snake_case + ≤ 30 chars on ``cfg.db.table_prefix``.
 
     Loud-fails with the field length, budget calculation, and the
     longest-suffix that drives the budget so the operator can either
@@ -878,7 +878,7 @@ RECON_GEN_DB_TABLE_PREFIX: Final = EnvVar(
     legacy_name="QS_GEN_DB_TABLE_PREFIX",
     description=(
         "Per-deploy DB table-name prefix (snake_case, ≤30 chars) — "
-        "overrides cfg.db_table_prefix. Z.C: replaces direct reads of "
+        "overrides cfg.db.table_prefix. Z.C: replaces direct reads of "
         "L2Instance.instance in schema/seed/datasets emit paths. "
         "Used by the Y.2.gate.m runner to namespace per-cell aw-target "
         "deploys so sister cells don't collide on shared-DB tables. "
@@ -895,7 +895,7 @@ RECON_GEN_DIALECT: Final = EnvVar(
     legacy_name="QS_GEN_DIALECT",
     description=(
         "DB dialect (postgres / oracle / duckdb) — overrides "
-        "cfg.dialect."
+        "cfg.db.dialect."
     ),
     coercer=str,
     optional=True,
@@ -920,7 +920,7 @@ RECON_GEN_TRAINER_DIALECTS: Final = EnvVar(
 RECON_GEN_APP2_DB_POOL_SIZE: Final = EnvVar(
     name="RECON_GEN_APP2_DB_POOL_SIZE",
     description=(
-        "App2 DB pool size — overrides cfg.app2_db_pool_size. "
+        "App2 DB pool size — overrides cfg.db.app2_pool_size. "
         "Cfg loader coerces from string to int."
     ),
     coercer=str,
@@ -942,7 +942,7 @@ RECON_GEN_AWS_PG_CLUSTER_ID: Final = EnvVar(
     legacy_name="QS_GEN_AWS_PG_CLUSTER_ID",
     description=(
         "Aurora PG cluster identifier (e.g., 'database-2' or "
-        "'recon-ci-aurora') — overrides cfg.aws_pg_cluster_id. "
+        "'recon-ci-aurora') — overrides cfg.aws.pg_cluster_id. "
         "Required for `./run_tests.sh up aws` / `down aws` / `status`."
     ),
     coercer=str,
@@ -955,7 +955,7 @@ RECON_GEN_AWS_ORACLE_INSTANCE_ID: Final = EnvVar(
     legacy_name="QS_GEN_AWS_ORACLE_INSTANCE_ID",
     description=(
         "Oracle RDS instance identifier (e.g., 'database-3' or "
-        "'recon-ci-oracle') — overrides cfg.aws_oracle_instance_id. "
+        "'recon-ci-oracle') — overrides cfg.aws.oracle_instance_id. "
         "Required for `./run_tests.sh up aws` / `down aws` / `status`."
     ),
     coercer=str,

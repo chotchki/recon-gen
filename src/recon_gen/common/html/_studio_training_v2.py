@@ -271,7 +271,7 @@ def _render_reset_button(*, standalone_mode: bool = False) -> str:
     BU.4 polish — copy uses operator vocabulary, no internal phase
     references (was "BTa.8 demo-gap overlay").
 
-    CZ.5 — when ``standalone_mode=True`` (cfg.etl_hook is None) the
+    CZ.5 — when ``standalone_mode=True`` (cfg.app2.etl_hook is None) the
     button label switches to the REPLAN-locked
     "Clear synthetic rows and re-seed" copy so the operator sees what
     the gate will actually do (DELETE only rows tagged
@@ -283,7 +283,7 @@ def _render_reset_button(*, standalone_mode: bool = False) -> str:
     if standalone_mode:
         button_label = f"↻ {STANDALONE_RESET_BUTTON_LABEL}"
         button_title = (
-            "Standalone mode (cfg.etl_hook is None) — only rows tagged "
+            "Standalone mode (cfg.app2.etl_hook is None) — only rows tagged "
             "metadata.source='training' will be removed. Any unmarked "
             "rows are presumed real customer data and survive."
         )
@@ -668,6 +668,6 @@ def now_anchor() -> datetime:
 
     Vertical-slice plant invocation uses now() so the planted rows
     fall in the default date window; BU.4 may swap in an explicit
-    cfg.test_generator.end_date anchor.
+    cfg.test.generator.end_date anchor.
     """
-    return datetime.now()  # typing-smell: ignore[no-datetime-now]: vertical-slice plant uses wall clock so planted rows fall in default date window; BU.4 may swap in cfg.test_generator.end_date
+    return datetime.now()  # typing-smell: ignore[no-datetime-now]: vertical-slice plant uses wall clock so planted rows fall in default date window; BU.4 may swap in cfg.test.generator.end_date

@@ -141,10 +141,10 @@ def build_theme(cfg: Config, theme: ThemePreset | None) -> Theme | None:
     if theme is None:
         return None
     preset = theme
-    theme_id = cfg.prefixed("theme")
+    theme_id = cfg.aws.prefixed("theme")
 
     permissions = None
-    if cfg.principal_arns:
+    if cfg.aws.principal_arns:
         theme_actions = [
             "quicksight:DescribeTheme",
             "quicksight:DescribeThemeAlias",
@@ -160,15 +160,15 @@ def build_theme(cfg: Config, theme: ThemePreset | None) -> Theme | None:
         ]
         permissions = [
             ResourcePermission(Principal=arn, Actions=theme_actions)
-            for arn in cfg.principal_arns
+            for arn in cfg.aws.principal_arns
         ]
 
     return Theme(
-        AwsAccountId=cfg.aws_account_id,
+        AwsAccountId=cfg.aws.account_id,
         ThemeId=theme_id,
         Name=preset.theme_name,
         BaseThemeId="CLASSIC",
-        Tags=cfg.tags(),
+        Tags=cfg.aws.tags(),
         Configuration=ThemeConfiguration(
             DataColorPalette=DataColorPalette(
                 Colors=preset.data_colors,

@@ -161,7 +161,7 @@ class AsOfFrame:
 
         The locked-binding path is untouched: ``locked()`` /
         ``live()`` keep their current shapes. This sibling is the
-        DB-aware variant; ``cfg.test_generator.as_of_frame()``
+        DB-aware variant; ``cfg.test.generator.as_of_frame()``
         accepts a ``db_anchor`` override that funnels through here.
         """
         anchor = _query_max_balance_day(conn, prefix)

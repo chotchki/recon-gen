@@ -1094,7 +1094,7 @@ def filter_scenario_plants(
     """Return a copy of ``base`` keeping only the requested L1 plant kinds.
 
     The data-shaping panel's plant-toggle checkboxes (X.4.h.2) write a
-    subset of the ``PlantKind`` enum into ``cfg.test_generator.plants``;
+    subset of the ``PlantKind`` enum into ``cfg.test.generator.plants``;
     this is the projection that consumes that subset. Per SPEC's
     "Data-shaping model / plants" section: ``None`` or empty tuple
     ⇒ "all kinds" (today's behavior), so the absent-block case stays

@@ -95,7 +95,7 @@ def write_daily_balance(
         ``cursor.execute(sql)`` exactly once.
       dialect: ``Dialect`` enum matching the cursor's underlying DB.
         Drives the timestamp literal syntax.
-      prefix: The L2 instance prefix (``cfg.deployment_name`` shape,
+      prefix: The L2 instance prefix (``cfg.aws.deployment_name`` shape,
         e.g. ``"acme_pr"``). Substituted into the table name.
       account: An ``L2Instance.accounts`` entry or compatible shape
         carrying the denorm fields the schema requires.
@@ -186,7 +186,7 @@ def write_transaction(
       dialect: ``Dialect`` enum matching the cursor's underlying DB.
         Drives the timestamp literal syntax (Oracle keeps PL/SQL
         ``TIMESTAMP '...'``; the others take an ISO string).
-      prefix: The L2 instance prefix (``cfg.deployment_name`` shape).
+      prefix: The L2 instance prefix (``cfg.aws.deployment_name`` shape).
       transaction_id: The leg's unique identifier (CR.17 lock — the
         caller ALWAYS provides this; no auto-generation). Becomes the
         ``id`` column.

@@ -40,9 +40,9 @@ matviews_aws = build_matview_status_dataset(
     ],
 )
 liveness_ds = Dataset(identifier=app_info_liveness_id("l1"),
-                     arn=cfg.dataset_arn(liveness_aws.DataSetId))
+                     arn=cfg.aws.dataset_arn(liveness_aws.DataSetId))
 matviews_ds = Dataset(identifier=app_info_matviews_id("l1"),
-                     arn=cfg.dataset_arn(matviews_aws.DataSetId))
+                     arn=cfg.aws.dataset_arn(matviews_aws.DataSetId))
 
 # As LAST sheet on the analysis:
 app_info_sheet = analysis.add_sheet(Sheet(
@@ -222,7 +222,7 @@ def build_liveness_dataset(cfg: Config, *, app_segment: str) -> DataSet:
 
     Postgres queries ``information_schema.tables``; Oracle queries
     ``USER_TABLES``. Returns one row with the user-visible-table count.
-    Per-dialect SQL resolved from ``cfg.dialect`` (P.9c — earlier
+    Per-dialect SQL resolved from ``cfg.db.dialect`` (P.9c — earlier
     versions hardcoded the Postgres SQL on both dialects, which
     silently broke the KPI on Oracle).
 
@@ -238,10 +238,10 @@ def build_liveness_dataset(cfg: Config, *, app_segment: str) -> DataSet:
     """
     return build_dataset(
         cfg,
-        cfg.prefixed(f"{app_segment}-app-info-liveness-dataset"),
+        cfg.aws.prefixed(f"{app_segment}-app-info-liveness-dataset"),
         "App Info -- Liveness",  # ASCII-only — testing QS em-dash hypothesis
         "app-info-liveness",
-        _liveness_sql(cfg.dialect),
+        _liveness_sql(cfg.db.dialect),
         LIVENESS_CONTRACT,
         visual_identifier=app_info_liveness_id(app_segment),
     )
@@ -268,10 +268,10 @@ def build_matview_status_dataset(
     """
     return build_dataset(
         cfg,
-        cfg.prefixed(f"{app_segment}-app-info-matviews-dataset"),
+        cfg.aws.prefixed(f"{app_segment}-app-info-matviews-dataset"),
         "App Info -- Matview Status",  # ASCII-only
         "app-info-matviews",
-        _matview_status_sql(view_specs, cfg.dialect),
+        _matview_status_sql(view_specs, cfg.db.dialect),
         MATVIEW_STATUS_CONTRACT,
         visual_identifier=app_info_matviews_id(app_segment),
     )
@@ -437,8 +437,8 @@ def populate_app_info_sheet(
     """
     accent = theme.accent
     version, sha, ts = _deploy_stamp()
-    dialect = cfg.dialect.value
-    prefix = cfg.deployment_name
+    dialect = cfg.db.dialect.value
+    prefix = cfg.aws.deployment_name
 
     # Row 1: liveness KPI (left half) + matview status table (right half).
     top = sheet.layout.row(height=_TABLE_HEIGHT)

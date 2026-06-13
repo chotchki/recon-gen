@@ -5821,7 +5821,7 @@ _SINGLETON_INTRO_BY_KIND: Mapping[EntityKind, tuple[str, str]] = {
         "institution_acronym out of the deleted <code>persona</code> "
         "block. Leave any field blank to clear it (silent-fallback: "
         "institution_name regex-extracts from the description when "
-        "absent; audit PDF falls back to <code>cfg.deployment_name</code>).</p>"
+        "absent; audit PDF falls back to <code>cfg.aws.deployment_name</code>).</p>"
     ),
 }
 
@@ -5887,7 +5887,7 @@ _INSTANCE_STRUCTURED_FIELDS: tuple[
     ("institution_name", "Institution name",
      "Display name surfaced in the audit PDF header + Investigation "
      "app landing prose + handbook substitution. Optional; falls back "
-     "to `cfg.deployment_name` when blank.", False,
+     "to `cfg.aws.deployment_name` when blank.", False,
      SurfaceAnchor("institution-name")),
     ("institution_acronym", "Institution acronym",
      "Short label (2-4 letters) used in dashboard titles + handbook "

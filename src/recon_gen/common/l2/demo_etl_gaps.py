@@ -43,7 +43,7 @@ invoked AFTER the generator finishes — same conceptual "plant"
 pattern (deterministic, demo-only, lights up a specific dashboard
 surface), different integration point.
 
-Gated by ``cfg.etl_hook is None`` at the studio call site — a real
+Gated by ``cfg.app2.etl_hook is None`` at the studio call site — a real
 operator's ETL feed is the source of truth; demo overlay would
 corrupt it. Locked seeds are unaffected because they're built from
 the generator pipeline directly, never via this overlay.

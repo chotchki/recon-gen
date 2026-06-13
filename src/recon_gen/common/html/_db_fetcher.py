@@ -24,7 +24,7 @@ so unit tests can swap in a fake DB-API 2.0 connection without
 needing a live Postgres / Oracle.
 
 X.3 (SQLite) is the third dialect this fetcher gains for free —
-``connect_demo_db`` already branches on ``cfg.dialect``; the SQL
+``connect_demo_db`` already branches on ``cfg.db.dialect``; the SQL
 here uses portable subset (CAST, ``||`` concat, no JSONB / window
 functions / db-specific casts) so the same query body runs against
 all three.
@@ -81,7 +81,7 @@ def make_db_fetcher(
         currently-supported pair (callers add cases as new visuals
         land — keeps the dispatch table the single source of truth).
     """
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     if connection_factory is None:
         # Lazy import — connect_demo_db pulls psycopg2 / oracledb
         # which are optional extras. Tests that pass a stub

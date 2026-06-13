@@ -895,14 +895,14 @@ async def make_snapshotter(
     """Dialect-dispatched factory. Mirrors ``make_connection_pool`` shape.
 
     Args:
-      cfg: Loaded ``Config``; ``cfg.dialect`` drives dispatch (and the
-        DuckDB impl also reads ``cfg.demo_database_url`` to locate the
+      cfg: Loaded ``Config``; ``cfg.db.dialect`` drives dispatch (and the
+        DuckDB impl also reads ``cfg.db.url`` to locate the
         file to copy).
       pool: The shared async pool against the live DB. PG + Oracle
         impls run all DDL/DML through it; the DuckDB impl wraps the
         snapshot+restore in ``pool.released_for_subprocess()`` so the
         file isn't held open during the copy.
-      base_prefix: DB-table prefix (``cfg.db_table_prefix``) — needed by
+      base_prefix: DB-table prefix (``cfg.db.table_prefix``) — needed by
         the PG / Oracle impls to enumerate the per-instance tables +
         matviews to mirror. Passed explicitly (rather than re-derived
         from cfg) so the factory signature documents the dependency.
@@ -915,33 +915,33 @@ async def make_snapshotter(
       A ``Snapshotter`` for this cell.
 
     Raises:
-      ValueError: ``cfg.dialect`` isn't one of the three supported
+      ValueError: ``cfg.db.dialect`` isn't one of the three supported
         dialects (PG / Oracle / DuckDB) — matches ``make_connection_pool``'s
         unknown-dialect handling.
     """
     # Sanity-check the dialect now so the factory fails loudly at wire
     # time rather than at first ``take()`` call.
-    if cfg.dialect not in (Dialect.DUCKDB, Dialect.POSTGRES, Dialect.ORACLE):
+    if cfg.db.dialect not in (Dialect.DUCKDB, Dialect.POSTGRES, Dialect.ORACLE):
         raise ValueError(
-            f"Unknown dialect {cfg.dialect!r}. "
+            f"Unknown dialect {cfg.db.dialect!r}. "
             "Snapshotter supports duckdb / postgres / oracle.",
         )
-    if cfg.dialect is Dialect.DUCKDB:
+    if cfg.db.dialect is Dialect.DUCKDB:
         # DuckDB arm — file-copy via DuckDBFileSnapshotter.
         # ``base_prefix`` + ``l2_instance`` aren't read by the file-copy
         # impl (the whole file IS the state), but the factory signature
         # keeps them for cross-dialect uniformity.
         del base_prefix, l2_instance
-        if cfg.demo_database_url is None:
+        if cfg.db.url is None:
             raise ValueError(
-                "cfg.demo_database_url is unset; "
+                "cfg.db.url is unset; "
                 "DuckDBFileSnapshotter needs a file path.",
             )
         return DuckDBFileSnapshotter(
-            db_path=Path(duckdb_path(cfg.demo_database_url)),
+            db_path=Path(duckdb_path(cfg.db.url)),
             pool=pool,
         )
-    if cfg.dialect is Dialect.ORACLE:
+    if cfg.db.dialect is Dialect.ORACLE:
         # BV.3.3 — Oracle arm via golden-mirror CTAS +
         # TRUNCATE + INSERT /*+ APPEND */ + DBMS_MVIEW.REFRESH.
         # ``l2_instance`` is currently unused by this impl (the

@@ -1,6 +1,6 @@
 """BU.1.8 — Typed pipeline overlay primitives.
 
-Replaces the round-1 indirection ``cfg.test_generator.scope = "uncovered_rails"``
+Replaces the round-1 indirection ``cfg.test.generator.scope = "uncovered_rails"``
 (which means "after wipe + covered={} → baseline only") with a
 typed surface that says what it means at the wiring site.
 
@@ -24,7 +24,7 @@ singleton, no dispatch table to update. Mirrors the BU.0 Lock 7
 PlantKindEntry "single source of truth" pattern but for the
 deploy-pipeline post-baseline layers.
 
-The current scope-string surface (`cfg.test_generator.scope`)
+The current scope-string surface (`cfg.test.generator.scope`)
 stays for CLI data apply backward compat; deploy_pipeline's
 Studio-facing entry points switch to ``overlays=`` typed kwarg.
 """
@@ -96,13 +96,13 @@ async def _apply_l1_invariant_plants(ctx: OverlayContext) -> None:
         })
     scenario = build_default_scenario(  # pyright: ignore[reportUnknownVariableType]: cli/_helpers has untyped-def waiver — propagates to callers until that module is annotated
         ctx.instance,
-        anchor=ctx.cfg.test_generator.end_date,
-        plants=ctx.cfg.test_generator.plants or None,
+        anchor=ctx.cfg.test.generator.end_date,
+        plants=ctx.cfg.test.generator.plants or None,
     )
     sql = emit_seed(  # pyright: ignore[reportUnknownArgumentType]  # WHY: scenario carries the helper-waiver
         ctx.instance, scenario,
-        prefix=ctx.cfg.db_table_prefix,
-        dialect=ctx.cfg.dialect,
+        prefix=ctx.cfg.db.table_prefix,
+        dialect=ctx.cfg.db.dialect,
     )
 
     def _run() -> None:
@@ -110,7 +110,7 @@ async def _apply_l1_invariant_plants(ctx: OverlayContext) -> None:
         try:
             cur = conn.cursor()
             try:
-                execute_script(cur, sql, dialect=ctx.cfg.dialect)
+                execute_script(cur, sql, dialect=ctx.cfg.db.dialect)
                 conn.commit()
             finally:
                 cur.close()
@@ -141,8 +141,8 @@ async def _apply_l2_demo_gap_overlay(ctx: OverlayContext) -> None:
     anchor = datetime.now()  # typing-smell: ignore[no-datetime-now]: overlay's wall-clock anchor matches the etl_run POST behavior so freshly-planted gaps fall in the operator's default date window
     sql = emit_demo_etl_gap_sql(
         ctx.instance,
-        prefix=ctx.cfg.db_table_prefix,
-        dialect=ctx.cfg.dialect,
+        prefix=ctx.cfg.db.table_prefix,
+        dialect=ctx.cfg.db.dialect,
         anchor=anchor,
     )
 
@@ -151,7 +151,7 @@ async def _apply_l2_demo_gap_overlay(ctx: OverlayContext) -> None:
         try:
             cur = conn.cursor()
             try:
-                execute_script(cur, sql, dialect=ctx.cfg.dialect)
+                execute_script(cur, sql, dialect=ctx.cfg.db.dialect)
                 conn.commit()
             finally:
                 cur.close()

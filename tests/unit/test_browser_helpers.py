@@ -247,18 +247,26 @@ class TestCaptureFailureDbCounts:
 
         from recon_gen.common.sql.dialect import Dialect
 
+        # DE.2 — _capture_failure_db_counts reads cfg.db.{table_prefix,
+        # dialect, url}; mirror the v14 nested shape inline.
+        @dataclass
+        class _DbCfg:
+            table_prefix: str
+            dialect: Dialect
+            url: str
+
         @dataclass
         class _Cfg:
-            db_table_prefix: str
-            dialect: Dialect
-            demo_database_url: str
+            db: _DbCfg
 
         from recon_gen.common.db import make_demo_database_url
 
         return _Cfg(
-            db_table_prefix=prefix,
-            dialect=Dialect.DUCKDB,
-            demo_database_url=make_demo_database_url(Dialect.DUCKDB, db_path),
+            db=_DbCfg(
+                table_prefix=prefix,
+                dialect=Dialect.DUCKDB,
+                url=make_demo_database_url(Dialect.DUCKDB, db_path),
+            ),
         )
 
     def test_writes_per_table_counts_for_prefixed_tables(

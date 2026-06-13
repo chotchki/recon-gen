@@ -787,7 +787,7 @@ def make_tree_db_fetcher(
                 sankey_items_limit=_sankey_items_limit(visual),
             )
 
-    base_prefix = str(cfg.db_table_prefix)
+    base_prefix = str(cfg.db.table_prefix)
     base_prefix_tok = f"{base_prefix}_"
 
     async def fetcher(visual_id: VisualId, params: Mapping[str, list[str]]) -> Any:  # typing-smell: ignore[explicit-any]: per-visual-kind shape (KPI float, Sankey {nodes,links}, etc.) — JSON-serialized downstream, so a real union here would be every renderer's shape
@@ -840,10 +840,10 @@ def make_tree_db_fetcher(
             sort_col, sort_desc = _parse_sort(params)
             paginated_sql = _paginate_table_sql(
                 sql, offset=offset, limit=limit,
-                sort_col=sort_col, sort_desc=sort_desc, dialect=cfg.dialect,
+                sort_col=sort_col, sort_desc=sort_desc, dialect=cfg.db.dialect,
             )
             rows, columns = await execute_visual_sql_async(
-                pool, paginated_sql, params, dialect=cfg.dialect,
+                pool, paginated_sql, params, dialect=cfg.db.dialect,
                 dataset_parameters=dataset_params,
             )
             # Last column is COUNT(*) OVER () — strip it positionally
@@ -877,7 +877,7 @@ def make_tree_db_fetcher(
                 column_decoration=plan.column_decoration,
             )
         rows, columns = await execute_visual_sql_async(
-            pool, sql, params, dialect=cfg.dialect,
+            pool, sql, params, dialect=cfg.db.dialect,
             dataset_parameters=dataset_params,
         )
         # AO.R.2 — BarChart / LineChart carry per-chart presentation
@@ -998,7 +998,7 @@ class PickerMatviewHint:
 
     Attributes:
         matview: the matview name (already prefixed via
-            ``cfg.prefixed`` / ``cfg.db_table_prefix``).
+            ``cfg.prefixed`` / ``cfg.db.table_prefix``).
         select_expr: the SAME projection expression the dataset's
             wrapped SQL uses for the picker column. Both sides MUST
             match or the hint path returns a different option set
@@ -1257,23 +1257,23 @@ def make_options_search_fetcher(
             escaped = escape_like_pattern(trimmed_query)
             extra_binds: Mapping[str, str] = {"q": escaped}
             options_sql = (
-                _picker_search_sql_matview_direct(hint, dialect=cfg.dialect)
+                _picker_search_sql_matview_direct(hint, dialect=cfg.db.dialect)
                 if hint is not None
                 else _picker_search_sql_wrap(
-                    get_sql(dataset_identifier), column, dialect=cfg.dialect,
+                    get_sql(dataset_identifier), column, dialect=cfg.db.dialect,
                 )
             )
         else:
             extra_binds = {}
             options_sql = (
-                _picker_seed_sql_matview_direct(hint, dialect=cfg.dialect)
+                _picker_seed_sql_matview_direct(hint, dialect=cfg.db.dialect)
                 if hint is not None
                 else _picker_seed_sql_wrap(
-                    get_sql(dataset_identifier), column, dialect=cfg.dialect,
+                    get_sql(dataset_identifier), column, dialect=cfg.db.dialect,
                 )
             )
         rows, _columns = await execute_visual_sql_async(
-            pool, options_sql, url_params, dialect=cfg.dialect,
+            pool, options_sql, url_params, dialect=cfg.db.dialect,
             dataset_parameters=get_dataset_params(dataset_identifier),
             extra_binds=extra_binds,
         )
