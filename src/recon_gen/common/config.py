@@ -469,6 +469,19 @@ class TestGeneratorConfig:
         return AsOfFrame.live(window_days=window_days)
 
 
+def _partition_from_arns(
+    datasource_arn: str | None, principal_arns: list[str],
+) -> str:
+    """Resolve AWS partition string from any available ARN.
+    See ``AwsConfig.partition`` for the resolution rationale."""
+    for source in (datasource_arn, *principal_arns):
+        if source and source.startswith("arn:"):
+            parts = source.split(":", 2)
+            if len(parts) >= 2 and parts[1]:
+                return parts[1]
+    return "aws"
+
+
 @dataclass
 class Config:
     # DE.5 steps 3-5 — ``aws_account_id`` + ``aws_region`` + ``deployment_name``
@@ -500,7 +513,10 @@ class Config:
     # user MAY set this equal to ``deployment_name`` (lower-case +
     # hyphens-to-underscores).
     db_table_prefix: str
-    datasource_arn: str | None = None
+    # DE.5 step 6 — datasource_arn + datasource_arn_was_derived dropped.
+    # Use ``aws=AwsConfig(datasource=DatasourceConfig(mode=..., arn=...))``;
+    # ``cli/json.py`` keys "we own it" off ``cfg.aws.datasource.mode == "create"``
+    # instead of the removed ``cfg.datasource_arn_was_derived`` sentinel.
     principal_arns: list[str] = field(default_factory=list[str])
     extra_tags: dict[str, str] = field(default_factory=dict[str, str])
     demo_database_url: str | None = None
@@ -540,16 +556,9 @@ class Config:
     # AwsConfig fires + __post_init__ raises (account_id="" is the
     # "not provided" sentinel).
     aws: AwsConfig = field(default_factory=AwsConfig)
-    # Set by ``__post_init__``: True iff ``datasource_arn`` was *derived*
-    # from ``demo_database_url`` (we own the QS datasource resource and
-    # emit ``out/datasource.json``), False iff the operator supplied an
-    # explicit ``datasource_arn`` (a pre-existing customer datasource —
-    # we leave it alone and DON'T emit a datasource resource), regardless
-    # of whether ``demo_database_url`` is also set. ``cli/json.py`` keys
-    # the datasource-emit on this; not an init param, not in repr/eq.
-    datasource_arn_was_derived: bool = field(
-        default=False, init=False, repr=False, compare=False,
-    )
+    # DE.5 step 6 — ``datasource_arn_was_derived`` sentinel removed.
+    # Use ``cfg.aws.datasource.mode == "create"`` (the "we own it" case
+    # post-DE.0 lock 3).
     # Y.2.gate.h.6 — Path to the L2 institution YAML the operator's external
     # DB has been seeded with. Runner injects ``RECON_GEN_TEST_L2_INSTANCE=<path>``
     # into subprocess env_overrides so both the seed flow (passes ``--l2 <yaml>``
@@ -761,18 +770,23 @@ class Config:
         account_id = self.aws.account_id
         region = self.aws.region
         deployment_name = self.aws.deployment_name
-        # If demo_database_url is set but datasource_arn is not, derive it
-        # — and record that we own the resulting datasource resource.
-        if self.datasource_arn is None and self.demo_database_url is not None:
+        # DE.5 step 6 — derive datasource arn into self.aws.datasource
+        # when caller-supplied AwsConfig left arn=None + demo_database_url
+        # is set. mode=create when we own it; mode=adopt when operator
+        # provided the arn explicitly.
+        ds_arn = self.aws.datasource.arn
+        ds_mode = self.aws.datasource.mode
+        if ds_arn is None and self.demo_database_url is not None:
             ds_id = f"{deployment_name}-demo-datasource"
-            self.datasource_arn = (
-                f"arn:{self.partition}:quicksight:{region}"
+            partition = _partition_from_arns(ds_arn, self.principal_arns)
+            ds_arn = (
+                f"arn:{partition}:quicksight:{region}"
                 f":{account_id}:datasource/{ds_id}"
             )
-            self.datasource_arn_was_derived = True
-        if self.datasource_arn is None:
+            ds_mode = "create"
+        if ds_arn is None:
             raise ValueError(
-                "datasource_arn is required unless demo_database_url is set."
+                "aws.datasource.arn is required unless demo_database_url is set."
             )
         # DE.5 — blend caller-supplied ``aws`` fields with remaining flats.
         self.aws = AwsConfig(
@@ -785,11 +799,7 @@ class Config:
             qs_disable_pg_ssl=self.qs_disable_pg_ssl,
             pg_cluster_id=self.aws_pg_cluster_id,
             oracle_instance_id=self.aws_oracle_instance_id,
-            datasource=DatasourceConfig(
-                mode=("adopt" if self.datasource_arn_was_derived is False
-                      and self.datasource_arn else "create"),
-                arn=self.datasource_arn,
-            ),
+            datasource=DatasourceConfig(mode=ds_mode, arn=ds_arn),
         )
 
     @property
@@ -815,7 +825,7 @@ class Config:
 
         Bare strings (no ``arn:`` prefix) fall through to the default.
         """
-        for source in (self.datasource_arn, *self.principal_arns):
+        for source in (self.aws.datasource.arn, *self.principal_arns):
             if source and source.startswith("arn:"):
                 parts = source.split(":", 2)
                 if len(parts) >= 2 and parts[1]:
@@ -859,10 +869,16 @@ class Config:
                 out["aws_region"] = aws_typed["region"]
             if aws_typed.get("deployment_name"):
                 out["deployment_name"] = aws_typed["deployment_name"]
-        derived = bool(out.pop("datasource_arn_was_derived", False))
+            # DE.5 step 6 — flatten aws.datasource → datasource_arn flat key.
+            # Skip when mode=create (loader re-derives on next load).
+            ds_block = aws_typed.get("datasource")
+            if isinstance(ds_block, dict):
+                ds_typed = cast(dict[str, Any], ds_block)
+                ds_mode = ds_typed.get("mode")
+                ds_arn = ds_typed.get("arn")
+                if ds_arn and ds_mode != "create":
+                    out["datasource_arn"] = ds_arn
         out["dialect"] = self.dialect.value
-        if derived:
-            out.pop("datasource_arn", None)
 
         # Drop empty / None / default-equivalent optionals so the
         # emitted YAML stays close to a minimal operator-edited file.
@@ -1490,17 +1506,22 @@ def load_config(path: str | Path | None = None) -> Config:
                 key_path=str(tls_dict["key_path"]),
             )
 
+    # DE.5 step 6 — datasource_arn flat field moved into aws.datasource.
+    raw_ds_arn = _opt_str(values, "datasource_arn")
     return Config(
-        # DE.5 steps 3-5 — account_id + region + deployment_name now in aws.
+        # DE.5 steps 3-6 — aws-block fields now in aws=AwsConfig(...).
         aws=AwsConfig(
             account_id=_require_str(values, "aws_account_id"),
             region=_require_str(values, "aws_region"),
             deployment_name=_require_str(values, "deployment_name"),
+            datasource=DatasourceConfig(
+                mode=("adopt" if raw_ds_arn else "create"),
+                arn=raw_ds_arn,
+            ),
         ),
         db_table_prefix=_validate_and_return_db_prefix(
             _require_str(values, "db_table_prefix")
         ),
-        datasource_arn=_opt_str(values, "datasource_arn"),
         principal_arns=principal_arns,
         extra_tags=extra_tags,
         demo_database_url=_opt_str(values, "demo_database_url"),

@@ -40,6 +40,7 @@ from recon_gen.cli._html_serve import (
 from recon_gen.common.config import (
     AwsConfig,
     Config,
+    DatasourceConfig,
     TestGeneratorConfig,
 )
 from recon_gen.common.db import (
@@ -126,11 +127,15 @@ def write_pg_etl_cfg(pg_url: str, tmp_path: Path) -> tuple[Config, Path]:
     }
     pg_cfg_path.write_text(yaml.safe_dump(pg_cfg_dict))
     cfg = Config(
-        aws=AwsConfig(account_id="111122223333", region="us-east-1", deployment_name="recon-pg-etl"),
-        db_table_prefix="sasquatch_pr",
-        datasource_arn=(
-            "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
+        aws=AwsConfig(
+            account_id="111122223333", region="us-east-1",
+            deployment_name="recon-pg-etl",
+            datasource=DatasourceConfig(
+                mode="adopt",
+                arn="arn:aws:quicksight:us-east-1:111122223333:datasource/x",
+            ),
         ),
+        db_table_prefix="sasquatch_pr",
         demo_database_url=pg_url,
         dialect=Dialect.POSTGRES,
     )
@@ -184,11 +189,15 @@ def make_studio_cfg(
     )
     # Z.C — deployment_name + db_table_prefix are required cfg fields.
     cfg = Config(
-        aws=AwsConfig(account_id="111122223333", region="us-east-1", deployment_name="recon-studio"),
-        db_table_prefix="sasquatch_pr",
-        datasource_arn=(
-            "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
+        aws=AwsConfig(
+            account_id="111122223333", region="us-east-1",
+            deployment_name="recon-studio",
+            datasource=DatasourceConfig(
+                mode="adopt",
+                arn="arn:aws:quicksight:us-east-1:111122223333:datasource/x",
+            ),
         ),
+        db_table_prefix="sasquatch_pr",
         demo_database_url=resolved_url,
         dialect=dialect,
         test_generator=TestGeneratorConfig(scope="full"),

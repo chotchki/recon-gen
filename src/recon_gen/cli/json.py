@@ -98,7 +98,9 @@ def json_apply(
     # the matching out/datasource.json. common/deploy.py reads this file when
     # it exists and skips when it doesn't — so the absence IS the "use the
     # operator's ARN as-is" signal.
-    if cfg.datasource_arn_was_derived:
+    # DE.5 step 6 — `datasource_arn_was_derived` sentinel removed.
+    # mode=create is the "we own it" case (post-DE.0 lock 3).
+    if cfg.aws.datasource.mode == "create":
         import json
         from recon_gen.common.datasource import build_datasource
         ds = build_datasource(cfg)

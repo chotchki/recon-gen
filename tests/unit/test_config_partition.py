@@ -16,21 +16,28 @@ from __future__ import annotations
 
 from typing import Any
 
-from recon_gen.common.config import AwsConfig, Config
+from recon_gen.common.config import AwsConfig, Config, DatasourceConfig
 
 
 def _cfg(**overrides: Any) -> Config:
     """Minimal Config with one of every required field; override per test."""
-    # DE.5 steps 3-5 — translate flat aws_* + deployment_name kwargs.
+    # DE.5 steps 3-6 — translate flat aws_* / deployment_name / datasource_arn kwargs.
     region = overrides.pop("aws_region", "us-east-1")
     account_id = overrides.pop("aws_account_id", "111122223333")
     deployment_name = overrides.pop("deployment_name", "recon-test")
+    datasource_arn = overrides.pop(
+        "datasource_arn",
+        f"arn:aws:quicksight:{region}:{account_id}:datasource/x",
+    )
     base: dict[str, Any] = dict(
         aws=AwsConfig(
             account_id=account_id, region=region,
             deployment_name=deployment_name,
+            datasource=DatasourceConfig(
+                mode=("adopt" if datasource_arn else "create"),
+                arn=datasource_arn,
+            ),
         ),
-        datasource_arn=f"arn:aws:quicksight:{region}:{account_id}:datasource/x",
         db_table_prefix="test",
     )
     base.update(overrides)

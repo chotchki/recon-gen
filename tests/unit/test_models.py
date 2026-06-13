@@ -648,10 +648,17 @@ class TestConfigDatasourceArnDerivation:
         )
 
     def test_explicit_arn_takes_precedence(self):
+        from recon_gen.common.config import DatasourceConfig
         cfg = Config(
-            aws=AwsConfig(account_id="111122223333", region="us-west-2", deployment_name="recon-explicit"),
+            aws=AwsConfig(
+                account_id="111122223333", region="us-west-2",
+                deployment_name="recon-explicit",
+                datasource=DatasourceConfig(
+                    mode="adopt",
+                    arn="arn:aws:quicksight:us-west-2:111122223333:datasource/custom",
+                ),
+            ),
             db_table_prefix="explicit",
-            datasource_arn="arn:aws:quicksight:us-west-2:111122223333:datasource/custom",
             demo_database_url="postgresql://u:p@h:5432/db",
         )
         assert cfg.aws.datasource.arn is not None
@@ -659,7 +666,7 @@ class TestConfigDatasourceArnDerivation:
 
     def test_raises_without_arn_or_demo_url(self):
         import pytest
-        with pytest.raises(ValueError, match="datasource_arn"):
+        with pytest.raises(ValueError, match="aws.datasource.arn"):
             Config(
                 aws=AwsConfig(account_id="123", region="us-east-1", deployment_name="recon-fail-test"),
                 db_table_prefix="fail_test",

@@ -284,7 +284,7 @@ class TestEmissionRoundTrip:
 # L.1.12 — Validation hooks audit
 # ---------------------------------------------------------------------------
 
-from recon_gen.common.config import AwsConfig, Config as _Cfg
+from recon_gen.common.config import AwsConfig, DatasourceConfig, Config as _Cfg
 from recon_gen.common.tree import (
     Analysis as _An,
     App as _A,
@@ -306,11 +306,15 @@ class TestValidationHooksAudit:
 
     # Z.C — deployment_name + db_table_prefix are required cfg fields.
     _CFG = _Cfg(
-        aws=AwsConfig(account_id="111122223333", region="us-west-2", deployment_name="recon-kitchen"),
-        db_table_prefix="kitchen",
-        datasource_arn=(
-            "arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds"
+        aws=AwsConfig(
+            account_id="111122223333", region="us-west-2",
+            deployment_name="recon-kitchen",
+            datasource=DatasourceConfig(
+                mode="adopt",
+                arn="arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds",
+            ),
         ),
+        db_table_prefix="kitchen",
     )
     _DS_X = _DS(identifier="ds-x", arn="arn:aws:quicksight:::dataset/x")
 

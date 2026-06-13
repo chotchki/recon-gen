@@ -34,11 +34,21 @@ from recon_gen.common.sql import Dialect
 
 def _make_cfg(**overrides: object) -> Config:
     """Build a minimal-but-complete legacy ``Config`` for proxy tests."""
-    # DE.5 steps 3-5 — aws_account_id / aws_region / deployment_name moved.
+    # DE.5 steps 3-6 — aws_account_id / aws_region / deployment_name /
+    # datasource_arn moved into nested aws=AwsConfig(...).
+    from recon_gen.common.config import DatasourceConfig  # noqa: PLC0415
+    datasource_arn_raw = overrides.pop("datasource_arn", None)
+    datasource_arn: str | None = (
+        str(datasource_arn_raw) if datasource_arn_raw else None
+    )
     aws_kwargs: dict[str, object] = {
         "account_id": overrides.pop("aws_account_id", "123456789012"),
         "region": overrides.pop("aws_region", "us-east-1"),
         "deployment_name": overrides.pop("deployment_name", "test-deploy"),
+        "datasource": DatasourceConfig(
+            mode=("adopt" if datasource_arn else "create"),
+            arn=datasource_arn,
+        ),
     }
     defaults: dict[str, object] = {
         "aws": AwsConfig(**aws_kwargs),  # pyright: ignore[reportArgumentType]: dict[str, object] kwarg surface
@@ -144,7 +154,7 @@ def test_aws_view_datasource_mode_create_when_arn_derived() -> None:
     # legacy code which uses `datasource_arn_was_derived` as the
     # discriminator; DE.4 wires the v14 mode=create path explicitly.
     assert cfg.aws.datasource.arn is not None
-    assert cfg.datasource_arn_was_derived is True
+    assert cfg.aws.datasource.mode == "create"
 
 
 # ---------------------------------------------------------------------------

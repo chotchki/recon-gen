@@ -48,13 +48,18 @@ def writable_l2_yaml(tmp_path: Path) -> Iterator[Path]:
 
 
 def _duckdb_cfg(tmp_path: Path, **overrides: object) -> Config:
+    from recon_gen.common.config import DatasourceConfig
     db_path = tmp_path / "demo.duckdb"
     base = Config(
-        aws=AwsConfig(account_id="111122223333", region="us-east-1", deployment_name="recon-test"),
-        db_table_prefix="test",
-        datasource_arn=(
-            "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
+        aws=AwsConfig(
+            account_id="111122223333", region="us-east-1",
+            deployment_name="recon-test",
+            datasource=DatasourceConfig(
+                mode="adopt",
+                arn="arn:aws:quicksight:us-east-1:111122223333:datasource/x",
+            ),
         ),
+        db_table_prefix="test",
         demo_database_url=make_demo_database_url(Dialect.DUCKDB, db_path),
         dialect=Dialect.DUCKDB,
     )

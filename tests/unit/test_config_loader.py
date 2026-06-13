@@ -327,7 +327,7 @@ def test_demo_database_url_satisfies_datasource_arn_requirement(
     assert "datasource/" in cfg.aws.datasource.arn
     # ...and records that we own the datasource resource → cli/json.py
     # emits out/datasource.json.
-    assert cfg.datasource_arn_was_derived is True
+    assert cfg.aws.datasource.mode == "create"
 
 
 def test_datasource_arn_was_derived_flag(
@@ -358,7 +358,7 @@ def test_datasource_arn_was_derived_flag(
         "datasource_arn": explicit_arn, "dialect": "postgres",
     })))
     assert cfg1.aws.datasource.arn == explicit_arn
-    assert cfg1.datasource_arn_was_derived is False
+    assert cfg1.aws.datasource.mode == "adopt"
 
     # Explicit ARN AND demo_database_url → still NOT derived (the fix);
     # the explicit ARN wins.
@@ -367,7 +367,7 @@ def test_datasource_arn_was_derived_flag(
         "demo_database_url": "postgresql://u:p@h:5432/d", "dialect": "postgres",
     })))
     assert cfg2.aws.datasource.arn == explicit_arn
-    assert cfg2.datasource_arn_was_derived is False
+    assert cfg2.aws.datasource.mode == "adopt"
 
     # demo_database_url only → derived; ARN carries the deployment_name
     # in the path (per Config.prefixed and __post_init__).
@@ -384,7 +384,7 @@ def test_datasource_arn_was_derived_flag(
             "dialect": "postgres",
         }).items() if k != "datasource_arn"
     }))
-    assert cfg3.datasource_arn_was_derived is True
+    assert cfg3.aws.datasource.mode == "create"
     assert "recon-sasquatch-pr" in (cfg3.aws.datasource.arn or "")
 
 
@@ -628,7 +628,7 @@ def test_to_yaml_dict_omits_derived_datasource_arn(tmp_path: Path) -> None:
     body.pop("datasource_arn")  # force the demo_database_url derivation path
     p = _write_yaml(tmp_path, body)
     cfg = load_config(p)
-    assert cfg.datasource_arn_was_derived is True
+    assert cfg.aws.datasource.mode == "create"
 
     emitted = cfg.to_yaml_dict()
     assert "datasource_arn" not in emitted
