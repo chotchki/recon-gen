@@ -1889,7 +1889,15 @@
       nodes: nodes.map((d) => Object.assign({}, d)),
       links: pruned.cleanLinks.map((d) => Object.assign({}, d)),
     });
-    svg
+    // DB.3 follow-up — match QS hover-only label behavior. Pre-DB.3
+    // App2 painted every node's name as always-visible text next to
+    // the rectangle; at realistic node counts (50+ accounts +
+    // templates on the L2FT Multi-Leg Flow Sankey) labels stack
+    // vertically and overlap into illegible noise. QS hides labels
+    // and surfaces them on hover via native tooltip — mirror that
+    // by attaching SVG ``<title>`` children to each rect + link
+    // (browsers render those as native hover tooltips, no JS needed).
+    var nodeRects = svg
       .append("g")
       .selectAll("rect")
       .data(graph.nodes)
@@ -1899,10 +1907,6 @@
       .attr("y", (d) => d.y0)
       .attr("height", (d) => d.y1 - d.y0)
       .attr("width", (d) => d.x1 - d.x0)
-      // Tailwind classes target SVG presentation via fill-* /
-      // stroke-* utilities. Hover + transition give the click
-      // affordance for free; cursor-pointer replaces the inline
-      // .style('cursor') we had before.
       .attr(
         "class",
         "fill-accent hover:opacity-80 cursor-pointer transition-colors",
@@ -1910,7 +1914,10 @@
       .on("click", (_event, d) => {
         if (visualId) fireAnchorRequest(visualId, d.name);
       });
-    svg
+    // QS node-hover shows just the node name (no aggregate value);
+    // mirror that.
+    nodeRects.append("title").text((d) => d.name);
+    var linkPaths = svg
       .append("g")
       .attr("fill", "none")
       .selectAll("path")
@@ -1921,18 +1928,26 @@
       .attr("class", "stroke-secondary-fg")
       .attr("stroke-opacity", 0.35)
       .attr("stroke-width", (d) => Math.max(1, d.width));
-    svg
-      .append("g")
-      .selectAll("text")
-      .data(graph.nodes)
-      .enter()
-      .append("text")
-      .attr("x", (d) => (d.x0 < width / 2 ? d.x1 + 6 : d.x0 - 6))
-      .attr("y", (d) => (d.y1 + d.y0) / 2)
-      .attr("dy", "0.35em")
-      .attr("text-anchor", (d) => (d.x0 < width / 2 ? "start" : "end"))
-      .text((d) => d.name)
-      .attr("class", "fill-primary-fg text-xs font-sans pointer-events-none");
+    // QS link-hover shows "<src>→<target>" on line 1 + the formatted
+    // value on line 2. Native <title> honors \n on every modern
+    // browser. Currency formatting: every Sankey in this app uses a
+    // ``Measure(currency=True)`` weight today (Money Trail / Account
+    // Network / Multi-Leg Flow). If a non-currency Sankey lands later
+    // plumb a ``data.value_format`` flag through ``shape_sankey``.
+    var usd = new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+    });
+    linkPaths
+      .append("title")
+      .text(
+        (d) =>
+          (d.source && d.source.name) +
+          "→" +
+          (d.target && d.target.name) +
+          "\n" +
+          usd.format(d.value || 0),
+      );
   }
 
   // d3-force ships in the d3 main bundle — no separate CDN needed.

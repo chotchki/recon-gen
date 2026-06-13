@@ -35,8 +35,8 @@ from recon_gen.apps.l1_dashboard.app import (
     _UNBUNDLED_AGING_NAME,
 )
 from recon_gen.apps.l2_flow_tracing.app import (
-    _CHAINS_NAME,
     _L2_EXCEPTIONS_NAME,
+    _TRANSFER_TEMPLATES_NAME,
 )
 from tests._marks import Need, Tier, needs, tier
 
@@ -77,20 +77,43 @@ def _wait_or_snap(
     driver: "DashboardDriver", sheet_slug: str, short: str, *titles: str,
 ) -> None:
     """``wait_loaded(title)`` then snap. Falls back through ``titles``
-    in order until one matches, then captures regardless of whether
-    any matched. Empty-state sheets (or those whose title drifted)
-    still produce a screenshot — the cold-read pass values "captured
-    SOMETHING" over "asserts a specific render state"."""
+    in order until one matches, then captures.
+
+    QS embed first-paint on a cold cell can run 20-30s; pass 45s
+    per-title timeout so the cold-read snap doesn't fire mid-load
+    (operator saw spinner-state captures for Pending Aging + L2
+    Exceptions when the helper defaulted to 10s).
+
+    After a title matches, sleep 2s to let sibling visuals on the
+    same sheet finish painting too — ``wait_loaded`` is per-visual,
+    but the snap captures the whole page."""
     # typing-smell: ignore[no-playwright-leak]: the helper has to catch
     # Playwright's TimeoutError to keep capture flowing on stale titles —
     # the rest of the test still talks DashboardDriver verbs only.
     import playwright.sync_api as _pw  # typing-smell: ignore[no-playwright-leak]: see helper docstring
+    matched = False
     for title in titles:
         try:
-            driver.wait_loaded(title, timeout_ms=10_000)
+            driver.wait_loaded(title, timeout_ms=45_000)
+            matched = True
             break
         except _pw.TimeoutError:
             continue
+        except RuntimeError:
+            # AA.A.8 — visual rendered with an error overlay. We still
+            # want to capture that state for operator review (the snap
+            # IS the diagnostic). Don't let it abort the capture pass.
+            matched = True
+            break
+    if matched:
+        # Let sibling visuals on the page finish painting before snap.
+        # ``wait_loaded`` is per-visual but the snap captures the whole
+        # page — without a settle wait, QS sheets snap with the matched
+        # visual painted + neighbors mid-spin (operator caught this on
+        # Pending Aging + L2 Exceptions cold reads). 2s is empirical:
+        # QS embed sheets settle ~1.5s after the last STOP_VIS frame.
+        import time as _t
+        _t.sleep(2.0)
     _snap(driver, sheet_slug, short)
 
 
@@ -230,15 +253,22 @@ def test_db3_snap_l2ft_exceptions(
     _wait_or_snap(driver, "l2ft-l2-exceptions", dashboard_id, "L2 Violation Detail")
 
 
-def test_db3_snap_l2ft_chains_sankey(
+def test_db3_snap_l2ft_transfer_templates_sankey(
     l2ft_dashboard_driver: "tuple[DashboardDriver, str]",
 ) -> None:
-    """L2FT Chains — Sankey with items_limit=50. Larger cap than
-    Investigation; the (others) bucket should still appear when the
-    L2 instance has >50 chain templates."""
+    """L2FT Transfer Templates — multi-leg flow Sankey with
+    items_limit=50. Larger cap than Investigation; the (others)
+    bucket should still appear when the L2 instance has >50 transfer
+    templates. (The Sankey lives on Transfer Templates, NOT Chains —
+    Chains is a per-instance Table-only explorer; runtime causality
+    is the wrong shape for Sankey.)"""
     driver, dashboard_id = l2ft_dashboard_driver
-    driver.open(dashboard_id, sheet=_CHAINS_NAME)
-    _wait_or_snap(driver, "l2ft-chains-sankey", dashboard_id, "Chain Templates", _CHAINS_NAME)
+    driver.open(dashboard_id, sheet=_TRANSFER_TEMPLATES_NAME)
+    _wait_or_snap(
+        driver, "l2ft-transfer-templates-sankey", dashboard_id,
+        "Multi-Leg Flow — Account → Template → Account",
+        "Template Instances",
+    )
 
 
 # ---------------------------------------------------------------------------

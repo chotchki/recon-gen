@@ -83,6 +83,74 @@ def test_sankey_empty_nodes_renders_empty_state_message() -> None:
     assert "No flows match" in message
 
 
+def test_sankey_node_tooltips_only_no_inline_text_labels() -> None:
+    """DB.3 follow-up — match QS hover-only label behavior. Pre-DB.3
+    App2 painted every node's name as always-visible ``<text>``
+    siblings; at 50+ nodes labels stack vertically and overlap into
+    illegible noise (operator screenshot: Multi-Leg Flow with labels
+    smeared across every row). QS shows labels on hover via tooltip
+    only. Mirror that: no inline ``<text>`` siblings, every node rect
+    gets a ``<title>`` child whose text is just the node name (no
+    aggregate value — QS doesn't show one on node hover either)."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        page.evaluate(
+            """() => {
+                const section = document.querySelector(
+                    'section[data-visual-id="viz-money-trail"]',
+                );
+                const target = document.createElement('div');
+                target.id = 'sankey-target';
+                section.appendChild(target);
+                window.__bootstrap_internals__.renderSankey(
+                    target,
+                    {
+                        nodes: [{name: 'AcctA'}, {name: 'TmplX'}, {name: 'AcctB'}],
+                        links: [
+                            {source: 0, target: 1, value: 125.0},
+                            {source: 1, target: 2, value: 125.0},
+                        ],
+                    },
+                    'viz-money-trail',
+                );
+            }""",
+        )
+        text_count = page.locator("#sankey-target svg g text").count()
+        title_count = page.locator("#sankey-target svg rect title").count()
+        node_title_texts = cast("list[str]", page.evaluate(
+            """() => Array.from(
+                document.querySelectorAll('#sankey-target svg rect title')
+            ).map(t => t.textContent)""",
+        ))
+        link_title_texts = cast("list[str]", page.evaluate(
+            """() => Array.from(
+                document.querySelectorAll('#sankey-target svg path title')
+            ).map(t => t.textContent)""",
+        ))
+        browser.close()
+    # No always-visible labels — QS-hover-only parity.
+    assert text_count == 0, (
+        "Sankey nodes shouldn't paint inline <text> labels — they "
+        "overlap into noise at 50+ nodes. QS shows on hover only; "
+        "match via <title> tooltips instead."
+    )
+    # One <title> per node.
+    assert title_count == 3
+    # Node tooltips: just the name (no aggregate / total — QS doesn't
+    # show one on node hover either).
+    assert sorted(node_title_texts) == ["AcctA", "AcctB", "TmplX"]
+    # Link tooltips: "<src>→<dst>\n$<currency-formatted value>".
+    assert len(link_title_texts) == 2
+    for link_text in link_title_texts:
+        assert "→" in link_text
+        assert "\n$125.00" in link_text, (
+            f"Link tooltip should carry the currency-formatted value "
+            f"on its own line (QS hover convention). Got {link_text!r}."
+        )
+
+
 def test_sankey_empty_links_renders_empty_state_message() -> None:
     """``{nodes: [{name: 'A'}], links: []}`` also paints the empty-state
     message. A graph with nodes but no edges is degenerate (d3-sankey

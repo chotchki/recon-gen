@@ -858,8 +858,19 @@ def _parametrized_dashboard_driver(
         # embed + AA.H.10 capture-hook. Skip-on-None policy because
         # the [qs, app2] parametrize already covers the App2 leg
         # separately; the qs branch needs a real QS embed.
+        #
+        # DB.3 follow-up — pass a tall (1600, 4000) viewport for the
+        # QS leg so full_page screenshots actually capture the whole
+        # sheet. QS embed uses internal scroll containers, so
+        # ``page.screenshot(full_page=True)`` only captures the
+        # viewport-visible region (unlike App2's HTML page which
+        # scroll-stitches). Without the tall viewport, cold-read
+        # parity captures clipped below-the-fold visuals (operator
+        # caught this on L2FT Chains where the table ran 30 rows in
+        # App2 but only the header rendered in the QS snap).
         with qs_driver_or_none(
             request, cfg=cfg, account_id=account_id, region=region,
+            viewport=(1600, 4000),
         ) as driver:
             if driver is None:
                 pytest.skip("RECON_E2E_USER_ARN unavailable — cannot derive QS user ARN")

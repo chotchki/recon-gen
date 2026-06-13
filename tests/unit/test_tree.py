@@ -1045,6 +1045,44 @@ class TestBarChartVisual:
             "invalid discriminated-union state — exactly one wins."
         )
 
+    def test_db3_count_value_label_apply_to_matches_row_one_calc_name(self):
+        """DB.3 follow-up — for ``count()`` measures, ``Measure.emit()``
+        rewrites the field-well's ``ColumnName`` to the dataset's
+        ``_row_one_*`` literal-1 calc field (BL.1). The
+        ``ValueLabelOptions.AxisLabelOptions[0].ApplyTo.Column.ColumnName``
+        must mirror that rewrite — otherwise QS sees a mismatch
+        against the well and silently drops the ``CustomLabel``,
+        leaking the raw ``_row_one_<dataset>_ds (Sum)`` onto the
+        QS-side value axis instead of the configured override.
+
+        Caught on QS Pending Aging + L2 Exceptions cold-read snaps
+        (operator flagged "qs pending aging looks broken")."""
+        from recon_gen.common.tree.fields import row_one_calc_name
+
+        bar = BarChart(
+            visual_id=VisualId("v-bar-count-label"),
+            title="Stuck Pending by Age Bucket",
+            category=[Dim(dataset=_DS, field_id="f-bucket", column="z_bucket")],
+            values=[Measure.count(dataset=_DS, field_id="f-cnt", column="recipient_id")],
+            value_label="Transactions",  # typing-smell: ignore[no-inline-production-constants]: test of the ApplyTo mirroring contract — the literal value doesn't matter, only that ApplyTo.Column matches the count()-rewritten well; importing _TRANSACTIONS_NAME would tie the test to L1's labeling unnecessarily
+            subtitle="t",
+        )
+        cfg = bar.emit().BarChartVisual.ChartConfiguration  # type: ignore[union-attr]: BarChart.emit() always sets BarChartVisual; pyright sees the wider Visual union
+        assert cfg is not None
+        vlo = cfg.ValueLabelOptions
+        assert vlo is not None and vlo.AxisLabelOptions is not None
+        apply_to = vlo.AxisLabelOptions[0].ApplyTo
+        assert apply_to is not None
+        # The override target must reference the SAME column the field
+        # well points at — the literal-1 calc field, not the
+        # count()'s source column.
+        assert apply_to.Column.ColumnName == row_one_calc_name(_DS), (
+            f"ApplyTo.Column.ColumnName must be {row_one_calc_name(_DS)!r} "
+            f"to match the count()-rewritten field well; got "
+            f"{apply_to.Column.ColumnName!r}. QS silently drops the "
+            "CustomLabel on mismatch and leaks the _row_one_* name."
+        )
+
     def test_bq_5_no_log_scale_leaves_value_axis_unset(self):
         """BQ.5 — default ``log_scale=False`` (every existing BarChart's
         shape pre-BQ.5) MUST leave ``ValueAxis`` None so QS's linear

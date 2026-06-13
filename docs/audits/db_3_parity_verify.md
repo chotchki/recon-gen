@@ -43,7 +43,7 @@ Operator drives the capture pass:
 |---|---|---|
 | Investigation Money Trail | `qs` + `app2` | Sankey with `_SANKEY_NODE_CAP` |
 | Investigation Account Network | `qs` + `app2` | two directional Sankeys + Touching Edges table |
-| L2FT Chains | `qs` + `app2` | Sankey with items_limit=50 |
+| L2FT Transfer Templates | `qs` + `app2` | Multi-Leg Flow Sankey with items_limit=50 |
 
 ### DB.1.3 — KPI Sparkline HIDDEN
 
@@ -72,7 +72,7 @@ Fill the table below after the capture pass:
 | Inv Money Trail (Sankey cap) | ⏳ pending | |
 | Inv Account Network (Sankeys) | ⏳ pending | |
 | L2FT L2 Exceptions (horizontal bar) | ⏳ pending | |
-| L2FT Chains (Sankey cap) | ⏳ pending | |
+| L2FT Transfer Templates (Sankey cap) | ⏳ pending | |
 
 ## Known divergences (expected — already in PARITY_BREAKS)
 

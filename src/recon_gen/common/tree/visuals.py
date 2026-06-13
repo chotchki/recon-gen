@@ -62,7 +62,7 @@ from recon_gen.common.tree.actions import Action, Drill
 from recon_gen.common.tree.formatting import Drillable
 from recon_gen.common.tree.calc_fields import CalcField, resolve_column
 from recon_gen.common.tree.datasets import Dataset
-from recon_gen.common.tree.fields import Dim, FieldRef, Measure, resolve_field_id
+from recon_gen.common.tree.fields import Dim, FieldRef, Measure, resolve_field_id, row_one_calc_name
 
 
 def _field_label(leaf: Dim | Measure) -> str:
@@ -99,18 +99,30 @@ def _axis_label_apply_to(leaf: Dim | Measure) -> AxisLabelReferenceOptions:
     pre-v8.6.1 emit only set ``CustomLabel``, which was the v8.5.5
     "axis labels keep not landing" symptom.
 
+    DB.3 follow-up — for ``count()`` measures, BL.1's
+    ``Measure.emit()`` rewrites the field-well's ``ColumnName`` to
+    the dataset's ``_row_one_*`` literal-1 calc field (so QS
+    translates ``count() → SUM(_row_one_*)``). The ``ApplyTo`` ref
+    must mirror that rewrite or QS sees a column-name mismatch
+    against the well and silently drops the ``CustomLabel`` —
+    surfaced as ``_row_one_<dataset>_ds (Sum)`` leaking onto the
+    QS-side axis instead of the configured ``value_label``.
+
     See `quicksight-quirks.md` 4.5 (axis label needs ApplyTo).
     """
     from recon_gen.common.tree.calc_fields import CalcField as _CF
     from recon_gen.common.tree.datasets import Column
 
-    col = leaf.column
-    if isinstance(col, Column):
-        column_name = col.name
-    elif isinstance(col, _CF):
-        column_name = str(col.name)
+    if isinstance(leaf, Measure) and leaf.kind == "count":
+        column_name = row_one_calc_name(leaf.dataset)
     else:
-        column_name = str(col)
+        col = leaf.column
+        if isinstance(col, Column):
+            column_name = col.name
+        elif isinstance(col, _CF):
+            column_name = str(col.name)
+        else:
+            column_name = str(col)
     return AxisLabelReferenceOptions(
         FieldId=resolve_field_id(leaf),
         Column=ColumnIdentifier(
