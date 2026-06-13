@@ -74,13 +74,16 @@ def _cfg_for_test(prefix: str) -> Config:
     """A minimal Config the seed emitter accepts. The actual values
     don't matter — we only walk the emitted SQL, never connect."""
     return Config(
-        aws=AwsConfig(account_id="000000000000", region="us-east-1", deployment_name=prefix),
+        aws=AwsConfig(
+            account_id="000000000000", region="us-east-1",
+            deployment_name=prefix,
+            principal_arns=(),
+        ),
         db_table_prefix=prefix,
         dialect=Dialect.POSTGRES,
         # demo_database_url required so Config skips the datasource_arn
         # gate; we never actually connect.
         demo_database_url=f"postgresql://noconn:noconn@localhost:1/{prefix}",
-        principal_arns=[],
     )
 
 

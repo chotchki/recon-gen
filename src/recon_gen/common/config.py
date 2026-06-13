@@ -517,7 +517,7 @@ class Config:
     # Use ``aws=AwsConfig(datasource=DatasourceConfig(mode=..., arn=...))``;
     # ``cli/json.py`` keys "we own it" off ``cfg.aws.datasource.mode == "create"``
     # instead of the removed ``cfg.datasource_arn_was_derived`` sentinel.
-    principal_arns: list[str] = field(default_factory=list[str])
+    # DE.5 step 7 — principal_arns moved to aws.principal_arns.
     extra_tags: dict[str, str] = field(default_factory=dict[str, str])
     demo_database_url: str | None = None
     # P.6.a — SQL dialect for emitted DDL + dataset SQL + demo apply.
@@ -776,9 +776,11 @@ class Config:
         # provided the arn explicitly.
         ds_arn = self.aws.datasource.arn
         ds_mode = self.aws.datasource.mode
+        # DE.5 step 7 — principal_arns now from caller-supplied aws.principal_arns.
+        principal_arns_list = list(self.aws.principal_arns)
         if ds_arn is None and self.demo_database_url is not None:
             ds_id = f"{deployment_name}-demo-datasource"
-            partition = _partition_from_arns(ds_arn, self.principal_arns)
+            partition = _partition_from_arns(ds_arn, principal_arns_list)
             ds_arn = (
                 f"arn:{partition}:quicksight:{region}"
                 f":{account_id}:datasource/{ds_id}"
@@ -793,7 +795,7 @@ class Config:
             account_id=account_id,
             region=region,
             deployment_name=deployment_name,
-            principal_arns=tuple(self.principal_arns),
+            principal_arns=tuple(principal_arns_list),
             extra_tags=tuple(sorted(self.extra_tags.items())),
             tagging_enabled=self.tagging_enabled,
             qs_disable_pg_ssl=self.qs_disable_pg_ssl,
@@ -825,7 +827,7 @@ class Config:
 
         Bare strings (no ``arn:`` prefix) fall through to the default.
         """
-        for source in (self.aws.datasource.arn, *self.principal_arns):
+        for source in (self.aws.datasource.arn, *self.aws.principal_arns):
             if source and source.startswith("arn:"):
                 parts = source.split(":", 2)
                 if len(parts) >= 2 and parts[1]:
@@ -869,6 +871,10 @@ class Config:
                 out["aws_region"] = aws_typed["region"]
             if aws_typed.get("deployment_name"):
                 out["deployment_name"] = aws_typed["deployment_name"]
+            # DE.5 step 7 — flatten aws.principal_arns → principal_arns: key.
+            principal_arns_out = aws_typed.get("principal_arns")
+            if principal_arns_out:
+                out["principal_arns"] = list(principal_arns_out)
             # DE.5 step 6 — flatten aws.datasource → datasource_arn flat key.
             # Skip when mode=create (loader re-derives on next load).
             ds_block = aws_typed.get("datasource")
@@ -1514,6 +1520,7 @@ def load_config(path: str | Path | None = None) -> Config:
             account_id=_require_str(values, "aws_account_id"),
             region=_require_str(values, "aws_region"),
             deployment_name=_require_str(values, "deployment_name"),
+            principal_arns=tuple(principal_arns),
             datasource=DatasourceConfig(
                 mode=("adopt" if raw_ds_arn else "create"),
                 arn=raw_ds_arn,
@@ -1522,7 +1529,6 @@ def load_config(path: str | Path | None = None) -> Config:
         db_table_prefix=_validate_and_return_db_prefix(
             _require_str(values, "db_table_prefix")
         ),
-        principal_arns=principal_arns,
         extra_tags=extra_tags,
         demo_database_url=_opt_str(values, "demo_database_url"),
         dialect=dialect,

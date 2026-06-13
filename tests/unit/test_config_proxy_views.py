@@ -34,17 +34,25 @@ from recon_gen.common.sql import Dialect
 
 def _make_cfg(**overrides: object) -> Config:
     """Build a minimal-but-complete legacy ``Config`` for proxy tests."""
-    # DE.5 steps 3-6 — aws_account_id / aws_region / deployment_name /
-    # datasource_arn moved into nested aws=AwsConfig(...).
+    # DE.5 steps 3-7 — aws_account_id / aws_region / deployment_name /
+    # datasource_arn / principal_arns moved into nested aws=AwsConfig(...).
     from recon_gen.common.config import DatasourceConfig  # noqa: PLC0415
     datasource_arn_raw = overrides.pop("datasource_arn", None)
     datasource_arn: str | None = (
         str(datasource_arn_raw) if datasource_arn_raw else None
     )
+    principal_arns_raw = overrides.pop(  # noqa: PLC0415
+        "principal_arns",
+        ["arn:aws:iam::123456789012:role/TestRole"],
+    )
+    # Narrow object → iterable[str] for AwsConfig.principal_arns
+    if not isinstance(principal_arns_raw, (list, tuple)):
+        raise TypeError(f"principal_arns must be list/tuple; got {type(principal_arns_raw).__name__}")
     aws_kwargs: dict[str, object] = {
         "account_id": overrides.pop("aws_account_id", "123456789012"),
         "region": overrides.pop("aws_region", "us-east-1"),
         "deployment_name": overrides.pop("deployment_name", "test-deploy"),
+        "principal_arns": tuple(str(p) for p in principal_arns_raw),  # type: ignore[union-attr]: isinstance check above narrows; str() per-element handles whatever the test passed
         "datasource": DatasourceConfig(
             mode=("adopt" if datasource_arn else "create"),
             arn=datasource_arn,
@@ -55,7 +63,6 @@ def _make_cfg(**overrides: object) -> Config:
         "db_table_prefix": "test_deploy",
         "demo_database_url": "postgresql://u:p@h:5432/d",
         "dialect": Dialect.POSTGRES,
-        "principal_arns": ["arn:aws:iam::123456789012:role/TestRole"],
     }
     defaults.update(overrides)
     return Config(**defaults)  # type: ignore[arg-type]: dict[str, object] is the dataclass kwarg surface; pyright can't narrow per-key

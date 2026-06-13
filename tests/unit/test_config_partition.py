@@ -21,7 +21,8 @@ from recon_gen.common.config import AwsConfig, Config, DatasourceConfig
 
 def _cfg(**overrides: Any) -> Config:
     """Minimal Config with one of every required field; override per test."""
-    # DE.5 steps 3-6 — translate flat aws_* / deployment_name / datasource_arn kwargs.
+    # DE.5 steps 3-7 — translate flat aws_* / deployment_name /
+    # datasource_arn / principal_arns kwargs.
     region = overrides.pop("aws_region", "us-east-1")
     account_id = overrides.pop("aws_account_id", "111122223333")
     deployment_name = overrides.pop("deployment_name", "recon-test")
@@ -29,10 +30,12 @@ def _cfg(**overrides: Any) -> Config:
         "datasource_arn",
         f"arn:aws:quicksight:{region}:{account_id}:datasource/x",
     )
+    principal_arns = overrides.pop("principal_arns", ())
     base: dict[str, Any] = dict(
         aws=AwsConfig(
             account_id=account_id, region=region,
             deployment_name=deployment_name,
+            principal_arns=tuple(principal_arns),
             datasource=DatasourceConfig(
                 mode=("adopt" if datasource_arn else "create"),
                 arn=datasource_arn,
@@ -76,12 +79,12 @@ def test_partition_from_principal_arn_when_no_datasource_set() -> None:
         aws=AwsConfig(
             account_id="111122223333", region="us-gov-east-1",
             deployment_name="recon-test",
+            principal_arns=(
+                "arn:aws-us-gov:iam::111122223333:user/operator",
+            ),
         ),
         demo_database_url="postgresql://example",
         db_table_prefix="test",
-        principal_arns=[
-            "arn:aws-us-gov:iam::111122223333:user/operator",
-        ],
     )
     assert cfg.aws.partition == "aws-us-gov"
     # And the synthesized datasource_arn picks it up:
@@ -148,10 +151,10 @@ def test_bare_string_principal_falls_through_to_default() -> None:
         aws=AwsConfig(
             account_id="111122223333", region="us-east-1",
             deployment_name="recon-test",
+            principal_arns=("not-an-arn",),
         ),
         demo_database_url="postgresql://example",
         db_table_prefix="test",
-        principal_arns=["not-an-arn"],
     )
     assert cfg.aws.partition == "aws"
 
@@ -163,10 +166,10 @@ def test_empty_partition_segment_falls_through() -> None:
         aws=AwsConfig(
             account_id="111122223333", region="us-east-1",
             deployment_name="recon-test",
+            principal_arns=("arn::iam::111122223333:user/operator",),
         ),
         demo_database_url="postgresql://example",
         db_table_prefix="test",
-        principal_arns=["arn::iam::111122223333:user/operator"],
     )
     assert cfg.aws.partition == "aws"
 

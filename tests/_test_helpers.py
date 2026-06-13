@@ -74,13 +74,14 @@ def make_test_config(**overrides: Any) -> Config:
       generated DB DDL; pin to a real prefix when it does.
     - ``dialect=Dialect.ORACLE`` — exercise the Oracle SQL branch.
     """
-    # DE.5 steps 3-6 — translate flat aws_* / deployment_name /
-    # datasource_arn kwargs into nested aws=AwsConfig(...).
+    # DE.5 steps 3-7 — translate flat aws_* / deployment_name /
+    # datasource_arn / principal_arns kwargs into nested aws=AwsConfig(...).
     from recon_gen.common.config import AwsConfig, DatasourceConfig  # noqa: PLC0415
     account_id = overrides.pop("aws_account_id", _TEST_ACCOUNT)
     region = overrides.pop("aws_region", _TEST_REGION)
     deployment_name = overrides.pop("deployment_name", "recon-test")
     datasource_arn = overrides.pop("datasource_arn", None)
+    principal_arns = overrides.pop("principal_arns", ())
     if datasource_arn is None:
         if region != _TEST_REGION:
             datasource_arn = (
@@ -94,6 +95,7 @@ def make_test_config(**overrides: Any) -> Config:
             account_id=account_id,
             region=region,
             deployment_name=deployment_name,
+            principal_arns=tuple(principal_arns),
             datasource=DatasourceConfig(
                 mode=("adopt" if datasource_arn else "create"),
                 arn=datasource_arn,

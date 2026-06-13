@@ -1001,6 +1001,9 @@ def _build_app(app_name: str) -> App:
         aws=AwsConfig(
             account_id="000000000000", region="us-east-2",
             deployment_name="qs-gen",
+            principal_arns=(
+                "arn:aws:quicksight:us-east-2:000000000000:user/default/dummy",
+            ),
             datasource=DatasourceConfig(
                 mode="adopt",
                 arn=(
@@ -1010,9 +1013,6 @@ def _build_app(app_name: str) -> App:
             ),
         ),
         db_table_prefix="spec_example",
-        principal_arns=[
-            "arn:aws:quicksight:us-east-2:000000000000:user/default/dummy"
-        ],
     )
     return _APP_BUILDERS[app_name](cfg, l2_instance=spec_example)
 
