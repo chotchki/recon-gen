@@ -55,7 +55,7 @@ def inv_dashboard_id(isolated_cfg: "Config") -> str:
     """Isolated cfg's investigation-dashboard ID. When the dashboard
     isn't deployed, qs_inv_driver yields None and the producer writes
     the no-leg sentinel."""
-    return f"{isolated_cfg.deployment_name}-investigation-dashboard"
+    return f"{isolated_cfg.aws.deployment_name}-investigation-dashboard"
 
 
 @pytest.fixture

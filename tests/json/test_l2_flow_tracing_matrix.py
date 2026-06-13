@@ -146,7 +146,7 @@ def test_every_dataset_id_carries_deployment_prefix(
     distinct cfg.yaml) don't collide in the same QS account. Mirrors
     `test_l1_dashboard_structure.py`'s prefix check."""
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
-    expected_prefix = f"{_CFG.deployment_name}-"
+    expected_prefix = f"{_CFG.aws.deployment_name}-"
     for ds in app.datasets:
         # The arn carries the dataset ID; pull it out of the ARN's
         # `:dataset/<id>` suffix.
@@ -166,7 +166,7 @@ def test_analysis_and_dashboard_ids_carry_deployment_prefix(
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
     analysis = app.emit_analysis()
     dashboard = app.emit_dashboard()
-    expected_prefix = f"{_CFG.deployment_name}-"
+    expected_prefix = f"{_CFG.aws.deployment_name}-"
     assert analysis.AnalysisId.startswith(expected_prefix)
     assert dashboard.DashboardId.startswith(expected_prefix)
 

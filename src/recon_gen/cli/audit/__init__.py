@@ -1429,7 +1429,7 @@ def audit_apply(
     l2_label = (
         Path(l2_instance_path).name
         if l2_instance_path is not None
-        else f"{_cfg.deployment_name} (bundled)"
+        else f"{_cfg.aws.deployment_name} (bundled)"
     )
     exec_summary = _query_executive_summary(_cfg, instance, frame)
     drift_rows = _query_drift_violations(_cfg, instance, frame)

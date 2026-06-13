@@ -47,7 +47,7 @@ _ISOLATION_SUFFIX = "iagree"
 
 @pytest.fixture(scope="module")
 def inv_dashboard_id(isolated_cfg: "Config") -> str:
-    return f"{isolated_cfg.deployment_name}-investigation-dashboard"
+    return f"{isolated_cfg.aws.deployment_name}-investigation-dashboard"
 
 
 @pytest.fixture

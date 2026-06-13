@@ -7,7 +7,7 @@ synthesis sites (``Config.dataset_arn``, ``Config.theme_arn``,
 ``demo_database_url``) breaks every deploy against a non-commercial
 partition — QuickSight rejects the synthesized resource ARNs.
 
-Resolution order (see ``Config.partition``): ``datasource_arn`` first
+Resolution order (see ``Config.aws.partition``): ``datasource_arn`` first
 (authoritative when the customer supplied a pre-existing datasource),
 then the first ``principal_arns`` entry, then ``aws`` as fallback.
 """

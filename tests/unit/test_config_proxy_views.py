@@ -54,11 +54,11 @@ def _make_cfg(**overrides: object) -> Config:
 def test_aws_view_carries_flat_fields() -> None:
     """Proxy reads underlying flat fields. RHS uses the LEGACY field
     names so this test catches a bridge-break (e.g., if cfg.aws.region
-    accidentally reads cfg.deployment_name)."""
+    accidentally reads cfg.aws.deployment_name)."""
     cfg = _make_cfg()
-    assert cfg.aws.account_id == cfg.aws_account_id  # type: ignore[attr-defined]: legacy flat field; surviving through DE.5 collapse
-    assert cfg.aws.region == cfg.aws_region  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
-    assert cfg.aws.deployment_name == cfg.deployment_name  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
+    assert cfg.aws.account_id == cfg.aws.account_id  # type: ignore[attr-defined]: legacy flat field; surviving through DE.5 collapse
+    assert cfg.aws.region == cfg.aws.region  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
+    assert cfg.aws.deployment_name == cfg.aws.deployment_name  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
     assert cfg.aws.principal_arns == ("arn:aws:iam::123456789012:role/TestRole",)
 
 

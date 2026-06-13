@@ -154,7 +154,7 @@ def test_analysis_registered_with_deployment_aware_name() -> None:
     L2 yaml's `instance:` field, dropped in Z.C)."""
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
-    assert _CFG.deployment_name in app.analysis.name
+    assert _CFG.aws.deployment_name in app.analysis.name
 
 
 def test_dashboard_registered() -> None:
@@ -1838,7 +1838,7 @@ def test_dashboard_emits_with_expected_id_suffix() -> None:
     app = build_l1_dashboard_app(_CFG)
     dashboard = app.emit_dashboard()
     assert dashboard.DashboardId.endswith("-l1-dashboard")
-    assert dashboard.DashboardId == f"{_CFG.deployment_name}-l1-dashboard"
+    assert dashboard.DashboardId == f"{_CFG.aws.deployment_name}-l1-dashboard"
 
 
 # -- CLI smoke (M.2a.9) ------------------------------------------------------

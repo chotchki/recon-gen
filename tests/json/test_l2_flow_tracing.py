@@ -183,7 +183,7 @@ def test_analysis_registered_with_deployment_aware_name() -> None:
     multi-deploy QS accounts are distinguishable in the UI."""
     app = build_l2_flow_tracing_app(_CFG)
     assert app.analysis is not None
-    assert _CFG.deployment_name in app.analysis.name
+    assert _CFG.aws.deployment_name in app.analysis.name
     assert _GETTING_STARTED_TITLE in app.analysis.name
 
 
@@ -208,7 +208,7 @@ def test_analysis_id_uses_deployment_prefix() -> None:
     app = build_l2_flow_tracing_app(_CFG)
     analysis = app.emit_analysis()
     assert analysis.AnalysisId == (
-        f"{_CFG.deployment_name}-l2-flow-tracing-analysis"
+        f"{_CFG.aws.deployment_name}-l2-flow-tracing-analysis"
     )
 
 
@@ -216,7 +216,7 @@ def test_dashboard_id_uses_deployment_prefix() -> None:
     app = build_l2_flow_tracing_app(_CFG)
     dashboard = app.emit_dashboard()
     assert dashboard.DashboardId == (
-        f"{_CFG.deployment_name}-l2-flow-tracing"
+        f"{_CFG.aws.deployment_name}-l2-flow-tracing"
     )
 
 

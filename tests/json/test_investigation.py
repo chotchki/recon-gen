@@ -267,7 +267,7 @@ def test_analysis_name_carries_deployment_name():
     # ``Name (deployment_name)`` shape so multi-deploy QS accounts are
     # visually distinguishable in the dashboard list.
     analysis = build_analysis(_TEST_CFG)
-    assert analysis.Name == f"Investigation ({_TEST_CFG.deployment_name})"
+    assert analysis.Name == f"Investigation ({_TEST_CFG.aws.deployment_name})"
 
 
 def test_dashboard_mirrors_analysis_definition():
@@ -277,7 +277,7 @@ def test_dashboard_mirrors_analysis_definition():
     assert dashboard.Definition.Sheets is not None
     assert analysis.Definition.Sheets is not None
     assert len(dashboard.Definition.Sheets) == len(analysis.Definition.Sheets)
-    assert dashboard.DashboardId == _TEST_CFG.prefixed("investigation-dashboard")
+    assert dashboard.DashboardId == _TEST_CFG.aws.prefixed("investigation-dashboard")
 
 
 def test_every_sheet_has_a_description():
@@ -292,7 +292,7 @@ def test_analysis_serializes_to_aws_json():
 
     5 content sheets + the M.4.4.5 App Info ("i") sheet = 6 total."""
     j = build_analysis(_TEST_CFG).to_aws_json()
-    assert j["AnalysisId"] == _TEST_CFG.prefixed("investigation-analysis")
+    assert j["AnalysisId"] == _TEST_CFG.aws.prefixed("investigation-analysis")
     assert len(j["Definition"]["Sheets"]) == 6
 
 
@@ -313,17 +313,17 @@ def test_investigation_datasets_in_expected_order():
     zip relies on it."""
     datasets = build_all_datasets(_TEST_CFG, _TEST_L2)
     assert len(datasets) == 11
-    assert datasets[0].DataSetId == _TEST_CFG.prefixed("inv-recipient-fanout-dataset")
-    assert datasets[1].DataSetId == _TEST_CFG.prefixed("inv-volume-anomalies-dataset")
-    assert datasets[2].DataSetId == _TEST_CFG.prefixed("inv-volume-anomalies-distribution-dataset")
-    assert datasets[3].DataSetId == _TEST_CFG.prefixed("inv-money-trail-dataset")
-    assert datasets[4].DataSetId == _TEST_CFG.prefixed("inv-money-trail-roots-dataset")
-    assert datasets[5].DataSetId == _TEST_CFG.prefixed("inv-account-network-dataset")
-    assert datasets[6].DataSetId == _TEST_CFG.prefixed("inv-account-network-inbound-dataset")
-    assert datasets[7].DataSetId == _TEST_CFG.prefixed("inv-account-network-outbound-dataset")
-    assert datasets[8].DataSetId == _TEST_CFG.prefixed("inv-anetwork-accounts-dataset")
-    assert datasets[9].DataSetId == _TEST_CFG.prefixed("inv-app-info-liveness-dataset")
-    assert datasets[10].DataSetId == _TEST_CFG.prefixed("inv-app-info-matviews-dataset")
+    assert datasets[0].DataSetId == _TEST_CFG.aws.prefixed("inv-recipient-fanout-dataset")
+    assert datasets[1].DataSetId == _TEST_CFG.aws.prefixed("inv-volume-anomalies-dataset")
+    assert datasets[2].DataSetId == _TEST_CFG.aws.prefixed("inv-volume-anomalies-distribution-dataset")
+    assert datasets[3].DataSetId == _TEST_CFG.aws.prefixed("inv-money-trail-dataset")
+    assert datasets[4].DataSetId == _TEST_CFG.aws.prefixed("inv-money-trail-roots-dataset")
+    assert datasets[5].DataSetId == _TEST_CFG.aws.prefixed("inv-account-network-dataset")
+    assert datasets[6].DataSetId == _TEST_CFG.aws.prefixed("inv-account-network-inbound-dataset")
+    assert datasets[7].DataSetId == _TEST_CFG.aws.prefixed("inv-account-network-outbound-dataset")
+    assert datasets[8].DataSetId == _TEST_CFG.aws.prefixed("inv-anetwork-accounts-dataset")
+    assert datasets[9].DataSetId == _TEST_CFG.aws.prefixed("inv-app-info-liveness-dataset")
+    assert datasets[10].DataSetId == _TEST_CFG.aws.prefixed("inv-app-info-matviews-dataset")
 
 
 def test_investigation_datasets_declared_in_analysis():
@@ -1030,7 +1030,7 @@ def test_money_trail_roots_companion_dataset_is_unfiltered():
     """
     datasets = build_all_datasets(_TEST_CFG, _TEST_L2)
     roots = datasets[4]  # immediately after the parameter-bearing dataset
-    assert roots.DataSetId == _TEST_CFG.prefixed(
+    assert roots.DataSetId == _TEST_CFG.aws.prefixed(
         "inv-money-trail-roots-dataset",
     )
     sql = _custom_sql(roots)
@@ -1280,7 +1280,7 @@ def test_account_network_dataset_reuses_money_trail_matview_with_pushdown_where(
     """
     # Index 5 post-Y.2.a (Y.1.b.companion + Y.2.a.companion shifted +2).
     ds = build_all_datasets(_TEST_CFG, _TEST_L2)[5]
-    assert ds.DataSetId == _TEST_CFG.prefixed("inv-account-network-dataset")
+    assert ds.DataSetId == _TEST_CFG.aws.prefixed("inv-account-network-dataset")
     sql = _custom_sql(ds)
     # N.3.d: matview name is per-instance prefixed.
     assert "FROM spec_example_inv_money_trail_edges" in sql

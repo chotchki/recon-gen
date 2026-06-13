@@ -446,7 +446,7 @@ class TestConfigPrefixed:
         """The headline use case: same dashboard kind, different deployment."""
         cfg_a = make_test_config(deployment_name="recon-sasquatch")
         cfg_b = make_test_config(deployment_name="recon-wonkawash")
-        assert cfg_a.prefixed("l1-dashboard") != cfg_b.prefixed("l1-dashboard")
+        assert cfg_a.aws.prefixed("l1-dashboard") != cfg_b.aws.prefixed("l1-dashboard")
 
 
 # ---------------------------------------------------------------------------
@@ -574,7 +574,7 @@ class TestBuildDatasource:
         ds = build_datasource(_DEMO_CFG)
         # Z.C — `<deployment_name>-demo-datasource` (was the historical
         # `qs-gen-demo-datasource` from the v8.x default resource_prefix).
-        assert ds.DataSourceId == f"{_DEMO_CFG.deployment_name}-demo-datasource"
+        assert ds.DataSourceId == f"{_DEMO_CFG.aws.deployment_name}-demo-datasource"
 
     def test_raises_without_demo_url(self):
         cfg = make_test_config()

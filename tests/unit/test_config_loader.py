@@ -224,7 +224,7 @@ def test_legacy_principal_arn_singular_still_works(tmp_path: Path) -> None:
         "principal_arn": "arn:aws:iam::111122223333:user/legacy",
     }))
     cfg = load_config(p)
-    # DE.2 — _AwsView.principal_arns is a tuple (v14 shape); legacy
+    # DE.2 — _AwsView.aws.principal_arns is a tuple (v14 shape); legacy
     # flat field is list. Assert tuple here since the sweep moved
     # callers to the v14 nested accessor.
     assert cfg.aws.principal_arns == ("arn:aws:iam::111122223333:user/legacy",)
@@ -357,7 +357,7 @@ def test_datasource_arn_was_derived_flag(
     cfg1 = load_config(_write_yaml(dir_a, _required_yaml({
         "datasource_arn": explicit_arn, "dialect": "postgres",
     })))
-    assert cfg1.datasource_arn == explicit_arn
+    assert cfg1.aws.datasource.arn == explicit_arn
     assert cfg1.datasource_arn_was_derived is False
 
     # Explicit ARN AND demo_database_url → still NOT derived (the fix);
@@ -366,7 +366,7 @@ def test_datasource_arn_was_derived_flag(
         "datasource_arn": explicit_arn,
         "demo_database_url": "postgresql://u:p@h:5432/d", "dialect": "postgres",
     })))
-    assert cfg2.datasource_arn == explicit_arn
+    assert cfg2.aws.datasource.arn == explicit_arn
     assert cfg2.datasource_arn_was_derived is False
 
     # demo_database_url only → derived; ARN carries the deployment_name
@@ -385,7 +385,7 @@ def test_datasource_arn_was_derived_flag(
         }).items() if k != "datasource_arn"
     }))
     assert cfg3.datasource_arn_was_derived is True
-    assert "recon-sasquatch-pr" in (cfg3.datasource_arn or "")
+    assert "recon-sasquatch-pr" in (cfg3.aws.datasource.arn or "")
 
 
 # X.4.g.1+3 — Deploy-pipeline config schema. Post-BS.4 two fields on
@@ -604,8 +604,8 @@ def test_to_yaml_dict_round_trips_through_load_config(tmp_path: Path) -> None:
     out_path = tmp_path / "round_trip.yaml"
     cfg.write_yaml(out_path)
     cfg2 = load_config(out_path)
-    assert cfg2.aws_account_id == cfg.aws.account_id
-    assert cfg2.deployment_name == cfg.aws.deployment_name
+    assert cfg2.aws.account_id == cfg.aws.account_id
+    assert cfg2.aws.deployment_name == cfg.aws.deployment_name
     assert cfg2.dialect == cfg.db.dialect
     # DE.2 — _AwsView normalizes to tuples; compare via proxy on both
     # sides so the list/tuple type-mismatch doesn't false-positive.

@@ -64,7 +64,7 @@ def test_postgres_dialect_swaps_to_pg_url() -> None:
     out = _call_bridge(cfg, pg_url="postgresql://container:5432/x")
     assert out.demo_database_url == "postgresql://container:5432/x"
     # Other fields preserved by `dataclasses.replace`.
-    assert out.deployment_name == "recon-test"
+    assert out.aws.deployment_name == "recon-test"
     assert out.dialect is Dialect.POSTGRES
 
 
@@ -101,9 +101,9 @@ def test_other_cfg_fields_preserved_on_swap() -> None:
     """
     cfg = _minimal_cfg(Dialect.POSTGRES, demo_url="old")
     out = _call_bridge(cfg, pg_url="new")
-    assert out.aws_account_id == cfg.aws.account_id
-    assert out.aws_region == cfg.aws.region
-    assert out.deployment_name == cfg.aws.deployment_name
+    assert out.aws.account_id == cfg.aws.account_id
+    assert out.aws.region == cfg.aws.region
+    assert out.aws.deployment_name == cfg.aws.deployment_name
     assert out.db_table_prefix == cfg.db.table_prefix
     # And the swap actually happened.
     assert out.demo_database_url != cfg.db.url

@@ -125,7 +125,7 @@ def _seeded_cli_env(seeded_cfg: Config) -> dict[str, str]:
     return {
         **os.environ,
         RECON_GEN_DB_TABLE_PREFIX.name: seeded_cfg.db_table_prefix,
-        RECON_GEN_DEPLOYMENT_NAME.name: seeded_cfg.deployment_name,
+        RECON_GEN_DEPLOYMENT_NAME.name: seeded_cfg.aws.deployment_name,
     }
 
 

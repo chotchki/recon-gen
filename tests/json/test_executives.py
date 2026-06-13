@@ -90,19 +90,19 @@ def test_analysis_name_is_executives(exec_analysis: "_ModelsAnalysis") -> None:
     # visually distinguishable in the dashboard list. Replaces the
     # prior ``(instance)`` shape (instance was auto-stamped from the
     # L2 yaml; now lives on cfg.aws.deployment_name).
-    assert exec_analysis.Name == f"Executives ({_TEST_CFG.deployment_name})"
+    assert exec_analysis.Name == f"Executives ({_TEST_CFG.aws.deployment_name})"
 
 
 def test_analysis_serializes_to_aws_json(exec_analysis: "_ModelsAnalysis") -> None:
     """to_aws_json() must succeed end-to-end — no None-strip crashes."""
     j = exec_analysis.to_aws_json()
-    assert j["AnalysisId"] == _TEST_CFG.prefixed("executives-analysis")
+    assert j["AnalysisId"] == _TEST_CFG.aws.prefixed("executives-analysis")
     assert len(j["Definition"]["Sheets"]) == 6
 
 
 def test_dashboard_mirrors_analysis(exec_app: "_App") -> None:
     dashboard = exec_app.emit_dashboard()
-    assert dashboard.DashboardId == _TEST_CFG.prefixed(
+    assert dashboard.DashboardId == _TEST_CFG.aws.prefixed(
         "executives-dashboard",
     )
     assert dashboard.Definition.Sheets is not None
@@ -130,28 +130,28 @@ def test_datasets_in_expected_order():
     datasets, in order."""
     datasets = build_all_datasets(_TEST_CFG)
     assert len(datasets) == 8
-    assert datasets[0].DataSetId == _TEST_CFG.prefixed(
+    assert datasets[0].DataSetId == _TEST_CFG.aws.prefixed(
         "exec-transaction-summary-dataset",
     )
-    assert datasets[1].DataSetId == _TEST_CFG.prefixed(
+    assert datasets[1].DataSetId == _TEST_CFG.aws.prefixed(
         "exec-transaction-daily-dataset",
     )
-    assert datasets[2].DataSetId == _TEST_CFG.prefixed(
+    assert datasets[2].DataSetId == _TEST_CFG.aws.prefixed(
         "exec-transaction-legs-dataset",
     )
-    assert datasets[3].DataSetId == _TEST_CFG.prefixed(
+    assert datasets[3].DataSetId == _TEST_CFG.aws.prefixed(
         "exec-account-summary-dataset",
     )
-    assert datasets[4].DataSetId == _TEST_CFG.prefixed(
+    assert datasets[4].DataSetId == _TEST_CFG.aws.prefixed(
         "exec-account-summary-active-dataset",
     )
-    assert datasets[5].DataSetId == _TEST_CFG.prefixed(
+    assert datasets[5].DataSetId == _TEST_CFG.aws.prefixed(
         "exec-program-health-dataset",
     )
-    assert datasets[6].DataSetId == _TEST_CFG.prefixed(
+    assert datasets[6].DataSetId == _TEST_CFG.aws.prefixed(
         "exec-app-info-liveness-dataset",
     )
-    assert datasets[7].DataSetId == _TEST_CFG.prefixed(
+    assert datasets[7].DataSetId == _TEST_CFG.aws.prefixed(
         "exec-app-info-matviews-dataset",
     )
 
@@ -251,15 +251,15 @@ def test_both_content_datasets_filter_to_status_posted():
     datasets read schema/matview metadata + don't carry a status
     column either."""
     skip_ids = {
-        _TEST_CFG.prefixed("exec-app-info-liveness-dataset"),
-        _TEST_CFG.prefixed("exec-app-info-matviews-dataset"),
+        _TEST_CFG.aws.prefixed("exec-app-info-liveness-dataset"),
+        _TEST_CFG.aws.prefixed("exec-app-info-matviews-dataset"),
         # BH.8 — transaction-legs deliberately skips the Posted filter
         # so its count matches App Info's per-leg / all-status row_count.
-        _TEST_CFG.prefixed("exec-transaction-legs-dataset"),
+        _TEST_CFG.aws.prefixed("exec-transaction-legs-dataset"),
         # CF.2 — program-health rollup reads from <prefix>_l1_exceptions
         # (a matview that's already pre-filtered to violations); status
         # filter would be a no-op.
-        _TEST_CFG.prefixed("exec-program-health-dataset"),
+        _TEST_CFG.aws.prefixed("exec-program-health-dataset"),
     }
     for ds in build_all_datasets(_TEST_CFG):
         if ds.DataSetId in skip_ids:
