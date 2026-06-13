@@ -135,30 +135,22 @@ def test_tagging_enabled_non_bool_rejected(tmp_path: Path) -> None:
         load_config(p)
 
 
-# Phase BS.2 — Studio toggle (D1 nav contract).
-
-def test_studio_enabled_defaults_to_true(tmp_path: Path) -> None:
-    """Default-on for dev. Production cfgs that ship dashboards-only
-    set ``studio_enabled: false`` per BS.0 Lock 1."""
-    cfg = load_config(_write_yaml(tmp_path, _required_yaml()))
-    assert cfg.studio_enabled is True
+# DE.5 step 20 — studio_enabled dropped. The loader silently accepts the
+# legacy yaml key for backward compat during the strangler period; the
+# previous BS.2 tests (defaults_to_true / false_loads / non_bool_rejected)
+# are gone with the field. `recon-gen studio` now always mounts Studio;
+# operators use `recon-gen dashboards` for the dashboards-only surface.
 
 
-def test_studio_enabled_false_loads(tmp_path: Path) -> None:
-    """Explicit opt-out keeps the cfg valid (no Studio surface mounted
-    on the binary, no Studio top-nav entries)."""
-    cfg = load_config(_write_yaml(tmp_path, _required_yaml({
+def test_studio_enabled_yaml_key_silently_accepted(tmp_path: Path) -> None:
+    """Legacy yamls carrying `studio_enabled:` still load (silently
+    ignored), so existing operator cfgs don't break on v14 upgrade."""
+    cfg_with = load_config(_write_yaml(tmp_path, _required_yaml({
         "studio_enabled": False,
     })))
-    assert cfg.studio_enabled is False
-
-
-def test_studio_enabled_non_bool_rejected(tmp_path: Path) -> None:
-    p = _write_yaml(tmp_path, _required_yaml({
-        "studio_enabled": "false",  # YAML string, not bool
-    }))
-    with pytest.raises(ValueError, match="studio_enabled must be a bool"):
-        load_config(p)
+    cfg_without = load_config(_write_yaml(tmp_path, _required_yaml()))
+    # No public surface for the dropped field; just confirm both load.
+    assert cfg_with.aws.deployment_name == cfg_without.aws.deployment_name
 
 
 @pytest.mark.parametrize("leaked_key", [

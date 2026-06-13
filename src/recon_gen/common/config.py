@@ -585,14 +585,10 @@ class Config:
     # ``resource_prefix`` — significantly weaker isolation. See the
     # docs reference for the loss-of-safety details before opting in.
     # DE.5 step 9 — moved to aws.tagging_enabled.
-    # Phase BS.2 (D1 nav contract) — toggles the Studio surface on/off
-    # in the App2 binary. When False, the Studio top-nav entries (L2
-    # Editor / ETL Support / Training) hide and the `/studio/*` routes
-    # are not mounted. Dashboards + Docs are baseline (always mounted).
-    # Default True for dev (Studio is the authoring path); production
-    # cfgs that ship dashboards-only set `studio_enabled: false`.
-    # See SPEC.md::D1 + PLAN.md::Phase BS BS.0 Lock 1.
-    studio_enabled: bool = True
+    # DE.5 step 20 — studio_enabled flat field dropped.
+    # The CLI mounts Studio unconditionally — production deployments use
+    # `recon-gen dashboards` (which never mounts Studio) for the
+    # dashboards-only surface. No cfg knob needed.
     # X.2.n.6 — Max concurrent DB connections in the App2 server's
     # async pool (``common/db.py::make_connection_pool``). Default 10
     # is sized for "one user opening a sheet with ~10 visuals" or
@@ -1305,11 +1301,10 @@ def load_config(path: str | Path | None = None) -> Config:
             f"tagging_enabled must be a bool; got {raw_tagging!r}."
         )
 
-    raw_studio_enabled = values.get("studio_enabled", True)
-    if not isinstance(raw_studio_enabled, bool):
-        raise ValueError(
-            f"studio_enabled must be a bool; got {raw_studio_enabled!r}."
-        )
+    # DE.5 step 20 — studio_enabled removed; silently accept-and-ignore
+    # the legacy yaml key during the strangler so already-deployed cfgs
+    # don't break on upgrade.
+    values.pop("studio_enabled", None)
 
     # BS.4 (2026-05-29): etl_datasource block removed from cfg — the
     # legacy upstream→demo_db copy is gone (etl_hook writes directly).
@@ -1551,7 +1546,6 @@ def load_config(path: str | Path | None = None) -> Config:
         # DE.5 step 18 — signing now on AuditConfig.
         audit=AuditConfig(signing=signing),
         auth=auth,
-        studio_enabled=raw_studio_enabled,
         # DE.5 step 17 — etl_hook + banner_text + app2_tls now on App2Config.
         app2=App2Config(
             etl_hook=app2_etl_hook,

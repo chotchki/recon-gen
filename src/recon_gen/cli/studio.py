@@ -147,18 +147,9 @@ def studio(
     )
 
     cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
-    # Phase BS.3 — cfg gates whether the Studio surface mounts at all
-    # per BS.0 Lock 1. Production cfgs set `studio_enabled: false` to
-    # ship dashboards-only without the authoring surface; running
-    # `recon-gen studio` against such a cfg is operator error (the
-    # command's whole job is to mount Studio).
-    if not cfg.studio_enabled:
-        raise click.ClickException(
-            "cfg.studio_enabled is False — this binary cfg explicitly "
-            "disables the Studio surface. Either flip `studio_enabled: "
-            "true` in the cfg (dev path), or use `recon-gen dashboards` "
-            "if you only want the Dashboards/Docs surface (prod path)."
-        )
+    # DE.5 step 20 — cfg.studio_enabled dropped. `recon-gen studio` always
+    # mounts the Studio surface; the dashboards-only path is `recon-gen
+    # dashboards` (a separate CLI verb that never mounts /studio/*).
     # X.4.h.2 — instantiate the data-shaping panel's knob cache here
     # (cfg is in scope; the factory just gets a kwarg). Initial state =
     # cfg.test.generator snapshot merged with sidefile overrides
