@@ -5001,10 +5001,23 @@ def cmd_triage(args: argparse.Namespace) -> int:
         "-Logfile", str(log_path),
         "bash", str(cmd_path),
     ]
-    # Inject the runner-variant env into the screen subprocess so the
-    # pytest invocation INSIDE screen sees the same cfg / URL / ARN that
-    # cmd_up_to would have plumbed.
-    spawn_env = {**os.environ, **runner_variant_env}
+    # POLICY 1 (CLAUDE.md "Build hygiene contract") — triage's env shape
+    # must match the chain's `up_to=<layer>` env shape EXACTLY. Pull the
+    # layer-specific env_addl from `_layer_command(layer, ...)` (the same
+    # function `cmd_up_to`'s dispatch loop calls per layer) and merge it
+    # into the spawn env. This brings in RECON_GEN_E2E=1 +
+    # RECON_GEN_LAYER + RECON_GEN_DEMO_DATABASE_URL[_PG/_OR] +
+    # RECON_E2E_PAGE_TIMEOUT + the SKIP_PYRIGHT/BIOME/TAILWIND set the
+    # chain's qs_browser layer sets — without which the e2e conftest's
+    # collect-modifyitems skips the test silently and triage drops into
+    # bash with rc=0 instead of into pdb on the real test body.
+    layer_env_addl: dict[str, str] = {}
+    layer_cmd_env = _layer_command(
+        layer, run_dir, options=None, variant_env=runner_variant_env,
+    )
+    if layer_cmd_env is not None:
+        _layer_argv, layer_env_addl = layer_cmd_env
+    spawn_env = {**os.environ, **runner_variant_env, **layer_env_addl}
     spawn_result = subprocess.run(
         screen_argv,
         cwd=REPO_ROOT,
