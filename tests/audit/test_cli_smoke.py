@@ -49,12 +49,16 @@ def min_config(tmp_path: Path) -> Path:
     need a live DB connection (skeleton mode is metadata-only)."""
     cfg = tmp_path / "config.yaml"
     cfg.write_text(
-        "aws_account_id: '111122223333'\n"
-        "aws_region: us-west-2\n"
-        "deployment_name: spec_example\n"
-        "db_table_prefix: spec_example\n"
-        "datasource_arn: arn:aws:quicksight:us-west-2:111122223333"
-        ":datasource/ds\n"
+        "aws:\n"
+        "  account_id: '111122223333'\n"
+        "  region: us-west-2\n"
+        "  deployment_name: spec_example\n"
+        "  datasource:\n"
+        "    mode: adopt\n"
+        "    arn: arn:aws:quicksight:us-west-2:111122223333:datasource/ds\n"
+        "db:\n"
+        "  dialect: postgres\n"
+        "  table_prefix: spec_example\n"
     )
     return cfg
 
@@ -319,16 +323,21 @@ def signed_config(tmp_path: Path) -> Path:
     """
     cfg = tmp_path / "config.yaml"
     cfg.write_text(
-        "aws_account_id: '111122223333'\n"
-        "aws_region: us-west-2\n"
-        "deployment_name: spec_example\n"
-        "db_table_prefix: spec_example\n"
-        "datasource_arn: arn:aws:quicksight:us-west-2:111122223333"
-        ":datasource/ds\n"
-        f"signing:\n"
-        f"  key_path: {_SIGNING_FIXTURE_KEY}\n"
-        f"  cert_path: {_SIGNING_FIXTURE_CERT}\n"
-        f"  signer_name: pytest signer\n"
+        "aws:\n"
+        "  account_id: '111122223333'\n"
+        "  region: us-west-2\n"
+        "  deployment_name: spec_example\n"
+        "  datasource:\n"
+        "    mode: adopt\n"
+        "    arn: arn:aws:quicksight:us-west-2:111122223333:datasource/ds\n"
+        "db:\n"
+        "  dialect: postgres\n"
+        "  table_prefix: spec_example\n"
+        "audit:\n"
+        f"  signing:\n"
+        f"    key_path: {_SIGNING_FIXTURE_KEY}\n"
+        f"    cert_path: {_SIGNING_FIXTURE_CERT}\n"
+        f"    signer_name: pytest signer\n"
     )
     return cfg
 
@@ -351,17 +360,22 @@ def test_audit_apply_signing_block_missing_field_errors(tmp_path: Path):
     from recon_gen.common.config import load_config
     cfg = tmp_path / "config.yaml"
     cfg.write_text(
-        "aws_account_id: '111122223333'\n"
-        "aws_region: us-west-2\n"
-        "deployment_name: spec_example\n"
-        "db_table_prefix: spec_example\n"
-        "datasource_arn: arn:aws:quicksight:us-west-2:111122223333"
-        ":datasource/ds\n"
-        "signing:\n"
-        "  key_path: /tmp/missing.pem\n"
+        "aws:\n"
+        "  account_id: '111122223333'\n"
+        "  region: us-west-2\n"
+        "  deployment_name: spec_example\n"
+        "  datasource:\n"
+        "    mode: adopt\n"
+        "    arn: arn:aws:quicksight:us-west-2:111122223333:datasource/ds\n"
+        "db:\n"
+        "  dialect: postgres\n"
+        "  table_prefix: spec_example\n"
+        "audit:\n"
+        "  signing:\n"
+        "    key_path: /tmp/missing.pem\n"
         # cert_path intentionally missing
     )
-    with pytest.raises(ValueError, match="signing block is missing"):
+    with pytest.raises(ValueError, match="audit.signing.cert_path"):
         load_config(cfg)
 
 

@@ -60,15 +60,21 @@ _SASQUATCH_L2 = _REPO_ROOT / "tests" / "l2" / "sasquatch_pr.yaml"
 def _write_min_config(tmp_path: Path) -> Path:
     """Minimal config.yaml the CLI loader accepts."""
     body = {
-        "aws_account_id": "111122223333",
-        "aws_region": "us-east-1",
-        # Z.C — both required cfg fields. db_table_prefix matches
+        # Z.C — both required cfg fields. db.table_prefix matches
         # sasquatch_pr because that's the L2 yaml the bundle reads.
-        "deployment_name": "recon-cross-ref",
-        "db_table_prefix": "sasquatch_pr",
-        "datasource_arn": (
-            "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
-        ),
+        "aws": {
+            "account_id": "111122223333",
+            "region": "us-east-1",
+            "deployment_name": "recon-cross-ref",
+            "datasource": {
+                "mode": "adopt",
+                "arn": "arn:aws:quicksight:us-east-1:111122223333:datasource/x",
+            },
+        },
+        "db": {
+            "dialect": "postgres",
+            "table_prefix": "sasquatch_pr",
+        },
     }
     p = tmp_path / "config.yaml"
     p.write_text(_json.dumps(body), encoding="utf-8")

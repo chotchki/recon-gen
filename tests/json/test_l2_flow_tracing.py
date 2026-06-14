@@ -367,11 +367,16 @@ def test_cli_json_apply_l2_instance_flag(tmp_path: Path) -> None:
     segment is gone; deployment_name is operator-set per cfg)."""
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(
-        "aws_account_id: '111122223333'\n"
-        "aws_region: us-west-2\n"
-        "deployment_name: recon-l2ft-l2flag\n"
-        "db_table_prefix: sasquatch_pr\n"
-        "datasource_arn: 'arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds'\n"
+        "aws:\n"
+        "  account_id: '111122223333'\n"
+        "  region: us-west-2\n"
+        "  deployment_name: recon-l2ft-l2flag\n"
+        "  datasource:\n"
+        "    mode: adopt\n"
+        "    arn: 'arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds'\n"
+        "db:\n"
+        "  dialect: postgres\n"
+        "  table_prefix: sasquatch_pr\n"
     )
     out_dir = tmp_path / "out"
 
@@ -401,12 +406,17 @@ def test_cli_json_apply_l2_flow_tracing_writes_files(tmp_path: Path) -> None:
     + the M.3.8 per-key dropdown fan-out."""
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(
-        "aws_account_id: '111122223333'\n"
-        "aws_region: us-west-2\n"
-        # Z.C — required cfg fields.
-        "deployment_name: recon-l2ft-cli\n"
-        "db_table_prefix: spec_example\n"
-        "datasource_arn: 'arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds'\n"
+        # Z.C — required cfg fields (v14 nested shape).
+        "aws:\n"
+        "  account_id: '111122223333'\n"
+        "  region: us-west-2\n"
+        "  deployment_name: recon-l2ft-cli\n"
+        "  datasource:\n"
+        "    mode: adopt\n"
+        "    arn: 'arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds'\n"
+        "db:\n"
+        "  dialect: postgres\n"
+        "  table_prefix: spec_example\n"
     )
     out_dir = tmp_path / "out"
 

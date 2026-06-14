@@ -86,15 +86,20 @@ def pg_url() -> Iterator[str]:
 def cfg_path(tmp_path: Path, pg_url: str) -> Path:
     """Write a minimal config.yaml pointing at the test PG container."""
     cfg_dict = {
-        "aws_account_id": "111122223333",
-        "aws_region": "us-east-1",
-        "deployment_name": "recon-bc7-test",
-        "db_table_prefix": "spec_example",
-        "datasource_arn": (
-            "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
-        ),
-        "demo_database_url": pg_url,
-        "dialect": "postgres",
+        "aws": {
+            "account_id": "111122223333",
+            "region": "us-east-1",
+            "deployment_name": "recon-bc7-test",
+            "datasource": {
+                "mode": "adopt",
+                "arn": "arn:aws:quicksight:us-east-1:111122223333:datasource/x",
+            },
+        },
+        "db": {
+            "dialect": "postgres",
+            "url": pg_url,
+            "table_prefix": "spec_example",
+        },
     }
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(yaml.safe_dump(cfg_dict))

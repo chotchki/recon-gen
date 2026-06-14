@@ -23,15 +23,21 @@ from recon_gen.cli.json import json_
 
 def _make_yaml_config(tmp_path: Path) -> Path:
     """Write a minimal config.yaml the CLI loader will accept."""
-    # Z.C — deployment_name + db_table_prefix are required cfg fields.
+    # Z.C — deployment_name + db.table_prefix are required cfg fields.
     body = {
-        "aws_account_id": "111122223333",
-        "aws_region": "us-east-1",
-        "deployment_name": "recon-cli-test",
-        "db_table_prefix": "test",
-        "datasource_arn": (
-            "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
-        ),
+        "aws": {
+            "account_id": "111122223333",
+            "region": "us-east-1",
+            "deployment_name": "recon-cli-test",
+            "datasource": {
+                "mode": "adopt",
+                "arn": "arn:aws:quicksight:us-east-1:111122223333:datasource/x",
+            },
+        },
+        "db": {
+            "dialect": "postgres",
+            "table_prefix": "test",
+        },
     }
     p = tmp_path / "config.yaml"
     p.write_text(_json.dumps(body), encoding="utf-8")
@@ -39,14 +45,19 @@ def _make_yaml_config(tmp_path: Path) -> Path:
 
 
 def _make_demo_yaml_config(tmp_path: Path) -> Path:
-    """Like ``_make_yaml_config`` but sets ``demo_database_url`` —
-    triggers the V.1.a auto-emit-datasource path."""
+    """Like ``_make_yaml_config`` but sets ``db.url`` — triggers the
+    V.1.a auto-emit-datasource path."""
     body = {
-        "aws_account_id": "111122223333",
-        "aws_region": "us-east-1",
-        "deployment_name": "recon-cli-demo",
-        "db_table_prefix": "test",
-        "demo_database_url": "postgresql://u:p@h:5432/d",
+        "aws": {
+            "account_id": "111122223333",
+            "region": "us-east-1",
+            "deployment_name": "recon-cli-demo",
+        },
+        "db": {
+            "dialect": "postgres",
+            "url": "postgresql://u:p@h:5432/d",
+            "table_prefix": "test",
+        },
     }
     p = tmp_path / "config.yaml"
     p.write_text(_json.dumps(body), encoding="utf-8")

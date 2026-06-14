@@ -350,3 +350,126 @@ auth:
         assert resolve_qs_user_arn(cfg) == "arn:aws:quicksight:cached:user/test"
     finally:
         _QS_USER_ARN_CACHE.pop(cache_key, None)
+
+
+# ---------------------------------------------------------------------------
+# DE.5.config_v14_consolidation.C — env-var overrides + run/*.yaml smoke
+# (absorbed from the retired tests/unit/test_config_loader.py)
+# ---------------------------------------------------------------------------
+
+
+def test_env_var_overrides_aws_account_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``RECON_GEN_AWS_ACCOUNT_ID`` overrides the yaml's ``aws.account_id``.
+
+    The runner injects per-cell env vars to point a single cfg.yaml at
+    multiple test cells without rewriting the file.
+    """
+    monkeypatch.setenv("RECON_GEN_AWS_ACCOUNT_ID", "999999999999")  # typing-smell: ignore[envvar-bypass]: cfg-loader env-var contract
+    p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
+    cfg = load_config(p)
+    assert cfg.aws.account_id == "999999999999"
+
+
+def test_env_var_overrides_demo_database_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``RECON_GEN_DEMO_DATABASE_URL`` overrides the yaml's ``db.url``."""
+    monkeypatch.setenv(  # typing-smell: ignore[envvar-bypass]: cfg-loader env-var contract
+        "RECON_GEN_DEMO_DATABASE_URL",
+        "postgresql://override:pw@host:5432/overridedb",
+    )
+    p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
+    cfg = load_config(p)
+    assert cfg.db.url == "postgresql://override:pw@host:5432/overridedb"
+
+
+def test_env_var_overrides_dialect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``RECON_GEN_DIALECT`` overrides the yaml's ``db.dialect``."""
+    monkeypatch.setenv("RECON_GEN_DIALECT", "duckdb")  # typing-smell: ignore[envvar-bypass]: cfg-loader env-var contract
+    p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
+    cfg = load_config(p)
+    assert cfg.db.dialect is Dialect.DUCKDB
+
+
+def test_env_var_overrides_datasource_arn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``RECON_GEN_DATASOURCE_ARN`` flips ``aws.datasource`` to mode=adopt
+    + sets the arn. Lets the runner point at a pre-existing QS datasource
+    without rewriting the cfg yaml."""
+    monkeypatch.setenv(  # typing-smell: ignore[envvar-bypass]: cfg-loader env-var contract
+        "RECON_GEN_DATASOURCE_ARN",
+        "arn:aws:quicksight:us-east-1:123456789012:datasource/preexisting",
+    )
+    p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
+    cfg = load_config(p)
+    assert cfg.aws.datasource.mode == "adopt"
+    assert (
+        cfg.aws.datasource.arn
+        == "arn:aws:quicksight:us-east-1:123456789012:datasource/preexisting"
+    )
+
+
+def test_env_var_overrides_principal_arns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``RECON_GEN_PRINCIPAL_ARNS`` (comma-separated) overrides the yaml's
+    ``aws.principal_arns`` list."""
+    monkeypatch.setenv(  # typing-smell: ignore[envvar-bypass]: cfg-loader env-var contract
+        "RECON_GEN_PRINCIPAL_ARNS",
+        "arn:aws:iam::1:user/a, arn:aws:iam::1:user/b",
+    )
+    p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
+    cfg = load_config(p)
+    assert cfg.aws.principal_arns == (
+        "arn:aws:iam::1:user/a", "arn:aws:iam::1:user/b",
+    )
+
+
+def test_env_var_app2_pool_size_int_coercion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``RECON_GEN_APP2_DB_POOL_SIZE`` coerces to int; non-int raises CfgError."""
+    monkeypatch.setenv("RECON_GEN_APP2_DB_POOL_SIZE", "42")  # typing-smell: ignore[envvar-bypass]: cfg-loader env-var contract
+    p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
+    cfg = load_config(p)
+    assert cfg.db.app2_pool_size == 42
+
+
+def test_run_postgres_config_smoke() -> None:
+    """The committed run/config.postgres.yaml round-trips through the
+    nested loader. Operator's actual ops cfg stays load-clean."""
+    p = Path(__file__).parent.parent.parent / "run" / "config.postgres.yaml"
+    if not p.exists():
+        pytest.skip(f"{p} not present (run/ is operator-local)")
+    cfg = load_config(p)
+    assert cfg.db.dialect is Dialect.POSTGRES
+    assert cfg.aws.deployment_name == "qsgen-postgres"
+
+
+def test_run_oracle_config_smoke() -> None:
+    p = Path(__file__).parent.parent.parent / "run" / "config.oracle.yaml"
+    if not p.exists():
+        pytest.skip(f"{p} not present (run/ is operator-local)")
+    cfg = load_config(p)
+    assert cfg.db.dialect is Dialect.ORACLE
+
+
+def test_run_duckdb_config_smoke() -> None:
+    p = Path(__file__).parent.parent.parent / "run" / "config.duckdb.yaml"
+    if not p.exists():
+        pytest.skip(f"{p} not present (run/ is operator-local)")
+    cfg = load_config(p)
+    assert cfg.db.dialect is Dialect.DUCKDB
+
+
+def test_load_config_raises_when_path_missing() -> None:
+    """Explicit non-existent path raises CfgError (vs falling back to
+    candidate discovery, which would mask the operator's typo)."""
+    from recon_gen.common.config import CfgError
+    with pytest.raises(CfgError, match="cfg path does not exist"):
+        load_config("/nonexistent/path/cfg.yaml")

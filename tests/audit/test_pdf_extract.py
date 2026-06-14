@@ -40,12 +40,16 @@ _SPEC_EXAMPLE = _FIXTURES / "spec_example.yaml"
 def min_config(tmp_path: Path) -> Path:
     cfg = tmp_path / "config.yaml"
     cfg.write_text(
-        "aws_account_id: '111122223333'\n"
-        "aws_region: us-west-2\n"
-        "deployment_name: recon-test\n"
-        "db_table_prefix: spec_example\n"
-        "datasource_arn: arn:aws:quicksight:us-west-2:111122223333"
-        ":datasource/ds\n"
+        "aws:\n"
+        "  account_id: '111122223333'\n"
+        "  region: us-west-2\n"
+        "  deployment_name: recon-test\n"
+        "  datasource:\n"
+        "    mode: adopt\n"
+        "    arn: arn:aws:quicksight:us-west-2:111122223333:datasource/ds\n"
+        "db:\n"
+        "  dialect: postgres\n"
+        "  table_prefix: spec_example\n"
     )
     return cfg
 

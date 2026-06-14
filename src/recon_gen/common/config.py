@@ -6,10 +6,10 @@ resources reference the datasource and account specified here.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any, Literal, cast, get_args
+from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 
 import yaml
 
@@ -484,9 +484,15 @@ def _partition_from_arns(
 # ---------------------------------------------------------------------------
 
 
-class CfgError(Exception):
+class CfgError(ValueError):
     """Base for v14 cfg errors. Operator-facing message format:
-    short cause + actionable next step."""
+    short cause + actionable next step.
+
+    Inherits from ValueError so cfg-load failures surface uniformly:
+    callers that catch ValueError (legacy CLI / runner / e2e harness)
+    continue to handle them, while tests asserting on specific cfg-error
+    subclasses (CycleError / LegacyFieldError / MissingFieldError) stay
+    precise."""
 
 
 class CycleError(CfgError):
@@ -680,19 +686,23 @@ def _build_db_nested(
     if not isinstance(block_raw, dict):
         raise MissingFieldError(f"{path}: required block 'db:' is absent")
     block = cast(dict[str, Any], block_raw)
-    for key in ("dialect", "url"):
-        if key not in block:
-            raise MissingFieldError(
-                f"{path}: required field 'db.{key}' is absent"
-            )
+    # ``dialect`` is required (drives SQL emission across the codebase);
+    # ``url`` is optional (tests that only exercise JSON emission don't
+    # need a DB binding; the operator-side flat-yaml shape made it
+    # optional too).
+    if "dialect" not in block:
+        raise MissingFieldError(
+            f"{path}: required field 'db.dialect' is absent"
+        )
     table_prefix = block.get("table_prefix")
     if not table_prefix:
         # Derive from aws.deployment_name (`-` → `_`)
         table_prefix = aws.deployment_name.replace("-", "_")
     validate_db_table_prefix(str(table_prefix))
+    url_raw = block.get("url")
     return DbConfig(
         dialect=_resolve_dialect_nested(block["dialect"]),
-        url=str(block["url"]),
+        url=str(url_raw) if url_raw is not None else None,
         table_prefix=str(table_prefix),
         default_l2_instance=block.get("default_l2_instance"),
         app2_pool_size=int(block.get("app2_pool_size", 10)),
@@ -705,6 +715,13 @@ def _build_auth_nested(raw: dict[str, Any], path: Path) -> "AuthConfig":  # typi
     if not isinstance(block_raw, dict):
         raise CfgError("auth must be a mapping when present")
     block = cast(dict[str, Any], block_raw)
+    _allowed_auth = {"aws", "oidc", "session"}
+    unknown = sorted(set(block) - _allowed_auth)
+    if unknown:
+        raise CfgError(
+            f"auth block contains unknown keys: {unknown}. "
+            f"Allowed: {sorted(_allowed_auth)}."
+        )
     aws_block_raw = block.get("aws", {})
     if not isinstance(aws_block_raw, dict):
         raise CfgError("auth.aws must be a mapping")
@@ -756,6 +773,13 @@ def _build_app2_nested(raw: dict[str, Any]) -> App2Config:  # typing-smell: igno
     if not isinstance(block_raw, dict):
         raise CfgError("app2 must be a mapping when present")
     block = cast(dict[str, Any], block_raw)
+    _allowed_app2 = {"tls", "etl_hook", "banner_text"}
+    unknown = sorted(set(block) - _allowed_app2)
+    if unknown:
+        raise CfgError(
+            f"app2 block contains unknown keys: {unknown}. "
+            f"Allowed: {sorted(_allowed_app2)}."
+        )
     tls_block_raw = block.get("tls")
     tls: App2TlsConfig | None = None
     if isinstance(tls_block_raw, dict):
@@ -1033,22 +1057,6 @@ def _load_nested_config(path: Path) -> "Config":
         audit=_build_audit_nested(raw),
         test=_build_test_nested(raw),
     )
-
-
-def _is_nested_v14_yaml(raw: dict[str, object]) -> bool:
-    """Detect whether a loaded cfg dict is v14 nested shape.
-
-    Heuristic: top-level ``aws:`` is a dict block (vs flat
-    ``aws_account_id`` scalar), OR top-level ``extends:`` is present
-    (a v14-only feature). The latter covers overlay yaml files that
-    only carry an ``extends:`` chain plus child-side overrides without
-    re-declaring ``aws:`` themselves.
-    """
-    if isinstance(raw.get("aws"), dict):
-        return True
-    if "extends" in raw:
-        return True
-    return False
 
 
 @dataclass
@@ -1348,818 +1356,72 @@ class Config:
     # .theme_arn(id) / .prefixed(name) methods dropped. All callers were
     # swept to cfg.aws.X by DE.2; those are real methods on AwsConfig.
 
-    def to_yaml_dict(self) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload — every value is something safe_dump can write
-        """Return a dict ``yaml.safe_dump`` can write that ``load_config``
-        round-trips. Inverse of the loader.
 
-        Three traps a naive ``dataclasses.asdict(cfg)`` falls into:
-          1. ``dialect`` is the ``Dialect`` enum — safe_dump refuses
-             to represent it. Coerced to the ``.value`` string here.
-          2. ``datasource_arn_was_derived`` (init=False) leaks in;
-             the loader rejects unknown keys. Stripped.
-          3. Empty / default-valued optionals (``signing=None``,
-             ``auth=None``, empty ``extra_tags``) bloat the YAML —
-             omitted for a compact emit.
-
-        When ``datasource_arn_was_derived`` is True, ``datasource_arn``
-        is omitted too so the re-load re-derives from
-        ``demo_database_url`` instead of pinning the derived ARN as if
-        the operator supplied it.
-        """
-        out: dict[str, Any] = asdict(self)  # typing-smell: ignore[explicit-any]: asdict returns dict[str, Any]
-        # DE.5 step 3 — `aws` carries the only-caller-provided fields
-        # (currently just `account_id`); emit those back to flat-yaml
-        # keys for round-trip compatibility with the legacy loader.
-        # As steps 4+ migrate more fields into aws, more entries shift
-        # from out["aws_X"] to out["aws"]["X"] on emit.
-        # DE.5 steps 12-16 — flatten db block back to legacy yaml keys.
-        db_out = out.pop("db", None)
-        if isinstance(db_out, dict):
-            db_typed = cast(dict[str, Any], db_out)
-            if db_typed.get("table_prefix"):
-                out["db_table_prefix"] = db_typed["table_prefix"]
-            if db_typed.get("url"):
-                out["demo_database_url"] = db_typed["url"]
-            if db_typed.get("dialect"):
-                # dialect is a Dialect enum; coerce to .value below
-                out["dialect"] = db_typed["dialect"]
-            if db_typed.get("default_l2_instance"):
-                out["default_l2_instance"] = db_typed["default_l2_instance"]
-            pool_size_out = db_typed.get("app2_pool_size")
-            if pool_size_out is not None and pool_size_out != 10:
-                out["app2_db_pool_size"] = pool_size_out
-        aws_out = out.pop("aws", None)
-        if isinstance(aws_out, dict):
-            aws_typed = cast(dict[str, Any], aws_out)
-            if aws_typed.get("account_id"):
-                out["aws_account_id"] = aws_typed["account_id"]
-            if aws_typed.get("region"):
-                out["aws_region"] = aws_typed["region"]
-            if aws_typed.get("deployment_name"):
-                out["deployment_name"] = aws_typed["deployment_name"]
-            # DE.5 step 7 — flatten aws.principal_arns → principal_arns: key.
-            principal_arns_out = aws_typed.get("principal_arns")
-            if principal_arns_out:
-                out["principal_arns"] = list(principal_arns_out)
-            # DE.5 steps 8-11 — flatten the remaining aws-block fields.
-            tags_out = aws_typed.get("extra_tags")
-            if tags_out:
-                out["extra_tags"] = dict(tags_out)
-            tagging_enabled = aws_typed.get("tagging_enabled")
-            if tagging_enabled is not None and tagging_enabled is not True:
-                # Default is True; emit only when overridden.
-                out["tagging_enabled"] = tagging_enabled
-            qs_disable_pg_ssl = aws_typed.get("qs_disable_pg_ssl")
-            if qs_disable_pg_ssl is not None and qs_disable_pg_ssl is not False:
-                # Default is False; emit only when overridden.
-                out["qs_disable_pg_ssl"] = qs_disable_pg_ssl
-            if aws_typed.get("pg_cluster_id"):
-                out["aws_pg_cluster_id"] = aws_typed["pg_cluster_id"]
-            if aws_typed.get("oracle_instance_id"):
-                out["aws_oracle_instance_id"] = aws_typed["oracle_instance_id"]
-            # DE.5 step 6 — flatten aws.datasource → datasource_arn flat key.
-            # Skip when mode=create (loader re-derives on next load).
-            ds_block = aws_typed.get("datasource")
-            if isinstance(ds_block, dict):
-                ds_typed = cast(dict[str, Any], ds_block)
-                ds_mode = ds_typed.get("mode")
-                ds_arn = ds_typed.get("arn")
-                if ds_arn and ds_mode != "create":
-                    out["datasource_arn"] = ds_arn
-        # DE.5 step 14 — dialect coerced from .value (was self.dialect.value).
-        out["dialect"] = self.db.dialect.value
-
-        # Drop empty / None / default-equivalent optionals so the
-        # emitted YAML stays close to a minimal operator-edited file.
-        # DE.5 step 18 — audit block is the new home for signing; flatten
-        # AuditConfig.signing into top-level signing for legacy yaml shape.
-        audit_out = out.pop("audit", None)
-        if isinstance(audit_out, dict):
-            audit_typed = cast(dict[str, Any], audit_out)
-            signing_out = audit_typed.get("signing")
-            if signing_out is not None:
-                out["signing"] = signing_out
-        if out.get("signing") is None:
-            out.pop("signing", None)
-        if out.get("auth") is None:
-            out.pop("auth", None)
-        if not out.get("principal_arns"):
-            out.pop("principal_arns", None)
-        if not out.get("extra_tags"):
-            out.pop("extra_tags", None)
-        for opt in (
-            "datasource_arn", "demo_database_url", "default_l2_instance",
-            "aws_pg_cluster_id", "aws_oracle_instance_id", "etl_hook",
-            "banner_text",
-        ):
-            if out.get(opt) is None:
-                out.pop(opt, None)
-        # DE.5 step 17 — emit app2 nested block from the new App2Config
-        # field. Loader reads ``app2.tls:`` / ``app2.etl_hook`` / etc.
-        app2_out = out.pop("app2", None)
-        if isinstance(app2_out, dict):
-            app2_typed = cast(dict[str, Any], app2_out)
-            app2_yaml: dict[str, Any] = {}  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload — every value is something safe_dump can write
-            if app2_typed.get("etl_hook"):
-                app2_yaml["etl_hook"] = app2_typed["etl_hook"]
-            if app2_typed.get("banner_text"):
-                app2_yaml["banner_text"] = app2_typed["banner_text"]
-            tls_block = app2_typed.get("tls")
-            if isinstance(tls_block, dict) and tls_block:
-                app2_yaml["tls"] = tls_block
-            if app2_yaml:
-                out["app2"] = app2_yaml
-
-        # DE.5 step 19 — flatten test.generator → test_generator for legacy yaml.
-        test_out = out.pop("test", None)
-        if isinstance(test_out, dict):
-            test_typed = cast(dict[str, Any], test_out)
-            tgen_inner = test_typed.get("generator")
-            if tgen_inner is not None:
-                out["test_generator"] = tgen_inner
-        # test_generator: omit when every field is at its default
-        # (loader resolves a missing key to ``TestGeneratorConfig()``).
-        # Otherwise coerce ``plants`` tuple → list for stable YAML.
-        tgen = out.get("test_generator")
-        default_tgen = asdict(TestGeneratorConfig())
-        if tgen == default_tgen:
-            out.pop("test_generator", None)
-        elif isinstance(tgen, dict):
-            tgen_typed = cast(dict[str, Any], tgen)
-            if "plants" in tgen_typed:
-                tgen_typed["plants"] = list(tgen_typed["plants"])
-            if tgen_typed.get("derive_balances_account_roles") is None:
-                tgen_typed.pop("derive_balances_account_roles", None)
-            for opt in ("end_date", "cutoff_date", "seed", "only_template"):
-                if tgen_typed.get(opt) is None:
-                    tgen_typed.pop(opt, None)
-        return out
-
-    def write_yaml(self, dest: Path | str | IO[str]) -> None:
-        """Serialize via ``to_yaml_dict`` and ``yaml.safe_dump`` to
-        ``dest`` (a path or an already-open text stream). Preserves
-        field order via ``sort_keys=False``.
-        """
-        payload = self.to_yaml_dict()
-        if isinstance(dest, (str, Path)):
-            with Path(dest).open("w") as f:
-                yaml.safe_dump(payload, f, sort_keys=False)
-        else:
-            yaml.safe_dump(payload, dest, sort_keys=False)
-
-
-# V.1.b — Strict config-key allowlist. config.yaml is environment-only:
-# AWS account / region / dialect / DB connection / signing material /
-# Z.C deployment + DB-prefix names. Institution-only fields (theme,
-# persona, accounts, rails, chains, transfer_templates, account_templates,
-# limit_schedules, description) live in the L2 institution YAML —
-# putting them in config.yaml is a sign the user has the wrong file open.
-_CONFIG_ALLOWED_KEYS: frozenset[str] = frozenset({
-    "aws_account_id", "aws_region", "datasource_arn",
-    "deployment_name", "db_table_prefix",
-    "principal_arns", "principal_arn", "extra_tags", "demo_database_url",
-    "dialect", "signing", "tagging_enabled", "studio_enabled",
-    "app2_db_pool_size", "auth",
-    "default_l2_instance", "aws_pg_cluster_id", "aws_oracle_instance_id",
-    # X.4.g.1+3 — deploy pipeline knobs (etl_datasource removed in BS.4).
-    "etl_hook", "test_generator",
-    # CB.11.a — flip DisableSsl on the QS PG data source for Docker PG endpoints.
-    "qs_disable_pg_ssl",
-    # CU.3 — optional top-of-page banner text.
-    "banner_text",
-    # DE.4 — Phase DC app2.tls: block (cert_path + key_path).
-    "app2",
-})
-
-# Z.C — `instance` removed: the L2 yaml no longer has an `instance:` field
-# at all (use cfg.deployment_name + cfg.db_table_prefix instead).
-_CONFIG_L2_ONLY_KEYS: frozenset[str] = frozenset({
-    "description", "accounts", "account_templates",
-    "rails", "transfer_templates", "chains", "limit_schedules",
-    "persona", "theme",
-})
-
-# Z.C — Legacy keys that USED to be valid in cfg.yaml but no longer are.
-# Each maps to an actionable migration message pointing the operator at
-# the new shape. Surfaced by `_reject_unknown_config_keys` so the loud-
-# fail message is specific instead of just "unknown key".
-_CONFIG_LEGACY_KEYS: dict[str, str] = {
-    "resource_prefix": (
-        "merged with l2_instance_prefix into 'deployment_name' (Z.C). "
-        "Set 'deployment_name: <your-deployment-id>' (e.g. 'recon-prod'). "
-        "Replaces both the v8.x default 'qs-gen' tool prefix AND the "
-        "auto-stamped L2 segment."
-    ),
-    "l2_instance_prefix": (
-        "merged with resource_prefix into 'deployment_name' (Z.C). "
-        "Set 'deployment_name: <your-deployment-id>' in cfg.yaml. The "
-        "auto-stamping from L2 yaml's 'instance:' is gone."
-    ),
-    "instance": (
-        "the L2 yaml's top-level 'instance:' field was dropped in Z.C. "
-        "Set 'deployment_name' AND 'db_table_prefix' in cfg.yaml — "
-        "they replace 'instance' (which previously did double duty as "
-        "QS-resource segment + DB-table prefix)."
-    ),
-}
-
-
-def _require_str(
-    values: dict[str, object], key: str, *, default: str | None = None,
-) -> str:
-    """Extract ``key`` as a ``str``, raising if absent/wrong-type.
-
-    Pyright sees ``dict[str, object].get(key)`` as ``object``; this
-    helper does the isinstance narrowing in one place so callers get
-    a properly-typed ``str``.
-    """
-    raw = values.get(key, default)
-    if raw is None:
-        raise ValueError(f"{key} is required")
-    if not isinstance(raw, str):
-        raise ValueError(
-            f"{key} must be a string; got {type(raw).__name__} ({raw!r})"
-        )
-    return raw
-
-
-def _validate_and_return_db_prefix(value: str) -> str:
-    """CR.4 — snake_case + ≤ 30-char cap on ``cfg.db_table_prefix``.
-
-    The pre-CR.4 ``primitives.py`` comment claimed this loader did
-    enforcement; in fact nothing did, so a long prefix only surfaced
-    deep in DDL as ``ORA-00972: identifier is too long``. CR.4 wires
-    ``validate_db_table_prefix`` here so the rename surfaces at cfg-
-    load with field name + budget calculation. Same validator runs
-    on the ``RECON_GEN_DB_TABLE_PREFIX`` env override.
-    """
-    validate_db_table_prefix(value)
-    return value
-
-
-def _opt_str(values: dict[str, object], key: str) -> str | None:
-    """``_require_str`` but None when missing."""
-    raw = values.get(key)
-    if raw is None:
-        return None
-    if not isinstance(raw, str):
-        raise ValueError(
-            f"{key} must be a string; got {type(raw).__name__} ({raw!r})"
-        )
-    return raw
-
-
-def _reject_unknown_config_keys(raw: dict[str, object], path: Path) -> None:
-    """Raise if config.yaml contains keys outside the env-only allowlist.
-
-    V.1.b: catches the two common mis-edits — dropping an L2 institution
-    block (theme, persona, rails, …) into config.yaml, and the Z.C-removed
-    legacy ``resource_prefix`` / ``l2_instance_prefix`` / ``instance`` keys
-    (each gets a specific migration pointer).
-    """
-    leaked_l2 = sorted(set(raw) & _CONFIG_L2_ONLY_KEYS)
-    if leaked_l2:
-        raise ValueError(
-            f"{path}: keys {leaked_l2} belong in the L2 institution YAML "
-            f"(passed via --l2), not config.yaml. config.yaml holds "
-            f"environment-only values (account / region / dialect / DB "
-            f"connection / signing); institution shape (theme / persona / "
-            f"rails / accounts / chains / transfer_templates / account_"
-            f"templates / limit_schedules / description) "
-            f"lives in the L2 YAML."
-        )
-    legacy_present = sorted(set(raw) & set(_CONFIG_LEGACY_KEYS))
-    if legacy_present:
-        msg_lines = [f"{path}: legacy config keys removed in Z.C:"]
-        for key in legacy_present:
-            msg_lines.append(f"  - '{key}': {_CONFIG_LEGACY_KEYS[key]}")
-        raise ValueError("\n".join(msg_lines))
-    unknown = sorted(set(raw) - _CONFIG_ALLOWED_KEYS)
-    if unknown:
-        raise ValueError(
-            f"{path}: unknown config keys {unknown}. "
-            f"Allowed: {sorted(_CONFIG_ALLOWED_KEYS)}."
-        )
+# ---------------------------------------------------------------------------
+# DE.5.config_v14_consolidation.C — flat-yaml loader retired.
+#
+# The v13 flat-yaml shape (``aws_account_id:`` / ``demo_database_url:`` /
+# etc.) is no longer accepted. Operators upgrading from v13 see
+# ``LegacyFieldError`` carrying the migration target. The nested-yaml
+# loader above (``_load_nested_config``) is the only entry point;
+# ``load_config`` here just resolves the cfg path + dispatches.
+#
+# Removed in this commit:
+# - ``Config.to_yaml_dict`` / ``Config.write_yaml`` — no production
+#   callers remained; the two test-side users have been retired or
+#   rewritten.
+# - ``_CONFIG_ALLOWED_KEYS`` / ``_CONFIG_L2_ONLY_KEYS`` /
+#   ``_CONFIG_LEGACY_KEYS`` / ``_reject_unknown_config_keys`` — the
+#   nested loader's per-block ``_build_*_nested`` functions reject
+#   unknown keys with field-path errors, replacing the flat allowlist.
+# - ``_require_str`` / ``_validate_and_return_db_prefix`` / ``_opt_str``
+#   — flat-only helpers.
+# - The legacy ``load_config`` body — replaced by a thin dispatcher.
+# ---------------------------------------------------------------------------
 
 
 def load_config(path: str | Path | None = None) -> Config:
-    """Load configuration from a YAML file, falling back to env vars.
+    """Resolve cfg path + dispatch to the v14 nested loader.
 
-    YAML keys map directly to Config fields (snake_case). ``principal_arns``
-    may be a single string or a list; a legacy ``principal_arn`` key is also
-    accepted as a single string.
-    Environment variables use uppercase with RECON_GEN_ prefix:
-        RECON_GEN_AWS_ACCOUNT_ID, RECON_GEN_AWS_REGION, RECON_GEN_DATASOURCE_ARN,
-        RECON_GEN_RESOURCE_PREFIX, RECON_GEN_PRINCIPAL_ARNS (comma-separated)
+    Resolution order:
 
-    V.1.b: rejects unknown YAML keys and L2-only keys (theme, persona,
-    rails, etc.) with a pointer to the L2 institution YAML.
+    1. ``path`` argument (explicit).
+    2. ``RECON_GEN_CONFIG`` env override.
+    3. Candidate list — first existing file wins:
+       ``config.yaml`` → ``run/config.yaml`` → ``run/config.postgres.yaml``
+       → ``run/config.oracle.yaml`` → ``run/config.duckdb.yaml``.
+
+    Raises ``CfgError`` when no path resolves OR the resolved file
+    can't be parsed; ``LegacyFieldError`` when an upgrading-from-v13
+    cfg carries flat-yaml shape (carries the migration target);
+    ``MissingFieldError`` / ``CycleError`` for the structural errors
+    surfaced by the nested loader.
     """
-    values: dict[str, object] = {}
-
-    # Try YAML first
-    if path is not None:
-        p = Path(path)
-        if p.exists():
-            with p.open() as f:
-                # ``yaml.safe_load`` returns ``Any``; the isinstance
-                # guard below narrows to dict[Hashable, Any] which we
-                # treat as dict[str, object] (config keys are strings
-                # by convention, validated against allowlists).
-                raw: object = yaml.safe_load(f)
-            if isinstance(raw, dict):
-                # YAML dicts come back as dict[Any, Any]; coerce keys
-                # to str (the rest of the loader assumes string keys)
-                # and let pyright treat values as ``object`` from here.
-                raw_typed = cast(dict[Any, Any], raw)
-                raw_dict: dict[str, object] = {
-                    str(k): v for k, v in raw_typed.items()
-                }
-                # DE.5.config_v14_consolidation — v14 nested shape
-                # takes its own loader path. Detected by ``aws:`` being
-                # a dict block (vs the v13 flat ``aws_account_id``
-                # scalar). The strangler keeps the legacy flat path
-                # alive below for the run/*.yaml files that haven't
-                # been migrated yet; once the migration commit lands,
-                # the flat path drops + this branch becomes the only
-                # exit.
-                if _is_nested_v14_yaml(raw_dict):
-                    return _load_nested_config(p)
-                _reject_unknown_config_keys(raw_dict, p)
-                values.update(raw_dict)
-
-    # Env vars override YAML. The (cfg_key → EnvVar) shape goes
-    # through the typed registry — get_or_none() coerces + validates
-    # at the boundary; any malformed override surfaces as
-    # EnvVarInvalid carrying the env-var name + description.
-    env_map = {
-        "aws_account_id": RECON_GEN_AWS_ACCOUNT_ID,
-        "aws_region": RECON_GEN_AWS_REGION,
-        "datasource_arn": RECON_GEN_DATASOURCE_ARN,
-        "deployment_name": RECON_GEN_DEPLOYMENT_NAME,
-        "db_table_prefix": RECON_GEN_DB_TABLE_PREFIX,
-        "demo_database_url": RECON_GEN_DEMO_DATABASE_URL,
-        "dialect": RECON_GEN_DIALECT,
-        "app2_db_pool_size": RECON_GEN_APP2_DB_POOL_SIZE,
-        "aws_pg_cluster_id": RECON_GEN_AWS_PG_CLUSTER_ID,
-        "aws_oracle_instance_id": RECON_GEN_AWS_ORACLE_INSTANCE_ID,
-    }
-    for cfg_key, spec in env_map.items():
-        env_val = spec.get_or_none()
-        if env_val is not None:
-            values[cfg_key] = env_val
-
-    env_principals = RECON_GEN_PRINCIPAL_ARNS.get_or_none()
-    if env_principals is not None:
-        values["principal_arns"] = [
-            p.strip() for p in env_principals.split(",") if p.strip()
-        ]
-
-    # Validate required fields (datasource_arn not required when demo_database_url is set).
-    # Z.C: deployment_name + db_table_prefix join the required-fields list.
-    required = ["aws_account_id", "aws_region", "deployment_name", "db_table_prefix"]
-    if "demo_database_url" not in values:
-        required.append("datasource_arn")
-    missing = [k for k in required if k not in values]
-    if missing:
-        required_env = {
-            "aws_account_id": "RECON_GEN_AWS_ACCOUNT_ID",
-            "aws_region": "RECON_GEN_AWS_REGION",
-            "datasource_arn": "RECON_GEN_DATASOURCE_ARN",
-            "deployment_name": "RECON_GEN_DEPLOYMENT_NAME",
-            "db_table_prefix": "RECON_GEN_DB_TABLE_PREFIX",
-        }
-        raise ValueError(
-            f"Missing required configuration: {', '.join(missing)}. "
-            f"Set them in your config YAML or via environment variables "
-            f"({', '.join(required_env[k] for k in missing)})."
-        )
-
-    # Extra tags: expect a dict under "extra_tags" in the YAML
-    raw_tags = values.get("extra_tags", {})
-    extra_tags: dict[str, str] = {}
-    if isinstance(raw_tags, dict):
-        tags_typed = cast(dict[Any, Any], raw_tags)
-        for k, v in tags_typed.items():
-            extra_tags[str(k)] = str(v)
-
-    # Principals: accept ``principal_arns`` (list or str) or legacy
-    # ``principal_arn`` (str or list).
-    principal_arns: list[str] = []
-    for key in ("principal_arns", "principal_arn"):
-        raw = values.get(key)
-        if raw is None:
-            continue
-        if isinstance(raw, str):
-            principal_arns.append(raw)
-        elif isinstance(raw, list):
-            list_typed = cast(list[Any], raw)
-            for item in list_typed:
-                principal_arns.append(str(item))
-
-    # Dialect parses to the enum; default Postgres for back-compat.
-    raw_dialect = values.get("dialect")
-    if raw_dialect is None:
-        dialect = Dialect.POSTGRES
-    elif isinstance(raw_dialect, Dialect):
-        dialect = raw_dialect
-    else:
-        try:
-            dialect = Dialect(str(raw_dialect).lower())
-        except ValueError as exc:
-            raise ValueError(
-                f"dialect must be one of {[d.value for d in Dialect]}; "
-                f"got {raw_dialect!r}."
-            ) from exc
-
-    # U.7.b — optional signing block.
-    raw_signing = values.get("signing")
-    signing: SigningConfig | None = None
-    if isinstance(raw_signing, dict):
-        sig_typed = cast(dict[Any, Any], raw_signing)
-        sig_dict: dict[str, object] = {
-            str(k): v for k, v in sig_typed.items()
-        }
-        try:
-            signing = SigningConfig(
-                key_path=str(sig_dict["key_path"]),
-                cert_path=str(sig_dict["cert_path"]),
-                passphrase_env=(
-                    str(sig_dict["passphrase_env"])
-                    if sig_dict.get("passphrase_env") is not None
-                    else None
-                ),
-                signer_name=(
-                    str(sig_dict["signer_name"])
-                    if sig_dict.get("signer_name") is not None
-                    else None
-                ),
-            )
-        except KeyError as exc:
-            raise ValueError(
-                f"signing block is missing required field: {exc}. "
-                f"Need both 'key_path' and 'cert_path'."
-            ) from exc
-
-    # Y.2.gate.h+i.0 — optional auth block. DE.2 commit A — default
-    # to empty AuthConfig() when block absent so cfg.auth is always
-    # present + cfg.auth.aws.profile is always reachable.
-    raw_auth = values.get("auth")
-    auth: AuthConfig = AuthConfig()
-    if isinstance(raw_auth, dict):
-        auth_typed = cast(dict[Any, Any], raw_auth)
-        auth_dict: dict[str, object] = {
-            str(k): v for k, v in auth_typed.items()
-        }
-        unknown_auth = set(auth_dict) - {
-            "aws_profile", "quicksight_user_arn", "aws", "oidc", "session",
-        }
-        if unknown_auth:
-            raise ValueError(
-                f"auth block contains unknown keys: {sorted(unknown_auth)}. "
-                f"Allowed: aws_profile, quicksight_user_arn, aws, oidc, session."
-            )
-        # DE.4 — auth.oidc: block (Phase DD). All four required fields
-        # raise with field path when block present but incomplete.
-        oidc_cfg: OidcConfig | None = None
-        raw_oidc = auth_dict.get("oidc")
-        if isinstance(raw_oidc, dict):
-            oidc_typed = cast(dict[Any, Any], raw_oidc)
-            oidc_dict: dict[str, object] = {
-                str(k): v for k, v in oidc_typed.items()
-            }
-            for key in (
-                "issuer_url", "client_id", "client_secret_env", "redirect_uri",
+    if path is None:
+        from recon_gen.common.env_keys import RECON_GEN_CONFIG  # noqa: PLC0415
+        env_override = RECON_GEN_CONFIG.get_or_none()
+        if env_override:
+            path = Path(env_override)
+        else:
+            for candidate in (
+                "config.yaml",
+                "run/config.yaml",
+                "run/config.postgres.yaml",
+                "run/config.oracle.yaml",
+                "run/config.duckdb.yaml",
             ):
-                if key not in oidc_dict:
-                    raise ValueError(
-                        f"auth.oidc.{key} is required when auth.oidc block present"
-                    )
-            scopes_raw = oidc_dict.get("scopes", ["openid", "email", "profile"])
-            if isinstance(scopes_raw, (list, tuple)):
-                scopes_iter = cast(list[Any] | tuple[Any, ...], scopes_raw)
-                scopes_tuple = tuple(str(s) for s in scopes_iter)
-            else:
-                raise ValueError(
-                    f"auth.oidc.scopes must be a list of strings; "
-                    f"got {type(scopes_raw).__name__}"
+                if Path(candidate).is_file():
+                    path = Path(candidate)
+                    break
+            if path is None:
+                raise CfgError(
+                    "No cfg path provided + no candidate found "
+                    "(config.yaml / run/config.yaml / "
+                    "run/config.postgres.yaml / run/config.oracle.yaml / "
+                    "run/config.duckdb.yaml). Set RECON_GEN_CONFIG or "
+                    "pass path explicitly."
                 )
-            oidc_cfg = OidcConfig(
-                issuer_url=str(oidc_dict["issuer_url"]),
-                client_id=str(oidc_dict["client_id"]),
-                client_secret_env=str(oidc_dict["client_secret_env"]),
-                redirect_uri=str(oidc_dict["redirect_uri"]),
-                scopes=scopes_tuple,
-            )
-        # DE.4 — auth.session: block (Phase DD).
-        session_cfg: SessionConfig | None = None
-        raw_session = auth_dict.get("session")
-        if isinstance(raw_session, dict):
-            session_typed = cast(dict[Any, Any], raw_session)
-            session_dict: dict[str, object] = {
-                str(k): v for k, v in session_typed.items()
-            }
-            if "jwt_secret_env" not in session_dict:
-                raise ValueError(
-                    "auth.session.jwt_secret_env is required when "
-                    "auth.session block present"
-                )
-            session_cfg = SessionConfig(
-                jwt_secret_env=str(session_dict["jwt_secret_env"]),
-            )
-        # DE.5 step 21 — flat aws_profile/quicksight_user_arn fields wrapped
-        # in AuthAwsConfig. Loader still reads the legacy top-level yaml
-        # keys; production yamls can also nest under `auth.aws:` (DE.0).
-        raw_auth_aws = auth_dict.get("aws")
-        if isinstance(raw_auth_aws, dict):
-            aws_typed = cast(dict[Any, Any], raw_auth_aws)
-            aws_inner: dict[str, object] = {
-                str(k): v for k, v in aws_typed.items()
-            }
-            auth_aws_cfg = AuthAwsConfig(
-                profile=(
-                    str(aws_inner["profile"])
-                    if aws_inner.get("profile") is not None else None
-                ),
-                quicksight_user_arn=(
-                    str(aws_inner["quicksight_user_arn"])
-                    if aws_inner.get("quicksight_user_arn") is not None else None
-                ),
-            )
-        else:
-            auth_aws_cfg = AuthAwsConfig(
-                profile=(
-                    str(auth_dict["aws_profile"])
-                    if auth_dict.get("aws_profile") is not None else None
-                ),
-                quicksight_user_arn=(
-                    str(auth_dict["quicksight_user_arn"])
-                    if auth_dict.get("quicksight_user_arn") is not None else None
-                ),
-            )
-        auth = AuthConfig(
-            aws=auth_aws_cfg,
-            oidc=oidc_cfg,
-            session=session_cfg,
-        )
-
-    raw_tagging = values.get("tagging_enabled", True)
-    if not isinstance(raw_tagging, bool):
-        raise ValueError(
-            f"tagging_enabled must be a bool; got {raw_tagging!r}."
-        )
-
-    # DE.5 step 20 — studio_enabled removed; silently accept-and-ignore
-    # the legacy yaml key during the strangler so already-deployed cfgs
-    # don't break on upgrade.
-    values.pop("studio_enabled", None)
-
-    # BS.4 (2026-05-29): etl_datasource block removed from cfg — the
-    # legacy upstream→demo_db copy is gone (etl_hook writes directly).
-    # See docs/audits/_archive/bs_4_arch_shift_spike.md.
-
-    # X.4.g.3 — optional test_generator block. Absent or None resolves
-    # to TestGeneratorConfig() (byte-identical-to-locked-seeds output);
-    # explicit dict parses + validates.
-    raw_tgen = values.get("test_generator")
-    test_generator = TestGeneratorConfig()
-    if isinstance(raw_tgen, dict):
-        tgen_typed = cast(dict[Any, Any], raw_tgen)
-        tgen_dict: dict[str, object] = {
-            str(k): v for k, v in tgen_typed.items()
-        }
-        allowed_tgen = {
-            "enabled", "scope", "end_date", "seed", "plants",
-            "only_template", "derive_balances",
-            "derive_balances_account_roles", "cutoff_date",
-        }
-        unknown_tgen = set(tgen_dict) - allowed_tgen
-        if unknown_tgen:
-            raise ValueError(
-                f"test_generator block contains unknown keys: "
-                f"{sorted(unknown_tgen)}. Allowed: {sorted(allowed_tgen)}."
-            )
-        scope_val = tgen_dict.get("scope", "full")
-        scope_allowed = get_args(ScopeKind)
-        if scope_val not in scope_allowed:
-            raise ValueError(
-                f"test_generator.scope must be one of {list(scope_allowed)}; "
-                f"got {scope_val!r}."
-            )
-        plants_raw = tgen_dict.get("plants", ())
-        if isinstance(plants_raw, (list, tuple)):
-            plants_iter = cast(list[Any] | tuple[Any, ...], plants_raw)
-            plants_seq = tuple(str(p) for p in plants_iter)
-        else:
-            raise ValueError(
-                f"test_generator.plants must be a list of strings; "
-                f"got {type(plants_raw).__name__} ({plants_raw!r})."
-            )
-        plants_allowed = get_args(PlantKind)
-        bad_plants = [p for p in plants_seq if p not in plants_allowed]
-        if bad_plants:
-            raise ValueError(
-                f"test_generator.plants contains unknown values "
-                f"{bad_plants}; allowed: {list(plants_allowed)}."
-            )
-        end_date_raw = tgen_dict.get("end_date")
-        end_date_val: date | None
-        if end_date_raw is None:
-            end_date_val = None
-        elif isinstance(end_date_raw, date):
-            end_date_val = end_date_raw
-        elif isinstance(end_date_raw, str):
-            try:
-                end_date_val = date.fromisoformat(end_date_raw)
-            except ValueError as exc:
-                raise ValueError(
-                    f"test_generator.end_date must be ISO 8601 (YYYY-MM-DD); "
-                    f"got {end_date_raw!r}."
-                ) from exc
-        else:
-            raise ValueError(
-                f"test_generator.end_date must be a date or ISO string; "
-                f"got {type(end_date_raw).__name__} ({end_date_raw!r})."
-            )
-        seed_raw = tgen_dict.get("seed")
-        seed_val: int | None
-        if seed_raw is None:
-            seed_val = None
-        elif isinstance(seed_raw, int) and not isinstance(seed_raw, bool):
-            seed_val = seed_raw
-        else:
-            raise ValueError(
-                f"test_generator.seed must be an integer; "
-                f"got {type(seed_raw).__name__} ({seed_raw!r})."
-            )
-        enabled_raw = tgen_dict.get("enabled", True)
-        if not isinstance(enabled_raw, bool):
-            raise ValueError(
-                f"test_generator.enabled must be a bool; got {enabled_raw!r}."
-            )
-        derive_raw = tgen_dict.get("derive_balances", False)
-        if not isinstance(derive_raw, bool):
-            raise ValueError(
-                f"test_generator.derive_balances must be a bool; "
-                f"got {derive_raw!r}."
-            )
-        # X.4.i.2 — optional per-account-role narrowing for the derive pass.
-        # None ⇒ default control-account set inside derive_balances.
-        deriv_ar_raw = tgen_dict.get("derive_balances_account_roles")
-        deriv_ar_val: tuple[str, ...] | None
-        if deriv_ar_raw is None:
-            deriv_ar_val = None
-        elif isinstance(deriv_ar_raw, (list, tuple)):
-            deriv_ar_iter = cast(
-                list[Any] | tuple[Any, ...], deriv_ar_raw,
-            )
-            deriv_ar_val = tuple(str(t) for t in deriv_ar_iter)
-        else:
-            raise ValueError(
-                f"test_generator.derive_balances_account_roles must be a "
-                f"list of strings or null; got "
-                f"{type(deriv_ar_raw).__name__} ({deriv_ar_raw!r}).",
-            )
-        only_template_raw = tgen_dict.get("only_template")
-        only_template_val: str | None = (
-            str(only_template_raw) if only_template_raw is not None else None
-        )
-        cutoff_date_raw = tgen_dict.get("cutoff_date")
-        cutoff_date_val: date | None
-        if cutoff_date_raw is None:
-            cutoff_date_val = None
-        elif isinstance(cutoff_date_raw, date):
-            cutoff_date_val = cutoff_date_raw
-        elif isinstance(cutoff_date_raw, str):
-            try:
-                cutoff_date_val = date.fromisoformat(cutoff_date_raw)
-            except ValueError as exc:
-                raise ValueError(
-                    f"test_generator.cutoff_date must be ISO 8601 (YYYY-MM-DD); "
-                    f"got {cutoff_date_raw!r}."
-                ) from exc
-        else:
-            raise ValueError(
-                f"test_generator.cutoff_date must be a date or ISO string; "
-                f"got {type(cutoff_date_raw).__name__} ({cutoff_date_raw!r})."
-            )
-        # cast() narrows the Literal type from runtime-validated str values.
-        test_generator = TestGeneratorConfig(
-            enabled=enabled_raw,
-            scope=cast(ScopeKind, scope_val),
-            end_date=end_date_val,
-            seed=seed_val,
-            plants=cast(tuple[PlantKind, ...], plants_seq),
-            only_template=only_template_val,
-            derive_balances=derive_raw,
-            derive_balances_account_roles=deriv_ar_val,
-            cutoff_date=cutoff_date_val,
-        )
-    elif raw_tgen is not None:
-        raise ValueError(
-            f"test_generator must be a mapping; got "
-            f"{type(raw_tgen).__name__} ({raw_tgen!r})."
-        )
-
-    raw_pool_size = values.get("app2_db_pool_size", 10)
-    if not isinstance(raw_pool_size, (int, str)):
-        raise ValueError(
-            f"app2_db_pool_size must be a positive integer; "
-            f"got {type(raw_pool_size).__name__} ({raw_pool_size!r})."
-        )
-    try:
-        pool_size = int(raw_pool_size)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"app2_db_pool_size must be a positive integer; "
-            f"got {raw_pool_size!r}."
-        ) from exc
-    if pool_size < 1:
-        raise ValueError(
-            f"app2_db_pool_size must be ≥ 1; got {pool_size}."
-        )
-
-    # DE.4 — app2.tls: block (Phase DC). Required pair when block present.
-    # DE.5 step 17 — app2.{etl_hook,banner_text} promoted out of flat fields;
-    # block reads tls / etl_hook / banner_text; flat-key fallback retained.
-    app2_tls_cfg: App2TlsConfig | None = None
-    app2_etl_hook: str | None = None
-    app2_banner_text: str | None = None
-    raw_app2 = values.get("app2")
-    if isinstance(raw_app2, dict):
-        app2_typed = cast(dict[Any, Any], raw_app2)
-        app2_dict: dict[str, object] = {
-            str(k): v for k, v in app2_typed.items()
-        }
-        unknown_app2 = set(app2_dict) - {"tls", "etl_hook", "banner_text"}
-        if unknown_app2:
-            raise ValueError(
-                f"app2 block contains unknown keys: {sorted(unknown_app2)}. "
-                f"Allowed: tls, etl_hook, banner_text."
-            )
-        raw_tls = app2_dict.get("tls")
-        if isinstance(raw_tls, dict):
-            tls_typed = cast(dict[Any, Any], raw_tls)
-            tls_dict: dict[str, object] = {
-                str(k): v for k, v in tls_typed.items()
-            }
-            for key in ("cert_path", "key_path"):
-                if key not in tls_dict:
-                    raise ValueError(
-                        f"app2.tls.{key} is required when app2.tls block present"
-                    )
-            app2_tls_cfg = App2TlsConfig(
-                cert_path=str(tls_dict["cert_path"]),
-                key_path=str(tls_dict["key_path"]),
-            )
-        if "etl_hook" in app2_dict and app2_dict["etl_hook"] is not None:
-            app2_etl_hook = str(app2_dict["etl_hook"])
-        if "banner_text" in app2_dict and app2_dict["banner_text"] is not None:
-            app2_banner_text = str(app2_dict["banner_text"])
-    # Flat-field fallback so legacy cfg yamls keep loading during strangler.
-    if app2_etl_hook is None:
-        app2_etl_hook = _opt_str(values, "etl_hook")
-    if app2_banner_text is None:
-        app2_banner_text = _opt_str(values, "banner_text")
-
-    # DE.5 step 6 — datasource_arn flat field moved into aws.datasource.
-    raw_ds_arn = _opt_str(values, "datasource_arn")
-    return Config(
-        # DE.5 steps 3-11 — all AWS-block fields now in aws=AwsConfig(...).
-        aws=AwsConfig(
-            account_id=_require_str(values, "aws_account_id"),
-            region=_require_str(values, "aws_region"),
-            deployment_name=_require_str(values, "deployment_name"),
-            principal_arns=tuple(principal_arns),
-            extra_tags=tuple(sorted(extra_tags.items())),
-            tagging_enabled=raw_tagging,
-            qs_disable_pg_ssl=bool(values.get("qs_disable_pg_ssl", False)),
-            pg_cluster_id=_opt_str(values, "aws_pg_cluster_id"),
-            oracle_instance_id=_opt_str(values, "aws_oracle_instance_id"),
-            datasource=DatasourceConfig(
-                mode=("adopt" if raw_ds_arn else "create"),
-                arn=raw_ds_arn,
-            ),
-        ),
-        # DE.5 steps 12-16 — all DB-block fields now in db=DbConfig(...).
-        db=DbConfig(
-            dialect=dialect,
-            url=_opt_str(values, "demo_database_url"),
-            table_prefix=_validate_and_return_db_prefix(
-                _require_str(values, "db_table_prefix")
-            ),
-            default_l2_instance=_opt_str(values, "default_l2_instance"),
-            app2_pool_size=pool_size,
-        ),
-        # DE.5 step 18 — signing now on AuditConfig.
-        audit=AuditConfig(signing=signing),
-        auth=auth,
-        # DE.5 step 17 — etl_hook + banner_text + app2_tls now on App2Config.
-        app2=App2Config(
-            etl_hook=app2_etl_hook,
-            banner_text=app2_banner_text,
-            tls=app2_tls_cfg,
-        ),
-        # DE.5 step 19 — test_generator moved to test.generator (TestConfig).
-        test=TestConfig(generator=test_generator),
-    )
+    p = Path(path) if isinstance(path, str) else path
+    if not p.exists():
+        raise CfgError(f"cfg path does not exist: {p}")
+    return _load_nested_config(p)

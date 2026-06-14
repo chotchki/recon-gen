@@ -385,8 +385,8 @@ def _resolve_qs_user_arn(cfg: Any) -> str | None:  # typing-smell: ignore[explic
     aws_profile = cfg.auth.aws.profile
     if aws_profile is None or not isinstance(aws_profile, str):
         return None
-    account_id = getattr(cfg, "aws_account_id", None)
-    region = getattr(cfg, "aws_region", None)
+    account_id = cfg.aws.account_id
+    region = cfg.aws.region
     if not account_id or not region:
         return None
     try:
@@ -1850,12 +1850,14 @@ def _setup_local_duckdb() -> tuple[dict[str, str], object | None]:
     db_path = tmp_dir / "demo.duckdb"
     cfg_path = tmp_dir / "config.duckdb.yaml"
     cfg_path.write_text(
-        f"aws_account_id: \"111122223333\"\n"
-        f"aws_region: \"us-east-1\"\n"
-        f"dialect: duckdb\n"
-        f"demo_database_url: \"duckdb:///{db_path}\"\n"
-        f"deployment_name: \"qsgen-duckdb\"\n"
-        f"db_table_prefix: \"qsgen_duckdb\"\n"
+        "aws:\n"
+        "  account_id: \"111122223333\"\n"
+        "  region: \"us-east-1\"\n"
+        "  deployment_name: \"qsgen-duckdb\"\n"
+        "db:\n"
+        "  dialect: duckdb\n"
+        f"  url: \"duckdb:///{db_path}\"\n"
+        "  table_prefix: \"qsgen_duckdb\"\n"
     )
     env: dict[str, str] = {
         RECON_GEN_DEMO_DATABASE_URL.name: f"duckdb:///{db_path}",

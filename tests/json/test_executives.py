@@ -374,13 +374,17 @@ class TestCli:
     def _base_config(self, tmp_path: Path) -> Path:
         p = tmp_path / "config.yaml"
         p.write_text(
-            "aws_account_id: '111122223333'\n"
-            "aws_region: us-west-2\n"
-            # Z.C — required cfg fields.
-            "deployment_name: recon-exec-cli\n"
-            "db_table_prefix: spec_example\n"
-            "datasource_arn: arn:aws:quicksight:us-west-2:111122223333"
-            ":datasource/ds\n"
+            # Z.C — required cfg fields (v14 nested shape).
+            "aws:\n"
+            "  account_id: '111122223333'\n"
+            "  region: us-west-2\n"
+            "  deployment_name: recon-exec-cli\n"
+            "  datasource:\n"
+            "    mode: adopt\n"
+            "    arn: arn:aws:quicksight:us-west-2:111122223333:datasource/ds\n"
+            "db:\n"
+            "  dialect: postgres\n"
+            "  table_prefix: spec_example\n"
         )
         return p
 

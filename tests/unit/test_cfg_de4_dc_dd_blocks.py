@@ -27,14 +27,16 @@ from recon_gen.common.config import (
 
 
 _MIN_YAML = """\
-aws_account_id: "123456789012"
-aws_region: us-east-1
-deployment_name: test-deploy
-db_table_prefix: test_deploy
-demo_database_url: postgresql://u:p@h:5432/d
-dialect: postgres
-principal_arns:
-  - arn:aws:iam::123456789012:role/TestRole
+aws:
+  account_id: "123456789012"
+  region: us-east-1
+  deployment_name: test-deploy
+  principal_arns:
+    - arn:aws:iam::123456789012:role/TestRole
+db:
+  dialect: postgres
+  url: postgresql://u:p@h:5432/d
+  table_prefix: test_deploy
 """
 
 

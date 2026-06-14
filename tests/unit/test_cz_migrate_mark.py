@@ -379,15 +379,17 @@ def _write_cfg_for_duckdb(
     Returns the path to the yaml — caller passes via ``-c``.
     """
     lines = [
-        "aws_account_id: '111111111111'",
-        "aws_region: us-east-1",
-        "deployment_name: cz6-test",
-        "db_table_prefix: spec_example",
-        f"demo_database_url: {db_url}",
-        "dialect: duckdb",
+        "aws:",
+        "  account_id: '111111111111'",
+        "  region: us-east-1",
+        "  deployment_name: cz6-test",
+        "db:",
+        "  dialect: duckdb",
+        f"  url: {db_url}",
+        "  table_prefix: spec_example",
     ]
     if etl_hook is not None:
-        lines.append(f"etl_hook: {etl_hook}")
+        lines += ["app2:", f"  etl_hook: {etl_hook}"]
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text("\n".join(lines) + "\n")
     return cfg_path

@@ -104,7 +104,7 @@ def test_env_override_accepts_valid_prefix(
 
 
 def test_yaml_loader_rejects_overlong_prefix(tmp_path: object) -> None:
-    """A bad ``db_table_prefix:`` in the cfg yaml must raise from
+    """A bad ``db.table_prefix:`` in the cfg yaml must raise from
     ``load_config`` (pre-CR.4 it loaded silently and crashed at the
     first CREATE TABLE)."""
     from pathlib import Path
@@ -114,14 +114,15 @@ def test_yaml_loader_rejects_overlong_prefix(tmp_path: object) -> None:
     assert isinstance(tmp_path, Path)
     cfg_yaml = tmp_path / "cfg.yaml"
     cfg_yaml.write_text(
-        "aws_account_id: \"123\"\n"
-        "aws_region: \"us-east-1\"\n"
-        "deployment_name: \"recon-demo\"\n"
-        f"db_table_prefix: \"{'a' * (DB_TABLE_PREFIX_MAX + 5)}\"\n"
-        "dialect: postgres\n"
-        # demo_database_url present so datasource_arn can derive
-        # without the operator needing real AWS creds for the test.
-        "demo_database_url: \"postgresql://u:p@h:5432/db\"\n",
+        "aws:\n"
+        "  account_id: \"123\"\n"
+        "  region: us-east-1\n"
+        "  deployment_name: recon-demo\n"
+        "db:\n"
+        "  dialect: postgres\n"
+        # url present so datasource arn auto-derives without real AWS creds
+        "  url: postgresql://u:p@h:5432/db\n"
+        f"  table_prefix: \"{'a' * (DB_TABLE_PREFIX_MAX + 5)}\"\n",
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="db_table_prefix"):

@@ -116,17 +116,22 @@ def write_pg_etl_cfg(pg_url: str, tmp_path: Path) -> tuple[Config, Path]:
     The etl_hook script invokes `recon-gen` against this yaml so
     `data apply` can re-seed the postgres on each pipeline run."""
     pg_cfg_path = tmp_path / "pg_etl_cfg.yaml"
-    # Z.C — deployment_name + db_table_prefix are required cfg fields.
+    # Z.C — deployment_name + db.table_prefix are required cfg fields.
     pg_cfg_dict = {
-        "aws_account_id": "111122223333",
-        "aws_region": "us-east-1",
-        "deployment_name": "recon-pg-etl",
-        "db_table_prefix": "sasquatch_pr",
-        "datasource_arn": (
-            "arn:aws:quicksight:us-east-1:111122223333:datasource/x"
-        ),
-        "demo_database_url": pg_url,
-        "dialect": "postgres",
+        "aws": {
+            "account_id": "111122223333",
+            "region": "us-east-1",
+            "deployment_name": "recon-pg-etl",
+            "datasource": {
+                "mode": "adopt",
+                "arn": "arn:aws:quicksight:us-east-1:111122223333:datasource/x",
+            },
+        },
+        "db": {
+            "dialect": "postgres",
+            "url": pg_url,
+            "table_prefix": "sasquatch_pr",
+        },
     }
     pg_cfg_path.write_text(yaml.safe_dump(pg_cfg_dict))
     cfg = Config(

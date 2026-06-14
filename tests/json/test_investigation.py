@@ -1794,11 +1794,16 @@ def _write_min_config(tmp_path: Path) -> Path:
     cfg_path = tmp_path / "config.yaml"
     # Z.C — required cfg fields.
     cfg_path.write_text(
-        "aws_account_id: '111122223333'\n"
-        "aws_region: us-west-2\n"
-        "deployment_name: recon-inv-cli\n"
-        "db_table_prefix: spec_example\n"
-        "datasource_arn: 'arn:aws:quicksight:us-west-2:111122223333:datasource/x'\n",
+        "aws:\n"
+        "  account_id: '111122223333'\n"
+        "  region: us-west-2\n"
+        "  deployment_name: recon-inv-cli\n"
+        "  datasource:\n"
+        "    mode: adopt\n"
+        "    arn: 'arn:aws:quicksight:us-west-2:111122223333:datasource/x'\n"
+        "db:\n"
+        "  dialect: postgres\n"
+        "  table_prefix: spec_example\n",
         encoding="utf-8",
     )
     return cfg_path

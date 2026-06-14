@@ -172,12 +172,16 @@ def cfg_with_prefix(tmp_path: Path) -> Config:
 
     cfg_file = tmp_path / "config.yaml"
     cfg_file.write_text(
-        "aws_account_id: '111122223333'\n"
-        "aws_region: us-west-2\n"
-        "deployment_name: recon-test-inst\n"
-        "db_table_prefix: test_inst\n"
-        "datasource_arn: arn:aws:quicksight:us-west-2:111122223333"
-        ":datasource/ds\n"
+        "aws:\n"
+        "  account_id: '111122223333'\n"
+        "  region: us-west-2\n"
+        "  deployment_name: recon-test-inst\n"
+        "  datasource:\n"
+        "    mode: adopt\n"
+        "    arn: arn:aws:quicksight:us-west-2:111122223333:datasource/ds\n"
+        "db:\n"
+        "  dialect: postgres\n"
+        "  table_prefix: test_inst\n"
     )
     return load_config(str(cfg_file))
 

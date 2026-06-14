@@ -27,12 +27,14 @@ from recon_gen._dev.runner import _sweep_test_prefixes
 def _make_cfg_yaml(tmp_path: Path, dialect: str, table_prefix: str) -> Path:
     """Minimal cfg.yaml the loader accepts for the sweep test."""
     cfg_text = (
-        f"aws_account_id: '470656905821'\n"
-        f"aws_region: us-east-1\n"
-        f"deployment_name: dg2-test\n"
-        f"db_table_prefix: {table_prefix}\n"
-        f"dialect: {dialect}\n"
-        f"demo_database_url: 'placeholder://will-be-overridden-by-env'\n"
+        "aws:\n"
+        "  account_id: '470656905821'\n"
+        "  region: us-east-1\n"
+        "  deployment_name: dg2-test\n"
+        "db:\n"
+        f"  dialect: {dialect}\n"
+        "  url: 'placeholder://will-be-overridden-by-env'\n"
+        f"  table_prefix: {table_prefix}\n"
     )
     p = tmp_path / "cfg.yaml"
     p.write_text(cfg_text)

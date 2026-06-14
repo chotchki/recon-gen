@@ -39,7 +39,7 @@ locked strings.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Iterator
 from unittest.mock import patch
@@ -64,23 +64,32 @@ from recon_gen.common.sql.dialect import Dialect
 
 
 @dataclass
-class _FakeCfg:
-    """Minimal cfg surface the query functions touch.
-
-    They check ``demo_database_url`` (truthy → run; None → early
-    return), ``dialect`` (the latter dispatches the per-dialect
-    date literal in ``date_literal``), and ``db_table_prefix``
-    (Z.C — used as the matview name prefix; was previously read
-    off the L2 instance). The patched ``connect_demo_db``
-    ignores ``demo_database_url`` so any truthy string suffices; the
-    ``dialect`` value, in contrast, IS load-bearing — it picks which
-    SQL form ``date_literal`` returns. Default is ``POSTGRES`` so the
-    locked snapshots match the PG/Oracle form. ``db_table_prefix``
-    defaults to ``ut`` to match the locked SQL string literals.
-    """
-    demo_database_url: str = "postgresql://stub/stub"
+class _FakeDbCfg:
+    """``cfg.db`` surface — what the audit query helpers touch."""
+    url: str | None = "postgresql://stub/stub"
     dialect: Dialect = Dialect.POSTGRES
-    db_table_prefix: str = "ut"
+    table_prefix: str = "ut"
+
+
+@dataclass
+class _FakeCfg:
+    """Minimal cfg surface the audit query functions touch.
+
+    They check ``cfg.db.url`` (truthy → run; None → early return),
+    ``cfg.db.dialect`` (dispatches the per-dialect date literal in
+    ``date_literal``), and ``cfg.db.table_prefix`` (Z.C — used as the
+    matview name prefix). The patched ``connect_demo_db`` ignores
+    ``url`` so any truthy string suffices; the ``dialect`` value, in
+    contrast, IS load-bearing — it picks which SQL form
+    ``date_literal`` returns. Default ``POSTGRES`` so the locked
+    snapshots match the PG/Oracle form. ``table_prefix`` defaults to
+    ``ut`` to match the locked SQL string literals.
+
+    DE.5.config_v14_consolidation: nested .db sub-cfg replaces the prior
+    flat ``demo_database_url`` / ``dialect`` / ``db_table_prefix``
+    attributes; cli/audit code reads ``cfg.db.X`` via the v14 shape.
+    """
+    db: _FakeDbCfg = field(default_factory=_FakeDbCfg)
 
 
 @dataclass
@@ -469,7 +478,7 @@ def test_skeleton_mode_short_circuits_drift(
     never attempt a connection. If this regresses, every audit
     skeleton-mode preview suddenly requires a live DB.
     """
-    cfg = _FakeCfg(demo_database_url=None)  # type: ignore[arg-type]: _FakeCfg is a stand-in for Config in skeleton-mode tests
+    cfg = _FakeCfg(db=_FakeDbCfg(url=None))  # type: ignore[arg-type]: _FakeCfg is a stand-in for Config in skeleton-mode tests
     result = _query_drift_violations(cfg, _INSTANCE, _FRAME)
     assert result is None
     assert captured_sql == []
@@ -480,7 +489,7 @@ def test_skeleton_mode_short_circuits_supersession(
 ) -> None:
     """Same skeleton-mode short-circuit as drift — repeated for the
     multi-query function to confirm no SQL leaks before the cfg check."""
-    cfg = _FakeCfg(demo_database_url=None)  # type: ignore[arg-type]: _FakeCfg is a stand-in for Config in skeleton-mode tests
+    cfg = _FakeCfg(db=_FakeDbCfg(url=None))  # type: ignore[arg-type]: _FakeCfg is a stand-in for Config in skeleton-mode tests
     result = _query_supersession(cfg, _INSTANCE, _FRAME)
     assert result is None
     assert captured_sql == []
