@@ -2009,25 +2009,28 @@ def _write_qs_cfg_for_thin(
     """
     import yaml  # noqa: PLC0415
 
-    from recon_gen.common.config import load_config  # noqa: PLC0415
+    from recon_gen.common.config import (  # noqa: PLC0415
+        _load_raw_nested,
+        load_config,
+    )
     from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
 
     peek_cfg = load_config(str(base_cfg_path))
     if peek_cfg.db.dialect is Dialect.DUCKDB:
         return None
 
-    with base_cfg_path.open() as f:
-        raw_any: Any = yaml.safe_load(f) or {}  # typing-smell: ignore[explicit-any]: yaml.safe_load returns scalar/list/dict/null per node
-    if not isinstance(raw_any, dict):
-        raise RuntimeError(
-            f"_write_qs_cfg_for_thin: base cfg {base_cfg_path} did not "
-            f"parse as a mapping (got {type(raw_any).__name__})"
-        )
-    raw: dict[str, Any] = cast(dict[str, Any], raw_any)  # typing-smell: ignore[explicit-any]: nested YAML payload
+    # DE.5.config_v14_consolidation.B (fix) — use the v14 loader's
+    # ``_load_raw_nested`` to resolve ``extends:`` against the source path
+    # BEFORE we mutate + dump. A bare ``yaml.safe_load`` preserves the
+    # ``extends: [./base.yaml]`` directive in the dumped qs.yaml; the
+    # relative ``./`` then resolves to ``runs/<id>/cfg/`` where base.yaml
+    # doesn't exist, so the dumped cfg fails to load and the deploy
+    # layer dispatch-skips silently. Resolving extends at this seam
+    # makes the dumped qs.yaml self-contained.
+    raw: dict[str, Any] = _load_raw_nested(base_cfg_path)  # typing-smell: ignore[explicit-any]: nested YAML payload — yaml.safe_load returns scalar/list/dict per node
 
-    # DE.5.config_v14_consolidation.B — operator cfg yaml is v14 nested
-    # shape; route mutations through the nested blocks instead of the
-    # legacy flat keys.
+    # operator cfg yaml is v14 nested shape; route mutations through the
+    # nested blocks instead of the legacy flat keys.
     db_block_raw = raw.setdefault("db", {})
     if not isinstance(db_block_raw, dict):
         raise RuntimeError(
