@@ -6,12 +6,15 @@ Invoked via the ``./run_tests.sh`` bash shim at repo root; the shim
 
 Verbs:
     up_to <layer>     Run the chain up to and including <layer>.
-                      Layers: unit | db | app2 | deploy | qs_api | qs_browser
+                      Layers: unit | db | app2 | qs_api | qs_browser
                       (pyright folds into unit via the conftest sessionstart
-                      gate). ``unit`` is variant-independent — it runs ONCE
-                      as a prelude before the matrix fans out (Y.2.gate.n),
-                      not once per cell. Equivalent forms: ``up_to=<layer>``
-                      and ``up_to <layer>``.
+                      gate). DI phase — ``deploy`` retired as a chain
+                      layer; the session-autouse ``qs_deployed`` fixture
+                      in tests/e2e/conftest.py owns QS deploy. ``unit``
+                      is variant-independent — it runs ONCE as a prelude
+                      before the matrix fans out (Y.2.gate.n), not once
+                      per cell. Equivalent forms: ``up_to=<layer>`` and
+                      ``up_to <layer>``.
     up [scope]        Boot dependencies. scope = local | aws | all (default).
     down [scope]      Tear down dependencies. scope as above.
     status [--cost]   Show what's currently running.
@@ -77,10 +80,16 @@ LAYERS: Final[tuple[str, ...]] = (
     "unit",
     "db",
     "app2",
-    "deploy",
     "qs_api",
     "qs_browser",
 )
+# DI phase — ``deploy`` retired as a chain layer. QS deploy is owned
+# by the session-autouse ``qs_deployed`` fixture in
+# ``tests/e2e/conftest.py``; the qs_api + qs_browser layers' pytest
+# invocations transitively fire it at session start under FileLock
+# rendezvous. Operators wanting a one-shot deploy still use
+# ``recon-gen json apply --execute`` directly (or ``up_to=qs_api``,
+# which fires the fixture without running the full browser tier).
 # v14.0.0 fast-fail — per-layer stdout-stuck thresholds in seconds.
 # When subprocess stdout hasn't grown in N seconds, the watchdog kills
 # the layer. Calibrated against observed wall-clock times of clean runs
@@ -98,8 +107,10 @@ _HANG_THRESHOLDS: Final[dict[str, int]] = {
     "unit": 180,        # ~60s clean; faulthandler kicks at 180s
     "db": 240,          # ~40s clean; matview refresh can sprawl
     "app2": 900,        # ~19m clean; Studio server tests run long
-    "deploy": 420,      # ~2-5m clean; AWS create_data_set can hang flaky
-    "qs_api": 120,      # ~15s clean; boto3 describes are fast
+    # DI phase — ``deploy`` layer retired; qs_api / qs_browser layers'
+    # session-autouse ``qs_deployed`` fixture absorbs the ~30-60s
+    # deploy wall into their own session window.
+    "qs_api": 180,      # ~15s clean + ~60s qs_deployed fixture
     "qs_browser": 900,  # ~5-21m clean; QS embed loads + reruns dominate
 }
 # CB.11.a.3 (2026-06-02) — renamed `api` → `qs_api`, `browser` →
@@ -190,7 +201,10 @@ _LAYER_DEPS: Final[dict[str, frozenset[str]]] = {
     # there's no remote cluster lifecycle to gate dispatch on. Docker
     # readiness is already covered by the `docker` dep; per-dialect
     # container-boot lands in CB.11.b.
-    "deploy": frozenset({"aws", "docker"}),
+    # DI phase — ``deploy`` retired as a chain layer; qs_api inherits
+    # the AWS + docker dep set (the qs_deployed fixture needs AWS to
+    # delete-then-create; container needs to be up + seeded so QS
+    # validate-connect against hotchkiss.io succeeds).
     "qs_api": frozenset({"aws", "docker"}),
     "qs_browser": frozenset({"aws", "docker", "qs_arn"}),
 }
@@ -595,16 +609,24 @@ class LayerResult:
 _VENV_BIN: Final = REPO_ROOT / ".venv" / "bin"
 
 
-def _build_deploy_command(
+def _build_deploy_command(  # pyright: ignore[reportUnusedFunction]: DI phase — runner-internal callsites retired; kept for tests/unit/test_runner_triage.py extraction-parity proofs + future re-use if a runner-side deploy primitive is reintroduced
     variant_env: dict[str, str],
     run_dir: Path,
 ) -> tuple[list[str], dict[str, str]] | None:
     """Return ``(cmd, env)`` for ``recon-gen json apply --execute``.
 
-    Extracted from ``_layer_command``'s deploy arm so the triage verb
-    (`cmd_triage`) can spawn the same deploy step without going through
-    the pytest-wrapped dispatch path. Same body, just lifted to module
-    level.
+    DI phase — no longer called from inside the runner. Deploy is owned
+    by the session-autouse ``qs_deployed`` fixture in
+    ``tests/e2e/conftest.py``, which builds its own subprocess invocation
+    (parity in shape, lives at the fixture layer to keep the runner free
+    of pytest fixture coupling). Helper retained as a documented
+    extraction so the test suite can prove command-shape parity and
+    re-use if a runner-side deploy primitive comes back.
+
+    Originally extracted from ``_layer_command``'s deploy arm so the
+    triage verb (`cmd_triage`) could spawn the same deploy step without
+    going through the pytest-wrapped dispatch path. Same body, just
+    lifted to module level.
 
     Cfg-path resolution (in order):
       1. ``variant_env[RECON_GEN_QS_CONFIG]`` — the hotchkiss.io-routed cfg
@@ -838,18 +860,12 @@ def _layer_command(
         # does not apply here. Leave qs_browser at default `--dist=load`.
         cmd += ["--dist=loadgroup"]
         return (cmd, {**env_addl, RECON_GEN_E2E.name: "1"})
-    if layer == "deploy":
-        # Y.2.gate.c.5.deploy — `recon-gen json apply --execute` against
-        # the cfg + L2 the runner discovered. Body extracted to the
-        # module-level ``_build_deploy_command`` so ``cmd_triage`` can
-        # reuse it without going through the pytest-wrapped dispatch
-        # path. See that helper's docstring for the cfg-path resolution
-        # rules (QS cfg precedence + fallback to ``_resolve_seed_config``).
-        built = _build_deploy_command(variant_env or {}, run_dir)
-        if built is None:
-            return None
-        cmd, _extra_env = built
-        return (cmd, env_addl)
+    # DI phase — ``deploy`` retired as a chain layer. The session-autouse
+    # ``qs_deployed`` fixture in ``tests/e2e/conftest.py`` owns deploy;
+    # the qs_api + qs_browser pytest invocations fire it at session
+    # start. ``_build_deploy_command`` lives on at module level for
+    # operators who want the ergonomic one-shot ``recon-gen json apply
+    # --execute`` from the CLI.
     if layer == "qs_api":
         # Y.2.gate.c.5.api — boto3-only e2e tests verifying deployed QS
         # resources via `describe_*` calls. CB.6: discover via the
@@ -1160,21 +1176,17 @@ def dispatch_layer(
     """
     cmd_env = _layer_command(layer, run_dir, options, variant_env=variant_env)
     if cmd_env is None:
-        # Y.2.gate.c.5 — None means the layer needed preconditions that
-        # weren't satisfied (most often: deploy without a cfg-discovered
-        # cfg path or default L2 instance). Print a clear pointer to the
-        # cfg fields the operator can set to unblock.
-        if layer == "deploy":
-            print(
-                f"{terminal_prefix}runner: dispatch-skip [{layer}] cfg "
-                f"missing — set `auth.aws.profile` (h+i.0) AND "
-                f"`db.default_l2_instance` (h.6) in run/config.<dialect>.yaml"
-            )
-        else:
-            print(
-                f"{terminal_prefix}runner: dispatch-skip [{layer}] no "
-                f"command wired (unknown layer name?)"
-            )
+        # Y.2.gate.c.5 — None means the layer name isn't wired (likely
+        # an unknown layer added to LAYERS without a matching arm in
+        # ``_layer_command``). DI phase — the prior ``deploy``-specific
+        # cfg-missing dispatch-skip is gone; deploy is retired and the
+        # ``qs_deployed`` fixture's pytest.fail surfaces deploy
+        # precondition failures (cfg / L2 missing) loudly from inside
+        # the qs_api / qs_browser session.
+        print(
+            f"{terminal_prefix}runner: dispatch-skip [{layer}] no "
+            f"command wired (unknown layer name?)"
+        )
         return LayerResult(layer=layer, exit_code=0, duration_seconds=0.0, skipped=True)
 
     cmd, env_addl = cmd_env
@@ -1321,10 +1333,16 @@ def dispatch_layer(
     )
 
 
-def _is_deploy_or_later(layer: str) -> bool:
-    """Y.2.gate.b.10 — layers ≥ deploy touch AWS/external state. Dirty-state
-    refusal applies only to those (layers 1-3 are local + idempotent)."""
-    return LAYERS.index(layer) >= LAYERS.index("deploy")
+def _is_aws_touching_layer(layer: str) -> bool:
+    """Y.2.gate.b.10 — layers ≥ qs_api touch AWS/external state. Dirty-state
+    refusal applies only to those (layers 1-3 are local + idempotent).
+
+    DI phase — renamed from ``_is_deploy_or_later``: the ``deploy``
+    chain layer is retired; the qs_api layer is now the first AWS-
+    touching one (its session-autouse ``qs_deployed`` fixture fires
+    the deploy at session start).
+    """
+    return LAYERS.index(layer) >= LAYERS.index("qs_api")
 
 
 # Y.2.gate.c.3 — drift threshold. ±50% triggers a ⚠ marker. Spec'd in audit
@@ -1616,15 +1634,19 @@ def is_layer_cached_green(layer: str, *, variant: str = "default") -> bool:
 # through (RECON_GEN_DEMO_DATABASE_URL etc.). Unit doesn't need it.
 # `app2` (b.3.impl.layer) reads the variant DB via the App2 fetcher
 # (`make_tree_db_fetcher`), so it lives here.
-DB_TOUCHING_LAYERS: Final = ("db", "app2", "deploy", "qs_api", "qs_browser")
+DB_TOUCHING_LAYERS: Final = ("db", "app2", "qs_api", "qs_browser")
 
 # m.4.f — layers that need an AWS-reachable datasource. Lo-target
 # cells seed a localhost container that QuickSight in AWS can't reach;
-# running deploy → api → browser against a localhost-pointed datasource
+# running qs_api → qs_browser against a localhost-pointed datasource
 # is a guaranteed dead pointer (deploy succeeds, but every dashboard
 # render times out because QS can't query localhost). Cap lo cells at
 # `app2` (the local-Docker terminal, locked by audit §7.10).
-AWS_TOUCHING_LAYERS: Final = ("deploy", "qs_api", "qs_browser")
+#
+# DI phase — ``deploy`` retired as a chain layer; qs_api inherits its
+# AWS-touching role. The session-autouse ``qs_deployed`` fixture in
+# ``tests/e2e/conftest.py`` fires at qs_api / qs_browser session start.
+AWS_TOUCHING_LAYERS: Final = ("qs_api", "qs_browser")
 
 # Y.2.gate.j.5 — Oracle container reuse. **Per-cell** name (not single
 # shared) so two Oracle cells (e.g., sp_or_lo + sq_or_lo) running in
@@ -3395,8 +3417,8 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     Cfg discovery: ``RECON_GEN_CONFIG`` env override →
     ``_DEFAULT_RUNNER_CFG_CANDIDATES``. L2 path comes from
     ``cfg.db.default_l2_instance`` (h.6) when present; missing →
-    ``deploy``/``qs_api``/``qs_browser`` layers' ``_layer_command``
-    returns None and dispatch prints ``dispatch-skip``.
+    the ``qs_deployed`` fixture (tests/e2e/conftest.py) raises
+    ``pytest.fail`` from the qs_api / qs_browser session start.
 
     Drops ``env_access.json`` per run for env-var liveness diff.
 
@@ -3408,7 +3430,7 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     """
     options = _options_from_args(args)
 
-    if _is_deploy_or_later(args.layer) and _is_dirty():
+    if _is_aws_touching_layer(args.layer) and _is_dirty():
         if not options.allow_dirty_deploy and not RECON_GEN_RUNNER_YES.get_or_none():
             print(
                 "runner: refusing to deploy: tracked changes present "
@@ -3498,15 +3520,19 @@ def cmd_up_to(args: argparse.Namespace) -> int:
                 f"runner: thin container up (dialect-matching) — "
                 f"{RECON_GEN_DEMO_DATABASE_URL.name}=...exported"
             )
-            # CB.17.d — when the chain reaches deploy/qs_api/qs_browser
+            # CB.17.d — when the chain reaches qs_api/qs_browser
             # AND dialect is QS-reachable (pg/or, not du), materialize
             # a QS-side cfg yaml with hotchkiss.io-routable URL. The
-            # CLI's deploy step + qs_* layers prefer RECON_GEN_QS_CONFIG
+            # qs_deployed fixture + qs_* layers prefer RECON_GEN_QS_CONFIG
             # over RECON_GEN_CONFIG so the QS DataSource endpoint
             # routes via DDNS, not 127.0.0.1.
-            qs_layers = ("deploy", "qs_api", "qs_browser")
+            #
+            # DI phase — ``deploy`` retired as a chain layer; the
+            # ``qs_deployed`` fixture in tests/e2e/conftest.py reads
+            # RECON_GEN_QS_CONFIG via env at session start.
             chain_includes_qs = any(
-                layer in qs_layers for layer in chain_through(args.layer)
+                layer in AWS_TOUCHING_LAYERS
+                for layer in chain_through(args.layer)
             )
             if chain_includes_qs and RECON_GEN_DEMO_DATABASE_URL.name in container_env:
                 try:
@@ -3674,22 +3700,17 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     final_code = EXIT_SUCCESS
     try:
         for layer in chain:
-            # CB.11.b parity — for the deploy layer, the CLI must load
-            # the QS cfg (hotchkiss.io URL) so the created DataSource
-            # points at the dev-machine forward QS can reach. Drop
-            # `RECON_GEN_DEMO_DATABASE_URL` from env or it'd override
-            # cfg's URL back to localhost (which QS in us-east-1 can't
-            # route to). qs_browser keeps the local URL because consumer
-            # tests read seeded state via connect_demo_db(cfg) — they
-            # need the dev box's loopback, not the operator's external
-            # IP. Same shape as legacy _run_one_variant layer_env logic.
+            # DI phase — the prior CB.11.b deploy-layer env-munge
+            # (swap RECON_GEN_CONFIG with the QS cfg + drop the local
+            # DB URL so the deploy CLI sees the hotchkiss.io endpoint)
+            # is gone. Deploy is owned by the session-autouse
+            # ``qs_deployed`` fixture (tests/e2e/conftest.py), which
+            # reads ``RECON_GEN_QS_CONFIG`` directly without needing
+            # the runner to alias it onto ``RECON_GEN_CONFIG``. The
+            # qs_browser layer still receives the local DB URL so
+            # consumer tests can read seeded state via
+            # connect_demo_db(cfg).
             layer_env = dict(runner_variant_env)
-            qs_cfg = layer_env.get(RECON_GEN_QS_CONFIG.name)
-            if qs_cfg is not None and layer == "deploy":
-                layer_env[RECON_GEN_CONFIG.name] = qs_cfg
-                layer_env.pop(RECON_GEN_DEMO_DATABASE_URL.name, None)
-                layer_env.pop(RECON_GEN_DEMO_DATABASE_URL_PG.name, None)
-                layer_env.pop(RECON_GEN_DEMO_DATABASE_URL_OR.name, None)
             result = dispatch_layer(
                 layer, run_dir, options, variant_env=layer_env,
             )
@@ -4752,7 +4773,7 @@ def cmd_triage(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         print(
-            "runner: pass --layer=<unit|db|app2|deploy|qs_api|qs_browser> "
+            "runner: pass --layer=<unit|db|app2|qs_api|qs_browser> "
             "to override",
             file=sys.stderr,
         )
@@ -4785,7 +4806,7 @@ def cmd_triage(args: argparse.Namespace) -> int:
             return EXIT_NEEDS_OPERATOR
 
     # Dirty-tree gate (deploy layer or later).
-    if _is_deploy_or_later(layer) and _is_dirty():
+    if _is_aws_touching_layer(layer) and _is_dirty():
         if not args.allow_dirty_deploy and not RECON_GEN_RUNNER_YES.get_or_none():
             print(
                 "runner: refusing to deploy: tracked changes present "
@@ -4863,8 +4884,10 @@ def cmd_triage(args: argparse.Namespace) -> int:
             )
             return EXIT_NEEDS_OPERATOR
 
-        # QS-side cfg when the chain reaches deploy/qs_api/qs_browser.
-        chain_includes_qs = layer in ("deploy", "qs_api", "qs_browser")
+        # QS-side cfg when the chain reaches qs_api/qs_browser. The
+        # qs_deployed fixture (tests/e2e/conftest.py) reads
+        # RECON_GEN_QS_CONFIG at session start.
+        chain_includes_qs = layer in AWS_TOUCHING_LAYERS
         if (
             chain_includes_qs
             and RECON_GEN_DEMO_DATABASE_URL.name in container_env
@@ -5238,7 +5261,9 @@ Auth (Y.2.gate.h+i):
       docs/audits/_iam/recon-gen-local-policy.json
 
 Layer chain (Y.2.gate.b/c/n):
-  unit -> db -> app2 -> deploy -> qs_api -> qs_browser
+  unit -> db -> app2 -> qs_api -> qs_browser
+  (DI phase: ``deploy`` retired; the session-autouse ``qs_deployed``
+  fixture in tests/e2e/conftest.py owns QS deploy.)
   ./run_tests.sh up_to=<layer>  runs the chain through that layer.
   Post-CB.17.d the runner uses a single-pytest-per-layer "thin path":
   each layer runs ONE pytest subprocess (no cell loop, no prelude
@@ -5277,7 +5302,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_up_to.add_argument(
         "--allow-dirty-deploy", action="store_true",
-        help="bypass the tracked-changes refusal on layers >= deploy.",
+        help="bypass the tracked-changes refusal on AWS-touching layers (qs_api / qs_browser).",
     )
     p_up_to.add_argument(
         "--coverage", action="store_true",
@@ -5334,9 +5359,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--allow-dirty-deploy",
         action="store_true",
         help=(
-            "Bypass the tracked-changes refusal for layers >= deploy "
-            "(matches up_to's gate; required for triaging a code change "
-            "you haven't yet committed)."
+            "Bypass the tracked-changes refusal for AWS-touching layers "
+            "(qs_api / qs_browser). Matches up_to's gate; required for "
+            "triaging a code change you haven't yet committed."
         ),
     )
     p_triage.add_argument(
