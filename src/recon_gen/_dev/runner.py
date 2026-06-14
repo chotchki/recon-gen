@@ -3763,71 +3763,90 @@ def _render_failures_for_run(
     print(f"# Failing layers in {run_dir.name}")
     print()
 
-    # Walk cells (variant subdirs). Skip the unit-prelude dir specially
-    # — it's `_prelude/unit/`, not a variant.
-    cells: list[tuple[str, Path]] = []
-    prelude = run_dir / "_prelude"
-    if prelude.is_dir():
-        cells.append(("_prelude", prelude))
+    # Collect (display_label, layer_name, cell_dir, layer_dir) tuples
+    # by scanning both runner shapes:
+    #
+    #   - **Thin path** (single-cell `up_to=<layer>` runs): layer dirs
+    #     live directly under run_dir (`runs/<id>/unit/cmd.json`).
+    #     Display label is just `<layer>`; cell_dir is run_dir itself
+    #     (capture-artifact resolution looks one level up).
+    #   - **Matrix path**: layer dirs live under a cell variant subdir
+    #     (`runs/<id>/sp_pg_lo/db/cmd.json`). Display label is
+    #     `<cell>/<layer>`; cell_dir is the variant subdir.
+    #
+    # A directory is "thin-path layer" iff `<dir>/cmd.json` is a file.
+    # The `_prelude` cell still walks one level deeper (its layer dirs
+    # carry `cmd.json` inside `_prelude/<layer>/`, not `_prelude/cmd.json`).
+    layer_entries: list[tuple[str, str, Path, Path]] = []
     for sub in sorted(run_dir.iterdir()):
-        if not sub.is_dir() or sub.name == "_prelude":
+        if not sub.is_dir():
             continue
-        if variant_filter and sub.name != variant_filter:
+        # Thin-path: top-level directory IS a layer (has cmd.json).
+        if (sub / "cmd.json").is_file():
+            if variant_filter and variant_filter not in ("", sub.name):
+                continue
+            layer_entries.append((sub.name, sub.name, run_dir, sub))
             continue
-        cells.append((sub.name, sub))
+        # Matrix-path or prelude: walk one level deeper for layer dirs.
+        if sub.name != "_prelude":
+            if variant_filter and sub.name != variant_filter:
+                continue
+        for child in sorted(sub.iterdir()):
+            if not child.is_dir():
+                continue
+            if (child / "cmd.json").is_file():
+                layer_entries.append(
+                    (f"{sub.name}/{child.name}", child.name, sub, child),
+                )
 
     found_any_failure = False
-    for cell_name, cell_dir in cells:
-        for layer_dir in sorted(cell_dir.iterdir()):
-            if not layer_dir.is_dir():
-                continue
-            layer = layer_dir.name
-            if layer in ("timings", "db-perf", "l2", "seed"):
-                # Auxiliary subdirs, not chain layers.
-                continue
-            cmd_json_path = layer_dir / "cmd.json"
-            if not cmd_json_path.is_file():
-                continue
-            cmd_json = json.loads(cmd_json_path.read_text())
-            exit_code = int(cmd_json.get("exit_code", 0) or 0)
-            if exit_code == 0:
-                continue
-            found_any_failure = True
-            duration = cmd_json.get("duration_seconds")
-            duration_str = f"{duration:.1f}s" if duration else "?"
-            hang_kill = bool(cmd_json.get("hang_kill"))
-            hang_marker = " HANG-KILLED" if hang_kill else ""
+    for display_label, layer, cell_dir, layer_dir in layer_entries:
+        if layer in ("timings", "db-perf", "l2", "seed"):
+            # Auxiliary subdirs, not chain layers.
+            continue
+        cmd_json_path = layer_dir / "cmd.json"
+        if not cmd_json_path.is_file():
+            continue
+        cmd_json = json.loads(cmd_json_path.read_text())
+        exit_code = int(cmd_json.get("exit_code", 0) or 0)
+        if exit_code == 0:
+            continue
+        found_any_failure = True
+        duration = cmd_json.get("duration_seconds")
+        duration_str = f"{duration:.1f}s" if duration else "?"
+        hang_kill = bool(cmd_json.get("hang_kill"))
+        hang_marker = " HANG-KILLED" if hang_kill else ""
+        print(
+            f"## [{display_label}]{hang_marker} "
+            f"exit={exit_code} duration={duration_str}"
+        )
+        print()
+        if hang_kill:
+            threshold = cmd_json.get("hang_threshold_seconds", "?")
             print(
-                f"## [{cell_name}/{layer}]{hang_marker} "
-                f"exit={exit_code} duration={duration_str}"
+                f"- Subprocess killed by hang watchdog: stdout stuck "
+                f"for >{threshold}s. Inspect `stderr.log` for the "
+                f"faulthandler thread dump at the time of the hang."
             )
             print()
-            if hang_kill:
-                threshold = cmd_json.get("hang_threshold_seconds", "?")
-                print(
-                    f"- Subprocess killed by hang watchdog: stdout stuck "
-                    f"for >{threshold}s. Inspect `stderr.log` for the "
-                    f"faulthandler thread dump at the time of the hang."
-                )
-                print()
-            env = cmd_json.get("env_overrides", {})
-            # Surface the high-signal env values — operator can derive
-            # rest from the run-id + cmd.json directly.
-            for key in (
-                "RECON_GEN_DEPLOYMENT_NAME", "RECON_GEN_FUZZ_SEED",
-                "RECON_GEN_TEST_L2_INSTANCE",
-            ):
-                if key in env:
-                    print(f"- `{key}={env[key]}`")
+        env = cmd_json.get("env_overrides", {})
+        # Surface the high-signal env values — operator can derive
+        # rest from the run-id + cmd.json directly.
+        for key in (
+            "RECON_GEN_DEPLOYMENT_NAME", "RECON_GEN_FUZZ_SEED",
+            "RECON_GEN_TEST_L2_INSTANCE",
+        ):
+            if key in env:
+                print(f"- `{key}={env[key]}`")
+        print()
+        stdout_log = layer_dir / "stdout.log"
+        if not stdout_log.is_file():
+            print("(no stdout.log)")
             print()
-            stdout_log = layer_dir / "stdout.log"
-            if not stdout_log.is_file():
-                print("(no stdout.log)")
-                print()
-                continue
-            stdout = stdout_log.read_text(errors="replace")
-            _dump_pytest_failures(stdout)
-            _dump_capture_status(cell_dir, layer_dir, stdout)
+            continue
+        stdout = stdout_log.read_text(errors="replace")
+        _dump_pytest_failures(stdout)
+        _dump_capture_status(cell_dir, layer_dir, stdout)
     if not found_any_failure:
         print("(no failing layers in this run — all clean)")
     return found_any_failure
