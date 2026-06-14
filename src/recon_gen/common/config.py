@@ -475,6 +475,582 @@ def _partition_from_arns(
     return "aws"
 
 
+# ---------------------------------------------------------------------------
+# DE.5 — v14 nested-yaml loader (ported from config_v14.py, which is deleted
+# in the same phase). Errors / DatasourceMode enum / legacy-key map / build
+# helpers + ``load_config`` reading the concern-grouped shape. During the
+# strangler step the legacy flat-yaml loader stays alive below; load_config
+# auto-detects which shape the file is in and routes.
+# ---------------------------------------------------------------------------
+
+
+class CfgError(Exception):
+    """Base for v14 cfg errors. Operator-facing message format:
+    short cause + actionable next step."""
+
+
+class CycleError(CfgError):
+    """``extends:`` chain references a cfg already in the resolution set.
+    Carries the cycle path for operator triage."""
+
+
+class LegacyFieldError(CfgError):
+    """A v13-shape key appeared in v14 cfg.yaml. Carries the migration
+    hint with the new path."""
+
+
+class MissingFieldError(CfgError):
+    """Required field absent after merge + derivation. Carries the field
+    path + the cfg files that contributed to the merged result."""
+
+
+# Legacy → new field-path migration map (used by ``_check_legacy_keys``).
+# Drives the LegacyFieldError messages so each v13 key the operator left
+# in the cfg points at the new location.
+_LEGACY_TO_NEW: dict[str, str] = {
+    "aws_account_id": "aws.account_id",
+    "aws_region": "aws.region",
+    "deployment_name": "aws.deployment_name",
+    "db_table_prefix": "db.table_prefix (auto-derived from aws.deployment_name when absent)",
+    "principal_arns": "aws.principal_arns",
+    "datasource_arn": "aws.datasource.arn (with aws.datasource.mode: adopt)",
+    "extra_tags": "aws.extra_tags",
+    "tagging_enabled": "aws.tagging_enabled",
+    "qs_disable_pg_ssl": "aws.qs_disable_pg_ssl",
+    "aws_pg_cluster_id": "aws.pg_cluster_id",
+    "aws_oracle_instance_id": "aws.oracle_instance_id",
+    "dialect": "db.dialect",
+    "demo_database_url": "db.url",
+    "app2_db_pool_size": "db.app2_pool_size",
+    "default_l2_instance": "db.default_l2_instance",
+    "studio_enabled": "(removed — absence of app2: block ⇒ studio off)",
+    "etl_hook": "app2.etl_hook",
+    "banner_text": "app2.banner_text",
+    "signing": "audit.signing",
+    "test_generator": "test.generator",
+    "auth.aws_profile": "auth.aws.profile",
+    "auth.quicksight_user_arn": "auth.aws.quicksight_user_arn",
+}
+
+
+def _deep_merge(parent: dict[str, Any], child: dict[str, Any]) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload — yaml.safe_load returns scalar/list/dict/null per node
+    """Child-wins deep merge. Dicts merge recursively; lists + scalars:
+    child replaces parent (no append). Lists wanting append semantics use
+    explicit ``[{{ inherited }}, new]`` in child."""
+    merged: dict[str, Any] = dict(parent)  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload
+    for key, child_value in child.items():
+        parent_value = merged.get(key)
+        if isinstance(parent_value, dict) and isinstance(child_value, dict):
+            merged[key] = _deep_merge(
+                cast(dict[str, Any], parent_value),
+                cast(dict[str, Any], child_value),
+            )
+        else:
+            merged[key] = child_value
+    return merged
+
+
+def _load_raw_nested(
+    path: Path, _seen: set[Path] | None = None,
+) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload
+    """Recursively load YAML + apply ``extends:`` chain. Returns the
+    merged raw dict (pre-typed)."""
+    _seen = _seen if _seen is not None else set()
+    abs_path = path.resolve()
+    if abs_path in _seen:
+        cycle = " → ".join(str(p) for p in _seen) + f" → {abs_path}"
+        raise CycleError(f"extends: cycle detected: {cycle}")
+    _seen.add(abs_path)
+    raw_any: object = yaml.safe_load(path.read_text())
+    raw: dict[str, Any] = cast(dict[str, Any], raw_any) if isinstance(raw_any, dict) else {}  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload
+    extends = raw.pop("extends", None)
+    if extends is None:
+        return raw
+    if isinstance(extends, str):
+        extends = [extends]
+    if not isinstance(extends, list):
+        raise CfgError(
+            f"extends: must be a list of paths (or a single string), "
+            f"got {type(extends).__name__} in {abs_path}"
+        )
+    extends_list = cast(list[Any], extends)  # typing-smell: ignore[explicit-any]: yaml-loaded list of arbitrary nodes
+    merged: dict[str, Any] = {}  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload
+    for ext_path_str in extends_list:
+        if not isinstance(ext_path_str, str):
+            raise CfgError(
+                f"extends: entries must be strings, got "
+                f"{type(ext_path_str).__name__} in {abs_path}"
+            )
+        ext_path = (path.parent / ext_path_str).resolve()
+        ext_raw = _load_raw_nested(ext_path, _seen=set(_seen))
+        merged = _deep_merge(merged, ext_raw)
+    return _deep_merge(merged, raw)
+
+
+def _check_legacy_keys_nested(raw: dict[str, Any], path: Path) -> None:  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload
+    """Raise LegacyFieldError if any v13-shape key appears at top level
+    or under the nested auth block."""
+    for legacy, new in _LEGACY_TO_NEW.items():
+        if "." in legacy:
+            block, key = legacy.split(".", 1)
+            block_val = raw.get(block)
+            if isinstance(block_val, dict) and key in block_val:
+                raise LegacyFieldError(
+                    f"{path}: legacy field {legacy!r} is no longer supported in "
+                    f"v14.0.0 cfg. Use {new!r} instead. See "
+                    f"docs/audits/de_0_cfg_redesign.md for the full migration table."
+                )
+        else:
+            if legacy in raw:
+                raise LegacyFieldError(
+                    f"{path}: legacy field {legacy!r} is no longer supported in "
+                    f"v14.0.0 cfg. Use {new!r} instead. See "
+                    f"docs/audits/de_0_cfg_redesign.md for the full migration table."
+                )
+
+
+def _resolve_dialect_nested(value: Any) -> Dialect:  # typing-smell: ignore[explicit-any]: yaml-loaded scalar — narrows via isinstance in the body
+    if isinstance(value, Dialect):
+        return value
+    if isinstance(value, str):
+        return Dialect(value)
+    raise CfgError(
+        f"db.dialect must be a string or Dialect, got {type(value).__name__}"
+    )
+
+
+def _build_aws_nested(raw: dict[str, Any], path: Path) -> AwsConfig:  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload
+    block_raw = raw.get("aws")
+    if not isinstance(block_raw, dict):
+        raise MissingFieldError(f"{path}: required block 'aws:' is absent")
+    block = cast(dict[str, Any], block_raw)
+    for key in ("account_id", "region", "deployment_name"):
+        if key not in block:
+            raise MissingFieldError(
+                f"{path}: required field 'aws.{key}' is absent"
+            )
+    ds_block_raw = block.get("datasource", {})
+    if not isinstance(ds_block_raw, dict):
+        raise CfgError(f"{path}: 'aws.datasource' must be a mapping")
+    ds_block = cast(dict[str, Any], ds_block_raw)
+    ds_mode_val = ds_block.get("mode", "create")
+    if ds_mode_val not in ("create", "adopt", "skip"):
+        raise CfgError(
+            f"{path}: aws.datasource.mode must be one of "
+            f"['create', 'adopt', 'skip'], got {ds_mode_val!r}"
+        )
+    ds_arn = ds_block.get("arn")
+    if ds_mode_val == "adopt" and not ds_arn:
+        raise MissingFieldError(
+            f"{path}: aws.datasource.mode='adopt' requires aws.datasource.arn"
+        )
+    extra_tags_raw = block.get("extra_tags", {})
+    if isinstance(extra_tags_raw, dict):
+        tags_typed = cast(dict[Any, Any], extra_tags_raw)
+        tags_tuple = tuple(sorted(
+            (str(k), str(v)) for k, v in tags_typed.items()
+        ))
+    else:
+        raise CfgError(f"{path}: aws.extra_tags must be a mapping")
+    principals_raw = block.get("principal_arns", [])
+    if not isinstance(principals_raw, list):
+        raise CfgError(f"{path}: aws.principal_arns must be a list")
+    principals_typed = cast(list[Any], principals_raw)
+    return AwsConfig(
+        account_id=str(block["account_id"]),
+        region=str(block["region"]),
+        deployment_name=str(block["deployment_name"]),
+        principal_arns=tuple(str(p) for p in principals_typed),
+        extra_tags=tags_tuple,
+        tagging_enabled=bool(block.get("tagging_enabled", True)),
+        qs_disable_pg_ssl=bool(block.get("qs_disable_pg_ssl", False)),
+        pg_cluster_id=block.get("pg_cluster_id"),
+        oracle_instance_id=block.get("oracle_instance_id"),
+        datasource=DatasourceConfig(
+            mode=ds_mode_val,
+            arn=ds_arn,
+        ),
+    )
+
+
+def _build_db_nested(
+    raw: dict[str, Any], aws: AwsConfig, path: Path,  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload
+) -> DbConfig:
+    block_raw = raw.get("db")
+    if not isinstance(block_raw, dict):
+        raise MissingFieldError(f"{path}: required block 'db:' is absent")
+    block = cast(dict[str, Any], block_raw)
+    for key in ("dialect", "url"):
+        if key not in block:
+            raise MissingFieldError(
+                f"{path}: required field 'db.{key}' is absent"
+            )
+    table_prefix = block.get("table_prefix")
+    if not table_prefix:
+        # Derive from aws.deployment_name (`-` → `_`)
+        table_prefix = aws.deployment_name.replace("-", "_")
+    validate_db_table_prefix(str(table_prefix))
+    return DbConfig(
+        dialect=_resolve_dialect_nested(block["dialect"]),
+        url=str(block["url"]),
+        table_prefix=str(table_prefix),
+        default_l2_instance=block.get("default_l2_instance"),
+        app2_pool_size=int(block.get("app2_pool_size", 10)),
+    )
+
+
+def _build_auth_nested(raw: dict[str, Any], path: Path) -> "AuthConfig":  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload
+    del path
+    block_raw = raw.get("auth", {})
+    if not isinstance(block_raw, dict):
+        raise CfgError("auth must be a mapping when present")
+    block = cast(dict[str, Any], block_raw)
+    aws_block_raw = block.get("aws", {})
+    if not isinstance(aws_block_raw, dict):
+        raise CfgError("auth.aws must be a mapping")
+    aws_block = cast(dict[str, Any], aws_block_raw)
+    aws_auth = AuthAwsConfig(
+        profile=aws_block.get("profile"),
+        quicksight_user_arn=aws_block.get("quicksight_user_arn"),
+    )
+    oidc_block_raw = block.get("oidc")
+    oidc: OidcConfig | None = None
+    if isinstance(oidc_block_raw, dict):
+        oidc_block = cast(dict[str, Any], oidc_block_raw)
+        for key in ("issuer_url", "client_id", "client_secret_env", "redirect_uri"):
+            if key not in oidc_block:
+                raise MissingFieldError(
+                    f"auth.oidc.{key} is required when auth.oidc block present"
+                )
+        scopes_raw = oidc_block.get("scopes", ["openid", "email", "profile"])
+        if not isinstance(scopes_raw, (list, tuple)):
+            raise CfgError(
+                f"auth.oidc.scopes must be a list of strings; "
+                f"got {type(scopes_raw).__name__}"
+            )
+        scopes_typed = cast(list[Any] | tuple[Any, ...], scopes_raw)
+        oidc = OidcConfig(
+            issuer_url=str(oidc_block["issuer_url"]),
+            client_id=str(oidc_block["client_id"]),
+            client_secret_env=str(oidc_block["client_secret_env"]),
+            redirect_uri=str(oidc_block["redirect_uri"]),
+            scopes=tuple(str(s) for s in scopes_typed),
+        )
+    session_block_raw = block.get("session")
+    session: SessionConfig | None = None
+    if isinstance(session_block_raw, dict):
+        session_block = cast(dict[str, Any], session_block_raw)
+        if "jwt_secret_env" not in session_block:
+            raise MissingFieldError(
+                "auth.session.jwt_secret_env is required when "
+                "auth.session block present"
+            )
+        session = SessionConfig(
+            jwt_secret_env=str(session_block["jwt_secret_env"]),
+        )
+    return AuthConfig(aws=aws_auth, oidc=oidc, session=session)
+
+
+def _build_app2_nested(raw: dict[str, Any]) -> App2Config:  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload
+    block_raw = raw.get("app2", {})
+    if not isinstance(block_raw, dict):
+        raise CfgError("app2 must be a mapping when present")
+    block = cast(dict[str, Any], block_raw)
+    tls_block_raw = block.get("tls")
+    tls: App2TlsConfig | None = None
+    if isinstance(tls_block_raw, dict):
+        tls_block = cast(dict[str, Any], tls_block_raw)
+        for key in ("cert_path", "key_path"):
+            if key not in tls_block:
+                raise MissingFieldError(
+                    f"app2.tls.{key} is required when app2.tls block present"
+                )
+        tls = App2TlsConfig(
+            cert_path=str(tls_block["cert_path"]),
+            key_path=str(tls_block["key_path"]),
+        )
+    return App2Config(
+        etl_hook=block.get("etl_hook"),
+        banner_text=block.get("banner_text"),
+        tls=tls,
+    )
+
+
+def _build_audit_nested(raw: dict[str, Any]) -> AuditConfig:  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload
+    block_raw = raw.get("audit", {})
+    if not isinstance(block_raw, dict):
+        raise CfgError("audit must be a mapping when present")
+    block = cast(dict[str, Any], block_raw)
+    signing_block_raw = block.get("signing")
+    signing: SigningConfig | None = None
+    if isinstance(signing_block_raw, dict):
+        signing_block = cast(dict[str, Any], signing_block_raw)
+        for key in ("key_path", "cert_path"):
+            if key not in signing_block:
+                raise MissingFieldError(
+                    f"audit.signing.{key} is required when "
+                    f"audit.signing block present"
+                )
+        signing = SigningConfig(
+            key_path=str(signing_block["key_path"]),
+            cert_path=str(signing_block["cert_path"]),
+            passphrase_env=signing_block.get("passphrase_env"),
+            signer_name=signing_block.get("signer_name"),
+        )
+    return AuditConfig(signing=signing)
+
+
+def _build_test_nested(raw: dict[str, Any]) -> "TestConfig":  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload
+    block_raw = raw.get("test", {})
+    if not isinstance(block_raw, dict):
+        raise CfgError("test must be a mapping when present")
+    block = cast(dict[str, Any], block_raw)
+    gen_block_raw = block.get("generator", {})
+    if not isinstance(gen_block_raw, dict):
+        raise CfgError("test.generator must be a mapping when present")
+    gen_block = cast(dict[str, Any], gen_block_raw)
+    end_date_raw = gen_block.get("end_date")
+    end_date_val: date | None = None
+    if end_date_raw is not None:
+        if isinstance(end_date_raw, date):
+            end_date_val = end_date_raw
+        elif isinstance(end_date_raw, str):
+            try:
+                end_date_val = date.fromisoformat(end_date_raw)
+            except ValueError as exc:
+                raise CfgError(
+                    f"test.generator.end_date must be ISO 8601 (YYYY-MM-DD); "
+                    f"got {end_date_raw!r}"
+                ) from exc
+        else:
+            raise CfgError(
+                f"test.generator.end_date must be a date / ISO string; "
+                f"got {type(end_date_raw).__name__}"
+            )
+    cutoff_date_raw = gen_block.get("cutoff_date")
+    cutoff_date_val: date | None = None
+    if cutoff_date_raw is not None:
+        if isinstance(cutoff_date_raw, date):
+            cutoff_date_val = cutoff_date_raw
+        elif isinstance(cutoff_date_raw, str):
+            try:
+                cutoff_date_val = date.fromisoformat(cutoff_date_raw)
+            except ValueError as exc:
+                raise CfgError(
+                    f"test.generator.cutoff_date must be ISO 8601 (YYYY-MM-DD); "
+                    f"got {cutoff_date_raw!r}"
+                ) from exc
+        else:
+            raise CfgError(
+                f"test.generator.cutoff_date must be a date / ISO string; "
+                f"got {type(cutoff_date_raw).__name__}"
+            )
+    plants_raw = gen_block.get("plants", ())
+    if not isinstance(plants_raw, (list, tuple)):
+        raise CfgError(
+            f"test.generator.plants must be a list; "
+            f"got {type(plants_raw).__name__}"
+        )
+    plants_typed = cast(list[Any] | tuple[Any, ...], plants_raw)
+    plants_tuple = tuple(str(p) for p in plants_typed)
+    drb_raw = gen_block.get("derive_balances_account_roles")
+    drb_tuple: tuple[str, ...] | None = None
+    if drb_raw is not None:
+        if not isinstance(drb_raw, (list, tuple)):
+            raise CfgError(
+                f"test.generator.derive_balances_account_roles must be a "
+                f"list / null; got {type(drb_raw).__name__}"
+            )
+        drb_typed = cast(list[Any] | tuple[Any, ...], drb_raw)
+        drb_tuple = tuple(str(r) for r in drb_typed)
+    scope_val = str(gen_block.get("scope", "full"))
+    if scope_val not in get_args(ScopeKind):
+        raise CfgError(
+            f"test.generator.scope must be one of "
+            f"{list(get_args(ScopeKind))}; got {scope_val!r}"
+        )
+    return TestConfig(
+        generator=TestGeneratorConfig(
+            enabled=bool(gen_block.get("enabled", True)),
+            scope=cast(ScopeKind, scope_val),
+            end_date=end_date_val,
+            seed=gen_block.get("seed"),
+            plants=cast(tuple[PlantKind, ...], plants_tuple),
+            only_template=gen_block.get("only_template"),
+            derive_balances=bool(gen_block.get("derive_balances", False)),
+            derive_balances_account_roles=drb_tuple,
+            cutoff_date=cutoff_date_val,
+        ),
+    )
+
+
+_QS_USER_ARN_CACHE: dict[tuple[str, str, str], str | None] = {}
+
+
+def resolve_qs_user_arn(cfg: "Config") -> str | None:
+    """Lazy resolve the QuickSight user ARN for e2e tests.
+
+    Priority:
+    1. ``cfg.auth.aws.quicksight_user_arn`` (explicit override).
+    2. Derive from ``cfg.auth.aws.profile`` + ``cfg.aws.account_id`` +
+       ``cfg.aws.region`` via ``quicksight.list_users(Namespace='default')``;
+       first ADMIN user's ARN (falls back to first user).
+    3. None (caller's qs_browser layer is skipped).
+
+    Cached per ``(profile, account_id, region)`` so per-cell subprocesses
+    share lookups. Boto failure → None + stderr breadcrumb.
+    """
+    explicit = cfg.auth.aws.quicksight_user_arn
+    if explicit:
+        return explicit
+    profile = cfg.auth.aws.profile
+    if not profile:
+        return None
+    account_id = cfg.aws.account_id
+    region = cfg.aws.region
+    cache_key = (profile, account_id, region)
+    if cache_key in _QS_USER_ARN_CACHE:
+        return _QS_USER_ARN_CACHE[cache_key]
+    import sys  # noqa: PLC0415
+    try:
+        import boto3  # noqa: PLC0415 — lazy: only on the derive path
+        session = boto3.Session(profile_name=profile, region_name=region)
+        qs: Any = session.client("quicksight")  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]: boto3-stubs overload union confuses pyright  # typing-smell: ignore[explicit-any]: boto3-stubs overload union — wrap to Any per X.2.o.5 pattern
+        users = qs.list_users(
+            AwsAccountId=account_id, Namespace="default",
+        ).get("UserList", [])
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"config: derive QS user ARN failed via aws_profile="
+            f"{profile!r} ({type(exc).__name__}: {exc}); qs_browser will skip",
+            file=sys.stderr,
+        )
+        _QS_USER_ARN_CACHE[cache_key] = None
+        return None
+    if not users:
+        print(
+            f"config: derive QS user ARN found 0 users in "
+            f"{account_id}/{region} default namespace via profile="
+            f"{profile!r}; qs_browser will skip",
+            file=sys.stderr,
+        )
+        _QS_USER_ARN_CACHE[cache_key] = None
+        return None
+    admins = [u for u in users if u.get("Role") == "ADMIN"]
+    target = admins[0] if admins else users[0]
+    arn = target.get("Arn")
+    _QS_USER_ARN_CACHE[cache_key] = arn
+    return arn
+
+
+def _apply_env_overrides_nested(raw: dict[str, Any]) -> None:  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload
+    """Apply RECON_GEN_* env var overrides to the nested raw cfg dict.
+
+    Mutates the nested dict in place so ``_build_*`` see overrides via
+    the same code path as the yaml values. Runner uses this to inject
+    per-cell DB URL / account / region / dialect without rewriting cfg
+    yaml per cell.
+    """
+    def _ensure_dict(key: str) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload
+        block = raw.get(key)
+        if not isinstance(block, dict):
+            block = {}
+            raw[key] = block
+        return cast(dict[str, Any], block)
+
+    aws_block = _ensure_dict("aws")
+    if (v := RECON_GEN_AWS_ACCOUNT_ID.get_or_none()) is not None:
+        aws_block["account_id"] = v
+    if (v := RECON_GEN_AWS_REGION.get_or_none()) is not None:
+        aws_block["region"] = v
+    if (v := RECON_GEN_DEPLOYMENT_NAME.get_or_none()) is not None:
+        aws_block["deployment_name"] = v
+    if (v := RECON_GEN_AWS_PG_CLUSTER_ID.get_or_none()) is not None:
+        aws_block["pg_cluster_id"] = v
+    if (v := RECON_GEN_AWS_ORACLE_INSTANCE_ID.get_or_none()) is not None:
+        aws_block["oracle_instance_id"] = v
+    if (v := RECON_GEN_PRINCIPAL_ARNS.get_or_none()) is not None:
+        aws_block["principal_arns"] = [
+            s.strip() for s in v.split(",") if s.strip()
+        ]
+    if (v := RECON_GEN_DATASOURCE_ARN.get_or_none()) is not None:
+        ds_block_raw = aws_block.setdefault("datasource", {})
+        if isinstance(ds_block_raw, dict):
+            ds_block = cast(dict[str, Any], ds_block_raw)
+            ds_block["mode"] = "adopt"
+            ds_block["arn"] = v
+
+    db_block = _ensure_dict("db")
+    if (v := RECON_GEN_DIALECT.get_or_none()) is not None:
+        db_block["dialect"] = v
+    if (v := RECON_GEN_DEMO_DATABASE_URL.get_or_none()) is not None:
+        db_block["url"] = v
+    if (v := RECON_GEN_DB_TABLE_PREFIX.get_or_none()) is not None:
+        db_block["table_prefix"] = v
+    pool_raw = RECON_GEN_APP2_DB_POOL_SIZE.get_or_none()
+    if pool_raw is not None:
+        try:
+            db_block["app2_pool_size"] = int(pool_raw)
+        except (TypeError, ValueError) as exc:
+            raise CfgError(
+                f"RECON_GEN_APP2_DB_POOL_SIZE must be int; got {pool_raw!r}"
+            ) from exc
+
+
+def _load_nested_config(path: Path) -> "Config":
+    """v14 nested-yaml loader. Path resolved by caller (``load_config``)."""
+    raw = _load_raw_nested(path)
+    _check_legacy_keys_nested(raw, path)
+    _apply_env_overrides_nested(raw)
+    aws = _build_aws_nested(raw, path)
+    db = _build_db_nested(raw, aws, path)
+    # Auto-derive datasource.arn when mode=create + arn is None. Mirrors
+    # the pre-DE Config.__post_init__ behavior so deploy emitters get a
+    # synthesized ARN without per-callsite logic.
+    if aws.datasource.mode == "create" and aws.datasource.arn is None:
+        ds_id = aws.prefixed("demo-datasource")
+        derived_arn = (
+            f"arn:{aws.partition}:quicksight:{aws.region}"
+            f":{aws.account_id}:datasource/{ds_id}"
+        )
+        aws = AwsConfig(
+            account_id=aws.account_id,
+            region=aws.region,
+            deployment_name=aws.deployment_name,
+            principal_arns=aws.principal_arns,
+            extra_tags=aws.extra_tags,
+            tagging_enabled=aws.tagging_enabled,
+            qs_disable_pg_ssl=aws.qs_disable_pg_ssl,
+            pg_cluster_id=aws.pg_cluster_id,
+            oracle_instance_id=aws.oracle_instance_id,
+            datasource=DatasourceConfig(mode="create", arn=derived_arn),
+        )
+    return Config(
+        aws=aws,
+        db=db,
+        auth=_build_auth_nested(raw, path),
+        app2=_build_app2_nested(raw),
+        audit=_build_audit_nested(raw),
+        test=_build_test_nested(raw),
+    )
+
+
+def _is_nested_v14_yaml(raw: dict[str, object]) -> bool:
+    """Detect whether a loaded cfg dict is v14 nested shape.
+
+    Heuristic: top-level ``aws:`` is a dict block (vs flat
+    ``aws_account_id`` scalar), OR top-level ``extends:`` is present
+    (a v14-only feature). The latter covers overlay yaml files that
+    only carry an ``extends:`` chain plus child-side overrides without
+    re-declaring ``aws:`` themselves.
+    """
+    if isinstance(raw.get("aws"), dict):
+        return True
+    if "extends" in raw:
+        return True
+    return False
+
+
 @dataclass
 class Config:
     # DE.5 steps 3-5 — ``aws_account_id`` + ``aws_region`` + ``deployment_name``
@@ -692,7 +1268,16 @@ class Config:
         ds_mode = self.aws.datasource.mode
         # DE.5 step 7 — principal_arns now from caller-supplied aws.principal_arns.
         principal_arns_list = list(self.aws.principal_arns)
-        if ds_arn is None and self.db.url is not None:
+        # DE.5.config_v14_consolidation — auto-derive only when mode=create;
+        # mode=skip means "don't touch the QS datasource API at all" so an arn
+        # is not required + clobbering to mode=create would defeat the escape.
+        # mode=adopt requires the operator to supply the arn explicitly (the
+        # loader's _build_aws_nested raises if absent).
+        if (
+            ds_mode == "create"
+            and ds_arn is None
+            and self.db.url is not None
+        ):
             ds_id = f"{deployment_name}-demo-datasource"
             partition = _partition_from_arns(ds_arn, principal_arns_list)
             ds_arn = (
@@ -700,9 +1285,10 @@ class Config:
                 f":{account_id}:datasource/{ds_id}"
             )
             ds_mode = "create"
-        if ds_arn is None:
+        if ds_arn is None and ds_mode != "skip":
             raise ValueError(
-                "aws.datasource.arn is required unless demo_database_url is set."
+                "aws.datasource.arn is required unless demo_database_url is "
+                "set OR aws.datasource.mode='skip'."
             )
         # DE.5 — blend caller-supplied ``aws`` fields with remaining flats.
         # DE.5 steps 8-11 — extra_tags / tagging_enabled / qs_disable_pg_ssl /
@@ -1089,6 +1675,16 @@ def load_config(path: str | Path | None = None) -> Config:
                 raw_dict: dict[str, object] = {
                     str(k): v for k, v in raw_typed.items()
                 }
+                # DE.5.config_v14_consolidation — v14 nested shape
+                # takes its own loader path. Detected by ``aws:`` being
+                # a dict block (vs the v13 flat ``aws_account_id``
+                # scalar). The strangler keeps the legacy flat path
+                # alive below for the run/*.yaml files that haven't
+                # been migrated yet; once the migration commit lands,
+                # the flat path drops + this branch becomes the only
+                # exit.
+                if _is_nested_v14_yaml(raw_dict):
+                    return _load_nested_config(p)
                 _reject_unknown_config_keys(raw_dict, p)
                 values.update(raw_dict)
 

@@ -27,7 +27,7 @@ from recon_gen.common.auth import (
     build_jwt_codec,
     build_oidc_client,
 )
-from recon_gen.common.config_v14 import (
+from recon_gen.common.config import (
     MissingFieldError,
     load_config,
 )

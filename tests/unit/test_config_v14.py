@@ -6,7 +6,7 @@ Covers:
 - ``extends:`` cycle detection.
 - Derive-on-load (``db.table_prefix`` from ``aws.deployment_name``).
 - Legacy-key detection raises ``LegacyFieldError``.
-- ``DatasourceMode`` enum + ``adopt`` requires arn.
+- ``aws.datasource.mode`` literal + ``adopt`` requires arn.
 - Required-field absence raises ``MissingFieldError``.
 
 Pinned per DE.0 lock; DE.2 phase sweep migrates all callsites to this shape.
@@ -18,9 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from recon_gen.common.config_v14 import (
+from recon_gen.common.config import (
     CycleError,
-    DatasourceMode,
     LegacyFieldError,
     MissingFieldError,
     _QS_USER_ARN_CACHE,
@@ -151,7 +150,7 @@ def test_datasource_mode_defaults_to_create(tmp_path: Path) -> None:
     get a synthesized ARN without per-callsite logic)."""
     p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
     cfg = load_config(p)
-    assert cfg.aws.datasource.mode is DatasourceMode.CREATE
+    assert cfg.aws.datasource.mode == "create"
     # Auto-derived: arn:aws:quicksight:<region>:<account>:datasource/<prefix>-demo-datasource
     assert cfg.aws.datasource.arn == (
         "arn:aws:quicksight:us-east-1:123456789012:datasource/test-deploy-demo-datasource"
@@ -184,13 +183,13 @@ def test_datasource_mode_skip_is_accepted(tmp_path: Path) -> None:
     )
     p = _write(tmp_path, "cfg.yaml", cfg_text)
     cfg = load_config(p)
-    assert cfg.aws.datasource.mode is DatasourceMode.SKIP
+    assert cfg.aws.datasource.mode == "skip"
     assert cfg.aws.datasource.arn is None
 
 
 def test_invalid_datasource_mode_raises(tmp_path: Path) -> None:
     """Unknown mode value raises ``CfgError``."""
-    from recon_gen.common.config_v14 import CfgError
+    from recon_gen.common.config import CfgError
     cfg_text = _MIN_CFG.replace(
         "deployment_name: test-deploy\n",
         "deployment_name: test-deploy\n  datasource:\n    mode: nonsense\n",

@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from recon_gen.common.config_v14 import Config
+    from recon_gen.common.config import Config
 
 
 class AuthConfigError(Exception):
