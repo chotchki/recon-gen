@@ -82,17 +82,23 @@ LAYERS: Final[tuple[str, ...]] = (
 # v14.0.0 fast-fail — per-layer stdout-stuck thresholds in seconds.
 # When subprocess stdout hasn't grown in N seconds, the watchdog kills
 # the layer. Calibrated against observed wall-clock times of clean runs
-# (cefcceee baseline + post-v14 follow-ups) with ~3× headroom over the
-# worst observed gap. Layers absent from this dict get no watchdog
-# (historical behavior). Operator-flagged 2026-06-13 after a 36-minute
-# qs_browser hang ate a debugging cycle.
+# (cefcceee baseline + post-v14 follow-ups). Layers absent from this
+# dict get no watchdog (historical behavior). Operator-flagged
+# 2026-06-13 after a 36-minute qs_browser hang ate a debugging cycle.
+#
+# 2026-06-14 calibration bump: ``app2`` + ``qs_browser`` raised from
+# 600s → 900s after a false-positive kill on a 19m26s clean run with
+# 2 faulthandler hits. ``-q -n auto --dist=loadgroup`` runs have
+# stdout-silent windows up to ~9-10 min during cluster-of-slow-tests
+# stretches; 600s clipped them mid-flight. 900s preserves the
+# fast-fail intent (~30% over typical worst gap) without false kills.
 _HANG_THRESHOLDS: Final[dict[str, int]] = {
     "unit": 180,        # ~60s clean; faulthandler kicks at 180s
     "db": 240,          # ~40s clean; matview refresh can sprawl
-    "app2": 600,        # ~19m clean; Studio server tests run long
+    "app2": 900,        # ~19m clean; Studio server tests run long
     "deploy": 420,      # ~2-5m clean; AWS create_data_set can hang flaky
     "qs_api": 120,      # ~15s clean; boto3 describes are fast
-    "qs_browser": 600,  # ~5-15m clean; QS embed loads + retries dominate
+    "qs_browser": 900,  # ~5-21m clean; QS embed loads + reruns dominate
 }
 # CB.11.a.3 (2026-06-02) — renamed `api` → `qs_api`, `browser` →
 # `qs_browser` to match the `Tier.QS_API` / `Tier.QS_BROWSER` marks
