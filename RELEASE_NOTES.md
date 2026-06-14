@@ -6,6 +6,54 @@
 > AI, BK, BQ, BW, CK, BV close, snapshotter pattern, runner readiness).
 > v13.14.4 below resumes the convention.
 
+## v14.1.0 — Phase DC TLS coordinator (LE via Cloudflare DNS-01)
+
+Minor bump. Phase DC layers runner-managed HTTPS over the DC.1 cfg
+surface from v14.0.0. New capability — operators don't have to pre-mint
+cert + key any more.
+
+### What's new
+
+- **`src/recon_gen/_dev/tls/`** — 5-module coordinator (storage /
+  public_ip / cloudflare_api / acme_client / ensure) backed by a 41-test
+  suite (mocked + 4 live-LE regression pins). Excluded from the
+  published wheel; the `acme` / `cryptography` / `dnspython` / `requests`
+  deps live under the `[dev]` extra only. Downstream `recon-gen.exe`
+  operators still supply their own PEMs.
+- **`TLS_TOUCHING_LAYERS`** + `_ensure_tls_if_configured` pre-flight
+  in `cmd_up_to`. Fires only when `cfg.app2.tls` is set AND the chain
+  target is in `{app2, qs_api, qs_browser}`. Missing token / Cloudflare
+  4xx / ACME rate-limit / IP-discovery failure → `EXIT_NEEDS_OPERATOR`
+  with actionable stderr. Unit / db runs never hit Cloudflare.
+- **`docs/operations/tls-setup.md`** — full operator runbook: token
+  mint → `run/secrets.env` paste → cfg block → first-run expectations
+  → troubleshooting → token rotation.
+- **`.github/workflows/ci.yml`** — `RECON_GEN_CLOUDFLARE_TOKEN` mapped
+  from `secrets.CLOUDFLARE_TOKEN`; the cfg-overwrite heredoc carries the
+  `app2.tls:` block (account_email from `secrets.TLS_ACME_EMAIL`).
+
+### Small breaking edge — `app2.tls.account_email` required
+
+If you already set `cfg.app2.tls.{cert_path,key_path}` under v14.0.x,
+the v14.1.0 loader now requires `account_email: <your-email>` in the
+same block (Let's Encrypt ACME account identity). The same block also
+accepts an optional `env: dev|ci` (default `dev`) selecting which SAN
+tuple the coordinator reconciles. Operators who never set the tls
+block see no behavior change.
+
+### Live-LE bugs caught during DC.5 verify + regression-pinned
+
+1. `acme_client._deadline` returned an offset-aware `datetime`; the
+   `acme` library's `poll_authorizations` compares against naive
+   `datetime.now()` → `TypeError` mid-poll. Fixed to naive.
+2. `_register_account` caught `messages.Error` for the "account already
+   exists" benign re-run, but the library raises
+   `acme.errors.ConflictError`. Caught the right class.
+3. After ConflictError, simply swallowing it left
+   `client.net.account` unset → "Unable to validate JWS :: No Key ID
+   in JWS header" on the next request. Recovery: reconstruct
+   `RegistrationResource` from the ConflictError's `.location` URL.
+
 ## v14.0.1 — first green build of v14
 
 Patch release. v14.0.0 was the intended Phase DE cut but release CI
