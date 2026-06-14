@@ -2015,24 +2015,42 @@ def _write_qs_cfg_for_thin(
         return None
 
     with base_cfg_path.open() as f:
-        raw: Any = yaml.safe_load(f) or {}
-    if not isinstance(raw, dict):
+        raw_any: Any = yaml.safe_load(f) or {}  # typing-smell: ignore[explicit-any]: yaml.safe_load returns scalar/list/dict/null per node
+    if not isinstance(raw_any, dict):
         raise RuntimeError(
             f"_write_qs_cfg_for_thin: base cfg {base_cfg_path} did not "
-            f"parse as a mapping (got {type(raw).__name__})"
+            f"parse as a mapping (got {type(raw_any).__name__})"
         )
+    raw: dict[str, Any] = cast(dict[str, Any], raw_any)  # typing-smell: ignore[explicit-any]: nested YAML payload
 
+    # DE.5.config_v14_consolidation.B — operator cfg yaml is v14 nested
+    # shape; route mutations through the nested blocks instead of the
+    # legacy flat keys.
+    db_block_raw = raw.setdefault("db", {})
+    if not isinstance(db_block_raw, dict):
+        raise RuntimeError(
+            f"_write_qs_cfg_for_thin: base cfg {base_cfg_path} db: must be "
+            f"a mapping (got {type(db_block_raw).__name__})"
+        )
+    db_block: dict[str, Any] = cast(dict[str, Any], db_block_raw)  # typing-smell: ignore[explicit-any]: nested YAML payload
+    aws_block_raw = raw.setdefault("aws", {})
+    if not isinstance(aws_block_raw, dict):
+        raise RuntimeError(
+            f"_write_qs_cfg_for_thin: base cfg {base_cfg_path} aws: must be "
+            f"a mapping (got {type(aws_block_raw).__name__})"
+        )
+    aws_block: dict[str, Any] = cast(dict[str, Any], aws_block_raw)  # typing-smell: ignore[explicit-any]: nested YAML payload
     if peek_cfg.db.dialect is Dialect.POSTGRES:
         # CB.17.h followup — port preserved from the source URL so
         # CI's shared PG on 5432 routes through hotchkiss.io:5432 and
         # local's testcontainer on 5433 routes through hotchkiss.io:5433.
         # DDNS layer routes per-port to the right backend.
         new_url = _swap_url_host(local_url, _QS_FORWARD_HOST)
-        raw["demo_database_url"] = new_url
-        raw["qs_disable_pg_ssl"] = True
+        db_block["url"] = new_url
+        aws_block["qs_disable_pg_ssl"] = True
     elif peek_cfg.db.dialect is Dialect.ORACLE:
         new_url = _swap_url_host(local_url, _QS_FORWARD_HOST)
-        raw["demo_database_url"] = new_url
+        db_block["url"] = new_url
         # Oracle datasource already hardcodes DisableSsl=True (common/datasource.py).
 
     cfg_dir = run_dir / "cfg"
