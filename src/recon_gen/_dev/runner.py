@@ -4861,7 +4861,18 @@ def cmd_triage(args: argparse.Namespace) -> int:
     # Container spin (skipped for unit-only triage).
     container_handle: object | None = None
     container_env: dict[str, str] = {}
+    docker_container_name: str | None = None
     if layer != "unit":
+        # Bug A.7 fix — disable testcontainers Ryuk so the container
+        # persists past cmd_triage exit. Default Ryuk behavior tears
+        # down ALL testcontainers-spawned containers when the parent
+        # process exits. cmd_triage spawns screen + returns; the
+        # screen-attached pytest session needs the container ALIVE.
+        # triage-down explicitly stops by the docker name captured
+        # below. Setting the env BEFORE _start_thin_container's lazy
+        # `from testcontainers.postgres import PostgresContainer`
+        # ensures Ryuk reads the disabled state at module init.
+        os.environ.setdefault("TESTCONTAINERS_RYUK_DISABLED", "true")
         try:
             container_env, container_handle = _start_thin_container(cfg_path)
             runner_variant_env.update(container_env)
@@ -4869,6 +4880,25 @@ def cmd_triage(args: argparse.Namespace) -> int:
                 f"runner: thin container up (dialect-matching) — "
                 f"{RECON_GEN_DEMO_DATABASE_URL.name}=...exported"
             )
+            # Bug A.7 fix — extract docker container name (anonymous
+            # testcontainers names are like `friendly_goldberg`). Used
+            # by triage-down to stop ONLY this container, not the
+            # over-broad `_cmd_down_local()` sweep that hit
+            # `recon-gen-snap-test-*` containers unrelated to triage.
+            # Best-effort: handle types vary (PostgresContainer wraps
+            # docker SDK, _PersistentContainerHandle has `.name`,
+            # _DuckdbHandle has no docker container).
+            try:
+                wrapped = getattr(container_handle, "get_wrapped_container", None)
+                if wrapped is not None:
+                    docker_container_name = str(wrapped().name)
+                else:
+                    # _PersistentContainerHandle / Oracle path
+                    handle_name = getattr(container_handle, "name", None)
+                    if handle_name:
+                        docker_container_name = str(handle_name)
+            except Exception:  # noqa: BLE001 — name extraction is best-effort
+                docker_container_name = None
         except Exception as exc:  # noqa: BLE001
             msg = (
                 f"runner: thin container start failed ({exc!r}); aborting "
@@ -5063,6 +5093,13 @@ def cmd_triage(args: argparse.Namespace) -> int:
             runner_variant_env.get(RECON_GEN_QS_CONFIG.name)
         ),
         "deployed": layer in AWS_TOUCHING_LAYERS,
+        # Bug A.7 fix — persist the triage-spawned container name so
+        # triage-down stops ONLY that container (instead of the
+        # over-broad `_cmd_down_local()` sweep that hit unrelated
+        # `recon-gen-snap-test-*` containers during the inaugural
+        # session 2026-06-14). None when the triage layer was unit
+        # (no container spun) or container name extraction failed.
+        "docker_container_name": docker_container_name,
     }
     _write_triage_state(state)
     print(f"runner: triage state -> {_rel_or_abs(_TRIAGE_STATE_FILE)}")
@@ -5186,18 +5223,47 @@ def cmd_triage_down(args: argparse.Namespace) -> int:
                 _TRIAGE_STATE_FILE.unlink(missing_ok=True)
                 return EXIT_FAILURE
 
-    # Container teardown.
+    # Container teardown — narrowed to ONLY the triage-spawned
+    # container (bug A.7 fix). Pre-fix this called `_cmd_down_local()`
+    # which stopped ALL `recon-gen-*` containers including
+    # `recon-gen-snap-test-pg/oracle` that weren't part of triage.
     if args.keep_container:
         print("runner: --keep-container set; skipping local container stop")
     else:
-        down_rc = _cmd_down_local()
-        if down_rc != EXIT_SUCCESS:
+        container_name_raw = state.get("docker_container_name")
+        container_name = (
+            container_name_raw if isinstance(container_name_raw, str) else None
+        )
+        if container_name is None:
             print(
-                f"runner: local container teardown failed rc={down_rc}",
-                file=sys.stderr,
+                "runner: no triage-spawned container recorded in state; "
+                "skipping container teardown (likely a unit-layer triage)"
             )
-            _TRIAGE_STATE_FILE.unlink(missing_ok=True)
-            return EXIT_FAILURE
+        else:
+            print(f"runner: stopping triage container {container_name!r}…")
+            stop_result = subprocess.run(  # noqa: S603 — fixed argv, no shell
+                ["docker", "stop", container_name],  # noqa: S607
+                capture_output=True, text=True, check=False,
+            )
+            if stop_result.returncode != 0:
+                # Treat "no such container" as success (already gone);
+                # any other failure is loud.
+                stderr_lower = stop_result.stderr.lower()
+                if "no such container" not in stderr_lower:
+                    print(
+                        f"runner: docker stop {container_name!r} failed "
+                        f"rc={stop_result.returncode}: "
+                        f"{stop_result.stderr.strip()}",
+                        file=sys.stderr,
+                    )
+                    _TRIAGE_STATE_FILE.unlink(missing_ok=True)
+                    return EXIT_FAILURE
+            # Best-effort docker rm so anonymous testcontainers names
+            # don't accumulate in `docker ps -a`.
+            subprocess.run(  # noqa: S603 — fixed argv, no shell
+                ["docker", "rm", container_name],  # noqa: S607
+                capture_output=True, text=True, check=False,
+            )
 
     _TRIAGE_STATE_FILE.unlink(missing_ok=True)
     print("runner: triage-down complete (state file removed)")

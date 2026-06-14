@@ -657,7 +657,6 @@ def qs_deployed(  # pyright: ignore[reportUnusedFunction]: pytest autouse fixtur
     request: pytest.FixtureRequest,
     cfg: Config,
     tmp_path_factory: pytest.TempPathFactory,
-    worker_id: str,
 ) -> None:
     """DI phase — idempotent QS deploy. Fires once per pytest session;
     cross-xdist-worker rendezvous via a filesystem sentinel + FileLock
