@@ -1038,12 +1038,45 @@ def _install_pgcrypto_extension(url: str) -> None:
     The invariant — pgcrypto exists before any consumer's
     ``emit_schema`` runs — belongs at the fixture layer, not in
     per-test pre-amble.
+
+    #266 — the local env-URL short-circuit path (CI / operator pre-
+    spun container) skips the runner's container-boot orchestration
+    AND its ``_wait_for_pg_ready`` probe. On a cold-Docker boot the
+    first connection here can hit SQLSTATE 57P03 (cannot_connect_now /
+    "the database system is starting up"). Wrap with a short retry
+    loop that tolerates 57P03 specifically; any other psycopg error
+    raises immediately (real config problem, not a startup race).
     """
     import psycopg  # noqa: PLC0415 — lazy: PG-only path
+    import time  # noqa: PLC0415 — lazy
 
-    with psycopg.connect(url, autocommit=True) as conn:
-        with conn.cursor() as cur:
-            cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+    last_exc: Exception | None = None
+    for i in range(10):  # ~30s total at 3s/attempt
+        try:
+            with psycopg.connect(url, autocommit=True, connect_timeout=5) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+                    return
+        except psycopg.OperationalError as exc:
+            # SQLSTATE 57P03 = cannot_connect_now (database starting up).
+            # `pgcode` is the canonical access path; `.diag.sqlstate`
+            # is the per-error fallback.
+            sqlstate = getattr(exc, "pgcode", None) or getattr(
+                getattr(exc, "diag", None), "sqlstate", None,
+            )
+            if sqlstate != "57P03" and i > 0:
+                # Not a startup race, AND first retry didn't fix it →
+                # bail out (the second attempt distinguishes "transient
+                # libpq timeout while postmaster warming" from "config
+                # problem that won't resolve").
+                raise
+            last_exc = exc
+            time.sleep(3.0)
+    raise RuntimeError(
+        f"_install_pgcrypto_extension: PG did not become ready within "
+        f"30s waiting for the env-URL pre-spun container. Last error: "
+        f"{last_exc!r}"
+    )
 
 
 def _install_pgcrypto_under_filelock(

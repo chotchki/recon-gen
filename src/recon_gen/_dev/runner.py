@@ -1708,6 +1708,91 @@ def _read_pg_container_user_db(container_name: str) -> tuple[str, str]:
     return user, db
 
 
+def _wait_for_pg_ready(
+    container_name: str, *, timeout_seconds: float = 60.0,
+) -> None:
+    """#266 — block until Postgres accepts connections in the named
+    container, or raise with the last pg_isready output.
+
+    Mirror of `_wait_for_oracle_ready`. On cold-Docker boots,
+    `existing.start()` returns once the container PID is running, but
+    `postmaster` needs another 1-3s before accepting connections; the
+    pre-fix `_read_pg_container_user_db` ran `docker exec <name> env`
+    and `_reset_pg_password_via_socket` ran `psql` during that gap,
+    intermittently failing with "connection refused" or "database
+    system is starting up". Polls `docker exec <name> pg_isready -U
+    postgres -q` (the pg_isready binary is bundled with the postgres
+    image and exits 0 iff the server accepts connections; -q
+    suppresses chatter). Default 60s covers postgres:17-alpine
+    cold-start which typically completes in <5s.
+    """
+    import subprocess  # noqa: PLC0415 — lazy
+    import time  # noqa: PLC0415 — lazy
+    deadline = time.monotonic() + timeout_seconds
+    last_rc = 0
+    last_err = ""
+    attempts = 0
+    while time.monotonic() < deadline:
+        attempts += 1
+        result = subprocess.run(
+            ["docker", "exec", container_name, "pg_isready", "-q"],
+            check=False,
+            capture_output=True,
+        )
+        last_rc = result.returncode
+        last_err = result.stderr.decode("utf-8", errors="replace")
+        if last_rc == 0:
+            return
+        # pg_isready exit codes: 0=accepting, 1=rejecting, 2=no
+        # response, 3=no attempt (e.g., bad args). 1/2 = retry; 3 = bail.
+        if last_rc == 3:
+            raise RuntimeError(
+                f"pg_isready in {container_name!r} returned rc=3 (no "
+                f"attempt — config / args problem). attempts={attempts}. "
+                f"stderr:\n{last_err}"
+            )
+        time.sleep(1.0)
+    raise RuntimeError(
+        f"Postgres readiness probe timed out after {timeout_seconds:.0f}s "
+        f"({attempts} attempts) waiting for {container_name!r} to accept "
+        f"connections. Last pg_isready rc={last_rc}. "
+        f"stderr:\n{last_err}"
+    )
+
+
+def _verify_pg_connect(
+    url: str, *, attempts: int = 5, delay: float = 1.0,
+) -> None:
+    """#266 — smoke-connect to the Postgres container before publishing
+    the rendezvous URL. Mirror of `_verify_oracle_connect`. If we can't
+    auth here, the xdist test workers won't either; better to raise
+    inside the first-firing fixture with a useful message than publish
+    a poisoned URL and have N workers all hit auth errors with no clue
+    where the regression came from.
+    """
+    import psycopg  # noqa: PLC0415 — lazy
+    import time  # noqa: PLC0415 — lazy
+    last_exc: Exception | None = None
+    for i in range(attempts):
+        try:
+            conn = psycopg.connect(url, connect_timeout=5)
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001 — best-effort close
+                pass
+            return
+        except Exception as exc:  # noqa: BLE001 — retry on any connect failure
+            last_exc = exc
+            if i < attempts - 1:
+                time.sleep(delay)
+    raise RuntimeError(
+        f"Postgres smoke-connect failed after {attempts} attempts "
+        f"against {_redact_password(url)!r}: {last_exc!r}. The "
+        f"rendezvous URL would have been published with credentials "
+        f"the container rejects."
+    )
+
+
 def _reset_pg_password_via_socket(container_name: str, password: str) -> None:
     """BX.248 — force-reset the container's Postgres superuser password
     via unix socket inside the container. BV.3.3.d — discover the actual
@@ -1728,8 +1813,16 @@ def _reset_pg_password_via_socket(container_name: str, password: str) -> None:
     ``capture_output=True`` ate the error. Every subsequent connect via
     the rendezvous URL then either authn-failed (wrong user) or
     authz-failed (missing db). Mirror of the Oracle #254 fix.
+
+    #266 — wait for postmaster to be ready before running the docker
+    exec env probe + ALTER USER. On cold-Docker boots `existing.start()`
+    returns once the container PID is up; pg_isready takes another
+    1-3s to flip green. Without the wait, `_read_pg_container_user_db`
+    intermittently hit "could not connect to server" against fresh
+    starts.
     """
     import subprocess  # noqa: PLC0415 — lazy
+    _wait_for_pg_ready(container_name)
     user, _db = _read_pg_container_user_db(container_name)
     result = subprocess.run(
         [
@@ -2552,7 +2645,9 @@ def _get_or_start_pg_container(
     # via unix-socket trust auth so our caller's password becomes the
     # live one. Cheap (~50ms) and idempotent. BV.3.3.d — raises LOUD
     # on subprocess failure instead of silently leaving a stale
-    # password live (mirrors the Oracle #254 fix).
+    # password live (mirrors the Oracle #254 fix). #266 — embedded
+    # pg_isready wait inside _reset_pg_password_via_socket so cold-Docker
+    # boots don't fire ALTER USER during the postmaster-warming gap.
     _reset_pg_password_via_socket(name, password)
     # BV.3.3.d — adopt path URL must match the live container's actual
     # user + db (testcontainers default = "test", not "postgres"). The
@@ -2561,6 +2656,13 @@ def _get_or_start_pg_container(
     # to converge on the same shape.
     user, db = _read_pg_container_user_db(name)
     url = f"postgresql://{user}:{password}@localhost:{host_port}/{db}"
+    # #266 — verify the URL actually authenticates before returning to
+    # the rendezvous. Belt-and-suspenders: the reset above raises on its
+    # own failure mode, but this catches "ALTER USER landed but
+    # postmaster cached the prior password" timing races + any other
+    # path where the live password drifts from what we expect.
+    # Mirror of `_verify_oracle_connect` (issue #254).
+    _verify_pg_connect(url)
     return url, _PersistentContainerHandle(name=name)
 
 
@@ -3427,11 +3529,18 @@ def cmd_up_to(args: argparse.Namespace) -> int:
             # mismatch → 32s of confusing failures. Surface as
             # EXIT_NEEDS_OPERATOR per the Y.2.gate.h+i convention
             # (matches the seed-failure abort below).
-            print(
+            msg = (
                 f"runner: thin container start failed ({exc!r}); "
                 f"aborting chain — `docker info` + `docker ps -a` to "
-                f"diagnose (post-reboot daemon may still be warming up)",
-                file=sys.stderr,
+                f"diagnose (post-reboot daemon may still be warming up)"
+            )
+            print(msg, file=sys.stderr)
+            _write_synthetic_cmd_json(
+                run_dir,
+                layer="container_start",
+                exit_code=EXIT_NEEDS_OPERATOR,
+                duration_seconds=0.0,
+                message=msg,
             )
             if container_handle is not None:
                 try:
@@ -3464,10 +3573,22 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     if container_env and cfg_path is not None:
         sweep_rc = _sweep_test_prefixes(cfg_path, container_env, run_dir)
         if sweep_rc != 0:
-            print(
+            msg = (
                 f"runner: DG.2 sweep failed rc={sweep_rc}; aborting chain "
-                f"(see runs/<id>/sweep/ for triage)",
-                file=sys.stderr,
+                f"(see runs/<id>/sweep/ for triage)"
+            )
+            print(msg, file=sys.stderr)
+            # `_sweep_test_prefixes` already writes runs/<id>/sweep/{cmd,stdout,stderr},
+            # but its cmd.json doesn't carry an `exit_code` field — the
+            # failure walker treated the missing-key as exit=0 and silently
+            # dropped the sweep failure. Re-stamp with the rc so the walker
+            # surfaces it.
+            _write_synthetic_cmd_json(
+                run_dir,
+                layer="sweep",
+                exit_code=sweep_rc,
+                duration_seconds=0.0,
+                message=msg,
             )
             if container_handle is not None:
                 try:
@@ -3508,10 +3629,17 @@ def cmd_up_to(args: argparse.Namespace) -> int:
             cfg_path, Path(l2_path_env), container_env, run_dir,
         )
         if seed_rc != 0:
-            print(
+            msg = (
                 f"runner: thin seed failed rc={seed_rc}; "
-                f"aborting chain (see runs/<id>-thin/seed/ for triage)",
-                file=sys.stderr,
+                f"aborting chain (see runs/<id>/seed/ for triage)"
+            )
+            print(msg, file=sys.stderr)
+            _write_synthetic_cmd_json(
+                run_dir,
+                layer="seed",
+                exit_code=seed_rc,
+                duration_seconds=0.0,
+                message=msg,
             )
             if container_handle is not None:
                 try:
@@ -3828,7 +3956,7 @@ def cmd_dump_last_errors(args: argparse.Namespace) -> int:
     - **Per failing test**: the ``FAILED ...`` summary line + the
       matched ``____ <test_id> ____`` traceback block from
       ``stdout.log`` (truncated at the next ``____`` / ``=====``).
-    - **Capture-artifact pointer**: ``$RECON_GEN_RUN_DIR/qs_browser/<sanitized
+    - **Capture-artifact pointer**: ``$RECON_GEN_RUN_DIR/browser/<sanitized
       test_id>/`` paths, with a loud warning if AA.H.6's 6 files
       (screenshot.png / dom.html / console.txt / network.txt /
       qs_errors.txt / trace.zip) are missing — AA.H.10 wired the hook
@@ -3873,13 +4001,65 @@ def cmd_dump_last_errors(args: argparse.Namespace) -> int:
         candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         run_dir = candidates[0]
 
-    _render_failures_for_run(run_dir, variant_filter=args.variant)
+    if args.variant is not None:
+        print(
+            f"runner: --variant {args.variant!r} ignored — the 13-cell "
+            f"matrix was retired in CB.17.d; the thin path produces one "
+            f"set of layer dirs per run.",
+            file=sys.stderr,
+        )
+    _render_failures_for_run(run_dir)
     return EXIT_SUCCESS
 
 
-def _render_failures_for_run(
-    run_dir: Path, *, variant_filter: str | None = None,
-) -> bool:
+def _write_synthetic_cmd_json(
+    run_dir: Path,
+    *,
+    layer: str,
+    exit_code: int,
+    duration_seconds: float,
+    message: str,
+) -> None:
+    """Stamp a synthetic ``<run_dir>/<layer>/cmd.json`` for failures that
+    happen OUTSIDE the per-layer pytest dispatch — container_start,
+    sweep, seed. The chain summary walker keys off ``cmd.json``'s
+    ``exit_code`` field; without this, those failures were invisible to
+    ``dump-last-errors`` even though the chain aborted on them.
+
+    Stamps cmd.json with the synthesized exit_code. If a stdout.log
+    already exists in the dir (sweep + seed write their own subprocess
+    log), preserve it. Only writes a placeholder stdout.log when none
+    exists (container_start fails before any subprocess runs).
+    """
+    layer_dir = run_dir / layer
+    layer_dir.mkdir(parents=True, exist_ok=True)
+    # If the failing path already wrote a cmd.json (sweep / seed do),
+    # merge our exit_code into it instead of clobbering — preserves
+    # the cmd, cwd, env_overrides fields the original write captured.
+    cmd_path = layer_dir / "cmd.json"
+    existing: dict[str, Any] = {}
+    if cmd_path.is_file():
+        try:
+            loaded = json.loads(cmd_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            loaded = {}
+        if isinstance(loaded, dict):
+            existing = cast(dict[str, Any], loaded)
+    cmd_meta: dict[str, Any] = {
+        **existing,
+        "layer": layer,
+        "synthetic": True,
+        "exit_code": int(exit_code),
+        "duration_seconds": float(duration_seconds),
+        "message": message,
+    }
+    cmd_path.write_text(json.dumps(cmd_meta, indent=2) + "\n")
+    stdout_path = layer_dir / "stdout.log"
+    if not stdout_path.is_file():
+        stdout_path.write_text(message + "\n")
+
+
+def _render_failures_for_run(run_dir: Path) -> bool:
     """Render the failing-layers report for ``run_dir`` to stdout.
 
     Returns ``True`` if at least one failing layer was found, else ``False``.
@@ -3911,14 +4091,11 @@ def _render_failures_for_run(
             continue
         # Thin-path: top-level directory IS a layer (has cmd.json).
         if (sub / "cmd.json").is_file():
-            if variant_filter and variant_filter not in ("", sub.name):
-                continue
             layer_entries.append((sub.name, sub.name, run_dir, sub))
             continue
         # Matrix-path or prelude: walk one level deeper for layer dirs.
-        if sub.name != "_prelude":
-            if variant_filter and sub.name != variant_filter:
-                continue
+        # Kept for backward compat reading old run dirs from before
+        # CB.17.d retired the 13-cell matrix.
         for child in sorted(sub.iterdir()):
             if not child.is_dir():
                 continue
@@ -3936,7 +4113,23 @@ def _render_failures_for_run(
         if not cmd_json_path.is_file():
             continue
         cmd_json = json.loads(cmd_json_path.read_text())
-        exit_code = int(cmd_json.get("exit_code", 0) or 0)
+        # Treat MISSING `exit_code` as a failure, not a pass. A cmd.json
+        # without `exit_code` means the layer never finished writing —
+        # killed mid-run, machine rebooted, OOM, etc. Pre-fix the
+        # `cmd_json.get("exit_code", 0)` default silently treated this
+        # as exit=0 (a layer SKIP, the only legitimate exit=0 path) and
+        # the chain summary said "all clean" while the run was half-baked.
+        if "exit_code" not in cmd_json:
+            found_any_failure = True
+            duration = cmd_json.get("duration_seconds")
+            duration_str = f"{duration:.1f}s" if duration else "?"
+            print(
+                f"## [{display_label}] exit=? duration={duration_str} "
+                f"(cmd.json incomplete — subprocess never finished)"
+            )
+            print()
+            continue
+        exit_code = int(cmd_json.get("exit_code") or 0)
         if exit_code == 0:
             continue
         found_any_failure = True
@@ -4052,7 +4245,14 @@ def _dump_capture_status(cell_dir: Path, layer_dir: Path, stdout: str) -> None:
     regression worth investigating."""
     if layer_dir.name != "qs_browser":
         return
-    browser_capture_root = cell_dir / "qs_browser"
+    # AA.H.6 captures land at `$RECON_GEN_RUN_DIR/browser/<test_id>/`
+    # (common/browser/helpers.py:185+368+432), NOT at
+    # `qs_browser/<test_id>/`. Pre-fix the runner walked the layer dir
+    # (`qs_browser/`) and found nothing — silently dropping the "missing
+    # capture" warning even when captures existed. (cell_dir == run_dir
+    # in the thin path post the failure-summary fix, so this resolves to
+    # `runs/<id>/browser/`.)
+    browser_capture_root = cell_dir / "browser"
     failed = list(_FAILED_LINE_RE.finditer(stdout))
     if not failed:
         return
@@ -4340,14 +4540,16 @@ def _build_parser() -> argparse.ArgumentParser:
             "default = latest by mtime."
         ),
     )
+    # `--variant` retired post-CB.17.d — the 13-cell matrix is gone;
+    # the thin path produces one set of layer dirs per run, no cells
+    # to filter. Kept on the argparse surface as a deprecated alias so
+    # existing scripts don't crash; the value gets ignored with a
+    # warning.
     p_dump.add_argument(
         "--variant",
         default=None,
         metavar="NAME",
-        help=(
-            "narrow to a single variant cell (e.g. sp_pg_aw); "
-            "default = all cells in the run."
-        ),
+        help="DEPRECATED — the matrix path was retired in CB.17.d. Ignored.",
     )
     p_dump.set_defaults(func=cmd_dump_last_errors)
 
