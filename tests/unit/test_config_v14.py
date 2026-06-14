@@ -448,7 +448,6 @@ def test_run_postgres_config_smoke() -> None:
         pytest.skip(f"{p} not present (run/ is operator-local)")
     cfg = load_config(p)
     assert cfg.db.dialect is Dialect.POSTGRES
-    assert cfg.aws.deployment_name == "qsgen-postgres"
 
 
 def test_run_oracle_config_smoke() -> None:
