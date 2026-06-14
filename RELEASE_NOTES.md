@@ -49,17 +49,19 @@ code paths and tests must read/write the nested form:
 | `cfg.auth.quicksight_user_arn` | `cfg.auth.aws.quicksight_user_arn` |
 | `cfg.studio_enabled`       | (removed — use `recon-gen dashboards` for prod) |
 
-### YAML compatibility
+### YAML — hard break to nested shape
 
-The loader retains backward-compat for the **flat-yaml** shape during
-the v14 strangler period. Existing operator `config.yaml` files
-continue to load without changes — internal flat fields are
-translated into the nested `Config` dataclass automatically.
+The flat-yaml shape (`aws_account_id:` / `demo_database_url:` / etc. at
+top level) is **no longer accepted**. Loader raises `LegacyFieldError`
+carrying the migration target for every legacy key it finds — operators
+upgrading from v13 see the exact `cfg.X` → `cfg.Y` path they need to
+edit. The full migration table above lists every legacy field.
 
-The new **nested-yaml** shape (`aws:`, `db:`, `app2:`, `audit:`,
-`test:`, `auth:` top-level blocks per DE.0) is supported by the
-separate `config_v14.py` loader; full deprecation of the flat-yaml
-loader + a hard-break upgrade message is deferred to a future phase.
+The new shape uses six top-level blocks — `aws:`, `db:`, `app2:`,
+`audit:`, `test:`, `auth:` — plus optional `extends:` for composition
+across operator-local cfg files (e.g. a per-deployment overlay extending
+a shared base). See `run/base.yaml` + `run/config.postgres.yaml` for the
+canonical operator-facing shape.
 
 ### Internal API surface
 
@@ -69,23 +71,26 @@ loader + a hard-break upgrade message is deferred to a future phase.
   proxy class).
 - `TestConfig` carries `__test__ = False` so pytest doesn't try to
   collect it.
+- `Config.to_yaml_dict` / `Config.write_yaml` retired — no production
+  callers; the two test-side users moved to nested-shape fixtures.
+- `CfgError` now inherits from `ValueError` so legacy `except ValueError`
+  catchers still handle cfg-load failures.
+- `config_v14.py` (the previous nested-yaml loader) deleted; the
+  consolidated `config.py` now carries the nested loader directly
+  (`_load_nested_config` + `_build_*_nested` helpers).
+- `extends:` chain support — operator cfg files can compose via
+  `extends: [./base.yaml]` (deep-merge child over parent, cycle
+  detection via `CycleError`).
 
 ### Phase DE plan
 
 Inline strangler pattern: drop one flat field per commit, sweep
 callsites, verify pyright + unit + data/json suites green, commit.
-21 commits in the series (DE.5 steps 3-21). No incomplete intermediate
-states — every step left the build green.
-
-### What's NOT yet collapsed in v14
-
-`config_v14.py` (the canonical nested-yaml loader) still exists
-alongside `config.py`. Callsites under `tests/unit/test_config_v14.py`,
-`tests/unit/test_auth_factories.py`, and the TYPE_CHECKING guard in
-`src/recon_gen/common/auth.py` still import from it. Final
-consolidation (delete `config_v14.py`, rename `config.py` to the
-nested-only canonical form, hard-break flat yamls) is queued as a
-follow-up phase.
+21 commits for steps 3-21 (flat-field collapse) + 4 commits for the
+`config_v14.py` consolidation series (A: additive port; B: runner
+yaml-dump; C: drop flat loader + fixture migration; D: delete the
+file). No incomplete intermediate states — every step left the build
+green.
 
 ## v13.15.1 — Phase DB.3 followups + Phase DG CI hygiene + triage
 
