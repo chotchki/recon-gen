@@ -5001,6 +5001,13 @@ def cmd_triage(args: argparse.Namespace) -> int:
         "layer": layer,
         "screen_name": _TRIAGE_SCREEN_NAME,
         "cfg_path": str(cfg_path),
+        # Issue #7 fix: persist the QS-side cfg (hotchkiss.io URL) when
+        # the deploy step minted one, so triage-down's `json clean`
+        # uses the same cfg the deploy used. None when the triage layer
+        # never reached deploy (qs_cfg_path stays unset).
+        "qs_cfg_path": (
+            runner_variant_env.get(RECON_GEN_QS_CONFIG.name)
+        ),
         "deployed": layer in ("deploy", "qs_api", "qs_browser"),
         # Container teardown: we don't persist a handle (not JSON-able);
         # instead `triage-down --keep-container=False` invokes
@@ -5109,7 +5116,13 @@ def cmd_triage_down(args: argparse.Namespace) -> int:
                 )
                 _TRIAGE_STATE_FILE.unlink(missing_ok=True)
                 return EXIT_FAILURE
-            sweep_rc = _triage_qs_sweep(Path(cfg_path_str))
+            # Issue #7 fix: prefer the QS-side cfg path (hotchkiss.io URL)
+            # when the deploy step minted one — matches deploy step routing.
+            qs_cfg_raw = state.get("qs_cfg_path")
+            qs_cfg_obj = (
+                Path(qs_cfg_raw) if isinstance(qs_cfg_raw, str) else None
+            )
+            sweep_rc = _triage_qs_sweep(Path(cfg_path_str), qs_cfg_obj)
             if sweep_rc != EXIT_SUCCESS:
                 print(
                     f"runner: QS sweep failed rc={sweep_rc}; state file "
@@ -5137,39 +5150,36 @@ def cmd_triage_down(args: argparse.Namespace) -> int:
     return EXIT_SUCCESS
 
 
-def _triage_qs_sweep(cfg_path: Path) -> int:
-    """Sweep Harness=e2e tagged QS resources via the same path as
-    ``cmd_sweep --yes``. Returns ``EXIT_SUCCESS`` / ``EXIT_NEEDS_OPERATOR``
-    matching that verb's surface.
-    """
-    from recon_gen.common.config import load_config
-    try:
-        import boto3
-    except ImportError as exc:
-        print(f"runner: triage-down sweep — boto3 missing: {exc}", file=sys.stderr)
-        return EXIT_NEEDS_OPERATOR
-    from recon_gen._dev.cleanup import sweep_qs_resources_by_tag
+def _triage_qs_sweep(cfg_path: Path, qs_cfg_path: Path | None = None) -> int:
+    """Sweep QS resources tagged ``ManagedBy=recon-gen`` +
+    ``Deployment=<deployment_name>`` by shelling out to
+    ``recon-gen json clean --execute -c <cfg>``.
 
-    cfg = load_config(str(cfg_path))
-    client: Any = boto3.client(  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]: boto3-stubs huge overload union confuses pyright
-        "quicksight", region_name=cfg.aws.region,
+    Mirrors triage's deploy step's cfg routing: prefers ``qs_cfg_path``
+    (hotchkiss.io URL — the cfg the deploy actually used to create the
+    QS DataSource) when present, falling back to the local cfg path.
+
+    Issue #7 fix: the prior body called
+    ``sweep_qs_resources_by_tag(tag_key="Harness", tag_value="e2e")``
+    which matches NOTHING in production — real deploys tag
+    ``ManagedBy=recon-gen`` + ``Deployment=<deployment_name>``
+    (``common/cleanup.py:33-35``). Going through the same CLI path
+    deploy used guarantees tag-key parity and won't silently orphan
+    QS resources in AWS.
+    """
+    effective_cfg = str(qs_cfg_path) if qs_cfg_path is not None else str(cfg_path)
+    cmd = [str(_VENV_BIN / "recon-gen"), "json", "clean", "--execute", "-c", effective_cfg]
+    result = subprocess.run(  # noqa: S603 — fixed argv, no shell
+        cmd, cwd=REPO_ROOT, capture_output=True, text=True, check=False,
     )
-    print(
-        f"runner: sweeping QS resources tagged Harness=e2e in "
-        f"{cfg.aws.region}..."
-    )
-    try:
-        raw_counts = sweep_qs_resources_by_tag(
-            client, cfg.aws.account_id,
-            tag_key="Harness", tag_value="e2e",
+    if result.returncode != 0:
+        print(
+            f"runner: json clean failed rc={result.returncode}: "
+            f"{result.stderr.strip()}",
+            file=sys.stderr,
         )
-    except Exception as exc:  # noqa: BLE001
-        print(f"runner: triage-down sweep — delete failed: {exc!r}", file=sys.stderr)
         return EXIT_NEEDS_OPERATOR
-    counts = raw_counts
-    print(
-        f"runner: sweep deleted: {counts} (total={sum(counts.values())})"
-    )
+    print(result.stdout.strip() or "runner: json clean done")
     return EXIT_SUCCESS
 
 
