@@ -339,6 +339,12 @@ jobs:
           auth:
             aws:
               quicksight_user_arn: "${{ secrets.RECON_E2E_USER_ARN }}"
+          app2:
+            tls:
+              cert_path: "~/.local/share/recon-gen/tls/ci/cert.pem"
+              key_path: "~/.local/share/recon-gen/tls/ci/key.pem"
+              account_email: "${{ secrets.TLS_ACME_EMAIL }}"
+              env: "ci"
           EOF
           cat > run/config.oracle.yaml <<EOF
           aws:
@@ -355,6 +361,12 @@ jobs:
           auth:
             aws:
               quicksight_user_arn: "${{ secrets.RECON_E2E_USER_ARN }}"
+          app2:
+            tls:
+              cert_path: "~/.local/share/recon-gen/tls/ci/cert.pem"
+              key_path: "~/.local/share/recon-gen/tls/ci/key.pem"
+              account_email: "${{ secrets.TLS_ACME_EMAIL }}"
+              env: "ci"
           EOF
 
       - name: Run the full layered chain (unit → qs_browser)

@@ -3433,8 +3433,8 @@ def _ensure_tls_if_configured(cfg_path: Path, layer: str) -> int:
     try:
         ensure_dev_env(
             Env(tls.env),
-            cert_path=Path(tls.cert_path),
-            key_path=Path(tls.key_path),
+            cert_path=Path(tls.cert_path).expanduser(),
+            key_path=Path(tls.key_path).expanduser(),
             account_email=tls.account_email,
         )
     except ValueError as exc:

@@ -121,6 +121,31 @@ def test_backend_error_returns_needs_operator(
     assert "Zone:DNS:Edit" in err
 
 
+def test_tilde_in_cert_paths_expands(tmp_path: Path) -> None:
+    """``~/`` in cfg cert_path / key_path expands to absolute home —
+    matches the convention the operator doc tells people to use."""
+    cfg_path = _write_cfg(
+        tmp_path,
+        _MIN_CFG_PG
+        + """\
+app2:
+  tls:
+    cert_path: ~/cert.pem
+    key_path: ~/key.pem
+    account_email: ops@example.com
+    env: dev
+""",
+    )
+    with patch("recon_gen._dev.tls.ensure_dev_env") as ensure:
+        rc = _ensure_tls_if_configured(cfg_path, layer="app2")
+    assert rc == 0
+    _, kwargs = ensure.call_args
+    # expanduser() converts the leading ~ to the absolute home dir.
+    assert "~" not in str(kwargs["cert_path"])
+    assert kwargs["cert_path"].is_absolute()
+    assert str(kwargs["cert_path"]).endswith("/cert.pem")
+
+
 def test_ci_env_passes_through(tmp_path: Path) -> None:
     """``env: ci`` cfg value maps to ``Env.CI`` in the ensure_dev_env call."""
     from recon_gen._dev.tls import Env

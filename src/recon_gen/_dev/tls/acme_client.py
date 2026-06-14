@@ -43,6 +43,7 @@ from acme import (  # pyright: ignore[reportMissingTypeStubs]: acme 5.x ships no
     challenges,
     client,
     crypto_util,
+    errors as acme_errors,
     messages,
 )
 from cryptography.hazmat.primitives import serialization
@@ -164,19 +165,51 @@ def run_acme_dns01(
 def _register_account(
     acme_client: client.ClientV2, *, email: str,
 ) -> None:
-    """Register (or no-op re-register) the ACME account."""
+    """Register the ACME account, or load the existing one on re-run.
+
+    Happy path: ``new_account`` registers and stores the regr on
+    ``acme_client.net.account``, which the client uses to sign all
+    subsequent requests with the right Key ID JWS header.
+
+    Re-run path: when the account key already exists at LE,
+    ``new_account`` raises ``acme.errors.ConflictError`` carrying
+    the account's Location URL in ``.location``. The acme library
+    raises this even when ``only_return_existing=True``, so we
+    can't use that flag to recover — we must manually reconstruct
+    the ``RegistrationResource`` from the location and set it on
+    the client. Without this, the next request fails with "Unable
+    to validate JWS :: No Key ID in JWS header".
+
+    The older ``messages.Error`` with ``accountAlreadyExists`` urn
+    is the JSON problem-doc variant for ACME servers that don't
+    return HTTP 409 — fold into the same recovery (but we can't
+    extract a location, so we fail loudly in that branch).
+    """
+    new_reg = cast(Any, messages).NewRegistration.from_data(
+        email=email, terms_of_service_agreed=True,
+    )
     try:
-        cast(Any, acme_client).new_account(
-            cast(Any, messages).NewRegistration.from_data(
-                email=email, terms_of_service_agreed=True,
-            )
-        )
+        cast(Any, acme_client).new_account(new_reg)
+        return
+    except acme_errors.ConflictError as exc:
+        location = exc.location
     except cast(Any, messages).Error as exc:
-        # ``urn:ietf:params:acme:error:accountAlreadyExists`` is the
-        # benign re-register signal — swallow. Re-raise anything else.
         if "accountAlreadyExists" in str(exc) or "already" in str(exc).lower():
-            return
+            raise RuntimeError(
+                "ACME server returned accountAlreadyExists via problem-doc "
+                "without a Location URL; can't recover the existing account. "
+                "Workaround: rotate the account key at "
+                f"{storage.account_key_path()} and retry."
+            ) from exc
         raise RuntimeError(f"ACME new-account failed: {exc}") from exc
+
+    # Reconstruct the regr from the location URL + push it onto the
+    # client's net.account so subsequent JWS signs include the Key ID.
+    regr = cast(Any, messages).RegistrationResource(
+        body=cast(Any, messages).Registration(),
+        uri=location,
+    )
+    cast(Any, acme_client).net.account = regr
 
 
 def _select_dns01_challenge(auth: Any) -> Any:
@@ -245,9 +278,14 @@ def _txt_contains(resolver: Any, hostname: str, expected_value: str) -> bool:
 
 
 def _deadline(seconds: float) -> dt.datetime:
-    """Build a ``datetime`` deadline ``seconds`` from now (UTC).
+    """Build a ``datetime`` deadline ``seconds`` from now (NAIVE local).
 
-    The acme library's ``poll_and_finalize`` takes a datetime; isolate
-    the construction here so we own the timezone semantics.
+    The acme library's ``poll_and_finalize`` does
+    ``while datetime.datetime.now() < deadline:`` — a naive comparison.
+    Handing it an offset-aware deadline raises
+    ``TypeError: can't compare offset-naive and offset-aware datetimes``
+    at the first poll iteration. Match the library's convention with a
+    naive timestamp. (Same convention the spine generators use per
+    ``[[project_local_tz_convention]]``.)
     """
-    return dt.datetime.now(dt.UTC) + dt.timedelta(seconds=seconds)
+    return dt.datetime.now() + dt.timedelta(seconds=seconds)
