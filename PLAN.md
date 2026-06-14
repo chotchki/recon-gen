@@ -500,11 +500,11 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
   - [x] DE.5.studio_enabled - Drop `cfg.studio_enabled` entirely. `recon-gen studio` always mounts Studio; production deployments use `recon-gen dashboards` for the dashboards-only surface. Loader silently accepts the legacy yaml key for backward compat.
   - [x] DE.5.auth - AuthConfig flat-field collapse (aws_profile / quicksight_user_arn → cfg.auth.aws.*). Loader accepts both legacy + nested yaml forms.
   - [x] DE.5.release_notes - RELEASE_NOTES.md v14.0.0 entry with full migration table (v13 field → v14 path) + flat-yaml backward-compat note.
-  - [ ] DE.5.config_v14_consolidation - Sub-steps below; each is one commit. End state: `config_v14.py` deleted, `auth.py` TYPE_CHECKING points at `config.py`, run/*.yaml + runner.py write the nested shape, `test_config_loader.py` covers the nested loader.
+  - [x] DE.5.config_v14_consolidation - End state: `config_v14.py` deleted, `auth.py` TYPE_CHECKING points at `config.py`, `runner.py` writes nested shape, `test_config_loader.py` retired into `test_config_v14.py` (which is now the canonical loader test).
     - [x] DE.5.config_v14_consolidation.A - Additive port: nested-yaml loader (CfgError / CycleError / LegacyFieldError / MissingFieldError / _LEGACY_TO_NEW / _deep_merge / _load_raw_nested / _check_legacy_keys_nested / _build_*_nested / resolve_qs_user_arn / _QS_USER_ARN_CACHE / _apply_env_overrides_nested / _load_nested_config) into `config.py`; `load_config` routes nested vs flat via `_is_nested_v14_yaml`. `tests/unit/test_config_v14.py` + `test_auth_factories.py` point at `config.py`; `auth.py` TYPE_CHECKING points at `config.py`. Flat-yaml path still alive. `config_v14.py` still on disk (deleted in step D).
-    - [ ] DE.5.config_v14_consolidation.B - Migrate `run/config.*.yaml` (5 files) + `runner.py`'s per-cell yaml-dump path to the nested shape.
-    - [ ] DE.5.config_v14_consolidation.C - Drop flat-yaml support from `load_config`; rewrite `tests/unit/test_config_loader.py` for the nested shape; retire `Config.to_yaml_dict` + `write_yaml` and update their consumers.
-    - [ ] DE.5.config_v14_consolidation.D - Delete `config_v14.py`.
+    - [x] DE.5.config_v14_consolidation.B - Migrated `runner.py`'s per-cell yaml-dump path to nested. Operator `run/config.*.yaml` files are gitignored — migration documented in RELEASE_NOTES.md.
+    - [x] DE.5.config_v14_consolidation.C - Dropped flat-yaml support from `load_config`. Retired `Config.to_yaml_dict` + `write_yaml`. Deleted `tests/unit/test_config_loader.py`; env-var-override + run-yaml smoke tests merged into `test_config_v14.py`. Migrated all flat-yaml test fixtures across `tests/{unit,cli,json,data,schema,audit,e2e}/` to nested shape. `CfgError` now inherits from `ValueError`. `_build_db_nested` makes `db.url` optional.
+    - [x] DE.5.config_v14_consolidation.D - Deleted `config_v14.py`.
   - [ ] DE.5.version_bump - Bump `__version__` to 14.0.0, tag, push. **Operator-gated.**
   - [ ] DE.5.archive_sweep - Sweep Phase DE to PLAN_ARCHIVE.md.
 

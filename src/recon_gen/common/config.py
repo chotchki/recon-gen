@@ -35,23 +35,20 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# DE.2 commit A — proxy view dataclasses
+# v14 concern-grouped Config (DE.0 lock; DE.5 phase collapsed this module
+# + the prior config_v14.py into one).
 # ---------------------------------------------------------------------------
 #
-# The legacy ``Config`` keeps flat fields (``aws_account_id``, ``dialect``,
-# etc.) for backward compatibility through the sweep. The proxy ``aws`` /
-# ``db`` / ``app2`` / ``audit`` / ``test`` properties below return view
-# dataclasses exposing the **v14-locked nested shape** (per DE.0 +
-# ``docs/audits/de_2_sweep_strategy.md``). Callsite sweep migrates
-# ``cfg.aws_account_id`` → ``cfg.aws.account_id`` etc. Once 100% swept
-# (DE.5), flat fields are dropped + ``config_v14.py`` collapses into here.
+# ``Config`` carries six nested sub-cfgs — ``aws`` / ``db`` / ``app2`` /
+# ``audit`` / ``test`` / ``auth`` — each a frozen dataclass exposing the
+# v14 yaml shape. The loader (``load_config`` → ``_load_nested_config``)
+# parses the nested yaml directly into these dataclasses, and operators
+# read e.g. ``cfg.aws.account_id`` / ``cfg.db.url`` / ``cfg.auth.aws.profile``.
 #
-# Views are ``frozen=True`` dataclasses (cheap to construct, hashable,
-# immutable) — built fresh each property access. Per-access cost is
-# trivial; the GC reclaims them promptly. Methods (``partition`` /
-# ``tags()`` / ``dataset_arn()`` / ``theme_arn()`` / ``prefixed()``)
-# live on the view classes they conceptually belong to (AWS-side on
-# ``AwsConfig``).
+# Methods (``partition`` / ``tags()`` / ``dataset_arn()`` / ``theme_arn()``
+# / ``prefixed()``) live on the sub-cfg they conceptually belong to —
+# AWS-side helpers on ``AwsConfig``, audit-signing on ``SigningConfig``,
+# etc.
 
 
 @dataclass(frozen=True)
@@ -94,7 +91,7 @@ class AwsConfig:
         China = ``aws-cn``. Resolution order: ``datasource.arn`` first,
         else first ``arn:``-prefixed ``principal_arns`` entry, else
         default ``aws``. Mirrors the pre-DE ``Config.partition``
-        property; full rationale at ``config_v14.AwsConfig.partition``.
+        property.
         """
         sources: list[str | None] = [self.datasource.arn, *self.principal_arns]
         for source in sources:
@@ -226,10 +223,7 @@ class AuthAwsConfig:
     quicksight_user_arn: str | None = None
 
 
-# DE.4 — phase DC + DD cfg block carriers on the legacy Config.
-# These mirror the v14 ``config_v14.AuthOidcConfig`` / ``AuthSessionConfig``
-# / ``App2TlsConfig`` shapes; defined here to avoid the circular import
-# config.py ↔ config_v14.py would otherwise create.
+# DE.4 — phase DC + DD cfg block carriers (OIDC + JWT session + TLS).
 
 
 @dataclass(frozen=True)
@@ -476,11 +470,8 @@ def _partition_from_arns(
 
 
 # ---------------------------------------------------------------------------
-# DE.5 — v14 nested-yaml loader (ported from config_v14.py, which is deleted
-# in the same phase). Errors / DatasourceMode enum / legacy-key map / build
-# helpers + ``load_config`` reading the concern-grouped shape. During the
-# strangler step the legacy flat-yaml loader stays alive below; load_config
-# auto-detects which shape the file is in and routes.
+# DE.5 — v14 nested-yaml loader. Errors / legacy-key map / build helpers
+# + ``load_config`` reading the concern-grouped shape.
 # ---------------------------------------------------------------------------
 
 
