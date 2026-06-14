@@ -546,6 +546,26 @@ RECON_GEN_QS_CONFIG: Final = EnvVar(
     optional=True,
 )
 
+# DI phase — operator escape hatch for the session-autouse
+# ``qs_deployed`` fixture (tests/e2e/conftest.py). When set, the fixture
+# returns early and the session runs against whatever QS state already
+# exists in the AWS account. Use case: "I deployed manually 30s ago,
+# just run the test." The fixture is normally always-apply
+# (delete-then-create, idempotent); this lets the operator skip the
+# ~30-60s redeploy when they know the state is fresh.
+RECON_GEN_SKIP_QS_DEPLOY: Final = EnvVar(
+    name="RECON_GEN_SKIP_QS_DEPLOY",
+    description=(
+        "Bool — set to any non-empty value to skip the session-autouse "
+        "QS deploy fixture (tests/e2e/conftest.py::qs_deployed). The "
+        "session runs against whatever QS state already exists in the "
+        "account. Use when you've just deployed manually and don't want "
+        "to pay the ~30-60s redeploy cost."
+    ),
+    coercer=_bool_coercer,
+    optional=True,
+)
+
 # Y.2.gate.c.11 — operator opt-in to capture Playwright traces on
 # every test (default is failure-only). Plumbed by RunOptions; the
 # webkit_page helper checks it in the finally block.

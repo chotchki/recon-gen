@@ -30,7 +30,9 @@ from recon_gen.common.env_keys import (
     RECON_E2E_VISUAL_TIMEOUT,
     RECON_GEN_CONFIG,
     RECON_GEN_E2E,
+    RECON_GEN_QS_CONFIG,
     RECON_GEN_RUN_DIR,
+    RECON_GEN_SKIP_QS_DEPLOY,
     RECON_GEN_TEST_L2_INSTANCE,
 )
 
@@ -651,8 +653,147 @@ def l2ft_analysis_id(deployment_name: str) -> str:
 
 
 @pytest.fixture(scope="session", autouse=True)
+def qs_deployed(  # pyright: ignore[reportUnusedFunction]: pytest autouse fixture — invoked by pytest via name, not directly accessed
+    request: pytest.FixtureRequest,
+    cfg: Config,
+    tmp_path_factory: pytest.TempPathFactory,
+    worker_id: str,
+) -> None:
+    """DI phase — idempotent QS deploy. Fires once per pytest session;
+    cross-xdist-worker rendezvous via a filesystem sentinel + FileLock
+    (mirrors ``tests/conftest.py::_install_pgcrypto_under_filelock``).
+
+    POLICY 1 (single source of truth): both ``./run_tests.sh up_to=*``
+    and ``./run_tests.sh triage`` reach QS deploy through this fixture
+    — neither orchestrator dispatches deploy directly. ``cmd_up_to``
+    retired the ``deploy`` chain layer; the qs_api + qs_browser layers'
+    pytest invocations transitively fire this fixture at session start.
+
+    Always-apply (NOT detect-then-apply). The ``recon-gen json apply
+    --execute`` body is delete-then-create end-to-end
+    (``common/deploy.py:380``); that covers fresh QS, healthy QS, and
+    half-failed CREATION_FAILED partial state with one body. The
+    sentinel only prevents re-firing within the same pytest session.
+
+    Gate ordering (collection-time skip cascade):
+
+    1. ``RECON_GEN_E2E`` unset → return (unit / non-e2e sessions).
+    2. ``RECON_GEN_SKIP_QS_DEPLOY`` set → return (operator escape
+       hatch; "I deployed manually 30s ago, just run the test").
+    3. ``_session_needs_aws(session)`` returns False → return (db-tier
+       and app2-tier sessions inherit this conftest but their fixture
+       closures don't touch AWS).
+
+    Wall cost: ~30-60s for full QS delete+create on Sasquatch with
+    four apps. Single fire per session under 16-worker xdist (vs 16×
+    if not gated).
+    """
+    import os
+    if os.environ.get(RECON_GEN_E2E.name) != "1":
+        return
+    if RECON_GEN_SKIP_QS_DEPLOY.get_or_none():
+        return
+    if not _session_needs_aws(request.session):
+        return
+
+    # xdist rendezvous — mirrors ``_install_pgcrypto_under_filelock``
+    # (``tests/conftest.py:1098``). All workers race here; first to
+    # acquire the lock deploys, others see the sentinel and bail.
+    from filelock import FileLock  # noqa: PLC0415 — lazy
+
+    root_tmp = tmp_path_factory.getbasetemp().parent
+    sentinel = root_tmp / "qs-deployed.sentinel"
+    lock_path = str(sentinel) + ".lock"
+    # Match the qs_browser layer's hang threshold so the lock acquire
+    # can't outlast the watchdog.
+    with FileLock(lock_path, timeout=900):
+        if sentinel.is_file():
+            return
+
+        # Output dir under the runner's run_dir when available; else tmp.
+        run_dir_env = RECON_GEN_RUN_DIR.get_or_none()
+        out_dir = (
+            Path(run_dir_env) / "deploy" / "out"
+            if run_dir_env
+            else tmp_path_factory.mktemp("qs-deploy-out")
+        )
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # Resolve the cfg the deploy should use. ``RECON_GEN_QS_CONFIG``
+        # (hotchkiss.io URL) wins when present — that's what the chain
+        # + triage container-spin both export. Else fall back to the
+        # operator-authored cfg already loaded into ``cfg``.
+        qs_cfg_str = RECON_GEN_QS_CONFIG.get_or_none()
+        if qs_cfg_str is not None:
+            deploy_cfg_path = str(qs_cfg_str)
+        else:
+            cfg_str = RECON_GEN_CONFIG.get_or_none()
+            if cfg_str is None:
+                pytest.fail(
+                    "qs_deployed: no cfg available — set "
+                    "RECON_GEN_CONFIG or RECON_GEN_QS_CONFIG. The "
+                    "runner exports these via _setup_thin_chain_"
+                    "environment; bare pytest needs an export."
+                )
+            deploy_cfg_path = str(cfg_str)
+        _ = cfg  # consumed only so the session-cfg gate fires; deploy uses the path
+
+        l2_path = RECON_GEN_TEST_L2_INSTANCE.get_or_none()
+        if l2_path is None:
+            pytest.fail(
+                "qs_deployed: RECON_GEN_TEST_L2_INSTANCE unset; "
+                "deploy needs an L2. The runner exports it via "
+                "_setup_thin_chain_environment; bare pytest needs "
+                "an export."
+            )
+
+        # Subprocess invocation (parity with ``_build_deploy_command``).
+        # Subprocess form gives the fixture a real returncode + stderr
+        # to surface; in-process would couple this conftest to the
+        # full ``recon-gen json apply`` body (click decorators, deploy
+        # helper, app-builder fan-out) which isn't worth the ~1s
+        # subprocess overhead.
+        import shutil
+        import subprocess
+        recon_gen_bin = shutil.which("recon-gen")
+        if recon_gen_bin is None:
+            # ``.venv/bin/recon-gen`` is the canonical path when no
+            # PATH-installed binary exists (matches the runner's
+            # ``_VENV_BIN / "recon-gen"`` pattern).
+            from pathlib import Path as _P  # noqa: PLC0415 — lazy
+            repo_root = _P(__file__).resolve().parents[2]
+            recon_gen_bin = str(repo_root / ".venv" / "bin" / "recon-gen")
+        argv = [
+            recon_gen_bin, "json", "apply",
+            "--execute",
+            "-c", deploy_cfg_path,
+            "--l2", str(l2_path),
+            "-o", str(out_dir),
+        ]
+        print(f"qs_deployed: invoking {' '.join(argv)}")
+        result = subprocess.run(  # noqa: S603 — fixed argv, no shell
+            argv, capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0:
+            # On failure DON'T write the sentinel — next session re-
+            # deploys (delete-then-create handles partial state).
+            pytest.fail(
+                f"qs_deployed: deploy subprocess failed rc="
+                f"{result.returncode}\nstdout: {result.stdout}\n"
+                f"stderr: {result.stderr}"
+            )
+
+        sentinel.touch()
+        print(
+            f"qs_deployed: deploy complete (cfg={deploy_cfg_path}) "
+            f"-> sentinel {sentinel}"
+        )
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _qs_pre_warm_dashboards(  # pyright: ignore[reportUnusedFunction]: pytest autouse fixture — invoked by pytest via name, not directly accessed
     request: pytest.FixtureRequest,
+    qs_deployed: None,
 ) -> None:
     """BL.3 follow-on (Task #466 mitigation): pre-warm each deployed
     dashboard via ``describe_dashboard_definition`` ONCE at session
@@ -680,7 +821,13 @@ def _qs_pre_warm_dashboards(  # pyright: ignore[reportUnusedFunction]: pytest au
     scope fixture's resolution and raises ``ScopeMismatch`` on
     collection. Computing the IDs here sidesteps the override without
     breaking the BL.0 isolation.
+
+    DI phase — declares ``qs_deployed: None`` to force pre-warm to
+    run AFTER the QS deploy fixture lands; without this dep, both
+    session-autouse fixtures order arbitrarily and pre-warm could
+    fire against a stale (or missing) dashboard set.
     """
+    del qs_deployed  # consumed via the param ordering dep only
     import os
     if os.environ.get(RECON_GEN_E2E.name) != "1":
         return
