@@ -405,7 +405,15 @@ class QsEmbedDriver:
         """Best-effort wait for the current sheet's visuals to hydrate
         their title labels. Swallows the timeout — a text-only sheet
         (e.g. ``Getting Started``) legitimately renders zero titled
-        visuals, so this can't be a hard wait."""
+        visuals, so this can't be a hard wait.
+
+        After the wait (or timeout), scan for SQL exceptions — a sheet
+        whose visuals all errored renders title labels normally but
+        every visual body is the QS error widget. Without the scan a
+        downstream verb would misdiagnose the errored visuals as
+        "legitimately empty" (the 2026-06-14 ConcentrationToFRBSweep
+        symptom).
+        """
         from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
         try:
@@ -417,6 +425,7 @@ class QsEmbedDriver:
             )
         except PlaywrightTimeoutError:
             pass
+        self._assert_no_sql_exception(context="_settle_visuals (post-open/goto_sheet)")
 
     # -- reads -----------------------------------------------------------
 
@@ -497,6 +506,14 @@ class QsEmbedDriver:
             )
         except PlaywrightTimeoutError:
             pass
+        # SQL-exception scan AFTER the wait. A timeout above can mean
+        # "the visual rendered as an error widget rather than a table
+        # body" — exactly the case the chain saw on 2026-06-14 where
+        # the empty-table assertion misdiagnosed a SQL exception. Scan
+        # ALL visuals (not just `visual_title`) because a sibling
+        # visual's error often surfaces the same dataset's failure
+        # earlier and gives a more actionable message.
+        self._assert_no_sql_exception(context=f"wait_loaded({visual_title!r})")
 
         # AA.A.8 — hard-fail on per-visual QS error overlay. Pre-AA.A.8
         # a broken visual silently timed out the wait above and the
@@ -703,6 +720,65 @@ class QsEmbedDriver:
 
     # -- writes ----------------------------------------------------------
 
+    def _assert_no_sql_exception(self, *, context: str) -> None:
+        """Scan every analysis-visual frame for QS's canonical SQL-exception
+        widget; raise immediately if any visual is errored.
+
+        The widget renders the text "Your database generated a SQL exception."
+        inside an `[data-automation-id="analysis_visual"]` container when the
+        visual's dataset query fails (timeout, dropped connection, missing
+        table, etc.). Pre-fix, the test driver had no scanner for this —
+        verbs like `wait_loaded` + `table_rows` would silently see "no
+        data cells rendered" and the test would assert "table empty",
+        misdiagnosing a SQL error as a legitimate 0-row result.
+
+        Per operator (2026-06-14): "the test driver should ALWAYS scan
+        for those sql exceptions when it loads a page, they make any
+        other test useless". This method gets called from every verb
+        that triggers a re-query (`wait_loaded`, `_settle_after_param_change`,
+        `open`); on detection it raises ``RuntimeError`` with the
+        visual title(s) + error text + the calling context.
+        """
+        errored = self._page.evaluate(
+            """() => {
+                const out = [];
+                const visuals = document.querySelectorAll(
+                    '[data-automation-id="analysis_visual"]'
+                );
+                for (const v of visuals) {
+                    const txt = (v.innerText || v.textContent || "");
+                    if (
+                        txt.includes("Your database generated a SQL exception")
+                        || txt.includes("database generated a SQL exception")
+                    ) {
+                        const title_el = v.querySelector(
+                            '[data-automation-id="analysis_visual_title_label"]'
+                        );
+                        const title = title_el ? title_el.innerText.trim() : "(no title)";
+                        // First ~200 chars of the visible error text (after
+                        // the title) so the operator sees the actionable
+                        // QS message in the stack trace.
+                        const err_idx = txt.indexOf("Your database generated");
+                        const snippet = txt.slice(err_idx, err_idx + 300).trim();
+                        out.push({title, snippet});
+                    }
+                }
+                return out;
+            }"""
+        )
+        if errored:
+            details = "\n".join(
+                f"  - [{e['title']}] {e['snippet']}" for e in errored
+            )
+            raise RuntimeError(
+                f"QS visual SQL exception detected during {context!r} — "
+                f"{len(errored)} visual(s) errored. The dataset query "
+                f"failed against the live DB (timeout / dropped "
+                f"connection / missing table / DDL race / etc.); the "
+                f"empty-table state is a SYMPTOM of this error, not a "
+                f"legitimate 0-row result. Errored visuals:\n{details}"
+            )
+
     def _settle_after_param_change(self, *, timeout_ms: int = 18_000) -> None:
         """Block until QS's WebSocket data layer has settled after a
         parameter write.
@@ -767,10 +843,16 @@ class QsEmbedDriver:
                     not new_pending
                     and self._ws_tracker.ms_since_last_start >= quiet_ms
                 ):
+                    self._assert_no_sql_exception(
+                        context="_settle_after_param_change (post-quiet)",
+                    )
                     return
             elif time.monotonic() > min_wait_deadline:
                 # No new cids since snapshot, past 500 ms grace.
                 # Cache-equivalent: nothing to wait for, return.
+                self._assert_no_sql_exception(
+                    context="_settle_after_param_change (cache-equivalent)",
+                )
                 return
             # Tight in-process loop — no IPC. The tracker state mutates
             # on Playwright's event-loop callback; this short sleep
