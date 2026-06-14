@@ -34,6 +34,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -4442,6 +4443,736 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     return EXIT_SUCCESS
 
 
+# ---------------------------------------------------------------------------
+# triage / triage-down — interactive PDB session inside a detached GNU screen.
+# ---------------------------------------------------------------------------
+#
+# Locked design: docs/audits — `triage` spawns ONE long-lived screen session
+# (name fixed at `recon-gen-triage`) running pytest under --pdb against a
+# single nodeid; operator attaches via ``screen -x recon-gen-triage``. State
+# (run_id, nodeid, layer, container handle metadata) persists to
+# ``runs/.triage-state.json`` so ``triage-down`` can tear everything down
+# without re-discovering it.
+
+_TRIAGE_SCREEN_NAME: Final = "recon-gen-triage"
+_TRIAGE_STATE_FILE: Final = RUNS_DIR / ".triage-state.json"
+_SCREEN_BIN: Final = "/usr/bin/screen"
+
+# Root-e2e parametrized test files. Per the design (rule 5): these files live
+# at tests/e2e/ root and partition by `[qs, app2]` parametrize ids. The
+# qs_browser layer's pytest invocation is a strict superset of app2's
+# prerequisites, so default to qs_browser when the nodeid matches; operator
+# can downshift via ``--layer=app2`` when they know the test is only
+# app2-parametrized.
+_ROOT_E2E_PARAMETRIZED_PREFIXES: Final[tuple[str, ...]] = (
+    "test_l1_",
+    "test_l2ft_",
+    "test_inv_",
+    "test_exec_",
+    "test_audit_",
+    "test_dashboard_driver",
+    "test_cq_picker_",
+    "test_studio_",
+    "test_parameter_anchored_sheets",
+    "test_db3_parity_snaps",
+)
+
+# Unit-layer prefixes (no DB / no AWS). Audit + data dirs are routed here as
+# the safe floor per design rule 7 (gap-handling).
+_UNIT_LAYER_PREFIXES: Final[tuple[str, ...]] = (
+    "tests/unit/",
+    "tests/json/",
+    "tests/cli/",
+    "tests/docs/",
+    "tests/schema/",
+    "tests/l2/",
+    "tests/audit/",
+    "tests/data/",
+)
+
+
+def _infer_layer_from_nodeid(nodeid: str) -> str | None:
+    """Map a pytest nodeid → layer via path-prefix lookup.
+
+    Returns None when no rule matches; ``cmd_triage`` maps that to
+    EXIT_CONFIG_ERROR with a "pass --layer=<X>" hint.
+
+    Normalization: strip leading ``./`` and any ``::selector`` suffix
+    BEFORE prefix matching (selectors / parametrize ids are irrelevant).
+    Absolute paths return None so ``cmd_triage`` rejects them — pytest
+    nodeids are repo-relative and silently coercing an absolute path
+    would hide operator typos.
+
+    Order of rules (first match wins) matches the design lock:
+      1. tests/e2e/qs_browser/ → qs_browser
+      2. tests/e2e/qs_api/     → qs_api
+      3. tests/e2e/app2/       → app2
+      4. tests/e2e/db/         → db
+      5. tests/e2e/<root parametrized file> → qs_browser
+      6. tests/{unit,json,cli,docs,schema,l2}/ → unit
+      7. tests/{audit,data}/   → unit (safe-floor fallback)
+      8. otherwise → None
+    """
+    if not nodeid:
+        return None
+    # Strip ::selector suffix; keep only the file path for prefix matching.
+    file_path = nodeid.split("::", 1)[0]
+    # Strip leading "./" if present.
+    if file_path.startswith("./"):
+        file_path = file_path[2:]
+    # Absolute paths are operator error — reject by returning None.
+    if file_path.startswith("/"):
+        return None
+    # Rules 1-4: per-tier subdirs.
+    if file_path.startswith("tests/e2e/qs_browser/"):
+        return "qs_browser"
+    if file_path.startswith("tests/e2e/qs_api/"):
+        return "qs_api"
+    if file_path.startswith("tests/e2e/app2/"):
+        return "app2"
+    if file_path.startswith("tests/e2e/db/"):
+        return "db"
+    # Rule 5: root parametrized files.
+    if file_path.startswith("tests/e2e/"):
+        filename = file_path[len("tests/e2e/"):].split("/", 1)[0]
+        # Strip .py for prefix-match against the parametrized-file list.
+        stem = filename[:-3] if filename.endswith(".py") else filename
+        for prefix in _ROOT_E2E_PARAMETRIZED_PREFIXES:
+            if stem.startswith(prefix) or stem == prefix:
+                return "qs_browser"
+        return None
+    # Rules 6-7: pytest-only trees.
+    for prefix in _UNIT_LAYER_PREFIXES:
+        if file_path.startswith(prefix):
+            return "unit"
+    return None
+
+
+def _screen_session_exists(name: str) -> bool:
+    """True when a GNU screen session named ``name`` is alive.
+
+    ``screen -ls <name>`` rc semantics shifted between 4.0 and 4.6 — rc=1
+    when nothing matches on 4.00.03, but the 4.6+ behavior isn't
+    consistent. Use string matching on the listing output (the session
+    line looks like ``\t12345.recon-gen-triage\t(Detached)`` — tab- or
+    space-separated depending on screen version).
+    """
+    result = subprocess.run(
+        [_SCREEN_BIN, "-ls", name],
+        capture_output=True, text=True, check=False,
+    )
+    return f".{name}\t" in result.stdout or f".{name}  " in result.stdout
+
+
+def _screen_kill(name: str) -> bool:
+    """Kill the named screen session. Idempotent — returns True when
+    the session was already gone (matches the design lock).
+
+    ``screen -S <name> -X quit`` returns rc=1 when no matching session
+    exists; the stderr / stdout carries "No screen session found".
+    Treat that as success so ``triage-down`` is safe to run repeatedly.
+    """
+    result = subprocess.run(
+        [_SCREEN_BIN, "-S", name, "-X", "quit"],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode == 0:
+        return True
+    if (
+        "No screen session found" in result.stderr
+        or "No screen session" in result.stdout
+    ):
+        return True
+    return False
+
+
+def _write_triage_state(state: dict[str, Any]) -> None:
+    """Persist the triage state file. Caller owns the schema."""
+    _TRIAGE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _TRIAGE_STATE_FILE.write_text(json.dumps(state, indent=2) + "\n")
+
+
+def _read_triage_state() -> dict[str, Any] | None:
+    """Read the triage state file. Returns None when absent;
+    raises ValueError when present-but-malformed (so ``cmd_triage_down``
+    bails to EXIT_NEEDS_OPERATOR rather than silently fall back to
+    "kill the well-known session name").
+    """
+    if not _TRIAGE_STATE_FILE.is_file():
+        return None
+    try:
+        loaded = json.loads(_TRIAGE_STATE_FILE.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"triage state file {_TRIAGE_STATE_FILE} is unparseable: {exc}"
+        ) from exc
+    if not isinstance(loaded, dict):
+        raise ValueError(
+            f"triage state file {_TRIAGE_STATE_FILE} is not a JSON object"
+        )
+    return cast(dict[str, Any], loaded)
+
+
+def _setup_thin_chain_environment(
+    cfg_path: Path,
+    *,
+    layer: str,
+    as_of_anchor: str,
+) -> dict[str, str]:
+    """Build the runner_variant_env dict for the thin chain — mirrors
+    the lines 3434-3470 block in ``cmd_up_to``.
+
+    Returns the env-override dict the caller threads into subprocess
+    spawns. Doesn't touch ``os.environ``. Doesn't start any containers
+    (that's ``_start_thin_container``); doesn't seed (that's
+    ``_seed_thin_container``).
+
+    Used by both ``cmd_up_to`` (via the in-line block) and ``cmd_triage``
+    (which calls this helper directly). Single source of truth for the
+    env-shape so the two verbs can't drift apart.
+    """
+    runner_variant_env: dict[str, str] = {
+        RECON_GEN_AS_OF_ANCHOR.name: as_of_anchor,
+        RECON_GEN_CONFIG.name: str(cfg_path),
+    }
+    try:
+        from recon_gen.common.config import load_config  # noqa: PLC0415
+        peek_cfg = load_config(str(cfg_path))
+        l2_default = peek_cfg.db.default_l2_instance
+        if l2_default:
+            l2_path = (
+                REPO_ROOT / l2_default
+                if not Path(l2_default).is_absolute()
+                else Path(l2_default)
+            )
+            if l2_path.exists():
+                runner_variant_env[RECON_GEN_TEST_L2_INSTANCE.name] = str(l2_path)
+        if peek_cfg.auth.aws.profile is not None:
+            runner_variant_env["AWS_PROFILE"] = peek_cfg.auth.aws.profile
+        # Only derive the QS user ARN when the layer needs it (qs_browser).
+        # Skipping for non-AWS layers avoids spurious STS calls during
+        # local unit/db triage.
+        if layer in AWS_TOUCHING_LAYERS and RECON_E2E_USER_ARN.name not in runner_variant_env:
+            arn = _resolve_qs_user_arn(peek_cfg)
+            if arn is not None:
+                runner_variant_env[RECON_E2E_USER_ARN.name] = arn
+    except Exception as exc:  # noqa: BLE001 — peek failure shouldn't gate triage
+        print(f"runner: cfg peek for L2 discovery failed ({exc!r}); continuing")
+    return runner_variant_env
+
+
+def cmd_triage(args: argparse.Namespace) -> int:
+    """Spawn a detached GNU screen session running ``pytest --pdb``
+    against a single nodeid. Operator attaches via
+    ``screen -x recon-gen-triage`` to drive pdb interactively.
+
+    Pre-flight sequence (mirrors ``cmd_up_to`` minus the matrix):
+      1. Infer layer from nodeid (or honor ``--layer`` override).
+      2. Reject existing session unless ``--force``.
+      3. Probe deps + dirty-tree gate (matches cmd_up_to).
+      4. Resolve cfg + L2.
+      5. Spin thin container (for layer != unit).
+      6. Write QS-side cfg (for layers that touch QS).
+      7. DG.2 sweep + seed (idempotent + cheap).
+      8. Run the deploy step directly when chain includes deploy.
+      9. Spawn the screen session.
+
+    Returns EXIT_SUCCESS when the session is spawned + state written.
+    Whether pytest INSIDE the screen passes or fails is not this verb's
+    concern — that's what triage is FOR (operator drives pdb).
+    """
+    nodeid = args.nodeid
+    # Reject empty / absolute nodeids early — design lock.
+    if not nodeid or nodeid.startswith("/"):
+        print(
+            f"runner: cannot infer layer from nodeid {nodeid!r}",
+            file=sys.stderr,
+        )
+        print(
+            "runner: nodeids must be repo-relative (e.g. "
+            "tests/e2e/qs_browser/test_foo.py::test_bar)",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG_ERROR
+
+    # Layer resolution.
+    layer = args.layer or _infer_layer_from_nodeid(nodeid)
+    if layer is None:
+        print(
+            f"runner: cannot infer layer from nodeid {nodeid!r}",
+            file=sys.stderr,
+        )
+        print(
+            "runner: known prefixes: tests/e2e/{qs_browser,qs_api,app2,db}/ ;"
+            " tests/{unit,json,cli,docs,schema,l2,audit,data}/",
+            file=sys.stderr,
+        )
+        print(
+            "runner: pass --layer=<unit|db|app2|deploy|qs_api|qs_browser> "
+            "to override",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG_ERROR
+
+    # Existing-session gate.
+    if _screen_session_exists(_TRIAGE_SCREEN_NAME):
+        if not args.force:
+            print(
+                f"runner: existing screen session {_TRIAGE_SCREEN_NAME!r} "
+                f"detected"
+            )
+            print(
+                f"runner: re-run with --force to kill and respawn, or "
+                f"attach with:"
+            )
+            print(f"runner:   screen -x {_TRIAGE_SCREEN_NAME}")
+            print(
+                f"runner: alternatively, ./run_tests.sh triage-down --yes "
+                f"to clean up first"
+            )
+            return EXIT_NEEDS_OPERATOR
+        # --force: kill the old session before spawning a new one.
+        if not _screen_kill(_TRIAGE_SCREEN_NAME):
+            print(
+                f"runner: failed to kill existing screen session "
+                f"{_TRIAGE_SCREEN_NAME!r}",
+                file=sys.stderr,
+            )
+            return EXIT_NEEDS_OPERATOR
+
+    # Dirty-tree gate (deploy layer or later).
+    if _is_deploy_or_later(layer) and _is_dirty():
+        if not args.allow_dirty_deploy and not RECON_GEN_RUNNER_YES.get_or_none():
+            print(
+                "runner: refusing to deploy: tracked changes present "
+                "(commit / stash, or pass --allow-dirty-deploy)",
+                file=sys.stderr,
+            )
+            return EXIT_NEEDS_OPERATOR
+
+    # Probe deps.
+    failures = probe_dependencies(layer)
+    if failures:
+        for failure in failures:
+            print(
+                f"runner: probe-fail [{failure.kind}] {failure.message}",
+                file=sys.stderr,
+            )
+        return EXIT_NEEDS_OPERATOR
+
+    # Run-id + run-dir.
+    run_id = create_run_id()
+    run_dir = RUNS_DIR / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    triage_dir = run_dir / "triage"
+    triage_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"runner: run_id={run_id}")
+    print(f"runner: run_dir={_rel_or_abs(run_dir)}")
+    print(f"runner: triage nodeid={nodeid}")
+    print(f"runner: inferred layer={layer}")
+
+    # As-of anchor (matches cmd_up_to).
+    import datetime as _dt  # noqa: PLC0415
+    as_of_anchor = (
+        os.environ.get(RECON_GEN_AS_OF_ANCHOR.name)
+        or _dt.date.today().isoformat()
+    )
+    print(f"runner: as_of_anchor={as_of_anchor}")
+
+    # Cfg + L2 + env shape.
+    cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
+    if cfg_path is None:
+        print(
+            "runner: no cfg found via _DEFAULT_RUNNER_CFG_CANDIDATES; "
+            "triage requires a cfg",
+            file=sys.stderr,
+        )
+        return EXIT_NEEDS_OPERATOR
+    runner_variant_env = _setup_thin_chain_environment(
+        cfg_path, layer=layer, as_of_anchor=as_of_anchor,
+    )
+
+    # Container spin (skipped for unit-only triage).
+    container_handle: object | None = None
+    container_env: dict[str, str] = {}
+    if layer != "unit":
+        try:
+            container_env, container_handle = _start_thin_container(cfg_path)
+            runner_variant_env.update(container_env)
+            print(
+                f"runner: thin container up (dialect-matching) — "
+                f"{RECON_GEN_DEMO_DATABASE_URL.name}=...exported"
+            )
+        except Exception as exc:  # noqa: BLE001
+            msg = (
+                f"runner: thin container start failed ({exc!r}); aborting "
+                f"triage"
+            )
+            print(msg, file=sys.stderr)
+            _write_synthetic_cmd_json(
+                run_dir,
+                layer="container_start",
+                exit_code=EXIT_NEEDS_OPERATOR,
+                duration_seconds=0.0,
+                message=msg,
+            )
+            return EXIT_NEEDS_OPERATOR
+
+        # QS-side cfg when the chain reaches deploy/qs_api/qs_browser.
+        chain_includes_qs = layer in ("deploy", "qs_api", "qs_browser")
+        if (
+            chain_includes_qs
+            and RECON_GEN_DEMO_DATABASE_URL.name in container_env
+        ):
+            try:
+                qs_cfg_path = _write_qs_cfg_for_thin(
+                    cfg_path,
+                    container_env[RECON_GEN_DEMO_DATABASE_URL.name],
+                    run_dir,
+                )
+                if qs_cfg_path is not None:
+                    runner_variant_env[RECON_GEN_QS_CONFIG.name] = str(qs_cfg_path)
+                    print(
+                        f"runner: thin QS-side cfg written -> "
+                        f"{_rel_or_abs(qs_cfg_path)}"
+                    )
+            except Exception as exc:  # noqa: BLE001
+                print(
+                    f"runner: thin QS-side cfg gen failed "
+                    f"({type(exc).__name__}: {exc})",
+                    file=sys.stderr,
+                )
+
+        # DG.2 sweep + seed (idempotent + cheap).
+        if container_env:
+            sweep_rc = _sweep_test_prefixes(cfg_path, container_env, run_dir)
+            if sweep_rc != 0:
+                msg = f"runner: DG.2 sweep failed rc={sweep_rc}; aborting triage"
+                print(msg, file=sys.stderr)
+                _write_synthetic_cmd_json(
+                    run_dir,
+                    layer="sweep",
+                    exit_code=sweep_rc,
+                    duration_seconds=0.0,
+                    message=msg,
+                )
+                _teardown_container_best_effort(container_handle)
+                return EXIT_NEEDS_OPERATOR
+            print("runner: DG.2 sweep done")
+        l2_path_env = runner_variant_env.get(RECON_GEN_TEST_L2_INSTANCE.name)
+        if l2_path_env is not None and container_env:
+            seed_rc = _seed_thin_container(
+                cfg_path, Path(l2_path_env), container_env, run_dir,
+            )
+            if seed_rc != 0:
+                msg = f"runner: thin seed failed rc={seed_rc}; aborting triage"
+                print(msg, file=sys.stderr)
+                _write_synthetic_cmd_json(
+                    run_dir,
+                    layer="seed",
+                    exit_code=seed_rc,
+                    duration_seconds=0.0,
+                    message=msg,
+                )
+                _teardown_container_best_effort(container_handle)
+                return EXIT_NEEDS_OPERATOR
+            print("runner: thin seed done (schema apply + data apply + data refresh)")
+
+    # Deploy step — only when the chain includes deploy/qs_api/qs_browser.
+    if layer in ("deploy", "qs_api", "qs_browser"):
+        deploy_env_for_cmd = dict(runner_variant_env)
+        qs_cfg = deploy_env_for_cmd.get(RECON_GEN_QS_CONFIG.name)
+        if qs_cfg is not None:
+            deploy_env_for_cmd[RECON_GEN_CONFIG.name] = qs_cfg
+            deploy_env_for_cmd.pop(RECON_GEN_DEMO_DATABASE_URL.name, None)
+            deploy_env_for_cmd.pop(RECON_GEN_DEMO_DATABASE_URL_PG.name, None)
+            deploy_env_for_cmd.pop(RECON_GEN_DEMO_DATABASE_URL_OR.name, None)
+        built = _build_deploy_command(deploy_env_for_cmd, run_dir)
+        if built is None:
+            msg = (
+                "runner: cannot build deploy command — cfg or "
+                "RECON_GEN_TEST_L2_INSTANCE missing"
+            )
+            print(msg, file=sys.stderr)
+            _write_synthetic_cmd_json(
+                run_dir,
+                layer="deploy",
+                exit_code=EXIT_NEEDS_OPERATOR,
+                duration_seconds=0.0,
+                message=msg,
+            )
+            _teardown_container_best_effort(container_handle)
+            return EXIT_NEEDS_OPERATOR
+        deploy_cmd, _deploy_env_addl = built
+        deploy_layer_dir = run_dir / "deploy"
+        deploy_layer_dir.mkdir(parents=True, exist_ok=True)
+        print("runner: deploying QS resources (json apply --execute)")
+        env = {**os.environ, **deploy_env_for_cmd}
+        rc, _duration = _spawn_with_tee(
+            deploy_cmd,
+            cwd=REPO_ROOT,
+            env=env,
+            stdout_path=deploy_layer_dir / "stdout.log",
+            stderr_path=deploy_layer_dir / "stderr.log",
+        )
+        if rc != 0:
+            msg = f"runner: deploy failed rc={rc}; aborting triage"
+            print(msg, file=sys.stderr)
+            _write_synthetic_cmd_json(
+                run_dir,
+                layer="deploy",
+                exit_code=rc,
+                duration_seconds=0.0,
+                message=msg,
+            )
+            _teardown_container_best_effort(container_handle)
+            return EXIT_NEEDS_OPERATOR
+        print("runner: deploy done")
+
+    # Build the screen launch script (cmd.sh) + spawn.
+    log_path = triage_dir / "screen.log"
+    cmd_path = triage_dir / "cmd.sh"
+    pytest_cmd_parts = [
+        shlex.quote(str(_VENV_BIN / "pytest")),
+        shlex.quote(nodeid),
+        "-p", "no:xdist",
+        "-p", "no:rerunfailures",
+        "-p", "no:cacheprovider",
+        "--capture=no", "-s", "--pdb", "-v",
+    ]
+    pytest_cmd_str = " ".join(pytest_cmd_parts)
+    cmd_path.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -uo pipefail\n"
+        f"cd {shlex.quote(str(REPO_ROOT))}\n"
+        f"echo '=== recon-gen triage: {nodeid} (layer={layer}) ==='\n"
+        f"{pytest_cmd_str}\n"
+        "echo '=== pytest exited with rc='$? ' ==='\n"
+        # Keep the session alive after pytest exits so the operator can
+        # scroll back / re-invoke. WITHOUT this the screen session dies
+        # as soon as pytest returns and the operator loses scrollback.
+        "exec bash --norc -i\n"
+    )
+    cmd_path.chmod(0o755)
+
+    print(f"runner: spawning screen session {_TRIAGE_SCREEN_NAME!r}")
+    screen_argv = [
+        _SCREEN_BIN,
+        "-dmS", _TRIAGE_SCREEN_NAME,
+        "-L",
+        "-Logfile", str(log_path),
+        "bash", str(cmd_path),
+    ]
+    # Inject the runner-variant env into the screen subprocess so the
+    # pytest invocation INSIDE screen sees the same cfg / URL / ARN that
+    # cmd_up_to would have plumbed.
+    spawn_env = {**os.environ, **runner_variant_env}
+    spawn_result = subprocess.run(
+        screen_argv,
+        cwd=REPO_ROOT,
+        env=spawn_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if spawn_result.returncode != 0:
+        msg = (
+            f"runner: screen spawn failed rc={spawn_result.returncode}: "
+            f"{spawn_result.stderr.strip() or spawn_result.stdout.strip()}"
+        )
+        print(msg, file=sys.stderr)
+        _write_synthetic_cmd_json(
+            run_dir,
+            layer="triage",
+            exit_code=EXIT_NEEDS_OPERATOR,
+            duration_seconds=0.0,
+            message=msg,
+        )
+        _teardown_container_best_effort(container_handle)
+        return EXIT_NEEDS_OPERATOR
+
+    # Persist the triage state so triage-down can find the run + sweep
+    # targets without re-discovering them.
+    state: dict[str, Any] = {
+        "run_id": run_id,
+        "run_dir": str(run_dir),
+        "nodeid": nodeid,
+        "layer": layer,
+        "screen_name": _TRIAGE_SCREEN_NAME,
+        "cfg_path": str(cfg_path),
+        "deployed": layer in ("deploy", "qs_api", "qs_browser"),
+        # Container teardown: we don't persist a handle (not JSON-able);
+        # instead `triage-down --keep-container=False` invokes
+        # `_cmd_down_local` which sweeps the well-known container names.
+        "as_of_anchor": as_of_anchor,
+    }
+    _write_triage_state(state)
+    print(f"runner: triage state -> {_rel_or_abs(_TRIAGE_STATE_FILE)}")
+
+    print()
+    print("================ TRIAGE READY ================")
+    print(f"  Attach:    screen -x {_TRIAGE_SCREEN_NAME}")
+    print("  Detach:    Ctrl-A then d (inside the session)")
+    print(f"  Log file:  {_rel_or_abs(log_path)}")
+    print("  Teardown:  ./run_tests.sh triage-down --yes")
+    print()
+    print("  Inside the session:")
+    print("    - pytest is running with --pdb; the test will drop into pdb on")
+    print("      first failure or any breakpoint() call.")
+    print("    - `(Pdb)` prompt commands: p / pp / l / n / s / c / w / q")
+    print("    - When pytest exits, an interactive bash shell takes over so you")
+    print("      can poke the run_dir, re-invoke pytest, etc. The screen session")
+    print("      stays alive until triage-down.")
+    print("===============================================")
+
+    return EXIT_SUCCESS
+
+
+def _teardown_container_best_effort(handle: object | None) -> None:
+    """Best-effort container.stop() — duck-typed contract (testcontainers
+    Container, _DuckdbHandle, _PersistentContainerHandle all expose
+    .stop()). Swallows exceptions; teardown failures shouldn't mask the
+    primary error.
+    """
+    if handle is None:
+        return
+    try:
+        handle.stop()  # type: ignore[attr-defined]: duck-typed teardown contract
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def cmd_triage_down(args: argparse.Namespace) -> int:
+    """Tear down the active triage session: kill the screen session,
+    sweep tagged QS resources, optionally stop the local container.
+
+    Destructive — requires ``--yes`` (matches cmd_down / cmd_sweep).
+
+    Idempotent — when no state file exists, prints a friendly message
+    and returns EXIT_SUCCESS rather than EXIT_NEEDS_OPERATOR. Rationale:
+    triage-down should be safely runnable any time; "nothing to clean
+    -> error 2" would train the operator to ignore the exit code.
+    """
+    if not args.yes and not RECON_GEN_RUNNER_YES.get_or_none():
+        print(
+            "runner: 'triage-down' is destructive — pass --yes "
+            "(or set RECON_GEN_RUNNER_YES=1)",
+            file=sys.stderr,
+        )
+        return EXIT_NEEDS_OPERATOR
+
+    print(f"runner: triage-down — reading state from {_rel_or_abs(_TRIAGE_STATE_FILE)}")
+    try:
+        state = _read_triage_state()
+    except ValueError as exc:
+        print(f"runner: {exc}", file=sys.stderr)
+        return EXIT_NEEDS_OPERATOR
+    if state is None:
+        print(
+            f"runner: triage-down — no active triage state at "
+            f"{_rel_or_abs(_TRIAGE_STATE_FILE)}"
+        )
+        print("runner: nothing to do; exit 0")
+        return EXIT_SUCCESS
+
+    nodeid = state.get("nodeid", "<unknown>")
+    print(
+        f"runner: killing screen session {_TRIAGE_SCREEN_NAME!r} "
+        f"(was for nodeid={nodeid})"
+    )
+    if not _screen_kill(_TRIAGE_SCREEN_NAME):
+        print(
+            f"runner: failed to kill screen session {_TRIAGE_SCREEN_NAME!r} "
+            f"— continuing teardown",
+            file=sys.stderr,
+        )
+    else:
+        print("runner: screen session terminated")
+
+    # QS sweep.
+    if args.keep_qs:
+        print("runner: --keep-qs set; skipping QS resource sweep")
+    else:
+        deployed = bool(state.get("deployed", False))
+        if not deployed:
+            print(
+                "runner: triage did not reach the deploy layer; "
+                "skipping QS sweep"
+            )
+        else:
+            cfg_path_str = state.get("cfg_path")
+            if not isinstance(cfg_path_str, str):
+                print(
+                    "runner: state file missing cfg_path; cannot run QS sweep",
+                    file=sys.stderr,
+                )
+                _TRIAGE_STATE_FILE.unlink(missing_ok=True)
+                return EXIT_FAILURE
+            sweep_rc = _triage_qs_sweep(Path(cfg_path_str))
+            if sweep_rc != EXIT_SUCCESS:
+                print(
+                    f"runner: QS sweep failed rc={sweep_rc}; state file "
+                    f"removed but AWS may still hold resources",
+                    file=sys.stderr,
+                )
+                _TRIAGE_STATE_FILE.unlink(missing_ok=True)
+                return EXIT_FAILURE
+
+    # Container teardown.
+    if args.keep_container:
+        print("runner: --keep-container set; skipping local container stop")
+    else:
+        down_rc = _cmd_down_local()
+        if down_rc != EXIT_SUCCESS:
+            print(
+                f"runner: local container teardown failed rc={down_rc}",
+                file=sys.stderr,
+            )
+            _TRIAGE_STATE_FILE.unlink(missing_ok=True)
+            return EXIT_FAILURE
+
+    _TRIAGE_STATE_FILE.unlink(missing_ok=True)
+    print("runner: triage-down complete (state file removed)")
+    return EXIT_SUCCESS
+
+
+def _triage_qs_sweep(cfg_path: Path) -> int:
+    """Sweep Harness=e2e tagged QS resources via the same path as
+    ``cmd_sweep --yes``. Returns ``EXIT_SUCCESS`` / ``EXIT_NEEDS_OPERATOR``
+    matching that verb's surface.
+    """
+    from recon_gen.common.config import load_config
+    try:
+        import boto3
+    except ImportError as exc:
+        print(f"runner: triage-down sweep — boto3 missing: {exc}", file=sys.stderr)
+        return EXIT_NEEDS_OPERATOR
+    from recon_gen._dev.cleanup import sweep_qs_resources_by_tag
+
+    cfg = load_config(str(cfg_path))
+    client: Any = boto3.client(  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]: boto3-stubs huge overload union confuses pyright
+        "quicksight", region_name=cfg.aws.region,
+    )
+    print(
+        f"runner: sweeping QS resources tagged Harness=e2e in "
+        f"{cfg.aws.region}..."
+    )
+    try:
+        raw_counts = sweep_qs_resources_by_tag(
+            client, cfg.aws.account_id,
+            tag_key="Harness", tag_value="e2e",
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"runner: triage-down sweep — delete failed: {exc!r}", file=sys.stderr)
+        return EXIT_NEEDS_OPERATOR
+    counts = raw_counts
+    print(
+        f"runner: sweep deleted: {counts} (total={sum(counts.values())})"
+    )
+    return EXIT_SUCCESS
+
+
 _HELP_EPILOG = """\
 Auth (Y.2.gate.h+i):
   AWS profile + QS embed user are read from run/config.<dialect>.yaml's
@@ -4520,6 +5251,89 @@ def _build_parser() -> argparse.ArgumentParser:
     p_sweep = subs.add_parser("sweep", help="Clean orphan resources tagged ManagedBy:recon-gen")
     p_sweep.add_argument("--yes", action="store_true", help="confirm destructive op")
     p_sweep.set_defaults(func=cmd_sweep)
+
+    p_triage = subs.add_parser(
+        "triage",
+        help=(
+            "Spawn a detached GNU screen session running a single test under "
+            "PDB control. Operator attaches via `screen -x recon-gen-triage` "
+            "to drive `pdb` interactively. Intended for stuck-test diagnosis; "
+            "use `triage-down` to clean up when finished."
+        ),
+    )
+    p_triage.add_argument(
+        "nodeid",
+        metavar="<test_nodeid>",
+        help=(
+            "Pytest nodeid (e.g. tests/e2e/qs_browser/test_inv_anomaly_qs.py::"
+            "test_renders_with_filter[anomaly_high]). Layer is inferred from "
+            "the path prefix; see --help for the rules."
+        ),
+    )
+    p_triage.add_argument(
+        "--layer",
+        choices=LAYERS,
+        default=None,
+        metavar="<layer>",
+        help=(
+            "Override inferred layer. Use when nodeid resolves to an "
+            "ambiguous path (e.g. tests/e2e/test_dashboard_driver.py)."
+        ),
+    )
+    p_triage.add_argument(
+        "--allow-dirty-deploy",
+        action="store_true",
+        help=(
+            "Bypass the tracked-changes refusal for layers >= deploy "
+            "(matches up_to's gate; required for triaging a code change "
+            "you haven't yet committed)."
+        ),
+    )
+    p_triage.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Kill any existing `recon-gen-triage` screen session before "
+            "spawning a fresh one (idempotent re-launch). Without --force, "
+            "an existing session aborts the verb with EXIT_NEEDS_OPERATOR "
+            "(2) so the operator can decide whether to attach or replace."
+        ),
+    )
+    p_triage.set_defaults(func=cmd_triage)
+
+    p_triage_down = subs.add_parser(
+        "triage-down",
+        help=(
+            "Tear down the active triage session: kill the screen session, "
+            "sweep tagged QS resources, optionally stop the local container."
+        ),
+    )
+    p_triage_down.add_argument(
+        "--yes",
+        action="store_true",
+        help=(
+            "Confirm destructive teardown (required; matches `down` + `sweep` "
+            "convention). Also honored via RECON_GEN_RUNNER_YES=1."
+        ),
+    )
+    p_triage_down.add_argument(
+        "--keep-container",
+        action="store_true",
+        help=(
+            "Skip the `docker stop` of the local PG/Oracle container; useful "
+            "when you want to re-launch triage against the same seeded data. "
+            "QS resources still get swept (they're a per-deploy concern)."
+        ),
+    )
+    p_triage_down.add_argument(
+        "--keep-qs",
+        action="store_true",
+        help=(
+            "Skip the QS sweep. Useful when triage stayed at db/app2 layer "
+            "and there's nothing in AWS to clean."
+        ),
+    )
+    p_triage_down.set_defaults(func=cmd_triage_down)
 
     p_pyright = subs.add_parser(
         "pyright",
