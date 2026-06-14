@@ -3449,46 +3449,33 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     # per cell). Deploy/qs_api/qs_browser layers need both; pytest-only
     # layers (unit/db/app2) tolerate absence (their pytest fixtures
     # discover cfg themselves via load_config's precedence chain).
+    #
+    # Issue #1 fix: delegate to ``_setup_thin_chain_environment`` so the
+    # env-shape is built in ONE place (helper is also called by
+    # ``cmd_triage``). Knobs preserve cmd_up_to's byte-identical
+    # behavior:
+    #
+    # - ``warn_on_missing_l2=True`` — print the stderr breadcrumb when
+    #   ``cfg.db.default_l2_instance`` points at a missing file
+    #   (deploy/qs_* layers downstream dispatch-skip).
+    # - ``always_derive_qs_user_arn=True`` — derive RECON_E2E_USER_ARN
+    #   regardless of the entry layer (the chain may transit through
+    #   qs_browser even when args.layer is unit).
     cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
-    runner_variant_env: dict[str, str] = {
-        RECON_GEN_AS_OF_ANCHOR.name: as_of_anchor,
-    }
     if cfg_path is not None:
-        runner_variant_env[RECON_GEN_CONFIG.name] = str(cfg_path)
-        try:
-            from recon_gen.common.config import load_config  # noqa: PLC0415
-            peek_cfg = load_config(str(cfg_path))
-            l2_default = peek_cfg.db.default_l2_instance
-            if l2_default:
-                l2_path = REPO_ROOT / l2_default if not Path(l2_default).is_absolute() else Path(l2_default)
-                if l2_path.exists():
-                    runner_variant_env[RECON_GEN_TEST_L2_INSTANCE.name] = str(l2_path)
-                else:
-                    print(
-                        f"runner: cfg.db.default_l2_instance={l2_default!r} not found on disk; "
-                        f"deploy/qs_* layers will dispatch-skip",
-                        file=sys.stderr,
-                    )
-            # CB.17.d — inject AWS_PROFILE so deploy/qs_api/qs_browser
-            # subprocesses see the long-lived IAM-user creds (avoids the
-            # SSO default-profile path that LoginRefreshRequired'd on
-            # an earlier thin run). Mirrors _run_one_variant's h+i.0 path.
-            # DE.2 commit A — cfg.auth is now always-present (default-factory).
-            if peek_cfg.auth.aws.profile is not None:
-                runner_variant_env["AWS_PROFILE"] = peek_cfg.auth.aws.profile
-            # Y.2.gate.h.1 — derive RECON_E2E_USER_ARN via STS+ListUsers
-            # so the qs_browser layer's embed URL minting works without
-            # the operator pre-exporting the ARN. Priority: explicit
-            # cfg.auth.aws.quicksight_user_arn (CI path) → derived from
-            # aws_profile (local path) → leave unset (probe should
-            # already have flagged this).
-            if RECON_E2E_USER_ARN.name not in runner_variant_env:
-                arn = _resolve_qs_user_arn(peek_cfg)
-                if arn is not None:
-                    runner_variant_env[RECON_E2E_USER_ARN.name] = arn
-        except Exception as exc:  # noqa: BLE001 — peek failure shouldn't gate the run
-            print(f"runner: cfg peek for L2 discovery failed ({exc!r}); continuing")
+        runner_variant_env = _setup_thin_chain_environment(
+            cfg_path,
+            layer=args.layer,
+            as_of_anchor=as_of_anchor,
+            warn_on_missing_l2=True,
+            always_derive_qs_user_arn=True,
+        )
     else:
+        # Helper requires cfg_path; without one we still need the
+        # as_of anchor exported to every layer subprocess.
+        runner_variant_env = {
+            RECON_GEN_AS_OF_ANCHOR.name: as_of_anchor,
+        }
         print(
             "runner: no cfg found via _DEFAULT_RUNNER_CFG_CANDIDATES; "
             "deploy/qs_* layers will dispatch-skip",
@@ -4645,6 +4632,8 @@ def _setup_thin_chain_environment(
     *,
     layer: str,
     as_of_anchor: str,
+    warn_on_missing_l2: bool = False,
+    always_derive_qs_user_arn: bool = False,
 ) -> dict[str, str]:
     """Build the runner_variant_env dict for the thin chain — mirrors
     the lines 3434-3470 block in ``cmd_up_to``.
@@ -4657,6 +4646,19 @@ def _setup_thin_chain_environment(
     Used by both ``cmd_up_to`` (via the in-line block) and ``cmd_triage``
     (which calls this helper directly). Single source of truth for the
     env-shape so the two verbs can't drift apart.
+
+    Per-caller knobs (Issue #1):
+
+    - ``warn_on_missing_l2``: when True, prints a stderr warning when
+      ``cfg.db.default_l2_instance`` points at a missing file. cmd_up_to
+      surfaces this (deploy/qs_* layers dispatch-skip downstream);
+      cmd_triage silently elides the L2 env entry (its own dispatch
+      gates handle the missing-L2 path).
+    - ``always_derive_qs_user_arn``: when True, derives RECON_E2E_USER_ARN
+      regardless of layer (cmd_up_to's behavior — chain may include
+      qs_browser even when the entry layer is unit). When False (default),
+      only derives for AWS_TOUCHING_LAYERS layers (cmd_triage's single-
+      layer scope).
     """
     runner_variant_env: dict[str, str] = {
         RECON_GEN_AS_OF_ANCHOR.name: as_of_anchor,
@@ -4674,16 +4676,24 @@ def _setup_thin_chain_environment(
             )
             if l2_path.exists():
                 runner_variant_env[RECON_GEN_TEST_L2_INSTANCE.name] = str(l2_path)
+            elif warn_on_missing_l2:
+                print(
+                    f"runner: cfg.db.default_l2_instance={l2_default!r} not found on disk; "
+                    f"deploy/qs_* layers will dispatch-skip",
+                    file=sys.stderr,
+                )
         if peek_cfg.auth.aws.profile is not None:
             runner_variant_env["AWS_PROFILE"] = peek_cfg.auth.aws.profile
-        # Only derive the QS user ARN when the layer needs it (qs_browser).
-        # Skipping for non-AWS layers avoids spurious STS calls during
-        # local unit/db triage.
-        if layer in AWS_TOUCHING_LAYERS and RECON_E2E_USER_ARN.name not in runner_variant_env:
+        # Default: only derive the QS user ARN when the entry layer
+        # itself needs it (qs_browser) — cmd_triage's scope. cmd_up_to
+        # passes always_derive_qs_user_arn=True because the chain may
+        # transit through qs_browser even when the entry layer is unit.
+        should_derive = always_derive_qs_user_arn or layer in AWS_TOUCHING_LAYERS
+        if should_derive and RECON_E2E_USER_ARN.name not in runner_variant_env:
             arn = _resolve_qs_user_arn(peek_cfg)
             if arn is not None:
                 runner_variant_env[RECON_E2E_USER_ARN.name] = arn
-    except Exception as exc:  # noqa: BLE001 — peek failure shouldn't gate triage
+    except Exception as exc:  # noqa: BLE001 — peek failure shouldn't gate the run
         print(f"runner: cfg peek for L2 discovery failed ({exc!r}); continuing")
     return runner_variant_env
 
