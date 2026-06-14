@@ -241,6 +241,21 @@ dev = [
     # NOTE: mkdocs + mkdocs-* + graphviz moved to [prod] post-BS.6.
     # `docs apply` is a production CLI verb so users following
     # `pip install recon-gen[prod]` get a working docs build.
+    # DC.2 — runner-internal ACME + Cloudflare DNS-01 coordinator.
+    # Lives under `src/recon_gen/_dev/tls/` (excluded from the
+    # published wheel). The `acme` lib is the IETF Let's Encrypt
+    # maintainer-stewarded Python client; `cryptography` for keypair
+    # + CSR + cert parsing; `dnspython` for TXT-propagation polling
+    # against 1.1.1.1; `requests` for the Cloudflare REST surface +
+    # the `cloudflare_trace` public-IP discovery. All four are
+    # transitive deps already of one prod entry (boto3 pulls in
+    # cryptography + requests via botocore[crt], acme has dnspython
+    # as a hard dep) but pinning them here makes `uv sync --extra
+    # dev` self-sufficient without relying on transitive bumps.
+    "acme>=2.10.0",
+    "cryptography>=41.0",
+    "dnspython>=2.4",
+    "requests>=2.31",
 ]
 e2e = [
     "pytest>=7.0",
