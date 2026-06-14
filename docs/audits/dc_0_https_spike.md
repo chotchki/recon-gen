@@ -51,41 +51,53 @@ The mkcert / Caddy / nginx / AWS ACM options remain on the table for completenes
 | Cert renewal automation | manual | auto (background) | cron + reload | **auto (every `./run_tests.sh up`)** | auto |
 | Cloudflare API dep | NO | NO | NO | **YES (one scoped token)** | NO |
 | Operator bootstrap | 2 (install, mint) | 1 (Caddyfile) | 5+ | **3 one-time (token, 2 DNS A records, paste token env)** | N/A bare host |
-| Codebase impact | ~80 LoC wrapper | ~120 LoC + Caddyfile | ~200 LoC + certbot | **~400 LoC + `acme` + `cryptography`** | ~150 LoC + boto3 |
-| Claude end-to-end driveable | YES | YES | NO (certbot interactive) | **YES (idempotent CLI verb)** | NO (AWS console) |
+| Codebase impact | ~80 LoC wrapper | ~120 LoC + Caddyfile | ~200 LoC + certbot | **~350 LoC under `_dev/tls/` + `acme` + `cryptography` (both in the `[dev]` extra, NOT shipped in the published wheel)** | ~150 LoC + boto3 |
+| Claude end-to-end driveable | YES | YES | NO (certbot interactive) | **YES (runner-internal helper)** | NO (AWS console) |
 | Shipping cert to downstream `recon-gen.exe` users | N/A | N/A | N/A | **Explicitly out-of-scope (user supplies cert via `cfg.app2.tls.*`)** | N/A |
 
 ## Recommendation — locked
 
-**Build a `recon-gen tls` verb that handles ACME DNS-01 against Let's Encrypt via the Cloudflare API.** Scope it to our test/local-dev/CI use only — `localdev.recon-gen.hotchkiss.io` and `ci.recon-gen.hotchkiss.io`. Downstream `recon-gen.exe` end-users continue to supply their own cert + key paths via `cfg.app2.tls.{cert_path,key_path}` (no change to the cfg shape, no built-in coordinator for them).
+**Build the ACME DNS-01 flow as runner-internal machinery under `src/recon_gen/_dev/tls/` — no user-facing CLI verb.** Scope it to our test/local-dev/CI use only — `localdev.recon-gen.hotchkiss.io` and `ci.recon-gen.hotchkiss.io`. Downstream `recon-gen.exe` end-users continue to supply their own cert + key paths via `cfg.app2.tls.{cert_path,key_path}` and own their own renewal flow (certbot, acme.sh, whatever fits their environment).
 
-This matches the operator's DX expectations: same flow local + CI; no per-machine CA install; real Let's Encrypt certs; auto-renew; one Cloudflare API token in env.
+This matches the operator's DX expectations: same flow local + CI; no per-machine CA install; real Let's Encrypt certs; auto-renew on `./run_tests.sh up`; one Cloudflare API token in env. Operators of the published wheel see nothing new — the `_dev/` namespace is excluded from the build.
 
-## Implementation plan (revised)
+## Implementation plan (revised, no user-facing CLI)
 
-**DC.2 — `recon-gen tls` verb + auto-renew on `up`**
+The cert provisioning is internal test/dev/CI machinery. Downstream `recon-gen.exe` operators see no new commands — they keep using `cfg.app2.tls.{cert_path,key_path}` with paths they manage themselves. Our cert flow lives entirely under `src/recon_gen/_dev/` (the dev-only namespace, excluded from the published wheel — verified via `pyproject.toml::tool.hatch.build.targets.wheel.packages`).
 
-1. Add `src/recon_gen/cli/tls.py` with three subcommands:
-   - `recon-gen tls ensure --host <fqdn>` — idempotent. Loads cert from `cfg.app2.tls.cert_path` if present; if absent or `not_after < now + 30d`, runs the ACME DNS-01 flow against Cloudflare + writes new PEMs to `cfg.app2.tls.{cert_path,key_path}`. Logs "cert valid until <date>" or "renewed via ACME (lasted Nd)".
-   - `recon-gen tls status` — prints cert SAN list + `not_after` + days-remaining. Exits non-zero when `<14d`.
-   - `recon-gen tls revoke --host <fqdn>` — calls Let's Encrypt's revoke endpoint for the cert; used during cleanup or when a key is suspected compromised.
-2. ACME state machine via the `acme` library (IETF maintainer, `pip install acme`). Account key stored at `run/tls/account.key` (gitignored — already covered by `run/` rule). Account email read from `cfg.audit.signing.signer_name`'s email (one identity for the whole tool) or `cfg.app2.acme.account_email` if we want to split (default to single field).
-3. Cloudflare API client — direct `requests` calls against `api.cloudflare.com/client/v4/zones/{zone_id}/dns_records`. Token read from env `RECON_GEN_CLOUDFLARE_TOKEN` (per the no-credential-friction rule, also accept a `cfg.cloudflare.token_env` indirection so the env var name lives in cfg). Zone ID derived once from `hotchkiss.io` lookup; cached at `run/tls/zone-id.txt`.
-4. DNS-01 flow:
+**DC.2 — runner-internal ACME flow**
+
+1. Add `src/recon_gen/_dev/tls/ensure.py` with a single function:
+   ```python
+   def ensure_dev_cert(host: str, cert_path: Path, key_path: Path) -> None:
+       """Idempotent: if cert at cert_path is valid for ≥30 days, no-op.
+       Else run ACME DNS-01 against Let's Encrypt via the Cloudflare API
+       and write fresh PEMs to cert_path/key_path.
+
+       Caller responsible for choosing host (`localdev.recon-gen.hotchkiss.io`
+       on the operator's Mac, `ci.recon-gen.hotchkiss.io` on the WSL2 CI
+       runner — detected from environment).
+       """
+   ```
+   No CLI verb. No subcommand. Purely a helper the runner calls.
+2. ACME state machine via the `acme` library (IETF maintainer, `pip install acme`) under a new `[dev]` extra so the downstream wheel stays minimal. Account key stored at `~/.local/share/recon-gen/tls/account.key` (per-machine, survives reclones; XDG path). Account email read from `cfg.audit.signing.signer_name` — one identity for the whole tool.
+3. Cloudflare API client — direct `requests` calls against `api.cloudflare.com/client/v4/zones/{zone_id}/dns_records`. Token read from env `RECON_GEN_CLOUDFLARE_TOKEN` (per `[[feedback_no_credential_friction]]`). Zone ID auto-discovered from `hotchkiss.io` lookup on first run; cached at `~/.local/share/recon-gen/tls/zone-id.txt`.
+4. DNS-01 flow inside `ensure_dev_cert`:
    1. ACME `new-order` for `<fqdn>`.
    2. Get authorization → DNS-01 challenge token.
    3. POST `_acme-challenge.<fqdn>` TXT record via Cloudflare API.
-   4. Poll via `hickory`-style DNS resolver (use `dnspython` since we're Python) against `1.1.1.1` until TXT propagates (typical: <15s).
+   4. Poll via `dnspython` against `1.1.1.1` until TXT propagates (typical: <15s).
    5. Tell ACME the challenge is ready; poll order until VALID.
    6. Generate keypair via `cryptography`, build CSR, finalize order, download PEM chain.
-   7. Write `cert.pem` + `key.pem` to `cfg.app2.tls.{cert_path,key_path}`.
+   7. Write `cert.pem` + `key.pem` to the caller-supplied paths.
    8. DELETE the TXT record (cleanup; idempotent on retry).
-5. Wire `recon-gen tls ensure --host <fqdn>` into `src/recon_gen/_dev/runner.py`'s chain prelude: when `cfg.app2.tls.cert_path` is configured AND the file is missing or `<30d`, run the ensure. Skip when `cfg.app2.tls.*` is unset (downstream operators' tool runs).
-6. Add `tests/unit/test_cli_tls.py` covering: account-key generation, cert-expiry computation, DNS-01 challenge response shape, missing-token error path. Mock `requests` for Cloudflare; mock the ACME client; real PEM parsing via `cryptography`.
+   9. File-lock `~/.local/share/recon-gen/tls/renew.lock` (10s critical section) so two concurrent runner invocations don't double-renew.
+5. Wire `ensure_dev_cert` into `cmd_up_to`'s prelude: when `cfg.app2.tls.cert_path` is configured AND the file is missing or `<30d`, call it. Skip when `cfg.app2.tls.*` is unset (the publication path — no managed cert involved). The host is `ci.recon-gen.hotchkiss.io` when `os.environ.get("CI")` is truthy, else `localdev.recon-gen.hotchkiss.io`.
+6. Add `tests/unit/test_dev_tls_ensure.py` covering: account-key generation, cert-expiry computation, DNS-01 challenge response shape, missing-token error path, idempotent no-op when cert is fresh. Mock `requests` for Cloudflare; mock the ACME client; real PEM parsing via `cryptography`.
 
 **DC.3 — runner integration + phase exit**
 
-1. The runner's `cmd_up` (`up local|aws|all`) gets a new prereq step: if `cfg.app2.tls.cert_path` is set and any of `localdev.recon-gen.hotchkiss.io` / `ci.recon-gen.hotchkiss.io` need renewal, run `recon-gen tls ensure --host <fqdn>`. Failure ⇒ `EXIT_NEEDS_OPERATOR` with the actionable message (token missing, Cloudflare 4xx, ACME rate-limit).
+1. The runner's `cmd_up` already pre-flights local containers. Extend it: if `cfg.app2.tls.cert_path` is configured, call `ensure_dev_cert(...)` before any layer dispatches. Failure ⇒ `EXIT_NEEDS_OPERATOR` with the actionable message (token missing, Cloudflare 4xx, ACME rate-limit).
 2. Document the **one-time operator setup** in `docs/reference/local-dev.md`:
    - Cloudflare API token creation (Zone:DNS:Edit, restricted to the `hotchkiss.io` zone) — paste step-by-step.
    - DNS records: `localdev.recon-gen.hotchkiss.io A 127.0.0.1` and `ci.recon-gen.hotchkiss.io A 127.0.0.1` (one Cloudflare dashboard click each).
@@ -100,8 +112,8 @@ This matches the operator's DX expectations: same flow local + CI; no per-machin
 2. **Account email for the ACME account** — single email shared with `cfg.audit.signing.signer_name`'s identity, or a separate `cfg.app2.acme.account_email`? Default: shared (one human identity for the whole tool).
 3. **DNS-01 vs HTTP-01** — DNS-01 (this spike) works against loopback A records; HTTP-01 would require port 80 on a public-routable host. Default: DNS-01.
 4. **Cert renewal at-rest threshold** — 30 days before expiry triggers renewal. Default. Drop to 14 if you want to amortize ACME calls; bump to 45 if you want more buffer against extended outages.
-5. **Single tool vs separate `recon-gen` binary vs library import** — the `recon-gen tls` verb compiles into the same binary as `recon-gen studio` / `recon-gen dashboards`. The DC.3 step that runs ensure-on-`up` is `subprocess.run([sys.executable, "-m", "recon_gen", "tls", "ensure", ...])` for clean process isolation. Default.
-6. **Account-key location** — `run/tls/account.key` (per-clone, regenerated on a fresh checkout) or `~/.local/share/recon-gen/tls/account.key` (per-machine, survives reclones)? Default: per-machine in XDG — saves the operator from having to bootstrap a new ACME account on every fresh clone.
+5. **No user-facing CLI verb** — locked by operator 2026-06-14. The ACME flow lives under `src/recon_gen/_dev/tls/` (the dev-only namespace), called inline by the runner. Downstream `recon-gen.exe` operators see no new commands; they supply their own cert+key paths via `cfg.app2.tls.*` and own the renewal externally (certbot, acme.sh, manual, whatever).
+6. **Account-key location** — `~/.local/share/recon-gen/tls/account.key` (per-machine, survives reclones, XDG path). Locked default.
 
 ## Out of scope (explicit)
 
