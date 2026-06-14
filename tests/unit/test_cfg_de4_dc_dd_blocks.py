@@ -52,17 +52,23 @@ def _write(tmp_path: Path, content: str) -> Path:
 
 
 def test_app2_tls_block_loads_when_present(tmp_path: Path) -> None:
-    """``app2.tls:`` block populates cfg.app2_tls + cfg.app2.tls view."""
+    """``app2.tls:`` block populates cfg.app2_tls + cfg.app2.tls view.
+
+    DC.3 — `account_email` is required, `env` defaults to "dev".
+    """
     cfg_text = _MIN_YAML + """\
 app2:
   tls:
     cert_path: /etc/ssl/cert.pem
     key_path: /etc/ssl/key.pem
+    account_email: ops@example.com
 """
     cfg = load_config(_write(tmp_path, cfg_text))
     assert isinstance(cfg.app2.tls, App2TlsConfig)
     assert cfg.app2.tls.cert_path == "/etc/ssl/cert.pem"
     assert cfg.app2.tls.key_path == "/etc/ssl/key.pem"
+    assert cfg.app2.tls.account_email == "ops@example.com"
+    assert cfg.app2.tls.env == "dev"
 
 
 def test_app2_tls_missing_cert_path_raises(tmp_path: Path) -> None:
@@ -71,6 +77,7 @@ def test_app2_tls_missing_cert_path_raises(tmp_path: Path) -> None:
 app2:
   tls:
     key_path: /etc/ssl/key.pem
+    account_email: ops@example.com
 """
     with pytest.raises(ValueError, match="app2.tls.cert_path"):
         load_config(_write(tmp_path, cfg_text))

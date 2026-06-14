@@ -219,7 +219,61 @@ auth:
 
 
 def test_app2_tls_block_loads_when_present(tmp_path: Path) -> None:
-    """Phase DC's ``app2.tls.*`` block loads when present."""
+    """Phase DC's ``app2.tls.*`` block loads when present.
+
+    Defaults: ``env="dev"`` when not specified; ``account_email`` is
+    required (raises MissingFieldError if absent — see test below).
+    """
+    cfg_text = _MIN_CFG + """\
+app2:
+  tls:
+    cert_path: /etc/ssl/cert.pem
+    key_path: /etc/ssl/key.pem
+    account_email: ops@example.com
+"""
+    p = _write(tmp_path, "cfg.yaml", cfg_text)
+    cfg = load_config(p)
+    assert cfg.app2.tls is not None
+    assert cfg.app2.tls.cert_path == "/etc/ssl/cert.pem"
+    assert cfg.app2.tls.key_path == "/etc/ssl/key.pem"
+    assert cfg.app2.tls.account_email == "ops@example.com"
+    assert cfg.app2.tls.env == "dev"  # default
+
+
+def test_app2_tls_env_ci_loads(tmp_path: Path) -> None:
+    """``app2.tls.env: ci`` overrides the default."""
+    cfg_text = _MIN_CFG + """\
+app2:
+  tls:
+    cert_path: /etc/ssl/cert.pem
+    key_path: /etc/ssl/key.pem
+    account_email: ops@example.com
+    env: ci
+"""
+    p = _write(tmp_path, "cfg.yaml", cfg_text)
+    cfg = load_config(p)
+    assert cfg.app2.tls is not None
+    assert cfg.app2.tls.env == "ci"
+
+
+def test_app2_tls_invalid_env_raises(tmp_path: Path) -> None:
+    """Unknown ``env`` value raises ``CfgError`` via ``__post_init__``."""
+    from recon_gen.common.config import CfgError
+    cfg_text = _MIN_CFG + """\
+app2:
+  tls:
+    cert_path: /etc/ssl/cert.pem
+    key_path: /etc/ssl/key.pem
+    account_email: ops@example.com
+    env: prod
+"""
+    p = _write(tmp_path, "cfg.yaml", cfg_text)
+    with pytest.raises(CfgError, match="app2.tls.env"):
+        load_config(p)
+
+
+def test_app2_tls_missing_account_email_raises(tmp_path: Path) -> None:
+    """``account_email`` is required when ``app2.tls:`` block is set."""
     cfg_text = _MIN_CFG + """\
 app2:
   tls:
@@ -227,9 +281,8 @@ app2:
     key_path: /etc/ssl/key.pem
 """
     p = _write(tmp_path, "cfg.yaml", cfg_text)
-    cfg = load_config(p)
-    assert cfg.app2.tls is not None
-    assert cfg.app2.tls.cert_path == "/etc/ssl/cert.pem"
+    with pytest.raises(MissingFieldError, match="app2.tls.account_email"):
+        load_config(p)
 
 
 def test_audit_signing_block_loads_when_present(tmp_path: Path) -> None:

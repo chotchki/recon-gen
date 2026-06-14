@@ -246,9 +246,25 @@ class SessionConfig:
 
 @dataclass(frozen=True)
 class App2TlsConfig:
-    """``app2.tls:`` block — Phase DC's TLS termination paths."""
+    """``app2.tls:`` block — Phase DC's TLS termination paths.
+
+    ``account_email`` is the ACME registration identity (Let's Encrypt
+    requires one per account); ``env`` selects which managed-DNS tuple
+    the runner's ``ensure_dev_env`` reconciles (``dev`` = operator's Mac,
+    ``ci`` = WSL2 CI runner). Both fields fire only when the runner
+    auto-mints certs via the DC.2 coordinator; downstream consumers
+    supplying their own pre-minted PEMs only need ``cert_path`` + ``key_path``.
+    """
     cert_path: str
     key_path: str
+    account_email: str
+    env: str = "dev"
+
+    def __post_init__(self) -> None:
+        if self.env not in ("dev", "ci"):
+            raise CfgError(
+                f"app2.tls.env must be 'dev' or 'ci' (got {self.env!r})"
+            )
 
 
 @dataclass(frozen=True)
@@ -795,7 +811,7 @@ def _build_app2_nested(raw: dict[str, Any]) -> App2Config:  # typing-smell: igno
     tls: App2TlsConfig | None = None
     if isinstance(tls_block_raw, dict):
         tls_block = cast(dict[str, Any], tls_block_raw)
-        for key in ("cert_path", "key_path"):
+        for key in ("cert_path", "key_path", "account_email"):
             if key not in tls_block:
                 raise MissingFieldError(
                     f"app2.tls.{key} is required when app2.tls block present"
@@ -803,6 +819,8 @@ def _build_app2_nested(raw: dict[str, Any]) -> App2Config:  # typing-smell: igno
         tls = App2TlsConfig(
             cert_path=str(tls_block["cert_path"]),
             key_path=str(tls_block["key_path"]),
+            account_email=str(tls_block["account_email"]),
+            env=str(tls_block.get("env", "dev")),
         )
     return App2Config(
         etl_hook=block.get("etl_hook"),
