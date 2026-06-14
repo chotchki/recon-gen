@@ -594,6 +594,55 @@ class LayerResult:
 _VENV_BIN: Final = REPO_ROOT / ".venv" / "bin"
 
 
+def _build_deploy_command(
+    variant_env: dict[str, str],
+    run_dir: Path,
+) -> tuple[list[str], dict[str, str]] | None:
+    """Return ``(cmd, env)`` for ``recon-gen json apply --execute``.
+
+    Extracted from ``_layer_command``'s deploy arm so the triage verb
+    (`cmd_triage`) can spawn the same deploy step without going through
+    the pytest-wrapped dispatch path. Same body, just lifted to module
+    level.
+
+    Cfg-path resolution (in order):
+      1. ``variant_env[RECON_GEN_QS_CONFIG]`` — the hotchkiss.io-routed cfg
+         (CB.11.b — QS in us-east-1 can't reach 127.0.0.1).
+      2. ``variant_env[RECON_GEN_CONFIG]`` — the operator-authored cfg.
+      3. Fall back to ``_resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)``
+         so the default variant still finds ``run/config.<dialect>.yaml``.
+
+    L2 path (``RECON_GEN_TEST_L2_INSTANCE``) must be present in
+    ``variant_env`` (the caller — ``cmd_up_to`` or ``cmd_triage`` —
+    derives it from ``cfg.db.default_l2_instance``); without it we
+    genuinely can't deploy and return ``None``.
+
+    The returned ``env`` is empty (no env additions beyond what the
+    caller already builds); kept in the tuple shape for parity with
+    ``_layer_command``'s contract so callers don't special-case the
+    deploy arm vs the pytest arms.
+    """
+    cfg_str = variant_env.get(RECON_GEN_QS_CONFIG.name) or variant_env.get(
+        RECON_GEN_CONFIG.name,
+    )
+    if cfg_str is None:
+        fallback_cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
+        cfg_str = str(fallback_cfg_path) if fallback_cfg_path is not None else None
+    l2_str = variant_env.get(RECON_GEN_TEST_L2_INSTANCE.name)
+    if cfg_str is None or l2_str is None:
+        return None
+    out_dir = run_dir / "deploy" / "out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        str(_VENV_BIN / "recon-gen"), "json", "apply",
+        "--execute",
+        "-c", cfg_str,
+        "--l2", l2_str,
+        "-o", str(out_dir),
+    ]
+    return (cmd, {})
+
+
 def _layer_command(
     layer: str,
     run_dir: Path,
@@ -790,47 +839,15 @@ def _layer_command(
         return (cmd, {**env_addl, RECON_GEN_E2E.name: "1"})
     if layer == "deploy":
         # Y.2.gate.c.5.deploy — `recon-gen json apply --execute` against
-        # the cfg + L2 the runner discovered. Two cfg-path sources, in order:
-        # (1) `variant_env[RECON_GEN_CONFIG]` — `_run_one_variant` only injects
-        #     this for non-default variants (local-pg / local-oracle /
-        #     local-duckdb, where the per-variant cfg matches the variant's
-        #     dialect-flavored DB). For the default variant `_run_one_variant`
-        #     doesn't inject it because the variant's cfg-discovery is
-        #     subprocess-side via `tests/e2e/conftest.py` etc.
-        # (2) Fall back to `_resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)`
-        #     so the default variant still finds run/config.{postgres,oracle}.yaml.
-        # L2 path (`RECON_GEN_TEST_L2_INSTANCE`) is always set by `_run_one_variant`
-        # when cfg.db.default_l2_instance is configured (h.6); when it isn't we
-        # genuinely can't deploy and fall through to the dispatch-skip path
-        # with an actionable error.
-        ve = variant_env or {}
-        # CB.11.b — prefer the QS-side cfg (hotchkiss.io endpoint +
-        # qs_disable_pg_ssl) over the local cfg for the deploy layer.
-        # The QS data source created here must be reachable from QS
-        # in us-east-1; the local cfg's 127.0.0.1 is not.
-        cfg_str = ve.get(RECON_GEN_QS_CONFIG.name) or ve.get(RECON_GEN_CONFIG.name)
-        if cfg_str is None:
-            fallback_cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
-            cfg_str = str(fallback_cfg_path) if fallback_cfg_path is not None else None
-        l2_str = ve.get(RECON_GEN_TEST_L2_INSTANCE.name)
-        if cfg_str is None or l2_str is None:
-            # Caller's dispatch_layer will print `dispatch-skip` — operator
-            # gets a clear "set cfg.db.default_l2_instance:" pointer because
-            # without both we genuinely cannot construct the command.
+        # the cfg + L2 the runner discovered. Body extracted to the
+        # module-level ``_build_deploy_command`` so ``cmd_triage`` can
+        # reuse it without going through the pytest-wrapped dispatch
+        # path. See that helper's docstring for the cfg-path resolution
+        # rules (QS cfg precedence + fallback to ``_resolve_seed_config``).
+        built = _build_deploy_command(variant_env or {}, run_dir)
+        if built is None:
             return None
-        out_dir = run_dir / "deploy" / "out"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        cmd = [
-            str(_VENV_BIN / "recon-gen"), "json", "apply",
-            "--execute",
-            "-c", cfg_str,
-            "--l2", l2_str,
-            "-o", str(out_dir),
-        ]
-        # Note: `--allow-dirty-deploy` is a runner-only flag (cmd_up_to
-        # gates the chain on it); the inner `recon-gen json apply`
-        # CLI doesn't have a tracked-changes refusal of its own, so no
-        # pass-through is needed.
+        cmd, _extra_env = built
         return (cmd, env_addl)
     if layer == "qs_api":
         # Y.2.gate.c.5.api — boto3-only e2e tests verifying deployed QS
