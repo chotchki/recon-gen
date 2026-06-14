@@ -4456,7 +4456,34 @@ def cmd_sweep(args: argparse.Namespace) -> int:
 
 _TRIAGE_SCREEN_NAME: Final = "recon-gen-triage"
 _TRIAGE_STATE_FILE: Final = RUNS_DIR / ".triage-state.json"
-_SCREEN_BIN: Final = "/usr/bin/screen"
+
+# Issue #9 fix: resolve `screen` via PATH instead of hardcoding
+# `/usr/bin/screen` (legacy macOS 4.00.03). chotchki's box has
+# `brew install screen` 5.0.1 at `/opt/homebrew/bin/screen`; PATH
+# resolution lets brew's newer build win without per-host overrides.
+_screen_bin_cache: str | None = None
+
+
+def _resolve_screen_bin() -> str:
+    """Return the resolved ``screen`` binary path (PATH-discovered, cached).
+
+    Raises ``RuntimeError`` when ``screen`` isn't installed — triage
+    requires the GNU screen tool. Cached after the first lookup so
+    repeated calls don't re-pay the PATH walk.
+    """
+    global _screen_bin_cache
+    if _screen_bin_cache is not None:
+        return _screen_bin_cache
+    resolved = shutil.which("screen")
+    if resolved is None:
+        raise RuntimeError(
+            "runner: `screen` not found on PATH — install via your "
+            "package manager (`brew install screen` on macOS, "
+            "`apt install screen` on Debian/Ubuntu); triage requires "
+            "GNU screen for the detached pdb session"
+        )
+    _screen_bin_cache = resolved
+    return resolved
 
 # Root-e2e parametrized test files. Per the design (rule 5): these files live
 # at tests/e2e/ root and partition by `[qs, app2]` parametrize ids. The
@@ -4558,7 +4585,7 @@ def _screen_session_exists(name: str) -> bool:
     space-separated depending on screen version).
     """
     result = subprocess.run(
-        [_SCREEN_BIN, "-ls", name],
+        [_resolve_screen_bin(), "-ls", name],
         capture_output=True, text=True, check=False,
     )
     return f".{name}\t" in result.stdout or f".{name}  " in result.stdout
@@ -4573,7 +4600,7 @@ def _screen_kill(name: str) -> bool:
     Treat that as success so ``triage-down`` is safe to run repeatedly.
     """
     result = subprocess.run(
-        [_SCREEN_BIN, "-S", name, "-X", "quit"],
+        [_resolve_screen_bin(), "-S", name, "-X", "quit"],
         capture_output=True, text=True, check=False,
     )
     if result.returncode == 0:
@@ -4958,7 +4985,7 @@ def cmd_triage(args: argparse.Namespace) -> int:
 
     print(f"runner: spawning screen session {_TRIAGE_SCREEN_NAME!r}")
     screen_argv = [
-        _SCREEN_BIN,
+        _resolve_screen_bin(),
         "-dmS", _TRIAGE_SCREEN_NAME,
         "-L",
         "-Logfile", str(log_path),
