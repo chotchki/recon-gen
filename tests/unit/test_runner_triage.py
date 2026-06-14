@@ -309,7 +309,7 @@ def triage_state_tmp(tmp_path: Path):
     try:
         yield fake_state
     finally:
-        r._TRIAGE_STATE_FILE = saved  # type: ignore[misc, assignment]
+        r._TRIAGE_STATE_FILE = saved  # type: ignore[misc, assignment]: Final hint isn't a runtime lock — restore the saved sentinel after the fixture's teardown
 
 
 def test_triage_state_write_read_roundtrip(triage_state_tmp: Path) -> None:

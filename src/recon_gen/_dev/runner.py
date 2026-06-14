@@ -4462,7 +4462,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
 # ``runs/.triage-state.json`` so ``triage-down`` can tear everything down
 # without re-discovering it.
 
-_TRIAGE_SCREEN_NAME: Final = "recon-gen-triage"
+_TRIAGE_SCREEN_NAME: Final = "recon-gen-triage"  # typing-smell: ignore[recon-prefix]: GNU screen session name (not a cfg-prefixed AWS / DB resource ID) — stable across triage spawn/teardown so `triage-down` can find the session by fixed name; not multi-tenant and intentionally does not flow through `cfg.aws.prefixed()`
 _TRIAGE_STATE_FILE: Final = RUNS_DIR / ".triage-state.json"
 
 # Issue #9 fix: resolve `screen` via PATH instead of hardcoding
