@@ -1137,3 +1137,25 @@ RECON_GEN_PICKER_MAX_QUERY_LEN: Final = EnvVar(
     optional=True,
     validator=positive_int,
 )
+
+# DC.2 — Cloudflare API token for runner-internal DNS-01 ACME +
+# A-record reconciliation. Scope: ``Zone:DNS:Edit`` on
+# ``hotchkiss.io`` only (per spike DC.0 §"Operator-confirm
+# questions" item 1). Local-dev: paste into ``run/secrets.env``
+# (gitignored) + ``set -a; source run/secrets.env; set +a``. CI:
+# GitHub secret ``CLOUDFLARE_TOKEN`` → workflow ``env:`` mapping.
+# Required by ``src/recon_gen/_dev/tls/ensure.py::ensure_dev_env``;
+# absent ⇒ ``ValueError`` with the actionable hint.
+RECON_GEN_CLOUDFLARE_TOKEN: Final = EnvVar(
+    name="RECON_GEN_CLOUDFLARE_TOKEN",
+    description=(
+        "Cloudflare API token with Zone:DNS:Edit on hotchkiss.io. "
+        "Used by the runner-internal TLS coordinator "
+        "(src/recon_gen/_dev/tls/) to provision Let's Encrypt certs "
+        "+ reconcile the 4 managed A records for dev / CI HTTPS. "
+        "Local: paste into run/secrets.env (gitignored) and source. "
+        "CI: GitHub secret ``CLOUDFLARE_TOKEN`` -> workflow env."
+    ),
+    coercer=str,
+    optional=True,
+)
