@@ -1761,6 +1761,89 @@ def _reset_pg_password_via_socket(container_name: str, password: str) -> None:
         )
 
 
+_ORACLE_NOT_READY_CODES: Final = ("ORA-01034", "ORA-01033", "ORA-01089", "ORA-12162")
+"""Oracle error codes that mean "the instance is still starting up, retry
+later" — not authoritative failure. ORA-01034 = ORACLE not available;
+ORA-01033/01089 = startup/shutdown in progress; ORA-12162 = service name
+not yet registered. The `_wait_for_oracle_ready` poll loop tolerates
+these; any OTHER ORA-* code raises immediately (real config / data
+problem, not a timing race)."""
+
+
+def _wait_for_oracle_ready(
+    container_name: str, *, timeout_seconds: float = 180.0,
+) -> None:
+    """#266 — block until Oracle's instance accepts sysdba SELECTs in
+    the named container, or raise with the last sqlplus output.
+
+    The adopt-path (`existing.start()`) returns once the container
+    process is running, but Oracle's PMON/listener/instance take 30-90s
+    after that on a cold-Docker boot before SQL*Plus can connect. Without
+    this wait, `_reset_oracle_password_via_socket` fires `ALTER USER`
+    during the gap and hits `ORA-01034: ORACLE not available` — the
+    failure we saw in `runs/20260614T151920Z-68ec16d4/unit/` after a
+    Docker restart.
+
+    Polls `SELECT 1 FROM DUAL` via in-container sysdba. Treats
+    ORA-01034 / ORA-01033 / ORA-01089 / ORA-12162 as "retry"; any other
+    ORA-* code raises immediately. Default timeout 180s covers Oracle
+    19c cold-start on the workstation; CI runner sets longer per its
+    own container-boot orchestration.
+    """
+    import subprocess  # noqa: PLC0415 — lazy
+    import time  # noqa: PLC0415 — lazy
+    probe_sql = (
+        "WHENEVER SQLERROR EXIT SQL.SQLCODE;\n"
+        "SELECT 1 FROM DUAL;\n"
+        "EXIT;\n"
+    )
+    deadline = time.monotonic() + timeout_seconds
+    last_stdout = ""
+    last_stderr = ""
+    last_rc = 0
+    attempts = 0
+    while time.monotonic() < deadline:
+        attempts += 1
+        result = subprocess.run(
+            [
+                "docker", "exec", "-i", container_name,
+                "bash", "-lc", "sqlplus -s / as sysdba",
+            ],
+            input=probe_sql.encode(),
+            check=False,
+            capture_output=True,
+        )
+        last_rc = result.returncode
+        last_stdout = result.stdout.decode("utf-8", errors="replace")
+        last_stderr = result.stderr.decode("utf-8", errors="replace")
+        combined = last_stdout + last_stderr
+        if last_rc == 0 and "ORA-" not in combined:
+            return
+        # Any non-retryable ORA-* code? Surface immediately so we don't
+        # waste 180s waiting for a real config problem to "resolve".
+        if any(code in combined for code in _ORACLE_NOT_READY_CODES):
+            time.sleep(3.0)
+            continue
+        if "ORA-" in combined:
+            raise RuntimeError(
+                f"Oracle readiness probe hit unexpected ORA error in "
+                f"{container_name!r} (rc={last_rc}, attempt={attempts}). "
+                f"This is a real config/data problem, not a startup "
+                f"race. sqlplus stdout:\n{last_stdout}\n"
+                f"sqlplus stderr:\n{last_stderr}"
+            )
+        # rc != 0 with no ORA-* — likely docker exec / bash error.
+        # Could be transient (container just started); retry briefly.
+        time.sleep(2.0)
+    raise RuntimeError(
+        f"Oracle readiness probe timed out after {timeout_seconds:.0f}s "
+        f"({attempts} attempts) waiting for {container_name!r} to accept "
+        f"sysdba SELECTs. Last rc={last_rc}. "
+        f"sqlplus stdout:\n{last_stdout}\n"
+        f"sqlplus stderr:\n{last_stderr}"
+    )
+
+
 def _reset_oracle_password_via_socket(container_name: str, password: str) -> None:
     """BX.248 — force-reset Oracle `system` user password via in-container
     sysdba auth.
@@ -1786,8 +1869,14 @@ def _reset_oracle_password_via_socket(container_name: str, password: str) -> Non
     in stdout raise RuntimeError with the full sqlplus output, so the
     fixture errors point at the actual problem instead of a generic
     invalid-credentials downstream.
+
+    #266 — wait for Oracle's instance to be ready before firing
+    ALTER USER. Cold-Docker boots leave a 30-90s gap where the
+    container is running but Oracle's listener / PMON haven't bound;
+    `_wait_for_oracle_ready` polls sysdba SELECT until they have.
     """
     import subprocess  # noqa: PLC0415 — lazy
+    _wait_for_oracle_ready(container_name)
     sql = (
         f'WHENEVER SQLERROR EXIT SQL.SQLCODE;\n'
         f'ALTER USER system IDENTIFIED BY "{password}" ACCOUNT UNLOCK;\n'
