@@ -769,9 +769,30 @@ def qs_deployed(  # pyright: ignore[reportUnusedFunction]: pytest autouse fixtur
             "--l2", str(l2_path),
             "-o", str(out_dir),
         ]
+        # Strip RECON_GEN_DEMO_DATABASE_URL{,_PG,_OR} from the
+        # subprocess env. Cmd_triage / cmd_up_to's container spin
+        # sets these to the LOCAL (127.0.0.1 / localhost) URL so the
+        # in-process pytest db/app2-tier tests can reach the
+        # testcontainers PG. The QS-side cfg (qs.yaml) carries the
+        # hotchkiss.io URL so QS in us-east-1 can route to the dev
+        # box. `recon-gen json apply`'s cfg loader applies env
+        # overrides AFTER cfg-from-file → the inherited localhost
+        # env wins over the QS cfg → `CreateDataSource` fails with
+        # "Unable to route to the host address localhost". The chain
+        # handled this via env-pop in `cmd_up_to`'s deploy step
+        # dispatch; the fixture refactor missed carrying that over.
+        # POLICY 1: single source of truth → fixture owns the env
+        # surgery instead of duplicating the logic in cmd_triage.
+        deploy_env = os.environ.copy()
+        for k in (
+            "RECON_GEN_DEMO_DATABASE_URL",
+            "RECON_GEN_DEMO_DATABASE_URL_PG",
+            "RECON_GEN_DEMO_DATABASE_URL_OR",
+        ):
+            deploy_env.pop(k, None)
         print(f"qs_deployed: invoking {' '.join(argv)}")
         result = subprocess.run(  # noqa: S603 — fixed argv, no shell
-            argv, capture_output=True, text=True, check=False,
+            argv, capture_output=True, text=True, check=False, env=deploy_env,
         )
         if result.returncode != 0:
             # On failure DON'T write the sentinel — next session re-
