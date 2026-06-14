@@ -1648,6 +1648,14 @@ DB_TOUCHING_LAYERS: Final = ("db", "app2", "qs_api", "qs_browser")
 # ``tests/e2e/conftest.py`` fires at qs_api / qs_browser session start.
 AWS_TOUCHING_LAYERS: Final = ("qs_api", "qs_browser")
 
+# Phase DC.3 — layers whose subprocess serves HTTPS (App2 uvicorn) or
+# transitively depends on a TLS-served app2 (qs_api/qs_browser harness).
+# The runner auto-mints + renews certs via ``ensure_dev_env`` before
+# dispatching these layers, but ONLY when ``cfg.app2.tls`` is configured.
+# Operators without the tls block see no behavior change; unit/db runs
+# never hit Cloudflare.
+TLS_TOUCHING_LAYERS: Final = ("app2", "qs_api", "qs_browser")
+
 # Y.2.gate.j.5 — Oracle container reuse. **Per-cell** name (not single
 # shared) so two Oracle cells (e.g., sp_or_lo + sq_or_lo) running in
 # parallel don't collide on `containers.create(name=...)` with a 409
@@ -3398,6 +3406,60 @@ def _finalize_run(
     return code
 
 
+def _ensure_tls_if_configured(cfg_path: Path, layer: str) -> int:
+    """DC.3 — pre-flight TLS cert reconciliation.
+
+    When ``cfg.app2.tls`` is configured AND the chain target is in
+    ``TLS_TOUCHING_LAYERS``, call ``ensure_dev_env`` to mint / renew
+    the cert + key + reconcile this env's 2 managed A records under
+    ``hotchkiss.io``. No-op when the tls block is absent (operator hasn't
+    opted in) or the target is a pre-TLS layer (unit/db).
+
+    Returns 0 on success / no-op; ``EXIT_NEEDS_OPERATOR`` with an
+    actionable stderr message on failure.
+    """
+    if layer not in TLS_TOUCHING_LAYERS:
+        return 0
+
+    from recon_gen.common.config import load_config  # noqa: PLC0415 — lazy
+    cfg = load_config(str(cfg_path))
+
+    tls = cfg.app2.tls
+    if tls is None:
+        return 0
+
+    from recon_gen._dev.tls import Env, ensure_dev_env  # noqa: PLC0415 — lazy
+
+    try:
+        ensure_dev_env(
+            Env(tls.env),
+            cert_path=Path(tls.cert_path),
+            key_path=Path(tls.key_path),
+            account_email=tls.account_email,
+        )
+    except ValueError as exc:
+        print(f"runner: TLS pre-flight failed: {exc}", file=sys.stderr)
+        print(
+            "runner: ensure RECON_GEN_CLOUDFLARE_TOKEN is set "
+            "(run/secrets.env on dev; CLOUDFLARE_TOKEN GitHub secret on CI)",
+            file=sys.stderr,
+        )
+        return EXIT_NEEDS_OPERATOR
+    except Exception as exc:  # noqa: BLE001 — operator-actionable bubble
+        print(
+            f"runner: TLS pre-flight failed ({type(exc).__name__}): {exc}",
+            file=sys.stderr,
+        )
+        print(
+            "runner: Cloudflare API / ACME challenge / public-IP discovery "
+            "errored; check token scope (Zone:DNS:Edit on hotchkiss.io), "
+            "Let's Encrypt rate limits, and network connectivity",
+            file=sys.stderr,
+        )
+        return EXIT_NEEDS_OPERATOR
+    return 0
+
+
 def cmd_up_to(args: argparse.Namespace) -> int:
     """Run the test chain up to and including the named layer.
 
@@ -3485,6 +3547,12 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     #   qs_browser even when args.layer is unit).
     cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
     if cfg_path is not None:
+        # DC.3 — pre-flight TLS cert reconciliation BEFORE any layer
+        # dispatches. No-op when cfg.app2.tls block is absent or the
+        # chain target isn't TLS-touching.
+        tls_exit = _ensure_tls_if_configured(cfg_path, args.layer)
+        if tls_exit != 0:
+            return tls_exit
         runner_variant_env = _setup_thin_chain_environment(
             cfg_path,
             layer=args.layer,
