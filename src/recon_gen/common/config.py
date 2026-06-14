@@ -558,6 +558,11 @@ def _load_raw_nested(
         cycle = " → ".join(str(p) for p in _seen) + f" → {abs_path}"
         raise CycleError(f"extends: cycle detected: {cycle}")
     _seen.add(abs_path)
+    if not path.exists():
+        raise CfgError(
+            f"cfg path does not exist: {abs_path}. Pass an existing yaml or "
+            f"check the parent's extends: entry that points here."
+        )
     raw_any: object = yaml.safe_load(path.read_text())
     raw: dict[str, Any] = cast(dict[str, Any], raw_any) if isinstance(raw_any, dict) else {}  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload
     extends = raw.pop("extends", None)
@@ -579,6 +584,21 @@ def _load_raw_nested(
                 f"{type(ext_path_str).__name__} in {abs_path}"
             )
         ext_path = (path.parent / ext_path_str).resolve()
+        if not ext_path.exists():
+            # Loud failure on missing parent. The runner used to silently
+            # dispatch-skip when this happened (because a downstream
+            # ``yaml.safe_load`` raised an opaque FileNotFoundError that
+            # got caught by the layer-launch wrapper); operator got the
+            # "deploy was skipped" symptom with no actionable trace back
+            # to the broken extends:. Surface the absolute resolved path
+            # + the source file's ``extends:`` entry that pointed here so
+            # ``EXIT_NEEDS_OPERATOR=2`` carries a fixable message.
+            raise CfgError(
+                f"extends: target {ext_path_str!r} (resolved to {ext_path}) "
+                f"does not exist; referenced from {abs_path}. Check the "
+                f"parent path is correct, the file is committed/staged, "
+                f"and the cwd matches what the cfg was authored against."
+            )
         ext_raw = _load_raw_nested(ext_path, _seen=set(_seen))
         merged = _deep_merge(merged, ext_raw)
     return _deep_merge(merged, raw)
