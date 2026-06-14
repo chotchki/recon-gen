@@ -160,15 +160,18 @@ Per-instance config.yaml changes:
 
 ```yaml
 # /Users/recon-demo/sasquatch_pr/config.yaml — after CU.4
-dialect: duckdb
-demo_database_url: duckdb:///Users/recon-demo/sasquatch_pr/current.duckdb
-aws_account_id: "111122223333"   # dummy; /deploy will fail at AWS step, intentional
-aws_region: "us-east-1"
-deployment_name: "recon-demo-sasquatch_pr"
-db_table_prefix: "demo_sasquatch_pr"
-banner_text: "Edits reset on next restart"   # CU.3 — new field
-# NOTE: no `etl_hook:` — `cfg.app2.etl_hook is None` → PUT route auto-skips
-# NOTE: no `principal_arns:` — /deploy will fail at AWS step regardless
+aws:
+  account_id: "111122223333"   # dummy; /deploy will fail at AWS step, intentional
+  region: "us-east-1"
+  deployment_name: "recon-demo-sasquatch_pr"
+db:
+  dialect: duckdb
+  url: duckdb:///Users/recon-demo/sasquatch_pr/current.duckdb
+  table_prefix: "demo_sasquatch_pr"
+app2:
+  banner_text: "Edits reset on next restart"   # CU.3 — new field
+# NOTE: no `app2.etl_hook:` — `cfg.app2.etl_hook is None` → PUT route auto-skips
+# NOTE: no `aws.principal_arns:` — /deploy will fail at AWS step regardless
 ```
 
 Sandbox profile is unchanged from CU.1 (already DuckDB + STUDIO_STATE_DIR writable). Wrapper script lands per CU.2. launchd plist `ProgramArguments` swap to point at the wrapper instead of bare `recon-gen` (the sasquatch plist already does this; spec doesn't yet).

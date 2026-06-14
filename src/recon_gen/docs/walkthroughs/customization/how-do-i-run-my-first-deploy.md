@@ -45,7 +45,7 @@ Three reference points:
   order.
 - **The QuickSight console** (`https://quicksight.aws.amazon.com`)
   — the visual target. After deploy, your analyses + dashboards
-  appear here under the configured `cfg.deployment_name` (Z.C —
+  appear here under the configured `cfg.aws.deployment_name` (Z.C —
   required cfg field, no default).
 
 ## What you'll see in the demo
@@ -250,7 +250,7 @@ Once your first deploy completes with all
 
 1. **Open the dashboard in QuickSight.** Console → Dashboards
    → `<deployment_name>-l1-dashboard` (where `<deployment_name>`
-   is your `cfg.deployment_name` value).
+   is your `cfg.aws.deployment_name` value).
    Click through the tabs. KPIs should populate; tables should
    render rows. Empty visuals usually mean the underlying
    dataset's SQL returned zero rows against your data — open

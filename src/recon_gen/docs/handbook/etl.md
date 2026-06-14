@@ -156,7 +156,7 @@ multi-row VALUES coalescer; psycopg / oracledb `executemany`).
 
 See [ETL Hook — Bulk Helpers Reference](etl-hook.md) for the column
 tuples, code examples, the `metadata.source` contract, the
-`cfg.etl_hook` ⇄ standalone-mode boundary, and a ~40-line
+`cfg.app2.etl_hook` ⇄ standalone-mode boundary, and a ~40-line
 `my_etl.py` skeleton.
 
 ## The exemplary helper

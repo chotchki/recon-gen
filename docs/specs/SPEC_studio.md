@@ -163,23 +163,24 @@ The **killer demo:** trainer changes `end_date` from day 12 to day 13 in Studio,
 
 ## Data-shaping model
 
-The `test_generator:` block in `config.yaml` carries the shaping knobs. Every field is optional; the all-absent case → today's behavior, byte-identical to the locked seeds.
+The `test.generator:` block in `config.yaml` carries the shaping knobs. Every field is optional; the all-absent case → today's behavior, byte-identical to the locked seeds.
 
 ```yaml
-test_generator:
-  enabled: true              # default true; set false to skip step 3 entirely
-  scope: full                # full | uncovered_rails | exceptions_only (default: full)
-  end_date: null             # ISO date or null; null = full 90-day window
-  seed: <default-int>        # int; default = today's locked-seed value
-  plants:                    # subset of exception kinds; absent = all
-    - drift
-    - overdraft
-    - limit_breach
-    - stuck_pending
-    - stuck_unbundled
-    - supersession
-  only_template: null        # template name or null; null = all templates
-  derive_balances: false     # bool; future expansion (subledger → GL)
+test:
+  generator:
+    enabled: true              # default true; set false to skip step 3 entirely
+    scope: full                # full | uncovered_rails | exceptions_only (default: full)
+    end_date: null             # ISO date or null; null = full 90-day window
+    seed: <default-int>        # int; default = today's locked-seed value
+    plants:                    # subset of exception kinds; absent = all
+      - drift
+      - overdraft
+      - limit_breach
+      - stuck_pending
+      - stuck_unbundled
+      - supersession
+    only_template: null        # template name or null; null = all templates
+    derive_balances: false     # bool; future expansion (subledger → GL)
 ```
 
 ### scope

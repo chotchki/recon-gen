@@ -132,7 +132,7 @@ L1 and L2 Flow Tracing are sibling dashboards over one L2 instance,
 not layered ones. Per the M.2d.3 prefix-isolation pattern, they share
 the same `{{ l2_instance_name }}_*` matviews on the same Aurora schema and produce
 their dashboard IDs as `<deployment_name>-l1-dashboard` and
-`<deployment_name>-l2-flow-tracing` respectively — `cfg.deployment_name`
+`<deployment_name>-l2-flow-tracing` respectively — `cfg.aws.deployment_name`
 namespaces both apps under one stable prefix, so an integrator deploying
 both apps against the same L2 instance (the typical case) gets clean,
 non-colliding QS resource IDs.

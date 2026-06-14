@@ -30,7 +30,7 @@ prose — derives from them.
 >   multiple zones MUST normalize at the ETL boundary (typically to
 >   UTC or the institution's local business zone).
 > See **Forbidden SQL patterns** at the end. Pick the dialect via the
-> `dialect:` field on your config YAML (default `postgres`).
+> `db.dialect` field on your config YAML (default `postgres`).
 
 ---
 
@@ -74,9 +74,9 @@ prefix-namespaced DDL.
 
 ## Per-instance prefix isolation
 
-Every CREATE in the emitted DDL is prefixed by `cfg.db_table_prefix`
+Every CREATE in the emitted DDL is prefixed by `cfg.db.table_prefix`
 (Z.C — required cfg field; the legacy `instance.instance` field on the
-L2 YAML was dropped). For a deployment with `db_table_prefix:
+L2 YAML was dropped). For a deployment with `db.table_prefix:
 {{ l2_instance_name }}`:
 
 | Layer | Object name |

@@ -3,7 +3,7 @@
 *Integrator reference for the Python ETL hook surface. Covers the
 canonical column tuples, the `bulk_insert_tx` / `bulk_insert_balance`
 helpers, the `metadata.source` contract, and the
-`cfg.etl_hook` ⇄ standalone-mode boundary. Companion to
+`cfg.app2.etl_hook` ⇄ standalone-mode boundary. Companion to
 [Data Integration handbook](etl.md) and
 [Schema v6](../Schema_v6.md).*
 
@@ -224,7 +224,7 @@ Two values matter:
   as a predicate: `DELETE WHERE JSON_VALUE(metadata, '$.source') = 'training'`.
 - **`'real'`** — what your ETL hook MUST stamp on every row it
   writes. Rows without the stamp are presumed real by the
-  standalone-mode gate (when `cfg.etl_hook is None`), so leaving
+  standalone-mode gate (when `cfg.app2.etl_hook is None`), so leaving
   metadata at NULL also presents as real — but the explicit stamp
   is the contract; future tooling may tighten the gate.
 
@@ -248,13 +248,14 @@ rows. The integrator surface is deliberately low-level: stamping at
 the bulk boundary would silently overwrite intentional `source='real'`
 rows.
 
-## The `cfg.etl_hook` ⇄ standalone-mode contract
+## The `cfg.app2.etl_hook` ⇄ standalone-mode contract
 
-`cfg.etl_hook` is a single optional field in the operator's
+`cfg.app2.etl_hook` is a single optional field in the operator's
 `config.yaml`:
 
 ```yaml
-etl_hook: ./bin/my_etl.py
+app2:
+  etl_hook: ./bin/my_etl.py
 ```
 
 When **configured** (pointing at your wrapper):
@@ -318,7 +319,7 @@ def fetch_daily_balances_from_your_source() -> list[tuple[object, ...]]:
 
 def main() -> int:
     cfg = load_config(os.environ["RECON_GEN_CONFIG"])
-    prefix = cfg.db_table_prefix
+    prefix = cfg.db.table_prefix
     conn = connect_demo_db(cfg)
     try:
         tx_rows = fetch_transactions_from_your_source()
@@ -342,7 +343,7 @@ for you in `recon-gen data refresh --execute`; from Python:
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import refresh_matviews_sql
 
-l2 = load_instance(cfg.default_l2_instance)
+l2 = load_instance(cfg.db.default_l2_instance)
 for stmt in refresh_matviews_sql(l2).split(";\n"):
     if stmt.strip():
         conn.execute(stmt)
@@ -353,15 +354,15 @@ conn.commit()
 
 Operator cfgs at `run/config.<dialect>.yaml`:
 
-- **`run/config.duckdb.yaml`** — `demo_database_url: "duckdb:///run/<your-l2>.duckdb"`.
+- **`run/config.duckdb.yaml`** — `db.url: "duckdb:///run/<your-l2>.duckdb"`.
   Single-process; the bulk helpers route to the CA.10 multi-row
   VALUES coalescer.
-- **`run/config.postgres.yaml`** — `demo_database_url:
+- **`run/config.postgres.yaml`** — `db.url:
   "postgresql://user:pass@host:port/db"`. The schema emitter prepends
   `CREATE EXTENSION IF NOT EXISTS pgcrypto` (audit-provenance hash);
   your role needs `CREATE EXTENSION` privilege OR the extension
   pre-installed by your DBA.
-- **`run/config.oracle.yaml`** — `demo_database_url:
+- **`run/config.oracle.yaml`** — `db.url:
   "oracle+oracledb://user:pass@host:port/?service_name=...`.
   The bulk helpers use `cursor.executemany` in 1000-row chunks so
   each iteration gets its own IDENTITY value — composite `(id, entry)`

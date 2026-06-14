@@ -4,7 +4,7 @@
 
 The deploy pipeline tags every QuickSight resource it creates with
 ``ManagedBy=recon-gen`` plus a ``Deployment={{ l2_instance_name }}``
-tag (Z.C — value comes from ``cfg.deployment_name``). ``json clean``
+tag (Z.C — value comes from ``cfg.aws.deployment_name``). ``json clean``
 uses those tags to fail-CLOSED-scope deletion to resources we
 deployed — anything untagged or wrongly tagged stays safe.
 
@@ -34,9 +34,11 @@ each deploy stamps its own ``Deployment`` tag value.
 
 ```yaml
 # config.yaml
-tagging_enabled: false             # ⚠ weakens cleanup isolation; see warning below
-deployment_name: "recon-myorg-prod"   # MUST be unique to your deploy scope
-db_table_prefix: "recon_myorg_prod"   # required cfg field; not used by cleanup
+aws:
+  tagging_enabled: false             # ⚠ weakens cleanup isolation; see warning below
+  deployment_name: "recon-myorg-prod"   # MUST be unique to your deploy scope
+db:
+  table_prefix: "recon_myorg_prod"   # required cfg field; not used by cleanup
 ```
 
 What changes:

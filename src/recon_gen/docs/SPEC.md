@@ -220,8 +220,10 @@ The L2 instance does NOT carry a prefix (Z.C, 2026-05-15 — the legacy `Instanc
 
 ```yaml
 # cfg.yaml — both required, no defaults
-deployment_name: "recon-prod"   # prefixes every QS resource ID
-db_table_prefix: "recon_prod"   # prefixes every DB table / matview / dataset name
+aws:
+  deployment_name: "recon-prod"   # prefixes every QS resource ID
+db:
+  table_prefix: "recon_prod"   # prefixes every DB table / matview / dataset name
 ```
 
 **`db_table_prefix` format**: MUST match `^[a-z][a-z0-9_]*$` (lowercase start, alphanumeric or underscore thereafter), max 30 characters. The lowercase-only constraint avoids Postgres' quoted-vs-unquoted-identifier hazard; the 30-character cap leaves room for the longest table-name suffix within Postgres' 63-character identifier limit.

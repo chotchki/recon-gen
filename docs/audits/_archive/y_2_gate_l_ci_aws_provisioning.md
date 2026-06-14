@@ -166,8 +166,9 @@ the local dev infra, add these fields to `run/config.postgres.yaml`
 
 ```yaml
 # Y.2.gate.l — RDS identifiers for ./run_tests.sh up/down/status
-aws_pg_cluster_id: "database-2"
-aws_oracle_instance_id: "database-3"
+aws:
+  pg_cluster_id: "database-2"
+  oracle_instance_id: "database-3"
 ```
 
 **Don't commit these to the repo** if `run/config.*.yaml` is local-only

@@ -98,7 +98,7 @@ FROM treasury.subledger_overdraft_v          -- your warehouse view
 WHERE bank_unit = 'your-unit-id'             -- your scope filter
 """
     return build_dataset(
-        cfg, cfg.prefixed("l1-overdraft-dataset"),
+        cfg, cfg.aws.prefixed("l1-overdraft-dataset"),
         "L1 Overdraft", "l1-overdraft",
         sql, OVERDRAFT_CONTRACT,
         visual_identifier=DS_L1_OVERDRAFT,

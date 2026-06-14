@@ -42,24 +42,25 @@ Three reference points:
 The example config from `examples/config.yaml`:
 
 ```yaml
-aws_account_id: "111122223333"
-aws_region: "us-east-1"
+aws:
+  account_id: "111122223333"
+  region: "us-east-1"
+  deployment_name: "recon-prod"
+  datasource:
+    mode: "explicit"
+    arn: "arn:aws:quicksight:us-east-1:111122223333:datasource/example-datasource"
+  principal_arns:
+    - "arn:aws:quicksight:us-east-1:111122223333:user/default/example-user"
 
-datasource_arn: "arn:aws:quicksight:us-east-1:111122223333:datasource/example-datasource"
-
-deployment_name: "recon-prod"
-db_table_prefix: "recon_prod"
+db:
+  # dialect: "postgres"  # or "oracle" — defaults to "postgres"
+  table_prefix: "recon_prod"
+  # url: "postgresql://user:password@host:5432/dbname"
+  # url: "user/password@host:1521/SERVICE"  # Oracle Easy Connect form
 
 # Theme is declared inline on the L2 institution YAML, not here
 # (N.4.j). When the L2 instance carries no ``theme:`` block, AWS
 # QuickSight CLASSIC takes over at deploy.
-
-principal_arns:
-  - "arn:aws:quicksight:us-east-1:111122223333:user/default/example-user"
-
-# dialect: "postgres"  # or "oracle" — defaults to "postgres"
-# demo_database_url: "postgresql://user:password@host:5432/dbname"
-# demo_database_url: "user/password@host:1521/SERVICE"  # Oracle Easy Connect form
 ```
 
 Six required fields (account, region, datasource ARN,
