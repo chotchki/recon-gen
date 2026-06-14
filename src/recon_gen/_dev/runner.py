@@ -5209,7 +5209,16 @@ def _triage_qs_sweep(cfg_path: Path, qs_cfg_path: Path | None = None) -> int:
     QS resources in AWS.
     """
     effective_cfg = str(qs_cfg_path) if qs_cfg_path is not None else str(cfg_path)
-    cmd = [str(_VENV_BIN / "recon-gen"), "json", "clean", "--execute", "-c", effective_cfg]
+    # `--all` makes triage-down unconditional regardless of repo-root
+    # `out/` carve-out state. Without it, if the operator has previously
+    # run `recon-gen json apply -o out/` against the same
+    # `deployment_name`, those repo-root `out/` artifacts will carve out
+    # matching resources from cleanup → triage QS resources for that
+    # deployment ORPHANED in AWS. triage-down is operator-explicit
+    # teardown (already gated by `--yes`); leaving repo-root `out/`
+    # artifacts in the carve-out is the wrong default for this verb.
+    # (Surfaced by adversarial review of #7 fix, runner.py post-054d2fe2.)
+    cmd = [str(_VENV_BIN / "recon-gen"), "json", "clean", "--all", "--execute", "-c", effective_cfg]
     result = subprocess.run(  # noqa: S603 — fixed argv, no shell
         cmd, cwd=REPO_ROOT, capture_output=True, text=True, check=False,
     )
