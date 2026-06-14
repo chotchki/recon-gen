@@ -3210,6 +3210,45 @@ def _finalize_run(
     if code != EXIT_SUCCESS:
         print()
         _render_failures_for_run(run_dir)
+    # Structured chain summary (#268) — written regardless of pipe
+    # semantics so triage tools can verify chain status without trusting
+    # `tee`-piped exit codes. `./run_tests.sh ... | tee logs.txt`
+    # exits with `tee`'s rc (0) when no operator has `set -o pipefail`,
+    # silently lying about chain status. The run.json file + the loud
+    # final-status line below are the authoritative signal.
+    run_json = {
+        "run_id": run_dir.name,
+        "exit_code": int(code),
+        "status": "PASS" if code == EXIT_SUCCESS else "FAIL",
+        "layers": [
+            {
+                "layer": lr.layer,
+                "exit_code": int(lr.exit_code),
+                "duration_seconds": float(lr.duration_seconds),
+                "skipped": bool(lr.skipped),
+            }
+            for lr in top_level
+        ],
+    }
+    (run_dir / "run.json").write_text(json.dumps(run_json, indent=2) + "\n")
+    # Loud final-status line — last line of the chain's stdout. Operators
+    # piping through tee can `tail -1` for unambiguous result; CI grep
+    # patterns key off this. Format keeps "FAIL" / "PASS" at fixed col
+    # so log scans are easy.
+    if code == EXIT_SUCCESS:
+        print(f"runner: chain status: PASS — all {len(top_level)} layers green")
+    else:
+        failed = [lr for lr in top_level if lr.exit_code != EXIT_SUCCESS and not lr.skipped]
+        first_fail = failed[0] if failed else None
+        if first_fail is not None:
+            print(
+                f"runner: chain status: FAIL at [{first_fail.layer}] "
+                f"exit={first_fail.exit_code}"
+            )
+        else:
+            # code != 0 but no failed layer found — probably a NEEDS_OPERATOR
+            # bail before any layer dispatched (probe-fail / dirty / cfg).
+            print(f"runner: chain status: FAIL exit={code} (pre-chain)")
     return code
 
 
