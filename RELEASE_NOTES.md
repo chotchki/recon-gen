@@ -6,6 +6,21 @@
 > AI, BK, BQ, BW, CK, BV close, snapshotter pattern, runner readiness).
 > v13.14.4 below resumes the convention.
 
+## v14.0.1 — first green build of v14
+
+Patch release. v14.0.0 was the intended Phase DE cut but release CI
+caught a hardcoded test assertion (`test_run_postgres_config_smoke`
+asserted the operator's local `deployment_name="qsgen-postgres"`; the
+CI workflow rewrites `run/config.postgres.yaml` with a per-run
+`qs-ci-<run-id>-pg` value before tests fire — POLICY 1 divergence).
+The over-specified assertion was dropped; the dialect check (which
+survives CI's overwrite) remains. No runtime behavior change vs
+v14.0.0; pip-install v14.0.1 to skip the broken-release-attempt tag.
+
+Paired into this cut: README v14 cfg-shape callout + chain layer
+string + triage verb; `docs/specs/SPEC_studio.md` field names; Phase
+DE swept to `PLAN_ARCHIVE.md`.
+
 ## v14.0.0 — Phase DE cfg.yaml structural redesign (BREAKING)
 
 **Major bump.** `Config` no longer carries 20+ flat fields — every
