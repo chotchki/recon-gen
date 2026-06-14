@@ -5180,3 +5180,46 @@ Together these break the project convention "left clicks move LEFT, right clicks
 - [x] DA.6 - **Tests.** Unit: `_table_column_meta` returns expected decoration map (accent vs accent-menu) for a Table with each shape. JS (Playwright): `renderTable` applies the right class on the right `<td>`; cell-click on menu-decorated cell opens the menu. Anti-regression for the DA.5 gate.
 - [x] DA.7 - **Cold-read v4 parity verify.** Visual side-by-side (QS embed + App2) of L1 Drift + Overdraft + L1 Exceptions sheets; confirm drill columns decorate identically. Output: `docs/audits/da_7_parity_verify.md`.
 - [x] DA.8 - **Phase exit + v13.15.x release cut.** Bundle clear_button + cache-bust + row-drill MENU contract + Phase DA into one release notes entry. Bump 13.14.5 → 13.15.0 (minor for the new App2 decoration feature). Operator authorize-at-cut per `[[feedback_always_ask_before_release_cut]]`. Sweep CN to PLAN_ARCHIVE.md.
+
+---
+
+# PLAN — Phase DE (archived 2026-06-14; shipped in v14.0.0)
+
+**Phase summary:** cfg.yaml structural redesign — the v13 flat shape (20+ top-level keys + 3 nested blocks accumulated across phases U/Y/CA/CB/CW) was collapsed into concern-grouped blocks (`aws:`, `db:`, `audit:`, `app2:`, `auth:`, `test:`) with `extends:` inheritance for base + per-env overlays + aggressive auto-derive (cfg fields appear only as overrides; defaults derive from siblings, e.g. `db.table_prefix` from `deployment_name`; `auth.aws.quicksight_user_arn` from `auth.aws.profile` via `list_users`). Hard break — no compat shim — per `[[feedback_no_compat_shims]]` and operator "no one is complaining on github (yet). Far better now than any other time." `auth:` nests two distinct concerns: `auth.aws.*` for AWS-API auth, `auth.oidc.*` + `auth.session.*` reserved for DD's web-app auth landing later. `demo_database_url` renamed to `db.url`. `cfg.studio_enabled` dropped entirely (`recon-gen studio` always mounts Studio; production uses `recon-gen dashboards` for the dashboards-only surface). Shipped in v14.0.0 (2026-06-14).
+
+**Why (verbatim from PLAN):** Six semantic problems with the v13 flat shape — (1) `auth:` block mis-named (held AWS auth, but DD adds web-app auth); (2) no posture grouping (operators couldn't tell which keys their posture needs); (3) random top-level scatter (QS-specific / App2-specific / audit-only flat together); (4) auto-derivable values still required (`db_table_prefix` mirrors `deployment_name`; `quicksight_user_arn` derives from `aws_profile`); (5) naming inconsistency (`demo_database_url` from v1 demo-only era; negative-flag-default-true booleans); (6) DC + DD will compound the mess if not locked first.
+
+**Locks (operator-confirmed 2026-06-12):**
+- **Inheritance is the headline feature, not polish.** `extends: <other-cfg.yaml>` (path or named); loader recursively merges (deep-merge by default; lists replace unless per-field policy). Operators keep `base.yaml` + tiny `<env>.yaml` overlays. Pairs with auto-derive.
+- **Hard break, no compat shim.** `Config.load` raises on legacy keys with migration-hint message. Re-evaluate posture flip if external integrators pin v14+.
+- **Auto-derive aggressively; cfg field appears only as the override.** Default: derive what we can, raise on what we can't. cfg file = deltas-from-derived.
+- **Group by concern, not by posture.** `aws:`, `db:`, `audit:`, `app2:`, `auth:`, `test:`.
+- **`auth:` reshapes to nest two distinct auth concerns.** `auth.aws.*` (existing); `auth.oidc.*` + `auth.session.*` (DD's web-app auth).
+- **`demo_database_url` → `db.url`.** Plus `db.dialect`, `db.table_prefix` (derived from `deployment_name`), `db.app2_pool_size`.
+- **Test-only fields default to optional + collapsed.** `test.generator.*` with doc-comment "ignore unless you're generating fuzz L2s programmatically".
+- **DC + DD coordination.** DE.1 lands first; DC.1's TLS block as `app2.tls.*`; DD.1's OIDC + session into restructured `auth:`.
+
+**Per-item disposition (15 leaves, all shipped):**
+- **DE.0** — Audit + redesign spike + inheritance prototype. Output: `docs/audits/de_0_cfg_redesign.md` (shipped, referenced from README.md). Inventoried every field across `common/config.py` + every `cfg.<field>` callsite + every yaml in `run/`; grouped into the locked concern blocks; built `extends:` loader prototype with deep-merge semantics + derive-or-raise required-field error path; locked `extends:` value shape + list-merge policy. Operator-confirmed at exit.
+- **DE.1** — New cfg shape + loader + `extends:`. Implemented the locked shape in `common/config.py` with `extends:` merge + derive-or-raise loader. All existing `run/` yamls migrated by hand to base+overlay form. Per-field tests on the new shape; merge tests for extends-cascade behavior.
+- **DE.2** — Cross-codebase callsite sweep. Every `cfg.<old_field>` access updated to the new path (`cfg.aws.account_id` / `cfg.db.url` / `cfg.aws.prefixed(name)` via proxy properties). Pyright caught most; rest grep-able. Tests + CI green.
+- **DE.3** — Doc sweep. README cfg-shape section + `docs/audits/y_2_gate_h_i_combined_spike.md` cfg appendix + every doc that shows a cfg snippet updated. CLAUDE.md cfg-fields section synced. `extends:` example added to the cfg authoring doc.
+- **DE.4** — DC + DD shape coordination. Confirmed DC.1 (`app2.tls:` block) + DD.1 (`auth.oidc:` + `auth.session:` blocks) land into the DE-locked hierarchy.
+- **DE.5** — Phase exit + release (v14.0.0 major). Sweep to PLAN_ARCHIVE.md. Major bump because cfg.yaml shape is a hard break.
+  - **DE.5.aws** — AWS-block flat-field collapse (account_id / region / deployment_name / principal_arns / extra_tags / tagging_enabled / qs_disable_pg_ssl / pg_cluster_id / oracle_instance_id / datasource_arn → `cfg.aws.*`).
+  - **DE.5.db** — DB-block flat-field collapse (db_table_prefix / demo_database_url / dialect / default_l2_instance / app2_db_pool_size → `cfg.db.*`).
+  - **DE.5.app2** — App2-block flat-field collapse (etl_hook / banner_text / app2_tls → `cfg.app2.*`).
+  - **DE.5.audit** — Audit-block flat-field collapse (signing → `cfg.audit.signing`). `SigningConfig` gained the `passphrase()` accessor.
+  - **DE.5.test** — Test-block flat-field collapse (test_generator → `cfg.test.generator`). `TestConfig` carries `__test__ = False` to opt out of pytest collection.
+  - **DE.5.studio_enabled** — Drop `cfg.studio_enabled` entirely. `recon-gen studio` always mounts Studio; production deployments use `recon-gen dashboards` for the dashboards-only surface. Loader silently accepts the legacy yaml key for backward compat.
+  - **DE.5.auth** — AuthConfig flat-field collapse (aws_profile / quicksight_user_arn → `cfg.auth.aws.*`). Loader accepts both legacy + nested yaml forms.
+  - **DE.5.release_notes** — RELEASE_NOTES.md v14.0.0 entry with full migration table (v13 field → v14 path) + flat-yaml backward-compat note.
+  - **DE.5.config_v14_consolidation** — End state: `config_v14.py` deleted, `auth.py` TYPE_CHECKING points at `config.py`, `runner.py` writes nested shape, `test_config_loader.py` retired into `test_config_v14.py` (canonical loader test). Four sub-steps:
+    - **DE.5.config_v14_consolidation.A** — Additive port: nested-yaml loader (CfgError / CycleError / LegacyFieldError / MissingFieldError / _LEGACY_TO_NEW / _deep_merge / _load_raw_nested / _check_legacy_keys_nested / _build_*_nested / resolve_qs_user_arn / _QS_USER_ARN_CACHE / _apply_env_overrides_nested / _load_nested_config) into `config.py`; `load_config` routes nested vs flat via `_is_nested_v14_yaml`. `tests/unit/test_config_v14.py` + `test_auth_factories.py` point at `config.py`; `auth.py` TYPE_CHECKING points at `config.py`. Flat-yaml path still alive.
+    - **DE.5.config_v14_consolidation.B** — Migrated `runner.py`'s per-cell yaml-dump path to nested. Operator `run/config.*.yaml` files are gitignored — migration documented in RELEASE_NOTES.md.
+    - **DE.5.config_v14_consolidation.C** — Dropped flat-yaml support from `load_config`. Retired `Config.to_yaml_dict` + `write_yaml`. Deleted `tests/unit/test_config_loader.py`; env-var-override + run-yaml smoke tests merged into `test_config_v14.py`. Migrated all flat-yaml test fixtures across `tests/{unit,cli,json,data,schema,audit,e2e}/` to nested shape. `CfgError` now inherits from `ValueError`. `_build_db_nested` makes `db.url` optional.
+    - **DE.5.config_v14_consolidation.D** — Deleted `config_v14.py`.
+  - **DE.5.version_bump** — Bumped `__version__` to 14.0.0, tagged, pushed. v14.0.0 shipped 2026-06-14.
+  - **DE.5.archive_sweep** — This entry.
+
+**Closing context:** v14.0.0 is the hard-break release. RELEASE_NOTES.md v14.0.0 entry carries the v13→v14 migration table. Operator `run/config.*.yaml` files are gitignored, so the migration is documented for re-clone / external integrators. Re-evaluate compat-shim posture flip if external integrators pin v14+.

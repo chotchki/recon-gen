@@ -199,7 +199,7 @@ python3 -m venv .venv
 
 ### Configure
 
-> **v14.0.0 cfg shape preview (DE phase).** The flat-field shape below is the **v13.x form** that loads today. v14.0.0 reshapes to concern-grouped (`aws:` / `db:` / `app2:` / `audit:` / `auth:` / `test:`) with `extends:` inheritance for base + per-env overlays. **In-process code already uses the v14 nested accessors** (`cfg.aws.account_id` / `cfg.db.url` etc.); yaml files migrate at DE.5 cut. Full spec + migration table: [`docs/audits/de_0_cfg_redesign.md`](docs/audits/de_0_cfg_redesign.md). Until v14.0.0 lands, use the legacy flat shape below.
+> **v14.0.0 cfg shape (shipped 2026-06-14).** Phase DE replaced the previous flat-field shape with concern-grouped nested blocks (`aws:` / `db:` / `app2:` / `audit:` / `auth:` / `test:`) and `extends:` inheritance for base + per-env overlays. Field accessors are `cfg.aws.account_id` / `cfg.db.url` / `cfg.auth.aws.profile` etc. Full migration map (every v13 key → its v14 path): [`docs/audits/de_0_cfg_redesign.md#migration-v13x--v1400-hard-break`](docs/audits/de_0_cfg_redesign.md#migration-v13x--v1400-hard-break).
 
 ```bash
 cp config.example.yaml config.yaml
@@ -208,43 +208,66 @@ cp config.example.yaml config.yaml
 Edit `config.yaml`:
 
 ```yaml
-aws_account_id: "123456789012"
-aws_region: "us-east-2"
+aws:
+  account_id: "123456789012"
+  region: "us-east-2"
+  # Required: deployment identity (Z.C). Prefixes every QS resource ID;
+  # also drives `cfg.aws.prefixed("foo")` → `<deployment_name>-foo`.
+  deployment_name: "recon-prod"
 
-# Pre-existing QuickSight datasource ARN.
-# Not required when demo_database_url is set (auto-derived).
-datasource_arn: "arn:aws:quicksight:us-east-2:123456789012:datasource/your-datasource-id"
+  # Optional: IAM principals granted permissions on generated resources.
+  principal_arns:
+    - "arn:aws:quicksight:us-east-1:123456789012:user/default/admin"
 
-# Required: deployment identity (Z.C). `deployment_name` prefixes
-# every QS resource ID; `db_table_prefix` prefixes every DB
-# table/matview/dataset name. Both are required — no defaults.
-deployment_name: "recon-prod"
-db_table_prefix: "recon_prod"
+  # Optional: additional tags on every generated resource.
+  extra_tags:
+    Environment: production
+    Team: finance
 
-# Optional: IAM principals granted permissions on generated resources.
-principal_arns:
-  - "arn:aws:quicksight:us-east-1:123456789012:user/default/admin"
+  # Optional: pre-existing QuickSight datasource ARN.
+  # Default (mode: create) auto-derives the ARN from deployment_name.
+  # datasource:
+  #   mode: adopt
+  #   arn: "arn:aws:quicksight:us-east-2:123456789012:datasource/your-datasource-id"
 
-# Optional: additional tags on every generated resource
-extra_tags:
-  Environment: production
-  Team: finance
+db:
+  # Required: SQL dialect (drives schema/seed emission).
+  dialect: "postgres"        # or "oracle" or "duckdb"
 
-# Optional: which database family for `data apply --execute` (default: postgres)
-# dialect: "postgres"   # or "oracle" or "duckdb"
+  # Optional: database URL for `data apply --execute` and friends.
+  # Postgres:
+  url: "postgresql://user:pass@localhost:5432/quicksight_demo"
+  # Oracle (Easy Connect form, no scheme prefix):
+  # url: "system/pass@localhost:1521/FREEPDB1"
+  # DuckDB (file or in-memory; integrator-local iteration loop, no server):
+  # url: "duckdb:///./demo.duckdb"
 
-# Optional: database URL for `data apply --execute` and friends
-# Postgres:
-# demo_database_url: "postgresql://user:pass@localhost:5432/quicksight_demo"
-# Oracle (Easy Connect form, no scheme prefix):
-# demo_database_url: "system/pass@localhost:1521/FREEPDB1"
-# DuckDB (file or in-memory; integrator-local iteration loop, no server):
-# demo_database_url: "duckdb:///./demo.duckdb"
+  # Optional: DB table-name prefix. Auto-derived from aws.deployment_name
+  # (`-` → `_`) when omitted; set explicitly to override.
+  # table_prefix: "recon_prod"
+
+auth:
+  aws:
+    # Optional: named profile from ~/.aws/credentials. Runner injects
+    # AWS_PROFILE into subprocess envs and auto-derives the QS user ARN
+    # via sts:GetCallerIdentity + quicksight:ListUsers.
+    profile: "recon-gen-local"
+```
+
+`extends:` lets you compose a base cfg with per-env overlays — child wins, dicts deep-merge:
+
+```yaml
+# config.prod.yaml
+extends: ./config.base.yaml
+aws:
+  deployment_name: "recon-prod"
+db:
+  url: "postgresql://prod-user:pass@prod-host:5432/recon"
 ```
 
 > Theme is declared inline on the L2 institution YAML's `theme:` block, not on the deploy config. When the L2 instance carries no `theme:` block, AWS QuickSight CLASSIC takes over at deploy.
 
-All values can also be set via `QS_GEN_`-prefixed environment variables (e.g. `QS_GEN_AWS_ACCOUNT_ID`). Env vars override YAML.
+All values can also be set via `RECON_GEN_`-prefixed environment variables (e.g. `RECON_GEN_AWS_ACCOUNT_ID` / `RECON_GEN_DEMO_DATABASE_URL` / `RECON_GEN_DIALECT`). Env vars override YAML.
 
 ### Generate and deploy
 
@@ -296,7 +319,7 @@ A deterministic demo generator seeds the four apps end-to-end so you can see the
 
 ```bash
 # Apply schema + seed to your demo database, then generate QuickSight JSON.
-# Requires: demo_database_url + dialect in config.yaml and the matching
+# Requires: db.url + db.dialect in config.yaml and the matching
 # extra installed (`[demo]` for Postgres, `[demo,demo-oracle]` for Oracle).
 # Per-prefix DDL + seed are emitted at apply time using cfg.db.table_prefix.
 recon-gen schema apply -c config.yaml --execute   # tables + matviews
@@ -331,7 +354,7 @@ recon-gen dashboards -c config.yaml                # one process, all 4 apps + t
 # → http://127.0.0.1:8765/dashboards
 ```
 
-It speaks all three SQL dialects (PostgreSQL / Oracle / SQLite); point `demo_database_url` at any of them. The schema + seed have to already be applied (`schema apply --execute`, `data apply --execute`, `data refresh --execute`) — Dashboards only reads. It's stateless: every GET re-runs the query, filter state round-trips as `?param_X=…` query params (so the URL is the cache key), no auth/sessions — put it behind your own auth front on a network. All browser-side assets (htmx, d3, the filter widgets) ship inside the wheel — it runs offline.
+It speaks all three SQL dialects (PostgreSQL / Oracle / DuckDB); point `db.url` at any of them. The schema + seed have to already be applied (`schema apply --execute`, `data apply --execute`, `data refresh --execute`) — Dashboards only reads. It's stateless: every GET re-runs the query, filter state round-trips as `?param_X=…` query params (so the URL is the cache key), no auth/sessions — put it behind your own auth front on a network. All browser-side assets (htmx, d3, the filter widgets) ship inside the wheel — it runs offline.
 
 Why two renderers: Dashboards is the offline-iteration loop (edit the L2 YAML / dataset SQL, refresh the page — no deploy cycle) and the renderer the in-progress Studio (`recon-gen studio`, the YAML editor + diagram + data-shaping orchestrator + ETL coverage) builds on. A 4-way cross-tool agreement test (`scenario plants ⊆ direct matview SELECT == QuickSight == Dashboards`, `== audit PDF` where it applies) gates the release, so "feature parity with QuickSight, minus the QuickSight bugs" is enforced, not just claimed. Full reference — what ships in the wheel, the maintainer recipes for bumping a vendored asset — in the handbook's *Self-hosting the dashboards* page.
 
@@ -385,7 +408,7 @@ src/recon_gen/
                         # for-your-role/, scenario/, Schema_v6.md, _diagrams/, _macros/.
                         # Renders against any L2 instance via mkdocs-macros + HandbookVocabulary.
 tests/                  # Mirror the artifact split: tests/{schema,data,json,docs,unit,e2e}/
-run_tests.sh            # Layered test chain runner (unit → db → app2 → deploy → api → browser)
+run_tests.sh            # Layered test chain runner (unit → db → app2 → qs_api → qs_browser)
 config.example.yaml
 ```
 
@@ -395,21 +418,23 @@ config.example.yaml
 ./run_tests.sh up_to=unit                                  # ~20s, no DB / no AWS
 ./run_tests.sh up_to=db                                    # full matrix (13 cells, parallel)
 ./run_tests.sh up_to=db --dialects=pg --targets=lo         # pg-container only
-./run_tests.sh up_to=browser                               # full chain through Playwright
-./run_tests.sh up_to=api --variants=sp_pg_aw               # single AW cell, API only
+./run_tests.sh up_to=qs_browser                            # full chain through Playwright
+./run_tests.sh up_to=qs_api --variants=sp_pg_aw            # single AW cell, API only
 ./run_tests.sh sweep --yes                                 # cleanup orphan AWS resources
 ```
 
-The runner enforces ordering — invoking layer N runs layers 1..N-1 first. See `CLAUDE.md::Test sequencing` for the full guide.
+The runner enforces ordering — invoking layer N runs layers 1..N-1 first. Layers: `unit → db → app2 → qs_api → qs_browser` (the standalone `deploy` layer was retired in Phase DI; QS deploy now fires inside pytest via the session-scoped `qs_deployed` autouse fixture in `tests/e2e/conftest.py` whenever the layer crosses into AWS-touching territory). See `CLAUDE.md::Test sequencing` for the full guide.
+
+**Triage a specific failing test:** `./run_tests.sh triage <pytest_nodeid>` spawns the appropriate DB container, lets the `qs_deployed` fixture handle QS deploy idempotently, and drops into a screen-attached pdb at the failure line. Multi-client — both operator and assistant can drive pdb via `screen -x recon-gen-triage` / `screen -S recon-gen-triage -X stuff $'<cmd>\n'`. Teardown: `./run_tests.sh triage-down --yes` (kills the screen session, sweeps QS resources, stops the triage container). Full runbook: `CLAUDE.md::Triage workflow` section.
 
 Coverage:
 
 - **Unit / integration**: models, tags, config, CLI, demo determinism + scenario coverage (per-instance SHA256 seed-hash locks), tree primitives + validators, dataset builders, visual builders, filter groups, cross-reference validation (dataset ARNs, filter bindings, visual ID uniqueness, sheet scoping), explanation coverage, schema + seed SQL structure for both Postgres + Oracle.
-- **E2E**: two layers gated by `QS_GEN_E2E=1`.
+- **E2E**: two layers gated by `RECON_GEN_E2E=1`.
   - *API layer (boto3)* — resource existence, status, dashboard structure (per-sheet visual counts, parameter / filter-group source-of-truth checks), dataset import health.
   - *Browser layer (Playwright WebKit, headless)* — dashboard loads via pre-authenticated embed URL, sheet tabs, per-sheet visual counts + spot-checked titles, drill-downs, mutual-filter reconciliation tables, date-range filter narrowing, Show-Only-X toggles, Investigation slider + dropdown filters.
 
-E2E tunables (env vars): `QS_E2E_PAGE_TIMEOUT`, `QS_E2E_VISUAL_TIMEOUT`, `QS_E2E_USER_ARN`, `QS_E2E_IDENTITY_REGION`. Failure screenshots land in `tests/e2e/screenshots/<app>/` (gitignored).
+E2E tunables (env vars): `RECON_E2E_PAGE_TIMEOUT`, `RECON_E2E_VISUAL_TIMEOUT`, `RECON_E2E_USER_ARN`, `RECON_E2E_IDENTITY_REGION`. `RECON_E2E_USER_ARN` is auto-derived from `cfg.auth.aws.profile` (via STS + `quicksight:ListUsers`) when unset, so the operator-side cfg block is the canonical wiring. Failure screenshots land in `tests/e2e/screenshots/<app>/` (gitignored).
 
 ## Customising
 

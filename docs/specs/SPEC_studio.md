@@ -87,11 +87,11 @@ A bad PUT returns 400 + the validator's error rendered inline in the form fragme
 
 `config.yaml`'s strict allowlist (V.1.b) gains three keys, all operator-machine-local (env-ish, not L2-institution structure):
 
-- **`etl_hook: <shell command string>`** — optional. The ETL engineer's pipeline command. Studio runs it as the first step of "Deploy changes."
-- **`etl_datasource:`** block — optional. Connection URL + the table allowlist (`transactions`, `daily_balances`). The source DB Studio pulls rows from into `demo_database_url`. Read-only from Studio's perspective.
-- **`test_generator:`** block — the operator's preferred shaping-knob defaults for THIS machine. See "Data-shaping model" below.
+- **`app2.etl_hook: <shell command string>`** — optional. The ETL engineer's pipeline command. Studio runs it as the first step of "Deploy changes."
+- **`etl_datasource:`** block — optional. Connection URL + the table allowlist (`transactions`, `daily_balances`). The source DB Studio pulls rows from into `cfg.db.url`. Read-only from Studio's perspective.
+- **`test.generator:`** block — the operator's preferred shaping-knob defaults for THIS machine. See "Data-shaping model" below.
 
-All three absent → today's behavior (no ETL pipeline run, no pull, generator runs at `data apply` defaults). Hard constraint: every field in `test_generator:` has a default such that the absent-block case emits SQL byte-identical to `tests/data/_locked_seeds/*` — `test_locked_seed_matches_fresh_emit` keeps passing.
+All three absent → today's behavior (no ETL pipeline run, no pull, generator runs at `data apply` defaults). Hard constraint: every field in `test.generator:` has a default such that the absent-block case emits SQL byte-identical to `tests/data/_locked_seeds/*` — `test_locked_seed_matches_fresh_emit` keeps passing.
 
 ## The "Deploy changes" pipeline
 
@@ -104,9 +104,9 @@ One button in Studio, available in every mode (editor / data-shaping / coverage)
 1. (if etl_hook set)  → run shell command  [GATE — non-zero halts; demo DB untouched]
     │ (gate passes)
     ▼
-2. WIPE demo_database_url base tables (unconditional once we reach this step)
+2. WIPE cfg.db.url base tables (unconditional once we reach this step)
    (if etl_datasource set)  → copy rows ≤ end_date from etl_datasource
-3. (if test_generator.enabled) → emit_full_seed (always additive — wipe was step 2)
+3. (if test.generator.enabled) → emit_full_seed (always additive — wipe was step 2)
 4. refresh matviews
 5. ping Dashboards: data-generation-id bumped
                    ↓
@@ -128,15 +128,15 @@ This gate is the safety floor: a broken ETL pipeline can never wipe out a workin
 
 ### Step 2 — wipe demo DB + (optional) etl_datasource pull
 
-Studio **always wipes** `<prefix>_transactions` + `<prefix>_daily_balances` in `demo_database_url` at this step (via the existing `wipe_demo_data_sql(l2_instance, dialect)` primitive in `common/l2/seed.py`). The wipe is unconditional because **Studio owns the refresh of `demo_database_url`** — every Deploy starts from a clean base.
+Studio **always wipes** `<prefix>_transactions` + `<prefix>_daily_balances` in `cfg.db.url` at this step (via the existing `wipe_demo_data_sql(l2_instance, dialect)` primitive in `common/l2/seed.py`). The wipe is unconditional because **Studio owns the refresh of `cfg.db.url`** — every Deploy starts from a clean base.
 
-Then, **if `etl_datasource` is set**, Studio opens it as a separate read-only connection and copies rows from its `transactions` + `daily_balances` (filtered to `posted_at ≤ end_date` / `balance_date ≤ end_date`) into `demo_database_url`. The pull is **cross-dialect**: the ETL DB may be PostgreSQL or Oracle, the demo DB may be SQLite. Reuses the existing dialect machinery (`common/sql/dialect.py`) and the Oracle INSERT-ALL batcher (`common/db.py::batch_oracle_inserts`).
+Then, **if `etl_datasource` is set**, Studio opens it as a separate read-only connection and copies rows from its `transactions` + `daily_balances` (filtered to `posted_at ≤ end_date` / `balance_date ≤ end_date`) into `cfg.db.url`. The pull is **cross-dialect**: the ETL DB may be PostgreSQL or Oracle, the demo DB may be SQLite. Reuses the existing dialect machinery (`common/sql/dialect.py`) and the Oracle INSERT-ALL batcher (`common/db.py::batch_oracle_inserts`).
 
-**Ownership boundary:** the `etl_hook` is in charge of refreshing the *`etl_datasource`* (the ETL engineer's pipeline owns its own DB). Studio owns the refresh of *`demo_database_url`* — that's why the wipe is unconditional and at the top of step 2. After step 2, the demo DB is either empty (no `etl_datasource`) or a clean snapshot of the `etl_datasource` rows (filtered to `≤ end_date`). Whatever the generator does in step 3 layers cleanly on top of that known starting point.
+**Ownership boundary:** the `etl_hook` is in charge of refreshing the *`etl_datasource`* (the ETL engineer's pipeline owns its own DB). Studio owns the refresh of *`cfg.db.url`* — that's why the wipe is unconditional and at the top of step 2. After step 2, the demo DB is either empty (no `etl_datasource`) or a clean snapshot of the `etl_datasource` rows (filtered to `≤ end_date`). Whatever the generator does in step 3 layers cleanly on top of that known starting point.
 
 ### Step 3 — generator (always additive)
 
-If `test_generator.enabled`, Studio runs the generator (`emit_full_seed`) with the current `test_generator:` shaping params, writing into `demo_database_url`. **Always additive** — the generator does NOT wipe; the wipe was step 2's job. The generator's `scope` knob (see "Data-shaping model") picks what it adds:
+If `test.generator.enabled`, Studio runs the generator (`emit_full_seed`) with the current `test.generator:` shaping params, writing into `cfg.db.url`. **Always additive** — the generator does NOT wipe; the wipe was step 2's job. The generator's `scope` knob (see "Data-shaping model") picks what it adds:
 
 - `scope: full` on top of an empty demo DB (no `etl_datasource`) = today's `data apply --execute` output, byte-identical to the locked seeds.
 - `scope: full` on top of an `etl_datasource` snapshot = the full 90-day baseline + plants layered over real data (probably redundant; `uncovered_rails` or `exceptions_only` is the natural pick when ETL data is present).
@@ -188,7 +188,7 @@ test:
 Three modes, dial-able by the user:
 
 - **`full`** (default) — today's behavior: 90-day baseline + planted exceptions on top. Byte-matches the locked seeds. The integrator's everyday demo.
-- **`uncovered_rails`** — generator inspects `demo_database_url` (post step 2 of the pipeline) and only generates baseline rows for rails that don't already have data. Pairs symmetrically with the ETL coverage overlay: the coverage view shows the integrator what's missing; this scope fills only what's missing. The natural ETL-engineer choice.
+- **`uncovered_rails`** — generator inspects `cfg.db.url` (post step 2 of the pipeline) and only generates baseline rows for rails that don't already have data. Pairs symmetrically with the ETL coverage overlay: the coverage view shows the integrator what's missing; this scope fills only what's missing. The natural ETL-engineer choice.
 - **`exceptions_only`** — skip the 90-day baseline, only emit the planted violations on top of whatever's already there. The natural trainer choice when planting teaching scenarios on top of real ETL data.
 
 ### plants
@@ -317,7 +317,7 @@ The `serve` Click group goes away with it (the only thing under it was `app2 app
 
 These are explicitly deferred (per the standing "don't silently defer" rule — flagged here, not buried):
 
-- **Persistence of in-flight shaping params.** Today: ephemeral per-session Studio state; on restart, reads the `test_generator:` block from `config.yaml` for defaults. If a trainer wants to save "today's lesson configuration" → small `scenario.yaml` later, when asked. Not in the first cut.
+- **Persistence of in-flight shaping params.** Today: ephemeral per-session Studio state; on restart, reads the `test.generator:` block from `config.yaml` for defaults. If a trainer wants to save "today's lesson configuration" → small `scenario.yaml` later, when asked. Not in the first cut.
   - Later I'll advocate for saving an updated config.yaml
 - **PK collisions** between real `etl_datasource` `transaction_id`s and the generator's synthetic IDs. The natural fix (exclude colliding accounts from generation) overlaps with `scope: uncovered_rails`, so there's no need to pre-build a guard. Address if/when it bites.
 - **Auth (phase.2).** Studio has writes; eventually it needs a different auth posture than Dashboards' read-only views. The same-Starlette-process design is severable for that day. Not in the first cut.
@@ -332,11 +332,11 @@ What this means concretely:
 
 - **Editor + cascade + shaping knobs → unit tests** against the in-memory `L2Instance` model + scenario object. No DB needed for the bulk of editor coverage. High coverage warranted (the cascade-rewrite logic is the riskiest correctness piece).
 - **Deploy changes pipeline → orchestration tests**, one per pipeline shape: gated halt on `etl_hook` failure (demo DB untouched), wipe-then-pull when `etl_datasource` is set, additive generator on top, refresh + reload bump. In-process; no full chain-runner matrix.
-- **Cross-dialect pull (step 2) → narrow targeted matrix.** This is the dialect-sensitive part of Studio. The short-term common case the SPEC targets: `etl_datasource` is PostgreSQL or Oracle (the operator's real DB), `demo_database_url` is SQLite (the fast local-iteration target). Test priority:
+- **Cross-dialect pull (step 2) → narrow targeted matrix.** This is the dialect-sensitive part of Studio. The short-term common case the SPEC targets: `etl_datasource` is PostgreSQL or Oracle (the operator's real DB), `cfg.db.url` is SQLite (the fast local-iteration target). Test priority:
   1. **PG → SQLite** — the integrator-local + ETL-engineer common case.
   2. **Oracle → SQLite** — the codebase already handles Oracle; same shape, different source dialect.
   3. **SQLite → SQLite** — the degenerate case (same dialect on both sides); verifies the code path doesn't choke.
-  4. *(Longer-term, not gated on Studio shipping)* — `demo_database_url` of PG or Oracle re-adds cells. Skipped in the short-term Studio matrix; the codebase keeps the dialect support, we just don't force the matrix.
+  4. *(Longer-term, not gated on Studio shipping)* — `cfg.db.url` of PG or Oracle re-adds cells. Skipped in the short-term Studio matrix; the codebase keeps the dialect support, we just don't force the matrix.
 - **Diagram → JS unit tests** in the existing `tests/js/` shape (Playwright harness, one per renderer feature: render the full graph for `sasquatch_pr`, toggle entity types, click-to-focus, coverage-tint mode). Renderer-specific once the spike picks D3 or graphviz.
 - **Studio + Dashboards integrated loop → 1-2 browser e2e tests** end-to-end against `sasquatch_pr` + SQLite (edit the YAML in Studio → Deploy → Dashboards reloads with the new data). NOT parametrized over `[qs, app2]` — Studio is App2-only; there's no QS-side analog to test parity against.
 - **Existing Dashboards / QS / 4-way agreement tests are untouched** by Studio. The X.2-era 13-cell `scenario × dialect × target` matrix and the agreement test keep running as they do today. Studio doesn't add to them and doesn't subtract from them.
@@ -355,7 +355,7 @@ The principle: keep good coverage, but don't pay X.2's matrix-fan-out cost on a 
 
 ## Hard invariants
 
-- **Defaults preserve today's behavior, byte-for-byte.** Every `test_generator:` field absent → emit_full_seed output is byte-identical to `tests/data/_locked_seeds/*`. The locked-seed determinism test must keep passing as new knobs land.
+- **Defaults preserve today's behavior, byte-for-byte.** Every `test.generator:` field absent → emit_full_seed output is byte-identical to `tests/data/_locked_seeds/*`. The locked-seed determinism test must keep passing as new knobs land.
 - **YAML on disk is authoritative.** Studio's in-memory `L2Instance` is a cache of the file, never a parallel source of truth. Every save writes the file before the response returns.
 - **Server owns cascade; client is dumb HTMX.** No client-side cascade computation, no diffing, no SPA state.
 - **Severability.** `dashboards` runs without `studio`. Studio routes never assume Dashboards-side state.
