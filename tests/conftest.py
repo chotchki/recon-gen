@@ -168,11 +168,11 @@ def _derive_env_from_cfg() -> None:
     except Exception:  # noqa: BLE001 — cfg peek is best-effort
         return
 
-    aws_profile = getattr(getattr(peek_cfg, "auth", None), "aws_profile", None)
+    aws_profile = peek_cfg.auth.aws.profile
     if aws_profile and "AWS_PROFILE" not in os.environ:
         os.environ["AWS_PROFILE"] = aws_profile
 
-    l2_default = getattr(peek_cfg, "default_l2_instance", None)
+    l2_default = peek_cfg.db.default_l2_instance
     if l2_default and RECON_GEN_TEST_L2_INSTANCE.get_or_none() is None:
         l2_path = (
             Path(l2_default)

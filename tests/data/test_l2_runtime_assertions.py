@@ -62,10 +62,18 @@ def _demo_database_url() -> str | None:
     cfg_path = Path(__file__).parent.parent / "run" / "config.postgres.yaml"
     if not cfg_path.exists():
         return None
-    import yaml
-    text = cfg_path.read_text()
-    cfg = yaml.safe_load(text)
-    return cfg.get("demo_database_url")
+    # Peek the raw yaml without applying load_config's AWS_PROFILE side-effect.
+    # Using _load_raw_nested resolves extends: chains so this works against
+    # the operator's run/base.yaml-extending cfgs.
+    from typing import cast
+    from recon_gen.common.config import _load_raw_nested  # noqa: PLC2701 — module-internal helper
+    raw = _load_raw_nested(cfg_path)
+    db_block = raw.get("db")
+    if not isinstance(db_block, dict):
+        return None
+    db_typed = cast("dict[str, object]", db_block)
+    url = db_typed.get("url")
+    return str(url) if isinstance(url, str) else None
 
 
 @pytest.fixture(scope="module")

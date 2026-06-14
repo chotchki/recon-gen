@@ -876,7 +876,7 @@ def _parametrized_dashboard_driver(
                 pytest.skip("RECON_E2E_USER_ARN unavailable — cannot derive QS user ARN")
             yield driver, dashboard_id
     else:  # app2
-        if not getattr(cfg, "demo_database_url", None):
+        if not cfg.db.url:
             pytest.skip(
                 "no cfg.db.url — the app2 leg reads the same DB "
                 "the deployed dashboard does"

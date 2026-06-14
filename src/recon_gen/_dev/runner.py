@@ -461,7 +461,7 @@ def _probe_qs_e2e_user_arn() -> ProbeFailure | None:
         message=(
             "RECON_E2E_USER_ARN unset and no cfg auth block found. "
             "Either export the QuickSight user ARN, or add an "
-            "`auth: { aws_profile: <name> }` block to "
+            "`auth: { aws: { profile: <name> } }` block to "
             "run/config.<dialect>.yaml (combined spike: "
             "docs/audits/y_2_gate_h_i_combined_spike.md)."
         ),
@@ -1056,8 +1056,8 @@ def dispatch_layer(
         if layer == "deploy":
             print(
                 f"{terminal_prefix}runner: dispatch-skip [{layer}] cfg "
-                f"missing — set `auth.aws_profile` (h+i.0) AND "
-                f"`default_l2_instance` (h.6) in run/config.<dialect>.yaml"
+                f"missing — set `auth.aws.profile` (h+i.0) AND "
+                f"`db.default_l2_instance` (h.6) in run/config.<dialect>.yaml"
             )
         else:
             print(
@@ -3946,8 +3946,9 @@ Auth (Y.2.gate.h+i):
   AWS profile + QS embed user are read from run/config.<dialect>.yaml's
   optional auth: block. Set:
       auth:
-        aws_profile: "recon-gen-local"   # ~/.aws/credentials profile
-        quicksight_user_arn: null             # optional explicit override
+        aws:
+          profile: "recon-gen-local"     # ~/.aws/credentials profile
+          quicksight_user_arn: null       # optional explicit override
   When set, the runner injects AWS_PROFILE into every layer subprocess and
   auto-derives RECON_E2E_USER_ARN via STS+ListUsers — no env-var exports.
   One-time IAM-user setup runbook + IAM policy json:

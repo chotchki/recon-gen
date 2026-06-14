@@ -88,8 +88,8 @@ def _load_l2_instance() -> Any:
 def _try_db_connection(cfg: Any) -> tuple[bool, str]:
     """Attempt to open a connection to the configured DB. Returns
     (ok, reason) — when ok is False, reason is the skip message."""
-    if not getattr(cfg, "demo_database_url", None):
-        return False, "no demo_database_url in cfg"
+    if not cfg.db.url:
+        return False, "no cfg.db.url in cfg"
     try:
         from recon_gen.common.db import connect_demo_db
         conn = connect_demo_db(cfg)
