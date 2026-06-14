@@ -165,8 +165,19 @@ def emit_schema(
     # Lock 3. DuckDB has built-in sha256(); Oracle has built-in
     # STANDARD_HASH(... 'SHA256') — no per-dialect equivalent stmt
     # needed there.
+    #
+    # DG followup — wrap in a DO block that catches ``unique_violation``
+    # so concurrent pytest-xdist workers don't race on the catalog-level
+    # ``pg_extension_name_index``. ``CREATE EXTENSION IF NOT EXISTS`` is
+    # not race-safe: two sessions can both see "doesn't exist" and both
+    # try to insert; the second hits the unique index. Wrapping in an
+    # exception handler is the standard PG idiom for this race.
     pg_extensions = (
-        "CREATE EXTENSION IF NOT EXISTS pgcrypto;\n"
+        "DO $$\n"
+        "BEGIN\n"
+        "  CREATE EXTENSION IF NOT EXISTS pgcrypto;\n"
+        "EXCEPTION WHEN unique_violation THEN NULL;\n"
+        "END $$;\n"
         if dialect is Dialect.POSTGRES
         else ""
     )
