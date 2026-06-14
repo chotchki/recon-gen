@@ -1435,4 +1435,31 @@ def load_config(path: str | Path | None = None) -> Config:
     p = Path(path) if isinstance(path, str) else path
     if not p.exists():
         raise CfgError(f"cfg path does not exist: {p}")
-    return _load_nested_config(p)
+    cfg = _load_nested_config(p)
+    _apply_cfg_aws_profile_to_env(cfg)
+    return cfg
+
+
+def _apply_cfg_aws_profile_to_env(cfg: "Config") -> None:
+    """Wire ``cfg.auth.aws.profile`` to ``AWS_PROFILE`` so downstream
+    ``boto3.client(...)`` calls pick up the long-lived IAM-user credentials
+    out of ``~/.aws/credentials`` instead of falling through to the
+    ambient SSO-cached default (which expires + raises
+    ``LoginRefreshRequired`` mid-deploy).
+
+    Operator's explicitly-set ``AWS_PROFILE`` env var wins — only
+    auto-populate when unset, so cron + CI overrides via env keep their
+    precedence.
+
+    Prior contract: the test layer runner injected ``AWS_PROFILE`` into
+    every subprocess it spawned; bare ``recon-gen`` invocations (e.g.,
+    ``recon-gen json apply --execute -c run/config.postgres.yaml`` outside
+    the runner) relied on the operator's ambient shell having ``AWS_PROFILE``
+    already exported. Picking it up from the cfg at load time closes
+    that gap so both invocation shapes use the same identity.
+    """
+    profile = cfg.auth.aws.profile
+    if not profile:
+        return
+    import os  # noqa: PLC0415 — lazy: only fired when cfg supplies a profile
+    os.environ.setdefault("AWS_PROFILE", profile)  # typing-smell: ignore[envvar-bypass]: cfg-supplied profile name (auth.aws.profile) per [[feedback_no_credential_friction]]
