@@ -92,14 +92,19 @@ def _mk_request(needs_aws: bool = True) -> Any:
 
 def _run_fixture(
     *, request: Any, cfg: Any, tmp_path_factory: pytest.TempPathFactory,
-    worker_id: str = "master",
 ) -> None:
     """Invoke the fixture function body directly (bypassing pytest's
     fixture machinery — we want unit-level control).
+
+    The fixture used to take `worker_id: str` but it was unused dead
+    code; dropped in commit d0635a2f (live-smoke bug A.4 — the
+    `-p no:xdist` triage spawn left `worker_id` fixture unregistered,
+    causing the qs_deployed fixture to fail at setup before the test
+    body ran). The test signature mirrors the fixture's.
     """
     e2e_conftest.qs_deployed.__wrapped__(  # type: ignore[attr-defined]: pytest decorators preserve the wrapped function
         request=request, cfg=cfg,
-        tmp_path_factory=tmp_path_factory, worker_id=worker_id,
+        tmp_path_factory=tmp_path_factory,
     )
 
 
