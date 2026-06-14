@@ -16,14 +16,28 @@ DC.1 makes uvicorn capable of serving HTTPS *if* given a cert + key. It does not
 
 Our test / local-dev / CI environments are exactly the postures where ANY browser warning blocks the DD work — `Secure` cookies require browser-trusted HTTPS, and you can't honestly validate the OIDC login flow with click-through warnings every restart. We need real certs in those environments.
 
-## The redirect — DNS + Let's Encrypt via Cloudflare
+## The redirect — DNS + Let's Encrypt via Cloudflare, 4 DNS names
 
-The prior revision recommended mkcert (local-CA self-signed) for local-dev + Caddy ACME for shared deploys. Operator pushback (2026-06-14): use real Let's Encrypt certs everywhere via DNS-01 challenge against `hotchkiss.io`, modeled on the [hotchkiss-io coordinator](https://github.com/chotchki/hotchkiss-io/tree/main/src/coordinator) pattern they already run for their personal site. Two domains, both `A → 127.0.0.1`:
+The prior revision recommended mkcert (local-CA self-signed) for local-dev + Caddy ACME for shared deploys. Operator pushback (2026-06-14, two passes):
 
-- `localdev.recon-gen.hotchkiss.io` — operator's Mac
-- `ci.recon-gen.hotchkiss.io` — WSL2 self-hosted CI runner's Windows machine
+**Pass 1 — real LE certs via DNS-01.** Use real Let's Encrypt certs everywhere via DNS-01 challenge against `hotchkiss.io`, modeled on the [hotchkiss-io coordinator](https://github.com/chotchki/hotchkiss-io/tree/main/src/coordinator) the operator already runs for their personal site.
 
-Both A records point at loopback. The cert validates because DNS-01 doesn't care that the target IP is local — it only requires that the validator can post `_acme-challenge.<domain>` TXT records via the Cloudflare API and that Let's Encrypt sees them. The browser hitting `https://localdev.recon-gen.hotchkiss.io:8765` resolves to 127.0.0.1 on the operator's machine, connects to the local uvicorn, and presents a real Let's Encrypt cert that every browser trusts out of the box.
+**Pass 2 — 4 DNS names, two with auto-discovered public IPs.** The prior 2-name shape (`localdev` + `ci`, both → 127.0.0.1) carried over the implicit assumption that *something else* keeps `hotchkiss.io` pointed at the operator's dev box (the existing `hotchkiss.io:5433` PG forward + `hotchkiss.io:1522` Oracle forward pattern documented in `[[project_cb10_qs_to_docker_pg_constraints]]`). Today the operator maintains that A record manually. Formalize it instead: the runner manages 4 DNS names directly, removing the external-process dep.
+
+The 4 names per environment:
+
+| Hostname | A → | Used for | Renewal |
+|---|---|---|---|
+| `localdev.recon-gen.hotchkiss.io` | `127.0.0.1` (static) | Operator's Mac browser → local uvicorn over loopback | One-time A record |
+| `dev.recon-gen.hotchkiss.io` | Operator's Mac public IP (auto-discovered) | QuickSight (us-east-1) → operator's Mac PG/Oracle Docker (replaces the implicit `hotchkiss.io:5433` forward) | Runner updates A record when public IP changes |
+| `localci.recon-gen.hotchkiss.io` | `127.0.0.1` (static) | WSL2 runner's local browser → local uvicorn over loopback | One-time A record |
+| `ci.recon-gen.hotchkiss.io` | WSL2 runner's public IP (auto-discovered) | QuickSight (us-east-1) → WSL2 runner's PG/Oracle Docker | Runner updates A record when public IP changes |
+
+**Why both loopback + public per environment.** Loopback is fastest and most reliable for the local browser (Studio / dashboards / QS embed in the operator's Chrome → local uvicorn never leaves the box). Public is needed so QuickSight in us-east-1 can reach the operator's Postgres/Oracle Docker (the existing `hotchkiss.io:5433` forward pattern, just renamed under our managed namespace). Splitting them gives the cert SAN list a coherent shape: one cert per environment covering both names, so the local browser AND QuickSight present the same Let's Encrypt cert as appropriate.
+
+**Self-managed public IP discovery.** Both `dev.recon-gen.hotchkiss.io` and `ci.recon-gen.hotchkiss.io` discover their public IP via the [`cloudflare_trace`](https://github.com/chotchki/hotchkiss-io/blob/main/src/coordinator/ip/cloudflare_trace.rs) pattern: GET `https://1.1.1.1/cdn-cgi/trace`, parse the `ip=` line, compare to the current Cloudflare A record value, PATCH if different. Run on every `./run_tests.sh up` and on a heartbeat inside the runner. Self-contained — no external "make sure hotchkiss.io still points here" process required.
+
+**Both DNS-01 challenges still validate against loopback or public — Let's Encrypt only cares about TXT records.** The browser hitting `https://localdev.recon-gen.hotchkiss.io:8765` resolves to 127.0.0.1, connects to local uvicorn, and presents a real Let's Encrypt cert. QuickSight hitting `dev.recon-gen.hotchkiss.io:5433` resolves to the operator's current public IP, connects to the PG Docker, and presents the same real Let's Encrypt cert (PG with TLS uses the same cert).
 
 **Why this beats the prior recommendation:**
 
@@ -50,61 +64,102 @@ The mkcert / Caddy / nginx / AWS ACM options remain on the table for completenes
 | CI fit (self-hosted runner) | needs install per runner | needs public IP / HTTP-01 forwarding | same | **YES (DNS-01 is identical to local-dev)** | NO |
 | Cert renewal automation | manual | auto (background) | cron + reload | **auto (every `./run_tests.sh up`)** | auto |
 | Cloudflare API dep | NO | NO | NO | **YES (one scoped token)** | NO |
-| Operator bootstrap | 2 (install, mint) | 1 (Caddyfile) | 5+ | **3 one-time (token, 2 DNS A records, paste token env)** | N/A bare host |
-| Codebase impact | ~80 LoC wrapper | ~120 LoC + Caddyfile | ~200 LoC + certbot | **~350 LoC under `_dev/tls/` + `acme` + `cryptography` (both in the `[dev]` extra, NOT shipped in the published wheel)** | ~150 LoC + boto3 |
+| Operator bootstrap | 2 (install, mint) | 1 (Caddyfile) | 5+ | **2 one-time (token, paste token env); runner manages all 4 DNS records** | N/A bare host |
+| Codebase impact | ~80 LoC wrapper | ~120 LoC + Caddyfile | ~200 LoC + certbot | **~450 LoC under `_dev/tls/` + `acme` + `cryptography` (both in the `[dev]` extra, NOT shipped in the published wheel)** | ~150 LoC + boto3 |
 | Claude end-to-end driveable | YES | YES | NO (certbot interactive) | **YES (runner-internal helper)** | NO (AWS console) |
 | Shipping cert to downstream `recon-gen.exe` users | N/A | N/A | N/A | **Explicitly out-of-scope (user supplies cert via `cfg.app2.tls.*`)** | N/A |
 
 ## Recommendation — locked
 
-**Build the ACME DNS-01 flow as runner-internal machinery under `src/recon_gen/_dev/tls/` — no user-facing CLI verb.** Scope it to our test/local-dev/CI use only — `localdev.recon-gen.hotchkiss.io` and `ci.recon-gen.hotchkiss.io`. Downstream `recon-gen.exe` end-users continue to supply their own cert + key paths via `cfg.app2.tls.{cert_path,key_path}` and own their own renewal flow (certbot, acme.sh, whatever fits their environment).
+**Build the ACME DNS-01 flow + public-IP auto-discovery as runner-internal machinery under `src/recon_gen/_dev/tls/` — no user-facing CLI verb.** Scope it to our test/local-dev/CI use only — 4 DNS names across two environments (operator's Mac + WSL2 CI runner). Downstream `recon-gen.exe` end-users continue to supply their own cert + key paths via `cfg.app2.tls.{cert_path,key_path}` and own their own renewal flow (certbot, acme.sh, whatever fits their environment).
 
-This matches the operator's DX expectations: same flow local + CI; no per-machine CA install; real Let's Encrypt certs; auto-renew on `./run_tests.sh up`; one Cloudflare API token in env. Operators of the published wheel see nothing new — the `_dev/` namespace is excluded from the build.
+This matches the operator's DX expectations:
 
-## Implementation plan (revised, no user-facing CLI)
+- Same flow local + CI; no per-machine CA install; real Let's Encrypt certs; auto-renew on `./run_tests.sh up`.
+- One Cloudflare API token in env (Zone:DNS:Edit on `hotchkiss.io`).
+- Removes the prior implicit "external process keeps `hotchkiss.io` pointed at the dev box" dep — the runner now owns it.
+- Operators of the published wheel see nothing new — the `_dev/` namespace is excluded from the build.
 
-The cert provisioning is internal test/dev/CI machinery. Downstream `recon-gen.exe` operators see no new commands — they keep using `cfg.app2.tls.{cert_path,key_path}` with paths they manage themselves. Our cert flow lives entirely under `src/recon_gen/_dev/` (the dev-only namespace, excluded from the published wheel — verified via `pyproject.toml::tool.hatch.build.targets.wheel.packages`).
+## Implementation plan (revised — runner-internal, 4 DNS names, 2 SAN certs)
 
-**DC.2 — runner-internal ACME flow**
+The cert + DNS provisioning is internal test/dev/CI machinery. Downstream `recon-gen.exe` operators see no new commands — they keep using `cfg.app2.tls.{cert_path,key_path}` with paths they manage themselves. Our flow lives entirely under `src/recon_gen/_dev/` (the dev-only namespace, excluded from the published wheel — verified via `pyproject.toml::tool.hatch.build.targets.wheel.packages`).
 
-1. Add `src/recon_gen/_dev/tls/ensure.py` with a single function:
-   ```python
-   def ensure_dev_cert(host: str, cert_path: Path, key_path: Path) -> None:
-       """Idempotent: if cert at cert_path is valid for ≥30 days, no-op.
-       Else run ACME DNS-01 against Let's Encrypt via the Cloudflare API
-       and write fresh PEMs to cert_path/key_path.
+**DC.2 — runner-internal ACME + public-IP discovery**
 
-       Caller responsible for choosing host (`localdev.recon-gen.hotchkiss.io`
-       on the operator's Mac, `ci.recon-gen.hotchkiss.io` on the WSL2 CI
-       runner — detected from environment).
-       """
-   ```
-   No CLI verb. No subcommand. Purely a helper the runner calls.
-2. ACME state machine via the `acme` library (IETF maintainer, `pip install acme`) under a new `[dev]` extra so the downstream wheel stays minimal. Account key stored at `~/.local/share/recon-gen/tls/account.key` (per-machine, survives reclones; XDG path). Account email read from `cfg.audit.signing.signer_name` — one identity for the whole tool.
-3. Cloudflare API client — direct `requests` calls against `api.cloudflare.com/client/v4/zones/{zone_id}/dns_records`. Token read from env `RECON_GEN_CLOUDFLARE_TOKEN` (per `[[feedback_no_credential_friction]]`). Zone ID auto-discovered from `hotchkiss.io` lookup on first run; cached at `~/.local/share/recon-gen/tls/zone-id.txt`.
-4. DNS-01 flow inside `ensure_dev_cert`:
-   1. ACME `new-order` for `<fqdn>`.
-   2. Get authorization → DNS-01 challenge token.
-   3. POST `_acme-challenge.<fqdn>` TXT record via Cloudflare API.
-   4. Poll via `dnspython` against `1.1.1.1` until TXT propagates (typical: <15s).
-   5. Tell ACME the challenge is ready; poll order until VALID.
-   6. Generate keypair via `cryptography`, build CSR, finalize order, download PEM chain.
-   7. Write `cert.pem` + `key.pem` to the caller-supplied paths.
-   8. DELETE the TXT record (cleanup; idempotent on retry).
-   9. File-lock `~/.local/share/recon-gen/tls/renew.lock` (10s critical section) so two concurrent runner invocations don't double-renew.
-5. Wire `ensure_dev_cert` into `cmd_up_to`'s prelude: when `cfg.app2.tls.cert_path` is configured AND the file is missing or `<30d`, call it. Skip when `cfg.app2.tls.*` is unset (the publication path — no managed cert involved). The host is `ci.recon-gen.hotchkiss.io` when `os.environ.get("CI")` is truthy, else `localdev.recon-gen.hotchkiss.io`.
-6. Add `tests/unit/test_dev_tls_ensure.py` covering: account-key generation, cert-expiry computation, DNS-01 challenge response shape, missing-token error path, idempotent no-op when cert is fresh. Mock `requests` for Cloudflare; mock the ACME client; real PEM parsing via `cryptography`.
+The module layout under `src/recon_gen/_dev/tls/`:
+
+```
+_dev/tls/
+  ensure.py         # the top-level entry: ensure_dev_env(env: Env) -> None
+  acme_client.py    # ACME DNS-01 state machine
+  cloudflare_api.py # Cloudflare client (DNS records + zone discovery)
+  public_ip.py      # cloudflare_trace.rs pattern, ported to Python
+  storage.py        # XDG paths, file locks, cert+key persistence
+```
+
+The shape of the entry function:
+
+```python
+class Env(StrEnum):
+    DEV = "dev"  # operator's Mac
+    CI = "ci"    # WSL2 CI runner
+
+# Hostnames per env (locked tuples)
+_HOSTS_BY_ENV: Final = {
+    Env.DEV: ("localdev.recon-gen.hotchkiss.io", "dev.recon-gen.hotchkiss.io"),
+    Env.CI:  ("localci.recon-gen.hotchkiss.io",  "ci.recon-gen.hotchkiss.io"),
+}
+
+def ensure_dev_env(
+    env: Env, *, cert_path: Path, key_path: Path,
+) -> None:
+    """Idempotent. One call covers everything the runner needs for HTTPS.
+
+    Concretely:
+      1. Reconcile A records: `local<env>` → 127.0.0.1 (static),
+         `<env>` → result of public_ip.discover() (auto). PATCH via
+         Cloudflare API if drift detected; no-op if current.
+      2. Read cert at cert_path. If present + not_after >= now+30d,
+         done.
+      3. Else run ACME DNS-01 for BOTH hostnames in _HOSTS_BY_ENV[env]
+         as a single SAN cert. Write PEM chain + key to caller paths.
+
+    Holds an advisory file lock at ~/.local/share/recon-gen/tls/renew.lock
+    so two concurrent runner invocations don't double-write or hit
+    Cloudflare API limits.
+    """
+```
+
+1. ACME state machine via the `acme` library (IETF maintainer, `pip install acme`) under a new `[dev]` extra so the downstream wheel stays minimal. Account key stored at `~/.local/share/recon-gen/tls/account.key` (per-machine, survives reclones; XDG path). Account email read from `cfg.audit.signing.signer_name` — one identity for the whole tool.
+2. Cloudflare API client — direct `requests` calls against `api.cloudflare.com/client/v4/zones/{zone_id}/dns_records`. Token read from env `RECON_GEN_CLOUDFLARE_TOKEN` (per `[[feedback_no_credential_friction]]`). Zone ID auto-discovered from `hotchkiss.io` lookup on first run; cached at `~/.local/share/recon-gen/tls/zone-id.txt`.
+3. Public-IP discovery (`public_ip.py`) ports the [`cloudflare_trace.rs`](https://github.com/chotchki/hotchkiss-io/blob/main/src/coordinator/ip/cloudflare_trace.rs) pattern: GET `https://1.1.1.1/cdn-cgi/trace`, parse text body line-by-line, return the `ip=` value. ~30 LoC. Retries 3× on transient HTTP errors; raises on 4xx (token / IP misconfig).
+4. DNS-01 flow inside `acme_client.py`, called once per env (covering both SANs in one cert):
+   1. ACME `new-order` with two identifiers (`local<env>` + `<env>` hostnames).
+   2. For each authorization → DNS-01 challenge token.
+   3. POST `_acme-challenge.<each_hostname>` TXT record via Cloudflare API.
+   4. Poll via `dnspython` against `1.1.1.1` until BOTH TXTs propagate (typical: <15s).
+   5. Tell ACME each challenge is ready; poll order until VALID.
+   6. Generate keypair via `cryptography`, build CSR with both SANs, finalize order, download PEM chain.
+   7. Write `cert.pem` + `key.pem` to caller-supplied paths.
+   8. DELETE both TXT records (cleanup; idempotent on retry).
+5. A-record reconciliation in `cloudflare_api.py`:
+   - For static records (`local<env>` → 127.0.0.1): GET current value, PATCH if different. No-op if equal.
+   - For dynamic records (`<env>` → public IP): GET current value, call `public_ip.discover()`, PATCH if different. Skip if equal.
+   - All four records reconciled on every `ensure_dev_env` call. Together this is <500ms when nothing changes (4 GETs, 0 PATCHes).
+6. Wire `ensure_dev_env` into `cmd_up_to`'s prelude: when `cfg.app2.tls.cert_path` is configured AND the file is missing or `<30d`, OR public-IP-discovery indicates drift on either dynamic A record, call it. Skip when `cfg.app2.tls.*` is unset (the publication path — no managed cert involved). Env detection: `Env.CI` when `os.environ.get("CI")` is truthy, else `Env.DEV`.
+7. Add `tests/unit/test_dev_tls_ensure.py` covering: account-key generation, cert-expiry computation, DNS-01 challenge response shape, missing-token error path, idempotent no-op when cert is fresh + A records match, cloudflare_trace parsing, A-record reconcile drift detection, public-IP-changed-without-cert-renewal path. Mock `requests` for Cloudflare + trace; mock the ACME client; real PEM parsing via `cryptography`.
 
 **DC.3 — runner integration + phase exit**
 
-1. The runner's `cmd_up` already pre-flights local containers. Extend it: if `cfg.app2.tls.cert_path` is configured, call `ensure_dev_cert(...)` before any layer dispatches. Failure ⇒ `EXIT_NEEDS_OPERATOR` with the actionable message (token missing, Cloudflare 4xx, ACME rate-limit).
-2. Document the **one-time operator setup** in `docs/reference/local-dev.md`:
+1. The runner's `cmd_up` already pre-flights local containers. Extend it: if `cfg.app2.tls.cert_path` is configured, call `ensure_dev_env(...)` before any layer dispatches. Failure ⇒ `EXIT_NEEDS_OPERATOR` with the actionable message (token missing, Cloudflare 4xx, ACME rate-limit, IP-discovery failure).
+2. **Migrate the existing `hotchkiss.io:5433` / `hotchkiss.io:1522` forwards** to the new managed names. Update `[[project_cb10_qs_to_docker_pg_constraints]]` reference; `cfg.aws.qs_disable_pg_ssl` may now be flipped to TLS-on since QS can validate the cert. (Out of strict DC scope but called out as a follow-up so it isn't lost.)
+3. Document the **one-time operator setup** in `docs/reference/local-dev.md`:
    - Cloudflare API token creation (Zone:DNS:Edit, restricted to the `hotchkiss.io` zone) — paste step-by-step.
-   - DNS records: `localdev.recon-gen.hotchkiss.io A 127.0.0.1` and `ci.recon-gen.hotchkiss.io A 127.0.0.1` (one Cloudflare dashboard click each).
+   - 4 DNS records (created automatically by the runner on first `up`; manual fallback documented). The `local<env>` records require no maintenance; the `<env>` records auto-update on public-IP change.
    - Env: `RECON_GEN_CLOUDFLARE_TOKEN=<token>` in shell profile (or a `direnv` `.envrc` if the operator prefers).
    - `cfg.app2.tls.cert_path: run/tls/cert.pem` + `cfg.app2.tls.key_path: run/tls/key.pem` (templated into `run/base.yaml`'s example).
-3. Add `tests/e2e/app2/test_tls_letsencrypt_smoke.py` — runs against the Let's Encrypt **staging** endpoint (NOT prod — prod has per-account/IP rate limits we don't want to chew through in CI). Asserts ACME-DNS-01 against a test domain returns a valid cert + that uvicorn serves HTTPS using it.
-4. Sweep DC to PLAN_ARCHIVE.md.
+4. Add `tests/e2e/app2/test_tls_letsencrypt_smoke.py` — runs against the Let's Encrypt **staging** endpoint (NOT prod — prod has per-account/IP rate limits we don't want to chew through in CI). Asserts ACME-DNS-01 against a test SAN cert returns a valid cert + that uvicorn serves HTTPS using it + that the cert covers both SAN entries.
+5. Sweep DC to PLAN_ARCHIVE.md.
 
 ## Operator-confirm questions
 
