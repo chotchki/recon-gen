@@ -738,6 +738,15 @@ class QsEmbedDriver:
         that triggers a re-query (`wait_loaded`, `_settle_after_param_change`,
         `open`); on detection it raises ``RuntimeError`` with the
         visual title(s) + error text + the calling context.
+
+        Before raising, eagerly fires the full AA.H.6 capture suite
+        (screenshot / dom / console / qs_errors / network / ws_frames /
+        db_counts / trace.zip) via ``trigger_failure_capture`` so the
+        artifacts reflect the EXACT moment the SQL exception was
+        detected — not the post-assertion state (where retries /
+        rerenders may have papered over the error widget). Capture is
+        best-effort: a capture failure must not mask the assertion
+        itself.
         """
         errored = self._page.evaluate(
             """() => {
@@ -766,18 +775,56 @@ class QsEmbedDriver:
                 return out;
             }"""
         )
-        if errored:
-            details = "\n".join(
-                f"  - [{e['title']}] {e['snippet']}" for e in errored
+        if not errored:
+            return
+        # Eager capture — write all AA.H.6 artifacts BEFORE raising so
+        # the operator's triage starts with a complete snapshot of the
+        # exact moment the SQL exception fired. Without this, the
+        # pytest-fixture-driven post-failure capture happens AFTER the
+        # exception has propagated up + may capture stale DOM.
+        from recon_gen.common.browser.helpers import (  # noqa: PLC0415 — lazy
+            trigger_failure_capture,
+        )
+        capture_dir_hint = ""
+        try:
+            trigger_failure_capture(self._page, cfg=self._cfg)
+            # Resolve the dir the artifacts landed in for the error message.
+            from recon_gen.common.browser.helpers import _capture_path  # noqa: PLC0415 — lazy
+            from recon_gen.common.browser.helpers import _test_id_from_pytest_env  # noqa: PLC0415 — lazy
+            tid: str = (
+                getattr(self._page, "_qs_gen_test_id", None)
+                or _test_id_from_pytest_env()
             )
-            raise RuntimeError(
-                f"QS visual SQL exception detected during {context!r} — "
-                f"{len(errored)} visual(s) errored. The dataset query "
-                f"failed against the live DB (timeout / dropped "
-                f"connection / missing table / DDL race / etc.); the "
-                f"empty-table state is a SYMPTOM of this error, not a "
-                f"legitimate 0-row result. Errored visuals:\n{details}"
+            capture_dir = _capture_path("screenshot.png", tid).parent
+            capture_dir_hint = (
+                f"\n\nFull triage artifacts captured at:\n"
+                f"  {capture_dir}/\n"
+                f"  ├── screenshot.png   — what the visual looked like at failure\n"
+                f"  ├── dom.html         — the rendered SQL-exception widget\n"
+                f"  ├── qs_errors.txt    — every QS error overlay scraped from the page\n"
+                f"  ├── console.txt      — browser console output (incl. SDK errors)\n"
+                f"  ├── network.txt      — XHR responses (incl. QS API errors)\n"
+                f"  ├── ws_frames.txt    — QS WebSocket START_VIS / STOP_VIS frames\n"
+                f"  ├── db_counts.txt    — per-table row counts (rules out missing data)\n"
+                f"  └── trace.zip        — Playwright trace (open with `playwright show-trace`)"
             )
+        except Exception as cap_exc:  # noqa: BLE001 — capture is best-effort; don't mask the assertion
+            capture_dir_hint = (
+                f"\n\n(Capture-on-detect failed: {cap_exc!r} — the standard "
+                f"pytest post-failure capture path should still fire.)"
+            )
+        details = "\n".join(
+            f"  - [{e['title']}] {e['snippet']}" for e in errored
+        )
+        raise RuntimeError(
+            f"QS visual SQL exception detected during {context!r} — "
+            f"{len(errored)} visual(s) errored. The dataset query "
+            f"failed against the live DB (timeout / dropped "
+            f"connection / missing table / DDL race / etc.); any "
+            f"empty-table assertion downstream is misdiagnosing a SQL "
+            f"error as a legitimate 0-row result.\n\nErrored visuals:\n"
+            f"{details}{capture_dir_hint}"
+        )
 
     def _settle_after_param_change(self, *, timeout_ms: int = 18_000) -> None:
         """Block until QS's WebSocket data layer has settled after a
