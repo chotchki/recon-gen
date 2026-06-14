@@ -4711,12 +4711,19 @@ def cmd_triage(args: argparse.Namespace) -> int:
       5. Spin thin container (for layer != unit).
       6. Write QS-side cfg (for layers that touch QS).
       7. DG.2 sweep + seed (idempotent + cheap).
-      8. Run the deploy step directly when chain includes deploy.
-      9. Spawn the screen session.
+      8. Spawn the screen session — pytest fires the session-autouse
+         ``qs_deployed`` fixture at session start when the layer
+         transitively touches AWS (qs_api / qs_browser).
 
     Returns EXIT_SUCCESS when the session is spawned + state written.
     Whether pytest INSIDE the screen passes or fails is not this verb's
     concern — that's what triage is FOR (operator drives pdb).
+
+    DI phase — the prior inline ``recon-gen json apply --execute``
+    block was retired. Deploy is owned by ``tests/e2e/conftest.py::
+    qs_deployed`` (session-scope, autouse, xdist-FileLock'd). One
+    deploy code path; cmd_triage + cmd_up_to both reach it via pytest
+    fixture dispatch. POLICY 1: single source of truth.
     """
     nodeid = args.nodeid
     # Reject empty / absolute nodeids early — design lock.
@@ -4916,56 +4923,19 @@ def cmd_triage(args: argparse.Namespace) -> int:
                 return EXIT_NEEDS_OPERATOR
             print("runner: thin seed done (schema apply + data apply + data refresh)")
 
-    # Deploy step — only when the chain includes deploy/qs_api/qs_browser.
-    if layer in ("deploy", "qs_api", "qs_browser"):
-        deploy_env_for_cmd = dict(runner_variant_env)
-        qs_cfg = deploy_env_for_cmd.get(RECON_GEN_QS_CONFIG.name)
-        if qs_cfg is not None:
-            deploy_env_for_cmd[RECON_GEN_CONFIG.name] = qs_cfg
-            deploy_env_for_cmd.pop(RECON_GEN_DEMO_DATABASE_URL.name, None)
-            deploy_env_for_cmd.pop(RECON_GEN_DEMO_DATABASE_URL_PG.name, None)
-            deploy_env_for_cmd.pop(RECON_GEN_DEMO_DATABASE_URL_OR.name, None)
-        built = _build_deploy_command(deploy_env_for_cmd, run_dir)
-        if built is None:
-            msg = (
-                "runner: cannot build deploy command — cfg or "
-                "RECON_GEN_TEST_L2_INSTANCE missing"
-            )
-            print(msg, file=sys.stderr)
-            _write_synthetic_cmd_json(
-                run_dir,
-                layer="deploy",
-                exit_code=EXIT_NEEDS_OPERATOR,
-                duration_seconds=0.0,
-                message=msg,
-            )
-            _teardown_container_best_effort(container_handle)
-            return EXIT_NEEDS_OPERATOR
-        deploy_cmd, _deploy_env_addl = built
-        deploy_layer_dir = run_dir / "deploy"
-        deploy_layer_dir.mkdir(parents=True, exist_ok=True)
-        print("runner: deploying QS resources (json apply --execute)")
-        env = {**os.environ, **deploy_env_for_cmd}
-        rc, _duration = _spawn_with_tee(
-            deploy_cmd,
-            cwd=REPO_ROOT,
-            env=env,
-            stdout_path=deploy_layer_dir / "stdout.log",
-            stderr_path=deploy_layer_dir / "stderr.log",
-        )
-        if rc != 0:
-            msg = f"runner: deploy failed rc={rc}; aborting triage"
-            print(msg, file=sys.stderr)
-            _write_synthetic_cmd_json(
-                run_dir,
-                layer="deploy",
-                exit_code=rc,
-                duration_seconds=0.0,
-                message=msg,
-            )
-            _teardown_container_best_effort(container_handle)
-            return EXIT_NEEDS_OPERATOR
-        print("runner: deploy done")
+    # DI phase — deploy is owned by the session-autouse ``qs_deployed``
+    # fixture in ``tests/e2e/conftest.py``. cmd_triage's inline deploy
+    # block is gone; the pytest invocation inside the screen session
+    # fires the fixture at session start (under FileLock + sentinel
+    # rendezvous) and the test proceeds against a freshly delete-then-
+    # created QS state. POLICY 1 (single source of truth): chain +
+    # triage both reach deploy through the fixture; neither
+    # orchestrator dispatches deploy directly.
+    #
+    # ``triage-down`` still owns the QS sweep on the way down — pytest
+    # fixture teardown doesn't fire reliably under ``screen --pdb``
+    # detach + ``triage-down --force`` mid-session, so explicit
+    # ``recon-gen json clean --all --execute`` is the safe path.
 
     # Build the screen launch script (cmd.sh) + spawn.
     log_path = triage_dir / "screen.log"
@@ -5044,25 +5014,32 @@ def cmd_triage(args: argparse.Namespace) -> int:
 
     # Persist the triage state so triage-down can find the run + sweep
     # targets without re-discovering them.
+    #
+    # DI phase — slimmed: dropped run_id / layer / as_of_anchor (none
+    # were read by triage-down). State is operational glue between
+    # triage + triage-down, NOT a source of truth for what was deployed
+    # (the QS account is) or which container is up (Docker is).
+    #
+    # ``deployed`` semantics: True when ``layer in AWS_TOUCHING_LAYERS``
+    # (the prediction "the qs_deployed fixture will fire"). When the
+    # operator triages a qs_browser test and pytest crashes before the
+    # fixture sets up, the QS account may still be clean — but
+    # ``json clean --all --execute`` is idempotent (deletes nothing
+    # when nothing matches the deployment tag), so over-cleaning is
+    # harmless.
     state: dict[str, Any] = {
-        "run_id": run_id,
         "run_dir": str(run_dir),
         "nodeid": nodeid,
-        "layer": layer,
         "screen_name": _TRIAGE_SCREEN_NAME,
         "cfg_path": str(cfg_path),
         # Issue #7 fix: persist the QS-side cfg (hotchkiss.io URL) when
         # the deploy step minted one, so triage-down's `json clean`
         # uses the same cfg the deploy used. None when the triage layer
-        # never reached deploy (qs_cfg_path stays unset).
+        # never touched QS (qs_cfg_path stays unset).
         "qs_cfg_path": (
             runner_variant_env.get(RECON_GEN_QS_CONFIG.name)
         ),
-        "deployed": layer in ("deploy", "qs_api", "qs_browser"),
-        # Container teardown: we don't persist a handle (not JSON-able);
-        # instead `triage-down --keep-container=False` invokes
-        # `_cmd_down_local` which sweeps the well-known container names.
-        "as_of_anchor": as_of_anchor,
+        "deployed": layer in AWS_TOUCHING_LAYERS,
     }
     _write_triage_state(state)
     print(f"runner: triage state -> {_rel_or_abs(_TRIAGE_STATE_FILE)}")
