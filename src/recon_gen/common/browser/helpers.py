@@ -315,7 +315,7 @@ def trigger_failure_capture(
 
     ``cfg`` is the Config dataclass; when present, also dumps
     ``db_counts.txt`` (per-table row counts for every relation matching
-    ``cfg.db_table_prefix_*``). Pass ``None`` to skip — the QS-side
+    ``cfg.db.table_prefix_*``). Pass ``None`` to skip — the QS-side
     artifacts still land. Conftest's ``maybe_capture_on_failure``
     resolves cfg from the ``cfg`` fixture and forwards it.
 

@@ -152,7 +152,7 @@ exec /usr/bin/sandbox-exec \
         --no-docs
 ```
 
-Spec needs the same shape (with `recon-gen dashboards` instead of `recon-gen studio` — read-only doesn't need the overlay copy, but for symmetry and so spec's `/data` panel works the same way, run studio there too with `cfg.studio_enabled: false` if we want to lock down the editor surface for spec specifically).
+Spec needs the same shape (with `recon-gen dashboards` instead of `recon-gen studio` — read-only doesn't need the overlay copy, but for symmetry and so spec's `/data` panel works the same way, run dashboards there too if we want to lock down the editor surface for spec specifically). Pre-DE.5 this was a `cfg.studio_enabled: false` toggle; post-DE.5 the choice is CLI-level (which binary the operator runs), not cfg-level.
 
 ## CU.4 — Mac mini cutover (operator-side)
 

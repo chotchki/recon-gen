@@ -148,8 +148,8 @@ aws:
   datasource:
     mode: create   # | adopt | skip
     arn: arn:aws:...   # required iff mode=adopt; ignored otherwise
-    # name + connection metadata stay implicit from cfg.deployment_name +
-    # db.url; only the lifecycle differs by mode.
+    # name + connection metadata stay implicit from cfg.aws.deployment_name +
+    # cfg.db.url; only the lifecycle differs by mode.
 ```
 
 - **`create`** (default for prod-deploy postures): generator creates the QS datasource if absent, updates if present. Today's no-arn behavior.

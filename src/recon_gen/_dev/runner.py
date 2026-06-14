@@ -4438,28 +4438,15 @@ Auth (Y.2.gate.h+i):
 Layer chain (Y.2.gate.b/c/n):
   unit -> db -> app2 -> deploy -> qs_api -> qs_browser
   ./run_tests.sh up_to=<layer>  runs the chain through that layer.
-  `unit` is variant-independent, so it runs ONCE per invocation as a
-  prelude (artifacts → runs/<id>/_prelude/unit/) — not once per matrix
-  cell. `up_to=unit` runs just the prelude; `>= db` runs the prelude
-  first, then fans the matrix out starting at `db`. A prelude failure
-  aborts before any cell dispatches.
+  Post-CB.17.d the runner uses a single-pytest-per-layer "thin path":
+  each layer runs ONE pytest subprocess (no cell loop, no prelude
+  split). Per-(file, worker) isolation moved into pytest fixtures
+  (`isolated_cfg`, `seeded_cfg`). Layer artifacts land at
+  runs/<id>/<layer>/{cmd.json,stdout.log,stderr.log,env_log/}.
 
-Variant matrix (Y.2.gate.m):
-  No flags = full 13-cell matrix (sp/sq named scenarios × pg/or/du × lo/aw,
-  plus 3 fuzz cells × pg/or/du × lo). Narrow via sub-flags or pin via --variants.
-  Invalid cells (du × aw — DuckDB isn't reachable from QS) auto-skip with a log.
-
-  Examples (all assume `up_to=db` or higher):
-    --scenarios=sp,sq                       sp + sq named-scenario subset
-    --scenarios=fuzz                        1 random fuzz seed (per-dialect cell)
-    --scenarios=fuzz:5                      5 random fuzz seeds (× dialect axis)
-    --scenarios=us:run/customer.yaml        operator-supplied L2 yaml
-    --dialects=pg                           postgres only
-    --dialects=pg,or                        cross-dialect subset
-    --targets=lo                            local containers / DuckDB tempfile
-    --targets=aw                            operator's external PG / Oracle
-    --variants=sp_pg_lo                     triage: pin a single cell
-    --variants=f12345_pg_lo                 reproduce a fuzz failure by seed
+  A failure at layer N aborts the chain — layers N+1..end don't
+  dispatch. `dump-last-errors` surfaces the failing layer's traceback
+  + missing-capture warnings from the latest run dir.
 """
 
 

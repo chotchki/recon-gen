@@ -549,7 +549,10 @@ def emit_top_nav(
     Callers build their ``entries`` list per their cfg+deploy state:
 
     - Studio entries (L2 Editor / ETL Support / Training) only when
-      ``cfg.studio_enabled`` is True.
+      the caller invokes the studio CLI (the ``studio_enabled`` bool
+      arg is computed at call site — pre-DE.5 it was a cfg field,
+      retired in DE.5 step 20 since studio-on-or-off is a CLI-level
+      decision, not a cfg-level one).
     - One entry per deployed dashboard.
     - Docs entry only when the docs site is embedded.
 
