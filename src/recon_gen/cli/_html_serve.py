@@ -230,11 +230,28 @@ def run_html_server(
             f"--app {app_name} needs a real database."
         )
 
-    # DE.4 — cfg.app2.tls fallback. CLI flags win, then env vars (wired
-    # at the Click layer via envvar=), then cfg.app2.tls.{cert_path,
-    # key_path} if the operator set the block. Half-set in cfg yaml is
-    # impossible (the loader raises); half-set across cfg + CLI is
-    # operator error but the pairing check below still catches it.
+    # DE.4 — cfg.app2.tls fallback. Precedence: CLI flag → env var →
+    # cfg.app2.tls.{cert_path,key_path}. The env read goes through the
+    # `env_keys` registry (`RECON_GEN_TLS_CERT/KEY` with `must_be_file`
+    # validator + access-log + deprecation channel) — NOT through the
+    # click `envvar=` bypass, which had no typed validator (post-v14
+    # audit fix #267: a typo `RECON_GEN_TLS_CRT` silently fell through
+    # to None → uvicorn booted HTTP when operator intended HTTPS).
+    # Half-set in cfg yaml is impossible (the loader raises); half-set
+    # across cfg + CLI is operator error but the pairing check below
+    # still catches it.
+    from recon_gen.common.env_keys import (  # noqa: PLC0415 — lazy: only used when serving
+        RECON_GEN_TLS_CERT,
+        RECON_GEN_TLS_KEY,
+    )
+    if tls_cert is None:
+        env_cert = RECON_GEN_TLS_CERT.get_or_none()
+        if env_cert is not None:
+            tls_cert = str(env_cert)
+    if tls_key is None:
+        env_key = RECON_GEN_TLS_KEY.get_or_none()
+        if env_key is not None:
+            tls_key = str(env_key)
     if tls_cert is None and tls_key is None:
         tls_cfg = cfg.app2.tls
         if tls_cfg is not None:

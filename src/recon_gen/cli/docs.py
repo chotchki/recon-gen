@@ -13,7 +13,7 @@ No ``--execute`` here — building a static site to a directory isn't
 a destructive side effect. The "emit" and the "do it" are the same
 operation.
 
-The ``--l2`` flag is honored via the ``QS_DOCS_L2_INSTANCE`` env var
+The ``--l2`` flag is honored via the ``RECON_GEN_DOCS_L2_INSTANCE`` env var
 that ``main.py`` reads at mkdocs-macros define-env time.
 """
 
@@ -56,7 +56,7 @@ def build_docs_site(
     """Run ``mkdocs build`` (the bundled config) into ``output_dir``.
 
     Returns the mkdocs exit code (0 = success). Threads the active L2
-    instance via ``QS_DOCS_L2_INSTANCE`` and sets ``cwd`` to the bundled
+    instance via ``RECON_GEN_DOCS_L2_INSTANCE`` and sets ``cwd`` to the bundled
     config's directory so mkdocs-macros's ``include_dir: docs/_macros``
     resolves (X.2.s.1 — mkdocs-macros joins ``include_dir`` against the
     process cwd, not the config-file dir). ``config`` overrides the
@@ -70,7 +70,7 @@ def build_docs_site(
     """
     env = os.environ.copy()
     if l2_instance_path is not None:
-        env["QS_DOCS_L2_INSTANCE"] = str(Path(l2_instance_path).resolve())
+        env["RECON_GEN_DOCS_L2_INSTANCE"] = str(Path(l2_instance_path).resolve())
     cmd = [
         sys.executable, "-m", "mkdocs", "build",
         "-f", str(config or _BUNDLED_MKDOCS_YML),
@@ -415,7 +415,7 @@ def docs_serve(l2_instance_path: str | None, port: int) -> None:
     """
     env = os.environ.copy()
     if l2_instance_path is not None:
-        env["QS_DOCS_L2_INSTANCE"] = str(Path(l2_instance_path).resolve())
+        env["RECON_GEN_DOCS_L2_INSTANCE"] = str(Path(l2_instance_path).resolve())
 
     cmd = [
         sys.executable, "-m", "mkdocs", "serve",
@@ -492,7 +492,7 @@ def docs_test(pytest_args: str) -> None:
     help=(
         "Optional path to an L2 institution YAML to bind the rendered "
         "docs against. Validated here; binding happens at mkdocs build "
-        "time via QS_DOCS_L2_INSTANCE env var."
+        "time via RECON_GEN_DOCS_L2_INSTANCE env var."
     ),
 )
 @click.option(
@@ -670,7 +670,7 @@ def docs_export(
         click.echo(
             "L2 instance bound: " + str(l2_path) + "\n"
             "To render against this instance, run:\n"
-            f"    QS_DOCS_L2_INSTANCE={l2_path} mkdocs build -f {dst}/mkdocs.yml"
+            f"    RECON_GEN_DOCS_L2_INSTANCE={l2_path} mkdocs build -f {dst}/mkdocs.yml"
         )
 
 

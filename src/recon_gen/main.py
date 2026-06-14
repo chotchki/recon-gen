@@ -9,7 +9,7 @@ mkdocs-macros loads the module named in ``mkdocs.yml`` plugins:
   ``vocabulary_for(l2_instance)`` so any markdown page can substitute
   ``{{ vocab.institution.name }}`` etc.
 
-Both default to the L2 instance at ``QS_DOCS_L2_INSTANCE`` (env var) or
+Both default to the L2 instance at ``RECON_GEN_DOCS_L2_INSTANCE`` (env var) or
 the bundled ``_l2_fixtures/spec_example.yaml`` if unset. ``docs export``
 lets the integrator pass an arbitrary L2 path.
 
@@ -22,7 +22,6 @@ the package's other resources.
 
 from __future__ import annotations
 
-import os
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -151,11 +150,10 @@ def define_env(env: Any) -> None:
     from recon_gen.common.handbook import vocabulary_for
     from recon_gen.common.l2.loader import load_instance
 
-    default_l2_path = Path(
-        os.environ.get(
-            "QS_DOCS_L2_INSTANCE",
-            str(_BUNDLED_L2_DIR / "spec_example.yaml"),
-        )
+    from recon_gen.common.env_keys import RECON_GEN_DOCS_L2_INSTANCE
+    default_l2_path = (
+        RECON_GEN_DOCS_L2_INSTANCE.get_or_none()
+        or _BUNDLED_L2_DIR / "spec_example.yaml"
     )
     default_l2 = load_instance(default_l2_path)
     env.variables["vocab"] = vocabulary_for(default_l2)

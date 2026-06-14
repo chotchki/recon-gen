@@ -324,7 +324,7 @@ class ExplicitAnyCheck(Check):
 # Names matching this pattern are owned by the env_keys.py registry.
 # Anything matching that the lint encounters outside the whitelist is
 # a bug going forward.
-_ENV_VAR_NAME_RE = re.compile(r"^(QS|RECON)_(GEN|E2E)_[A-Z0-9_]+$")
+_ENV_VAR_NAME_RE = re.compile(r"^(QS|RECON)_(GEN|E2E|DOCS)_[A-Z0-9_]+$")
 
 
 def _is_qs_env_literal(node: ast.AST) -> str | None:

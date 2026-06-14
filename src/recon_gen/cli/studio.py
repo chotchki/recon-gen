@@ -93,24 +93,23 @@ from recon_gen.cli._html_serve import run_html_server
 @click.option(
     "--tls-cert",
     "tls_cert",
-    envvar="RECON_GEN_TLS_CERT",
     default=None,
     help=(
         "Path to a PEM-encoded TLS cert. When set together with "
         "``--tls-key`` the server listens HTTPS via uvicorn's "
-        "ssl_certfile. Half-set raises UsageError. Env: "
-        "``RECON_GEN_TLS_CERT``. DC.1; cfg fallback "
+        "ssl_certfile. Half-set raises UsageError. Env fallback: "
+        "``RECON_GEN_TLS_CERT`` (validated via env_keys registry — "
+        "must_be_file). DC.1; cfg fallback "
         "(``cfg.app2.tls.cert_path``) wires in DE.2."
     ),
 )
 @click.option(
     "--tls-key",
     "tls_key",
-    envvar="RECON_GEN_TLS_KEY",
     default=None,
     help=(
         "Path to a PEM-encoded TLS private key (paired with "
-        "``--tls-cert``). Env: ``RECON_GEN_TLS_KEY``."
+        "``--tls-cert``). Env fallback: ``RECON_GEN_TLS_KEY``."
     ),
 )
 def studio(

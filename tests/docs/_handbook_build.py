@@ -100,7 +100,7 @@ def build_handbook(
 
     env = os.environ.copy()
     if l2_instance_path is not None:
-        env["QS_DOCS_L2_INSTANCE"] = str(Path(l2_instance_path).resolve())
+        env["RECON_GEN_DOCS_L2_INSTANCE"] = str(Path(l2_instance_path).resolve())
     cmd = [
         sys.executable, "-m", "mkdocs", "build",
         "-f", str(synth),

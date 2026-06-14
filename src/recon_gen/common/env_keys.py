@@ -686,6 +686,102 @@ RECON_GEN_TEST_L2_INSTANCE: Final = EnvVar(
     validator=must_be_file,
 )
 
+# Docs-build L2 instance — distinct from RECON_GEN_TEST_L2_INSTANCE
+# because the docs build (mkdocs-macros vocabulary, in-page diagrams)
+# can be configured to render against a DIFFERENT L2 than the test
+# fixtures pin. AC.B.3 renamed all QS_GEN_* → RECON_GEN_* with a
+# legacy_name fallback, but `QS_DOCS_L2_INSTANCE` slipped past the AST
+# lint (the regex matched `QS_(GEN|E2E)_*` only — `QS_DOCS_*` had no
+# second-segment match → silently skipped). Registered now with a
+# legacy_name fallback so existing `QS_DOCS_L2_INSTANCE` exports in
+# operator shells still resolve (with deprecation warning) while
+# `RECON_GEN_DOCS_L2_INSTANCE` becomes the canonical name. AST lint
+# regex widened in the same commit to cover `DOCS` as a second segment.
+RECON_GEN_DOCS_L2_INSTANCE: Final = EnvVar(
+    name="RECON_GEN_DOCS_L2_INSTANCE",
+    legacy_name="QS_DOCS_L2_INSTANCE",
+    description=(
+        "Path to L2 instance YAML for handbook / docs builds. Absent → "
+        "bundled spec_example default. Distinct from RECON_GEN_TEST_L2_"
+        "INSTANCE because docs may render against a different L2 than "
+        "test fixtures."
+    ),
+    coercer=Path,
+    optional=True,
+    validator=must_be_file,
+)
+
+# DC.1 — App2 TLS cert + key paths. The studio + dashboards CLI
+# accept `--tls-cert` / `--tls-key` flags; when absent, fall back to
+# cfg.app2.tls.{cert_path,key_path}. Pre-v14.0.0 these env vars were
+# wired only via click `envvar=` which bypasses the env_keys registry
+# entirely (no typed coercer, no `must_be_file` validator, no
+# deprecation channel, no access log). A typo
+# (`RECON_GEN_TLS_CRT`) silently fell through to None → uvicorn boots
+# HTTP when operator intended HTTPS. Registered now with `must_be_file`
+# so a typo or missing PEM raises with the actionable message.
+RECON_GEN_TLS_CERT: Final = EnvVar(
+    name="RECON_GEN_TLS_CERT",
+    description=(
+        "Path to TLS cert PEM for studio / dashboards HTTPS. Overrides "
+        "cfg.app2.tls.cert_path. Absent → cfg or HTTP-local-dev."
+    ),
+    coercer=Path,
+    optional=True,
+    validator=must_be_file,
+)
+
+RECON_GEN_TLS_KEY: Final = EnvVar(
+    name="RECON_GEN_TLS_KEY",
+    description=(
+        "Path to TLS private-key PEM for studio / dashboards HTTPS. "
+        "Overrides cfg.app2.tls.key_path. Absent → cfg or HTTP-local-dev."
+    ),
+    coercer=Path,
+    optional=True,
+    validator=must_be_file,
+)
+
+# Runner — opt-out toggles for the layered chain's static gates.
+# `unit` layer's pytest_sessionstart fires pyright (strict-include),
+# biome (changed JS), and tailwind (drift gate). When the operator is
+# iterating on Python-only work and wants the unit layer < 30s, they
+# can opt OUT via these env vars — the runner sets them automatically
+# for non-unit layers (db / app2 / deploy / qs_api / qs_browser) so
+# those layers don't re-run the static checks that the unit layer
+# already covered. Pre-registration these were set as bare strings
+# (`subprocess env["RECON_GEN_SKIP_PYRIGHT"] = "1"`) which bypassed
+# the registry's typed `_bool_coercer` + access-log path.
+RECON_GEN_SKIP_PYRIGHT: Final = EnvVar(
+    name="RECON_GEN_SKIP_PYRIGHT",
+    description=(
+        "Bool — skip the pyright static gate in unit-layer "
+        "pytest_sessionstart. Set by the runner for non-unit layers."
+    ),
+    coercer=_bool_coercer,
+    optional=True,
+)
+
+RECON_GEN_SKIP_BIOME: Final = EnvVar(
+    name="RECON_GEN_SKIP_BIOME",
+    description=(
+        "Bool — skip the biome JS lint gate in unit-layer "
+        "pytest_sessionstart. Set by the runner for non-unit layers."
+    ),
+    coercer=_bool_coercer,
+    optional=True,
+)
+
+RECON_GEN_SKIP_TAILWIND: Final = EnvVar(
+    name="RECON_GEN_SKIP_TAILWIND",
+    description=(
+        "Bool — skip the tailwind output.css drift gate in unit-layer "
+        "pytest_sessionstart. Set by the runner for non-unit layers."
+    ),
+    coercer=_bool_coercer,
+    optional=True,
+)
+
 # Browser e2e — required for embed-URL signing. The probe
 # (_probe_qs_e2e_user_arn) catches the absent case before dispatch
 # to give an operator-actionable message.
