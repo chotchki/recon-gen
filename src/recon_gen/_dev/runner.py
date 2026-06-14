@@ -78,6 +78,21 @@ LAYERS: Final[tuple[str, ...]] = (
     "qs_api",
     "qs_browser",
 )
+# v14.0.0 fast-fail — per-layer stdout-stuck thresholds in seconds.
+# When subprocess stdout hasn't grown in N seconds, the watchdog kills
+# the layer. Calibrated against observed wall-clock times of clean runs
+# (cefcceee baseline + post-v14 follow-ups) with ~3× headroom over the
+# worst observed gap. Layers absent from this dict get no watchdog
+# (historical behavior). Operator-flagged 2026-06-13 after a 36-minute
+# qs_browser hang ate a debugging cycle.
+_HANG_THRESHOLDS: Final[dict[str, int]] = {
+    "unit": 180,        # ~60s clean; faulthandler kicks at 180s
+    "db": 240,          # ~40s clean; matview refresh can sprawl
+    "app2": 600,        # ~19m clean; Studio server tests run long
+    "deploy": 420,      # ~2-5m clean; AWS create_data_set can hang flaky
+    "qs_api": 120,      # ~15s clean; boto3 describes are fast
+    "qs_browser": 600,  # ~5-15m clean; QS embed loads + retries dominate
+}
 # CB.11.a.3 (2026-06-02) — renamed `api` → `qs_api`, `browser` →
 # `qs_browser` to match the `Tier.QS_API` / `Tier.QS_BROWSER` marks
 # defined in `tests/_marks.py`. The pytest mark selectors below still
@@ -900,16 +915,17 @@ def _layer_command(
             # cycle. A test that's genuinely broken fails 3× → still
             # halts.
             #
-            # 2026-05-27 — bumped ``--reruns-delay`` from 10s → 60s after
-            # the v11.22.12 ``test_l1_additive_pickers_keep_anchor_row
-            # [qs-Overdraft]`` flake hit all 3 attempts before the
-            # ``gh rerun`` cleared it. Pattern matches the known
-            # Sasquatch L1 dashboard render flake (task backlog #466):
-            # QS's analysis cache takes longer than 10s × 3 attempts to
-            # clear after a fresh deploy. 60s × 2 reruns = ~2 min of
-            # recovery time per affected test, well within the chain's
-            # tolerance.
-            "--reruns", "2", "--reruns-delay", "60",
+            # v14.0.0 fast-fail (2026-06-13) — operator-flagged: with
+            # ``--reruns 2 --reruns-delay 60`` a single hung test eats
+            # up to 3 minutes of wall (60s × 2 retries + initial run);
+            # multiplied across xdist workers and many flakes that adds
+            # up. Tighten to one retry + 15s delay. Real bugs surface
+            # within ~30s. The known QS-cache-warmup flake (task #466)
+            # is largely cleared post-deploy now that
+            # ``recon-gen json apply`` is idempotent (BR.x); if the
+            # cache flake re-surfaces we bump the delay back up rather
+            # than re-bloat reruns.
+            "--reruns", "1", "--reruns-delay", "15",
             # CB.7-followup (2026-06-02) — loadgroup dropped; see unit-layer note.
         ]
         # Bump the per-page Playwright timeout for the browser layer to 60 s
@@ -965,6 +981,8 @@ def _spawn_with_tee(
     stdout_path: Path,
     stderr_path: Path,
     terminal_prefix: str = "",
+    hang_threshold_seconds: int | None = None,
+    hang_kill_flag: list[bool] | None = None,
 ) -> tuple[int, float]:
     """Spawn ``cmd`` as a subprocess; tee stdout/stderr to operator's
     terminal AND to the named log files; return (returncode, duration).
@@ -976,6 +994,16 @@ def _spawn_with_tee(
     Y.2.gate.c.6.async — extracted from ``dispatch_layer`` so
     ``seed_variant`` (and any future subprocess) can capture + prefix
     with the same contract.
+
+    v14.0.0 fast-fail — when ``hang_threshold_seconds`` is set, a
+    watchdog daemon thread polls the tee'd stdout file's size every
+    30s. If size hasn't advanced for ``hang_threshold_seconds``,
+    proc.kill() the subprocess + log a clear stderr message. The
+    one-element ``hang_kill_flag`` list (passed from the caller so the
+    flag survives thread boundaries) is set to True on kill so the
+    caller can mark cmd.json + the failing-layers report. None disables
+    the watchdog — historical behavior for tests that mock the
+    subprocess shape.
     """
     start = time.monotonic()
     with stdout_path.open("w") as out_f, stderr_path.open("w") as err_f:
@@ -1002,6 +1030,14 @@ def _spawn_with_tee(
         )
         t_out.start()
         t_err.start()
+        if hang_threshold_seconds is not None:
+            t_watchdog = threading.Thread(
+                target=_hang_watchdog,
+                args=(proc, stdout_path, hang_threshold_seconds, terminal_prefix),
+                kwargs={"hang_kill_flag": hang_kill_flag},
+                daemon=True,
+            )
+            t_watchdog.start()
         proc.wait()
         # Drain both pipes before declaring done — wait() doesn't wait
         # on the reader threads.
@@ -1009,6 +1045,55 @@ def _spawn_with_tee(
         t_err.join()
     duration = time.monotonic() - start
     return proc.returncode, duration
+
+
+def _hang_watchdog(
+    proc: "subprocess.Popen[str]",
+    stdout_path: Path,
+    threshold_seconds: int,
+    terminal_prefix: str,
+    *,
+    hang_kill_flag: list[bool] | None = None,
+) -> None:
+    """v14.0.0 fast-fail — kill ``proc`` when its tee'd stdout file
+    size hasn't advanced in ``threshold_seconds``. Polls every 30s.
+
+    Picks file size (not mtime) as the progress signal because the tee
+    thread appends every line as the subprocess emits it; size growth
+    is a strict-monotonic proxy for "the subprocess is alive and making
+    progress." mtime advances on the tee thread's flush which doesn't
+    correlate to subprocess progress as cleanly.
+
+    Logs a clear ``[hang-kill] layer=X — stuck for Ys`` line to stderr
+    + sets ``hang_kill_flag[0] = True`` so the caller surfaces the kill
+    in cmd.json + the failing-layers report (rather than reporting an
+    opaque SIGKILL exit code as a normal failure).
+    """
+    last_size = 0
+    last_progress = time.monotonic()
+    poll_interval = 30
+    while proc.poll() is None:
+        time.sleep(poll_interval)
+        try:
+            size = stdout_path.stat().st_size
+        except OSError:
+            continue
+        if size > last_size:
+            last_size = size
+            last_progress = time.monotonic()
+            continue
+        stuck_for = int(time.monotonic() - last_progress)
+        if stuck_for > threshold_seconds:
+            if hang_kill_flag is not None:
+                hang_kill_flag[0] = True
+            sys.stderr.write(
+                f"{terminal_prefix}runner: [hang-kill] stdout stuck for "
+                f"{stuck_for}s (threshold {threshold_seconds}s) — "
+                f"killing subprocess + draining pipes\n"
+            )
+            sys.stderr.flush()
+            proc.kill()
+            return
 
 
 def dispatch_layer(
@@ -1147,6 +1232,8 @@ def dispatch_layer(
     cmd_path.write_text(json.dumps(cmd_meta, indent=2) + "\n")
 
     print(f"{terminal_prefix}runner: dispatch-run [{layer}] {' '.join(cmd)}")
+    hang_kill_flag: list[bool] = [False]
+    threshold = _HANG_THRESHOLDS.get(layer)
     returncode, duration = _spawn_with_tee(
         cmd,
         cwd=REPO_ROOT,
@@ -1154,6 +1241,8 @@ def dispatch_layer(
         stdout_path=stdout_path,
         stderr_path=stderr_path,
         terminal_prefix=terminal_prefix,
+        hang_threshold_seconds=threshold,
+        hang_kill_flag=hang_kill_flag,
     )
 
     # Re-write cmd.json with the result. Append shape (rather than two
@@ -1161,6 +1250,15 @@ def dispatch_layer(
     # ensure-dir handles the race window (see _ensure_dir comment).
     cmd_meta["exit_code"] = returncode
     cmd_meta["duration_seconds"] = duration
+    if hang_kill_flag[0]:
+        cmd_meta["hang_kill"] = True
+        cmd_meta["hang_threshold_seconds"] = threshold
+        print(
+            f"{terminal_prefix}runner: [hang-kill] layer={layer} — "
+            f"stdout was stuck for >{threshold}s; subprocess killed. "
+            f"See {stderr_path.relative_to(REPO_ROOT)} for the last "
+            f"thread dumps."
+        )
 
     # DG.3 — heartbeat-hit detection. The stdlib faulthandler dumps a
     # stack trace to stderr whenever a test exceeds
@@ -3675,8 +3773,21 @@ def _render_failures_for_run(
             found_any_failure = True
             duration = cmd_json.get("duration_seconds")
             duration_str = f"{duration:.1f}s" if duration else "?"
-            print(f"## [{cell_name}/{layer}] exit={exit_code} duration={duration_str}")
+            hang_kill = bool(cmd_json.get("hang_kill"))
+            hang_marker = " HANG-KILLED" if hang_kill else ""
+            print(
+                f"## [{cell_name}/{layer}]{hang_marker} "
+                f"exit={exit_code} duration={duration_str}"
+            )
             print()
+            if hang_kill:
+                threshold = cmd_json.get("hang_threshold_seconds", "?")
+                print(
+                    f"- Subprocess killed by hang watchdog: stdout stuck "
+                    f"for >{threshold}s. Inspect `stderr.log` for the "
+                    f"faulthandler thread dump at the time of the hang."
+                )
+                print()
             env = cmd_json.get("env_overrides", {})
             # Surface the high-signal env values — operator can derive
             # rest from the run-id + cmd.json directly.
