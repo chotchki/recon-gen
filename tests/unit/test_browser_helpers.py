@@ -344,28 +344,28 @@ class TestCaptureFailureDbCounts:
         # Empty file IS the signal — schema was never applied / prefix is wrong.
         assert out == ""
 
-    def test_sidecar_swallows_bad_dialect(
+    def test_sidecar_swallows_bad_cfg_without_raising(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """Sidecar contract: a malformed cfg passed to the capture helper
+        must be swallowed via stderr warning, not raised. v14 Config has
+        typed required fields so the prior "missing db.table_prefix /
+        db.dialect" sentinel file path is unreachable; instead exercise
+        the outer try/except by handing the helper a bare object."""
         from recon_gen.common.browser.helpers import _capture_failure_db_counts
 
-        # RECON_GEN_RUN_DIR takes priority over SCREENSHOT_DIR (set by
-        # the runner per-cell); force the legacy branch.
         monkeypatch.delenv(RECON_GEN_RUN_DIR.name, raising=False)
         monkeypatch.setattr(
             "recon_gen.common.browser.helpers.SCREENSHOT_DIR", tmp_path,
         )
 
-        class _BadCfg:
-            db_table_prefix = "smoke"
-            dialect = None  # missing → helper writes a "skipped" marker
-            demo_database_url = ""
-
-        # Must not raise — sidecar contract.
-        _capture_failure_db_counts(_BadCfg(), "test_capture_bad_cfg")
-
-        out = (tmp_path / "_failures" / "test_capture_bad_cfg_db_counts.txt").read_text()
-        assert "capture skipped" in out
+        # Must not raise — outer try/except wraps everything in the helper.
+        _capture_failure_db_counts(object(), "test_capture_bad_cfg")
+        # No file should be written (the exception fired before the
+        # dialect-dispatch write paths).
+        assert not (
+            tmp_path / "_failures" / "test_capture_bad_cfg_db_counts.txt"
+        ).exists()
 
 
 class TestNoHardcodedArnInSource:

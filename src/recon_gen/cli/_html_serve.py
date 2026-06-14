@@ -236,7 +236,7 @@ def run_html_server(
     # impossible (the loader raises); half-set across cfg + CLI is
     # operator error but the pairing check below still catches it.
     if tls_cert is None and tls_key is None:
-        tls_cfg = getattr(getattr(cfg, "app2", None), "tls", None)
+        tls_cfg = cfg.app2.tls
         if tls_cfg is not None:
             tls_cert = tls_cfg.cert_path
             tls_key = tls_cfg.key_path
@@ -396,7 +396,7 @@ def run_html_server(
             asgi_app = make_app(
                 dashboards=dashboards, dev_log=dev_log, docs_dir=docs_dir,
                 studio_routes=studio_routes,
-                banner_text=getattr(cfg, "banner_text", None),
+                banner_text=cfg.app2.banner_text,
             )
             scheme = "https" if tls_enabled else "http"
             click.echo(f"server: {scheme}://{host}:{port}/")

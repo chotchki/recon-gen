@@ -20,7 +20,7 @@ import time
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Generator, TypeVar
+from typing import TYPE_CHECKING, Callable, Generator, TypeVar, cast
 
 from recon_gen.common.env_keys import (
     EnvVarInvalid,
@@ -778,17 +778,14 @@ def _capture_failure_db_counts(
         path = _capture_path("db_counts.txt", test_id)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        # DE.2 — v14 nested shape: cfg.db.{table_prefix, dialect}
-        db_proxy = getattr(cfg, "db", None)
-        prefix = str(getattr(db_proxy, "table_prefix", "") or "") if db_proxy is not None else ""
-        dialect = getattr(db_proxy, "dialect", None) if db_proxy is not None else None
-        if not prefix or dialect is None:
-            path.write_text(
-                f"# capture skipped: cfg missing db.table_prefix or db.dialect\n"
-                f"# prefix={prefix!r} dialect={dialect!r}\n",
-                encoding="utf-8",
-            )
-            return
+        # v14 nested shape: cfg.db.{table_prefix, dialect} always present
+        # (Config.__post_init__ raises if absent). Cast through the
+        # soft-duck-typed Config interface; importing the real type at
+        # module top would force a cycle from helpers.py.
+        from recon_gen.common.config import Config  # noqa: PLC0415
+        cfg_typed = cast("Config", cfg)
+        prefix = cfg_typed.db.table_prefix
+        dialect = cfg_typed.db.dialect
 
         conn = connect_demo_db(cfg)  # type: ignore[arg-type]: cfg duck-typed to Config (see header note)
         try:

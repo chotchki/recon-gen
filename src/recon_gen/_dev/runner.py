@@ -3086,7 +3086,7 @@ def cmd_up_to(args: argparse.Namespace) -> int:
         try:
             from recon_gen.common.config import load_config  # noqa: PLC0415
             peek_cfg = load_config(str(cfg_path))
-            l2_default = getattr(peek_cfg, "default_l2_instance", None)
+            l2_default = peek_cfg.db.default_l2_instance
             if l2_default:
                 l2_path = REPO_ROOT / l2_default if not Path(l2_default).is_absolute() else Path(l2_default)
                 if l2_path.exists():
