@@ -53,6 +53,7 @@ from recon_gen.common.env_keys import (
     RECON_GEN_CONFIG,
     RECON_GEN_DB_READ_ONLY,
     RECON_GEN_DEMO_DATABASE_URL,
+    RECON_GEN_ENV_LOG_DIR,
     RECON_GEN_DEMO_DATABASE_URL_OR,
     RECON_GEN_DEMO_DATABASE_URL_PG,
     RECON_GEN_QS_CONFIG,
@@ -1208,7 +1209,10 @@ def dispatch_layer(
     # diff vs prior runs).
     env_log_dir = run_dir / layer / "env_log"
     env_log_dir.mkdir(parents=True, exist_ok=True)
-    env_addl = {**env_addl, "RECON_GEN_ENV_LOG_DIR": str(env_log_dir)}
+    env_addl = {
+        **env_addl,
+        RECON_GEN_ENV_LOG_DIR.name: RECON_GEN_ENV_LOG_DIR.serialize(str(env_log_dir)),
+    }
     env = {**os.environ, **env_addl, **effective_variant_env}
 
     # Per-layer capture artifacts. Created lazily so a stub-skip

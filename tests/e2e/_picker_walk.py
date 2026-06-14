@@ -144,7 +144,7 @@ def _build_apps(cfg: Config | None = None) -> Sequence[tuple[str, App]]:
     from recon_gen.apps.executives.app import build_executives_app
 
     effective_cfg = cfg or make_test_config(
-        default_l2_instance=_DEFAULT_L2,
+        db_default_l2_instance=_DEFAULT_L2,
     )
     l2 = load_l2_instance(_DEFAULT_L2)
     apps = [

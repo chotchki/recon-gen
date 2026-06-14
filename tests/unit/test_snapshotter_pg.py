@@ -124,8 +124,10 @@ def pg_cfg(snapshotter_pg_container_url: str, worker_id: str) -> Config:
     from tests._test_helpers import make_test_config
 
     base = make_test_config(
-        dialect=Dialect.POSTGRES,
-        db=DbConfig(table_prefix=f"{_BASE_PREFIX}_{worker_id}"),
+        db=DbConfig(
+            table_prefix=f"{_BASE_PREFIX}_{worker_id}",
+            dialect=Dialect.POSTGRES,
+        ),
     )
     return replace(base, db=replace(base.db, url=snapshotter_pg_container_url))
 

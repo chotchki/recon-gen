@@ -734,7 +734,7 @@ def aiosqlite_pool() -> Iterator[AsyncConnectionPool]:
     conn.commit()
     conn.close()
 
-    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
+    cfg = make_test_config(db_dialect=Dialect.DUCKDB, db_url=path)
     pool = asyncio.run(make_connection_pool(cfg))
     try:
         yield pool

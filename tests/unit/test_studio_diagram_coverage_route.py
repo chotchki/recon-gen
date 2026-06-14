@@ -78,7 +78,7 @@ def seeded_studio_pool() -> Iterator[AsyncConnectionPool]:
     conn.commit()
     conn.close()
 
-    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
+    cfg = make_test_config(db_dialect=Dialect.DUCKDB, db_url=path)
     pool = asyncio.run(make_connection_pool(cfg))
     try:
         yield pool
@@ -192,7 +192,7 @@ def test_make_studio_routes_pool_without_dialect_raises() -> None:
     """
     cache = L2InstanceCache.from_path(_FIXTURES / "spec_example.yaml")
     # Build a real pool just to have a non-None value to hand in.
-    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=":memory:")
+    cfg = make_test_config(db_dialect=Dialect.DUCKDB, db_url=":memory:")
     pool = asyncio.run(make_connection_pool(cfg))
     try:
         with pytest.raises(ValueError, match="dialect"):

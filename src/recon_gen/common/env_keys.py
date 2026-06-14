@@ -570,6 +570,7 @@ RECON_GEN_TRACE_ALL: Final = EnvVar(
 # env and continue to open read-write.
 RECON_GEN_DB_READ_ONLY: Final = EnvVar(
     name="RECON_GEN_DB_READ_ONLY",
+    legacy_name="QS_GEN_DB_READ_ONLY",
     description=(
         "Bool — set to '1' to force connect_demo_db / _AsyncDuckdbPool "
         "to open the .duckdb file read_only=True (multi-process safe). "

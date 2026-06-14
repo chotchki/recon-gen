@@ -76,47 +76,57 @@ def _normalize_extra_tags(raw: Any) -> tuple[tuple[str, str], ...]:
 def make_test_config(**overrides: Any) -> Config:
     """Return a Config preloaded with the canonical placeholder values.
 
-    Any field can be overridden by keyword. Common cases:
+    Any field can be overridden by keyword. Kwarg names mirror the v14
+    nested cfg path, dotted-to-underscored: ``aws.deployment_name`` →
+    ``aws_deployment_name``, ``db.dialect`` → ``db_dialect``,
+    ``app2.etl_hook`` → ``app2_etl_hook``, etc. Any future cfg field
+    rename mechanically requires the matching test-helper kwarg rename
+    — no v13-flat strangler shim insulating callsites from drift.
 
-    - ``aws_region="us-east-2"`` — pin the region to match a fixture
-      (e.g. tests asserting on rendered ARNs).
-    - ``deployment_name="recon-spec-example"`` — pin the QS resource
-      prefix (Z.C). Default ``recon-test`` works for most tests; pin
-      to a real deployment name when the test asserts on rendered IDs.
-    - ``db_table_prefix="spec_example"`` — pin the DB table prefix
-      (Z.C). Default ``test`` works when the test doesn't touch
-      generated DB DDL; pin to a real prefix when it does.
-    - ``dialect=Dialect.ORACLE`` — exercise the Oracle SQL branch.
+    Common cases:
+
+    - ``aws_region="us-east-2"`` — pin region to match a fixture (e.g.
+      tests asserting on rendered ARNs). ``aws_account_id`` likewise.
+    - ``aws_deployment_name="recon-spec-example"`` — pin the QS
+      resource prefix (Z.C). Default ``recon-test`` works for most
+      tests; pin to a real deployment name when the test asserts on
+      rendered IDs.
+    - ``db_table_prefix="spec_example"`` — pin DB table prefix (Z.C).
+    - ``db_dialect=Dialect.ORACLE`` — exercise the Oracle SQL branch.
+    - ``db_url=":memory:"`` — point at a specific DB URL.
+
+    Block-level kwargs (``db=DbConfig(...)``, ``app2=App2Config(...)``)
+    REPLACE the relevant default block entirely; passing both a block
+    AND its flattened fields raises ``TypeError`` (avoids ambiguity).
     """
-    # DE.5 steps 3-19 — translate every legacy flat kwarg into the nested
-    # aws/db/app2/audit/test blocks on Config.
     from recon_gen.common.config import (  # noqa: PLC0415
         App2Config, AuditConfig, AwsConfig, DatasourceConfig, DbConfig,
         Dialect, TestConfig, TestGeneratorConfig,
     )
+    # AwsConfig fields
     account_id = overrides.pop("aws_account_id", _TEST_ACCOUNT)
     region = overrides.pop("aws_region", _TEST_REGION)
-    deployment_name = overrides.pop("deployment_name", "recon-test")
-    datasource_arn = overrides.pop("datasource_arn", None)
-    principal_arns = overrides.pop("principal_arns", ())
-    extra_tags_raw = overrides.pop("extra_tags", {})
-    tagging_enabled = overrides.pop("tagging_enabled", True)
-    qs_disable_pg_ssl = overrides.pop("qs_disable_pg_ssl", False)
+    deployment_name = overrides.pop("aws_deployment_name", "recon-test")
+    datasource_arn = overrides.pop("aws_datasource_arn", None)
+    principal_arns = overrides.pop("aws_principal_arns", ())
+    extra_tags_raw = overrides.pop("aws_extra_tags", {})
+    tagging_enabled = overrides.pop("aws_tagging_enabled", True)
+    qs_disable_pg_ssl = overrides.pop("aws_qs_disable_pg_ssl", False)
     aws_pg_cluster_id = overrides.pop("aws_pg_cluster_id", None)
     aws_oracle_instance_id = overrides.pop("aws_oracle_instance_id", None)
-    # DB-block legacy kwargs
+    # DbConfig fields
     db_table_prefix = overrides.pop("db_table_prefix", "test")
-    demo_database_url = overrides.pop("demo_database_url", None)
-    dialect = overrides.pop("dialect", Dialect.POSTGRES)
-    default_l2_instance = overrides.pop("default_l2_instance", None)
-    app2_db_pool_size = overrides.pop("app2_db_pool_size", 10)
-    # App2-block legacy kwargs
-    etl_hook = overrides.pop("etl_hook", None)
-    banner_text = overrides.pop("banner_text", None)
+    db_url = overrides.pop("db_url", None)
+    dialect = overrides.pop("db_dialect", Dialect.POSTGRES)
+    default_l2_instance = overrides.pop("db_default_l2_instance", None)
+    app2_db_pool_size = overrides.pop("db_app2_pool_size", 10)
+    # App2Config fields
+    etl_hook = overrides.pop("app2_etl_hook", None)
+    banner_text = overrides.pop("app2_banner_text", None)
     app2_tls = overrides.pop("app2_tls", None)
-    # Audit-block legacy kwargs
-    signing = overrides.pop("signing", None)
-    # Test-block legacy kwargs
+    # AuditConfig fields
+    signing = overrides.pop("audit_signing", None)
+    # TestConfig fields
     test_generator = overrides.pop("test_generator", None)
     if test_generator is None:
         test_generator = TestGeneratorConfig()
@@ -146,7 +156,7 @@ def make_test_config(**overrides: Any) -> Config:
         ),
         "db": DbConfig(
             dialect=dialect,
-            url=demo_database_url,
+            url=db_url,
             table_prefix=db_table_prefix,
             default_l2_instance=default_l2_instance,
             app2_pool_size=app2_db_pool_size,
@@ -159,25 +169,19 @@ def make_test_config(**overrides: Any) -> Config:
         "audit": AuditConfig(signing=signing),
         "test": TestConfig(generator=test_generator),
     }
-    # If caller passed `db=DbConfig(...)` AND legacy DB-block kwargs, merge
-    # them — the explicit DbConfig's set fields win, but anything it didn't
-    # touch comes from the legacy-kwarg-built default. Without this, callers
-    # who pass both lose their legacy values to the bare override.
-    import dataclasses as _dc  # noqa: PLC0415
-
-    def _merge(block_name: str, block_cls: type[Any]) -> None:
-        override = overrides.pop(block_name, None)
-        if isinstance(override, block_cls):
-            merged: dict[str, Any] = {}
-            for f in _dc.fields(block_cls):
-                ov = getattr(override, f.name)
-                default = f.default if f.default is not _dc.MISSING else (
-                    f.default_factory() if f.default_factory is not _dc.MISSING else None
-                )
-                merged[f.name] = ov if ov != default else getattr(base[block_name], f.name)
-            base[block_name] = block_cls(**merged)
-
-    _merge("db", DbConfig)
-    _merge("app2", App2Config)
-    base.update(overrides)
+    # Block-level kwargs (`aws=AwsConfig(...)` / `db=DbConfig(...)` /
+    # etc.) REPLACE the relevant default block entirely. Passing both
+    # a block AND its flattened fields is ambiguous — we raise rather
+    # than silently picking one.
+    for block_name in ("aws", "db", "app2", "audit", "test"):
+        if block_name in overrides:
+            base[block_name] = overrides.pop(block_name)
+    if overrides:
+        raise TypeError(
+            f"make_test_config: unknown kwargs {list(overrides)!r}. "
+            f"Use v14-nested-flat names (e.g. `aws_deployment_name`, "
+            f"`db_dialect`, `app2_etl_hook`) or pass full blocks "
+            f"(e.g. `db=DbConfig(...)`). The v13-flat strangler shim "
+            f"was retired post-DE.5 v14 audit."
+        )
     return Config(**base)

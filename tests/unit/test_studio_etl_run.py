@@ -186,7 +186,7 @@ def test_etl_run_coverage_carries_failures_only_toggle(
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=db_path)
+    cfg = make_test_config(db_dialect=Dialect.DUCKDB, db_url=db_path)
     pool = asyncio.run(make_connection_pool(cfg))
     try:
         # Seed a DeploySummary so the renderer skips the
@@ -411,7 +411,7 @@ def test_coverage_renders_empty_state_when_no_run_this_session_even_with_rows(
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=db_path)
+    cfg = make_test_config(db_dialect=Dialect.DUCKDB, db_url=db_path)
     pool = asyncio.run(make_connection_pool(cfg))
     try:
         body = asyncio.run(_render_etl_coverage_section(

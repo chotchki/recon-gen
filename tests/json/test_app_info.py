@@ -200,13 +200,13 @@ def test_app_info_deploy_stamp_reads_dialect_and_prefix_from_cfg(builder: _AppBu
     for cfg in [
         make_test_config(
             aws_region="us-east-2",
-            dialect=Dialect.POSTGRES,
-            deployment_name="recon-prod",
+            db_dialect=Dialect.POSTGRES,
+            aws_deployment_name="recon-prod",
         ),
         make_test_config(
             aws_region="us-east-2",
-            dialect=Dialect.ORACLE,
-            deployment_name="recon-staging",
+            db_dialect=Dialect.ORACLE,
+            aws_deployment_name="recon-staging",
         ),
     ]:
         app = builder(cfg)

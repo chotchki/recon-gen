@@ -112,7 +112,7 @@ def pool_factory() -> Iterator[PoolFactory]:
     paths: list[str] = []
 
     def _build(path: str) -> AsyncConnectionPool:
-        cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
+        cfg = make_test_config(db_dialect=Dialect.DUCKDB, db_url=path)
         pool = asyncio.run(make_connection_pool(cfg))
         pools.append(pool)
         paths.append(path)

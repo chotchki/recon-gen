@@ -147,7 +147,7 @@ class TestMakeSnapshotter:
         """
         from recon_gen.common.snapshotter import PostgresSchemaSnapshotter
 
-        cfg = make_test_config(dialect=Dialect.POSTGRES)
+        cfg = make_test_config(db_dialect=Dialect.POSTGRES)
         snap = asyncio.run(
             make_snapshotter(
                 cfg,
@@ -171,7 +171,7 @@ class TestMakeSnapshotter:
         """
         from recon_gen.common.snapshotter import OracleGoldenMirrorSnapshotter
 
-        cfg = make_test_config(dialect=Dialect.ORACLE)
+        cfg = make_test_config(db_dialect=Dialect.ORACLE)
         snap = asyncio.run(
             make_snapshotter(
                 cfg,
@@ -198,8 +198,8 @@ class TestMakeSnapshotter:
 
         db_file = tmp_path / "dispatch.duckdb"
         cfg = make_test_config(
-            dialect=Dialect.DUCKDB,
-            demo_database_url=make_demo_database_url(Dialect.DUCKDB, db_file),
+            db_dialect=Dialect.DUCKDB,
+            db_url=make_demo_database_url(Dialect.DUCKDB, db_file),
         )
 
         async def _run() -> None:
@@ -222,7 +222,7 @@ class TestMakeSnapshotter:
         # Construct a Config then mutate dialect to a non-enum value
         # through __dict__ — emulates the way ``make_connection_pool``
         # surfaces a corrupt cfg.yaml (same loud-fail philosophy).
-        cfg = make_test_config(dialect=Dialect.POSTGRES)
+        cfg = make_test_config(db_dialect=Dialect.POSTGRES)
         # DE.5 step 12 — dialect now lives on cfg.db; mutate the cached
         # nested copy. (Snapshotter reads cfg.db.dialect; the legacy
         # flat ``cfg.db.dialect`` is unused after the DE.2 sweep.)

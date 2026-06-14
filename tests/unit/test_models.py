@@ -408,7 +408,7 @@ class TestConfigTags:
 
     def test_extra_tags_merged(self):
         cfg = make_test_config(
-            extra_tags={"Environment": "prod", "Team": "finance"},
+            aws_extra_tags={"Environment": "prod", "Team": "finance"},
         )
         tags = cfg.aws.tags()
         assert tags is not None
@@ -421,7 +421,7 @@ class TestConfigTags:
         assert "Team" in keys
 
     def test_common_tag_always_first(self):
-        cfg = make_test_config(extra_tags={"Foo": "bar"})
+        cfg = make_test_config(aws_extra_tags={"Foo": "bar"})
         tags = cfg.aws.tags()
         assert tags is not None
         assert tags[0].Key == MANAGED_TAG_KEY
@@ -429,7 +429,7 @@ class TestConfigTags:
     def test_deployment_tag_carries_cfg_value(self):
         """Z.C — Deployment tag value mirrors cfg.aws.deployment_name so
         cleanup's per-deploy filter has something to match against."""
-        cfg = make_test_config(deployment_name="qs-ci-12345-pg")
+        cfg = make_test_config(aws_deployment_name="qs-ci-12345-pg")
         tags_by_key = {t.Key: t.Value for t in cfg.aws.tags()}
         assert tags_by_key[DEPLOYMENT_TAG_KEY] == "qs-ci-12345-pg"
 
@@ -439,13 +439,13 @@ class TestConfigPrefixed:
     segment (replaces v8.x's <resource_prefix>-<l2_instance_prefix>-...)."""
 
     def test_prefixed_uses_deployment_name(self):
-        cfg = make_test_config(deployment_name="recon-prod")
+        cfg = make_test_config(aws_deployment_name="recon-prod")
         assert cfg.aws.prefixed("l1-dashboard") == "recon-prod-l1-dashboard"
 
     def test_prefixed_lets_two_deployments_coexist(self):
         """The headline use case: same dashboard kind, different deployment."""
-        cfg_a = make_test_config(deployment_name="recon-sasquatch")
-        cfg_b = make_test_config(deployment_name="recon-wonkawash")
+        cfg_a = make_test_config(aws_deployment_name="recon-sasquatch")
+        cfg_b = make_test_config(aws_deployment_name="recon-wonkawash")
         assert cfg_a.aws.prefixed("l1-dashboard") != cfg_b.aws.prefixed("l1-dashboard")
 
 
@@ -454,7 +454,7 @@ class TestConfigPrefixed:
 # ---------------------------------------------------------------------------
 
 _TEST_CFG = make_test_config(
-    principal_arns=["arn:aws:quicksight:us-west-2:111122223333:user/default/admin"],
+    aws_principal_arns=["arn:aws:quicksight:us-west-2:111122223333:user/default/admin"],
 )
 
 
@@ -532,8 +532,8 @@ class TestDataSourceSerialization:
 # ---------------------------------------------------------------------------
 
 _DEMO_CFG = make_test_config(
-    demo_database_url="postgresql://demouser:demopass@db.example.com:5432/quicksight_demo",
-    principal_arns=["arn:aws:quicksight:us-west-2:111122223333:user/default/admin"],
+    db_url="postgresql://demouser:demopass@db.example.com:5432/quicksight_demo",
+    aws_principal_arns=["arn:aws:quicksight:us-west-2:111122223333:user/default/admin"],
 )
 
 
@@ -565,7 +565,7 @@ class TestBuildDatasource:
 
     def test_no_permissions_without_principal(self):
         cfg = make_test_config(
-            demo_database_url="postgresql://u:p@h:5432/db",
+            db_url="postgresql://u:p@h:5432/db",
         )
         ds = build_datasource(cfg)
         assert ds.Permissions is None
@@ -592,8 +592,8 @@ class TestBuildDatasourceOracle:
     def _oracle_cfg(self, url: str) -> Config:
         from recon_gen.common.sql import Dialect
         return make_test_config(
-            demo_database_url=url,
-            dialect=Dialect.ORACLE,
+            db_url=url,
+            db_dialect=Dialect.ORACLE,
         )
 
     def test_easy_connect_url_parses_into_oracle_parameters(self):

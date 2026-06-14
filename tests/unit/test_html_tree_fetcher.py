@@ -45,7 +45,7 @@ from tests._test_helpers import make_test_config
 
 
 _TEST_CFG = make_test_config()
-_TEST_CFG_SQLITE = make_test_config(dialect=Dialect.DUCKDB)
+_TEST_CFG_SQLITE = make_test_config(db_dialect=Dialect.DUCKDB)
 
 
 # The producer's ``DataFetcher`` is typed ``Callable[..., Awaitable[Any]]``,
@@ -162,8 +162,8 @@ def aiosqlite_pool() -> Iterator[AsyncConnectionPool]:
     conn.close()
 
     cfg = make_test_config(
-        dialect=Dialect.DUCKDB,
-        demo_database_url=path,
+        db_dialect=Dialect.DUCKDB,
+        db_url=path,
     )
     pool = asyncio.run(make_connection_pool(cfg))
     try:
@@ -342,8 +342,8 @@ def test_make_tree_db_fetcher_retargets_to_alt_prefix(
     conn.close()
 
     cfg = make_test_config(
-        dialect=Dialect.DUCKDB,
-        demo_database_url=str(db_path),
+        db_dialect=Dialect.DUCKDB,
+        db_url=str(db_path),
     )
     pool = asyncio.run(make_connection_pool(cfg))
     try:
@@ -528,8 +528,8 @@ def aiosqlite_sankey_pool() -> Iterator[AsyncConnectionPool]:
     conn.close()
 
     cfg = make_test_config(
-        dialect=Dialect.DUCKDB,
-        demo_database_url=path,
+        db_dialect=Dialect.DUCKDB,
+        db_url=path,
     )
     pool = asyncio.run(make_connection_pool(cfg))
     try:

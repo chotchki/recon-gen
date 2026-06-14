@@ -183,7 +183,7 @@ def test_training_v3_landing_renders_standalone_banner() -> None:
     from html import escape
 
     standalone_banner_html = _standalone_mode_banner(
-        make_test_config(etl_hook=None),
+        make_test_config(app2_etl_hook=None),
     )
 
     html = render_training_v3_landing(

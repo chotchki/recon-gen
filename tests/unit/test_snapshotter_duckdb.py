@@ -108,8 +108,8 @@ def _file_hash(path: Path) -> str:
 
 def _build_cfg_for(db_file: Path):
     return make_test_config(
-        dialect=Dialect.DUCKDB,
-        demo_database_url=make_demo_database_url(Dialect.DUCKDB, db_file),
+        db_dialect=Dialect.DUCKDB,
+        db_url=make_demo_database_url(Dialect.DUCKDB, db_file),
     )
 
 

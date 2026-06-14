@@ -105,21 +105,28 @@ def test_reset_pg_password_via_socket_uses_actual_user(
     env_response = _FakeCompletedProcess(
         returncode=0, stdout=b"POSTGRES_USER=test\nPOSTGRES_DB=test\n",
     )
+    # #266 — `_reset_pg_password_via_socket` now invokes
+    # `_wait_for_pg_ready` first, which runs `docker exec <c> pg_isready
+    # -q`. Mock it as ready (rc=0) so the wait completes immediately.
+    pg_isready_ok = _FakeCompletedProcess(returncode=0)
     alter_response = _FakeCompletedProcess(returncode=0)
     calls: list[list[str]] = []
 
     def fake_run(cmd: list[str], **kwargs: Any) -> _FakeCompletedProcess:
         calls.append(cmd)
+        if cmd[1] == "exec" and cmd[3] == "pg_isready":
+            return pg_isready_ok
         if cmd[1] == "exec" and cmd[3] == "env":
             return env_response
         return alter_response
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     _reset_pg_password_via_socket("fake-container", "newpass")
-    # Second call is the psql ALTER USER — verify it targets `test`, not
-    # `postgres`, and the ALTER USER statement matches.
-    assert len(calls) == 2
-    psql_cmd = calls[1]
+    # Three calls now: pg_isready, env probe, then the psql ALTER USER —
+    # verify the psql targets `test`, not `postgres`, and the ALTER USER
+    # statement matches.
+    assert len(calls) == 3
+    psql_cmd = calls[2]
     assert "psql" in psql_cmd
     assert "-U" in psql_cmd
     user_flag_idx = psql_cmd.index("-U")
@@ -136,11 +143,14 @@ def test_reset_pg_password_via_socket_raises_loud_on_nonzero_rc(
     env_response = _FakeCompletedProcess(
         returncode=0, stdout=b"POSTGRES_USER=test\nPOSTGRES_DB=test\n",
     )
+    pg_isready_ok = _FakeCompletedProcess(returncode=0)
     alter_response = _FakeCompletedProcess(
         returncode=2, stderr=b"psql: error: connection refused",
     )
 
     def fake_run(cmd: list[str], **kwargs: Any) -> _FakeCompletedProcess:
+        if cmd[1] == "exec" and cmd[3] == "pg_isready":
+            return pg_isready_ok
         if cmd[1] == "exec" and cmd[3] == "env":
             return env_response
         return alter_response
@@ -159,12 +169,15 @@ def test_reset_pg_password_via_socket_raises_loud_on_role_does_not_exist(
     env_response = _FakeCompletedProcess(
         returncode=0, stdout=b"POSTGRES_USER=test\nPOSTGRES_DB=test\n",
     )
+    pg_isready_ok = _FakeCompletedProcess(returncode=0)
     alter_response = _FakeCompletedProcess(
         returncode=0,
         stderr=b'ERROR:  role "postgres" does not exist',
     )
 
     def fake_run(cmd: list[str], **kwargs: Any) -> _FakeCompletedProcess:
+        if cmd[1] == "exec" and cmd[3] == "pg_isready":
+            return pg_isready_ok
         if cmd[1] == "exec" and cmd[3] == "env":
             return env_response
         return alter_response

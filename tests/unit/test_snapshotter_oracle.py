@@ -129,9 +129,11 @@ def oracle_cfg(
     # identifier cap; using the raw worker_id (rather than a hash)
     # keeps the prefix grep-able during triage.
     return make_test_config(
-        dialect=Dialect.ORACLE,
-        demo_database_url=snapshotter_oracle_container_url,
-        db=DbConfig(table_prefix=f"snap_or_{worker_id}"),
+        db=DbConfig(
+            table_prefix=f"snap_or_{worker_id}",
+            dialect=Dialect.ORACLE,
+            url=snapshotter_oracle_container_url,
+        ),
     )
 
 

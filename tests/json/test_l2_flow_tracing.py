@@ -225,8 +225,8 @@ def test_per_deployment_prefix_isolates_resource_ids() -> None:
     analysis IDs. Prevents multi-deploy collisions in the same QS account
     (replaces the prior per-L2-instance prefix isolation; deployments are
     now the per-tenant axis on cfg, not on the L2 yaml)."""
-    cfg_a = make_test_config(deployment_name="recon-spec")
-    cfg_b = make_test_config(deployment_name="recon-sasq")
+    cfg_a = make_test_config(aws_deployment_name="recon-spec")
+    cfg_b = make_test_config(aws_deployment_name="recon-sasq")
     a_app = build_l2_flow_tracing_app(cfg_a, l2_instance=default_l2_instance())
     b_app = build_l2_flow_tracing_app(
         cfg_b, l2_instance=load_instance(SASQUATCH_PR_YAML),

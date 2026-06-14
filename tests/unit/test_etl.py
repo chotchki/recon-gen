@@ -489,8 +489,8 @@ def duckdb_cfg() -> object:
     # strips back to the absolute path. Two-slash form would resolve
     # relative to cwd.
     return make_test_config(
-        dialect=Dialect.DUCKDB,
-        demo_database_url=f"duckdb:///{path}",
+        db_dialect=Dialect.DUCKDB,
+        db_url=f"duckdb:///{path}",
     )
 
 

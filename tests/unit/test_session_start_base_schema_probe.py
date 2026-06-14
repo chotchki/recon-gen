@@ -36,9 +36,11 @@ from tests._test_helpers import make_test_config
 
 def _make_duckdb_cfg(db_path: Path) -> object:
     return make_test_config(
-        dialect=Dialect.DUCKDB,
-        demo_database_url=f"duckdb:///{db_path}",
-        db=DbConfig(table_prefix="cs13_probe"),
+        db=DbConfig(
+            table_prefix="cs13_probe",
+            dialect=Dialect.DUCKDB,
+            url=f"duckdb:///{db_path}",
+        ),
     )
 
 

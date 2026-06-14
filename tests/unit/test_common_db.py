@@ -120,7 +120,7 @@ class TestSplitOracleScript:
 
 def _cfg(*, dialect: Dialect, url: str | None) -> Config:
     return make_test_config(
-        aws_region="us-east-2", dialect=dialect, demo_database_url=url,
+        aws_region="us-east-2", db_dialect=dialect, db_url=url,
     )
 
 
@@ -336,8 +336,8 @@ class TestMakeConnectionPool:
 
         cfg = make_test_config(
             aws_region="us-east-2",
-            dialect=Dialect.DUCKDB,
-            demo_database_url=":memory:",
+            db_dialect=Dialect.DUCKDB,
+            db_url=":memory:",
         )
 
         async def run() -> tuple[type, int]:
@@ -369,8 +369,8 @@ class TestMakeConnectionPool:
 
         cfg = make_test_config(
             aws_region="us-east-2",
-            dialect=Dialect.DUCKDB,
-            demo_database_url=None,
+            db_dialect=Dialect.DUCKDB,
+            db_url=None,
         )
         with pytest.raises(ValueError, match="cfg.db.url is unset"):
             asyncio.run(make_connection_pool(cfg))
@@ -398,8 +398,8 @@ class TestMakeConnectionPool:
 
         cfg = make_test_config(
             aws_region="us-east-2",
-            dialect=Dialect.DUCKDB,
-            demo_database_url=":memory:",
+            db_dialect=Dialect.DUCKDB,
+            db_url=":memory:",
         )
         pool = asyncio.run(make_connection_pool(cfg))
         try:

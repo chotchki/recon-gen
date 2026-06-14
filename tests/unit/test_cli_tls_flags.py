@@ -62,22 +62,25 @@ def _find_option(cmd: click.Command, flag: str) -> click.Option:
     raise AssertionError(f"Option {flag} not on {cmd.name}")
 
 
-def test_dashboards_tls_envvar_fallback_declared() -> None:
+def test_dashboards_tls_envvar_fallback_not_via_click_envvar() -> None:
     """``RECON_GEN_TLS_CERT`` / ``RECON_GEN_TLS_KEY`` env vars wire via
-    Click's ``envvar=`` so an operator can ``export`` and run
-    ``recon-gen dashboards`` flag-free."""
+    the env_keys registry (``must_be_file`` validated + access-log +
+    deprecation channel) in ``_html_serve``, NOT via Click's ``envvar=``
+    bypass. Post-v14 audit fix #267 — the click bypass had no typed
+    validator; a typo silently fell through to None.
+    """
     cert_opt = _find_option(dashboards, "--tls-cert")
     key_opt = _find_option(dashboards, "--tls-key")
-    assert cert_opt.envvar == "RECON_GEN_TLS_CERT"
-    assert key_opt.envvar == "RECON_GEN_TLS_KEY"
+    assert cert_opt.envvar is None
+    assert key_opt.envvar is None
 
 
-def test_studio_tls_envvar_fallback_declared() -> None:
-    """Studio carries the same env-var fallback shape."""
+def test_studio_tls_envvar_fallback_not_via_click_envvar() -> None:
+    """Studio carries the same registry-routed env-var fallback shape."""
     cert_opt = _find_option(studio, "--tls-cert")
     key_opt = _find_option(studio, "--tls-key")
-    assert cert_opt.envvar == "RECON_GEN_TLS_CERT"
-    assert key_opt.envvar == "RECON_GEN_TLS_KEY"
+    assert cert_opt.envvar is None
+    assert key_opt.envvar is None
 
 
 def test_run_html_server_rejects_half_set_tls(monkeypatch: pytest.MonkeyPatch) -> None:

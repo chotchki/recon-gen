@@ -359,7 +359,7 @@ def test_gaps_actually_surface_in_triage_detect_gaps(
     conn.commit()
     conn.close()
 
-    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=db_path)
+    cfg = make_test_config(db_dialect=Dialect.DUCKDB, db_url=db_path)
     pool: AsyncConnectionPool = asyncio.run(make_connection_pool(cfg))
     try:
         contracts = derive_column_contracts(inst)

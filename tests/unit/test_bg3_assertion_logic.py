@@ -125,7 +125,7 @@ def planted_drift_sqlite() -> Iterator["Config"]:
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path, db_table_prefix="pfx")
+    cfg = make_test_config(db_dialect=Dialect.DUCKDB, db_url=path, db_table_prefix="pfx")
     try:
         yield cfg
     finally:
@@ -321,8 +321,11 @@ def test_bg3_kv_pin_anchors_test_to_deploy_day_across_midnight(
     from recon_gen.common.config import DbConfig  # noqa: PLC0415
     from recon_gen.common.db import make_demo_database_url
     cfg = make_test_config(
-        dialect=Dialect.DUCKDB,
-        db=DbConfig(table_prefix=prefix, url=make_demo_database_url(Dialect.DUCKDB, db_path)),
+        db=DbConfig(
+            dialect=Dialect.DUCKDB,
+            table_prefix=prefix,
+            url=make_demo_database_url(Dialect.DUCKDB, db_path),
+        ),
     )
 
     unpinned = cfg.test.generator.as_of_frame(window_days=7).as_of

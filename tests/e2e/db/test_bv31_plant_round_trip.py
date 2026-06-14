@@ -116,7 +116,7 @@ def _build_seeded_sqlite(
     # rows. Stub Config — `build_config_populate_sql` only reads
     # `db_table_prefix` + `dialect` off it.
     cfg = make_test_config(
-        deployment_name="recon-bv31",
+        aws_deployment_name="recon-bv31",
         db=DbConfig(table_prefix=_PREFIX, dialect=Dialect.DUCKDB),
     )
     config_sql = build_config_populate_sql(cfg, inst, anchor=date(2026, 5, 30))
@@ -169,7 +169,7 @@ def _signal_etl_triage(
 
     inst = load_instance(l2_path)
     cfg = make_test_config(
-        deployment_name="recon-bv31",
+        aws_deployment_name="recon-bv31",
         db=DbConfig(table_prefix=_PREFIX, dialect=Dialect.DUCKDB, url=db_path),
     )
 
@@ -200,7 +200,7 @@ def _signal_etl_run_coverage(
 
     inst = load_instance(l2_path)
     cfg = make_test_config(
-        deployment_name="recon-bv31",
+        aws_deployment_name="recon-bv31",
         db=DbConfig(table_prefix=_PREFIX, dialect=Dialect.DUCKDB, url=db_path),
     )
 

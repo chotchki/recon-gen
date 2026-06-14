@@ -156,7 +156,7 @@ def _seeded_pool_with_unmatched_rail(yaml_path: Path) -> tuple[AsyncConnectionPo
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=db_path)
+    cfg = make_test_config(db_dialect=Dialect.DUCKDB, db_url=db_path)
     pool = asyncio.run(make_connection_pool(cfg))
     _ = cache  # cache loaded but the render reads via cache parameter
     return pool, db_path
@@ -214,7 +214,7 @@ def test_etl_triage_empty_state_when_no_gaps(
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=db_path)
+    cfg = make_test_config(db_dialect=Dialect.DUCKDB, db_url=db_path)
     pool = asyncio.run(make_connection_pool(cfg))
     try:
         body = asyncio.run(_render_etl_triage_page(

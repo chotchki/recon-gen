@@ -157,7 +157,7 @@ def test_patched_config_keeps_etl_hook_when_enabled() -> None:
     etl_hook is the only ETL knob now (it writes directly to demo_db,
     so there's no upstream-source to coordinate)."""
     cfg = make_test_config(
-        etl_hook="echo upstream-pull",
+        app2_etl_hook="echo upstream-pull",
     )
     cache = TestGeneratorCache.from_config(cfg)
     assert cache.is_etl_hook_enabled() is True
@@ -170,7 +170,7 @@ def test_patched_config_clears_etl_hook_when_disabled() -> None:
     cfg — step 1 (etl_hook subprocess) no-ops for that deploy. Original
     cfg's stored field is untouched (re-enable + re-deploy restores)."""
     cfg = make_test_config(
-        etl_hook="echo upstream-pull",
+        app2_etl_hook="echo upstream-pull",
     )
     cache = TestGeneratorCache.from_config(cfg)
     cache.set_etl_hook_enabled(False)

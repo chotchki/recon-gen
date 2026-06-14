@@ -195,7 +195,7 @@ def test_dump_browser_failure_with_capture_dir_no_warning(
     runs_dir: Path,
 ) -> None:
     """A failed browser test WITH an artifact dir under
-    ``<cell>/qs_browser/<sanitized_test_id>/`` → no warning."""
+    ``<cell>/browser/<sanitized_test_id>/`` → no warning."""
     run_dir = runs_dir / _RUN_ID_NEW
     run_dir.mkdir()
     _write_layer(
@@ -209,7 +209,7 @@ def test_dump_browser_failure_with_capture_dir_no_warning(
     slug = (
         nodeid.replace("/", "_").replace("::", "__").replace(".py", "")
     )
-    cap = run_dir / "sp_pg_aw" / "qs_browser" / slug
+    cap = run_dir / "sp_pg_aw" / "browser" / slug
     cap.mkdir(parents=True)
     (cap / "screenshot.png").write_bytes(b"fake-png")
     out = _dump(runs_dir)
@@ -248,7 +248,7 @@ def test_dump_browser_failure_with_empty_capture_dir_warns(
     slug = (
         nodeid.replace("/", "_").replace("::", "__").replace(".py", "")
     )
-    cap = run_dir / "sp_pg_aw" / "qs_browser" / slug
+    cap = run_dir / "sp_pg_aw" / "browser" / slug
     cap.mkdir(parents=True)
     # Empty dir — no expected files.
     out = _dump(runs_dir)
@@ -299,18 +299,19 @@ def test_dump_missing_run_arg_returns_needs_operator(runs_dir: Path) -> None:
     assert rc == r.EXIT_NEEDS_OPERATOR
 
 
-def test_dump_variant_arg_narrows_cells(runs_dir: Path) -> None:
-    """``--variant NAME`` shows only the matching cell, hides others."""
+def test_dump_variant_arg_deprecated_warns_then_ignores(runs_dir: Path) -> None:
+    """``--variant NAME`` is retired post-CB.17.d — the 13-cell matrix
+    is gone. The arg is still accepted (so legacy scripts don't crash)
+    but ignored with a stderr warning; the dump shows ALL cells found
+    under the run dir, not just the named variant."""
     run_dir = runs_dir / _RUN_ID_NEW
     run_dir.mkdir()
     _write_layer(run_dir, "sp_pg_aw", "qs_browser", exit_code=1, stdout="FAILED tests/aw.py::test_aw\n")
     _write_layer(run_dir, "sp_or_lo", "qs_browser", exit_code=1, stdout="FAILED tests/or.py::test_or\n")
-    out_aw = _dump(runs_dir, variant="sp_pg_aw")
-    assert "sp_pg_aw/qs_browser" in out_aw
-    assert "sp_or_lo" not in out_aw
-    out_or = _dump(runs_dir, variant="sp_or_lo")
-    assert "sp_or_lo/qs_browser" in out_or
-    assert "sp_pg_aw" not in out_or
+    out = _dump(runs_dir, variant="sp_pg_aw")
+    # Both cells surface — --variant was ignored, no cell narrowing.
+    assert "sp_pg_aw/qs_browser" in out
+    assert "sp_or_lo/qs_browser" in out
 
 
 # -- prelude handling --------------------------------------------------------

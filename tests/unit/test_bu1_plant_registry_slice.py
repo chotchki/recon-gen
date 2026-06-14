@@ -373,7 +373,7 @@ def test_phantom_rail_plant_surfaces_on_etl_triage(
     conn.close()
 
     cfg = make_test_config(
-        dialect=Dialect.DUCKDB, demo_database_url=db_path,
+        db_dialect=Dialect.DUCKDB, db_url=db_path,
     )
     pool: AsyncConnectionPool = asyncio.run(make_connection_pool(cfg))
     try:

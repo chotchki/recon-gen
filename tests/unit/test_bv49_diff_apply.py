@@ -117,9 +117,11 @@ def fresh_v_overlay(tmp_path: Path) -> Iterator[tuple[Config, Path]]:
     (designed for an already-bootstrapped base prefix)."""
     db_path = tmp_path / "bv49.sqlite"
     cfg = make_test_config(
-        dialect=Dialect.DUCKDB,
-        demo_database_url=str(db_path),
-        db=DbConfig(table_prefix="bv49"),
+        db=DbConfig(
+            table_prefix="bv49",
+            dialect=Dialect.DUCKDB,
+            url=str(db_path),
+        ),
     )
 
     fixtures_root = Path(__file__).resolve().parent.parent / "l2"

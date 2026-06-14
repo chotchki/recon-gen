@@ -73,7 +73,7 @@ def sqlite_cfg() -> Iterator["Config"]:
     )
     conn.commit()
     conn.close()
-    cfg = make_test_config(dialect=Dialect.DUCKDB, demo_database_url=path)
+    cfg = make_test_config(db_dialect=Dialect.DUCKDB, db_url=path)
     try:
         yield cfg
     finally:

@@ -185,8 +185,10 @@ def seeded_l2_db(isolated_cfg: "Config") -> None:
     # — direct os.environ.pop persists only for the seed; the next
     # test's reader-shape uses are unaffected.
     import os
+    # Single pop covers both — the EnvVar registry's legacy_name
+    # fallback handles QS_GEN_DB_READ_ONLY transparently, so the
+    # downstream readers see "unset" iff the canonical name is unset.
     os.environ.pop("RECON_GEN_DB_READ_ONLY", None)
-    os.environ.pop("QS_GEN_DB_READ_ONLY", None)
     conn = connect_demo_db(isolated_cfg)
     try:
         apply_db_seed(
