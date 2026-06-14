@@ -130,8 +130,20 @@ def ensure_dev_env(
     """
 ```
 
-1. ACME state machine via the `acme` library (IETF maintainer, `pip install acme`) under a new `[dev]` extra so the downstream wheel stays minimal. Account key stored at `~/.local/share/recon-gen/tls/account.key` (per-machine, survives reclones; XDG path). Account email read from `cfg.audit.signing.signer_name` — one identity for the whole tool.
-2. Cloudflare API client — direct `requests` calls against `api.cloudflare.com/client/v4/zones/{zone_id}/dns_records`. Token read from env `RECON_GEN_CLOUDFLARE_TOKEN` (per `[[feedback_no_credential_friction]]`). Zone ID auto-discovered from `hotchkiss.io` lookup on first run; cached at `~/.local/share/recon-gen/tls/zone-id.txt`.
+1. ACME state machine via the `acme` library (IETF maintainer, `pip install acme`) under a new `[dev]` extra so the downstream wheel stays minimal. ACME long-lived state lives at the XDG path `~/.local/share/recon-gen/tls/` — survives `rm -rf run/` and fresh clones, avoids burning the Let's Encrypt account-creation rate limit (5 per IP per 3h) on every reset. Layout:
+   ```
+   ~/.local/share/recon-gen/tls/
+     account.key       # ACME account private key (one per machine)
+     zone-id.txt       # Cloudflare zone-id cache (skips lookup on every run)
+     dev/cert.pem      # operator's-Mac SAN cert (localdev + dev hostnames)
+     dev/key.pem
+     ci/cert.pem       # WSL2-runner SAN cert (localci + ci hostnames)
+     ci/key.pem
+     renew.lock        # advisory file lock for concurrent runner safety
+   ```
+   The WSL2 self-hosted CI runner's home dir persists across workflow runs (same as the long-lived `recon-gen-local` IAM keys), so XDG works on CI without special-case. `release.yml` on `ubuntu-latest` doesn't need the coordinator — it's just wheel install + smoke test.
+   Account email read from `cfg.audit.signing.signer_name` — one identity for the whole tool. Cfg escape hatch `cfg.app2.acme.state_dir` overrides the XDG default for operators who prefer one storage convention everywhere.
+2. Cloudflare API client — direct `requests` calls against `api.cloudflare.com/client/v4/zones/{zone_id}/dns_records`. Token read from env `RECON_GEN_CLOUDFLARE_TOKEN` (per `[[feedback_no_credential_friction]]`). Local-dev secret-at-rest convention: `run/secrets.env` (gitignored, sourceable: `set -a; source run/secrets.env; set +a`) holds the token. CI: GitHub secret → workflow `env:` → process env. Single read-site in either case. Zone ID auto-discovered from `hotchkiss.io` lookup on first run; cached at `~/.local/share/recon-gen/tls/zone-id.txt` (alongside the rest of the XDG state).
 3. Public-IP discovery (`public_ip.py`) ports the [`cloudflare_trace.rs`](https://github.com/chotchki/hotchkiss-io/blob/main/src/coordinator/ip/cloudflare_trace.rs) pattern: GET `https://1.1.1.1/cdn-cgi/trace`, parse text body line-by-line, return the `ip=` value. ~30 LoC. Retries 3× on transient HTTP errors; raises on 4xx (token / IP misconfig).
 4. DNS-01 flow inside `acme_client.py`, called once per env (covering both SANs in one cert):
    1. ACME `new-order` with two identifiers (`local<env>` + `<env>` hostnames).
@@ -156,8 +168,10 @@ def ensure_dev_env(
 3. Document the **one-time operator setup** in `docs/reference/local-dev.md`:
    - Cloudflare API token creation (Zone:DNS:Edit, restricted to the `hotchkiss.io` zone) — paste step-by-step.
    - 4 DNS records (created automatically by the runner on first `up`; manual fallback documented). The `local<env>` records require no maintenance; the `<env>` records auto-update on public-IP change.
-   - Env: `RECON_GEN_CLOUDFLARE_TOKEN=<token>` in shell profile (or a `direnv` `.envrc` if the operator prefers).
+   - **Local-dev token storage**: paste `RECON_GEN_CLOUDFLARE_TOKEN=<token>` into `run/secrets.env` (gitignored). Operator sources it via `set -a; source run/secrets.env; set +a` in their shell profile, or via `direnv` with a `.envrc` that sources `run/secrets.env`. Same file holds future secrets (DD's OIDC client secret + JWT secret) so we keep ONE secret file convention.
+   - **CI token storage**: GitHub secret `CLOUDFLARE_TOKEN` → `e2e.yml` / `ci.yml` workflow `env: RECON_GEN_CLOUDFLARE_TOKEN: ${{ secrets.CLOUDFLARE_TOKEN }}` → process env. Token never lands on disk in CI.
    - `cfg.app2.tls.cert_path: run/tls/cert.pem` + `cfg.app2.tls.key_path: run/tls/key.pem` (templated into `run/base.yaml`'s example).
+   - ACME long-lived state under `~/.local/share/recon-gen/tls/` — no operator-facing action; the runner creates the dir on first run.
 4. Add `tests/e2e/app2/test_tls_letsencrypt_smoke.py` — runs against the Let's Encrypt **staging** endpoint (NOT prod — prod has per-account/IP rate limits we don't want to chew through in CI). Asserts ACME-DNS-01 against a test SAN cert returns a valid cert + that uvicorn serves HTTPS using it + that the cert covers both SAN entries.
 5. Sweep DC to PLAN_ARCHIVE.md.
 
