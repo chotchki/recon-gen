@@ -34,7 +34,6 @@ sys.path.insert(0, str(ROOT / "src"))
 from recon_gen._dev import perf  # noqa: E402
 from recon_gen.common.config import load_config  # noqa: E402
 from recon_gen.common.db import connect_demo_db  # noqa: E402
-from recon_gen.common.sql import Dialect  # noqa: E402
 
 
 def main() -> int:
@@ -61,14 +60,7 @@ def main() -> int:
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    dialect_str = perf.dialect_name(cfg.dialect)
-
-    if cfg.dialect is Dialect.SQLITE:
-        args.output.write_text(perf.format_skipped(
-            title=args.title, dialect=dialect_str,
-            reason="SQLite has no pg_stat_statements / v$sqlstats equivalent",
-        ))
-        return 0
+    dialect_str = perf.dialect_name(cfg.db.dialect)
 
     try:
         conn = connect_demo_db(cfg)
@@ -83,7 +75,7 @@ def main() -> int:
     try:
         try:
             rows = perf.fetch_top_queries(
-                conn, cfg.dialect, like_pattern=args.like, top=args.top,
+                conn, cfg.db.dialect, like_pattern=args.like, top=args.top,
             )
         except Exception as e:
             args.output.write_text(perf.format_skipped(

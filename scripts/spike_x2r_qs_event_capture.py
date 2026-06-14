@@ -125,11 +125,11 @@ def _print_window(
 
 def main() -> None:
     cfg = load_config("run/config.postgres.yaml")
-    print(f"Opening {_DASHBOARD_ID} in account {cfg.aws_account_id}, region {cfg.aws_region}")
+    print(f"Opening {_DASHBOARD_ID} in account {cfg.aws.account_id}, region {cfg.aws.region}")
 
     with QsEmbedDriver.embed(
-        aws_account_id=cfg.aws_account_id,
-        aws_region=cfg.aws_region,
+        aws_account_id=cfg.aws.account_id,
+        aws_region=cfg.aws.region,
         headless=True,
     ) as driver:
         page = driver._page  # noqa: SLF001  -- spike-only access

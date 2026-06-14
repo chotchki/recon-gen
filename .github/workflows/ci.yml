@@ -325,30 +325,36 @@ jobs:
         run: |
           mkdir -p run
           cat > run/config.postgres.yaml <<EOF
-          aws_account_id: "470656905821"
-          aws_region: "us-east-1"
-          deployment_name: "qs-ci-${{ github.run_id }}-pg"
-          db_table_prefix: "qs_ci_${{ github.run_id }}_pg"
-          dialect: "postgres"
-          demo_database_url: "postgresql://postgres:${PG_PASSWORD}@127.0.0.1:5432/postgres"
-          default_l2_instance: "tests/l2/sasquatch_pr.yaml"
-          principal_arns:
-            - "${{ secrets.RECON_E2E_USER_ARN }}"
+          aws:
+            account_id: "470656905821"
+            region: "us-east-1"
+            deployment_name: "qs-ci-${{ github.run_id }}-pg"
+            principal_arns:
+              - "${{ secrets.RECON_E2E_USER_ARN }}"
+          db:
+            dialect: "postgres"
+            url: "postgresql://postgres:${PG_PASSWORD}@127.0.0.1:5432/postgres"
+            table_prefix: "qs_ci_${{ github.run_id }}_pg"
+            default_l2_instance: "tests/l2/sasquatch_pr.yaml"
           auth:
-            quicksight_user_arn: "${{ secrets.RECON_E2E_USER_ARN }}"
+            aws:
+              quicksight_user_arn: "${{ secrets.RECON_E2E_USER_ARN }}"
           EOF
           cat > run/config.oracle.yaml <<EOF
-          aws_account_id: "470656905821"
-          aws_region: "us-east-1"
-          deployment_name: "qs-ci-${{ github.run_id }}-or"
-          db_table_prefix: "qs_ci_${{ github.run_id }}_or"
-          dialect: "oracle"
-          demo_database_url: "oracle+oracledb://system:${ORACLE_PASSWORD}@127.0.0.1:1521/?service_name=FREEPDB1"
-          default_l2_instance: "tests/l2/sasquatch_pr.yaml"
-          principal_arns:
-            - "${{ secrets.RECON_E2E_USER_ARN }}"
+          aws:
+            account_id: "470656905821"
+            region: "us-east-1"
+            deployment_name: "qs-ci-${{ github.run_id }}-or"
+            principal_arns:
+              - "${{ secrets.RECON_E2E_USER_ARN }}"
+          db:
+            dialect: "oracle"
+            url: "oracle+oracledb://system:${ORACLE_PASSWORD}@127.0.0.1:1521/?service_name=FREEPDB1"
+            table_prefix: "qs_ci_${{ github.run_id }}_or"
+            default_l2_instance: "tests/l2/sasquatch_pr.yaml"
           auth:
-            quicksight_user_arn: "${{ secrets.RECON_E2E_USER_ARN }}"
+            aws:
+              quicksight_user_arn: "${{ secrets.RECON_E2E_USER_ARN }}"
           EOF
 
       - name: Run the full layered chain (unit → qs_browser)
