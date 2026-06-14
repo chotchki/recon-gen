@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+import pytest
+
 from recon_gen.common.as_of_frame import LOCKED_ANCHOR, AsOfFrame
 from recon_gen.common.intervals import DateInterval
 from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
@@ -41,6 +43,34 @@ def test_live_ends_at_today_via_same_code_path() -> None:
     assert (live.as_of - live.window_start) == (
         locked.as_of - locked.window_start
     )
+
+
+def test_live_respects_recon_gen_as_of_anchor_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """v14.0.0 — when ``RECON_GEN_AS_OF_ANCHOR`` is set (the runner
+    exports it at chain start), ``AsOfFrame.live()`` uses that pin
+    instead of ``date.today()``. Pins the chain-wide ``as_of`` so a
+    midnight-crossing chain run doesn't shift the dataset-default
+    window by a day between deploy and qs_browser tests."""
+    pinned = date(2026, 3, 15)
+    monkeypatch.setenv("RECON_GEN_AS_OF_ANCHOR", pinned.isoformat())  # typing-smell: ignore[envvar-bypass]: cfg-loader-style env contract — set raw to exercise the EnvVar coercion path
+    live = AsOfFrame.live(window_days=30)
+    assert live.as_of == pinned
+    # The window derivation honors the pin too, not just the bare anchor.
+    assert live.window.end == pinned
+    assert live.window.start == pinned - timedelta(days=30)
+
+
+def test_live_without_env_falls_back_to_today(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Absent env var ⇒ historical ``date.today()`` behavior preserved.
+    Bare CLI / ad-hoc data apply outside the runner shouldn't have to
+    care about the chain-wide pin."""
+    monkeypatch.delenv("RECON_GEN_AS_OF_ANCHOR", raising=False)  # typing-smell: ignore[envvar-bypass]: cfg-loader-style env contract — exercising the EnvVar's absence path
+    live = AsOfFrame.live()
+    assert live.as_of == date.today()
 
 
 def test_window_start_derives_from_anchor() -> None:

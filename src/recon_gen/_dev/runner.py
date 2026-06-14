@@ -49,6 +49,7 @@ from typing import Any, Final, cast
 from recon_gen.common.env_keys import (
     RECON_E2E_PAGE_TIMEOUT,
     RECON_E2E_USER_ARN,
+    RECON_GEN_AS_OF_ANCHOR,
     RECON_GEN_CONFIG,
     RECON_GEN_DB_READ_ONLY,
     RECON_GEN_DEMO_DATABASE_URL,
@@ -3173,12 +3174,27 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     if options.fuzz_seed_value is not None:
         print(f"runner: fuzz_seed={options.fuzz_seed_value} (pin via RECON_GEN_FUZZ_SEED env to repro)")
 
+    # v14.0.0 — pin the chain's ``as_of`` anchor at chain start, before
+    # any layer subprocess spawns. Exported via ``RECON_GEN_AS_OF_ANCHOR``
+    # so every ``AsOfFrame.live()`` read across the chain agrees on the
+    # same calendar day even when the run straddles local midnight.
+    # Operator override (already-set env) wins — supports replay /
+    # bisect against a pinned historical date.
+    import datetime as _dt  # noqa: PLC0415
+    as_of_anchor = (
+        os.environ.get(RECON_GEN_AS_OF_ANCHOR.name)
+        or _dt.date.today().isoformat()
+    )
+    print(f"runner: as_of_anchor={as_of_anchor}")
+
     # Resolve cfg + L2 ONCE for the whole run (vs cmd_up_to which does it
     # per cell). Deploy/qs_api/qs_browser layers need both; pytest-only
     # layers (unit/db/app2) tolerate absence (their pytest fixtures
     # discover cfg themselves via load_config's precedence chain).
     cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
-    runner_variant_env: dict[str, str] = {}
+    runner_variant_env: dict[str, str] = {
+        RECON_GEN_AS_OF_ANCHOR.name: as_of_anchor,
+    }
     if cfg_path is not None:
         runner_variant_env[RECON_GEN_CONFIG.name] = str(cfg_path)
         try:

@@ -121,8 +121,16 @@ class AsOfFrame:
 
         ``window_days`` ergonomic shortcut — see `locked` for the
         construction shape.
+
+        v14.0.0 — when ``RECON_GEN_AS_OF_ANCHOR`` is set (the runner
+        exports it at chain start as an ISO date), use that pin
+        instead of ``date.today()``. This makes the chain-wide
+        ``as_of`` agree across deploy + dataset emit + qs_browser test
+        even when the run straddles local midnight. Operators outside
+        the runner (bare CLI, ad-hoc data apply) hit the unchanged
+        ``date.today()`` path.
         """
-        today = date.today()  # typing-smell: ignore[no-datetime-now]: AsOfFrame.live() is the SINGLE blessed wall-clock read — every other site reads frame.as_of; AQ.3 funnels the 4 ad-hoc date.today() fallbacks through this constructor
+        today = _as_of_today()
         window = (
             DateInterval.single_day(today)
             if window_days <= 0
@@ -233,6 +241,19 @@ class AsOfFrame:
         epoch.
         """
         return self.window.contains(day)
+
+
+def _as_of_today() -> date:
+    """The single blessed wall-clock read in this codebase — every
+    other site reads ``frame.as_of`` via ``AsOfFrame.live()``. AQ.3
+    funneled the 4 ad-hoc ``date.today()`` fallbacks through here; v14
+    adds the ``RECON_GEN_AS_OF_ANCHOR`` env override.
+    """
+    from recon_gen.common.env_keys import RECON_GEN_AS_OF_ANCHOR  # noqa: PLC0415
+    pinned = RECON_GEN_AS_OF_ANCHOR.get_or_none()
+    if pinned is not None:
+        return pinned
+    return date.today()  # typing-smell: ignore[no-datetime-now]: this is the SINGLE blessed wall-clock read in the codebase — every other site reads ``frame.as_of`` via ``AsOfFrame.live()``
 
 
 def _query_max_balance_day(

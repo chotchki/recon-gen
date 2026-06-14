@@ -67,6 +67,7 @@ import re
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Final
 
@@ -196,6 +197,15 @@ def _bool_coercer(s: str) -> bool:
     does NOT write ``"false"`` and expect it to disable — that
     convention has never been part of this codebase."""
     return bool(s)
+
+
+def _iso_date_coercer(s: str) -> "date":
+    """ISO 8601 date (YYYY-MM-DD) coercer for ``RECON_GEN_AS_OF_ANCHOR``.
+    Raises ``ValueError`` (wrapped by EnvVar to EnvVarInvalid) when the
+    string isn't a parseable date. Lazy-imports ``date`` at the function
+    boundary to keep the module-import-time cost low."""
+    from datetime import date as _date  # noqa: PLC0415
+    return _date.fromisoformat(s)
 
 
 # ---------------------------------------------------------------------------
@@ -385,6 +395,31 @@ RECON_GEN_E2E: Final = EnvVar(
     name="RECON_GEN_E2E",
     description="Bool gate for tests/e2e/ — set to any non-empty value to enable.",
     coercer=_bool_coercer,
+    optional=True,
+)
+
+# v14.0.0 — chain-wide ``as_of`` anchor pin. Set by the test layer
+# chain runner at chain start (writes to env_overrides for every layer
+# subprocess); read by ``AsOfFrame.live()`` so all wall-clock-now reads
+# across the chain agree on the same calendar day even when the run
+# straddles local midnight. Without this pin, ``json apply`` /
+# ``data apply`` / dataset emit at deploy-time would stamp today=X, and
+# later qs_browser tests computing dataset defaults at assertion time
+# would see today=Y (when Y > X by one day across the boundary),
+# silently shifting the KPI window by a day and breaking the
+# "QS-rendered == dataset-SQL aggregate" contract.
+#
+# ISO date string (YYYY-MM-DD); coerced to ``date`` at read time.
+# Absent ⇒ historical wall-clock behavior (``date.today()``).
+RECON_GEN_AS_OF_ANCHOR: Final = EnvVar(
+    name="RECON_GEN_AS_OF_ANCHOR",
+    description=(
+        "ISO date (YYYY-MM-DD); chain-wide ``as_of`` anchor pin. Runner "
+        "exports at chain start so deploy + dataset emit + qs_browser "
+        "tests share one calendar day across the run. Absent ⇒ "
+        "``AsOfFrame.live()`` reads ``date.today()`` (historical)."
+    ),
+    coercer=_iso_date_coercer,
     optional=True,
 )
 
