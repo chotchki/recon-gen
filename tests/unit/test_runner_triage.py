@@ -604,28 +604,137 @@ def test_build_deploy_command_prefers_qs_cfg_over_local_cfg(
     assert str(local_cfg) not in cmd
 
 
-def test_build_deploy_command_matches_layer_command_deploy(
-    tmp_path: Path,
-) -> None:
-    """Extraction-parity: _build_deploy_command output matches the
-    deploy arm of _layer_command (modulo env_addl noise the layer arm
-    adds for the pytest path).
+def test_deploy_retired_from_layers_tuple() -> None:
+    """DI phase: ``deploy`` is gone from the LAYERS chain.
+
+    The session-autouse ``qs_deployed`` fixture in
+    tests/e2e/conftest.py owns QS deploy; qs_api inherits as the
+    first AWS-touching chain layer. Locks the design lock here so
+    a future re-introduction of the deploy chain layer trips this
+    test instead of silently splitting the deploy code path.
     """
-    cfg = tmp_path / "cfg.yaml"
-    cfg.write_text("placeholder")
-    l2 = tmp_path / "l2.yaml"
-    l2.write_text("placeholder")
+    assert "deploy" not in r.LAYERS
+    assert r.LAYERS == ("unit", "db", "app2", "qs_api", "qs_browser")
+
+
+def test_aws_touching_layers_starts_at_qs_api() -> None:
+    """DI phase: AWS_TOUCHING_LAYERS = (qs_api, qs_browser).
+
+    The qs_deployed fixture fires when a session's collected tests
+    pull in AWS-dependent fixtures (qs_client / qs_driver / etc.) —
+    which only the qs_api + qs_browser tiers do. Db + app2 tiers
+    inherit tests/e2e/conftest.py but their fixture closures don't
+    touch AWS, so qs_deployed bails via _session_needs_aws.
+    """
+    assert r.AWS_TOUCHING_LAYERS == ("qs_api", "qs_browser")
+    assert "deploy" not in r.AWS_TOUCHING_LAYERS
+
+
+def test_layer_command_deploy_arm_removed(tmp_path: Path) -> None:
+    """DI phase: ``_layer_command("deploy", ...)`` returns None
+    because the deploy arm is gone. Locks the design lock so a
+    future re-introduction trips this test.
+    """
     variant_env = {
-        r.RECON_GEN_CONFIG.name: str(cfg),
-        r.RECON_GEN_TEST_L2_INSTANCE.name: str(l2),
+        r.RECON_GEN_CONFIG.name: str(tmp_path / "cfg.yaml"),
+        r.RECON_GEN_TEST_L2_INSTANCE.name: str(tmp_path / "l2.yaml"),
     }
-    direct = r._build_deploy_command(variant_env, tmp_path)
-    via_layer = r._layer_command(
+    assert r._layer_command(
         "deploy", tmp_path, variant_env=variant_env,
+    ) is None
+
+
+def test_is_aws_touching_layer_qs_api_and_later() -> None:
+    """DI phase: dirty-tree refusal triggers on qs_api and qs_browser
+    (not earlier). Renamed from _is_deploy_or_later.
+    """
+    assert r._is_aws_touching_layer("qs_api") is True
+    assert r._is_aws_touching_layer("qs_browser") is True
+    assert r._is_aws_touching_layer("app2") is False
+    assert r._is_aws_touching_layer("db") is False
+    assert r._is_aws_touching_layer("unit") is False
+
+
+def test_chain_through_qs_browser_skips_deploy() -> None:
+    """``chain_through("qs_browser")`` no longer transits ``deploy``.
+
+    Concrete proof that ``up_to=qs_browser`` is a 5-layer chain
+    (not 6) post-DI. The qs_deployed fixture absorbs the deploy
+    work into the qs_api / qs_browser session at start.
+    """
+    chain = r.chain_through("qs_browser")
+    assert chain == ["unit", "db", "app2", "qs_api", "qs_browser"]
+    assert "deploy" not in chain
+
+
+def test_chain_through_qs_api_is_4_layers() -> None:
+    """``up_to=qs_api`` runs the full chain through qs_api — 4 layers."""
+    chain = r.chain_through("qs_api")
+    assert chain == ["unit", "db", "app2", "qs_api"]
+    assert "deploy" not in chain
+
+
+# ---------------------------------------------------------------------------
+# cmd_triage — DI phase: no inline container spin / deploy spawn.
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_triage_state_file_omits_run_id_layer_as_of_anchor(
+    triage_state_tmp: Path,
+) -> None:
+    """DI phase: triage state file slimmed. ``run_id`` / ``layer`` /
+    ``as_of_anchor`` were dropped (none read by triage-down). Only the
+    fields actually consumed downstream are persisted.
+    """
+    # Read-side parity — _read_triage_state still accepts any dict
+    # shape; we're locking the WRITER's shape via cmd_triage's body.
+    # Sniff the source for the field names the writer uses; the
+    # writer body is small enough that a string-match is sufficient
+    # signal without a full integration spin.
+    import inspect
+    cmd_triage_source = inspect.getsource(r.cmd_triage)
+    state_block_start = cmd_triage_source.index("state: dict[str, Any] = {")
+    state_block_end = cmd_triage_source.index("}", state_block_start)
+    state_block = cmd_triage_source[state_block_start:state_block_end]
+    # Slim shape — these stay.
+    assert '"run_dir"' in state_block
+    assert '"nodeid"' in state_block
+    assert '"screen_name"' in state_block
+    assert '"cfg_path"' in state_block
+    assert '"qs_cfg_path"' in state_block
+    assert '"deployed"' in state_block
+    # Slimmed away.
+    assert '"run_id"' not in state_block
+    assert '"layer"' not in state_block
+    assert '"as_of_anchor"' not in state_block
+
+
+def test_cmd_triage_body_drops_inline_deploy_block() -> None:
+    """DI phase: cmd_triage no longer calls ``_build_deploy_command``
+    or ``_spawn_with_tee`` from inside its body. Deploy is owned by
+    the session-autouse qs_deployed fixture in tests/e2e/conftest.py;
+    cmd_triage's body purely sets up env + spawns the screen session
+    that fires pytest (which fires the fixture).
+    """
+    import inspect
+    cmd_triage_source = inspect.getsource(r.cmd_triage)
+    # The old block called these helpers directly from cmd_triage's
+    # body; deploy retirement removed those callsites.
+    assert "_build_deploy_command(" not in cmd_triage_source, (
+        "cmd_triage should not call _build_deploy_command — deploy "
+        "is owned by tests/e2e/conftest.py::qs_deployed."
     )
-    assert direct is not None
-    assert via_layer is not None
-    direct_cmd, _ = direct
-    via_layer_cmd, _ = via_layer
-    # The cmd argv must match exactly (both call the same helper now).
-    assert direct_cmd == via_layer_cmd
+    # _spawn_with_tee survives elsewhere in cmd_triage's flow (for
+    # things like sweep / seed); the assertion that proves deploy is
+    # gone is the _build_deploy_command absence above.
+
+
+def test_cmd_triage_no_inline_deploy_step_log_string() -> None:
+    """DI phase: the operator-facing deploy-step banner
+    (``runner: deploying QS resources``) is gone from cmd_triage.
+    The qs_deployed fixture prints its own banner from inside the
+    pytest session.
+    """
+    import inspect
+    cmd_triage_source = inspect.getsource(r.cmd_triage)
+    assert "deploying QS resources" not in cmd_triage_source

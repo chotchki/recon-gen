@@ -755,14 +755,14 @@ def qs_deployed(  # pyright: ignore[reportUnusedFunction]: pytest autouse fixtur
         # subprocess overhead.
         import shutil
         import subprocess
-        recon_gen_bin = shutil.which("recon-gen")
+        recon_gen_bin = shutil.which("recon-gen")  # typing-smell: ignore[no-inline-production-constants]: literal binary name, not the MANAGED_TAG_VALUE — a rename of the CLI bin would surface here loudly via PATH-not-found, which is exactly what we want
         if recon_gen_bin is None:
             # ``.venv/bin/recon-gen`` is the canonical path when no
             # PATH-installed binary exists (matches the runner's
             # ``_VENV_BIN / "recon-gen"`` pattern).
             from pathlib import Path as _P  # noqa: PLC0415 — lazy
             repo_root = _P(__file__).resolve().parents[2]
-            recon_gen_bin = str(repo_root / ".venv" / "bin" / "recon-gen")
+            recon_gen_bin = str(repo_root / ".venv" / "bin" / "recon-gen")  # typing-smell: ignore[no-inline-production-constants]: literal binary name, not the MANAGED_TAG_VALUE — sibling of the shutil.which lookup above
         argv = [
             recon_gen_bin, "json", "apply",
             "--execute",
