@@ -34,11 +34,14 @@ import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import uvicorn
 
 from recon_gen.common.env_keys import EnvVarInvalid, RECON_GEN_RUN_DIR
+
+if TYPE_CHECKING:
+    from recon_gen.common.config import Config
 from recon_gen.common.html._tree_fetcher import OptionsSearchFetcher
 from recon_gen.common.html.render import FilterSpec
 from recon_gen.common.html.server import (
@@ -136,6 +139,7 @@ def html2_server(
     options_search_fetcher: OptionsSearchFetcher | None = None,
     dev_log: bool = False,
     startup_timeout_s: float = 5.0,
+    cfg: "Config | None" = None,
 ) -> Iterator[str]:
     """Run an App2 Starlette server on an ephemeral port.
 
@@ -178,6 +182,10 @@ def html2_server(
             ),
         },
         dev_log=dev_log,
+        # DD.4 — when the caller passes a cfg with auth.oidc + auth.session
+        # both set, make_app wires the OIDC middleware + /auth routes.
+        # Default None keeps the existing no-auth test path untouched.
+        cfg=cfg,
         # AA.A.race.1 root-cause: the production default of max-age=60
         # on /visuals/.../data causes WebKit to serve identical-URL
         # follow-up picks (e.g. inverse → restore) from disk cache.

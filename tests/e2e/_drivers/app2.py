@@ -200,6 +200,11 @@ class App2Driver:
             filter_specs=filter_specs,
             options_search_fetcher=options_search_fetcher,
             dev_log=dev_log,
+            # DD.4 — when cfg carries auth.oidc + auth.session blocks,
+            # html2_server forwards to make_app(cfg=...) which wires the
+            # auth middleware + /auth routes. Existing tests with no auth
+            # block in cfg keep the no-auth code path.
+            cfg=cfg,
         ) as url, webkit_page() as page:
             yield cls(
                 base_url=url, page=page, cfg=cfg,

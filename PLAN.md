@@ -477,7 +477,7 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
   - [x] DD.4.conftest - `dex_container_url` session fixture mirroring `pg_container_url`'s xdist pattern. Short-circuits on `RECON_GEN_DEX_URL`; otherwise calls `ensure_dev_idp` via the `_shared_container_url` rendezvous. Skips when `cfg.auth.oidc` or `cfg.app2.tls` absent.
   - [x] DD.4.ci - `.github/workflows/ci.yml` openssl-rand step for OIDC_CLIENT_SECRET / JWT_SECRET / DEX_USER_PASSWORD + cfg-overwrite heredoc `auth.oidc:` + `auth.session:` blocks. `RECON_GEN_DEX_URL` pytest-env line commented out — DC.3 LE cert on WSL2 runner needs to be verified live before enabling shared-ci-dex spinup (TODO comment in ci.yml flags this).
   - [x] DD.4.driver - `App2Driver.sign_in_via_oidc` / `sign_out_via_oidc` / `inspect_jwt_cookie` verbs; `QsEmbedDriver` raises structured-triple `NotImplementedError`.
-  - [ ] DD.4.e2e - `tests/e2e/app2/test_oauth_login_flow.py` browser e2e: login → dashboard → logout + tampered-JWT-401 negative path.
+  - [x] DD.4.e2e - `tests/e2e/app2/test_oauth_login_flow.py` browser e2e: login → dashboard → logout + tampered-JWT-401 negative path.
 - [ ] DD.5 - **Local dev onboarding doc + recipe.** Doc the two postures (HTTP local-dev / HTTPS+OAuth shared) + walk operators through cfg.yaml example for an Okta-style production deploy. Note the test-side IdP recipe for those who want to reproduce CI locally.
 - [ ] DD.6 - **Phase exit + release.** Sweep to PLAN_ARCHIVE.md.
 
