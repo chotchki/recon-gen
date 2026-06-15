@@ -6,6 +6,115 @@
 > AI, BK, BQ, BW, CK, BV close, snapshotter pattern, runner readiness).
 > v13.14.4 below resumes the convention.
 
+## v14.2.0 — Phase DD OIDC auth (authlib + JWT cookies + Dex test IdP)
+
+Minor bump. Phase DD lays down the OIDC code-flow login wiring on top
+of DC's HTTPS surface. New capability — `recon-gen studio` /
+`recon-gen dashboards` can gate every request through any
+OIDC-compliant provider (Okta / Auth0 / AzureAD / Keycloak / Dex)
+with zero per-tenant code, and the runner spins a real Dex container
+for test/CI parity with the production posture.
+
+### What's new
+
+- **`src/recon_gen/common/html/auth.py`** — `JwtCookieMiddleware`
+  decodes the `recon_gen_session` HMAC-SHA256 JWT on every request,
+  branches on `HX-Request` to return 401 JSON vs 302 → `/auth/login`.
+  Public-prefix bypass `("/auth/", "/static/", "/docs/", "/health")`.
+  `oauth_routes(...)` builds the three `/auth/{login,callback,logout}`
+  routes via authlib's `starlette_client.OAuth`. Logout follows
+  RP-Initiated Logout via the IdP's `end_session_endpoint` discovery.
+- **`make_app(cfg=...)`** — auth wiring fires only when
+  `cfg.auth.oidc` AND `cfg.auth.session` are both set. Absent
+  block ⇒ HTTP-local-dev passthrough (no behavior change for existing
+  deployments). New `itsdangerous>=2.2` runtime dep (SessionMiddleware
+  for authlib's PKCE/state round-trip storage).
+- **`src/recon_gen/_dev/oidc/`** — 5-module Dex coordinator
+  (secrets / container / config_writer / ensure / __init__). Spins or
+  adopts the shared `recon-gen-test-dex` Docker container, mounts the
+  DC.3-managed LE cert for HTTPS, injects per-run scrambled
+  `client_secret` + bcrypt-hashed user password via Dex's
+  `secretEnv`/`hashFromEnv` yaml fields. Issuer URLs locked at
+  `https://localdev.recon-gen.hotchkiss.io:5557/dex` (DEV) /
+  `https://localci.recon-gen.hotchkiss.io:5556/dex` (CI). Excluded
+  from the published wheel; the Dex container + bcrypt deps live
+  under the `[dev]` extra only.
+- **`OIDC_TOUCHING_LAYERS = ("app2",)`** + `_ensure_oidc_if_configured`
+  pre-flight in `cmd_up_to`. Narrower than TLS — `qs_browser` uses
+  auth-independent QS embed URLs. Hard-depends on DC.3; returns
+  `EXIT_NEEDS_OPERATOR` with `tls-setup.md` hint when
+  `cfg.auth.oidc` is set but `cfg.app2.tls` is `None`.
+- **DashboardDriver OIDC verbs** —
+  `sign_in_via_oidc(*, email, password)` /
+  `sign_out_via_oidc()` /
+  `inspect_jwt_cookie()`. App2 drives Dex v2.40.0's
+  `password.html` + `approval.html` form selectors. `QsEmbedDriver`
+  raises `NotImplementedError` for all three under a structured
+  triple (raise-site comment cross-linking
+  `[[project_qs_embed_url_presigned_no_oidc]]` +
+  `docs/reference/quicksight-quirks.md` entry + memory file) — QS
+  embed URLs are pre-signed at mint time so OIDC verbs have no QS
+  analog.
+- **`docs/operations/oidc-setup.md`** — full operator runbook:
+  three postures (HTTP local-dev / production OIDC / managed Dex),
+  cfg block + field semantics, secrets convention
+  (`run/secrets.env` continuation), IdP-side client registration
+  recipe, CI GitHub-secrets recipe, eight troubleshooting recipes,
+  rotation procedure.
+- **`.github/workflows/ci.yml`** — `Generate random OIDC credentials`
+  step + cfg-overwrite heredoc carrying `auth.oidc:` + `auth.session:`
+  blocks. Three new GitHub secrets surface (`OIDC_CLIENT_SECRET` /
+  `JWT_SECRET` / `DEX_USER_PASSWORD`) but the workflow's `openssl rand`
+  step generates fresh per-run values today; the secrets are
+  configured for future pinning.
+- **`tests/e2e/app2/test_oauth_login_flow.py`** — 7-test browser e2e
+  pinning the JwtCookieMiddleware contract through Playwright
+  (unauth 302 / HX-Request 401 / valid JWT renders / cookie
+  inspection / sign-in idempotency / sign-out clears cookie /
+  tampered JWT 401). Skips when `cfg.auth.oidc` / `cfg.auth.session`
+  absent (cfg-shape skip — POLICY 1 consistent across CI / local).
+
+### Env-var surface
+
+Four new `RECON_GEN_*` env vars register with the typed registry:
+
+- `RECON_GEN_OIDC_CLIENT_SECRET` — OIDC client secret (named via
+  `cfg.auth.oidc.client_secret_env`).
+- `RECON_GEN_JWT_SECRET` — local session JWT HMAC signing key (named
+  via `cfg.auth.session.jwt_secret_env`).
+- `RECON_GEN_DEX_USER_PASSWORD` — plaintext password for the static
+  Dex test user (`testuser@example.com`).
+- `RECON_GEN_DEX_URL` — short-circuit for the pre-spun shared-Dex
+  pattern (registered, not yet wired into `ci.yml`; reserved for the
+  future shared-CI-Dex step).
+
+### No breaking changes
+
+Existing deployments with no `auth:` block in their cfg yaml see
+zero behavior change — the middleware short-circuits to passthrough
+and the new env-var registrations are inert. To opt in: add the two
+blocks per `docs/operations/oidc-setup.md` Step 2.
+
+### Carry-along fixes
+
+- Date-picker value-commit needs Tab, not Enter
+  (`docs/reference/quicksight-quirks.md` AA.A.l2ft-date-commit). QS's
+  `ParameterDateTimePicker` React `onChange` wiring listens for
+  focus-loss, not Enter — same root cause as the σ-slider
+  commit-needs-Tab pattern already documented inline. Surfaced by
+  the `test_l2ft_additive_pickers_keep_anchor_row[qs-Rails]` triage
+  (5,551 rows post-filter vs the expected ≤9). Backlog #83 carries
+  the typed-wrapper follow-up.
+- Bulk-insert helpers — `bulk_insert_tx` / `bulk_insert_balance`
+  gain an optional `columns` parameter so ETL integrators can
+  bulk-load schema columns the spine-author defaults exclude
+  (`transfer_completion` / `bundle_id` for transactions;
+  `supersedes` for balances). `_coerce_to_cents_int` now accepts
+  `str` (CSV bulk loads — `csv.DictReader` lands every column as a
+  string) and raises `TypeError` on unknown types instead of silent
+  passthrough that surfaced as opaque downstream BIGINT INSERT
+  failures.
+
 ## v14.1.0 — Phase DC TLS coordinator (LE via Cloudflare DNS-01)
 
 Minor bump. Phase DC layers runner-managed HTTPS over the DC.1 cfg
