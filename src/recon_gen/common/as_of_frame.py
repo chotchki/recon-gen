@@ -297,3 +297,48 @@ def _query_max_balance_day(
     # Defensive: an unexpected type means we shouldn't trust the
     # data-derive result. Fall back to wall-clock via None.
     return None
+
+
+def _query_data_anchor(  # pyright: ignore[reportUnusedFunction]: imported from cli/json.py at runtime via PLC0415 deferred import
+    conn: "SyncConnection", prefix: str,
+) -> date | None:
+    """DK.1 — query ``SELECT data_anchor FROM <prefix>_data_anchor LIMIT 1``.
+
+    Returns the most recent moment the feed has data for, as a calendar
+    date (DATE-truncated from the underlying TIMESTAMP). The matview
+    contains exactly one row by SQL construction (DK.1's UNION ALL +
+    outer MAX form); the row's ``data_anchor`` value is NULL when both
+    source tables are empty (cold-DB state).
+
+    Returns:
+        - A ``date`` when the matview has a non-NULL value.
+        - ``None`` when the matview row is NULL (cold DB) OR the query
+          fails (table missing, connection error). Best-effort by
+          design — CLI callers (DK.4) decide whether to raise loudly or
+          fall through to the live(wall-clock) fallback when this
+          returns None.
+
+    Distinct from :func:`_query_max_balance_day` (which reads only the
+    balance side): this helper consults BOTH transactions.posting and
+    daily_balances.business_day_end via the matview, so the anchor
+    tracks whichever surface lands latest in the feed.
+    """
+    sql = f"SELECT data_anchor FROM {prefix}_data_anchor LIMIT 1"
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(sql)
+            row = cur.fetchone()
+        finally:
+            cur.close()
+    except Exception:  # noqa: BLE001 — defensive: matview-missing / DB-error MUST NOT crash CLI render path; surface None so caller chooses fallback
+        return None
+    if row is None or row[0] is None:
+        return None
+    candidate = row[0]
+    from datetime import datetime as _dt  # noqa: PLC0415
+    if isinstance(candidate, _dt):
+        return candidate.date()
+    if isinstance(candidate, date):
+        return candidate
+    return None
