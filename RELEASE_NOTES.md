@@ -6,6 +6,126 @@
 > AI, BK, BQ, BW, CK, BV close, snapshotter pattern, runner readiness).
 > v13.14.4 below resumes the convention.
 
+## v14.4.0 — Phase DK data-anchor refactor + DJ tech-debt sweep
+
+Minor bump. Phase DK retires the wall-clock `as_of` fallback in
+favour of a data-derived anchor — dashboards stop silently rendering
+"all-time" against a stale feed when the operator omits `end_date`.
+Phase DJ is the post-v14.2.0 tech-debt sweep (RECON_GEN_E2E gate
+retirement, CodeQL XSS fixes, dev-IdP polish, QS Autocomplete
+noOptions race). Phase DL is in flight; the design lock (DL.0) and
+the cross-sheet drill enumeration helper (DL.1) land here, the
+parametrized guardrail (DL.2-DL.4) ships in v14.5.0. v14.3.0 is
+skipped (abandoned cut, per [[feedback_no_tag_rewriting]] — bump
+forward rather than reuse the slot).
+
+### What's new — Phase DK
+
+- **`<prefix>_data_anchor` singleton matview** — emitted by
+  `common/l2/schema.py::emit_schema` alongside the L1 invariant
+  matviews. Schema:
+  `SELECT 1 AS row_marker, MAX(anchor) AS data_anchor` over
+  `UNION ALL` of `MAX(posting)` from `<prefix>_current_transactions`
+  and `MAX(business_day_end)` from `<prefix>_current_daily_balances
+  WHERE account_scope = 'internal'`. Outer `MAX` over `UNION ALL`
+  chosen over Oracle `GREATEST(NULL, X)` (which would silently NULL
+  out a populated side). `row_marker=1` constant + `CREATE UNIQUE
+  INDEX` qualifies the matview for PG `REFRESH CONCURRENTLY`.
+- **as_of resolution refactor** — `common/as_of_frame.py` adds
+  `_query_data_anchor(conn, prefix)` and `cli/_helpers.py` adds
+  `maybe_export_data_anchor(cfg)` which both `recon-gen json apply`
+  and `recon-gen audit apply` call before generating. The data-derived
+  anchor populates `RECON_GEN_AS_OF_ANCHOR` env; the Info sheet
+  attributes the value via the new `RECON_GEN_AS_OF_ANCHOR_SOURCE`
+  marker so an analyst can tell at a glance whether the dashboard is
+  pinned by data, env, or cfg.
+- **Info-sheet `as_of` bullets + Latest Balance Day visual** — every
+  app's Info sheet now surfaces the anchor value and source in
+  `populate_app_info_sheet`, plus a Latest Balance Day table visual
+  (KPI was rejected by QS — QS KPI accepts only numerical measures).
+  New `LATEST_BALANCE_DAY_CONTRACT` + `build_latest_balance_day_dataset`
+  + `app_info_latest_balance_day_id`; per-app dataset count bumps
+  2 → 3.
+- **App2 date picker max-date clamp** (DK.10) — `ParameterDateSpec`
+  gains `max_date: str | None`; the render emits `data-max-date` on
+  the Flatpickr target; `bootstrap.js`'s `wireFlatpickrSingle` /
+  `wireFlatpickrRange` read the attribute and pass `maxDate` to
+  Flatpickr. `ServedDashboard.data_anchor_fetcher` closure live-queries
+  `<prefix>_data_anchor` per request and stamps the spec via
+  `dataclasses.replace`. **No QS coverage** — QS
+  `ParameterDateTimePickerControl` has no min/max field; logged as a
+  permanent capability gap in `docs/reference/quicksight-quirks.md`.
+- **Browser-driver entity scanner** (DK.11) —
+  `assert_no_literal_html_entities(page, *, context, root_selector)`
+  walks `textContent` (one decode layer already applied by the
+  browser) for entity-shaped substrings and skips CODE/PRE/TEXTAREA/
+  SCRIPT/STYLE/NOSCRIPT. Both `App2Driver.open` and
+  `QsEmbedDriver.wait_loaded` call it now, so HTML-entity bleed in
+  page chrome (apostrophes, ampersands) fails the e2e tier rather
+  than slipping through to operator cold-reads.
+- **Operator runbook** (DK.8) — new
+  `docs/operations/as-of-resolution.md` documents the three valid
+  sources (cfg / env / data-derived) and the trade-off of pinning a
+  stale `end_date`.
+
+### What's new — Phase DJ
+
+- **`RECON_GEN_E2E` gate retired** (DJ.1) — the cost-guard env var is
+  removed from `tests/e2e/conftest.py::pytest_collection_modifyitems`
+  and all 30+ callsites; QS subscription is fixed-cost so the gate
+  was pure POLICY 1 divergence (operators forget to set it → silent
+  skip → ghost-pass).
+- **CodeQL XSS-through-DOM fix** (DJ.3) — 6 sites in 3 JS files where
+  user-influenced strings reached `innerHTML`; switched to
+  `textContent` + `setAttribute` with the same DOM shape.
+- **QS MUI Autocomplete noOptions race** (DJ.4) —
+  `narrow_dropdown_options_by_query` now polls past the
+  noOptions-during-virtualization frame instead of accepting it as
+  ground truth.
+- **Dev-IdP polish** (DJ.2 — 5 sub-items) — tempdir cleanup at
+  `atexit`, name-threading consolidation, Windows guard with friendly
+  `RuntimeError`, adopt-mount divergence force-recreate, explicit
+  failed-state recreate trigger.
+
+### What's new — Phase DL (in flight)
+
+- **DL.0 design lock** — `docs/audits/dl_0_drill_guardrail_design.md`
+  documents the cross-sheet drill content + picker-value guardrail
+  contract; cross-references existing per-drill coverage so DL.2
+  scopes against the actual gap (operator-confirmed via cold-read of
+  the existing test surface, not the design-doc draft).
+- **`iter_cross_sheet_drills` helper** (DL.1) —
+  `tests/e2e/_helpers/drill_enumeration.py` walks any built `App`
+  tree and yields a `DrillSite(src_sheet, src_visual, drill,
+  dst_sheet)` namedtuple for every cross-sheet drill. Same-sheet
+  drills excluded (covered by walk-the-flow tests); KPI visuals
+  silently skipped (no `actions` attr). `tests/json/
+  test_cross_sheet_drill_date_widening.py` migrated off the inline
+  walker.
+- **Kitchen sink same-sheet drill** — `tests/e2e/_kitchen_app.py`
+  gains a same-sheet drill on the bar chart so the exhaustive
+  primitives coverage now spans both `DATA_POINT_CLICK` and
+  `DATA_POINT_MENU` triggers — and the DL.1 enumeration helper can
+  prove same-sheet exclusion.
+
+### Bug fixes
+
+- **`test_tampered_cookie_treated_as_missing` 1-in-16 flake** —
+  the previous "flip the last base64url char of the signature" tamper
+  was mathematically a no-op when the canonical last char was `'Y'`
+  (binary `011000`, upper-4 = `0110`) because flipping to `'a'`
+  (`011010`, upper-4 = `0110`) decoded to the identical signature
+  byte — bottom 2 bits of an unpadded-base64url 32-byte HMAC are
+  dropped on decode. Mint the tampered token with a different secret
+  instead; deterministic HMAC mismatch every time.
+- **Runner app2 watchdog** — bumped 900s → 1800s for the 3-dialect
+  concurrent case (Oracle trainer-dogfood tests sum to ~16 minutes
+  on one xdist loadgroup worker; the 900s stdout-silent watchdog was
+  tripping).
+- **`_render_sql_literal` single-quote escape** — `bulk_insert_tx`
+  now escapes single quotes in string literals; previously a quoted
+  apostrophe in a transaction memo could break the seed SQL.
+
 ## v14.2.0 — Phase DD OIDC auth (authlib + JWT cookies + Dex test IdP)
 
 Minor bump. Phase DD lays down the OIDC code-flow login wiring on top

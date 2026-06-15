@@ -570,7 +570,7 @@ These are related concerns — both about end-to-end resource lifecycle hygiene 
   - [ ] DK.7.snapshot _roundtrip - Trainer-dogfood test: plant a row past the snapshot's data_anchor, restore, verify the post-restore data_anchor reflects the planted row (proves the matview regenerates correctly on restore).
   - [x] DK.7.e2e - E2E: with `end_date` unset + feed lagging by N days, dashboards render against the data anchor (not blank); Info sheet shows the anchor correctly; cold DB raises rather than silently rendering empty.
 - [x] DK.8 - **Docs sweep.** README, `docs/Schema_v6.md`, `docs/operations/*.md` — replace any "live wall-clock fallback" mentions with the data-derived model. Add an `as_of` section to operator runbook covering the three valid sources (cfg / env / data-derived) + the trade-off of pinning a stale `end_date`.
-- [ ] DK.9 - **Phase exit + v14.4.0 release cut** (operator-driven — release notes + version bump + tag at operator's discretion after reviewing diff).
+- [x] DK.9 - **Phase exit + v14.4.0 release cut** (operator-driven — release notes + version bump + tag at operator's discretion after reviewing diff).
 
 ## Phase DL - Cross-sheet drill content + picker-value guardrail (draft 2026-06-15)
 
