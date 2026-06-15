@@ -34,7 +34,6 @@ from typing import Final
 from recon_gen._dev.oidc import secrets as oidc_secrets
 from recon_gen._dev.oidc.config_writer import write_dex_config_dir
 from recon_gen._dev.oidc.container import (
-    DEX_SHARED_CONTAINER_NAME,
     get_or_start_dex_container,
     verify_dex_url,
     wait_for_dex_ready,
@@ -206,9 +205,10 @@ def ensure_dev_idp(
     # this via hashFromEnv (DEX_USER_PASSWORD_HASH).
     user_password_hash = oidc_secrets.bcrypt_hash(user_password)
 
-    # 4. Container adopt-or-create.
+    # 4. Container adopt-or-create. DJ.2.name_threading (2026-06-15):
+    # `name` arg dropped — get_or_start_dex_container now references
+    # DEX_SHARED_CONTAINER_NAME internally (single-caller-single-value).
     get_or_start_dex_container(
-        name=DEX_SHARED_CONTAINER_NAME,
         host_port=host_port,
         cfg_dir=cfg_dir,
         cert_path=cert_path,

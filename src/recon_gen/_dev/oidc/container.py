@@ -68,7 +68,6 @@ class _PersistentContainerHandle:
 
 def get_or_start_dex_container(
     *,
-    name: str,
     host_port: int,
     cfg_dir: Path,
     cert_path: Path,
@@ -76,7 +75,14 @@ def get_or_start_dex_container(
     client_secret: str,
     user_password_hash: str,
 ) -> tuple[str, _PersistentContainerHandle]:
-    """Adopt-or-create a Dex container at ``name``.
+    """Adopt-or-create the shared Dex container.
+
+    DJ.2.name_threading (2026-06-15): the prior ``name`` parameter
+    was illusory — only one caller passed it, always with the value
+    ``DEX_SHARED_CONTAINER_NAME``. Removed to match the actual call
+    surface; the internal references to ``DEX_SHARED_CONTAINER_NAME``
+    in ``_dex_logs_tail`` no longer represent a "hardcoded internally,
+    parametrized at the boundary" smell.
 
     Adopt path: ``client.containers.get(name)``. If running, re-extract
     the host port and return. Container env vars (DEX_CLIENT_SECRET +
@@ -127,7 +133,7 @@ def get_or_start_dex_container(
 
     # Adopt path.
     try:
-        existing = client.containers.get(name)
+        existing = client.containers.get(DEX_SHARED_CONTAINER_NAME)
         # If the container exited with a non-zero code, the last
         # docker-entrypoint run hit a fatal config error (bad cert path,
         # yaml malformed, perms locked). Restarting won't help — the
@@ -141,7 +147,6 @@ def get_or_start_dex_container(
                 pass
             return _start_fresh_dex_container(
                 client=client,
-                name=name,
                 host_port=host_port,
                 cfg_dir=cfg_dir,
                 cert_path=cert_path,
@@ -165,7 +170,6 @@ def get_or_start_dex_container(
                 pass
             return _start_fresh_dex_container(
                 client=client,
-                name=name,
                 host_port=host_port,
                 cfg_dir=cfg_dir,
                 cert_path=cert_path,
@@ -174,11 +178,10 @@ def get_or_start_dex_container(
                 user_password_hash=user_password_hash,
             )
 
-        return str(actual_host_port), _PersistentContainerHandle(name=name)
+        return str(actual_host_port), _PersistentContainerHandle(name=DEX_SHARED_CONTAINER_NAME)
     except NotFound:
         return _start_fresh_dex_container(
             client=client,
-            name=name,
             host_port=host_port,
             cfg_dir=cfg_dir,
             cert_path=cert_path,
@@ -191,7 +194,6 @@ def get_or_start_dex_container(
 def _start_fresh_dex_container(
     *,
     client: object,
-    name: str,
     host_port: int,
     cfg_dir: Path,
     cert_path: Path,  # noqa: ARG001 — cert lives in cfg_dir on disk; arg kept for caller-symmetry with adopt path
@@ -227,7 +229,7 @@ def _start_fresh_dex_container(
     # line up. Doesn't escape the container; host file perms untouched.
     container = client.containers.run(  # type: ignore[attr-defined]: docker.client.DockerClient stub lacks .containers
         image=DEX_IMAGE,
-        name=name,
+        name=DEX_SHARED_CONTAINER_NAME,
         detach=True,
         command=["dex", "serve", "/etc/dex/config.yaml"],
         ports={f"{_DEX_INTERNAL_PORT}/tcp": host_port},
@@ -248,7 +250,7 @@ def _start_fresh_dex_container(
         restart_policy={"Name": "no"},
     )
     container.reload()  # type: ignore[reportUnknownMemberType]: docker SDK lacks PEP 561 stubs
-    return str(host_port), _PersistentContainerHandle(name=name)
+    return str(host_port), _PersistentContainerHandle(name=DEX_SHARED_CONTAINER_NAME)
 
 
 def wait_for_dex_ready(
