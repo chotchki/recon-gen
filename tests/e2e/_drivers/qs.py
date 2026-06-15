@@ -1056,6 +1056,42 @@ class QsEmbedDriver:
             "metadata popup is App2-only per operator lock 7"
         )
 
+    # -- OIDC auth (DD.4 — permanent gap; QS embed is pre-signed at mint)
+    #
+    # QS embed URLs are pre-signed at mint time via
+    # cfg.auth.aws.profile → STS → generate_embed_url_for_registered_user
+    # (see _harness_qs.py / common.embed). The session is established
+    # when QsEmbedDriver.embed() loads the URL; there is no Dex web
+    # flow to drive, no JWT cookie to inspect, no logout endpoint to
+    # hit on the QS side. App2's OIDC verbs do not have a QS analog.
+    #
+    # Structured triple per CLAUDE.md POLICY 2 carve-out:
+    #   (1) NotImplementedError raises below + this comment naming the gap
+    #   (2) docs/reference/quicksight-quirks.md "Embed URLs are pre-signed
+    #       at mint — OIDC verbs don't apply"
+    #   (3) memory file [[project_qs_embed_url_presigned_no_oidc]]
+
+    def sign_in_via_oidc(self, *, email: str, password: str) -> None:
+        raise NotImplementedError(
+            "QS embed URLs are auth-independent (pre-signed at mint via "
+            "STS) — OIDC login verbs do not apply on the QS side; "
+            "see [[project_qs_embed_url_presigned_no_oidc]]"
+        )
+
+    def sign_out_via_oidc(self) -> None:
+        raise NotImplementedError(
+            "QS embed URLs are auth-independent (pre-signed at mint via "
+            "STS) — OIDC logout verbs do not apply on the QS side; "
+            "see [[project_qs_embed_url_presigned_no_oidc]]"
+        )
+
+    def inspect_jwt_cookie(self) -> dict[str, str] | None:
+        raise NotImplementedError(
+            "QS embed URLs do not set a recon_gen_session JWT cookie — "
+            "auth lives in the pre-signed embed URL itself; "
+            "see [[project_qs_embed_url_presigned_no_oidc]]"
+        )
+
     # -- artifacts -------------------------------------------------------
 
     def screenshot(self, path: str | Path | None = None) -> bytes:

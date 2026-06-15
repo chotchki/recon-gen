@@ -431,6 +431,57 @@ class DashboardDriver(Protocol):
         """
         ...
 
+    # -- OIDC auth (DD.4 — App2-only; QS embed is pre-signed at mint) ----
+
+    def sign_in_via_oidc(self, *, email: str, password: str) -> None:
+        """Drive the App2 → Dex → App2 OIDC code-flow login.
+
+        ``GET /auth/login`` → 302 to Dex's authorize endpoint → fill
+        ``input[name='login']`` (Dex local-connector field name; the
+        visible label is "Email Address") and ``input[name='password']``
+        on Dex's ``password.html`` → click ``#submit-login`` → click
+        ``Grant Access`` on Dex's ``approval.html`` → 302 back to
+        ``/auth/callback?code=...&state=...`` → 302 to ``/`` with the
+        ``recon_gen_session`` JWT cookie set. Blocks until the post-login
+        landing page settles (``networkidle``).
+
+        Idempotent: if ``recon_gen_session`` is already present in the
+        Playwright context's cookie jar this returns without driving the
+        form (mirrors ``pick_filter`` peek-before-act).
+
+        App2-only. ``QsEmbedDriver`` raises ``NotImplementedError`` per
+        ``[[project_qs_embed_url_presigned_no_oidc]]`` — QS embed URLs
+        are pre-signed at mint time (``cfg.auth.aws.profile`` → STS →
+        ``generate_embed_url_for_registered_user``) so OIDC verbs never
+        apply on the QS side."""
+        ...
+
+    def sign_out_via_oidc(self) -> None:
+        """Drive ``GET /auth/logout`` — App2's logout route deletes the
+        ``recon_gen_session`` cookie and 302s to Dex's
+        ``end_session_endpoint`` (or ``/`` fallback). Blocks until
+        ``networkidle``.
+
+        Idempotent: if no ``recon_gen_session`` cookie is present this
+        returns without driving the logout URL.
+
+        App2-only. ``QsEmbedDriver`` raises ``NotImplementedError`` per
+        ``[[project_qs_embed_url_presigned_no_oidc]]``."""
+        ...
+
+    def inspect_jwt_cookie(self) -> dict[str, str] | None:
+        """Return the current ``recon_gen_session`` cookie as a flat
+        ``{name, value, domain, path}`` dict, or ``None`` when absent.
+
+        The shape is intentionally string-valued (not Playwright's
+        ``Cookie`` typed-dict) so tests can ``assert cookie is None`` /
+        ``assert cookie["value"].startswith(\"eyJ\")`` without importing
+        Playwright types — matches the no-Playwright-leak lint.
+
+        App2-only. ``QsEmbedDriver`` raises ``NotImplementedError`` per
+        ``[[project_qs_embed_url_presigned_no_oidc]]``."""
+        ...
+
     # -- artifacts -------------------------------------------------------
 
     def screenshot(self, path: str | Path | None = None) -> bytes:

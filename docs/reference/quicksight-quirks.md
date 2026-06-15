@@ -765,3 +765,27 @@ Latent since at least 2026-03 — the date pickers have shown the right DOM valu
 The picker's visible value persistence is the dangerous part: a screenshot or `driver.filter_options('Date From')` query would return `'2026/06/14'`, suggesting the picker worked, while the underlying parameter never committed. Browser-test any new `ParameterDateTimePicker` end-to-end with a row-count assertion (not just the DOM read).
 
 Append-only quirks log: this entry stays even after the AA.A.l2ft-date-commit fix lands.
+
+## QS embed URLs are pre-signed at mint — OIDC verbs don't apply on the QS side — DD.4, 2026-06-14
+
+### Symptom
+
+Calling any of the App2-shaped OIDC verbs (`sign_in_via_oidc` / `sign_out_via_oidc` / `inspect_jwt_cookie`) on `QsEmbedDriver` raises `NotImplementedError`. The structured-triple comment block at the raise site (`tests/e2e/_drivers/qs.py` — "OIDC auth" section) points here and to memory entry `[[project_qs_embed_url_presigned_no_oidc]]`.
+
+### Confirmed-via
+
+DD.0 spike + DD.4 driver lock, 2026-06-14. Operator confirmation: *"QS has its own authentication mechanisms that are independent."* The QS embed URL minted by `generate_embed_url_for_registered_user` (boto3 QuickSight API) is signed by the cfg's `auth.aws.profile`-derived QS user ARN at mint time; the browser navigates to that URL and the dashboard renders without passing through any login chrome.
+
+### Root cause
+
+This is a permanent capability gap on the QS side, not a renderer bug. QS embed pages live on `*.quicksight.aws.amazon.com` with their own session cookie domain; the App2 `recon_gen_session` JWT cookie has no presence there. Logout is not a meaningful operation — closing the embed page IS the logout; the single-use URL can't be replayed.
+
+### Workaround
+
+In cross-renderer `[qs, app2]` parametrized tests that exercise the auth gate, gate the QS branch behind `pytest.skip("QS embed is auth-independent")` or assert `pytest.raises(NotImplementedError)`. The App2 branch carries the real assertions. If a future test needs to verify that a QS embed URL itself was minted under the right IAM identity, hit boto3 / `cfg.auth.aws.profile` ground truth directly — not via the driver protocol.
+
+### Notes
+
+POLICY 2 structured-triple discipline applies (per `CLAUDE.md`): if AWS ever ships a workaround (e.g. embed URLs that accept a federated IdP redirect for additional auth claims), this entry retires, the `NotImplementedError` raises in `tests/e2e/_drivers/qs.py::sign_in_via_oidc` etc. become real impls, and the `project_qs_embed_url_presigned_no_oidc.md` memory file is deleted — all three artifacts come down together. Until then, do not propose URL-parameter or post-load redirect approaches as workarounds.
+
+Append-only quirks log: this entry stays even if/when AWS ships a fix.

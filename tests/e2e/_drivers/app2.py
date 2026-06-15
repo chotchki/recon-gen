@@ -76,6 +76,13 @@ _REFETCH_TIMEOUT_MS = 30_000  # CR.x — bumped 15s→30s; CI's xdist=4 server l
 # CQ.5's `clearOptions()` triggers an extra fetch cycle. Local single-worker runs
 # typically settle in 1-3s, so the bump only matters under high parallelism.
 
+# DD.4 — matches recon_gen.common.html.auth.SESSION_COOKIE_NAME (kept as a
+# local literal so the test driver doesn't import the production module
+# every call; if the production constant ever changes, the unit gate
+# `tests/unit/test_session_cookie_name_constant_matches.py` will catch
+# the drift before a green chain misleads).
+_SESSION_COOKIE_NAME = "recon_gen_session"
+
 
 class App2Driver:
     """``DashboardDriver`` over a running App 2 server + a WebKit page.
@@ -1181,6 +1188,114 @@ class App2Driver:
         return int(self._page.locator(
             "details[open][data-json-node]",
         ).count())
+
+    # -- OIDC auth (DD.4 — drives Dex local-connector v2.40.0 form) ------
+
+    def sign_in_via_oidc(self, *, email: str, password: str) -> None:
+        """Drive the full OIDC code-flow login against the live Dex
+        IdP — see protocol docstring for the redirect chain. Idempotent.
+
+        Implementation notes:
+        - Dex's local-connector ``password.html`` field is ``name='login'``
+          (NOT ``email`` / ``username``); the visible label text comes
+          from ``UsernamePrompt`` which defaults to ``Email Address``.
+        - The submit button is ``#submit-login`` with visible text
+          ``Login``.
+        - ``approval.html`` ("Grant Access" heading) renders unconditionally
+          today — ``config_writer.py`` does not set
+          ``oauth2.skipApprovalScreen``. If a future commit flips that,
+          the Grant Access click becomes a no-op (the wait_for is a
+          ``not_visible`` check below so the verb stays robust).
+        """
+        # Peek-before-act idempotency — short-circuit if already signed in.
+        if self._has_session_cookie():
+            return
+
+        # Kick off the redirect chain.
+        self._page.goto(f"{self._base}/auth/login")
+
+        # Wait for Dex's password page. The heading text "Log in to Your
+        # Account" is a template literal in v2.40.0/web/templates/
+        # password.html — not Go-templated — so it's a stable anchor.
+        self._page.wait_for_selector(
+            "h2:has-text('Log in to Your Account')",
+            timeout=15_000,
+        )
+
+        # Fill + submit. Playwright's `.fill()` fires input + change events
+        # natively; Dex's form is a plain POST (no JS overlay widget), so
+        # no special evaluate() wrapper needed here (unlike pick_filter's
+        # TomSelect path).
+        self._page.locator("input[name='login']").fill(email)
+        self._page.locator("input[name='password']").fill(password)
+
+        # Wait for the navigation to either approval.html or back to the
+        # callback. expect_navigation catches whichever Dex emits.
+        with self._page.expect_navigation(timeout=15_000):
+            self._page.locator("button#submit-login").click()
+
+        # If approval.html rendered, click Grant Access. We probe by
+        # selector visibility (short timeout) — if Dex skipped the
+        # approval screen we move on without waiting the full timeout.
+        grant_access = self._page.locator(
+            "button:has-text('Grant Access')",
+        )
+        if grant_access.count() > 0 and grant_access.first.is_visible():
+            with self._page.expect_navigation(timeout=15_000):
+                grant_access.first.click()
+
+        # Settle on the post-callback landing page.
+        self._page.wait_for_load_state("networkidle", timeout=15_000)
+
+        # Verify the cookie actually landed — if it didn't, surface
+        # the failure here (not as a downstream NoneType blowup).
+        if not self._has_session_cookie():
+            raise RuntimeError(
+                "sign_in_via_oidc: callback completed but "
+                "recon_gen_session cookie was not set on the page "
+                "context — check JwtCookieMiddleware wiring and Dex "
+                "discovery URL."
+            )
+
+    def sign_out_via_oidc(self) -> None:
+        """Drive ``GET /auth/logout``. Idempotent (returns immediately
+        when no session cookie is present)."""
+        if not self._has_session_cookie():
+            return
+
+        # /auth/logout deletes the cookie + 302s to Dex's
+        # end_session_endpoint. Dex's end_session page is plain HTML —
+        # no further redirect by default — so we just wait for
+        # networkidle. The cookie is gone regardless of where the
+        # browser lands.
+        self._page.goto(f"{self._base}/auth/logout")
+        self._page.wait_for_load_state("networkidle", timeout=15_000)
+
+    def inspect_jwt_cookie(self) -> dict[str, str] | None:
+        """Return a flat ``{name, value, domain, path}`` dict for the
+        ``recon_gen_session`` cookie, or ``None`` when absent. The
+        Playwright Cookie typed-dict carries more fields (``expires``,
+        ``httpOnly``, ``secure``, ``sameSite``) — we project to the
+        four the no-Playwright-leak lint allows tests to consume."""
+        for cookie in self._page.context.cookies():
+            if cookie.get("name") == _SESSION_COOKIE_NAME:
+                return {
+                    "name": str(cookie.get("name", "")),
+                    "value": str(cookie.get("value", "")),
+                    "domain": str(cookie.get("domain", "")),
+                    "path": str(cookie.get("path", "")),
+                }
+        return None
+
+    def _has_session_cookie(self) -> bool:
+        """Peek-before-act helper shared by ``sign_in`` / ``sign_out``
+        — kept private to avoid leaking the boolean shape via the
+        cross-renderer protocol surface (only ``inspect_jwt_cookie`` is
+        in the contract)."""
+        return any(
+            cookie.get("name") == _SESSION_COOKIE_NAME
+            for cookie in self._page.context.cookies()
+        )
 
     # -- Snapshot (BV.3.3 trainer dogfood per-plant restore) -------------
 
