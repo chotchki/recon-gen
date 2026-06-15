@@ -514,6 +514,32 @@ These are related concerns — both about end-to-end resource lifecycle hygiene 
 - [ ] DH.2 - **Cleanup coverage sweep.** Per DH.0 scope: add `list_folders` / `list_refresh_schedules` / etc. paginators to `cleanup.py`, filter on `ManagedBy: recon-gen` + `Deployment: <name>`, delete the stale set. Add per-kind tests against a mocked QS client (similar shape to existing cleanup tests).
 - [ ] DH.3 - **Phase exit + release.** Sweep to PLAN_ARCHIVE.md.
 
+## Phase DJ - Tech debt sweep (post-v14.2.0 cleanup) (draft 2026-06-15)
+
+**Why:** Three independent cleanup items surfaced during DD.4 + the v14.2.0 cut. None blocks a feature; all reduce drift / silent-failure surface. Bundling into one phase keeps the bisect-trail clean. Operator-authorized overnight autonomous run 2026-06-15 (all three + direct-to-main push per [[feedback_autonomous_run_boundaries]]).
+
+**Locks (operator-confirmed 2026-06-15):**
+- **All three sub-phases land in v14.3.0** (post-cut, minor bump for the POLICY 1 net-new + JS security fixes).
+- **Each leaf is its own commit** so morning review is granular + bisect-friendly.
+- **Direct-to-main push per leaf.** Pre-push hook gates on full unit tier locally; CI runs autonomously per push.
+- **No tag/release cut overnight.** v14.3.0 cut happens in operator's morning session after they review the diffs.
+
+- [ ] DJ.1 - **Retire `RECON_GEN_E2E` env-var gate (#79).** Remove `RECON_GEN_E2E=1` gate at `tests/e2e/conftest.py::pytest_collection_modifyitems` + the env-var registration in `env_keys.py` + the runner's per-layer `RECON_GEN_E2E=1` sets + all 30+ `RECON_GEN_E2E.get_or_none()` callsites. POLICY 1 divergence fix: operator-confirmed 2026-06-14 there's no marginal AWS cost (QS subscription is fixed-cost). Pre-removal: full unit suite + chain to verify no test silently skipped only because the gate was hiding it.
+- [ ] DJ.2 - **DD.4 adversarial-review polish (5 sub-items).** All bounded fixes from the wrxjfgldy workflow's 16 minor findings:
+  - [ ] DJ.2.tempdir _cleanup - register an `atexit` sweeper (or context-manager hook) that `shutil.rmtree`s `cfg_dir` tempdirs created by `ensure_dev_idp` after the container's lifetime ends. Stops accumulated 0o600 LE-key copies under `/tmp/recon-gen-dex-cfg-*` from piling up indefinitely. Adversarial-review's most operationally-painful follow-up.
+  - [ ] DJ.2.name _threading - `_dex_logs_tail` thread `name` parameter from `get_or_start_dex_container`'s signature (or drop the parametrization at the caller — pick whichever is cleaner). Today's hardcode of `DEX_SHARED_CONTAINER_NAME` is the classic "parametrized at the boundary, hardcoded internally" smell.
+  - [ ] DJ.2.windows _guard - `os.getuid()` / `os.getgid()` in `container.py` AttributeErrors on Windows. Add `sys.platform != 'win32'` guard with a friendly `RuntimeError("Dex test container fixture requires Linux/macOS")`. _dev/ is excluded from the wheel so the constraint is test-only, but the failure shape should be operator-friendly.
+  - [ ] DJ.2.adopt _mount_check - On the adopt path, inspect `existing.attrs['Mounts']` and force-recreate when the bind-mount source doesn't match the current `cfg_dir`. Closes the "adopted container serves stale cert / config" gap that the b298ca26 docstring honestly named but didn't fix.
+  - [ ] DJ.2.adopt _status_explicit - Adopt path: match `existing.status in ('exited', 'dead')` for force-recreate rather than `!= 'running'`. Avoids destroying `created` / `restarting` / `paused` mid-flight containers in races.
+- [ ] DJ.3 - **CodeQL XSS-through-DOM fix (6 high-severity warnings).** Validate URL protocol via `new URL(url).protocol in ('http:', 'https:')` before assigning to `window.location.href` at all 6 flagged sites:
+  - [ ] DJ.3.bootstrap _608 - `src/recon_gen/common/html/assets/js/bootstrap.js:608` (row-drill URL).
+  - [ ] DJ.3.bootstrap _768 - `src/recon_gen/common/html/assets/js/bootstrap.js:768` (row click → drill URL).
+  - [ ] DJ.3.bootstrap _773 - `src/recon_gen/common/html/assets/js/bootstrap.js:773` (Enter/Space → drill URL).
+  - [ ] DJ.3.mini _diagram_154 - `src/recon_gen/common/html/_studio_assets/mini-diagram.js:154` (edit URL click).
+  - [ ] DJ.3.diagram _533 - `src/recon_gen/common/html/_studio_assets/diagram.js:533` (edit-badge href).
+  - [ ] DJ.3.diagram _534 - `src/recon_gen/common/html/_studio_assets/diagram.js:534` (edit-badge xlink:href).
+- [ ] DJ.4 - **Phase exit + v14.3.0 release cut** (operator-driven morning session — release notes + version bump + tag are NOT in scope for the overnight run per the autonomous-boundary rule).
+
 ## Backlog (not yet phased)
 
 - **date-model.plant-days_ago-bounded — replace plant days_ago: int with days_into_window bounded type** — added 2026-06-12.
