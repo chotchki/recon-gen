@@ -429,17 +429,24 @@ class TestGeneratorConfig:
             routed through db_anchor even if one is supplied; locked
             binding is the gate for byte-identity tests).
           * ``end_date is not None`` → explicit-anchor frame (operator
-            override or trainer-pinned).
+            override or trainer-pinned). Post-DK its purpose is test-
+            determinism + optional operator end-of-period freeze
+            (e.g. end-of-month reconciliation snapshot).
           * ``end_date is None`` + ``db_anchor is not None`` →
-            v13.6.1 fix #3 — pin the live frame at the DB-derived
-            latest balance day (caller queried it via
-            :func:`as_of_frame._query_max_balance_day` or
-            :meth:`AsOfFrame.live_from_db`) so the picker defaults
-            to the latest day with emitted data rather than a
+            data-derived frame pinned at the DB-side anchor (queried
+            from ``<prefix>_data_anchor`` matview at app-build time
+            per DK.4). Operator never sees the picker default to a
             wall-clock today that hasn't received its load yet.
           * ``end_date is None`` + ``db_anchor is None`` →
-            ``AsOfFrame.live()`` (production ends-at-now; the pre-fix
-            shape for paths that don't have a DB connection).
+            ``AsOfFrame.live()`` (production ends-at-now). **DK.3
+            DEPRECATION:** this branch is reachable today only because
+            DK.4 hasn't yet migrated every callsite to pass
+            ``db_anchor=`` from the data_anchor matview. After DK.4 it
+            should be unreachable in prod (dashboards / audit CLI) and
+            the live(wall-clock) fallback removed entirely. Tests
+            still set ``end_date`` directly (or via
+            ``RECON_GEN_AS_OF_ANCHOR``) for determinism so this branch
+            never fires there either.
 
         ``window_days`` is an ergonomic shortcut: 0 means a single-day
         frame, N>0 means an N-day window ending at the anchor. BD.1
@@ -469,6 +476,13 @@ class TestGeneratorConfig:
                 )
             )
             return AsOfFrame(as_of=db_anchor, window=window)
+        # DK.3 — final fallback marked for removal post-DK.4. Every
+        # dashboard / audit callsite should plumb ``db_anchor=`` from
+        # the ``<prefix>_data_anchor`` matview by the end of DK.4; this
+        # branch becomes unreachable in prod. Until then, ``live()``
+        # honours ``RECON_GEN_AS_OF_ANCHOR`` for chain-wide test
+        # determinism, but a prod hit here is a footgun (renders blank
+        # dashboards on stale feeds — the entire problem DK is solving).
         return AsOfFrame.live(window_days=window_days)
 
 
