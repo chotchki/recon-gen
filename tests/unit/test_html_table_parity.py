@@ -275,10 +275,17 @@ def test_shape_table_forwards_decoration_to_column_payload() -> None:
 
 def test_l1_overdraft_account_resolves_to_accent_menu() -> None:
     """Anti-regression for the operator-flagged Overdraft bug class:
-    the account_id column on the Overdraft sheet's Violations table
+    the drill-source column on the Overdraft sheet's Violations table
     carries a Drillable + a DATA_POINT_MENU drill writing from it, so
-    `_table_column_meta` must resolve it to "accent-menu" (tint
-    background — the cue that subsumes plain accent text)."""
+    ``_table_column_meta`` must resolve it to "accent-menu" (tint
+    background — the cue that subsumes plain accent text).
+
+    DL.3 moved the drill source from raw ``account_id`` (which Daily
+    Statement's WHERE clause couldn't match against the display-format
+    binding) to ``account_display`` (the composite ``"<name> (<id>)"``
+    shape Daily Statement's MappedDataSetParameters expects). The
+    accent-menu decoration follows the drill source, so this assertion
+    now checks ``account_display``."""
     app = _build_app("l1_dashboard")
     assert app.analysis is not None
 
@@ -292,9 +299,9 @@ def test_l1_overdraft_account_resolves_to_accent_menu() -> None:
                 continue
             ds_id = _find_visual_dataset_identifier(visual)
             _l, _f, _h, decoration = _table_column_meta(visual, ds_id)
-            assert decoration.get("account_id") == "accent-menu", (
-                f"Overdraft Violations: account_id decoration was "
-                f"{decoration.get('account_id')!r}; expected "
+            assert decoration.get("account_display") == "accent-menu", (
+                f"Overdraft Violations: account_display decoration was "
+                f"{decoration.get('account_display')!r}; expected "
                 f"'accent-menu' since the menu drill writes from it. "
                 f"Full decoration map: {decoration}"
             )

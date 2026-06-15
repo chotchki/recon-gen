@@ -244,10 +244,16 @@ def test_c7_guard_keeps_transfer_keyed_missed_violation(
     assert db_url is not None
     conn = duckdb.connect(db_url)
     try:
-        rows = conn.execute(sql).fetchall()
+        cur = conn.execute(sql)
+        cols = [c[0] for c in cur.description]
+        rows = cur.fetchall()
     finally:
         conn.close()
-    transfer_ids = {row[7] for row in rows}
+    # DL.3 added account_display to the projection, shifting fixed
+    # positional indexes. Resolve by name so the index drift doesn't
+    # break this guard.
+    tid_idx = cols.index("transfer_id")
+    transfer_ids = {row[tid_idx] for row in rows}
     assert "xfer-missed-001" in transfer_ids, (
         f"transfer-keyed *_missed row (magnitude_count=0) was dropped "
         f"by the C7 guard — the bug5 transfer_id-NOT-NULL relaxation "
@@ -269,10 +275,16 @@ def test_c7_guard_keeps_transfer_keyed_overlap_violation(
     assert db_url is not None
     conn = duckdb.connect(db_url)
     try:
-        rows = conn.execute(sql).fetchall()
+        cur = conn.execute(sql)
+        cols = [c[0] for c in cur.description]
+        rows = cur.fetchall()
     finally:
         conn.close()
-    transfer_ids = {row[7] for row in rows}
+    # DL.3 added account_display to the projection, shifting fixed
+    # positional indexes. Resolve by name so the index drift doesn't
+    # break this guard.
+    tid_idx = cols.index("transfer_id")
+    transfer_ids = {row[tid_idx] for row in rows}
     assert "xfer-overlap-002" in transfer_ids, (
         f"transfer-keyed *_overlap row (magnitude_count=2) was "
         f"dropped — the guard inverted? "

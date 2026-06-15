@@ -403,6 +403,18 @@ def _aging_bucket_case_sql(
 DRIFT_CONTRACT = DatasetContract(columns=[
     ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
     ColumnSpec("account_name", "STRING"),
+    # DL.3 — account_display (``"<name> (<id>)"``) is the shape Daily
+    # Statement's account picker reads + the shape its WHERE clause
+    # matches via ``account_display_expr``. Drills writing
+    # ``pL1DsAccount`` (e.g. the Leaf Account Drift drill at
+    # ``app.py:813``) source from this column so the destination's
+    # MappedDataSetParameters bridge lands the display-format string
+    # the WHERE clause expects. Pre-DL.3 the drills wrote raw
+    # ``account_id`` → destination's narrowed to 0 rows because
+    # ``"external-001" != "Foo (external-001)"``.
+    ColumnSpec(
+        "account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY,
+    ),
     ColumnSpec("account_role", "STRING"),
     ColumnSpec("account_parent_role", "STRING"),
     ColumnSpec("business_day_start", "DATETIME", shape=ColumnShape.DATETIME_DAY),
@@ -422,6 +434,10 @@ DRIFT_CONTRACT = DatasetContract(columns=[
 LEDGER_DRIFT_CONTRACT = DatasetContract(columns=[
     ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
     ColumnSpec("account_name", "STRING"),
+    # DL.3 — see DRIFT_CONTRACT for account_display rationale.
+    ColumnSpec(
+        "account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY,
+    ),
     ColumnSpec("account_role", "STRING"),
     ColumnSpec("business_day_start", "DATETIME", shape=ColumnShape.DATETIME_DAY),
     ColumnSpec("business_day_end", "DATETIME", shape=ColumnShape.DATETIME_DAY),
@@ -438,6 +454,10 @@ LEDGER_DRIFT_CONTRACT = DatasetContract(columns=[
 OVERDRAFT_CONTRACT = DatasetContract(columns=[
     ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
     ColumnSpec("account_name", "STRING"),
+    # DL.3 — see DRIFT_CONTRACT for account_display rationale.
+    ColumnSpec(
+        "account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY,
+    ),
     ColumnSpec("account_role", "STRING"),
     ColumnSpec("account_parent_role", "STRING"),
     ColumnSpec("business_day_start", "DATETIME", shape=ColumnShape.DATETIME_DAY),
@@ -454,6 +474,10 @@ OVERDRAFT_CONTRACT = DatasetContract(columns=[
 LIMIT_BREACH_CONTRACT = DatasetContract(columns=[
     ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
     ColumnSpec("account_name", "STRING"),
+    # DL.3 — see DRIFT_CONTRACT for account_display rationale.
+    ColumnSpec(
+        "account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY,
+    ),
     ColumnSpec("account_role", "STRING"),
     ColumnSpec("account_parent_role", "STRING"),
     ColumnSpec("business_day", "DATETIME", shape=ColumnShape.DATETIME_DAY),
@@ -482,6 +506,10 @@ L1_EXCEPTIONS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("check_type", "STRING"),
     ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
     ColumnSpec("account_name", "STRING"),
+    # DL.3 — see DRIFT_CONTRACT for account_display rationale.
+    ColumnSpec(
+        "account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY,
+    ),
     ColumnSpec("account_role", "STRING"),
     ColumnSpec("account_parent_role", "STRING"),
     ColumnSpec("business_day", "DATETIME", shape=ColumnShape.DATETIME_DAY),
@@ -571,6 +599,10 @@ TRANSACTIONS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("transaction_id", "STRING"),
     ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
     ColumnSpec("account_name", "STRING"),
+    # DL.3 — see DRIFT_CONTRACT for account_display rationale.
+    ColumnSpec(
+        "account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY,
+    ),
     ColumnSpec("account_role", "STRING"),
     ColumnSpec("account_parent_role", "STRING"),
     ColumnSpec("transfer_id", "STRING", shape=ColumnShape.TRANSFER_ID),
@@ -679,6 +711,11 @@ SUPERSESSION_DAILY_BALANCES_CONTRACT = DatasetContract(columns=[
     ColumnSpec("entry", "INTEGER"),
     ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
     ColumnSpec("account_name", "STRING"),
+    # DL.3 — see DRIFT_CONTRACT for account_display rationale (drill at
+    # ``app.py:1730`` from Daily Balances Audit → Daily Statement).
+    ColumnSpec(
+        "account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY,
+    ),
     ColumnSpec("account_role", "STRING"),
     ColumnSpec("supersedes", "STRING"),
     ColumnSpec("business_day_start", "DATETIME", shape=ColumnShape.DATETIME_DAY),
@@ -842,8 +879,15 @@ def build_drift_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
     # is always positive. Same expression on the ledger-drift sibling
     # below so both datasets carry the same column shape.
     abs_drift = f"ABS({drift})"
+    # DL.3 — account_display drives the Drift drill writing pL1DsAccount.
+    # Pre-DL.3 the drill wrote raw account_id which doesn't match Daily
+    # Statement's WHERE clause shape (account_display_expr); now the
+    # drill writes account_display so the destination narrows correctly.
+    acct_display = account_display_expr("account_name", "account_id")
     sql = (
-        f"SELECT account_id, account_name, account_role,"
+        f"SELECT account_id, account_name,"
+        f" {acct_display} AS account_display,"
+        f" account_role,"
         f" account_parent_role, business_day_start, business_day_end,"
         f" {sb} AS stored_balance,"
         f" {cb} AS computed_balance,"
@@ -887,8 +931,12 @@ def build_ledger_drift_dataset(
     cb = cents_to_dollars_sql("computed_balance", dialect=cfg.db.dialect)
     drift = cents_to_dollars_sql("drift", dialect=cfg.db.dialect)
     abs_drift = f"ABS({drift})"  # BO.4 — see build_drift_dataset comment.
+    # DL.3 — see build_drift_dataset for account_display rationale.
+    acct_display = account_display_expr("account_name", "account_id")
     sql = (
-        f"SELECT account_id, account_name, account_role,"
+        f"SELECT account_id, account_name,"
+        f" {acct_display} AS account_display,"
+        f" account_role,"
         f" business_day_start, business_day_end,"
         f" {sb} AS stored_balance,"
         f" {cb} AS computed_balance,"
@@ -938,8 +986,12 @@ def build_overdraft_dataset(
     """
     prefix = cfg.db.table_prefix
     sb = cents_to_dollars_sql("stored_balance", dialect=cfg.db.dialect)
+    # DL.3 — see build_drift_dataset for account_display rationale.
+    acct_display = account_display_expr("account_name", "account_id")
     sql = (
-        f"SELECT account_id, account_name, account_role,"
+        f"SELECT account_id, account_name,"
+        f" {acct_display} AS account_display,"
+        f" account_role,"
         f" account_parent_role, business_day_start, business_day_end,"
         f" {sb} AS stored_balance\n"
         f"FROM {prefix}_overdraft\n"
@@ -983,8 +1035,12 @@ def build_limit_breach_dataset(
     prefix = cfg.db.table_prefix
     outbound = cents_to_dollars_sql("outbound_total", dialect=cfg.db.dialect)
     cap = cents_to_dollars_sql("cap", dialect=cfg.db.dialect)
+    # DL.3 — see build_drift_dataset for account_display rationale.
+    acct_display = account_display_expr("account_name", "account_id")
     sql = (
-        f"SELECT account_id, account_name, account_role,"
+        f"SELECT account_id, account_name,"
+        f" {acct_display} AS account_display,"
+        f" account_role,"
         f" account_parent_role, business_day, rail_name, direction,"
         f" {outbound} AS outbound_total,"
         f" {cap} AS cap\n"
@@ -1064,8 +1120,17 @@ def build_l1_exceptions_dataset(
     # The discriminator is `transfer_id IS NOT NULL`: every money-keyed
     # branch projects {null_text} into the transfer_id slot; every
     # transfer-keyed branch projects an actual transfer_id literal.
+    # DL.3 — see build_drift_dataset for account_display rationale.
+    # The L1 Exceptions matview rows can have NULL account_name for
+    # branches like dead_rails (no account); account_display_expr's
+    # COALESCE keeps that safe — falls back to account_id when name is
+    # NULL, or to NULL when both are NULL (which is fine; non-account
+    # branches don't drill on this column).
+    acct_display = account_display_expr("account_name", "account_id")
     sql = (
-        f"SELECT check_type, account_id, account_name, account_role,"
+        f"SELECT check_type, account_id, account_name,"
+        f" {acct_display} AS account_display,"
+        f" account_role,"
         f" account_parent_role, business_day, rail_name, transfer_id,"
         f" {magnitude_amount} AS magnitude_amount,"
         f" magnitude_count\n"
@@ -1330,8 +1395,11 @@ def build_transactions_dataset(
     # `posting` (matches the contract's DATETIME_DAY shape so the Posting
     # Ledger's Daily Statement drill can write it to _DP_DS_BALANCE_DATE).
     business_day_expr = date_trunc_day("posting", cfg.db.dialect)
+    # DL.3 — see build_drift_dataset for account_display rationale.
+    acct_display = account_display_expr("account_name", "account_id")
     sql = (
         f"SELECT id AS transaction_id, account_id, account_name,"
+        f" {acct_display} AS account_display,"
         f" account_role, account_parent_role,"
         f" transfer_id, transfer_parent_id, rail_name,"
         f" {amount} AS amount_money, amount_direction, status, origin,"
@@ -1624,9 +1692,13 @@ def build_supersession_daily_balances_dataset(
     # AO.1.impl — daily_balances.money is BIGINT cents under the
     # foundation; wrap to dollars at the outer projection.
     money = cents_to_dollars_sql("money", dialect=cfg.db.dialect)
+    # DL.3 — see build_drift_dataset for account_display rationale.
+    acct_display = account_display_expr("account_name", "account_id")
     sql = (
         f"SELECT entry,"
-        f" account_id, account_name, account_role, supersedes,"
+        f" account_id, account_name,"
+        f" {acct_display} AS account_display,"
+        f" account_role, supersedes,"
         f" business_day_start, business_day_end,"
         f" {money} AS money"
         f" FROM ("

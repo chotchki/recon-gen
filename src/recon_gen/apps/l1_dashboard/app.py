@@ -224,7 +224,16 @@ _DRILL_RESET_SENTINEL = "__ALL__"
 # writes at construction time (the K.2 invariant).
 _DP_FILTER_ACCOUNT = DrillParam(P_L1_FILTER_ACCOUNT, ColumnShape.ACCOUNT_ID)
 _DP_TX_TRANSFER = DrillParam(P_L1_TX_TRANSFER, ColumnShape.TRANSFER_ID)
-_DP_DS_ACCOUNT = DrillParam(P_L1_DS_ACCOUNT, ColumnShape.ACCOUNT_ID)
+# DL.3 — shape widened from ACCOUNT_ID to ACCOUNT_DISPLAY. Daily
+# Statement's account picker is bound to ``LinkedValues.from_column(
+# DS_L1_DS_ACCOUNTS["account_display"])`` and the dataset WHERE clause
+# matches the same display-format string (see
+# ``_account_display_clause``); the drill source field is now an
+# ``account_display`` Dim (composite ``"<name> (<id>)"``) too. Pre-DL.3
+# the shape said ``ACCOUNT_ID`` and the drills wrote raw account_id
+# strings the destination's WHERE clause couldn't match against — the
+# user-reported drift→daily-statement bug.
+_DP_DS_ACCOUNT = DrillParam(P_L1_DS_ACCOUNT, ColumnShape.ACCOUNT_DISPLAY)
 _DP_DS_BALANCE_DATE = DrillParam(
     P_L1_DS_BALANCE_DATE, ColumnShape.DATETIME_DAY,
 )
@@ -786,6 +795,13 @@ def _populate_drift_sheet(
     # Statement filters by start-of-day — previously off by 1 day
     # because the visual was showing end and the drill wrote end.
     leaf_account_col = ds_drift["account_id"].dim()
+    # DL.3 — Daily Statement's account picker is bound to
+    # account_display (composite "<name> (<id>)" — see
+    # _wire_daily_statement_filters at line ~2498) and its WHERE clause
+    # matches the same shape via account_display_expr. The drill must
+    # write the display string into pL1DsAccount, not raw account_id;
+    # the un-surfaced (hidden via column-list) drill source carries it.
+    leaf_account_display_col = ds_drift["account_display"].dim()
     leaf_day_col = ds_drift["business_day_start"].date(
         date_granularity="SECOND",
     )
@@ -802,6 +818,12 @@ def _populate_drift_sheet(
         columns=[
             leaf_account_col,
             ds_drift["account_name"].dim(),
+            # DL.3 — account_display is the drill source for pL1DsAccount
+            # (Daily Statement's WHERE clause matches this shape). Shown
+            # alongside account_id + account_name so the operator sees
+            # the row's bound-display value AND can click it; the
+            # Drillable below points at this column.
+            leaf_account_display_col,
             ds_drift["account_role"].dim(),
             ds_drift["account_parent_role"].dim(),
             leaf_day_col,
@@ -814,14 +836,14 @@ def _populate_drift_sheet(
                 target_sheet=daily_statement_sheet,
                 name="View Daily Statement for this account-day",
                 writes=[
-                    (_DP_DS_ACCOUNT, leaf_account_col),
+                    (_DP_DS_ACCOUNT, leaf_account_display_col),
                     (_DP_DS_BALANCE_DATE, leaf_day_col),
                 ],
                 trigger="DATA_POINT_MENU",
             ),
         ],
         conditional_formatting=[
-            Drillable(on=leaf_account_col, color=accent),
+            Drillable(on=leaf_account_display_col, color=accent),
         ],
     )
 
@@ -831,6 +853,8 @@ def _populate_drift_sheet(
     # AA.A.996 — see ``leaf_day_col`` above for the natural-key alignment
     # + SECOND-granularity + per-account boundary rationale.
     parent_account_col = ds_ledger_drift["account_id"].dim()
+    # DL.3 — see leaf_account_display_col above for rationale.
+    parent_account_display_col = ds_ledger_drift["account_display"].dim()
     parent_day_col = ds_ledger_drift["business_day_start"].date(
         date_granularity="SECOND",
     )
@@ -847,6 +871,8 @@ def _populate_drift_sheet(
         columns=[
             parent_account_col,
             ds_ledger_drift["account_name"].dim(),
+            # DL.3 — see leaf_account_display_col rationale above.
+            parent_account_display_col,
             ds_ledger_drift["account_role"].dim(),
             parent_day_col,
             ds_ledger_drift["stored_balance"].numerical(currency=True),
@@ -858,14 +884,14 @@ def _populate_drift_sheet(
                 target_sheet=daily_statement_sheet,
                 name="View Daily Statement for this account-day",
                 writes=[
-                    (_DP_DS_ACCOUNT, parent_account_col),
+                    (_DP_DS_ACCOUNT, parent_account_display_col),
                     (_DP_DS_BALANCE_DATE, parent_day_col),
                 ],
                 trigger="DATA_POINT_MENU",
             ),
         ],
         conditional_formatting=[
-            Drillable(on=parent_account_col, color=accent),
+            Drillable(on=parent_account_display_col, color=accent),
         ],
     )
 
@@ -1012,6 +1038,10 @@ def _populate_overdraft_sheet(
     # AA.A.996 — see leaf_day_col on the Drift sheet for the natural-key
     # alignment + SECOND-granularity + per-account boundary rationale.
     account_col = ds_overdraft["account_id"].dim()
+    # DL.3 — see leaf_account_display_col rationale in
+    # _populate_drift_sheet. The Daily Statement drill writes the
+    # display-format string into pL1DsAccount.
+    account_display_col = ds_overdraft["account_display"].dim()
     day_col = ds_overdraft["business_day_start"].date(
         date_granularity="SECOND",
     )
@@ -1026,6 +1056,8 @@ def _populate_overdraft_sheet(
         columns=[
             account_col,
             ds_overdraft["account_name"].dim(),
+            # DL.3 — see leaf_account_display_col rationale.
+            account_display_col,
             ds_overdraft["account_role"].dim(),
             ds_overdraft["account_parent_role"].dim(),
             day_col,
@@ -1036,14 +1068,14 @@ def _populate_overdraft_sheet(
                 target_sheet=daily_statement_sheet,
                 name="View Daily Statement for this account-day",
                 writes=[
-                    (_DP_DS_ACCOUNT, account_col),
+                    (_DP_DS_ACCOUNT, account_display_col),
                     (_DP_DS_BALANCE_DATE, day_col),
                 ],
                 trigger="DATA_POINT_MENU",
             ),
         ],
         conditional_formatting=[
-            Drillable(on=account_col, color=accent),
+            Drillable(on=account_display_col, color=accent),
         ],
     )
 
@@ -1140,6 +1172,12 @@ def _populate_l1_exceptions_sheet(
     amount_col = ds["magnitude_amount"].numerical(currency=True)
     count_col = ds["magnitude_count"].numerical()
     account_col = ds["account_id"].dim()
+    # DL.3 — see leaf_account_display_col rationale in
+    # _populate_drift_sheet. The Daily Statement drill writes the
+    # display-format string into pL1DsAccount; the back-to-Drift drill
+    # uses raw account_id (pL1FilterAccount sentinel-pattern matches
+    # the drift dataset's account_id column).
+    account_display_col = ds["account_display"].dim()
     business_day_col = ds["business_day"].date()
     sheet.layout.row(height=_TABLE_ROW_SPAN).add_table(
         width=_FULL,
@@ -1157,6 +1195,9 @@ def _populate_l1_exceptions_sheet(
             ds["check_type"].dim(),
             account_col,
             ds["account_name"].dim(),
+            # DL.3 — see leaf_account_display_col rationale. Surfaced so
+            # the Daily Statement drill source is visible.
+            account_display_col,
             ds["account_role"].dim(),
             ds["account_parent_role"].dim(),
             business_day_col,
@@ -1182,14 +1223,20 @@ def _populate_l1_exceptions_sheet(
                 target_sheet=daily_statement_sheet,
                 name="View Daily Statement for this account-day",
                 writes=[
-                    (_DP_DS_ACCOUNT, account_col),
+                    (_DP_DS_ACCOUNT, account_display_col),
                     (_DP_DS_BALANCE_DATE, business_day_col),
                 ],
                 trigger="DATA_POINT_MENU",
             ),
         ],
         conditional_formatting=[
+            # Left-click drill (Drift) writes from account_col; the
+            # right-click Daily Statement drill writes from
+            # account_display_col. Both columns get the accent so the
+            # operator can see either is clickable for the corresponding
+            # action.
             Drillable(on=account_col, color=accent),
+            Drillable(on=account_display_col, color=accent),
         ],
     )
 
@@ -1279,6 +1326,9 @@ def _populate_limit_breach_sheet(
     )
 
     account_col = ds_lb["account_id"].dim()
+    # DL.3 — see leaf_account_display_col rationale in
+    # _populate_drift_sheet. Daily Statement drill writes display-format.
+    account_display_col = ds_lb["account_display"].dim()
     day_col = ds_lb["business_day"].date()
     sheet.layout.row(height=_TABLE_ROW_SPAN).add_table(
         width=_FULL,
@@ -1295,6 +1345,8 @@ def _populate_limit_breach_sheet(
         columns=[
             account_col,
             ds_lb["account_name"].dim(),
+            # DL.3 — see leaf_account_display_col rationale.
+            account_display_col,
             ds_lb["account_role"].dim(),
             ds_lb["account_parent_role"].dim(),
             day_col,
@@ -1310,14 +1362,14 @@ def _populate_limit_breach_sheet(
                 target_sheet=daily_statement_sheet,
                 name="View Daily Statement for this account-day",
                 writes=[
-                    (_DP_DS_ACCOUNT, account_col),
+                    (_DP_DS_ACCOUNT, account_display_col),
                     (_DP_DS_BALANCE_DATE, day_col),
                 ],
                 trigger="DATA_POINT_MENU",
             ),
         ],
         conditional_formatting=[
-            Drillable(on=account_col, color=accent),
+            Drillable(on=account_display_col, color=accent),
         ],
     )
 
@@ -1701,6 +1753,9 @@ def _populate_supersession_audit_sheet(
     # Row 3: daily-balances audit detail — every entry of every
     # superseded (account_id, business_day_start) cell.
     db_account_col = ds_db["account_id"].dim()
+    # DL.3 — see leaf_account_display_col rationale in
+    # _populate_drift_sheet. Daily Statement drill writes display-format.
+    db_account_display_col = ds_db["account_display"].dim()
     db_day_col = ds_db["business_day_start"].date()
     sheet.layout.row(height=_TABLE_ROW_SPAN).add_table(
         width=_FULL,
@@ -1716,6 +1771,8 @@ def _populate_supersession_audit_sheet(
             ds_db["entry"].numerical(),
             db_account_col,
             ds_db["account_name"].dim(),
+            # DL.3 — see leaf_account_display_col rationale.
+            db_account_display_col,
             ds_db["account_role"].dim(),
             ds_db["supersedes"].dim(),
             db_day_col,
@@ -1727,14 +1784,14 @@ def _populate_supersession_audit_sheet(
                 target_sheet=daily_statement_sheet,
                 name="View Daily Statement for this account-day",
                 writes=[
-                    (_DP_DS_ACCOUNT, db_account_col),
+                    (_DP_DS_ACCOUNT, db_account_display_col),
                     (_DP_DS_BALANCE_DATE, db_day_col),
                 ],
                 trigger="DATA_POINT_MENU",
             ),
         ],
         conditional_formatting=[
-            Drillable(on=db_account_col, color=accent),
+            Drillable(on=db_account_display_col, color=accent),
         ],
     )
 
@@ -1762,6 +1819,9 @@ def _populate_transactions_sheet(
     ds_tx = datasets[DS_TRANSACTIONS]
 
     account_col = ds_tx["account_id"].dim()
+    # DL.3 — see leaf_account_display_col rationale in
+    # _populate_drift_sheet. Daily Statement drill writes display-format.
+    account_display_col = ds_tx["account_display"].dim()
     transfer_col = ds_tx["transfer_id"].dim()
     posting_col = ds_tx["posting"].date()
     # Phase DA — day-grain drill source. `posting` is minute-grain; the
@@ -1784,6 +1844,8 @@ def _populate_transactions_sheet(
         columns=[
             account_col,
             ds_tx["account_name"].dim(),
+            # DL.3 — see leaf_account_display_col rationale.
+            account_display_col,
             ds_tx["account_role"].dim(),
             transfer_col,
             ds_tx["rail_name"].dim(),
@@ -1806,7 +1868,7 @@ def _populate_transactions_sheet(
                 target_sheet=daily_statement_sheet,
                 name="View Daily Statement for this account-day",
                 writes=[
-                    (_DP_DS_ACCOUNT, account_col),
+                    (_DP_DS_ACCOUNT, account_display_col),
                     (_DP_DS_BALANCE_DATE, business_day_col),
                 ],
                 trigger="DATA_POINT_MENU",
@@ -1814,8 +1876,10 @@ def _populate_transactions_sheet(
         ],
         # Phase DA — transfer_col stripped (self-drill: target would be
         # this same Transactions sheet). account_col only.
+        # DL.3 — moved Drillable to account_display_col since that's the
+        # column the drill writes from.
         conditional_formatting=[
-            Drillable(on=account_col, color=accent),
+            Drillable(on=account_display_col, color=accent),
         ],
         # CY.4 — App2 renderer surfaces the per-row ``metadata`` JSON
         # as a popup; the column is carried on every row payload but
