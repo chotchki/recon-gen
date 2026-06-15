@@ -122,20 +122,20 @@ def test_l2_exceptions_sheet_visuals_invariant_M3_10l(
 # -- Dataset count + ID prefix invariants -----------------------------------
 
 
-def test_dataset_count_is_thirteen_per_instance(
+def test_dataset_count_is_fourteen_per_instance(
     l2_instance: L2Instance,
 ) -> None:
-    """6 content datasets (M.3.10l) + 2 App Info datasets (M.4.4.5)
-    + 5 shared LinkedValues picker source datasets (CQ.3.c).
+    """6 content datasets (M.3.10l) + 3 App Info datasets (M.4.4.5 +
+    DK.5.kpi) + 5 shared LinkedValues picker source datasets (CQ.3.c).
 
     Content: postings + meta-values (Rails cascade), chain-instances
     (Chains), tt-instances + tt-legs (Transfer Templates), unified-
-    exceptions (L2 Exceptions). App Info: liveness + matview status.
-    CQ.3.c: rails / templates / account_roles / metadata_keys /
-    chain_parents (shared with L1 — same AWS DataSetIds, de-dup at
-    deploy time)."""
+    exceptions (L2 Exceptions). App Info: liveness + matview status +
+    latest-balance-day (DK.5.kpi data_anchor reader). CQ.3.c: rails /
+    templates / account_roles / metadata_keys / chain_parents (shared
+    with L1 — same AWS DataSetIds, de-dup at deploy time)."""
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
-    assert len(app.datasets) == 13
+    assert len(app.datasets) == 14
 
 
 def test_every_dataset_id_carries_deployment_prefix(

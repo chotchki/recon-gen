@@ -48,6 +48,7 @@ from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_DESCRIPTION,
     APP_INFO_SHEET_NAME,
     APP_INFO_SHEET_TITLE,
+    app_info_latest_balance_day_id,
     app_info_liveness_id,
     app_info_matviews_id,
     populate_app_info_sheet,
@@ -56,6 +57,7 @@ from recon_gen.common.sheets.app_info import (
 # BO.5 — per-app App Info dataset identifiers; see l1_dashboard/app.py.
 _DS_APP_INFO_LIVENESS = app_info_liveness_id("exec")
 _DS_APP_INFO_MATVIEWS = app_info_matviews_id("exec")
+_DS_APP_INFO_LATEST_BALANCE_DAY = app_info_latest_balance_day_id("exec")
 from recon_gen.common.theme import resolve_l2_theme
 from recon_gen.common.tree import (
     Analysis,
@@ -304,6 +306,7 @@ def _datasets(cfg: Config) -> dict[str, Dataset]:
         DS_EXEC_PROGRAM_HEALTH,
         _DS_APP_INFO_LIVENESS,
         _DS_APP_INFO_MATVIEWS,
+        _DS_APP_INFO_LATEST_BALANCE_DAY,
     ]
     return {
         name: Dataset(identifier=name, arn=cfg.aws.dataset_arn(ds.DataSetId))
@@ -982,6 +985,7 @@ def build_executives_app(
         cfg, app_info_sheet,
         liveness_ds=datasets[_DS_APP_INFO_LIVENESS],
         matview_status_ds=datasets[_DS_APP_INFO_MATVIEWS],
+        latest_balance_day_ds=datasets[_DS_APP_INFO_LATEST_BALANCE_DAY],
         theme=theme,
         l2_instance=l2_instance,
     )

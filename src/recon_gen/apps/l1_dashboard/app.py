@@ -110,6 +110,7 @@ from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_DESCRIPTION,
     APP_INFO_SHEET_NAME,
     APP_INFO_SHEET_TITLE,
+    app_info_latest_balance_day_id,
     app_info_liveness_id,
     app_info_matviews_id,
     populate_app_info_sheet,
@@ -122,6 +123,7 @@ from recon_gen.common.sheets.app_info import (
 # app's matview-status panel. Per-segment IDs let all four coexist.
 _DS_APP_INFO_LIVENESS = app_info_liveness_id("l1")
 _DS_APP_INFO_MATVIEWS = app_info_matviews_id("l1")
+_DS_APP_INFO_LATEST_BALANCE_DAY = app_info_latest_balance_day_id("l1")
 from recon_gen.common.l2 import ThemePreset
 from recon_gen.common.theme import resolve_l2_theme
 from recon_gen.common.tree.actions import DrillWrite
@@ -568,6 +570,7 @@ def _l1_datasets(
         # are L2FT-only). Order matches build_all_l1_dashboard_datasets.
         DS_RAILS, DS_ACCOUNT_ROLES,
         _DS_APP_INFO_LIVENESS, _DS_APP_INFO_MATVIEWS,
+        _DS_APP_INFO_LATEST_BALANCE_DAY,
     ]
     return {
         vid: Dataset(identifier=vid, arn=cfg.aws.dataset_arn(aws.DataSetId))
@@ -2962,6 +2965,7 @@ def build_l1_dashboard_app(
         cfg, app_info_sheet,
         liveness_ds=datasets[_DS_APP_INFO_LIVENESS],
         matview_status_ds=datasets[_DS_APP_INFO_MATVIEWS],
+        latest_balance_day_ds=datasets[_DS_APP_INFO_LATEST_BALANCE_DAY],
         theme=theme,
         l2_instance=l2_instance,
     )

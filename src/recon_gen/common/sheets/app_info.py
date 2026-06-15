@@ -114,11 +114,23 @@ def app_info_matviews_id(app_segment: str) -> str:
     return f"{app_segment}-app-info-matviews-ds"
 
 
+def app_info_latest_balance_day_id(app_segment: str) -> str:
+    """DK.5.kpi — per-app data-anchor visual_identifier.
+
+    Mirrors ``app_info_liveness_id``'s per-segment scheme so all four
+    apps' Latest Balance Day datasets coexist in the App2 process-global
+    SQL registry without overwriting each other (same registry-collision
+    risk BO.5 fixed for the liveness + matviews datasets).
+    """
+    return f"{app_segment}-app-info-latest-balance-day-ds"
+
+
 # Visual titles — exported so tests can import them rather than inline
 # the literal (which silently rots when the title changes; v11.22.3's
 # BH.18 cold-read rename caught test_qs_table_rows_well_formed flat).
 APP_INFO_LIVENESS_TITLE = "Liveness"
 APP_INFO_MATVIEW_STATUS_TITLE = "Matview Status — sources this app reads from"
+APP_INFO_LATEST_BALANCE_DAY_TITLE = "Latest Balance Day"
 
 
 # Module-level contract instances — must be the same object every time
@@ -127,6 +139,11 @@ APP_INFO_MATVIEW_STATUS_TITLE = "Matview Status — sources this app reads from"
 # satisfy that.
 LIVENESS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("table_count", "INTEGER"),
+])
+
+
+LATEST_BALANCE_DAY_CONTRACT = DatasetContract(columns=[
+    ColumnSpec("data_anchor", "DATETIME"),
 ])
 
 
@@ -215,6 +232,39 @@ def _matview_status_sql(
             f"{date_expr} AS latest_date FROM {name}"
         )
     return "\nUNION ALL\n".join(parts)
+
+
+def build_latest_balance_day_dataset(
+    cfg: Config, *, app_segment: str,
+) -> DataSet:
+    """DK.5.kpi — Latest Balance Day KPI dataset.
+
+    Real-query against the DK.1 singleton matview ``<prefix>_data_anchor``.
+    Returns one row with the most recent moment the feed has data for
+    (the same value DK.4 exports as ``RECON_GEN_AS_OF_ANCHOR`` at
+    json-apply time, but live-queried per dashboard load so any post-
+    deploy matview refresh moves the KPI forward without re-deploying).
+
+    Operators read the KPI alongside the deploy-stamp ``as_of (at emit)``
+    bullet (DK.5.bullets): when the KPI lags the bullet by more than a
+    feed-cycle, the ETL is stale (and the dashboards are showing
+    last-loaded data, not "today"). No alarm styling per DK.0 — data lag
+    is normal in real systems.
+    """
+    sql = (
+        f"SELECT data_anchor "
+        f"FROM {cfg.db.table_prefix}_data_anchor "
+        f"LIMIT 1"
+    )
+    return build_dataset(
+        cfg,
+        cfg.aws.prefixed(f"{app_segment}-app-info-latest-balance-day-dataset"),
+        "App Info -- Latest Balance Day",
+        "app-info-latest-balance-day",
+        sql,
+        LATEST_BALANCE_DAY_CONTRACT,
+        visual_identifier=app_info_latest_balance_day_id(app_segment),
+    )
 
 
 def build_liveness_dataset(cfg: Config, *, app_segment: str) -> DataSet:
@@ -380,6 +430,12 @@ _FULL = 36
 _HALF = 18
 _TABLE_HEIGHT = 12
 _TEXT_HEIGHT = 6
+# DK.5.kpi — single-value KPI row height (Latest Balance Day). Matches
+# the existing TABLE_HEIGHT for visual balance with the row above it
+# (Liveness KPI + Matview Status table); QS KPI cards size their text
+# to fill the available height, so a TABLE_HEIGHT row reads as one
+# prominent big-number visual at full-width.
+_KPI_HEIGHT = 12
 
 
 def _cadence_summary_line(l2_instance: L2Instance) -> str:
@@ -465,6 +521,7 @@ def populate_app_info_sheet(
     matview_status_ds: Dataset,
     theme: ThemePreset,
     l2_instance: L2Instance | None = None,
+    latest_balance_day_ds: Dataset | None = None,
 ) -> None:
     """Populate the "i" sheet with three visuals (KPI + table + text box).
 
@@ -517,6 +574,32 @@ def populate_app_info_sheet(
             matview_status_ds["latest_date"].date(),
         ],
     )
+
+    # DK.5.kpi — Latest Balance Day single-cell table: live query against
+    # the DK.1 singleton data_anchor matview. Pairs with the deploy-stamp
+    # ``as_of (at emit)`` bullet — if the table value lags the bullet,
+    # the feed has aged since deploy. Neutral subtitle per DK.0 lock:
+    # data lag is normal in real systems; observability not alarm.
+    #
+    # Implemented as a Table (not a KPI) because QS's KPI visual only
+    # accepts numerical measures; data_anchor is a DATETIME column and
+    # the natural display is the date itself, not a count of it. The
+    # 1-row × 1-column table reads like a labeled big-number cell.
+    # Skipped when caller didn't pass the dataset (back-compat shim).
+    if latest_balance_day_ds is not None:
+        middle = sheet.layout.row(height=_KPI_HEIGHT)
+        middle.add_table(
+            width=_FULL,
+            title=APP_INFO_LATEST_BALANCE_DAY_TITLE,
+            subtitle=(
+                "Most recent emitted balance day from the feed — live "
+                "query against `<prefix>_data_anchor` (DK.1). When this "
+                "lags the `as_of (at emit)` bullet below, the ETL has "
+                "aged since the last `recon-gen json apply`; dashboards "
+                "are still showing the deploy-time anchor, not today."
+            ),
+            columns=[latest_balance_day_ds["data_anchor"].date()],
+        )
 
     # Row 2: deploy stamp text box. CY.2 — DuckDB is the legit local-prod
     # path post-CA (project_duckdb_local_default_post_ca) and the Mac mini

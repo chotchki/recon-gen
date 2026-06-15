@@ -54,6 +54,7 @@ from recon_gen.common.models import (
 )
 from recon_gen.common.l2 import L2Instance
 from recon_gen.common.sheets.app_info import (
+    build_latest_balance_day_dataset,
     build_liveness_dataset,
     build_matview_status_dataset,
 )
@@ -991,6 +992,8 @@ def build_all_datasets(
             cfg, app_segment="inv",
             view_specs=inv_matview_specs(cfg),
         ),
+        # DK.5.kpi — Latest Balance Day KPI from <prefix>_data_anchor.
+        build_latest_balance_day_dataset(cfg, app_segment="inv"),
     ]
 
 

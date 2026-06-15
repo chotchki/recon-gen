@@ -126,10 +126,10 @@ def test_every_sheet_has_a_description(exec_analysis: "_ModelsAnalysis") -> None
 def test_datasets_in_expected_order():
     """6 content datasets (CF.2 added program-health rollup; BH.8 added
     transaction-legs per-leg / all-status counter; Y.2.h split account
-    into base + active; AO.5 added daily rollup) + 2 M.4.4.5 App Info
-    datasets, in order."""
+    into base + active; AO.5 added daily rollup) + 3 M.4.4.5 App Info
+    datasets (DK.5.kpi added latest-balance-day), in order."""
     datasets = build_all_datasets(_TEST_CFG)
-    assert len(datasets) == 8
+    assert len(datasets) == 9
     assert datasets[0].DataSetId == _TEST_CFG.aws.prefixed(
         "exec-transaction-summary-dataset",
     )
@@ -154,6 +154,9 @@ def test_datasets_in_expected_order():
     assert datasets[7].DataSetId == _TEST_CFG.aws.prefixed(
         "exec-app-info-matviews-dataset",
     )
+    assert datasets[8].DataSetId == _TEST_CFG.aws.prefixed(
+        "exec-app-info-latest-balance-day-dataset",
+    )
 
 
 def test_datasets_declared_in_analysis(exec_analysis: "_ModelsAnalysis") -> None:
@@ -168,13 +171,15 @@ def test_datasets_declared_in_analysis(exec_analysis: "_ModelsAnalysis") -> None
         DS_EXEC_TRANSACTION_SUMMARY,
     )
     from recon_gen.common.sheets.app_info import (
+        app_info_latest_balance_day_id,
         app_info_liveness_id, app_info_matviews_id,
     )
 
     decls = exec_analysis.Definition.DataSetIdentifierDeclarations
     # BO.5 — App Info dataset identifiers are per-app-segmented now (the
     # process-global App2 SQL registry would otherwise collide across the
-    # four-app server).
+    # four-app server). DK.5.kpi added latest_balance_day as the third
+    # App Info dataset.
     assert [d.Identifier for d in decls] == [
         DS_EXEC_TRANSACTION_SUMMARY,
         DS_EXEC_TRANSACTION_DAILY,
@@ -184,6 +189,7 @@ def test_datasets_declared_in_analysis(exec_analysis: "_ModelsAnalysis") -> None
         DS_EXEC_PROGRAM_HEALTH,
         app_info_liveness_id("exec"),
         app_info_matviews_id("exec"),
+        app_info_latest_balance_day_id("exec"),
     ]
 
 
@@ -253,6 +259,9 @@ def test_both_content_datasets_filter_to_status_posted():
     skip_ids = {
         _TEST_CFG.aws.prefixed("exec-app-info-liveness-dataset"),
         _TEST_CFG.aws.prefixed("exec-app-info-matviews-dataset"),
+        # DK.5.kpi — data_anchor singleton matview reads via SELECT
+        # data_anchor; no transactions column so no status filter.
+        _TEST_CFG.aws.prefixed("exec-app-info-latest-balance-day-dataset"),
         # BH.8 — transaction-legs deliberately skips the Posted filter
         # so its count matches App Info's per-leg / all-status row_count.
         _TEST_CFG.aws.prefixed("exec-transaction-legs-dataset"),

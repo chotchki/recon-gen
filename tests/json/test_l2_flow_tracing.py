@@ -62,6 +62,7 @@ from recon_gen.common.l2 import load_instance
 from recon_gen.common.models import DataSet
 from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_NAME,
+    app_info_latest_balance_day_id,
     app_info_liveness_id,
     app_info_matviews_id,
 )
@@ -281,7 +282,7 @@ def test_dataset_count_matches_populated_sheets() -> None:
         DS_TEMPLATES,
     )
     app = build_l2_flow_tracing_app(_CFG)
-    assert len(app.datasets) == 13
+    assert len(app.datasets) == 14
     assert {d.identifier for d in app.datasets} == {
         DS_POSTINGS,
         DS_META_VALUES,
@@ -296,6 +297,7 @@ def test_dataset_count_matches_populated_sheets() -> None:
         DS_CHAIN_PARENTS,
         app_info_liveness_id("l2ft"),
         app_info_matviews_id("l2ft"),
+        app_info_latest_balance_day_id("l2ft"),
     }
 
 

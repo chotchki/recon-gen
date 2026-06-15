@@ -312,7 +312,7 @@ def test_investigation_datasets_in_expected_order():
     last. Order matters — analysis.py's DataSetIdentifierDeclarations
     zip relies on it."""
     datasets = build_all_datasets(_TEST_CFG, _TEST_L2)
-    assert len(datasets) == 11
+    assert len(datasets) == 12
     assert datasets[0].DataSetId == _TEST_CFG.aws.prefixed("inv-recipient-fanout-dataset")
     assert datasets[1].DataSetId == _TEST_CFG.aws.prefixed("inv-volume-anomalies-dataset")
     assert datasets[2].DataSetId == _TEST_CFG.aws.prefixed("inv-volume-anomalies-distribution-dataset")
@@ -324,14 +324,17 @@ def test_investigation_datasets_in_expected_order():
     assert datasets[8].DataSetId == _TEST_CFG.aws.prefixed("inv-anetwork-accounts-dataset")
     assert datasets[9].DataSetId == _TEST_CFG.aws.prefixed("inv-app-info-liveness-dataset")
     assert datasets[10].DataSetId == _TEST_CFG.aws.prefixed("inv-app-info-matviews-dataset")
+    assert datasets[11].DataSetId == _TEST_CFG.aws.prefixed("inv-app-info-latest-balance-day-dataset")
 
 
 def test_investigation_datasets_declared_in_analysis():
-    """9 content datasets + the 2 M.4.4.5 App Info datasets.
+    """9 content datasets + the 3 M.4.4.5 + DK.5.kpi App Info datasets.
     Y.1.b.companion added DS_INV_VOLUME_ANOMALIES_DISTRIBUTION;
     Y.2.a.companion added DS_INV_MONEY_TRAIL_ROOTS;
-    BO.2 added DS_INV_ACCOUNT_NETWORK_INBOUND + _OUTBOUND."""
+    BO.2 added DS_INV_ACCOUNT_NETWORK_INBOUND + _OUTBOUND;
+    DK.5.kpi added the latest-balance-day data_anchor reader."""
     from recon_gen.common.sheets.app_info import (
+        app_info_latest_balance_day_id,
         app_info_liveness_id, app_info_matviews_id,
     )
 
@@ -350,6 +353,7 @@ def test_investigation_datasets_declared_in_analysis():
         DS_INV_ANETWORK_ACCOUNTS,
         app_info_liveness_id("inv"),
         app_info_matviews_id("inv"),
+        app_info_latest_balance_day_id("inv"),
     ]
 
 

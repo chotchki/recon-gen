@@ -74,6 +74,7 @@ from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_DESCRIPTION,
     APP_INFO_SHEET_NAME,
     APP_INFO_SHEET_TITLE,
+    app_info_latest_balance_day_id,
     app_info_liveness_id,
     app_info_matviews_id,
     populate_app_info_sheet,
@@ -82,6 +83,7 @@ from recon_gen.common.sheets.app_info import (
 # BO.5 — per-app App Info dataset identifiers; see l1_dashboard/app.py.
 _DS_APP_INFO_LIVENESS = app_info_liveness_id("l2ft")
 _DS_APP_INFO_MATVIEWS = app_info_matviews_id("l2ft")
+_DS_APP_INFO_LATEST_BALANCE_DAY = app_info_latest_balance_day_id("l2ft")
 from recon_gen.common.l2 import ThemePreset
 from recon_gen.common.theme import resolve_l2_theme
 from recon_gen.common.tree.actions import DrillWrite
@@ -338,6 +340,7 @@ def build_l2_flow_tracing_app(
         cfg, app_info_sheet,
         liveness_ds=datasets[_DS_APP_INFO_LIVENESS],
         matview_status_ds=datasets[_DS_APP_INFO_MATVIEWS],
+        latest_balance_day_ds=datasets[_DS_APP_INFO_LATEST_BALANCE_DAY],
         theme=theme,
         l2_instance=l2_instance,
     )
@@ -391,6 +394,7 @@ def _l2ft_datasets(
         "v-config-account-roles-ds",
         DS_METADATA_KEYS, DS_CHAIN_PARENTS,
         _DS_APP_INFO_LIVENESS, _DS_APP_INFO_MATVIEWS,  # M.4.4.5; BO.5 per-app
+        _DS_APP_INFO_LATEST_BALANCE_DAY,                # DK.5.kpi
     ]
     return {
         vid: Dataset(identifier=vid, arn=cfg.aws.dataset_arn(aws.DataSetId))

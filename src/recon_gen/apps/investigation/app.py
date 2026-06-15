@@ -64,8 +64,10 @@ from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_DESCRIPTION,
     APP_INFO_SHEET_NAME,
     APP_INFO_SHEET_TITLE,
+    app_info_latest_balance_day_id,
     app_info_liveness_id,
     app_info_matviews_id,
+    build_latest_balance_day_dataset,
     build_liveness_dataset,
     build_matview_status_dataset,
     populate_app_info_sheet,
@@ -74,6 +76,7 @@ from recon_gen.common.sheets.app_info import (
 # BO.5 — per-app App Info dataset identifiers; see l1_dashboard/app.py.
 _DS_APP_INFO_LIVENESS = app_info_liveness_id("inv")
 _DS_APP_INFO_MATVIEWS = app_info_matviews_id("inv")
+_DS_APP_INFO_LATEST_BALANCE_DAY = app_info_latest_balance_day_id("inv")
 from recon_gen.common.theme import resolve_l2_theme
 from recon_gen.common.models import Analysis as ModelAnalysis
 from recon_gen.common.models import Dashboard as ModelDashboard
@@ -1175,6 +1178,9 @@ def _build_app_info_sheet(
     matviews_aws = build_matview_status_dataset(
         cfg, app_segment="inv", view_specs=inv_matview_specs(cfg),
     )
+    latest_balance_day_aws = build_latest_balance_day_dataset(
+        cfg, app_segment="inv",
+    )
     liveness_ds = app.add_dataset(Dataset(
         identifier=_DS_APP_INFO_LIVENESS,
         arn=cfg.aws.dataset_arn(liveness_aws.DataSetId),
@@ -1182,6 +1188,10 @@ def _build_app_info_sheet(
     matviews_ds = app.add_dataset(Dataset(
         identifier=_DS_APP_INFO_MATVIEWS,
         arn=cfg.aws.dataset_arn(matviews_aws.DataSetId),
+    ))
+    latest_balance_day_ds = app.add_dataset(Dataset(
+        identifier=_DS_APP_INFO_LATEST_BALANCE_DAY,
+        arn=cfg.aws.dataset_arn(latest_balance_day_aws.DataSetId),
     ))
     sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_INV_APP_INFO,
@@ -1193,6 +1203,7 @@ def _build_app_info_sheet(
     populate_app_info_sheet(
         cfg, sheet,
         liveness_ds=liveness_ds, matview_status_ds=matviews_ds,
+        latest_balance_day_ds=latest_balance_day_ds,
         theme=theme, l2_instance=l2_instance,
     )
 
