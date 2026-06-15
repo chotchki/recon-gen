@@ -3,8 +3,10 @@
 
 Coverage:
 
-- Gate cascade: RECON_GEN_E2E unset → RECON_GEN_SKIP_QS_DEPLOY set →
+- Gate cascade: RECON_GEN_SKIP_QS_DEPLOY set →
   _session_needs_aws(False) → early return (no subprocess fire).
+  (DJ.1 — the prior RECON_GEN_E2E env-gate was retired 2026-06-15;
+  e2e tests collect by default now.)
 - Idempotency: sentinel-present skips the subprocess fire.
 - Subprocess shape: argv matches ``recon-gen json apply --execute -c
   <cfg> --l2 <l2> -o <out>``.
@@ -32,7 +34,6 @@ import pytest
 
 from recon_gen.common.env_keys import (
     RECON_GEN_CONFIG,
-    RECON_GEN_E2E,
     RECON_GEN_QS_CONFIG,
     RECON_GEN_RUN_DIR,
     RECON_GEN_SKIP_QS_DEPLOY,
@@ -110,7 +111,6 @@ def _run_fixture(
 
 def _arm_required_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path]:
     """Set the env vars the fixture reads on the happy path."""
-    monkeypatch.setenv(RECON_GEN_E2E.name, "1")
     monkeypatch.delenv(RECON_GEN_SKIP_QS_DEPLOY.name, raising=False)
     cfg_path = tmp_path / "cfg.yaml"
     cfg_path.write_text("placeholder")
@@ -128,23 +128,10 @@ def _arm_required_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[
 # ---------------------------------------------------------------------------
 
 
-def test_qs_deployed_skips_when_e2e_unset(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
-) -> None:
-    """RECON_GEN_E2E unset → no subprocess fire (unit / non-e2e sessions)."""
-    monkeypatch.delenv(RECON_GEN_E2E.name, raising=False)
-    request = _mk_request(needs_aws=True)
-    tpf = _mk_tmp_path_factory(tmp_path, monkeypatch)
-    with patch.object(subprocess, "run") as run_mock:
-        _run_fixture(request=request, cfg=MagicMock(), tmp_path_factory=tpf)
-    run_mock.assert_not_called()
-
-
 def test_qs_deployed_skips_when_skip_env_set(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
     """RECON_GEN_SKIP_QS_DEPLOY set → operator escape hatch fires; no subprocess."""
-    monkeypatch.setenv(RECON_GEN_E2E.name, "1")
     monkeypatch.setenv(RECON_GEN_SKIP_QS_DEPLOY.name, "1")
     request = _mk_request(needs_aws=True)
     tpf = _mk_tmp_path_factory(tmp_path, monkeypatch)
@@ -159,7 +146,6 @@ def test_qs_deployed_skips_when_session_doesnt_need_aws(
     """_session_needs_aws(session) == False → no subprocess fire (db /
     app2 tier sessions inherit this conftest but their fixtures don't
     touch AWS)."""
-    monkeypatch.setenv(RECON_GEN_E2E.name, "1")
     monkeypatch.delenv(RECON_GEN_SKIP_QS_DEPLOY.name, raising=False)
     request = _mk_request(needs_aws=False)
     tpf = _mk_tmp_path_factory(tmp_path, monkeypatch)

@@ -13,7 +13,7 @@ Two legs:
 
 X.2.q.3 will fold a real app (L1) onto a single ``@parametrize(["qs",
 "app2"])`` fixture so one body verifies both renderers. Gated by
-``RECON_GEN_E2E`` like every e2e (``conftest.py`` matches on path) and
+(DJ.1 retired the prior RECON_GEN_E2E gate — e2e tests collect by default) and
 skips cleanly without Playwright.
 """
 

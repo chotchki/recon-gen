@@ -424,12 +424,13 @@ jobs:
         # and returns immediately — no testcontainers spin, no second
         # container competing for resources.
         #
-        # `RECON_GEN_E2E=1` lets the e2e-tier pytest collections run.
-        # `RECON_E2E_USER_ARN` is consumed by the qs_browser layer for
-        # embed URL minting (also derivable from cfg.auth, kept
-        # explicit for parity with the legacy e2e.yml shape).
+        # DJ.1 (2026-06-15) — RECON_GEN_E2E env-var gate retired.
+        # e2e-tier tests collect by default; per-fixture cfg-shape
+        # checks gate the heavyweight setup. RECON_E2E_USER_ARN is
+        # consumed by the qs_browser layer for embed URL minting
+        # (also derivable from cfg.auth, kept explicit for parity
+        # with the legacy e2e.yml shape).
         env:
-          RECON_GEN_E2E: "1"
           RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
           # Phase DC.3 — Cloudflare API token for the run-internal TLS
           # coordinator (ensure_dev_env). Scope: Zone:DNS:Edit on

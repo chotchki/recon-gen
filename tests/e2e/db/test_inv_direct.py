@@ -31,7 +31,6 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from recon_gen.common.db import connect_demo_db, execute_script
-from recon_gen.common.env_keys import RECON_GEN_E2E
 from recon_gen.common.l2 import (
     L2Instance,
     load_instance,
@@ -39,11 +38,6 @@ from recon_gen.common.l2 import (
 )
 from recon_gen.common.l2.primitives import SCOPE_INTERNAL
 
-if not RECON_GEN_E2E.get_or_none():
-    pytest.skip(
-        "Investigation agreement producer needs RECON_GEN_E2E=1",
-        allow_module_level=True,
-    )
 
 # noqa: E402 — post-skip imports keep collection cheap on the unit job
 from recon_gen.common.spine import (  # noqa: E402

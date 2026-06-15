@@ -11,7 +11,7 @@ Constraints (per `[feedback_browser_drivers_user_facing_locators]`):
 - No Playwright in the test body (X.2.q's no-playwright-leak lint);
   driver-only.
 
-Gated behind `RECON_GEN_E2E=1`; tier=QS_BROWSER; needs=PLAYWRIGHT.
+tier=QS_BROWSER; needs=PLAYWRIGHT. (DJ.1 retired the RECON_GEN_E2E gate.)
 """
 
 from __future__ import annotations

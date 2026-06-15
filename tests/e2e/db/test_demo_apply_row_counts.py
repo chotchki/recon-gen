@@ -30,12 +30,6 @@ import pytest
 
 from recon_gen.common.config import Config
 from recon_gen.common.db import connect_demo_db
-from recon_gen.common.env_keys import RECON_GEN_E2E
-
-if not RECON_GEN_E2E.get_or_none():
-    pytest.skip(
-        "e2e tests disabled (set RECON_GEN_E2E=1)", allow_module_level=True,
-    )
 
 
 # Matview suffixes expected to be non-empty for any validated L2 instance.

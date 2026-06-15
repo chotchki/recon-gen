@@ -63,7 +63,6 @@ from recon_gen.common.env_keys import (
     RECON_GEN_DEMO_DATABASE_URL_OR,
     RECON_GEN_DEMO_DATABASE_URL_PG,
     RECON_GEN_QS_CONFIG,
-    RECON_GEN_E2E,
     RECON_GEN_FUZZ_SEED,
     RECON_GEN_LAYER,
     RECON_GEN_ORACLE_IMAGE,
@@ -809,7 +808,7 @@ def _layer_command(
         # contention, just N× wall on producer modules (acceptable).
         return (cmd, env_addl)
     if layer == "db":
-        # 3a — DB-touching pytest (behind RECON_GEN_E2E=1). CB.6: discover
+        # 3a — DB-touching pytest. CB.6: discover
         # via the per-tier directory ``tests/e2e/db/`` — the conftest there
         # auto-applies ``@tier(Tier.DB)``, so adding a new DB-tier test is
         # ``touch tests/e2e/db/test_foo.py`` instead of editing this
@@ -826,7 +825,7 @@ def _layer_command(
         cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
         # CB.7-followup (2026-06-02) — loadgroup dropped; see unit-layer note.
-        return (cmd, {**env_addl, RECON_GEN_E2E.name: "1"})
+        return (cmd, env_addl)
     if layer == "app2":
         # b.3.impl.layer — App2 e2e (HTMX dialect, Playwright WebKit
         # against the App2 Starlette server). CB.6: discover via the
@@ -861,7 +860,7 @@ def _layer_command(
         # `tests/e2e/app2/` directory with NO `-m` filter — that hazard
         # does not apply here. Leave qs_browser at default `--dist=load`.
         cmd += ["--dist=loadgroup"]
-        return (cmd, {**env_addl, RECON_GEN_E2E.name: "1"})
+        return (cmd, env_addl)
     # DI phase — ``deploy`` retired as a chain layer. The session-autouse
     # ``qs_deployed`` fixture in ``tests/e2e/conftest.py`` owns deploy;
     # the qs_api + qs_browser pytest invocations fire it at session
@@ -875,7 +874,7 @@ def _layer_command(
         # ``@tier(Tier.QS_API)``) PLUS root-e2e files carrying the
         # legacy ``pytest.mark.api`` mark (parametrized [qs, app2]
         # tests that live at the root and partition by mark).
-        # Behind `RECON_GEN_E2E=1`.
+        
         #
         # Default `-n 4` (capped) — pre-cap (2026-05-17), this layer
         # ran ``-n auto`` (= cpu_count, ~10-12 workers on a beefy Mac)
@@ -898,12 +897,12 @@ def _layer_command(
         cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "4"]
         # CB.7-followup (2026-06-02) — loadgroup dropped; see unit-layer note.
-        return (cmd, {**env_addl, RECON_GEN_E2E.name: "1"})
+        return (cmd, env_addl)
     if layer == "qs_browser":
         # Y.2.gate.c.5.browser — Playwright WebKit e2e against deployed QS
         # embed URLs. Pytest mark `browser`. Default `-n 4` per existing
         # `./run_e2e.sh` pattern (browser tier is heavy enough that 8+
-        # workers thrash QS embed limits). Behind `RECON_GEN_E2E=1`.
+        # workers thrash QS embed limits).
         # `RECON_E2E_USER_ARN` already in subprocess env via h.1 derivation.
         #
         # CB.5 stage 2 follow-up (qs-browser-skip-triage, 2026-06-11) —
@@ -977,7 +976,7 @@ def _layer_command(
         # (tests/e2e/conftest.py) is fine for a local-pg container but too
         # tight for the `aw` target's remote Aurora / Oracle. Operator-set
         # value wins.
-        browser_env = {**env_addl, RECON_GEN_E2E.name: "1"}
+        browser_env = env_addl
         if RECON_E2E_PAGE_TIMEOUT.name not in os.environ:
             browser_env[RECON_E2E_PAGE_TIMEOUT.name] = "60000"
         return (cmd, browser_env)
@@ -5202,7 +5201,7 @@ def cmd_triage(args: argparse.Namespace) -> int:
     # must match the chain's `up_to=<layer>` env shape EXACTLY. Pull the
     # layer-specific env_addl from `_layer_command(layer, ...)` (the same
     # function `cmd_up_to`'s dispatch loop calls per layer) and merge it
-    # into the spawn env. This brings in RECON_GEN_E2E=1 +
+    # into the spawn env. This brings in
     # RECON_GEN_LAYER + RECON_GEN_DEMO_DATABASE_URL[_PG/_OR] +
     # RECON_E2E_PAGE_TIMEOUT + the SKIP_PYRIGHT/BIOME/TAILWIND set the
     # chain's qs_browser layer sets — without which the e2e conftest's

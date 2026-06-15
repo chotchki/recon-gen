@@ -1,12 +1,14 @@
 """Shared fixtures for end-to-end tests.
 
-All e2e tests are skipped unless RECON_GEN_E2E=1 is set. This keeps
-`pytest` fast and free of AWS dependencies by default.
+DJ.1 (2026-06-15) — the RECON_GEN_E2E env-var gate retired. e2e tests
+now collect by default. Session-scoped fixtures (qs_deployed,
+pg_container_url, dex_container_url) handle their own AWS / cfg-shape
+skips per POLICY 1 (CI ≡ local, no env-var divergence).
 
-Required env vars (or config.yaml):
-    RECON_GEN_AWS_ACCOUNT_ID
-    RECON_GEN_AWS_REGION
-    RECON_GEN_DATASOURCE_ARN (or RECON_GEN_DEMO_DATABASE_URL)
+Required cfg.yaml fields for the QS-touching path:
+    aws.account_id
+    aws.region
+    auth.aws.quicksight_user_arn (or derived via aws.profile + STS)
 
 Optional env vars for tuning:
     RECON_E2E_PAGE_TIMEOUT   — page load timeout in ms (default 30000)
@@ -16,6 +18,7 @@ Optional env vars for tuning:
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -29,7 +32,6 @@ from recon_gen.common.env_keys import (
     RECON_E2E_PAGE_TIMEOUT,
     RECON_E2E_VISUAL_TIMEOUT,
     RECON_GEN_CONFIG,
-    RECON_GEN_E2E,
     RECON_GEN_QS_CONFIG,
     RECON_GEN_RUN_DIR,
     RECON_GEN_SKIP_QS_DEPLOY,
@@ -89,19 +91,6 @@ def _session_needs_aws(session: pytest.Session | None) -> bool:
             break
     session._recon_aws_required = needs_aws  # type: ignore[attr-defined]: cache attribute attached to session at runtime per BV.3.3.f gate
     return needs_aws
-
-
-def pytest_collection_modifyitems(
-    config: pytest.Config, items: list[pytest.Item],
-) -> None:
-    """Skip all e2e tests unless RECON_GEN_E2E=1."""
-    del config  # unused; required by the pytest hook signature
-    if RECON_GEN_E2E.get_or_none():
-        return
-    skip = pytest.mark.skip(reason="e2e tests disabled (set RECON_GEN_E2E=1)")
-    for item in items:
-        if "e2e" in str(item.fspath):
-            item.add_marker(skip)
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -457,8 +446,6 @@ def _refresh_matviews_once_per_session(  # pyright: ignore[reportUnusedFunction]
     matviews) is logged and the session continues — the tests will
     report their own DB-state-derived failures.
     """
-    if not RECON_GEN_E2E.get_or_none():
-        return
     # BV.3.3.f — skip when no AWS-dependent test runs this session.
     # The cfg's demo DB (Aurora in production) is irrelevant for
     # sqlite/local-PG tests that bring their own DB; the connect-
@@ -676,10 +663,9 @@ def qs_deployed(  # pyright: ignore[reportUnusedFunction]: pytest autouse fixtur
 
     Gate ordering (collection-time skip cascade):
 
-    1. ``RECON_GEN_E2E`` unset → return (unit / non-e2e sessions).
-    2. ``RECON_GEN_SKIP_QS_DEPLOY`` set → return (operator escape
+    1. ``RECON_GEN_SKIP_QS_DEPLOY`` set → return (operator escape
        hatch; "I deployed manually 30s ago, just run the test").
-    3. ``_session_needs_aws(session)`` returns False → return (db-tier
+    2. ``_session_needs_aws(session)`` returns False → return (db-tier
        and app2-tier sessions inherit this conftest but their fixture
        closures don't touch AWS).
 
@@ -687,9 +673,6 @@ def qs_deployed(  # pyright: ignore[reportUnusedFunction]: pytest autouse fixtur
     four apps. Single fire per session under 16-worker xdist (vs 16×
     if not gated).
     """
-    import os
-    if os.environ.get(RECON_GEN_E2E.name) != "1":
-        return
     if RECON_GEN_SKIP_QS_DEPLOY.get_or_none():
         return
     if not _session_needs_aws(request.session):
@@ -848,9 +831,6 @@ def _qs_pre_warm_dashboards(  # pyright: ignore[reportUnusedFunction]: pytest au
     fire against a stale (or missing) dashboard set.
     """
     del qs_deployed  # consumed via the param ordering dep only
-    import os
-    if os.environ.get(RECON_GEN_E2E.name) != "1":
-        return
     # BV.3.3.f — skip when no AWS-dependent test runs this session.
     # Lazy-request the AWS fixtures from inside the body so this
     # autouse fixture's own parameter list doesn't contaminate the

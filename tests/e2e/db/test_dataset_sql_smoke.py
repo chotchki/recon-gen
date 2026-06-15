@@ -48,7 +48,6 @@ from recon_gen.common.db import connect_demo_db
 from recon_gen.common.env_keys import (
     EnvVarInvalid,
     RECON_GEN_CONFIG,
-    RECON_GEN_E2E,
     RECON_GEN_TEST_L2_INSTANCE,
 )
 from recon_gen.common.l2 import L2Instance, load_instance
@@ -63,10 +62,6 @@ from recon_gen.common.models import DataSet, DatasetParameter
 # label) so the collection-time PLAIN cfg's names match the runtime
 # isolated cfg's names exactly.
 
-if not RECON_GEN_E2E.get_or_none():
-    pytest.skip(
-        "e2e tests disabled (set RECON_GEN_E2E=1)", allow_module_level=True,
-    )
 
 
 # ---------------------------------------------------------------------------

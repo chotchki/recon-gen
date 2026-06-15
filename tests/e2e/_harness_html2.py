@@ -21,9 +21,9 @@ verified against both dialects when the X.2.a.5 cross-dialect
 parity tests land.
 
 No AWS, no embed URL, no QuickSight identity region. Just uvicorn
-+ Playwright. Fast enough that gating behind ``RECON_GEN_E2E=1`` is
-the only e2e-suite concession — local devs setting that env var
-get the dialect parity tests in the same run as the QS tests.
++ Playwright. Fast enough that running by default (post-DJ.1, when
+the prior RECON_GEN_E2E env-gate was retired) costs little — local
+devs get the dialect parity tests in the same run as the QS tests.
 """
 
 from __future__ import annotations

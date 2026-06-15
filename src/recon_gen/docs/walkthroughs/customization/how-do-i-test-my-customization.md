@@ -28,7 +28,7 @@ now, and where do I add a test for the change I just made?"
 Three reference points:
 
 - **`tests/`** — the shipped pytest suite. Two layers: unit /
-  integration (fast, no AWS) and e2e (gated on `RECON_GEN_E2E=1`,
+  integration (fast, no AWS) and e2e (
   hits a real AWS account).
 - **`tests/test_dataset_contract.py`** — the contract test.
   For every dataset, asserts the SQL projection's column
@@ -143,7 +143,7 @@ new index) are most likely to fail tests here. The fix is
 usually to update the matching test expectation alongside the
 schema change.
 
-### Layer 4 — End-to-end (`tests/e2e/*`, gated on `RECON_GEN_E2E=1`)
+### Layer 4 — End-to-end (`tests/e2e/*`)
 
 The expensive layer. Two sub-layers:
 

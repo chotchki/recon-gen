@@ -14,18 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 
-from recon_gen.common.env_keys import RECON_GEN_E2E
-
-if not RECON_GEN_E2E.get_or_none():
-    # Mirror the L2 producers' module-level skip so the validator
-    # collection matches the producer collection (the @inputs marker
-    # requires the producer nodeids to exist in the same collection).
-    pytest.skip(
-        "Investigation agreement validator needs RECON_GEN_E2E=1",
-        allow_module_level=True,
-    )
 
 from tests._marks import inputs  # noqa: E402
 from tests.e2e._agreement import read_rendered_rows  # noqa: E402

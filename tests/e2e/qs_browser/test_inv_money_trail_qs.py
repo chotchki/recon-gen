@@ -11,13 +11,7 @@ from typing import TYPE_CHECKING, Iterator
 
 import pytest
 
-from recon_gen.common.env_keys import RECON_GEN_E2E
 
-if not RECON_GEN_E2E.get_or_none():
-    pytest.skip(
-        "QS L2 money_trail producer needs RECON_GEN_E2E=1",
-        allow_module_level=True,
-    )
 
 # noqa: E402 — post-skip imports
 from tests.audit._inv_dashboard_extract import (  # noqa: E402

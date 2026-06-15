@@ -30,7 +30,7 @@ than clarify.
 
 Gates:
 
-- ``RECON_GEN_E2E=1`` — same as every other tests/e2e/ file
+- (DJ.1 retired the prior RECON_GEN_E2E env-gate.)
 - A reachable DB (cfg.db.url + driver installed)
 - ``RECON_GEN_TEST_L2_INSTANCE=<path>`` — points at the L2 YAML that
   matches the seeded DB. Defaults to ``spec_example`` (rarely what you

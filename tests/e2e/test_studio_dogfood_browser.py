@@ -43,7 +43,7 @@ AI.2.d.2 ship sequence (piece-by-piece per user 2026-05-25):
 3. **Then** — full `create_l2` walk for spec_example, with the same
    AI.4 + AI.5 equivalence assertions on the saved YAML.
 
-Gated behind ``RECON_GEN_E2E=1`` per conftest.
+(DJ.1 retired the prior RECON_GEN_E2E gate — e2e tests collect by default.)
 """
 
 from __future__ import annotations

@@ -388,15 +388,14 @@ RECON_GEN_LAYER: Final = EnvVar(
     optional=True,
 )
 
-# E2E gate — every test under ``tests/e2e/`` checks this and skips
-# silently when unset. Operator opts in for the heavyweight cells
-# (DB / AWS / Playwright). Bool semantics: any non-empty = on.
-RECON_GEN_E2E: Final = EnvVar(
-    name="RECON_GEN_E2E",
-    description="Bool gate for tests/e2e/ — set to any non-empty value to enable.",
-    coercer=_bool_coercer,
-    optional=True,
-)
+# DJ.1 (2026-06-15) — RECON_GEN_E2E env-var gate retired. Operator
+# confirmed 2026-06-14 there's no marginal AWS cost on QS subscription
+# (subscription fixed-cost; cleanup sweep wipes resources), so the
+# silent-skip-when-unset behavior was pure POLICY 1 divergence
+# (operators forgot the env var → ghost-pass locally while CI was
+# green). E2E tests now collect by default; per-fixture cfg-shape
+# checks (qs_deployed needs aws creds; dex_container_url needs
+# cfg.auth.oidc + cfg.app2.tls) gate the heavyweight setup.
 
 # v14.0.0 — chain-wide ``as_of`` anchor pin. Set by the test layer
 # chain runner at chain start (writes to env_overrides for every layer
@@ -909,8 +908,8 @@ RECON_E2E_SCREENSHOT_DIR: Final = EnvVar(
 )
 
 # tests/audit/test_pdf_matches_scenario.py — bool gate for
-# destructive DB tests in the audit suite. Same shape as
-# RECON_GEN_E2E (any non-empty = on).
+# destructive DB tests in the audit suite. Bool semantics: any
+# non-empty value = on.
 RECON_GEN_DB_TESTS: Final = EnvVar(
     name="RECON_GEN_DB_TESTS",
     legacy_name="QS_GEN_DB_TESTS",

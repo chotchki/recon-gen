@@ -46,13 +46,7 @@ import pytest
 
 from recon_gen.common.config import Config
 from recon_gen.common.db import connect_demo_db
-from recon_gen.common.env_keys import RECON_GEN_E2E
 
-if not RECON_GEN_E2E.get_or_none():
-    pytest.skip(
-        "spine live-agreement test requires RECON_GEN_E2E=1",
-        allow_module_level=True,
-    )
 
 from recon_gen.common.spine import (  # noqa: E402 — post-skip imports
     AnomalyInvariant,

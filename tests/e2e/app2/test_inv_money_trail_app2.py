@@ -13,13 +13,7 @@ from typing import TYPE_CHECKING, Any, Iterator
 import pytest
 
 from recon_gen.common.db import connect_demo_db, execute_script
-from recon_gen.common.env_keys import RECON_GEN_E2E
 
-if not RECON_GEN_E2E.get_or_none():
-    pytest.skip(
-        "App2 L2 money_trail tier needs RECON_GEN_E2E=1",
-        allow_module_level=True,
-    )
 
 # noqa: E402 — post-skip imports
 from recon_gen.common.l2 import (  # noqa: E402

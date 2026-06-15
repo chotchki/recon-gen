@@ -41,7 +41,7 @@ works as a single-dialect pin for back-compat. Helpers use
 for column introspection so every read works across all three
 dialects without dialect branching at the test layer.
 
-Gated behind ``RECON_GEN_E2E=1`` per conftest (the ``browser`` marker).
+(DJ.1 retired the prior RECON_GEN_E2E gate; tier-scoping via the ``browser`` marker stays.)
 File lives under ``tests/e2e/app2/`` so the dir-conftest auto-applies
 ``@tier(Tier.APP2)``.
 """

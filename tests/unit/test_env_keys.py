@@ -16,7 +16,6 @@ from recon_gen.common.env_keys import (
     RECON_E2E_USER_ARN,
     RECON_GEN_CONFIG,
     RECON_GEN_DEMO_DATABASE_URL,
-    RECON_GEN_E2E,
     RECON_GEN_FUZZ_SEED,
     RECON_GEN_RUN_DIR,
     RECON_GEN_RUNNER_YES,
@@ -249,7 +248,6 @@ def test_canonical_specs_are_present() -> None:
     expected_names = {
         "RECON_GEN_RUN_DIR",
         "RECON_GEN_LAYER",
-        "RECON_GEN_E2E",
         "RECON_GEN_DEMO_DATABASE_URL",
         "RECON_GEN_TRACE_ALL",
         "RECON_GEN_FUZZ_SEED",
@@ -262,7 +260,7 @@ def test_canonical_specs_are_present() -> None:
         "RECON_E2E_IDENTITY_REGION",
     }
     actual_specs = [
-        RECON_GEN_RUN_DIR, RECON_GEN_E2E, RECON_GEN_DEMO_DATABASE_URL,
+        RECON_GEN_RUN_DIR, RECON_GEN_DEMO_DATABASE_URL,
         RECON_GEN_TRACE_ALL, RECON_GEN_FUZZ_SEED, RECON_GEN_RUNNER_YES,
         RECON_GEN_CONFIG, RECON_GEN_TEST_L2_INSTANCE,
         RECON_E2E_USER_ARN, RECON_E2E_IDENTITY_REGION,
