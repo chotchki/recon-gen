@@ -6,9 +6,9 @@
 
 ## Problem statement
 
-Operator observation 2026-06-15 — jumping from the L1 Drift "leaf account drift" cell to the Daily Statement sheet doesn't pre-populate the destination's account picker. The drill's `account_id` reaches the destination URL / parameter store, but the picker control on Daily Statement doesn't bind to it; analysts read the destination as "any account" when the upstream drill said "this account".
+Operator observation 2026-06-15 — jumping from the L1 Drift "Leaf Account Drift" table's "View Daily Statement for this account-day" drill to the Daily Statement sheet doesn't pre-populate the destination's account picker. The drill writes `pL1DsAccount=<account_id>` + `pL1DsBalanceDate=<business_day>` per `apps/l1_dashboard/app.py:813-821`, but the picker control on Daily Statement doesn't bind to those values; analysts read the destination as "any account" when the upstream drill said "this account-day".
 
-The reported bug is real, but the cross-cutting observation matters more: **there is no guardrail today asserting that any cross-sheet drill actually lands on a populated destination.** Every drill — and there are several per app, across four apps and two renderers — is currently covered by an operator manually clicking it during a cold-read. A regression in any drill's wiring stays silent until someone happens to walk that flow.
+The reported bug is real, but the cross-cutting observation matters more: **there is no guardrail today asserting that any cross-sheet drill actually lands on a populated destination.** Coverage today is hand-listed and partial — see "Existing coverage and the actual gap" below.
 
 DL closes the gap by:
 
@@ -25,6 +25,32 @@ The user-reported drift→daily-statement bug lands as one of the parametrized f
 - **Both renderers** (`[qs, app2]` parametrize per existing E2E test convention). Cross-sheet drill mechanics differ across renderers (QS writes to the parameter store via DrillWrite; App2 threads via URL `?param_<name>=<value>` into the destination's filter form initial state). Both paths need coverage.
 - **POLICY 2 structured-triple for renderer-specific permanent gaps.** If a drill's picker-value assertion can never pass on one renderer because of a documented capability gap (e.g. [[project_qs_url_parameter_no_control_sync]] — QS URL parameter doesn't sync sheet controls; the data filters but the picker shows "All"), DL.3 applies the POLICY 2 structured triple: `NotImplementedError` in the driver verb with a comment cross-linking the memory entry; an entry in `docs/reference/quicksight-quirks.md`; a memory file under `project_<renderer>_<gap>.md`. Bare skip / xfail is not an option per POLICY 2.
 - **One commit per leaf** (bisect-friendly); release ships as part of v14.5.0.
+
+## Existing coverage and the actual gap
+
+Before scoping DL, audit of existing tests (2026-06-15):
+
+**json tier:**
+- `tests/json/test_cross_sheet_drill_date_widening.py` programmatically walks the emitted L1 analysis JSON, finds every drill whose target is `l1-sheet-transactions`, and asserts each drill's `writes=` list includes wide-static `pL1DateStart` / `pL1DateEnd`. **Programmatic enumeration**, **single class of check** (date widening), **single sheet** (Transactions), **single app** (L1).
+
+**e2e tier (per-drill hand-written, both renderers via `[qs, app2]` fixture):**
+- `tests/e2e/test_l1_cross_sheet_drill_date_widening.py::test_pending_aging_drill_to_transactions_shows_target` — fires the Stuck Pending Detail drill, calls `wait_loaded(_TRANSACTIONS_TITLE)`, asserts `len(driver.table_rows(_TRANSACTIONS_TITLE)) > 0`. **Already covers the "did content render?" assertion.**
+- `tests/e2e/test_l2ft_cross_sheet_drill.py::test_l2_exceptions_view_in_rails_narrows_destination` — fires L2 Violation Detail → Rails drill, reads destination's `rail_name` column, asserts every row matches the drilled value. **Already covers picker-narrowed-to-value contract**, the strongest assertion.
+- `tests/e2e/test_l2ft_cross_sheet_drill.py::test_l2_exceptions_view_in_chains_narrows_destination` — same shape for Chains.
+- `tests/e2e/test_inv_drilldown.py::test_account_network_table_walk_rerenders_table` — fires the Account Network row drill, asserts re-render.
+
+**What's actually missing:**
+
+| Gap | Evidence |
+|---|---|
+| The user-reported drill (Drift's Leaf Account Drift → Daily Statement) has NO existing test | `grep -rn "Leaf Account Drift\|drift.*daily" tests/e2e/` returns only filtering tests, never the drill |
+| Coverage is hand-listed: a new drill added to any app gets zero e2e coverage by default | The four covered drills (Pending Aging, two L2FT, Account Network) are each their own bespoke test; no shared walker |
+| The json walker is single-class (date widening) and single-target (Transactions sheet only) | `_drills_into_transactions` hardcodes the target sheet ID; can't be reused for "drills into Daily Statement" without copy-pasting the walker |
+| Several other Daily Statement drill sites exist | `grep "View Daily Statement" apps/l1_dashboard/app.py` finds 12 drill construction sites — none have e2e coverage |
+
+The operator was correct that **a check exists** — the per-drill e2e pattern already asserts content (via `wait_loaded` + `table_rows`) and in some cases picker-narrowed-to-value. The actual gap is **enumeration coverage**: the pattern only fires for the drills somebody hand-wrote a test for. DL.1 builds the missing tree-walk; DL.2 builds the parametrized harness that reuses the existing per-drill assertion shape (wait_loaded + table_rows + picker-narrow assert) but applies it to every drill the tree-walk yields.
+
+The drift→daily-statement bug surfaces in DL.2 as one parametrized failure (currently uncovered → DL.2 lights it red → DL.3 triages the actual mismatch).
 
 ## Why tree-walk enumeration over a hand-listed allowlist
 
