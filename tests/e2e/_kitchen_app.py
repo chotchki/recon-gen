@@ -317,6 +317,22 @@ def build_kitchen_app(cfg: Config) -> App:
         trigger="DATA_POINT_MENU",
     ))
 
+    # Same-sheet drill — walk-the-flow style. Re-renders the showcase
+    # sheet around the clicked bar's category (writes pKitchenCategory
+    # to its own row value, no sheet navigation). target_sheet=AUTO
+    # (default) signals "the sheet that owns me"; App.resolve_auto_ids
+    # back-fills the owning sheet. Pairs with the cross-sheet drill
+    # above so the kitchen sink exhaustively exercises both drill modes
+    # AND the drill-enumeration helper (DL.1) can prove it excludes
+    # same-sheet drills from the cross-sheet enumeration.
+    bar.actions.append(Drill(
+        writes=[(drill_param, DrillSourceField(
+            field_id="kitchen-bar-cat", shape=ColumnShape.ACCOUNT_DISPLAY,
+        ))],
+        name="Filter this sheet by category",
+        trigger="DATA_POINT_CLICK",
+    ))
+
     table.actions.append(Drill(
         target_sheet=drill_target,
         writes=[(drill_param, DrillSourceField(

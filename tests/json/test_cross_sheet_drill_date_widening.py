@@ -36,7 +36,9 @@ from typing import Any
 import pytest
 
 from recon_gen.apps.l1_dashboard.app import build_l1_dashboard_app
+from recon_gen.common.tree import App
 from tests._test_helpers import make_test_config
+from tests.e2e._helpers.drill_enumeration import iter_cross_sheet_drills
 
 
 _TRANSACTIONS_SHEET_ID = "l1-sheet-transactions"
@@ -51,57 +53,82 @@ _JsonDict = dict[str, Any]
 
 
 @pytest.fixture(scope="module")
-def emitted() -> _JsonDict:
+def kitchen_l1_app() -> App:
+    """Build the L1 Dashboard app, with auto-IDs resolved.
+
+    Shared between the tree walker (which needs the resolved tree to
+    iterate drills) and the JSON fixture (which needs the same App
+    emitted to dict). Built once per module to keep the test cheap.
+    """
     cfg = make_test_config()
     app = build_l1_dashboard_app(cfg)
-    return app.emit_analysis().to_aws_json()
+    # Idempotent — the iter_cross_sheet_drills helper also calls this,
+    # but materializing IDs here pins them BEFORE emit_analysis() runs
+    # so the JSON's action_id / visual_id values match what the tree
+    # walker observes (no auto-ID drift between the two reads).
+    app.resolve_auto_ids()
+    return app
+
+
+@pytest.fixture(scope="module")
+def emitted(kitchen_l1_app: App) -> _JsonDict:
+    return kitchen_l1_app.emit_analysis().to_aws_json()
 
 
 def _drills_into_transactions(
-    emitted: _JsonDict,
+    app: App, emitted: _JsonDict,
 ) -> list[tuple[str, str, _JsonDict]]:
-    """Yield ``(source_sheet_id, source_visual_id, drill_action_dict)`` for
-    every drill whose target sheet is the Transactions sheet."""
+    """Return ``(source_sheet_id, source_visual_id, drill_action_dict)``
+    for every cross-sheet drill whose target is the Transactions sheet.
+
+    Migrated to ``iter_cross_sheet_drills(app)`` (DL.1) — the tree
+    walker identifies the drills (by ``src_sheet`` / ``src_visual`` /
+    ``drill.action_id``), then this helper looks up the corresponding
+    action dict in the emitted JSON via those same IDs. Replaces the
+    pre-DL.1 hand-rolled dict walk; the public test's assertion shape
+    is unchanged.
+    """
     out: list[tuple[str, str, _JsonDict]] = []
+    # JSON-side index for action lookup: (sheet_id, visual_id, action_name)
+    # → action dict. (Name is used rather than action_id because the
+    # Drill emit's ``CustomActionName`` carries the human-readable name
+    # and the action_id is captured in the same dict — we key on the
+    # composite that uniquely identifies a drill in the emitted JSON.)
+    by_key: dict[tuple[str, str, str], _JsonDict] = {}
     definition: _JsonDict = emitted.get("Definition") or {}
     sheets: list[_JsonDict] = definition.get("Sheets") or []
     for sheet in sheets:
-        sheet_id: str = sheet.get("SheetId", "<unknown>")
-        if sheet_id == _TRANSACTIONS_SHEET_ID:
-            # Skip drills that target the same sheet — only cross-sheet
-            # drills INTO Transactions are the bug class.
-            continue
+        sid: str = sheet.get("SheetId", "<unknown>")
         visuals: list[_JsonDict] = sheet.get("Visuals") or []
         for v in visuals:
-            # Drill actions live under ``ChartConfiguration``-adjacent
-            # ``Actions``; the wrapping VisualVisual key varies by
-            # visual type, so we walk all visual subtypes uniformly.
-            for visual_kind, visual_body in v.items():
+            for _, visual_body in v.items():
                 if not isinstance(visual_body, dict):
                     continue
-                # visual_body narrowed to dict[str, Any] via isinstance.
                 visual_body_d: _JsonDict = visual_body  # type: ignore[assignment]: third-party stub or test scaffolding cascade
-                visual_id: str = visual_body_d.get("VisualId", "<unknown>")
-                actions: list[_JsonDict] = visual_body_d.get("Actions") or []
-                for action in actions:
-                    nav = _find_target_sheet(action)
-                    if nav == _TRANSACTIONS_SHEET_ID:
-                        out.append((sheet_id, visual_id, action))
-                _ = visual_kind
+                vid: str = visual_body_d.get("VisualId", "<unknown>")
+                actions_list: list[_JsonDict] = (
+                    visual_body_d.get("Actions") or []
+                )
+                for action in actions_list:
+                    name: str = action.get("Name") or "<unknown>"
+                    by_key[(sid, vid, name)] = action
+
+    for site in iter_cross_sheet_drills(app):
+        if site.dst_sheet.sheet_id != _TRANSACTIONS_SHEET_ID:
+            continue
+        sid = str(site.src_sheet.sheet_id)
+        # After resolve_auto_ids, visual_id is the resolved VisualId.
+        vid_raw = getattr(site.src_visual, "visual_id", None)
+        vid = str(vid_raw) if vid_raw is not None else "<unknown>"
+        name = site.drill.name
+        action_dict = by_key.get((sid, vid, name))
+        assert action_dict is not None, (
+            f"Tree walker yielded drill (sheet={sid!r} visual={vid!r} "
+            f"name={name!r}) but no matching action found in the "
+            f"emitted JSON — visual-id / action-name resolution drift."
+        )
+        out.append((sid, vid, action_dict))
     return out
-
-
-def _find_target_sheet(action: _JsonDict) -> str | None:
-    """Return the action's NavigationOperation target sheet id, or None
-    if the action isn't a navigation drill."""
-    ops: list[_JsonDict] = action.get("ActionOperations") or []
-    for op in ops:
-        nav: _JsonDict = op.get("NavigationOperation") or {}
-        local: _JsonDict = nav.get("LocalNavigationConfiguration") or {}
-        target: str | None = local.get("TargetSheetId")
-        if target:
-            return target
-    return None
 
 
 def _written_param_values(action: _JsonDict) -> dict[str, str]:
@@ -131,11 +158,13 @@ def _written_param_values(action: _JsonDict) -> dict[str, str]:
     return out
 
 
-def test_drills_into_transactions_widen_date_range(emitted: _JsonDict) -> None:
+def test_drills_into_transactions_widen_date_range(
+    kitchen_l1_app: App, emitted: _JsonDict,
+) -> None:
     """Every cross-sheet drill into the Transactions sheet must write
     the wide-window date-range params so the target row survives the
     destination's universal date filter."""
-    drills = _drills_into_transactions(emitted)
+    drills = _drills_into_transactions(kitchen_l1_app, emitted)
     assert drills, (
         "No cross-sheet drills into Transactions found in the emitted "
         "L1 dashboard JSON. Either the test selector is wrong or the "
@@ -166,7 +195,7 @@ def test_drills_into_transactions_widen_date_range(emitted: _JsonDict) -> None:
 
 
 def test_drills_into_transactions_count_matches_known_sites(
-    emitted: _JsonDict,
+    kitchen_l1_app: App, emitted: _JsonDict,
 ) -> None:
     """Sanity check: there should be exactly 5 cross-sheet drills into
     Transactions (Pending Aging / Unbundled Aging / Supersession Audit
@@ -175,7 +204,7 @@ def test_drills_into_transactions_count_matches_known_sites(
     new one is added, this fails — extending the expected count is fine,
     but flag it as a deliberate review point so the new drill's
     ``writes=`` is checked for the wide-date pattern."""
-    drills = _drills_into_transactions(emitted)
+    drills = _drills_into_transactions(kitchen_l1_app, emitted)
     expected = 4
     assert len(drills) == expected, (
         f"Expected {expected} cross-sheet drills into Transactions; "
