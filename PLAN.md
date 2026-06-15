@@ -538,7 +538,8 @@ These are related concerns — both about end-to-end resource lifecycle hygiene 
   - [ ] DJ.3.mini _diagram_154 - `src/recon_gen/common/html/_studio_assets/mini-diagram.js:154` (edit URL click).
   - [ ] DJ.3.diagram _533 - `src/recon_gen/common/html/_studio_assets/diagram.js:533` (edit-badge href).
   - [ ] DJ.3.diagram _534 - `src/recon_gen/common/html/_studio_assets/diagram.js:534` (edit-badge xlink:href).
-- [ ] DJ.4 - **Phase exit + v14.3.0 release cut** (operator-driven morning session — release notes + version bump + tag are NOT in scope for the overnight run per the autonomous-boundary rule).
+- [ ] DJ.4 - **QS MUI Autocomplete noOptions-race fix in `narrow_dropdown_options_by_query`.** Triaged from CI run 27533230182 (`test_cq_4_e_l2ft_picker_finds_known_value[qs-Rails-Rail]` failing with `Advertised (first 10 of 0): []` while DB has 30 rails). Same class as task #68 (Transactions-Transfer sheet-mount), #69 (Anchor DOM shape), #70 (Anchor MUI noOptions). After the `wait_for_selector(option | noOptions)` resolves, re-poll `_OPTION_SELECTOR` for ~2s when noOptions won the initial race + the listbox isn't yet populated. Lets a late-arriving listbox win; still returns `[]` for genuine empty results. Closes task #70 by construction.
+- [ ] DJ.5 - **Phase exit + v14.3.0 release cut** (operator-driven morning session — release notes + version bump + tag are NOT in scope for the overnight run per the autonomous-boundary rule).
 
 ## Backlog (not yet phased)
 

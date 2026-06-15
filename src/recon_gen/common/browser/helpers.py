@@ -2494,6 +2494,30 @@ def narrow_dropdown_options_by_query(
             # raised timeout so the caller can assert on the empty
             # set if that's the test contract).
             pass
+        # DJ.4 (2026-06-15) — QS sometimes flickers
+        # `.MuiAutocomplete-noOptions` while still fetching the
+        # LinkedValues source dataset; if noOptions wins the initial
+        # race and the populated listbox hasn't arrived yet, re-poll
+        # `_OPTION_SELECTOR` specifically for ~2s before reading.
+        # Lets a late-arriving listbox win; still returns `[]` for
+        # genuinely empty results (the re-poll just hits its own
+        # timeout, no harm). Closes the
+        # `[[project_qs_anchor_picker_mui_autocomplete_no_options]]`
+        # race that surfaced on Anchor (task #70) +
+        # Transactions-Transfer (#68) + L2FT Rails pickers.
+        no_options_visible = page.locator(
+            ".MuiAutocomplete-noOptions",
+        ).count() > 0
+        options_visible = page.locator(_OPTION_SELECTOR).count() > 0
+        if no_options_visible and not options_visible:
+            try:
+                page.wait_for_selector(
+                    _OPTION_SELECTOR, timeout=2_000, state="visible",
+                )
+            except _PWTimeout:
+                # Genuine empty result — the noOptions placeholder
+                # was the final state, not a transient flicker.
+                pass
     # Read both shapes (listbox + sheet_control_value-menu) so the
     # SIMPLE variant's options + the SEARCH variant's narrowed
     # options both come back through one code path.
