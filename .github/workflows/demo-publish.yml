@@ -62,6 +62,14 @@ jobs:
     # clean early abort beats opaque permission denial.
     steps:
       - name: Identify runner user
+        env:
+          # CodeQL js/cache-poisoning hardening (alert #37): inlining
+          # `${{ github.event.workflow_run.head_branch }}` directly into
+          # the bash `echo` lets a hostile branch name (`"; rm -rf / #`)
+          # land in the runner shell unescaped. Route through an env var
+          # so bash sees the value as a string literal at expand time,
+          # not as command text at parse time.
+          RELEASE_TAG: ${{ github.event.workflow_run.head_branch || 'manual' }}
         run: |
           set -eu
           if [ "$(id -un)" != "recon-demo" ]; then
@@ -70,7 +78,7 @@ jobs:
           fi
           echo "runner user: $(id -un)"
           echo "hostname:    $(hostname)"
-          echo "release tag: ${{ github.event.workflow_run.head_branch || 'manual' }}"
+          echo "release tag: $RELEASE_TAG"
 
       - name: Wait for PyPI index propagation (CZ.1 — race fix for refresh-demos.sh pip upgrade)
         if: github.event_name == 'workflow_run'
