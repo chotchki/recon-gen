@@ -140,6 +140,7 @@ def html2_server(
     dev_log: bool = False,
     startup_timeout_s: float = 5.0,
     cfg: "Config | None" = None,
+    wire_auth: bool = False,
 ) -> Iterator[str]:
     """Run an App2 Starlette server on an ephemeral port.
 
@@ -182,10 +183,12 @@ def html2_server(
             ),
         },
         dev_log=dev_log,
-        # DD.4 — when the caller passes a cfg with auth.oidc + auth.session
-        # both set, make_app wires the OIDC middleware + /auth routes.
-        # Default None keeps the existing no-auth test path untouched.
-        cfg=cfg,
+        # DD.4 — only thread cfg into make_app when the caller explicitly
+        # opts in via wire_auth=True. CI's cfg has auth.oidc + auth.session
+        # both set; if we always forwarded cfg, every existing app2 e2e
+        # would suddenly get the auth middleware wired and 302 to
+        # /auth/login. wire_auth=True is the OAuth-test-only escape hatch.
+        cfg=cfg if wire_auth else None,
         # AA.A.race.1 root-cause: the production default of max-age=60
         # on /visuals/.../data causes WebKit to serve identical-URL
         # follow-up picks (e.g. inverse → restore) from disk cache.

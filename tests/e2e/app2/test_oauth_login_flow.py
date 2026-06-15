@@ -109,6 +109,7 @@ def auth_driver(auth_cfg: Config) -> Iterator[App2Driver]:
         data_fetcher=_exec_stub_fetcher,  # pyright: ignore[reportArgumentType]: inline fetcher closure; structural DataFetcher contract holds at runtime
         dashboard_id=_DASHBOARD_ID,
         dashboard_title="Auth Test",
+        wire_auth=True,  # DD.4 — opt in to the auth middleware + /auth routes
     ) as driver:
         yield driver
 

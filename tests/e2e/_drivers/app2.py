@@ -167,6 +167,7 @@ class App2Driver:
         filter_specs: Sequence[FilterSpec] = (),
         options_search_fetcher: OptionsSearchFetcher | None = None,
         dev_log: bool = False,
+        wire_auth: bool = False,
     ) -> Generator["App2Driver", None, None]:
         """Spin a local App 2 server serving any tree + fetcher and yield
         a driver pointed at it.
@@ -200,11 +201,13 @@ class App2Driver:
             filter_specs=filter_specs,
             options_search_fetcher=options_search_fetcher,
             dev_log=dev_log,
-            # DD.4 — when cfg carries auth.oidc + auth.session blocks,
-            # html2_server forwards to make_app(cfg=...) which wires the
-            # auth middleware + /auth routes. Existing tests with no auth
-            # block in cfg keep the no-auth code path.
+            # DD.4 — opt-in auth wiring. Default off so existing app2 e2e
+            # tests keep their no-auth code path even when cfg carries
+            # the auth.oidc + auth.session blocks (which CI's cfg does).
+            # The OAuth login flow test sets wire_auth=True; nothing
+            # else should.
             cfg=cfg,
+            wire_auth=wire_auth,
         ) as url, webkit_page() as page:
             yield cls(
                 base_url=url, page=page, cfg=cfg,
