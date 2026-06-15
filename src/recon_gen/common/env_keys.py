@@ -422,6 +422,33 @@ RECON_GEN_AS_OF_ANCHOR: Final = EnvVar(
     optional=True,
 )
 
+# DK.5.bullets — marker env var set by ``recon-gen json apply``'s
+# ``_maybe_export_data_anchor`` when it auto-exports the as_of value
+# from the ``<prefix>_data_anchor`` matview (DK.4 wire shape). The
+# Info-sheet deploy stamp reads this to distinguish between three
+# operator-meaningful sources of the as_of value:
+#
+#   - cfg.test.generator.end_date pin (operator set in yaml)
+#   - RECON_GEN_AS_OF_ANCHOR set by operator (manual env pin, e.g.
+#     runner-controlled chain determinism)
+#   - data-derived: this marker == "data_anchor" — DK.4 read
+#     ``<prefix>_data_anchor`` and exported the anchor automatically
+#
+# Absent ⇒ NOT auto-derived. Either the operator pinned the env
+# manually, or live(wall-clock) is firing (the post-DK.4 case where
+# the data_anchor matview was empty / connect failed).
+RECON_GEN_AS_OF_ANCHOR_SOURCE: Final = EnvVar(
+    name="RECON_GEN_AS_OF_ANCHOR_SOURCE",
+    description=(
+        "Marker — when set to 'data_anchor', signals that DK.4's "
+        "_maybe_export_data_anchor auto-exported RECON_GEN_AS_OF_ANCHOR "
+        "from the data_anchor matview rather than the operator setting "
+        "it explicitly. Info-sheet deploy-stamp surface only."
+    ),
+    coercer=lambda s: s,
+    optional=True,
+)
+
 # Opt-in gate for the per-test DB connection-leak detector wired in
 # tests/conftest.py::pytest_runtest_teardown. Detects unclosed
 # DuckDBPyConnection instances (the post-CB.8 leak surface — `with

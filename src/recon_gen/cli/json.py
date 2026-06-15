@@ -103,7 +103,11 @@ def _maybe_export_data_anchor(cfg: Config) -> None:
     # (For in-process callers, ``RECON_GEN_AS_OF_ANCHOR.get_or_none()``
     # re-reads ``os.environ`` on each call — no module caching to bust.)
     import os  # noqa: PLC0415
+    from recon_gen.common.env_keys import RECON_GEN_AS_OF_ANCHOR_SOURCE  # noqa: PLC0415
     os.environ[RECON_GEN_AS_OF_ANCHOR.name] = anchor.isoformat()
+    # DK.5.bullets — marker for Info-sheet deploy-stamp source attribution.
+    # Distinguishes "operator pinned env" from "DK.4 auto-derived from matview".
+    os.environ[RECON_GEN_AS_OF_ANCHOR_SOURCE.name] = "data_anchor"
     click.echo(
         f"as_of pinned at {anchor.isoformat()} from "
         f"{cfg.db.table_prefix}_data_anchor (DK.4)."

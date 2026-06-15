@@ -412,6 +412,51 @@ def _cadence_summary_line(l2_instance: L2Instance) -> str:
     return f"cadence: {sparse_n} sparse, {explicit_n} explicit_daily"
 
 
+def _resolve_as_of_at_emit(cfg: Config) -> tuple[str, str]:
+    """DK.5.bullets — resolve (value, source-label) for the Info-sheet
+    deploy-stamp at emit time.
+
+    Priority mirrors :func:`recon_gen.common.config.TestGeneratorConfig.as_of_frame`
+    + the DK.4 ``_maybe_export_data_anchor`` wire shape:
+
+    1. ``cfg.test.generator.end_date`` is set in yaml — operator pinned.
+       Returns (date.isoformat(), "cfg.test.generator.end_date").
+    2. ``RECON_GEN_AS_OF_ANCHOR_SOURCE`` env == "data_anchor" — DK.4
+       auto-exported from the ``<prefix>_data_anchor`` matview. Returns
+       (env value, "data-derived (data_anchor matview)").
+    3. ``RECON_GEN_AS_OF_ANCHOR`` env is set with no DK.4-source marker
+       — operator pinned manually (runner / shell export). Returns
+       (env value, "RECON_GEN_AS_OF_ANCHOR env").
+    4. Else — ``AsOfFrame.live()`` falls through to ``date.today()`` at
+       dataset-emit time. The DK.3 deprecation comment marks this branch
+       for post-DK.4 removal; in practice it only fires if DK.4's
+       matview query returned None (cold DB / connect failure). Returns
+       (today's date, "live (wall-clock fallback)").
+
+    The Info-sheet renders these two strings as bullets; downstream
+    Latest Balance Day KPI (DK.5.kpi) is a separate live-query against
+    the matview for ETL-cadence freshness comparison.
+    """
+    if cfg.test.generator.end_date is not None:
+        return (cfg.test.generator.end_date.isoformat(),
+                "cfg.test.generator.end_date")
+    from recon_gen.common.env_keys import (  # noqa: PLC0415
+        RECON_GEN_AS_OF_ANCHOR,
+        RECON_GEN_AS_OF_ANCHOR_SOURCE,
+    )
+    anchor = RECON_GEN_AS_OF_ANCHOR.get_or_none()
+    source = RECON_GEN_AS_OF_ANCHOR_SOURCE.get_or_none()
+    if anchor is not None and source == "data_anchor":
+        return (anchor.isoformat(),
+                "data-derived (data_anchor matview)")
+    if anchor is not None:
+        return (anchor.isoformat(), "RECON_GEN_AS_OF_ANCHOR env")
+    # Live(wall-clock) — DK.3-deprecated path. Read via _as_of_today so
+    # the value at emit matches what AsOfFrame.live() would produce.
+    from recon_gen.common.as_of_frame import _as_of_today  # noqa: PLC0415
+    return (_as_of_today().isoformat(), "live (wall-clock fallback)")
+
+
 def populate_app_info_sheet(
     cfg: Config,
     sheet: Sheet,
@@ -480,12 +525,31 @@ def populate_app_info_sheet(
     # ``__build_info__.build_kind`` baked into the wheel, not by inferring
     # build kind from dialect.
     dialect_line = f"dialect: {dialect}"
+    # DK.5.bullets — as_of resolution surface. Operators reading the
+    # deploy stamp need to know (a) which calendar day the dashboards
+    # default to, and (b) where that value came from. The four
+    # operator-meaningful sources:
+    #
+    #   - "cfg.test.generator.end_date"     — pinned in yaml
+    #   - "RECON_GEN_AS_OF_ANCHOR env"      — pinned manually via env
+    #   - "data-derived (data_anchor matview)"
+    #                                       — DK.4 auto-export from feed
+    #   - "live (wall-clock fallback)"     — DK.3-deprecated; should not
+    #                                          fire in prod post-DK.4
+    #
+    # Tracked via `cfg.test.generator.end_date` + RECON_GEN_AS_OF_ANCHOR
+    # + RECON_GEN_AS_OF_ANCHOR_SOURCE env. The deploy stamp is baked at
+    # emit time so the value is locked once; live-changing data freshness
+    # lives in the "Latest Balance Day" KPI (DK.5.kpi).
+    as_of_value, as_of_source = _resolve_as_of_at_emit(cfg)
     bullet_lines = [
         f"recon-gen: v{version}",
         f"git: {sha}",
         f"generated: {ts}",
         dialect_line,
         f"prefix: {prefix}",
+        f"as_of (at emit): {as_of_value}",
+        f"as_of source: {as_of_source}",
     ]
     if l2_instance is not None:
         bullet_lines.append(_cadence_summary_line(l2_instance))
