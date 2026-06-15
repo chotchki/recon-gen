@@ -525,3 +525,81 @@ def test_load_config_raises_when_path_missing() -> None:
     from recon_gen.common.config import CfgError
     with pytest.raises(CfgError, match="cfg path does not exist"):
         load_config("/nonexistent/path/cfg.yaml")
+
+
+# ---------------------------------------------------------------------------
+# write_yaml — mutate-via-`dataclasses.replace`-then-save round-trip
+# (restored 2026-06-15; original Config.write_yaml landed pre-DE.5 then
+# was dropped in DE.5.config_v14_consolidation.C alongside the flat-yaml
+# loader retirement. Operator use case: edit a cfg in-process then
+# persist back to disk via `cfg.write_yaml(path)`. Round-trip semantics
+# matter; byte-identity does not.)
+# ---------------------------------------------------------------------------
+
+
+def test_write_yaml_round_trips_minimal_cfg(tmp_path: Path) -> None:
+    """The minimal cfg loads, writes back out, and re-loads to the same
+    semantic Config — Dialect coerced through .value, no None bloat."""
+    p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
+    cfg = load_config(p)
+    out_path = tmp_path / "out.yaml"
+    cfg.write_yaml(out_path)
+    cfg2 = load_config(out_path)
+    assert cfg2.aws.account_id == cfg.aws.account_id
+    assert cfg2.aws.region == cfg.aws.region
+    assert cfg2.aws.deployment_name == cfg.aws.deployment_name
+    assert cfg2.db.dialect is cfg.db.dialect  # Enum survived through .value
+    assert cfg2.db.url == cfg.db.url
+
+
+def test_write_yaml_after_dataclasses_replace_mutate(tmp_path: Path) -> None:
+    """Canonical use case: load, mutate via dataclasses.replace, save
+    back. The frozen-dataclass constraint forces functional mutation;
+    write_yaml is the persistence half."""
+    from dataclasses import replace
+    p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
+    cfg = load_config(p)
+    mutated = replace(
+        cfg,
+        aws=replace(cfg.aws, deployment_name="prod-deploy"),
+    )
+    mutated.write_yaml(p)
+    re_loaded = load_config(p)
+    assert re_loaded.aws.deployment_name == "prod-deploy"
+    # Other fields preserved.
+    assert re_loaded.aws.account_id == cfg.aws.account_id
+    assert re_loaded.db.dialect is Dialect.POSTGRES
+
+
+def test_write_yaml_drops_none_optional_blocks(tmp_path: Path) -> None:
+    """``cfg.auth.oidc`` / ``cfg.app2.tls`` / ``cfg.audit.signing`` are
+    all None on the minimal cfg. The emitted YAML must NOT carry
+    ``oidc: null`` etc. — load_config treats absent and null
+    equivalently, but the operator-facing file stays compact."""
+    import yaml as _yaml
+    p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
+    cfg = load_config(p)
+    out_path = tmp_path / "out.yaml"
+    cfg.write_yaml(out_path)
+    raw = _yaml.safe_load(out_path.read_text())
+    # None-valued nested fields dropped.
+    auth = raw.get("auth", {})
+    assert "oidc" not in auth
+    assert "session" not in auth
+    app2 = raw.get("app2", {})
+    assert "tls" not in app2
+    audit = raw.get("audit", {})
+    assert "signing" not in audit
+
+
+def test_write_yaml_to_stream(tmp_path: Path) -> None:
+    """write_yaml accepts an already-open text stream (use case: write
+    to stdout, write to a BytesIO buffer for tests, etc.)."""
+    import io
+    p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
+    cfg = load_config(p)
+    buf = io.StringIO()
+    cfg.write_yaml(buf)
+    rendered = buf.getvalue()
+    assert "account_id: '123456789012'" in rendered
+    assert "dialect: postgres" in rendered

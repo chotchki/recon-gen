@@ -6,10 +6,10 @@ resources reference the datasource and account specified here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast, get_args
+from typing import IO, TYPE_CHECKING, Any, Literal, cast, get_args
 
 import yaml
 
@@ -1384,6 +1384,72 @@ class Config:
     # DE.5 step 5 — legacy Config.tags() / .dataset_arn(id) /
     # .theme_arn(id) / .prefixed(name) methods dropped. All callers were
     # swept to cfg.aws.X by DE.2; those are real methods on AwsConfig.
+
+    def to_yaml_dict(self) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload — every value is something safe_dump can write
+        """Return a dict ``yaml.safe_dump`` can write that
+        ``load_config`` can re-read. Inverse of the v14 nested loader.
+
+        Use case: operator mutates a cfg via ``dataclasses.replace``
+        (the only way through a frozen dataclass) then saves back to
+        disk. Round-trip ergonomics matter; byte-identity does not.
+
+        Traps a naive ``dataclasses.asdict(cfg)`` falls into:
+
+        1. ``cfg.db.dialect`` is the ``Dialect`` enum — ``safe_dump``
+           refuses to represent it. Coerced to ``.value`` here.
+        2. ``None``-valued optional blocks (``auth.oidc`` /
+           ``app2.tls`` / ``audit.signing`` / etc.) bloat the YAML.
+           Dropped recursively so the emit reads like a hand-edited
+           minimal cfg.
+        3. Empty containers (``principal_arns: ()``, ``extra_tags:
+           ()``) — same drop. Loader supplies defaults on re-read.
+        4. ``tuple`` values become ``list`` for YAML cleanliness; the
+           loader rebuilds tuples (extra_tags pairs, principal_arns,
+           oidc.scopes, test_generator.plants).
+        """
+        raw: dict[str, Any] = asdict(self)  # typing-smell: ignore[explicit-any]: asdict returns dict[str, Any]
+        # Dialect enum — PyYAML's safe_dump can't represent it; coerce to
+        # the string Dialect(value) will accept back.
+        raw["db"]["dialect"] = self.db.dialect.value
+        return _compact_for_yaml(raw)
+
+    def write_yaml(self, dest: Path | str | IO[str]) -> None:
+        """Serialize via ``to_yaml_dict`` + ``yaml.safe_dump`` to
+        ``dest`` (a path-like or an already-open text stream).
+        Preserves field order via ``sort_keys=False`` so blocks emit
+        in dataclass declaration order (``auth`` / ``aws`` / ``db`` /
+        ``app2`` / ``audit`` / ``test``).
+        """
+        payload = self.to_yaml_dict()
+        if isinstance(dest, (str, Path)):
+            with Path(dest).open("w") as f:
+                yaml.safe_dump(payload, f, sort_keys=False)
+        else:
+            yaml.safe_dump(payload, dest, sort_keys=False)
+
+
+def _compact_for_yaml(value: Any) -> Any:  # typing-smell: ignore[explicit-any]: recursive YAML-payload walk
+    """Recursively strip ``None`` + empty-container values from a dict
+    tree + convert tuples to lists. Used by ``Config.to_yaml_dict``.
+
+    Returned dicts contain only keys whose values survived; nested
+    dicts that empty out are themselves dropped at the parent level.
+    """
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload — every value is something safe_dump can write
+        for k, v in cast("dict[str, Any]", value).items():
+            cleaned = _compact_for_yaml(v)
+            if cleaned is None:
+                continue
+            if isinstance(cleaned, (dict, list)) and not cleaned:
+                continue
+            result[k] = cleaned
+        return result
+    if isinstance(value, tuple):
+        return [_compact_for_yaml(v) for v in cast("tuple[Any, ...]", value)]
+    if isinstance(value, list):
+        return [_compact_for_yaml(v) for v in cast("list[Any]", value)]
+    return value
 
 
 # ---------------------------------------------------------------------------
