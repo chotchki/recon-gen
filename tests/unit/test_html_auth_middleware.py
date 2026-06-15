@@ -138,10 +138,14 @@ def test_missing_cookie_htmx_client_gets_401_json() -> None:
 
 
 def test_tampered_cookie_treated_as_missing() -> None:
+    # Mint with a different secret so the server's codec rejects the signature.
+    # The previous "flip the last char" approach was a 1-in-16 flake: for a 32-byte
+    # HMAC-SHA256, the last base64url char carries only 4 significant bits in the
+    # upper position, so flipping 'Y'→'a' (both upper-4 = 0110) decodes to the
+    # identical signature bytes.
     codec = JwtCodec(secret=_TEST_SECRET)
-    valid = codec.encode({"sub": "user-1"})
-    # Flip one character in the signature segment.
-    tampered = valid[:-1] + ("a" if valid[-1] != "a" else "b")
+    wrong_codec = JwtCodec(secret="other-secret-must-be-at-least-32-bytes!")
+    tampered = wrong_codec.encode({"sub": "user-1"})
     client = TestClient(_make_app(codec))
     client.cookies.set(SESSION_COOKIE_NAME, tampered)
     response = client.get(
