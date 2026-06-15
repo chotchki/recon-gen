@@ -146,6 +146,26 @@ jobs:
             echo "ORACLE_PASSWORD=${ORACLE_PASSWORD}"
           } >> "$GITHUB_ENV"
 
+      - name: Generate random OIDC credentials (DD.4)
+        # Same BX.248 mirror: per-workflow-run random secrets for the
+        # shared Dex container's OIDC client + test user + the App2 JWT
+        # signing key. All three injected into $GITHUB_ENV; the runner's
+        # _ensure_oidc_if_configured reads them via the typed
+        # RECON_GEN_OIDC_CLIENT_SECRET / RECON_GEN_JWT_SECRET /
+        # RECON_GEN_DEX_USER_PASSWORD registry.
+        run: |
+          OIDC_CLIENT_SECRET=$(openssl rand -hex 14)
+          JWT_SECRET=$(openssl rand -hex 32)
+          DEX_USER_PASSWORD=$(openssl rand -hex 14)
+          echo "::add-mask::${OIDC_CLIENT_SECRET}"
+          echo "::add-mask::${JWT_SECRET}"
+          echo "::add-mask::${DEX_USER_PASSWORD}"
+          {
+            echo "RECON_GEN_OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}"
+            echo "RECON_GEN_JWT_SECRET=${JWT_SECRET}"
+            echo "RECON_GEN_DEX_USER_PASSWORD=${DEX_USER_PASSWORD}"
+          } >> "$GITHUB_ENV"
+
       - name: Ensure shared PG + Oracle are up (reuse persistent containers when present)
         # CI box exposes PG on host port 5432 and Oracle on host port
         # 1521. `hotchkiss.io:5432` / `:1521` DDNS forwards point at
@@ -339,6 +359,17 @@ jobs:
           auth:
             aws:
               quicksight_user_arn: "${{ secrets.RECON_E2E_USER_ARN }}"
+            oidc:
+              issuer_url: "https://localci.recon-gen.hotchkiss.io:5556/dex"
+              client_id: "recon-gen-app2-test"
+              client_secret_env: "RECON_GEN_OIDC_CLIENT_SECRET"
+              redirect_uri: "https://localci.recon-gen.hotchkiss.io:8765/auth/callback"
+              scopes:
+                - "openid"
+                - "email"
+                - "profile"
+            session:
+              jwt_secret_env: "RECON_GEN_JWT_SECRET"
           app2:
             tls:
               cert_path: "~/.local/share/recon-gen/tls/ci/cert.pem"
@@ -361,6 +392,17 @@ jobs:
           auth:
             aws:
               quicksight_user_arn: "${{ secrets.RECON_E2E_USER_ARN }}"
+            oidc:
+              issuer_url: "https://localci.recon-gen.hotchkiss.io:5556/dex"
+              client_id: "recon-gen-app2-test"
+              client_secret_env: "RECON_GEN_OIDC_CLIENT_SECRET"
+              redirect_uri: "https://localci.recon-gen.hotchkiss.io:8765/auth/callback"
+              scopes:
+                - "openid"
+                - "email"
+                - "profile"
+            session:
+              jwt_secret_env: "RECON_GEN_JWT_SECRET"
           app2:
             tls:
               cert_path: "~/.local/share/recon-gen/tls/ci/cert.pem"
@@ -396,6 +438,15 @@ jobs:
           # block is set AND the chain target is in TLS_TOUCHING_LAYERS
           # ({app2, qs_api, qs_browser}).
           RECON_GEN_CLOUDFLARE_TOKEN: ${{ secrets.CLOUDFLARE_TOKEN }}
+          # Phase DD.4 — Dex IdP URL for the App2 OAuth flow. Set by
+          # the runner if the runner spun a local Dex (when this env
+          # var is absent the runner spins one); CI relies on the
+          # _ensure_oidc_if_configured short-circuit to skip spinup
+          # when this is set. Per the DD.4 design, the WSL2 runner
+          # would have a separately-managed ci-shared-dex container —
+          # tracked as a follow-up; for now the runner spawns
+          # per-workflow-run Dex when needed.
+          # RECON_GEN_DEX_URL: "https://localci.recon-gen.hotchkiss.io:5556/dex"
           # CB.17.f env-URL short-circuit — runner reads these from
           # `_start_thin_container` and skips its own container spin.
           # Both the seed (`recon-gen schema apply` etc.) and the

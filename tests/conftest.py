@@ -25,8 +25,11 @@ from recon_gen.common.env_keys import (
     EnvVarInvalid,
     RECON_GEN_DEMO_DATABASE_URL_OR,
     RECON_GEN_DEMO_DATABASE_URL_PG,
+    RECON_GEN_DEX_URL,
+    RECON_GEN_DEX_USER_PASSWORD,
     RECON_GEN_FUZZ_SEED,
     RECON_GEN_LAYER,
+    RECON_GEN_OIDC_CLIENT_SECRET,
     RECON_GEN_RUN_DIR,
     RECON_GEN_DB_CONN_LEAK_GATE,
     RECON_GEN_TEST_L2_INSTANCE,
@@ -1279,6 +1282,111 @@ def oracle_container_url(
         state_filename="oracle-container-url.txt",
     )
     os.environ[RECON_GEN_DEMO_DATABASE_URL_OR.name] = url
+    yield url
+
+
+# DD.4 — Dex (OIDC IdP) shared-container fixture. Same xdist-coordinated
+# pattern as pg_container_url; one Dex per pytest invocation, all
+# workers converge via on-disk URL rendezvous.
+def _resolve_dex_container_url(
+    *,
+    tmp_path_factory: pytest.TempPathFactory,
+    worker_id: str,
+    cfg: "object",  # avoid forward-reference; the duck-typed cfg surface keeps the conftest lazy import minimal
+) -> str:
+    """Adopt-or-create the shared Dex container and return its issuer URL.
+
+    Mirrors ``_resolve_pg_container_url`` — short-circuits on
+    ``RECON_GEN_DEX_URL`` (CI pre-spun container) and otherwise runs
+    through ``_shared_container_url``'s FileLock rendezvous against a
+    spinup closure that calls ``ensure_dev_idp``.
+
+    Hard-depends on the supplied cfg having both ``cfg.auth.oidc`` set
+    (test wants OIDC) AND ``cfg.app2.tls`` set (Dex needs the DC.3 LE
+    cert). Tests that don't satisfy both should not request this
+    fixture — pytest.skip from the test body or use a fixture that
+    short-circuits.
+    """
+    env_url = RECON_GEN_DEX_URL.get_or_none()
+    if env_url is not None:
+        return env_url
+
+    cfg_obj: Any = cfg  # noqa: ANN401 — duck-typed cfg via Any to keep import lazy
+    if cfg_obj.auth.oidc is None or cfg_obj.app2.tls is None:
+        pytest.skip(
+            "dex_container_url requires cfg.auth.oidc + cfg.app2.tls "
+            "(DC.3 LE cert needed for Dex HTTPS)",
+        )
+
+    from pathlib import Path  # noqa: PLC0415 — lazy
+    from recon_gen._dev.oidc import Env, ensure_dev_idp  # noqa: PLC0415
+    from recon_gen._dev.oidc.secrets import (  # noqa: PLC0415
+        generate_client_secret,
+        generate_user_password,
+    )
+
+    client_secret = (
+        os.environ.get(cfg_obj.auth.oidc.client_secret_env)
+        or RECON_GEN_OIDC_CLIENT_SECRET.get_or_none()
+        or generate_client_secret()
+    )
+    user_password = (
+        RECON_GEN_DEX_USER_PASSWORD.get_or_none()
+        or generate_user_password()
+    )
+
+    cert_path = Path(cfg_obj.app2.tls.cert_path).expanduser()
+    key_path = Path(cfg_obj.app2.tls.key_path).expanduser()
+    env_tier = Env(cfg_obj.app2.tls.env)
+
+    def _spinup(_name: str) -> tuple[str, object]:
+        issuer_url = ensure_dev_idp(
+            env_tier,
+            cfg=cfg_obj,
+            cert_path=cert_path,
+            key_path=key_path,
+            client_id=cfg_obj.auth.oidc.client_id,
+            client_secret=client_secret,
+            redirect_uri=cfg_obj.auth.oidc.redirect_uri,
+            user_email="testuser@example.com",
+            user_password=user_password,
+        )
+        # The _shared_container_url helper expects a (url, handle) tuple;
+        # Dex's adopt-or-create lives inside ensure_dev_idp so there's no
+        # caller-managed handle. None is fine — the helper just yields
+        # the URL.
+        return issuer_url, None  # pyright: ignore[reportReturnType]: handle is intentionally None for shared-Dex
+
+    return _shared_container_url(
+        tmp_path_factory=tmp_path_factory,
+        worker_id=worker_id,
+        state_filename="dex-container-url.txt",
+        container_name="recon-gen-test-dex",  # typing-smell: ignore[recon-prefix]: Docker container name for the DD.4 xdist-shared Dex fixture (matches DEX_SHARED_CONTAINER_NAME in src/recon_gen/_dev/oidc/container.py)
+        spinup_fn=_spinup,
+    )
+
+
+@pytest.fixture(scope="session")
+def dex_container_url(
+    tmp_path_factory: pytest.TempPathFactory,
+    worker_id: str,
+    cfg: "object",
+) -> Generator[str, None, None]:
+    """URL for a session-shared Dex (OIDC IdP) container — DD.4.
+
+    Tests that exercise the App2 OAuth flow request this fixture; it
+    skips automatically when cfg.auth.oidc or cfg.app2.tls is absent
+    (DC.3 LE cert is required for Dex HTTPS).
+
+    Env URL escape hatch: ``RECON_GEN_DEX_URL`` skips spinup + rendezvous
+    (CI workflows set it to point at the pre-spun ci-shared-dex).
+    """
+    url = _resolve_dex_container_url(
+        tmp_path_factory=tmp_path_factory,
+        worker_id=worker_id,
+        cfg=cfg,
+    )
+    os.environ[RECON_GEN_DEX_URL.name] = url
     yield url
 
 

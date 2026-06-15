@@ -474,8 +474,8 @@ All BV / BV-post backlog items moved to the canonical **# Backlog (not yet phase
   - [x] DD.4.env_keys - `RECON_GEN_DEX_URL` (short-circuit) + `RECON_GEN_OIDC_CLIENT_SECRET` + `RECON_GEN_JWT_SECRET` + `RECON_GEN_DEX_USER_PASSWORD` registered.
   - [x] DD.4.runner - `OIDC_TOUCHING_LAYERS = ("app2",)` (narrower than TLS — qs_browser uses auth-independent QS embed). `_ensure_oidc_if_configured` wired into `cmd_up_to` right after the TLS pre-flight. Hard-depends on DC.3 — returns EXIT_NEEDS_OPERATOR with `tls-setup.md` hint when oidc set but app2.tls is None.
   - [x] DD.4.unit_tests - 8 branch tests in `tests/unit/test_ensure_oidc.py`.
-  - [ ] DD.4.conftest - `dex_container_url` session fixture mirroring `pg_container_url`'s xdist pattern.
-  - [ ] DD.4.ci - `.github/workflows/ci.yml` openssl-rand step for the 3 OIDC secrets + shared-Dex-up step + cfg-overwrite heredoc `auth:` block + pytest env `RECON_GEN_DEX_URL`.
+  - [x] DD.4.conftest - `dex_container_url` session fixture mirroring `pg_container_url`'s xdist pattern. Short-circuits on `RECON_GEN_DEX_URL`; otherwise calls `ensure_dev_idp` via the `_shared_container_url` rendezvous. Skips when `cfg.auth.oidc` or `cfg.app2.tls` absent.
+  - [x] DD.4.ci - `.github/workflows/ci.yml` openssl-rand step for OIDC_CLIENT_SECRET / JWT_SECRET / DEX_USER_PASSWORD + cfg-overwrite heredoc `auth.oidc:` + `auth.session:` blocks. `RECON_GEN_DEX_URL` pytest-env line commented out — DC.3 LE cert on WSL2 runner needs to be verified live before enabling shared-ci-dex spinup (TODO comment in ci.yml flags this).
   - [ ] DD.4.driver - `App2Driver.sign_in_via_oidc` / `sign_out_via_oidc` / `inspect_jwt_cookie` verbs; `QsEmbedDriver` raises structured-triple `NotImplementedError`.
   - [ ] DD.4.e2e - `tests/e2e/app2/test_oauth_login_flow.py` browser e2e: login → dashboard → logout + tampered-JWT-401 negative path.
 - [ ] DD.5 - **Local dev onboarding doc + recipe.** Doc the two postures (HTTP local-dev / HTTPS+OAuth shared) + walk operators through cfg.yaml example for an Okta-style production deploy. Note the test-side IdP recipe for those who want to reproduce CI locally.
