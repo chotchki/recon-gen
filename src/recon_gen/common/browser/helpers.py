@@ -2001,7 +2001,18 @@ def set_parameter_datetime_value(
     )
     page.wait_for_selector(picker_selector, timeout=timeout_ms, state="visible")
     page.fill(picker_selector, value)
+    # AA.A.l2ft-date-commit (2026-06-14 triage) — Enter alone fills the
+    # DOM input but doesn't propagate the value into QS's analysis-param
+    # state. The visual stays at the date param's default (1990 / 2099),
+    # MappedDataSetParameters never re-fires, and the dataset SQL keeps
+    # the wide-range default — the test sees the "all dates" row count
+    # even though the picker UI shows the picked value. Tab simulates
+    # focus-loss which IS the commit trigger (mirrors the σ-slider
+    # commit path further down — same React onChange wiring). Verified
+    # live: with Tab, the table re-fetches and narrows; without Tab,
+    # it stays at 5,551 rows for the L2FT additive-pickers test.
     page.press(picker_selector, "Enter")
+    page.press(picker_selector, "Tab")
 
 
 def set_parameter_slider_value(

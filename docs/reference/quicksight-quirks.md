@@ -733,3 +733,35 @@ adding ``hx-select`` to a wrapper.
 
 Append-only quirks log: this entry stays even after the
 underlying wrapper pattern is refactored out.
+
+## `ParameterDateTimePicker` value-commit needs Tab, not Enter — AA.A.l2ft-date-commit, 2026-06-14
+
+### Symptom
+
+`tests/e2e/test_l2ft_additive_pickers.py::test_l2ft_additive_pickers_keep_anchor_row[qs-Rails]` (and the parametrized siblings on any L2FT sheet whose pickers include Date From/Date To) fails with the table row count after applying anchor's picker values being `>>` the before-count: for the Rails case, 5,551 (= rail-only count, any date) vs the expected ≤9 (= rail + date + status + bundle). The Date picker DOM input shows the picked value (`2026/06/14`) — visually correct. The other dropdowns (Rail / Status / Bundle) DO narrow. Just the date doesn't.
+
+### Confirmed-via
+
+Triage via `./run_tests.sh triage 'tests/e2e/test_l2ft_additive_pickers.py::test_l2ft_additive_pickers_keep_anchor_row[qs-Rails]'`. Post-mortem in pdb:
+
+1. `boto3.describe_data_set` showed all 7 DatasetParameters declared (including `pL2ftDateStart` / `pL2ftDateEnd` with the right Default datetime values).
+2. `describe_analysis_definition` showed `MappedDataSetParameters` correctly pointing `l2ft-postings-ds.pL2ftDateStart` to the analysis's `pL2ftDateStart` parameter.
+3. `driver._page.locator(date_picker_selector).input_value()` returned `'2026/06/14'` — DOM input has the value.
+4. Direct PG count with the picker values: `WHERE rail = ... AND status = ... AND bundle IS NULL AND posting BETWEEN '2026-06-14' AND '2026-06-15'` = 9 rows. Without date: 5,551. The test's `after_count` matched the "without date" count exactly.
+5. In pdb: `driver._page.locator(date_picker_selector).press("Tab")` → table re-fetched and dropped to 42 rows DOM-visible (down from 5,551). Tab IS the commit trigger.
+
+### Root cause
+
+`set_parameter_datetime_value` (in `src/recon_gen/common/browser/helpers.py`) did `page.fill(picker_selector, value)` + `page.press(picker_selector, "Enter")`. The fill puts the value in the DOM input; Enter satisfies form-submit semantics but does NOT trigger QS's React `onChange` wiring for the analysis parameter — same root cause as the σ-slider commit-needs-Tab path the helper already documents inline. Without the parameter actually committing, `MappedDataSetParameters` never re-fires, the dataset SQL substitutes the default values (`1990-01-01` / `2099-12-31`), and the visual re-fetches against the wide-range default.
+
+### Fix
+
+Add `page.press(picker_selector, "Tab")` after the Enter in `set_parameter_datetime_value`. Tab simulates focus-loss, which is what QS's date-picker React wiring listens for. Mirrors the existing `set_parameter_slider_value` Tab-on-commit pattern (~30 lines below in the same file).
+
+### Notes
+
+Latent since at least 2026-03 — the date pickers have shown the right DOM value while the underlying parameter stayed at default for months. The failure mode only surfaces when a test EXPLICITLY asserts the count narrowed (additive-pickers + AA.A inverse). Cold-reads + visual screenshots showed the picker value populated and the table refreshing, but didn't verify the SQL had actually narrowed on date.
+
+The picker's visible value persistence is the dangerous part: a screenshot or `driver.filter_options('Date From')` query would return `'2026/06/14'`, suggesting the picker worked, while the underlying parameter never committed. Browser-test any new `ParameterDateTimePicker` end-to-end with a row-count assertion (not just the DOM read).
+
+Append-only quirks log: this entry stays even after the AA.A.l2ft-date-commit fix lands.
