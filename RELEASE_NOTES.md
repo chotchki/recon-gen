@@ -13,11 +13,16 @@ favour of a data-derived anchor — dashboards stop silently rendering
 "all-time" against a stale feed when the operator omits `end_date`.
 Phase DJ is the post-v14.2.0 tech-debt sweep (RECON_GEN_E2E gate
 retirement, CodeQL XSS fixes, dev-IdP polish, QS Autocomplete
-noOptions race). Phase DL is in flight; the design lock (DL.0) and
-the cross-sheet drill enumeration helper (DL.1) land here, the
-parametrized guardrail (DL.2-DL.4) ships in v14.5.0. v14.3.0 is
-skipped (abandoned cut, per [[feedback_no_tag_rewriting]] — bump
-forward rather than reuse the slot).
+noOptions race). Phase DL (cross-sheet drill content + picker-value
+guardrail) also lands in this cut — the v14.4.0 release commit was
+planned to ship just DL.0 + DL.1 with the parametrized guardrail
+deferred to v14.5.0, but the agent driving DL.2/DL.3/DL.4 pushed its
+3 commits during the v14.4.0 release commit's pre-push hook window
+(~107s); the hook fetched + integrated them so the final tagged
+commit (`9b28c53e`) is a descendant of `5940f74e` (DL.4). Notes
+updated post-tag to reflect what shipped; tag is immutable per
+[[feedback_no_tag_rewriting]]. v14.3.0 is also skipped (abandoned
+earlier cut, same no-tag-rewriting rule).
 
 ### What's new — Phase DK
 
@@ -87,7 +92,7 @@ forward rather than reuse the slot).
   `RuntimeError`, adopt-mount divergence force-recreate, explicit
   failed-state recreate trigger.
 
-### What's new — Phase DL (in flight)
+### What's new — Phase DL
 
 - **DL.0 design lock** — `docs/audits/dl_0_drill_guardrail_design.md`
   documents the cross-sheet drill content + picker-value guardrail
@@ -107,6 +112,37 @@ forward rather than reuse the slot).
   primitives coverage now spans both `DATA_POINT_CLICK` and
   `DATA_POINT_MENU` triggers — and the DL.1 enumeration helper can
   prove same-sheet exclusion.
+- **Parametrized cross-sheet drill guardrail** (DL.2) —
+  `tests/e2e/test_drill_guardrail.py` enumerates 14 cross-sheet
+  drills (12 L1 + 2 L2FT) × 2 renderers = 28 e2e cells. Per drill:
+  open source sheet → read row 0 cell values for each
+  `drill.writes` field → execute drill via
+  `drill_from_first_row{,_via_menu}` → assert destination renders
+  content (`wait_loaded` + `table_rows > 0`) AND the destination's
+  picker for each drilled column reflects the captured source value.
+  Anchor visual selection: first Table on dst sheet + 5-entry
+  `_DST_ANCHOR_FALLBACKS` map for sheets where the first Table isn't
+  a useful row-data probe. No new driver verbs needed (reused
+  `table_rows` / `wait_loaded` / `drill_from_first_row{,_via_menu}`).
+- **Drift → Daily Statement (and 6 other L1 drills) fixed** (DL.3) —
+  7 source drills all writing `pL1DsAccount` were sourcing raw
+  `account_id` strings (e.g. `external-001`) but Daily Statement's
+  WHERE clause expected the composite display format
+  `"<name> (<id>)"`. Fix re-pointed each drill to source from a new
+  `account_display` Dim and widened `_DP_DS_ACCOUNT`'s shape from
+  `ACCOUNT_ID` to `ACCOUNT_DISPLAY`. Affects drift (leaf + parent),
+  overdraft violations, today's exceptions detail, limit breach
+  detail, supersession audit balances, and posting ledger
+  transactions — all now land on a populated Daily Statement with
+  the picker bound to the drilled account.
+- **DL.4 static drill-shape audit** — walked the remaining cross-
+  sheet drills against destination dataset SQL shapes; no further
+  mismatches found beyond the 7 fixed in DL.3. The DL.2 parametrize
+  IS the runtime check for any residual issues; no structured
+  triples needed (no permanent renderer-gap-driven
+  `NotImplementedError`s introduced — the data-shape level fix works
+  for both App2's `?param_pL1DsAccount=<display>` and QS's
+  `MappedDataSetParameters` bridge).
 
 ### Bug fixes
 
