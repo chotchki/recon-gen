@@ -123,25 +123,27 @@ def get_or_start_dex_container(
     # Adopt path.
     try:
         existing = client.containers.get(name)
+        # If the container exited with a non-zero code, the last
+        # docker-entrypoint run hit a fatal config error (bad cert path,
+        # yaml malformed, perms locked). Restarting won't help — the
+        # entrypoint redoes gomplate-rendering with the same inputs.
+        # Always force-recreate so the new fresh-create path picks up
+        # any cfg / perm fix that landed since the prior crash.
         if existing.status != "running":
             try:
-                existing.start()
-                existing.reload()
-            except Exception:  # noqa: BLE001 — restart failed → recreate
-                try:
-                    existing.remove(force=True)
-                except Exception:  # noqa: BLE001 — best-effort
-                    pass
-                return _start_fresh_dex_container(
-                    client=client,
-                    name=name,
-                    host_port=host_port,
-                    cfg_dir=cfg_dir,
-                    cert_path=cert_path,
-                    key_path=key_path,
-                    client_secret=client_secret,
-                    user_password_hash=user_password_hash,
-                )
+                existing.remove(force=True)
+            except Exception:  # noqa: BLE001 — best-effort
+                pass
+            return _start_fresh_dex_container(
+                client=client,
+                name=name,
+                host_port=host_port,
+                cfg_dir=cfg_dir,
+                cert_path=cert_path,
+                key_path=key_path,
+                client_secret=client_secret,
+                user_password_hash=user_password_hash,
+            )
 
         # Mirror PG path — read actual host port from container attrs
         # so the URL we return matches the live binding. If the mapping
@@ -204,9 +206,20 @@ def _start_fresh_dex_container(
     daemon rejects with "container name already exists"; caller's loop
     in the adopt-or-create flow handles by falling back to adopt.
     """
+    import os  # noqa: PLC0415 — lazy
+
     # The exec command is the Dex binary serving the static config we
     # write to cfg_dir/config.yaml. Internal port 5556 is the Dex
     # default; we bind it to the env-locked host_port.
+    #
+    # `user=<host_uid>:<host_gid>`: dexidp/dex's Dockerfile sets
+    # `USER 1001`, but our cfg_dir is a `tempfile.mkdtemp()` (mode 700,
+    # owned by the host user that ran the runner) — UID 1001 inside the
+    # container can't even traverse a host-uid-owned 700 dir, so the
+    # image's docker-entrypoint fails at gomplate's first `stat` with
+    # "permission denied". Override the container's runtime UID to
+    # match the host user that created the bind-mount, so file perms
+    # line up. Doesn't escape the container; host file perms untouched.
     container = client.containers.run(  # type: ignore[attr-defined]: docker.client.DockerClient stub lacks .containers
         image=DEX_IMAGE,
         name=name,
@@ -223,6 +236,7 @@ def _start_fresh_dex_container(
             "DEX_CLIENT_SECRET": client_secret,
             "DEX_USER_PASSWORD_HASH": user_password_hash,
         },
+        user=f"{os.getuid()}:{os.getgid()}",
         # Restart policy: don't auto-restart on crash; the readiness
         # poll will fast-fail with EXIT_NEEDS_OPERATOR so the operator
         # can read logs from the dead container.
@@ -270,6 +284,7 @@ def wait_for_dex_ready(
                 f"Dex readiness check failed: hard timeout "
                 f"({deadline_seconds}s) on {discovery_url}; "
                 "container may have started but Dex didn't bind"
+                f"{_dex_logs_tail()}"
             )
 
         try:
@@ -290,8 +305,8 @@ def wait_for_dex_ready(
                 raise RuntimeError(
                     "Dex readiness check failed: connection refused "
                     f"for {_READY_REFUSED_FAILFAST_SECONDS:.0f}s on "
-                    f"{discovery_url}; container may have crashed — "
-                    "check `docker logs recon-gen-test-dex`"
+                    f"{discovery_url}; container may have crashed"
+                    f"{_dex_logs_tail()}"
                 ) from None
         except httpx.HTTPError:
             # Transient (TLS handshake mid-warmup, partial read) —
@@ -299,6 +314,45 @@ def wait_for_dex_ready(
             refused_since = None
 
         time.sleep(_READY_POLL_INTERVAL_SECONDS)
+
+
+def _dex_logs_tail(*, max_lines: int = 40) -> str:
+    """Capture the last ``max_lines`` of Dex's stdout+stderr and
+    return them formatted for inclusion in a RuntimeError message.
+
+    Surfaces Dex's actual crash reason (missing cert path / unparseable
+    config / port bind failure) in the same error the CI runner emits,
+    so the operator doesn't have to manually shell into the runner +
+    run `docker logs recon-gen-test-dex` to diagnose. Returns an empty
+    string on any docker-side failure — the readiness error is the
+    primary signal; log capture is best-effort enrichment.
+    """
+    try:
+        import docker  # type: ignore[import-untyped]: third-party SDK lacks PEP 561 stubs  # noqa: PLC0415
+    except ImportError:
+        return ""
+    try:
+        client = docker.from_env()
+        container = client.containers.get(DEX_SHARED_CONTAINER_NAME)
+        raw = container.logs(tail=max_lines, stdout=True, stderr=True)
+        text = raw.decode("utf-8", errors="replace")
+        if not text.strip():
+            return (
+                f"\n  (container {DEX_SHARED_CONTAINER_NAME} produced no "
+                "logs — likely never ran the Dex binary; check the image "
+                "pull + command line)"
+            )
+        return (
+            f"\n  --- docker logs {DEX_SHARED_CONTAINER_NAME} "
+            f"(tail {max_lines}) ---\n  "
+            + text.replace("\n", "\n  ").rstrip()
+            + f"\n  --- end docker logs ---"
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort enrichment
+        return (
+            f"\n  (could not fetch docker logs for "
+            f"{DEX_SHARED_CONTAINER_NAME}: {type(exc).__name__}: {exc})"
+        )
 
 
 def verify_dex_url(url: str) -> None:
