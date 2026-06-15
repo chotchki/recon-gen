@@ -74,6 +74,7 @@ from recon_gen.cli._helpers import (
     config_option,
     execute_option,
     l2_instance_option,
+    maybe_export_data_anchor,
     resolve_l2_for_demo,
 )
 from recon_gen.common.money import Cents
@@ -1423,6 +1424,14 @@ def audit_apply(
     from recon_gen import __version__ as _qsg_version
 
     _cfg, instance = resolve_l2_for_demo(config, l2_instance_path)
+    # DK.6 — share dashboards' data-derived as_of resolution. When the
+    # operator hasn't pinned end_date or RECON_GEN_AS_OF_ANCHOR, export
+    # the value from <prefix>_data_anchor (DK.1) so AsOfFrame.live() in
+    # _resolve_frame below picks it up via _as_of_today() → env-read.
+    # Single source of truth across dashboards (DK.4) + audit PDF — no
+    # divergence between what the dashboard renders and what the audit
+    # reports as the same calendar day.
+    maybe_export_data_anchor(_cfg)
     frame = _resolve_frame(period)
     institution = _institution_name(instance, _cfg)
     generated_at = datetime.now()

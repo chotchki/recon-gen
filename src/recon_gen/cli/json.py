@@ -28,90 +28,10 @@ from recon_gen.cli._helpers import (
     config_option,
     execute_option,
     l2_instance_option,
+    maybe_export_data_anchor,
     output_option,
     resolve_l2_for_demo,
 )
-from recon_gen.common.config import Config
-
-
-def _maybe_export_data_anchor(cfg: Config) -> None:
-    """DK.4 — export ``RECON_GEN_AS_OF_ANCHOR`` from the data_anchor matview.
-
-    Runs before app generation. When neither ``cfg.test.generator.end_date``
-    nor the existing ``RECON_GEN_AS_OF_ANCHOR`` env-pin is set, query the
-    ``<prefix>_data_anchor`` matview (DK.1) and export its value as
-    ``RECON_GEN_AS_OF_ANCHOR``. Downstream dataset builders' calls to
-    ``cfg.test.generator.as_of_frame()`` then fall through to
-    ``AsOfFrame.live()`` → ``_as_of_today()`` → env-read, so every
-    dataset's date-parameter default pins on the feed's actual latest
-    moment instead of wall-clock today.
-
-    No-op when either the cfg pin or the env pin is already present —
-    preserves operator-pin + chain-determinism semantics.
-
-    Cold-DB / empty-matview case: log a warning, leave the env unset.
-    Downstream AsOfFrame.live() falls through to date.today() — the
-    pre-DK behavior, which the operator probably wants to fix by
-    running ``data apply --execute`` first. DK.7.e2e exercises this
-    path to verify the warning is loud enough.
-
-    Connection failure (no DB / wrong host / matview missing on legacy
-    deploy): same as cold-DB — warn, fall through. Treats the absence
-    of the DK.1 matview as the legacy case rather than an error so
-    pre-DK deploys don't break on the v14.4.0 upgrade.
-    """
-    from recon_gen.common.as_of_frame import _query_data_anchor  # noqa: PLC0415
-    from recon_gen.common.db import connect_demo_db  # noqa: PLC0415
-    from recon_gen.common.env_keys import RECON_GEN_AS_OF_ANCHOR  # noqa: PLC0415
-
-    # Operator pin via cfg yaml wins — DK.3's path 2.
-    if cfg.test.generator.end_date is not None:
-        return
-    # Existing env-pin wins — chain-determinism / RECON_GEN_AS_OF_ANCHOR
-    # override path. Caller already set it; we don't second-guess.
-    if RECON_GEN_AS_OF_ANCHOR.get_or_none() is not None:
-        return
-    # Data-derived path.
-    try:
-        conn = connect_demo_db(cfg)
-    except Exception as exc:  # noqa: BLE001 — DB-connect failure → fall through to live(wall-clock); not the right time to crash json apply
-        click.echo(
-            f"warning: could not connect to demo DB for data-anchor "
-            f"resolution ({exc!r}); falling back to live(wall-clock). "
-            f"Dashboards may render blank for the default date window "
-            f"if the feed is stale.",
-            err=True,
-        )
-        return
-    try:
-        anchor = _query_data_anchor(conn, cfg.db.table_prefix)
-    finally:
-        try:
-            conn.close()
-        except Exception:  # noqa: BLE001 — close on a half-broken conn must not mask the original error
-            pass
-    if anchor is None:
-        click.echo(
-            f"warning: <prefix>_data_anchor matview is empty or absent "
-            f"({cfg.db.table_prefix}_data_anchor); falling back to "
-            f"live(wall-clock). Run `recon-gen data apply --execute` + "
-            f"`recon-gen data refresh --execute` to populate the feed.",
-            err=True,
-        )
-        return
-    # Export so every downstream subprocess inherits the same anchor.
-    # (For in-process callers, ``RECON_GEN_AS_OF_ANCHOR.get_or_none()``
-    # re-reads ``os.environ`` on each call — no module caching to bust.)
-    import os  # noqa: PLC0415
-    from recon_gen.common.env_keys import RECON_GEN_AS_OF_ANCHOR_SOURCE  # noqa: PLC0415
-    os.environ[RECON_GEN_AS_OF_ANCHOR.name] = anchor.isoformat()
-    # DK.5.bullets — marker for Info-sheet deploy-stamp source attribution.
-    # Distinguishes "operator pinned env" from "DK.4 auto-derived from matview".
-    os.environ[RECON_GEN_AS_OF_ANCHOR_SOURCE.name] = "data_anchor"
-    click.echo(
-        f"as_of pinned at {anchor.isoformat()} from "
-        f"{cfg.db.table_prefix}_data_anchor (DK.4)."
-    )
 
 
 @click.group()
@@ -172,7 +92,7 @@ def json_apply(
     # gets the pre-DK behavior they had before). DK.7.e2e will exercise
     # this path with an empty-feed e2e to verify the warning is loud
     # enough that a real prod-stale-feed slip wouldn't go silent.
-    _maybe_export_data_anchor(cfg)
+    maybe_export_data_anchor(cfg)
 
     click.echo(f"Generating JSON for all four apps into {out_path}/...")
     _generate_investigation(config, output, l2_instance_path=l2_instance_path)
