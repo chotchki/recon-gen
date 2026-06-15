@@ -414,6 +414,11 @@ def run_html_server(
                 dashboards=dashboards, dev_log=dev_log, docs_dir=docs_dir,
                 studio_routes=studio_routes,
                 banner_text=cfg.app2.banner_text,
+                # DD.3 — passing cfg threads through to make_app's auth
+                # middleware short-circuit. When cfg.auth.oidc + .session
+                # are both set, JwtCookieMiddleware + the /auth/* routes
+                # fire; absent ⇒ HTTP local-dev passthrough.
+                cfg=cfg,
             )
             scheme = "https" if tls_enabled else "http"
             click.echo(f"server: {scheme}://{host}:{port}/")
