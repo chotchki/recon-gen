@@ -530,6 +530,22 @@ class QsEmbedDriver:
                 f"QuickSight visual {visual_title!r} rendered with "
                 f"error overlay: {err}"
             )
+        # DK.11 — fail loudly on visible literal HTML entity references.
+        # Scopes to the analysis-visual containers (sidesteps QS chrome
+        # we don't control; QS's own SDK chrome may legitimately carry
+        # entity-shaped placeholder strings in tooltips / aria labels
+        # outside the visual area). Catches double-escaped emit on
+        # dataset SQL → visual title / subtitle / cell text without
+        # depending on the operator finding the bug visually.
+        from recon_gen.common.browser.helpers import (  # noqa: PLC0415
+            VISUAL_SELECTOR,
+            assert_no_literal_html_entities,
+        )
+        assert_no_literal_html_entities(
+            self._page,
+            context=f"QsEmbedDriver.wait_loaded({visual_title!r})",
+            root_selector=VISUAL_SELECTOR,
+        )
 
     def table_rows(
         self,

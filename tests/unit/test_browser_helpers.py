@@ -368,6 +368,86 @@ class TestCaptureFailureDbCounts:
         ).exists()
 
 
+class _FakePage:
+    """Minimal Playwright Page stand-in for unit-testing the Python
+    side of ``assert_no_literal_html_entities``. The real JS body runs
+    via Playwright in browser-tier tests; here we just verify the
+    Python raise / return contract given canned findings."""
+
+    def __init__(self, findings: list[dict[str, object]]) -> None:
+        self._findings = findings
+        self.calls: list[tuple[str, object]] = []
+
+    def evaluate(self, js: str, arg: object = None) -> list[dict[str, object]]:
+        self.calls.append((js, arg))
+        return self._findings
+
+
+class TestAssertNoLiteralHtmlEntities:
+    """DK.11 — driver-level scanner for visible double-escaped HTML in
+    rendered DOM text. Catches double-escape bugs the moment any
+    browser-tier test navigates / waits."""
+
+    def test_returns_silently_on_empty_findings(self) -> None:
+        from recon_gen.common.browser.helpers import (
+            assert_no_literal_html_entities,
+        )
+        page = _FakePage(findings=[])
+        # Should not raise.
+        assert_no_literal_html_entities(
+            page,  # pyright: ignore[reportArgumentType]: structural duck-type matches Page surface (evaluate only)
+            context="open",
+        )
+        assert len(page.calls) == 1
+        # The JS body must include the entity regex + the skip-tag list
+        # so the lock catches a refactor that loses one of them.
+        js, _ = page.calls[0]
+        assert "ENTITY_RE" in js
+        assert "amp|lt|gt|quot|apos" in js
+        assert "CODE" in js and "PRE" in js and "TEXTAREA" in js
+
+    def test_raises_with_actionable_message_on_findings(self) -> None:
+        from recon_gen.common.browser.helpers import (
+            assert_no_literal_html_entities,
+        )
+        page = _FakePage(findings=[
+            {"tag": "H2", "text": "Bob&#x27;s Bank — Daily Statement",
+             "entities": ["&#x27;"]},
+            {"tag": "P", "text": "Cash &amp; Due From Federal Reserve",
+             "entities": ["&amp;"]},
+        ])
+        with pytest.raises(RuntimeError) as excinfo:
+            assert_no_literal_html_entities(
+                page,  # pyright: ignore[reportArgumentType]: same duck-type rationale
+                context="wait_loaded('Daily Statement')",
+            )
+        msg = str(excinfo.value)
+        # The error names BOTH the verb context (so the operator knows
+        # which call triggered the scan) AND the first finding's text +
+        # entity (so they can grep the source).
+        assert "wait_loaded('Daily Statement')" in msg
+        assert "Bob&#x27;s Bank" in msg
+        assert "&#x27;" in msg
+        # Surfaces the double-escape root cause in plain English so a
+        # cold-read operator doesn't need to know what the test does.
+        assert "double-escaped" in msg or "double-escape" in msg
+
+    def test_root_selector_threads_through_to_js_arg(self) -> None:
+        from recon_gen.common.browser.helpers import (
+            VISUAL_SELECTOR,
+            assert_no_literal_html_entities,
+        )
+        page = _FakePage(findings=[])
+        assert_no_literal_html_entities(
+            page,  # pyright: ignore[reportArgumentType]: same duck-type rationale
+            context="x",
+            root_selector=VISUAL_SELECTOR,
+        )
+        _, arg = page.calls[0]
+        assert isinstance(arg, dict)
+        assert arg["rootSelector"] == VISUAL_SELECTOR
+
+
 class TestNoHardcodedArnInSource:
     """W.4 hygiene: the helpers module must not retain a hardcoded
     AWS account ID. The previous silent fallback baked a real account

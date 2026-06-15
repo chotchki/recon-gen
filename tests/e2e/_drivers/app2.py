@@ -253,6 +253,18 @@ class App2Driver:
         # Visual sections auto-load via hx-trigger="load" — those AJAX
         # GETs count toward network activity, so networkidle waits them out.
         self._page.wait_for_load_state("networkidle")
+        # DK.11 — fail loudly on visible literal HTML entity references.
+        # A page-level scan after networkidle catches double-escaped
+        # chrome (titles, top nav, banners, sheet descriptions) the
+        # moment a navigation lands, before downstream verbs run their
+        # own per-visual checks. Operators see "Bob&#x27;s Bank"
+        # instead of "Bob's Bank" → caught here.
+        from recon_gen.common.browser.helpers import (  # noqa: PLC0415
+            assert_no_literal_html_entities,
+        )
+        assert_no_literal_html_entities(
+            self._page, context=f"App2Driver.open({dashboard=!r}, {sheet=!r})",
+        )
 
     def goto_sheet(self, name: str) -> None:
         # App 2 routing is stateless — a sheet switch is just a new URL.

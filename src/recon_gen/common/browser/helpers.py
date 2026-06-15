@@ -2584,3 +2584,116 @@ def screenshot(page: Page, name: str, subdir: str | None = None) -> Path:
     path = target_dir / f"{name}.png"
     page.screenshot(path=str(path), full_page=True)
     return path
+
+
+def assert_no_literal_html_entities(
+    page: Page,
+    *,
+    context: str,
+    root_selector: str = "body",
+) -> None:
+    """Fail loudly when the rendered DOM contains visible literal HTML
+    entity references (``&amp;`` / ``&#39;`` / ``&#x27;`` / etc.) as text
+    content rather than as their decoded characters.
+
+    Symptom this catches: operator opens a dashboard, sees ``Bob&#x27;s
+    Bank`` instead of ``Bob's Bank`` because some server-side path
+    double-escaped the data (single-escape produces ``&#x27;`` in the
+    HTML source which the browser correctly decodes to ``'``; double-
+    escape produces ``&amp;#x27;`` which renders as the literal text
+    ``&#x27;``).
+
+    The text-node walker reads ``textContent`` — which already has
+    one layer of entity decoding applied by the browser. So if the
+    walker finds an entity-shaped substring in ``textContent``, the
+    source HTML had it double-encoded (or it was injected via JS as
+    a pre-escaped string assigned to ``textContent`` instead of
+    ``innerHTML``). Either way: a real rendering bug.
+
+    Exclusions: skip ``<code>`` / ``<pre>`` / ``<textarea>`` /
+    ``<script>`` / ``<style>`` subtrees. Code / preformatted blocks
+    legitimately show literal entity strings (e.g. documentation
+    pages that explain ``&amp;``). Form-input values aren't checked
+    for the same reason — value attributes have their own decoding
+    rules and aren't part of the user-visible prose surface.
+
+    Args:
+        page: Playwright Page (the iframe for QS embed, or the App2
+            root document).
+        context: caller's calling-site label — surfaces in the raised
+            error so the failure points at the verb that triggered
+            the scan (``wait_loaded(...)``, ``open(...)``, etc.).
+        root_selector: limit the scan to a subtree. Default ``body``
+            scans the whole page. Pass ``[data-automation-id="analysis_visual"]``
+            on QS to scope to embed-iframe visuals (faster, sidesteps
+            QS-chrome false-positives).
+
+    Raises:
+        RuntimeError when at least one literal entity is found in
+            visible text. The message includes the (tag, snippet,
+            entities) for the first ~5 matches so the test failure
+            output is immediately actionable.
+    """
+    findings = page.evaluate(
+        """({rootSelector}) => {
+            const SKIP_TAGS = new Set([
+                'CODE', 'PRE', 'TEXTAREA', 'SCRIPT', 'STYLE',
+                // Tooltips / aria-labels on flatpickr can carry the
+                // entity-shaped placeholder strings — pickers' decorative
+                // chrome shouldn't trip the scan.
+                'NOSCRIPT'
+            ]);
+            // Named refs we recognize + decimal/hex numeric refs.
+            const ENTITY_RE = /&(amp|lt|gt|quot|apos|nbsp|#[0-9]+|#x[0-9a-fA-F]+);/g;
+            const root = document.querySelector(rootSelector);
+            if (!root) return [];
+            const out = [];
+            const walker = document.createTreeWalker(
+                root, NodeFilter.SHOW_TEXT, null
+            );
+            let node;
+            while ((node = walker.nextNode())) {
+                let p = node.parentElement;
+                let skip = false;
+                while (p && p !== root) {
+                    if (SKIP_TAGS.has(p.tagName)) { skip = true; break; }
+                    p = p.parentElement;
+                }
+                if (skip) continue;
+                // textContent already has the one decoded layer
+                // applied. An entity-shaped substring here means the
+                // source double-encoded it (or JS assigned a pre-
+                // escaped string via textContent instead of innerHTML).
+                const matches = node.textContent.match(ENTITY_RE);
+                if (matches && matches.length > 0) {
+                    out.push({
+                        tag: node.parentElement
+                            ? node.parentElement.tagName
+                            : '(detached)',
+                        text: node.textContent.slice(0, 200),
+                        entities: matches.slice(0, 5),
+                    });
+                    if (out.length >= 5) break;
+                }
+            }
+            return out;
+        }""",
+        {"rootSelector": root_selector},
+    )
+    if not findings:
+        return
+    details = "\n".join(
+        f"  - <{f['tag']}> shows {f['entities']!r} as literal text: "
+        f"{f['text']!r}"
+        for f in findings
+    )
+    raise RuntimeError(
+        f"Literal HTML entity references rendered as visible text "
+        f"during {context!r} — {len(findings)} site(s) found. The "
+        f"server emitted double-escaped HTML, or JS assigned a "
+        f"pre-escaped string to .textContent instead of .innerHTML. "
+        f"Operators see e.g. 'Bob&#x27;s Bank' instead of \"Bob's "
+        f"Bank\". Fix at the emit site (single-escape only) or the "
+        f"JS assignment (use innerHTML for HTML-shaped strings).\n\n"
+        f"First-found sites:\n{details}"
+    )
