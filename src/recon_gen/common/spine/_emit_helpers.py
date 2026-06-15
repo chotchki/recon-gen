@@ -98,9 +98,10 @@ def _coerce_to_cents_int(value: object) -> object:
     AO.1: the three money columns (amount_money / money /
     expected_eod_balance) store BIGINT cents on every dialect. Spine
     generators author in floats (``leg_amount: float = 100.0``) and
-    Decimals (seed test fixtures); downstream parallel agents may
-    pass already-converted ``Cents``. Coerce all three shapes at this
-    one boundary so the wire path is uniform.
+    Decimals (seed test fixtures); ETL integrators bulk-loading from
+    CSV pass strings (``"100.50"``); downstream parallel agents may
+    pass already-converted ``Cents``. Coerce all shapes at this one
+    boundary so the wire path is uniform.
 
     None passes through (NULL column). ``Cents`` → its ``.value``.
     ``int`` passes through unchanged ONLY when already in cents shape
@@ -108,6 +109,13 @@ def _coerce_to_cents_int(value: object) -> object:
     passes an int as a money kwarg today (always float / Decimal),
     so route ints through ``from_dollars`` for consistency. Bool is
     treated as int (defensive — Python's ``isinstance(True, int)``).
+    ``str`` routes through ``from_dollars`` — CSV bulk loads land here.
+
+    Raises ``TypeError`` on any unrecognized type. The previous silent
+    passthrough surfaced as opaque downstream BIGINT INSERT failures
+    (PG: "invalid input syntax for type bigint"; Oracle: ORA-01722)
+    that gave no breadcrumb back to the bad caller — explicit error
+    at the coerce boundary points at the offending value.
     """
     if value is None:
         return None
@@ -117,13 +125,21 @@ def _coerce_to_cents_int(value: object) -> object:
         # Defensive — Python's bool is an int subclass; route through
         # from_dollars to keep the contract uniform (True→100, False→0).
         return Cents.from_dollars(int(value)).value
-    if isinstance(value, (Decimal, int)):
+    if isinstance(value, (Decimal, int, str)):
+        # Cents.from_dollars accepts ``Decimal | str | int`` directly;
+        # str path unblocks CSV bulk loads where every column lands as
+        # a string (the canonical csv.DictReader / pandas object dtype
+        # shape).
         return Cents.from_dollars(value).value
     if isinstance(value, float):
         # str() avoids float-init Decimal drift (Decimal(0.1) !=
         # Decimal('0.1')) — same convention as Cents.from_dollars.
         return Cents.from_dollars(str(value)).value
-    return value
+    raise TypeError(
+        f"_coerce_to_cents_int: unsupported money value type "
+        f"{type(value).__name__} (got {value!r}); supported: None, "
+        f"Cents, Decimal, int, str, float, bool"
+    )
 
 
 # AO.1: money columns that need dollar→cents coercion at the insert
@@ -340,25 +356,33 @@ def bulk_insert_tx(
     rows: Sequence[tuple[object, ...]],
     *,
     prefix: str = DEFAULT_PREFIX,
+    columns: Sequence[str] | None = None,
 ) -> None:
     """Bulk-load rows into ``<prefix>_transactions`` via the dialect's
     fast path.
 
     Public surface for `etl_hook` integrators: a single call takes a
-    sequence of tuples (positional in ``TX_COLS`` order) and lands them
+    sequence of tuples (positional in column order) and lands them
     using ``_flush_duckdb_multivalues`` (DuckDB) / ``executemany``
     (PG / Oracle). Avoids the per-row ``cur.execute`` cost of
     `insert_tx` — sized for 10k+ row loads.
 
-    Each tuple must be positional over ``TX_COLS``. If you want
-    column-by-name input, call `insert_tx` instead — bulk is positional
-    by design (matches the dialect-fast-path contracts where named
-    bindings would cost a per-row Python dict build).
+    Column shape:
 
-    Money columns (``amount_money``) auto-coerce dollar shapes to
-    BIGINT cents via `_coerce_to_cents_int` — same contract as
-    `insert_tx`, so integrators can pass floats / Decimals / Cents
-    without precomputing.
+    - **Default (``columns=None``)** uses ``TX_COLS`` — the canonical
+      spine-author subset that excludes ``entry`` (auto-increment),
+      ``transfer_completion`` (optional), and ``bundle_id`` (NULL by
+      default — stuck_unbundled's plant relies on this). Plant
+      generators byte-stable; all in-repo callers stay on this path.
+    - **``columns=<tuple>``** loads any subset of the schema. Pass to
+      include ``transfer_completion`` / ``bundle_id`` / any future
+      column ETL integrators need. Tuple shape MUST match
+      ``len(columns)`` and column ORDER. Money columns (``amount_money``)
+      still auto-coerce regardless of position.
+
+    Money columns auto-coerce dollar shapes (float / Decimal / str /
+    int / Cents) to BIGINT cents via `_coerce_to_cents_int`. CSV bulk
+    loads where every column is a string land cleanly here.
 
     Empty ``rows`` is a no-op (no cursor open, no SQL parsed).
 
@@ -371,10 +395,11 @@ def bulk_insert_tx(
     boundary would silently overwrite intentional `source='real'`
     rows that an integrator is loading.
     """
+    cols = tuple(columns) if columns is not None else TX_COLS
     _bulk_insert(
         conn,
         f"{prefix}_transactions",
-        TX_COLS,
+        cols,
         rows,
         _TX_MONEY_COLS,
     )
@@ -385,19 +410,25 @@ def bulk_insert_balance(
     rows: Sequence[tuple[object, ...]],
     *,
     prefix: str = DEFAULT_PREFIX,
+    columns: Sequence[str] | None = None,
 ) -> None:
     """Bulk-load rows into ``<prefix>_daily_balances`` via the dialect's
     fast path.
 
     Mirrors `bulk_insert_tx` for the balance table — same positional
-    tuple contract (in ``DB_COLS`` order), same money coercion
-    (``money`` + ``expected_eod_balance`` are BIGINT cents), same
+    tuple contract, same money coercion (``money`` +
+    ``expected_eod_balance`` are BIGINT cents), same
     metadata-not-stamped contract (see `bulk_insert_tx` docstring).
+
+    Column shape: ``columns=None`` → ``DB_COLS`` (spine-author subset);
+    ``columns=<tuple>`` → arbitrary subset (e.g. add ``supersedes`` for
+    technical-correction loads).
     """
+    cols = tuple(columns) if columns is not None else DB_COLS
     _bulk_insert(
         conn,
         f"{prefix}_daily_balances",
-        DB_COLS,
+        cols,
         rows,
         _DB_MONEY_COLS,
     )

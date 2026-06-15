@@ -311,3 +311,156 @@ def test_bulk_insert_tx_10k_rows_under_one_second() -> None:
     row = cur.fetchone()
     assert row is not None
     assert row[0] == 10_000
+
+
+# ---------------------------------------------------------------------------
+# 2026-06-15 fix: _coerce_to_cents_int now accepts strings (the
+# canonical csv.DictReader shape) and raises TypeError on unrecognized
+# types — replaces the prior silent passthrough that surfaced as opaque
+# downstream BIGINT INSERT failures.
+# ---------------------------------------------------------------------------
+
+
+def test_bulk_insert_tx_money_coercion_string_dollars_to_cents() -> None:
+    """CSV bulk loads land every column as a string (csv.DictReader /
+    pandas object dtype). `_coerce_to_cents_int` now routes strings
+    through `Cents.from_dollars` so "12.34" → 1234 cents same as 12.34
+    or Decimal("12.34")."""
+    conn = _fresh_db()
+    bulk_insert_tx(
+        conn, [_tx_row(tx_id="tx-csv-string", amount_money="12.34")],
+    )
+    conn.commit()
+    cur = conn.cursor()
+    cur.execute(
+        f"SELECT amount_money FROM {_PREFIX}_transactions "
+        f"WHERE id = 'tx-csv-string'"
+    )
+    row = cur.fetchone()
+    assert row is not None
+    assert row[0] == 1234
+
+
+def test_bulk_insert_balance_money_coercion_string_dollars_to_cents() -> None:
+    conn = _fresh_db()
+    bulk_insert_balance(
+        conn,
+        [_balance_row(account_id="acct-csv-string", money="98.76")],
+    )
+    conn.commit()
+    cur = conn.cursor()
+    cur.execute(
+        f"SELECT money FROM {_PREFIX}_daily_balances "
+        f"WHERE account_id = 'acct-csv-string'"
+    )
+    row = cur.fetchone()
+    assert row is not None
+    assert row[0] == 9876
+
+
+def test_coerce_to_cents_int_raises_on_unrecognized_type() -> None:
+    """Pre-2026-06-15: unknown types silently passed through and
+    surfaced as PG `invalid input syntax for type bigint` / Oracle
+    ORA-01722 with no breadcrumb back to the bad caller. Now raises
+    TypeError at the coerce boundary."""
+    import pytest as _pytest
+
+    from recon_gen.common.spine._emit_helpers import _coerce_to_cents_int
+
+    with _pytest.raises(TypeError, match="unsupported money value type"):
+        _coerce_to_cents_int(object())
+
+
+# ---------------------------------------------------------------------------
+# 2026-06-15 fix: bulk_insert_tx / bulk_insert_balance accept an
+# optional `columns` override so ETL integrators can load schema
+# columns TX_COLS/DB_COLS exclude (transfer_completion / bundle_id
+# for transactions; supersedes for balances) without changing the
+# canonical plant-author default.
+# ---------------------------------------------------------------------------
+
+
+def test_bulk_insert_tx_custom_columns_includes_transfer_completion() -> None:
+    """ETL integrators bulk-loading real transactions need to set
+    `transfer_completion` (the post-settlement timestamp). TX_COLS
+    omits it for spine-author byte-identity; `columns=` opt-in lifts
+    the restriction."""
+    conn = _fresh_db()
+    custom_cols = (
+        "id", "account_id", "account_scope", "amount_money",
+        "amount_direction", "status", "posting", "transfer_id",
+        "transfer_completion", "rail_name", "origin",
+    )
+    rows = [(
+        "tx-completion", "clearing-suspense-1", "internal",
+        100.0, "Credit", "Posted", "2026-01-01 12:00:00",
+        "xfer-completion", "2026-01-01 12:00:05",
+        "_bulk_test", "etl",
+    )]
+    bulk_insert_tx(conn, rows, prefix=_PREFIX, columns=custom_cols)
+    conn.commit()
+    cur = conn.cursor()
+    cur.execute(
+        f"SELECT transfer_completion FROM {_PREFIX}_transactions "
+        f"WHERE id = 'tx-completion'"
+    )
+    row = cur.fetchone()
+    assert row is not None
+    assert row[0] is not None  # set to '2026-01-01 12:00:05', not NULL
+
+
+def test_bulk_insert_tx_custom_columns_includes_bundle_id() -> None:
+    """Same opt-in for `bundle_id` — the schema column TX_COLS omits
+    because the stuck_unbundled plant relies on NULL-by-default. ETL
+    integrators bulk-loading bundled transactions pass `columns=` with
+    bundle_id present."""
+    conn = _fresh_db()
+    custom_cols = (
+        "id", "account_id", "account_scope", "amount_money",
+        "amount_direction", "status", "posting", "transfer_id",
+        "rail_name", "origin", "bundle_id",
+    )
+    rows = [(
+        "tx-bundled", "clearing-suspense-1", "internal",
+        50.0, "Credit", "Posted", "2026-01-01 12:00:00",
+        "xfer-bundled", "_bulk_test", "etl", "bundle-abc",
+    )]
+    bulk_insert_tx(conn, rows, prefix=_PREFIX, columns=custom_cols)
+    conn.commit()
+    cur = conn.cursor()
+    cur.execute(
+        f"SELECT bundle_id FROM {_PREFIX}_transactions "
+        f"WHERE id = 'tx-bundled'"
+    )
+    row = cur.fetchone()
+    assert row is not None
+    assert row[0] == "bundle-abc"
+
+
+def test_bulk_insert_balance_custom_columns_includes_supersedes() -> None:
+    """Mirror for `bulk_insert_balance` — `supersedes` is in the
+    schema but DB_COLS omits it (snapshots without corrections are
+    the default). `columns=` lifts that."""
+    conn = _fresh_db()
+    custom_cols = (
+        "account_id", "account_scope", "business_day_start",
+        "business_day_end", "money", "supersedes",
+    )
+    from recon_gen.common.l2.primitives import SUPERSEDE_TECHNICAL_CORRECTION
+    rows = [(
+        "acct-correction", "internal",
+        "2026-01-01 00:00:00", "2026-01-02 00:00:00",
+        0.0, SUPERSEDE_TECHNICAL_CORRECTION,
+    )]
+    bulk_insert_balance(
+        conn, rows, prefix=_PREFIX, columns=custom_cols,
+    )
+    conn.commit()
+    cur = conn.cursor()
+    cur.execute(
+        f"SELECT supersedes FROM {_PREFIX}_daily_balances "
+        f"WHERE account_id = 'acct-correction'"
+    )
+    row = cur.fetchone()
+    assert row is not None
+    assert row[0] == SUPERSEDE_TECHNICAL_CORRECTION

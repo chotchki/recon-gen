@@ -117,6 +117,7 @@ def bulk_insert_tx(
     rows: Sequence[tuple[object, ...]],
     *,
     prefix: str = DEFAULT_PREFIX,
+    columns: Sequence[str] | None = None,
 ) -> None: ...
 
 def bulk_insert_balance(
@@ -124,25 +125,40 @@ def bulk_insert_balance(
     rows: Sequence[tuple[object, ...]],
     *,
     prefix: str = DEFAULT_PREFIX,
+    columns: Sequence[str] | None = None,
 ) -> None: ...
 ```
 
 Properties of both:
 
-- **Positional tuple input.** Build rows in `TX_COLS` / `DB_COLS`
-  order. The named-kwarg `insert_tx` / `insert_balance` helpers
-  exist for one-row inserts; bulk is positional by design.
+- **Positional tuple input.** Build rows in column order. The named-kwarg
+  `insert_tx` / `insert_balance` helpers exist for one-row inserts; bulk
+  is positional by design.
+- **Default columns: the spine-author subset.** When `columns=None`
+  (the default), `bulk_insert_tx` uses `TX_COLS` and `bulk_insert_balance`
+  uses `DB_COLS`. These cover the spine-generator-author subsets and
+  exclude a few schema columns that have plant-specific NULL defaults
+  (`transfer_completion` / `bundle_id` / `supersedes`).
+- **Custom columns: `columns=<tuple>`** lifts the default restriction.
+  Pass any column subset including the omitted-by-default fields when
+  you're bulk-loading real (non-plant) data — typical CSV / pandas
+  shape. Tuple shape MUST match `len(columns)` and column ORDER.
 - **Money auto-coercion.** Money columns route through
   `_coerce_to_cents_int` at the insert boundary, which interprets
   values as follows:
-  - `float`, `Decimal`, `int` → DOLLARS. `100.50` becomes `10050` cents;
-    `100` becomes `10000` cents (a hundred dollars, NOT a hundred cents).
+  - `float`, `Decimal`, `int`, `str` → DOLLARS. `100.50` becomes
+    `10050` cents; `100` becomes `10000` cents (a hundred dollars,
+    NOT a hundred cents); `"100.50"` works for CSV bulk loads where
+    every column lands as a string.
   - `Cents(N)` instance → already cents, passed through unchanged
     (use this when your source system already gives you integer cents).
   - `None` → SQL NULL (use for the optional money cols).
   - To pass a literal integer-cents value, wrap it: `Cents(15432)`
     means 15432 cents = $154.32. **Passing `15432` directly means
     $15,432.00** — easy footgun, see Pitfalls below.
+  - Any other type raises `TypeError` at the coerce boundary (no
+    silent passthrough that surfaces as opaque downstream BIGINT
+    INSERT failures).
 - **Empty rows = no-op.** `bulk_insert_tx(conn, [])` does not open
   a cursor and does not fire SQL.
 - **Dialect dispatch.** DuckDB connections route through the CA.10
