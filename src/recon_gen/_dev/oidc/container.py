@@ -134,13 +134,26 @@ def get_or_start_dex_container(
     # Adopt path.
     try:
         existing = client.containers.get(DEX_SHARED_CONTAINER_NAME)
-        # If the container exited with a non-zero code, the last
-        # docker-entrypoint run hit a fatal config error (bad cert path,
-        # yaml malformed, perms locked). Restarting won't help — the
-        # entrypoint redoes gomplate-rendering with the same inputs.
-        # Always force-recreate so the new fresh-create path picks up
-        # any cfg / perm fix that landed since the prior crash.
-        if existing.status != "running":
+        # DJ.2.adopt_status_explicit (2026-06-15): explicit failed-
+        # state set instead of `!= "running"`. The prior catch-all
+        # would destroy ``created`` (just-created-not-started) and
+        # ``restarting`` (mid-restart-policy) containers — narrow
+        # race window in test paths thanks to the conftest FileLock,
+        # but the explicit list makes operator-staging scenarios
+        # (manual `docker create`) safe by construction.
+        #
+        # Docker statuses we DO recreate from:
+        #  - ``exited``: docker-entrypoint hit a fatal config error;
+        #    restart redoes the same gomplate render → recreate is
+        #    the only recovery.
+        #  - ``dead``: Docker daemon couldn't clean up the prior
+        #    container; recreate to flush the wedged state.
+        #  - ``created``: container exists but never started; treat
+        #    as "ready to be recreated with our cfg".
+        # Other states (``paused`` / ``restarting`` / ``removing``)
+        # fall through to the port-read branch which itself force-
+        # recreates on shape mismatch.
+        if existing.status in ("exited", "dead", "created"):
             try:
                 existing.remove(force=True)
             except Exception:  # noqa: BLE001 — best-effort
