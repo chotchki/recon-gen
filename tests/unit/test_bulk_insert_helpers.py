@@ -464,3 +464,54 @@ def test_bulk_insert_balance_custom_columns_includes_supersedes() -> None:
     row = cur.fetchone()
     assert row is not None
     assert row[0] == SUPERSEDE_TECHNICAL_CORRECTION
+
+
+# ---------------------------------------------------------------------------
+# 2026-06-15 fix — single-quote escape in `_render_sql_literal`. Reported
+# from v14.0.1: bulk-loading a transaction with a string containing `'`
+# (e.g. customer name "O'Reilly") bombed the SQL because the DuckDB
+# multi-row VALUES path didn't escape the inner quote, producing
+# malformed SQL like `INSERT ... VALUES ('O'Reilly', ...)`.
+# ---------------------------------------------------------------------------
+
+
+def test_bulk_insert_tx_handles_single_quote_in_strings() -> None:
+    """A string containing `'` must round-trip through the DuckDB
+    multi-row VALUES coalescer + back from the DB as the same string.
+    Pre-fix: `_render_sql_literal` wrapped strings as `f"'{v}'"` with
+    no escape, so `O'Reilly` became `'O'Reilly'` → SQL parse error."""
+    conn = _fresh_db()
+    rows = [
+        _tx_row(tx_id="tx-quote-1", account_id="O'Reilly Capital"),
+        _tx_row(tx_id="tx-quote-2", account_id="Bob's Bank"),
+        _tx_row(tx_id="tx-quote-3", account_id="''double-leading'"),
+    ]
+    bulk_insert_tx(conn, rows, prefix=_PREFIX)
+    conn.commit()
+    cur = conn.cursor()
+    cur.execute(
+        f"SELECT id, account_id FROM {_PREFIX}_transactions "
+        f"WHERE id LIKE 'tx-quote-%' ORDER BY id"
+    )
+    fetched = cur.fetchall()
+    assert fetched == [
+        ("tx-quote-1", "O'Reilly Capital"),
+        ("tx-quote-2", "Bob's Bank"),
+        ("tx-quote-3", "''double-leading'"),
+    ]
+
+
+def test_render_sql_literal_escapes_single_quotes() -> None:
+    """Unit-level test of the escape — independent of the DB layer.
+    `_render_sql_literal` is the actual fix site."""
+    from recon_gen.common.db import _render_sql_literal
+    assert _render_sql_literal("plain") == "'plain'"
+    assert _render_sql_literal("O'Reilly") == "'O''Reilly'"
+    # Input has 2 single quotes → 4 escaped + outer quotes = 5+leading+1
+    assert _render_sql_literal("''leading") == "'''''leading'"
+    assert _render_sql_literal("trailing'") == "'trailing'''"
+    assert _render_sql_literal("multi'quote'string") == "'multi''quote''string'"
+    # NULL / numeric / bool unchanged
+    assert _render_sql_literal(None) == "NULL"
+    assert _render_sql_literal(True) == "TRUE"
+    assert _render_sql_literal(42) == "42"

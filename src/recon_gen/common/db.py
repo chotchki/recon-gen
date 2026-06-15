@@ -1090,16 +1090,27 @@ def _apply_seed_via_oracle_dpl(cur: Any, sql: str) -> None:  # typing-smell: ign
 
 
 def _render_sql_literal(v: object) -> str:
-    """Render a Python primitive (from `_parse_simple_values`) back as
-    DuckDB SQL literal text. The parser bails on any string containing
-    `''` escapes so we don't need quote-escape logic here — only the
-    primitive shapes the parser emits round-trip.
+    """Render a Python primitive back as DuckDB SQL literal text.
+
+    Two caller classes:
+
+    1. CA.10 seed-apply (`_parse_simple_values` → `_render_sql_literal`):
+       parser bails on `''` escapes so its emitted strings are
+       guaranteed to contain no `'`. Round-trips cleanly.
+    2. `bulk_insert_tx` → `_flush_duckdb_multivalues`: takes Python
+       tuples directly. Strings may contain ANY character including
+       `'`. Reported 2026-06-15 — bulk-loading a transaction with
+       a description like `"O'Reilly"` bombed the SQL.
+
+    Both paths get correct SQL by double-quoting embedded single
+    quotes (SQL standard escape — DuckDB / PG / Oracle all accept).
+    Doesn't break path 1 because the parser guarantees no `'` in its
+    output, so the `replace` is a no-op there.
 
     NULL → ``NULL``; bool → ``TRUE`` / ``FALSE``; int/float → ``str(v)``;
-    str → single-quoted (no escape needed per the parser's contract);
+    str → single-quoted with `'` escaped to `''`;
     `_TypedSqlLiteral(kind, text)` → ``<kind> '<text>'`` (e.g.
-    ``TIMESTAMP '2026-03-03 00:00:01'``). Unrecognized shapes raise —
-    would be a parser/flush invariant violation.
+    ``TIMESTAMP '2026-03-03 00:00:01'``). Unrecognized shapes raise.
     """
     if v is None:
         return "NULL"
@@ -1108,12 +1119,15 @@ def _render_sql_literal(v: object) -> str:
     if isinstance(v, (int, float)):
         return str(v)
     if isinstance(v, _TypedSqlLiteral):
-        return f"{v.kind} '{v.text}'"
+        # _TypedSqlLiteral only emits from the parser, which guarantees
+        # no `'` in `text`. Still belt-and-suspenders escape so a
+        # future direct-construction caller can't bomb the SQL.
+        return f"{v.kind} '{v.text.replace(chr(39), chr(39) * 2)}'"
     if isinstance(v, str):
-        return f"'{v}'"
+        return "'" + v.replace("'", "''") + "'"
     raise TypeError(
         f"_render_sql_literal: unrecognized primitive {type(v).__name__}: "
-        f"{v!r}. `_parse_simple_values` should have bailed on this shape."
+        f"{v!r}"
     )
 
 
