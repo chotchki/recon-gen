@@ -1550,6 +1550,46 @@ def test_refresh_matviews_sql_dependency_order() -> None:
     assert _idx("current_daily_balances") < _idx("daily_statement_summary")
 
 
+def test_data_anchor_matview_emitted_in_schema() -> None:
+    """DK.1 lock — the data_anchor singleton matview is emitted by
+    emit_schema with the GREATEST-over-MAX-UNION-ALL shape, a
+    UNIQUE index on row_marker (for PG REFRESH CONCURRENTLY
+    qualification per BV.6), and refreshes alongside the L1 helpers."""
+    from recon_gen.common.l2.schema import emit_schema
+    sql = emit_schema(_baseline_instance(), prefix="dk")
+    # Matview body — the SQL chooses the larger of (transactions.posting
+    # MAX, daily_balances.business_day_end MAX) per DK.0 design lock.
+    assert "dk_data_anchor" in sql
+    assert "MAX(posting) AS anchor FROM dk_current_transactions" in sql
+    assert "MAX(business_day_end) AS anchor" in sql
+    assert "FROM dk_current_daily_balances" in sql
+    assert "WHERE account_scope = 'internal'" in sql
+    # Inner UNION ALL + outer MAX (not GREATEST) so Oracle's
+    # GREATEST(NULL,...) = NULL doesn't drop the populated source.
+    assert "UNION ALL" in sql
+    # Singleton + UNIQUE index for PG CONCURRENTLY refresh.
+    assert "1 AS row_marker" in sql
+    assert "CREATE UNIQUE INDEX idx_dk_data_anchor_row" in sql
+
+
+def test_data_anchor_in_refresh_dependency_order() -> None:
+    """DK.1 — data_anchor must REFRESH after current_* matviews
+    (its sources) and before consumers. Today the only consumer is
+    the dashboards' app-build read (DK.4); no downstream matview
+    depends on it, so the second invariant is trivially true. Lock
+    the upstream order so a future regression flagging matview
+    refresh ordering surfaces here, not at run time."""
+    sql = refresh_matviews_sql(_baseline_instance(), prefix="re")
+    # DK.1 singleton qualifies for PG REFRESH CONCURRENTLY (unique
+    # index on row_marker), matching every other matview in the set.
+    da_marker = "REFRESH MATERIALIZED VIEW CONCURRENTLY re_data_anchor;"
+    ct_marker = "REFRESH MATERIALIZED VIEW CONCURRENTLY re_current_transactions;"
+    cdb_marker = "REFRESH MATERIALIZED VIEW CONCURRENTLY re_current_daily_balances;"
+    assert da_marker in sql
+    assert sql.index(ct_marker) < sql.index(da_marker)
+    assert sql.index(cdb_marker) < sql.index(da_marker)
+
+
 def test_refresh_matviews_sql_uses_instance_prefix() -> None:
     """Prefix is per-deployment (Z.C — cfg.db.table_prefix); switching prefixes switches table names."""
     inst = L2Instance(

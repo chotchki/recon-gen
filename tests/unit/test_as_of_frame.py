@@ -443,3 +443,91 @@ def test_config_db_anchor_ignored_when_explicit_end_date() -> None:
     derived = _date(2026, 6, 5)
     frame = cfg.as_of_frame(db_anchor=derived)
     assert frame.as_of == pinned
+
+
+# ---------------------------------------------------------------------------
+# DK.1/DK.4 — _query_data_anchor helper (reads the <prefix>_data_anchor
+# singleton matview emitted by DK.1; called from DK.4's
+# maybe_export_data_anchor at json apply / audit apply entry).
+# ---------------------------------------------------------------------------
+
+
+def test_query_data_anchor_returns_matview_date() -> None:
+    """_query_data_anchor reads `data_anchor` from the singleton matview.
+    Happy path: matview has one non-NULL row → return the date."""
+    from datetime import date as _date
+    from recon_gen.common.as_of_frame import _query_data_anchor
+
+    class _Cursor:
+        def execute(self, sql: str) -> None:
+            # Lock the SQL shape — caller pins on this exact query.
+            assert sql == (
+                "SELECT data_anchor FROM demo_data_anchor LIMIT 1"
+            )
+        def fetchone(self) -> tuple[object, ...]:
+            return (_date(2026, 6, 15),)
+        def close(self) -> None: pass
+
+    class _Conn:
+        def cursor(self) -> _Cursor:
+            return _Cursor()
+
+    assert _query_data_anchor(_Conn(), "demo") == _date(2026, 6, 15)  # pyright: ignore[reportArgumentType]: structural duck-type matches SyncConnection Protocol
+
+
+def test_query_data_anchor_returns_none_on_null_row() -> None:
+    """Cold-DB case: matview has one row with data_anchor IS NULL
+    (both source tables empty). Return None so the caller decides
+    whether to raise or fall through to live(wall-clock)."""
+    from recon_gen.common.as_of_frame import _query_data_anchor
+
+    class _Cursor:
+        def execute(self, sql: str) -> None: pass
+        def fetchone(self) -> tuple[object, ...]:
+            return (None,)
+        def close(self) -> None: pass
+
+    class _Conn:
+        def cursor(self) -> _Cursor:
+            return _Cursor()
+
+    assert _query_data_anchor(_Conn(), "demo") is None  # pyright: ignore[reportArgumentType]: structural duck-type matches SyncConnection Protocol
+
+
+def test_query_data_anchor_returns_none_on_missing_matview() -> None:
+    """Legacy-deploy case: the data_anchor matview doesn't exist
+    (pre-DK.1 schema). Query raises; caller falls through to live()."""
+    from recon_gen.common.as_of_frame import _query_data_anchor
+
+    class _Cursor:
+        def execute(self, sql: str) -> None:
+            raise RuntimeError("relation 'demo_data_anchor' does not exist")
+        def fetchone(self) -> None: return None
+        def close(self) -> None: pass
+
+    class _Conn:
+        def cursor(self) -> _Cursor:
+            return _Cursor()
+
+    assert _query_data_anchor(_Conn(), "demo") is None  # pyright: ignore[reportArgumentType]: structural duck-type matches SyncConnection Protocol
+
+
+def test_query_data_anchor_coerces_datetime_to_date() -> None:
+    """The DK.1 matview projects a TIMESTAMP (GREATEST over the two
+    source TIMESTAMP MAXes). PG / DuckDB return it as a datetime;
+    coerce to date so the consumer (RECON_GEN_AS_OF_ANCHOR env via
+    isoformat()) stays calendar-day-typed."""
+    from datetime import date as _date, datetime as _dt
+    from recon_gen.common.as_of_frame import _query_data_anchor
+
+    class _Cursor:
+        def execute(self, sql: str) -> None: pass
+        def fetchone(self) -> tuple[object, ...]:
+            return (_dt(2026, 6, 15, 21, 54, 0),)
+        def close(self) -> None: pass
+
+    class _Conn:
+        def cursor(self) -> _Cursor:
+            return _Cursor()
+
+    assert _query_data_anchor(_Conn(), "demo") == _date(2026, 6, 15)  # pyright: ignore[reportArgumentType]: structural duck-type matches SyncConnection Protocol
