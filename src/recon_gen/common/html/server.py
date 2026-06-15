@@ -79,6 +79,10 @@ import json
 import logging
 import re
 import traceback
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from recon_gen.common.config import Config
 
 html_escape = _html_module.escape
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -91,6 +95,8 @@ from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import QueryParams
 from starlette.exceptions import HTTPException
+from starlette.middleware import Middleware
+from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request
 from starlette.responses import (
     HTMLResponse, JSONResponse, RedirectResponse, Response,
@@ -481,6 +487,7 @@ def make_app(
     docs_dir: Path | None = None,
     studio_routes: Sequence[Route | Mount] | None = None,
     banner_text: str | None = None,
+    cfg: "Config | None" = None,
 ) -> Starlette:
     """Build a Starlette ASGI app serving multiple dashboards.
 
@@ -1178,9 +1185,40 @@ def make_app(
     # own "no route matched" 404. Generic ``Exception`` catches any
     # uncaught throw from a fetcher / render path so production never
     # returns the framework default page.
+    # DD.2 — auth wiring when cfg.auth.{oidc, session} both set.
+    # Routes (login/callback/logout) prepend to the routes list so they
+    # resolve before any other route that might shadow them. Middleware
+    # composes as: SessionMiddleware (OAuth round-trip state for authlib)
+    # then JwtCookieMiddleware (long-lived session check on every request).
+    # Order matters: SessionMiddleware must run FIRST (outermost) so
+    # `request.session` is populated when the auth routes use it.
+    middleware_stack: list[Middleware] = []
+    if cfg is not None and cfg.auth.oidc is not None and cfg.auth.session is not None:
+        from recon_gen.common.auth import build_jwt_codec  # noqa: PLC0415
+        from recon_gen.common.html.auth import (  # noqa: PLC0415
+            JwtCookieMiddleware,
+            build_starlette_oauth,
+            oauth_routes,
+        )
+        oauth = build_starlette_oauth(cfg)
+        jwt_codec = build_jwt_codec(cfg)
+        routes = [*oauth_routes(oauth=oauth, jwt_codec=jwt_codec, cfg=cfg), *routes]
+        middleware_stack.append(
+            Middleware(
+                SessionMiddleware,
+                secret_key=jwt_codec.secret,
+                same_site="lax",
+                https_only=True,
+            )
+        )
+        middleware_stack.append(
+            Middleware(JwtCookieMiddleware, jwt_codec=jwt_codec)
+        )
+
     return Starlette(
         debug=False,
         routes=routes,
+        middleware=middleware_stack or None,
         exception_handlers={
             404: not_found_handler,
             # CS.8 — explicit handler for the CO.x typed exception so
