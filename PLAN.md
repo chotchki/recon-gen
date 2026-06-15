@@ -531,7 +531,7 @@ These are related concerns — both about end-to-end resource lifecycle hygiene 
   - [ ] DJ.2.windows _guard - `os.getuid()` / `os.getgid()` in `container.py` AttributeErrors on Windows. Add `sys.platform != 'win32'` guard with a friendly `RuntimeError("Dex test container fixture requires Linux/macOS")`. _dev/ is excluded from the wheel so the constraint is test-only, but the failure shape should be operator-friendly.
   - [ ] DJ.2.adopt _mount_check - On the adopt path, inspect `existing.attrs['Mounts']` and force-recreate when the bind-mount source doesn't match the current `cfg_dir`. Closes the "adopted container serves stale cert / config" gap that the b298ca26 docstring honestly named but didn't fix.
   - [ ] DJ.2.adopt _status_explicit - Adopt path: match `existing.status in ('exited', 'dead')` for force-recreate rather than `!= 'running'`. Avoids destroying `created` / `restarting` / `paused` mid-flight containers in races.
-- [ ] DJ.3 - **CodeQL XSS-through-DOM fix (6 high-severity warnings).** Validate URL protocol via `new URL(url).protocol in ('http:', 'https:')` before assigning to `window.location.href` at all 6 flagged sites:
+- [x] DJ.3 - **CodeQL XSS-through-DOM fix (6 high-severity warnings).** Validate URL protocol via `new URL(url).protocol in ('http:', 'https:')` before assigning to `window.location.href` at all 6 flagged sites:
   - [ ] DJ.3.bootstrap _608 - `src/recon_gen/common/html/assets/js/bootstrap.js:608` (row-drill URL).
   - [ ] DJ.3.bootstrap _768 - `src/recon_gen/common/html/assets/js/bootstrap.js:768` (row click → drill URL).
   - [ ] DJ.3.bootstrap _773 - `src/recon_gen/common/html/assets/js/bootstrap.js:773` (Enter/Space → drill URL).
