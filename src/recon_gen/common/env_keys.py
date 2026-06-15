@@ -1159,3 +1159,72 @@ RECON_GEN_CLOUDFLARE_TOKEN: Final = EnvVar(
     coercer=str,
     optional=True,
 )
+
+# DD.4 — pre-spun Dex URL (set by ci.yml's ensure-shared-dex step to
+# bypass per-run spinup). When absent, the runner's
+# ``_ensure_oidc_if_configured`` spins a local container per the
+# DD.4 design (cfg.app2.tls cert mounted into Dex, HTTPS issuer URL
+# at the LE-cert-covered loopback DNS names). Mirrors the env-URL
+# short-circuit shape of ``RECON_GEN_DEMO_DATABASE_URL_PG``: present
+# ⇒ use as-is; absent ⇒ spin local.
+RECON_GEN_DEX_URL: Final = EnvVar(
+    name="RECON_GEN_DEX_URL",
+    description=(
+        "DD.4 — pre-spun Dex URL (set by ci.yml's ensure-shared-dex "
+        "step to bypass per-run spinup). When absent, the runner's "
+        "_ensure_oidc_if_configured spins a local container."
+    ),
+    coercer=str,
+    optional=True,
+)
+
+# DD.4 — OIDC client secret. Operator-supplied per
+# [[feedback_no_credential_friction]]; cfg's
+# ``cfg.auth.oidc.client_secret_env`` names this env var rather than
+# storing the secret in cfg yaml. Generated per CI run via
+# ``openssl rand -hex 14`` and injected into both the Dex container
+# (via secretEnv/hashFromEnv) and the App2 auth middleware (which
+# reads it through the cfg-named env var indirection).
+RECON_GEN_OIDC_CLIENT_SECRET: Final = EnvVar(
+    name="RECON_GEN_OIDC_CLIENT_SECRET",
+    description=(
+        "DD.4 — OIDC client secret. Cfg's cfg.auth.oidc.client_secret_env "
+        "names this env var; we don't store the secret in cfg yaml. "
+        "Generated per CI run via openssl rand -hex 14."
+    ),
+    coercer=str,
+    optional=True,
+)
+
+# DD.4 — JWT signing secret for the DD.2 auth middleware session
+# cookie. Operator-supplied per [[feedback_no_credential_friction]];
+# cfg's ``cfg.auth.session.jwt_secret_env`` names this env var rather
+# than storing the secret in cfg yaml. Generated per CI run via
+# ``openssl rand -hex 14``.
+RECON_GEN_JWT_SECRET: Final = EnvVar(
+    name="RECON_GEN_JWT_SECRET",
+    description=(
+        "DD.4 — JWT signing secret for the DD.2 auth middleware session "
+        "cookie. Cfg's cfg.auth.session.jwt_secret_env names this env "
+        "var; we don't store the secret in cfg yaml. Generated per CI "
+        "run via openssl rand -hex 14."
+    ),
+    coercer=str,
+    optional=True,
+)
+
+# DD.4 — plaintext password for the static Dex test user. Browser
+# e2e tests use this to log in via the Dex UI; the runner's
+# ``_ensure_oidc_if_configured`` bcrypts it for the Dex static-user
+# ``hashFromEnv`` resolution at container startup. Operator-supplied
+# per [[feedback_no_credential_friction]].
+RECON_GEN_DEX_USER_PASSWORD: Final = EnvVar(
+    name="RECON_GEN_DEX_USER_PASSWORD",
+    description=(
+        "DD.4 — plaintext test-user password. Browser e2e tests use "
+        "this to log in via the Dex UI; the runner bcrypts it for the "
+        "Dex static-user hashFromEnv resolution."
+    ),
+    coercer=str,
+    optional=True,
+)

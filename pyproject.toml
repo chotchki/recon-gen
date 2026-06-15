@@ -260,6 +260,13 @@ dev = [
     "cryptography>=41.0",
     "dnspython>=2.4",
     "requests>=2.31",
+    # DD.4 — Dex (test-side OIDC IdP) needs a bcrypt-hashed user
+    # password baked into its config. The runner generates the hash
+    # at spinup via `bcrypt.hashpw(RECON_GEN_DEX_USER_PASSWORD,
+    # bcrypt.gensalt())`. Test fixtures also import bcrypt to verify
+    # the hash round-trip when asserting auth flows. Pure-Python wheel
+    # with a tiny C extension; install cost minor.
+    "bcrypt>=4.0",
 ]
 e2e = [
     "pytest>=7.0",

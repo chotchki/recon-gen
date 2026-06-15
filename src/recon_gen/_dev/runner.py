@@ -57,6 +57,8 @@ from recon_gen.common.env_keys import (
     RECON_GEN_CONFIG,
     RECON_GEN_DB_READ_ONLY,
     RECON_GEN_DEMO_DATABASE_URL,
+    RECON_GEN_DEX_URL,
+    RECON_GEN_DEX_USER_PASSWORD,
     RECON_GEN_ENV_LOG_DIR,
     RECON_GEN_DEMO_DATABASE_URL_OR,
     RECON_GEN_DEMO_DATABASE_URL_PG,
@@ -1655,6 +1657,10 @@ AWS_TOUCHING_LAYERS: Final = ("qs_api", "qs_browser")
 # Operators without the tls block see no behavior change; unit/db runs
 # never hit Cloudflare.
 TLS_TOUCHING_LAYERS: Final = ("app2", "qs_api", "qs_browser")
+
+# Phase DD.4 — App2-only per spike lock. qs_browser tests use QS embed
+# which is auth-independent (AWS-side identity), so they don't need Dex.
+OIDC_TOUCHING_LAYERS: Final = ("app2",)
 
 # Y.2.gate.j.5 — Oracle container reuse. **Per-cell** name (not single
 # shared) so two Oracle cells (e.g., sp_or_lo + sq_or_lo) running in
@@ -3460,6 +3466,100 @@ def _ensure_tls_if_configured(cfg_path: Path, layer: str) -> int:
     return 0
 
 
+def _ensure_oidc_if_configured(cfg_path: Path, layer: str) -> int:
+    """DD.4 — pre-flight Dex OIDC IdP spinup.
+
+    When ``cfg.auth.oidc`` is configured AND the chain target is in
+    ``OIDC_TOUCHING_LAYERS``, spin/adopt the Dex container with
+    scrambled-per-run credentials, mounting ``cfg.app2.tls`` cert/key
+    for HTTPS. No-op when the block is absent or the target is a
+    pre-app2 layer (unit/db).
+
+    Hard-depends on DC.3 — if ``cfg.auth.oidc`` is set but
+    ``cfg.app2.tls`` is None, return ``EXIT_NEEDS_OPERATOR`` with an
+    actionable message pointing at ``docs/operations/tls-setup.md``.
+    Dex serves HTTPS via the LE cert minted by ``ensure_dev_env``;
+    no separate cert mgmt in DD.4.
+
+    Returns 0 on success/no-op; ``EXIT_NEEDS_OPERATOR`` on failure.
+    """
+    if layer not in OIDC_TOUCHING_LAYERS:
+        return 0
+
+    from recon_gen.common.config import load_config  # noqa: PLC0415 — lazy
+    cfg = load_config(str(cfg_path))
+
+    if cfg.auth.oidc is None:
+        return 0
+
+    if cfg.app2.tls is None:
+        print(
+            "runner: OIDC pre-flight failed: cfg.auth.oidc is set but "
+            "cfg.app2.tls is None. Dex needs the DC.3 LE cert to serve "
+            "HTTPS. Set up cfg.app2.tls first — see "
+            "docs/operations/tls-setup.md.",
+            file=sys.stderr,
+        )
+        return EXIT_NEEDS_OPERATOR
+
+    # Short-circuit: when RECON_GEN_DEX_URL is set (CI pre-spun shared
+    # container OR a developer pointing at a manually-spun Dex), skip
+    # the spinup. The runner trusts the operator's URL.
+    env_url = RECON_GEN_DEX_URL.get_or_none()
+    if env_url is not None:
+        return 0
+
+    from recon_gen._dev.oidc import Env, ensure_dev_idp  # noqa: PLC0415
+    from recon_gen._dev.oidc.secrets import (  # noqa: PLC0415
+        generate_client_secret,
+        generate_user_password,
+    )
+
+    client_secret = (
+        os.environ.get(cfg.auth.oidc.client_secret_env)
+        or generate_client_secret()
+    )
+    user_password = (
+        RECON_GEN_DEX_USER_PASSWORD.get_or_none()
+        or generate_user_password()
+    )
+
+    try:
+        ensure_dev_idp(
+            Env(cfg.app2.tls.env),
+            cfg=cfg,
+            cert_path=Path(cfg.app2.tls.cert_path).expanduser(),
+            key_path=Path(cfg.app2.tls.key_path).expanduser(),
+            client_id=cfg.auth.oidc.client_id,
+            client_secret=client_secret,
+            redirect_uri=cfg.auth.oidc.redirect_uri,
+            user_email="testuser@example.com",
+            user_password=user_password,
+        )
+    except ValueError as exc:
+        print(f"runner: OIDC pre-flight failed: {exc}", file=sys.stderr)
+        print(
+            "runner: ensure RECON_GEN_OIDC_CLIENT_SECRET, "
+            "RECON_GEN_JWT_SECRET, RECON_GEN_DEX_USER_PASSWORD are set "
+            "(run/secrets.env on dev; GitHub secrets on CI)",
+            file=sys.stderr,
+        )
+        return EXIT_NEEDS_OPERATOR
+    except Exception as exc:  # noqa: BLE001 — operator-actionable bubble
+        print(
+            f"runner: OIDC pre-flight failed ({type(exc).__name__}): {exc}",
+            file=sys.stderr,
+        )
+        print(
+            "runner: Dex container spinup / readiness probe / DC.3 cert "
+            "mount errored; check Docker daemon + cfg.app2.tls cert/key "
+            "existence",
+            file=sys.stderr,
+        )
+        return EXIT_NEEDS_OPERATOR
+    return 0
+
+
 def cmd_up_to(args: argparse.Namespace) -> int:
     """Run the test chain up to and including the named layer.
 
@@ -3553,6 +3653,12 @@ def cmd_up_to(args: argparse.Namespace) -> int:
         tls_exit = _ensure_tls_if_configured(cfg_path, args.layer)
         if tls_exit != 0:
             return tls_exit
+        # DD.4 — pre-flight Dex IdP spinup. No-op when cfg.auth.oidc
+        # is None or the chain target isn't in OIDC_TOUCHING_LAYERS.
+        # Hard-depends on DC.3 (cert/key for Dex HTTPS).
+        oidc_exit = _ensure_oidc_if_configured(cfg_path, args.layer)
+        if oidc_exit != 0:
+            return oidc_exit
         runner_variant_env = _setup_thin_chain_environment(
             cfg_path,
             layer=args.layer,
