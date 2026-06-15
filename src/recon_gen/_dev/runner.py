@@ -104,10 +104,23 @@ LAYERS: Final[tuple[str, ...]] = (
 # stdout-silent windows up to ~9-10 min during cluster-of-slow-tests
 # stretches; 600s clipped them mid-flight. 900s preserves the
 # fast-fail intent (~30% over typical worst gap) without false kills.
+#
+# 2026-06-15 DJ.6 follow-on: ``app2`` raised 900s → 1800s after a
+# diagnosed false-positive on a 19m45s 3-dialect concurrent run.
+# Trainer-dogfood spans all 3 dialects (du/pg/or), each pinned to its
+# own xdist loadgroup; after du+pg finish (~6min) only the Oracle
+# worker emits dots, and an isolated Oracle slow-matview-refresh on a
+# memory-pressured host can silently chew 12-15 min on a single test
+# while the ~4-8GB Oracle container starves the other Studio servers.
+# Isolation runs prove no single test exceeds 65s in clean conditions
+# (or=18m32s for 17 tests in isolation; pg=6m16s; du=64s) — the
+# concurrent run's silent window is resource contention, not a hung
+# test. 1800s preserves fast-fail intent for a genuinely-hung session
+# while accommodating worst-case memory-pressured cluster.
 _HANG_THRESHOLDS: Final[dict[str, int]] = {
     "unit": 180,        # ~60s clean; faulthandler kicks at 180s
     "db": 240,          # ~40s clean; matview refresh can sprawl
-    "app2": 900,        # ~19m clean; Studio server tests run long
+    "app2": 1800,       # ~19m clean, ~30m memory-pressured 3-dialect concurrent
     # DI phase — ``deploy`` layer retired; qs_api / qs_browser layers'
     # session-autouse ``qs_deployed`` fixture absorbs the ~30-60s
     # deploy wall into their own session window.
