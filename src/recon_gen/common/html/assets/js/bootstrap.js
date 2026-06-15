@@ -2603,9 +2603,15 @@
     el.dataset.widgetWired = "1";
     var fromInput = scope.querySelector('input[name="date_from"]');
     var toInput = scope.querySelector('input[name="date_to"]');
+    // DK.10 — clamp picker upper bound to the data_anchor matview value
+    // when the server rendered ``data-max-date``. Same shape as single
+    // picker; the range picker can't pick a window past the anchor on
+    // either end.
+    var maxDate = el.dataset.maxDate || undefined;
     flatpickr(el, {
       mode: "range",
       dateFormat: "Y-m-d",
+      maxDate: maxDate,
       onChange: (selectedDates, _dateStr, instance) => {
         var lo = selectedDates[0]
           ? instance.formatDate(selectedDates[0], "Y-m-d")
@@ -2634,10 +2640,15 @@
     var hidden = targetName
       ? scope.querySelector('input[name="' + targetName + '"]')
       : null;
+    // DK.10 — clamp picker upper bound to the data_anchor matview value
+    // when the server rendered ``data-max-date`` (per-request live query).
+    // Empty / unset → unbounded (legacy behavior).
+    var maxDate = el.dataset.maxDate || undefined;
     flatpickr(el, {
       mode: "single",
       dateFormat: "Y-m-d",
       defaultDate: hidden && hidden.value ? hidden.value : null,
+      maxDate: maxDate,
       onChange: (selectedDates, _dateStr, instance) => {
         var d = selectedDates[0]
           ? instance.formatDate(selectedDates[0], "Y-m-d")

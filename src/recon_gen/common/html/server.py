@@ -209,6 +209,16 @@ class ServedDashboard:
     # dropdowns) → those dropdowns render empty + Tom Select
     # preload no-ops (degraded, not a crash).
     options_search_fetcher: OptionsSearchFetcher | None = None
+    # DK.10 — per-request data-anchor fetcher. Awaitable returns the
+    # ISO ``YYYY-MM-DD`` value from ``<prefix>_data_anchor`` (DK.1)
+    # or ``None`` when the matview is empty / unreachable. The
+    # dashboard route awaits it once per request and stamps the
+    # value onto every ``ParameterDateSpec.max_date`` so the
+    # Flatpickr UI clamps the upper bound. ``None`` (default) =
+    # no clamp — preserves legacy behavior when caller hasn't wired
+    # the matview lookup (smoke app, unit tests, dashboards built
+    # before DK.10 landed).
+    data_anchor_fetcher: Callable[[], Awaitable[str | None]] | None = None
 
 
 # CR.1 (2026-06-08) — Excel sheet name limit: ≤ 31 chars + no `: \ / ? * [ ]`.
@@ -220,6 +230,23 @@ class ServedDashboard:
 # shortform; >31-char human strings raise so the rename surfaces at
 # request time. Unit-tier lint at tests/unit/test_xlsx_sheet_title.py
 # walks every app's emitted tree and asserts the contract pre-deploy.
+def _stamp_max_date_on_date_specs(
+    specs: Sequence[FilterSpec], max_date: str | None,
+) -> tuple[FilterSpec, ...]:
+    """DK.10 — set ``ParameterDateSpec.max_date`` to the data_anchor value
+    on every date-picker spec in ``specs``. Non-date specs pass through
+    unchanged. ``max_date=None`` is a no-op so the legacy-shaped wires
+    (smoke app, unit tests, dashboards built before DK.10) keep
+    rendering an unbounded picker.
+    """
+    if max_date is None:
+        return tuple(specs)
+    return tuple(
+        replace(s, max_date=max_date) if isinstance(s, ParameterDateSpec) else s
+        for s in specs
+    )
+
+
 _XLSX_FORBIDDEN_RE = re.compile(r"[:\\/?*\[\]]")
 _VISUAL_ID_UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
@@ -643,6 +670,14 @@ def make_app(
         filter_specs = _apply_url_param_overrides(
             filter_specs, request.query_params,
         )
+        # DK.10 — per-request data-anchor query; clamps Flatpickr UI's
+        # upper bound to the latest moment the feed has data for. Skipped
+        # when the served dashboard didn't wire a fetcher (smoke app,
+        # unit tests) or when the matview is empty / unreachable (returns
+        # None; legacy unbounded behavior preserved).
+        if served.data_anchor_fetcher is not None:
+            max_date = await served.data_anchor_fetcher()
+            filter_specs = _stamp_max_date_on_date_specs(filter_specs, max_date)
         # X.4.g.12.b — capture the current generation counter at render
         # time. The page's poller will compare against this baseline.
         from recon_gen.common.l2.deploy_pipeline import (  # noqa: PLC0415
@@ -700,6 +735,10 @@ def make_app(
         filter_specs = _apply_url_param_overrides(
             filter_specs, request.query_params,
         )
+        # DK.10 — same per-request data-anchor clamp as dashboard_view.
+        if served.data_anchor_fetcher is not None:
+            max_date = await served.data_anchor_fetcher()
+            filter_specs = _stamp_max_date_on_date_specs(filter_specs, max_date)
         # X.4.g.12.b — same poller baseline as dashboard_view.
         from recon_gen.common.l2.deploy_pipeline import (  # noqa: PLC0415
             get_data_generation_id,

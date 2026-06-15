@@ -282,6 +282,37 @@ def test_bo_10_date_picker_placeholder_signals_empty_state() -> None:
     assert default_spec.placeholder == "Latest day"
 
 
+def test_dk10_date_picker_max_date_renders_when_set() -> None:
+    """DK.10 — when ``ParameterDateSpec.max_date`` is set (server stamps
+    the value from the ``<prefix>_data_anchor`` matview at request time),
+    the Flatpickr target carries ``data-max-date="YYYY-MM-DD"`` so the
+    JS clamps the upper bound. None (default) renders unbounded.
+
+    Stops operators from picking past the latest feed day; pairs with
+    the matview-resolved as_of bullet on the Info sheet (DK.5.bullets).
+    """
+    from recon_gen.common.html import ParameterDateSpec
+
+    app, sheet = _build_app()
+    form = _filter_form(emit_html(
+        app, sheet, dashboard_id="x",
+        filter_specs=[
+            ParameterDateSpec(
+                name="p_clamped", label="Date To",
+                max_date="2026-06-15",
+            ),
+            ParameterDateSpec(name="p_unbounded", label="Date From"),
+        ],
+    ))
+    # Clamped picker renders the data-max-date attribute.
+    assert 'data-max-date="2026-06-15"' in form
+    # Unbounded picker (legacy default) does NOT — preserves pre-DK
+    # behavior for smoke-app / unit-test wires that don't stamp.
+    # Use a more targeted check: count occurrences and assert exactly
+    # one (the clamped picker).
+    assert form.count("data-max-date=") == 1
+
+
 def test_parameter_dropdown_is_tomselect() -> None:
     app, sheet = _build_app()
     spec = ParameterDropdownSpec(

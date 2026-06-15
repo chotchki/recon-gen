@@ -789,3 +789,34 @@ In cross-renderer `[qs, app2]` parametrized tests that exercise the auth gate, g
 POLICY 2 structured-triple discipline applies (per `CLAUDE.md`): if AWS ever ships a workaround (e.g. embed URLs that accept a federated IdP redirect for additional auth claims), this entry retires, the `NotImplementedError` raises in `tests/e2e/_drivers/qs.py::sign_in_via_oidc` etc. become real impls, and the `project_qs_embed_url_presigned_no_oidc.md` memory file is deleted — all three artifacts come down together. Until then, do not propose URL-parameter or post-load redirect approaches as workarounds.
 
 Append-only quirks log: this entry stays even if/when AWS ships a fix.
+
+## `ParameterDateTimePickerControl` has no min/max date — DK.10, 2026-06-15
+
+### Symptom
+
+Operators on QS-rendered dashboards can pick any date in their `Date From` / `Date To` / single-day pickers, including dates past the feed's actual latest day (the `<prefix>_data_anchor` matview value). The dataset SQL still filters correctly (rows past anchor simply don't exist), so visuals don't show ghost data — but the picker UI doesn't communicate "you've selected past the data window" the way a clamped picker would.
+
+App2 (HTMX renderer) clamps the picker via Flatpickr's `maxDate` config: the server live-queries `<prefix>_data_anchor` per request and stamps the value onto the rendered input as `data-max-date="..."`. QS has no equivalent.
+
+### Confirmed-via
+
+DK.10 design conversation, 2026-06-15. The `ParameterDateTimePickerControl` model (`src/recon_gen/common/models.py:1222`) — and the AWS QS API it mirrors — only carries `ParameterControlId` / `Title` / `SourceParameterName`, plus a `DisplayOptions` block that controls formatting (no min/max date). The bound `DateTimeParameter` has a `DefaultValueWhenUnset` but no constraint field either.
+
+### Root cause
+
+This is a permanent capability gap on the QS API side. The only ways to clamp would be:
+
+1. **Bake at deploy time** — emit the picker with a `RollingDate` expression or a fixed default, then re-deploy whenever the anchor moves. Requires `recon-gen json apply --execute` per ETL cycle. Operationally awkward.
+2. **Client-side JS in the embed wrapper** — inject a script that intercepts the picker DOM and applies a max. The embed page is on `*.quicksight.aws.amazon.com` so the embedding host can't reach into it directly; this would need AWS's embedding SDK to expose a hook, which it doesn't today.
+
+Neither path satisfies the no-redeploy invariant operators expect ("the data anchor advances daily; my dashboards shouldn't need a daily re-deploy to reflect that").
+
+### Workaround
+
+Accept the asymmetry. App2 dashboards clamp via Flatpickr; QS dashboards don't. The dataset SQL still filters correctly on both renderers, so the only practical difference is the picker UI: on App2 the operator can't pick past the anchor (the day is greyed out), on QS they can (rows past the anchor just return empty). The Info sheet's `as_of (at emit)` bullet + Latest Balance Day KPI (DK.5) show the actual data window even when the picker doesn't enforce it.
+
+### Notes
+
+POLICY 2 structured-triple applies. If AWS ships a min/max field on `ParameterDateTimePickerControl`, this entry retires, the App2 `_render_parameter_date` shape gets mirrored on the QS side, and the parity gap closes.
+
+Append-only quirks log: this entry stays even if/when AWS ships a fix.

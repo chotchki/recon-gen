@@ -148,6 +148,35 @@ def build_real_dashboards(
     # page; typeahead passes the user-typed string. The pre-CQ.2
     # make_options_fetcher with its silent LIMIT 2000 is gone.
     opts_search_fetcher = make_options_search_fetcher(cfg, pool=pool)
+    # DK.10 — per-request data-anchor fetcher. Server route awaits it
+    # once per dashboard / sheet GET and stamps the resulting
+    # ``YYYY-MM-DD`` onto every ParameterDateSpec so the Flatpickr UI
+    # clamps the upper bound to the latest moment the feed has data
+    # for. Pool-backed; matview is one row, fetch cost is negligible.
+    # Closes over ``cfg.db.table_prefix`` so all dashboards on this
+    # server (one prefix per cfg) share the lookup.
+    prefix = cfg.db.table_prefix
+
+    async def _fetch_data_anchor() -> str | None:
+        sql = f"SELECT data_anchor FROM {prefix}_data_anchor LIMIT 1"
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch_all(sql)  # pyright: ignore[reportUnknownMemberType]: SyncConnection Protocol; pool wraps per-dialect async wrapper around the same row-shaped result
+        except Exception:  # noqa: BLE001 — best-effort; matview missing / legacy deploy / cold DB → unbounded picker (legacy behavior)
+            return None
+        if not rows:
+            return None
+        anchor = rows[0][0] if rows[0] else None
+        if anchor is None:
+            return None
+        # Drivers return either a date or datetime; coerce to ISO date.
+        from datetime import date as _date, datetime as _dt  # noqa: PLC0415
+        if isinstance(anchor, _dt):
+            return anchor.date().isoformat()
+        if isinstance(anchor, _date):
+            return anchor.isoformat()
+        return None
+
     return {
         name: ServedDashboard(
             tree_app=tree_app,
@@ -157,6 +186,7 @@ def build_real_dashboards(
             theme=theme,
             filter_specs=(),
             options_search_fetcher=opts_search_fetcher,
+            data_anchor_fetcher=_fetch_data_anchor,
         )
         for name, tree_app, sheet in real_apps
     }

@@ -265,11 +265,26 @@ class ParameterDateSpec:
     ``selected`` is filled from a ``?param_<name>=<v>`` page-URL key by
     ``server.py::_apply_url_param_overrides`` so a bookmark / drill lands on
     that day with the visuals' load-fetch already narrowed.
+
+    DK.10 — ``max_date`` (ISO ``YYYY-MM-DD``, optional) clamps the
+    Flatpickr UI so the operator can't pick past the feed's data
+    anchor (DK.1 ``<prefix>_data_anchor`` matview). When set, renders
+    as ``data-max-date="..."`` on the Flatpickr target; the
+    ``wireFlatpickrSingle`` / ``wireFlatpickrRange`` JS reads it and
+    passes ``maxDate`` to the Flatpickr config. Server-side helper in
+    ``server.py`` queries the matview once per request and stamps the
+    value onto every ``ParameterDateSpec``. ``None`` = no clamp
+    (legacy behavior — also the default when the matview is empty or
+    unreachable). QS-side clamping isn't covered: the
+    ``ParameterDateTimePickerControl`` API has no min/max field, and
+    the only workarounds (deploy-time bake or client-side JS in the
+    embed wrapper) violate the no-redeploy invariant.
     """
     name: str
     label: str
     selected: str = ""
     placeholder: str = "Latest day"
+    max_date: str | None = None
 
 
 FilterSpec = (
@@ -1131,12 +1146,19 @@ def _render_parameter_date(spec: ParameterDateSpec) -> str:
     target = f"param_{spec.name}"
     val = html.escape(spec.selected)
     placeholder = html.escape(spec.placeholder)
+    # DK.10 — max_date clamp from the data_anchor matview (when present).
+    # Renders as data-max-date="YYYY-MM-DD" on the Flatpickr target;
+    # bootstrap.js wireFlatpickrSingle / wireFlatpickrRange reads it.
+    max_attr = (
+        f' data-max-date="{html.escape(spec.max_date)}"'
+        if spec.max_date else ""
+    )
     return (
         f'    <label class="{_FORM_LABEL_CLASS}">{html.escape(spec.label)} '
         f'<input type="text" data-widget="flatpickr-single" '
         f'data-target-input="{target}" readonly placeholder="{placeholder}" '
         f'class="{_DATE_INPUT_CLASS}" style="{_DATE_INPUT_STYLE}"'
-        f' value="{val}"></label>'
+        f' value="{val}"{max_attr}></label>'
         f'<input type="hidden" name="{target}" value="{val}">'
     )
 
