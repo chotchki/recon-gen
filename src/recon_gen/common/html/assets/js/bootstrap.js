@@ -20,6 +20,28 @@
 // phase's swap-on-edit pattern reuses this exact dispatch.
 
 (() => {
+  // DJ.3 (2026-06-15) — CodeQL js/xss-through-dom hardening. Drill URLs
+  // ride from server-rendered data attrs into ``window.location.href``;
+  // a hostile cell value substituted into a drill template could land
+  // as ``javascript:alert(1)`` and execute on click. Parse via the URL
+  // constructor (relative-to-origin to accept normal in-app paths),
+  // accept only http: / https:, refuse everything else.
+  function safeNavigate(url) {
+    if (typeof url !== "string" || !url) return;
+    var parsed;
+    try {
+      parsed = new URL(url, window.location.origin);
+    } catch (e) {
+      console.warn("Refusing to navigate to malformed URL:", url, e);
+      return;
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      console.warn("Refusing to navigate to non-http(s) URL:", url);
+      return;
+    }
+    window.location.href = parsed.href;
+  }
+
   // Build the merged values dict for an anchor click — current form
   // inputs PLUS the anchor selection. d3 owns the SVG so it owns the
   // click; htmx.ajax() is HTMX's documented programmatic-trigger API
@@ -605,7 +627,7 @@
       return {
         text: d.label,
         action: () => {
-          window.location.href = url;
+          safeNavigate(url);
         },
       };
     });
@@ -765,12 +787,12 @@
         tr.setAttribute("data-row-drill", "1");
         tr.setAttribute("tabindex", "0");
         tr.addEventListener("click", () => {
-          window.location.href = url;
+          safeNavigate(url);
         });
         tr.addEventListener("keydown", (e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            window.location.href = url;
+            safeNavigate(url);
           }
         });
       }

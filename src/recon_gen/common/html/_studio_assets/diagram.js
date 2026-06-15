@@ -26,6 +26,24 @@
 // The renderer choice is the X.4.b spike question; ?engine= lets you
 // flip layouts without restarting Studio.
 
+// DJ.3 (2026-06-15) — CodeQL js/xss-through-dom hardening. Validate
+// any URL flowing from server-rendered data attrs into SVG `<a href>`
+// (or any href) before assigning. Accept only http(s); return null on
+// anything else (`javascript:`, `data:`, malformed). Caller skips
+// badge injection / navigation on null.
+function _validateHttpUrl(url) {
+  if (typeof url !== "string" || !url) return null;
+  try {
+    const parsed = new URL(url, window.location.origin);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.href;
+  } catch (e) {
+    return null;
+  }
+}
+
 const PREFIX_TO_KIND = {
   "role__": "role",
   "rail__": "rail",
@@ -501,6 +519,14 @@ function _wireFocus(svg, roleCarriers) {
 // coordinates already, so we can compute the upper-right corner
 // directly without coordinate-space transforms.
 function _injectEditBadge(nodeGroup, href, displayId) {
+  // DJ.3 (2026-06-15) — CodeQL js/xss-through-dom hardening. `href`
+  // flows from `_editorUrlForNode` (which reads server-rendered data
+  // attrs) → SVG `<a href="...">`. SVG anchors accept `javascript:` URLs
+  // just like HTML anchors, so a hostile data attr would execute on
+  // badge click. Validate via the URL constructor; skip badge entirely
+  // on non-http(s) (no badge is safer than a broken / dangerous one).
+  const safeHref = _validateHttpUrl(href);
+  if (!safeHref) return;
   // Find the primary shape to anchor against. Graphviz emits a single
   // dominant shape per node (rect / polygon / ellipse / path). Pick
   // the first match.
@@ -530,11 +556,13 @@ function _injectEditBadge(nodeGroup, href, displayId) {
 
   const a = document.createElementNS(NS, 'a');
   // SVG2 href; legacy xlink:href as fallback for older renderers.
-  a.setAttribute('href', href);
-  a.setAttributeNS('http://www.w3.org/1999/xlink', 'href', href);
+  // `safeHref` was validated through _validateHttpUrl above; both
+  // setAttribute calls use it (not the raw `href` arg).
+  a.setAttribute('href', safeHref);
+  a.setAttributeNS('http://www.w3.org/1999/xlink', 'href', safeHref);
   a.setAttribute('class', 'edit-badge');
   a.setAttribute('data-role', 'diagram-edit-link');
-  a.setAttribute('data-edit-href', href);
+  a.setAttribute('data-edit-href', safeHref);
   // aria-label for SR users so they hear "Edit <id>" not just "Edit".
   a.setAttribute('aria-label', `Edit ${displayId}`);
 

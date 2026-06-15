@@ -117,7 +117,10 @@ def test_diagram_js_emits_hover_edit_badge_via_injector() -> None:
     assert "const editHref = _editorUrlForNode(title);" in diagram_js
     # The anchor wears the locator hook + the URL it'll navigate to.
     assert "'data-role', 'diagram-edit-link'" in diagram_js
-    assert "'data-edit-href', href" in diagram_js
+    # DJ.3 (2026-06-15): URL is `safeHref` (validated through
+    # _validateHttpUrl) instead of the raw `href` arg — CodeQL
+    # js/xss-through-dom hardening.
+    assert "'data-edit-href', safeHref" in diagram_js
     # Keyboard reachability: tabindex=0 so :focus-within reveals the
     # badge for keyboard navigation.
     assert "'tabindex', '0'" in diagram_js

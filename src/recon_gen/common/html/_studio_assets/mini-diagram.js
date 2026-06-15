@@ -23,6 +23,24 @@
 // main diagram's right-click rule). The self-node never navigates on
 // click (you're already editing it).
 
+// DJ.3 (2026-06-15) — CodeQL js/xss-through-dom hardening.
+// `editUrl` flows from `_miniEditorUrlForNode` → server-rendered
+// data attrs → `window.location.href`. Validate protocol before
+// navigate so a hostile data attr can't land as `javascript:alert(1)`.
+function _safeNavigate(url) {
+  if (typeof url !== "string" || !url) return;
+  try {
+    const parsed = new URL(url, window.location.origin);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      console.warn("Refusing to navigate to non-http(s) URL:", url);
+      return;
+    }
+    window.location.href = parsed.href;
+  } catch (e) {
+    console.warn("Refusing to navigate to malformed URL:", url, e);
+  }
+}
+
 const PREFIX_TO_KIND = {
   "role__": "role",
   "rail__": "rail",
@@ -151,7 +169,7 @@ async function renderMiniDiagram() {
       g.style.cursor = "pointer";
       g.addEventListener("click", (e) => {
         e.stopPropagation();
-        window.location.href = editUrl;
+        _safeNavigate(editUrl);
       });
     }
   }
