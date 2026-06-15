@@ -244,7 +244,13 @@ def oauth_routes(
             key=SESSION_COOKIE_NAME,
             value=session_token,
             httponly=True,
-            secure=True,
+            # Secure flag tracks the request scheme — production is HTTPS
+            # so this is True (default + correct); HTTP test/local-dev
+            # server (Set-Cookie with Secure on HTTP would be silently
+            # dropped by Chrome/WebKit since 2020) gets False. Cookie
+            # confidentiality is still upheld in production by the cfg
+            # contract (auth.oidc set ⇒ HTTPS deploy per DD.0 lock).
+            secure=request.url.scheme == "https",
             samesite="lax",
             max_age=jwt_codec.ttl_seconds,
             path="/",
@@ -263,7 +269,12 @@ def oauth_routes(
             key=SESSION_COOKIE_NAME,
             path="/",
             httponly=True,
-            secure=True,
+            # Mirror set_cookie's scheme-derived Secure — without this
+            # the Set-Cookie with Max-Age=0 + Secure on HTTP gets
+            # dropped by the browser, leaving the cookie alive.
+            # Surfaced by DD.4.e2e test_sign_out_via_oidc on the CI
+            # WSL2 runner (HTTP test server + cfg.auth.oidc set).
+            secure=request.url.scheme == "https",
             samesite="lax",
         )
         return response
