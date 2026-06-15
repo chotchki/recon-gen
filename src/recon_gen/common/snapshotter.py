@@ -88,6 +88,11 @@ _V_OVERLAY_MATVIEW_SUFFIXES: tuple[str, ...] = (
     "computed_ledger_balance",
     # CL.5 carry-forward effective balance.
     "effective_balances",
+    # DK.1 data_anchor singleton — leaf (reads only from current_*).
+    # Regenerated from base tables on snapshot restore so the anchor
+    # always reflects the post-restore row set; this is the property
+    # that justified matview over config_kv persistence (DK.0 audit).
+    "data_anchor",
     # L1 invariants.
     "drift",
     "ledger_drift",
