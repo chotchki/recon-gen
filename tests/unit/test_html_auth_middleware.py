@@ -98,7 +98,8 @@ def test_valid_jwt_attaches_user_to_request_state() -> None:
     codec = JwtCodec(secret=_TEST_SECRET)
     token = codec.encode({"sub": "user-42", "email": "u@example.com"})
     client = TestClient(_make_app(codec))
-    response = client.get("/api", cookies={SESSION_COOKIE_NAME: token})
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    response = client.get("/api")
     assert response.status_code == 200
     body: dict[str, Any] = response.json()
     user = body["user"]
@@ -142,10 +143,10 @@ def test_tampered_cookie_treated_as_missing() -> None:
     # Flip one character in the signature segment.
     tampered = valid[:-1] + ("a" if valid[-1] != "a" else "b")
     client = TestClient(_make_app(codec))
+    client.cookies.set(SESSION_COOKIE_NAME, tampered)
     response = client.get(
         "/api",
         headers={"Accept": "text/html"},
-        cookies={SESSION_COOKIE_NAME: tampered},
         follow_redirects=False,
     )
     assert response.status_code == 302
@@ -163,11 +164,8 @@ def test_expired_cookie_treated_as_missing() -> None:
         algorithm="HS256",
     )
     client = TestClient(_make_app(codec))
-    response = client.get(
-        "/api",
-        headers={"HX-Request": "true"},
-        cookies={SESSION_COOKIE_NAME: expired},
-    )
+    client.cookies.set(SESSION_COOKIE_NAME, expired)
+    response = client.get("/api", headers={"HX-Request": "true"})
     assert response.status_code == 401
 
 
