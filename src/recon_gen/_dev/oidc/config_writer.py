@@ -19,6 +19,7 @@ without breaking a running Dex container.
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -62,13 +63,18 @@ def write_dex_config_dir(
         OSError: on any filesystem write error.
     """
     # 1. Copy cert + key into the dir. shutil.copyfile preserves
-    # file content but NOT permissions; that's fine because the bind
-    # mount is read-only inside the container and Dex reads as the
-    # container's user.
+    # file content but NOT permissions — and on most host umasks the
+    # destination lands at 0o644 (world-readable). Cert material is
+    # public (LE CT logs); the private key MUST stay 0o600. Explicit
+    # chmod here, not inherited from the umask of whoever invoked the
+    # runner. The Dex container reads as the host UID anyway
+    # (container.py user= override), so 0o600 doesn't block reads.
     target_cert = dir_path / "cert.pem"
     target_key = dir_path / "key.pem"
     shutil.copyfile(cert_path, target_cert)
     shutil.copyfile(key_path, target_key)
+    os.chmod(target_cert, 0o644)
+    os.chmod(target_key, 0o600)
 
     # 2. Compose the Dex static config. Field-by-field comments map
     # back to Dex's docs (https://dexidp.io/docs/configuration/).

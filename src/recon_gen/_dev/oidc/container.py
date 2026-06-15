@@ -20,6 +20,7 @@ connection-refused — that shape means the container crashed.
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -81,15 +82,19 @@ def get_or_start_dex_container(
     the host port and return. Container env vars (DEX_CLIENT_SECRET +
     DEX_USER_PASSWORD_HASH) are NOT re-injected on adopt — Dex's
     static config reads them at process start, and the container is
-    already running. Per BX.248, the right thing on adopt is to ensure
-    the live env matches what we wrote on the LAST fresh-create — same
-    issuer URL, same cfg_dir bind-mount, so the same Dex process keeps
-    answering for any cfg the caller produced.
+    already running.
 
-    NOTE: ``cfg_dir`` is bind-mounted at /etc/dex (ro). On the adopt
-    path we trust that the prior fresh-create's config.yaml + cert.pem
-    + key.pem are still on disk — the runner re-writes them on every
-    ``ensure_dev_idp`` call (see ensure.py), so this is safe.
+    HONEST CAVEAT (adversarial review, 2026-06-15): on the adopt path
+    the adopted container's bind-mount still points at the FIRST run's
+    ``cfg_dir`` tempdir. ``ensure_dev_idp`` always allocates a FRESH
+    tempdir per call (mkdtemp), so the new tempdir is unused on adopt
+    and any cert/config change between runs is INVISIBLE to the live
+    Dex process. ``verify_dex_url`` catches issuer-URL drift but not
+    stale cert content. To rotate cert / client_secret / issuer-URL:
+    ``docker rm -f recon-gen-test-dex`` then re-run — the next call
+    will fall through to the fresh-create path. Backlog item:
+    inspect ``existing.attrs['Mounts']`` on adopt + force-recreate
+    when the bind-mount source diverges from ``cfg_dir``.
 
     Fresh path: ``client.containers.run(...)`` with the host_port
     binding + cfg_dir bind-mount + env vars set so Dex's ``secretEnv``
@@ -250,6 +255,7 @@ def wait_for_dex_ready(
     url: str,
     *,
     deadline_seconds: int = _READY_HARD_TIMEOUT_SECONDS,
+    redact: "Sequence[str]" = (),
 ) -> None:
     """Poll ``<url>/.well-known/openid-configuration`` until Dex is
     ready (any 2xx response) or until we hit a fail-fast / hard
@@ -265,6 +271,15 @@ def wait_for_dex_ready(
     during the Dex warm-up window.
 
     HTTPS to the real LE-cert hostname — no verify=False needed.
+
+    ``redact``: sequence of secret values to scrub from the captured
+    Dex logs before they ride out via the RuntimeError. The error
+    propagates to ``runs/<id>/<variant>/<layer>/stderr.log`` which
+    ci.yml uploads as a 14-day GHA artifact on a PUBLIC repo (DD.4
+    adversarial-review finding); we must NEVER leak the resolved
+    DEX_CLIENT_SECRET / DEX_USER_PASSWORD_HASH values via this path.
+    Pass the actual secret strings; substring replacement scrubs them
+    from the log text.
 
     Raises:
         RuntimeError: on fail-fast or hard-timeout. Message names the
@@ -284,7 +299,7 @@ def wait_for_dex_ready(
                 f"Dex readiness check failed: hard timeout "
                 f"({deadline_seconds}s) on {discovery_url}; "
                 "container may have started but Dex didn't bind"
-                f"{_dex_logs_tail()}"
+                f"{_dex_logs_tail(redact=redact)}"
             )
 
         try:
@@ -306,7 +321,7 @@ def wait_for_dex_ready(
                     "Dex readiness check failed: connection refused "
                     f"for {_READY_REFUSED_FAILFAST_SECONDS:.0f}s on "
                     f"{discovery_url}; container may have crashed"
-                    f"{_dex_logs_tail()}"
+                    f"{_dex_logs_tail(redact=redact)}"
                 ) from None
         except httpx.HTTPError:
             # Transient (TLS handshake mid-warmup, partial read) —
@@ -316,7 +331,7 @@ def wait_for_dex_ready(
         time.sleep(_READY_POLL_INTERVAL_SECONDS)
 
 
-def _dex_logs_tail(*, max_lines: int = 40) -> str:
+def _dex_logs_tail(*, max_lines: int = 40, redact: "Sequence[str]" = ()) -> str:
     """Capture the last ``max_lines`` of Dex's stdout+stderr and
     return them formatted for inclusion in a RuntimeError message.
 
@@ -326,6 +341,13 @@ def _dex_logs_tail(*, max_lines: int = 40) -> str:
     run `docker logs recon-gen-test-dex` to diagnose. Returns an empty
     string on any docker-side failure — the readiness error is the
     primary signal; log capture is best-effort enrichment.
+
+    ``redact``: substring-scrub list. Any non-empty string in this
+    sequence is replaced with ``<redacted>`` in the captured log
+    text before it's returned. Pass the resolved DEX_CLIENT_SECRET +
+    DEX_USER_PASSWORD_HASH values so we can never accidentally leak
+    them via a future Dex log-verbosity bump landing the secret in
+    the PUBLIC-repo GHA artifact (DD.4 adversarial-review finding).
     """
     try:
         import docker  # type: ignore[import-untyped]: third-party SDK lacks PEP 561 stubs  # noqa: PLC0415
@@ -336,6 +358,9 @@ def _dex_logs_tail(*, max_lines: int = 40) -> str:
         container = client.containers.get(DEX_SHARED_CONTAINER_NAME)
         raw = container.logs(tail=max_lines, stdout=True, stderr=True)
         text = raw.decode("utf-8", errors="replace")
+        for secret in redact:
+            if secret:
+                text = text.replace(secret, "<redacted>")
         if not text.strip():
             return (
                 f"\n  (container {DEX_SHARED_CONTAINER_NAME} produced no "

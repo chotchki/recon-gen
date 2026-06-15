@@ -188,8 +188,18 @@ def ensure_dev_idp(
         user_password_hash=user_password_hash,
     )
 
-    # 5. Readiness poll — fast-fail on connection-refused.
-    wait_for_dex_ready(issuer_url, deadline_seconds=60)
+    # 5. Readiness poll — fast-fail on connection-refused. The
+    # `redact` list scrubs the resolved client_secret +
+    # user_password_hash out of any docker-logs tail that rides into
+    # the RuntimeError (the error propagates to ci.yml's GHA artifact,
+    # which is 14-day public on this repo — adversarial review caught
+    # the leak surface before a future Dex log-verbosity bump could
+    # leak the secrets unredacted).
+    wait_for_dex_ready(
+        issuer_url,
+        deadline_seconds=60,
+        redact=(client_secret, user_password_hash),
+    )
 
     # 6. Smoke the issuer URL to catch stale-config drift on the adopt
     # path (the adopt path doesn't re-create the container, so if a
