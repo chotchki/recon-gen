@@ -63,8 +63,8 @@ _TEST_OIDC_SECRET = "test-oidc-client-secret"
 def set_secret_envs(monkeypatch: pytest.MonkeyPatch) -> None:
     """The auth blocks read secrets from named env vars per
     [[feedback_no_credential_friction]]."""
-    monkeypatch.setenv("RECON_GEN_OIDC_CLIENT_SECRET", _TEST_OIDC_SECRET)
-    monkeypatch.setenv("RECON_GEN_JWT_SECRET", _TEST_JWT_SECRET)
+    monkeypatch.setenv("RECON_GEN_OIDC_CLIENT_SECRET", _TEST_OIDC_SECRET)  # typing-smell: ignore[envvar-bypass]: cfg.auth.oidc.client_secret_env is operator-supplied; the typed registry isn't the right shape
+    monkeypatch.setenv("RECON_GEN_JWT_SECRET", _TEST_JWT_SECRET)  # typing-smell: ignore[envvar-bypass]: cfg.auth.session.jwt_secret_env is operator-supplied; the typed registry isn't the right shape
 
 
 def _make_cfg() -> Config:
