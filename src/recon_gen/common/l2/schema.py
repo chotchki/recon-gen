@@ -381,6 +381,14 @@ def refresh_matviews_sql(
         # (not just emitted rows). Reads from current_daily_balances +
         # current_transactions; refresh after those two.
         f"{p}_effective_balances",
+        # DK.1 — data_anchor singleton matview: GREATEST over MAX(
+        # transactions.posting) and MAX(daily_balances.business_day_end
+        # WHERE account_scope='internal'). Read by dashboards at
+        # app-build time when cfg.test.generator.end_date is unset
+        # (replaces pre-DK live(wall-clock) fallback). Leaf — reads
+        # only from current_* views; no downstream matview depends
+        # on it. Refresh alongside effective_balances.
+        f"{p}_data_anchor",
         # L1 invariants: read from current_* + helpers.
         f"{p}_drift",
         f"{p}_ledger_drift",
@@ -524,6 +532,9 @@ def _emit_table_based_matview_refresh(
         f"{p}_computed_ledger_balance",
         # CL.5 — carry-forward source for drift / ledger_drift / overdraft.
         f"{p}_effective_balances",
+        # DK.1 — data_anchor singleton matview (DuckDB table-based refresh
+        # path; mirrors the PG/Oracle list above).
+        f"{p}_data_anchor",
         f"{p}_drift",
         f"{p}_ledger_drift",
         f"{p}_overdraft",
@@ -2172,6 +2183,10 @@ _L1_INVARIANT_DROP_NAMES: tuple[str, ...] = (
     # CL.5 — effective_balances is a carry-forward source for the 3
     # invariants above; drop after them.
     "effective_balances",
+    # DK.1 — data_anchor is a leaf (reads only from current_*); no
+    # downstream matview depends on it (consumers query at app-build).
+    # Drops alongside effective_balances as another leaf helper.
+    "data_anchor",
     "computed_ledger_balance",
     "computed_subledger_balance",
 )
@@ -2857,6 +2872,42 @@ WHERE c.carried_tod IS NOT NULL;
 -- to keep the invariant). UNIQUE unlocks PG REFRESH … CONCURRENTLY.
 CREATE UNIQUE INDEX idx_{p}_eff_balances_account_day
     ON {p}_effective_balances (account_id, business_day_start);
+
+-- ---------------------------------------------------------------------
+-- DK.1 — Data anchor (singleton matview).
+-- Computes the most recent moment the feed has data for, as a single
+-- row. Dashboards (post-DK.4) read this when cfg.test.generator.end_date
+-- is unset, replacing the pre-DK live(wall-clock) fallback that
+-- produced blank dashboards on stale feeds.
+--
+-- Shape: GREATEST over (MAX transaction posting, MAX internal-scope
+-- daily balance business_day_end). Implemented as inner UNION ALL +
+-- outer MAX so Oracle's GREATEST(NULL, ...) = NULL semantic doesn't
+-- silently drop one source when the other is empty. Both PG and Oracle
+-- MAX skip NULLs cleanly, so an empty-one-side case yields the other
+-- side's max; both-empty cold-DB case yields NULL.
+--
+-- row_marker is a constant 1: gives the matview a NOT-NULL-ish UNIQUE
+-- key for PG REFRESH MATERIALIZED VIEW CONCURRENTLY (BV.6 contract).
+-- Singleton by SQL construction (SELECT aggregate without GROUP BY
+-- returns exactly 1 row on PG / Oracle / DuckDB).
+-- ---------------------------------------------------------------------
+{matview_create_kw} {p}_data_anchor{matview_options} AS
+SELECT
+    1 AS row_marker,
+    MAX(anchor) AS data_anchor
+FROM (
+    SELECT MAX(posting) AS anchor FROM {p}_current_transactions
+    UNION ALL
+    SELECT MAX(business_day_end) AS anchor
+      FROM {p}_current_daily_balances
+     WHERE account_scope = 'internal'
+) anchors;
+-- BV.6 — UNIQUE on row_marker (always 1; structurally a singleton)
+-- so PG REFRESH MATERIALIZED VIEW CONCURRENTLY qualifies. No other
+-- index needed — consumers read the single row via a bare SELECT.
+CREATE UNIQUE INDEX idx_{p}_data_anchor_row
+    ON {p}_data_anchor (row_marker);
 
 -- ---------------------------------------------------------------------
 -- L1 invariant: Sub-ledger drift.

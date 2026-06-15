@@ -261,9 +261,9 @@ def test_refresh_matviews_sql_oracle_uses_dbms_mview() -> None:
     # xor_group_violation [AB.3.3] / fan_in_disagreement [AB.4.7] /
     # multi_xor_violation [AB.6.5]) + 1 derived (transfer_parents [AB.4.3])
     # + 2 dashboard-shape (daily_statement / l1_exceptions) + 2
-    # Investigation matviews.
-    assert sql.count("BEGIN DBMS_MVIEW.REFRESH(") == 22
-    assert sql.count("BEGIN DBMS_STATS.GATHER_TABLE_STATS(") == 22
+    # Investigation matviews + DK.1's data_anchor singleton.
+    assert sql.count("BEGIN DBMS_MVIEW.REFRESH(") == 23
+    assert sql.count("BEGIN DBMS_STATS.GATHER_TABLE_STATS(") == 23
     # Per-instance prefix appears in every refresh + analyze call.
     assert "'orcl_current_transactions'" in sql
     assert "'orcl_inv_money_trail_edges'" in sql
