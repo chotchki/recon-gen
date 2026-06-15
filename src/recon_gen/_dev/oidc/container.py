@@ -178,6 +178,27 @@ def get_or_start_dex_container(
                 user_password_hash=user_password_hash,
             )
 
+        # DJ.2.adopt_mount_check (2026-06-15): the adopted container's
+        # bind-mount source must match the current cfg_dir, else the
+        # container is serving STALE config (cert renewal, client_secret
+        # rotation, issuer change all live in cfg_dir's contents). The
+        # original DD.4.a docstring honestly admitted this gap; we now
+        # detect + force-recreate when the mount source diverges.
+        if not _adopt_mount_matches(existing, cfg_dir):
+            try:
+                existing.remove(force=True)
+            except Exception:  # noqa: BLE001 — best-effort
+                pass
+            return _start_fresh_dex_container(
+                client=client,
+                host_port=host_port,
+                cfg_dir=cfg_dir,
+                cert_path=cert_path,
+                key_path=key_path,
+                client_secret=client_secret,
+                user_password_hash=user_password_hash,
+            )
+
         return str(actual_host_port), _PersistentContainerHandle(name=DEX_SHARED_CONTAINER_NAME)
     except NotFound:
         return _start_fresh_dex_container(
@@ -189,6 +210,46 @@ def get_or_start_dex_container(
             client_secret=client_secret,
             user_password_hash=user_password_hash,
         )
+
+
+def _adopt_mount_matches(existing: object, cfg_dir: Path) -> bool:
+    """Return True iff the adopted container's bind-mount source for
+    ``/etc/dex`` resolves to the same path as ``cfg_dir``.
+
+    Docker's ``container.attrs['Mounts']`` is a list of dicts shaped:
+
+        {"Type": "bind", "Source": "/tmp/recon-gen-dex-cfg-...",
+         "Destination": "/etc/dex", "Mode": "ro", ...}
+
+    Resolves both sides through ``Path.resolve()`` to absorb symlink
+    differences (``/private/tmp/...`` vs ``/tmp/...`` on macOS, for
+    instance). Returns False on any missing key / shape mismatch /
+    OSError — the safe fallback is "force-recreate".
+
+    DJ.2.adopt_mount_check (2026-06-15). Backlog source: DD.4
+    adversarial review.
+    """
+    from typing import Any, cast  # noqa: PLC0415 — lazy
+    try:
+        mounts = cast(
+            "list[dict[str, Any]]",  # typing-smell: ignore[explicit-any]: Docker SDK lacks PEP 561 stubs
+            existing.attrs["Mounts"],  # type: ignore[attr-defined]: Docker SDK lacks PEP 561 stubs
+        )
+        for mount in mounts:
+            if mount.get("Destination") != "/etc/dex":
+                continue
+            source = mount.get("Source")
+            if not isinstance(source, str) or not source:
+                return False
+            try:
+                return Path(source).resolve() == cfg_dir.resolve()
+            except OSError:
+                # Source path may have been rmtree'd by a prior
+                # session's atexit; treat as divergence.
+                return False
+        return False
+    except (KeyError, TypeError, AttributeError):
+        return False
 
 
 def _start_fresh_dex_container(
