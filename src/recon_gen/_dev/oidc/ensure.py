@@ -24,6 +24,8 @@ The runner (cmd_up_to, not in this commit) surfaces these as
 
 from __future__ import annotations
 
+import atexit
+import shutil
 import tempfile
 from enum import StrEnum
 from pathlib import Path
@@ -37,6 +39,31 @@ from recon_gen._dev.oidc.container import (
     verify_dex_url,
     wait_for_dex_ready,
 )
+
+
+def _rmtree_at_exit(path: Path) -> None:
+    """atexit-registered cleanup for tempdir cfg_dirs from
+    ``ensure_dev_idp``. Best-effort — Docker on Linux pins the
+    bind-mount inodes to the running container so the rmtree is
+    host-side cleanup only; the container's mounted view continues
+    to work.
+
+    Why this is safe: each ``ensure_dev_idp`` call allocates a FRESH
+    tempdir via ``mkdtemp``; only the first session's tempdir is
+    actually consumed by the persistent container's bind-mount. All
+    subsequent calls produce tempdirs that are written-to and then
+    immediately orphaned (the adopt path doesn't re-bind-mount).
+    Without cleanup the unused tempdirs accumulate in /tmp with the
+    LE private key copy still inside (config_writer 0o600 chmod
+    limits per-host blast radius but doesn't bound the count).
+
+    DJ.2.tempdir_cleanup (2026-06-15). Backlog source: DD.4
+    adversarial review.
+    """
+    try:
+        shutil.rmtree(path, ignore_errors=True)
+    except Exception:  # noqa: BLE001 — atexit cleanup is best-effort
+        pass
 
 
 class Env(StrEnum):
@@ -158,11 +185,13 @@ def ensure_dev_idp(
         )
 
     # 2. Allocate cfg tempdir + write the three mounted files.
-    # tempfile.mkdtemp leaves the dir on disk — that's deliberate, the
-    # Dex container needs it live for the container lifetime. The
-    # adopt path re-writes the same paths so adopted containers see
-    # fresh config every call.
+    # tempfile.mkdtemp leaves the dir on disk — the Dex container's
+    # bind-mount needs it live for the container's lifetime. The
+    # atexit hook below rmtrees the host-side dir on interpreter
+    # exit; Docker pins the bind-mount inodes so the container's
+    # mounted view continues to work after host-side cleanup.
     cfg_dir = Path(tempfile.mkdtemp(prefix="recon-gen-dex-cfg-"))  # typing-smell: ignore[recon-prefix]: tempfile prefix for the per-run mount dir; not a cfg-prefixed AWS / DB resource ID and intentionally does not flow through `cfg.aws.prefixed()`
+    atexit.register(_rmtree_at_exit, cfg_dir)
     write_dex_config_dir(
         dir_path=cfg_dir,
         issuer_url=issuer_url,
