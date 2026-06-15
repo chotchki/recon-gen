@@ -308,7 +308,7 @@ out/
     <deployment_name>-exec-*.json             # 2 Executives datasets
     <deployment_name>-l1-*.json               # 14 L1 Dashboard datasets
     <deployment_name>-l2ft-*.json             # 2 L2 Flow Tracing datasets
-    <deployment_name>-*-app-info-*.json       # 2 App Info datasets per app (8 total)
+    <deployment_name>-*-app-info-*.json       # 3 App Info datasets per app (12 total)
 ```
 
 `<deployment_name>` comes from `cfg.aws.deployment_name` (required field). Pick distinct values per environment (e.g. `recon-staging` vs `recon-prod`) so multiple deployments can coexist in the same QuickSight account without colliding.
