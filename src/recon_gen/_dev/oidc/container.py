@@ -214,6 +214,22 @@ def _start_fresh_dex_container(
     in the adopt-or-create flow handles by falling back to adopt.
     """
     import os  # noqa: PLC0415 — lazy
+    import sys  # noqa: PLC0415 — lazy
+
+    # DJ.2.windows_guard (2026-06-15): os.getuid() / os.getgid() are
+    # POSIX-only — on Windows both raise AttributeError. The Dex test
+    # fixture requires Linux/macOS by construction (the cfg_dir
+    # tempdir is mode 700 and the host-UID bind-mount-perms match
+    # only works on POSIX). Fail explicitly with the documented
+    # constraint instead of bubbling an obscure AttributeError from
+    # the f-string below.
+    if not hasattr(os, "getuid"):  # pragma: no cover — Windows-only branch
+        raise RuntimeError(
+            "Dex test container fixture requires Linux/macOS — "
+            "host-UID match needs os.getuid()/os.getgid() (POSIX only). "
+            f"Found sys.platform={sys.platform!r}. "
+            "_dev/ is excluded from the wheel; this constraint is test-only."
+        )
 
     # The exec command is the Dex binary serving the static config we
     # write to cfg_dir/config.yaml. Internal port 5556 is the Dex
