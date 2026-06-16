@@ -42,6 +42,24 @@
 
 set -eu
 
+# Refuse to run as root. The 2026-06-15 demo-box outage burned hours
+# because an operator reached for `sudo bash -x refresh-demos.sh` during
+# 502 triage — sudo left root-owned `current.duckdb` / `audit.pdf` /
+# log files that the launchd-managed dashboard service (running as
+# recon-demo) couldn't read. Early-fail BEFORE pip install or any mv,
+# so a wrong-user run leaves the filesystem untouched.
+if [ "$(id -u)" -eq 0 ]; then
+    echo "ERROR: refresh-demos.sh refuses to run as root." >&2
+    echo "  Re-run as recon-demo:" >&2
+    echo "    su - recon-demo -c $0" >&2
+    echo "  Running under sudo leaves root-owned next.duckdb / audit.pdf" >&2
+    echo "  files that the dashboard service (running as recon-demo)" >&2
+    echo "  can't read after the atomic mv. The launchd-driven nightly" >&2
+    echo "  fire always runs as recon-demo per the plist's UserName, so" >&2
+    echo "  this check only affects manual invocations." >&2
+    exit 2
+fi
+
 RECON_DEMO_HOME="${RECON_DEMO_HOME:-/Users/recon-demo}"
 VENV="$RECON_DEMO_HOME/venv"
 PIP="$VENV/bin/pip"

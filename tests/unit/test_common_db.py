@@ -531,3 +531,53 @@ class TestApplySeedViaDuckdbPyarrow:
             ).fetchall() == [(1,)]
         finally:
             con.close()
+
+
+class TestDuckdbPath:
+    """``duckdb_path`` parses SQLAlchemy-style URLs to filesystem paths.
+
+    The 4-slash form encodes absolute paths; 3-slash is relative. The
+    2026-06-15 demo-box outage burned hours because the operator's cfg
+    used 3 slashes against an absolute-looking name (`duckdb:///Users/...`)
+    which silently parsed as relative — fail-loud on that shape.
+    """
+
+    def test_four_slash_absolute(self) -> None:
+        from recon_gen.common.db import duckdb_path
+        assert duckdb_path("duckdb:////Users/foo.duckdb") == "/Users/foo.duckdb"
+        assert duckdb_path("duckdb:////tmp/demo.duckdb") == "/tmp/demo.duckdb"
+
+    def test_three_slash_explicit_relative(self) -> None:
+        from recon_gen.common.db import duckdb_path
+        # Explicit `./` or `../` are kept — operator's intent is clear.
+        assert duckdb_path("duckdb:///./local.duckdb") == "./local.duckdb"
+        assert duckdb_path("duckdb:///../sibling.duckdb") == "../sibling.duckdb"
+
+    def test_three_slash_bare_relative_filename(self) -> None:
+        from recon_gen.common.db import duckdb_path
+        # A bare filename / non-ambiguous segment is accepted as relative.
+        assert duckdb_path("duckdb:///demo.duckdb") == "demo.duckdb"
+        assert duckdb_path("duckdb:///mydata/local.duckdb") == "mydata/local.duckdb"
+
+    def test_memory_form(self) -> None:
+        from recon_gen.common.db import duckdb_path
+        assert duckdb_path("duckdb://:memory:") == ":memory:"
+
+    def test_bare_path_passthrough(self) -> None:
+        from recon_gen.common.db import duckdb_path
+        # No scheme prefix — pass through unchanged for ergonomics.
+        assert duckdb_path("/tmp/demo.duckdb") == "/tmp/demo.duckdb"
+
+    def test_three_slash_absolute_looking_raises(self) -> None:
+        from recon_gen.common.db import duckdb_path
+        # The 2026-06-15 demo-box outage shape: `duckdb:///Users/...` parses
+        # as `Users/...` (relative joined against CWD) but the operator
+        # almost certainly meant `duckdb:////Users/...`.
+        with pytest.raises(ValueError, match="Did you mean 'duckdb:////Users/recon-demo"):
+            duckdb_path("duckdb:///Users/recon-demo/sasquatch_pr/current.duckdb")
+
+    def test_three_slash_ambiguous_top_dirs_raise(self) -> None:
+        from recon_gen.common.db import duckdb_path
+        for top in ("home", "tmp", "var", "opt", "etc", "usr", "Volumes"):
+            with pytest.raises(ValueError, match="Did you mean"):
+                duckdb_path(f"duckdb:///{top}/foo.duckdb")

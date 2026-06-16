@@ -118,10 +118,52 @@ def duckdb_path(url: str) -> str:
     if url == "duckdb://:memory:" or url.endswith(":memory:"):
         return ":memory:"
     if url.startswith("duckdb:///"):
-        return url[len("duckdb:///"):]
+        path = url[len("duckdb:///"):]
+        # SQLAlchemy-style URL convention: 4 slashes encodes absolute
+        # paths (`duckdb:////Users/foo.duckdb` → `/Users/foo.duckdb`),
+        # 3 slashes encodes relative (`duckdb:///./demo.duckdb` →
+        # `./demo.duckdb`). The 2026-06-15 demo-box outage burned hours
+        # because `duckdb:///Users/recon-demo/...` (3 slashes) parsed
+        # silently as a relative path joined against the launchd plist's
+        # WorkingDirectory. Fail loud when the relative path's first
+        # segment looks like an absolute-path component — operator
+        # almost certainly meant 4 slashes.
+        if path and not path.startswith(("/", "./", "../", ":memory:")):
+            first_segment = path.split("/", 1)[0]
+            if first_segment in _AMBIGUOUS_DUCKDB_TOP_DIRS:
+                suggested = url.replace("duckdb:///", "duckdb:////", 1)
+                raise ValueError(
+                    f"duckdb URL {url!r} parses as a RELATIVE path "
+                    f"{path!r} (joined against CWD), but {first_segment!r} "
+                    f"is conventionally an absolute-path component. "
+                    f"Did you mean {suggested!r} (4 slashes for an "
+                    "absolute path)?"
+                )
+        return path
     if url.startswith("duckdb://"):
         return url[len("duckdb://"):]
     return url
+
+
+# Top-level directory names that make a 3-slash duckdb URL ambiguous:
+# `duckdb:///Users/foo.duckdb` parses as RELATIVE `Users/foo.duckdb`
+# but the operator almost certainly meant `/Users/foo.duckdb`. Covers
+# macOS + Linux defaults. Genuinely-relative paths that happen to
+# nest under one of these directory names can still use `./Users/...`
+# explicitly or `../Users/...`.
+_AMBIGUOUS_DUCKDB_TOP_DIRS: frozenset[str] = frozenset({
+    "Users",      # macOS user homes
+    "home",       # Linux user homes
+    "tmp",        # ephemeral writable
+    "var",        # service state
+    "opt",        # optional packages
+    "mnt",        # mount points
+    "Volumes",    # macOS mount points
+    "etc",        # system config
+    "usr",        # user-installed
+    "private",    # macOS aliased /
+    "Library",    # macOS user/system Library
+})
 
 
 def connect_demo_db(cfg: Config) -> "SyncConnection":  # CB.16 — replaces the `-> Any` escape hatch with the structural Protocol defined below. Per-driver concrete types (psycopg.Connection / oracledb.Connection / duckdb.DuckDBPyConnection) all match SyncConnection structurally, so callers downcast at the boundary if they need driver-specific features.
