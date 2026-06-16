@@ -1,22 +1,27 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
 
 /* X.2 — Tailwind v4 CSS-first config.
  *
- * @source directives tell Tailwind which files to scan for class
- * names. The render module's page-shell HTML lives in render.py
- * and the bootstrap JS embeds class names in d3 .attr('class', ...)
- * calls — both are plain string content the regex scanner picks up.
+ * AH.9 (2026-06-16): `source(none)` disables Tailwind v4's automatic
+ * project-root scan — the auto-scan was pulling class-looking
+ * substrings out of docs/ markdown, PLAN.md prose, and audit reports,
+ * bloating output.css with utilities the App2 surface never uses
+ * ("Tailwind prose pollution"). Explicit @source globs below carry
+ * the full scan set; the test at
+ * `tests/unit/test_studio_tw_classes.py::test_every_utility_in_output_css`
+ * guards against under-scoping (any helper utility absent from
+ * output.css fails the test).
+ *
+ * Below: a recursive Python-file glob catches every .py in the html
+ * package — render.py, the studio route modules, the training /
+ * side-panel / theme-editor / component renderers, plus anything new
+ * under _studio_assets. The Tailwind v4 regex scanner finds class
+ * names in plain string content regardless of quote style or f-string
+ * interpolation. The bootstrap JS gets its own explicit entry since
+ * it lives under assets.
  */
-@source "../render.py";
-@source "../__main__.py";
+@source "../**/*.py";
 @source "../assets/js/bootstrap.js";
-/* AM.1 (2026-05-25) — studio editor + routes scan-scoping. The
- * editor templates live as f-string-embedded class= attributes in
- * the route modules. Tailwind v4's regex scanner finds class names
- * regardless of quote style or string interpolation. */
-@source "../_studio_routes.py";
-@source "../_studio_editor_routes.py";
-@source "../_studio_assets/tw_classes.py";
 
 /*
  * X.2.l — Semantic theme tokens.
