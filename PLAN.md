@@ -595,6 +595,16 @@ Sub-leaves enumerated by `docs/audits/dn_0_running_balance.md` (DN.0 lock — SQ
 - [ ] DN.5 - Tests: cross-dialect SQL-emit + Python-accumulate equivalence; closing-arithmetic agreement (`running_balance(last_leg) == closing_balance_recomputed - opening_balance`); sparse-account fixture for the DN.3 carry-forward; E2E `[qs, app2]` column present + arithmetic correct; audit PDF parity.
 - [ ] DN.6 - Phase exit + release cut (operator-driven; version depends on DM ship order).
 
+## Phase DP - qs_browser regression sweep (overnight DL.3/DK fallout, 2026-06-16)
+
+Main went red at the v14.4.0 cut: the qs_browser layer hung (stdout-stuck >900s → SIGKILL → exit 247) on top of picker/drill failures. Root: DL.3.1/DL.3.7 `_spine_plant` zero-amount marker tx (recent `posting` via the carry-day sweep) won picker anchors + led drill-source rows. Operator decision 2026-06-16: plants ARE user-facing errors and won't round-trip cleanly; tests must exercise VALID rows; pickers selecting errors is a backlog enhancement.
+
+- [x] DP.0 - Picker-anchor fix: exclude `_spine_plant` from the L1 Transactions + L2FT Rails additive-picker anchors (anchor a valid transfer). Resolves the 4 picker failures + the exit-247 hang. Committed `96bae2ab`; verified on a narrowed qs_browser run (31 passed, hang gone).
+- [x] DP.1 - QS driver hardening: convert the BO.1 one-shot 800ms empty-state re-check into a bounded condition-poll (`_visual_settled_empty`) on both `table_row_count` + `table_rows`, fixing the flaky `dropdown_pickers_inverse_excludes_anchor[qs-*]` restore step (DOM paint lag > 800ms under concurrent-worker load). Verified: every `dropdown_inverse` test passes (incl. the previously-hard-failed `[qs-Pending Aging]` `assert 0==1` and the formerly-flaky `[qs-Drift]`/`[qs-Transactions]`), no reruns needed.
+- [ ] DP.2 - Drill guardrail `Stuck Unbundled Detail → Transactions` (app2): drilled a real transfer (`tr-base-tmpl-…`) but destination didn't populate/narrow — characterize (capture/triage) + fix.
+- [ ] DP.3 - Drill guardrail `L2 Violation Detail → Chains` (app2): source row 0 is a `_spine_plant` error → drill writes a non-existent chain. Fix per operator framing (exercise a valid row, or correct the plant's chain entity — decide from the capture).
+- [ ] DP.4 - Full `up_to=qs_browser` green + push the batch. Backlog filed: enhance pickers to select planted-error values.
+
 ## Backlog (not yet phased)
 
 - **date-model.plant-days_ago-bounded — replace plant days_ago: int with days_into_window bounded type** — added 2026-06-12.
@@ -602,3 +612,4 @@ Sub-leaves enumerated by `docs/audits/dn_0_running_balance.md` (DN.0 lock — SQ
 - **Encode QS parameter-commit sequence as a typed wrapper (Tab-required)** — added 2026-06-15.
 - **DD.4.e2e follow-up: full sign_in_via_oidc Dex round-trip e2e** — added 2026-06-15. `tests/e2e/app2/test_oauth_login_flow.py` exercises the JwtCookieMiddleware contract + 4 of 6 OIDC verb paths, but not the full Dex code-flow round-trip. Requires `html2_server` to bind to `cfg.auth.oidc.redirect_uri`'s exact `host:port` over HTTPS via `cfg.app2.tls` — current ephemeral-port HTTP server doesn't match the Dex-registered redirect_uri. Add `bind_host` / `bind_port` / `ssl_certfile` / `ssl_keyfile` kwargs to `html2_server` + thread through `App2Driver.serving`, then unskip the `sign_in_via_oidc` full-flow test guarded by `cfg.app2.tls` + `dex_container_url`. Operator triage step: spin Dex via `./run_tests.sh triage tests/e2e/app2/test_oauth_login_flow.py::<new_test>` + pdb-inspect the Dex login form selectors against `password.html` v2.40.0.
 - **App2 table sort arrow appears backwards (operator-reported, code-trace looks right — need repro path)** — added 2026-06-16.
+- **Enhance pickers to allow selecting planted-error values (e.g. _spine_plant)** — added 2026-06-16.

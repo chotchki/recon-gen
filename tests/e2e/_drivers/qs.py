@@ -81,6 +81,14 @@ _TODO = "X.2.q — QsEmbedDriver verb not implemented yet"
 
 _DEFAULT_PAGE_TIMEOUT_MS = 30_000
 _DEFAULT_VISUAL_TIMEOUT_MS = 15_000
+# Budget for polling QS's empty-state overlay to clear after a parameter
+# write whose WS data layer already settled (the rows were fetched but
+# their DOM paint lags). Converts the prior fixed one-shot wait into a
+# bounded condition-poll so the restore step of the dropdown-inverse
+# picker tests stops flaking under concurrent-worker CPU contention.
+# Only the genuinely-empty path pays the full budget. See
+# QsEmbedDriver._visual_settled_empty.
+_EMPTY_STATE_PAINT_POLL_S = 3.0
 
 
 def _table_has_scroll_overflow(page: Any, visual_title: str) -> bool:
@@ -589,7 +597,6 @@ class QsEmbedDriver:
         from recon_gen.common.browser.helpers import (  # noqa: PLC0415
             bump_table_page_size_to_10000,
             read_table_rows_via_scroll,
-            visual_is_empty,
         )
 
         # `wait_for_cells=False` — the bump+settle below handles the
@@ -601,7 +608,10 @@ class QsEmbedDriver:
             self._page, visual_title, self._visual_timeout,
             wait_for_cells=False,
         )
-        if visual_is_empty(self._page, visual_title):
+        # Same bounded paint-poll as `table_row_count`: a post-pick read
+        # can hit the stale empty-state overlay before QS repaints the
+        # fetched rows. Poll the overlay out before accepting "no rows".
+        if self._visual_settled_empty(visual_title):
             return []
         # Page-size-bump path: same shape as table_row_count. WS-settle
         # after the bump triggers a re-fetch; failing to settle would
@@ -670,19 +680,16 @@ class QsEmbedDriver:
         # bump cost. Test callers like `_assert_anchor_present_and_populated`
         # rely on this returning 0 to decide whether to `pytest.skip`.
         #
-        # BO.1 fix — stability poll on the empty-state branch. After a
-        # picker pick that restored a previously-narrowed value, the
-        # DOM can carry the toggle's empty-state overlay momentarily
-        # before QS finishes painting the restored row. `pick_filter`'s
-        # `_settle_after_param_change` waits for WS frames to quiet but
-        # the DOM update lags by a few hundred ms. Without this poll,
-        # `test_l1_dropdown_pickers_inverse_excludes_anchor[qs-Drift]`
-        # read 0 from the stale empty-state.
-        if visual_is_empty(self._page, visual_title):
-            # Re-check after a brief wait; if still empty, accept 0.
-            self._page.wait_for_timeout(800)  # typing-smell: ignore[no-sleep]: 800ms post-pick DOM-update window; bounded one-shot, not a poll loop
-            if visual_is_empty(self._page, visual_title):
-                return 0
+        # BO.1 + 2026-06-16 — route the empty-state branch through the
+        # bounded paint-poll. The original one-shot 800ms re-check flaked
+        # the `dropdown_pickers_inverse_excludes_anchor[qs-*]` restore step
+        # under concurrent-worker load: it read 0 from the stale empty-
+        # state overlay before the restored row repainted (`assert 0==1`).
+        # `_visual_settled_empty` polls the overlay until it clears (paint
+        # done -> fall through to the count paths) or the budget elapses
+        # (genuine 0 rows).
+        if self._visual_settled_empty(visual_title):
+            return 0
         # AA.A.l2ft-rails-inverse.2 — three table shapes QS uses, three
         # paths to the true row count:
         #
@@ -716,6 +723,38 @@ class QsEmbedDriver:
             # IS the full set (same fallback as pre-AA.H.11).
             return max(0, count_table_rows(self._page, visual_title))
         return max(0, total)
+
+    def _visual_settled_empty(self, visual_title: str) -> bool:
+        """Return True iff the visual is empty AND stays empty across a
+        bounded paint-poll.
+
+        After a parameter write whose WS data layer has settled
+        (``_settle_after_param_change`` confirmed every new cid STOPped),
+        QS still paints the result into the DOM with a variable lag —
+        the empty-state overlay can linger for a few hundred ms cold, but
+        >800 ms under concurrent-worker CPU contention. The prior BO.1
+        fix re-checked once after a fixed ``wait_for_timeout(800)``, which
+        flaked the ``dropdown_pickers_inverse_excludes_anchor[qs-*]``
+        restore step (read 0 from the stale empty-state overlay before the
+        restored row repainted -> ``assert 0 == 1``).
+
+        Poll until the overlay clears (return ``False`` -> the caller
+        reads the now-painted rows) or ``_EMPTY_STATE_PAINT_POLL_S``
+        elapses (return ``True`` -> a genuinely-empty result). A
+        condition-poll beats the fixed wait per the no-time-based-waits
+        rule; non-empty visuals return immediately on the first check, so
+        only the genuinely-empty path pays the full budget.
+        """
+        if not visual_is_empty(self._page, visual_title):
+            return False
+        deadline = time.monotonic() + _EMPTY_STATE_PAINT_POLL_S
+        while time.monotonic() < deadline:
+            # Inter-poll interval; the tracker/DOM update on Playwright's
+            # event loop, so this yields it room to paint the row.
+            self._page.wait_for_timeout(150)  # typing-smell: ignore[no-sleep]: bounded condition-poll interval, not a fixed settle
+            if not visual_is_empty(self._page, visual_title):
+                return False
+        return True
 
     def kpi_value(self, visual_title: str) -> str | None:
         try:
