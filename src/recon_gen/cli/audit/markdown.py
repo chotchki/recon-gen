@@ -670,11 +670,13 @@ def _render_daily_statement_walks_markdown(
             f"${w.drift:,.2f} |\n"
         )
         if w.transactions:
+            # DN.4 — Balance (running balance) column between Amount and
+            # Status, mirroring the dashboard's Posted Money Records visual.
             out += (
                 "\n"
                 "| Posted | Transaction ID | Transfer type "
-                "| Direction | Amount | Status |\n"
-                "|---|---|---|---|---:|---|\n"
+                "| Direction | Amount | Balance | Status |\n"
+                "|---|---|---|---|---:|---:|---|\n"
             )
             for t in w.transactions:
                 out += (
@@ -683,6 +685,7 @@ def _render_daily_statement_walks_markdown(
                     f"| {t.rail_name} "
                     f"| {t.amount_direction} "
                     f"| ${t.amount_money:,.2f} "
+                    f"| ${t.running_balance:,.2f} "
                     f"| {t.status} |\n"
                 )
         else:

@@ -1520,9 +1520,13 @@ def _daily_statement_walks_story(
             elements.append(Paragraph(
                 "Posted Money records", styles["Heading3"],
             ))
+            # DN.4 — "Balance" column (running balance) between Amount and
+            # Status, mirroring the dashboard's Posted Money Records visual
+            # column placement so the audit reads "this leg moved $X,
+            # balance is now $Y" in one fixation.
             txn_data: list[list[object]] = [
                 ["Posted", "Transaction ID", "Transfer type",
-                 "Direction", "Amount", "Status"],
+                 "Direction", "Amount", "Balance", "Status"],
             ]
             for t in w.transactions:
                 txn_data.append([
@@ -1531,17 +1535,19 @@ def _daily_statement_walks_story(
                     Paragraph(t.rail_name, cell_style),
                     t.amount_direction,
                     f"${t.amount_money:,.2f}",
+                    f"${t.running_balance:,.2f}",
                     t.status,
                 ])
             txn_style = TableStyle(
                 base_table_style.getCommands() + [
-                    ("ALIGN", (4, 1), (4, -1), "RIGHT"),
+                    ("ALIGN", (4, 1), (5, -1), "RIGHT"),
                 ],
             )
             elements.append(LongTable(
                 txn_data,
-                colWidths=[0.7 * inch, 1.5 * inch, 1.4 * inch,
-                           0.85 * inch, 1.0 * inch, 0.8 * inch],
+                colWidths=[0.65 * inch, 1.4 * inch, 1.3 * inch,
+                           0.8 * inch, 0.95 * inch, 0.95 * inch,
+                           0.75 * inch],
                 style=txn_style, repeatRows=1,
             ))
         else:

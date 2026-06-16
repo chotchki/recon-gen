@@ -87,7 +87,7 @@ from recon_gen.common.provenance import (
     l2_yaml_sha256,
     recon_gen_code_identity,
 )
-from recon_gen.common.sql.dialect import date_literal
+from recon_gen.common.sql.dialect import date_literal, date_trunc_day
 from recon_gen.common.sql.intervals import range_clause
 from recon_gen.common.theme import DEFAULT_PRESET, resolve_l2_theme
 
@@ -1175,6 +1175,14 @@ class DailyStatementTransaction:
     rail_name: str
     amount_money: Decimal
     amount_direction: str
+    # DN.4 — running balance: cumulative SUM of signed amount_money over
+    # (account_id, business_day) in posting order, mirroring the
+    # dashboard's DAILY_STATEMENT_TRANSACTIONS_CONTRACT.running_balance
+    # (DN.1). Positioned between amount_direction and status to match the
+    # contract + visual column order. Projected by the same window
+    # function in `_query_daily_statement_walks` so the 4-way agreement
+    # gate (audit ≡ direct-DB ≡ QS ≡ App2) holds row-for-row.
+    running_balance: Decimal
     status: str
     posting: datetime
 
@@ -1329,13 +1337,34 @@ def _query_daily_statement_walks(
             ) = summary
 
             # 3) Day's transactions from current_transactions matview.
+            # DN.4 — running_balance via the SAME window function the
+            # dashboard's `_daily_statement_transactions_sql` (DN.1) uses:
+            # cumulative SUM of signed amount_money over
+            # (account_id, business_day) in posting order, `id` as the
+            # deterministic tiebreaker for legs sharing a posting
+            # timestamp. PARTITION BY account_id + business_day is
+            # defensive (this query already narrows to one account + one
+            # day's posting range), keeping the projection identical to
+            # the dataset SQL so the 4-way agreement gate holds. Storage
+            # is signed BIGINT cents (CHECK enforces sign-direction) so
+            # the bare SUM is the running balance; `_cents_to_dollars`
+            # projects at the read boundary like amount_money.
+            tx_business_day = date_trunc_day("posting", cfg.db.dialect)
+            running_balance_cents = (
+                f"SUM(amount_money) OVER ("
+                f"PARTITION BY account_id, {tx_business_day} "
+                f"ORDER BY posting, id "
+                f"ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"
+            )
             cur.execute(
                 f"SELECT id, transfer_id, rail_name,"
-                f"       amount_money, amount_direction, status, posting"
+                f"       amount_money, amount_direction,"
+                f"       {running_balance_cents} AS running_balance,"
+                f"       status, posting"
                 f"  FROM {prefix}_current_transactions"
                 f" WHERE account_id = '{account_id}'"
                 f"   AND {day_posting_range}"
-                f" ORDER BY posting"
+                f" ORDER BY posting, id"
             )
             transactions = [
                 DailyStatementTransaction(
@@ -1346,8 +1375,11 @@ def _query_daily_statement_walks(
                     # → dollars at boundary.
                     amount_money=_cents_to_dollars(r[3]),
                     amount_direction=str(r[4] or ""),
-                    status=str(r[5] or ""),
-                    posting=_coerce_to_datetime(r[6]),
+                    # DN.4 — running balance SUM is BIGINT cents → dollars
+                    # at boundary (same projection as amount_money).
+                    running_balance=_cents_to_dollars(r[5]),
+                    status=str(r[6] or ""),
+                    posting=_coerce_to_datetime(r[7]),
                 )
                 for r in cur.fetchall()
             ]
