@@ -820,3 +820,29 @@ Accept the asymmetry. App2 dashboards clamp via Flatpickr; QS dashboards don't. 
 POLICY 2 structured-triple applies. If AWS ships a min/max field on `ParameterDateTimePickerControl`, this entry retires, the App2 `_render_parameter_date` shape gets mirrored on the QS side, and the parity gap closes.
 
 Append-only quirks log: this entry stays even if/when AWS ships a fix.
+
+## QS filter/parameter controls can't cascade — a picker dataset can't narrow on another control's value — DM.4, 2026-06-16
+
+### Symptom
+
+A dependent (cascading) dropdown can't narrow its option universe based on another control's current selection. Concretely: the Daily Statement's Account picker should show only the accounts belonging to the Role picked above it — on QS it shows ALL accounts regardless of the Role selection. App2 (HTMX renderer) cascades correctly: picking a Role narrows the Account dropdown to that role's accounts, and changing the Role clears the stale Account pick.
+
+### Confirmed-via
+
+CQ.4.a (2026-06) + DM.2 (2026-06-16). The Account picker dataset (`l1-ds-accounts-ds`) was originally parameterized with `<<$pL1DsRole>>` to return only the selected role's accounts. In QS this produced a broken picker: a `ParameterDropDownControl` / `FilterDropDownControl`'s option list is populated by the `GetUniqueAttributeValuesSyncForAnalysis` API, which fetches the dataset's unique attribute values WITHOUT threading the analysis's current parameter values — so the `<<$pL1DsRole>>` substitution never receives the Role control's value. CQ.4.a removed the parameterization from `DS_L1_DS_ACCOUNTS` to make the QS picker functional (showing all accounts) rather than broken/empty.
+
+### Root cause
+
+Permanent capability gap on the QS API side. `GetUniqueAttributeValuesSyncForAnalysis` (the call backing a control's option list) does not pass the analysis's current parameter values to the dataset's CustomSql, so a picker dataset can't be parameterized on another control's value — there is no cascade primitive for filter/parameter controls. This is distinct from the dataset-parameter pushdown that DOES work for VISUAL datasets (`<<$pX>>` bridged via `MappedDataSetParameters` at visual fetch time) — that path fires for visuals, not for the unique-values call that populates a control.
+
+### Workaround
+
+The cascade is **App2-only**. App2's options-search fetcher (`common/html/_tree_fetcher.py::make_options_search_fetcher` + `build_cascade_map`) applies the source param's value as an `AND <match_column> IN (...)` predicate dynamically at fetch time, WITHOUT re-parameterizing the dataset — so the QS-side dataset stays unparameterized (functional, shows all) while App2 narrows. The cascade is declared in the tree via `ParameterDropdown.cascade_source` / `cascade_match_column`; the QS emit path skips it (`common/tree/controls.py` gates on `cascade_source.app2_only`), and App2 reads the same tree nodes. On source change App2 also clears the target's stale value (`bootstrap.js::wireTomSelect`) — QS has no equivalent because it has no cascade at all.
+
+The same family covers DM.3 day-availability decoration (per-day fill/ring markers on the Business Day picker): App2-only, because QS's `ParameterDateTimePickerControl` renders a plain picker with no per-day decoration hook (and the markers depend on a per-account fetch the control can't issue).
+
+### Notes
+
+POLICY 2 structured-triple: this entry + the `project_qs_no_searchfilter_cascading` memory + the `NotImplementedError` raised on any QS-side cascade / day-availability driver verb (App2-only features) together acknowledge the permanent gap. If AWS ships parameter-aware unique-value fetching (or a native control cascade primitive), this entry retires, the `cascade_source` emit gate opens on the QS side, and the parity gap closes.
+
+Append-only quirks log: this entry stays even if/when AWS ships a fix.
