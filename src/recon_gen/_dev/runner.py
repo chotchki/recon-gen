@@ -3392,6 +3392,32 @@ def _normalize_only_expr(expr: str | None) -> str | None:
     return normalized
 
 
+# DL.3.4 — earlier-layer pytest invocations under ``--only`` collect
+# zero items. Pytest alone exits 5 (NO_TESTS_COLLECTED); pytest-xdist
+# escalates to exit 3 (INTERNAL_ERROR) on the same "0 items" shape
+# because its scheduler's ``handle_crashitem`` path hits an
+# ``assert not crashitem`` before dispatch even reaches the test
+# loop (xdist 3.8 / pytest 9 combination, surfaced 2026-06-15). The
+# operator-actionable answer is the same in both cases: skip this
+# layer, the filter targets a later one.
+_PYTEST_NO_TESTS_COLLECTED = 5
+_PYTEST_INTERNAL_ERROR = 3
+
+
+def _is_only_no_match_exit(exit_code: int, only: str | None) -> bool:
+    """Return True iff the layer's exit code is the ``--only``-filters-
+    out-all-items shape and ``--only`` is set.
+
+    Guarded by ``only is not None`` so we don't paper over a real
+    internal error / no-tests-collected condition when the operator
+    didn't ask for a filter. Returns False for rc=0 (passing) and rc=1
+    (real failures) — those never get masked.
+    """
+    if only is None:
+        return False
+    return exit_code in (_PYTEST_NO_TESTS_COLLECTED, _PYTEST_INTERNAL_ERROR)
+
+
 def _options_from_args(args: argparse.Namespace) -> RunOptions:
     """Build a RunOptions from the argparse Namespace. Defaults are baked in
     (most flags `default=False`/`default=None` from `_build_parser`).
@@ -4087,12 +4113,16 @@ def cmd_up_to(args: argparse.Namespace) -> int:
             result = dispatch_layer(
                 layer, run_dir, options, variant_env=layer_env,
             )
-            # #986 followon parity — when --only narrows to a single later-
-            # layer test, earlier-layer pytest invocations collect nothing
-            # and exit 5. Without this tolerance the chain halts before
-            # the target layer ever dispatches. The target layer's own
-            # invocation still fails loud if the expr typos.
-            if result.exit_code == 5 and options.only is not None:
+            # #986 followon parity + DL.3.4 — when --only narrows to a
+            # single later-layer test, earlier-layer pytest invocations
+            # collect nothing. Pytest alone exits 5; pytest-xdist
+            # escalates to 3 (INTERNAL_ERROR via ``assert not
+            # crashitem``). Both shapes mean the same thing: the filter
+            # targets a later layer, this one has nothing to do. The
+            # target layer's own invocation still fails loud if the
+            # expr typos.
+            if _is_only_no_match_exit(result.exit_code, options.only):
+                prior_rc = result.exit_code
                 result = LayerResult(
                     layer=layer,
                     exit_code=0,
@@ -4100,9 +4130,9 @@ def cmd_up_to(args: argparse.Namespace) -> int:
                     skipped=True,
                 )
                 print(
-                    f"runner: layer-skip [{layer}] rc=5 → 0 (--only="
-                    f"{options.only!r} matched no tests in this layer, "
-                    f"deferring to later layers)"
+                    f"runner: layer-skip [{layer}] rc={prior_rc} → 0 "
+                    f"(--only={options.only!r} matched no tests in "
+                    f"this layer, deferring to later layers)"
                 )
             layer_results.append(result)
             if not result.passed and not result.skipped:
