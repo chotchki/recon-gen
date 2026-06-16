@@ -36,7 +36,7 @@ remain sync (pure CPU); only the SQL-execute roundtrip is awaited.
 from __future__ import annotations
 
 import re
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, NamedTuple
 
@@ -1051,6 +1051,142 @@ def get_picker_matview_hint(
     return _PICKER_MATVIEW_HINT_REGISTRY.get(visual_identifier)
 
 
+# DM.2 — App2-side cascade narrowing for the options-search fetcher.
+#
+# The QS-side cascade (``CascadingControlConfiguration``) can't be
+# emitted when the source dropdown is ``app2_only`` (DM.0.5 renderer
+# gate) — and CQ.4.a de-parameterized the picker dataset (so there's no
+# ``<<$pRole>>`` placeholder to substitute) because QS's
+# ``GetUniqueAttributeValuesSyncForAnalysis`` can't execute parameterized
+# picker datasets. App2 therefore narrows the picker's option universe
+# DYNAMICALLY in the fetcher: the dataset SQL stays unparameterized
+# (QS keeps working), and App2 wraps the same SQL with an extra
+# ``AND <match_column> IN (<source picked values>)`` predicate built from
+# the live form state at fetch time. Generic over any cascade dropdown
+# — driven by the tree-derived ``CascadeMap``, not hardcoded to
+# ``pL1DsRole`` / ``account_role``.
+class CascadeRule(NamedTuple):
+    """A single Role→Account-shaped cascade narrowing rule.
+
+    ``match_column`` — the column on the options dataset that equals
+        the cascade source's picked value (e.g. ``account_role``).
+    ``source_param`` — the parameter name of the cascade SOURCE dropdown
+        (e.g. ``pL1DsRole``); its live value rides the request as the
+        ``param_<source_param>`` query-string key.
+    ``sentinels`` — the source param's "no selection" defaults
+        (``value_when_unset`` + declared ``default``); when the live
+        value is one of these (or empty) the rule is a no-op (match
+        all), exactly the QS cascade-without-pick semantics.
+    """
+    match_column: str
+    source_param: str
+    sentinels: frozenset[str]
+
+
+# Keyed by ``(options dataset_identifier, options column)`` — the same
+# ``(dataset, column)`` the fetcher serves. So a fetch of
+# ``("l1-ds-accounts-ds", "account_display")`` looks up its cascade rule
+# in O(1).
+CascadeMap = Mapping[tuple[str, str], CascadeRule]
+
+
+def build_cascade_map(apps: Sequence[App]) -> dict[tuple[str, str], CascadeRule]:
+    """Walk the tree apps and build the App2 cascade-narrowing map.
+
+    For every ``ParameterDropdown`` carrying a ``cascade_source``, record
+    — keyed by the dropdown's OWN ``(options dataset_identifier, options
+    column)`` (the ``LinkedValues`` pair the options fetcher is keyed on)
+    — the ``CascadeRule`` of ``(cascade_match_column.name,
+    cascade_source.parameter.name, source sentinels)``.
+
+    Only ``LinkedValues``-sourced dropdowns participate (a static-values
+    dropdown has no dataset/column the fetcher serves). A cascade without
+    a ``cascade_match_column`` is skipped (the QS-emit path asserts on it;
+    here we just no-op so App2 doesn't crash on a half-wired cascade).
+
+    The map is global (dataset identifiers are unique across apps), so one
+    fetcher serving every dashboard keys correctly. Caller builds it once
+    from the same ``real_apps`` list it composes the served dashboards
+    from (see ``_html_serve.build_real_dashboards``).
+    """
+    from recon_gen.common.tree.controls import (  # noqa: PLC0415
+        LinkedValues,
+        ParameterDropdown,
+    )
+    cascade_map: dict[tuple[str, str], CascadeRule] = {}
+    for app in apps:
+        if app.analysis is None:
+            continue
+        for sheet in app.analysis.sheets:
+            for ctrl in sheet.parameter_controls:
+                if not isinstance(ctrl, ParameterDropdown):
+                    continue
+                if ctrl.cascade_source is None:
+                    continue
+                if ctrl.cascade_match_column is None:
+                    continue
+                if not isinstance(ctrl.selectable_values, LinkedValues):
+                    continue
+                key = (
+                    ctrl.selectable_values.dataset.identifier,
+                    ctrl.selectable_values.column_name,
+                )
+                source = ctrl.cascade_source
+                # The source's "match all" markers: its ValueWhenUnset
+                # custom value + any declared StaticValues default. A
+                # live value matching any of these = no narrowing.
+                sentinels: set[str] = set()
+                vwu = getattr(source.parameter, "value_when_unset", None)
+                if isinstance(vwu, str):
+                    sentinels.add(vwu)
+                default = getattr(source.parameter, "default", None)
+                if isinstance(default, (list, tuple)):
+                    for v in default:  # pyright: ignore[reportUnknownVariableType]: getattr off the ParameterDeclLike Protocol — default is list[str] on StringParam but the Protocol doesn't carry it; coerced to str below
+                        sentinels.add(str(v))  # pyright: ignore[reportUnknownArgumentType]: see above — element type unknown via getattr, str() coerces
+                cascade_map[key] = CascadeRule(
+                    match_column=ctrl.cascade_match_column.name,
+                    source_param=source.parameter.name,
+                    sentinels=frozenset(sentinels),
+                )
+    return cascade_map
+
+
+def _cascade_clause_and_binds(
+    rule: CascadeRule,
+    url_params: Mapping[str, list[str]],
+    *,
+    dialect: Dialect,
+) -> tuple[str | None, Mapping[str, str]]:
+    """Build the ``AND <match> IN (:b0, :b1, …)`` cascade predicate +
+    its binds from the live form state, or ``(None, {})`` when the
+    source has no real (non-sentinel) selection.
+
+    Single-value source (the Role→Account case) collapses to a
+    one-element ``IN`` list — ``IN (:b0)`` is equivalent to ``=`` but
+    keeps the multi-value path uniform (a future MULTI_SELECT cascade
+    source picks more than one). Bind names are namespaced by the source
+    param so they can't collide with the dataset's ``:q`` or any
+    ``param_*`` bind. ``column_name`` folds the match column for Oracle
+    case-correctness.
+    """
+    raw = url_params.get(f"param_{rule.source_param}") or []
+    values = [
+        v for v in raw
+        if v and v not in rule.sentinels
+    ]
+    if not values:
+        return None, {}
+    col_ref = column_name(rule.match_column, dialect)
+    binds: dict[str, str] = {}
+    placeholders: list[str] = []
+    for i, v in enumerate(values):
+        name = f"{rule.source_param}_cascade_{i}"
+        binds[name] = v
+        placeholders.append(f":{name}")
+    clause = f"AND {col_ref} IN ({', '.join(placeholders)})"
+    return clause, binds
+
+
 # Max user-typed query length. Caps the LIKE planner-DOS attack
 # surface (a 1 MB POST body with a million-char ``q`` would still bind
 # but waste planner time). 100 chars is comfortable for any real
@@ -1096,6 +1232,7 @@ class OptionsSearchResult(NamedTuple):
 def _picker_search_sql_wrap(
     base_sql: str, column: str, *, dialect: Dialect,
     limit: int = PICKER_PAGE_SIZE,
+    cascade_clause: str | None = None,
 ) -> str:
     """Build the WRAP-path search SQL — for pickers whose source dataset
     is a multi-matview UNION (DS_L1_ACCOUNTS) or has no matview hint.
@@ -1111,9 +1248,18 @@ def _picker_search_sql_wrap(
     pipeline (PG → ``%(q)s``, DuckDB → ``$q``, Oracle → ``:q``). The
     bound value MUST be pre-escaped via
     :func:`escape_like_pattern`.
+
+    DM.2 — ``cascade_clause`` is an optional pre-built ``AND``-prefixed
+    predicate (``AND opt_src.account_role = :pL1DsRole_cascade``) that
+    narrows the option universe by a cascade source's picked value. The
+    wrapped subquery exposes the match column directly (the dataset
+    projects it), so the predicate lands on ``opt_src``. ``None`` =
+    no cascade narrowing (the unparameterized-dataset baseline). The
+    bind value is supplied via ``extra_binds`` by the fetcher.
     """
     col_ref = column_name(column, dialect)
     where_clause = case_insensitive_substring_match(col_ref, "q", dialect)
+    cascade = f" {cascade_clause}" if cascade_clause else ""
     limit_clause = (
         f"FETCH FIRST {limit} ROWS ONLY"
         if dialect is Dialect.ORACLE
@@ -1121,7 +1267,7 @@ def _picker_search_sql_wrap(
     )
     return (
         f"SELECT DISTINCT {col_ref} AS opt FROM ({base_sql}) opt_src "
-        f"WHERE {col_ref} IS NOT NULL AND {where_clause} "
+        f"WHERE {col_ref} IS NOT NULL AND {where_clause}{cascade} "
         f"ORDER BY 1 {limit_clause}"
     )
 
@@ -1129,6 +1275,7 @@ def _picker_search_sql_wrap(
 def _picker_search_sql_matview_direct(
     hint: PickerMatviewHint, *, dialect: Dialect,
     limit: int = PICKER_PAGE_SIZE,
+    cascade_clause: str | None = None,
 ) -> str:
     """CQ.2.g — build the MATVIEW-DIRECT search SQL.
 
@@ -1141,11 +1288,16 @@ def _picker_search_sql_matview_direct(
     uses (e.g. ``COALESCE(account_name, account_id) || ' (' ||
     account_id || ')'``). Both sides MUST match — see PickerMatviewHint
     docstring.
+
+    DM.2 — ``cascade_clause`` (see :func:`_picker_search_sql_wrap`); the
+    match column is a real column on the matview so the predicate lands
+    directly (no ``opt_src`` alias on this path).
     """
     ilike_clause = case_insensitive_substring_match(
         hint.select_expr, "q", dialect,
     )
     extra = f" AND ({hint.where_clause})" if hint.where_clause else ""
+    cascade = f" {cascade_clause}" if cascade_clause else ""
     limit_clause = (
         f"FETCH FIRST {limit} ROWS ONLY"
         if dialect is Dialect.ORACLE
@@ -1154,7 +1306,7 @@ def _picker_search_sql_matview_direct(
     return (
         f"SELECT DISTINCT {hint.select_expr} AS opt "
         f"FROM {hint.matview} "
-        f"WHERE {hint.select_expr} IS NOT NULL AND {ilike_clause}{extra} "
+        f"WHERE {hint.select_expr} IS NOT NULL AND {ilike_clause}{extra}{cascade} "
         f"ORDER BY 1 {limit_clause}"
     )
 
@@ -1162,12 +1314,20 @@ def _picker_search_sql_matview_direct(
 def _picker_seed_sql_wrap(
     base_sql: str, column: str, *, dialect: Dialect,
     limit: int = PICKER_PAGE_SIZE,
+    cascade_clause: str | None = None,
 ) -> str:
     """Empty-query seed page on the WRAP path — no ILIKE clause, just
     the top-N alphabetical universe. Drives the ``preload: 'focus'``
     initial-load semantics.
+
+    DM.2 — ``cascade_clause`` (see :func:`_picker_search_sql_wrap`). The
+    HTML cascade endpoint (``dropdown-options/...``) drives THIS seed
+    path with ``query=''`` after the source picker changes, so the
+    cascade narrowing has to apply here too (not only on the typed-query
+    search path).
     """
     col_ref = column_name(column, dialect)
+    cascade = f" {cascade_clause}" if cascade_clause else ""
     limit_clause = (
         f"FETCH FIRST {limit} ROWS ONLY"
         if dialect is Dialect.ORACLE
@@ -1175,16 +1335,21 @@ def _picker_seed_sql_wrap(
     )
     return (
         f"SELECT DISTINCT {col_ref} AS opt FROM ({base_sql}) opt_src "
-        f"WHERE {col_ref} IS NOT NULL ORDER BY 1 {limit_clause}"
+        f"WHERE {col_ref} IS NOT NULL{cascade} ORDER BY 1 {limit_clause}"
     )
 
 
 def _picker_seed_sql_matview_direct(
     hint: PickerMatviewHint, *, dialect: Dialect,
     limit: int = PICKER_PAGE_SIZE,
+    cascade_clause: str | None = None,
 ) -> str:
-    """Empty-query seed page on the MATVIEW-DIRECT path."""
+    """Empty-query seed page on the MATVIEW-DIRECT path.
+
+    DM.2 — ``cascade_clause`` (see :func:`_picker_search_sql_matview_direct`).
+    """
     extra = f" AND ({hint.where_clause})" if hint.where_clause else ""
+    cascade = f" {cascade_clause}" if cascade_clause else ""
     limit_clause = (
         f"FETCH FIRST {limit} ROWS ONLY"
         if dialect is Dialect.ORACLE
@@ -1193,7 +1358,7 @@ def _picker_seed_sql_matview_direct(
     return (
         f"SELECT DISTINCT {hint.select_expr} AS opt "
         f"FROM {hint.matview} "
-        f"WHERE {hint.select_expr} IS NOT NULL{extra} "
+        f"WHERE {hint.select_expr} IS NOT NULL{extra}{cascade} "
         f"ORDER BY 1 {limit_clause}"
     )
 
@@ -1215,6 +1380,7 @@ def make_options_search_fetcher(
     cfg: Config,
     *,
     pool: AsyncConnectionPool,
+    cascade_map: CascadeMap | None = None,
 ) -> OptionsSearchFetcher:
     """CQ.2.b/g — server-side typeahead + seed page fetcher.
 
@@ -1243,6 +1409,19 @@ def make_options_search_fetcher(
     cascade endpoint (``dropdown-options/{dataset}/{column}``,
     ``query=''``) through this single fetcher — same option semantics,
     different response shape.
+
+    DM.2 — ``cascade_map`` (built from the tree via
+    :func:`build_cascade_map`) drives App2-side cascade NARROWING. The
+    picker datasets are unparameterized (CQ.4.a — QS can't execute a
+    parameterized picker dataset), so the Role→Account narrowing can't
+    ride a ``<<$pRole>>`` placeholder. Instead, when the served
+    ``(dataset, column)`` has a cascade rule AND the request carries a
+    real (non-sentinel) source value, the fetcher appends an
+    ``AND <match_column> IN (…)`` predicate to the wrapped options SQL
+    and binds the value(s) via ``extra_binds`` — dynamic narrowing
+    without touching the dataset SQL (so QS's native cascade still works
+    off the same unparameterized dataset). ``None`` / no matching rule =
+    today's no-cascade behavior.
     """
     async def fetch(
         dataset_identifier: str,
@@ -1254,23 +1433,41 @@ def make_options_search_fetcher(
         trimmed_query = query[:cap]
         truncated = len(query) > cap
         hint = get_picker_matview_hint(dataset_identifier)
+        # DM.2 — resolve the cascade narrowing for this (dataset, column)
+        # off the live form state. No rule / sentinel-only source value →
+        # ``(None, {})`` (no narrowing).
+        cascade_clause: str | None = None
+        cascade_binds: Mapping[str, str] = {}
+        rule = cascade_map.get((dataset_identifier, column)) if cascade_map else None
+        if rule is not None:
+            cascade_clause, cascade_binds = _cascade_clause_and_binds(
+                rule, url_params, dialect=cfg.db.dialect,
+            )
         if trimmed_query:
             escaped = escape_like_pattern(trimmed_query)
-            extra_binds: Mapping[str, str] = {"q": escaped}
+            extra_binds: dict[str, str] = {"q": escaped, **cascade_binds}
             options_sql = (
-                _picker_search_sql_matview_direct(hint, dialect=cfg.db.dialect)
+                _picker_search_sql_matview_direct(
+                    hint, dialect=cfg.db.dialect,
+                    cascade_clause=cascade_clause,
+                )
                 if hint is not None
                 else _picker_search_sql_wrap(
                     get_sql(dataset_identifier), column, dialect=cfg.db.dialect,
+                    cascade_clause=cascade_clause,
                 )
             )
         else:
-            extra_binds = {}
+            extra_binds = dict(cascade_binds)
             options_sql = (
-                _picker_seed_sql_matview_direct(hint, dialect=cfg.db.dialect)
+                _picker_seed_sql_matview_direct(
+                    hint, dialect=cfg.db.dialect,
+                    cascade_clause=cascade_clause,
+                )
                 if hint is not None
                 else _picker_seed_sql_wrap(
                     get_sql(dataset_identifier), column, dialect=cfg.db.dialect,
+                    cascade_clause=cascade_clause,
                 )
             )
         rows, _columns = await execute_visual_sql_async(

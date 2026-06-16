@@ -347,10 +347,16 @@ def make_live_db_fetchers_for_app(
         make_connection_pool,
     )
     from recon_gen.common.html._tree_fetcher import (  # noqa: PLC0415
+        build_cascade_map,
         make_options_search_fetcher,
         make_tree_db_fetcher,
     )
 
+    # DM.2 — cascade narrowing map for the options fetcher (POLICY 1: the
+    # browser-tier harness must wire the same cascade narrowing the CLI
+    # serve path does in ``_html_serve.build_real_dashboards``). One
+    # tree_app here; the map keys off (options dataset, column).
+    cascade_map = build_cascade_map([tree_app])
     cached: dict[str, Any] = {}
 
     async def _pool() -> Any:
@@ -375,7 +381,9 @@ def make_live_db_fetchers_for_app(
     ) -> Any:
         fn = cached.get("of")
         if fn is None:
-            fn = make_options_search_fetcher(cfg, pool=await _pool())
+            fn = make_options_search_fetcher(
+                cfg, pool=await _pool(), cascade_map=cascade_map,
+            )
             cached["of"] = fn
         return await fn(dataset_id, column, query, url_params)
 

@@ -136,6 +136,7 @@ def build_real_dashboards(
     guarded the parity between the two serve paths.
     """
     from recon_gen.common.html._tree_fetcher import (  # noqa: PLC0415
+        build_cascade_map,
         make_day_availability_fetcher,
         make_options_search_fetcher,
         make_tree_db_fetcher,
@@ -143,12 +144,26 @@ def build_real_dashboards(
     from recon_gen.common.html.server import (  # noqa: PLC0415
         ServedDashboard,
     )
+    # DM.2 — cascade narrowing map for the options-search fetcher. Walks
+    # every served app's tree for ``ParameterDropdown`` controls carrying
+    # a ``cascade_source`` (the Daily Statement Role→Account cascade) and
+    # records, keyed by the dropdown's own (options dataset, column), the
+    # match column + source param + sentinels. The picker datasets are
+    # unparameterized (CQ.4.a — QS can't execute parameterized picker
+    # datasets), so the App2 narrowing rides this map at fetch time
+    # instead of a ``<<$pRole>>`` placeholder. Built from the SAME
+    # real_apps the served dashboards are composed from (one fetcher
+    # serves every dashboard; dataset identifiers are globally unique so
+    # the map keys correctly across apps).
+    cascade_map = build_cascade_map([tree_app for _name, tree_app, _sheet in real_apps])
     # CQ.2.e — single search fetcher serves both the JSON typeahead
     # endpoint (per-keystroke load) AND the HTML cascade endpoint
     # (sibling-change re-fetch). Both pass query='' for the seed
     # page; typeahead passes the user-typed string. The pre-CQ.2
     # make_options_fetcher with its silent LIMIT 2000 is gone.
-    opts_search_fetcher = make_options_search_fetcher(cfg, pool=pool)
+    opts_search_fetcher = make_options_search_fetcher(
+        cfg, pool=pool, cascade_map=cascade_map,
+    )
     # DM.3 — per-(account, day) availability fetcher for the Daily
     # Statement Business Day picker (App2 only). Pool-backed; one
     # UNION-ALL query per visible calendar window (overscanned by the
