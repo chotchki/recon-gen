@@ -842,6 +842,106 @@ def test_daily_statement_transactions_business_day_is_dialect_aware() -> None:
     assert "DATE_TRUNC" not in sql_or
 
 
+def test_daily_statement_transactions_projects_running_balance() -> None:
+    """DN.1 — Daily Statement's per-leg dataset projects a
+    ``running_balance`` column via a window function: cumulative SUM of
+    the signed ``amount_money`` over ``(account_id, business_day)`` in
+    ``(posting, id)`` order. Storage is signed BIGINT cents (Credit >= 0
+    / Debit <= 0 per the CHECK constraint at common/l2/schema.py:1985-
+    1988); the running sum stays in cents inside the OVER clause and
+    wraps with ``cents_to_dollars_sql`` for the dollar projection.
+    Cross-dialect: same SQL shape on PG / Oracle / DuckDB — window
+    functions are in the portable cross-dialect surface per
+    ``[[project_oracle_19c_compat]]``. The Oracle leg wraps the inner
+    SELECT with the lowercase-alias outer wrapper, so the running_balance
+    projection lives inside the wrapped form; the outer wrapper picks the
+    new contract column up automatically. See
+    ``docs/audits/dn_0_running_balance.md`` for the design lock.
+    """
+    from dataclasses import replace
+    from recon_gen.common.l2 import default_l2_instance
+    from recon_gen.apps.l1_dashboard.datasets import (
+        DAILY_STATEMENT_TRANSACTIONS_CONTRACT,
+        build_daily_statement_transactions_dataset,
+    )
+    from recon_gen.common.sql import Dialect
+
+    # Contract carries the new column between amount_direction + status
+    # (DN.0 lock: operator's eye reads "this leg moved $X, balance is
+    # now $Y" in one fixation).
+    names = [c.name for c in DAILY_STATEMENT_TRANSACTIONS_CONTRACT.columns]
+    assert "running_balance" in names, (
+        "DAILY_STATEMENT_TRANSACTIONS_CONTRACT must declare "
+        f"running_balance; got {names!r}"
+    )
+    rb_idx = names.index("running_balance")
+    assert names[rb_idx - 1] == "amount_direction", (
+        f"running_balance must follow amount_direction; got "
+        f"{names[rb_idx - 1]!r} immediately before"
+    )
+    assert names[rb_idx + 1] == "status", (
+        f"running_balance must precede status; got "
+        f"{names[rb_idx + 1]!r} immediately after"
+    )
+
+    instance = default_l2_instance()
+    # Same window-function shape across all three dialects we ship for
+    # (PG 17+, Oracle 19c, DuckDB) — no per-dialect branches expected.
+    # The business_day expression differs per dialect (DATE_TRUNC on PG
+    # vs CAST(TRUNC(...) AS TIMESTAMP) on Oracle vs CAST(... AS DATE) on
+    # DuckDB), so we assert the dialect-invariant fragments separately
+    # from the OVER (PARTITION BY ...) shape.
+    for dialect in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.DUCKDB):
+        cfg = replace(_CFG, db=replace(_CFG.db, dialect=dialect))
+        cs = next(iter(
+            build_daily_statement_transactions_dataset(cfg, instance)
+            .PhysicalTableMap.values()
+        )).CustomSql
+        assert cs is not None
+        sql = cs.SqlQuery
+
+        # The running-balance projection (dialect-invariant fragments).
+        assert "SUM(tx.amount_money) OVER (" in sql, (
+            f"{dialect.name}: missing running-balance window SUM; got "
+            f"{sql!r}"
+        )
+        assert "PARTITION BY tx.account_id" in sql, (
+            f"{dialect.name}: window must partition by account_id; got "
+            f"{sql!r}"
+        )
+        # Deterministic tiebreaker — without `tx.id` the running balance
+        # flickers on legs sharing a posting timestamp.
+        assert "ORDER BY tx.posting, tx.id" in sql, (
+            f"{dialect.name}: window ORDER BY must tiebreak on tx.id; "
+            f"got {sql!r}"
+        )
+        assert (
+            "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW" in sql
+        ), (
+            f"{dialect.name}: window frame must be cumulative "
+            f"(UNBOUNDED PRECEDING..CURRENT ROW); got {sql!r}"
+        )
+        # Cents → dollars wrap at the dataset boundary (AO.1 pattern;
+        # storage is BIGINT cents, dashboard reads DECIMAL dollars).
+        assert "AS running_balance" in sql, (
+            f"{dialect.name}: window result must be aliased "
+            f"running_balance; got {sql!r}"
+        )
+        assert "/ 100.0) AS running_balance" in sql, (
+            f"{dialect.name}: running_balance must wrap the cents sum "
+            f"with cents_to_dollars_sql (`/ 100.0`); got {sql!r}"
+        )
+        # The InputColumn list (driven from the contract) carries the
+        # new column on every dialect — QS-side declared column shape
+        # matches the projected SQL.
+        cols = cs.Columns or []
+        col_names = [c.Name for c in cols]
+        assert "running_balance" in col_names, (
+            f"{dialect.name}: dataset InputColumns must declare "
+            f"running_balance; got {col_names!r}"
+        )
+
+
 def test_daily_statement_balance_date_narrow_renders_a_portable_day_string() -> None:
     """AO.10 / AR.2 regression — the balance-date WHERE narrow must NOT
     feed the ``<<$pL1DsBalanceDate>>`` param into ``date_trunc_day``: on

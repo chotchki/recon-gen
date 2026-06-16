@@ -578,6 +578,17 @@ DAILY_STATEMENT_TRANSACTIONS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("rail_name", "STRING", shape=ColumnShape.RAIL_NAME),
     ColumnSpec("amount_money", "DECIMAL"),
     ColumnSpec("amount_direction", "STRING"),
+    # DN.1 — running balance: cumulative SUM of the signed amount_money
+    # over (account_id, business_day) in posting order. Window function
+    # in `_daily_statement_transactions_sql` (no matview — per
+    # `docs/audits/dn_0_running_balance.md` § Decision); position between
+    # `amount_direction` and `status` so the operator's eye reads
+    # "this leg moved $X, balance is now $Y" in one fixation. Projected
+    # in dollars via `cents_to_dollars_sql` (storage is signed BIGINT
+    # cents per AO.1; the CHECK constraint enforces sign-direction
+    # agreement so SUM(amount_money) is the running balance directly,
+    # no Credit/Debit-case translation needed).
+    ColumnSpec("running_balance", "DECIMAL"),
     ColumnSpec("status", "STRING"),
     ColumnSpec("origin", "STRING"),
     # CY.4 — surfaced for the Table visual's metadata_popup feature.
@@ -1324,6 +1335,28 @@ def _daily_statement_transactions_sql(prefix: str, dialect: Dialect) -> str:
     # view-primitive strict-collapse decision).
     # AO.1.impl — tx.amount_money is BIGINT cents; project as dollars.
     amount = cents_to_dollars_sql("tx.amount_money", dialect=dialect)
+    # DN.1 — running balance via window function: cumulative SUM of the
+    # signed amount_money over (account_id, business_day) in posting
+    # order. `tx.id` is the deterministic tiebreaker for legs sharing a
+    # posting timestamp — without it, ties flip the running-balance
+    # sequence non-deterministically across runs. Storage is signed
+    # BIGINT cents (Credit >= 0 / Debit <= 0 per the CHECK constraint
+    # at common/l2/schema.py:1985-1988) so the bare SUM produces the
+    # running balance directly; wrap with cents_to_dollars_sql for the
+    # dollar projection. The PARTITION BY account_id + business_day is
+    # defensive (the WHERE clause narrows to one (account, day) at
+    # render time via the pL1DsAccount / pL1DsBalanceDate params) so
+    # the same SQL evaluated against a multi-account fixture in unit
+    # tests still yields the right per-account result.
+    running_balance_cents = (
+        f"SUM(tx.amount_money) OVER ("
+        f"PARTITION BY tx.account_id, {business_day} "
+        f"ORDER BY tx.posting, tx.id "
+        f"ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"
+    )
+    running_balance = cents_to_dollars_sql(
+        running_balance_cents, dialect=dialect,
+    )
     # CY.4 — surface `metadata` on every row for the Table visual's
     # metadata_popup feature. Stays in the projection but is hidden
     # from rendered column headers (see render.py).
@@ -1334,6 +1367,7 @@ def _daily_statement_transactions_sql(prefix: str, dialect: Dialect) -> str:
         f"       tx.posting,"
         f"       tx.transfer_id, tx.rail_name,"
         f"       {amount} AS amount_money, tx.amount_direction,"
+        f"       {running_balance} AS running_balance,"
         f"       tx.status, tx.origin,"
         f"       tx.metadata"
         f" FROM {prefix}_current_transactions tx"
