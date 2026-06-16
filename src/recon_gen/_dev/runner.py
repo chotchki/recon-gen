@@ -2263,7 +2263,7 @@ def _testcontainer_logs_tail(
             # be a str or an iterator of bytes per docker-py's ``logs(stream=)``
             # surface; stringify defensively. The type: ignore on the prior
             # line propagates Unknown, hence the cast here.
-            text = str(raw)  # type: ignore[reportUnknownArgumentType]
+            text = str(raw)  # pyright: ignore[reportUnknownArgumentType]
         if not text.strip():
             return (
                 "\n  (container produced no logs — likely never ran the "
