@@ -1498,7 +1498,7 @@ class App2Driver:
         if not is_open:
             details.locator("> summary").first.click()
 
-    def trainer_apply(self, timeout_ms: int = 120_000) -> None:
+    def trainer_apply(self, timeout_ms: int = 300_000) -> None:
         """Click Apply; wait for the detached task to finish.
 
         BV.4.10.d.2 — Apply mirrors Session Start: POST 303s back
@@ -1507,8 +1507,16 @@ class App2Driver:
 
         Wait shape mirrors `trainer_start_session` (in-progress
         banner → live-tail finished state → JS-reloaded last-apply
-        banner). Default timeout 2 min — DuckDB Apply finishes in
-        seconds, PG slow-path reclone takes ~30s, oracle ~few min.
+        banner). Default timeout 5 min — DuckDB Apply finishes in
+        seconds, PG slow-path reclone takes ~30s, but Oracle's matview
+        refresh runs a few min and got heavier once DK added the
+        `data_anchor` singleton matview to the refresh set. The prior
+        2 min ceiling flaked `test_trainer_dogfood_per_kind[or-*]` —
+        the apply's `_trainer_wait_until_finished` hit 120s on the
+        Oracle refresh (it passed in CI but timed out locally, where
+        Oracle is slower). `trainer_start_session` already runs a 10 min
+        ceiling for the same matview-refresh reason; this is its
+        smaller sibling.
 
         CF.1 — terminal-state detection waits on the unified
         `data-test-last-apply-banner` attr (carried by all three
