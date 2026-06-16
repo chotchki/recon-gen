@@ -231,17 +231,10 @@ def _title_case(sql_column: str) -> str:
 # Parametrize generation
 # ---------------------------------------------------------------------------
 
-class _AppRef(NamedTuple):
-    """One enumerated app for the parametrize set."""
-    short: str  # "l1" | "l2ft" — matches the driver-fixture short slug
-    builder_module: str  # importable module path with build_<X>_app
-
-
-_APPS_WITH_CROSS_SHEET_DRILLS: list[_AppRef] = [
-    _AppRef("l1", "recon_gen.apps.l1_dashboard.app"),
-    _AppRef("l2ft", "recon_gen.apps.l2_flow_tracing.app"),
-    # inv app has same-sheet-only drills; exec has none.
-]
+# L1 + L2FT carry cross-sheet drills; ``inv`` has same-sheet-only
+# drills; ``exec`` has none. Each app gets its own test function below
+# so the renderer-parametrized ``<app>_dashboard_driver`` fixture
+# resolves correctly (see DL.2 fix notes above ``_enumerate_app_sites``).
 
 
 def _build_app(short: str) -> App:
@@ -287,69 +280,71 @@ def _build_app(short: str) -> App:
     return app
 
 
-def _enumerate_parametrize() -> "Iterator[Any]":
-    """Yield one ``pytest.param`` per (app, drill) pair, with a
+def _enumerate_app_sites(short: str) -> "Iterator[Any]":
+    """Yield one ``pytest.param`` per drill site for one app, with a
     legible ID for ``-k`` filtering and triage.
 
     ``pytest.param`` returns ``pytest.ParameterSet`` at runtime but the
     type isn't exposed publicly; ``Any`` is the pragmatic annotation.
+
+    Split per-app (vs. the prior one-set-for-all-apps) so each test
+    function can declare its own renderer-parametrized
+    ``<app>_dashboard_driver`` fixture directly in its signature —
+    pytest can't disambiguate which renderer-variant to instantiate
+    when a parametrized fixture is pulled via
+    ``request.getfixturevalue`` (the call returns a single value, but
+    the fixture has two configurations), which broke every qs_browser
+    cell at collection on the prior shape.
     """
-    for app_ref in _APPS_WITH_CROSS_SHEET_DRILLS:
-        try:
-            app = _build_app(app_ref.short)
-        except Exception as exc:  # pragma: no cover — defensive
-            # If app build fails at collection time, surface as a
-            # collection error rather than silently dropping coverage.
-            yield pytest.param(
-                app_ref.short, None,
-                id=f"{app_ref.short}/BUILD_FAILED",
-                marks=pytest.mark.xfail(
-                    reason=f"app build failed: {exc!r}", strict=True,
-                ),
-            )
-            continue
-        for site in iter_cross_sheet_drills(app):
-            src_title = getattr(site.src_visual, "title", "(no-title)")
-            test_id = (
-                f"{app_ref.short}/{site.src_sheet.sheet_id}"
-                f"/{src_title}"
-                f"/{site.drill.name}"
-                f"->{site.dst_sheet.sheet_id}"
-            )
-            yield pytest.param(app_ref.short, site, id=test_id)
+    try:
+        app = _build_app(short)
+    except Exception as exc:  # pragma: no cover — defensive
+        # If app build fails at collection time, surface as a
+        # collection error rather than silently dropping coverage.
+        yield pytest.param(
+            None,
+            id=f"{short}/BUILD_FAILED",
+            marks=pytest.mark.xfail(
+                reason=f"app build failed: {exc!r}", strict=True,
+            ),
+        )
+        return
+    for site in iter_cross_sheet_drills(app):
+        src_title = getattr(site.src_visual, "title", "(no-title)")
+        test_id = (
+            f"{site.src_sheet.sheet_id}"
+            f"/{src_title}"
+            f"/{site.drill.name}"
+            f"->{site.dst_sheet.sheet_id}"
+        )
+        yield pytest.param(site, id=test_id)
 
 
-_PARAMETRIZE_SET: list[Any] = list(_enumerate_parametrize())
+_L1_PARAMETRIZE_SET: list[Any] = list(_enumerate_app_sites("l1"))
+_L2FT_PARAMETRIZE_SET: list[Any] = list(_enumerate_app_sites("l2ft"))
 
 
 # ---------------------------------------------------------------------------
-# Test
+# Test body — shared between both per-app test functions
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "app_short,site", _PARAMETRIZE_SET,
-)
-def test_cross_sheet_drill_lands_populated_and_narrowed(
-    request: pytest.FixtureRequest,
-    app_short: str,
+def _run_cross_sheet_drill_guardrail(
+    driver_pair: tuple["DashboardDriver", str],
     site: DrillSite | None,
 ) -> None:
-    """For every cross-sheet ``Drill`` in every app: drill from row 0
-    of the source visual, then assert the destination renders content
-    AND its data narrowed to the drilled value.
+    """Shared body: drill from row 0 of ``site.src_visual``, assert the
+    destination renders content AND its data narrowed to the drilled
+    value.
 
-    See the module docstring for the two-assertion contract and the
-    drift→daily-statement bug this guardrail surfaces.
+    Per-app test functions wrap this so each can declare its own
+    ``<app>_dashboard_driver`` fixture directly (the
+    ``[qs, app2]``-parametrized fixture can't be resolved through
+    ``request.getfixturevalue`` — pytest needs the parametrize wired
+    into the test's own fixture closure).
     """
     assert site is not None, "parametrize bug — site is None"
 
-    # Pull the renderer-parametrized fixture by short slug. The
-    # ``<app>_dashboard_driver`` fixtures are themselves parametrized
-    # over ``[qs, app2]``, so this test inherits that × the drill
-    # enumeration above.
-    driver_fixture = f"{app_short}_dashboard_driver"
-    driver_pair = request.getfixturevalue(driver_fixture)
     driver, dashboard_arg = driver_pair
 
     src_sheet_name = site.src_sheet.name
@@ -477,3 +472,43 @@ def test_cross_sheet_drill_lands_populated_and_narrowed(
             f"the source app's Drill construction or the destination's "
             f"control / dataset wiring."
         )
+
+
+# ---------------------------------------------------------------------------
+# Per-app test functions
+# ---------------------------------------------------------------------------
+#
+# Split per app so each function can declare its own
+# ``<app>_dashboard_driver`` fixture directly — the prior single-test
+# shape pulled the renderer-parametrized fixture via
+# ``request.getfixturevalue``, which fails at collection ("requested
+# fixture has no parameter defined for test") because pytest can't
+# pick which ``[qs, app2]`` configuration to instantiate when the
+# fixture isn't in the test's own closure. Splitting also mirrors the
+# canonical pattern in ``test_l2ft_cross_sheet_drill.py`` /
+# ``test_l1_cross_sheet_drill_date_widening.py``.
+
+
+@pytest.mark.parametrize("site", _L1_PARAMETRIZE_SET)
+def test_l1_cross_sheet_drill_lands_populated_and_narrowed(
+    l1_dashboard_driver: tuple["DashboardDriver", str],
+    site: DrillSite | None,
+) -> None:
+    """L1 leg of the cross-sheet drill content + picker-value guardrail.
+
+    See the module docstring for the two-assertion contract and the
+    drift→daily-statement bug this guardrail surfaces.
+    """
+    _run_cross_sheet_drill_guardrail(l1_dashboard_driver, site)
+
+
+@pytest.mark.parametrize("site", _L2FT_PARAMETRIZE_SET)
+def test_l2ft_cross_sheet_drill_lands_populated_and_narrowed(
+    l2ft_dashboard_driver: tuple["DashboardDriver", str],
+    site: DrillSite | None,
+) -> None:
+    """L2FT leg of the cross-sheet drill content + picker-value guardrail.
+
+    See the module docstring for the two-assertion contract.
+    """
+    _run_cross_sheet_drill_guardrail(l2ft_dashboard_driver, site)
