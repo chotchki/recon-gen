@@ -2804,6 +2804,20 @@
       fpConfig.onMonthChange = (_sel, _str, fp) => {
         fp.redraw();
       };
+      // DM.3 — legend inside the calendar popup so the fill/ring marker
+      // is self-explanatory. Built once; the swatches mirror the
+      // .has-transactions (fill) / .has-balance (ring) CSS exactly.
+      fpConfig.onReady = (_sel, _str, fp) => {
+        if (fp.calendarContainer.querySelector(".day-picker-legend")) return;
+        var legend = document.createElement("div");
+        legend.className = "day-picker-legend";
+        legend.innerHTML =
+          '<span class="legend-item">' +
+          '<span class="legend-swatch legend-tx"></span>Transactions</span>' +
+          '<span class="legend-item">' +
+          '<span class="legend-swatch legend-bal"></span>Balance</span>';
+        fp.calendarContainer.appendChild(legend);
+      };
     }
 
     flatpickr(el, fpConfig);
