@@ -19,6 +19,8 @@ connection-refused — that shape means the container crashed.
 
 from __future__ import annotations
 
+import os
+import sys
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -222,7 +224,21 @@ def get_or_start_dex_container(
         # rotation, issuer change all live in cfg_dir's contents). The
         # original DD.4.a docstring honestly admitted this gap; we now
         # detect + force-recreate when the mount source diverges.
-        if not _adopt_mount_matches(existing, cfg_dir):
+        #
+        # DD.4 adversarial-review #5 (2026-06-16): also validate image
+        # + runtime user. Image mismatch (operator manually `docker
+        # create`d an unrelated container with our stable name; or a
+        # prior run pinned an older Dex version that we've since
+        # upgraded) silently serves the wrong binary. Runtime-user
+        # mismatch breaks the host-uid-aware bind-mount handshake the
+        # fresh path sets up via `user=$UID:$GID` — adopt'd container
+        # may have a different runtime UID + permission-deny on the
+        # mounted config files.
+        if (
+            not _adopt_mount_matches(existing, cfg_dir)
+            or not _adopt_image_matches(existing)
+            or not _adopt_runtime_user_matches(existing)
+        ):
             try:
                 existing.remove(force=True)
             except Exception:  # noqa: BLE001 — best-effort
@@ -286,6 +302,60 @@ def _adopt_mount_matches(existing: object, cfg_dir: Path) -> bool:
                 # session's atexit; treat as divergence.
                 return False
         return False
+    except (KeyError, TypeError, AttributeError):
+        return False
+
+
+def _adopt_image_matches(existing: object) -> bool:
+    """Return True iff the adopted container's image matches ``DEX_IMAGE``.
+
+    Docker's ``container.attrs['Config']['Image']`` carries the image
+    reference the container was created from. Compare via exact string
+    match — Dex versions are pinned in ``DEX_IMAGE`` and we don't want
+    silent version drift.
+
+    Returns False on any missing key / shape mismatch — the safe
+    fallback is "force-recreate".
+
+    DD.4 adversarial-review #5 (2026-06-16).
+    """
+    from typing import Any, cast  # noqa: PLC0415 — lazy
+    try:
+        config = cast(
+            "dict[str, Any]",  # typing-smell: ignore[explicit-any]: Docker SDK lacks PEP 561 stubs
+            existing.attrs["Config"],  # type: ignore[attr-defined]: Docker SDK lacks PEP 561 stubs
+        )
+        image = config.get("Image")
+        return isinstance(image, str) and image == DEX_IMAGE
+    except (KeyError, TypeError, AttributeError):
+        return False
+
+
+def _adopt_runtime_user_matches(existing: object) -> bool:
+    """Return True iff the adopted container's runtime user matches
+    the host's UID:GID, which is what ``_start_fresh_dex_container``
+    sets via ``user=f"{os.getuid()}:{os.getgid()}"``.
+
+    The host-uid-aware bind-mount handshake (see
+    ``_start_fresh_dex_container`` docstring) only works when the
+    container's runtime user owns the bind-mounted cfg files. An
+    operator-staged container running as a different UID would
+    permission-deny at gomplate's first stat.
+
+    Returns False on any missing key / shape mismatch — the safe
+    fallback is "force-recreate".
+
+    DD.4 adversarial-review #5 (2026-06-16).
+    """
+    from typing import Any, cast  # noqa: PLC0415 — lazy
+    try:
+        config = cast(
+            "dict[str, Any]",  # typing-smell: ignore[explicit-any]: Docker SDK lacks PEP 561 stubs
+            existing.attrs["Config"],  # type: ignore[attr-defined]: Docker SDK lacks PEP 561 stubs
+        )
+        actual_user = config.get("User")
+        expected_user = f"{os.getuid()}:{os.getgid()}" if sys.platform != "win32" else ""
+        return isinstance(actual_user, str) and actual_user == expected_user
     except (KeyError, TypeError, AttributeError):
         return False
 
