@@ -2223,6 +2223,65 @@ def _setup_local_duckdb() -> tuple[dict[str, str], object | None]:
     return env, _DuckdbHandle(db_path=db_path, cfg_path=cfg_path)
 
 
+def _testcontainer_logs_tail(
+    container: object | str, *, max_lines: int = 40,
+) -> str:
+    """DD.4 adversarial-review #7 (2026-06-16) — capture a docker
+    container's stdout+stderr tail and format for inclusion in a
+    thin-container start-failure RuntimeError. Mirrors the Dex-side
+    ``_dex_logs_tail`` pattern so PG / Oracle start failures surface
+    the actual crash reason instead of just the docker daemon's 500.
+
+    Best-effort — returns an empty string when the docker SDK is
+    unavailable, the wrapped container isn't readable, or logs can't
+    be fetched. The primary error is the caller's; log capture is
+    enrichment.
+
+    Accepts:
+    - a testcontainers wrapper exposing ``.get_wrapped_container()``
+      (PostgresContainer, OracleDbContainer)
+    - a docker Container object with ``.logs()`` directly
+    - a string container name; resolved via ``docker.from_env()``
+      (covers operator-staged adopt failures + the Oracle stable-name
+      path where the helper raises before returning the handle).
+    """
+    try:
+        if isinstance(container, str):
+            import docker  # type: ignore[import-untyped]: third-party SDK lacks PEP 561 stubs  # noqa: PLC0415
+            client = docker.from_env()
+            docker_container: object = client.containers.get(container)
+        else:
+            # testcontainers wraps the docker container; both PG and Oracle
+            # bases expose .get_wrapped_container().
+            wrapped = getattr(container, "get_wrapped_container", None)
+            docker_container = wrapped() if callable(wrapped) else container
+        raw = docker_container.logs(tail=max_lines, stdout=True, stderr=True)  # type: ignore[attr-defined]  # noqa: PLC0415 — duck-typed
+        if isinstance(raw, bytes):
+            text = raw.decode("utf-8", errors="replace")
+        else:
+            # Duck-typed object (docker SDK lacks PEP 561 stubs); ``raw`` may
+            # be a str or an iterator of bytes per docker-py's ``logs(stream=)``
+            # surface; stringify defensively. The type: ignore on the prior
+            # line propagates Unknown, hence the cast here.
+            text = str(raw)  # type: ignore[reportUnknownArgumentType]
+        if not text.strip():
+            return (
+                "\n  (container produced no logs — likely never ran the "
+                "image's entrypoint; check the image pull + command line)"
+            )
+        name = getattr(docker_container, "name", "container") or "container"
+        return (
+            f"\n  --- docker logs {name} (tail {max_lines}) ---\n  "
+            + text.replace("\n", "\n  ").rstrip()
+            + "\n  --- end docker logs ---"
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort enrichment
+        return (
+            f"\n  (could not fetch container logs: "
+            f"{type(exc).__name__}: {exc})"
+        )
+
+
 def _start_thin_container(
     cfg_path: Path,
 ) -> tuple[dict[str, str], object | None]:
@@ -2316,7 +2375,18 @@ def _start_thin_container(
             )
             .with_bind_ports(5432, _LOCAL_PG_HOST_PORT)
         )
-        container.start()
+        try:
+            container.start()
+        except Exception as exc:  # noqa: BLE001 — enrich with container logs then re-raise
+            # DD.4 adversarial-review #7 (2026-06-16): mirror Dex's
+            # _dex_logs_tail pattern — capture the PG container's
+            # stdout/stderr on start failure so the operator sees the
+            # actual postmaster crash reason in the runner's error,
+            # not just the docker daemon's 500.
+            tail = _testcontainer_logs_tail(container)
+            raise RuntimeError(
+                f"PostgresContainer start failed: {exc!r}{tail}"
+            ) from exc
         raw_url: str = container.get_connection_url()  # type: ignore[no-untyped-call]: testcontainers method has no type annotations
         url = _normalize_pg_url(raw_url)
         env: dict[str, str] = {
@@ -2327,9 +2397,19 @@ def _start_thin_container(
 
     if peek_cfg.db.dialect is Dialect.ORACLE:
         # Adopt-or-create; stable name so subsequent thin runs reuse.
-        url, handle = _get_or_start_oracle_container(
-            "recon-gen-thin-oracle", generate_db_password(),  # typing-smell: ignore[recon-prefix]: Docker container name (not a cfg-prefixed AWS / DB resource ID) — stable across thin-path runs so adopt-or-create can find the persistent container; not multi-tenant
-        )
+        try:
+            url, handle = _get_or_start_oracle_container(
+                "recon-gen-thin-oracle", generate_db_password(),  # typing-smell: ignore[recon-prefix]: Docker container name (not a cfg-prefixed AWS / DB resource ID) — stable across thin-path runs so adopt-or-create can find the persistent container; not multi-tenant
+            )
+        except Exception as exc:  # noqa: BLE001 — enrich with container logs then re-raise
+            # DD.4 adversarial-review #7 (2026-06-16): same enrichment as
+            # the PG path. The stable name lets us look up the container
+            # by docker name even if the testcontainers handle wasn't
+            # returned.
+            tail = _testcontainer_logs_tail("recon-gen-thin-oracle")
+            raise RuntimeError(
+                f"OracleDbContainer start failed: {exc!r}{tail}"
+            ) from exc
         env = {
             RECON_GEN_DEMO_DATABASE_URL.name: url,
             RECON_GEN_DEMO_DATABASE_URL_OR.name: url,
