@@ -51,6 +51,7 @@ from recon_gen.common.sql import (
     account_display_expr,
     date_trunc_day,
     day_text,
+    fetch_first_one_row,
     universal_date_range_clause,
 )
 from recon_gen.common.sql.money import cents_to_dollars_sql
@@ -1261,12 +1262,45 @@ def build_daily_statement_summary_dataset(
     # behavior: anchor-day with no data ⇒ blank statement; operator
     # adjusts the picker (paired with the account selection they already
     # have to do).
-    # AO.1.impl — money columns (opening_balance / total_debits /
-    # total_credits / net_flow / closing_balance_stored /
-    # closing_balance_recomputed / drift) project as BIGINT cents from
-    # the daily-statement-summary matview; wrap each into dollars at the
-    # dataset boundary so dashboard KPIs receive dollars.
-    opening = cents_to_dollars_sql("opening_balance", dialect=cfg.db.dialect)
+    # AO.1.impl — money columns (total_debits / total_credits / net_flow /
+    # closing_balance_stored / closing_balance_recomputed / drift) project
+    # as BIGINT cents from the daily-statement-summary matview; wrap each
+    # into dollars at the dataset boundary so dashboard KPIs receive
+    # dollars.
+    #
+    # DN.3 — opening_balance comes from a correlated subquery against
+    # `<prefix>_current_daily_balances` instead of the matview's LAG-derived
+    # column. The matview's `LAG(eb.effective_money) ORDER BY business_day_
+    # start` returns NULL on the first day of a partition (no prior row);
+    # under sparse-ETL deployments where `current_daily_balances` only emits
+    # on activity, the picked (account, day) may not have a matview row at
+    # all — though the `effective_balances` calendar spine usually fills
+    # carry days, this dataset-level source removes that dependency and
+    # makes the carry-forward semantic explicit:
+    #   opening_balance = most-recent emitted `money` strictly BEFORE the
+    #   picked day (= EOD of the prior emit; matches LAG semantic where the
+    #   spine is intact).
+    # Strict `<` (not `<=`) because `daily_balances.money` is end-of-day
+    # for that row's `business_day_start`; the opening for day N must be
+    # the closing of the prior emit day, not day N's own closing. Edge case
+    # (no prior row at all — account's first emit, or pre-history pick):
+    # COALESCE to 0 so the KPI renders as $0.00 instead of NULL.
+    # `day_text(...)` both sides matches the AO.10/AR.2 day-string compare
+    # pattern used elsewhere (PG TO_CHAR / DuckDB strftime); lexicographic
+    # YYYY-MM-DD ordering is correct for `<`.
+    prefix_qualified_acct = f"{prefix}_daily_statement_summary.account_id"
+    opening_cents_subq = (
+        f"(SELECT cdb.money"
+        f" FROM {prefix}_current_daily_balances cdb"
+        f" WHERE cdb.account_id = {prefix_qualified_acct}"
+        f"   AND {day_text('cdb.business_day_start', cfg.db.dialect)} < {bdate}"
+        f" ORDER BY cdb.business_day_start DESC"
+        f" {fetch_first_one_row(cfg.db.dialect)})"
+    )
+    opening = (
+        f"COALESCE({cents_to_dollars_sql(opening_cents_subq, dialect=cfg.db.dialect)}"
+        f", 0)"
+    )
     debits = cents_to_dollars_sql("total_debits", dialect=cfg.db.dialect)
     credits = cents_to_dollars_sql("total_credits", dialect=cfg.db.dialect)
     net = cents_to_dollars_sql("net_flow", dialect=cfg.db.dialect)
