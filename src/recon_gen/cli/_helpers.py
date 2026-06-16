@@ -182,6 +182,16 @@ def resolve_l2_for_demo(
 _DEFAULT_DENSIFY_FACTOR = 5
 _DEFAULT_BROKEN_COUNT = 15
 _DEFAULT_FANOUT_MULTIPLIER = 5
+# DM.1 — pack drift + ledger-drift violations into the L1 universal
+# 7-day window so the Leaf Account Drift / Parent Account Drift visuals
+# always carry rows the DL.2 drill guardrail can read row 0 from. Pre-
+# DM.1 the densify_scenario(factor=5, day_stride=7) shape only landed
+# ONE drift plant inside the 7-day window — clean-skipped both QS cells
+# even when the matview held 10+ drift rows (the rest were past the
+# window). 7 drift + 5 ledger_drift gives a comfortable in-window
+# margin against window-edge / matview-refresh races.
+_DEFAULT_DRIFT_PLANT_COUNT = 7
+_DEFAULT_LEDGER_DRIFT_PLANT_COUNT = 5
 
 
 def build_default_scenario(
@@ -222,6 +232,7 @@ def build_default_scenario(
     """
     from recon_gen.common.l2.auto_scenario import (
         add_broken_rail_plants,
+        add_drift_plants,
         boost_inv_fanout_plants,
         default_scenario_for,
         densify_scenario,
@@ -237,8 +248,19 @@ def build_default_scenario(
     broken = add_broken_rail_plants(
         dense, instance, broken_count=int(_DEFAULT_BROKEN_COUNT * density),
     )
+    # DM.1 — drift / ledger-drift densification packed into the L1
+    # universal 7-day window (see _DEFAULT_DRIFT_PLANT_COUNT). Slots
+    # AFTER broken-rail so the drift count is independent of stuck-
+    # pending density, BEFORE boost so fanout amount-multiplier doesn't
+    # touch drift plants (drift's delta_money is the violation magnitude,
+    # not an inv-fanout amount to scale).
+    drifted = add_drift_plants(
+        broken, instance,
+        drift_count=int(_DEFAULT_DRIFT_PLANT_COUNT * density),
+        ledger_drift_count=int(_DEFAULT_LEDGER_DRIFT_PLANT_COUNT * density),
+    )
     boosted = boost_inv_fanout_plants(
-        broken, amount_multiplier=int(_DEFAULT_FANOUT_MULTIPLIER * density),
+        drifted, amount_multiplier=int(_DEFAULT_FANOUT_MULTIPLIER * density),
     )
     return filter_scenario_plants(boosted, plants)
 

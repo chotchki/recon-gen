@@ -491,6 +491,87 @@ class TestEmitFullSeed:
         result = add_broken_rail_plants(base, instance, broken_count=0)
         assert result is base
 
+    def test_add_drift_plants_packs_window_resident_violations(self) -> None:
+        # DM.1 — add_drift_plants layers drift + ledger_drift violations
+        # at distinct in-window days_ago values so the L1 Drift sheet's
+        # Leaf + Parent tables carry rows inside the universal 7-day
+        # window. Without this the DL.2 drill guardrail clean-skipped
+        # both QS cells (drift visual rendered empty for ≤1 in-window
+        # row). The day-allocation skips days_ago=5 (default scenario's
+        # cust1 plant) because the DriftGenerator's parent-balance write
+        # at (parent_account_id, anchor_day) collides when two plants
+        # share an anchor_day.
+        from recon_gen.common.l2.auto_scenario import add_drift_plants
+        instance = load_instance(_SASQUATCH_PR)
+        base = default_scenario_for(instance, today=_ANCHOR).scenario
+        drifted = add_drift_plants(
+            base, instance, drift_count=7, ledger_drift_count=5,
+        )
+        # 7 new DriftPlants — each at a distinct days_ago value.
+        added_drift = len(drifted.drift_plants) - len(base.drift_plants)
+        assert added_drift == 7
+        new_drift_days = sorted({
+            p.days_ago for p in drifted.drift_plants[len(base.drift_plants):]
+        })
+        # Allocates from [1..8] skipping default_scenario_for's 5.
+        assert new_drift_days == [1, 2, 3, 4, 6, 7, 8], (
+            f"DM.1 drift plants must pick distinct in-window days_ago "
+            f"skipping default_scenario_for's days_ago=5; got "
+            f"{new_drift_days}"
+        )
+        # 5 new LedgerDriftPlants — same window-packing intent.
+        added_ledger = (
+            len(drifted.ledger_drift_plants)
+            - len(base.ledger_drift_plants)
+        )
+        assert added_ledger == 5
+        new_ledger_days = sorted({
+            p.days_ago
+            for p in drifted.ledger_drift_plants[len(base.ledger_drift_plants):]
+        })
+        assert new_ledger_days == [0, 1, 2, 3, 4]
+        # All leaf-drift plants land on template_instances[0] (cust1).
+        # Per CP the spec_example's template carries a -3h business-day
+        # offset that fans to tmpl-cust-002; DriftGenerator.emit doesn't
+        # compose offsets so cross-account alternation produces
+        # effective_balances duplicates. Pinning to cust1 — which
+        # default_scenario_for also picks — sidesteps the collision.
+        new_accounts = {
+            p.account_id
+            for p in drifted.drift_plants[len(base.drift_plants):]
+        }
+        assert len(new_accounts) == 1
+        assert (
+            list(new_accounts)[0] == base.template_instances[0].account_id
+        )
+
+    def test_add_drift_plants_zero_count_is_noop(self) -> None:
+        from recon_gen.common.l2.auto_scenario import add_drift_plants
+        instance = load_instance(_SASQUATCH_PR)
+        base = default_scenario_for(instance, today=_ANCHOR).scenario
+        result = add_drift_plants(
+            base, instance, drift_count=0, ledger_drift_count=0,
+        )
+        assert result is base
+
+    def test_add_drift_plants_preserves_other_kinds(self) -> None:
+        # DM.1 — adding drift density must not silently drop any
+        # other plant kind. This protects against the field-omission
+        # class the DM.1 sweep also fixed in densify / boost /
+        # add_broken_rail / filter_scenario_plants.
+        from recon_gen.common.l2.auto_scenario import add_drift_plants
+        instance = load_instance(_SASQUATCH_PR)
+        base = default_scenario_for(instance, today=_ANCHOR).scenario
+        result = add_drift_plants(
+            base, instance, drift_count=3, ledger_drift_count=2,
+        )
+        assert result.overdraft_plants == base.overdraft_plants
+        assert result.limit_breach_plants == base.limit_breach_plants
+        assert result.stuck_pending_plants == base.stuck_pending_plants
+        assert result.stuck_unbundled_plants == base.stuck_unbundled_plants
+        assert result.template_instances == base.template_instances
+        assert result.today == base.today
+
     def test_baseline_and_plant_id_namespaces_dont_collide(self) -> None:
         # Plants use tr-drift-*/tr-overdraft-*/etc. ids; baseline uses
         # tr-base-*/tr-base-bundle-*/tr-base-chain-*. None should overlap.

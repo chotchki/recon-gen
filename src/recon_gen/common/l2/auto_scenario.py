@@ -75,6 +75,7 @@ from .seed import (
     MultiXorOverlapPlant,
     InboundCapBreachPlant,
     InvFanoutPlant,
+    LedgerDriftPlant,
     LimitBreachPlant,
     OverdraftPlant,
     RailFiringPlant,
@@ -887,6 +888,17 @@ def densify_scenario(
         drift_plants=tuple(
             r for p in base.drift_plants for r in replicate_drift(p)
         ),
+        # DM.1 — ledger_drift_plants + expected_eod_balance_plants pass
+        # through un-replicated; densify_scenario predates these fields
+        # (DriftPlant siblings landed later). Same pattern as chain /
+        # xor / fan-in plants — one fixture per plant kind is enough for
+        # matview coverage; not preserving them silently dropped any
+        # caller-side plants on this kind. The DL drift-guardrail leaf
+        # adds `add_drift_plants` which populates these — the dropped-
+        # preservation bug here meant calling densify before that helper
+        # nuked them.
+        ledger_drift_plants=base.ledger_drift_plants,
+        expected_eod_balance_plants=base.expected_eod_balance_plants,
         overdraft_plants=tuple(
             r for p in base.overdraft_plants for r in replicate_overdraft(p)
         ),
@@ -976,6 +988,10 @@ def boost_inv_fanout_plants(
     return ScenarioPlant(
         template_instances=base.template_instances,
         drift_plants=base.drift_plants,
+        # DM.1 — preserve plant kinds added after this helper was first
+        # written (see densify_scenario for the same note).
+        ledger_drift_plants=base.ledger_drift_plants,
+        expected_eod_balance_plants=base.expected_eod_balance_plants,
         overdraft_plants=base.overdraft_plants,
         limit_breach_plants=base.limit_breach_plants,
         inbound_cap_breach_plants=base.inbound_cap_breach_plants,
@@ -1061,6 +1077,10 @@ def add_broken_rail_plants(
     return ScenarioPlant(
         template_instances=base.template_instances,
         drift_plants=base.drift_plants,
+        # DM.1 — preserve plant kinds added after this helper was first
+        # written (see densify_scenario for the same note).
+        ledger_drift_plants=base.ledger_drift_plants,
+        expected_eod_balance_plants=base.expected_eod_balance_plants,
         overdraft_plants=base.overdraft_plants,
         limit_breach_plants=base.limit_breach_plants,
         inbound_cap_breach_plants=base.inbound_cap_breach_plants,
@@ -1074,6 +1094,200 @@ def add_broken_rail_plants(
         multi_xor_missed_plants=base.multi_xor_missed_plants,
         multi_xor_overlap_plants=base.multi_xor_overlap_plants,
         stuck_pending_plants=base.stuck_pending_plants + extra_plants,
+        failed_transaction_plants=base.failed_transaction_plants,
+        stuck_unbundled_plants=base.stuck_unbundled_plants,
+        supersession_plants=base.supersession_plants,
+        transfer_template_plants=base.transfer_template_plants,
+        rail_firing_plants=base.rail_firing_plants,
+        inv_fanout_plants=base.inv_fanout_plants,
+        today=base.today,
+    )
+
+
+# -- DM.1 — Drift density helper -----------------------------------------
+
+
+def _allocate_drift_days_ago(
+    *, count: int, skip: frozenset[int],
+) -> tuple[int, ...]:
+    """Pick ``count`` distinct ``days_ago`` values in [1, 90] not in ``skip``.
+
+    Constraint: ``_adapt_drift``'s anchor-day pick is
+    ``offset = max(days_ago - 1, 0)``. Two drift plants with the same
+    offset write a duplicate parent-control balance row (when the L2
+    declares a singleton parent for the template's role). The default
+    scenario's drift plant + densify replicas occupy
+    days_ago ∈ {5, 12, 19, 26, 33}; this helper allocates around them.
+
+    Strategy: start at days_ago=1 (offset=0; window.end) and walk up
+    skipping any value in the union of ``skip`` and our own picks.
+    Yields the first ``count`` distinct values. Distinct days_ago ⇒
+    distinct offsets ⇒ distinct anchor_days for the parent-balance
+    write.
+    """
+    out: list[int] = []
+    candidate = 1
+    while len(out) < count and candidate <= 90:
+        if candidate not in skip and candidate not in out:
+            out.append(candidate)
+        candidate += 1
+    if len(out) < count:
+        raise ValueError(
+            f"_allocate_drift_days_ago: ran out of days_ago slots in "
+            f"[1, 90] (skip={sorted(skip)}); only allocated {len(out)} "
+            f"of {count} requested",
+        )
+    return tuple(out)
+
+
+def add_drift_plants(
+    base: ScenarioPlant,
+    instance: L2Instance,
+    *,
+    drift_count: int = 7,
+    ledger_drift_count: int = 5,
+) -> ScenarioPlant:
+    """Densify drift / ledger-drift violations across the recent window.
+
+    The DL.2 drill guardrail walks the source visual's row 0 to read the
+    drilled values before firing the drill. ``default_scenario_for``
+    only plants ONE ``DriftPlant`` at ``days_ago=5``, and
+    ``densify_scenario(factor=5, day_stride=7)`` spreads its replicas
+    across days_ago in [5, 12, 19, 26, 33] — only one falls inside the
+    L1 dashboard's universal 7-day window (anchor minus 6 .. anchor).
+    Same density miss on ``ledger_drift_plants`` (zero by default — the
+    matview's residual rows come from baseline noise on existing
+    parent-control accounts and don't reliably surface inside the
+    7-day window either).
+
+    With only 0–1 in-window rows the QS Leaf Account Drift / Parent
+    Account Drift tables can render empty (rendering-order quirks +
+    matview-refresh race) and the drill guardrail clean-skips with
+    "source visual is empty (test-data gap)" — the very bug DL.3 fixed
+    is never runtime-verified.
+
+    This helper layers additional ``DriftPlant`` and ``LedgerDriftPlant``
+    rows packed into days_ago in [0, 6] so both visuals always carry
+    rows inside the universal window. Plants alternate across the two
+    materialized template_instances so the Leaf table also covers more
+    than one account_id (the Account dropdown picker has ≥2 options).
+
+    No-op when no eligible 2-leg rail / external counter exists OR the
+    base scenario carries no template_instances (same fall-throughs as
+    ``add_broken_rail_plants``).
+    """
+    if drift_count <= 0 and ledger_drift_count <= 0:
+        return base
+    if not base.template_instances:
+        return base
+
+    extra_drift: tuple[DriftPlant, ...] = ()
+    if drift_count > 0:
+        # Mirror default_scenario_for's picker — first 2-leg inbound
+        # rail whose destination_role matches the materialized
+        # template's role, plus an external counter on the rail's
+        # source side.
+        template_role = base.template_instances[0].template_role
+        drift_rail = _pick_inbound_2leg_rail(instance, template_role)
+        if drift_rail is not None:
+            drift_counter = _pick_external_counter_for_rail(
+                instance, drift_rail,
+            )
+            if drift_counter is not None:
+                # `_adapt_drift` (spine/plant_adapter.py) anchors each
+                # plant via `offset = max(days_ago - 1, 0)`. Days_ago=0
+                # and days_ago=1 BOTH map to offset=0 → same anchor_day.
+                # When the L2 declares a singleton parent for the
+                # template role (spec_example's `customer-ledger`),
+                # `DriftGenerator.emit` also inserts a parent-balance
+                # row at `(parent_account_id, anchor_day)`. Two drift
+                # plants sharing the same anchor_day collide on
+                # `<prefix>_daily_balances`'s unique `(account_id,
+                # business_day_start)` index even when the child
+                # accounts differ.
+                #
+                # Pick distinct days_ago values that ALSO don't collide
+                # with the densified default_scenario plant set
+                # (default plants `days_ago=5` for cust1 → densify
+                # x5/stride=7 → {5, 12, 19, 26, 33}). Allocate from
+                # [1..8] skipping 5 — gives 7 distinct in-window slots
+                # (days_ago 1..4, 6..8 → offsets 0..3, 5..7) with no
+                # parent-balance collision against densify's offset=4.
+                day_choices = _allocate_drift_days_ago(
+                    count=drift_count,
+                    skip=frozenset(p.days_ago for p in base.drift_plants),
+                )
+                # All plants land on `template_instances[0]` (matches
+                # `default_scenario_for`'s pick — cust1). Per CP the
+                # spec_example's template carries a -3h business-day
+                # offset that fans out to template-materialized
+                # instances (tmpl-cust-002). `DriftGenerator.emit` calls
+                # `day_bounds(anchor_day)` which always returns midnight
+                # bounds — it doesn't compose per-account offsets — so
+                # a drift plant on cust2 / tmpl-cust-002 writes a
+                # midnight-stamped balance that doesn't collide with
+                # baseline rows at the offset-shifted timestamp; the
+                # `effective_balances` matview then sees two distinct
+                # `business_day_start` values for that (account,
+                # calendar_day) pair and the unique index fails. Pinning
+                # to cust1 sidesteps the issue without re-architecting
+                # the spine to thread offsets through. Account-picker
+                # diversity for the Drift sheet's dropdown is owned
+                # elsewhere (BK.6 LimitBreach pattern); this helper
+                # focuses on the DL.2 drill guardrail's row-0 read.
+                pick_account = base.template_instances[0]
+                extra_drift = tuple(
+                    DriftPlant(
+                        account_id=pick_account.account_id,
+                        days_ago=day_choices[i],
+                        delta_money=(
+                            Decimal("75.00") + Decimal(str(i * 25))
+                        ),
+                        rail_name=drift_rail.name,
+                        counter_account_id=drift_counter.id,
+                    )
+                    for i in range(drift_count)
+                )
+
+    extra_ledger_drift: tuple[LedgerDriftPlant, ...] = ()
+    if ledger_drift_count > 0:
+        # LedgerDriftPlant doesn't need rail/counter picking — the
+        # spine adapter plants a synthetic parent+child pair under a
+        # unique parent_role (see _invoke_ledger_drift_plant in
+        # plant_registry.py). Pack across days_ago in [0,
+        # ledger_drift_count) so the Parent Account Drift table also
+        # carries window-resident rows.
+        extra_ledger_drift = tuple(
+            LedgerDriftPlant(
+                days_ago=i,
+                delta_money=(
+                    Decimal("250.00") + Decimal(str(i * 50))
+                ),
+            )
+            for i in range(ledger_drift_count)
+        )
+
+    if not extra_drift and not extra_ledger_drift:
+        return base
+
+    return ScenarioPlant(
+        template_instances=base.template_instances,
+        drift_plants=base.drift_plants + extra_drift,
+        ledger_drift_plants=base.ledger_drift_plants + extra_ledger_drift,
+        expected_eod_balance_plants=base.expected_eod_balance_plants,
+        overdraft_plants=base.overdraft_plants,
+        limit_breach_plants=base.limit_breach_plants,
+        inbound_cap_breach_plants=base.inbound_cap_breach_plants,
+        two_template_chain_plants=base.two_template_chain_plants,
+        chain_parent_disagreement_plants=base.chain_parent_disagreement_plants,
+        xor_variant_missed_firing_plants=base.xor_variant_missed_firing_plants,
+        xor_variant_overlap_plants=base.xor_variant_overlap_plants,
+        fan_in_chain_plants=base.fan_in_chain_plants,
+        fan_in_chain_missing_parent_plants=base.fan_in_chain_missing_parent_plants,
+        fan_in_chain_extra_parent_plants=base.fan_in_chain_extra_parent_plants,
+        multi_xor_missed_plants=base.multi_xor_missed_plants,
+        multi_xor_overlap_plants=base.multi_xor_overlap_plants,
+        stuck_pending_plants=base.stuck_pending_plants,
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants,
         supersession_plants=base.supersession_plants,
@@ -1118,6 +1332,13 @@ def filter_scenario_plants(
     return ScenarioPlant(
         template_instances=base.template_instances,
         drift_plants=base.drift_plants if "drift" in selected else (),
+        # DM.1 — ledger_drift_plants ride the same "drift" toggle: both
+        # are sub-ledger / parent conservation flavors of the same kind
+        # from the operator's perspective. expected_eod_balance has its
+        # own toggle slot. Pre-DM.1 these silently dropped because
+        # filter_scenario_plants didn't list them.
+        ledger_drift_plants=base.ledger_drift_plants if "drift" in selected else (),
+        expected_eod_balance_plants=base.expected_eod_balance_plants if "expected_eod_balance" in selected else (),
         overdraft_plants=base.overdraft_plants if "overdraft" in selected else (),
         limit_breach_plants=base.limit_breach_plants if "limit_breach" in selected else (),
         inbound_cap_breach_plants=base.inbound_cap_breach_plants if "limit_breach" in selected else (),

@@ -33,6 +33,7 @@ from recon_gen.common.l2 import (
 from recon_gen.common.l2.auto_scenario import (
     ScenarioMode,
     add_broken_rail_plants,
+    add_drift_plants,
     boost_inv_fanout_plants,
     default_scenario_for,
     densify_scenario,
@@ -148,11 +149,17 @@ def apply_db_seed(
     report = default_scenario_for(instance, today=today_ref, mode=mode)
     if include_baseline:
         # Match what cli._apply_demo does (densify → broken-rail →
-        # boost → baseline).
+        # drift-densify → boost → baseline). DM.1 — add_drift_plants
+        # packs 7 drift + 5 ledger_drift into the L1 universal 7-day
+        # window so the drift visuals are reliably non-empty for the
+        # DL.2 drill guardrail. Counts mirror _helpers._DEFAULT_*.
         scenario = boost_inv_fanout_plants(
-            add_broken_rail_plants(
-                densify_scenario(report.scenario, factor=5),
-                instance, broken_count=15,
+            add_drift_plants(
+                add_broken_rail_plants(
+                    densify_scenario(report.scenario, factor=5),
+                    instance, broken_count=15,
+                ),
+                instance, drift_count=7, ledger_drift_count=5,
             ),
             amount_multiplier=5,
         )
