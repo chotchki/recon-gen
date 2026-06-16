@@ -21,6 +21,7 @@ catch a regression that's already discoverable here.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from datetime import date as _date
 from pathlib import Path
 
@@ -45,12 +46,21 @@ _SPEC_EXAMPLE = (
 
 
 @pytest.fixture(autouse=True)
-def _clean_anchor_env(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]: pytest autouse fixture — invoked by pytest via name, not directly accessed
-    """Each test starts with both env vars cleared so the
-    resolution-path branches fire deterministically. monkeypatch
-    restores the prior state at teardown — no leaks across tests."""
+def _clean_anchor_env(monkeypatch: pytest.MonkeyPatch) -> "Iterator[None]":  # pyright: ignore[reportUnusedFunction]: pytest autouse fixture — invoked by pytest via name, not directly accessed
+    """Each test starts with both env vars cleared so the resolution-path
+    branches fire deterministically. Also explicitly pops the env after
+    the test — ``maybe_export_data_anchor`` sets env via raw
+    ``os.environ[...] = ...`` which monkeypatch's restore-prior-state
+    teardown does NOT track. The explicit pop closes the cross-suite
+    leak that surfaced 2026-06-16 when CI's wall clock rolled past the
+    hardcoded ``2026-06-15`` test posting and broke unrelated
+    ``test_studio_data_route.py`` cells that read ``date.today()``
+    through the leaked ``RECON_GEN_AS_OF_ANCHOR``."""
     monkeypatch.delenv(RECON_GEN_AS_OF_ANCHOR.name, raising=False)
     monkeypatch.delenv(RECON_GEN_AS_OF_ANCHOR_SOURCE.name, raising=False)
+    yield
+    os.environ.pop(RECON_GEN_AS_OF_ANCHOR.name, None)
+    os.environ.pop(RECON_GEN_AS_OF_ANCHOR_SOURCE.name, None)
 
 
 def _make_seeded_db(
