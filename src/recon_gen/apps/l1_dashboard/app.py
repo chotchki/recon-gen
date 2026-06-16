@@ -2599,9 +2599,9 @@ def _wire_daily_statement_filters(
     # → Day). ``app2_only=True`` (DM.0.5 renderer-gate) drops it from the
     # QS emitter walk so QS keeps the flat Account + Day pair; App2
     # renders it as the cascade source. Options source from the L2-derived
-    # DISTINCT account-roles dataset. DM.2 captures the returned dropdown
-    # and wires it as the Account dropdown's ``cascade_source``.
-    daily_statement_sheet.add_parameter_dropdown(
+    # DISTINCT account-roles dataset. DM.2 captures it as ``role_dd`` and
+    # wires it as the Account dropdown's ``cascade_source``.
+    role_dd = daily_statement_sheet.add_parameter_dropdown(
         parameter=ds_role, title="Role",
         type="SINGLE_SELECT",
         selectable_values=LinkedValues.from_column(
@@ -2622,9 +2622,17 @@ def _wire_daily_statement_filters(
             # || ' (' || account_id || ')') = <<$pL1DsAccount>>``).
             datasets[DS_L1_DS_ACCOUNTS]["account_display"],
         ),
-        # DM.2 wires ``cascade_source=role_dd`` +
-        # ``cascade_match_column=...["account_role"]`` here so the
-        # Account dropdown narrows to the picked Role.
+        # DM.2 — Role → Account cascade. When the (App2-only) Role picker
+        # changes, the Account dropdown re-narrows to accounts whose
+        # ``account_role`` matches the picked role. App2 reads
+        # ``cascade_source`` off the tree (render.py →
+        # _tree_filter_specs) and wires the BR.1 ``dropdown-options``
+        # HTMX refresh; the QS emit of the CascadingControlConfiguration
+        # is gated OFF because ``role_dd.app2_only`` is True (the source
+        # control isn't emitted to QS, so a QS cascade block would
+        # dangle — see ``common/tree/controls.py::ParameterDropdown.emit``).
+        cascade_source=role_dd,
+        cascade_match_column=datasets[DS_L1_DS_ACCOUNTS]["account_role"],
         # SINGLE_SELECT semantically requires picking exactly one —
         # "All" doesn't apply.
         hidden_select_all=True,

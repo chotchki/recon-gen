@@ -126,3 +126,54 @@ def test_dm1_role_dropped_from_qs_emit_kept_on_app2() -> None:
     assert "Role" in app2_labels, (
         "App2 spec walker must render the Role dropdown"
     )
+
+
+# --------------------------------------------------------------------------
+# DM.2 — Role → Account cascade (tree wiring + renderer split).
+# --------------------------------------------------------------------------
+
+def test_dm2_account_dropdown_cascade_source_is_role() -> None:
+    """The Account dropdown's ``cascade_source`` is the Role dropdown and
+    its ``cascade_match_column`` is the accounts dataset's
+    ``account_role`` column."""
+    sheet = _daily_statement_sheet(_build_l1_app())
+    account = next(d for d in _dropdowns(sheet) if d.title == "Account")
+    assert account.cascade_source is not None, (
+        "DM.2 Account dropdown must declare a cascade_source"
+    )
+    assert account.cascade_source.title == "Role"
+    assert account.cascade_match_column is not None
+    assert account.cascade_match_column.name == "account_role"
+
+
+def test_dm2_app2_account_spec_carries_cascade_source_param() -> None:
+    """App2's Account dropdown spec threads the cascade source param
+    name (``pL1DsRole``) so render.py wires the BR.1 HTMX refresh."""
+    sheet = _daily_statement_sheet(_build_l1_app())
+    specs = make_filter_specs_for_sheet(sheet)
+    account_spec = next(
+        s for s in specs
+        if isinstance(s, ParameterDropdownSpec) and s.label == "Account"
+    )
+    assert account_spec.cascade_source_param == "pL1DsRole", (
+        "DM.2 App2 Account spec must carry the Role cascade source param"
+    )
+
+
+def test_dm2_qs_account_emit_has_no_cascade_config() -> None:
+    """The QS emit of the Account control carries NO
+    ``CascadingControlConfiguration`` — the cascade source (Role) is
+    app2_only and never emitted to QS, so referencing it from a QS
+    cascade block would dangle. controls.py gates the emit on the
+    source's ``app2_only`` flag."""
+    sheet = _daily_statement_sheet(_build_l1_app())
+    emitted = sheet.emit()
+    account_ctrl = next(
+        c for c in (emitted.ParameterControls or [])
+        if c.Dropdown is not None and c.Dropdown.Title == "Account"
+    )
+    assert account_ctrl.Dropdown is not None
+    assert account_ctrl.Dropdown.CascadingControlConfiguration is None, (
+        "QS Account control must not carry a CascadingControlConfiguration "
+        "pointing at the app2_only Role control"
+    )

@@ -25,13 +25,20 @@ encoded in the type system, asserted by walking the tree.
 
 from __future__ import annotations
 
+from recon_gen.common.dataset_contract import (
+    ColumnSpec,
+    DatasetContract,
+    register_contract,
+)
 from recon_gen.common.html import make_filter_specs_for_sheet
 from recon_gen.common.ids import ParameterName, SheetId
 from recon_gen.common.models import DateTimeDefaultValues
 from recon_gen.common.tree import (
     Analysis,
     App,
+    Dataset,
     DateTimeParam,
+    LinkedValues,
     ParameterDateTimePicker,
     ParameterDropdown,
     Sheet,
@@ -42,6 +49,20 @@ from tests._test_helpers import make_test_config
 
 
 _DT_DEFAULT = DateTimeDefaultValues(StaticValues=["2030-01-01"])
+
+
+def _one_col_dataset() -> Dataset:
+    """A tiny single-column (``account_role``) dataset for the DM.2
+    cascade-match-column wiring. Registers its contract so
+    ``ds["account_role"]`` resolves."""
+    ident = "dm2-cascade-accounts-ds"
+    register_contract(ident, DatasetContract(columns=[
+        ColumnSpec("account_role", "STRING"),
+    ]))
+    return Dataset(
+        identifier=ident,
+        arn=f"arn:aws:quicksight:::dataset/{ident}",
+    )
 
 
 def test_app2_only_defaults_false_on_parameter_dropdown() -> None:
@@ -164,3 +185,60 @@ def test_app2_side_count_unchanged_by_gate() -> None:
         f"app2_only=True sheet={len(specs_a)} vs "
         f"app2_only=False sheet={len(specs_b)}"
     )
+
+
+def test_dm2_cascade_emit_gated_on_app2_only_source() -> None:
+    """DM.2 — a ``ParameterDropdown`` whose ``cascade_source`` is
+    ``app2_only`` emits NO ``CascadingControlConfiguration`` (the source
+    control is dropped from the QS walk, so a QS cascade block would
+    dangle). When the source is NOT app2_only, the cascade emits
+    normally. App2 cascades regardless — it reads ``cascade_source`` off
+    the tree, independent of this QS emit."""
+    app = App(name="dm2-cascade-gate", cfg=make_test_config())
+    analysis = app.set_analysis(Analysis(
+        analysis_id_suffix="dm2-cascade", name="DM.2 Cascade Gate",
+    ))
+    sheet = analysis.add_sheet(Sheet(
+        sheet_id=SheetId("dm2-cascade-sheet"), name="Cascade",
+        title="Cascade", description="DM.2 cascade-gate fixture",
+    ))
+    p_role = analysis.add_parameter(StringParam(
+        name=ParameterName("pRole"), default=["__no_role__"],
+    ))
+    p_account = analysis.add_parameter(StringParam(
+        name=ParameterName("pAccount"), default=["__no_account__"],
+    ))
+    # Role source is app2_only — gated off the QS walk.
+    role_dd = sheet.add_parameter_dropdown(
+        parameter=p_role, title="Role",
+        selectable_values=StaticValues(values=["concentration", "dda"]),
+        app2_only=True,
+    )
+    # Account binds StaticValues (no LinkedValues column), so to supply
+    # a cascade_match_column we use a tiny dataset column. Reuse the
+    # LinkedValues path: build a one-column dataset for the match.
+    ds = app.add_dataset(_one_col_dataset())
+    sheet.add_parameter_dropdown(
+        parameter=p_account, title="Account",
+        selectable_values=LinkedValues.from_column(ds["account_role"]),
+        cascade_source=role_dd,
+        cascade_match_column=ds["account_role"],
+    )
+    app.resolve_auto_ids()
+
+    emitted = sheet.emit()
+    account_ctrl = next(
+        c for c in (emitted.ParameterControls or [])
+        if c.Dropdown is not None and c.Dropdown.Title == "Account"
+    )
+    assert account_ctrl.Dropdown is not None
+    assert account_ctrl.Dropdown.CascadingControlConfiguration is None, (
+        "app2_only cascade source must gate the QS cascade emit off"
+    )
+    # Role itself is dropped from the QS walk (app2_only).
+    qs_titles = {
+        c.Dropdown.Title for c in (emitted.ParameterControls or [])
+        if c.Dropdown is not None
+    }
+    assert "Role" not in qs_titles
+    assert "Account" in qs_titles

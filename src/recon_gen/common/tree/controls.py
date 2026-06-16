@@ -235,7 +235,17 @@ class ParameterDropdown:
             }
 
         cascading_config = None
-        if self.cascade_source is not None:
+        # DM.2 — gate the QS CascadingControlConfiguration emit on the
+        # source control's renderer disposition. When the cascade source
+        # is ``app2_only`` (DM.0.5 renderer-gate), it is dropped from the
+        # QS emitter walk (``Sheet.emit()`` skips app2_only controls), so
+        # a QS cascade block pointing at ``SourceSheetControlId`` would
+        # dangle (reference a control QS never sees). App2 still cascades
+        # correctly because its renderer reads ``cascade_source`` directly
+        # off the tree (``common/html/_tree_filter_specs.py``) and wires
+        # the BR.1 server-side refresh — independent of this QS emit. See
+        # ``docs/audits/dm_0_daily_statement_app2_cascade.md``.
+        if self.cascade_source is not None and not self.cascade_source.app2_only:
             from recon_gen.common.models import (
                 CascadingControlConfiguration,
                 CascadingControlSource,
