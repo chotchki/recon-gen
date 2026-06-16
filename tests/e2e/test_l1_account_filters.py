@@ -40,6 +40,7 @@ from recon_gen.apps.l1_dashboard.app import (
 from recon_gen.apps.l1_dashboard.datasets import (
     build_daily_statement_summary_dataset,
 )
+from recon_gen.common.l2.primitives import CREDIT
 from tests.e2e._daily_statement_pick import (
     find_account_day_with_data,
     find_one_account_day_per_role,
@@ -162,7 +163,7 @@ def test_dn5_posted_money_records_running_balance(
     running = Decimal("0")
     for i, row in enumerate(rows):
         amount = _parse_currency_kpi(row["Amount"])
-        signed = amount if row["Direction"] == "Credit" else -amount
+        signed = amount if row["Direction"] == CREDIT else -amount
         running += signed
         rendered = _parse_currency_kpi(row["Running Balance"])
         assert rendered == running, (
