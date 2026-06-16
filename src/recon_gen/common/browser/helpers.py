@@ -1017,6 +1017,25 @@ def right_click_first_row_of_visual(
     event so QuickSight opens the visual's DATA_POINT_MENU drill list.
     Tags the cell with ``data-e2e-target`` first so the click target is
     unambiguous when multiple tables share the same global cell selectors.
+
+    DL.3.6 — three QS DATA_POINT_MENU cells (Overdraft / Stuck Pending /
+    Transactions Audit) hit a paint-timing race where the cell DOM
+    element is present but its data hasn't streamed in yet when the
+    right-click fires. QS arms the contextmenu handler when the row's
+    data point is materialized; right-clicking a cell whose text content
+    is still empty dispatches the event but QS's handler is a no-op (no
+    data point → no menu). Three-layer defense:
+
+      (1) Wait for ``sn-table-cell-0-0`` to have non-empty text content
+          (data point materialized — not just the DOM container).
+      (2) Hover the cell first to ensure pointer events have hit the
+          row's interactive layer (some QS row-renderers gate
+          contextmenu arming behind a mouseenter cycle).
+      (3) Right-click via Playwright's ``button="right"`` for the
+          primary attempt; if the menu doesn't appear within a short
+          window, retry with a JS-dispatched ``contextmenu`` event
+          targeting the cell's interactive descendant (the inner span
+          that carries the actual click handler, not the outer cell div).
     """
     scroll_visual_into_view(page, visual_title, timeout_ms)
     ok = page.evaluate(
@@ -1036,16 +1055,75 @@ def right_click_first_row_of_visual(
         visual_title,
     )
     assert ok, f"Could not find first cell of visual {visual_title!r}"
-    page.locator('[data-e2e-target="1"]').first.click(
-        button="right", timeout=timeout_ms,
+
+    # Step (1): wait for cell text content to materialize. QS may mount
+    # the cell <div> before the row data arrives over the WebSocket;
+    # right-clicking an empty cell dispatches the event but QS's
+    # contextmenu handler exits early (no data point → no menu).
+    page.wait_for_function(
+        """() => {
+            const cell = document.querySelector('[data-e2e-target="1"]');
+            if (!cell) return false;
+            const text = (cell.textContent || '').trim();
+            return text.length > 0;
+        }""",
+        timeout=timeout_ms,
     )
-    # Confirm the contextmenu actually popped (vs. a fixed sleep). Two
-    # wins: returns the moment the menu mounts (no fixed 800ms), and
-    # fails *here* with "waiting for [role=menu]" if no DATA_POINT_MENU
-    # drill is wired on this visual — instead of the caller's
-    # ``click_context_menu_item`` timing out 30s later on the absent
-    # menu *item*.
-    page.wait_for_selector('[role="menu"]', timeout=timeout_ms, state="visible")
+
+    # Step (2): hover first so QS sees a pointer enter on the row.
+    cell_locator = page.locator('[data-e2e-target="1"]').first
+    cell_locator.hover(timeout=timeout_ms)
+
+    # Step (3): right-click. Cap the menu-wait at a short window — if
+    # the contextmenu didn't arm we retry via JS dispatch (some QS row
+    # renderers only honor synthetic contextmenu events bubbled from a
+    # descendant span). 5s is generous: when the menu IS armed it
+    # mounts within ~200ms on a healthy fetch.
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+    cell_locator.click(button="right", timeout=timeout_ms)
+    try:
+        page.wait_for_selector(
+            '[role="menu"]', timeout=5_000, state="visible",
+        )
+    except PlaywrightTimeoutError:
+        # Retry path: dispatch contextmenu directly via JS on the cell's
+        # interactive descendant. QS's row renderer wires the handler
+        # on the cell's content span (not the outer cell div); dispatching
+        # on the outer div bubbles but some handlers stopPropagation
+        # before reaching the registered listener.
+        page.evaluate(
+            """() => {
+                const cell = document.querySelector('[data-e2e-target="1"]');
+                if (!cell) return false;
+                // Prefer the deepest non-empty text-carrying descendant
+                // (the rendered cell content) over the outer div.
+                let target = cell;
+                const candidates = cell.querySelectorAll('*');
+                for (const c of candidates) {
+                    const t = (c.textContent || '').trim();
+                    if (t.length > 0 && c.children.length === 0) {
+                        target = c;
+                        break;
+                    }
+                }
+                const rect = target.getBoundingClientRect();
+                const evt = new MouseEvent('contextmenu', {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    button: 2,
+                    buttons: 2,
+                    clientX: rect.left + rect.width / 2,
+                    clientY: rect.top + rect.height / 2,
+                });
+                target.dispatchEvent(evt);
+                return true;
+            }"""
+        )
+        page.wait_for_selector(
+            '[role="menu"]', timeout=timeout_ms, state="visible",
+        )
+
     page.evaluate(
         """() => document.querySelectorAll('[data-e2e-target]').forEach(
             e => e.removeAttribute('data-e2e-target')
