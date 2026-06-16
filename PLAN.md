@@ -606,6 +606,17 @@ Main went red at the v14.4.0 cut: the qs_browser layer hung (stdout-stuck >900s 
 - [x] DP.5 - App2 trainer-apply timeout bump (120s → 300s). The full-chain run aborted at the app2 layer on `test_trainer_dogfood_per_kind[or-expected_eod_balance_breach]` — `trainer_apply`'s `_trainer_wait_until_finished` hit the 120s ceiling on Oracle's matview refresh (heavier since DK added the `data_anchor` matview; the docstring already said "oracle ~few min" but defaulted to 2 min). Passed in CI, timed out locally (slower Oracle). Operator-directed: it's a timeout we control → raise it (sibling `trainer_start_session` already uses 10 min). Unrelated to the DP picker/drill fixes.
 - [ ] DP.4 - Full `up_to=qs_browser` green + push the batch. Backlog filed: enhance pickers to select planted-error values.
 
+## Phase DQ - Strongly-typed database-object model (dependency order + typed column refs) (planned 2026-06-16)
+
+Operator directive 2026-06-16 (surfaced by the DP Oracle-trainer near-miss): database objects (base tables, Current* views, matviews, v-overlay) should declare their dependencies AND columns in a strongly-typed model, so two latent-bug classes become unrepresentable:
+- **Refresh/drop order is DERIVED** (topological sort of the dependency graph), not three hand-maintained order lists (`schema.refresh_matviews_sql`, the drop-order list, `snapshotter._V_OVERLAY_MATVIEW_SUFFIXES`) that can silently diverge. "Is drift_summary after its parents?" stops being an eyeball check. (The DP sweep verified the lists are *currently* consistent — that they CAN diverge is the footgun.)
+- **Column references are TYPED** — the same per-object declaration eliminates the implicit STRING column references scattered across dataset SQL, matview SELECT bodies, and dashboard field refs (a renamed/dropped column fails at runtime, not construction). Extends the existing `DatasetContract` / typed-ID / `ColumnShape` patterns down to the schema layer. Operator note: the dependency-graph model "would also solve our implicit column references all over the codebase" — same root.
+
+- [ ] DQ.0 - **Audit + design lock.** Output: `docs/audits/dq_0_typed_db_objects.md`. Inventory every DB object + its upstream deps + emitted columns; survey the current string-column-reference surfaces. Propose the typed model (one declaration per object = deps + columns), the topological-order helper, and how column refs become typed attrs. Decide incremental vs big-bang + which footgun closes first. Operator-confirm before DQ.1.
+- [ ] DQ.1 - **Dependency graph + derived order.** Replace the hand-maintained matview order lists with a declared dependency graph + topological sort; `refresh_matviews_sql` / drop order / snapshotter suffixes all derive from it. Construction-time validation: a cycle or missing dep fails loudly. Test: derived order matches today's (correct) order; an inverted dep raises at construction.
+- [ ] DQ.2 - **Typed column references (incremental).** Per DQ.0, migrate the highest-value string-column-reference surfaces to typed attrs so a renamed/dropped column fails at construction. Likely starts at the matview/dataset boundary the DP work touched.
+- [ ] DQ.3 - **Phase exit + release.** Sweep to PLAN_ARCHIVE.md.
+
 ## Backlog (not yet phased)
 
 - **date-model.plant-days_ago-bounded — replace plant days_ago: int with days_into_window bounded type** — added 2026-06-12.
