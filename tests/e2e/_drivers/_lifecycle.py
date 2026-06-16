@@ -82,9 +82,20 @@ def qs_driver_or_none(
         # can still run other legs).
         yield None
         return
+    # DL.3.5 — propagate RECON_E2E_PAGE_TIMEOUT (default 30s) /
+    # RECON_E2E_VISUAL_TIMEOUT (default 10s) from env → driver so
+    # operator-controlled timeout knobs actually engage. Pre-DL.3.5
+    # the driver was constructed with hardcoded 30s / 15s defaults
+    # and the env vars were dead weight (the runner sets
+    # RECON_E2E_PAGE_TIMEOUT=60000 for slow drill-guardrail rows,
+    # but QsEmbedDriver.embed() ignored it). Import locally so
+    # this module doesn't pull conftest at import time.
+    from tests.e2e.conftest import PAGE_TIMEOUT, VISUAL_TIMEOUT
     with QsEmbedDriver.embed(
         cfg=cfg,
         aws_account_id=account_id, aws_region=region, viewport=viewport,
+        page_timeout_ms=PAGE_TIMEOUT,
+        visual_timeout_ms=VISUAL_TIMEOUT,
     ) as driver:
         try:
             yield driver
