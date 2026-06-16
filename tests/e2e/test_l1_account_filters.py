@@ -117,6 +117,61 @@ def test_daily_statement_account_populates_table(
     )
 
 
+def test_dn5_posted_money_records_running_balance(
+    l1_dashboard_driver: tuple["DashboardDriver", str], cfg: Config,
+) -> None:
+    """DN.5 (iv) — the Posted Money Records table renders a "Running
+    Balance" column (DN.1/DN.2) on BOTH renderers, and its values are
+    the cumulative running sum of the per-leg signed amount in display
+    order.
+
+    Parametrized over ``[qs, app2]`` via ``l1_dashboard_driver``; both
+    renderers issue the same window-function dataset SQL, so a column-
+    missing or value-mismatch outcome here is a real renderer wiring
+    divergence. The unit-tier ``test_dn5_running_balance`` proves the SQL
+    produces the right sequence against DuckDB; this proves the rendered
+    table surfaces it correctly. NEEDS a qs_browser run to verify
+    behaviorally (not exercised in the unit/audit run that authored it).
+    """
+    driver, dashboard_arg = l1_dashboard_driver
+    driver.open(dashboard_arg, sheet=_DAILY_STATEMENT_NAME)
+    target_visual = "Posted Money Records"
+    driver.wait_loaded(target_visual)
+
+    picked_account, _picked_role, picked_day = find_account_day_with_data(cfg)
+    driver.pick_filter("Account", [picked_account])
+    driver.set_date("Business Day", picked_day)
+    driver.wait_loaded(target_visual)
+
+    rows = driver.table_rows(target_visual)
+    driver.screenshot()
+    assert len(rows) > 0, (
+        f"After Account={picked_account!r} + Business Day={picked_day!r}, "
+        f"Posted Money Records should render ≥1 row; got {len(rows)}."
+    )
+    # Column present (header derives from `running_balance` →
+    # `_smart_title` → "Running Balance").
+    assert "Running Balance" in rows[0], (
+        f"Posted Money Records must render a 'Running Balance' column "
+        f"(DN.1/DN.2); headers seen: {sorted(rows[0])}"
+    )
+
+    # Arithmetic: running balance is the cumulative signed-amount sum in
+    # display order. Direction column distinguishes Debit (subtract) from
+    # Credit (add); Amount is the absolute rendered dollars.
+    running = Decimal("0")
+    for i, row in enumerate(rows):
+        amount = _parse_currency_kpi(row["Amount"])
+        signed = amount if row["Direction"] == "Credit" else -amount
+        running += signed
+        rendered = _parse_currency_kpi(row["Running Balance"])
+        assert rendered == running, (
+            f"row {i} running balance mismatch: rendered {rendered} != "
+            f"cumulative {running} (amount={amount}, "
+            f"direction={row['Direction']!r})"
+        )
+
+
 def test_bo_1_daily_statement_picks_reconcile_per_role(
     l1_dashboard_driver: tuple["DashboardDriver", str], cfg: Config,
 ) -> None:
