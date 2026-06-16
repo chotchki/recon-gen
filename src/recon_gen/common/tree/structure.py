@@ -288,6 +288,7 @@ class Sheet:
         hidden_select_all: bool = False,
         cascade_source: ParameterDropdown | None = None,
         cascade_match_column: Column | None = None,
+        app2_only: bool = False,
         control_id: str | AutoResolved = AUTO,
     ) -> ParameterDropdown:
         """Construct + register a parameter dropdown control on this sheet.
@@ -299,6 +300,9 @@ class Sheet:
         any CategoryFilter using it matches nothing. Caught the L1
         Daily Statement account-dropdown footgun (v8.3.3 hotfix); the
         type makes it unrepresentable going forward.
+
+        ``app2_only`` (DM.0.5) — when True, the QS emitter walk skips
+        this control entirely; App2 renders it normally. Default False.
         """
         ctrl = ParameterDropdown(
             parameter=parameter, title=title, type=type,
@@ -306,6 +310,7 @@ class Sheet:
             hidden_select_all=hidden_select_all,
             cascade_source=cascade_source,
             cascade_match_column=cascade_match_column,
+            app2_only=app2_only,
             control_id=control_id,
         )
         self.parameter_controls.append(ctrl)
@@ -335,11 +340,17 @@ class Sheet:
         *,
         parameter: ParameterDeclLike,
         title: str,
+        app2_only: bool = False,
         control_id: str | AutoResolved = AUTO,
     ) -> ParameterDateTimePicker:
-        """Construct + register a parameter datetime picker control."""
+        """Construct + register a parameter datetime picker control.
+
+        ``app2_only`` (DM.0.5) — when True, the QS emitter walk skips
+        this control entirely; App2 renders it normally. Default False.
+        """
         ctrl = ParameterDateTimePicker(
-            parameter=parameter, title=title, control_id=control_id,
+            parameter=parameter, title=title, app2_only=app2_only,
+            control_id=control_id,
         )
         self.parameter_controls.append(ctrl)
         return ctrl
@@ -498,8 +509,17 @@ class Sheet:
                 [fc.emit() for fc in self.filter_controls]
                 if self.filter_controls else []
             ),
+            # DM.0.5 — ``app2_only=True`` controls skip QS emission
+            # entirely. The cascade primitive (Role → Account narrow)
+            # silently fails on QS (cascading dataset parameter +
+            # URL-param-no-control-sync); App2's per-request server
+            # query handles it cleanly. See
+            # ``docs/audits/dm_0_daily_statement_app2_cascade.md``.
             ParameterControls=(
-                [c.emit() for c in self.parameter_controls]
+                [
+                    c.emit() for c in self.parameter_controls
+                    if not getattr(c, "app2_only", False)
+                ]
                 if self.parameter_controls else None
             ),
             TextBoxes=(

@@ -573,7 +573,7 @@ These are related concerns — both about end-to-end resource lifecycle hygiene 
 - **One commit per leaf**; release ships as v14.5.0.
 
 - [ ] DM.0 - **Audit + design lock** at `docs/audits/dm_0_daily_statement_app2_cascade.md`. Document the cascade chain, the day-availability SQL shape (single roundtrip via the existing pool), the empty-state UX, the QS-not-supported structured triple, and the renderer-gate-primitive scout result. The principle ("data parity, UX divergence") leads the doc.
-- [ ] DM.0.5 - **Renderer-gate primitive** (if scout shows none exists) — add typed `app2_only: bool` field to relevant tree primitives (Filter / ParameterControl), branch in QS emitter walk to skip them. Tree-walking unit test asserts QS-side surface count vs App2-side surface count when any `app2_only` nodes exist.
+- [x] DM.0.5 - **Renderer-gate primitive** (if scout shows none exists) — add typed `app2_only: bool` field to relevant tree primitives (Filter / ParameterControl), branch in QS emitter walk to skip them. Tree-walking unit test asserts QS-side surface count vs App2-side surface count when any `app2_only` nodes exist.
 - [ ] DM.1 - **Add Role picker to Daily Statement** (App2-only via the renderer-gate primitive). Wire as third picker between Account and Day.
 - [ ] DM.2 - **Role → Account cascade** via the existing BR.1 cascade-refresh endpoint. Reuse `dropdown-options/...` route pattern.
 - [ ] DM.3 - **Day picker decoration**: server endpoint returns `{date: ['transactions'|'balance']}` map; Flatpickr `onDayCreate` adds CSS classes; CSS rules for the markers (dot / underline / bullet — pick at design time in DM.0).

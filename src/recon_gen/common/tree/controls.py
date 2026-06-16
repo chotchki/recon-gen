@@ -203,6 +203,16 @@ class ParameterDropdown:
     # where this column equals the source value, then re-distincts
     # the dropdown's options. Required when cascade_source is set.
     cascade_match_column: "Column | None" = None
+    # DM.0.5 — App2-only renderer gate. When True, the QS emitter walk
+    # (``Sheet.emit()``) skips this control entirely; the App2
+    # renderer (``common/html/_tree_filter_specs.py``) ignores the
+    # field and renders the control normally. Use when the cascade /
+    # picker UX a QS-side primitive can't honor (cascading dataset
+    # parameter silent-fail + URL-param no-control-sync) but App2's
+    # per-request server query handles cleanly. Default False keeps
+    # today's both-renderer behavior. See
+    # ``docs/audits/dm_0_daily_statement_app2_cascade.md``.
+    app2_only: bool = False
     control_id: str | AutoResolved = AUTO
 
     _AUTO_KIND: ClassVar[str] = "dropdown"
@@ -297,9 +307,16 @@ class ParameterSlider:
 
 @dataclass(eq=False)
 class ParameterDateTimePicker:
-    """Date/time picker control bound to a DateTime parameter."""
+    """Date/time picker control bound to a DateTime parameter.
+
+    ``app2_only`` (DM.0.5) — see ``ParameterDropdown.app2_only``. When
+    True, the QS emitter walk skips this control; App2 renders it
+    normally. Use for the day-availability decorated picker shape
+    (DM.3) where the App2 renderer adds CSS markers QS can't.
+    """
     parameter: ParameterDeclLike
     title: str
+    app2_only: bool = False
     control_id: str | AutoResolved = AUTO
 
     _AUTO_KIND: ClassVar[str] = "datetime"
