@@ -86,9 +86,19 @@ _DST_ANCHOR_FALLBACKS: dict[str, str] = {
     # L1 Transactions sheet's first Table is "Posting Ledger" — same as
     # Daily Statement, surfaces transfer_id rows.
     "l1-sheet-transactions": "Posting Ledger",
-    # L1 Drift sheet's first Table is "Leaf Account Drift" — the
-    # account-day drill destination from Today's Exceptions.
-    "l1-sheet-drift": "Leaf Account Drift",
+    # L1 Drift sheet has two Tables: "Leaf Account Drift" (first) and
+    # "Parent Account Drift". The cross-sheet drill source — Exception
+    # Detail on l1-sheet-exceptions — sorts by amount DESC, so row 0 is
+    # deterministically a CONTROL/PARENT account (the largest dollar
+    # magnitudes belong to ledger-aggregating parents, not leaf
+    # accounts). Pin the anchor to Parent Account Drift so the test
+    # checks the visual where the drilled account_id actually appears.
+    # Leaf Account Drift never shows control accounts (it filters
+    # account_class=leaf), so the prior "Leaf" pin reliably saw 0
+    # matching rows — the test was wrong about which anchor to read,
+    # not the DL.3.5 drift_summary matview wiring (operator-confirmed
+    # via screenshot: Parent Account Drift renders 8 rows for this row 0).
+    "l1-sheet-drift": "Parent Account Drift",
     # L2FT Rails: "Transactions" is the rail-narrowed feed (the
     # existing L2FT cross-sheet drill test uses this anchor).
     "l2ft-sheet-rails": "Transactions",
