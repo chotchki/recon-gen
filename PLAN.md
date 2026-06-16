@@ -589,7 +589,7 @@ Sub-leaves enumerated by `docs/audits/dn_0_running_balance.md` (DN.0 lock — SQ
 
 - [x] DN.0 - Audit + design lock at `docs/audits/dn_0_running_balance.md`.
 - [x] DN.1 - Contract update + dataset SQL. Add `ColumnSpec("running_balance", "DECIMAL")` between `amount_direction` and `status` in `DAILY_STATEMENT_TRANSACTIONS_CONTRACT`. Extend `_daily_statement_transactions_sql` with `SUM(tx.amount_money) OVER (PARTITION BY tx.account_id, business_day ORDER BY tx.posting, tx.id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` wrapped via `cents_to_dollars_sql` — single SQL across PG / Oracle / DuckDB. Unit test asserts the projection on every dialect.
-- [ ] DN.2 - Posted Money Records visual: add running_balance column on both renderers between amount_direction and status, `currency=True`.
+- [x] DN.2 - Posted Money Records visual: add running_balance column on both renderers between amount_direction and status, `currency=True`.
 - [ ] DN.3 - Carry-forward fix for sparse-account opening_balance KPI (`_daily_statement_summary_sql` source change from `business_day_start = picked` to `business_day_start <= picked ORDER BY business_day_start DESC LIMIT 1`).
 - [ ] DN.4 - Audit PDF extension: `DailyStatementTransaction` dataclass gains `running_balance: Decimal`; `_query_daily_statement_walks` projects via the same window function.
 - [ ] DN.5 - Tests: cross-dialect SQL-emit + Python-accumulate equivalence; closing-arithmetic agreement (`running_balance(last_leg) == closing_balance_recomputed - opening_balance`); sparse-account fixture for the DN.3 carry-forward; E2E `[qs, app2]` column present + arithmetic correct; audit PDF parity.

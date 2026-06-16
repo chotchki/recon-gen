@@ -1998,6 +1998,7 @@ def _populate_daily_statement_sheet(
             ds_txn["rail_name"].dim(),
             ds_txn["amount_money"].numerical(currency=True),
             ds_txn["amount_direction"].dim(),
+            ds_txn["running_balance"].numerical(currency=True),
             ds_txn["status"].dim(),
             ds_txn["origin"].dim(),
             ds_txn["posting"].date(),
