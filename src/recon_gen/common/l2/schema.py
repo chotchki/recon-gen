@@ -392,6 +392,9 @@ def refresh_matviews_sql(
         # L1 invariants: read from current_* + helpers.
         f"{p}_drift",
         f"{p}_ledger_drift",
+        # DL.3.5 — drift_summary reads from drift + ledger_drift via
+        # UNION ALL; must refresh AFTER both parents are fresh.
+        f"{p}_drift_summary",
         f"{p}_overdraft",
         f"{p}_expected_eod_balance_breach",
         # CL.6 — cadence-aware missing-balance invariant.
@@ -537,6 +540,8 @@ def _emit_table_based_matview_refresh(
         f"{p}_data_anchor",
         f"{p}_drift",
         f"{p}_ledger_drift",
+        # DL.3.5 — drift_summary reads drift + ledger_drift via UNION ALL.
+        f"{p}_drift_summary",
         f"{p}_overdraft",
         f"{p}_expected_eod_balance_breach",
         f"{p}_balance_cadence_gap",
@@ -2178,6 +2183,10 @@ _L1_INVARIANT_DROP_NAMES: tuple[str, ...] = (
     "balance_cadence_gap",
     "expected_eod_balance_breach",
     "overdraft",
+    # DL.3.5 — drift_summary depends on drift + ledger_drift (UNION ALL).
+    # Drop BEFORE its parents so the parent drops don't fail with
+    # "dependent objects" on PG.
+    "drift_summary",
     "ledger_drift",
     "drift",
     # CL.5 — effective_balances is a carry-forward source for the 3
@@ -2998,6 +3007,78 @@ CREATE INDEX idx_{p}_ledger_drift_role
 -- spinning-dropdown class).
 CREATE INDEX idx_{p}_ledger_drift_day_account_role
     ON {p}_ledger_drift (business_day_start, account_id, account_role);
+
+-- ---------------------------------------------------------------------
+-- DL.3.5 — Drift summary matview.
+-- Pre-aggregates ``<prefix>_drift`` (leaf-account violations) and
+-- ``<prefix>_ledger_drift`` (parent-account violations) into one
+-- UNION-ALL'd projection that already carries:
+--   - ``account_display`` (the ``"<name> (<id>)"`` concat the L1
+--     dashboard's Drift sheet picker reads + the cross-app drill source)
+--   - ``abs_drift`` (magnitude companion used for KPI / sort-by-magnitude)
+--   - ``account_class`` (``'leaf'`` / ``'parent'`` discriminator so a
+--     single source matview backs BOTH the Leaf Account Drift and
+--     Parent Account Drift visuals)
+--
+-- Motivation: the QS Leaf/Parent Account Drift table visuals were
+-- paint-timing-out on the cross-sheet drill guardrail (DL.3.5). Both
+-- visuals had been computing ``account_display`` + ``abs_drift``
+-- inline at dataset SQL time; moving those projections to refresh-time
+-- lets QS hit a flat tabular shape (no per-paint string concat / ABS)
+-- and gives a single index hot-path for the Drift sheet's account
+-- picker + date-window narrow.
+--
+-- Row count is small: |drift| + |ledger_drift| (typically <100 in the
+-- demo dataset). Storage cost is trivial vs. the rendering win.
+--
+-- Note: ``account_parent_role`` is non-NULL on the leaf branch
+-- (parents are NOT leaves) and NULL on the parent branch (parents
+-- ARE the parents). Consumers narrow on ``account_class`` to pick
+-- one of the two row sets; the column shape is identical otherwise.
+-- ---------------------------------------------------------------------
+{matview_create_kw} {p}_drift_summary{matview_options} AS
+SELECT
+    account_id,
+    account_name,
+    (COALESCE(account_name, account_id) || ' (' || account_id || ')')
+        AS account_display,
+    account_role,
+    account_parent_role,
+    business_day_start,
+    business_day_end,
+    stored_balance,
+    computed_balance,
+    drift,
+    ABS(drift) AS abs_drift,
+    'leaf' AS account_class
+FROM {p}_drift
+UNION ALL
+SELECT
+    account_id,
+    account_name,
+    (COALESCE(account_name, account_id) || ' (' || account_id || ')')
+        AS account_display,
+    account_role,
+    NULL AS account_parent_role,
+    business_day_start,
+    business_day_end,
+    stored_balance,
+    computed_balance,
+    drift,
+    ABS(drift) AS abs_drift,
+    'parent' AS account_class
+FROM {p}_ledger_drift;
+-- UNIQUE on (account_class, account_id, business_day_start). Source
+-- matviews each ship a UNIQUE index on (account_id, business_day_start);
+-- the class discriminator separates them in the UNION. Lets PG REFRESH
+-- MATERIALIZED VIEW … CONCURRENTLY engage on this matview too.
+CREATE UNIQUE INDEX idx_{p}_drift_summary_class_acct_day
+    ON {p}_drift_summary (account_class, account_id, business_day_start);
+-- Account-picker hot-path: dropdown narrows on account_display + date
+-- window. Composite covers ``WHERE account_display IN (...) AND
+-- business_day_start BETWEEN ... AND ...``.
+CREATE INDEX idx_{p}_drift_summary_display_day
+    ON {p}_drift_summary (account_display, business_day_start);
 
 -- ---------------------------------------------------------------------
 -- L1 invariant: Non-negative stored balance.

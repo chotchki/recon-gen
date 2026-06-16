@@ -96,6 +96,10 @@ _V_OVERLAY_MATVIEW_SUFFIXES: tuple[str, ...] = (
     # L1 invariants.
     "drift",
     "ledger_drift",
+    # DL.3.5 — drift_summary UNION ALL'd derivation of drift + ledger_drift;
+    # refresh AFTER both parents are restored so its rows reflect the
+    # snapshot's drift / ledger_drift content.
+    "drift_summary",
     "overdraft",
     "expected_eod_balance_breach",
     "balance_cadence_gap",

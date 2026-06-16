@@ -1497,13 +1497,14 @@ def test_refresh_matviews_sql_emits_one_per_view() -> None:
     (daily_statement_summary + l1_exceptions) + 2 Investigation
     matviews (inv_pair_rolling_anomalies + inv_money_trail_edges,
     added in N.3.b) + AB.6.5's multi_xor_violation + DK.1's data_anchor
-    singleton = 23 matviews × 2 statements each = 46 total."""
+    singleton + DL.3.5's drift_summary derived matview
+    = 24 matviews × 2 statements each = 48 total."""
     sql = refresh_matviews_sql(_baseline_instance(), prefix="re")
     statements = [s.strip() for s in sql.split(";") if s.strip()]
     refreshes = [s for s in statements if s.startswith("REFRESH ")]
     analyzes = [s for s in statements if s.startswith("ANALYZE ")]
-    assert len(refreshes) == 23
-    assert len(analyzes) == 23
+    assert len(refreshes) == 24
+    assert len(analyzes) == 24
     # Every REFRESHed matview gets a matching ANALYZE.
     # BV.6 — PG emits REFRESH MATERIALIZED VIEW CONCURRENTLY <name>; for
     # every matview that ships a UNIQUE index. Post-BV.6-finish (2026-06-10)

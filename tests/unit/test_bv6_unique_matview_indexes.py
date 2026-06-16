@@ -84,6 +84,15 @@ _BV6_UNIQUE_MATVIEWS: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("effective_balances", ("account_id", "business_day_start"), "eff_balances_account_day"),
     ("drift", ("account_id", "business_day_start"), "drift_account_day"),
     ("ledger_drift", ("account_id", "business_day_start"), "ledger_drift_account_day"),
+    # DL.3.5 — drift_summary UNION ALL'd derivation of drift + ledger_drift;
+    # UNIQUE on (account_class, account_id, business_day_start) — the
+    # class discriminator separates the two source matviews' rows in the
+    # UNION result. Lets PG REFRESH MATERIALIZED VIEW … CONCURRENTLY engage.
+    (
+        "drift_summary",
+        ("account_class", "account_id", "business_day_start"),
+        "drift_summary_class_acct_day",
+    ),
     ("overdraft", ("account_id", "business_day_start"), "overdraft_account_day"),
     ("balance_cadence_gap", ("account_id", "business_day_start"), "bcg_account_day"),
     ("expected_eod_balance_breach", ("account_id", "business_day_start"), "eod_breach_account_day"),
