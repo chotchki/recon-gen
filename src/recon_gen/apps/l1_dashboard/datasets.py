@@ -82,6 +82,9 @@ def l1_matview_specs(cfg: Config) -> list[tuple[str, str | None]]:
         (f"{p}_current_daily_balances", "business_day_start"),
         (f"{p}_drift", "business_day_end"),
         (f"{p}_ledger_drift", "business_day_end"),
+        # DL.3.5 — drift_summary UNION ALL'd projection over drift +
+        # ledger_drift; the Drift sheet's Leaf/Parent visuals consume this.
+        (f"{p}_drift_summary", "business_day_end"),
         (f"{p}_overdraft", "business_day_end"),
         (f"{p}_limit_breach", "business_day"),
         (f"{p}_l1_exceptions", "business_day"),
@@ -868,33 +871,36 @@ def build_drift_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
     ``cents_to_dollars_sql`` at this read boundary so the dashboard
     receives dollars. SELECT * is replaced with the explicit column
     list because the wrap needs per-column control.
+
+    DL.3.5 — sources from ``<prefix>_drift_summary`` (the UNION ALL'd
+    leaf + parent drift matview) narrowed to ``account_class = 'leaf'``.
+    Pre-DL.3.5 the SELECT JOINed against ``<prefix>_drift`` and computed
+    ``account_display`` + ``abs_drift`` inline; both now project from
+    the matview's stored columns so QS has a flat tabular read at paint
+    time. Functionally equivalent to the pre-DL.3.5 SELECT — same column
+    list, same dataset parameters, same WHERE-clause pushdown shape.
     """
     prefix = cfg.db.table_prefix
     sb = cents_to_dollars_sql("stored_balance", dialect=cfg.db.dialect)
     cb = cents_to_dollars_sql("computed_balance", dialect=cfg.db.dialect)
     drift = cents_to_dollars_sql("drift", dialect=cfg.db.dialect)
-    # BO.4 — ABS wrap goes OUTSIDE cents_to_dollars_sql so the
-    # cents-to-dollars float divide doesn't flip sign on weird DB-driver
-    # types; the inner result is a dollar-valued number, ABS of a number
-    # is always positive. Same expression on the ledger-drift sibling
-    # below so both datasets carry the same column shape.
-    abs_drift = f"ABS({drift})"
-    # DL.3 — account_display drives the Drift drill writing pL1DsAccount.
-    # Pre-DL.3 the drill wrote raw account_id which doesn't match Daily
-    # Statement's WHERE clause shape (account_display_expr); now the
-    # drill writes account_display so the destination narrows correctly.
-    acct_display = account_display_expr("account_name", "account_id")
+    # BO.4 — abs_drift is now projected by the matview as ABS(drift) on
+    # the cents-valued column; wrap with cents_to_dollars_sql here so
+    # the dashboard receives the magnitude in dollars (same units as
+    # the signed ``drift`` projection).
+    abs_drift = cents_to_dollars_sql("abs_drift", dialect=cfg.db.dialect)
     sql = (
         f"SELECT account_id, account_name,"
-        f" {acct_display} AS account_display,"
+        f" account_display,"
         f" account_role,"
         f" account_parent_role, business_day_start, business_day_end,"
         f" {sb} AS stored_balance,"
         f" {cb} AS computed_balance,"
         f" {drift} AS drift,"
         f" {abs_drift} AS abs_drift\n"
-        f"FROM {prefix}_drift\n"
-        f"WHERE {_account_display_clause(P_L1_DRIFT_ACCOUNT)}\n"
+        f"FROM {prefix}_drift_summary\n"
+        f"WHERE account_class = 'leaf'\n"
+        f"  AND {_account_display_clause(P_L1_DRIFT_ACCOUNT)}\n"
         f"  AND {_data_value_clause('account_role', P_L1_DRIFT_ROLE)}\n"
         f"  AND {_l1_date_range_clause('business_day_start', cfg)}"
     )
@@ -925,25 +931,29 @@ def build_ledger_drift_dataset(
     ``build_drift_dataset`` (same shared universal-range params).
 
     AO.1.impl — cents → dollars wrap mirrors ``build_drift_dataset``.
+
+    DL.3.5 — sources from ``<prefix>_drift_summary`` (UNION ALL'd matview)
+    narrowed to ``account_class = 'parent'``. ``account_display`` /
+    ``abs_drift`` projected from the matview; see ``build_drift_dataset``
+    docstring for the full rationale.
     """
     prefix = cfg.db.table_prefix
     sb = cents_to_dollars_sql("stored_balance", dialect=cfg.db.dialect)
     cb = cents_to_dollars_sql("computed_balance", dialect=cfg.db.dialect)
     drift = cents_to_dollars_sql("drift", dialect=cfg.db.dialect)
-    abs_drift = f"ABS({drift})"  # BO.4 — see build_drift_dataset comment.
-    # DL.3 — see build_drift_dataset for account_display rationale.
-    acct_display = account_display_expr("account_name", "account_id")
+    abs_drift = cents_to_dollars_sql("abs_drift", dialect=cfg.db.dialect)
     sql = (
         f"SELECT account_id, account_name,"
-        f" {acct_display} AS account_display,"
+        f" account_display,"
         f" account_role,"
         f" business_day_start, business_day_end,"
         f" {sb} AS stored_balance,"
         f" {cb} AS computed_balance,"
         f" {drift} AS drift,"
         f" {abs_drift} AS abs_drift\n"
-        f"FROM {prefix}_ledger_drift\n"
-        f"WHERE {_account_display_clause(P_L1_DRIFT_ACCOUNT)}\n"
+        f"FROM {prefix}_drift_summary\n"
+        f"WHERE account_class = 'parent'\n"
+        f"  AND {_account_display_clause(P_L1_DRIFT_ACCOUNT)}\n"
         f"  AND {_data_value_clause('account_role', P_L1_DRIFT_ROLE)}\n"
         f"  AND {_l1_date_range_clause('business_day_start', cfg)}"
     )

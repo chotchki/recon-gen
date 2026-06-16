@@ -309,10 +309,16 @@ def test_drift_dataset_sql_targets_prefixed_l1_views() -> None:
     # money columns (stored_balance / computed_balance / drift) can be
     # wrapped cents→dollars at the projection. Gate on the FROM clause
     # + the SELECT prefix instead of the SELECT * literal.
+    # DL.3.5 — both drift datasets now SELECT from <prefix>_drift_summary
+    # (UNION ALL'd matview over drift + ledger_drift), narrowed by
+    # ``account_class = 'leaf'`` / ``account_class = 'parent'``. The
+    # FROM-clause assertion follows the actual source.
     assert drift_sql.SqlQuery.startswith("SELECT account_id")
-    assert f"FROM {prefix}_drift" in drift_sql.SqlQuery
+    assert f"FROM {prefix}_drift_summary" in drift_sql.SqlQuery
+    assert "account_class = 'leaf'" in drift_sql.SqlQuery
     assert ledger_sql.SqlQuery.startswith("SELECT account_id")
-    assert f"FROM {prefix}_ledger_drift" in ledger_sql.SqlQuery
+    assert f"FROM {prefix}_drift_summary" in ledger_sql.SqlQuery
+    assert "account_class = 'parent'" in ledger_sql.SqlQuery
 
 
 def test_bo_4_drift_kpis_use_abs_drift_to_match_timelines_sign_convention() -> None:
