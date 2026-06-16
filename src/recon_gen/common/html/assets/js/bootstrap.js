@@ -2632,7 +2632,24 @@
           });
       };
     }
-    new TomSelect(el, settings);
+    var tomInstance = new TomSelect(el, settings);
+    // BR.1 cascade — when the SOURCE param's control changes, clear this
+    // TARGET's stale value. The prior pick may not belong to the new
+    // source scope (e.g. an Account from the old Role), and the narrowed
+    // re-fetch only refreshes the *options* on the next open — it doesn't
+    // drop a now-invalid selection. chotchki 2026-06-16: the target of a
+    // cascade must clear its current value when the source changes.
+    var cascadeSourceParam = el.dataset.cascadeSourceParam || null;
+    var cascadeForm = cascadeSourceParam ? el.closest("form") : null;
+    var cascadeSource = cascadeForm?.querySelector(
+      '[name="param_' + cascadeSourceParam + '"]',
+    );
+    if (cascadeSource) {
+      cascadeSource.addEventListener("change", () => {
+        tomInstance.clear();
+        tomInstance.clearOptions();
+      });
+    }
   }
 
   function wireFlatpickrRange(el, scope) {
