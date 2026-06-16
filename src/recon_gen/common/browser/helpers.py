@@ -2723,6 +2723,16 @@ def assert_no_literal_html_entities(
             ]);
             // Named refs we recognize + decimal/hex numeric refs.
             const ENTITY_RE = /&(amp|lt|gt|quot|apos|nbsp|#[0-9]+|#x[0-9a-fA-F]+);/g;
+            // Quote-family entities — ' (&apos; / &#39; / &#x27;) and
+            // " (&quot; / &#34; / &#x22;) — are NEVER legitimate as literal
+            // visible text. They only appear when html.escape(quote=True)
+            // double-encoded a prose apostrophe / quote, classically inside
+            // a markdown `code` span (e.g. `status='Pending'`). Flag these
+            // EVEN inside the skipped <code>/<pre> subtrees — doc pages may
+            // render &amp; / &lt; legitimately, but never a literal &#x27;.
+            // Operator 2026-06-16: the scanner must hit the Pending Aging
+            // code-span case it was previously blind to.
+            const QUOTE_RE = /&(apos|quot|#0*39|#0*34|#x0*2[27]);/gi;
             const root = document.querySelector(rootSelector);
             if (!root) return [];
             const out = [];
@@ -2737,12 +2747,13 @@ def assert_no_literal_html_entities(
                     if (SKIP_TAGS.has(p.tagName)) { skip = true; break; }
                     p = p.parentElement;
                 }
-                if (skip) continue;
                 // textContent already has the one decoded layer
                 // applied. An entity-shaped substring here means the
                 // source double-encoded it (or JS assigned a pre-
                 // escaped string via textContent instead of innerHTML).
-                const matches = node.textContent.match(ENTITY_RE);
+                // In a skipped subtree (code/pre/...) only the quote-family
+                // entities are bugs; elsewhere every entity shape is.
+                const matches = node.textContent.match(skip ? QUOTE_RE : ENTITY_RE);
                 if (matches && matches.length > 0) {
                     out.push({
                         tag: node.parentElement

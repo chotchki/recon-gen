@@ -405,6 +405,10 @@ class TestAssertNoLiteralHtmlEntities:
         assert "ENTITY_RE" in js
         assert "amp|lt|gt|quot|apos" in js
         assert "CODE" in js and "PRE" in js and "TEXTAREA" in js
+        # QUOTE_RE — the quote-family entities flagged even inside the
+        # skipped <code>/<pre> subtrees (the Pending Aging code-span
+        # double-escape the broad skip was previously blind to).
+        assert "QUOTE_RE" in js
 
     def test_raises_with_actionable_message_on_findings(self) -> None:
         from recon_gen.common.browser.helpers import (

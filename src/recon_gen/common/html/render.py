@@ -517,7 +517,14 @@ def _render_inline_markdown(text: str) -> str:
     tags inside; callers wrap with a ``<div>`` accordingly.
     """
     import markdown as _md  # noqa: PLC0415 — lazy
-    escaped = html.escape(text)
+    # quote=False — escape only the XSS-relevant `& < >`, NOT `'` / `"`.
+    # This is prose rendered as text content (never an HTML attribute), so
+    # quotes need no escaping; escaping them (the html.escape default) turns
+    # a `'` into `&#x27;`, and inside a markdown `code` span python-markdown
+    # then re-escapes the `&` → `&amp;#x27;`, which renders as the LITERAL
+    # `&#x27;` an operator sees (e.g. the Pending Aging description's
+    # `` `status='Pending'` ``). Operator-reported 2026-06-16.
+    escaped = html.escape(text, quote=False)
     rendered = _md.markdown(escaped, extensions=["fenced_code", "tables"])
     # markdown.markdown wraps single-paragraph input in <p>...</p>;
     # strip that one wrapper since the caller's container provides
