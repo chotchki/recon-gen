@@ -127,7 +127,7 @@
       filename: evt.filename || null,
       line: evt.lineno || null,
       col: evt.colno || null,
-      stack: (evt.error && evt.error.stack) || null,
+      stack: evt.error?.stack || null,
     });
   });
 

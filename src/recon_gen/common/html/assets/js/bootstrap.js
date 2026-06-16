@@ -291,7 +291,7 @@
     if (avail <= 0 || need <= avail) return;
     var base = parseFloat(getComputedStyle(el).fontSize) || 30;
     // 0.97 fudge absorbs sub-pixel rounding so the last glyph isn't clipped.
-    el.style.fontSize = Math.max((base * avail) / need * 0.97, 14) + "px";
+    el.style.fontSize = Math.max(((base * avail) / need) * 0.97, 14) + "px";
   }
 
   function formatKPIValue(value, format) {
@@ -678,11 +678,7 @@
     // via htmx.ajax instead of navigating. ``window.__sidePanelOpen``
     // is the CY.3 programmatic hook exposed by _side_panel.py's
     // panel JS. The ``{}`` glyph is literal — operator lock.
-    if (
-      section &&
-      section.getAttribute &&
-      section.getAttribute("data-metadata-popup") === "1"
-    ) {
+    if (section?.getAttribute("data-metadata-popup") === "1") {
       metaIdx = colIndex.metadata;
       transactionIdx = colIndex.transaction_id;
       if (metaIdx !== undefined && metaIdx !== null) {
@@ -1887,8 +1883,8 @@
     // render bug. Same problem hits every Sankey on this site, so the fix
     // lives in the renderer (not per-sheet content).
     var empty;
-    var nodes = (data && data.nodes) || [];
-    var links = (data && data.links) || [];
+    var nodes = data?.nodes || [];
+    var links = data?.links || [];
     if (nodes.length === 0 || links.length === 0) {
       empty = document.createElement("div");
       empty.className =
@@ -2005,9 +2001,9 @@
       .append("title")
       .text(
         (d) =>
-          (d.source && d.source.name) +
+          d.source?.name +
           "→" +
-          (d.target && d.target.name) +
+          d.target?.name +
           "\n" +
           usd.format(d.value || 0),
       );
@@ -2026,8 +2022,8 @@
     // Network sheet hits this on a no-plant scenario; without the explicit
     // empty-state the panel is indistinguishable from a still-loading
     // force-graph simulation.
-    var fgNodes = (data && data.nodes) || [];
-    var fgLinks = (data && data.links) || [];
+    var fgNodes = data?.nodes || [];
+    var fgLinks = data?.links || [];
     var emptyFg;
     if (fgNodes.length === 0 || fgLinks.length === 0) {
       emptyFg = document.createElement("div");
@@ -2701,7 +2697,7 @@
     // The empty-state hint sits adjacent to the picker (the server
     // renders a hidden <p class="day-picker-empty-window" role="status">).
     var emptyHint = null;
-    if (hidden && hidden.parentNode) {
+    if (hidden?.parentNode) {
       emptyHint = hidden.parentNode.querySelector(".day-picker-empty-window");
     }
 
@@ -2723,17 +2719,13 @@
       params.set("window_start", windowStart);
       params.set("window_end", windowEnd);
       return fetch(dayAvailabilityUrl + "?" + params.toString())
-        .then(function (r) {
-          return r.json();
-        })
-        .then(function (body) {
-          var dates = (body && body.dates) || {};
+        .then((r) => r.json())
+        .then((body) => {
+          var dates = body?.dates || {};
           dayAvailabilityCache[cacheKey] = dates;
           return dates;
         })
-        .catch(function () {
-          return {};
-        });
+        .catch(() => ({}));
     }
 
     function applyDayClasses(dayElem, dateStr, datesMap) {
@@ -2748,10 +2740,8 @@
     function windowBounds(fp) {
       // Overscan 30 days each side of the displayed month so an
       // adjacent-month flip is usually already cached.
-      var first =
-        fp.days && fp.days.firstChild ? fp.days.firstChild.dateObj : null;
-      var last =
-        fp.days && fp.days.lastChild ? fp.days.lastChild.dateObj : null;
+      var first = fp.days?.firstChild ? fp.days.firstChild.dateObj : null;
+      var last = fp.days?.lastChild ? fp.days.lastChild.dateObj : null;
       if (!first || !last) return null;
       var pad = 30 * 24 * 60 * 60 * 1000;
       return {
@@ -2781,9 +2771,9 @@
     var fpConfig = {
       mode: "single",
       dateFormat: "Y-m-d",
-      defaultDate: hidden && hidden.value ? hidden.value : null,
+      defaultDate: hidden?.value ? hidden.value : null,
       maxDate: maxDate,
-      onChange: function (selectedDates, _dateStr, instance) {
+      onChange: (selectedDates, _dateStr, instance) => {
         var d = selectedDates[0]
           ? instance.formatDate(selectedDates[0], "Y-m-d")
           : "";
@@ -2795,14 +2785,14 @@
     };
 
     if (dayAvailabilityUrl && accountParam) {
-      fpConfig.onDayCreate = function (_dObj, _dStr, fp, dayElem) {
+      fpConfig.onDayCreate = (_dObj, _dStr, fp, dayElem) => {
         var accountValue = readAccountValue();
         if (!accountValue || accountValue.indexOf("__") === 0) return;
         var bounds = windowBounds(fp);
         if (!bounds) return;
         var dateStr = fp.formatDate(dayElem.dateObj, "Y-m-d");
         loadDayAvailability(bounds.start, bounds.end, accountValue).then(
-          function (datesMap) {
+          (datesMap) => {
             applyDayClasses(dayElem, dateStr, datesMap);
             toggleEmptyHint(datesMap, accountValue, bounds);
           },
@@ -2811,7 +2801,7 @@
       // Re-fetch on month flip. redraw() re-runs onDayCreate per cell;
       // the cache absorbs repeat flips so a tight back-and-forth never
       // re-hits the endpoint.
-      fpConfig.onMonthChange = function (_sel, _str, fp) {
+      fpConfig.onMonthChange = (_sel, _str, fp) => {
         fp.redraw();
       };
     }
@@ -2918,7 +2908,7 @@
       var t = ev.target;
       var p;
       while (t && t !== document) {
-        if (t.classList && t.classList.contains("handbook-help-button")) {
+        if (t.classList?.contains("handbook-help-button")) {
           ev.preventDefault();
           p = t.getAttribute("data-handbook-path");
           if (p) {
@@ -3049,7 +3039,7 @@
       var expBtn;
       var colBtn;
       var panel;
-      if (!t || !t.closest) return;
+      if (!t?.closest) return;
       copyBtn = t.closest("[data-metadata-copy]");
       if (copyBtn) {
         ev.preventDefault();
