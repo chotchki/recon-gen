@@ -137,6 +137,7 @@ def html2_server(
     dashboard_title: str = "Harness",
     filter_specs: Sequence[FilterSpec] = (),
     options_search_fetcher: OptionsSearchFetcher | None = None,
+    day_availability_fetcher: Any = None,
     dev_log: bool = False,
     startup_timeout_s: float = 5.0,
     cfg: "Config | None" = None,
@@ -180,6 +181,11 @@ def html2_server(
                 title=dashboard_title, data_fetcher=data_fetcher,
                 filter_specs=tuple(filter_specs),
                 options_search_fetcher=options_search_fetcher,
+                # DM.3 — the Daily Statement Business Day picker reads
+                # this to decorate calendar days with .has-transactions /
+                # .has-balance markers. None (most harness callers) =
+                # undecorated picker.
+                day_availability_fetcher=day_availability_fetcher,
             ),
         },
         dev_log=dev_log,
@@ -399,6 +405,47 @@ def make_live_db_fetcher_for_app(
     for callers that don't carry dataset-sourced dropdowns (so don't
     need the options fetcher)."""
     return make_live_db_fetchers_for_app(tree_app=tree_app, cfg=cfg)[0]
+
+
+def make_live_db_day_availability_fetcher(*, cfg: Any) -> Any:
+    """DM.3 — build the live-DB per-(account, day) availability fetcher
+    the App2 Daily Statement Business Day picker decorates from.
+
+    POLICY 1: the browser-tier harness must wire the SAME
+    ``make_day_availability_fetcher`` the production serve path does in
+    ``cli/_html_serve.build_real_dashboards``. The fetcher owns its own
+    lazily-created connection pool (bound to uvicorn's loop on first
+    call, same pattern as ``make_live_db_fetchers_for_app``) and runs one
+    UNION-ALL query per visible calendar window. Returned as a thin async
+    wrapper so the pool is opened inside the server's event loop, not the
+    test thread's.
+    """
+    from recon_gen.common.db import make_connection_pool  # noqa: PLC0415
+    from recon_gen.common.html._tree_fetcher import (  # noqa: PLC0415
+        make_day_availability_fetcher,
+    )
+
+    cached: dict[str, Any] = {}
+
+    async def _pool() -> Any:
+        pool = cached.get("pool")
+        if pool is None:
+            pool = await make_connection_pool(
+                cfg, max_size=cfg.db.app2_pool_size,
+            )
+            cached["pool"] = pool
+        return pool
+
+    async def day_availability_fetcher(
+        account_display: str, window_start: str, window_end: str,
+    ) -> dict[str, list[str]]:
+        fn = cached.get("daf")
+        if fn is None:
+            fn = make_day_availability_fetcher(cfg, pool=await _pool())
+            cached["daf"] = fn
+        return await fn(account_display, window_start, window_end)
+
+    return day_availability_fetcher
 
 
 def make_recording_fetcher(

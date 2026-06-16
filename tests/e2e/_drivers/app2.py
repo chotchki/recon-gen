@@ -166,6 +166,7 @@ class App2Driver:
         dashboard_title: str = "Harness",
         filter_specs: Sequence[FilterSpec] = (),
         options_search_fetcher: OptionsSearchFetcher | None = None,
+        day_availability_fetcher: Any = None,
         dev_log: bool = False,
         wire_auth: bool = False,
     ) -> Generator["App2Driver", None, None]:
@@ -200,6 +201,8 @@ class App2Driver:
             dashboard_title=dashboard_title,
             filter_specs=filter_specs,
             options_search_fetcher=options_search_fetcher,
+            # DM.3 — App2-only Daily Statement day-availability decoration.
+            day_availability_fetcher=day_availability_fetcher,
             dev_log=dev_log,
             # DD.4 — opt-in auth wiring. Default off so existing app2 e2e
             # tests keep their no-auth code path even when cfg carries
@@ -701,6 +704,145 @@ class App2Driver:
         if loc.count() == 0:
             return None
         return loc.inner_text().strip()
+
+    def filter_value(self, label: str) -> str | None:
+        """DM/BR.1 — the currently-selected VALUE of the single-select
+        dropdown labelled ``label``, or ``None`` when nothing is picked.
+
+        Reads Tom Select's ``getValue()`` when the widget is wired (the
+        authoritative selected value — the underlying ``<select>``'s
+        ``.value`` can lag a programmatic ``setValue`` until the next
+        sync); falls back to the bare ``<select>.value`` on a degraded
+        (no-Tom-Select / offline-CDN) load. An empty string normalizes to
+        ``None`` so a cleared / never-picked dropdown reads the same on
+        both paths — the cascade-clear test asserts ``value is None`` after
+        the source changes.
+
+        Single-select only: a multi-select ``getValue()`` returns an
+        array; this verb is for the Role→Account cascade where both
+        pickers are SINGLE_SELECT. Returns the raw bound value (the
+        ``account_display`` string for the Account picker), not the option
+        label — for these pickers they're the same (label == value).
+        """
+        sel = self._filter_control(label).locator("select").first
+        sel.wait_for(state="attached")
+        raw = sel.evaluate(
+            """(s) => {
+                if (s.tomselect) {
+                    const v = s.tomselect.getValue();
+                    // Single-select getValue() is a string; guard against
+                    // an unexpected array by joining (empty → '').
+                    return Array.isArray(v) ? v.join(',') : (v || '');
+                }
+                return s.value || '';
+            }"""
+        )
+        text = str(raw).strip()
+        return text or None
+
+    def day_availability(
+        self, label: str, *, open_on: str | None = None,
+    ) -> dict[str, list[str]]:
+        """DM.3 — open the Flatpickr day picker labelled ``label`` and
+        read each visible calendar day's availability markers.
+
+        Returns ``{iso_date: [states]}`` where ``states`` is a subset of
+        ``["transactions", "balance"]`` — derived from the
+        ``.has-transactions`` / ``.has-balance`` classes the
+        ``onDayCreate`` callback added per the server's day-availability
+        map. Days with no marker are omitted (the picker renders them
+        plain — DECORATION not restriction). The ISO date is read off
+        each ``.flatpickr-day``'s ``dateObj`` via the live flatpickr
+        instance's ``formatDate`` (mirrors exactly how ``onDayCreate``
+        keyed the map), so the keys match the DB's per-day sets without a
+        locale-fragile ``aria-label`` parse.
+
+        Opens the picker by clicking its visible input, then — when
+        ``open_on`` (``YYYY-MM-DD``) is given — jumps the calendar to that
+        month via the flatpickr instance's ``jumpToDate`` + ``redraw`` so
+        the visible grid lands on the seeded data window (the picker's
+        DEFAULT month is the as_of-frame anchor, which for a live clock can
+        be months away from a LOCKED_ANCHOR-seeded DB). ``jumpToDate``
+        navigates without selecting a day, so it doesn't perturb the
+        picked Business Day. The ``redraw`` re-runs ``onDayCreate`` per
+        cell, re-fetching + re-decorating for the new month. Then waits for
+        the decoration fetch + class-add to settle and snapshots the
+        calendar. Mirrors the user gesture (open → page to the month →
+        read).
+        """
+        ctrl = self._filter_control(label)
+        visible = ctrl.locator(
+            'input[data-widget="flatpickr-single"]'
+        ).first
+        visible.wait_for(state="attached")
+        # Open the calendar (flatpickr binds on the input's focus/click).
+        visible.click()
+        # The flatpickr calendar mounts as a sibling .flatpickr-calendar.
+        self._page.locator(".flatpickr-calendar.open").first.wait_for(
+            state="visible", timeout=10_000,
+        )
+        if open_on is not None:
+            # Navigate the calendar to the target month WITHOUT selecting a
+            # day. redraw() re-runs onDayCreate so the new month decorates.
+            visible.evaluate(
+                """(el, iso) => {
+                    const fp = el._flatpickr;
+                    if (!fp) return;
+                    fp.jumpToDate(iso, false);
+                    fp.redraw();
+                }""",
+                open_on,
+            )
+        # onDayCreate's class-add runs after the day-availability fetch
+        # resolves (a network round-trip). Poll until at least one day
+        # carries a marker OR a short settle deadline elapses (an account
+        # with zero activity in the window legitimately decorates nothing,
+        # so we can't hard-require a marker — the deadline bounds that
+        # case). The poll reads through the live flatpickr instance.
+        return self._read_day_markers(visible)
+
+    def _read_day_markers(self, visible_input: Any) -> dict[str, list[str]]:
+        """Read ``{iso: [states]}`` off the open flatpickr calendar via
+        its live instance. Polls briefly so the async ``onDayCreate``
+        class-add (gated on a network fetch) has landed before the
+        snapshot; bounded so a genuinely-undecorated window returns ``{}``
+        rather than hanging."""
+        import time as _time
+        deadline = _time.monotonic() + 8.0
+        markers: dict[str, list[str]] = {}
+        while _time.monotonic() < deadline:
+            markers = visible_input.evaluate(
+                """(el) => {
+                    const fp = el._flatpickr;
+                    if (!fp || !fp.calendarContainer) return {};
+                    const out = {};
+                    const days = fp.calendarContainer.querySelectorAll(
+                        '.flatpickr-day'
+                    );
+                    days.forEach((d) => {
+                        if (!d.dateObj) return;
+                        // Skip the prev/next-month spill cells so the keys
+                        // stay inside the displayed month (the test
+                        // compares against the DB's per-account day set,
+                        // which the overscanned window covers).
+                        const states = [];
+                        if (d.classList.contains('has-transactions')) {
+                            states.push('transactions');
+                        }
+                        if (d.classList.contains('has-balance')) {
+                            states.push('balance');
+                        }
+                        if (states.length === 0) return;
+                        const iso = fp.formatDate(d.dateObj, 'Y-m-d');
+                        out[iso] = states;
+                    });
+                    return out;
+                }"""
+            )
+            if markers:
+                break
+            self._page.wait_for_timeout(150)
+        return markers
 
     def query_db(
         self,

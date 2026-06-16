@@ -283,6 +283,39 @@ class DashboardDriver(Protocol):
         named visual isn't a KPI / has no value rendered yet."""
         ...
 
+    def filter_value(self, label: str) -> str | None:
+        """The currently-selected value of the single-select dropdown
+        labelled ``label``, or ``None`` when nothing is picked (empty /
+        cleared). Used by the DM cascade-clear test to assert the Account
+        picker drops its stale value when the Role source changes.
+
+        App2-only — the Role→Account cascade-clear is an App2 affordance
+        (the QS-side cascade source is gated off via ``app2_only`` because
+        QS can't execute a parameterized picker dataset; see
+        ``[[project_qs_no_searchfilter_cascading]]``). ``QsEmbedDriver``
+        raises ``NotImplementedError``."""
+        ...
+
+    def day_availability(
+        self, label: str, *, open_on: str | None = None,
+    ) -> dict[str, list[str]]:
+        """Open the Flatpickr day picker labelled ``label`` and return
+        each visible calendar day's availability markers as
+        ``{iso_date: [states]}`` (``states`` ⊆ ``["transactions",
+        "balance"]``). Days with no marker are omitted. ``open_on``
+        (``YYYY-MM-DD``) navigates the calendar to that month before
+        reading (without selecting a day) so the visible grid lands on the
+        seeded data window — the picker's default month is the as_of-frame
+        anchor, which can be far from a LOCKED_ANCHOR-seeded DB.
+
+        App2-only (DM.3) — the per-day decoration is added by the App2
+        Flatpickr ``onDayCreate`` callback from the server's
+        ``day-availability`` endpoint. QuickSight's
+        ``ParameterDateTimePickerControl`` has no per-day decoration
+        surface (see ``[[project_qs_no_searchfilter_cascading]]``), so
+        ``QsEmbedDriver`` raises ``NotImplementedError``."""
+        ...
+
     def query_db(
         self,
         sql: str,

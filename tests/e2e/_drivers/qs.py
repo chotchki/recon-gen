@@ -1077,6 +1077,45 @@ class QsEmbedDriver:
             self._page, menu_item, self._page_timeout,
         )
 
+    # -- Daily Statement cascade + day-availability (DM — App2-only) ----
+    #
+    # The Daily Statement Role→Account cascade NARROWING (DM.2), the
+    # cascade CLEAR-on-source-change (DM/BR.1), and the per-day
+    # availability DECORATION on the Business Day picker (DM.3) are App2
+    # affordances with no QuickSight analog. The Role dropdown that
+    # SOURCES the cascade is gated ``app2_only`` (DM.0.5 renderer gate)
+    # because QS's GetUniqueAttributeValuesSyncForAnalysis can't execute a
+    # parameterized picker dataset (CQ.4.a), so QS renders the flat
+    # Account + Day pair with no cascade narrowing, no clear-on-change, and
+    # no per-day marker surface (ParameterDateTimePickerControl exposes no
+    # onDayCreate-equivalent).
+    #
+    # Structured triple per CLAUDE.md POLICY 2 carve-out:
+    #   (1) NotImplementedError raises below + this comment naming the gap
+    #   (2) docs/reference/quicksight-quirks.md entry for the App2-only
+    #       cascade narrowing / clear / day-availability decoration
+    #   (3) memory file [[project_qs_no_searchfilter_cascading]]
+    #       (authored in parallel; the forward-link is intentional)
+
+    def filter_value(self, label: str) -> str | None:
+        raise NotImplementedError(
+            "filter_value (the DM cascade-clear read) is App2-only — QS's "
+            "Role dropdown is gated app2_only because QS can't execute a "
+            "parameterized picker dataset, so there is no QS cascade "
+            "source whose value to clear; see "
+            "[[project_qs_no_searchfilter_cascading]]"
+        )
+
+    def day_availability(
+        self, label: str, *, open_on: str | None = None,
+    ) -> dict[str, list[str]]:
+        raise NotImplementedError(
+            "day_availability (DM.3 per-day decoration) is App2-only — "
+            "QuickSight's ParameterDateTimePickerControl has no per-day "
+            "decoration surface (no onDayCreate equivalent); see "
+            "[[project_qs_no_searchfilter_cascading]]"
+        )
+
     # -- metadata popup (CY.9 — App2-only per operator lock 7) ----------
 
     def open_metadata_panel(
