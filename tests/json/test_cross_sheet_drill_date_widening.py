@@ -5,7 +5,7 @@ v8.5.7 — bug class: a drill from a current-state sheet (Pending Aging,
 Unbundled Aging, Supersession Audit — none in the universal date
 filter scope) into the Transactions sheet (which IS scoped) lost any
 row whose ``posting`` was older than the picker's default 7-day
-window. The drill wrote ``pL1TxTransfer`` but did NOT write the date
+window. The drill wrote ``pL1TxTransferId`` but did NOT write the date
 range params, so the Transactions sheet's universal filter remained
 narrow and the target row fell outside it.
 
@@ -187,7 +187,7 @@ def test_drills_into_transactions_widen_date_range(
         f"Cross-sheet drills into Transactions are missing the wide "
         f"date-range writes (expected start="
         f"{_EXPECTED_WIDE_START!r}, end={_EXPECTED_WIDE_END!r}). Drills "
-        f"that write only ``pL1TxTransfer`` will land on a Transactions "
+        f"that write only ``pL1TxTransferId`` will land on a Transactions "
         f"sheet whose universal date filter excludes the target row "
         f"when the row's posting is older than the picker's default "
         f"7-day window:\n" + "\n".join(bad)

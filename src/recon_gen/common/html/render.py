@@ -1989,7 +1989,7 @@ def _serialize_table_row_drills(visual: Any, dashboard_id: str) -> str:  # typin
         [{"label": "View Transactions for this transfer",
           "trigger": "DATA_POINT_MENU",
           "target_path": "/dashboards/<dash>/sheets/<target-sheet>",
-          "params": [{"name": "pL1TxTransfer", "column": "transfer_id"}]}]
+          "params": [{"name": "pL1TxTransferId", "column": "transfer_id"}]}]
 
     ``bootstrap.js::wireRowDrills`` reads it: a ``DATA_POINT_CLICK`` drill
     makes each ``<tr>`` left-clickable (navigates to ``target_path`` with

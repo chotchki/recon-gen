@@ -1411,7 +1411,8 @@ def test_pending_aging_buckets_computed_in_dataset_sql() -> None:
 
 def test_pending_aging_drill_to_transactions() -> None:
     """M.2b.7 drill plumbing — the detail table's right-click menu
-    drills to Transactions and writes pL1TxTransfer."""
+    drills to Transactions and writes pL1TxTransferId (DL.3.2 — was
+    pL1TxTransfer before the dataset-bridge migration)."""
     from recon_gen.common.tree import Drill
 
     app = build_l1_dashboard_app(_CFG)
@@ -1636,37 +1637,59 @@ def test_supersession_audit_has_supersedes_filter() -> None:
 
 
 def test_drill_target_parameters_registered() -> None:
-    """M.2b.7: 2 sentinel-pattern params land on the analysis with the
-    "__ALL__" default. They never surface as sheet controls — drills
-    set them, and the destination calc fields treat the sentinel as
-    PASS so the un-drilled state shows everything."""
-    from recon_gen.apps.l1_dashboard.app import (
-        P_L1_FILTER_ACCOUNT, P_L1_TX_TRANSFER,
-    )
+    """M.2b.7: the analysis-level sentinel-pattern param ``pL1FilterAccount``
+    lands with the "__ALL__" default and is never surfaced as a sheet
+    control — drills set it, the destination calc fields treat the
+    sentinel as PASS so the un-drilled state shows everything.
+
+    DL.3.2 — the Transactions drill destination dropped its analysis-
+    level proxy ``pL1TxTransfer`` and now writes the dataset-bridge
+    analysis param ``pL1TxTransferId`` directly (so App2's URL-param
+    → SQL bind path narrows the same way QS's MappedDataSetParameters
+    bridge does). The ``pL1TxTransferId`` param IS still registered on
+    the analysis — it's created by ``_populate_pushdown_value_dropdown``
+    for the Transactions sheet's Transfer dropdown — so the cross-
+    reference at deploy time succeeds.
+    """
+    from recon_gen.apps.l1_dashboard.app import P_L1_FILTER_ACCOUNT
+    from recon_gen.apps.l1_dashboard.datasets import P_L1_TX_TRANSFER_ID
+    from recon_gen.common.ids import ParameterName
     from recon_gen.common.tree import StringParam
 
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
     by_name = {p.name: p for p in app.analysis.parameters}
     assert P_L1_FILTER_ACCOUNT in by_name
-    assert P_L1_TX_TRANSFER in by_name
-    # Both default to the sentinel string — drill-target params are
-    # always StringParams (sentinel is text), so the runtime narrow
-    # is safe.
+    # DL.3.2 — pL1TxTransferId is created by the Transactions sheet's
+    # Transfer dropdown wiring (`_populate_pushdown_value_dropdown`),
+    # NOT by `_wire_drill_filter_groups`. The drill writes it directly.
+    p_transfer_id_pname = ParameterName(P_L1_TX_TRANSFER_ID)
+    assert p_transfer_id_pname in by_name
     p_account = by_name[P_L1_FILTER_ACCOUNT]
-    p_transfer = by_name[P_L1_TX_TRANSFER]
+    p_transfer = by_name[p_transfer_id_pname]
     assert isinstance(p_account, StringParam)
     assert isinstance(p_transfer, StringParam)
     assert p_account.default == [_DRILL_RESET_SENTINEL]
-    assert p_transfer.default == [_DRILL_RESET_SENTINEL]
+    # DL.3.2 — pL1TxTransferId uses the dataset-side sentinel
+    # (L1_ALL_SENTINEL = "__l1_all__") because its narrowing is via
+    # SQL pushdown (`_data_value_clause`), not via an analysis-level
+    # calc-field.
+    from recon_gen.apps.l1_dashboard.datasets import L1_ALL_SENTINEL
+    assert p_transfer.default == [L1_ALL_SENTINEL]
 
 
 def test_drill_calc_fields_present() -> None:
-    """M.2b.7: 5 sentinel-or-match calc fields, one per drill destination
-    dataset (drift, ledger_drift, overdraft, limit_breach, transactions).
-    Each calc field's expression compares its dataset's column against
-    the sentinel-pattern parameter; PASS when the param is "__ALL__"
-    OR the column matches; FAIL otherwise."""
+    """M.2b.7 / DL.3.2: 4 sentinel-or-match calc fields, one per
+    pL1FilterAccount drill destination dataset (drift / ledger_drift /
+    overdraft / limit_breach). Each calc field's expression compares
+    its dataset's column against ``pL1FilterAccount``; PASS when the
+    param is "__ALL__" OR the column matches; FAIL otherwise.
+
+    DL.3.2 — the Transactions destination dropped its calc-field
+    pattern; narrowing happens via dataset SQL pushdown on
+    ``pL1TxTransferId`` instead (see
+    ``_data_value_clause('transfer_id', P_L1_TX_TRANSFER_ID)`` in
+    ``datasets.py``)."""
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
     calc_names = {c.name for c in app.analysis.calc_fields}
@@ -1675,10 +1698,14 @@ def test_drill_calc_fields_present() -> None:
         "_drill_pass_pL1FilterAccount_on_ledger_drift",
         "_drill_pass_pL1FilterAccount_on_overdraft",
         "_drill_pass_pL1FilterAccount_on_limit_breach",
-        "_drill_pass_pL1TxTransfer_on_transactions",
     }
     assert expected.issubset(calc_names), (
         f"missing calc fields: {expected - calc_names}"
+    )
+    # DL.3.2 — pL1TxTransfer's calc field is GONE.
+    assert "_drill_pass_pL1TxTransfer_on_transactions" not in calc_names, (
+        "DL.3.2 dropped the pL1TxTransfer calc-field FilterGroup; "
+        "narrowing now happens via pL1TxTransferId SQL pushdown"
     )
 
     # Each expression is the sentinel-or-match shape.
@@ -1693,9 +1720,14 @@ def test_drill_calc_fields_present() -> None:
 
 
 def test_drill_filter_groups_present() -> None:
-    """M.2b.7: 5 SINGLE_DATASET FilterGroups (one per destination)
-    apply the calc-field PASS filter to scope each destination sheet's
-    visuals when its sentinel-pattern param is set."""
+    """M.2b.7 / DL.3.2: 4 SINGLE_DATASET FilterGroups (one per
+    pL1FilterAccount destination) apply the calc-field PASS filter to
+    scope each destination sheet's visuals when its sentinel-pattern
+    param is set.
+
+    DL.3.2 — the Transactions destination dropped its FilterGroup;
+    narrowing happens via dataset SQL pushdown on ``pL1TxTransferId``
+    instead."""
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
     fg_ids = {fg.filter_group_id for fg in app.analysis.filter_groups}
@@ -1704,10 +1736,14 @@ def test_drill_filter_groups_present() -> None:
         "fg-l1-drill-account-on-ledger-drift",
         "fg-l1-drill-account-on-overdraft",
         "fg-l1-drill-account-on-limit-breach",
-        "fg-l1-drill-transfer-on-transactions",
     }
     assert expected.issubset(fg_ids), (
         f"missing filter groups: {expected - fg_ids}"
+    )
+    # DL.3.2 — fg-l1-drill-transfer-on-transactions is GONE.
+    assert "fg-l1-drill-transfer-on-transactions" not in fg_ids, (
+        "DL.3.2 dropped this FilterGroup; narrowing now via "
+        "pL1TxTransferId SQL pushdown on the Transactions dataset"
     )
 
 
@@ -1765,7 +1801,8 @@ def test_per_invariant_sheets_drill_to_daily_statement() -> None:
 
 def test_daily_statement_drills_to_transactions() -> None:
     """M.2b.7: Daily Statement detail table has DATA_POINT_MENU drill
-    into Transactions that writes transfer_id into pL1TxTransfer."""
+    into Transactions that writes transfer_id into pL1TxTransferId
+    (DL.3.2 — was pL1TxTransfer before the dataset-bridge migration)."""
     from recon_gen.common.tree import Drill
 
     app = build_l1_dashboard_app(_CFG)

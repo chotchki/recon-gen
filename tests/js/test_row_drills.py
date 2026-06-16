@@ -103,7 +103,7 @@ _MENU_DRILL = [{
     "label": "View Transactions for this transfer",
     "trigger": "DATA_POINT_MENU",
     "target_path": "/dashboards/d1/sheets/transactions",
-    "params": [{"name": "pL1TxTransfer", "column": "transfer_id"}],
+    "params": [{"name": "pL1TxTransferId", "column": "transfer_id"}],
 }]
 
 _CLICK_DRILL = [{
@@ -186,7 +186,7 @@ def test_row_drill_url_resolves_params_against_row_cells() -> None:
             var colIndex = { transfer_id: 0, amount: 1, status: 2 };
             return [
                 f({ target_path: '/d/s/t', params: [
-                    { name: 'pL1TxTransfer', column: 'transfer_id' },
+                    { name: 'pL1TxTransferId', column: 'transfer_id' },
                 ]}, ['xfr-1', 100, 'Pending'], colIndex),
                 // column not in the row → param dropped → bare path
                 f({ target_path: '/d/s/t', params: [
@@ -198,7 +198,7 @@ def test_row_drill_url_resolves_params_against_row_cells() -> None:
             ];
         }"""))
         browser.close()
-    assert urls[0] == "/d/s/t?param_pL1TxTransfer=xfr-1"
+    assert urls[0] == "/d/s/t?param_pL1TxTransferId=xfr-1"
     assert urls[1] == "/d/s/t"
     assert urls[2] == "/d/s/t"
 

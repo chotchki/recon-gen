@@ -10,7 +10,7 @@ v8.5.7 — bug class regression (QS side). Pre-v8.5.7 a drill from a
 current-state sheet (Pending Aging — not in the universal date filter
 scope) into the Transactions sheet (which IS scoped to a default 7-day
 window) lost the target transfer's legs whenever the source row's
-posting was older than 7 days. The drill wrote ``pL1TxTransfer`` but did
+posting was older than 7 days. The drill wrote ``pL1TxTransferId`` but did
 NOT write the date range params, leaving the Transactions sheet's
 universal filter narrow. Fix: the QS drill now also writes
 ``pL1DateStart=1990-01-01`` / ``pL1DateEnd=2099-12-31`` via

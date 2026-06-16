@@ -47,7 +47,7 @@ aren't surfaced here.
 None outbound. Transactions is the leaf — the raw event log, the
 deepest layer the dashboard exposes.
 
-When drilled to from Daily Statement, the `pL1TxTransfer` parameter
+When drilled to from Daily Statement, the `pL1TxTransferId` parameter
 narrows the table to one `transfer_id`; clearing the parameter (re-
 opening the sheet from the tab bar) restores the full ledger.
 

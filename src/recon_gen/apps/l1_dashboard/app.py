@@ -206,14 +206,27 @@ P_L1_DS_BALANCE_DATE = ParameterName("pL1DsBalanceDate")
 
 # M.2b.7 — Drill-target parameters (sentinel-pattern, mirror of AR).
 # These never appear as visible sheet controls — they're only written
-# by drill actions. Each per-invariant sheet (Drift / Overdraft /
-# Limit Breach) carries a calc-field-backed FilterGroup that reads
-# ``pL1FilterAccount`` to narrow its dataset to one account; the
-# Transactions sheet does the same for ``pL1TxTransfer``. The "__ALL__"
-# sentinel default means "no filter" — destination calc fields special-
-# case it to PASS so the un-drilled state shows everything.
+# by drill actions. The per-invariant sheets (Drift / Overdraft /
+# Limit Breach) each carry a calc-field-backed FilterGroup that reads
+# ``pL1FilterAccount`` to narrow their dataset to one account; the
+# "__ALL__" sentinel default means "no filter" — destination calc
+# fields special-case it to PASS so the un-drilled state shows
+# everything.
+#
+# DL.3.2 — Transactions used to follow the same calc-field pattern via
+# ``pL1TxTransfer``, but App2 doesn't honor analysis-level calc-field
+# FilterGroups (its narrowing is URL-param → SQL bind only) so the
+# drill landed without narrowing (CI run 27586777150 caught the 50/50
+# row mismatch). Replaced by writing the dataset-level analysis param
+# ``pL1TxTransferId`` directly — it's the same param the Transactions
+# sheet's Transfer dropdown bridges to (`_populate_pushdown_value_
+# dropdown` creates it), so QS's MappedDataSetParameters bridge +
+# App2's `apply_dataset_param_defaults` both narrow the Transactions
+# dataset SQL via `WHERE (__l1_all__ = pL1TxTransferId OR transfer_id =
+# pL1TxTransferId)`. No calc-field FilterGroup is needed since the
+# narrowing is at the dataset SQL layer.
 P_L1_FILTER_ACCOUNT = ParameterName("pL1FilterAccount")
-P_L1_TX_TRANSFER = ParameterName("pL1TxTransfer")
+P_L1_TX_TRANSFER_ID_PNAME = ParameterName(P_L1_TX_TRANSFER_ID)
 
 # Sentinel value the M.2b.7 drill calc fields treat as PASS — same
 # string AR uses (mirror).
@@ -223,7 +236,8 @@ _DRILL_RESET_SENTINEL = "__ALL__"
 # expected ColumnShape so cross_sheet_drill() refuses shape-mismatched
 # writes at construction time (the K.2 invariant).
 _DP_FILTER_ACCOUNT = DrillParam(P_L1_FILTER_ACCOUNT, ColumnShape.ACCOUNT_ID)
-_DP_TX_TRANSFER = DrillParam(P_L1_TX_TRANSFER, ColumnShape.TRANSFER_ID)
+# DL.3.2 — see module-level note on pL1TxTransfer → pL1TxTransferId.
+_DP_TX_TRANSFER = DrillParam(P_L1_TX_TRANSFER_ID_PNAME, ColumnShape.TRANSFER_ID)
 # DL.3 — shape widened from ACCOUNT_ID to ACCOUNT_DISPLAY. Daily
 # Statement's account picker is bound to ``LinkedValues.from_column(
 # DS_L1_DS_ACCOUNTS["account_display"])`` and the dataset WHERE clause
@@ -2574,11 +2588,27 @@ def _wire_daily_statement_filters(
 # M.2b.7 — Cross-sheet drill plumbing
 # ---------------------------------------------------------------------------
 #
-# Two sentinel-pattern parameters (`pL1FilterAccount`, `pL1TxTransfer`)
-# carry the drill-target value. Each destination sheet has a calc-field-
-# backed FilterGroup that reads its parameter and either narrows the
-# dataset to one row or PASSes everything through (when the param is
-# the `__ALL__` sentinel).
+# Cross-sheet drill plumbing splits across two parameter shapes:
+#
+# - `pL1FilterAccount` — analysis-level sentinel-pattern StringParam.
+#   Each pL1FilterAccount destination sheet (Drift / Overdraft /
+#   Limit Breach) has a calc-field-backed FilterGroup that reads it
+#   and either narrows the dataset to one row or PASSes everything
+#   through (when the param is the `__ALL__` sentinel). This is the
+#   K.2 sentinel-or-match pattern.
+#
+# - `pL1TxTransferId` — analysis-level proxy on the Transactions
+#   sheet's Transfer dropdown (`_populate_pushdown_value_dropdown`)
+#   bridged via MappedDataSetParameters to the dataset-level
+#   `pL1TxTransferId` parameter that the Transactions dataset's SQL
+#   substitutes into its WHERE clause's `_data_value_clause('transfer_id',
+#   P_L1_TX_TRANSFER_ID)`. DL.3.2 moved the drill onto THIS param so
+#   App2's URL-param → SQL bind path (which doesn't honor calc-field
+#   FilterGroups) narrows the same way QS's MappedDataSetParameters
+#   bridge does — the pre-DL.3.2 `pL1TxTransfer` analysis-level proxy
+#   only narrowed in QS via the calc-field, leaving App2 to render the
+#   full unfiltered Transactions dataset (CI run 27586777150's 50/50
+#   row mismatch).
 #
 # Drill writes auto-reset every sentinel-pattern param the caller didn't
 # explicitly write — so a stale "I drilled to account-A on Drift earlier"
@@ -2588,7 +2618,19 @@ def _wire_daily_statement_filters(
 # Auto-reset list — only the sentinel-pattern params. Picker-driven
 # params (P_L1_DS_*, P_L1_DATE_*) stay sticky across drills, since
 # clearing a DateTimeParam to a string sentinel would break it.
-_L1_DRILL_RESET_PARAMS = (_DP_FILTER_ACCOUNT, _DP_TX_TRANSFER)
+#
+# DL.3.2 — Per-param reset sentinel value. Most sentinel-pattern params
+# (pL1FilterAccount) use the analysis-level ``__ALL__`` value which a
+# calc-field FilterGroup recognizes as PASS. pL1TxTransferId is the
+# special case: it's an analysis param bridged to the Transactions
+# dataset's pL1TxTransferId dataset param (see
+# ``_populate_pushdown_value_dropdown``), so its sentinel is the
+# dataset-side ``__l1_all__`` (= L1_ALL_SENTINEL). Writing the wrong
+# sentinel narrows the dataset to 0 rows post-auto-reset.
+_L1_DRILL_RESET_PARAMS: tuple[tuple[DrillParam, str], ...] = (
+    (_DP_FILTER_ACCOUNT, _DRILL_RESET_SENTINEL),
+    (_DP_TX_TRANSFER, L1_ALL_SENTINEL),
+)
 
 
 def _l1_drill(
@@ -2607,9 +2649,9 @@ def _l1_drill(
     """
     written = {param.name for param, _ in writes}
     full_writes = list(writes)
-    for param in _L1_DRILL_RESET_PARAMS:
+    for param, reset_value in _L1_DRILL_RESET_PARAMS:
         if param.name not in written:
-            full_writes.append((param, DrillResetSentinel()))
+            full_writes.append((param, DrillResetSentinel(value=reset_value)))
     return Drill(
         target_sheet=target_sheet,
         writes=full_writes,
@@ -2625,7 +2667,7 @@ def _wire_drill_filter_groups(
     datasets: dict[str, Dataset],
     sheets: dict[str, Sheet],
 ) -> None:
-    """5 sentinel-pattern FilterGroups + their backing calc fields.
+    """4 sentinel-pattern FilterGroups + their backing calc fields.
 
     Each spec encodes one drill-destination filter:
     - parameter to test (sentinel-pattern StringParam, default "__ALL__")
@@ -2638,16 +2680,28 @@ def _wire_drill_filter_groups(
     parameter-bound CustomFilterConfiguration's empty-string narrowing
     bug AR's docstring calls out.
 
+    DL.3.2 — the Transactions destination dropped the calc-field pattern
+    and now narrows via the existing ``pL1TxTransferId`` analysis-param
+    bridge that ``_populate_pushdown_value_dropdown`` already creates.
+    The drill writes ``pL1TxTransferId`` directly; QS's
+    ``MappedDataSetParameters`` + App2's
+    ``apply_dataset_param_defaults`` both substitute it into the
+    Transactions dataset SQL's ``WHERE (__l1_all__ = pL1TxTransferId
+    OR transfer_id = pL1TxTransferId)`` clause — narrowing at the
+    dataset layer instead of the analysis-level calc-field. The reason
+    is App2: App2 doesn't honor analysis-level calc-field FilterGroups
+    (its narrowing is URL-param → SQL bind only), so the pre-DL.3.2
+    drill landed on App2 with the full unfiltered Transactions dataset
+    even though QS would have narrowed via the calc-field. The shared-
+    contract fix is to route through the SQL-pushdown path both
+    renderers honor.
+
     Parameters are added to the analysis via ``_wire_drill_parameters``;
     this helper wires the per-destination calc field + filter group.
     """
-    # Declare the 2 drill-target StringParams with sentinel defaults.
+    # Declare the drill-target StringParam with sentinel default.
     analysis.add_parameter(StringParam(
         name=P_L1_FILTER_ACCOUNT,
-        default=[_DRILL_RESET_SENTINEL],
-    ))
-    analysis.add_parameter(StringParam(
-        name=P_L1_TX_TRANSFER,
         default=[_DRILL_RESET_SENTINEL],
     ))
 
@@ -2687,13 +2741,6 @@ def _wire_drill_filter_groups(
             dataset_id=DS_LIMIT_BREACH,
             column_name="account_id",
             sheet_id=SHEET_LIMIT_BREACH,
-        ),
-        _DrillDest(
-            fg_id=FilterGroupId("fg-l1-drill-transfer-on-transactions"),
-            param_name=P_L1_TX_TRANSFER,
-            dataset_id=DS_TRANSACTIONS,
-            column_name="transfer_id",
-            sheet_id=SHEET_TRANSACTIONS,
         ),
     ]
 
