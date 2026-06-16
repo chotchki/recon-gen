@@ -257,7 +257,15 @@ def seeded_cfg(isolated_cfg: "Config") -> Iterator["Config"]:
     from recon_gen.common.l2 import default_l2_instance  # noqa: PLC0415
 
     instance = default_l2_instance()
-    conn = connect_demo_db(isolated_cfg)
+    # read_only=False forces a read-WRITE seed connection even when the
+    # runner set RECON_GEN_DB_READ_ONLY=1 for the DuckDB tier. The
+    # read-only env is the test-READ contract (per-worker reads); the
+    # seed below must write the iso DB. Without this the DuckDB iso file
+    # is opened read-only, can't be created, and every db-tier test that
+    # depends on seeded_cfg errors at setup. PG/Oracle ignore the arg
+    # (they seed read-write regardless; their read-only is enforced via
+    # SET default_transaction_read_only, not the connect mode).
+    conn = connect_demo_db(isolated_cfg, read_only=False)
     try:
         apply_db_seed(
             conn,

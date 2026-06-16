@@ -166,7 +166,7 @@ _AMBIGUOUS_DUCKDB_TOP_DIRS: frozenset[str] = frozenset({
 })
 
 
-def connect_demo_db(cfg: Config) -> "SyncConnection":  # CB.16 — replaces the `-> Any` escape hatch with the structural Protocol defined below. Per-driver concrete types (psycopg.Connection / oracledb.Connection / duckdb.DuckDBPyConnection) all match SyncConnection structurally, so callers downcast at the boundary if they need driver-specific features.
+def connect_demo_db(cfg: Config, *, read_only: bool | None = None) -> "SyncConnection":  # CB.16 — replaces the `-> Any` escape hatch with the structural Protocol defined below. Per-driver concrete types (psycopg.Connection / oracledb.Connection / duckdb.DuckDBPyConnection) all match SyncConnection structurally, so callers downcast at the boundary if they need driver-specific features.
     """Open a DB-API 2.0 connection to ``cfg.db.url``.
 
     Branches on ``cfg.db.dialect``:
@@ -240,7 +240,15 @@ def connect_demo_db(cfg: Config) -> "SyncConnection":  # CB.16 — replaces the 
         import duckdb
         from recon_gen.common.env_keys import RECON_GEN_DB_READ_ONLY
         path = duckdb_path(cfg.db.url)
-        read_only = bool(RECON_GEN_DB_READ_ONLY.get_or_none())
+        # DM-followup (2026-06-16) — an explicit ``read_only=`` arg wins
+        # over the env. RECON_GEN_DB_READ_ONLY enforces the test-READ
+        # contract across xdist workers; it must NOT bind the SEED step
+        # (``seeded_cfg``), which WRITES the per-worker iso DB. Passing
+        # ``read_only=False`` there opens read-write regardless of the
+        # env; the test-read fixtures pass nothing → env-driven default
+        # preserved, so the enforcement contract is intact.
+        if read_only is None:
+            read_only = bool(RECON_GEN_DB_READ_ONLY.get_or_none())
         return cast("SyncConnection", duckdb.connect(path, read_only=read_only))  # DuckDBPyConnection.commit returns self for chaining; SyncConnection.commit returns None per PEP 249. The two-arg `cur.execute(sql, params)` shape callers use works on both
     raise ValueError(
         f"Unknown dialect {cfg.db.dialect!r}. "
