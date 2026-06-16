@@ -171,6 +171,12 @@ def make_filter_specs_for_sheet(sheet: "Sheet") -> list[FilterSpec]:
                 specs.append(ParameterDateSpec(
                     name=str(ctrl.parameter.name), label=ctrl.title,
                     placeholder=placeholder,
+                    # DM.3 — carry the day-availability source account
+                    # param through to the spec; the server route stamps
+                    # the endpoint URL when the dashboard wires a fetcher.
+                    day_availability_account_param=getattr(
+                        ctrl, "day_availability_account_param", None,
+                    ),
                 ))
             continue
         if not isinstance(ctrl, ParameterDropdown):

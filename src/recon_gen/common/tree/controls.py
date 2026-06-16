@@ -323,10 +323,19 @@ class ParameterDateTimePicker:
     True, the QS emitter walk skips this control; App2 renders it
     normally. Use for the day-availability decorated picker shape
     (DM.3) where the App2 renderer adds CSS markers QS can't.
+
+    ``day_availability_account_param`` (DM.3) — when set to a source
+    account-picker parameter name (e.g. ``pL1DsAccount``), the App2
+    renderer wires the Flatpickr ``onDayCreate`` decoration against the
+    ``day-availability`` endpoint, reading the picked account from the
+    named sibling control. ``None`` (default) = no decoration. App2-only
+    (the QS emit ignores it; the QS ``ParameterDateTimePickerControl``
+    API has no per-day decoration surface).
     """
     parameter: ParameterDeclLike
     title: str
     app2_only: bool = False
+    day_availability_account_param: str | None = None
     control_id: str | AutoResolved = AUTO
 
     _AUTO_KIND: ClassVar[str] = "datetime"

@@ -341,15 +341,23 @@ class Sheet:
         parameter: ParameterDeclLike,
         title: str,
         app2_only: bool = False,
+        day_availability_account_param: str | None = None,
         control_id: str | AutoResolved = AUTO,
     ) -> ParameterDateTimePicker:
         """Construct + register a parameter datetime picker control.
 
         ``app2_only`` (DM.0.5) — when True, the QS emitter walk skips
         this control entirely; App2 renders it normally. Default False.
+
+        ``day_availability_account_param`` (DM.3) — when set to an
+        account-picker parameter name, the App2 Flatpickr decorates
+        calendar days with activity markers from the day-availability
+        endpoint, reading the picked account off the named sibling
+        control. ``None`` (default) = no decoration. App2-only.
         """
         ctrl = ParameterDateTimePicker(
             parameter=parameter, title=title, app2_only=app2_only,
+            day_availability_account_param=day_availability_account_param,
             control_id=control_id,
         )
         self.parameter_controls.append(ctrl)

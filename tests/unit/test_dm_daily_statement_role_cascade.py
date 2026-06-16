@@ -22,15 +22,21 @@ Design lock: ``docs/audits/dm_0_daily_statement_app2_cascade.md``.
 from __future__ import annotations
 
 from recon_gen.apps.l1_dashboard.app import (
+    P_L1_DS_ACCOUNT,
+    P_L1_DS_BALANCE_DATE,
+    P_L1_DS_ROLE,
     SHEET_DAILY_STATEMENT,
     build_l1_dashboard_app,
 )
 from recon_gen.apps.l1_dashboard.datasets import build_all_l1_dashboard_datasets
 from recon_gen.common.html import make_filter_specs_for_sheet
-from recon_gen.common.html.render import ParameterDropdownSpec
+from recon_gen.common.html.render import ParameterDateSpec, ParameterDropdownSpec
 from recon_gen.common.l2 import default_l2_instance
 from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
-from recon_gen.common.tree.controls import ParameterDropdown
+from recon_gen.common.tree.controls import (
+    ParameterDateTimePicker,
+    ParameterDropdown,
+)
 from recon_gen.common.tree.structure import App, Sheet
 from tests._test_helpers import make_test_config
 
@@ -74,7 +80,7 @@ def test_dm1_role_dropdown_present_and_app2_only() -> None:
     assert role.app2_only is True, (
         "DM.1 Role dropdown must be app2_only=True so the QS emit skips it"
     )
-    assert role.parameter.name == "pL1DsRole"
+    assert role.parameter.name == str(P_L1_DS_ROLE)
 
 
 def test_dm1_role_first_in_picker_chain() -> None:
@@ -155,7 +161,7 @@ def test_dm2_app2_account_spec_carries_cascade_source_param() -> None:
         s for s in specs
         if isinstance(s, ParameterDropdownSpec) and s.label == "Account"
     )
-    assert account_spec.cascade_source_param == "pL1DsRole", (
+    assert account_spec.cascade_source_param == str(P_L1_DS_ROLE), (
         "DM.2 App2 Account spec must carry the Role cascade source param"
     )
 
@@ -176,4 +182,55 @@ def test_dm2_qs_account_emit_has_no_cascade_config() -> None:
     assert account_ctrl.Dropdown.CascadingControlConfiguration is None, (
         "QS Account control must not carry a CascadingControlConfiguration "
         "pointing at the app2_only Role control"
+    )
+
+
+# --------------------------------------------------------------------------
+# DM.3 — Business Day picker day-availability decoration wiring.
+# --------------------------------------------------------------------------
+
+def test_dm3_business_day_picker_declares_account_source() -> None:
+    """The Business Day picker declares its day-availability source
+    account param (``pL1DsAccount``) so App2 wires the decoration."""
+    sheet = _daily_statement_sheet(_build_l1_app())
+    pickers = [
+        c for c in sheet.parameter_controls
+        if isinstance(c, ParameterDateTimePicker)
+    ]
+    business_day = next(
+        (p for p in pickers if p.title == "Business Day"), None,
+    )
+    assert business_day is not None
+    assert business_day.day_availability_account_param == str(P_L1_DS_ACCOUNT), (
+        "DM.3 Business Day picker must name the Account picker as its "
+        "day-availability source"
+    )
+
+
+def test_dm3_app2_date_spec_carries_account_param() -> None:
+    """App2's date spec for the Business Day picker threads the source
+    account param so the server can stamp the endpoint URL."""
+    sheet = _daily_statement_sheet(_build_l1_app())
+    specs = make_filter_specs_for_sheet(sheet)
+    date_specs = [s for s in specs if isinstance(s, ParameterDateSpec)]
+    business_day = next(
+        (s for s in date_specs if s.name == str(P_L1_DS_BALANCE_DATE)), None,
+    )
+    assert business_day is not None
+    assert business_day.day_availability_account_param == str(P_L1_DS_ACCOUNT)
+
+
+def test_dm3_business_day_picker_not_gated_off_qs() -> None:
+    """DM.3 decoration is App2-only via the tree flag (not app2_only) —
+    the Business Day picker STILL emits to QS as a plain picker. (QS
+    keeps Account + Day; only the Role widget is dropped.)"""
+    sheet = _daily_statement_sheet(_build_l1_app())
+    emitted = sheet.emit()
+    dt_titles = {
+        c.DateTimePicker.Title
+        for c in (emitted.ParameterControls or [])
+        if c.DateTimePicker is not None
+    }
+    assert "Business Day" in dt_titles, (
+        "QS must still render the plain Business Day picker"
     )

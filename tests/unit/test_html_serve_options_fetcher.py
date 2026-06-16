@@ -61,3 +61,13 @@ def test_build_real_dashboards_wires_options_search_fetcher_for_every_app() -> N
             f"narrow (permanently blank sheet)."
         )
         assert served.data_fetcher is not None, f"{name}: no data_fetcher"
+        # DM.3 — the day-availability fetcher must be wired on every
+        # served app so the Daily Statement Business Day picker can
+        # decorate calendar days. Same parity-guard rationale as the
+        # options fetcher above: the CLI serve path must not silently
+        # drop it (POLICY 1 — CLI ≡ e2e harness).
+        assert served.day_availability_fetcher is not None, (
+            f"{name}: ServedDashboard has no day_availability_fetcher — "
+            f"the Daily Statement day-picker decoration (DM.3) will "
+            f"silently no-op (the endpoint returns an empty map)."
+        )

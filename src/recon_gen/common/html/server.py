@@ -115,7 +115,10 @@ _DEVLOG = logging.getLogger("recon_gen.app2.devlog")
 
 from recon_gen.common.db import PoolReleasedDuringRefresh
 from recon_gen.common.html._side_panel import metadata_panel_route_factory
-from recon_gen.common.html._tree_fetcher import OptionsSearchFetcher
+from recon_gen.common.html._tree_fetcher import (
+    DayAvailabilityFetcher,
+    OptionsSearchFetcher,
+)
 from recon_gen.common.html._tree_filter_specs import (
     make_filter_specs_for_sheet,
 )
@@ -219,6 +222,18 @@ class ServedDashboard:
     # the matview lookup (smoke app, unit tests, dashboards built
     # before DK.10 landed).
     data_anchor_fetcher: Callable[[], Awaitable[str | None]] | None = None
+    # DM.3 — per-(account, day) availability fetcher for the Daily
+    # Statement Business Day picker (App2 only). The ``day-availability``
+    # route awaits it with ``(account_display, window_start,
+    # window_end)`` and returns a ``{iso_date: ["transactions" |
+    # "balance"]}`` map the Flatpickr ``onDayCreate`` callback uses to
+    # add ``.has-transactions`` / ``.has-balance`` / ``.has-both`` CSS
+    # markers. DECORATION not restriction — every day stays clickable
+    # (sparse accounts mean any day up to the data anchor is a valid
+    # pick). ``None`` (default) = no decoration (smoke app, unit tests,
+    # dashboards built before DM.3). See
+    # ``docs/audits/dm_0_daily_statement_app2_cascade.md``.
+    day_availability_fetcher: DayAvailabilityFetcher | None = None
 
 
 # CR.1 (2026-06-08) — Excel sheet name limit: ≤ 31 chars + no `: \ / ? * [ ]`.
@@ -243,6 +258,36 @@ def _stamp_max_date_on_date_specs(
         return tuple(specs)
     return tuple(
         replace(s, max_date=max_date) if isinstance(s, ParameterDateSpec) else s
+        for s in specs
+    )
+
+
+def _stamp_day_availability_url(
+    specs: Sequence[FilterSpec],
+    *,
+    dashboard_id: str,  # typing-smell: ignore[bare-str-id]: dashboard_id arrives as a raw path-param string
+    sheet_id: str,  # typing-smell: ignore[bare-str-id]: sheet_id arrives as a raw path-param string
+    has_fetcher: bool,
+) -> tuple[FilterSpec, ...]:
+    """DM.3 — stamp the absolute ``day-availability`` endpoint URL onto
+    every ``ParameterDateSpec`` that declares a
+    ``day_availability_account_param`` AND when the served dashboard
+    wires a ``day_availability_fetcher`` (``has_fetcher``). Other date
+    specs (range pickers, decoration-less single pickers) pass through
+    unchanged. No fetcher → no URL stamped → the picker stays
+    undecorated (smoke app, unit tests, pre-DM.3 dashboards)."""
+    if not has_fetcher:
+        return tuple(specs)
+    route = (
+        f"/dashboards/{dashboard_id}/sheets/{sheet_id}/day-availability"
+    )
+    return tuple(
+        replace(s, day_availability_url=route)
+        if (
+            isinstance(s, ParameterDateSpec)
+            and s.day_availability_account_param is not None
+        )
+        else s
         for s in specs
     )
 
@@ -678,6 +723,15 @@ def make_app(
         if served.data_anchor_fetcher is not None:
             max_date = await served.data_anchor_fetcher()
             filter_specs = _stamp_max_date_on_date_specs(filter_specs, max_date)
+        # DM.3 — stamp the day-availability endpoint URL onto the Daily
+        # Statement Business Day picker (when this dashboard wires a
+        # fetcher + the tree control declares a source account param).
+        filter_specs = _stamp_day_availability_url(
+            filter_specs,
+            dashboard_id=str(dash_id),
+            sheet_id=str(served.sheet.sheet_id),
+            has_fetcher=served.day_availability_fetcher is not None,
+        )
         # X.4.g.12.b — capture the current generation counter at render
         # time. The page's poller will compare against this baseline.
         from recon_gen.common.l2.deploy_pipeline import (  # noqa: PLC0415
@@ -739,6 +793,14 @@ def make_app(
         if served.data_anchor_fetcher is not None:
             max_date = await served.data_anchor_fetcher()
             filter_specs = _stamp_max_date_on_date_specs(filter_specs, max_date)
+        # DM.3 — same day-availability URL stamp as dashboard_view, but
+        # against the path's sheet (the picker lives on Daily Statement).
+        filter_specs = _stamp_day_availability_url(
+            filter_specs,
+            dashboard_id=str(dash_id),
+            sheet_id=str(sheet_id),
+            has_fetcher=served.day_availability_fetcher is not None,
+        )
         # X.4.g.12.b — same poller baseline as dashboard_view.
         from recon_gen.common.l2.deploy_pipeline import (  # noqa: PLC0415
             get_data_generation_id,
@@ -1018,6 +1080,44 @@ def make_app(
             "truncated": result.truncated,
         })
 
+    async def day_availability(request: Request) -> Response:
+        """DM.3 — per-(account, day) availability map for the Daily
+        Statement Business Day picker (App2 only).
+
+        Query params:
+          - ``param_pL1DsAccount`` — the picked ``account_display`` value
+            (the cascade / typeahead value; empty / sentinel → empty
+            map, no SQL fired).
+          - ``window_start`` / ``window_end`` — ISO ``YYYY-MM-DD`` bounds
+            of the visible (overscanned) calendar window.
+
+        Returns ``{"dates": {iso_date: ["transactions" | "balance"]}}``.
+        Days absent from the map render plain — the picker stays fully
+        clickable (DECORATION not restriction). The Flatpickr
+        ``onDayCreate`` callback adds ``.has-transactions`` /
+        ``.has-balance`` / ``.has-both`` markers from this map.
+        """
+        dash_id = str(request.path_params["dashboard_id"])
+        served = dashboards.get(dash_id)
+        if served is None:
+            raise HTTPException(status_code=404)
+        sheet_id = str(request.path_params["sheet_id"])
+        if sheet_id not in all_sheets[dash_id]:
+            raise HTTPException(status_code=404)
+        if served.day_availability_fetcher is None:
+            return JSONResponse({"dates": {}})
+        account = str(request.query_params.get("param_pL1DsAccount", ""))
+        window_start = str(request.query_params.get("window_start", ""))
+        window_end = str(request.query_params.get("window_end", ""))
+        if not account or not window_start or not window_end:
+            # No account picked yet, or the calendar hasn't reported its
+            # window — nothing to decorate.
+            return JSONResponse({"dates": {}})
+        dates = await served.day_availability_fetcher(
+            account, window_start, window_end,
+        )
+        return JSONResponse({"dates": dates})
+
     async def log_event(request: Request) -> Response:
         try:
             payload = await request.json()
@@ -1175,6 +1275,17 @@ def make_app(
             "/dashboards/{dashboard_id}/sheets/{sheet_id}"
             "/dropdown-search/{dataset}/{column}",
             dropdown_search, methods=["GET"],
+        ),
+        # DM.3 — per-(account, day) availability map for the Daily
+        # Statement Business Day picker (App2 only). Sibling route to the
+        # dropdown-options/-search cascade endpoints; the Flatpickr
+        # ``onDayCreate`` callback fetches it per visible calendar window
+        # to decorate days with activity markers (decoration NOT
+        # restriction — every day stays clickable).
+        Route(
+            "/dashboards/{dashboard_id}/sheets/{sheet_id}"
+            "/day-availability",
+            day_availability, methods=["GET"],
         ),
         # CY.5 — row-metadata side-panel fragment for tables wired
         # with ``Table.metadata_popup=True``. Stateless: the metadata

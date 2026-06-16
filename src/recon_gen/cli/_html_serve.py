@@ -136,6 +136,7 @@ def build_real_dashboards(
     guarded the parity between the two serve paths.
     """
     from recon_gen.common.html._tree_fetcher import (  # noqa: PLC0415
+        make_day_availability_fetcher,
         make_options_search_fetcher,
         make_tree_db_fetcher,
     )
@@ -148,6 +149,12 @@ def build_real_dashboards(
     # page; typeahead passes the user-typed string. The pre-CQ.2
     # make_options_fetcher with its silent LIMIT 2000 is gone.
     opts_search_fetcher = make_options_search_fetcher(cfg, pool=pool)
+    # DM.3 — per-(account, day) availability fetcher for the Daily
+    # Statement Business Day picker (App2 only). Pool-backed; one
+    # UNION-ALL query per visible calendar window (overscanned by the
+    # JS so a month-flip rarely re-fires). Shared across dashboards on
+    # this server (one prefix per cfg).
+    day_avail_fetcher = make_day_availability_fetcher(cfg, pool=pool)
     # DK.10 — per-request data-anchor fetcher. Server route awaits it
     # once per dashboard / sheet GET and stamps the resulting
     # ``YYYY-MM-DD`` onto every ParameterDateSpec so the Flatpickr UI
@@ -187,6 +194,7 @@ def build_real_dashboards(
             filter_specs=(),
             options_search_fetcher=opts_search_fetcher,
             data_anchor_fetcher=_fetch_data_anchor,
+            day_availability_fetcher=day_avail_fetcher,
         )
         for name, tree_app, sheet in real_apps
     }

@@ -2654,12 +2654,105 @@
     // when the server rendered ``data-max-date`` (per-request live query).
     // Empty / unset → unbounded (legacy behavior).
     var maxDate = el.dataset.maxDate || undefined;
-    flatpickr(el, {
+
+    // DM.3 — day-availability decoration (App2-only). When the server
+    // stamped ``data-day-availability-url`` + ``data-account-param`` the
+    // calendar decorates each visible day with activity markers
+    // (.has-transactions / .has-balance / .has-both) read from a
+    // per-window server map. DECORATION not restriction: every day stays
+    // clickable. Empty / absent attr → none of the decoration path runs.
+    var dayAvailabilityUrl = el.dataset.dayAvailabilityUrl || null;
+    var accountParam = el.dataset.accountParam || null;
+    // Cache keyed on (account, windowStart, windowEnd) so a tight
+    // back-and-forth between two months doesn't hammer the endpoint.
+    var dayAvailabilityCache = {};
+
+    // The empty-state hint sits adjacent to the picker (the server
+    // renders a hidden <p class="day-picker-empty-window" role="status">).
+    var emptyHint = null;
+    if (hidden && hidden.parentNode) {
+      emptyHint = hidden.parentNode.querySelector(".day-picker-empty-window");
+    }
+
+    function readAccountValue() {
+      if (!accountParam) return "";
+      // The Account picker is a Tom Select <select> (or a plain input on
+      // a degraded load); read whichever carries the name.
+      var node = scope.querySelector('[name="' + accountParam + '"]');
+      return node ? node.value || "" : "";
+    }
+
+    function loadDayAvailability(windowStart, windowEnd, accountValue) {
+      var cacheKey = accountValue + "|" + windowStart + "|" + windowEnd;
+      if (cacheKey in dayAvailabilityCache) {
+        return Promise.resolve(dayAvailabilityCache[cacheKey]);
+      }
+      var params = new URLSearchParams();
+      params.set(accountParam, accountValue);
+      params.set("window_start", windowStart);
+      params.set("window_end", windowEnd);
+      return fetch(dayAvailabilityUrl + "?" + params.toString())
+        .then(function (r) {
+          return r.json();
+        })
+        .then(function (body) {
+          var dates = (body && body.dates) || {};
+          dayAvailabilityCache[cacheKey] = dates;
+          return dates;
+        })
+        .catch(function () {
+          return {};
+        });
+    }
+
+    function applyDayClasses(dayElem, dateStr, datesMap) {
+      var tags = datesMap[dateStr] || [];
+      var hasTx = tags.indexOf("transactions") !== -1;
+      var hasBal = tags.indexOf("balance") !== -1;
+      if (hasTx && hasBal) dayElem.classList.add("has-both");
+      if (hasTx) dayElem.classList.add("has-transactions");
+      if (hasBal) dayElem.classList.add("has-balance");
+    }
+
+    function windowBounds(fp) {
+      // Overscan 30 days each side of the displayed month so an
+      // adjacent-month flip is usually already cached.
+      var first =
+        fp.days && fp.days.firstChild ? fp.days.firstChild.dateObj : null;
+      var last =
+        fp.days && fp.days.lastChild ? fp.days.lastChild.dateObj : null;
+      if (!first || !last) return null;
+      var pad = 30 * 24 * 60 * 60 * 1000;
+      return {
+        start: fp.formatDate(new Date(first.getTime() - pad), "Y-m-d"),
+        end: fp.formatDate(new Date(last.getTime() + pad), "Y-m-d"),
+      };
+    }
+
+    function toggleEmptyHint(datesMap, accountValue, bounds) {
+      if (!emptyHint) return;
+      var isEmpty = Object.keys(datesMap).length === 0;
+      if (isEmpty && accountValue) {
+        emptyHint.textContent =
+          "No activity for " +
+          accountValue +
+          " in the visible window (" +
+          bounds.start +
+          " to " +
+          bounds.end +
+          ").";
+        emptyHint.hidden = false;
+      } else {
+        emptyHint.hidden = true;
+      }
+    }
+
+    var fpConfig = {
       mode: "single",
       dateFormat: "Y-m-d",
       defaultDate: hidden && hidden.value ? hidden.value : null,
       maxDate: maxDate,
-      onChange: (selectedDates, _dateStr, instance) => {
+      onChange: function (selectedDates, _dateStr, instance) {
         var d = selectedDates[0]
           ? instance.formatDate(selectedDates[0], "Y-m-d")
           : "";
@@ -2668,7 +2761,31 @@
           hidden.dispatchEvent(new Event("change", { bubbles: true }));
         }
       },
-    });
+    };
+
+    if (dayAvailabilityUrl && accountParam) {
+      fpConfig.onDayCreate = function (_dObj, _dStr, fp, dayElem) {
+        var accountValue = readAccountValue();
+        if (!accountValue || accountValue.indexOf("__") === 0) return;
+        var bounds = windowBounds(fp);
+        if (!bounds) return;
+        var dateStr = fp.formatDate(dayElem.dateObj, "Y-m-d");
+        loadDayAvailability(bounds.start, bounds.end, accountValue).then(
+          function (datesMap) {
+            applyDayClasses(dayElem, dateStr, datesMap);
+            toggleEmptyHint(datesMap, accountValue, bounds);
+          },
+        );
+      };
+      // Re-fetch on month flip. redraw() re-runs onDayCreate per cell;
+      // the cache absorbs repeat flips so a tight back-and-forth never
+      // re-hits the endpoint.
+      fpConfig.onMonthChange = function (_sel, _str, fp) {
+        fp.redraw();
+      };
+    }
+
+    flatpickr(el, fpConfig);
   }
 
   function wireNoUiSlider(el, scope) {

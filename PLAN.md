@@ -576,7 +576,7 @@ These are related concerns — both about end-to-end resource lifecycle hygiene 
 - [x] DM.0.5 - **Renderer-gate primitive** (if scout shows none exists) — add typed `app2_only: bool` field to relevant tree primitives (Filter / ParameterControl), branch in QS emitter walk to skip them. Tree-walking unit test asserts QS-side surface count vs App2-side surface count when any `app2_only` nodes exist.
 - [x] DM.1 - **Add Role picker to Daily Statement** (App2-only via the renderer-gate primitive). Wire as third picker between Account and Day.
 - [x] DM.2 - **Role → Account cascade** via the existing BR.1 cascade-refresh endpoint. Reuse `dropdown-options/...` route pattern.
-- [ ] DM.3 - **Day picker decoration**: server endpoint returns `{date: ['transactions'|'balance']}` map; Flatpickr `onDayCreate` adds CSS classes; CSS rules for the markers (dot / underline / bullet — pick at design time in DM.0).
+- [x] DM.3 - **Day picker decoration**: server endpoint returns `{date: ['transactions'|'balance']}` map; Flatpickr `onDayCreate` adds CSS classes; CSS rules for the markers (dot / underline / bullet — pick at design time in DM.0).
 - [ ] DM.4 - **Document the QS divergence** (structured triple): append to `docs/reference/quicksight-quirks.md` + file `project_qs_no_searchfilter_cascading.md` memory cross-linking the rationale.
 - [ ] DM.5 - **Tests**: unit (cascade SQL emit, day-availability projection, empty-state hint); E2E App2-only (pick role → account narrows; pick account → day decorations match seed; pick account with no data → empty-state hint shown). QS branch is a no-op assertion that Role picker doesn't exist on QS.
 - [ ] DM.6 - **Phase exit + v14.5.0 release cut** (operator-driven — release notes + version bump + tag at operator's discretion).

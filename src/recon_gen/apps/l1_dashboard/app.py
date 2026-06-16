@@ -2637,8 +2637,19 @@ def _wire_daily_statement_filters(
         # "All" doesn't apply.
         hidden_select_all=True,
     )
+    # DM.3 — Business Day picker gains day-availability decoration
+    # (App2-only). ``day_availability_account_param`` names the Account
+    # picker whose pick keys the per-day activity map; App2's Flatpickr
+    # ``onDayCreate`` adds ``.has-transactions`` / ``.has-balance`` /
+    # ``.has-both`` markers per visible day. DECORATION not restriction —
+    # every day stays clickable (sparse accounts mean any day up to the
+    # data anchor is a valid pick). QS renders the plain picker (the
+    # ``ParameterDateTimePickerControl`` API has no per-day decoration
+    # surface; the tree flag is App2-only). See
+    # ``docs/audits/dm_0_daily_statement_app2_cascade.md``.
     daily_statement_sheet.add_parameter_datetime_picker(
         parameter=ds_balance_date, title="Business Day",
+        day_availability_account_param=str(P_L1_DS_ACCOUNT),
     )
 
 

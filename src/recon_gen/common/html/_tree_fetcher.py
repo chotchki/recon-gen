@@ -72,6 +72,7 @@ from recon_gen.common.sql.dialect import (
     column_name,
     escape_like_pattern,
 )
+from recon_gen.common.sql.display_labels import account_display_expr
 from recon_gen.common.tree.fields import Dim, Measure
 from recon_gen.common.tree.structure import App
 # AO.R.1 — reuse the EXACT label QuickSight stamps on a table header so
@@ -1294,3 +1295,121 @@ def make_options_search_fetcher(
 # ``make_options_search_fetcher`` — cascade passes ``query=''`` to
 # get the seed page, typeahead passes the user-typed ``q``. No
 # silent truncation; no two parallel code paths.
+
+
+# DM.3 — day-availability fetcher. The Daily Statement Business Day
+# picker (App2 only) decorates calendar dates with CSS markers based
+# on per-(account, day) activity. ``(account_display, window_start,
+# window_end) → {iso_date: ["transactions" | "balance", ...]}``. Days
+# absent from the map render plain; the picker stays fully clickable
+# (decoration NOT restriction — sparse accounts mean every day up to
+# ``as_of`` is a valid pick target). Empty account → empty map (no SQL
+# fired). Design lock:
+# ``docs/audits/dm_0_daily_statement_app2_cascade.md`` §"Day-availability
+# endpoint contract" + §"Why decoration not restriction".
+DayAvailabilityFetcher = Callable[
+    [str, str, str],
+    Awaitable[dict[str, list[str]]],
+]
+
+
+def _day_availability_sql(prefix: str) -> str:
+    """UNION-ALL of the per-day ``transactions`` + ``balance`` tags for
+    one account-display value over a date window. Single roundtrip; both
+    arms are ``account_display``-equality + day-range over the Current*
+    matviews.
+
+    Day columns differ per matview (the canonical L1 date-column map in
+    ``datasets.py``): ``current_transactions`` keys its business day off
+    ``posting`` (a timestamp); ``current_daily_balances`` carries a
+    stored ``business_day_start``. Both arms ``CAST … AS DATE`` so the
+    per-day map keys are bare ISO dates regardless of source granularity.
+
+    ``account_display`` is a derived expression (not a stored column) so
+    both arms match via :func:`account_display_expr` — the same NULL-safe
+    ``COALESCE(name, id)`` shape the Daily Statement dataset WHERE
+    clauses use (CQ.1 single-source). Portable across PG / Oracle /
+    DuckDB (ANSI ``CAST AS DATE`` + ``||`` concat).
+    """
+    display = account_display_expr("account_name", "account_id")
+    return (
+        f"SELECT DISTINCT CAST(posting AS DATE) AS business_day,"
+        f" 'transactions' AS source\n"
+        f" FROM {prefix}_current_transactions\n"
+        f" WHERE {display} = :p_account\n"
+        f"   AND CAST(posting AS DATE) >= :p_wstart\n"
+        f"   AND CAST(posting AS DATE) <= :p_wend\n"
+        f"UNION ALL\n"
+        f"SELECT DISTINCT CAST(business_day_start AS DATE) AS business_day,"
+        f" 'balance' AS source\n"
+        f" FROM {prefix}_current_daily_balances\n"
+        f" WHERE {display} = :p_account\n"
+        f"   AND CAST(business_day_start AS DATE) >= :p_wstart\n"
+        f"   AND CAST(business_day_start AS DATE) <= :p_wend"
+    )
+
+
+def make_day_availability_fetcher(
+    cfg: Config,
+    *,
+    pool: AsyncConnectionPool,
+) -> DayAvailabilityFetcher:
+    """DM.3 — build the per-(account, day) availability fetcher.
+
+    The returned awaitable runs one UNION-ALL query (see
+    :func:`_day_availability_sql`) and collapses the
+    ``(business_day, source)`` rows into a ``{iso_date: [tags]}`` map.
+    Empty / sentinel account → empty map, no SQL fired (matches the
+    "no account selected, no data to look at" state). The binds travel
+    as ``extra_binds`` (``:p_account`` / ``:p_wstart`` / ``:p_wend``)
+    so the dialect-aware placeholder rewrite in ``_sql_executor`` binds
+    them as a prepared statement — no SQL injection surface, no
+    per-dialect paramstyle branching here.
+    """
+    prefix = cfg.db.table_prefix
+    sql = _day_availability_sql(prefix)
+
+    async def fetch(
+        account_display: str,
+        window_start: str,
+        window_end: str,
+    ) -> dict[str, list[str]]:
+        if not account_display or account_display.startswith("__"):
+            # Sentinel default / empty pick — no account to look at.
+            return {}
+        rows, _columns = await execute_visual_sql_async(
+            pool, sql, {}, dialect=cfg.db.dialect,
+            extra_binds={
+                "p_account": account_display,
+                "p_wstart": window_start,
+                "p_wend": window_end,
+            },
+        )
+        out: dict[str, list[str]] = {}
+        for day_val, source in rows:
+            if day_val is None or source is None:
+                continue
+            iso = _coerce_iso_date(day_val)
+            if iso is None:
+                continue
+            tags = out.setdefault(iso, [])
+            src = str(source)
+            if src not in tags:
+                tags.append(src)
+        return out
+
+    return fetch
+
+
+def _coerce_iso_date(value: object) -> str | None:
+    """Coerce a driver-returned day value (date / datetime / ISO string)
+    to a bare ``YYYY-MM-DD`` string. ``None`` if it can't be parsed."""
+    from datetime import date as _date, datetime as _dt  # noqa: PLC0415
+    if isinstance(value, _dt):
+        return value.date().isoformat()
+    if isinstance(value, _date):
+        return value.isoformat()
+    s = str(value)
+    # Drivers (DuckDB on some builds) may hand back an ISO string with a
+    # time component; keep just the date portion.
+    return s[:10] if len(s) >= 10 else None

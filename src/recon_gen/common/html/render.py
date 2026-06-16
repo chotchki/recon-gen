@@ -286,6 +286,18 @@ class ParameterDateSpec:
     selected: str = ""
     placeholder: str = "Latest day"
     max_date: str | None = None
+    # DM.3 — day-availability decoration. When set, the Flatpickr
+    # ``onDayCreate`` callback fetches the day-availability map (keyed on
+    # the picked account read from the ``day_availability_account_param``
+    # sibling control) and adds ``.has-transactions`` / ``.has-balance``
+    # / ``.has-both`` CSS markers per visible calendar day. The server
+    # route stamps ``day_availability_url`` (the absolute endpoint URL)
+    # when the served dashboard wires a ``day_availability_fetcher`` and
+    # the tree control declares ``day_availability_account_param``. Both
+    # ``None`` (default) = no decoration. App2-only (QS never renders the
+    # attributes — the gated tree control has no QS surface).
+    day_availability_account_param: str | None = None
+    day_availability_url: str | None = None
 
 
 FilterSpec = (
@@ -1161,13 +1173,37 @@ def _render_parameter_date(spec: ParameterDateSpec) -> str:
         f' data-max-date="{html.escape(spec.max_date)}"'
         if spec.max_date else ""
     )
+    # DM.3 — day-availability decoration attributes (App2-only). When the
+    # server stamped a ``day_availability_url`` AND the tree control
+    # declared a source account param, the Flatpickr ``onDayCreate``
+    # callback fetches the per-day activity map (keyed on the picked
+    # account read from the named sibling control) and adds CSS markers.
+    # Absent → the legacy undecorated picker.
+    day_attr = ""
+    hint_el = ""
+    if spec.day_availability_url and spec.day_availability_account_param:
+        day_attr = (
+            f' data-day-availability-url='
+            f'"{html.escape(spec.day_availability_url)}"'
+            f' data-account-param='
+            f'"param_{html.escape(spec.day_availability_account_param)}"'
+        )
+        # Empty-state hint: a quiet, role="status" line the JS toggles
+        # visible when the picked account has no activity in the visible
+        # window. Located by visible text in e2e
+        # ([[feedback_browser_drivers_user_facing_locators]]), not class.
+        hint_el = (
+            f'<p class="day-picker-empty-window" role="status" '
+            f'aria-live="polite" hidden></p>'
+        )
     return (
         f'    <label class="{_FORM_LABEL_CLASS}">{html.escape(spec.label)} '
         f'<input type="text" data-widget="flatpickr-single" '
         f'data-target-input="{target}" readonly placeholder="{placeholder}" '
         f'class="{_DATE_INPUT_CLASS}" style="{_DATE_INPUT_STYLE}"'
-        f' value="{val}"{max_attr}></label>'
+        f' value="{val}"{max_attr}{day_attr}></label>'
         f'<input type="hidden" name="{target}" value="{val}">'
+        f'{hint_el}'
     )
 
 
