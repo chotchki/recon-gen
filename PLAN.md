@@ -574,7 +574,7 @@ These are related concerns — both about end-to-end resource lifecycle hygiene 
 
 - [x] DM.0 - **Audit + design lock** at `docs/audits/dm_0_daily_statement_app2_cascade.md` (shipped overnight, commit `03769610`; 43KB doc covers the principle, cascade chain, BR.1 cascade-endpoint contract, day-availability endpoint contract, decoration-not-restriction rationale, empty-state UX, and the DM.0.5 renderer-gate scout). Box was left untick'd by the overnight run.
 - [x] DM.0.5 - **Renderer-gate primitive** (if scout shows none exists) — add typed `app2_only: bool` field to relevant tree primitives (Filter / ParameterControl), branch in QS emitter walk to skip them. Tree-walking unit test asserts QS-side surface count vs App2-side surface count when any `app2_only` nodes exist.
-- [ ] DM.1 - **Add Role picker to Daily Statement** (App2-only via the renderer-gate primitive). Wire as third picker between Account and Day.
+- [x] DM.1 - **Add Role picker to Daily Statement** (App2-only via the renderer-gate primitive). Wire as third picker between Account and Day.
 - [ ] DM.2 - **Role → Account cascade** via the existing BR.1 cascade-refresh endpoint. Reuse `dropdown-options/...` route pattern.
 - [ ] DM.3 - **Day picker decoration**: server endpoint returns `{date: ['transactions'|'balance']}` map; Flatpickr `onDayCreate` adds CSS classes; CSS rules for the markers (dot / underline / bullet — pick at design time in DM.0).
 - [ ] DM.4 - **Document the QS divergence** (structured triple): append to `docs/reference/quicksight-quirks.md` + file `project_qs_no_searchfilter_cascading.md` memory cross-linking the rationale.

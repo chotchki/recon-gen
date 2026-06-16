@@ -1,0 +1,128 @@
+"""DM.1 + DM.2 — Daily Statement Role picker + Role→Account cascade.
+
+These tests walk the REAL L1 Daily Statement tree (not a synthetic
+fixture like ``test_app2_only_renderer_gate.py``) and lock the
+DM-shape:
+
+- **DM.1** — the Daily Statement sheet carries a ``Role`` dropdown,
+  flagged ``app2_only=True``, positioned FIRST in the picker chain
+  (Role → Account → Day). The QS emit drops it (flat Account + Day
+  pair survives); the App2 spec walker keeps it.
+- **DM.2** — the ``Account`` dropdown declares ``cascade_source`` =
+  the Role dropdown + ``cascade_match_column`` = the accounts
+  dataset's ``account_role`` column. The App2 spec carries the
+  cascade-source param name (``pL1DsRole``); the QS emit of the
+  Account control carries NO ``CascadingControlConfiguration`` because
+  the cascade source is gated ``app2_only`` (see
+  ``common/tree/controls.py::ParameterDropdown.emit``).
+
+Design lock: ``docs/audits/dm_0_daily_statement_app2_cascade.md``.
+"""
+
+from __future__ import annotations
+
+from recon_gen.apps.l1_dashboard.app import (
+    SHEET_DAILY_STATEMENT,
+    build_l1_dashboard_app,
+)
+from recon_gen.apps.l1_dashboard.datasets import build_all_l1_dashboard_datasets
+from recon_gen.common.html import make_filter_specs_for_sheet
+from recon_gen.common.html.render import ParameterDropdownSpec
+from recon_gen.common.l2 import default_l2_instance
+from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
+from recon_gen.common.tree.controls import ParameterDropdown
+from recon_gen.common.tree.structure import App, Sheet
+from tests._test_helpers import make_test_config
+
+
+def _build_l1_app() -> App:
+    cfg = make_test_config(db_table_prefix=DEFAULT_PREFIX)
+    inst = default_l2_instance()
+    build_all_l1_dashboard_datasets(cfg, inst)
+    app = build_l1_dashboard_app(cfg, l2_instance=inst)
+    app.resolve_auto_ids()
+    return app
+
+
+def _daily_statement_sheet(app: App) -> Sheet:
+    assert app.analysis is not None
+    for sheet in app.analysis.sheets:
+        if sheet.sheet_id == SHEET_DAILY_STATEMENT:
+            return sheet
+    raise AssertionError("Daily Statement sheet not found in L1 tree")
+
+
+def _dropdowns(sheet: Sheet) -> list[ParameterDropdown]:
+    return [
+        c for c in sheet.parameter_controls
+        if isinstance(c, ParameterDropdown)
+    ]
+
+
+# --------------------------------------------------------------------------
+# DM.1 — Role picker, App2-only, first in the chain.
+# --------------------------------------------------------------------------
+
+def test_dm1_role_dropdown_present_and_app2_only() -> None:
+    """The Daily Statement sheet carries a ``Role`` dropdown that is
+    flagged ``app2_only=True``."""
+    sheet = _daily_statement_sheet(_build_l1_app())
+    role = next(
+        (d for d in _dropdowns(sheet) if d.title == "Role"), None,
+    )
+    assert role is not None, "DM.1 Role dropdown missing on Daily Statement"
+    assert role.app2_only is True, (
+        "DM.1 Role dropdown must be app2_only=True so the QS emit skips it"
+    )
+    assert role.parameter.name == "pL1DsRole"
+
+
+def test_dm1_role_first_in_picker_chain() -> None:
+    """Picker order is Role → Account → Day. The Role dropdown precedes
+    the Account dropdown in the sheet's control list."""
+    sheet = _daily_statement_sheet(_build_l1_app())
+    titles = [d.title for d in _dropdowns(sheet)]
+    assert "Role" in titles and "Account" in titles
+    assert titles.index("Role") < titles.index("Account"), (
+        f"Role must come before Account; got order {titles}"
+    )
+
+
+def test_dm1_role_param_not_pushed_into_datasets() -> None:
+    """The Role param is a cascade SOURCE only — no
+    ``mapped_dataset_params`` (the narrow happens in App2's BR.1 query,
+    not via a QS dataset-param pushdown)."""
+    sheet = _daily_statement_sheet(_build_l1_app())
+    role = next(d for d in _dropdowns(sheet) if d.title == "Role")
+    bridges = getattr(role.parameter, "mapped_dataset_params", None)
+    assert not bridges, (
+        "DM.1 Role param must not bridge into any dataset — it is a "
+        f"cascade source only; got {bridges!r}"
+    )
+
+
+def test_dm1_role_dropped_from_qs_emit_kept_on_app2() -> None:
+    """QS emit drops the app2_only Role control; the App2 spec walker
+    keeps it (renders all controls)."""
+    sheet = _daily_statement_sheet(_build_l1_app())
+
+    # QS side: the emitted SheetDefinition's parameter-control titles
+    # do NOT include "Role"; Account + Business Day survive.
+    emitted = sheet.emit()
+    qs_titles = {
+        c.Dropdown.Title for c in (emitted.ParameterControls or [])
+        if c.Dropdown is not None
+    }
+    assert "Role" not in qs_titles, (
+        "QS emit must NOT carry the app2_only Role control"
+    )
+    assert "Account" in qs_titles
+
+    # App2 side: the spec walker carries a dropdown spec for Role.
+    specs = make_filter_specs_for_sheet(sheet)
+    app2_labels = {
+        s.label for s in specs if isinstance(s, ParameterDropdownSpec)
+    }
+    assert "Role" in app2_labels, (
+        "App2 spec walker must render the Role dropdown"
+    )

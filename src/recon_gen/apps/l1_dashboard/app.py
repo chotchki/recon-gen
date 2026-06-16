@@ -194,6 +194,22 @@ P_L1_DATE_END = ParameterName(_P_L1_DATE_END)
 # both the summary KPIs and the transactions detail table.
 P_L1_DS_ACCOUNT = ParameterName("pL1DsAccount")
 P_L1_DS_BALANCE_DATE = ParameterName("pL1DsBalanceDate")
+# DM.1 — Role picker RE-INTRODUCED as the App2-only top-of-chain control
+# (Role → Account → Day). The CQ.4.a note below records why the ORIGINAL
+# ``pL1DsRole`` cascade was dropped: QS's
+# ``GetUniqueAttributeValuesSyncForAnalysis`` can't execute parameterized
+# datasets, so the cascade only ever worked on App2. DM accepts that
+# asymmetry intentionally and gates the Role dropdown ``app2_only=True``
+# (DM.0.5 renderer-gate) — QS keeps the flat Account + Day pair, App2
+# gains the Role narrow via the existing BR.1 cascade endpoint. The Role
+# param is a cascade SOURCE only; it is NOT pushed into the Daily
+# Statement datasets (no ``mapped_dataset_params``) — the narrow happens
+# in the App2 server-side cascade query, not via QS's
+# MappedDataSetParameters bridge (which the gate skips emitting anyway).
+# Sentinel default ``__l1_no_role_selected__`` = "match all roles".
+# See ``docs/audits/dm_0_daily_statement_app2_cascade.md``.
+P_L1_DS_ROLE = ParameterName("pL1DsRole")
+_L1_DS_ROLE_SENTINEL = "__l1_no_role_selected__"
 # CQ.4.a — Role cascade dropped 2026-06-08. Pre-CQ.4 a `pL1DsRole`
 # parameter narrowed the Account dropdown via SQL pushdown into
 # ``DS_L1_DS_ACCOUNTS``; QS's ``GetUniqueAttributeValuesSyncForAnalysis``
@@ -202,7 +218,9 @@ P_L1_DS_BALANCE_DATE = ParameterName("pL1DsBalanceDate")
 # accounts should be searchable" — the Account picker now sources from
 # the un-parameterized `scope = 'internal'` view (every internal
 # account) and the 10 GL-control singletons get their own reference
-# Table at the bottom of the sheet.
+# Table at the bottom of the sheet. DM.1 revives the Role picker as
+# App2-only decoration of this same un-parameterized universe (the
+# narrow is App2-server-side, not a dataset-param pushdown).
 
 # M.2b.7 — Drill-target parameters (sentinel-pattern, mirror of AR).
 # These never appear as visible sheet controls — they're only written
@@ -2508,6 +2526,17 @@ def _wire_daily_statement_filters(
       ``TimeEqualityFilter`` on each dataset's day column (Y.2.f date
       territory; not pushed down here).
     """
+    # DM.1 — Role param (App2-only cascade SOURCE). Mirrors ds_account's
+    # sentinel-default shape so QS doesn't error on an empty
+    # DefaultValues even though the gated dropdown never emits to QS. NO
+    # ``mapped_dataset_params`` — the Role narrow happens in App2's BR.1
+    # cascade query (Role → Account), not via a dataset-param pushdown
+    # (QS can't honor it; see the P_L1_DS_ROLE note above).
+    ds_role = analysis.add_parameter(StringParam(
+        name=P_L1_DS_ROLE,
+        default=[_L1_DS_ROLE_SENTINEL],
+        value_when_unset=_L1_DS_ROLE_SENTINEL,
+    ))
     ds_account = analysis.add_parameter(StringParam(
         name=P_L1_DS_ACCOUNT,
         # BR.x — explicit default matches the dataset's
@@ -2566,6 +2595,23 @@ def _wire_daily_statement_filters(
     # against-parameterized-dataset blocker is gone), so QS's native
     # typeahead works without the pL1DsRole bridge. App2's CQ.2
     # server-side typeahead picks up the same wider universe.
+    # DM.1 — Role picker (App2-only), FIRST in the chain (Role → Account
+    # → Day). ``app2_only=True`` (DM.0.5 renderer-gate) drops it from the
+    # QS emitter walk so QS keeps the flat Account + Day pair; App2
+    # renders it as the cascade source. Options source from the L2-derived
+    # DISTINCT account-roles dataset. DM.2 captures the returned dropdown
+    # and wires it as the Account dropdown's ``cascade_source``.
+    daily_statement_sheet.add_parameter_dropdown(
+        parameter=ds_role, title="Role",
+        type="SINGLE_SELECT",
+        selectable_values=LinkedValues.from_column(
+            datasets[DS_ACCOUNT_ROLES]["account_role"],
+        ),
+        app2_only=True,
+        # SINGLE_SELECT semantically requires picking exactly one —
+        # "All" doesn't apply.
+        hidden_select_all=True,
+    )
     daily_statement_sheet.add_parameter_dropdown(
         parameter=ds_account, title="Account",
         type="SINGLE_SELECT",
@@ -2576,6 +2622,9 @@ def _wire_daily_statement_filters(
             # || ' (' || account_id || ')') = <<$pL1DsAccount>>``).
             datasets[DS_L1_DS_ACCOUNTS]["account_display"],
         ),
+        # DM.2 wires ``cascade_source=role_dd`` +
+        # ``cascade_match_column=...["account_role"]`` here so the
+        # Account dropdown narrows to the picked Role.
         # SINGLE_SELECT semantically requires picking exactly one —
         # "All" doesn't apply.
         hidden_select_all=True,
