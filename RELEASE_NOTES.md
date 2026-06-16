@@ -6,6 +6,47 @@
 > AI, BK, BQ, BW, CK, BV close, snapshotter pattern, runner readiness).
 > v13.14.4 below resumes the convention.
 
+## v14.4.1 — qs_browser regression sweep + App2 fixes (Phase DP)
+
+Patch. v14.4.0 was tagged while the qs_browser test layer was red — the
+Phase DK/DL overnight refactors had fallout that an exit-247 watchdog
+hang was masking. This cut fixes the user-facing App2 bugs that surfaced
+and stabilizes the CI suite. No new features.
+
+### Fixed — App2 (self-hosted dashboards)
+
+- **Literal `&#x27;` in descriptions.** Sheet/visual descriptions with a
+  quoted code span (e.g. L1 Pending Aging's `` `status='Pending'` ``)
+  rendered a literal `&#x27;` instead of `'`. `_render_inline_markdown`
+  over-escaped the apostrophe with `html.escape(quote=True)` before the
+  markdown pass, which python-markdown then re-escaped inside the code
+  span. Fixed via `quote=False` (prose is text content, never an HTML
+  attribute). The DK.11 literal-entity scanner now also pierces
+  `<code>`/`<pre>` for the quote family so a recurrence fails a test.
+- **Cross-sheet drills widen the destination date window again.** Drilling
+  "View Transactions for this transfer" (Pending / Unbundled Aging,
+  Supersession Audit → Transactions) onto an OLD transfer landed on an
+  empty table — App2 was dropping the drill's `DrillStaticDateTime`
+  date-widen writes (the assumption "App2's date filter defaults to all
+  rows" went false at the DK data-anchor refactor). App2 now applies
+  static-value drill writes, restoring App2↔QS parity.
+
+### Test / CI stabilization (Phase DP)
+
+- Picker anchors + drill guardrails now exercise VALID rows instead of
+  `_spine_plant` planted-error markers (which surfaced as picker anchors
+  and drill rows after DL.3's marker sweep), eliminating the exit-247
+  hang that had painted main red since the v14.4.0 cut.
+- The QS embed driver's empty-state read converts from a fixed 800ms
+  one-shot to a bounded paint-poll, fixing the flaky
+  `dropdown_pickers_inverse_excludes_anchor[qs-*]` restore step under
+  concurrent-worker load.
+
+(The original DL.3 leaf-drift → Daily-Statement picker-shape fix — drill
+writing `account_id` vs the picker's `account_display` — shipped in
+v14.4.0; v14.4.1 fixes the regressions the same overnight sweep layered
+on top, now guarded by the parametrized cross-sheet-drill suite.)
+
 ## v14.4.0 — Phase DK data-anchor refactor + DJ tech-debt sweep
 
 Minor bump. Phase DK retires the wall-clock `as_of` fallback in
