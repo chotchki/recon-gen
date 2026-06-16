@@ -81,6 +81,7 @@ from recon_gen.common.tree.structure import App, Sheet
 from recon_gen.common.tree.actions import Drill
 from recon_gen.common.tree.fields import Dim, Measure
 from recon_gen.common.tree.calc_fields import resolve_column
+from recon_gen.common.drill import DrillStaticDateTime
 
 
 # X.2.d — filter primitives beyond the date-range form. All values
@@ -1968,15 +1969,34 @@ def _row_drill_source_column(source: Any) -> str | None:
     """Column name a row-level drill reads its parameter value from.
 
     Only ``Dim`` / ``Measure`` object refs carry a column the App2 table
-    renderer can resolve against the row's cells. ``DrillStaticDateTime``
-    / ``DrillResetSentinel`` writes are QuickSight-isms (date-window
-    widening, sentinel reset) with no App2 equivalent — App2's date
-    filter defaults to "all rows" and there's no calc-field-backed
-    sentinel param — so they're dropped; the bare ``DrillSourceField``
-    escape hatch carries no column name, so it's dropped too.
+    renderer resolves against the row's cells. ``DrillStaticDateTime``
+    carries no column — it's a static literal, emitted via
+    ``_row_drill_static_value`` instead. ``DrillResetSentinel`` (sentinel
+    reset) has no App2 equivalent and the bare ``DrillSourceField`` escape
+    hatch carries no column name, so both are dropped.
     """
     if isinstance(source, (Dim, Measure)):
         return resolve_column(source.column)
+    return None
+
+
+def _row_drill_static_value(source: Any) -> str | None:
+    """Static literal a row-level drill writes verbatim — no row-cell lookup.
+
+    ``DrillStaticDateTime`` carries an ISO-8601 datetime the drill writes
+    to a date-range param to widen the destination's window (the Pending /
+    Unbundled Aging / Supersession Audit → Transactions drills, whose
+    target row can be arbitrarily old). Pre-fix these were dropped on the
+    assumption that "App2's date filter defaults to all rows" — false since
+    the DK data-anchor refactor moved the default to an as_of-anchored
+    window, so a drill onto an old transfer landed on an empty Transactions
+    table. App2's date filter is a DATE picker (``ParameterDateSpec``), so
+    emit the ``YYYY-MM-DD`` date portion;
+    ``server.py::_apply_url_param_overrides`` threads it onto the
+    destination's date spec. Returns None for the other write kinds.
+    """
+    if isinstance(source, DrillStaticDateTime):
+        return source.value.split("T", 1)[0]
     return None
 
 
@@ -1989,7 +2009,13 @@ def _serialize_table_row_drills(visual: Any, dashboard_id: str) -> str:  # typin
         [{"label": "View Transactions for this transfer",
           "trigger": "DATA_POINT_MENU",
           "target_path": "/dashboards/<dash>/sheets/<target-sheet>",
-          "params": [{"name": "pL1TxTransferId", "column": "transfer_id"}]}]
+          "params": [{"name": "pL1TxTransferId", "column": "transfer_id"},
+                     {"name": "pL1DateStart", "value": "1990-01-01"}]}]
+
+    Each ``params`` entry carries EITHER a ``column`` (the value is the
+    drilled row's cell for that column, resolved client-side) OR a
+    ``value`` (a static literal baked in server-side, e.g. a
+    ``DrillStaticDateTime`` date-widen).
 
     ``bootstrap.js::wireRowDrills`` reads it: a ``DATA_POINT_CLICK`` drill
     makes each ``<tr>`` left-clickable (navigates to ``target_path`` with
@@ -2015,6 +2041,13 @@ def _serialize_table_row_drills(visual: Any, dashboard_id: str) -> str:  # typin
             col = _row_drill_source_column(source)
             if col is not None:
                 params.append({"name": str(param.name), "column": col})
+                continue
+            static = _row_drill_static_value(source)
+            if static is not None:
+                # Static literal (e.g. DrillStaticDateTime date-widen) —
+                # ``value`` rides the URL verbatim; bootstrap.js's
+                # rowDrillUrl uses it without a row-cell lookup.
+                params.append({"name": str(param.name), "value": static})
         out.append({
             "label": d.name,
             "trigger": d.trigger,

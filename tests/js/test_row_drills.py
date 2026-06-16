@@ -223,6 +223,32 @@ def test_row_drill_url_column_match_is_case_insensitive() -> None:
     assert url == "/d/s/t?param_pTx=xfr-9"
 
 
+def test_row_drill_url_emits_static_value_params() -> None:
+    """A param carrying a static ``value`` (e.g. a DrillStaticDateTime
+    date-widen) rides the URL verbatim — no row-cell lookup — alongside
+    the per-row ``column`` params. Pre-DP.2 these writes were dropped, so
+    date-widening drills onto old rows landed on an empty destination once
+    the DK data-anchor refactor made the date default an as_of window."""
+    with playwright_sync_api.sync_playwright() as p:
+        browser = p.webkit.launch(headless=True)
+        page = browser.new_page()
+        _load_harness(page)
+        url = cast(str, page.evaluate("""() => {
+            var f = window.__bootstrap_internals__.rowDrillUrl;
+            var colIndex = { transfer_id: 0 };
+            return f({ target_path: '/d/s/t', params: [
+                { name: 'pL1TxTransferId', column: 'transfer_id' },
+                { name: 'pL1DateStart', value: '1990-01-01' },
+                { name: 'pL1DateEnd', value: '2099-12-31' },
+            ]}, ['xfr-1'], colIndex);
+        }"""))
+        browser.close()
+    assert url == (
+        "/d/s/t?param_pL1TxTransferId=xfr-1"
+        "&param_pL1DateStart=1990-01-01&param_pL1DateEnd=2099-12-31"
+    )
+
+
 # -- CY.6 — metadata-popup ctxmenu entry ---------------------------------
 
 

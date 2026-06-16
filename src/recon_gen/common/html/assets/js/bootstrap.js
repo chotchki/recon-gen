@@ -583,11 +583,21 @@
     var qs = [];
     var params = drill.params || [];
     params.forEach((p) => {
-      var i = colIndex[String(p.column).toLowerCase()];
       var v;
-      if (i === undefined || i === null) return;
-      v = row[i];
-      if (v === undefined || v === null) v = "";
+      var i;
+      if (p.value !== undefined && p.value !== null) {
+        // Static-literal write (e.g. a DrillStaticDateTime date-widen):
+        // the value is baked in server-side, so use it verbatim with no
+        // row-cell lookup. Pre-fix these writes were dropped entirely,
+        // so date-widening drills onto old rows landed on an empty
+        // destination once the date default became an as_of window.
+        v = p.value;
+      } else {
+        i = colIndex[String(p.column).toLowerCase()];
+        if (i === undefined || i === null) return;
+        v = row[i];
+        if (v === undefined || v === null) v = "";
+      }
       qs.push(
         "param_" +
           encodeURIComponent(p.name) +
