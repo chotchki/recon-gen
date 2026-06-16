@@ -207,6 +207,11 @@ class OverdraftGenerator:
         scenario_id: str | None = None,
     ) -> None:
         from recon_gen.common.spine.scenario_context import scenario_metadata
+        from recon_gen.common.spine._emit_helpers import insert_tx, ts
+        from recon_gen.common.l2.primitives import (
+            ORIGIN_INTERNAL_INITIATED,
+            POSTED_STATUS,
+        )
         # CZ.2: unconditional source='training' stamp.
         metadata = scenario_metadata(
             scenario_id, generator="OverdraftGenerator",
@@ -223,6 +228,41 @@ class OverdraftGenerator:
             business_day_start=start,
             business_day_end=end,
             money=-self.magnitude,
+            metadata=metadata,
+        )
+        # DL.3.1 — zero-amount drilldown marker tx so the `Overdraft
+        # Violations → Daily Statement for this account-day` drill
+        # destination is non-empty. The matview shows
+        # `Overdraft Acct ({role}) ({account_id})` for the synthetic
+        # daily_balances row (MAX(entry) wins over the baseline customer
+        # name when the plant lands on a template-instance account); the
+        # drill writes that account_display + business_day. Without a
+        # matching tx the Daily Statement Transactions WHERE returns 0
+        # rows and the DL.2 drill guardrail fails with destination-empty.
+        #
+        # Zero amount preserves the overdraft invariant identity: the
+        # matview reads `effective_money < 0` purely from
+        # daily_balances; transactions don't enter the formula. Adding
+        # this tx CAN nudge `computed_subledger` on subsequent days
+        # (it's a cumulative sum), but at amount=0 the sum is
+        # unchanged — drift values on this account stay byte-identical.
+        day_slug = self.anchor_day.isoformat()
+        insert_tx(
+            conn,
+            prefix=self.prefix,
+            id=f"tx-overdraft-marker-{self.account_role}-{self.account_id}-{day_slug}",
+            account_id=self.account_id,
+            account_name=f"Overdraft Acct ({self.account_role})",
+            account_role=self.account_role,
+            account_scope="internal",
+            account_parent_role=self.account_parent_role,
+            amount_money=0.0,
+            amount_direction="Debit",
+            status=POSTED_STATUS,
+            posting=ts(self.anchor_day),
+            transfer_id=f"xfer-overdraft-marker-{self.account_role}-{self.account_id}-{day_slug}",
+            rail_name="_spine_plant",
+            origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
         )
 

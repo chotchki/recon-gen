@@ -37,7 +37,6 @@ from recon_gen.common.spine import (
     iter_edges,
 )
 from recon_gen.common.sql import Dialect
-from tests._test_helpers import fetch_scalar
 
 _SPEC_EXAMPLE = (
     Path(__file__).resolve().parents[1] / "l2" / "spec_example.yaml"
@@ -148,20 +147,56 @@ def test_overdraft_generator_magnitude_zero_does_not_fire() -> None:
         conn.close()
 
 
-def test_overdraft_generator_emits_zero_transactions() -> None:
-    # Balance-only invariant — overdraft's matview reads
-    # current_daily_balances directly, no leg arithmetic. Pinning this
-    # so a future change can't silently grow accidental _insert_tx calls.
+def test_overdraft_generator_emits_one_zero_amount_marker_tx() -> None:
+    # DL.3.1 — OverdraftGenerator emits exactly ONE Posted Money Records
+    # row on the same account-day as the planted overdraft, with
+    # `amount_money = 0`. This is the drilldown marker that makes the
+    # `Overdraft Violations → Daily Statement for this account-day`
+    # drill destination non-empty WITHOUT changing the L1 invariant
+    # math:
+    #
+    # - Overdraft matview reads `effective_money < 0` purely from
+    #   daily_balances; transactions don't enter that formula.
+    # - The AU.0 edge (overdraft on a leaf ALSO trips drift) survives
+    #   because drift's `stored ≠ Σ posted legs` predicate stays true
+    #   when amount=0 (Σ legs = 0; stored = −magnitude; −magnitude ≠ 0).
+    # - `computed_subledger`'s cumulative Σ stays unchanged at +0,
+    #   so other accounts' drift values are not affected by a stray
+    #   non-zero leg here.
+    #
+    # Pinning the exact shape (count=1, amount=0, account_name matches
+    # the synthetic balance row) so a future change can't silently grow
+    # a *non-zero* leg that would break drift's intended-identity
+    # invariant.
     gen = OverdraftInvariant().scenario_for("CustomerSubledger", magnitude=5.0)
     conn = _fresh_db()
     try:
         gen.emit(conn)
         conn.commit()
-        tx_count = fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_transactions",)
+        rows = list(conn.execute(
+            f"SELECT id, account_id, account_name, amount_money "
+            f"FROM {_PREFIX}_transactions"
+        ).fetchall())
     finally:
         conn.close()
-    assert tx_count == 0, (
-        f"OverdraftGenerator emitted {tx_count} transactions; expected 0"
+    assert len(rows) == 1, (
+        f"OverdraftGenerator emitted {len(rows)} transactions; expected 1 "
+        f"(the DL.3.1 zero-amount drilldown marker)"
+    )
+    tx_id, _account_id, account_name, amount_money = rows[0]
+    assert str(tx_id).startswith("tx-overdraft-marker-"), (
+        f"unexpected tx id {tx_id!r}; expected the `tx-overdraft-marker-` "
+        f"DL.3.1 marker shape"
+    )
+    assert amount_money == 0, (
+        f"OverdraftGenerator marker tx amount={amount_money}; expected 0 "
+        f"(non-zero would break drift's `Σ legs ≠ stored` AU.0 edge + "
+        f"shift cumulative computed_subledger on subsequent days)"
+    )
+    assert "Overdraft Acct" in str(account_name), (
+        f"unexpected account_name {account_name!r}; expected to match the "
+        f"synthetic daily_balances row so the Daily Statement Transactions "
+        f"WHERE clause matches account_display"
     )
 
 

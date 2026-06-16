@@ -243,6 +243,7 @@ class DriftGenerator:
             scenario_id, generator="DriftGenerator",
         )
         start, end = day_bounds(self.anchor_day)
+        day_slug = self.anchor_day.isoformat()
         # Child: clean balance == leg total. Stored is shifted by
         # `magnitude` → drift fires on the child.
         insert_balance(
@@ -258,6 +259,13 @@ class DriftGenerator:
             money=self.leg_amount + self.magnitude,
             metadata=metadata,
         )
+        # The non-zero clean leg. ID slug intentionally OMITS anchor_day
+        # so multiple DriftPlants on the same (child_account_id,
+        # child_role) collapse to ONE surviving leg via
+        # current_transactions's MAX(entry) dedup — preserves the
+        # pre-DL.3.1 cumulative-Σ-of-legs shape that the drift
+        # invariant math + semantic locks pin to. Per-day visibility
+        # for the drill destination is the marker tx's job (below).
         insert_tx(
             conn,
             prefix=self.prefix,
@@ -272,6 +280,40 @@ class DriftGenerator:
             status=POSTED_STATUS,
             posting=ts(self.anchor_day),
             transfer_id=f"xfer-drift-{self.child_role}-{self.child_account_id}-1",
+            rail_name="_spine_plant",
+            origin=ORIGIN_INTERNAL_INITIATED,
+            metadata=metadata,
+        )
+        # DL.3.1 — zero-amount drilldown marker tx on the child so the
+        # `Leaf Account Drift → Daily Statement for this account-day`
+        # drill destination is non-empty for EVERY plant's anchor_day.
+        # Anchor_day in the id slug uniquifies per-plant — multiple
+        # DriftPlants on the same (child_account_id, child_role) all
+        # survive current_transactions's MAX(entry) dedup since each
+        # carries a distinct id.
+        #
+        # Zero amount keeps `computed_subledger`'s cumulative Σ legs
+        # unchanged → drift = stored − Σ legs identity is preserved
+        # bit-for-bit, so tests/data/_semantic_locks/* stays
+        # byte-identical across the (drift invariant identity) shape.
+        # Without the marker the only leg tx surviving dedup lands on
+        # whichever plant emitted last (MAX(entry)); the 6 other
+        # DriftPlants in the DM.1 helper's 7-plant pack render with
+        # zero Posted Money Records on their drilled day.
+        insert_tx(
+            conn,
+            prefix=self.prefix,
+            id=f"tx-drift-marker-child-{self.child_account_id}-{day_slug}",
+            account_id=self.child_account_id,
+            account_name=f"Drift Child ({self.child_role})",
+            account_role=self.child_role,
+            account_scope="internal",
+            account_parent_role=self.parent_role,
+            amount_money=0.0,
+            amount_direction="Credit",
+            status=POSTED_STATUS,
+            posting=ts(self.anchor_day),
+            transfer_id=f"xfer-drift-marker-child-{self.child_account_id}-{day_slug}",
             rail_name="_spine_plant",
             origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
@@ -292,6 +334,41 @@ class DriftGenerator:
                 business_day_start=start,
                 business_day_end=end,
                 money=self.leg_amount,
+                metadata=metadata,
+            )
+            # DL.3.1 — zero-amount drilldown marker tx so the `Parent
+            # Account Drift → Daily Statement` drill destination
+            # carries at least one Posted Money Record on the parent
+            # account-day. The parent shows in `_drift` matview via
+            # ledger_drift propagation (parent.stored − Σ child.stored =
+            # −magnitude); the drill writes the parent's account_display
+            # + business_day. Without this tx the Daily Statement
+            # Transactions WHERE clause (account_display = pL1DsAccount
+            # AND posting_day = pL1DsBalanceDate) returns 0 rows and the
+            # DL.2 drill guardrail fails with destination-empty.
+            #
+            # Zero amount keeps `computed_ledger_balance` (Σ parent
+            # direct postings) exactly 0 → ledger_drift's
+            # `parent.stored − parent.computed` math is preserved, so
+            # the violation identity in tests/data/_semantic_locks/*
+            # stays byte-identical (verified by re-lock-emits-no-diff
+            # post-change).
+            insert_tx(
+                conn,
+                prefix=self.prefix,
+                id=f"tx-drift-marker-parent-{self.parent_account_id}-{day_slug}",
+                account_id=self.parent_account_id,
+                account_name=f"Drift Parent ({self.parent_account_role})",
+                account_role=self.parent_account_role,
+                account_scope="internal",
+                account_parent_role=None,
+                amount_money=0.0,
+                amount_direction="Credit",
+                status=POSTED_STATUS,
+                posting=ts(self.anchor_day),
+                transfer_id=f"xfer-drift-marker-parent-{self.parent_account_id}-{day_slug}",
+                rail_name="_spine_plant",
+                origin=ORIGIN_INTERNAL_INITIATED,
                 metadata=metadata,
             )
 
@@ -368,6 +445,11 @@ class LedgerDriftGenerator:
             money=self.leg_amount,
             metadata=metadata,
         )
+        # Child clean leg — id intentionally omits anchor_day so the
+        # pre-DL.3.1 cumulative-Σ shape is preserved (see
+        # DriftGenerator.emit's same-shape comment). Today's per-day-
+        # unique parent_role keeps this id collision-safe across plants.
+        day_slug = self.anchor_day.isoformat()
         insert_tx(
             conn,
             prefix=self.prefix,
@@ -400,6 +482,32 @@ class LedgerDriftGenerator:
             business_day_start=start,
             business_day_end=end,
             money=self.leg_amount + self.delta,
+            metadata=metadata,
+        )
+        # DL.3.1 — zero-amount drilldown marker tx on the parent so the
+        # `Parent Account Drift → Daily Statement for this account-day`
+        # drill destination is non-empty. Mirrors DriftGenerator's
+        # parent-side marker (see DriftGenerator.emit for rationale).
+        # Zero amount preserves `computed_ledger_balance` (Σ parent
+        # direct postings stays 0) → ledger_drift = parent.stored −
+        # Σ child.stored = delta exactly — invariant identity locked
+        # in tests/data/_semantic_locks/* stays byte-identical.
+        insert_tx(
+            conn,
+            prefix=self.prefix,
+            id=f"tx-ledger-drift-marker-parent-{self.parent_account_id}-{day_slug}",
+            account_id=self.parent_account_id,
+            account_name=f"Ledger Drift Parent ({self.parent_role})",
+            account_role=self.parent_role,
+            account_scope="internal",
+            account_parent_role=None,
+            amount_money=0.0,
+            amount_direction="Credit",
+            status=POSTED_STATUS,
+            posting=ts(self.anchor_day),
+            transfer_id=f"xfer-ledger-drift-marker-parent-{self.parent_account_id}-{day_slug}",
+            rail_name="_spine_plant",
+            origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
         )
 

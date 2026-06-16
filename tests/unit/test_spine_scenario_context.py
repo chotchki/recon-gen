@@ -343,8 +343,12 @@ def test_cleanup_by_scenario_id_is_surgical() -> None:
         ctx_b.compose(conn, gen_b)
         assert fetch_scalar(conn, f"SELECT COUNT(*) FROM {_PREFIX}_daily_balances",) == 2
         deleted = ctx_a.cleanup(conn)
-        assert deleted == 1, (
-            f"Expected 1 row deleted (one daily_balances row); got {deleted}"
+        # DL.3.1 — OverdraftGenerator now emits 1 daily_balances row +
+        # 1 zero-amount drilldown-marker tx, so scenario-A's tagged
+        # footprint is 2 rows. Pre-DL.3.1 was 1 (balance-only emit).
+        assert deleted == 2, (
+            f"Expected 2 rows deleted (one daily_balances + one DL.3.1 "
+            f"drilldown-marker tx); got {deleted}"
         )
         remaining = conn.execute(
             f"SELECT account_id FROM {_PREFIX}_daily_balances",
