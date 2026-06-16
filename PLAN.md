@@ -557,6 +557,35 @@ These are related concerns — both about end-to-end resource lifecycle hygiene 
 - [x] DL.3.5 - **QS drift cells fast-skip at 5.7s (table cells don't render in time).** Even with planted drift data (`db_counts.txt` shows drift=17, ledger_drift=18), the QS embed iframe doesn't paint Leaf Account Drift's first row in time for `_read_source_row_values()` to capture it. Same renderer-timing class as task #68 (Transactions-Transfer sheet-mount), #69 (Anchor DOM shape). Operator suspects a matview is needed to pre-aggregate the drift visual so QS can render fast enough. Investigate: probable shape is a `<prefix>_drift_summary` matview projecting `(account_display, leaf_drift_amount, parent_drift_amount, business_day)` so QS hits a tabular shape directly. **Landed**: `<prefix>_drift_summary` matview UNIONs `<prefix>_drift` + `<prefix>_ledger_drift` with pre-computed `account_display` + `abs_drift` + `account_class` discriminator. Wired into refresh order, snapshotter, BV.6 UNIQUE-index test list. `build_drift_dataset` + `build_ledger_drift_dataset` SELECT from the new matview filtered by `account_class`. Same dataset IDs + contracts — visual rewire is transparent.
 - [ ] DL.3.6 - **Phase exit + v14.4.1 release cut** (operator-driven — bundled hotfix release including the entire DL.3-reopen chain).
 
+## Phase DM - Daily Statement App2-only cascade + day-availability picker (draft 2026-06-16)
+
+**Why:** App2's server-rendered model can dynamically query "what data exists for this account" cheaply per request; QS can't (dataset-parameter cross-wiring hits `[[project_qs_url_parameter_no_control_sync]]`). This is the right kind of symmetry break — driven by renderer capability, not arbitrary preference. Per `[[feedback_qs_convention_origin]]` ("App2 may break the rule when a better affordance exists"), this is the second authorized App2-over-QS divergence.
+
+**Principle (prominent in DM.0):** App2 cascades on search/filter; the DATA stays consistent with QS. The symmetry break is UX-of-finding-the-row, not what-the-row-shows. Motivation: every tester gets burned by QS's cascade-that-doesn't (cascading dataset parameters silently failing, control-sync quirks).
+
+**Locks (operator-confirmed 2026-06-16):**
+- **Picker order**: Role → Account → Day (top-to-bottom in sidebar; left-to-right in horizontal layout). Reads as a natural drill-down progression.
+- **Role → Account cascade** via the existing BR.1 cascade-refresh endpoint pattern.
+- **Account → Day filter — DECORATION not RESTRICTION.** Sparse accounts mean any day up to `as_of` stays valid as a pick target. Flatpickr's `onDayCreate` callback adds CSS classes (`.has-transactions`, `.has-balance`, `.has-both`) based on a server-supplied date map. No `enable:`/`disable:` arrays — full date space stays clickable.
+- **QS keeps Account + Day pickers, no work, just document the divergence** via structured triple (quirks.md + memory file).
+- **Renderer-gate primitive: strongly typed in core trees** (per operator preference, not a registry side-table; tree-walking already pays off in DL.1's `iter_cross_sheet_drills` + DA.5's `Table.__post_init__` type-system gate). If no primitive exists, add `app2_only: bool` field to relevant tree primitives (Filter / ParameterControl) + branch in QS emitter walk to skip those nodes — that's DM.0.5 (prereq).
+- **One commit per leaf**; release ships as v14.5.0.
+
+- [ ] DM.0 - **Audit + design lock** at `docs/audits/dm_0_daily_statement_app2_cascade.md`. Document the cascade chain, the day-availability SQL shape (single roundtrip via the existing pool), the empty-state UX, the QS-not-supported structured triple, and the renderer-gate-primitive scout result. The principle ("data parity, UX divergence") leads the doc.
+- [ ] DM.0.5 - **Renderer-gate primitive** (if scout shows none exists) — add typed `app2_only: bool` field to relevant tree primitives (Filter / ParameterControl), branch in QS emitter walk to skip them. Tree-walking unit test asserts QS-side surface count vs App2-side surface count when any `app2_only` nodes exist.
+- [ ] DM.1 - **Add Role picker to Daily Statement** (App2-only via the renderer-gate primitive). Wire as third picker between Account and Day.
+- [ ] DM.2 - **Role → Account cascade** via the existing BR.1 cascade-refresh endpoint. Reuse `dropdown-options/...` route pattern.
+- [ ] DM.3 - **Day picker decoration**: server endpoint returns `{date: ['transactions'|'balance']}` map; Flatpickr `onDayCreate` adds CSS classes; CSS rules for the markers (dot / underline / bullet — pick at design time in DM.0).
+- [ ] DM.4 - **Document the QS divergence** (structured triple): append to `docs/reference/quicksight-quirks.md` + file `project_qs_no_searchfilter_cascading.md` memory cross-linking the rationale.
+- [ ] DM.5 - **Tests**: unit (cascade SQL emit, day-availability projection, empty-state hint); E2E App2-only (pick role → account narrows; pick account → day decorations match seed; pick account with no data → empty-state hint shown). QS branch is a no-op assertion that Role picker doesn't exist on QS.
+- [ ] DM.6 - **Phase exit + v14.5.0 release cut** (operator-driven — release notes + version bump + tag at operator's discretion).
+
+## Phase DN - Running balance on Daily Statement (both renderers, placeholder 2026-06-16)
+
+Operator flagged 2026-06-16 in the DM design discussion: adding a running-balance column to Daily Statement (balance carried forward across transactions on a given account-day) would benefit BOTH QS and App2 — it's a parity feature, not a symmetry break. Parked as a separate phase from DM because DM is specifically the UX-of-finding-the-row work; running balance is the row-shape work.
+
+Sub-leaves TBD at phase-open. Probable touch surface: `apps/l1_dashboard/datasets.py` (Daily Statement SQL + contract — running balance is a window-aggregation projection), `common/l2/schema.py` (only if a matview helps), `tests/e2e/` (both renderer cells assert running-balance column present + arithmetic correct).
+
 ## Backlog (not yet phased)
 
 - **date-model.plant-days_ago-bounded — replace plant days_ago: int with days_into_window bounded type** — added 2026-06-12.
@@ -564,6 +593,3 @@ These are related concerns — both about end-to-end resource lifecycle hygiene 
 - **Encode QS parameter-commit sequence as a typed wrapper (Tab-required)** — added 2026-06-15.
 - **DD.4.e2e follow-up: full sign_in_via_oidc Dex round-trip e2e** — added 2026-06-15. `tests/e2e/app2/test_oauth_login_flow.py` exercises the JwtCookieMiddleware contract + 4 of 6 OIDC verb paths, but not the full Dex code-flow round-trip. Requires `html2_server` to bind to `cfg.auth.oidc.redirect_uri`'s exact `host:port` over HTTPS via `cfg.app2.tls` — current ephemeral-port HTTP server doesn't match the Dex-registered redirect_uri. Add `bind_host` / `bind_port` / `ssl_certfile` / `ssl_keyfile` kwargs to `html2_server` + thread through `App2Driver.serving`, then unskip the `sign_in_via_oidc` full-flow test guarded by `cfg.app2.tls` + `dex_container_url`. Operator triage step: spin Dex via `./run_tests.sh triage tests/e2e/app2/test_oauth_login_flow.py::<new_test>` + pdb-inspect the Dex login form selectors against `password.html` v2.40.0.
 - **App2 table sort arrow appears backwards (operator-reported, code-trace looks right — need repro path)** — added 2026-06-16.
-- **DL.3.3 — Runner `--only` rejects pytest -k expressions with spaces** — added 2026-06-16.
-- **DL.3.4 — Runner xdist exit=3 when --only filters out all items in an earlier layer** — added 2026-06-16.
-- **DL.3.5 — QS drift cells fast-skip at 5.7s (matview likely needed)** — added 2026-06-16.
