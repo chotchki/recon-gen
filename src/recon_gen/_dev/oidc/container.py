@@ -191,6 +191,31 @@ def get_or_start_dex_container(
                 user_password_hash=user_password_hash,
             )
 
+        # DD.4 adversarial-review #6 (2026-06-16) — honor caller's pinned
+        # port. When the caller passes a specific host_port > 0 but the
+        # adopted container is bound to a different port, the test path
+        # that pins the port (e.g. `cfg.auth.oidc.redirect_uri`'s exact
+        # `host:port` registered with Dex) would otherwise burn a 30s
+        # refused-failfast trying to connect on the requested port while
+        # Dex is reachable elsewhere. Force-recreate on mismatch so the
+        # caller's intent wins. `host_port == 0` (auto-assign) skips
+        # this check — every adopt would force-recreate otherwise, which
+        # defeats the shared-container optimization.
+        if host_port > 0 and actual_host_port != host_port:
+            try:
+                existing.remove(force=True)
+            except Exception:  # noqa: BLE001 — best-effort
+                pass
+            return _start_fresh_dex_container(
+                client=client,
+                host_port=host_port,
+                cfg_dir=cfg_dir,
+                cert_path=cert_path,
+                key_path=key_path,
+                client_secret=client_secret,
+                user_password_hash=user_password_hash,
+            )
+
         # DJ.2.adopt_mount_check (2026-06-15): the adopted container's
         # bind-mount source must match the current cfg_dir, else the
         # container is serving STALE config (cert renewal, client_secret
