@@ -2263,7 +2263,7 @@ def _testcontainer_logs_tail(
             # be a str or an iterator of bytes per docker-py's ``logs(stream=)``
             # surface; stringify defensively. The type: ignore on the prior
             # line propagates Unknown, hence the cast here.
-            text = str(raw)  # pyright: ignore[reportUnknownArgumentType]
+            text = str(raw)  # pyright: ignore[reportUnknownArgumentType]: docker-py's logs() return is Unknown per the type: ignore on the prior line
         if not text.strip():
             return (
                 "\n  (container produced no logs — likely never ran the "
@@ -2406,7 +2406,7 @@ def _start_thin_container(
             # the PG path. The stable name lets us look up the container
             # by docker name even if the testcontainers handle wasn't
             # returned.
-            tail = _testcontainer_logs_tail("recon-gen-thin-oracle")
+            tail = _testcontainer_logs_tail("recon-gen-thin-oracle")  # typing-smell: ignore[recon-prefix]: same Docker container name as line 2402 — stable for adopt-or-create lookup, not an AWS / DB resource ID
             raise RuntimeError(
                 f"OracleDbContainer start failed: {exc!r}{tail}"
             ) from exc
