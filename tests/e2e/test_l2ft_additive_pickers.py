@@ -143,6 +143,13 @@ L2FT_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         dataset_builder=build_postings_dataset,
         contract=POSTINGS_CONTRACT,
         anchor_order="posting DESC, id ASC",
+        # DL.3.1/DL.3.7 plant zero-amount '_spine_plant' marker tx with
+        # recent ``posting``; without this constraint ``posting DESC``
+        # lands the anchor on a marker whose non-advertised rail can't
+        # round-trip the Rail dropdown (QS hangs on the missing listbox
+        # option -> the exit-247 hang-watchdog SIGKILL; App2 no-ops the
+        # setValue). Anchor a real rail's transfer — skip planted markers.
+        anchor_where_template="rail_name <> '_spine_plant'",
         pickers=(
             PickerSpec(
                 label="Date From", kind="date_from", column="posting",

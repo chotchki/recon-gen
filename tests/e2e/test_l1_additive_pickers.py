@@ -352,6 +352,15 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
             "account_id IN ("
             "SELECT account_id FROM {prefix}_current_daily_balances"
             ")"
+            # DL.3.1/DL.3.7 plant zero-amount drilldown marker tx with
+            # rail_name='_spine_plant' (a non-advertised synthetic rail).
+            # DL.3.7's carry-day sweep gives them recent ``posting``, so
+            # the ``posting DESC`` tiebreak lands the anchor on a marker
+            # whose rail can't round-trip the Transfer Type dropdown (App2
+            # no-ops the TomSelect setValue; QS hangs on the missing
+            # listbox option -> the exit-247 hang-watchdog SIGKILL).
+            # Anchor a real transfer instead — skip the planted markers.
+            " AND rail_name <> '_spine_plant'"
         ),
         pickers=(
             PickerSpec(
