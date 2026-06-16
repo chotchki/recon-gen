@@ -3289,6 +3289,109 @@ def _normalize_argv(argv: Sequence[str]) -> list[str]:
     return args
 
 
+# DL.3.3 — pytest -k's tokenizer accepts identifiers (``[A-Za-z0-9_]+``)
+# joined by ``and`` / ``or`` / ``not`` / parens. Visible-name substrings
+# carrying spaces ("Leaf Account", "Parent Account") are first-class for
+# operators (those ARE the visual / parametrize-id strings they grep
+# the codebase for) but pytest rejects them with
+# ``at column N: expected end of input; got identifier``. We transform
+# each whitespace-containing token into ``(word1 and word2)`` so each
+# word becomes its own identifier substring AND-joined — pytest's
+# substring matching then finds parametrize ids like
+# ``[Leaf Account Drift]``. Operator-typed ``and`` / ``or`` / ``not``
+# stay as operators; parens stay intact. Quoting / escaping was the
+# obvious-but-doesn't-work fallback (pytest -k flatly rejects
+# ``"Leaf Account"`` as ``string literal``).
+_K_OP_TOKENS: Final = frozenset({"and", "or", "not"})
+
+
+def _normalize_only_expr(expr: str | None) -> str | None:
+    """Convert pytest ``-k`` expressions with space-bearing identifier
+    substrings into a tokenizer-safe equivalent.
+
+    ``"Leaf Account or Parent Account"`` →
+    ``"(Leaf and Account) or (Parent and Account)"``. ``None`` and
+    already-tokenizer-safe expressions pass through unchanged.
+    """
+    if expr is None:
+        return None
+    # Strip trivial outer whitespace; pytest tolerates it but the
+    # tokenization below is cleaner without it.
+    if not expr.strip():
+        return expr
+    # Walk the expression character-by-character, partitioning into
+    # identifier tokens vs parens. Whitespace ends an identifier token.
+    # We accumulate identifier chars into ``buf``; on a paren or
+    # whitespace boundary we flush + classify ``buf``.
+    out: list[str] = []
+    buf: list[str] = []
+
+    def _flush() -> None:
+        if not buf:
+            return
+        ident = "".join(buf)
+        buf.clear()
+        out.append(ident)
+
+    prev_was_space = False
+    for ch in expr:
+        if ch.isspace():
+            _flush()
+            # Collapse consecutive whitespace into a single delimiter
+            # token so the run-collecting loop below has a clean
+            # invariant ("space tokens are exactly one space").
+            if not prev_was_space:
+                out.append(" ")
+                prev_was_space = True
+        elif ch in "()":
+            _flush()
+            out.append(ch)
+            prev_was_space = False
+        else:
+            buf.append(ch)
+            prev_was_space = False
+    _flush()
+
+    # Treat consecutive identifier tokens (no operator between them,
+    # e.g. ``Leaf Account``) as a single space-bearing token that
+    # needs the AND-rewrite.
+    pieces: list[str] = []
+    i = 0
+    while i < len(out):
+        tok = out[i]
+        if tok == " ":
+            pieces.append(" ")
+            i += 1
+            continue
+        if tok in "()" or tok in _K_OP_TOKENS:
+            pieces.append(tok)
+            i += 1
+            continue
+        # Identifier token. Greedy-collect consecutive identifier tokens
+        # (separated by exactly one whitespace, not operators / parens)
+        # and AND-join them if there's more than one.
+        run = [tok]
+        j = i + 1
+        while j + 1 < len(out) and out[j] == " ":
+            nxt = out[j + 1]
+            if nxt in "()" or nxt in _K_OP_TOKENS or nxt == " ":
+                break
+            run.append(nxt)
+            j += 2
+        if len(run) == 1:
+            pieces.append(run[0])
+        else:
+            pieces.append("(" + " and ".join(run) + ")")
+        i = j
+
+    normalized = "".join(pieces).strip()
+    # Collapse any doubled spaces left over (defensive — the
+    # tokenization above already deduped them).
+    while "  " in normalized:
+        normalized = normalized.replace("  ", " ")
+    return normalized
+
+
 def _options_from_args(args: argparse.Namespace) -> RunOptions:
     """Build a RunOptions from the argparse Namespace. Defaults are baked in
     (most flags `default=False`/`default=None` from `_build_parser`).
@@ -3296,9 +3399,13 @@ def _options_from_args(args: argparse.Namespace) -> RunOptions:
     Y.2.gate.c.6.xdist-safety: ``fuzz_seed_value`` is resolved here (not
     argparse) — operator overrides via ``RECON_GEN_FUZZ_SEED`` env (the canonical
     pinning channel per audit §7.11), else random per invocation.
+
+    DL.3.3: ``only`` is normalized via ``_normalize_only_expr`` so
+    operator-typed visible names with spaces (``"Leaf Account or Parent
+    Account"``) pass pytest -k's identifier-only tokenizer.
     """
     return RunOptions(
-        only=getattr(args, "only", None),
+        only=_normalize_only_expr(getattr(args, "only", None)),
         parallel=getattr(args, "parallel", 1),
         scenarios=getattr(args, "scenarios", None),
         dialects=getattr(args, "dialects", None),
