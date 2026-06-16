@@ -1,6 +1,16 @@
 # QuickSight Generator — Active Plan
 
 
+## Phase DMDN-E2E - App2 e2e coverage for DM/DN Daily Statement features (POLICY-2)
+
+POLICY-2 browser coverage for three App2-only Daily Statement features landed on `feature/dm-dn` (cascade narrowing DM.2, cascade clear-on-source-change DM/BR.1, day-availability decoration DM.3). QS cannot do these → App2-targeted tests, structured-triple gap on the QS driver.
+
+- [ ] DMDN-E2E.1 - Add driver verbs: `filter_value(label)` + `day_availability(label)` on `App2Driver`; Protocol stubs in `_drivers/base.py`; `NotImplementedError` (structured-triple) on `QsEmbedDriver`.
+- [ ] DMDN-E2E.2 - Wire `day_availability_fetcher` through `html2_server` + `App2Driver.serving` + `make_live_db_*` harness so the live L1 server decorates the picker.
+- [ ] DMDN-E2E.3 - `tests/e2e/app2/test_dm_cascade_and_day_availability.py` — cascade narrowing, cascade clear-on-source-change, day-availability decoration; expectations derived from DB/tree.
+- [ ] DMDN-E2E.4 - Green through `./run_tests.sh up_to=app2 --dialects=du --targets=lo`; pyright + biome clean; commit on `feature/dm-dn`.
+
+
 ## Phase BX - L2 Editor cold-read + address cycle (provisional)
 
 Same cold-read → triage → design → implement → re-cold-read pattern that BT/BTa established, applied to the L2 Editor surface (the `/` home + `/l2_shape/<kind>/{list, new, edit}` for the six entity kinds + the three singleton pages for instance / theme / persona). Unlike BT (where the design intent was operator-driven from SPEC), the L2 Editor is **discovery-first** — we haven't pointed a first-time persona at it yet, so we don't know what's broken until BX.0.5 fires. BX.1+ implementation cells get enumerated by BX.0.7's REPLAN after operator triage.
@@ -577,7 +587,7 @@ These are related concerns — both about end-to-end resource lifecycle hygiene 
 - [x] DM.1 - **Add Role picker to Daily Statement** (App2-only via the renderer-gate primitive). Wire as third picker between Account and Day.
 - [x] DM.2 - **Role → Account cascade** via the existing BR.1 cascade-refresh endpoint. Reuse `dropdown-options/...` route pattern.
 - [x] DM.3 - **Day picker decoration**: server endpoint returns `{date: ['transactions'|'balance']}` map; Flatpickr `onDayCreate` adds CSS classes; CSS rules for the markers (dot / underline / bullet — pick at design time in DM.0).
-- [ ] DM.4 - **Document the QS divergence** (structured triple): append to `docs/reference/quicksight-quirks.md` + file `project_qs_no_searchfilter_cascading.md` memory cross-linking the rationale.
+- [x] DM.4 - **Document the QS divergence** (structured triple): append to `docs/reference/quicksight-quirks.md` (`2e3bc6f2`) + file `project_qs_no_searchfilter_cascading.md` memory cross-linking the rationale. Plus DM polish this session: day markers fill=transactions/ring=balance + legend (`c635f603`), KPI fit-to-width + bottom-align (`a613398c`), cascade clear-on-source-change (`64396f49`), pre-existing biome/typing-smell debt cleared (`e358104c`/`162c7671`). gl-1010 weekend-balance question → Backlog.
 - [ ] DM.5 - **Tests**: unit (cascade SQL emit, day-availability projection, empty-state hint); E2E App2-only (pick role → account narrows; pick account → day decorations match seed; pick account with no data → empty-state hint shown). QS branch is a no-op assertion that Role picker doesn't exist on QS.
 - [ ] DM.6 - **Phase exit + v14.5.0 release cut** (operator-driven — release notes + version bump + tag at operator's discretion).
 
@@ -627,3 +637,4 @@ Operator directive 2026-06-16 (surfaced by the DP Oracle-trainer near-miss): dat
 - **DD.4.e2e follow-up: full sign_in_via_oidc Dex round-trip e2e** — added 2026-06-15. `tests/e2e/app2/test_oauth_login_flow.py` exercises the JwtCookieMiddleware contract + 4 of 6 OIDC verb paths, but not the full Dex code-flow round-trip. Requires `html2_server` to bind to `cfg.auth.oidc.redirect_uri`'s exact `host:port` over HTTPS via `cfg.app2.tls` — current ephemeral-port HTTP server doesn't match the Dex-registered redirect_uri. Add `bind_host` / `bind_port` / `ssl_certfile` / `ssl_keyfile` kwargs to `html2_server` + thread through `App2Driver.serving`, then unskip the `sign_in_via_oidc` full-flow test guarded by `cfg.app2.tls` + `dex_container_url`. Operator triage step: spin Dex via `./run_tests.sh triage tests/e2e/app2/test_oauth_login_flow.py::<new_test>` + pdb-inspect the Dex login form selectors against `password.html` v2.40.0.
 - **App2 table sort arrow appears backwards (operator-reported, code-trace looks right — need repro path)** — added 2026-06-16.
 - **How should planted errors surface in the app? (+ enhance pickers to SELECT them)** — added 2026-06-16. Two coupled questions surfaced by the DP qs_browser sweep: (1) **Surfacing/semantics** — the `_spine_plant` zero-amount drill-scaffolding marker tx (DL.3.1) leak across apps: they win L1 picker anchors, lead L1 drill-source rows, AND surface in **L2FT as a violation whose `entity_a` is a rail, not a chain** (so a chain-drill from that row can't round-trip). Decide whether scaffolding markers should be distinguishable from real errors, whether they should create L2FT violations at all, and how error rows should be presented (badge? grouped? non-leading sort?). The DP fixes (anchor-skip `_spine_plant`, drill-guardrail `_PLANT_ERROR_SENTINEL` exempt) keep the TESTS honest but punt this product question. (2) **Selectability** — once (1) is decided, pickers/dropdowns should let an operator who SEES an error row filter to it (the dropdown universes advertise only "valid" declared values today). Operator note 2026-06-16: it's not fair to make the test assert error-round-trip; this is the app's job to figure out.
+- **Confirm gl-1010 weekend daily_balances are intended (not a seed quirk)** — added 2026-06-16.
