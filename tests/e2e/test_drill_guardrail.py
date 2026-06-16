@@ -77,6 +77,19 @@ pytestmark = [
 # destination sheet's ``sheet_id`` (the str value, not the SheetId
 # wrapper).
 
+# Operator 2026-06-16 — sentinel that a drilled row-0 value is a planted
+# ERROR, not a real entity. The `_spine_plant` rail tags the zero-amount
+# DL.3.1 drill-scaffolding marker tx; those markers also surface as L2FT
+# violations whose `entity_a` is a rail (not a chain), so a drill like
+# "View in Chains (filter parent_chain_name to entity_a)" writes a value
+# no chain matches → empty destination. Per operator: plants ARE
+# user-facing errors and legitimately do NOT round-trip through a drill
+# (the drilled value has no match in the destination's universe). The
+# guardrail exempts these rows from the populated/narrowed contract —
+# same principle as the additive-picker anchor skipping `_spine_plant`.
+# Making pickers/drills SELECT error rows is a separate backlog item.
+_PLANT_ERROR_SENTINEL = "_spine_plant"
+
 _DST_ANCHOR_FALLBACKS: dict[str, str] = {
     # L1 Daily Statement's first visual is the "Statement of Account"
     # KPI grid; the first Table is "Posting Ledger" (the detail
@@ -399,6 +412,20 @@ def _run_cross_sheet_drill_guardrail(
                 f"drill-mechanics bug."
             )
         source_values = result
+
+    # Operator 2026-06-16 — exempt planted-error rows from the
+    # populated/narrowed contract: the drilled value has no match in the
+    # destination's universe (e.g. a `_spine_plant` rail surfacing as an
+    # L2FT violation drilled into Chains via parent_chain_name). See
+    # _PLANT_ERROR_SENTINEL.
+    if any(_PLANT_ERROR_SENTINEL in str(v) for v in source_values.values()):
+        pytest.skip(
+            f"Drill {site.drill.name!r} from row 0 of {src_visual_title!r} "
+            f"reads a planted-error value ({source_values!r}); planted "
+            f"errors don't round-trip through drills (operator 2026-06-16) "
+            f"— the guardrail exercises VALID-row drills. Selecting error "
+            f"rows in pickers/drills is a separate backlog enhancement."
+        )
 
     # Step 3: fire the drill.
     if site.drill.trigger == "DATA_POINT_MENU":
