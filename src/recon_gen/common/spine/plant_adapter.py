@@ -399,7 +399,19 @@ def _adapt_overdraft(
     anchor_day: date, plant_window: DateInterval | None = None,
 ) -> ViolationGenerator:
     """BC.4b: per-plant `anchor_day` from `days_ago` (see _adapt_drift
-    docstring for the offset math)."""
+    docstring for the offset math).
+
+    DL.3.7: thread ``plant_window.end`` through as ``as_of_day`` so the
+    OverdraftGenerator sweeps a zero-amount marker tx across every CL.5
+    carry-forward day the ``<prefix>_overdraft`` matview surfaces. The
+    DL.3.1 single-marker-on-anchor-day pattern left every carry day's
+    `Overdraft Violations → Daily Statement for this account-day` drill
+    landing on an empty destination table — only the emit day had a
+    matching tx in ``_current_transactions``. Spec-locked anchor case
+    (unit tests + ``data lock`` chain) still doesn't pass a window;
+    those call sites stay single-marker so the locked-seed identity
+    set is unchanged.
+    """
     if plant_window is not None:
         offset = max(plant.days_ago - 1, 0)
         anchor_day = SingleDayPlant.at_offset_from_end(
@@ -414,6 +426,7 @@ def _adapt_overdraft(
         account_parent_role=parent_role,
         anchor_day=anchor_day,
         magnitude=float(abs(plant.money)),
+        as_of_day=plant_window.end if plant_window is not None else None,
     )
 
 

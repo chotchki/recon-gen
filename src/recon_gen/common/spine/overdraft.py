@@ -39,7 +39,7 @@ from __future__ import annotations
 
 from recon_gen.common.db import SyncConnection
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import ClassVar
 
 from recon_gen.common.l2.primitives import L2Instance
@@ -163,6 +163,16 @@ class OverdraftGenerator:
     # the emitted row lands on the right deployment's table; default
     # matches the in-process test harness shape.
     prefix: str = "spec_example"
+    # DL.3.7 — when set, emit a drilldown marker tx on EVERY business
+    # day from ``anchor_day`` through ``as_of_day`` (inclusive). The
+    # ``<prefix>_overdraft`` matview reads from ``effective_balances``'s
+    # CL.5 carry-forward, so a single plant emits a visible overdraft row
+    # on every day from its emit day forward (until the next emit / the
+    # window end). The DL.3.1 single-marker-on-anchor-day pattern leaves
+    # the drill destination empty on every carry day. Sweeping markers
+    # across the carry window fixes that. ``None`` (default) preserves
+    # the DL.3.1 single-marker behavior — that's what the unit tests use.
+    as_of_day: date | None = None
 
     @property
     def intended(self) -> RuleViolation:
@@ -246,25 +256,81 @@ class OverdraftGenerator:
         # this tx CAN nudge `computed_subledger` on subsequent days
         # (it's a cumulative sum), but at amount=0 the sum is
         # unchanged — drift values on this account stay byte-identical.
-        day_slug = self.anchor_day.isoformat()
-        insert_tx(
-            conn,
-            prefix=self.prefix,
-            id=f"tx-overdraft-marker-{self.account_role}-{self.account_id}-{day_slug}",
-            account_id=self.account_id,
-            account_name=f"Overdraft Acct ({self.account_role})",
-            account_role=self.account_role,
-            account_scope="internal",
-            account_parent_role=self.account_parent_role,
-            amount_money=0.0,
-            amount_direction="Debit",
-            status=POSTED_STATUS,
-            posting=ts(self.anchor_day),
-            transfer_id=f"xfer-overdraft-marker-{self.account_role}-{self.account_id}-{day_slug}",
-            rail_name="_spine_plant",
-            origin=ORIGIN_INTERNAL_INITIATED,
-            metadata=metadata,
-        )
+        #
+        # DL.3.7 — extend the marker emit across CL.5 carry-forward days.
+        # The ``<prefix>_overdraft`` matview reads from
+        # ``effective_balances`` which carries forward a negative balance
+        # on every day until the next emit (or window end), so a single
+        # plant surfaces 1..N visible overdraft rows in the L1 dashboard
+        # — one per carry day. The DL.3.1 single-marker-on-anchor pattern
+        # left every carry day's drill destination empty. When
+        # ``as_of_day`` is set (production seed pipeline via
+        # ``_adapt_overdraft``), sweep one zero-amount marker per day
+        # from ``anchor_day`` through ``as_of_day`` inclusive. ``None``
+        # (default; unit-test path) preserves the single-marker
+        # byte-identity. Each marker's id includes BOTH the plant anchor
+        # day AND the coverage day to keep ids unique across multiple
+        # OverdraftGenerators on the same account whose carry windows
+        # overlap (densified plants land at e.g. days_ago=6,13,20,27,34
+        # all on cust-0002-snb; without the anchor-day prefix, plant A's
+        # marker on plant B's emit day would PK-collide on
+        # ``_current_transactions.id``).
+        anchor_slug = self.anchor_day.isoformat()
+        end_day = self.as_of_day if self.as_of_day is not None else self.anchor_day
+        # Guard against ``as_of_day < anchor_day`` (degenerate input —
+        # the plant is later than the audit window's end). Treat as
+        # single-day emit so we don't silently skip the marker.
+        if end_day < self.anchor_day:
+            end_day = self.anchor_day
+        cursor = self.anchor_day
+        while cursor <= end_day:
+            coverage_slug = cursor.isoformat()
+            if self.as_of_day is None:
+                # Preserve the DL.3.1 id shape byte-identically when the
+                # caller (the in-process unit-test harness) didn't ask
+                # for window-spanning markers. Test pins on the
+                # ``tx-overdraft-marker-<role>-<account>-<day>`` prefix +
+                # ``count == 1``; the DL.3.7 window-extended id below
+                # would still match the prefix but the count assertion
+                # would tighten unhelpfully.
+                tx_id = (
+                    f"tx-overdraft-marker-{self.account_role}-"
+                    f"{self.account_id}-{coverage_slug}"
+                )
+                xfer_id = (
+                    f"xfer-overdraft-marker-{self.account_role}-"
+                    f"{self.account_id}-{coverage_slug}"
+                )
+            else:
+                tx_id = (
+                    f"tx-overdraft-marker-{self.account_role}-"
+                    f"{self.account_id}-anchor-{anchor_slug}-"
+                    f"day-{coverage_slug}"
+                )
+                xfer_id = (
+                    f"xfer-overdraft-marker-{self.account_role}-"
+                    f"{self.account_id}-anchor-{anchor_slug}-"
+                    f"day-{coverage_slug}"
+                )
+            insert_tx(
+                conn,
+                prefix=self.prefix,
+                id=tx_id,
+                account_id=self.account_id,
+                account_name=f"Overdraft Acct ({self.account_role})",
+                account_role=self.account_role,
+                account_scope="internal",
+                account_parent_role=self.account_parent_role,
+                amount_money=0.0,
+                amount_direction="Debit",
+                status=POSTED_STATUS,
+                posting=ts(cursor),
+                transfer_id=xfer_id,
+                rail_name="_spine_plant",
+                origin=ORIGIN_INTERNAL_INITIATED,
+                metadata=metadata,
+            )
+            cursor = cursor + timedelta(days=1)
 
 
 # Phase AU.3.d (2026-05-23): local helpers hoisted to

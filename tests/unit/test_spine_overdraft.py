@@ -147,6 +147,121 @@ def test_overdraft_generator_magnitude_zero_does_not_fire() -> None:
         conn.close()
 
 
+def test_overdraft_generator_sweeps_marker_txs_across_carry_window() -> None:
+    # DL.3.7 — when ``as_of_day`` is set the generator emits one
+    # zero-amount marker tx per business day from ``anchor_day`` through
+    # ``as_of_day`` inclusive. The ``<prefix>_overdraft`` matview reads
+    # ``effective_balances``'s CL.5 carry-forward, so a single plant
+    # surfaces on EVERY day from its emit day onward until the next emit
+    # (or window end). DL.3.1's single-marker-on-anchor-day pattern left
+    # every carry day's `Overdraft Violations → Daily Statement` drill
+    # landing on an empty destination — only the emit day matched.
+    # Sweeping markers across the window fixes that.
+    from datetime import date, timedelta
+    from recon_gen.common.spine import OverdraftGenerator
+    anchor = date(2030, 1, 1)
+    as_of = anchor + timedelta(days=4)  # 5-day carry window: anchor + 4 carry days
+    gen = OverdraftGenerator(
+        account_id="acct-overdraft-CustomerSubledger",
+        account_role="CustomerSubledger",
+        account_parent_role="CustomerLedger",
+        anchor_day=anchor,
+        magnitude=5.0,
+        as_of_day=as_of,
+    )
+    conn = _fresh_db()
+    try:
+        gen.emit(conn)
+        conn.commit()
+        rows = list(conn.execute(
+            f"SELECT id, amount_money, DATE_TRUNC('day', posting) AS day "
+            f"FROM {_PREFIX}_transactions ORDER BY day"
+        ).fetchall())
+    finally:
+        conn.close()
+    # 5 days inclusive (anchor + 4) → 5 markers.
+    assert len(rows) == 5, (
+        f"DL.3.7 expected 5 marker txs (one per day in "
+        f"[anchor={anchor}, as_of={as_of}]); got {len(rows)}: {rows}"
+    )
+    # Every marker is amount=0 (preserves L1 invariant identities).
+    for tx_id, amount, _day in rows:
+        assert amount == 0, (
+            f"marker tx amount={amount} on {tx_id!r}; expected 0 — "
+            f"non-zero would shift _computed_subledger and break "
+            f"drift's `stored − Σ legs` identity"
+        )
+        assert str(tx_id).startswith("tx-overdraft-marker-"), (
+            f"unexpected tx id {tx_id!r}; expected the "
+            f"`tx-overdraft-marker-` DL.3.7 prefix"
+        )
+    # Days span anchor..as_of inclusive, one row per day.
+    days = sorted({str(r[2])[:10] for r in rows})
+    expected_days = [
+        (anchor + timedelta(days=i)).isoformat() for i in range(5)
+    ]
+    assert days == expected_days, (
+        f"DL.3.7 marker days mismatch — expected {expected_days}, "
+        f"got {days}"
+    )
+
+
+def test_overdraft_generator_two_plants_overlapping_carry_windows_no_pk_collision() -> None:
+    # DL.3.7 — densify_scenario factor=5 emits multiple OverdraftPlants
+    # on the same (account_id, account_role) — e.g. days_ago=6/13/20/27/34
+    # all on cust-0002-snb. Their carry windows OVERLAP (plant at days_ago=13
+    # covers days_ago=13..0; plant at days_ago=6 covers days_ago=6..0; the
+    # 6..0 range is shared). The DL.3.7 id includes BOTH the plant's
+    # anchor day AND the coverage day so overlapping plants emit
+    # non-colliding marker tx ids on shared coverage days. Without the
+    # anchor-day prefix, ``_current_transactions``'s UNIQUE INDEX on
+    # (id) would reject the second plant's INSERT on every shared day.
+    from datetime import date
+    from recon_gen.common.spine import OverdraftGenerator
+    anchor_early = date(2030, 1, 1)
+    anchor_late = date(2030, 1, 4)
+    as_of = date(2030, 1, 7)
+    gen_a = OverdraftGenerator(
+        account_id="acct-shared",
+        account_role="CustomerSubledger",
+        account_parent_role="CustomerLedger",
+        anchor_day=anchor_early,
+        magnitude=5.0,
+        as_of_day=as_of,
+    )
+    gen_b = OverdraftGenerator(
+        account_id="acct-shared",
+        account_role="CustomerSubledger",
+        account_parent_role="CustomerLedger",
+        anchor_day=anchor_late,
+        magnitude=5.0,
+        as_of_day=as_of,
+    )
+    conn = _fresh_db()
+    try:
+        # gen_a + gen_b share Jan 4..Jan 7 coverage; without DL.3.7's
+        # anchor-day-in-id discipline this second emit would PK-collide.
+        gen_a.emit(conn)
+        gen_b.emit(conn)
+        conn.commit()
+        count_row = conn.execute(
+            f"SELECT COUNT(*) FROM {_PREFIX}_transactions"
+        ).fetchone()
+        assert count_row is not None, (
+            "COUNT(*) returned no row — DuckDB harness misconfigured"
+        )
+        count = int(count_row[0])
+    finally:
+        conn.close()
+    # gen_a: Jan 1..Jan 7 → 7 markers
+    # gen_b: Jan 4..Jan 7 → 4 markers
+    # No collisions → 11 total.
+    assert count == 11, (
+        f"DL.3.7 overlapping-window PK-collision regression — expected "
+        f"11 markers (7 from gen_a + 4 from gen_b), got {count}"
+    )
+
+
 def test_overdraft_generator_emits_one_zero_amount_marker_tx() -> None:
     # DL.3.1 — OverdraftGenerator emits exactly ONE Posted Money Records
     # row on the same account-day as the planted overdraft, with
