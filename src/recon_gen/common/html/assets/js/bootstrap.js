@@ -208,7 +208,7 @@
     // is the load-bearing channel for colorblind users; color is the
     // parallel signal. Mirrors what the QS-side conditional-formatting
     // emits on the same Visual.
-    cards
+    var valueSel = cards
       .append("div")
       .attr("class", (d) => {
         // CF.X-infra — 3-band state: success / warning / danger.
@@ -237,12 +237,26 @@
         // on 13-char balances like $5,634,512.24; text-3xl (30px) +
         // tabular-nums fits comfortably in the min-w-[180px] flex-1
         // card while still reading as the primary KPI number.
-        return "kpi-value text-3xl font-bold " + color + " tabular-nums";
+        return (
+          "kpi-value text-3xl font-bold whitespace-nowrap " +
+          color +
+          " tabular-nums"
+        );
       })
       .text((d) => {
         var prefix = d.state_icon ? d.state_icon + " " : "";
         return prefix + formatKPIValue(d.value, d.format);
       });
+    // DM-followup (chotchki 2026-06-16) — a currency value like
+    // "$5,634,512.24" is one unbreakable token; at text-3xl it overruns a
+    // narrow 5-across KPI card and clips at the border. Scale the font
+    // down to fit the card width (only ever DOWN, floored so it stays
+    // legible). Runs after the cards are in the DOM so clientWidth /
+    // scrollWidth are valid; a no-op when the value already fits, so
+    // short numbers keep their full text-3xl size.
+    valueSel.each(function () {
+      fitKpiValueToWidth(this);
+    });
     cards
       .filter((d) => typeof d.delta === "number")
       .append("div")
@@ -261,6 +275,23 @@
       .append("div")
       .attr("class", "kpi-label text-sm text-secondary-fg mt-2")
       .text((d) => d.label || "");
+  }
+
+  function fitKpiValueToWidth(el) {
+    // Shrink an over-wide KPI big-number to fit its card. The value is a
+    // single unbreakable token (a formatted number / currency), so when
+    // it's wider than the card it clips at the border rather than
+    // wrapping. Measure the overflow (scrollWidth vs clientWidth) and
+    // scale font-size by the ratio. Only ever scales DOWN; floored at
+    // 14px so it stays readable; no-op when it already fits or the
+    // element isn't laid out yet (clientWidth 0).
+    if (!el) return;
+    var avail = el.clientWidth;
+    var need = el.scrollWidth;
+    if (avail <= 0 || need <= avail) return;
+    var base = parseFloat(getComputedStyle(el).fontSize) || 30;
+    // 0.97 fudge absorbs sub-pixel rounding so the last glyph isn't clipped.
+    el.style.fontSize = Math.max((base * avail) / need * 0.97, 14) + "px";
   }
 
   function formatKPIValue(value, format) {

@@ -2151,6 +2151,18 @@ def _render_visual(
     section_class = (
         "p-4 bg-surface rounded-lg shadow-sm border border-surface-border"
     )
+    # DM-followup (chotchki 2026-06-16) — KPI sections stretch to their
+    # grid-row height (a tall row-mate like a paragraph-subtitle KPI or a
+    # Table). Make the section a flex column and (below) let its
+    # ``.visual-data`` grow + bottom-justify, so the value group lands on
+    # a shared baseline across the row instead of floating at the
+    # subtitle's mercy. Scoped to KPI so Tables / charts keep top-down
+    # flow. ``visual_data_extra`` carries the matching grow/justify
+    # utilities onto the swap-target div further down.
+    is_kpi = kind == "KPI"
+    visual_data_extra = " flex-1 flex flex-col justify-end" if is_kpi else ""
+    if is_kpi:
+        section_class += " flex flex-col"
     h2_class = "text-xl font-semibold text-primary-fg mb-1"
     subtitle_class = "subtitle text-sm text-secondary-fg mb-4"
 
@@ -2220,7 +2232,7 @@ def _render_visual(
     # state. The visual briefly shows the empty-param result then
     # swaps in the filtered one — minor flicker, full correctness.
     parts.append(
-        f'    <div id="visual-data-{esc_id}" class="visual-data"'
+        f'    <div id="visual-data-{esc_id}" class="visual-data{visual_data_extra}"'
         f' hx-get="{esc_url}"'
         f' hx-trigger="load, refresh from:body"'
         f' hx-include="#filter-form"'

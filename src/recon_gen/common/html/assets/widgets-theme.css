@@ -186,6 +186,31 @@
 .flatpickr-day {
   color: var(--color-primary-fg);
 }
+
+/* DM.3 — day-availability decoration (App2-only). The Daily Statement
+ * Business Day picker tints each calendar day by the picked account's
+ * per-day activity, so the operator can scan which days hold a statement
+ * worth reading — no grid needed, the fill IS the day cell. DECORATION
+ * not restriction: every day stays clickable. These rules sit ABOVE the
+ * :hover / .today / .selected / .inRange rules below so those
+ * interaction + selection states still own the cell background — the
+ * availability tint only shows on an otherwise-idle day. Tints derive
+ * from theme tokens via color-mix (no hardcoded palette). The
+ * ``has-transactions`` rule is ordered AFTER ``has-balance`` so a day
+ * carrying BOTH classes reads as "has postings" — the accent tint wins
+ * on equal specificity.
+ *   - .has-balance (only) → faint muted tint: balance carried, no postings.
+ *   - .has-transactions   → faint accent tint: postable records present.
+ *   - .has-both           → both classes set; the accent tint wins. */
+.flatpickr-day.has-balance {
+  background: color-mix(in srgb, var(--color-secondary-fg) 16%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-secondary-fg) 16%, var(--color-surface));
+}
+.flatpickr-day.has-transactions {
+  background: color-mix(in srgb, var(--color-accent) 18%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-accent) 18%, var(--color-surface));
+}
+
 .flatpickr-day:hover,
 .flatpickr-day.prevMonthDay:hover,
 .flatpickr-day.nextMonthDay:hover {
@@ -224,43 +249,6 @@
 }
 span.flatpickr-weekday {
   color: var(--color-secondary-fg);
-}
-
-/* DM.3 — day-availability decoration markers (App2-only). The Daily
- * Statement Business Day picker decorates each calendar day with small
- * pseudo-element dots based on the picked account's per-day activity.
- * DECORATION not restriction: the day cell stays fully clickable; the
- * dots ride on top of the cell's color box so Flatpickr's own
- * .selected / .today rules still own the cell background. The day
- * cell needs position:relative for the absolute-positioned dots.
- *   - .has-transactions → bottom-center dot in the accent color.
- *   - .has-balance      → top-right dot in the success color.
- *   - .has-both         → both dots render (the shorthand class exists
- *                         for e2e-locator + specificity convenience). */
-.flatpickr-day.has-transactions,
-.flatpickr-day.has-balance {
-  position: relative;
-}
-.flatpickr-day.has-transactions::after {
-  content: "";
-  position: absolute;
-  bottom: 3px;
-  left: 50%;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--color-accent);
-  transform: translateX(-50%);
-}
-.flatpickr-day.has-balance::before {
-  content: "";
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--color-success);
 }
 
 /* DM.3 — empty-state hint: a quiet one-line message the JS toggles
