@@ -5,10 +5,10 @@
 
 POLICY-2 browser coverage for three App2-only Daily Statement features landed on `feature/dm-dn` (cascade narrowing DM.2, cascade clear-on-source-change DM/BR.1, day-availability decoration DM.3). QS cannot do these → App2-targeted tests, structured-triple gap on the QS driver.
 
-- [ ] DMDN-E2E.1 - Add driver verbs: `filter_value(label)` + `day_availability(label)` on `App2Driver`; Protocol stubs in `_drivers/base.py`; `NotImplementedError` (structured-triple) on `QsEmbedDriver`.
-- [ ] DMDN-E2E.2 - Wire `day_availability_fetcher` through `html2_server` + `App2Driver.serving` + `make_live_db_*` harness so the live L1 server decorates the picker.
-- [ ] DMDN-E2E.3 - `tests/e2e/app2/test_dm_cascade_and_day_availability.py` — cascade narrowing, cascade clear-on-source-change, day-availability decoration; expectations derived from DB/tree.
-- [ ] DMDN-E2E.4 - Green through `./run_tests.sh up_to=app2 --dialects=du --targets=lo`; pyright + biome clean; commit on `feature/dm-dn`.
+- [x] DMDN-E2E.1 - Add driver verbs: `filter_value(label)` + `day_availability(label)` on `App2Driver`; Protocol stubs in `_drivers/base.py`; `NotImplementedError` (structured-triple) on `QsEmbedDriver`.
+- [x] DMDN-E2E.2 - Wire `day_availability_fetcher` through `html2_server` + `App2Driver.serving` + `make_live_db_*` harness so the live L1 server decorates the picker.
+- [x] DMDN-E2E.3 - `tests/e2e/app2/test_dm_cascade_and_day_availability.py` — cascade narrowing, cascade clear-on-source-change, day-availability decoration; expectations derived from DB/tree.
+- [x] DMDN-E2E.4 - Green through `./run_tests.sh up_to=app2` (DuckDB cfg); pyright + typing-smells clean; commit on `feature/dm-dn`. (matrix `--dialects`/`--targets` flags retired post-CB.17.d — dialect comes from the cfg.)
 
 
 ## Phase BX - L2 Editor cold-read + address cycle (provisional)
