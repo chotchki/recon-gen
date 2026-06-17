@@ -1,4 +1,4 @@
-"""Browser e2e: Supersession Audit interactions (DR.4 + DR.5).
+"""Browser e2e: Supersession Audit interactions (DR.4 + DR.5 + DR.6).
 
 Parametrized over ``[qs, app2]`` via ``l1_dashboard_driver``.
 
@@ -17,6 +17,11 @@ rows from rows that carry a reason. The partition invariant (with the
 Supersedes Reason filter at its sentinel): ``Has reason`` count +
 ``No reason`` count == the full audit count, since every row's flag is 0
 or 1. This both proves the pushdown narrows AND that it partitions cleanly.
+
+DR.6 — the visible "Transaction ID" dropdown shares P_L1_SA_TRANSACTION
+with the DR.4 drill; picking an id narrows to that one trail. Its option
+universe is the audit's own superseded ids, so a table id is always
+pickable.
 
 Data-agnostic: assert relative narrowing (no hard-coded ids/counts), skip
 cleanly if the seeded DB has no superseded rows.
@@ -135,4 +140,38 @@ def test_supersession_audit_no_reason_filter_partitions_the_audit(
         f"partition the full audit ({full_count}) — every row's flag is 0 "
         f"or 1. A mismatch means the parallel string CASE diverged from the "
         f"projected flag, or the sentinel guard leaked/dropped rows."
+    )
+
+
+def test_supersession_audit_transaction_id_dropdown_narrows_to_one_trail(
+    l1_dashboard_driver: tuple["DashboardDriver", str],
+) -> None:
+    """DR.6 — the visible Transaction ID dropdown narrows the audit to one
+    transaction's trail (the picker shares P_L1_SA_TRANSACTION with the
+    DR.4 drill). Picking an id the audit shows must narrow to exactly that
+    id; the companion's option universe IS the audit's superseded ids, so a
+    table id is always pickable."""
+    driver, dashboard_arg = l1_dashboard_driver
+    driver.open(dashboard_arg, sheet=_SUPERSESSION_AUDIT_NAME)
+    driver.wait_loaded(_AUDIT_TABLE)
+
+    pre_rows = driver.table_rows(_AUDIT_TABLE, columns=["transaction_id"])
+    if not pre_rows:
+        pytest.skip(
+            "Supersession Audit is empty in the seeded DB — no transaction "
+            "to pick."
+        )
+    target = pre_rows[0]["transaction_id"]
+
+    driver.pick_filter("Transaction ID", [target])
+    driver.wait_loaded(_AUDIT_TABLE)
+    post_rows = driver.table_rows(_AUDIT_TABLE, columns=["transaction_id"])
+    assert post_rows, (
+        f"DR.6 Transaction ID dropdown narrowed to zero rows for {target!r} "
+        f"— the picker's id universe diverged from the audit's, or the "
+        f"P_L1_SA_TRANSACTION bridge didn't reach the dataset WHERE."
+    )
+    assert all(r["transaction_id"] == target for r in post_rows), (
+        f"DR.6 dropdown must narrow to exactly {target!r}; saw "
+        f"{sorted({r['transaction_id'] for r in post_rows})}."
     )

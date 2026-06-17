@@ -345,6 +345,10 @@ DS_L1_TX_IDS = "l1-tx-ids-ds"
 # Transactions sheet's Transaction ID typeahead (separate from the
 # Transfer picker: a different select_expr → its own matview hint).
 DS_L1_TX_TRANSACTION_IDS = "l1-tx-transaction-ids-ds"
+# DR.6 — distinct SUPERSEDED transaction `id` picker source for the
+# Supersession Audit's Transaction ID dropdown (a different universe from
+# DS_L1_TX_TRANSACTION_IDS: only the ids that appear in the audit).
+DS_L1_SUPERSESSION_TX_IDS = "l1-supersession-tx-ids-ds"
 DS_L1_TX_FACETS = "l1-tx-facets-ds"
 # CQ.4.b — Daily Statement singleton-control reference table source.
 # Same matview as DS_L1_DS_ACCOUNTS but narrowed to parent/1:1
@@ -800,6 +804,14 @@ L1_TX_IDS_CONTRACT = DatasetContract(columns=[
 
 # DR.3 — companion picker source for the Transaction ID typeahead.
 L1_TX_TRANSACTION_IDS_CONTRACT = DatasetContract(columns=[
+    ColumnSpec(
+        "transaction_id", "STRING", shape=ColumnShape.TRANSACTION_ID,
+    ),
+])
+
+# DR.6 — companion picker source for the Supersession Audit's Transaction
+# ID dropdown (only superseded ids).
+L1_SUPERSESSION_TX_IDS_CONTRACT = DatasetContract(columns=[
     ColumnSpec(
         "transaction_id", "STRING", shape=ColumnShape.TRANSACTION_ID,
     ),
@@ -1756,6 +1768,18 @@ _SUPERSESSION_NO_REASON_COND = "entry > min_entry AND supersedes IS NULL"
 L1_SA_NO_REASON_LABEL = "No reason"
 L1_SA_HAS_REASON_LABEL = "Has reason"
 
+# DR.1.b / DR.6 — the audit's SELECT-narrowing, factored so the audit
+# dataset and the DR.6 Transaction ID picker's companion share ONE
+# definition of "which ids are a genuine supersession" (a per-id window
+# count > 1 AND at least one row carrying a `supersedes` cause). If these
+# drift, the picker offers ids the table doesn't show (or hides some).
+_SUPERSESSION_ENTRY_COUNT_WINDOW = "COUNT(*) OVER (PARTITION BY id)"
+_SUPERSESSION_HAS_SUPERSEDE_WINDOW = (
+    "MAX(CASE WHEN supersedes IS NOT NULL THEN 1 ELSE 0 END)"
+    " OVER (PARTITION BY id)"
+)
+_SUPERSESSION_SELECT_PREDICATE = "entry_count > 1 AND has_supersede = 1"
+
 
 def build_supersession_transactions_dataset(
     cfg: Config, l2_instance: L2Instance,
@@ -1809,17 +1833,16 @@ def build_supersession_transactions_dataset(
         f"   account_id, account_name,"
         f"   transfer_id, rail_name,"
         f"   amount_money, amount_direction, status, posting, bundle_id,"
-        f"   COUNT(*) OVER (PARTITION BY id) AS entry_count,"
+        f"   {_SUPERSESSION_ENTRY_COUNT_WINDOW} AS entry_count,"
         f"   MIN(entry) OVER (PARTITION BY id) AS min_entry,"
         # DR.1.b — only keep trails that contain a REAL supersession. Without
         # this, densified-plant id collisions (the spine id omits the day, so
         # 5 replicas reuse one id with NO supersedes) over-select: 77 rows on
         # the baseline, only 10 a genuine trail.
-        f"   MAX(CASE WHEN supersedes IS NOT NULL THEN 1 ELSE 0 END)"
-        f"     OVER (PARTITION BY id) AS has_supersede"
+        f"   {_SUPERSESSION_HAS_SUPERSEDE_WINDOW} AS has_supersede"
         f"   FROM {prefix}_transactions"
         f" ) sub"
-        f" WHERE entry_count > 1 AND has_supersede = 1"
+        f" WHERE {_SUPERSESSION_SELECT_PREDICATE}"
         f" AND ({_data_value_clause('supersedes', P_L1_SUPERSEDE_REASON)}"
         f" OR supersedes IS NULL)"
         # DR.4 — same-sheet self-filter to one transaction's trail. Filters
@@ -2155,6 +2178,39 @@ def build_l1_tx_transaction_ids_dataset(
     )
 
 
+def build_l1_supersession_tx_ids_dataset(
+    cfg: Config, l2_instance: L2Instance,
+) -> DataSet:
+    """DR.6 companion — distinct transaction ``id`` of the trails that
+    actually appear in the Supersession Audit. Feeds the audit sheet's
+    Transaction ID dropdown via ``LinkedValues``.
+
+    The universe MUST match the audit dataset's SELECT-narrowing (a real
+    supersession: ``entry_count > 1 AND has_supersede = 1``) so every
+    offered id resolves to a populated trail — shares the
+    ``_SUPERSESSION_*`` window/predicate constants with
+    ``build_supersession_transactions_dataset`` so the two can't drift.
+    Reads the BASE table (the audit's source, not Current*), so no
+    matview hint — the superseded-id universe is small (the KPI targets
+    0; production carries a steady trickle), the wrap path is cheap.
+    """
+    prefix = cfg.db.table_prefix
+    sql = (
+        f"SELECT DISTINCT transaction_id FROM ("
+        f"  SELECT id AS transaction_id,"
+        f"  {_SUPERSESSION_ENTRY_COUNT_WINDOW} AS entry_count,"
+        f"  {_SUPERSESSION_HAS_SUPERSEDE_WINDOW} AS has_supersede"
+        f"  FROM {prefix}_transactions"
+        f" ) sub WHERE {_SUPERSESSION_SELECT_PREDICATE}"
+    )
+    return build_dataset(
+        cfg, cfg.aws.prefixed("l1-supersession-tx-ids-dataset"),
+        "L1 Supersession Transaction IDs", "l1-supersession-tx-ids",
+        sql, L1_SUPERSESSION_TX_IDS_CONTRACT,
+        visual_identifier=DS_L1_SUPERSESSION_TX_IDS,
+    )
+
+
 def build_l1_tx_facets_dataset(
     cfg: Config, l2_instance: L2Instance,
 ) -> DataSet:
@@ -2209,6 +2265,8 @@ def build_all_l1_dashboard_datasets(
         build_l1_tx_ids_dataset(cfg, l2_instance),
         # DR.3 — Transaction ID typeahead picker source.
         build_l1_tx_transaction_ids_dataset(cfg, l2_instance),
+        # DR.6 — Supersession Audit Transaction ID picker source.
+        build_l1_supersession_tx_ids_dataset(cfg, l2_instance),
         build_l1_tx_facets_dataset(cfg, l2_instance),
         # CQ.3.c — shared LinkedValues picker source datasets. L1 emits
         # only the ones it BINDS to a visual/filter — unbound datasets

@@ -45,6 +45,7 @@ from recon_gen.apps.l1_dashboard.datasets import (
     DS_L1_ACCOUNTS,
     DS_L1_DS_ACCOUNTS,
     DS_L1_DS_CONTROL_ACCOUNTS,
+    DS_L1_SUPERSESSION_TX_IDS,
     DS_L1_TX_FACETS,
     DS_L1_TX_IDS,
     DS_L1_TX_TRANSACTION_IDS,
@@ -619,7 +620,8 @@ def _l1_datasets(
         DS_SUPERSESSION_TRANSACTIONS, DS_SUPERSESSION_DAILY_BALANCES,
         DS_L1_ACCOUNTS, DS_L1_DS_ACCOUNTS,
         DS_L1_DS_CONTROL_ACCOUNTS, DS_L1_TX_IDS,
-        DS_L1_TX_TRANSACTION_IDS, DS_L1_TX_FACETS,
+        DS_L1_TX_TRANSACTION_IDS, DS_L1_SUPERSESSION_TX_IDS,
+        DS_L1_TX_FACETS,
         # CQ.3.c — shared LinkedValues picker source datasets. L1 binds
         # only Rails + AccountRoles (Templates / MetadataKeys / ChainParents
         # are L2FT-only). Order matches build_all_l1_dashboard_datasets.
@@ -1688,18 +1690,12 @@ def _populate_supersession_audit_sheet(
     ds_tx = datasets[DS_SUPERSESSION_TRANSACTIONS]
     ds_db = datasets[DS_SUPERSESSION_DAILY_BALANCES]
 
-    # DR.4 — analysis param + dataset bridge for the same-sheet transaction
-    # self-filter. No visible control: the transaction_id cell drill writes
-    # it (focus a trail) and the right-click "Clear" action resets it. The
-    # bridge lets QS's MappedDataSetParameters + App2's dataset-param-default
-    # substitute the value into the audit dataset's WHERE — narrowing at the
-    # SQL layer so both renderers behave identically.
-    analysis.add_parameter(StringParam(
-        name=ParameterName(P_L1_SA_TRANSACTION),
-        multi_valued=False,
-        default=[L1_ALL_SENTINEL],
-        mapped_dataset_params=[(ds_tx, P_L1_SA_TRANSACTION)],
-    ))
+    # DR.4/DR.6 — the same-sheet transaction self-filter writes
+    # P_L1_SA_TRANSACTION (the transaction_id cell drill + the visible
+    # Transaction ID dropdown both narrow the audit to one trail). The
+    # analysis param + dataset bridge are declared by that dropdown's
+    # `_populate_pushdown_value_dropdown` in `_wire_per_sheet_dropdowns`
+    # (runs before emit), so the drill here just references the param.
 
 
     # Row 1: three KPIs — supersession count on the left, $ exposure in
@@ -2385,6 +2381,7 @@ def _wire_per_sheet_dropdowns(
     ds_sp = datasets[DS_STUCK_PENDING]
     ds_su = datasets[DS_STUCK_UNBUNDLED]
     ds_sa_tx = datasets[DS_SUPERSESSION_TRANSACTIONS]
+    ds_sa_tx_ids = datasets[DS_L1_SUPERSESSION_TX_IDS]
     ds_te = datasets[DS_L1_EXCEPTIONS]
     ds_tx = datasets[DS_TRANSACTIONS]
     ds_accounts = datasets[DS_L1_ACCOUNTS]
@@ -2518,6 +2515,20 @@ def _wire_per_sheet_dropdowns(
         param_name=ParameterName(P_L1_SA_NO_REASON),
         title="Reason Provided",
         all_values=l1_supersession_no_reason_values(),
+    )
+    # DR.6 — visible Transaction ID dropdown on the audit. Shares
+    # P_L1_SA_TRANSACTION with the transaction_id cell drill (DR.4): the
+    # drill writes it (focus a trail), the dropdown is the discoverable
+    # picker + clear affordance. This call declares the analysis param +
+    # dataset bridge the drill references (see the note in
+    # `_populate_supersession_audit_sheet`). Options are the audit's own
+    # superseded ids so every offered value resolves to a populated trail.
+    _populate_pushdown_value_dropdown(
+        sheet=supersession_audit_sheet, analysis=analysis,
+        bridges=[(ds_sa_tx, P_L1_SA_TRANSACTION)],
+        param_name=ParameterName(P_L1_SA_TRANSACTION),
+        title="Transaction ID",
+        options_dataset=ds_sa_tx_ids, options_column="transaction_id",
     )
 
     # --- L1 Exceptions sheet — Check Type (enum) + Account
