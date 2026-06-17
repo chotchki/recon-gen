@@ -221,10 +221,19 @@ class TreeValidator:
         filter_ctrls: list[Any] = getattr(sheet, "filter_controls", None) or []
         param_ctrls: list[Any] = getattr(sheet, "parameter_controls", None) or []
         _renderer_divergent = {"datetime"}
+        # DM.0.5 renderer-gate — ``app2_only`` controls (e.g. the Daily
+        # Statement Role picker, DM.1) render ONLY on App2; the QS emitter
+        # walk (``Sheet.emit()``) drops them. So exclude them from the QS
+        # comparison — otherwise the validator reads a deliberately-
+        # QS-absent control as a "missing sheet control". App2 still
+        # validates them (it renders them), and the DM.5 cascade e2e proves
+        # the Role picker works on App2.
+        _is_qs = getattr(self.driver, "dialect", None) == "qs"
         comparable: list[Any] = [
             c
             for c in (*filter_ctrls, *param_ctrls)
             if getattr(c, "_AUTO_KIND", None) not in _renderer_divergent
+            and not (_is_qs and getattr(c, "app2_only", False))
         ]
         expected = {t for t in (_control_title(c) for c in comparable) if t}
         if not expected:

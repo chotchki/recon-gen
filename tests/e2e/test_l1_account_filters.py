@@ -157,20 +157,50 @@ def test_dn5_posted_money_records_running_balance(
         f"(DN.1/DN.2); headers seen: {sorted(rows[0])}"
     )
 
-    # Arithmetic: running balance is the cumulative signed-amount sum in
-    # display order. Direction column distinguishes Debit (subtract) from
-    # Credit (add); Amount is the absolute rendered dollars.
-    running = Decimal("0")
+    # Arithmetic (DN-followup 2026-06-16): the running balance is
+    # OPENING-ANCHORED — opening_balance + the cumulative signed
+    # `amount_money` in posting order (the actual account balance after
+    # each posting, landing on the day's posting-implied closing).
+    # `Amount Money` is already SIGNED at source (Credit ≥ 0 / Debit ≤ 0
+    # per the storage CHECK), so it's summed directly.
+    #
+    # Verified ORDER-INDEPENDENTLY: the table may render newest-first and
+    # the `Posting` display format differs by renderer (QS vs App2), so we
+    # don't sort on it. Instead use the chain identity — each posting's
+    # PRE-balance (running_balance − its amount) equals the PRIOR
+    # posting's running balance, or the opening for the first posting; the
+    # last posting's running balance (= opening + Σ amounts, the closing)
+    # is no posting's pre-balance. So as a multiset:
+    #   {running_balance − amount : each row}  ==  {opening} ∪ {running_balance} − {closing}
+    opening_str = driver.kpi_value("Opening Balance")
+    assert opening_str is not None, (
+        "Daily Statement should render an 'Opening Balance' KPI to anchor "
+        "the running balance against."
+    )
+    opening = _parse_currency_kpi(opening_str)
+    amounts = [_parse_currency_kpi(r["Amount Money"]) for r in rows]
+    balances = [_parse_currency_kpi(r["Running Balance"]) for r in rows]
+    # Sanity: the signed Amount Money agrees with the Direction column.
     for i, row in enumerate(rows):
-        amount = _parse_currency_kpi(row["Amount"])
-        signed = amount if row["Direction"] == CREDIT else -amount
-        running += signed
-        rendered = _parse_currency_kpi(row["Running Balance"])
-        assert rendered == running, (
-            f"row {i} running balance mismatch: rendered {rendered} != "
-            f"cumulative {running} (amount={amount}, "
-            f"direction={row['Direction']!r})"
-        )
+        amt = amounts[i]
+        if row["Amount Direction"] == CREDIT:
+            assert amt >= 0, f"row {i}: Credit Amount Money should be ≥0, got {amt}"
+        else:
+            assert amt <= 0, f"row {i}: Debit Amount Money should be ≤0, got {amt}"
+    closing = opening + sum(amounts, Decimal("0"))
+    expected_pre = sorted([opening, *balances])
+    assert closing in expected_pre, (
+        f"day's posting-implied closing {closing} (opening + Σ amounts) "
+        f"is not among the rendered running balances {sorted(balances)}"
+    )
+    expected_pre.remove(closing)
+    actual_pre = sorted(b - a for b, a in zip(balances, amounts))
+    assert actual_pre == expected_pre, (
+        f"running-balance chain is not an opening-anchored cumulative:\n"
+        f"  pre-balances (running_balance − amount): {actual_pre}\n"
+        f"  expected (opening + prior running balances): {expected_pre}\n"
+        f"  opening={opening}, closing={closing}"
+    )
 
 
 def test_bo_1_daily_statement_picks_reconcile_per_role(
