@@ -1,7 +1,7 @@
 # QuickSight Generator — Active Plan
 
 
-## Phase DMDN-E2E - App2 e2e coverage for DM/DN Daily Statement features (POLICY-2)
+## Phase DMDN - E2E - App2 e2e coverage for DM/DN Daily Statement features (POLICY-2)
 
 POLICY-2 browser coverage for three App2-only Daily Statement features landed on `feature/dm-dn` (cascade narrowing DM.2, cascade clear-on-source-change DM/BR.1, day-availability decoration DM.3). QS cannot do these → App2-targeted tests, structured-triple gap on the QS driver.
 
@@ -638,3 +638,5 @@ Operator directive 2026-06-16 (surfaced by the DP Oracle-trainer near-miss): dat
 - **App2 table sort arrow appears backwards (operator-reported, code-trace looks right — need repro path)** — added 2026-06-16.
 - **How should planted errors surface in the app? (+ enhance pickers to SELECT them)** — added 2026-06-16. Two coupled questions surfaced by the DP qs_browser sweep: (1) **Surfacing/semantics** — the `_spine_plant` zero-amount drill-scaffolding marker tx (DL.3.1) leak across apps: they win L1 picker anchors, lead L1 drill-source rows, AND surface in **L2FT as a violation whose `entity_a` is a rail, not a chain** (so a chain-drill from that row can't round-trip). Decide whether scaffolding markers should be distinguishable from real errors, whether they should create L2FT violations at all, and how error rows should be presented (badge? grouped? non-leading sort?). The DP fixes (anchor-skip `_spine_plant`, drill-guardrail `_PLANT_ERROR_SENTINEL` exempt) keep the TESTS honest but punt this product question. (2) **Selectability** — once (1) is decided, pickers/dropdowns should let an operator who SEES an error row filter to it (the dropdown universes advertise only "valid" declared values today). Operator note 2026-06-16: it's not fair to make the test assert error-round-trip; this is the app's job to figure out.
 - **Confirm gl-1010 weekend daily_balances are intended (not a seed quirk)** — added 2026-06-16.
+- **Fix stale CLAUDE.md test-runner docs (post-CB.17.d variant-matrix retirement)** — added 2026-06-16.
+- **app2-layer test hangs on an Oracle seed when Oracle is unavailable locally** — added 2026-06-16.
