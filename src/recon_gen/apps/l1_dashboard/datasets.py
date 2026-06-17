@@ -331,6 +331,10 @@ DS_SUPERSESSION_DAILY_BALANCES = "l1-supersession-daily-balances-ds"
 # enum), so they get a companion rather than StaticValues.
 DS_L1_ACCOUNTS = "l1-accounts-ds"
 DS_L1_TX_IDS = "l1-tx-ids-ds"
+# DR.3 — distinct logical transaction `id` picker source for the
+# Transactions sheet's Transaction ID typeahead (separate from the
+# Transfer picker: a different select_expr → its own matview hint).
+DS_L1_TX_TRANSACTION_IDS = "l1-tx-transaction-ids-ds"
 DS_L1_TX_FACETS = "l1-tx-facets-ds"
 # CQ.4.b — Daily Statement singleton-control reference table source.
 # Same matview as DS_L1_DS_ACCOUNTS but narrowed to parent/1:1
@@ -782,6 +786,13 @@ L1_CONTROL_ACCOUNTS_CONTRACT = DatasetContract(columns=[
 
 L1_TX_IDS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("transfer_id", "STRING", shape=ColumnShape.TRANSFER_ID),
+])
+
+# DR.3 — companion picker source for the Transaction ID typeahead.
+L1_TX_TRANSACTION_IDS_CONTRACT = DatasetContract(columns=[
+    ColumnSpec(
+        "transaction_id", "STRING", shape=ColumnShape.TRANSACTION_ID,
+    ),
 ])
 
 L1_TX_FACETS_CONTRACT = DatasetContract(columns=[
@@ -1449,6 +1460,9 @@ def build_daily_statement_transactions_dataset(
 # open-set in the L1 schema); rail_name is the bounded enum.
 P_L1_TX_ACCOUNT = "pL1TxAccount"
 P_L1_TX_TRANSFER_ID = "pL1TxTransferId"
+# DR.3 — Transaction ID typeahead pushdown (filters on the matview's
+# `id` column; sentinel-OR show-all on load, narrows to one id on pick).
+P_L1_TX_TRANSACTION_ID = "pL1TxTransactionId"
 P_L1_TX_STATUS = "pL1TxStatus"
 P_L1_TX_ORIGIN = "pL1TxOrigin"
 P_L1_TX_TYPE = "pL1TxType"
@@ -1500,6 +1514,10 @@ def build_transactions_dataset(
         f" FROM {prefix}_current_transactions\n"
         f"WHERE {_account_display_clause(P_L1_TX_ACCOUNT)}\n"
         f"  AND {_data_value_clause('transfer_id', P_L1_TX_TRANSFER_ID)}\n"
+        # DR.3 — filter on `id` (the matview column), NOT the
+        # `transaction_id` SELECT alias (a same-level alias is illegal in
+        # WHERE — the Y.2.b SELECT-alias-in-WHERE bug class).
+        f"  AND {_data_value_clause('id', P_L1_TX_TRANSACTION_ID)}\n"
         f"  AND {_data_value_clause('status', P_L1_TX_STATUS)}\n"
         f"  AND {_data_value_clause('origin', P_L1_TX_ORIGIN)}\n"
         f"  AND {_data_value_clause('rail_name', P_L1_TX_TYPE)}\n"
@@ -1513,6 +1531,7 @@ def build_transactions_dataset(
         dataset_parameters=[
             _all_sentinel_sv_param(P_L1_TX_ACCOUNT),
             _all_sentinel_sv_param(P_L1_TX_TRANSFER_ID),
+            _all_sentinel_sv_param(P_L1_TX_TRANSACTION_ID),
             _all_sentinel_sv_param(P_L1_TX_STATUS),
             _all_sentinel_sv_param(P_L1_TX_ORIGIN),
             _all_sentinel_sv_param(P_L1_TX_TYPE),
@@ -2059,6 +2078,38 @@ def build_l1_tx_ids_dataset(
     )
 
 
+def build_l1_tx_transaction_ids_dataset(
+    cfg: Config, l2_instance: L2Instance,
+) -> DataSet:
+    """DR.3 companion — distinct logical transaction ``id`` over the
+    current ledger. Feeds the Transactions sheet's Transaction ID
+    typeahead picker via ``LinkedValues``.
+
+    Mirrors ``build_l1_tx_ids_dataset`` but projects ``id`` (the v6 PK)
+    instead of ``transfer_id``. ``id`` is UNIQUE-indexed on
+    ``<prefix>_current_transactions`` (``idx_<p>_curr_tx_id``,
+    schema.py), so the matview-direct typeahead search is sub-ms even
+    at fleet scale. ``select_expr="id"`` matches the dataset's projection
+    expression (``id`` aliased to ``transaction_id``) so the QS wrap path
+    and the App2 matview-direct path return the same option set.
+    """
+    prefix = cfg.db.table_prefix
+    sql = (
+        f"SELECT DISTINCT id AS transaction_id"
+        f" FROM {prefix}_current_transactions WHERE id IS NOT NULL"
+    )
+    return build_dataset(
+        cfg, cfg.aws.prefixed("l1-tx-transaction-ids-dataset"),
+        "L1 Transaction IDs", "l1-tx-transaction-ids",
+        sql, L1_TX_TRANSACTION_IDS_CONTRACT,
+        visual_identifier=DS_L1_TX_TRANSACTION_IDS,
+        picker_matview_hint=PickerMatviewHint(
+            matview=f"{prefix}_current_transactions",
+            select_expr="id",
+        ),
+    )
+
+
 def build_l1_tx_facets_dataset(
     cfg: Config, l2_instance: L2Instance,
 ) -> DataSet:
@@ -2111,6 +2162,8 @@ def build_all_l1_dashboard_datasets(
         # CQ.4.b — Daily Statement singleton-control reference table source.
         build_l1_ds_control_accounts_dataset(cfg, l2_instance),
         build_l1_tx_ids_dataset(cfg, l2_instance),
+        # DR.3 — Transaction ID typeahead picker source.
+        build_l1_tx_transaction_ids_dataset(cfg, l2_instance),
         build_l1_tx_facets_dataset(cfg, l2_instance),
         # CQ.3.c — shared LinkedValues picker source datasets. L1 emits
         # only the ones it BINDS to a visual/filter — unbound datasets

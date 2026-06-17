@@ -47,6 +47,7 @@ from recon_gen.apps.l1_dashboard.datasets import (
     DS_L1_DS_CONTROL_ACCOUNTS,
     DS_L1_TX_FACETS,
     DS_L1_TX_IDS,
+    DS_L1_TX_TRANSACTION_IDS,
     DS_LEDGER_DRIFT,
     DS_LEDGER_DRIFT_TIMELINE,
     DS_LIMIT_BREACH,
@@ -79,6 +80,7 @@ from recon_gen.apps.l1_dashboard.datasets import (
     P_L1_TX_ACCOUNT,
     P_L1_TX_ORIGIN,
     P_L1_TX_STATUS,
+    P_L1_TX_TRANSACTION_ID,
     P_L1_TX_TRANSFER_ID,
     P_L1_TX_TYPE,
     P_L1_UNBUNDLED_ACCOUNT,
@@ -605,7 +607,8 @@ def _l1_datasets(
         DS_STUCK_PENDING, DS_STUCK_UNBUNDLED,
         DS_SUPERSESSION_TRANSACTIONS, DS_SUPERSESSION_DAILY_BALANCES,
         DS_L1_ACCOUNTS, DS_L1_DS_ACCOUNTS,
-        DS_L1_DS_CONTROL_ACCOUNTS, DS_L1_TX_IDS, DS_L1_TX_FACETS,
+        DS_L1_DS_CONTROL_ACCOUNTS, DS_L1_TX_IDS,
+        DS_L1_TX_TRANSACTION_IDS, DS_L1_TX_FACETS,
         # CQ.3.c — shared LinkedValues picker source datasets. L1 binds
         # only Rails + AccountRoles (Templates / MetadataKeys / ChainParents
         # are L2FT-only). Order matches build_all_l1_dashboard_datasets.
@@ -1870,10 +1873,15 @@ def _populate_transactions_sheet(
             "Every Money record (leg) in the L2 instance's current "
             "view — supersession-aware, so replaced entries don't "
             "show. Sorted by posting time DESC so the most recent "
-            "activity is at the top. Right-click the account_id cell "
-            "to view the Daily Statement for that account's business-day."
+            "activity is at the top. Use the Transaction ID search to "
+            "jump to one logical transaction's legs. Right-click the "
+            "account_id cell to view the Daily Statement for that "
+            "account's business-day."
         ),
         columns=[
+            # DR.3 — logical transaction id, leading column so the
+            # Transaction ID search narrows a visible column.
+            ds_tx["transaction_id"].dim(),
             account_col,
             ds_tx["account_name"].dim(),
             # DL.3 — see leaf_account_display_col rationale.
@@ -2325,6 +2333,7 @@ def _wire_per_sheet_dropdowns(
     ds_tx = datasets[DS_TRANSACTIONS]
     ds_accounts = datasets[DS_L1_ACCOUNTS]
     ds_tx_ids = datasets[DS_L1_TX_IDS]
+    ds_tx_transaction_ids = datasets[DS_L1_TX_TRANSACTION_IDS]
     ds_tx_facets = datasets[DS_L1_TX_FACETS]
 
     # CQ.3.d — L2-derived picker universes now come from shared
@@ -2478,6 +2487,17 @@ def _wire_per_sheet_dropdowns(
         bridges=[(ds_tx, P_L1_TX_TRANSFER_ID)],
         param_name=ParameterName(P_L1_TX_TRANSFER_ID), title="Transfer",
         options_dataset=ds_tx_ids, options_column="transfer_id",
+    )
+    # DR.3 — Transaction ID typeahead: search the ledger by the logical
+    # transaction `id` (a different axis from Transfer — `id` keys one
+    # transaction, `transfer_id` groups the legs of a transfer event).
+    _populate_pushdown_value_dropdown(
+        sheet=transactions_sheet, analysis=analysis,
+        bridges=[(ds_tx, P_L1_TX_TRANSACTION_ID)],
+        param_name=ParameterName(P_L1_TX_TRANSACTION_ID),
+        title="Transaction ID",
+        options_dataset=ds_tx_transaction_ids,
+        options_column="transaction_id",
     )
     _populate_pushdown_value_dropdown(
         sheet=transactions_sheet, analysis=analysis,

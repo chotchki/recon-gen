@@ -318,6 +318,18 @@ _L1_PICKER_SEARCH_SPECS: tuple[PickerSearchSpec, ...] = (
         ),
         description="DS_L1_TX_IDS — Transactions Transfer picker (CQ.2 typeahead, was 8k+ rows)",
     ),
+    # DR.3 — DS_L1_TX_TRANSACTION_IDS typeahead picker (Transactions
+    # Transaction ID). The value universe is `id` (the v6 PK), UNIQUE-
+    # indexed on the matview so the matview-direct search is sub-ms.
+    PickerSearchSpec(
+        sheet_name=_TRANSACTIONS_NAME,
+        picker_label="Transaction ID",
+        value_sql_template=(
+            "SELECT MIN(id) FROM {prefix}_current_transactions "
+            "WHERE id IS NOT NULL"
+        ),
+        description="DS_L1_TX_TRANSACTION_IDS — Transactions Transaction ID picker (DR.3 typeahead, indexed via UNIQUE idx_*_curr_tx_id)",
+    ),
 )
 
 

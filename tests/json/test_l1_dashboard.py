@@ -2165,8 +2165,8 @@ def test_y2g_datasets_declare_pushdown_params() -> None:
             {"pL1UnbundledAccount", "pL1UnbundledType", "pL1UnbundledRail"},
         build_supersession_transactions_dataset: {"pL1SupersedeReason"},
         build_transactions_dataset: {
-            "pL1TxAccount", "pL1TxTransferId", "pL1TxStatus",
-            "pL1TxOrigin", "pL1TxType",
+            "pL1TxAccount", "pL1TxTransferId", "pL1TxTransactionId",
+            "pL1TxStatus", "pL1TxOrigin", "pL1TxType",
         },
         build_daily_statement_summary_dataset: {"pL1DsAccount"},
         build_daily_statement_transactions_dataset: {"pL1DsAccount"},
