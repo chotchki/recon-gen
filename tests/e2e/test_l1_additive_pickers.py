@@ -28,8 +28,14 @@ Unbundled Aging, L1 Exceptions, Transactions — every L1 sheet
 with ≥2 pickers AND a Table target. Daily Statement is covered by
 the pre-existing ``test_daily_statement_*`` tests via the bespoke
 ``find_account_day_with_data`` helper; not re-wired here. Drift
-Timelines (LineChart only, no Table) and Supersession Audit (single
-dropdown) don't qualify for ≥2 pickers + Table target.
+Timelines (LineChart only, no Table) don't qualify. The Supersession
+Audit has 2 dropdowns post-DR.5 (Supersedes Reason + Reason Provided)
+but is still excluded: its Supersedes Reason picker keeps NULL-reason
+rows visible (``OR supersedes IS NULL``) and anchor rows with a NULL
+supersedes can't be driven to a dropdown value, so the "drive each
+picker to the row's value" contract degenerates. Its pickers + the
+DR.4 self-filter drill get bespoke coverage in
+``test_dr4_supersession_self_filter.py`` instead.
 
 Cross-app scope (why AA.A.6 v1 is L1-only):
 

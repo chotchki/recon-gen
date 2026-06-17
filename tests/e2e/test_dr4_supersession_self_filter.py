@@ -1,21 +1,25 @@
-"""Browser e2e: DR.4 same-sheet transaction self-filter on the
-Supersession Audit.
+"""Browser e2e: Supersession Audit interactions (DR.4 + DR.5).
 
-Parametrized over ``[qs, app2]`` via ``l1_dashboard_driver``. The
-self-filter is a ``DATA_POINT_CLICK`` drill (``drill_from_first_row``)
-that writes the ``pL1SaTransaction`` pushdown param and re-renders the
-SAME sheet — narrowing the Transactions Audit table to one logical
-transaction's full entry trail. Because it's a control-write (not a
-cross-sheet URL nav) it sidesteps the QS URL-param-no-control-sync quirk,
-so both renderers narrow identically.
+Parametrized over ``[qs, app2]`` via ``l1_dashboard_driver``.
 
-The ``Clear transaction filter`` right-click action
+DR.4 — the same-sheet transaction self-filter is a ``DATA_POINT_CLICK``
+drill (``drill_from_first_row``) that writes the ``pL1SaTransaction``
+pushdown param and re-renders the SAME sheet — narrowing the Transactions
+Audit table to one logical transaction's full entry trail. Because it's a
+control-write (not a cross-sheet URL nav) it sidesteps the QS
+URL-param-no-control-sync quirk, so both renderers narrow identically. The
+``Clear transaction filter`` right-click action
 (``drill_from_first_row_via_menu``) resets the param to its show-all
 sentinel — the standalone "back to all" affordance.
 
-Data-agnostic: asserts the filter narrows to whatever transaction the
-first row carries (no hard-coded id), and skips cleanly if the seeded DB
-has no superseded rows to drill from.
+DR.5 — the "Reason Provided" dropdown isolates no-reason (policy-violation)
+rows from rows that carry a reason. The partition invariant (with the
+Supersedes Reason filter at its sentinel): ``Has reason`` count +
+``No reason`` count == the full audit count, since every row's flag is 0
+or 1. This both proves the pushdown narrows AND that it partitions cleanly.
+
+Data-agnostic: assert relative narrowing (no hard-coded ids/counts), skip
+cleanly if the seeded DB has no superseded rows.
 """
 
 from __future__ import annotations
@@ -27,6 +31,10 @@ import pytest
 from tests._marks import Need, Tier, needs, tier
 
 from recon_gen.apps.l1_dashboard.app import _SUPERSESSION_AUDIT_NAME
+from recon_gen.apps.l1_dashboard.datasets import (
+    L1_SA_HAS_REASON_LABEL,
+    L1_SA_NO_REASON_LABEL,
+)
 
 if TYPE_CHECKING:
     from tests.e2e._drivers import DashboardDriver
@@ -90,4 +98,41 @@ def test_supersession_audit_self_filter_narrows_to_one_transaction(
         f"Clear transaction filter must restore the full audit "
         f"({full_count} rows), but the table still shows {cleared_count} "
         f"(focused was {focus_count}) — the reset write didn't land."
+    )
+
+
+def test_supersession_audit_no_reason_filter_partitions_the_audit(
+    l1_dashboard_driver: tuple["DashboardDriver", str],
+) -> None:
+    """DR.5 — the "Reason Provided" dropdown narrows to no-reason vs
+    has-reason rows, and the two narrowings partition the full audit
+    (every row's flag is exactly 0 or 1, so the counts sum)."""
+    driver, dashboard_arg = l1_dashboard_driver
+    driver.open(dashboard_arg, sheet=_SUPERSESSION_AUDIT_NAME)
+    driver.wait_loaded(_AUDIT_TABLE)
+
+    full_count = driver.table_row_count(_AUDIT_TABLE)
+    if full_count == 0:
+        pytest.skip(
+            "Supersession Audit is empty in the seeded DB — no rows to "
+            "partition by reason presence."
+        )
+
+    driver.pick_filter("Reason Provided", [L1_SA_HAS_REASON_LABEL])
+    driver.wait_loaded(_AUDIT_TABLE)
+    has_count = driver.table_row_count(_AUDIT_TABLE)
+
+    driver.pick_filter("Reason Provided", [L1_SA_NO_REASON_LABEL])
+    driver.wait_loaded(_AUDIT_TABLE)
+    no_count = driver.table_row_count(_AUDIT_TABLE)
+
+    assert has_count <= full_count and no_count <= full_count, (
+        f"DR.5 narrowing must not exceed the full audit: has={has_count}, "
+        f"no={no_count}, full={full_count}."
+    )
+    assert has_count + no_count == full_count, (
+        f"DR.5 'Has reason' ({has_count}) + 'No reason' ({no_count}) must "
+        f"partition the full audit ({full_count}) — every row's flag is 0 "
+        f"or 1. A mismatch means the parallel string CASE diverged from the "
+        f"projected flag, or the sentinel guard leaked/dropped rows."
     )
