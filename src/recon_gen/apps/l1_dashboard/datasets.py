@@ -1737,7 +1737,11 @@ def build_supersession_transactions_dataset(
     amount = cents_to_dollars_sql("amount_money", dialect=cfg.db.dialect)
     sql = (
         f"SELECT entry, transaction_id, supersedes,"
-        f" CASE WHEN entry > 1 AND supersedes IS NULL THEN 1 ELSE 0 END"
+        # DR.1.a — flag against the id's OWN minimum entry, not `entry > 1`.
+        # `entry` is a GLOBAL insert-order serial (not per-id), so `> 1` was
+        # true for ~every row and flagged the ORIGINAL row of every trail.
+        f" CASE WHEN entry > min_entry AND supersedes IS NULL"
+        f"   THEN 1 ELSE 0 END"
         f"   AS l1_supersession_no_reason,"
         f" account_id, account_name,"
         f" transfer_id, rail_name,"
@@ -1748,10 +1752,17 @@ def build_supersession_transactions_dataset(
         f"   account_id, account_name,"
         f"   transfer_id, rail_name,"
         f"   amount_money, amount_direction, status, posting, bundle_id,"
-        f"   COUNT(*) OVER (PARTITION BY id) AS entry_count"
+        f"   COUNT(*) OVER (PARTITION BY id) AS entry_count,"
+        f"   MIN(entry) OVER (PARTITION BY id) AS min_entry,"
+        # DR.1.b — only keep trails that contain a REAL supersession. Without
+        # this, densified-plant id collisions (the spine id omits the day, so
+        # 5 replicas reuse one id with NO supersedes) over-select: 77 rows on
+        # the baseline, only 10 a genuine trail.
+        f"   MAX(CASE WHEN supersedes IS NOT NULL THEN 1 ELSE 0 END)"
+        f"     OVER (PARTITION BY id) AS has_supersede"
         f"   FROM {prefix}_transactions"
         f" ) sub"
-        f" WHERE entry_count > 1"
+        f" WHERE entry_count > 1 AND has_supersede = 1"
         f" AND ({_data_value_clause('supersedes', P_L1_SUPERSEDE_REASON)}"
         f" OR supersedes IS NULL)"
     )
@@ -1795,10 +1806,16 @@ def build_supersession_daily_balances_dataset(
         f"   account_id, account_name, account_role, supersedes,"
         f"   business_day_start, business_day_end, money,"
         f"   COUNT(*) OVER (PARTITION BY account_id, business_day_start)"
-        f"     AS entry_count"
+        f"     AS entry_count,"
+        # DR.1.b — require a real supersession in the (account, day) trail,
+        # mirroring the transactions dataset (a densified-plant or replica
+        # daily-balance collision would otherwise over-select here too).
+        f"   MAX(CASE WHEN supersedes IS NOT NULL THEN 1 ELSE 0 END)"
+        f"     OVER (PARTITION BY account_id, business_day_start)"
+        f"     AS has_supersede"
         f"   FROM {prefix}_daily_balances"
         f" ) sub"
-        f" WHERE entry_count > 1"
+        f" WHERE entry_count > 1 AND has_supersede = 1"
     )
     return build_dataset(
         cfg, cfg.aws.prefixed("l1-supersession-daily-balances-dataset"),

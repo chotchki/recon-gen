@@ -1741,6 +1741,19 @@ def test_supersession_datasets_registered_and_target_base_tables() -> None:
     )
     assert "entry_count > 1" in tx_sql.SqlQuery
     assert "entry_count > 1" in db_sql.SqlQuery
+    # DR.1.b — selection requires the (id / account-day) trail to contain a
+    # real supersession; without it, densified-plant id collisions (replicas
+    # reuse one id with NO supersedes) over-select (77→10 on the baseline).
+    assert "has_supersede = 1" in tx_sql.SqlQuery
+    assert "has_supersede = 1" in db_sql.SqlQuery
+    assert "MAX(CASE WHEN supersedes IS NOT NULL" in tx_sql.SqlQuery
+    assert "MAX(CASE WHEN supersedes IS NOT NULL" in db_sql.SqlQuery
+    # DR.1.a — the no-reason flag compares against the id's OWN minimum entry,
+    # not `entry > 1` (entry is a global serial → `> 1` flagged every original
+    # row). Guard against regression to the old form.
+    assert "MIN(entry) OVER (PARTITION BY id)" in tx_sql.SqlQuery
+    assert "entry > min_entry" in tx_sql.SqlQuery
+    assert "entry > 1 AND supersedes IS NULL" not in tx_sql.SqlQuery
 
 
 def test_supersession_audit_has_supersedes_filter() -> None:
