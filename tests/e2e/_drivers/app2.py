@@ -803,45 +803,87 @@ class App2Driver:
 
     def _read_day_markers(self, visible_input: Any) -> dict[str, list[str]]:
         """Read ``{iso: [states]}`` off the open flatpickr calendar via
-        its live instance. Polls briefly so the async ``onDayCreate``
-        class-add (gated on a network fetch) has landed before the
-        snapshot; bounded so a genuinely-undecorated window returns ``{}``
-        rather than hanging."""
+        its live instance.
+
+        The ``onDayCreate`` decoration lands ASYNCHRONOUSLY: a
+        ``redraw()`` rebuilds all 42 day cells (clearing their classes),
+        then each cell's ``onDayCreate`` kicks off a network fetch and
+        applies ``.has-transactions`` / ``.has-balance`` in a ``.then``
+        callback. Those callbacks flush across many microtasks, so a
+        snapshot taken too early catches a PARTIAL decoration — e.g. the
+        leading both-days lit but the later carry days not yet, or a
+        single day decorated (observed: a ``total=1`` snapshot at ~15ms
+        before the full set lands at ~20ms; the window widens under CI
+        xdist load + PG latency). The pre-DM-fix "return the first
+        non-empty snapshot" therefore returned mid-flush partials —
+        which is exactly the ``no carry day rendered`` CI flake
+        (sasquatch_pr gl-1810: the both-days decorated first, the
+        snapshot fired, the carry days were dropped).
+
+        Fix: wait for the marker set to STABILIZE — return only after the
+        snapshot is byte-identical across ``_STABLE_POLLS`` consecutive
+        reads (the decoration flush has quiesced), bounded by a deadline.
+        A genuinely-undecorated window stabilizes at ``{}`` and returns
+        after the stability window elapses (no hang), so the empty-state
+        contract is preserved. Robust by construction: the read doesn't
+        depend on how long the async flush takes, only on it having
+        settled.
+        """
         import time as _time
-        deadline = _time.monotonic() + 8.0
-        markers: dict[str, list[str]] = {}
+        deadline = _time.monotonic() + 12.0
+        # Number of consecutive identical reads that prove the async
+        # decoration flush has quiesced. 3 × the 150ms poll gap (~450ms
+        # of no change) clears the observed mid-flush partials with margin
+        # even under CI load.
+        _STABLE_POLLS = 3
+        snapshot_js = """(el) => {
+            const fp = el._flatpickr;
+            if (!fp || !fp.calendarContainer) return {};
+            const out = {};
+            const days = fp.calendarContainer.querySelectorAll(
+                '.flatpickr-day'
+            );
+            days.forEach((d) => {
+                if (!d.dateObj) return;
+                // Skip the prev/next-month spill cells so the keys
+                // stay inside the displayed month (the test
+                // compares against the DB's per-account day set,
+                // which the overscanned window covers).
+                const states = [];
+                if (d.classList.contains('has-transactions')) {
+                    states.push('transactions');
+                }
+                if (d.classList.contains('has-balance')) {
+                    states.push('balance');
+                }
+                if (states.length === 0) return;
+                const iso = fp.formatDate(d.dateObj, 'Y-m-d');
+                out[iso] = states;
+            });
+            return out;
+        }"""
+
+        def _snapshot() -> dict[str, list[str]]:
+            return visible_input.evaluate(snapshot_js)
+
+        def _key(m: dict[str, list[str]]) -> tuple[tuple[str, tuple[str, ...]], ...]:
+            return tuple(sorted((k, tuple(v)) for k, v in m.items()))
+
+        markers = _snapshot()
+        last_key = _key(markers)
+        stable_count = 0
         while _time.monotonic() < deadline:
-            markers = visible_input.evaluate(
-                """(el) => {
-                    const fp = el._flatpickr;
-                    if (!fp || !fp.calendarContainer) return {};
-                    const out = {};
-                    const days = fp.calendarContainer.querySelectorAll(
-                        '.flatpickr-day'
-                    );
-                    days.forEach((d) => {
-                        if (!d.dateObj) return;
-                        // Skip the prev/next-month spill cells so the keys
-                        // stay inside the displayed month (the test
-                        // compares against the DB's per-account day set,
-                        // which the overscanned window covers).
-                        const states = [];
-                        if (d.classList.contains('has-transactions')) {
-                            states.push('transactions');
-                        }
-                        if (d.classList.contains('has-balance')) {
-                            states.push('balance');
-                        }
-                        if (states.length === 0) return;
-                        const iso = fp.formatDate(d.dateObj, 'Y-m-d');
-                        out[iso] = states;
-                    });
-                    return out;
-                }"""
-            )
-            if markers:
-                break
             self._page.wait_for_timeout(150)
+            current = _snapshot()
+            current_key = _key(current)
+            if current_key == last_key:
+                stable_count += 1
+                if stable_count >= _STABLE_POLLS:
+                    return current
+            else:
+                stable_count = 0
+                last_key = current_key
+            markers = current
         return markers
 
     def query_db(

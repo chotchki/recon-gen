@@ -285,13 +285,20 @@ def _day_sets_for_account(
 def _account_with_both_and_carry(
     cfg: "Config", window_start: str, window_end: str,
 ) -> str:
-    """Find an internal account that has BOTH ``has-both`` days (a posting
-    day that also carries a balance) AND ``has-balance``-only carry days
-    (weekend balances with no posting) in the window — the richest
-    decoration shape. Prefers a GL-control / parent role (those reconcile
-    daily so they show the weekend-carry pattern); falls back to any
-    account with both day kinds. Raises if none exists (thin window /
-    seed)."""
+    """Find an internal account that is RICH in ``has-balance``-only carry
+    days (weekend balances with no posting) AND also has ``has-both`` days
+    (a posting day that also carries a balance) in the window — the richest
+    decoration shape that makes the carry channel robust to prove.
+
+    Ordering prioritizes ``carry_days DESC`` (then ``both_days DESC``), the
+    inverse of the pre-DM-fix ``both_days DESC`` order: that old order
+    landed on a carry-POOR account (sasquatch_pr gl-1810: 65 both-days but
+    its carry days clump at month edges), so a single rendered month grid
+    could miss the only carry day in it. A carry-RICH account has a carry
+    day in (nearly) every month, so the month the test opens is guaranteed
+    to render one. We also require a small carry threshold so the picked
+    account has carry days spread across months (not one lone weekend).
+    Raises if none exists (thin window / seed)."""
     prefix = cfg.db.table_prefix
     rows = _query(cfg, (
         f"WITH txd AS ("
@@ -318,7 +325,7 @@ def _account_with_both_and_carry(
         f"GROUP BY bald.ad "
         f"HAVING COUNT(DISTINCT CASE WHEN txd.d IS NOT NULL THEN bald.d END) > 0 "
         f"   AND COUNT(DISTINCT CASE WHEN txd.d IS NULL THEN bald.d END) > 0 "
-        f"ORDER BY both_days DESC, carry_days DESC, bald.ad ASC"
+        f"ORDER BY carry_days DESC, both_days DESC, bald.ad ASC"
     ))
     if not rows:
         raise RuntimeError(
@@ -328,36 +335,75 @@ def _account_with_both_and_carry(
     return str(rows[0][0])
 
 
+def _grid_window_for_month(month_start: str) -> tuple[str, str]:
+    """The ISO ``(grid_start, grid_end)`` a flatpickr month grid actually
+    renders for ``month_start`` (``YYYY-MM-01``).
+
+    flatpickr ALWAYS lays out a fixed 6-week grid (42 cells) starting on
+    the leading Sunday on/before the 1st — NOT the minimal number of weeks.
+    So the window is exactly ``[leading_sunday, leading_sunday + 41 days]``.
+    Empirically confirmed against the live picker (March 2026 starts on a
+    Sunday → grid 2026-03-01 .. 2026-04-11, 42 cells).
+
+    The day-availability test asserts the rendered markers against the DB
+    sets restricted to THIS window (the grid renders prev/next-month spill
+    cells too, so the visible set is the month plus a few adjacent days —
+    not just the calendar month). Computing it here keeps the DB ground
+    truth and the rendered grid in lock-step regardless of dialect.
+    """
+    from datetime import date, timedelta
+
+    y, m, _ = (int(p) for p in month_start.split("-"))
+    first = date(y, m, 1)
+    # flatpickr weeks start Sunday (weekday(): Mon=0..Sun=6 → Sun=6).
+    grid_start = first - timedelta(days=(first.weekday() + 1) % 7)
+    grid_end = grid_start + timedelta(days=41)  # fixed 6×7 = 42 cells
+    return grid_start.isoformat(), grid_end.isoformat()
+
+
 def _best_month_for_account(
     cfg: "Config", account_display: str, window_start: str, window_end: str,
-) -> str:
-    """Return the ``YYYY-MM-01`` of the month (within the window) where
-    ``account_display`` has BOTH a ``has-both`` day (posting + balance) AND
-    a ``has-balance``-only carry day — the month the day-availability test
-    opens the calendar on so the visible grid carries both marker channels.
+) -> tuple[str, str, str]:
+    """Pick the month grid to open + the specific (both_day, carry_day)
+    pair to assert on.
 
-    The picker renders a 6-week grid for one month at a time, so the test
-    has to land on a month the DB confirms carries both day kinds; the grid
-    then shows that month plus a few spill cells from the adjacent months.
+    Returns ``(month_start, both_day, carry_day)`` where ``month_start`` is
+    ``YYYY-MM-01`` and both ``both_day`` / ``carry_day`` are ISO dates the
+    DB confirms fall inside the SAME rendered 6-week grid (so opening that
+    month is guaranteed to render both channels — no edge-of-window miss).
+    ``both_day`` is a posting+balance day; ``carry_day`` is a balance-only
+    (weekend carry) day.
+
+    The picker renders one month's 6-week grid at a time (the month plus
+    prev/next-month spill cells), so the test lands on a month whose
+    rendered grid the DB confirms carries both day kinds. Iterates months
+    in order, computing each month's true rendered grid window via
+    :func:`_grid_window_for_month` and checking the DB sets restricted to
+    that grid window carry at least one of each — so the asserted days are
+    provably visible, not merely in the calendar month.
     """
     tx_days, bal_days = _day_sets_for_account(
         cfg, account_display, window_start, window_end,
     )
     carry_days = bal_days - tx_days
     both_days = bal_days & tx_days
-    by_month: dict[str, dict[str, bool]] = {}
-    for d in both_days:
-        by_month.setdefault(d[:7], {})["both"] = True
-    for d in carry_days:
-        by_month.setdefault(d[:7], {})["carry"] = True
-    for month in sorted(by_month):
-        flags = by_month[month]
-        if flags.get("both") and flags.get("carry"):
-            return f"{month}-01"
+    months = sorted({d[:7] for d in bal_days})
+    for month in months:
+        month_start = f"{month}-01"
+        grid_start, grid_end = _grid_window_for_month(month_start)
+        grid_both = sorted(
+            d for d in both_days if grid_start <= d <= grid_end
+        )
+        grid_carry = sorted(
+            d for d in carry_days if grid_start <= d <= grid_end
+        )
+        if grid_both and grid_carry:
+            return month_start, grid_both[0], grid_carry[0]
     raise RuntimeError(
-        f"no single month in [{window_start}, {window_end}] carries both a "
-        f"has-both day AND a carry day for {account_display!r} — the marker "
-        f"channels can't both be proven in one rendered grid"
+        f"no single rendered month grid in [{window_start}, {window_end}] "
+        f"carries both a has-both day AND a carry day for "
+        f"{account_display!r} — the marker channels can't both be proven "
+        f"in one rendered grid"
     )
 
 
@@ -573,13 +619,23 @@ def test_dm3_day_availability_decorates_picked_account(
         f"account {account!r} has tx_days={len(tx_days)} "
         f"bal_days={len(bal_days)} — picker chose an account without both"
     )
-    # The month to open the calendar on: one the DB confirms carries BOTH a
-    # has-both day AND a carry day for this account (the picker's default
-    # month is the live-clock as_of anchor, which can be far from the
-    # LOCKED_ANCHOR-seeded data — so we navigate explicitly).
-    open_on = _best_month_for_account(
+    # The month to open the calendar on + the EXACT (both_day, carry_day)
+    # pair the DB confirms fall inside that month's rendered 6-week grid —
+    # so opening the month is guaranteed to render both marker channels
+    # (no edge-of-window miss). The picker's default month is the live-
+    # clock as_of anchor, which can be far from the LOCKED_ANCHOR-seeded
+    # data, so we navigate explicitly.
+    open_on, expected_both_day, expected_carry_day = _best_month_for_account(
         cfg, account, window_start, window_end,
     )
+    # The DB ground truth restricted to the EXACT grid the open month
+    # renders (the month plus prev/next-month spill cells). The rendered
+    # markers are a subset of this; comparing against the grid window
+    # rather than the full data window keeps the DB and the rendered grid
+    # in lock-step.
+    grid_start, grid_end = _grid_window_for_month(open_on)
+    grid_tx_days = {d for d in tx_days if grid_start <= d <= grid_end}
+    grid_bal_days = {d for d in bal_days if grid_start <= d <= grid_end}
 
     dm_driver.open("l1", sheet=_DAILY_STATEMENT_NAME)
     dm_driver.wait_loaded("Opening Balance")
@@ -590,12 +646,15 @@ def test_dm3_day_availability_decorates_picked_account(
     dm_driver.pick_filter("Account", [account])
 
     # Open the calendar, navigate to the data-window month, read the
-    # decorated days.
+    # decorated days. The driver settles on a STABLE marker snapshot (the
+    # async onDayCreate flush has quiesced) — not the first non-empty read,
+    # which used to catch a mid-flush partial (the carry-day CI flake).
     markers = dm_driver.day_availability("Business Day", open_on=open_on)
     assert markers, (
         f"Business Day picker rendered NO decorated days for "
         f"{account!r}. Expected markers on the days in the DB tx set "
-        f"({len(tx_days)}) ∪ balance set ({len(bal_days)}). The "
+        f"({len(grid_tx_days)}) ∪ balance set ({len(grid_bal_days)}) "
+        f"within the rendered grid [{grid_start}, {grid_end}]. The "
         f"onDayCreate fetch (day-availability endpoint) returned empty or "
         f"the markers never applied — check the day_availability_fetcher "
         f"wiring + the param_pL1DsAccount value the JS reads."
@@ -603,49 +662,62 @@ def test_dm3_day_availability_decorates_picked_account(
 
     # Every decorated day must agree with the DB: a 'transactions' marker
     # ⟺ the day is in the DB tx set; a 'balance' marker ⟺ in the DB
-    # balance set. Only check the rendered window (the picker decorates the
-    # visible/overscanned days only, a subset of the full DB sets).
+    # balance set. Compared against the DB sets restricted to the rendered
+    # grid window so the rendered (subset) markers line up exactly.
     mismatches: list[str] = []
     for iso, states in markers.items():
         has_tx_marker = "transactions" in states
         has_bal_marker = "balance" in states
-        if has_tx_marker != (iso in tx_days):
+        if has_tx_marker != (iso in grid_tx_days):
             mismatches.append(
                 f"{iso}: transactions marker={has_tx_marker} but "
-                f"DB-tx={iso in tx_days}"
+                f"DB-tx={iso in grid_tx_days}"
             )
-        if has_bal_marker != (iso in bal_days):
+        if has_bal_marker != (iso in grid_bal_days):
             mismatches.append(
                 f"{iso}: balance marker={has_bal_marker} but "
-                f"DB-balance={iso in bal_days}"
+                f"DB-balance={iso in grid_bal_days}"
             )
     assert not mismatches, (
-        f"day-availability markers disagree with the DB for {account!r}:\n"
+        f"day-availability markers disagree with the DB for {account!r} "
+        f"in grid [{grid_start}, {grid_end}]:\n"
         + "\n".join(mismatches[:10])
     )
 
-    # The two channels are INDEPENDENT (fill vs ring) — prove both light up
-    # within the rendered window: at least one 'has-both' day AND at least
-    # one 'balance'-only carry day.
-    rendered_both = [
-        iso for iso, st in markers.items()
-        if "transactions" in st and "balance" in st
-    ]
-    rendered_carry = [
-        iso for iso, st in markers.items()
-        if "balance" in st and "transactions" not in st
-    ]
-    assert rendered_both, (
-        f"no 'has-both' day rendered for {account!r} — the .has-transactions "
-        f"+ .has-balance channels didn't both light on any visible day "
+    # The full rendered set must match the DB's grid-restricted union
+    # EXACTLY (not just "some marker exists") — proves the decoration is
+    # complete, not a mid-flush partial. Every DB day in the grid window
+    # carries a marker (tx ∪ balance); no extra/missing day.
+    expected_union = grid_tx_days | grid_bal_days
+    rendered_days = set(markers.keys())
+    assert rendered_days == expected_union, (
+        f"rendered marker days != DB grid-window union for {account!r} "
+        f"in grid [{grid_start}, {grid_end}].\n"
+        f"  only-rendered: {sorted(rendered_days - expected_union)[:10]}\n"
+        f"  only-in-DB:    {sorted(expected_union - rendered_days)[:10]}\n"
+        f"(if only-in-DB is non-empty the read returned before the async "
+        f"onDayCreate flush settled — the partial-decoration race)"
+    )
+
+    # The two channels are INDEPENDENT (fill vs ring). Assert the SPECIFIC
+    # DB-derived days decorate the right channel: the both-day lights both
+    # .has-transactions AND .has-balance; the carry-day lights .has-balance
+    # ONLY (no .has-transactions). Landing on exact days (vs "some carry
+    # day exists somewhere") makes the assertion deterministic + dialect-
+    # invariant — the days were proven to be in this rendered grid.
+    assert set(markers.get(expected_both_day, [])) == {
+        "transactions", "balance"
+    }, (
+        f"expected has-both day {expected_both_day} for {account!r} to "
+        f"decorate BOTH channels; got {markers.get(expected_both_day)!r} "
         f"(rendered markers: {dict(sorted(markers.items())[:8])})"
     )
-    assert rendered_carry, (
-        f"no 'has-balance'-only carry day rendered for {account!r} — the "
-        f"balance-only (weekend carry) channel never showed in the visible "
-        f"window. The account was chosen BECAUSE the DB has such days; if "
-        f"none rendered, the visible month didn't include one — widen the "
-        f"opened month or the marker isn't applied for carry days "
-        f"(rendered markers: {dict(sorted(markers.items())[:8])})"
+    assert set(markers.get(expected_carry_day, [])) == {"balance"}, (
+        f"expected balance-only carry day {expected_carry_day} for "
+        f"{account!r} to decorate .has-balance ONLY (no .has-transactions); "
+        f"got {markers.get(expected_carry_day)!r}. The balance-only "
+        f"(weekend carry) channel must light independently of the "
+        f"transaction channel (rendered markers: "
+        f"{dict(sorted(markers.items())[:8])})"
     )
     dm_driver.screenshot()
