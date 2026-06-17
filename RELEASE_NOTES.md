@@ -6,6 +6,27 @@
 > AI, BK, BQ, BW, CK, BV close, snapshotter pattern, runner readiness).
 > v13.14.4 below resumes the convention.
 
+## v14.5.1 — re-cut of v14.5.0 (stranded by a runner CI outage) + CI resilience
+
+Patch. v14.5.0 was tagged but **never published**: a runner-side CI outage
+stranded it. The self-hosted runner's daily
+`docker image prune -af --filter "until=168h"` cron removed the un-pullable
+`recon-gen/oracle-19c:local` image (a stable base, always older than the 7-day
+window), and a later run's teardown left the shared PG/Oracle containers
+stopped — so the "Ensure shared PG + Oracle are up" CI step failed and the
+release gate correctly blocked the publish. v14.5.1 ships the **same Daily
+Statement features as v14.5.0 below** (no product change) plus the CI fix.
+
+### Fixed — CI / runner resilience
+
+- The "Ensure shared PG + Oracle are up" step now `docker rm -f`'s any stopped
+  same-name leftover before `docker run` (a stopped `ci-shared-pg`/`-oracle` no
+  longer exits 125 on a create name-conflict), and fails loudly with a rebuild
+  pointer if the Oracle image is missing instead of a cryptic
+  pull-access-denied. (Runner-side, the Oracle image is now
+  `recon-gen.keep`-labeled and excluded from the prune cron so it can't be
+  swept again.)
+
 ## v14.5.0 — Daily Statement running balance, day-availability markers + Role→Account cascade (Phases DM, DN)
 
 Minor. New Daily Statement features — a running-balance column, day-availability
