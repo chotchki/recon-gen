@@ -38,7 +38,7 @@ from __future__ import annotations
 import contextlib
 import json
 import time
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -881,7 +881,9 @@ class QsEmbedDriver:
             f"{details}{capture_dir_hint}"
         )
 
-    def _settle_after_param_change(self, *, timeout_ms: int = 18_000) -> None:
+    def _settle_after_param_change(
+        self, *, timeout_ms: int = 18_000, snapshot: WsSnapshot | None = None,
+    ) -> None:
         """Block until QS's WebSocket data layer has settled after a
         parameter write.
 
@@ -920,14 +922,23 @@ class QsEmbedDriver:
         pre-race.3 absolute-state heuristic (``total_starts > baseline``
         which spun until timeout if QS never fired a new START_VIS).
         """
-        # Snapshot must happen BEFORE the caller's mutating action.
-        # Callers invoke this AFTER the action; we capture immediately
-        # on entry. Two-thread interleaving caveat: a STOP_VIS for a
-        # previously-pending cid could land between action fire + this
-        # snapshot, shrinking ``snap.pending``. That's fine — the
-        # ``new_pending_since`` set will just be slightly wider than
-        # strictly necessary; the wait still terminates correctly.
-        snap = self._ws_tracker.snapshot()
+        # Single-write callers invoke this AFTER their one action and pass
+        # no ``snapshot``: we capture on entry and rely on QS's START_VIS
+        # frame lagging the write (the JS event loop delivers it after this
+        # call begins), so the new cid is seen. Multi-write callers
+        # (``set_date_range`` commits TWO bounds before settling) MUST pass
+        # a ``snapshot`` captured BEFORE their first write — otherwise both
+        # per-bound re-queries can fire before this on-entry capture, the
+        # loop sees ``new_starts == 0`` and takes the cache-equivalent
+        # fast-path, and the caller reads the transient
+        # ``[From-committed, To-still-default-2099]`` = all-time state (the
+        # 8043-row L2FT additive-picker CI flake, 2026-06-17). Two-thread
+        # interleaving caveat: a STOP_VIS for a previously-pending cid could
+        # land between action fire + an on-entry snapshot, shrinking
+        # ``snap.pending``. That's fine — the ``new_pending_since`` set will
+        # just be slightly wider than strictly necessary; the wait still
+        # terminates correctly.
+        snap = snapshot if snapshot is not None else self._ws_tracker.snapshot()
         deadline = time.monotonic() + (timeout_ms / 1000.0)
         # Quiet window (ms) past the most recent START before we accept
         # "all new cids settled". 300 ms straddles the two-burst case.
@@ -961,6 +972,26 @@ class QsEmbedDriver:
             # gives that loop room to deliver any queued frames.
             self._page.wait_for_timeout(80)
 
+    def _settle_around(
+        self, action: Callable[[], None], *, timeout_ms: int = 18_000,
+    ) -> None:
+        """Snapshot the WS tracker, run a param-mutating ``action``, then
+        block until every re-query ``action`` fired has drained.
+
+        The snapshot is captured BEFORE ``action`` — the contract
+        ``snapshot()`` documents — so even a multi-control write
+        (``set_date_range`` commits two date bounds, each firing its own
+        re-query) is fully waited on: the lone settle can't miss a frame
+        that fired mid-action and fall through to the cache-equivalent
+        fast-path, leaving the caller reading a transient intermediate
+        state (the 8043-row L2FT additive-picker flake, 2026-06-17). Every
+        param-write verb routes through here, so the snapshot-before-write
+        invariant holds by construction rather than per-verb discipline.
+        """
+        snap = self._ws_tracker.snapshot()
+        action()
+        self._settle_after_param_change(snapshot=snap, timeout_ms=timeout_ms)
+
     def pick_filter(self, label: str, values: Sequence[str]) -> None:
         # Post-AA.A.3 the L1 / L2FT dropdowns are single-select
         # ParameterDropDownControls (pre-AA.A.3 they were multi-select on
@@ -977,15 +1008,18 @@ class QsEmbedDriver:
         # encapsulates the typing dance so tests stay renderer-agnostic
         # (AA.H.8).
         vals = list(values)
-        if len(vals) == 1:
-            set_dropdown_value(
-                self._page, label, vals[0], self._page_timeout,
-            )
-        else:
-            set_multi_select_values(
-                self._page, label, vals, self._page_timeout,
-            )
-        self._settle_after_param_change()
+
+        def _do() -> None:
+            if len(vals) == 1:
+                set_dropdown_value(
+                    self._page, label, vals[0], self._page_timeout,
+                )
+            else:
+                set_multi_select_values(
+                    self._page, label, vals, self._page_timeout,
+                )
+
+        self._settle_around(_do)
 
     def set_date_range(self, from_: str | None, to: str | None) -> None:
         # The universal date filter renders as two ParameterDateTimePicker
@@ -994,17 +1028,27 @@ class QsEmbedDriver:
         # call sites). QS's picker text format is ``YYYY/MM/DD``; the
         # protocol takes ISO ``YYYY-MM-DD``, so translate. ``None`` on a
         # side leaves that picker untouched.
-        touched = False
-        for control_title, iso in (("Date From", from_), ("Date To", to)):
-            if iso is None:
-                continue
-            set_parameter_datetime_value(
-                self._page, control_title, iso.replace("-", "/"),
-                self._page_timeout,
-            )
-            touched = True
-        if touched:
-            self._settle_after_param_change()
+        # AA.A.date-commit (2026-06-17) — set_date_range commits TWO
+        # ParameterDateTimePickers (each Tab-commit fires its own re-query),
+        # so it MUST snapshot before the first write: a single post-write
+        # settle could read new_starts == 0 (both frames already fired), take
+        # the cache-equivalent fast-path, and let the caller read the
+        # transient [From, default-To=2099] = all-time state. ``_settle_around``
+        # takes the pre-write snapshot so the settle waits for BOTH bounds'
+        # re-queries to drain before the caller reads.
+        if from_ is None and to is None:
+            return
+
+        def _do() -> None:
+            for control_title, iso in (("Date From", from_), ("Date To", to)):
+                if iso is None:
+                    continue
+                set_parameter_datetime_value(
+                    self._page, control_title, iso.replace("-", "/"),
+                    self._page_timeout,
+                )
+
+        self._settle_around(_do)
 
     def set_date(self, label: str, iso: str | None) -> None:
         # AA.B.5.followon — single-value DateTimePicker control (currently
@@ -1015,10 +1059,11 @@ class QsEmbedDriver:
         # form. Block until the dataset re-query lands.
         if iso is None:
             return
-        set_parameter_datetime_value(
-            self._page, label, iso.replace("-", "/"), self._page_timeout,
+        self._settle_around(
+            lambda: set_parameter_datetime_value(
+                self._page, label, iso.replace("-", "/"), self._page_timeout,
+            )
         )
-        self._settle_after_param_change()
 
     def set_slider(
         self, label: str, lo: float | None, hi: float | None,
@@ -1034,10 +1079,11 @@ class QsEmbedDriver:
                 f"set_slider({label!r}): no value — pass it as ``lo`` "
                 f"(``hi`` is unused for a single-handle ParameterSlider)."
             )
-        set_parameter_slider_value(
-            self._page, label, value, self._page_timeout,
+        self._settle_around(
+            lambda: set_parameter_slider_value(
+                self._page, label, value, self._page_timeout,
+            )
         )
-        self._settle_after_param_change()
 
     def clear_filters(self) -> None:
         # Re-mint the embed URL and re-navigate — QS parameter controls
@@ -1054,10 +1100,11 @@ class QsEmbedDriver:
         # Left-click the first row's cell-0-0 to fire a DATA_POINT_CLICK
         # drill (typically a same-sheet param write — Account Network's
         # walk-the-flow is the K.4.8 case). Then settle on the re-fetch.
-        click_first_row_of_visual(
-            self._page, visual_title, self._page_timeout,
+        self._settle_around(
+            lambda: click_first_row_of_visual(
+                self._page, visual_title, self._page_timeout,
+            )
         )
-        self._settle_after_param_change()
 
     def drill_from_first_row_via_menu(
         self, visual_title: str, menu_item: str,
