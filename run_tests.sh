@@ -31,6 +31,26 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Auto-load run/secrets.env so callers never need the `set -a; source`
+# dance — `./run_tests.sh` is meant to just work. The file holds dev-only
+# secrets (e.g. RECON_GEN_CLOUDFLARE_TOKEN for the QS→Docker-PG DNS
+# forward the qs_browser layer's TLS pre-flight requires).
+#
+# Env wins, file fills the gap: a var already in the environment (CI's
+# GitHub secrets, or an operator's exported value) is NEVER overwritten;
+# the file only supplies vars that aren't set. The sed rewrites each
+# `KEY=val` to `KEY="${KEY:-val}"` so the existing env value survives,
+# then `set -a` exports the result so the runner subprocess inherits it.
+# Tolerates an optional `export ` prefix + comment/blank lines.
+# [[feedback_no_credential_friction]] — the runner derives; the operator
+# never has to remember.
+if [ -f run/secrets.env ]; then
+  set -a
+  # shellcheck disable=SC1090
+  source <(sed -E 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/\2="${\2:-\3}"/' run/secrets.env)
+  set +a
+fi
+
 if [ ! -x ".venv/bin/python" ]; then
   echo "error: .venv not found at ${SCRIPT_DIR}/.venv — run 'uv sync --all-extras' first" >&2
   exit 1
