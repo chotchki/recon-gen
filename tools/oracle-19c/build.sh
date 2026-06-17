@@ -172,12 +172,23 @@ docker stop --time 60 "${INIT_NAME}" > /dev/null
 # Commit the writable layer back onto the same tag. Future `docker run`
 # starts the container with the DB files already present; runOracle.sh
 # detects the existing $ORACLE_BASE/oradata/$ORACLE_SID and skips DBCA.
+#
+# `--change LABEL recon-gen.keep=true` marks the image so the runner's daily
+# prune cron skips it:
+#   docker image prune -af --filter "until=168h" --filter "label!=recon-gen.keep"
+# This image is un-pullable (build-it-yourself, not in any registry) AND a
+# stable base that's always older than the 7-day until-window — so without the
+# label a prune sweeps it the moment no container references it, which stranded
+# the v14.5.0 release (image gone -> `docker run` hit pull-access-denied). The
+# runner's existing image was labeled in place; this bakes it so every future
+# rebuild stays prune-protected.
 echo "build.sh: committing initialized DB back onto ${LOCAL_TAG}…"
-docker commit "${INIT_NAME}" "${LOCAL_TAG}" > /dev/null
+docker commit --change 'LABEL recon-gen.keep=true' "${INIT_NAME}" "${LOCAL_TAG}" > /dev/null
 docker rm "${INIT_NAME}" > /dev/null
 
 echo
 echo "build.sh: done. Image ${LOCAL_TAG} pre-initialized + ready."
 echo
-echo "Verify:   docker image inspect ${LOCAL_TAG} --format '{{.Architecture}}'"
-echo "Cleanup:  docker rmi oracle/database:19.3.0-ee  # keeps recon-gen/oracle-19c:local"
+echo "Verify:     docker image inspect ${LOCAL_TAG} --format '{{.Architecture}}'"
+echo "Keep-label: docker image inspect ${LOCAL_TAG} --format '{{index .Config.Labels \"recon-gen.keep\"}}'  # expect: true"
+echo "Cleanup:    docker rmi oracle/database:19.3.0-ee  # keeps recon-gen/oracle-19c:local"
