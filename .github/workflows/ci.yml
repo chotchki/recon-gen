@@ -267,6 +267,12 @@ jobs:
               echo "ci-shared-pg already has max_connections=300 + /dev/shm≥2GB — reusing in place."
             fi
           else
+            # DR-followup — a prior run's teardown STOPS ci-shared-pg (it
+            # doesn't remove it); a blind `docker run --name ci-shared-pg`
+            # then exits 125 on a name conflict with the stopped container
+            # (the setup/teardown asymmetry that stranded the v14.5.0 cut).
+            # Drop any stopped same-name leftover before creating.
+            docker rm -f ci-shared-pg >/dev/null 2>&1 || true
             docker run -d --name ci-shared-pg \
               --shm-size=2g \
               -e POSTGRES_PASSWORD="${PG_PASSWORD}" \
@@ -289,6 +295,19 @@ jobs:
               echo "Shared Oracle already named ci-shared-oracle — reusing in place."
             fi
           else
+            # DR-followup — fail LOUDLY (not with a cryptic pull-125) if the
+            # un-pullable Oracle image is missing. It's build-it-yourself
+            # (tools/oracle-19c/build.sh, needs the ~3GB Oracle zip that
+            # isn't in the CI checkout, so an in-CI rebuild can't self-heal)
+            # and is now recon-gen.keep-labeled to survive the daily
+            # `docker image prune` cron that stranded the v14.5.0 cut.
+            if ! docker image inspect recon-gen/oracle-19c:local >/dev/null 2>&1; then
+              echo "::error::recon-gen/oracle-19c:local missing on the runner — rebuild via tools/oracle-19c/build.sh (build-it-yourself image, not in any registry; now label-excluded from the prune cron)." >&2
+              exit 1
+            fi
+            # Drop any stopped same-name leftover (the prior run's teardown
+            # stops, doesn't remove) before creating, else docker-run 125s.
+            docker rm -f ci-shared-oracle >/dev/null 2>&1 || true
             docker run -d --name ci-shared-oracle \
               -e ORACLE_PWD="${ORACLE_PASSWORD}" \
               -e ORACLE_PDB=FREEPDB1 \
