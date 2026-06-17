@@ -6,6 +6,54 @@
 > AI, BK, BQ, BW, CK, BV close, snapshotter pattern, runner readiness).
 > v13.14.4 below resumes the convention.
 
+## v14.5.0 — Daily Statement running balance, day-availability markers + Role→Account cascade (Phases DM, DN)
+
+Minor. New Daily Statement features — a running-balance column, day-availability
+decoration on the day picker, and a Role→Account cascade — plus the QS e2e
+driver hardening that stabilizes the qs_browser layer.
+
+### Added — Daily Statement
+
+- **Running Balance column** on the Daily Statement and Posted Money Records
+  visuals. Anchored to the account's opening balance (the prior day's closing)
+  and accumulated leg-by-leg, ending at the recomputed closing balance. Ledger
+  drift surfaces as the gap between this recomputed closing and the stored
+  closing — the errors stay visible in the running total instead of being
+  hidden by a reset-to-zero start.
+- **Role → Account cascade** (App2). Picking a Role narrows the Account picker
+  to that role's accounts; changing the Role clears a now-stale Account
+  selection. App2-only — QuickSight filter/parameter controls can't cascade (a
+  picker dataset can't narrow on another control's value); documented in the
+  quirks log.
+- **Day-availability markers** on the Daily Statement day picker (App2). Days
+  with data are decorated so you can see at a glance which have activity: a
+  filled marker for transaction days, a ring for balance days — distinguished
+  by shape, not color, so it survives any theme — with a legend.
+
+### Added — Audit PDF
+
+- Running-balance column on the regulator-ready PDF's Daily Statement walk,
+  matching the dashboards (the 4-way agreement contract).
+
+### Fixed — App2
+
+- KPI values no longer overflow their tiles — the value scales to fit the box
+  width and bottom-aligns within the visual.
+
+### Test / CI stabilization
+
+- **QS embed-driver settle races.** Three qs_browser flakes (cascade-clear,
+  day-availability marker read, and the date-range commit) were settle-timing
+  races where the driver read DOM/data state before QS's re-query landed.
+  Fixed by settling on stable post-action state and pre-snapshotting the
+  WebSocket activity tracker before multi-write parameter changes. A new
+  `_settle_around` helper makes the snapshot-before-write contract hold by
+  construction across every QS param-write verb.
+- DuckDB db-tier `seeded_cfg` now opens a read-WRITE seed connection even when
+  the runner sets `RECON_GEN_DB_READ_ONLY=1` for the read tier.
+- The deployed-dashboard structure check skips `app2_only` controls on the QS
+  renderer (the Daily Statement Role picker renders only on App2).
+
 ## v14.4.1 — qs_browser regression sweep + App2 fixes (Phase DP)
 
 Patch. v14.4.0 was tagged while the qs_browser test layer was red — the
