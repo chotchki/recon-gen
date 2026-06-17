@@ -79,6 +79,13 @@ class ColumnShape(Enum):
 
     # Transfer identifiers
     TRANSFER_ID = "transfer_id"
+    # Logical transaction id (``<prefix>_transactions.id`` — the v6 PK,
+    # projected as ``transaction_id``). A DIFFERENT axis from TRANSFER_ID:
+    # ``transfer_id`` groups the legs of one transfer event, ``id`` keys a
+    # single logical transaction (its supersession trail shares one id).
+    # Kept distinct so the Supersession Audit's transaction-id drill cannot
+    # be cross-wired into a transfer_id parameter (DR.2).
+    TRANSACTION_ID = "transaction_id"
     # Rail name — the L2-declared Rail.name (Z.B subsumed
     # ``transfer_type`` into ``rail_name`` 2026-05-15; the
     # ``<prefix>_transactions.rail_name`` column carries the value).

@@ -611,7 +611,8 @@ DAILY_STATEMENT_TRANSACTIONS_CONTRACT = DatasetContract(columns=[
 # table doesn't need them. account_id + transfer_id stay for drill
 # wiring (M.2b.7).
 TRANSACTIONS_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("transaction_id", "STRING"),
+    # DR.2 — logical-transaction key, drill-eligible (search/navigate axis).
+    ColumnSpec("transaction_id", "STRING", shape=ColumnShape.TRANSACTION_ID),
     ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
     ColumnSpec("account_name", "STRING"),
     # DL.3 — see DRIFT_CONTRACT for account_display rationale.
@@ -707,7 +708,8 @@ STUCK_UNBUNDLED_CONTRACT = DatasetContract(columns=[
 # TechnicalCorrection).
 SUPERSESSION_TRANSACTIONS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("entry", "INTEGER"),
-    ColumnSpec("transaction_id", "STRING"),
+    # DR.2 — drill source for the same-sheet trail self-filter (DR.4).
+    ColumnSpec("transaction_id", "STRING", shape=ColumnShape.TRANSACTION_ID),
     ColumnSpec("supersedes", "STRING"),
     ColumnSpec("l1_supersession_no_reason", "INTEGER"),
     ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
