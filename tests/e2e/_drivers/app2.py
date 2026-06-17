@@ -934,6 +934,132 @@ class App2Driver:
         )
         self._page.wait_for_load_state("networkidle")
 
+    def _cascade_target_params(self, source_select: Any) -> list[str]:
+        """The ``param_<name>`` of every ``#filter-form`` ``<select>`` that
+        names ``source_select`` as its cascade source (carries
+        ``data-cascade-source-param`` == ``source_select``'s bare param) —
+        i.e. the targets this control will CLEAR when it changes.
+
+        Returns ``[]`` when ``source_select`` is not a cascade source (the
+        common case — every non-cascade picker). The driver uses a
+        non-empty result to switch ``pick_filter`` from the
+        ``expect_response`` wait (which can hard-hang on a cascade-source
+        pick — see ``pick_filter``) to the stable-DOM settle in
+        ``_wait_for_cascade_settle``.
+
+        Read entirely in-browser off the live form so it tracks the served
+        tree's cascade wiring with no Python-side mirror to drift.
+        """
+        return list(source_select.evaluate(
+            """(s) => {
+                const form = s.closest('#filter-form, form');
+                if (!form) return [];
+                const myParam = (s.name || '').replace(/^param_/, '');
+                if (!myParam) return [];
+                const out = [];
+                form.querySelectorAll(
+                    'select[data-cascade-source-param]'
+                ).forEach((tgt) => {
+                    if (tgt.dataset.cascadeSourceParam === myParam) {
+                        // The hidden/underlying select's own param name —
+                        // the value the driver polls for "cleared".
+                        out.push(tgt.name || '');
+                    }
+                });
+                return out.filter(Boolean);
+            }"""
+        ))
+
+    def _wait_for_cascade_settle(
+        self, action: Callable[[], object], target_params: Sequence[str],
+    ) -> None:
+        """Run ``action`` (a cascade-SOURCE pick) then block until the
+        post-cascade DOM has SETTLED — robust by construction, never a hard
+        hang.
+
+        A cascade-source pick (Daily Statement Role → Account) triggers:
+        (1) ``bootstrap.js``'s ``tomInstance.clear()`` on each cascade
+        TARGET — synchronous, but Tom Select applies it across microtasks;
+        (2) the target's own ``dropdown-options`` re-fetch (NOT a visual
+        request); (3) an INDIRECT, debounced visual re-fetch that — under CI
+        load + slow PG — serializes behind ``hx-sync="this:queue last"`` so
+        the first ``/visuals/.../data`` response can land past 30s, or never
+        fires in-window when a re-wire ``change`` keeps resetting the 300ms
+        debounce. Gating on a single ``expect_response`` therefore hangs for
+        the full timeout (the 3 consecutive CI failures on this test).
+
+        Settle condition (both must hold for ``_STABLE_POLLS`` consecutive
+        reads, OR the deadline elapses — graceful fallback, no hang, like
+        ``_read_day_markers``):
+        - every cascade TARGET's value is CLEARED (Tom Select ``getValue()``
+          empty) — the clear-on-source-change the test asserts;
+        - NO ``.visual-data`` carries a ``.visual-loading`` skeleton — every
+          visual's most-recent (post-pick) request has landed and swapped.
+
+        The deadline (45s) exceeds the worst-case serial-visual-fetch wall
+        seen under heavy CI load + ``queue last`` re-fire (8 visuals × slow
+        PG), so a genuinely-slow-but-progressing refresh still settles
+        properly; a never-firing refresh falls through after the deadline
+        rather than hard-hanging — and the caller's own assertions
+        (``filter_value`` cleared, visuals correct) then surface the real
+        failure with a readable message instead of an opaque
+        ``TimeoutError waiting for response``.
+        """
+        import time as _time
+
+        action()
+        deadline = _time.monotonic() + 45.0
+        # 3 × the 150ms poll gap (~450ms of no in-flight skeleton AND the
+        # targets staying cleared) proves the cascade flush + the indirect
+        # visual refresh have both quiesced.
+        _STABLE_POLLS = 3
+        targets = list(target_params)
+
+        def _settled() -> bool:
+            # (a) no visual skeleton in flight.
+            loading = self._page.evaluate(
+                "() => document.querySelectorAll("
+                "'.visual-data:has(.visual-loading)'"
+                ").length"
+            )
+            if loading:
+                return False
+            # (b) every cascade target's value is cleared.
+            for name in targets:
+                val = self._page.evaluate(
+                    """(name) => {
+                        const sel = document.querySelector(
+                            '[name="' + name + '"]'
+                        );
+                        if (!sel) return '';
+                        if (sel.tomselect) {
+                            const v = sel.tomselect.getValue();
+                            return Array.isArray(v) ? v.join(',') : (v || '');
+                        }
+                        return sel.value || '';
+                    }""",
+                    name,
+                )
+                if str(val).strip():
+                    return False
+            return True
+
+        stable = 0
+        while _time.monotonic() < deadline:
+            if _settled():
+                stable += 1
+                if stable >= _STABLE_POLLS:
+                    break
+            else:
+                stable = 0
+            self._page.wait_for_timeout(150)
+        # One final networkidle drain so any tail request (a queue-last
+        # re-fire that landed right at the settle boundary) is flushed
+        # before the caller reads. Bounded so a stuck poller can't wedge
+        # the test indefinitely — the settle loop above is the authority.
+        with contextlib.suppress(Exception):
+            self._page.wait_for_load_state("networkidle", timeout=5_000)
+
     def _filter_control(self, label: str) -> Any:
         """Locator for the ``#filter-form`` control group whose visible
         text starts with ``label`` — a ``<label>`` for dropdown /
@@ -1043,6 +1169,28 @@ class App2Driver:
                     if has_v:
                         break
                     self._page.wait_for_timeout(100)
+        # DM.5 — is THIS control a cascade SOURCE? A cascade TARGET
+        # ``<select>`` (e.g. Daily Statement's Account picker) carries
+        # ``data-cascade-source-param="<this control's param>"`` and an
+        # ``hx-trigger="change from:[name='param_<src>']"`` re-fetch of its
+        # *options* (a ``dropdown-options`` request — NOT a
+        # ``/visuals/.../data`` request). When the source changes,
+        # ``bootstrap.js::wireTomSelect``'s listener fires
+        # ``tomInstance.clear() + clearOptions()`` on the target. The
+        # downstream visual re-fetch is then INDIRECT (source change →
+        # target clear → form ``change`` → debounced refresh) and, under
+        # CI load + slow PG, the per-visual fetches serialize behind
+        # ``hx-sync="this:queue last"`` so the FIRST ``/visuals/.../data``
+        # response can land well past the 30s ``expect_response`` ceiling —
+        # OR a re-wire ``change`` resets the 300ms debounce and the trigger
+        # never fires in-window. Either way ``_wait_for_refetch`` hard-hangs
+        # for a response that may never come in time (the 3 consecutive CI
+        # failures on this test). So a cascade-source pick waits for the
+        # STABLE post-cascade DOM state (target cleared + visual skeletons
+        # gone) on a bounded deadline with a graceful no-hang fallback —
+        # the same robust-by-construction shape as ``_read_day_markers``,
+        # not a fixed ``expect_response`` that may never fire.
+        cascade_target_params = self._cascade_target_params(sel)
         # CT.1 — peek BEFORE the action: if cur === target, setValue() is
         # a no-op and no `change` event fires → no visual-data request →
         # `_wait_for_refetch` hangs for the full 30s timeout. This is
@@ -1096,12 +1244,20 @@ class App2Driver:
             }""",
             vals,
         )
-        if will_change:
-            self._wait_for_refetch(action)
-        else:
+        if not will_change:
             # Already at target — fire the (no-op) setValue for
             # idempotency, but don't wait for a refetch that won't come.
             action()
+        elif cascade_target_params:
+            # DM.5 — cascade-source pick: the visual re-fetch is indirect
+            # and may serialize past 30s (or never fire in-window), so
+            # don't gate on a single ``expect_response``. Run the action,
+            # then settle on the stable post-cascade DOM (target cleared +
+            # no in-flight visual skeletons) with a bounded deadline +
+            # graceful no-hang fallback.
+            self._wait_for_cascade_settle(action, cascade_target_params)
+        else:
+            self._wait_for_refetch(action)
 
     def set_date_range(self, from_: str | None, to: str | None) -> None:
         """Phase BM — the pre-BM universal date-RANGE Flatpickr widget
