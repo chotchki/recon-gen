@@ -1369,24 +1369,35 @@ def _daily_statement_transactions_sql(prefix: str, dialect: Dialect) -> str:
     # view-primitive strict-collapse decision).
     # AO.1.impl — tx.amount_money is BIGINT cents; project as dollars.
     amount = cents_to_dollars_sql("tx.amount_money", dialect=dialect)
-    # DN.1 — running balance via window function: cumulative SUM of the
-    # signed amount_money over (account_id, business_day) in posting
-    # order. `tx.id` is the deterministic tiebreaker for legs sharing a
-    # posting timestamp — without it, ties flip the running-balance
-    # sequence non-deterministically across runs. Storage is signed
-    # BIGINT cents (Credit >= 0 / Debit <= 0 per the CHECK constraint
-    # at common/l2/schema.py:1985-1988) so the bare SUM produces the
-    # running balance directly; wrap with cents_to_dollars_sql for the
-    # dollar projection. The PARTITION BY account_id + business_day is
-    # defensive (the WHERE clause narrows to one (account, day) at
-    # render time via the pL1DsAccount / pL1DsBalanceDate params) so
-    # the same SQL evaluated against a multi-account fixture in unit
-    # tests still yields the right per-account result.
+    # DN.1 + DN-followup (2026-06-16) — running balance = the account's
+    # actual balance AFTER each posting, not the day's postings summed
+    # from zero. Anchor the cumulative SUM to the OPENING balance (the
+    # prior emit's EOD `money`, via the same DN.3 correlated subquery the
+    # summary dataset uses for opening_balance) so the column flows from
+    # ~Opening down each posting and lands on the day's posting-implied
+    # closing (= closing_recomputed; any gap to closing_stored is the
+    # planted reconciliation drift the Posting Drift KPI surfaces).
+    # Cumulative SUM of signed amount_money over (account_id,
+    # business_day) in posting order; `tx.id` is the deterministic
+    # tiebreaker for legs sharing a posting timestamp. Storage is signed
+    # BIGINT cents (Credit >= 0 / Debit <= 0) and `money` is cents too,
+    # so opening + bare SUM yields the running balance directly; wrap
+    # with cents_to_dollars_sql for the dollar projection. PARTITION BY
+    # account_id + business_day is defensive (WHERE narrows to one
+    # (account, day) at render time via pL1DsAccount / pL1DsBalanceDate).
+    opening_cents_subq = (
+        f"(SELECT cdb.money"
+        f" FROM {prefix}_current_daily_balances cdb"
+        f" WHERE cdb.account_id = tx.account_id"
+        f"   AND {day_text('cdb.business_day_start', dialect)} < {bdate}"
+        f" ORDER BY cdb.business_day_start DESC"
+        f" {fetch_first_one_row(dialect)})"
+    )
     running_balance_cents = (
-        f"SUM(tx.amount_money) OVER ("
+        f"(COALESCE({opening_cents_subq}, 0) + SUM(tx.amount_money) OVER ("
         f"PARTITION BY tx.account_id, {business_day} "
         f"ORDER BY tx.posting, tx.id "
-        f"ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"
+        f"ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW))"
     )
     running_balance = cents_to_dollars_sql(
         running_balance_cents, dialect=dialect,

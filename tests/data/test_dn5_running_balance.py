@@ -2,18 +2,20 @@
 
 DN.1 added the ``running_balance`` window-function column to the Daily
 Statement per-leg dataset; DN.4 mirrored it onto the audit's
-``DailyStatementTransaction`` + ``_query_daily_statement_walks``. This
-module proves the BEHAVIOR (the SQL produces the right sequence), not
-just the emitted-SQL shape (the json-tier
-``test_daily_statement_transactions_projects_running_balance`` already
-pins the dialect-invariant fragments across PG / Oracle / DuckDB).
+``DailyStatementTransaction`` + ``_query_daily_statement_walks``.
+DN-followup (2026-06-16): the running balance is ANCHORED to the opening
+balance — the actual account balance after each posting — not the day's
+postings summed from zero. This module proves the BEHAVIOR (the SQL
+produces the right sequence), not just the emitted-SQL shape (the
+json-tier ``test_daily_statement_transactions_projects_running_balance``
+already pins the dialect-invariant fragments across PG / Oracle / DuckDB).
 
 Gates here (all DuckDB-executed — the one dialect we can run without a
 container; the cross-dialect SQL-emit shape is pinned at the json tier):
 
   (i)   **Python-accumulate equivalence** — the window-function
-        ``running_balance`` sequence equals a Python running-sum
-        (``itertools.accumulate``) over the same legs in
+        ``running_balance`` sequence equals ``opening + a Python
+        running-sum`` (``itertools.accumulate``) over the same legs in
         ``(posting, id)`` order. This is the direct-DB ≡ dataset-SQL
         leg of the `[[project_audit_dashboard_agreement]]` contract.
   (ii)  **Multi-account isolation** — the defensive
@@ -22,11 +24,10 @@ container; the cross-dialect SQL-emit shape is pinned at the json tier):
         (so a multi-account fixture still gives the right per-account
         sequence, per `[[feedback_production_honest_invariants]]`).
   (iii) **Closing arithmetic agreement** —
-        ``running_balance(last_leg) == closing_balance_recomputed
-        - opening_balance`` (the unanchored variant DN.1 shipped; the
-        Posted Money Records running balance starts at 0, the opening
-        KPI sits above it). A disagreement here is a real arithmetic
-        bug — the window function and the matview's
+        ``running_balance(last_leg) == closing_balance_recomputed``
+        (opening-anchored: the last leg lands ON the day's
+        posting-implied closing). A disagreement here is a real
+        arithmetic bug — the window function and the matview's
         ``opening + credits - debits`` would diverge.
   (iv)  **Audit-PDF parity** — ``_query_daily_statement_walks`` produces
         the SAME ``running_balance`` sequence as the dashboard dataset
@@ -44,7 +45,7 @@ from __future__ import annotations
 import os
 import tempfile
 from collections.abc import Iterator
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from itertools import accumulate
 from typing import TYPE_CHECKING
@@ -70,6 +71,7 @@ if TYPE_CHECKING:
 _PREFIX = "pfx"
 _DAY = date(2026, 1, 5)
 _DAY_ISO = _DAY.isoformat()
+_PRIOR_ISO = (_DAY - timedelta(days=1)).isoformat()
 
 # Account A — five legs on the picked day, in posting order.
 # (id, posting_HH:MM:SS, signed cents, direction)
@@ -88,8 +90,10 @@ _ACCT_B_LEGS: list[tuple[int, str, int, str]] = [
 ]
 
 # Opening balances (cents) carried into the picked day for each account.
-# Drives the closing-arithmetic gate (iii):
-#   closing_recomputed == opening + sum(signed legs)
+# DN-followup: these are the prior-emit EOD ``money`` the running balance
+# anchors to (seeded into current_daily_balances on the prior day) AND the
+# daily_statement_summary opening_balance — both must agree so gate (iii)
+# (running lands on closing_recomputed) holds.
 _ACCT_A_OPENING = 1_000_00
 _ACCT_B_OPENING = 50_00
 
@@ -98,24 +102,34 @@ def _signed_dollars(cents: int) -> Decimal:
     return Decimal(cents) / Decimal(100)
 
 
-def _expected_running(legs: list[tuple[int, str, int, str]]) -> list[Decimal]:
+def _expected_running(
+    legs: list[tuple[int, str, int, str]], opening_cents: int,
+) -> list[Decimal]:
     """Python running-sum over the legs in their fixture order (which is
-    already (posting, id) order). The window function must reproduce this
-    exactly."""
-    return [_signed_dollars(c) for c in accumulate(leg[2] for leg in legs)]
+    already (posting, id) order), ANCHORED to the opening balance. The
+    window function must reproduce this exactly (DN-followup 2026-06-16:
+    running balance = opening + cumulative, the actual account balance
+    after each posting)."""
+    return [
+        _signed_dollars(opening_cents + c)
+        for c in accumulate(leg[2] for leg in legs)
+    ]
 
 
 @pytest.fixture
 def two_account_duckdb() -> Iterator["Config"]:
-    """DuckDB with ``current_transactions`` + ``daily_statement_summary``
-    + ``drift`` planted for two accounts on the picked day.
+    """DuckDB with ``current_transactions`` + ``current_daily_balances``
+    + ``daily_statement_summary`` + ``drift`` planted for two accounts on
+    the picked day.
 
     The transactions feed the dataset SQL + the audit walk's per-leg
-    query; the summary feeds the closing-arithmetic gate + the audit
-    walk's KPI read; the drift table feeds the audit walk's
-    account-enumeration (the walk emits for every drifted (account, day)
-    OR every singleton parent). Both accounts are planted with a
-    non-zero drift row so they enumerate regardless of singleton-set.
+    query; current_daily_balances feeds the opening-balance correlated
+    subquery the running balance anchors to (DN-followup); the summary
+    feeds the closing-arithmetic gate + the audit walk's KPI read; the
+    drift table feeds the audit walk's account-enumeration (the walk emits
+    for every drifted (account, day) OR every singleton parent). Both
+    accounts are planted with a non-zero drift row so they enumerate
+    regardless of singleton-set.
     """
     fd, path = tempfile.mkstemp(suffix=".duckdb")
     os.close(fd)
@@ -148,6 +162,23 @@ def two_account_duckdb() -> Iterator["Config"]:
         f"INSERT INTO {_PREFIX}_current_transactions VALUES "
         "(?,?,?,?,?,?,?,?,?,?,?,?)",
         rows,
+    )
+
+    # current_daily_balances — the opening-balance source. DN-followup
+    # (2026-06-16): the running balance anchors to the prior emit's EOD
+    # ``money`` via the dataset/audit correlated subquery, so seed a
+    # prior-day balance row per account = that account's opening.
+    conn.execute(
+        f"CREATE TABLE {_PREFIX}_current_daily_balances ("
+        "  account_id TEXT, business_day_start TIMESTAMP, money BIGINT"
+        ")"
+    )
+    conn.executemany(
+        f"INSERT INTO {_PREFIX}_current_daily_balances VALUES (?,?,?)",
+        [
+            ("acc-A", f"{_PRIOR_ISO} 00:00:00", _ACCT_A_OPENING),
+            ("acc-B", f"{_PRIOR_ISO} 00:00:00", _ACCT_B_OPENING),
+        ],
     )
 
     # daily_statement_summary — KPIs the closing gate + the audit walk
@@ -246,12 +277,14 @@ def test_dn5_window_running_balance_equals_python_accumulate(
     two_account_duckdb: "Config",
 ) -> None:
     """(i) The dataset SQL's window-function ``running_balance`` sequence
-    equals a Python ``accumulate`` over the same legs for account A."""
+    equals ``opening + a Python accumulate`` over the same legs for
+    account A."""
     got = _dataset_running_balance(two_account_duckdb, "Account A (acc-A)")
-    expected = _expected_running(_ACCT_A_LEGS)
+    expected = _expected_running(_ACCT_A_LEGS, _ACCT_A_OPENING)
     assert got == expected, (
         f"running_balance window-function sequence diverged from the "
-        f"Python running-sum.\n  SQL:    {got}\n  Python: {expected}"
+        f"opening-anchored Python running-sum.\n"
+        f"  SQL:    {got}\n  Python: {expected}"
     )
 
 
@@ -260,18 +293,21 @@ def test_dn5_partition_isolates_accounts(
 ) -> None:
     """(ii) The defensive ``PARTITION BY account_id`` keeps account B's
     running sum independent of account A's even though both share the
-    picked day. Account B's first leg must start its own partition at
-    $90.00, not continue A's accumulated total."""
+    picked day. Account B's first leg must start its own partition at B's
+    own opening + first leg ($50.00 + $90.00 = $140.00), not continue A's
+    accumulated total."""
     got = _dataset_running_balance(two_account_duckdb, "Account B (acc-B)")
-    expected = _expected_running(_ACCT_B_LEGS)
+    expected = _expected_running(_ACCT_B_LEGS, _ACCT_B_OPENING)
     assert got == expected, (
         f"PARTITION BY account_id failed to isolate account B: "
         f"\n  SQL:    {got}\n  Python: {expected}"
     )
-    # First leg starts a fresh partition (not A's running total).
-    assert got[0] == Decimal("90.00"), (
-        f"account B's first running_balance must be its own first leg "
-        f"($90.00), got {got[0]!r} — partition leaked from account A"
+    # First leg starts a fresh partition (not A's running total) — B's
+    # own opening ($50.00) + its first leg ($90.00) = $140.00.
+    assert got[0] == Decimal("140.00"), (
+        f"account B's first running_balance must be its own opening + "
+        f"first leg ($140.00), got {got[0]!r} — partition leaked from "
+        f"account A"
     )
 
 
@@ -310,24 +346,24 @@ def test_dn5_closing_arithmetic_agreement(
     account_id: str,
     display: str,
 ) -> None:
-    """(iii) ``running_balance(last_leg) == closing_balance_recomputed
-    - opening_balance`` (unanchored variant — DN.1 ships the table's
-    running balance starting at 0, opening KPI above). closing + opening
-    come from the ``daily_statement_summary`` matview (the KPI source);
-    the running balance from the window function. A disagreement means
-    the window-function running sum and the matview's
-    ``opening + credits - debits`` diverge — a real arithmetic bug, not
-    a test artifact."""
+    """(iii) ``running_balance(last_leg) == closing_balance_recomputed``
+    (DN-followup 2026-06-16: the running balance is opening-anchored, so
+    the last leg lands ON the day's posting-implied closing, not the
+    delta). closing + opening come from the ``daily_statement_summary``
+    matview (the KPI source); the running balance from the window
+    function. A disagreement means the window-function running sum and the
+    matview's ``opening + credits - debits`` diverge — a real arithmetic
+    bug, not a test artifact."""
     running = _dataset_running_balance(two_account_duckdb, display)
     last_running = running[-1]
     closing, opening = _matview_closing_and_opening(
         two_account_duckdb, account_id,
     )
 
-    assert last_running == closing - opening, (
+    assert last_running == closing, (
         f"closing-arithmetic disagreement for {display}: "
         f"running_balance(last_leg)={last_running} but "
-        f"closing_recomputed - opening = {closing - opening} "
+        f"closing_recomputed = {closing} "
         f"(matview closing={closing}, opening={opening})"
     )
 
@@ -359,9 +395,9 @@ def test_dn5_audit_walk_running_balance_matches_dataset(
         f"{sorted(by_account)}"
     )
 
-    for acct_id, display, legs in (
-        ("acc-A", "Account A (acc-A)", _ACCT_A_LEGS),
-        ("acc-B", "Account B (acc-B)", _ACCT_B_LEGS),
+    for acct_id, display, legs, opening in (
+        ("acc-A", "Account A (acc-A)", _ACCT_A_LEGS, _ACCT_A_OPENING),
+        ("acc-B", "Account B (acc-B)", _ACCT_B_LEGS, _ACCT_B_OPENING),
     ):
         walk = by_account[acct_id]
         # Walk transactions are ordered (posting, id) by the audit query.
@@ -372,9 +408,9 @@ def test_dn5_audit_walk_running_balance_matches_dataset(
             f"for {acct_id}:\n  audit:   {audit_running}"
             f"\n  dataset: {dataset_running}"
         )
-        # And both equal the Python ground truth (closes the 4-way loop:
-        # audit ≡ dataset ≡ direct-DB-accumulate).
-        assert audit_running == _expected_running(legs), (
+        # And both equal the opening-anchored Python ground truth (closes
+        # the 4-way loop: audit ≡ dataset ≡ direct-DB-accumulate).
+        assert audit_running == _expected_running(legs, opening), (
             f"audit-walk running_balance diverged from the Python "
             f"running-sum for {acct_id}: {audit_running}"
         )

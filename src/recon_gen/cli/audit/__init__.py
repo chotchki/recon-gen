@@ -87,7 +87,11 @@ from recon_gen.common.provenance import (
     l2_yaml_sha256,
     recon_gen_code_identity,
 )
-from recon_gen.common.sql.dialect import date_literal, date_trunc_day
+from recon_gen.common.sql.dialect import (
+    date_literal,
+    date_trunc_day,
+    fetch_first_one_row,
+)
 from recon_gen.common.sql.intervals import range_clause
 from recon_gen.common.theme import DEFAULT_PRESET, resolve_l2_theme
 
@@ -1350,11 +1354,28 @@ def _query_daily_statement_walks(
             # the bare SUM is the running balance; `_cents_to_dollars`
             # projects at the read boundary like amount_money.
             tx_business_day = date_trunc_day("posting", cfg.db.dialect)
+            # DN-followup (2026-06-16) — anchor the running balance to the
+            # OPENING balance (prior emit's EOD `money`, the same DN.3
+            # correlated subquery shape the dataset uses) so it's the
+            # actual account balance after each posting, landing on the
+            # day's posting-implied closing. Keeps the projection
+            # value-identical to _daily_statement_transactions_sql so the
+            # 4-way agreement gate holds. `money` is BIGINT cents, like
+            # amount_money, so opening + bare SUM is cents → dollars at
+            # the read boundary.
+            opening_cents_subq = (
+                f"(SELECT cdb.money"
+                f" FROM {prefix}_current_daily_balances cdb"
+                f" WHERE cdb.account_id = '{account_id}'"
+                f"   AND cdb.business_day_start < {day_start_lit}"
+                f" ORDER BY cdb.business_day_start DESC"
+                f" {fetch_first_one_row(cfg.db.dialect)})"
+            )
             running_balance_cents = (
-                f"SUM(amount_money) OVER ("
+                f"(COALESCE({opening_cents_subq}, 0) + SUM(amount_money) OVER ("
                 f"PARTITION BY account_id, {tx_business_day} "
                 f"ORDER BY posting, id "
-                f"ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"
+                f"ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW))"
             )
             cur.execute(
                 f"SELECT id, transfer_id, rail_name,"

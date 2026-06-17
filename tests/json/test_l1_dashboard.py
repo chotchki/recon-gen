@@ -931,6 +931,23 @@ def test_daily_statement_transactions_projects_running_balance() -> None:
             f"{dialect.name}: running_balance must wrap the cents sum "
             f"with cents_to_dollars_sql (`/ 100.0`); got {sql!r}"
         )
+        # DN-followup (2026-06-16) — the running balance is ANCHORED to
+        # the opening balance (prior emit's EOD `money` via a
+        # current_daily_balances correlated subquery), not summed from
+        # zero. Pin the opening-subquery's dialect-invariant fragments so
+        # a regression that drops the anchor fails on every dialect.
+        assert "_current_daily_balances cdb" in sql, (
+            f"{dialect.name}: running_balance must anchor to the opening "
+            f"balance via a current_daily_balances subquery; got {sql!r}"
+        )
+        assert "cdb.account_id = tx.account_id" in sql, (
+            f"{dialect.name}: opening-balance subquery must correlate on "
+            f"account_id; got {sql!r}"
+        )
+        assert "+ SUM(tx.amount_money) OVER" in sql, (
+            f"{dialect.name}: running_balance must be opening + cumulative "
+            f"SUM (COALESCE(opening, 0) + SUM(...) OVER (...)); got {sql!r}"
+        )
         # The InputColumn list (driven from the contract) carries the
         # new column on every dialect — QS-side declared column shape
         # matches the projected SQL.
