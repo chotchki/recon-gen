@@ -36,6 +36,8 @@ import pytest
 
 from recon_gen.apps.l1_dashboard.datasets import (
     L1_ALL_SENTINEL,
+    L1_SA_HAS_REASON_LABEL,
+    L1_SA_NO_REASON_LABEL,
     build_supersession_transactions_dataset,
 )
 from recon_gen.common.l2 import default_l2_instance
@@ -110,14 +112,18 @@ def supersession_duckdb() -> Iterator["Config"]:
 
 
 def _run_supersession_audit(
-    cfg: "Config", *, transaction: str = L1_ALL_SENTINEL,
+    cfg: "Config",
+    *,
+    transaction: str = L1_ALL_SENTINEL,
+    no_reason: str = L1_ALL_SENTINEL,
 ) -> list[dict[str, object]]:
     """Run the production Supersession Audit transactions dataset SQL.
 
-    Both pushdown pickers default to their show-all sentinel (match-all):
-    ``pL1SupersedeReason`` (the cause-class filter) and ``pL1SaTransaction``
-    (DR.4's same-sheet transaction self-filter). Pass ``transaction`` to
-    exercise the DR.4 self-filter narrowing to one transaction's trail.
+    All three pushdown pickers default to their show-all sentinel
+    (match-all): ``pL1SupersedeReason`` (the cause-class filter),
+    ``pL1SaTransaction`` (DR.4's same-sheet transaction self-filter), and
+    ``pL1SaNoReason`` (DR.5's "(No reason)" presence filter). Pass
+    ``transaction`` / ``no_reason`` to exercise the respective narrowing.
     """
     ds = build_supersession_transactions_dataset(cfg, default_l2_instance())
     physical = next(iter(ds.PhysicalTableMap.values()))
@@ -128,6 +134,7 @@ def _run_supersession_audit(
         cfg, sql, binds={
             "param_pL1SupersedeReason": L1_ALL_SENTINEL,
             "param_pL1SaTransaction": transaction,
+            "param_pL1SaNoReason": no_reason,
         },
     )
 
@@ -194,3 +201,42 @@ def test_dr4_self_filter_narrows_to_one_transaction_trail(
     # returns nothing — the self-filter can't resurrect a non-supersession.
     phantom = _run_supersession_audit(supersession_duckdb, transaction="tx-phantom")
     assert phantom == []
+
+
+def test_dr5_no_reason_presence_filter_isolates_violation_rows(
+    supersession_duckdb: "Config",
+) -> None:
+    """DR.5 — the "(No reason)" presence filter (``pL1SaNoReason``) isolates
+    the policy-violation rows (a higher-entry supersession with no reason)
+    from rows that carry a reason. It keys off the SAME condition as the
+    projected flag, via a parallel STRING CASE so the sentinel guard compares
+    string-to-string (no integer-vs-'__l1_all__' coercion that breaks on PG).
+
+    tx-genuine's trail: entry 10 (original, min-entry → Has reason),
+    entry 20 (supersedes='TechnicalCorrection' → Has reason), entry 30
+    (higher entry, no supersedes → No reason)."""
+    # "No reason" → only the violation row (entry 30).
+    no_reason = _run_supersession_audit(
+        supersession_duckdb, no_reason=L1_SA_NO_REASON_LABEL,
+    )
+    no_reason_entries = {int(str(r["entry"])) for r in no_reason}  # typing-smell: ignore[no-inline-production-constants]: dataset result-dict col
+    assert no_reason_entries == {30}, (
+        f"DR.5 'No reason' must isolate the higher-entry no-supersedes row "
+        f"(entry 30), got {sorted(no_reason_entries)}."
+    )
+    assert all(
+        int(str(r["l1_supersession_no_reason"])) == 1 for r in no_reason
+    ), "every 'No reason' row must carry the flag = 1"
+
+    # "Has reason" → the original + the with-reason revision (entries 10, 20).
+    has_reason = _run_supersession_audit(
+        supersession_duckdb, no_reason=L1_SA_HAS_REASON_LABEL,
+    )
+    has_reason_entries = {int(str(r["entry"])) for r in has_reason}  # typing-smell: ignore[no-inline-production-constants]: dataset result-dict col
+    assert has_reason_entries == {10, 20}, (
+        f"DR.5 'Has reason' must keep the reasoned rows (entries 10, 20), "
+        f"got {sorted(has_reason_entries)}."
+    )
+    assert all(
+        int(str(r["l1_supersession_no_reason"])) == 0 for r in has_reason
+    ), "every 'Has reason' row must carry the flag = 0"

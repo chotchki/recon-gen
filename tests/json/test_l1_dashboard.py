@@ -2165,7 +2165,7 @@ def test_y2g_datasets_declare_pushdown_params() -> None:
         build_stuck_unbundled_dataset:
             {"pL1UnbundledAccount", "pL1UnbundledType", "pL1UnbundledRail"},
         build_supersession_transactions_dataset: {
-            "pL1SupersedeReason", "pL1SaTransaction",
+            "pL1SupersedeReason", "pL1SaTransaction", "pL1SaNoReason",
         },
         build_transactions_dataset: {
             "pL1TxAccount", "pL1TxTransferId", "pL1TxTransactionId",

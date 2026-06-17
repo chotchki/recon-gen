@@ -214,6 +214,16 @@ def l1_check_type_values() -> list[str]:
     return list(_L1_CHECK_TYPE_VALUES)
 
 
+def l1_supersession_no_reason_values() -> list[str]:
+    """DR.5 — the two values the "(No reason)" presence picker offers on the
+    Supersession Audit. They are the literals the dataset's parallel string
+    CASE emits (see ``_SUPERSESSION_NO_REASON_COND`` in
+    ``build_supersession_transactions_dataset``), so the StaticValues dropdown
+    pushes a value that actually matches a row. "No reason" first — the
+    policy-violation rows are the analyst's primary interest (KPI target 0)."""
+    return [L1_SA_NO_REASON_LABEL, L1_SA_HAS_REASON_LABEL]
+
+
 def _all_sentinel_sv_param(name: str) -> DatasetParameter:
     """AA.A.3 — a SINGLE_VALUED string dataset param whose static default
     is the bare ``L1_ALL_SENTINEL`` (wrapped in a 1-element list per the
@@ -1730,6 +1740,21 @@ P_L1_SUPERSEDE_REASON = "pL1SupersedeReason"
 # transaction. The transaction_id cell drill writes this; sentinel-OR
 # show-all on load, narrows to one transaction's full entry trail on click.
 P_L1_SA_TRANSACTION = "pL1SaTransaction"
+# DR.5 — "(No reason)" presence filter: isolate the policy-violation rows
+# (a higher-entry supersession lacking a `supersedes` cause) from rows that
+# carry a reason. Distinct from P_L1_SUPERSEDE_REASON (which narrows by cause
+# CLASS); this narrows by whether a reason EXISTS at all.
+P_L1_SA_NO_REASON = "pL1SaNoReason"
+
+# DR.1.a / DR.5 — the no-reason condition, shared by the projected INTEGER
+# flag (for the KPI sum) and the DR.5 presence filter (a parallel string
+# CASE — string comparison so the sentinel guard works on every dialect,
+# avoiding the integer-vs-'__l1_all__' coercion that breaks on PG). `entry`
+# is a GLOBAL serial, so the flag keys off the id's OWN min entry, not `> 1`.
+_SUPERSESSION_NO_REASON_COND = "entry > min_entry AND supersedes IS NULL"
+# DR.5 picker values (also the literals the string CASE emits).
+L1_SA_NO_REASON_LABEL = "No reason"
+L1_SA_HAS_REASON_LABEL = "Has reason"
 
 
 def build_supersession_transactions_dataset(
@@ -1760,12 +1785,19 @@ def build_supersession_transactions_dataset(
     # AO.1.impl — amount_money lives in the BASE table as BIGINT cents;
     # wrap the outer projection so the dataset surfaces dollars.
     amount = cents_to_dollars_sql("amount_money", dialect=cfg.db.dialect)
+    # DR.5 — string-valued mirror of the no-reason flag for the presence
+    # picker. String CASE (not the INTEGER flag) so `_data_value_clause`'s
+    # sentinel guard compares string-to-string on every dialect.
+    no_reason_label_expr = (
+        f"(CASE WHEN {_SUPERSESSION_NO_REASON_COND}"
+        f" THEN '{L1_SA_NO_REASON_LABEL}' ELSE '{L1_SA_HAS_REASON_LABEL}' END)"
+    )
     sql = (
         f"SELECT entry, transaction_id, supersedes,"
         # DR.1.a — flag against the id's OWN minimum entry, not `entry > 1`.
         # `entry` is a GLOBAL insert-order serial (not per-id), so `> 1` was
         # true for ~every row and flagged the ORIGINAL row of every trail.
-        f" CASE WHEN entry > min_entry AND supersedes IS NULL"
+        f" CASE WHEN {_SUPERSESSION_NO_REASON_COND}"
         f"   THEN 1 ELSE 0 END"
         f"   AS l1_supersession_no_reason,"
         f" account_id, account_name,"
@@ -1795,6 +1827,8 @@ def build_supersession_transactions_dataset(
         # the outer WHERE, unlike a same-level SELECT alias). Sentinel default
         # matches all; the drill writes one id to focus its full entry trail.
         f" AND {_data_value_clause('transaction_id', P_L1_SA_TRANSACTION)}"
+        # DR.5 — "(No reason)" presence filter on the parallel string CASE.
+        f" AND {_data_value_clause(no_reason_label_expr, P_L1_SA_NO_REASON)}"
     )
     return build_dataset(
         cfg, cfg.aws.prefixed("l1-supersession-transactions-dataset"),
@@ -1805,6 +1839,7 @@ def build_supersession_transactions_dataset(
         dataset_parameters=[
             _all_sentinel_sv_param(P_L1_SUPERSEDE_REASON),
             _all_sentinel_sv_param(P_L1_SA_TRANSACTION),
+            _all_sentinel_sv_param(P_L1_SA_NO_REASON),
         ],
     )
 

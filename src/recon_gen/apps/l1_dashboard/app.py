@@ -73,6 +73,7 @@ from recon_gen.apps.l1_dashboard.datasets import (
     P_L1_PENDING_ACCOUNT,
     P_L1_PENDING_RAIL,
     P_L1_PENDING_TYPE,
+    P_L1_SA_NO_REASON,
     P_L1_SA_TRANSACTION,
     P_L1_SUPERSEDE_REASON,
     P_L1_TODAYS_EXC_ACCOUNT,
@@ -90,6 +91,7 @@ from recon_gen.apps.l1_dashboard.datasets import (
     build_all_l1_dashboard_datasets,
     l1_check_type_values,
     l1_supersede_reason_values,
+    l1_supersession_no_reason_values,
 )
 from recon_gen.common import rich_text as rt
 from recon_gen.common.config import Config
@@ -2504,6 +2506,18 @@ def _wire_per_sheet_dropdowns(
         bridges=[(ds_sa_tx, P_L1_SUPERSEDE_REASON)],
         param_name=ParameterName(P_L1_SUPERSEDE_REASON),
         title="Supersedes Reason", all_values=l1_supersede_reason_values(),
+    )
+    # DR.5 — "(No reason)" presence filter: isolate the policy-violation
+    # rows (a higher-entry supersession lacking a reason) from those that
+    # carry one. Distinct axis from Supersedes Reason (which narrows by
+    # cause CLASS). Pushes into the same transactions dataset via the
+    # parallel string CASE; daily-balances stays unfiltered (no flag there).
+    _populate_pushdown_enum_dropdown(
+        sheet=supersession_audit_sheet, analysis=analysis,
+        bridges=[(ds_sa_tx, P_L1_SA_NO_REASON)],
+        param_name=ParameterName(P_L1_SA_NO_REASON),
+        title="Reason Provided",
+        all_values=l1_supersession_no_reason_values(),
     )
 
     # --- L1 Exceptions sheet — Check Type (enum) + Account
