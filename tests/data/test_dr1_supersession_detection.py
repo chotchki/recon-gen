@@ -145,8 +145,12 @@ def test_dr1a_no_reason_flag_uses_per_id_min_entry(
     entry, not ``entry > 1``: 0 for the original (min-entry) row, 0 for a
     revision that carries a reason, 1 for a revision with no reason."""
     rows = _run_supersession_audit(supersession_duckdb)
+    # The "entry" / "l1_supersession_no_reason" keys are the supersession
+    # dataset's projected result-dict columns (contract-defined via
+    # SUPERSESSION_TRANSACTIONS_CONTRACT), independent of migrate_mark's
+    # private _ROW_ID_COLUMN choice — hence the contract-independence allowlist.
     flag_by_entry = {
-        int(str(r["entry"])): int(str(r["l1_supersession_no_reason"]))
+        int(str(r["entry"])): int(str(r["l1_supersession_no_reason"]))  # typing-smell: ignore[no-inline-production-constants]: dataset result-dict col
         for r in rows
     }
     assert flag_by_entry == {10: 0, 20: 0, 30: 1}, (
