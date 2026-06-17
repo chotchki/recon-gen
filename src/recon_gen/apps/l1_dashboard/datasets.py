@@ -1726,6 +1726,10 @@ def build_stuck_unbundled_dataset(
 # load and while narrowing — you always see the trail, the dropdown
 # just narrows which cause class you're auditing.
 P_L1_SUPERSEDE_REASON = "pL1SupersedeReason"
+# DR.4 — same-sheet self-filter of the audit trail to one logical
+# transaction. The transaction_id cell drill writes this; sentinel-OR
+# show-all on load, narrows to one transaction's full entry trail on click.
+P_L1_SA_TRANSACTION = "pL1SaTransaction"
 
 
 def build_supersession_transactions_dataset(
@@ -1786,6 +1790,11 @@ def build_supersession_transactions_dataset(
         f" WHERE entry_count > 1 AND has_supersede = 1"
         f" AND ({_data_value_clause('supersedes', P_L1_SUPERSEDE_REASON)}"
         f" OR supersedes IS NULL)"
+        # DR.4 — same-sheet self-filter to one transaction's trail. Filters
+        # on `transaction_id` (a column of the `sub` derived table — valid in
+        # the outer WHERE, unlike a same-level SELECT alias). Sentinel default
+        # matches all; the drill writes one id to focus its full entry trail.
+        f" AND {_data_value_clause('transaction_id', P_L1_SA_TRANSACTION)}"
     )
     return build_dataset(
         cfg, cfg.aws.prefixed("l1-supersession-transactions-dataset"),
@@ -1795,6 +1804,7 @@ def build_supersession_transactions_dataset(
         visual_identifier=DS_SUPERSESSION_TRANSACTIONS,
         dataset_parameters=[
             _all_sentinel_sv_param(P_L1_SUPERSEDE_REASON),
+            _all_sentinel_sv_param(P_L1_SA_TRANSACTION),
         ],
     )
 

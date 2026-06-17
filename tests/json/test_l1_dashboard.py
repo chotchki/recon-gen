@@ -1981,12 +1981,13 @@ def test_drill_emission_navigation_plus_set_parameters() -> None:
                         f"action {action['Name']!r} missing set-params op"
                     )
                     drill_count += 1
-    # 11 drill source sites: Today's Exc (2), Drift (2), Overdraft (1),
+    # Drill source sites: Today's Exc (2), Drift (2), Overdraft (1),
     # Limit Breach (1), Pending Aging (1), Unbundled Aging (1), Daily
     # Statement (1) + Phase DA wires (Posting Ledger / Transactions Audit
-    # / Daily Balances Audit = 3) = 12 total drills.
-    assert drill_count == 12, (
-        f"expected 12 drills total, saw {drill_count}"
+    # / Daily Balances Audit = 3) = 12, + DR.4 same-sheet transaction
+    # self-filter on the Transactions Audit (Filter-to + Clear = 2) = 14.
+    assert drill_count == 14, (
+        f"expected 14 drills total, saw {drill_count}"
     )
 
 
@@ -2163,7 +2164,9 @@ def test_y2g_datasets_declare_pushdown_params() -> None:
             {"pL1PendingAccount", "pL1PendingType", "pL1PendingRail"},
         build_stuck_unbundled_dataset:
             {"pL1UnbundledAccount", "pL1UnbundledType", "pL1UnbundledRail"},
-        build_supersession_transactions_dataset: {"pL1SupersedeReason"},
+        build_supersession_transactions_dataset: {
+            "pL1SupersedeReason", "pL1SaTransaction",
+        },
         build_transactions_dataset: {
             "pL1TxAccount", "pL1TxTransferId", "pL1TxTransactionId",
             "pL1TxStatus", "pL1TxOrigin", "pL1TxType",

@@ -109,16 +109,26 @@ def supersession_duckdb() -> Iterator["Config"]:
         os.unlink(path)
 
 
-def _run_supersession_audit(cfg: "Config") -> list[dict[str, object]]:
-    """Run the production Supersession Audit transactions dataset SQL with
-    the supersedes-reason picker at its show-all sentinel (match-all)."""
+def _run_supersession_audit(
+    cfg: "Config", *, transaction: str = L1_ALL_SENTINEL,
+) -> list[dict[str, object]]:
+    """Run the production Supersession Audit transactions dataset SQL.
+
+    Both pushdown pickers default to their show-all sentinel (match-all):
+    ``pL1SupersedeReason`` (the cause-class filter) and ``pL1SaTransaction``
+    (DR.4's same-sheet transaction self-filter). Pass ``transaction`` to
+    exercise the DR.4 self-filter narrowing to one transaction's trail.
+    """
     ds = build_supersession_transactions_dataset(cfg, default_l2_instance())
     physical = next(iter(ds.PhysicalTableMap.values()))
     assert physical.CustomSql is not None
     sql = physical.CustomSql.SqlQuery
     assert sql is not None
     return query_db_via_cfg(
-        cfg, sql, binds={"param_pL1SupersedeReason": L1_ALL_SENTINEL},
+        cfg, sql, binds={
+            "param_pL1SupersedeReason": L1_ALL_SENTINEL,
+            "param_pL1SaTransaction": transaction,
+        },
     )
 
 
@@ -158,3 +168,29 @@ def test_dr1a_no_reason_flag_uses_per_id_min_entry(
         f"30:1 (no-reason)}}, got {flag_by_entry}. The old `entry > 1` would "
         f"flag entry 10 (the original) as a no-reason supersession."
     )
+
+
+def test_dr4_self_filter_narrows_to_one_transaction_trail(
+    supersession_duckdb: "Config",
+) -> None:
+    """DR.4 — the same-sheet transaction self-filter (``pL1SaTransaction``)
+    narrows the audit to one transaction's FULL entry trail. Filtering to
+    ``tx-genuine`` keeps all 3 of its entries (the trail is preserved — the
+    point of the surface); a phantom id that isn't a genuine supersession
+    yields nothing (the DR.1 detection still gates the self-filter)."""
+    # Sentinel (show-all) keeps the one genuine trail — the DR.1 baseline.
+    all_rows = _run_supersession_audit(supersession_duckdb)
+    assert {str(r["transaction_id"]) for r in all_rows} == {"tx-genuine"}
+
+    # Self-filter to the genuine trail → its full 3-entry history, unchanged.
+    focused = _run_supersession_audit(supersession_duckdb, transaction="tx-genuine")
+    assert {str(r["transaction_id"]) for r in focused} == {"tx-genuine"}
+    assert {int(str(r["entry"])) for r in focused} == {10, 20, 30}, (  # typing-smell: ignore[no-inline-production-constants]: dataset result-dict col
+        "DR.4 self-filter must preserve the full entry trail, not collapse "
+        "to a single row."
+    )
+
+    # Self-filter to a phantom id (excluded by DR.1's has_supersede gate)
+    # returns nothing — the self-filter can't resurrect a non-supersession.
+    phantom = _run_supersession_audit(supersession_duckdb, transaction="tx-phantom")
+    assert phantom == []

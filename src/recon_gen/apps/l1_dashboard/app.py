@@ -73,6 +73,7 @@ from recon_gen.apps.l1_dashboard.datasets import (
     P_L1_PENDING_ACCOUNT,
     P_L1_PENDING_RAIL,
     P_L1_PENDING_TYPE,
+    P_L1_SA_TRANSACTION,
     P_L1_SUPERSEDE_REASON,
     P_L1_TODAYS_EXC_ACCOUNT,
     P_L1_TODAYS_EXC_CHECK_TYPE,
@@ -278,6 +279,14 @@ _DP_DS_BALANCE_DATE = DrillParam(
 # target row is in scope. See ``_WIDE_DATE_WRITES`` below.
 _DP_DATE_START = DrillParam(P_L1_DATE_START, ColumnShape.DATETIME_DAY)
 _DP_DATE_END = DrillParam(P_L1_DATE_END, ColumnShape.DATETIME_DAY)
+# DR.4 — same-sheet self-filter of the Supersession Audit trail by the
+# logical transaction id. Pushdown param (not a calc-field FilterGroup —
+# App2 ignores those, see DL.3.2 note above), so it narrows identically on
+# both renderers. ColumnShape.TRANSACTION_ID matches the audit dataset's
+# transaction_id source column (tagged in DR.2).
+_DP_SA_TRANSACTION = DrillParam(
+    ParameterName(P_L1_SA_TRANSACTION), ColumnShape.TRANSACTION_ID,
+)
 
 # Far-past + far-future ISO-8601 literals the drill writes use when
 # widening the universal date range. The destination sheet's picker
@@ -1677,6 +1686,19 @@ def _populate_supersession_audit_sheet(
     ds_tx = datasets[DS_SUPERSESSION_TRANSACTIONS]
     ds_db = datasets[DS_SUPERSESSION_DAILY_BALANCES]
 
+    # DR.4 — analysis param + dataset bridge for the same-sheet transaction
+    # self-filter. No visible control: the transaction_id cell drill writes
+    # it (focus a trail) and the right-click "Clear" action resets it. The
+    # bridge lets QS's MappedDataSetParameters + App2's dataset-param-default
+    # substitute the value into the audit dataset's WHERE — narrowing at the
+    # SQL layer so both renderers behave identically.
+    analysis.add_parameter(StringParam(
+        name=ParameterName(P_L1_SA_TRANSACTION),
+        multi_valued=False,
+        default=[L1_ALL_SENTINEL],
+        mapped_dataset_params=[(ds_tx, P_L1_SA_TRANSACTION)],
+    ))
+
 
     # Row 1: three KPIs — supersession count on the left, $ exposure in
     # the middle (AO.9 — the dollar side of the audit; count alone left
@@ -1734,12 +1756,17 @@ def _populate_supersession_audit_sheet(
 
     # Row 2: transactions audit detail — every entry of every
     # superseded logical row, sorted by (transaction_id, entry).
-    # Phase DA — Drillable moved from `transaction_id` to `transfer_id`:
-    # the natural drill target is "show me all legs of this same
-    # transfer" (filtering by tx_id lands on a single-row table, useless).
-    # transfer_id reuses the existing _DP_TX_TRANSFER drill param landing
-    # pad on the Transactions sheet — no new parameter plumbing.
+    # Two drills, two axes:
+    #  - transfer_id (right-click) → cross-sheet to the Transactions sheet's
+    #    legs-of-this-transfer view (Phase DA; the Current* sheet is max-
+    #    entry-only so a transaction_id there lands on a single row — useless
+    #    cross-sheet, hence transfer_id for that nav).
+    #  - transaction_id (left-click, DR.4) → SAME-sheet self-filter to this
+    #    transaction's full multi-entry trail. The "single-row" objection
+    #    doesn't apply here: the audit reads the BASE table, so a
+    #    transaction_id has all its entries. Pushdown param (both renderers).
     tx_transfer_col = ds_tx["transfer_id"].dim()
+    tx_transaction_col = ds_tx["transaction_id"].dim()
     sheet.layout.row(height=_TABLE_ROW_SPAN).add_table(
         width=_FULL,
         title="Transactions Audit",
@@ -1748,12 +1775,15 @@ def _populate_supersession_audit_sheet(
             "The `supersedes` column on the higher-entry row tells you "
             "why it exists. Use the supersedes filter (Inflight / "
             "BundleAssignment / TechnicalCorrection) to narrow the "
-            "audit to one cause class. Right-click the transfer_id cell "
-            "to view every leg of this transfer on the Transactions sheet."
+            "audit to one cause class. Left-click a transaction_id cell "
+            "to focus this sheet on that transaction's full trail "
+            "(right-click → Clear to return to all). Right-click the "
+            "transfer_id cell to view every leg of this transfer on the "
+            "Transactions sheet."
         ),
         columns=[
             ds_tx["entry"].numerical(),
-            ds_tx["transaction_id"].dim(),
+            tx_transaction_col,
             ds_tx["supersedes"].dim(),
             ds_tx["account_id"].dim(),
             ds_tx["account_name"].dim(),
@@ -1766,6 +1796,17 @@ def _populate_supersession_audit_sheet(
             ds_tx["bundle_id"].dim(),
         ],
         actions=[
+            # DR.4 — same-sheet self-filter: left-click a transaction_id
+            # focuses the audit on that one transaction's full entry trail.
+            # target_sheet=sheet (self); writes the pushdown param both
+            # renderers honor. A control-write (not a cross-sheet URL nav),
+            # so it sidesteps the QS URL-param-no-control-sync quirk.
+            _l1_drill(
+                target_sheet=sheet,
+                name="Filter to this transaction",
+                writes=[(_DP_SA_TRANSACTION, tx_transaction_col)],
+                trigger="DATA_POINT_CLICK",
+            ),
             _l1_drill(
                 target_sheet=transactions_sheet,
                 name="View Transactions for this transfer",
@@ -1779,8 +1820,21 @@ def _populate_supersession_audit_sheet(
                 ],
                 trigger="DATA_POINT_MENU",
             ),
+            # DR.4 — the standalone "back to all" affordance for the
+            # transaction self-filter (resets the pushdown param to its
+            # show-all sentinel without navigating away).
+            _l1_drill(
+                target_sheet=sheet,
+                name="Clear transaction filter",
+                writes=[(
+                    _DP_SA_TRANSACTION,
+                    DrillResetSentinel(value=L1_ALL_SENTINEL),
+                )],
+                trigger="DATA_POINT_MENU",
+            ),
         ],
         conditional_formatting=[
+            Drillable(on=tx_transaction_col, color=accent),
             Drillable(on=tx_transfer_col, color=accent),
         ],
     )
@@ -2719,6 +2773,9 @@ def _wire_daily_statement_filters(
 _L1_DRILL_RESET_PARAMS: tuple[tuple[DrillParam, str], ...] = (
     (_DP_FILTER_ACCOUNT, _DRILL_RESET_SENTINEL),
     (_DP_TX_TRANSFER, L1_ALL_SENTINEL),
+    # DR.4 — so navigating away from the Supersession Audit (e.g. the
+    # transfer drill) clears the same-sheet transaction self-filter.
+    (_DP_SA_TRANSACTION, L1_ALL_SENTINEL),
 )
 
 
