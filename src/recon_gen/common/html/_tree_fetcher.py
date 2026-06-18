@@ -1257,7 +1257,17 @@ def _picker_search_sql_wrap(
     no cascade narrowing (the unparameterized-dataset baseline). The
     bind value is supplied via ``extra_binds`` by the fetcher.
     """
-    col_ref = column_name(column, dialect)
+    # DR.7.e — quoted-lowercase ref, NOT column_name(column, dialect). The
+    # outer SELECT references a column of ({base_sql}) opt_src, and base_sql
+    # is the dataset's CustomSql which on Oracle flows through
+    # _oracle_lowercase_alias_wrapper → quoted-lowercase aliases
+    # ("transaction_id"). An unquoted column_name() ref folds to UPPERCASE on
+    # Oracle and can't find it (ORA-00904) — the exact BV.3.3.e / m.5.d defect.
+    # No-hint pickers (e.g. DR.6's Supersession-Audit Transaction ID dropdown)
+    # are the only ones that ride this wrap path, so the bug stayed latent
+    # until DR.6. Quoting matches the wrapper on Oracle and the case-folded
+    # lowercase column on PG/DuckDB — symmetric with the pagination wrap above.
+    col_ref = _quote_col(column)
     where_clause = case_insensitive_substring_match(col_ref, "q", dialect)
     cascade = f" {cascade_clause}" if cascade_clause else ""
     limit_clause = (
@@ -1326,7 +1336,10 @@ def _picker_seed_sql_wrap(
     cascade narrowing has to apply here too (not only on the typed-query
     search path).
     """
-    col_ref = column_name(column, dialect)
+    # DR.7.e — quoted-lowercase ref (see _picker_search_sql_wrap): base_sql's
+    # Oracle wrapper exposes "transaction_id" quoted-lowercase, so an unquoted
+    # column_name() ref ORA-00904s. No-op on PG/DuckDB.
+    col_ref = _quote_col(column)
     cascade = f" {cascade_clause}" if cascade_clause else ""
     limit_clause = (
         f"FETCH FIRST {limit} ROWS ONLY"

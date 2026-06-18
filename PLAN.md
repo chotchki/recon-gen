@@ -646,7 +646,7 @@ Empirically confirmed on the densified seed: the Supersession Audit shows 10 row
 - [ ] DR.7.b - Re-lock DuckDB semantic locks + refresh the stale `datasets.py` "5 replicas reuse one id" comment.
 - [x] DR.7.c - e2e: replaced the tautological `all(== target)` with real narrowing (pre-set >1 id guard, STRICT `focus_count < full_count`, post-set == {target}) on both DR.4 self-filter + DR.6 dropdown.
 - [x] DR.7.d - json static guard: `build_l1_supersession_tx_ids_dataset` SQL asserted to share all three `_SUPERSESSION_*` predicate constants with the audit dataset.
-- [ ] DR.7.e - DR.6 dropdown Oracle+App2 ORA-00904 (no-hint picker rides the case-folding wrap path) — dedicated id-universe view + `PickerMatviewHint`, or case-safe wrap.
+- [x] DR.7.e - DR.6 dropdown Oracle+App2 ORA-00904 fixed at the wrap path: `_picker_search_sql_wrap`/`_picker_seed_sql_wrap` used `column_name()` (unquoted→UPPER on Oracle) against base_sql's `_oracle_lowercase_alias_wrapper` quoted-lowercase surface. Switched to `_quote_col()` (the validated BV.3.3.e/m.5.d pattern) — no-op on PG/DuckDB, fixes Oracle. Unit-locked.
 - [ ] DR.7.f - Phase exit + v14.6.0 release cut (operator pre-authorized 2026-06-17 overnight: fix findings → CI green → release).
 
 ## Phase DS - Math-invariant ↔ code parity (canonical residual + oracle-equivalence gate) (draft 2026-06-17)

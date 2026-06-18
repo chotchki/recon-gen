@@ -72,13 +72,40 @@ class TestPickerSearchSqlWrap:
         )
         assert f"({_BASE_SQL}) opt_src" in sql
 
-    def test_dialect_column_naturalization(self) -> None:
-        """Oracle gets UPPER-folded column name to dodge case-fold
-        confusion at the planner."""
+    def test_oracle_col_ref_is_quoted_lowercase(self) -> None:
+        """DR.7.e — the outer ref into ``({base_sql}) opt_src`` must be
+        QUOTED-lowercase (``"account_display"``), NOT unquoted
+        ``column_name()`` (``ACCOUNT_DISPLAY``). ``base_sql`` is the
+        dataset CustomSql, which on Oracle flows through
+        ``_oracle_lowercase_alias_wrapper`` → quoted-lowercase aliases;
+        an unquoted ref folds to UPPERCASE and can't find it (ORA-00904,
+        the BV.3.3.e / m.5.d defect). No-hint pickers (DR.6's
+        Supersession-Audit Transaction ID dropdown) are the only ones on
+        this wrap path, so the bug stayed latent until DR.6."""
         sql = _picker_search_sql_wrap(
             _BASE_SQL, "account_display", dialect=Dialect.ORACLE,
         )
-        assert "ACCOUNT_DISPLAY" in sql
+        # projection + null-guard reference the wrapper's quoted-lowercase
+        # surface, not a bare uppercase identifier.
+        assert 'SELECT DISTINCT "account_display" AS opt' in sql
+        assert '"account_display" IS NOT NULL' in sql
+        assert "ACCOUNT_DISPLAY AS opt" not in sql
+        # the case-insensitive ILIKE still UPPER-wraps (the quoted ref),
+        # so Oracle case-folding is handled at the value layer, not by
+        # leaving the identifier unquoted.
+        assert 'UPPER("account_display")' in sql
+
+    def test_seed_wrap_oracle_col_ref_is_quoted_lowercase(self) -> None:
+        """DR.7.e — the empty-query seed path (dropdown population, no
+        ILIKE) has the same wrapper-surface requirement as the search
+        path. This is the path that populates the DR.6 dropdown on
+        initial load, so it must quote the ref too."""
+        sql = _picker_seed_sql_wrap(
+            _BASE_SQL, "account_display", dialect=Dialect.ORACLE,
+        )
+        assert 'SELECT DISTINCT "account_display" AS opt' in sql
+        assert '"account_display" IS NOT NULL' in sql
+        assert "ACCOUNT_DISPLAY AS opt" not in sql
 
     def test_custom_limit_honored(self) -> None:
         sql = _picker_search_sql_wrap(
