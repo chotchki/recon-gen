@@ -1924,13 +1924,26 @@ def _reset_pg_password_via_socket(container_name: str, password: str) -> None:
         )
 
 
-_ORACLE_NOT_READY_CODES: Final = ("ORA-01034", "ORA-01033", "ORA-01089", "ORA-12162")
+_ORACLE_NOT_READY_CODES: Final = (
+    "ORA-01034", "ORA-01033", "ORA-01089", "ORA-12162", "ORA-01109",
+)
 """Oracle error codes that mean "the instance is still starting up, retry
 later" — not authoritative failure. ORA-01034 = ORACLE not available;
 ORA-01033/01089 = startup/shutdown in progress; ORA-12162 = service name
-not yet registered. The `_wait_for_oracle_ready` poll loop tolerates
-these; any OTHER ORA-* code raises immediately (real config / data
-problem, not a timing race)."""
+not yet registered; ORA-01109 = database mounted but NOT OPEN yet (the
+gvenzl image bounces the DB during first-boot setup, so the instance
+accepts sysdba connects while DUAL/ALTER still raise 01109). The
+`_wait_for_oracle_ready` poll loop tolerates these; any OTHER ORA-* code
+raises immediately (real config / data problem, not a timing race)."""
+
+_ORACLE_RESET_MAX_ATTEMPTS: Final = 5
+"""How many times `_reset_oracle_password_via_socket` re-waits + retries
+the `ALTER USER` when it hits a still-starting code. The first-boot DB
+bounce is a TOCTOU race: `_wait_for_oracle_ready` can return (DUAL
+selectable) microseconds before the image bounces the DB shut, so the
+ALTER then hits ORA-01109. Each attempt re-runs the (now 01109-aware)
+ready-wait, which blocks through the bounce — so a handful of attempts
+makes the race vanishingly unlikely without an unbounded loop."""
 
 
 def _wait_for_oracle_ready(
@@ -2037,9 +2050,17 @@ def _reset_oracle_password_via_socket(container_name: str, password: str) -> Non
     ALTER USER. Cold-Docker boots leave a 30-90s gap where the
     container is running but Oracle's listener / PMON haven't bound;
     `_wait_for_oracle_ready` polls sysdba SELECT until they have.
+
+    #266-followup — the gvenzl image bounces the DB shut once during
+    first-boot setup, so `_wait_for_oracle_ready` can return (DUAL
+    selectable) microseconds before the ALTER fires into a now-closed
+    DB → ORA-01109. That's a TOCTOU race, not a real failure, so we
+    re-wait + retry the reset up to `_ORACLE_RESET_MAX_ATTEMPTS` times
+    on any still-starting code before failing loud. Non-transient ORA
+    errors (bad creds, syntax) still fail on the first hit.
     """
     import subprocess  # noqa: PLC0415 — lazy
-    _wait_for_oracle_ready(container_name)
+    import time  # noqa: PLC0415 — lazy
     sql = (
         f'WHENEVER SQLERROR EXIT SQL.SQLCODE;\n'
         f'ALTER USER system IDENTIFIED BY "{password}" ACCOUNT UNLOCK;\n'
@@ -2047,31 +2068,48 @@ def _reset_oracle_password_via_socket(container_name: str, password: str) -> Non
         f'FAILED_LOGIN_ATTEMPTS UNLIMITED PASSWORD_LIFE_TIME UNLIMITED;\n'
         f'EXIT;\n'
     )
-    result = subprocess.run(
-        [
-            "docker", "exec", "-i", container_name,
-            "bash", "-lc", "sqlplus -s / as sysdba",
-        ],
-        input=sql.encode(),
-        check=False,
-        capture_output=True,
-    )
-    stdout = result.stdout.decode("utf-8", errors="replace")
-    stderr = result.stderr.decode("utf-8", errors="replace")
-    # sqlplus's WHENEVER SQLERROR EXIT SQL.SQLCODE sets a non-zero rc on
-    # ORA-* errors; the rc-only check would already cover most cases,
-    # but stdout-scan adds belt-and-suspenders for cases where the
-    # heredoc never reaches sqlplus (container not running, bash error,
-    # etc.) — those also surface here.
-    has_ora_error = "ORA-" in stdout or "ORA-" in stderr
-    if result.returncode != 0 or has_ora_error:
-        raise RuntimeError(
-            f"Oracle password reset via sysdba failed for {container_name!r} "
-            f"(rc={result.returncode}). This will cause downstream ORA-01017 "
-            f"errors on every connection attempt. "
-            f"sqlplus stdout:\n{stdout}\n"
-            f"sqlplus stderr:\n{stderr}"
+    last_rc = 0
+    last_stdout = ""
+    last_stderr = ""
+    for _attempt in range(_ORACLE_RESET_MAX_ATTEMPTS):
+        # Re-wait each attempt: a 01109-aware ready-wait blocks through
+        # the first-boot bounce, so the retry fires once the DB is open
+        # for good (not just transiently selectable).
+        _wait_for_oracle_ready(container_name)
+        result = subprocess.run(
+            [
+                "docker", "exec", "-i", container_name,
+                "bash", "-lc", "sqlplus -s / as sysdba",
+            ],
+            input=sql.encode(),
+            check=False,
+            capture_output=True,
         )
+        last_rc = result.returncode
+        last_stdout = result.stdout.decode("utf-8", errors="replace")
+        last_stderr = result.stderr.decode("utf-8", errors="replace")
+        combined = last_stdout + last_stderr
+        # sqlplus's WHENEVER SQLERROR EXIT SQL.SQLCODE sets a non-zero rc
+        # on ORA-* errors; the rc-only check covers most cases, but the
+        # stdout-scan adds belt-and-suspenders for cases where the
+        # heredoc never reaches sqlplus (container gone, bash error) —
+        # those surface here too.
+        if last_rc == 0 and "ORA-" not in combined:
+            return
+        # Still-starting code (incl. ORA-01109 from a mid-bounce DB) →
+        # the ready-wait returned during the TOCTOU window; sleep and
+        # retry. Any other ORA-* is a real problem → fail loud now.
+        if any(code in combined for code in _ORACLE_NOT_READY_CODES):
+            time.sleep(3.0)
+            continue
+        break
+    raise RuntimeError(
+        f"Oracle password reset via sysdba failed for {container_name!r} "
+        f"(rc={last_rc}, after {_ORACLE_RESET_MAX_ATTEMPTS} attempts). This "
+        f"will cause downstream ORA-01017 errors on every connection attempt. "
+        f"sqlplus stdout:\n{last_stdout}\n"
+        f"sqlplus stderr:\n{last_stderr}"
+    )
 
 
 def _verify_oracle_connect(url: str, *, attempts: int = 5, delay: float = 2.0) -> None:
