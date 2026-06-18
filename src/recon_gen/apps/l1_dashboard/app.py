@@ -1774,10 +1774,10 @@ def _populate_supersession_audit_sheet(
             "why it exists. Use the supersedes filter (Inflight / "
             "BundleAssignment / TechnicalCorrection) to narrow the "
             "audit to one cause class. Left-click a transaction_id cell "
-            "to focus this sheet on that transaction's full trail "
-            "(right-click → Clear to return to all). Right-click the "
-            "transfer_id cell to view every leg of this transfer on the "
-            "Transactions sheet."
+            "to focus this sheet on that transaction's full trail (or pick "
+            "one from the Transaction ID dropdown; clear that dropdown to "
+            "return to all). Right-click the transfer_id cell to view every "
+            "leg of this transfer on the Transactions sheet."
         ),
         columns=[
             ds_tx["entry"].numerical(),
@@ -1818,18 +1818,10 @@ def _populate_supersession_audit_sheet(
                 ],
                 trigger="DATA_POINT_MENU",
             ),
-            # DR.4 — the standalone "back to all" affordance for the
-            # transaction self-filter (resets the pushdown param to its
-            # show-all sentinel without navigating away).
-            _l1_drill(
-                target_sheet=sheet,
-                name="Clear transaction filter",
-                writes=[(
-                    _DP_SA_TRANSACTION,
-                    DrillResetSentinel(value=L1_ALL_SENTINEL),
-                )],
-                trigger="DATA_POINT_MENU",
-            ),
+            # DR.6 — clearing the self-filter is the Transaction ID
+            # dropdown's job (empty it → back to the full audit). No
+            # right-click "Clear" action: the visible picker already owns
+            # the show-all affordance, so a menu duplicate is redundant.
         ],
         conditional_formatting=[
             Drillable(on=tx_transaction_col, color=accent),

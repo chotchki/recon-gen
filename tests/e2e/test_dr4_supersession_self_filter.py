@@ -7,10 +7,9 @@ drill (``drill_from_first_row``) that writes the ``pL1SaTransaction``
 pushdown param and re-renders the SAME sheet — narrowing the Transactions
 Audit table to one logical transaction's full entry trail. Because it's a
 control-write (not a cross-sheet URL nav) it sidesteps the QS
-URL-param-no-control-sync quirk, so both renderers narrow identically. The
-``Clear transaction filter`` right-click action
-(``drill_from_first_row_via_menu``) resets the param to its show-all
-sentinel — the standalone "back to all" affordance.
+URL-param-no-control-sync quirk, so both renderers narrow identically.
+Clearing the focus is the DR.6 Transaction ID dropdown's job (empty it →
+back to all), so there's no right-click "Clear" action to exercise here.
 
 DR.5 — the "Reason Provided" dropdown isolates no-reason (policy-violation)
 rows from rows that carry a reason. The partition invariant (with the
@@ -59,7 +58,8 @@ def test_supersession_audit_self_filter_narrows_to_one_transaction(
 ) -> None:
     """Left-clicking a transaction_id cell on the Supersession Audit
     narrows the Transactions Audit table to exactly that transaction's
-    trail; the Clear action restores the full audit."""
+    trail. (Clearing the focus is the DR.6 dropdown's job — see the
+    Transaction ID dropdown test below.)"""
     driver, dashboard_arg = l1_dashboard_driver
     driver.open(dashboard_arg, sheet=_SUPERSESSION_AUDIT_NAME)
     driver.wait_loaded(_AUDIT_TABLE)
@@ -93,16 +93,6 @@ def test_supersession_audit_self_filter_narrows_to_one_transaction(
     focus_count = driver.table_row_count(_AUDIT_TABLE)
     assert focus_count <= full_count, (
         "The self-filter must not grow the table beyond the unfiltered audit."
-    )
-
-    # Clear → the param returns to its show-all sentinel (full audit back).
-    driver.drill_from_first_row_via_menu(_AUDIT_TABLE, "Clear transaction filter")
-    driver.wait_loaded(_AUDIT_TABLE)
-    cleared_count = driver.table_row_count(_AUDIT_TABLE)
-    assert cleared_count >= focus_count, (
-        f"Clear transaction filter must restore the full audit "
-        f"({full_count} rows), but the table still shows {cleared_count} "
-        f"(focused was {focus_count}) — the reset write didn't land."
     )
 
 

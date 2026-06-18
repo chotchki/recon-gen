@@ -1989,9 +1989,11 @@ def test_drill_emission_navigation_plus_set_parameters() -> None:
     # Limit Breach (1), Pending Aging (1), Unbundled Aging (1), Daily
     # Statement (1) + Phase DA wires (Posting Ledger / Transactions Audit
     # / Daily Balances Audit = 3) = 12, + DR.4 same-sheet transaction
-    # self-filter on the Transactions Audit (Filter-to + Clear = 2) = 14.
-    assert drill_count == 14, (
-        f"expected 14 drills total, saw {drill_count}"
+    # self-filter on the Transactions Audit (Filter-to only = 1) = 13.
+    # (No right-click Clear — the DR.6 Transaction ID dropdown owns the
+    # show-all affordance.)
+    assert drill_count == 13, (
+        f"expected 13 drills total, saw {drill_count}"
     )
 
 
