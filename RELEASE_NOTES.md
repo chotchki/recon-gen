@@ -6,6 +6,50 @@
 > AI, BK, BQ, BW, CK, BV close, snapshotter pattern, runner readiness).
 > v13.14.4 below resumes the convention.
 
+## v14.6.0 — Supersession Audit: detection fix + transaction-id navigation
+
+Minor. Phase DR adds the Supersession Audit's transaction-grain navigation
+surface and corrects the supersession detection invariant. The product-facing
+changes are in the L1 Dashboard's Supersession Audit; the DR.7 series is
+test/CI hardening with no product change.
+
+### Added — Supersession Audit (Phase DR)
+
+- **Transaction ID typeahead** on the L1 Transactions sheet (both renderers) —
+  search a single transaction by id (DR.3).
+- **Same-sheet transaction self-filter** on the Supersession Audit: clicking a
+  transaction narrows the audit to that transaction's full entry trail (DR.4).
+- **"(No reason)" presence filter** — isolate policy-violation supersessions
+  (no `supersedes` reason) from reasoned ones; the two narrowings partition the
+  audit (DR.5).
+- **Visible "Transaction ID" dropdown** on the Supersession Audit, sharing the
+  self-filter's pushdown parameter so a table id is always pickable (DR.6).
+
+### Fixed — supersession detection (Phase DR.1)
+
+- Supersession is now detected per-id with a `has_supersede` SELECT narrowing
+  on both the transactions and daily-balances audit datasets. A multi-entry id
+  with no `supersedes` pointer is a plain multi-leg transfer and no longer
+  over-selects into the audit.
+
+### Fixed — CI / test hardening (Phase DR.7, no product change)
+
+- Day-unique supersession plant ids (`transaction_id` / `transfer_id` carry the
+  anchor day) + the plant adapter honors `days_ago`, so the densified scenario
+  plants day-distinct supersession trails; the supersession e2e was
+  de-tautologized to assert real narrowing accordingly (DR.7.a / DR.7.c).
+- DR.6 dropdown Oracle+App2 `ORA-00904` fixed at the picker wrap path
+  (quoted-lowercase column ref against the Oracle lowercase-alias wrapper),
+  matching the established BV.3.3.e pattern (DR.7.e).
+- Two browser-driver read/click races that blocked the release gate (DR.7.g):
+  the App2 row-drill drove a center-of-row click that landed on a context-menu
+  cell — it now drives the row's keyboard Enter handler; and the QS
+  `table_rows` read could catch the stale empty-state overlay before a
+  cross-sheet drill repainted — it now routes through the same paint-poll
+  `table_rows_full` / `table_row_count` already use.
+- Runner survives the Oracle first-boot DB bounce during the password reset;
+  `run_tests.sh` auto-sources `run/secrets.env`.
+
 ## v14.5.1 — re-cut of v14.5.0 (stranded by a runner CI outage) + CI resilience
 
 Patch. v14.5.0 was tagged but **never published**: a runner-side CI outage

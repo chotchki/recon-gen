@@ -1835,10 +1835,15 @@ def build_supersession_transactions_dataset(
         f"   amount_money, amount_direction, status, posting, bundle_id,"
         f"   {_SUPERSESSION_ENTRY_COUNT_WINDOW} AS entry_count,"
         f"   MIN(entry) OVER (PARTITION BY id) AS min_entry,"
-        # DR.1.b — only keep trails that contain a REAL supersession. Without
-        # this, densified-plant id collisions (the spine id omits the day, so
-        # 5 replicas reuse one id with NO supersedes) over-select: 77 rows on
-        # the baseline, only 10 a genuine trail.
+        # DR.1.b — only keep trails that contain a REAL supersession (a
+        # non-null `supersedes` pointer somewhere in the id's entry set). A
+        # multi-entry id with no supersedes is a plain multi-leg transfer, not
+        # a supersession, and must not surface in the audit. (This also
+        # originally absorbed a densified-id collision: pre-DR.7.a the spine id
+        # omitted the day, so the weekly replicas shared one id and inflated
+        # entry_count. DR.7.a made the id day-unique — each replica is now its
+        # own day-distinct trail — but the has_supersede guard stays correct on
+        # its own terms.)
         f"   {_SUPERSESSION_HAS_SUPERSEDE_WINDOW} AS has_supersede"
         f"   FROM {prefix}_transactions"
         f" ) sub"
