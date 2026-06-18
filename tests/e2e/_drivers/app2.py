@@ -878,7 +878,20 @@ class App2Driver:
             current_key = _key(current)
             if current_key == last_key:
                 stable_count += 1
-                if stable_count >= _STABLE_POLLS:
+                # DR.7.f — only a stable NON-EMPTY snapshot counts as
+                # "settled". A stable EMPTY snapshot is ambiguous: it reads
+                # identically whether the async onDayCreate fetch hasn't
+                # applied markers yet (transient — under xdist + PG latency
+                # the first decoration can land >_STABLE_POLLS×150ms after
+                # the redraw) or the window is genuinely undecorated.
+                # Returning it early was the DM.3 "empty markers" flake
+                # (surfaced when DR.7.a's seed shift moved the carry-richest
+                # account onto a heavier-fetch account). The sole caller
+                # always picks an account WITH data, so keep waiting through
+                # a stable-empty; a genuinely-empty window still falls
+                # through to the deadline return below (no hang, contract
+                # preserved).
+                if stable_count >= _STABLE_POLLS and current:
                     return current
             else:
                 stable_count = 0
