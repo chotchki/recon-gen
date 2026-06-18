@@ -644,8 +644,8 @@ Empirically confirmed on the densified seed: the Supersession Audit shows 10 row
 
 - [x] DR.7.a - Day-unique supersession plant id (`transaction_id` + `transfer_id` include `anchor_day`) + `_adapt_supersession` honors `days_ago` (it dropped the day-spread, a pre-BC.4 latent bug) → confirmed on clean reseed: no-reason KPI 4→0, 5 distinct ids.
 - [ ] DR.7.b - Re-lock DuckDB semantic locks + refresh the stale `datasets.py` "5 replicas reuse one id" comment.
-- [ ] DR.7.c - e2e: replace the tautological `all(== target)` with real narrowing (pre-set >1 id, `focus_count < full_count`, post-set == {target}).
-- [ ] DR.7.d - json static guard: assert `build_l1_supersession_tx_ids_dataset` SQL shares the `_SUPERSESSION_*` predicate constants with the audit dataset.
+- [x] DR.7.c - e2e: replaced the tautological `all(== target)` with real narrowing (pre-set >1 id guard, STRICT `focus_count < full_count`, post-set == {target}) on both DR.4 self-filter + DR.6 dropdown.
+- [x] DR.7.d - json static guard: `build_l1_supersession_tx_ids_dataset` SQL asserted to share all three `_SUPERSESSION_*` predicate constants with the audit dataset.
 - [ ] DR.7.e - DR.6 dropdown Oracle+App2 ORA-00904 (no-hint picker rides the case-folding wrap path) — dedicated id-universe view + `PickerMatviewHint`, or case-safe wrap.
 - [ ] DR.7.f - Phase exit + v14.6.0 release cut (operator pre-authorized 2026-06-17 overnight: fix findings → CI green → release).
 

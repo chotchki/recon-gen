@@ -52,6 +52,20 @@ pytestmark = [
 
 _AUDIT_TABLE = "Transactions Audit"
 
+# DR.7.c — narrowing is only OBSERVABLE when the audit holds >1 distinct
+# transaction_id: with a single id, every filter result trivially equals
+# that id and `focus_count == full_count`, so a dead control-write→dataset
+# bridge would pass green (the tautology the adversarial review caught).
+# DR.7.a's day-unique supersession id makes CI's densified scenario plant
+# 5 day-distinct trails, so this skip never fires on CI; it only guards a
+# thin local seed.
+_NARROWING_UNOBSERVABLE_SKIP = (
+    "Supersession Audit has <2 distinct transaction_ids in the seeded DB — "
+    "narrowing is unobservable (any filter result trivially equals the single "
+    "id, so a dead bridge would pass). CI's densified scenario plants 5 "
+    "day-distinct supersession trails (DR.7.a); a thin local seed may not."
+)
+
 
 def test_supersession_audit_self_filter_narrows_to_one_transaction(
     l1_dashboard_driver: tuple["DashboardDriver", str],
@@ -65,12 +79,9 @@ def test_supersession_audit_self_filter_narrows_to_one_transaction(
     driver.wait_loaded(_AUDIT_TABLE)
 
     pre_rows = driver.table_rows(_AUDIT_TABLE, columns=["transaction_id"])
-    if not pre_rows:
-        pytest.skip(
-            "Supersession Audit has no superseded rows in the seeded DB — "
-            "nothing to drill from. (CI's auto-scenario plants supersession "
-            "trails; a thin local seed may not.)"
-        )
+    pre_ids = {r["transaction_id"] for r in pre_rows}
+    if len(pre_ids) < 2:
+        pytest.skip(_NARROWING_UNOBSERVABLE_SKIP)
     target = pre_rows[0]["transaction_id"]
     full_count = driver.table_row_count(_AUDIT_TABLE)
 
@@ -91,8 +102,13 @@ def test_supersession_audit_self_filter_narrows_to_one_transaction(
         f"{sorted({r['transaction_id'] for r in post_rows})}."
     )
     focus_count = driver.table_row_count(_AUDIT_TABLE)
-    assert focus_count <= full_count, (
-        "The self-filter must not grow the table beyond the unfiltered audit."
+    assert focus_count < full_count, (
+        f"DR.4 self-filter must STRICTLY narrow the audit. The clicked "
+        f"transaction {target!r} is one of {len(pre_ids)} distinct ids, so its "
+        f"trail ({focus_count} rows) must be smaller than the full audit "
+        f"({full_count} rows). focus == full means the pushdown param never "
+        f"reached the dataset WHERE on this renderer — the control-write→bridge "
+        f"is dead and the audit didn't actually filter."
     )
 
 
@@ -146,12 +162,11 @@ def test_supersession_audit_transaction_id_dropdown_narrows_to_one_trail(
     driver.wait_loaded(_AUDIT_TABLE)
 
     pre_rows = driver.table_rows(_AUDIT_TABLE, columns=["transaction_id"])
-    if not pre_rows:
-        pytest.skip(
-            "Supersession Audit is empty in the seeded DB — no transaction "
-            "to pick."
-        )
+    pre_ids = {r["transaction_id"] for r in pre_rows}
+    if len(pre_ids) < 2:
+        pytest.skip(_NARROWING_UNOBSERVABLE_SKIP)
     target = pre_rows[0]["transaction_id"]
+    full_count = driver.table_row_count(_AUDIT_TABLE)
 
     driver.pick_filter("Transaction ID", [target])
     driver.wait_loaded(_AUDIT_TABLE)
@@ -164,4 +179,12 @@ def test_supersession_audit_transaction_id_dropdown_narrows_to_one_trail(
     assert all(r["transaction_id"] == target for r in post_rows), (
         f"DR.6 dropdown must narrow to exactly {target!r}; saw "
         f"{sorted({r['transaction_id'] for r in post_rows})}."
+    )
+    focus_count = driver.table_row_count(_AUDIT_TABLE)
+    assert focus_count < full_count, (
+        f"DR.6 dropdown must STRICTLY narrow the audit. {target!r} is one of "
+        f"{len(pre_ids)} distinct ids, so its trail ({focus_count} rows) must "
+        f"be smaller than the full audit ({full_count}). focus == full means "
+        f"the P_L1_SA_TRANSACTION bridge never reached the dataset WHERE on "
+        f"this renderer."
     )

@@ -1706,11 +1706,13 @@ def test_supersession_datasets_registered_and_target_base_tables() -> None:
     entries by design, but the audit specifically needs them."""
     from recon_gen.common.l2 import default_l2_instance
     from recon_gen.apps.l1_dashboard.datasets import (
+        DS_L1_SUPERSESSION_TX_IDS,
         DS_SUPERSESSION_DAILY_BALANCES,
         DS_SUPERSESSION_TRANSACTIONS,
         _SUPERSESSION_ENTRY_COUNT_WINDOW,
         _SUPERSESSION_HAS_SUPERSEDE_WINDOW,
         _SUPERSESSION_SELECT_PREDICATE,
+        build_l1_supersession_tx_ids_dataset,
         build_supersession_daily_balances_dataset,
         build_supersession_transactions_dataset,
     )
@@ -1758,6 +1760,29 @@ def test_supersession_datasets_registered_and_target_base_tables() -> None:
     assert "MIN(entry) OVER (PARTITION BY id)" in tx_sql.SqlQuery
     assert "entry > min_entry" in tx_sql.SqlQuery
     assert "entry > 1 AND supersedes IS NULL" not in tx_sql.SqlQuery
+
+    # DR.7.d — the DR.6 Transaction ID dropdown's option universe
+    # (DS_L1_SUPERSESSION_TX_IDS) MUST project the SAME superseded-id set
+    # the audit table shows, or the picker offers ids the table can't
+    # display (or hides ids it does). In source they share the
+    # _SUPERSESSION_* detection constants; assert the companion's SQL
+    # carries all three so a future edit can't silently diverge the two
+    # id universes (only the silently-skippable e2e test checked this
+    # before — the adversarial review flagged the missing static guard).
+    assert DS_L1_SUPERSESSION_TX_IDS in registered_ids
+    picker_ds = build_l1_supersession_tx_ids_dataset(_CFG, instance)
+    picker_sql = next(iter(picker_ds.PhysicalTableMap.values())).CustomSql
+    assert picker_sql is not None
+    for shared in (
+        _SUPERSESSION_ENTRY_COUNT_WINDOW,
+        _SUPERSESSION_HAS_SUPERSEDE_WINDOW,
+        _SUPERSESSION_SELECT_PREDICATE,
+    ):
+        assert shared in picker_sql.SqlQuery, (
+            f"DR.6 picker dataset SQL must share the audit's detection "
+            f"predicate {shared!r} so their id universes can't drift; "
+            f"saw:\n{picker_sql.SqlQuery}"
+        )
 
 
 def test_supersession_audit_has_supersedes_filter() -> None:
