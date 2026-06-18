@@ -1426,7 +1426,19 @@ class App2Driver:
                 f"App2Driver.drill_from_first_row — table {visual_title!r} "
                 f"declares no row-level drill (no <tr data-row-drill>)"
             )
-        first_row.click()
+        # DR.7.g — drive the row's *primary* DATA_POINT_CLICK via its keyboard
+        # handler, NOT a center-of-row click. Playwright's ``.click()`` targets
+        # the row's geometric center; on a CLICK+MENU table (e.g. the
+        # Supersession Audit's Transactions Audit, where transfer_id is a
+        # ``cell-accent-menu`` MENU cell) the center lands on that menu cell,
+        # whose listener ``stopPropagation()``s + opens the ctxmenu — preempting
+        # the row-level ``safeNavigate`` so the DATA_POINT_CLICK self-filter
+        # (the transaction_id write) never fires. bootstrap.js wires Enter/Space
+        # → the same ``safeNavigate(url)`` on the ``<tr>`` inside the
+        # ``if (clickDrill)`` block that also sets ``data-row-drill`` +
+        # ``tabindex=0`` — so every row this locator matches is focusable and
+        # Enter-navigable, position-independent.
+        first_row.press("Enter")
         self._page.wait_for_load_state("networkidle")
         self._sync_nav_from_url()
 

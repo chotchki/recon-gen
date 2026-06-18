@@ -570,6 +570,18 @@ class QsEmbedDriver:
             self._page, visual_title, self._visual_timeout,
             wait_for_cells=False,
         )
+        # DR.7.g — bounded paint-poll before accepting "no rows". A read
+        # immediately after a cross-sheet drill (or any param write) can hit
+        # the stale empty-state overlay before QS repaints the fetched rows —
+        # the overdraft→daily-statement guardrail race, where the
+        # failure-capture screenshot showed 4 rows already on screen while this
+        # read returned 0. ``table_rows_full`` / ``table_row_count`` already
+        # route through this guard; ``table_rows`` was the lone read that
+        # skipped it. A genuinely-empty visual exhausts the poll budget and
+        # falls through to read ``[]`` as before; a non-empty one returns from
+        # the guard immediately (no added cost on the common path).
+        if self._visual_settled_empty(visual_title):
+            return []
         rows = read_table_rows_dom(self._page, visual_title)
         # AA.A.995 — caller-supplied column names override the rendered
         # ``.title`` text. QS stamps ``column.human_name`` on the visible
