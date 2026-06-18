@@ -627,6 +627,46 @@ Operator directive 2026-06-16 (surfaced by the DP Oracle-trainer near-miss): dat
 - [ ] DQ.2 - **Typed column references (incremental).** Per DQ.0, migrate the highest-value string-column-reference surfaces to typed attrs so a renamed/dropped column fails at construction. Likely starts at the matview/dataset boundary the DP work touched.
 - [ ] DQ.3 - **Phase exit + release.** Sweep to PLAN_ARCHIVE.md.
 
+## Phase DR - Supersession Audit detection fix + transaction-id navigation (planned 2026-06-17)
+
+Design lock: `docs/audits/dr_0_supersession_design.md`. The Supersession Audit "flags everything" — root-caused to TWO independent defects, both from `entry` being a global insert-order serial (not per-id): (A) the no-reason FLAG (`entry > 1`) fires on every original row; (B) the SELECT (`COUNT(*) OVER (PARTITION BY id) > 1`) over-selects — on the full baseline it returns 77 rows but only 10 are a genuine supersession; the other 67 are densified-plant legs whose deterministic `id` omits the day, so 5 replicas collide on one `id`. Both fixed detection-side in the dataset SQL (DR.1 — the correctness bug shipped in v14.5.1; lands first, standalone). DR.2-DR.5 add the operator's transaction-id navigation (search + crosslink on the logical `id` the audit is keyed on, vs `transfer_id`). DR.4 carries one open decision-gate (crosslink target — option (b) same-sheet trail filter recommended).
+
+- [x] DR.1 - Supersession detection fix (flag + SELECT narrowing, both datasets)
+- [x] DR.2 - ColumnShape.TRANSACTION_ID + contract tagging
+- [x] DR.3 - Transaction-id search on the L1 Transactions tab (both renderers)
+- [x] DR.4 - Crosslink → transaction id (option (b): same-sheet trail filter)
+- [x] DR.5 - "(No reason)" filter on the Supersession Audit (depends on DR.1.a)
+- [x] DR.6 - Visible Transaction ID picker on the Supersession Audit
+
+### DR.7 - Post-review fixes (adversarial review `wszrtv8bf`: 4 confirmed findings)
+
+Empirically confirmed on the densified seed: the Supersession Audit shows 10 rows / **1 distinct id** / **4 false no-reason flags**. Root cause: `replicate_super` densifies 5 same-account SupersessionPlants across 5 days, but `SupersessionGenerator.transaction_id`/`transfer_id` OMIT the day, so 5 independent daily trails collapse onto one id; `entry > min_entry AND supersedes IS NULL` then flags the 4 later-day originals (DR.1 fixed the SELECT predicate but not the no-reason FLAG's collision-blindness). Per `[[feedback_production_honest_invariants]]` the fix is seed-side, not matview-side.
+
+- [x] DR.7.a - Day-unique supersession plant id (`transaction_id` + `transfer_id` include `anchor_day`) + `_adapt_supersession` honors `days_ago` (it dropped the day-spread, a pre-BC.4 latent bug) → confirmed on clean reseed: no-reason KPI 4→0, 5 distinct ids.
+- [ ] DR.7.b - Re-lock DuckDB semantic locks + refresh the stale `datasets.py` "5 replicas reuse one id" comment.
+- [ ] DR.7.c - e2e: replace the tautological `all(== target)` with real narrowing (pre-set >1 id, `focus_count < full_count`, post-set == {target}).
+- [ ] DR.7.d - json static guard: assert `build_l1_supersession_tx_ids_dataset` SQL shares the `_SUPERSESSION_*` predicate constants with the audit dataset.
+- [ ] DR.7.e - DR.6 dropdown Oracle+App2 ORA-00904 (no-hint picker rides the case-folding wrap path) — dedicated id-universe view + `PickerMatviewHint`, or case-safe wrap.
+- [ ] DR.7.f - Phase exit + v14.6.0 release cut (operator pre-authorized 2026-06-17 overnight: fix findings → CI green → release).
+
+## Phase DS - Math-invariant ↔ code parity (canonical residual + oracle-equivalence gate) (draft 2026-06-17)
+
+Operator directive 2026-06-17: each math invariant's law is currently encoded 3-4 times — the Python sim (`ledger_simulation` / `account_simulation` / `expected_eod`), the detector matview SQL (`schema.py`), the generator's planted magnitude (`spine/*`), and the audit-PDF walk — with nothing forcing them to agree. Two latent-bug classes become unrepresentable:
+- **Generator↔detector magnitude drift** — a generator plants a hardcoded δ calibrated against one version of the detector's formula; the formula moves; the plant no longer trips its own detector. Live instance: CV-followup.3 (`InvFanoutGenerator`'s 5× boost calibrated against global z, may not surface under per-pair z). Fix: generators plant *to a residual the detector computes*, not a literal magnitude.
+- **Detector↔oracle semantic drift** — the matview WHERE-clause silently diverges from the canonical math (a `<` where the law says `=`). DQ's typed-DB model can't see this; only oracle-equivalence over generated states can. DN.5 already proves the pattern for running_balance (`python accumulate == dataset SQL == matview closing_balance_recomputed - opening_balance == audit-PDF`); DR generalizes it to every conservation invariant.
+
+Single source of truth: each invariant becomes a pure signed-residual fn `State -> Money` (zero = satisfied). Detector reads it, generator plants to it, healthy asserts zero. Conservation invariants (drift, ledger_drift, overdraft, expected_eod_balance_breach, limit_breach, money_trail) get exact-residual contracts; probabilistic invariants (anomaly / per-pair z) get a SEPARATE tolerance-band contract — do not force exact-δ on the statistical bucket.
+
+Gated on DQ.2 (typed column refs) so residuals reference typed columns and "detector reads exactly the columns its invariant is defined over" becomes a construction-time assertion. The residual + hand-derived KAT work (DS.0–DS.1) can start in parallel; column-typing wires in after DQ.2.
+
+- [ ] DS.0 - **Audit + design lock.** Output: `docs/audits/dr_0_invariant_parity.md`. Inventory every math invariant × where its law currently lives (sim / matview / generator magnitude / audit-PDF). Classify conservation (signed residual) vs probabilistic (tolerance). Propose the `MathInvariant` enum + `residual(state) -> Money` signature + the KAT format — test vectors derived BY HAND from the written law, not lifted from current code (per `[[feedback_cheapest_validation_must_fire]]`: the audit bridge can't be the code auditing itself). Operator-confirm before DS.1.
+- [ ] DS.1 - **Canonical residuals — conservation bucket.** One pure `residual(state) -> Money` per conservation invariant = the single home of that law. KATs pinned to hand-computed vectors. No I/O, no detection logic copied in — the matview stays the detector; the residual is the spec it's checked against.
+- [ ] DS.2 - **Generators plant to residual, not magnitude.** Refactor the drift-prone generators (start `InvFanoutGenerator` — closes CV-followup.3) to plant to a target residual the detector reads. Kills the calibration-drift class structurally; recalibration stops being a recurring backlog item.
+- [ ] DS.3 - **Oracle≡matview parity gate.** Generalize DN.5: Hypothesis over generated states asserting `python_residual == matview_residual` per invariant, named by `MathInvariant` id so a red test points at the exact law; healthy-state ⟹ residual zero across ALL detectors (no-false-positive gate).
+- [ ] DS.4 - **Probabilistic bucket — tolerance contract.** Distributional / tolerance-band assertion for anomaly-class invariants (not exact δ). First consumer: recalibrate + pin the fanout boost under per-pair z (absorbs CV-followup.3's recalibration tail).
+- [ ] DS.5 - **Completeness gate at construction.** Every `MathInvariant` member has residual + matview ref + ≥1 generator + KAT; a missing edge raises at import (extends `[[feedback_invariants_in_types]]` / completeness-gate-fails-at-construction down to the invariant layer).
+- [ ] DS.6 - **Phase exit + release.** Sweep to PLAN_ARCHIVE.md.
+
 ## Backlog (not yet phased)
 
 - **Revert (or justify) the DP.5 trainer-apply timeout bump (120s→300s, commit `531dd020`, shipped v14.4.1)** — added 2026-06-16. The bump was a wrong-diagnosis fix: the Oracle `test_trainer_dogfood_per_kind[or-*]` failures' real cause was an 11h-stale Oracle container (DG-phase debris), not apply slowness — a fresh container ran 17/17 green. Confirm a fresh-Oracle `trainer_apply` finishes under 120s; if so revert to 120s, else keep 300s as legitimate headroom (the docstring already says "oracle ~few min"). Low-priority cleanup; harmless either way.
@@ -639,4 +679,4 @@ Operator directive 2026-06-16 (surfaced by the DP Oracle-trainer near-miss): dat
 - **How should planted errors surface in the app? (+ enhance pickers to SELECT them)** — added 2026-06-16. Two coupled questions surfaced by the DP qs_browser sweep: (1) **Surfacing/semantics** — the `_spine_plant` zero-amount drill-scaffolding marker tx (DL.3.1) leak across apps: they win L1 picker anchors, lead L1 drill-source rows, AND surface in **L2FT as a violation whose `entity_a` is a rail, not a chain** (so a chain-drill from that row can't round-trip). Decide whether scaffolding markers should be distinguishable from real errors, whether they should create L2FT violations at all, and how error rows should be presented (badge? grouped? non-leading sort?). The DP fixes (anchor-skip `_spine_plant`, drill-guardrail `_PLANT_ERROR_SENTINEL` exempt) keep the TESTS honest but punt this product question. (2) **Selectability** — once (1) is decided, pickers/dropdowns should let an operator who SEES an error row filter to it (the dropdown universes advertise only "valid" declared values today). Operator note 2026-06-16: it's not fair to make the test assert error-round-trip; this is the app's job to figure out.
 - **Confirm gl-1010 weekend daily_balances are intended (not a seed quirk)** — added 2026-06-16.
 - **Fix stale CLAUDE.md test-runner docs (post-CB.17.d variant-matrix retirement)** — added 2026-06-16.
-- **app2-layer test hangs on an Oracle seed when Oracle is unavailable locally** — added 2026-06-16.
+- **app2-layer test hangs on an Oracle seed when Oracle is unavailable locally** — added 2026-06-16.- **test_snapshotter_pg restore-SLA test is load-flaky in the pre-push hook** — added 2026-06-17.

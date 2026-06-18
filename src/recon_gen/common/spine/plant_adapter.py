@@ -268,7 +268,9 @@ def scenario_to_generators(
     for ftp in scenarios.failed_transaction_plants:
         out.append(_adapt_failed_transaction(ftp, instance, scenarios, anchor_day))
     for spp in scenarios.supersession_plants:
-        out.append(_adapt_supersession(spp, instance, scenarios, anchor_day))
+        out.append(_adapt_supersession(
+            spp, instance, scenarios, anchor_day, plant_window,
+        ))
 
     # Seed-color (broad-mode) plants — CoverageObservation evidence.
     for tp in scenarios.transfer_template_plants:
@@ -775,8 +777,22 @@ def _adapt_failed_transaction(
 
 def _adapt_supersession(
     plant: SupersessionPlant, instance: L2Instance, scenarios: ScenarioPlant,
-    anchor_day: date,
+    anchor_day: date, plant_window: DateInterval | None = None,
 ) -> ViolationGenerator:
+    # DR.7.a — derive THIS plant's anchor_day from its days_ago (same BC.4
+    # policy as _adapt_drift). densify_scenario replicates the supersession
+    # plant across consecutive days via per-replica days_ago; without this
+    # every replica collapsed onto the batch anchor_day, which — together
+    # with a (now-fixed) day-omitting logical id — merged N independent
+    # daily supersession trails onto ONE id and tripped the audit's
+    # no-reason flag (`entry > min_entry AND supersedes IS NULL`) on every
+    # later-day ORIGINAL. Each replica now lands on its own day and gets
+    # its own day-scoped id (SupersessionGenerator.transaction_id).
+    if plant_window is not None:
+        offset = max(plant.days_ago - 1, 0)
+        anchor_day = SingleDayPlant.at_offset_from_end(
+            plant_window, offset,
+        ).day
     role, scope, parent_role = _resolve_account_triple(
         instance, scenarios, plant.account_id,
     )

@@ -71,12 +71,27 @@ class SupersessionGenerator:
     @property
     def transaction_id(self) -> str:
         """The shared logical id for both rows — the supersession
-        anchor. Deterministic on account_id."""
-        return f"tx-supersedes-{self.account_id}"
+        anchor. Deterministic on account_id AND anchor_day.
+
+        DR.7.a — the day MUST be in the id. `densify_scenario` replicates
+        this plant `factor` times on ONE account across consecutive days
+        (`replicate_super` varies `days_ago` only). A day-omitting id
+        collapsed all N daily trails onto a single logical id, which (a)
+        made the Supersession Audit's no-reason FLAG (`entry > min_entry
+        AND supersedes IS NULL`) fire on every later-day ORIGINAL — a
+        false "no documented reason" violation — and (b) left the whole
+        audit table sharing one id, making the renderer self-filter/dropdown
+        e2e narrowing assertions tautological. Each densify replica is a
+        genuinely independent supersession event, so it gets its own
+        day-scoped id."""
+        return f"tx-supersedes-{self.account_id}-{self.anchor_day:%Y%m%d}"
 
     @property
     def transfer_id(self) -> str:
-        return f"tr-supersedes-{self.account_id}"
+        """Day-scoped for the same reason as `transaction_id` (DR.7.a):
+        each densify replica is its own transfer event, not 2N legs of one
+        transfer."""
+        return f"tr-supersedes-{self.account_id}-{self.anchor_day:%Y%m%d}"
 
     @property
     def intended(self) -> AuditFixture:
