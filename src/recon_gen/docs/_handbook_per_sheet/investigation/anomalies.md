@@ -51,7 +51,7 @@ The bar chart clearly renders high-sigma buckets ("3-4 sigma", "4+ sigma") but t
 
 ## What "no rows" means
 
-A clean anomalies sheet means every (sender, recipient) pair-window in the window sits within your sigma cutoff. That is the expected steady-state — the sheet flags *outliers*, not routine activity. If you see zero rows:
+A clean anomalies sheet means every (sender, recipient) pair-window in the window sits within your sigma cutoff. That is the expected steady-state — the sheet flags OUTLIERS, not routine activity. If you see zero rows:
 
 - **Check the sigma slider position.** The default is 2σ (the second bucket from the left). If the *Pair-Window σ Distribution* chart shows data up to 2–3σ but nothing beyond, and the slider is set to 3 or higher, you're outside the data tail — lower the slider to flag what exists.
 - **Check the date window filter.** A narrow date range may contain no flagged activity. Widen to trailing 7 or 30 days to see whether anomalies are recurring.
@@ -70,4 +70,4 @@ The Volume Anomalies sheet has no drills defined. The table rows are reference d
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `matview`, `account_role`, and the other project-specific terms.*
+*First time here? See the [Vocabulary](../_glossary.md) for `matview`, `account_role` and the other project-specific terms.*

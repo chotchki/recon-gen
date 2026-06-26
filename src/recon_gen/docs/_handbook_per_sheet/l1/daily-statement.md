@@ -4,7 +4,7 @@
 
 ## What you're looking at
 
-You're looking at a per-account, per-day narrative. Pick an account using the *Account* dropdown (the full internal-account universe) and a business day using the *Business Day* picker; the five KPIs across the top show you the opening balance, debits posted, credits posted, stored closing balance, and posting drift for that day. Below, the *Posted Money Records* table lists every Money record (leg) that posted that day on the picked account. The *Control Accounts* reference table at the bottom lists the L2-declared singleton control accounts (one row per `account_role` whose template materializes to exactly one account) — use it to cross-check that your picked account is the canonical control for its role, not one of many DDA-like rows in the same role.
+You're looking at a per-account, per-day narrative. Pick an account using the *Account* dropdown (the full internal-account universe) and a business day using the *Business Day* picker; the five KPIs across the top show you the opening balance, debits posted, credits posted, stored closing balance and posting drift for that day. Below, the *Posted Money Records* table lists every Money record (leg) that posted that day on the picked account. The *Control Accounts* reference table at the bottom lists the L2-declared singleton control accounts (one row per `account_role` whose template materializes to exactly one account) — use it to cross-check that your picked account is the canonical control for its role, not one of many DDA-like rows in the same role.
 
 ## How to read the numbers
 
@@ -15,13 +15,13 @@ The sheet reads from two datasets derived from the `<prefix>_daily_statement_sum
 - *Debits (signed)* — sum of `amount_money` over all Debit-direction legs posted today, already signed negative per v6 convention (Debit = negative money).
 - *Credits (signed)* — sum of `amount_money` over all Credit-direction legs posted today, already signed positive per v6 convention (Credit = positive money).
 - *Closing Stored* — the feed's reported end-of-day balance for this account on this day (or carried forward if no balance row arrived).
-- *Posting Drift* — `closing_balance_stored − (opening_balance + net_flow)`. The formula is: starting balance + signed net of today's legs = what the ledger should say; if the stored closing disagrees, drift is non-zero. Zero drift means the day reconciles; non-zero drift signals a posting was rejected at the boundary, a balance update misfired, or (on sparse-cadence accounts) a posting landed on a non-emit day and the carried balance doesn't account for it.
+- *Posting Drift* — `closing_balance_stored − (opening_balance + net_flow)`. The formula is: starting balance + signed net of today's legs = what the ledger should say; if the stored closing disagrees, drift is non-zero. Zero drift means the day reconciles; non-zero drift signals a posting was rejected at the boundary, a balance update misfired or (on sparse-cadence accounts) a posting landed on a non-emit day and the carried balance doesn't account for it.
 
 **The KPI formula note:**
 Opening + Credits + Debits = Closing Stored on a healthy day. The signs are already baked in (Credit = positive, Debit = negative), so you add all three; don't subtract the debits.
 
 **Posted Money Records table:**
-Each row is one Money record from `<prefix>_current_transactions`, filtered to the picked account and business day (determined by `date_trunc_day(posting)`). Columns are `transaction_id`, `transfer_id`, `rail_name`, `amount_money`, `amount_direction` (Debit or Credit), `status` (Pending / Posted / Failed), `origin` (InternalInitiated / ExternalForcePosted / ExternalAggregated), and `posting` timestamp.
+Each row is one Money record from `<prefix>_current_transactions`, filtered to the picked account and business day (determined by `date_trunc_day(posting)`). Columns are `transaction_id`, `transfer_id`, `rail_name`, `amount_money`, `amount_direction` (Debit or Credit), `running_balance` (cumulative signed balance after this leg, in posting order within the account-day), `status` (Pending / Posted / Failed), `origin` (InternalInitiated / ExternalForcePosted / ExternalAggregated) and `posting` timestamp.
 
 ## Common patterns
 
@@ -31,7 +31,7 @@ Each row is one Money record from `<prefix>_current_transactions`, filtered to t
 
 ### Posting Drift non-zero (red X)
 
-*Posting Drift* shows a non-zero amount with a red X. Something disagrees between what the institution reports and what the postings sum to. Scroll through the *Posted Money Records* table to look for unusual entries: a `status='Failed'` leg that shouldn't be there, a `status='Pending'` leg stuck for days, or an `origin='ExternalForcePosted'` entry that the upstream system didn't actually send. If you spot a culprit, drill to the *Transactions* sheet (right-click on the row → *View Transactions for this transfer*) to see the full transfer's legs across all accounts.
+*Posting Drift* shows a non-zero amount with a red X. Something disagrees between what the institution reports and what the postings sum to. Scroll through the *Posted Money Records* table to look for unusual entries: a `status='Failed'` leg that shouldn't be there, a `status='Pending'` leg stuck for days or an `origin='ExternalForcePosted'` entry that the upstream system didn't actually send. If you spot a culprit, drill to the *Transactions* sheet (right-click on the row → *View Transactions for this transfer*) to see the full transfer's legs across all accounts.
 
 ### Stored closing is carried from a prior day
 

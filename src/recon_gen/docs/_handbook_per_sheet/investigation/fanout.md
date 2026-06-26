@@ -4,7 +4,7 @@
 
 ## What you're looking at
 
-The sheet opens on a strip of three KPIs across the top — *Qualifying Recipients* (distinct recipient accounts meeting your threshold), *Distinct Senders (Union)* (the total population of unique senders feeding those recipients), and *Total Inbound* (the aggregate dollar value of money flowing in). Below sits a full-width table titled *Recipient Fanout — Ranked*, listing one row per qualifying recipient, sorted by the number of distinct senders from widest funnel to narrowest. Each row shows the recipient's account ID and name, how many distinct senders are feeding that recipient, how many distinct transfers came in, and the total inflow dollar amount. Two controls sit at the top: a *Date Range* picker (narrows `posted_at`) and a *Min distinct senders* slider (the fanout threshold).
+The sheet opens on a strip of three KPIs across the top — *Qualifying Recipients* (distinct recipient accounts meeting your threshold), *Distinct Senders (Union)* (the total population of unique senders feeding those recipients) and *Total Inbound* (the aggregate dollar value of money flowing in). Below sits a full-width table titled *Recipient Fanout — Ranked*, listing one row per qualifying recipient, sorted by the number of distinct senders from widest funnel to narrowest. Each row shows the recipient's account ID and name, how many distinct senders are feeding that recipient, how many distinct transfers came in and the total inflow dollar amount. Two controls sit at the top: a *Date Range* picker (narrows `posted_at`) and a *Min distinct senders* slider (the fanout threshold).
 
 ## How to read the numbers
 
@@ -19,7 +19,7 @@ The three KPIs are:
 The table reads from the joined inflows + outflows CTEs, aggregated `GROUP BY recipient_account_id`. Each row's columns are:
 
 - `recipient_account_id`, `recipient_account_name`, `recipient_account_type` — the receiving account's identity and role (e.g. `CustomerDDA`, `MerchantDDA`).
-- *Senders Feeding This Recipient* — `MAX(distinct_senders)` per recipient (the window function from the dataset SQL, one value per grouped recipient).
+- *Senders Feeding This Recipient* — `MAX(distinct_senders)` per recipient. `distinct_senders` is computed once per recipient by a `COUNT(DISTINCT sender_account_id)` GROUP BY in the dataset's `distinct_per_recipient` CTE, so it's constant within a recipient and the table's `MAX` just surfaces that single value.
 - Column 2 (implicit column header in the app) — `COUNT(DISTINCT transfer_id)` — how many distinct transfers touched this recipient.
 - Column 3 — `SUM(amount)` — total inflow to this recipient in the window.
 
@@ -29,7 +29,7 @@ The filter — `WHERE distinct_senders >= <<$pInvFanoutThreshold>>` — lives in
 
 ### Single high-fanout recipient, hundreds of senders
 
-One row at the top of the table with a very large "Senders Feeding This Recipient" value; *Qualifying Recipients* KPI shows 1; *Distinct Senders (Union)* KPI also shows roughly that same count. This is a **classic recipient concentration** — one account is a hub receiving from a large dispersed sender population. The intent matters: is this a sweep account, a payables consolidation point, or a known correspondent? Check the *Account* (recipient) name and account type (`recipient_account_type`). Cross-reference with your compliance matrix and the business function that account serves. If the account should not be a hub, flag it for the AML/compliance team with the sender account list (drill into individual rows if needed).
+One row at the top of the table with a very large "Senders Feeding This Recipient" value; *Qualifying Recipients* KPI shows 1; *Distinct Senders (Union)* KPI also shows roughly that same count. This is a **classic recipient concentration** — one account is a hub receiving from a large dispersed sender population. The intent matters: is this a sweep account, a payables consolidation point or a known correspondent? Check the *Account* (recipient) name and account type (`recipient_account_type`). Cross-reference with your compliance matrix and the business function that account serves. If the account should not be a hub, flag it for the AML/compliance team with the sender account list (drill into individual rows if needed).
 
 ### Moderate fanout across many recipients
 
@@ -55,4 +55,4 @@ This sheet defines no drill actions. Use the account name and sender details to 
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `internal` / `external` scope, `account_role`, and other project-specific terms.*
+*First time here? See the [Vocabulary](../_glossary.md) for `internal` / `external` scope, `account_role` and other project-specific terms.*

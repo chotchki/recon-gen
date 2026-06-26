@@ -12,8 +12,8 @@ Below that sits *Stuck Pending by Age Bucket*, a horizontal bar chart
 breaking the population across five age bands (0–6h, 6–24h, 1–3d, 3–7d, >7d),
 stacked by rail so you can see which transfer pattern each band contains.
 Below the chart is the *Stuck Pending Detail* table listing every stuck
-transaction with account, transfer, rail, amount, and age in seconds. Filters
-at the top let you narrow by account, transfer type, and rail.
+transaction with account, transfer, rail, amount and age in seconds. Filters
+at the top let you narrow by account, transfer type and rail.
 
 ## How to read the numbers
 
@@ -91,27 +91,27 @@ bundling process is stalled.
 
 ## What "no rows" means
 
-A clean Pending Aging sheet — zero rows — means *every* Pending leg in the
+A clean Pending Aging sheet — zero rows — means EVERY Pending leg in the
 system is younger than its [rail](../_glossary.md#rail)'s `max_pending_age`
 cap. This is the steady-state expectation: Pending transactions are
 intermediate states meant to be temporary. If you see zero rows:
 
 - **Confirm the matview is fresh.** Cross to *App Info* and check the
-  *Matview Status* table's `stuck_pending` row. If `last_refresh_at` is more
-  than a few minutes old AND new postings landed since, the data may be clean
-  *as of the last refresh* but stale. The institution refreshes matviews on
-  every ETL load; ad-hoc dashboard hits don't trigger one.
-- **Check the filter windows.** A very narrow account, transfer type, or [rail](../_glossary.md#rail)
+  *Matview Status* table's `stuck_pending` row. Each row carries a `latest_date`
+  — the most recent date in that table. If `stuck_pending`'s `latest_date` lags
+  the base tables' `latest_date`, the matview hasn't refreshed since new data
+  landed, so the sheet is clean only as of that last refresh. The institution
+  refreshes matviews on every ETL load; ad-hoc dashboard hits don't trigger one.
+- **Check the filter windows.** A very narrow account, transfer type or [rail](../_glossary.md#rail)
   filter can show zero on a day with stuck legs outside your filter. Widen to
-  "All Accounts", "All Transfer Types", and "All Rails" to see the full picture.
+  "All Accounts", "All Transfer Types" and "All Rails" to see the full picture.
 - **Don't assume all-clear.** Pending Aging is one of twelve L1 invariants. A
   clean Pending Aging sheet next to a populated *Unbundled Aging* or *Drift*
-  sheet means the *other* invariants have open violations — `?` those sheets
+  sheet means the OTHER invariants have open violations — `?` those sheets
   next.
 
-If *App Info* shows `last_refresh_at` as null or the matview row count as
-zero across the board, the L1 invariant pipeline didn't run. That's an ops
-alert, not a "clean" signal.
+If *App Info* shows the matview `row_count` as zero across the board, the L1
+invariant pipeline didn't run. That's an ops alert, not a "clean" signal.
 
 ## Cross-sheet drills
 
@@ -135,4 +135,4 @@ alert, not a "clean" signal.
 ---
 
 *First time here? See the [Vocabulary](../_glossary.md) for `L1`, `rail`,
-`matview`, and the other project-specific terms.*
+`matview` and the other project-specific terms.*

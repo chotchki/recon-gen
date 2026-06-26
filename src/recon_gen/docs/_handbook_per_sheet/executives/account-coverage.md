@@ -4,7 +4,7 @@
 
 ## What you're looking at
 
-You're starting at two KPIs across the top — *Total Open Accounts* (left) and *Active Accounts (this window)* (right). The gap between them tells the story: if they're equal, every account in your book transacted; if active is much smaller, you have idle accounts worth investigating. Below the KPIs sit two horizontal bar charts side by side: *Open Accounts by Type* (left) and *Active Accounts by Type* (right), both broken down by `account_type` so you can see the shape of your deposit base next to the operational GL control accounts that drive operations. At the bottom, a detail table called *Account Detail* lists every account with its last activity date and total transaction-leg count, sorted by activity in descending order — the busiest accounts surface first.
+You're starting at two KPIs across the top — *Total Open Accounts* (left) and *Active Accounts (this window)* (right). The gap between them tells the story: if they're equal, every account in your book transacted; if active is much smaller, you have idle accounts worth investigating. Below the KPIs sit two horizontal bar charts side by side: *Open Accounts by Type* (left) and *Active Accounts by Type* (right), both broken down by `account_type` so you can see the shape of your deposit base next to the operational GL control accounts. At the bottom, a detail table called *Account Detail* lists every account with its last activity date and total transaction-leg count, sorted by activity in descending order — the busiest accounts surface first.
 
 ## How to read the numbers
 
@@ -14,7 +14,7 @@ The sheet reads from two datasets built over the shared `<prefix>_transactions` 
 
 **Active Accounts (this window)** narrows to accounts with at least one Posted leg in the selected date range. The date filter (`pExecDateStart` and `pExecDateEnd`) pushes into the dataset SQL as `WHERE t.posting BETWEEN <start> AND <end+1 day>`. Only accounts passing the `COALESCE(activity_count, 0) > 0` predicate appear in this count, so a zero-activity account (no legs in the window) never surfaces here.
 
-Both bars aggregate counts by `account_type` (which maps to the `account_role` field in `daily_balances`) — so you see CustomerDDA, MerchantDDA, GL control, settlement, and other role types side by side. The *Open* bar shows the all-time type distribution; the *Active* bar shows which types are moving money in the window.
+Both bars aggregate counts by `account_type` (which maps to the `account_role` field in `daily_balances`) — so you see CustomerDDA, MerchantDDA, GL control, settlement and other role types side by side. The *Open* bar shows the all-time type distribution; the *Active* bar shows which types are moving money in the window.
 
 The *Account Detail* table shows one row per account in the dataset (the base, date-independent snapshot), with columns:
 - `account_id` — the ledger key
@@ -41,14 +41,14 @@ The *Open Accounts by Type* and *Active Accounts by Type* bars show different sh
 
 ### All zeros in activity_count
 
-The detail table shows `activity_count = 0` for every row. Either the date window is too narrow (no postings on those days) or the `<prefix>_transactions` table is stale/empty. Cross to the *App Info* sheet and check the `<prefix>_transactions` row — if `row_count` is zero, no transactions have landed; if it's positive but `last_refresh_at` is old, the Executives datasets are using stale snapshots.
+The detail table shows `activity_count = 0` for every row. Either the date window is too narrow (no postings on those days) or the `<prefix>_transactions` table is stale/empty. Cross to the *App Info* sheet and check the `<prefix>_transactions` row — if `row_count` is zero, no transactions have landed; if it's positive but `latest_date` is lagging the base tables, the Executives datasets are reading stale snapshots.
 
 ## What "no rows" means
 
 A clean Account Detail table (zero rows after applying filters) is rare because you almost always have accounts that exist; it means either:
 
 - The date filter is so narrow (single day with no activity on any account) that the active-only variant's `COALESCE(activity_count, 0) > 0` predicate excludes everything. Widen the window to the last 7 or 30 days.
-- The `<prefix>_daily_balances` table is empty or stale. Cross to *App Info* and check `<prefix>_daily_balances` row_count and `last_refresh_at`.
+- The `<prefix>_daily_balances` table is empty or stale. Cross to *App Info* and check `<prefix>_daily_balances` `row_count` and `latest_date`.
 
 If you see zero rows for Total Open Accounts + Active Accounts KPIs, the situation is critical: the daily-balances snapshot is missing. That's an ETL alert, not a data-clean signal.
 

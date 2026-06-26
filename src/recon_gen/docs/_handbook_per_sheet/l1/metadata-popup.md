@@ -22,11 +22,11 @@ Below the header sits the JSON tree itself. Object and array nodes render as col
 
 ## Empty state
 
-Rows where the database's `metadata` column is `NULL`, `{}`, `[]`, the JSON literal `null`, or missing the field entirely render a single line:
+Rows where the database's `metadata` column is `NULL`, `{}`, `[]`, the JSON literal `null` or missing the field entirely render a single line:
 
 > *No metadata for this row.*
 
-No toolbar, no tree, no Copy button — there's nothing to copy. This is healthy. Most ledger legs don't carry metadata; the column exists for the legs that do.
+No toolbar, tree or Copy button renders — there's nothing to copy. This is healthy. Most ledger legs don't carry metadata; the column exists for the legs that do.
 
 ## Common patterns
 
@@ -53,13 +53,13 @@ Click **Copy**. The button flashes *Copied!* for 1.5s. Paste the pretty-printed 
 
 ## What it's NOT
 
-- **Not an editor.** The popup observes, never mutates. There's no Save button, no inline edit, no DELETE entry. The metadata column is a customer-ETL-owned surface; the dashboard is read-only against it.
+- **Not an editor.** The popup observes, never mutates. There's no Save button, inline edit or DELETE entry. The metadata column is a customer-ETL-owned surface; the dashboard is read-only against it.
 - **Not in the audit PDF.** The regulator-ready audit report (`recon-gen audit apply`) shows L1 invariant findings, not per-row metadata. Metadata is operator-facing troubleshooting context; the audit surface is the regulator-facing findings set.
 - **Not a second DB round-trip.** The metadata JSON travels as a URL query param sourced from the already-rendered row payload. The popup-open path is `htmx.ajax → render → swap` — no per-click `SELECT` against the database. (The cost is paid once when the row payload renders the table.)
 
 ## When schema drift breaks it
 
-If a future schema change drops or renames the `metadata` column, or weakens the `IS JSON` constraint, the wiring fails loud — the `Table.__post_init__` guard raises `ValueError` at generate time and the route returns a 500 with `'metadata column missing or invalid — schema may have drifted'`. No silent empty-render fallback (operator lock 8). If you see the loud error, the schema and the tree have drifted and one of them needs to be corrected; the popup is doing its job.
+If a future schema change drops or renames the `metadata` column, or weakens the `IS JSON` constraint, the wiring fails loud — the `Table.__post_init__` guard raises `ValueError` at generate time, and a malformed-JSON row makes the metadata route return a 500 with `'metadata JSON parse failed: …'`. No silent empty-render fallback (operator lock 8). If you see the loud error, the schema and the tree have drifted and one of them needs to be corrected; the popup is doing its job.
 
 ## Related handbook pages
 

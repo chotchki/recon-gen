@@ -1,14 +1,14 @@
 # L1 Reconciliation Dashboard
 
-> **What this sheet teaches.** The L1 reconciliation dashboard answers a single foundational question: is each account's stored balance honest? This Getting Started sheet is the welcome page — it explains the scope of accounts and infrastructure the dashboard monitors, then points you to the appropriate per-invariant tab.
+> **What this sheet teaches.** The L1 reconciliation dashboard answers a single foundational question: is each account's stored balance honest? This Getting Started sheet is the welcome page — it explains the scope of accounts and infrastructure the dashboard monitors, then points you to the right per-invariant tab.
 
 ## What you're looking at
 
-The Getting Started sheet opens with a welcome text box (supplied by the L2 instance's description) and an *L2 Coverage* inventory block listing the dashboard's configured scope: how many internal and external accounts, how many account templates (role classes), how many rails (transfer families), transfer templates (multi-leg shared transfers), chains (ordered transfer-of-transfers sequences), and limit schedules (daily outbound caps). The numbers live-count from the L2 instance at each deployment, so switching L2 instances (different banks, different regulatory postures) re-scopes the dashboard without code changes.
+Getting Started opens with a welcome text box (supplied by the L2 instance's description) and an *L2 Coverage* inventory block listing the dashboard's configured scope: how many internal and external accounts, how many account templates (role classes), how many rails (transfer families), transfer templates (multi-leg shared transfers), chains (ordered transfer-of-transfers sequences) and limit schedules (daily outbound caps). The numbers live-count from the L2 instance at each deployment, so switching L2 instances (different banks, different regulatory postures) re-scopes the dashboard without code changes.
 
 ## How to read the numbers
 
-The L2 Coverage section displays six inventory measures, all live-populated from the configured L2 instance:
+L2 Coverage displays six inventory measures, all live-populated from the configured L2 instance:
 
 - **Internal / external accounts** — the institution's own ledgers vs counterparty books (banks, payment networks, the fed). L1 invariants apply to internal accounts only.
 - **Account templates** — semantic role classes (like CustomerSubledger, MerchantDDA) that bind to specific accounts at posting time.
@@ -29,7 +29,7 @@ Click the *Drift Timelines* tab. It shows Σ |drift| per business day, one line 
 
 ### "I need to audit a specific account's reconciliation for the past 30 days."
 
-Click the *Daily Statement* tab. Pick the account and set the date range. You'll see the per-day walk: opening balance, debits in, credits in, closing balance, and the drift (should be zero). If a day shows non-zero drift, click that row's right-click menu → *View Transactions* to see every Money record (leg) that posted that day.
+Click the *Daily Statement* tab. Pick the account and set the date range. You'll see the per-day walk: opening balance, debits in, credits in, closing balance and the drift (should be zero). If a day shows non-zero drift, click that row's right-click menu → *View Transactions* to see every Money record (leg) that posted that day.
 
 ### "We're seeing pending transactions age out. Which ones?"
 
@@ -37,11 +37,11 @@ Click the *Pending Aging* tab. It shows every Money record with `status='Pending
 
 ## Where to start
 
-If you land on *Getting Started* and see the L2 Coverage block populated (accounts, roles, rails, templates, chains, limits all showing non-zero counts), the dashboard is healthy and connected to its data source. If the numbers look wrong — for example, 0 accounts when you know the institution has 50 — the matview pipeline didn't run or the L2 instance's schema is out of date. Cross to the *Info* sheet (the last tab) and check the *Matview Status* table. If `last_refresh_at` is older than the most recent data load, ask the ops team to trigger a refresh. If the row count is zero across the board, the L1 invariant SQL didn't execute — that's an infrastructure alert, not a dashboard problem.
+If you land on *Getting Started* and see the L2 Coverage block populated (accounts, roles, rails, templates, chains, limits all showing non-zero counts), the dashboard is healthy and connected to its data source. If the numbers look wrong — for example, 0 accounts when you know the institution has 50 — the matview pipeline didn't run or the L2 instance's schema is out of date. Cross to the *Info* sheet (the last tab) and check the *Matview Status* table. If a matview's `latest_date` lags the base tables' (the data moved forward but that matview stayed behind), ask the ops team to trigger a refresh. If the row count is zero across the board, the L1 invariant SQL didn't execute — that's an infrastructure alert, not a dashboard problem.
 
 ## Cross-sheet drills
 
-The Getting Started sheet itself contains no drillable rows — it's a landing page of pure reference material. Every L1 invariant tab (Drift, Overdraft, Limit Breach, Pending Aging, Unbundled Aging, Supersession Audit, L1 Exceptions, Daily Statement, Transactions) carries its own drill actions. Use the `?` button on each sheet for detailed drill documentation.
+The Getting Started sheet itself contains no drillable rows — it's a landing page of reference material. Every L1 invariant tab (Drift, Overdraft, Limit Breach, Pending Aging, Unbundled Aging, Supersession Audit, L1 Exceptions, Daily Statement, Transactions) carries its own drill actions. Use the `?` button on each sheet for detailed drill documentation.
 
 ## Related handbook pages
 
@@ -52,4 +52,4 @@ The Getting Started sheet itself contains no drillable rows — it's a landing p
 
 ## Vocabulary
 
-First time here? The L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants)) dashboard uses several project-specific terms: [matview](../_glossary.md#matview--materialized-view) (a refreshed SQL view), [account_role](../_glossary.md#account-role) (a semantic grouping of accounts), [rail](../_glossary.md#rail) (a named transfer family), [chain](../_glossary.md#chain) (a declared multi-leg transfer sequence), and [template](../_glossary.md#template) (a blueprint for transfer metadata). See the [Vocabulary](../_glossary.md) for expanded definitions.
+First time here? The L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants)) dashboard uses several project-specific terms: [matview](../_glossary.md#matview--materialized-view) (a refreshed SQL view), [account_role](../_glossary.md#account-role) (a semantic grouping of accounts), [rail](../_glossary.md#rail) (a named transfer family), [chain](../_glossary.md#chain) (a declared multi-leg transfer sequence) and [template](../_glossary.md#template) (a blueprint for transfer metadata). See the [Vocabulary](../_glossary.md) for expanded definitions.

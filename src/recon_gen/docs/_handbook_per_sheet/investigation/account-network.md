@@ -1,6 +1,6 @@
 # Account Network
 
-> **What this sheet teaches.** Who does this account exchange money with, on either side? The *Account Network* sheet visualizes the directed graph of money movements flowing in and out of a chosen anchor account, distinguishing inbound counterparties (those sending money INTO your anchor) from outbound counterparties (those your anchor sends money TO).
+> **What this sheet teaches.** Who a chosen anchor account exchanges money with, on either side. The *Account Network* sheet visualizes the directed graph of money movements flowing in and out of that anchor, distinguishing inbound counterparties (those sending money INTO your anchor) from outbound counterparties (those your anchor sends money TO).
 
 ## What you're looking at
 
@@ -87,4 +87,4 @@ See [quirks log §dependent-dropdown-no-refresh](../../reference/quicksight-quir
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `matview`, `rail`, `chain`, and the other project-specific terms.*
+*First time here? See the [Vocabulary](../_glossary.md) for `matview`, `rail`, `chain` and the other project-specific terms.*

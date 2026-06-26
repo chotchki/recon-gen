@@ -9,7 +9,7 @@
 
 ## What you're looking at
 
-The sheet opens on a strip of two KPIs across the top — *Largest Leaf
+A strip of two KPIs runs across the top — *Largest Leaf
 Drift Day (peak business day)* and *Largest Parent Drift Day (peak
 business day)*. Below sit two side-by-side line charts: *Leaf Account
 Drift Over Time* (showing Σ |drift| per business day for leaf [accounts](../_glossary.md#parent--leaf-accounts),
@@ -60,7 +60,7 @@ drifting.
 ### Single isolated spike
 
 One line spikes sharply once, then returns to zero. This is a **one-off
-event** — a posting rejection, a balance-emission skip, or a deploy-time
+event** — a posting rejection, a balance-emission skip or a deploy-time
 correction. Unlike the recurring spike (which signals an ongoing feed
 problem), a single spike may be expected if you know a data correction
 happened that day. Check the posting timestamps and the Daily Statement
@@ -70,7 +70,7 @@ for that role / account to confirm the cause.
 
 One role's line sits above zero across the entire window, never dropping.
 This is a **carry-forward of a prior incident** — a posting was missed
-weeks ago, the stored balance was never adjusted, and the mismatch
+weeks ago, the stored balance was never adjusted and the mismatch
 locked in. The magnitude may be constant or grow if more postings land
 on non-emit days. Cross to the Drift sheet with the same role and date
 filters to find the specific account, then drill to *Supersession Audit*
@@ -139,4 +139,4 @@ or *Transactions*.
 ---
 
 *First time here? See the [Vocabulary](../_glossary.md) for `L1`,
-`matview`, `account_role`, and the other project-specific terms.*
+`matview`, `account_role` and the other project-specific terms.*

@@ -4,7 +4,7 @@
 
 ## What you're looking at
 
-The sheet opens on a filter bar with six controls — **Date From** and **Date To** to scope by posting date, **Chain** (single-select dropdown) to narrow by declared parent rail / template name, **Completion** (single-select dropdown) to show Completed / Incomplete / No Required Children status, **Metadata Key** (single-select dropdown), and **Metadata Value** (free-text input) for cascading metadata filtering. Below the filters sits a single table: *Chain Instances*, one row per parent transfer firing. Each row reports the parent's posted date, declared chain name, transfer ID, completion status, the count of Required children that fired and the count declared, the parent amount in dollars, and the parent leg's status.
+The sheet opens on a filter bar with six controls — **Date From** and **Date To** to scope by posting date, **Chain** (single-select dropdown) to narrow by declared parent rail / template name, **Completion** (single-select dropdown) to show Completed / Incomplete status, **Metadata Key** (single-select dropdown) and **Metadata Value** (free-text input) for cascading metadata filtering. Below the filters sits a single table: *Chain Instances*, one row per parent transfer firing. Each row reports the parent's posted date, declared chain name, transfer ID, completion status, the count of Required children that fired and the count declared, the parent amount in dollars and the parent leg's status.
 
 ## How to read the numbers
 
@@ -18,7 +18,6 @@ The columns on the table:
 - `completion_status` — one of:
   - *Completed* — every Required child [chain](../_glossary.md#chain--a-declared-sequence-of-leg-patterns) fired against this parent transfer_id AND every XOR-group (mutually-exclusive leg set) had exactly one member fire
   - *Incomplete* — at least one Required child is missing, or any XOR group was orphaned (zero fires) or duplicated (>1 fires)
-  - *No Required Children* — the parent declares only XOR-group or optional children (zero Required children by design), and the actual firings honored that shape
 - `required_fired` / `required_total` — two Required Children columns. `required_total` is the count of Required child chains the L2 declared for this parent; `required_fired` is how many actually posted. A chain with only XOR-sibling children declares zero Required, so a 0/0 row is normal and healthy for those parents.
 - `parent_amount_money` — the posted amount in dollars (cents converted from the ledger)
 - `parent_status` — the status of the parent leg (Pending / Posted / Failed)
@@ -29,11 +28,7 @@ The dataset filters `WHERE parent_posting >= <<date_start>> AND parent_posting <
 
 ### Completed with 0/0 required children
 
-A row with `completion_status='Completed'`, `required_fired=0`, and `required_total=0`. This parent's declared children are all XOR-group members — exactly one SHOULD fire, and the system found exactly one (or zero XOR groups entirely). A 0/0 completion is healthy, not a violation.
-
-### No Required Children
-
-A row with `completion_status='No Required Children'`. This parent declares only optional (XOR-group) children; no Required child chains are part of its contract. The completion check still verifies that any XOR groups present honored their cardinality (exactly one fires per group), but there are no Required-child dependencies to fail. This is a normal firing shape for certain parent rail / template combinations.
+A row with `completion_status='Completed'`, `required_fired=0` and `required_total=0`. This parent's declared children are all XOR-group members — exactly one SHOULD fire, and the system found exactly one (or zero XOR groups entirely). A 0/0 completion is healthy, not a violation.
 
 ### Incomplete: missing required children
 
@@ -49,7 +44,7 @@ An Incomplete row with a large `parent_amount_money` and low `required_fired` co
 
 ### No rows in window
 
-A blank table with no Completed / Incomplete / No Required Children rows. Either no parent transfers fired in the date range, or the Chain / Completion filters are too narrow. Widen the date window or clear the Chain dropdown; if you still get zero rows, no declared chain parents were exercised during that period — check the Rails sheet to confirm postings exist, and confirm the parent rail / template names in your L2 declaration match the actual `rail_name` / `template_name` values in the ledger.
+A blank table with no Completed / Incomplete rows. Either no parent transfers fired in the date range, or the Chain / Completion filters are too narrow. Widen the date window or clear the Chain dropdown; if you still get zero rows, no declared chain parents were exercised during that period — check the Rails sheet to confirm postings exist, and confirm the parent rail / template names in your L2 declaration match the actual `rail_name` / `template_name` values in the ledger.
 
 ## What "no rows" means
 
@@ -58,7 +53,7 @@ An empty *Chain Instances* table can mean several things:
 - **No declared chains in the L2.** If your instance has no chain declarations at all, the table is always empty. Cross to *Getting Started* and confirm the L2 instance's `chains:` block is populated.
 - **No chain parents fired in the date window.** The L2 declares chains but no parent transfer fired during the selected dates. Widen the date range; if still empty, check the Rails sheet (same date filter) to see whether any postings exist at all.
 - **Filter too narrow.** You've selected a specific Chain name or Completion status that has no matches in the window. Clear the filters and try again.
-- **Matview stale.** Cross to *App Info* and check the transaction [matview](../_glossary.md#matview--materialized-view)'s `last_refresh_at` timestamp. If it predates your expected chain firings, the dashboard is showing a stale state — the ETL pipeline refreshes on every load, so wait a few minutes and reload.
+- **Matview stale.** Cross to *App Info* and compare the transaction [matview](../_glossary.md#matview--materialized-view)'s `latest_date` to the base table's. If the matview lags behind, it hasn't been refreshed since the last ETL load — the dashboard is showing a stale state, so re-run the matview refresh and reload.
 
 ## Cross-sheet drills
 
@@ -73,4 +68,4 @@ An empty *Chain Instances* table can mean several things:
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `L2`, `matview`, `chain`, `template`, and the other project-specific terms.*
+*First time here? See the [Vocabulary](../_glossary.md) for `L2`, `matview`, `chain`, `template` and the other project-specific terms.*

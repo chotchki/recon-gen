@@ -4,7 +4,7 @@
 
 ## What you're looking at
 
-The sheet opens on a pair of KPIs across the top — *Stuck Unbundled* (count of posted legs without a bundle) and *Stuck Unbundled Exposure* (the total dollar amount of those legs). Below sits a bar chart titled *Stuck Unbundled by Age Bucket* that groups the stuck legs across four age bands (1: <1d, 2: 1-2d, 3: 2-7d, 4: >7d) and stacks them by rail so you can see which payment rail is generating the backlog. A detail table lists every stuck unbundled leg with the account, transfer, rail, amount, posting timestamp, and live age in seconds. Filters across the top let you narrow by account, transfer type, and rail.
+A pair of KPIs sits across the top — *Stuck Unbundled* (count of posted legs without a bundle) and *Stuck Unbundled Exposure* (the total dollar amount of those legs). Below sits a bar chart titled *Stuck Unbundled by Age Bucket* that groups the stuck legs across four age bands (1: <1d, 2: 1-2d, 3: 2-7d, 4: >7d) and stacks them by rail so you can see which payment rail is generating the backlog. A detail table lists every stuck unbundled leg with the account, transfer, rail, amount, posting timestamp and live age in seconds. Filters across the top let you narrow by account, transfer type and rail.
 
 ## How to read the numbers
 
@@ -45,7 +45,7 @@ An empty unbundled sheet means every posted leg has either been bundled (assigne
 
 - **Confirm the matview is fresh.** Cross to *App Info* and check the *Matview Status* table's `stuck_unbundled` row. If `last_refresh_at` is more than a few minutes old AND new postings landed since, the matview may be stale. The institution refreshes matviews on every ETL load; ad-hoc dashboard hits don't trigger a refresh.
 - **Check the date filter and drill state.** If you drilled here from another sheet, the account or rail filter may be too narrow. Widen to "All Accounts" and "All Rails" to see the universe.
-- **Don't celebrate yet.** Unbundled aging is one of twelve L1 invariants. A clean Unbundled Aging sheet next to a populated *Pending Aging* or *Overdraft* sheet means *that* invariant has work — `?` those sheets next.
+- **Don't celebrate yet.** Unbundled aging is one of twelve L1 invariants. A clean Unbundled Aging sheet next to a populated *Pending Aging* or *Overdraft* sheet means THAT invariant has work — `?` those sheets next.
 
 If *App Info* shows `last_refresh_at` as null or the matview row count as zero across the board, the L1 invariant pipeline didn't run. That's an ops alert, not a "clean" signal.
 
@@ -62,4 +62,4 @@ If *App Info* shows `last_refresh_at` as null or the matview row count as zero a
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `L1`, `matview`, `account_role`, `rail`, and the other project-specific terms.*
+*First time here? See the [Vocabulary](../_glossary.md) for `L1`, `matview`, `account_role`, `rail` and the other project-specific terms.*

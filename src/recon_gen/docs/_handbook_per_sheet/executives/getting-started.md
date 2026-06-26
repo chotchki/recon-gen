@@ -1,20 +1,20 @@
 # Getting Started
 
-> **What this dashboard is for.** Board-cadence summary of the bank's account coverage, transaction throughput, money movement, and ledger integrity. Scan for trends in a 30-day rolling window; click any row or bar to drill into operational details.
+> **What this dashboard is for.** Board-cadence summary of the bank's account coverage, transaction throughput, money movement and ledger integrity. Scan for trends in a 30-day rolling window; click any row or bar to drill into operational details.
 
 ## What you're looking at
 
-The Getting Started sheet is a navigation layer — you won't find KPIs or visuals here, only text boxes that preview each of the four operational sheets below. The dashboard opens with a welcome message explaining the clickability model: accent-coloured cells are interactive. Each sheet's preview box is clickable — read the heading to jump to that tab. The descriptions beneath each sheet name tell you what you're about to see — *Program Health* (a single tripwire count), *Account Coverage* (open vs active account counts and detail tables), *Transaction Volume Over Time* (daily and period tallies by transfer type), and *Money Moved* (net and gross dollars by rail).
+The Getting Started sheet is a navigation layer — you won't find KPIs or visuals here, only text boxes that preview each of the four operational sheets below. The dashboard opens with a welcome message explaining the clickability model: accent-coloured cells are interactive. Each sheet's preview box is clickable — read the heading to jump to that tab. The descriptions beneath each sheet name tell you what you're about to see — *Program Health* (a single tripwire count), *Account Coverage* (open vs active account counts and detail tables), *Transaction Volume Over Time* (daily and period tallies by rail) and *Money Moved* (net and gross dollars by rail).
 
 ## How to read the dashboard
 
 Each sheet in this dashboard is built to answer one question at the 30-day executive cadence:
 
-**Program Health** — Is the ledger clean? A single threshold-banded KPI tile shows the count of L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants)) invariant violations open in the selected date window. Green means zero violations; amber means at least one; red means 20 or more — a systemic mark the board should see flagged. Open the L1 Dashboard (linked from the sheet) for per-row triage. This is the speedbump check: *before* reading the volume trends below, confirm nothing is broken at the accounts layer.
+**Program Health** — Is the ledger clean? A single threshold-banded KPI tile shows the count of L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants)) invariant violations open in the selected date window. Green means zero violations; amber means at least one; red means 20 or more — a systemic mark the board should see flagged. Open the L1 Dashboard (linked from the sheet) for per-row triage. This is the speedbump check: BEFORE reading the volume trends below, confirm nothing is broken at the accounts layer.
 
 **Account Coverage** — Which accounts do we have on the books, and how many are actually moving money? Two KPIs show the total (all-time) open-account count and the narrower active-account count within the date window. Two bar charts break both down by `account_type` so you can see the shape of the deposit base next to the GL control accounts that drive operations. A detail table lists every account with its last activity date and a transaction-leg count, sorted by activity so the busiest accounts surface at the top.
 
-**Transaction Volume Over Time** — What is the daily transaction throughput, and how is it composed by transfer type? Three KPIs report the total transfer count (per-transfer deduped, Posted-only), the sibling per-leg all-status count (shown for App Info parity), and the average daily volume over active days. A stacked-bar chart by `rail_name` shows daily counts over time (trend plus composition); a clustered bar on a log scale shows the period total per rail so the long tail of smaller rails stays readable when one rail dominates.
+**Transaction Volume Over Time** — What is the daily transaction throughput, and how is it composed by transfer type? Three KPIs report the total transfer count (per-transfer deduped, Posted-only), the sibling per-leg all-status count (shown for App Info parity) and the average daily volume over active days. A stacked-bar chart by `rail_name` shows daily counts over time (trend plus composition); a clustered bar on a log scale shows the period total per rail so the long tail of smaller rails stays readable when one rail dominates.
 
 **Money Moved** — What is the total dollar volume, and which direction is the net? Two KPIs report the net money moved (`Σ signed amount` — expected near zero on a balanced book, positive for net inflow, negative for net outflow) with a sign glyph, and the gross handle (`Σ absolute amounts` regardless of direction). A stacked bar by `rail_name` shows daily gross dollars over time; a log-scale clustered bar shows period gross by rail so the executive can see where the volume is coming from without the long tail disappearing.
 
@@ -30,7 +30,7 @@ Each sheet in this dashboard is built to answer one question at the 30-day execu
 
 **First time opening the dashboard.** Start at *Program Health* — it's the second sheet after Getting Started and takes 10 seconds to read. If the KPI is green, move down through *Account Coverage* → *Transaction Volume Over Time* → *Money Moved* in order. If it's amber or red, open the L1 Dashboard link and triage the ledger breaks first; you'll come back to the Executives sheets once that's resolved.
 
-**Month-end check.** Skim all four sheets' KPIs + the top chart (daily or open-count bar) to spot trends — are volumes growing, shrinking, or flat? Has coverage expanded? Is the ledger clean? These four visuals tell the story in under two minutes. If something looks off, drill into the detail table or Account Reconciliation for a closer look.
+**Month-end check.** Skim all four sheets' KPIs + the top chart (daily or open-count bar) to spot trends — are volumes growing, shrinking or flat? Has coverage expanded? Is the ledger clean? These four visuals tell the story in under two minutes. If something looks off, drill into the detail table or Account Reconciliation for a closer look.
 
 **On-call alert.** The Program Health KPI is your alert surface — if it goes red (≥20 violations), something broke upstream. Click the L1 Dashboard link and find the violation. The account + date it shows are your starting point. Don't close the alert until the KPI is back to green.
 
@@ -43,4 +43,4 @@ Each sheet in this dashboard is built to answer one question at the 30-day execu
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `L1`, `matview`, `account_role`, `rail`, `template`, `carry-forward`, and the other project-specific terms.*
+*First time here? See the [Vocabulary](../_glossary.md) for `L1`, `matview`, `account_role`, `rail`, `template`, `carry-forward` and the other project-specific terms.*

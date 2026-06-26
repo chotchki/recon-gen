@@ -1,10 +1,10 @@
 # L1 Exceptions
 
-> **What this sheet teaches.** The unified snapshot of every L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants)) SHOULD-constraint violation across all twelve invariant checks, scoped to the date window you're examining. This is your morning scan: one sheet that answers "what's broken across balance, chain flow, and aging" without hopping between five separate invariant sheets.
+> **What this sheet teaches.** The unified snapshot of every L1 ([account-integrity](../_glossary.md#l1-dashboard--account-integrity-invariants)) SHOULD-constraint violation across all twelve invariant checks, scoped to the date window you're examining. This is your morning scan: one sheet that answers "what's broken across balance, chain flow and aging" without hopping between five separate invariant sheets.
 
 ## What you're looking at
 
-The sheet opens with a single KPI: *Open Exceptions* — the total count of violations in the selected date window. Below sits *Exceptions by Check Type* (a horizontal bar chart with log-scale Y axis) that groups the violations into twelve categories so you can see which invariant is dominating. The detail table *Exception Detail* lists every single violation, sorted by dollar magnitude (largest first), so the highest-impact items surface at the top.
+The sheet opens with a single KPI: *Open Exceptions* — the total count of violations in the selected date window. Below sits *Exceptions by Check Type* (a horizontal bar chart with log-scale Y axis) that groups the violations into twelve categories so you can see which invariant is dominating. The detail table *Exception Detail* lists every violation, sorted by dollar magnitude (largest first), so the highest-impact items surface at the top.
 
 At the bottom is an *Institution Context* text box carrying your L2 instance's description — the unified-view landing page's anchor for "what this institution reconciles."
 
@@ -30,7 +30,7 @@ The detail table draws from a live UNION ALL across twelve L1 invariant matview 
 - `fan_in_disagreement` — a fan-in child Transfer's parent count disagrees with the expected count
 - `multi_xor_violation` — multiple XOR groups on the same chain misfire together (a higher-order overlap)
 
-Every row carries `account_id`, `account_name`, `account_role`, and `business_day`. For money-based checks (balance and aging branches), `magnitude_amount` holds the dollar variance; for transfer-keyed checks, `magnitude_count` holds the cardinality disagreement (the count of unexpected parents, or firing/child count mismatch). Exactly one magnitude column is populated per row.
+Every row carries `account_id`, `account_name`, `account_role` and `business_day`. For money-based checks (balance and aging branches), `magnitude_amount` holds the dollar variance; for transfer-keyed checks, `magnitude_count` holds the cardinality disagreement (the count of unexpected parents, or firing/child count mismatch). Exactly one magnitude column is populated per row.
 
 The *Open Exceptions* KPI counts all rows in the dataset within the selected date window and filter settings. The *Exceptions by Check Type* bar chart groups by `check_type` to show you the volume mix across the twelve branches — useful for spotting which invariant is the current bottleneck.
 
@@ -78,4 +78,4 @@ If *App Info* shows `last_refresh_at` as NULL across the board or the `l1_except
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `L1`, `matview`, `account_role`, `rail`, `chain`, `template`, and the other project-specific terms.*
+*First time here? See the [Vocabulary](../_glossary.md) for `L1`, `matview`, `account_role`, `rail`, `chain`, `template` and the other project-specific terms.*

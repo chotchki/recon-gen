@@ -8,12 +8,12 @@
 
 ## What you're looking at
 
-The sheet opens with a single KPI — *Account-Days in Overdraft* — showing the
-count of internal-account day-rows holding negative balances in the current
-date window. Below sits an *Overdraft Violations* table listing every account-day
-where `stored_balance < 0`, with the account identifier, role, business day,
+A single KPI — *Account-Days in Overdraft* — opens the sheet, counting the
+internal-account day-rows that hold negative balances in the current date
+window. Below it sits an *Overdraft Violations* table listing every account-day
+where `stored_balance < 0`, with the account identifier, role, business day
 and the negative amount. Filters across the top let you narrow by date range
-(universal across the L1 app), by specific account, and by account role.
+(universal across the L1 app), by specific account and by account role.
 
 ## How to read the numbers
 
@@ -34,7 +34,7 @@ The visible columns are:
 - `stored_balance` — `effective_balances.effective_money` converted to dollars
   (negative value; underlined on the sheet to signal the constraint violation)
 
-The matview also tracks a `source` field (whether the balance was `emitted` or `carried` from a prior day) and includes the full `business_day` window at day grain, but these are not displayed in the base table.
+The matview also tracks a `source` field (whether the balance was `emitted` or `carried` from a prior day) and a `business_day_end` column closing the window at day grain, but neither is displayed in the base table.
 
 The *Account-Days in Overdraft* KPI counts rows in the matview within the current
 date filter. External accounts (banks, payment networks) never appear here — the
@@ -72,7 +72,7 @@ liquidity event** — a whole role (e.g., all merchant DDAs, or all customer swe
 targets) went short on the same day. Usually means a high-volume transfer leg
 (an aggregator [rail](../_glossary.md#rail) bundle, a wire sweep, a batch settlement)
 posted without sufficient pre-funding. Check the upstream rail (ACH aggregation,
-wire settlement, etc.) to confirm the inbound funding landed *after* the outbound
+wire settlement, etc.) to confirm the inbound funding landed AFTER the outbound
 batch fired; if timing is correct, loop the treasury team in to rebalance.
 
 ### Overdraft on sparse-emit account, many consecutive days
@@ -82,7 +82,7 @@ days in a row — the account's last reported balance was negative, and no new
 balance was emitted since, so every non-emit day carries forward the same deficit.
 This is a **known-issue pattern on sparse-cadence accounts** — the institution
 doesn't report balances daily, so a negative balance from a prior emit "sticks"
-across all the days until the next emit. Right-click the *first* row to
+across all the days until the next emit. Right-click the FIRST row to
 *View Daily Statement* for the first `business_day_start` on which `source='emitted'`
 to see what actually happened; if the account has posted activity that would have
 cured the deficit, but the institution didn't emit a new balance to capture it,
@@ -90,7 +90,7 @@ check the balance-emission cadence configuration for that account [role](../_glo
 
 ## What "no rows" means
 
-A clean overdraft sheet means *every* internal account's stored balance was
+A clean overdraft sheet means EVERY internal account's stored balance was
 ≥ $0.00 at the end of every business day in the current window. That is the
 steady-state expectation, not an edge case: overdraft is a SHOULD-constraint
 catcher, not a metric to be trended. If you see zero rows:
@@ -105,7 +105,7 @@ catcher, not a metric to be trended. If you see zero rows:
   internal account was overdrafted in that window.
 - **Don't celebrate yet.** Overdraft is one of twelve L1 invariants. A clean
   Overdraft sheet next to a populated *Drift* or *Limit Breach* sheet means
-  *that* invariant has work — `?` those sheets next.
+  THAT invariant has work — `?` those sheets next.
 
 If *App Info* shows `last_refresh_at` as null or the matview row count as zero
 across the board, the L1 invariant pipeline didn't run. That's an ops alert, not
@@ -131,5 +131,5 @@ a "clean" signal.
 ---
 
 *First time here? See the [Vocabulary](../_glossary.md) for `L1`, `matview`,
-`account_role`, [rail](../_glossary.md#rail), [carry-forward](../_glossary.md#carry-forward--sparse-cadence),
+`account_role`, [rail](../_glossary.md#rail), [carry-forward](../_glossary.md#carry-forward--sparse-cadence)
 and the other project-specific terms.*

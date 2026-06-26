@@ -1,6 +1,6 @@
 # Getting Started
 
-> **What this sheet teaches.** The Investigation Dashboard is a compliance and anti-money-laundering triage surface. It surfaces three core question-shaped sheets (recipient fanout, volume anomalies, money trail) that drill back into account and payment reconciliation for row-level evidence, plus an Account Network visualization for peer-graph analysis.
+> **What this sheet teaches.** The Investigation Dashboard is a compliance and anti-money-laundering triage surface. It surfaces three question-shaped sheets (recipient fanout, volume anomalies, money trail) that drill back into account and payment reconciliation for row-level evidence, plus an Account Network visualization for peer-graph analysis.
 
 ## What you're looking at
 
@@ -22,7 +22,7 @@ The Investigation Dashboard consists of four sheets:
 
 ### Recipient flagged; need to understand the network
 
-Start on **Recipient Fanout**. You've pinned a high-value recipient with many senders above the threshold. Click through to **Account Network**, anchor that recipient, and observe the inbound Sankey: which counterparties are the senders? Are they clustered by geography, entity type, or time window? Walk the anchor back to each sender and observe *their* inbound networks — layering chains often have a signature of intermediaries with narrow, linear networks.
+Start on **Recipient Fanout**. You've pinned a high-value recipient with many senders above the threshold. Click through to **Account Network**, anchor that recipient, and observe the inbound Sankey: which counterparties are the senders? Are they clustered by geography, entity type or time window? Walk the anchor back to each sender and observe THEIR inbound networks — layering chains often have a signature of intermediaries with narrow, linear networks.
 
 ### Pair-wise spike detected; is it real or noise?
 
@@ -56,4 +56,4 @@ If you have no specific hypothesis, start with **Recipient Fanout** at the defau
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `account_role`, `rail`, `chain`, `template`, and other project-specific terms.*
+*First time here? See the [Vocabulary](../_glossary.md) for `account_role`, `rail`, `chain`, `template` and other project-specific terms.*

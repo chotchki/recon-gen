@@ -45,7 +45,7 @@ Validator constraints:
 - `fan_in=true` is only valid on TransferTemplate children. Rails fail
   validator C8a (`TT-not-Rail` gate).
 - `expected_parent_count` must be ≥ 2 when `fan_in=true` (validator
-  C8b). A fan-in of 1 is just one-to-one with a longer name.
+  C8c). A fan-in of 1 is just one-to-one with a longer name.
 - Mixed-cardinality is fine. Inside one XOR alternation, one child
   can be fan-in while the siblings stay one-to-one. The sasquatch
   `MerchantSettlementCycle` chain is the canonical demo.

@@ -1,10 +1,10 @@
 # Rails — Transactions Explorer
 
-> **What this sheet teaches.** The L2 ([Flow Tracing](../_glossary.md#l2-flow-tracing--per-chain-transfer-integrity)) dashboard's Rails sheet is a transactions explorer — a ledger dump where you look up individual transfer legs by date, rail, status, or embedded metadata. Every row is one posting; the sheet's filters push down into the SQL so you narrow to the exact slice you need.
+> **What this sheet teaches.** The L2 ([Flow Tracing](../_glossary.md#l2-flow-tracing--per-chain-transfer-integrity)) dashboard's Rails sheet is a transactions explorer — a ledger dump where you look up individual transfer legs by date, rail, status or embedded metadata. Every row is one posting; the sheet's filters push down into the SQL so you narrow to the exact slice you need.
 
 ## What you're looking at
 
-A KPI row at the top orients you to the data window: *Legs in Window* (count of postings matching all current filters) and *Largest Leg* (the single biggest `amount_money` in that window). Below sit six filter controls: two date pickers (*Date From* / *Date To*), three categorical dropdowns (*Rail*, *Status*, *Bundle*), and a cascading metadata pair (*Metadata Key* / *Metadata Value*). The *Transactions* table below renders one row per leg, showing posting date, rail name, transfer ID, account, amount, direction (debit/credit), status, bundle status, and parent transfer ID.
+A KPI row at the top orients you to the data window: *Legs in Window* (count of postings matching all current filters) and *Largest Leg* (the single biggest `amount_money` in that window). Below sit six filter controls: two date pickers (*Date From* / *Date To*), three categorical dropdowns (*Rail*, *Status*, *Bundle*) and a cascading metadata pair (*Metadata Key* / *Metadata Value*). The *Transactions* table below renders one row per leg, showing posting date, rail name, transfer ID, account, amount, direction (debit/credit), status, bundle status and parent transfer ID.
 
 The metadata cascade lets you narrow by embedded leg properties: pick a *Metadata Key* (e.g., `customer_id`), then type the *Metadata Value* you want to filter by. With no key picked, every leg in the date window appears; with a key selected, only legs whose metadata carries that key=value pair show. This is the same cascade the Chains and Transfer Templates sheets use.
 
@@ -17,8 +17,8 @@ The *Transactions* table reads from the `<prefix>_current_transactions` matview 
 - `transfer_id` — the logical event identifier linking all legs of one multi-leg transfer. Non-failed transfers' legs net to zero by construction.
 - `account_name` — the account being debited or credited. Internal/external scope is in the `account_scope` column (not displayed, but filters upstream).
 - `amount_money` — the signed posting amount in dollars (positive = money INTO the account, negative = OUT). Single column, not split debit/credit; the sign convention follows the source `signed_amount` field on the base transactions table. The *Largest Leg* KPI picks the maximum `amount_money` in the current window.
-- `amount_direction` — debit (+, money out of the account) or credit (−, money into the account) from that account's perspective.
-- `status` — the transaction's state: *Pending* (not yet settled), *Posted* (completed), or *Other* (any terminal state like Failed, Rejected, Cancelled). The *Status* dropdown defaults to all three; pick one to narrow.
+- `amount_direction` — debit (−, money out of the account) or credit (+, money into the account) from that account's perspective.
+- `status` — the transaction's state: *Pending* (not yet settled), *Posted* (completed) or *Other* (any terminal state like Failed, Rejected, Cancelled). The *Status* dropdown defaults to all three; pick one to narrow.
 - `bundle_status` — derived from whether `bundle_id` is NULL. *Bundled* means the leg was collected into a batch for settlement; *Unbundled* means it's still individual. Calculated as `CASE WHEN bundle_id IS NULL THEN 'Unbundled' ELSE 'Bundled' END`.
 - `transfer_parent_id` — if this leg is a child of a declared [chain](../_glossary.md#chain), this holds the parent's `transfer_id`. Useful for tracing up to the initiating transfer when you're deep in a multi-leg chain.
 
@@ -46,11 +46,11 @@ Paste the `transfer_id` into the table's search / filter row (most renderers sup
 
 An empty *Transactions* table can happen for two reasons:
 
-- **The filters are too narrow.** If you've picked a specific rail, status, metadata key/value, or date range, try clearing some of them. Start by widening the date window to the trailing 7 days or "all time"; if you still see zero rows with no other constraints, the system is clean for that day range.
-- **The matview is stale or the SQL hasn't run.** Cross to the *App Info* sheet and check the *Matview Status* table's `<prefix>_current_transactions` row. If `last_refresh_at` is null or older than your most recent ETL load, the matview hasn't refreshed. The institution refreshes matviews on every ETL load; ad-hoc dashboard hits do not trigger a refresh.
+- **The filters are too narrow.** If you've picked a specific rail, status, metadata key/value or date range, try clearing some of them. Start by widening the date window to the trailing 7 days or "all time"; if you still see zero rows with no other constraints, the system is clean for that day range.
+- **The matview is stale or the SQL hasn't run.** Cross to the *App Info* sheet and check the *Matview Status* table's `<prefix>_current_transactions` row. The `latest_date` column there is `MAX(posting)` for that matview; if it's null or older than your most recent ETL load, the matview hasn't refreshed. The institution refreshes matviews on every ETL load; ad-hoc dashboard hits do not trigger a refresh.
 - **The metadata cascade is confusing you.** If you've picked a *Metadata Key* but entering a *Metadata Value* in the text field returns no rows, it means no legs in the current date window have that key with a value matching what you typed. Clear the key filter and start fresh.
 
-If *App Info* shows `last_refresh_at` as null across the board, the L2FT pipeline didn't run — that's an ops alert, not a "system is clean" signal.
+If *App Info* shows `latest_date` as null across the board, the L2FT pipeline didn't run — that's an ops alert, not a "system is clean" signal.
 
 ## Cross-sheet drills
 
@@ -67,4 +67,4 @@ If you arrived at this Rails sheet from a right-click on the L2 Exceptions sheet
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `rail`, `chain`, `matview`, `transfer`, and other project-specific terms.*
+*First time here? See the [Vocabulary](../_glossary.md) for `rail`, `chain`, `matview`, `transfer` and other project-specific terms.*

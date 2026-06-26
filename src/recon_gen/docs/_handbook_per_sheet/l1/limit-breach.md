@@ -32,7 +32,7 @@ The matview runs two parallel UNION branches:
 - **Outbound branch** — sums `ABS(amount_money)` where `amount_direction = 'Debit'`
   (classic per-rail send cap) and `status = 'Posted'`, grouped by
   `account_id`, `business_day` (the trading day the transaction posted),
-  `rail_name`, and `account_parent_role`. Only internal accounts (rows where
+  `rail_name` and `account_parent_role`. Only internal accounts (rows where
   `account_scope = 'internal'`) surface here.
 - **Inbound branch** — sums `ABS(amount_money)` where `amount_direction = 'Credit'`
   (receive-side volume threshold, typically for AML / structuring detection
@@ -73,7 +73,7 @@ run) or unexpected.
 
 Multiple rows, same `business_day`, same `rail_name`, same `direction`, but
 different `account_id` values. This is a **bulk event on that rail** —
-possibly a batch process, a settlement window, or a scheduled transfer run that
+possibly a batch process, a settlement window or a scheduled transfer run that
 pushed multiple customers over their caps simultaneously. The breaches are
 likely correlated. Check whether the L2 instance's limit caps are correctly
 tuned for the expected transaction cadence on that rail, or whether there's a
@@ -105,7 +105,7 @@ expectation, not an edge case:
 - **Confirm the matview is fresh.** Cross to *App Info* and check the
   *Matview Status* table's `limit_breach` row. If `last_refresh_at` is more
   than a few minutes old AND new postings landed since, the data may be clean
-  *as of the last refresh* but stale. Matviews refresh on every ETL load;
+  as of the last refresh but STALE. Matviews refresh on every ETL load;
   ad-hoc dashboard hits do not trigger one.
 - **Check the date filter.** A very narrow date window can show zero on a day
   with light traffic. Widen to the trailing 7 days; if you still get zero, the
@@ -137,4 +137,4 @@ not a "clean" signal.
 ---
 
 *First time here? See the [Vocabulary](../_glossary.md) for `L1`, `matview`,
-`account_role`, `rail`, and the other project-specific terms.*
+`account_role`, `rail` and the other project-specific terms.*

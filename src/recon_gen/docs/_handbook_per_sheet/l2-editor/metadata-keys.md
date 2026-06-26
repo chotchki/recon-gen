@@ -43,7 +43,7 @@ entries as `PostedRequirements` on every leg rail.
 
 ## Why a value-examples picker per chip
 
-The pre-BF.4 form had two separate fields — a textarea of metadata
+The earlier form had two separate fields — a textarea of metadata
 keys and a parallel textarea of values. Operators routinely got the
 two out of sync (added a key without examples, deleted a key while
 its examples lingered). The per-chip embedded picker means the two

@@ -4,7 +4,7 @@
 
 ## What you're looking at
 
-The sheet opens on a **Date From** / **Date To** filter spanning the date range, followed by **Template**, **Completion**, **Metadata Key**, and **Metadata Value** filters to narrow the data. Below the filter bar is an *Edge legend* text box naming the three flow types you'll see in the Sankey below. A *Multi-Leg Flow — Account → Template → Account* Sankey dominates the middle of the sheet, visualizing how money flows through each template's declared structure: debit accounts on the left feed into the template middle node, and credit accounts on the right receive. Matched chain children (declared follow-on rails that actually fired) appear as edges flowing out of the template; orphan chain children (declared but not firing) appear as dashed links with "(orphan)" appended to the node name. Below the Sankey sits the *Template Instances* table, showing one row per shared Transfer with balance detail and chain-completion status.
+The sheet opens on a **Date From** / **Date To** filter spanning the date range, followed by **Template**, **Completion**, **Metadata Key** and **Metadata Value** filters to narrow the data. Below the filter bar is an *Edge legend* text box naming the three flow types you'll see in the Sankey below. A *Multi-Leg Flow — Account → Template → Account* Sankey dominates the middle of the sheet, visualizing how money flows through each template's declared structure: debit accounts on the left feed into the template middle node, and credit accounts on the right receive. Matched chain children (declared follow-on rails that actually fired) appear as edges flowing out of the template; orphan chain children (declared but not firing) appear as dashed links with "(orphan)" appended to the node name. Below the Sankey sits the *Template Instances* table, showing one row per shared Transfer with balance detail and chain-completion status.
 
 ## How to read the numbers
 
@@ -30,7 +30,7 @@ The Sankey's width represents `SUM(amount_abs)` across all matching legs on each
 
 ### All Complete, every firing balanced and chained
 
-Every row in the *Template Instances* table reads 'Complete'; the Sankey shows only thick flow edges with no "(orphan)" suffix nodes. This is the steady-state expectation — every declared template fires, balances, and every Required child leg posts as scheduled. If you're seeing this across multiple templates and dates, your transfer-template declarations match the runtime correctly.
+Every row in the *Template Instances* table reads 'Complete'; the Sankey shows only thick flow edges with no "(orphan)" suffix nodes. This is the steady-state expectation — every declared template fires and balances, and every Required child leg posts as scheduled. If you're seeing this across multiple templates and dates, your transfer-template declarations match the runtime correctly.
 
 ### One template, many Imbalanced rows
 
@@ -42,7 +42,7 @@ Multiple rows show `completion_status = 'Orphaned'` despite `net_diff` near zero
 
 ### Sparse or empty Sankey despite table rows
 
-The table shows rows but the Sankey appears thin or empty. This can happen when `leg_count` is low (few legs per transfer, so the Sankey's proportional widths collapse) or when metadata cascade filters are in effect. Widening the **Metadata Key** / **Metadata Value** filters or picking **Template = All** can expand the visible flow. Remember: the Sankey is capped to the top 30 source/target nodes by magnitude; if your L2 has 100+ accounts × any-template, the "Other" bucket absorbs the tail.
+The table shows rows but the Sankey appears thin or empty. This can happen when `leg_count` is low (few legs per transfer, so the Sankey's proportional widths collapse) or when metadata cascade filters are in effect. Widening the **Metadata Key** / **Metadata Value** filters or picking **Template = All** can expand the visible flow. The Sankey is capped to the top 50 source/target nodes by magnitude; if your L2 has 100+ accounts × any-template, the "Other" bucket absorbs the tail.
 
 ### Mismatch between Sankey and Table filters
 

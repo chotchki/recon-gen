@@ -4,7 +4,7 @@
 
 ## What you're looking at
 
-A single table scrolls the entire posting ledger one leg per row. No KPIs headline the sheet — the value is "show me the legs I ask for." At the top sit five filter dropdowns: Account, Transfer, Status, Origin, and Transfer Type. Pick any combination and the table narrows to rows matching ALL filters (AND logic). The table shows each leg's account, transfer membership, direction (Debit / Credit), amount in dollars, status (Pending / Posted / Failed), origin (internal or external routing), rail name, and posting timestamp. Sorting is by posting time descending, so the most recent activity reads at the top.
+A single table scrolls the entire posting ledger one leg per row. No KPIs headline the sheet — the value is "show me the legs I ask for." At the top sit six filter dropdowns: Account, Transfer, Transaction ID, Status, Origin and Transfer Type. Pick any combination and the table narrows to rows matching ALL filters (AND logic). The table shows each leg's account, transfer membership, direction (Debit / Credit), amount in dollars, status (Pending / Posted / Failed), origin (internal or external routing), rail name and posting timestamp. Sorting is by posting time descending, so the most recent activity reads at the top.
 
 ## How to read the numbers
 
@@ -23,7 +23,7 @@ The SQL selects these columns from the matview:
 - `origin` — how the leg entered the system: InternalInitiated / ExternalForcePosted / ExternalAggregated
 - `posting` — the timestamp when the leg recorded
 
-Five dropdown filters push predicates into the SQL WHERE clause via dataset parameters. The `account_id` filter uses the `_account_display_clause()` pattern (showing accounts with stored daily balances only); the others use `_data_value_clause()` with the sentinel-OR guard so "all" defaults to PASS. A sixth universal date-range filter ([date start / date end](../_glossary.md#cross-cutting-concepts)) narrows by posting timestamp, with the upper bound expanded +1 day so same-day non-midnight rows on the end day are included.
+Six dropdown filters push predicates into the SQL WHERE clause via dataset parameters. The `account_id` filter uses the `_account_display_clause()` pattern (showing accounts with stored daily balances only); the Transaction ID search filters on the matview's `id` column; the rest use `_data_value_clause()` with the sentinel-OR guard so "all" defaults to PASS. A universal date-range filter ([date start / date end](../_glossary.md#cross-cutting-concepts)) narrows by posting timestamp, with the upper bound expanded +1 day so same-day non-midnight rows on the end day are included.
 
 ## Common patterns
 
@@ -49,13 +49,14 @@ A blank Transactions sheet means no Money records match your filter criteria. Th
 
 - **Filter too narrow.** You picked a transfer ID that doesn't exist in the date window, or an account with no postings in the range. Widen the date picker or clear the Account / Transfer dropdowns to "All".
 - **Date window misses the activity.** Transactions only shows postings within the universal date-range filter. A leg posted on 2026-05-01 won't appear if the picker is set to 2026-06-01 through 2026-06-07. Widen the range.
-- **Matview is stale.** Cross to *App Info* and check the `<prefix>_current_transactions` row's `last_refresh_at`. If it predates the most recent ETL load, the matview hasn't refreshed since postings arrived. Ad-hoc dashboard hits don't trigger a refresh — the institution's ETL pipeline does on its schedule.
+- **Matview is stale.** Cross to *App Info* and check the `<prefix>_current_transactions` row's `latest_date`. If it lags the base tables' most recent `latest_date`, the matview hasn't refreshed since postings arrived. Ad-hoc dashboard hits don't trigger a refresh — the institution's ETL pipeline does on its schedule.
 
-If *App Info* shows `last_refresh_at` as null or the matview row count as zero across the board, the L1 transaction pipeline didn't run — that's an ops alert, not a "no data" state.
+If *App Info* shows that `latest_date` as null or the matview row count as zero across the board, the L1 transaction pipeline didn't run — that's an ops alert, not a "no data" state.
 
 ## Cross-sheet drills
 
-- **Posting Ledger table row, `transfer_id` column → Transactions** (right-click → *View Transactions for this transfer*). Narrows this Transactions sheet to only legs of that transfer so you can inspect the full multi-leg structure. Available from Pending Aging, Unbundled Aging, and Daily Statement's detail table.
+- **Posting Ledger row, `account_id` column → Daily Statement** (right-click → *View Daily Statement for this account-day*). Lands on the per-account-per-day narrative for the leg's business day so you can read the full balance walk around that posting.
+- **Inbound** — this sheet is the target of *View Transactions for this transfer* drills defined on Pending Aging, Unbundled Aging, Supersession Audit and Daily Statement's detail table (right-click a `transfer_id` cell there). Each narrows this sheet to only the legs of that transfer so you can inspect the full multi-leg structure.
 
 ## Related handbook pages
 
@@ -71,4 +72,4 @@ If *App Info* shows `last_refresh_at` as null or the matview row count as zero a
 
 ---
 
-*First time here? See the [Vocabulary](../_glossary.md) for `L1`, `matview`, `rail`, `account_role`, and the other project-specific terms.*
+*First time here? See the [Vocabulary](../_glossary.md) for `L1`, `matview`, `rail`, `account_role` and the other project-specific terms.*

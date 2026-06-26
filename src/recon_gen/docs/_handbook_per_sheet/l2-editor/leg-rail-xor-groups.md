@@ -32,7 +32,7 @@ the same group-member every time.
   required rail.
 - Every member must already be in the template's `leg_rails`.
 - Every member must be a `SingleLegRail` with
-  `direction="variable"`. Fixed-direction rails are unconditional;
+  `leg_direction="Variable"`. Fixed-direction rails are unconditional;
   the XOR construct doesn't apply.
 - No rail may appear in two groups. The form disables already-claimed
   rails in the other group rows to surface this before submit.

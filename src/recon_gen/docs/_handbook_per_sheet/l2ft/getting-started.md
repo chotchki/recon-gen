@@ -1,16 +1,16 @@
 # L2 Flow Tracing
 
-> **What this sheet teaches.** An introduction to the L2 ([Flow Tracing](../_glossary.md#l2-flow-tracing--per-chain-transfer-integrity)) dashboard and its five explorer tabs. Use this page to orient yourself before drilling into Rails, Chains, Transfer Templates, or L2 Exceptions.
+> **What this sheet teaches.** An introduction to the L2 ([Flow Tracing](../_glossary.md#l2-flow-tracing--per-chain-transfer-integrity)) dashboard and its five explorer tabs. Use this page to orient yourself before drilling into Rails, Chains, Transfer Templates or L2 Exceptions.
 
 ## What you're looking at
 
-You're on the Getting Started tab — the dashboard's entry point. Above you'll see tabs for the four sheets where the real work happens: *Rails* (transactions explorer), *Chains* (parent-child firing relationships), *Transfer Templates* (multi-leg flow), *L2 Exceptions* (hygiene violations), and *Info* (diagnostic health). Below, two text blocks orient you: the first explains what L2 Flow Tracing measures; the second describes the specific L2 instance your dashboard is connected to.
+You're on the Getting Started tab — the dashboard's entry point. Above you'll see tabs for the four work sheets — *Rails* (transactions explorer), *Chains* (parent-child firing relationships), *Transfer Templates* (multi-leg flow), *L2 Exceptions* (hygiene violations) — plus *Info* (diagnostic health). Below, two text blocks orient you: the first explains what L2 Flow Tracing measures; the second describes the specific L2 instance your dashboard is connected to.
 
 ## How to read the numbers
 
 This sheet carries no tables or KPIs — it's a welcome page. The L1 dashboard answers "are my postings internally consistent?" One step up: L2 Flow Tracing answers "is my L2 declaration alive?" — every Rail, every Chain, every TransferTemplate, every LimitSchedule the L2 instance declares should produce activity in the runtime data. When it doesn't, that's an L2 hygiene problem, not an L1 ledger problem.
 
-The L2 Instance block below shows a description you'll see different text here depending on which L2 instance this dashboard is connected to — it describes the specific transfer shapes and business rules your institution declared.
+The L2 Instance block below shows different text depending on which L2 instance this dashboard is connected to — it describes the specific transfer shapes and business rules your institution declared.
 
 ## Common patterns
 
@@ -22,7 +22,7 @@ N/A — this page always renders the same welcome content.
 
 ## Cross-sheet drills
 
-- **Tab navigation** (click any tab). Jump directly to *Rails*, *Chains*, *Transfer Templates*, *L2 Exceptions*, or *Info*.
+- **Tab navigation** (click any tab). Jump directly to *Rails*, *Chains*, *Transfer Templates*, *L2 Exceptions* or *Info*.
 
 ## Related handbook pages
 

@@ -48,7 +48,7 @@ The option universe is "every metadata key declared on every leg
 rail of this template", which the form would have to derive
 dynamically. The textarea sidesteps the derivation — the operator
 types the key names, validator R12 catches mismatches at save
-time with a clear error pointing at the broken leg rail.
+time with an error pointing at the broken leg rail.
 
 ## Related handbook pages
 

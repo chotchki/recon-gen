@@ -1,7 +1,7 @@
 # Bundles activity
 
 > **What this field controls.** Which rails or templates this
-> *aggregating* rail bundles into its periodic sweep.
+> AGGREGATING rail bundles into its periodic sweep.
 
 ## What you're looking at
 
@@ -15,7 +15,7 @@ attribution but doesn't change correctness.
 
 Bundles-activity only renders when the rail's `aggregating` flag is
 `true`. An aggregating rail fires on a cadence (intraday-2h, daily-eod,
-weekly-monday, etc.) and represents a sweep that nets activity from
+weekly-mon, etc.) and represents a sweep that nets activity from
 the bundled-children rails into a single transfer.
 
 The canonical example is an ACH origination sweep: many individual
@@ -41,7 +41,7 @@ check-type branch.
 - The L2 layer doesn't enforce a maximum count; in practice an
   aggregating rail bundles 1–3 children.
 - Empty `bundles_activity` on an aggregating rail is rejected by
-  validator V3b — the rail has nothing to sweep.
+  validator S5 — the rail has nothing to sweep.
 
 ## Related handbook pages
 

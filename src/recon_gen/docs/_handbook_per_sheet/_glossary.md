@@ -7,7 +7,7 @@ once so every other page can lean on the names without re-explaining.
 ## The four dashboards
 
 Recon Generator ships four dashboards on top of one shared data model.
-Each one answers a different *class* of integrity question.
+Each one answers a different CLASS of integrity question.
 
 ### L1 Dashboard — account-integrity invariants
 
@@ -44,7 +44,7 @@ internal and external systems. It answers questions like:
 - Are XOR groups (mutually-exclusive leg sets) satisfied?
 - Did the aggregator rail pick this leg up into a bundle on time?
 
-L2 violations are about *paths*, not *positions*. An L1-clean ledger
+L2 violations are about PATHS, not POSITIONS. An L1-clean ledger
 can still have L2 violations — every account agrees with itself but
 the transfer chain dropped a leg somewhere.
 
@@ -53,7 +53,7 @@ the transfer chain dropped a leg somewhere.
 **"Who's moving money in patterns we want a closer look at?"**
 
 The investigation app answers compliance / anti-money-laundering
-questions about *behavior*, not integrity:
+questions about BEHAVIOR, not integrity:
 
 - **Recipient fanout** — which accounts send to unusually many
   distinct counterparties?
@@ -90,10 +90,10 @@ than the most recent ETL load, the matviews are stale.
 
 A single ledger position. Has an `account_id`, an `account_name`, an
 `account_role` (what kind of position — e.g. CustomerSubledger,
-CustomerLedger, MerchantDDA), and a `scope` of either `internal` (the
+CustomerLedger, MerchantDDA) and a `scope` of either `internal` (the
 institution's own books) or `external` (banks, payment networks, the
 fed). The L1 invariants apply to internal accounts only — external
-accounts are *expected* to behave however they behave; the institution
+accounts are EXPECTED to behave however they behave; the institution
 is responsible for keeping its own house in order.
 
 ### Account role
@@ -116,7 +116,7 @@ what someone else's ledger says.
 ### Parent / leaf accounts
 
 A parent account is a control account whose stored balance is
-*defined* as the sum of its children's stored balances. A leaf
+DEFINED as the sum of its children's stored balances. A leaf
 account has no children — its stored balance is just a number that
 gets emitted directly. L1 drift on a leaf account means "my postings
 disagree with my stored balance"; L1 drift on a parent means "my
@@ -128,7 +128,7 @@ tables for each.
 A single money-movement leg with an `account_id`, an `amount` (in
 integer cents — never floats), a `signed_amount` (+ in, − out), a
 `status` (Pending / Posted / Failed), a `posted_at` timestamp, a
-`balance_date` (the business day the leg counts against), and JSON
+`balance_date` (the business day the leg counts against) and JSON
 metadata that varies by rail.
 
 ### Transfer
@@ -143,7 +143,7 @@ A named family of transfers — ACH, wire, check, merchant card, on-us
 internal transfer. Each rail carries its own configuration: a
 `max_pending_age` cap (how long a Pending leg may sit before it's
 considered stuck), a `max_unbundled_age` cap (how long a Posted leg
-may wait for the aggregator), metadata-key requirements, and so on.
+may wait for the aggregator), metadata-key requirements and so on.
 
 ### Chain
 
