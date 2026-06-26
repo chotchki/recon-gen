@@ -275,3 +275,36 @@ Lessons (these govern the DT.3+ fan-out):
   pages KEEP that depth — do NOT cut there. Audience-layered: README lean + links;
   handbook deep + authoritative. What's noise in the README is the point in the
   handbook.
+
+---
+
+## 9. Fan-out directives (DT.3+, operator 2026-06-25)
+
+- **Run the staleness audit per file — extra verification.** Operator: "run the
+  extra verification passes on this too since we've found so much drifted old
+  stuff." The handbook is older + larger than the README (which had ~20 stale
+  claims), so expect MORE drift. Every fan-out file gets a doc-vs-reality pass:
+  check file paths, CLI flags / commands, counts, behavior, version claims
+  against the ACTUAL codebase (grep / read), FIX clear-cut stale facts inline,
+  FLAG the uncertain ones for operator review. Voice rewrite AND staleness audit.
+- **Cross-reference + link the two live demos.** `https://recon-gen-spec.hotchkiss.io/`
+  (spec_example, dashboards-only HTMX) and `https://recon-gen-sasquatch.hotchkiss.io/`
+  (Studio read-only). They render FROM the codebase, so they're ground truth for
+  "does the dashboard actually show this" AND a links-as-proof target: link them
+  where a reader would want to see-it-live, and treat them as screenshot
+  candidates for the handbook (binary screenshots of real UI are fine — that's
+  not the architecture-diagram rule). The codebase is the equivalent ground truth
+  (the demos are generated from it), so verify against the code; fetching the
+  demo is optional.
+- **Handbook INVERTS the README's DRY cut.** The README links TO the handbook, so
+  handbook pages KEEP the depth — voice-rewrite the prose, do NOT delete detail.
+  Cut only TRUE duplication BETWEEN handbook pages (link the canonical one).
+  Preserve every jinja / vocab / diagram macro token verbatim, persona-neutrality
+  (`test_docs_persona_neutral`), and all facts / links.
+- **Leave:** `SPEC.md` (chotchki-authored, a voice source) and the heavily
+  macro-generated files (`L1_Invariants.md`, `Schema_v6.md`, `scenario/*`,
+  `L2_Triage_Gaps.md`, `L2FT_Exceptions.md` — mostly generated tables; surgical
+  prose-only touches at most).
+- **Verify each batch:** `recon-gen docs test` (link sweep + persona-neutral) +
+  `recon-gen docs apply -o <tmp>` (build — catches broken macros) + `tests/docs/`.
+  Commit per batch on `feature/dt-doc-voice`; do NOT push main (operator reviews).
