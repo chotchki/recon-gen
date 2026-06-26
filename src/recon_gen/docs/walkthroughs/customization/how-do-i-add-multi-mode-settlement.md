@@ -18,11 +18,11 @@ variant fires per merchant per cycle.
 Today, you'd model this with three separate templates and a chain
 XOR row to alternate between them. That works but the model is
 noisy: three templates with the same closure semantic, three
-``expected_net`` declarations, three ``transfer_key`` declarations,
+``expected_net`` declarations, three ``transfer_key`` declarations
 and any "did this merchant settle today?" query has to UNION
 across all three matview branches.
 
-This is exactly the AB.3
+This is exactly the
 [XOR groups](../../concepts/l2/transfer-template.md#multi-mode-templates-ab3-one-closure-several-variants)
 feature. You declare ONE template with the variants as Variable-direction
 SingleLegRails inside its ``leg_rails``, and group the competing
@@ -94,7 +94,7 @@ rails:
 ```
 
 All three share ``leg_role``, ``leg_direction=Variable``,
-``origin``, and ``metadata_keys`` — they're the same closure leg,
+``origin`` and ``metadata_keys`` — they're the same closure leg,
 just with different cadence SLAs.
 
 **2. Add the variants to the template's `leg_rails` AND list the
@@ -152,29 +152,34 @@ both per merchant per cycle.
 
 ## How to verify
 
-Re-emit the L2-derived schema and seed against your demo DB:
+Re-emit the L2-derived schema, re-seed and refresh the matviews
+against your demo DB:
 
 ```bash
 recon-gen schema apply -c run/config.yaml --execute
 recon-gen data apply -c run/config.yaml --execute
+recon-gen data refresh -c run/config.yaml --execute
 ```
 
-The first command rewrites the `<prefix>_xor_group_violation`
-matview against the new XOR-grouped templates (the matview body
-inlines the group membership rows from your L2 yaml). The second
-command re-seeds the demo data — `auto_scenario.py` plants ONE
+`schema apply` rewrites the `<prefix>_xor_group_violation` matview
+against the new XOR-grouped templates (the matview body inlines the
+group membership rows from your L2 yaml). `data apply` re-seeds the
+demo data — `auto_scenario.py` plants ONE
 ``XorVariantMissedFiringPlant`` (a Transfer where the group has
 zero firings ⇒ ``firing_count=0``, ``fired_rails=''``) AND ONE
 ``XorVariantOverlapPlant`` (a Transfer where two variants fired ⇒
-``firing_count=2``, ``fired_rails='<a>,<b>'``).
+``firing_count=2``, ``fired_rails='<a>,<b>'``). `data refresh`
+re-runs the matviews so they see the new rows — matviews don't
+auto-refresh, so skip this and the dashboards stay empty.
 
-Open the L1 L1 Exceptions sheet. You should see:
+Open the L1 Exceptions sheet. You should see:
 
-- One row with `check_type='xor_group_violation'` and `magnitude=0`
-  (the missed-firing plant — the template fired but no group
-  variant did).
-- One row with `check_type='xor_group_violation'` and `magnitude=2`
-  (the overlap plant — two variants fired for the same cycle).
+- One row with `check_type='xor_group_violation'` and
+  `magnitude_count=0` (the missed-firing plant — the template fired
+  but no group variant did).
+- One row with `check_type='xor_group_violation'` and
+  `magnitude_count=2` (the overlap plant — two variants fired for
+  the same cycle).
 - The `rail_name` column on both rows shows the template name
   (e.g. `MerchantSettlementCycle`); the violation is per-template,
   not per-variant.
@@ -205,7 +210,7 @@ template cluster, labeled "XOR group 1 (exactly 1 fires)".
 - **Don't put a TwoLegRail in an XOR group.** Same C1b rejection.
   The mutual-exclusion contract is per-closure-leg, not per-leg-pair.
   If you need alternating two-leg flows, model them as separate
-  templates with a chain XOR (Z.A multi-children grammar).
+  templates with a chain XOR (the multi-children chain grammar).
 - **Don't make a 1-member group.** A 1-member group means "the
   rail always fires", which is what `leg_rails` already says.
   Validator C1d rejects singletons. If you genuinely have only one
@@ -230,5 +235,5 @@ template cluster, labeled "XOR group 1 (exactly 1 fires)".
   ``transfer_id`` / ``template_name`` / ``xor_group_index`` /
   ``firing_count`` / ``fired_rails`` / ``business_day``).
 - [How do I chain two templates?](how-do-i-chain-two-templates.md)
-  — the sibling AB.2 walkthrough for cascading multi-leg flows
-  (the OTHER closure-shape extension landed alongside AB.3).
+  — the sibling walkthrough for cascading multi-leg flows (the
+  OTHER closure-shape extension).

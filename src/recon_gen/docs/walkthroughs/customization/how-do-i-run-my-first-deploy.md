@@ -10,19 +10,20 @@ Your data is landing in `{{ l2_instance_name }}_transactions` +
 your `config.yaml` is in place
 ([How do I configure the deploy?](how-do-i-configure-the-deploy.md)),
 and you're ready to push the dashboards to QuickSight for the
-first time. This walkthrough is the actual deploy invocation —
-what runs, what to watch for, and how to roll back if something
-looks off.
+first time. This walkthrough is the deploy invocation itself —
+what runs, what to watch for and how to roll back if it looks off.
 
-The deploy is **idempotent and delete-then-create**: every run
-deletes existing resources by ID and creates fresh ones. There's
-no concept of "update" in this tool. Schema drift between an old
-deploy and the current generate output never causes weird
-half-updated states because nothing is updated — everything is
-re-created from scratch on every run. The trade-off is a deploy
-takes ~3-5 minutes (the asynchronous CREATE_ANALYSIS /
+The deploy is idempotent and DELETE-then-create: every run deletes
+existing resources by ID and creates fresh ones. There's no
+"update" path in this tool. Schema drift between an old deploy and
+the current generate output never lands you in a half-updated
+state, because nothing is updated — everything is re-created from
+scratch on every run. The trade-off is the wall time (a deploy
+takes ~3-5 minutes, since the asynchronous CREATE_ANALYSIS /
 CREATE_DASHBOARD calls poll to terminal state); the win is no
 state-divergence debugging, ever.
+
+See it live: https://recon-gen-spec.hotchkiss.io/
 
 ## The question
 
@@ -34,19 +35,19 @@ cleanly?"
 
 Three reference points:
 
-- **`recon-gen --help`** — the CLI surface. Four artifact
-  groups: `schema`, `data`, `json`, `docs`. Each has at minimum
-  `apply` / `clean` / `test`; everything destructive defaults to
-  emit (print SQL, write JSON to `out/`) and only runs against the
-  DB or AWS when you pass `--execute`. `json apply` always emits
-  all four apps' JSON — there's no per-app filter.
+- **`recon-gen --help`** — the CLI surface. Five artifact
+  groups: `schema`, `data`, `json`, `docs` and `audit`. Each has at
+  minimum `apply` / `clean` / `test`; everything destructive
+  defaults to emit (print SQL, write JSON to `out/`) and only
+  touches the DB or AWS when you pass `--execute`. `json apply`
+  always emits all four apps' JSON — there's no per-app filter.
 - **`src/recon_gen/common/deploy.py`** — the deploy
   implementation. Read `deploy()` to see the delete-then-create
   order.
 - **The QuickSight console** (`https://quicksight.aws.amazon.com`)
   — the visual target. After deploy, your analyses + dashboards
-  appear here under the configured `cfg.aws.deployment_name` (Z.C —
-  required cfg field, no default).
+  appear here under the configured `cfg.aws.deployment_name`
+  (required cfg field, no default).
 
 ## What you'll see in the demo
 
@@ -57,7 +58,7 @@ recon-gen json apply -c config.yaml -o out/ --execute
 ```
 
 `json apply` always writes the JSON tree (theme + per-app
-analyses, dashboards, and datasets) into `out/`. The
+analyses, dashboards and datasets) into `out/`. The
 `--execute` flag adds the AWS deploy step on top — it never
 gates the local JSON emit. Drop `--execute` to write JSON to
 `out/` only without touching AWS (useful for inspecting the
@@ -118,8 +119,8 @@ Done. All resources deployed to 111122223333 in us-east-2.
 ```
 
 Total wall time on a fresh account: 3-5 minutes. Most of it is
-the analysis + dashboard polls (the ~27 datasets are synchronous
-and complete in seconds).
+the analysis + dashboard polls (the datasets are synchronous and
+complete in seconds).
 
 ## What it means
 
@@ -145,7 +146,8 @@ they tear down what the first one created.
 1. **Datasource** (demo only) — created from
    `out/datasource.json`.
 2. **Theme** — created from `out/theme.json`.
-3. **Datasets** — created from `out/datasets/*.json` (32+ files).
+3. **Datasets** — created from `out/datasets/*.json` (one file
+   per dataset).
 4. **Analyses** — created from `out/<app>-analysis.json`.
 5. **Dashboards** — created from `out/<app>-dashboard.json`.
 
@@ -176,20 +178,19 @@ recon-gen json clean -c config.yaml
 ```
 
 This enumerates every QuickSight resource tagged
-`ManagedBy:recon-gen` in the account and prints what
-*would* be deleted on a `json clean --execute`. The deploy itself
-also deletes-then-creates the resources it manages, but
-`json clean` finds *orphans* — resources from a previous deploy
-that the current generate output no longer produces (a
-dataset you removed, an analysis you renamed). Run it before
-the real deploy to spot any unexpected state.
+`ManagedBy:recon-gen` in the account and prints what WOULD be
+deleted on a `json clean --execute`. The deploy itself also
+deletes-then-creates the resources it manages, but `json clean`
+finds ORPHANS — resources from a previous deploy that the current
+generate output no longer produces (a dataset you removed, an
+analysis you renamed). Run it before the real deploy to spot any
+unexpected state.
 
-If the dry-run lists things you don't recognize, *do not*
-proceed with `json clean --execute` until you've investigated. The
-`ManagedBy:recon-gen` tag scope is intentional — the
-tool will never touch resources without that tag — but a
-co-worker running a different prefix could have left
-unrelated state.
+If the dry-run lists things you don't recognize, DO NOT proceed
+with `json clean --execute` until you've investigated. The
+`ManagedBy:recon-gen` tag scope is intentional — the tool never
+touches resources without that tag — but a co-worker running a
+different prefix could have left unrelated state.
 
 ### Iteration loop: `json apply --execute`
 
@@ -202,8 +203,8 @@ recon-gen json apply -c config.yaml -o out/ --execute
 ```
 
 `json apply --execute` rewrites JSON to `out/` and deploys it in
-one command. About 3-5 minutes per cycle — the new CLI always
-emits and deploys all four apps as a bundle.
+one command. About 3-5 minutes per cycle — it always emits and
+deploys all four apps as a bundle.
 
 ### Cleanup after dropping a dataset
 
@@ -218,7 +219,7 @@ recon-gen json clean -c config.yaml
 ```
 
 This enumerates `ManagedBy:recon-gen` resources, compares
-against current `out/` contents, and prints anything that's
+against current `out/` contents and prints anything that's
 no longer in the build. The default is dry-run; pass `--execute`
 to actually delete.
 
@@ -235,10 +236,10 @@ No manual cleanup typically required.
 
 If a deploy keeps failing on the same resource, read the poll
 output for the `Errors` field on the failing resource —
-QuickSight surfaces dataset-projection errors,
-column-type-mismatch errors, and missing-field errors here
-verbatim. The most common production failure is a custom
-dataset SQL whose column shape drifted from the contract; the
+QuickSight surfaces them here verbatim: dataset-projection
+errors, column-type-mismatch errors, missing-field errors. The
+most common production failure is a custom dataset SQL whose
+column shape drifted from the contract; the
 contract test
 ([How do I swap dataset SQL?](how-do-i-swap-dataset-sql.md))
 catches this before deploy, but only if you ran it.
@@ -257,8 +258,9 @@ Once your first deploy completes with all
    the dataset directly to see the SQL and run it manually
    against your warehouse.
 2. **Hand the dashboard URL to a small group of users first.**
-   The principals you listed in `config.yaml` get edit + view
-   access. Your treasury / GL recon team is the natural first
+   The principals you listed under `aws.principal_arns` in
+   `config.yaml` get edit + view access. Your treasury / GL recon
+   team is the natural first
    audience for the L1 dashboard; your compliance team for
    Investigation; your CFO for Executives.
 3. **Wire deploy into CI.** Once the deploy is reliable

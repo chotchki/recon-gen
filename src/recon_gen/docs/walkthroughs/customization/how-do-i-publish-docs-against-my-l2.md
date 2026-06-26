@@ -1,8 +1,8 @@
 # How do I publish docs against my L2?
 
-The unified docs site renders against any L2 institution YAML. Pick
-yours; the same source produces a different rendered handbook (vocab,
-diagrams, intro prose) without touching any markdown.
+The unified docs site renders against any L2 institution YAML. Point
+it at yours and the SAME source produces a different rendered handbook
+(vocab, diagrams, intro prose) with zero markdown edits.
 
 ## Render against your L2
 
@@ -15,7 +15,7 @@ recon-gen docs serve --l2 run/my-l2.yaml
 ```
 
 The rendered `site/` directory is a static site you can publish to
-GitHub Pages, S3, or any static host that runs HTTP.
+GitHub Pages, S3 or any static host that runs HTTP.
 
 ## Ship a portable site (open via `file://`)
 
@@ -72,7 +72,7 @@ Three substitution surfaces:
 
 - **Conceptual diagrams** (`docs/_diagrams/conceptual/*.dot`) are
   hand-authored teaching aids. They don't change per L2.
-- **Reference material** describing the L1 invariants, the SPEC, and
+- **Reference material** describing the L1 invariants, the SPEC and
   the Schema v6 contract are persona-blind and identical across
   renders.
 - **Walkthroughs** describing per-sheet operator flows are written
@@ -85,14 +85,14 @@ Three substitution surfaces:
 ## Adding your institution's flavor
 
 If your institution wants richer flavor than the neutral fallback,
-the primary path is the optional **`persona:` block** on your L2
+the primary path is the optional `persona:` block on your L2
 YAML — institution name + acronym, upstream stakeholders, GL
 account labels, merchant names, free-form flavor literals. The
 handbook templates substitute via `vocab` Jinja references at render time.
 
 See [How do I brand my handbook prose?](how-do-i-brand-my-handbook-prose.md)
 for the full block shape, the field-by-field map to handbook
-surfaces, and the neutral fall-through behavior when fields are
+surfaces and the neutral fall-through behavior when fields are
 omitted.
 
 The Investigation walkthroughs' worked-example admonitions (the

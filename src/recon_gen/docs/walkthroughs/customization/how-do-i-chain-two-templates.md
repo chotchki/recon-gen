@@ -14,7 +14,7 @@ hygiene check that catches the case where the fee accrual fires but
 the downstream transfer never does, or worse, fires against the wrong
 parent (stale reference, cross-cycle contamination, race condition).
 
-This is exactly the AB.2
+This is exactly the
 [template-as-chain-child](../../concepts/l2/chain.md#template-as-chain-child-ab2)
 feature. You declare a chain where:
 
@@ -23,12 +23,14 @@ feature. You declare a chain where:
   child encodes "required" semantics — every parent firing MUST
   invoke this template)
 
-The L2 grammar handles the rest: the validator auto-derives the
-`parent_transfer_id` posted-metadata requirement on every leg_rail of
-the child template, the seed emits chain firings where all leg_rails
-share one Transfer with one shared parent_transfer_id, and the L1
-`chain_parent_disagreement` matview catches any leg that claims a
-different parent.
+The L2 grammar handles the rest:
+
+- the validator auto-derives the `parent_transfer_id` posted-metadata
+  requirement on every leg_rail of the child template
+- the seed emits chain firings where all leg_rails share one Transfer
+  with one shared `parent_transfer_id`
+- the L1 `chain_parent_disagreement` matview catches any leg that
+  claims a different parent
 
 ## The question
 
@@ -71,8 +73,8 @@ chains:
       of the child template (InternalTransferDebit / Credit /
       SuspenseClose) share one child Transfer and one
       `parent_transfer_id` (first-firing-wins). ETL bugs that
-      disagree on which parent the legs belong to surface on Today's
-      Exceptions under `check_type='chain_parent_disagreement'`.
+      disagree on which parent the legs belong to surface on the L1
+      Exceptions sheet under `check_type='chain_parent_disagreement'`.
 ```
 
 The validator will:
@@ -100,15 +102,17 @@ templates exist). The second one re-seeds the demo data —
 violation) AND a `ChainParentDisagreementPlant` (synthetic ETL bug
 with conflicting parent_transfer_ids).
 
-Open the L1 L1 Exceptions sheet. You should see:
+Open the L1 Exceptions sheet. You should see:
 
 - One row with `check_type='chain_parent_disagreement'` and a
   `rail_name` column showing `InternalTransferCycle` (the template
   name surfaces in the rail_name slot for this row category).
-- The `magnitude` column reads `2` (= cardinality of the conflicting
-  parent_transfer_id set).
+- The `magnitude_count` column reads `2` (= cardinality of the
+  conflicting parent_transfer_id set).
 - Drilling from the row leads you to the Transactions sheet
   filtered to the conflicting Transfer's id.
+
+See it live: https://recon-gen-spec.hotchkiss.io/
 
 ## What you should NOT do
 
@@ -118,9 +122,8 @@ Open the L1 L1 Exceptions sheet. You should see:
   case (cardinality≥2, row surfaces).
 - **Don't declare `parent_transfer_id` in the child template's
   leg_rails' `metadata_keys`** — the validator auto-derives the
-  requirement from the chain relationship per AB.2.0 design lock.
-  Adding it to yaml is redundant and creates two sources of truth
-  for one fact.
+  requirement from the chain relationship, so declaring it by hand is
+  redundant and creates two sources of truth for one fact.
 - **Don't use a multi-children chain (`children: [a, b]`) when the
   semantic is "always fires"** — multi-children encodes XOR
   alternation (exactly one fires per parent). For "every parent must

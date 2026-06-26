@@ -20,8 +20,8 @@ to high-end retail), and you want the planted scenarios to size to
 the same band so plants look like ordinary firings (just at the
 boundary that triggers the SHOULD-constraint).
 
-This is the AB.5 [amount_typical_range](../../concepts/l2/rail.md#optional-typical-amount-range-ab5)
-feature. You declare a per-firing soft bound on the rail, and both
+This is the [amount_typical_range](../../concepts/l2/rail.md#optional-typical-amount-range-ab5)
+feature: you declare a per-firing soft bound on the rail and both
 the baseline emitter and the planted-scenario emitter respect it
 without any schema migration or matview rewrite.
 
@@ -35,9 +35,8 @@ between $5 and $500 instead of the heavy-tailed lognormal default?"
 Three reference points:
 
 - **[Rail (concept) → Optional: typical amount range](../../concepts/l2/rail.md#optional-typical-amount-range-ab5)**
-  — the field semantics: how the log-uniform sampler works, what
-  the cap interaction does, what the V1a-c validator rules
-  enforce.
+  — the field semantics: the log-uniform sampler, the cap
+  interaction and the V1a-c validator rules.
 - **`tests/l2/spec_example.yaml`** — the minimal fixture carries
   3 ranged rails (``ExternalRailInbound`` [50, 5000],
   ``ExternalRailOutbound`` [50, 10000], ``SubledgerCharge`` [1,
@@ -56,7 +55,6 @@ and add ``amount_typical_range: [min, max]``:
 rails:
   # existing rails...
   - name: MerchantCardSale
-    kind: TwoLegRail
     source_role: MerchantSettlement
     destination_role: MerchantDDA
     metadata_keys: [transfer_id, card_brand, terminal_id]
@@ -71,18 +69,21 @@ Two notes on shape:
 
 - ``min`` and ``max`` are dollar amounts (not cents). They accept
   the same shape the rest of the L2 grammar uses for Money —
-  strings (``"5.00"``), bare ints (``5``), or floats (``5.00``).
+  strings (``"5.00"``), bare ints (``5``) or floats (``5.00``).
 - ``min`` MUST be strictly less than ``max`` (V1a). Both MUST be
-  ``> 0`` (V1b). The field is **forbidden on rails with
-  ``aggregating: true``** (V1c) — aggregator amounts derive from
+  ``> 0`` (V1b). The field is FORBIDDEN on rails with
+  ``aggregating: true`` (V1c) — aggregator amounts derive from
   bundled children, so set the range on the child rails instead.
 
 ## How to verify
 
-Re-seed the demo:
+Re-seed the demo, then refresh the matviews (``data apply`` does NOT
+auto-refresh — the Limit Breach sheet reads a matview, so skip this
+and it shows the OLD amounts):
 
 ```bash
 recon-gen data apply -c run/config.yaml --execute
+recon-gen data refresh -c run/config.yaml --execute
 ```
 
 The seed regenerates the demo Transactions with the log-uniform
@@ -90,12 +91,21 @@ sampler honoring your declared range. Open the L1 dashboard and
 filter to ``rail_name = MerchantCardSale`` — every firing should
 land between $5 and $500, clustering at the low end.
 
-If your rail also carries a LimitSchedule cap, the cap-breach
-plant amount is now clamped to ``min(cap × 1.5, range.max × 3)``.
-So a $5000 cap on a rail with ``amount_typical_range: [5, 500]``
-breaches at ``min(7500, 1500) = $1500`` instead of $7500 — still
-exceeds the cap (the violation is preserved) but in a realistic
-ballpark relative to the rail's typical volume.
+See it live: https://recon-gen-spec.hotchkiss.io/ (the spec_example
+fixture's ranged rails render there).
+
+If your rail also carries a LimitSchedule cap, the cap-breach plant
+amount is now ``max(min(cap × 1.5, range.max × 3), cap + 1)``. The
+realism clamp pulls the breach down toward ``range.max × 3``; the
+``cap + 1`` floor guarantees it still EXCEEDS the cap (without that
+floor a high cap on a small-range rail could clamp BELOW the cap and
+the violation would vanish — a real bug we hit).
+
+So a $5000 cap on a rail with ``amount_typical_range: [5, 500]``:
+``min(7500, 1500) = 1500`` falls below the cap, the floor wins, and
+the plant breaches at $5001 — just over the cap instead of an absurd
+$7500. When the range is wide enough that ``range.max × 3`` clears
+the cap, the clamp lands the breach realistically on its own.
 
 ## What you should NOT do
 

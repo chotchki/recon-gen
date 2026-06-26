@@ -6,18 +6,18 @@
 
 Your bank does a kind of money movement the demo doesn't model
 — say `RepoSettlement` for repurchase agreements,
-`MortgageServicingPassthrough` for mortgage passthrough, or
+`MortgageServicingPassthrough` for mortgage passthrough or
 `CorrespondentSettlement` for nostro/vostro flows. You want it on
 the dashboards: filterable, groupable, drill-able, the whole
 experience the existing rails get out of the box.
 
-Under the Z.B (2026-05-15) symmetric grammar collapse, the rail's
-**`name` IS the type identifier**. There is no separate
-`transfer_type` field anymore — to add a new movement type, you
-add a new Rail in your L2 instance YAML and reference it from the
-appropriate Templates / Chains / LimitSchedules. The
-`{{ l2_instance_name }}_transactions.rail_name` column is the
-single binding between a posted leg and its declaring Rail.
+The rail's `name` IS the type identifier — the symmetric grammar
+collapse dropped the separate `transfer_type` field. To add a new
+movement type you add a new Rail in your L2 instance YAML and
+reference it from the appropriate Templates / Chains /
+LimitSchedules. The `{{ l2_instance_name }}_transactions.rail_name`
+column is the single binding between a posted leg and its
+declaring Rail.
 
 ## The question
 
@@ -29,7 +29,7 @@ first-class value on the dashboards?"
 
 Three reference points:
 
-- **Your L2 instance YAML** — the `rails:`, `transfer_templates:`,
+- **Your L2 instance YAML** — the `rails:`, `transfer_templates:`
   and `chains:` blocks declare every movement type your
   institution participates in. The L2 Flow Tracing dashboard
   renders these declarations directly, and
@@ -65,7 +65,7 @@ the moment they appear in `{{ l2_instance_name }}_transactions`.
 The `account_type` column is unconstrained at the schema level:
 
 ```sql
-account_role VARCHAR(50) NOT NULL,
+account_role VARCHAR(100) NOT NULL,
 ```
 
 The canonical list (`gl_control`, `dda`, `merchant_dda`,
@@ -75,15 +75,17 @@ documented in
 but enforced only by convention. Adding a new account_type is
 zero-DDL.
 
+See it live: https://recon-gen-spec.hotchkiss.io/
+
 ## What it means
 
 The "extend" surface depends on which column you're touching:
 
 ### Adding a new Rail
 
-Every new movement type is a new Rail under Z.B. There's no
-"value-only" path — the Rail must exist in the L2 declaration so
-the L1 invariant views know what to do with its rows.
+Every new movement type is a new Rail — there's no value-only
+path. The Rail must exist in the L2 declaration so the L1
+invariant views know what to do with its rows.
 
 1. **Update your L2 instance YAML.** Add the new `Rail` (single-
    or two-leg). If it carries an outbound cap, add a
@@ -99,13 +101,13 @@ the L1 invariant views know what to do with its rows.
    feed produces the new movement type now writes
    `rail_name = 'RepoSettlement'` (or whatever you named it).
 4. **Run the L2 Flow Tracing dashboard.** It surfaces every
-   declared rail, transfer template, chain, and bundle activity.
+   declared rail, transfer template, chain and bundle activity.
    Your new rail should appear; if it doesn't, the L2 declaration
    has a hygiene issue (caught by the L2 Hygiene Exceptions sheet).
 
 ### Adding a new `account_type` value
 
-One step (no L2 change, no schema change):
+Two steps, no L2 or schema change:
 
 1. **Document the new value.** Update
    [Schema_v6.md → Canonical account_type values](../../Schema_v6.md#table-1-prefix_transactions)
@@ -132,12 +134,12 @@ required after the ETL writes the new value.
 ### Why no new tables
 
 The four shipped apps share the same two prefixed base tables. A
-new rail is a new *value* in the existing
+new rail is a new VALUE in the existing
 `{{ l2_instance_name }}_transactions.rail_name` column — not a
-new table, not a new dataset, not a new sheet. This is the single
-load-bearing decision behind the schema: denormalization-by-default
-keeps the surface small enough that "add a movement type" is a
-value-write, not a schema migration.
+new table, dataset or sheet. This is the one decision the whole
+schema rests on: denormalization-by-default keeps the surface
+small enough that "add a movement type" is a value-write, not a
+schema migration.
 
 When you're tempted to add a per-rail table
 (`repo_transactions`, `mortgage_servicing_transactions`), push
@@ -154,7 +156,7 @@ The L1 invariant views (`{{ l2_instance_name }}_drift`,
 `{{ l2_instance_name }}_expected_eod_balance_breach`) read from
 `{{ l2_instance_name }}_transactions` and
 `{{ l2_instance_name }}_daily_balances` without filtering on
-`rail_name` for most account-level checks — they apply to *every*
+`rail_name` for most account-level checks — they apply to EVERY
 posted leg that lands in the affected account. So your new
 `rail_name = 'RepoSettlement'` rows will participate in every
 account-level check:
@@ -171,7 +173,7 @@ account-level check:
   fire on your new rail unless the L2 declares the relevant cap
   or aging field on it.
 
-The decision per check: does the *semantic intent* of the check
+The decision per check: does the SEMANTIC intent of the check
 apply to your new rail? If yes, ensure the L2 declares the
 relevant cap / aging window; if no, the bare-Rail declaration
 without those fields is enough.
@@ -199,10 +201,10 @@ Otherwise the validator rejects the L2 with an S3 error.
 Once your new rail is wired:
 
 1. **Run pytest.** The contract tests
-   (`tests/test_dataset_contract.py`) don't enumerate rail
+   (`tests/json/test_dataset_contract.py`) don't enumerate rail
    names, so they'll pass without changes. But if you extended a
    rail-scoped exception check's WHERE clause via an L2 update,
-   the contract test for *that* dataset will catch any
+   the contract test for THAT dataset will catch any
    column-shape drift.
 2. **Seed a few demo rows for the new rail.** Add a generator
    branch in your L2 instance's auto-scenario module that emits

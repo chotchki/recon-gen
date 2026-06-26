@@ -6,26 +6,26 @@
 
 You've stood up the dashboards against your data. Marketing
 walks by, sees the demo's "Sasquatch National Bank" forest-green
-palette in production, and asks the obvious question: *can we
+palette in production and asks the obvious question: *can we
 get our actual brand colors on this?*
 
-The answer is yes, and it takes about ten minutes. The visual
-layer never references hex colors directly — every accent,
-foreground, background, and link tint resolves at generate time
-from the L2 institution YAML's inline ``theme:`` block. To
-rebrand, you add a ``theme:`` block to your L2 YAML, regenerate,
-deploy. The analysis name, KPI accent colors, table-cell tints,
-and conditional formatting all flip together.
+Yes, and it takes about ten minutes. The visual layer never
+references hex colors directly — every accent, foreground,
+background and link tint resolves at generate time from the L2
+institution YAML's inline ``theme:`` block. To rebrand you add a
+``theme:`` block to your L2 YAML, regenerate, deploy. The
+analysis name, KPI accent colors, table-cell tints and
+conditional formatting all flip together.
 
-The rebrand surface is deliberately small: one block on one
-YAML. The same constraint that keeps the visual layer
-rebrand-friendly (no hardcoded hex codes in app code) is what
-makes this walkthrough this short.
+The rebrand surface is SMALL by design: one block on one YAML.
+The same constraint that keeps the visual layer rebrand-friendly
+(no hardcoded hex in app code) is what keeps this walkthrough
+short.
 
 ## The question
 
 "My bank's brand book says navy blue and silver, our typography
-is Inter, and our analysis names need to read 'SNB Treasury' not
+is Inter and our analysis names need to read 'SNB Treasury' not
 'L1 Reconciliation'. Where do I drop those in?"
 
 ## Where to look
@@ -74,8 +74,8 @@ theme:
   # ... rest of the tokens (foreground variants, dimension/measure)
 ```
 
-Every token has a job. The three load-bearing ones (the ones
-that change the most when you swap in your brand):
+Every token has a job. The three that change the most when you
+swap in your colors:
 
 - **`accent`** — the dashboard's primary brand color. Drives
   KPI value text, clickable cell text, accent-colored bar fills,
@@ -93,8 +93,10 @@ that change the most when you swap in your brand):
 
 The rest (data palette, gradient, semantic colors, dimension /
 measure colors) are bulk fills — they affect chart series order
-and KPI tile chrome, but the brand-recognition load lives on the
-three above.
+and KPI tile chrome, but brand recognition rides on the three
+above.
+
+See it live: https://recon-gen-spec.hotchkiss.io/
 
 ## What it means
 
@@ -107,7 +109,6 @@ Pattern, using a hypothetical ACME Treasury palette:
 
 ```yaml
 # acme_treasury.yaml — your institution YAML
-instance: acme_treasury
 description: |
   ACME Treasury — internal cash concentration + customer DDA reconciliation.
 
@@ -157,7 +158,7 @@ brand colors don't matter yet.
 
 ```bash
 recon-gen json apply --l2 acme_treasury.yaml -c config.yaml -o out/
-recon-gen json apply -c config.yaml -o out/ --execute
+recon-gen json apply --l2 acme_treasury.yaml -c config.yaml -o out/ --execute
 ```
 
 The deploy delete-then-creates the theme + analyses + dashboards
@@ -198,12 +199,12 @@ A few tokens to know about beyond the obvious accent:
 Once your theme block is declared and the deploy reflects your
 brand:
 
-1. **Spot-check the three load-bearing surfaces.** Open the L1
-   L1 Exceptions sheet and check: KPI text colors
-   (`accent`), table cells with right-click drills (`link_tint`
-   background), and the aging bar chart (gradient + data_colors
-   series order). These are the three places where a wrong
-   token surfaces most visibly.
+1. **Spot-check the three brand-defining surfaces.** Open the L1
+   Exceptions sheet and check: KPI text colors (`accent`), table
+   cells with right-click drills (`link_tint` background) and the
+   aging bar chart (gradient + data_colors series order). These
+   are the three places where a wrong token surfaces most
+   visibly.
 2. **Confirm the analysis name.** With
    ``analysis_name_prefix: null``, the analysis in QuickSight
    reads its app's display name (no prefix). Demo themes
@@ -217,7 +218,7 @@ brand:
 ## The docs site follows the same theme block
 
 The docs site (the mkdocs handbook published from `docs export` /
-`docs apply`) reads the **same** `theme:` block — both the colors
+`docs apply`) reads the SAME `theme:` block — both the colors
 above and an optional pair of brand-asset fields.
 
 **Colors.** The handbook chrome — header bar, the hero block on
@@ -242,7 +243,7 @@ theme:
 
 Both accept either:
 
-- **A URL** (`http://`, `https://`, or protocol-relative `//`) —
+- **A URL** (`http://`, `https://` or protocol-relative `//`) —
   passed through verbatim to mkdocs `theme.logo` /
   `theme.favicon`.
 - **An absolute file path** (must start with `/`) — copied into

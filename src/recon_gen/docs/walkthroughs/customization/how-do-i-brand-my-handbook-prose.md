@@ -6,40 +6,39 @@
 
 You've pointed the rendered mkdocs site at your own L2 instance
 (see [How do I publish docs against my L2?](how-do-i-publish-docs-against-my-l2.md))
-and the handbook now reads against your accounts, your rails,
-your chains. But the prose still says "Your Institution" where
-the bundled `sasquatch_pr` fixture would say "Sasquatch National
-Bank — SNB". The neutral fallback works, but the result is
-colorless.
+and the handbook now reads against your accounts, your rails, your
+chains. The prose still says "Your Institution" everywhere, though —
+where the bundled `sasquatch_pr` fixture would say "Sasquatch National
+Bank — SNB". The neutral fallback renders fine, it just reads colorless.
 
-The fix is three top-level fields on the L2 YAML:
-`institution_name`, `institution_acronym`, and `description`. The
-handbook templates substitute them at render time via Jinja
-`vocab.institution.name` / `vocab.institution.acronym` references
-across ~20 pages — no code changes, no docs site fork.
+The fix is three top-level fields on the L2 YAML — `institution_name`,
+`institution_acronym` and `description`. The handbook templates
+substitute them at render time via Jinja `vocab.institution.name` /
+`vocab.institution.acronym` references across ~20 pages. No code
+changes, no docs-site fork.
 
-For curated Investigation-walkthrough narrative (anchor account
-names, shell-DDA layering chain, anomaly-pair sender display
-names), declare an `investigation_personas:` block carrying
-typed `{name, account_id, role}` entries. The roles the
-walkthrough templates gate on: `convergence_anchor`,
-`counterparty_bank`, `operations_account`, `shell_entity`.
+For curated Investigation-walkthrough narrative (anchor account names,
+shell-DDA layering chain, anomaly-pair sender display names), declare
+an `investigation_personas:` block carrying typed
+`{name, account_id, role}` entries. The roles the walkthrough templates
+gate on: `convergence_anchor`, `counterparty_bank`, `operations_account`
+and `shell_entity`.
 
-## What changed in BXa.1
+## Migrating from the old `persona:` block
 
-Pre-BXa.1, the L2 carried a `persona:` block with `institution`
-(name+acronym tuple), `stakeholders`, `merchants`, `gl_accounts`,
-and `flavor` fields — plus a hardcoded production-code intercept
+The old L2 carried a `persona:` block — `institution` (name+acronym
+tuple) plus `stakeholders`, `merchants`, `gl_accounts` and `flavor`
+fields — and a hardcoded production-code intercept
 (`_sasquatch_pr_vocabulary`) that bypassed the operator-supplied
 `stakeholders` + `merchants` values for the bundled fixture. The
-intercept then populated `HandbookVocabulary` fields that were
-**never substituted in any docs page** (`{{ vocab.stakeholders }}`
-etc. existed as variables but no template used them).
+intercept then populated `HandbookVocabulary` fields that NO docs page
+ever substituted (`{{ vocab.stakeholders }}` etc. existed as variables,
+no template touched them).
 
-BXa.1 nuked the doubly-dead surface and promoted the load-bearing
-fields to top-level:
+We dropped that doubly-dead surface and promoted the fields that
+actually get substituted to top-level:
 
-| Pre-BXa.1 (deleted) | Post-BXa.1 |
+| Old `persona:` block (removed) | Now |
 |---|---|
 | `persona.institution[0]` | `institution_name` (top-level) |
 | `persona.institution[1]` | `institution_acronym` (top-level) |
@@ -49,20 +48,26 @@ fields to top-level:
 | `persona.flavor` | gone — `flavor[1]`/`[2]` populated optional handbook `region` + `legacy_entity` which were never substituted |
 | (hardcoded `investigation_personas` table) | `investigation_personas:` top-level field on L2 |
 
-Net: smaller editor surface, no L3-leaking-into-L2 (`common/handbook/`
-no longer carries Sasquatch-specific strings), same operator-visible
-rendered output for institutions that fill in their `institution_name`.
+Net: a smaller editor surface, no L3 leaking into L2 (`common/handbook/`
+no longer carries Sasquatch-specific strings) and the same
+operator-visible rendered output for institutions that fill in their
+`institution_name`.
 
 ## Want to substitute new per-institution strings in your custom prose?
 
-Add a top-level field to `L2Instance` (`primitives.py`), wire the
-loader / serializer, extend `HandbookVocabulary` (`vocabulary.py`)
-to surface it, then `{{ vocab.your_field }}` in your fork of the
-markdown templates. The "drop-in-via-YAML" pre-BXa.1 path is gone;
-new substitution variables require a small PR. The audit
-`docs/audits/_archive/bx_persona_audit.md` explains why — substitution
-variables that no template actually used were silently misleading
-operators into filling out forms whose values went nowhere.
+The drop-in-via-YAML path the old `persona:` block offered is gone — a
+new substitution variable now takes a small PR. Four steps:
+
+1. Add a top-level field to `L2Instance` (`primitives.py`).
+2. Wire the loader / serializer.
+3. Extend `HandbookVocabulary` (`vocabulary.py`) to surface it.
+4. Reference `{{ vocab.your_field }}` in your fork of the markdown
+   templates.
+
+The PR gate's reasoning lives in the archived audit
+(`docs/audits/_archive/bx_persona_audit.md`):
+substitution variables that no template actually used were silently
+misleading operators into filling out forms whose values went nowhere.
 
 ## Worked example — minimal flavored L2
 
@@ -86,25 +91,23 @@ investigation_personas:
 # ... accounts / rails / templates / chains / limit_schedules below ...
 ```
 
-That's the full flavor surface. Handbook pages now read "Acme
-Federal Bank" / "AFB" in every substitution callsite; Investigation
+That's the full flavor surface. Handbook pages now read "Acme Federal
+Bank" / "AFB" at every substitution callsite; Investigation
 walkthroughs render the curated shell-chain narrative when
 `vocab.demo.investigation.layering_chain` is non-empty.
 
 ## Acceptance test
 
-`docs/handbook/index.md` opens with:
+The docs landing page (`index.md`) renders its intro against your L2:
 
-> Welcome to **{{ vocab.institution.name }}** (`{{ l2_instance_name }}`)…
+> …rendered against **{{ vocab.institution.name }}** (`{{ l2_instance_name }}`)…
 
-Build the docs against your L2 (`QS_DOCS_L2_INSTANCE=path/to/my.yaml
-recon-gen docs ...`). The rendered index reads **"Acme Federal
-Bank"** instead of **"Your Institution"**. The bank's acronym shows
-up in role-specific landing pages (`for-your-role/operator.md`
-opens with "*Audience — reconciliation operator at Acme Federal
-Bank*").
+Build against your L2 (`recon-gen docs apply --l2 path/to/my.yaml`). The
+rendered intro reads "Acme Federal Bank" instead of "Your Institution".
+The acronym shows up on role-specific landing pages —
+`for-your-role/operator.md` opens with "*Audience — reconciliation
+operator at Acme Federal Bank*".
 
 If `vocab.institution.name` still reads "Your Institution",
-double-check that you set `institution_name:` at the top level of
-the YAML (not nested under any block — BXa.1 dropped the
-nesting).
+double-check that you set `institution_name:` at the TOP level of the
+YAML — not nested under any block (the old `persona:` nesting is gone).

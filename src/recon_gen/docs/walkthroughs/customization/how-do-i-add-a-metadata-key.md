@@ -9,19 +9,19 @@ Your ETL team added a new attribute to
 sales, or `risk_score` on external transfers. The key is landing
 in the JSON; you can see it in the database. Now you need to
 surface it on the dashboards: as a column in a table, a filter in
-a sheet control, a grouping dimension in a pivot, or a category
+a sheet control, a grouping dimension in a pivot or a category
 axis on a bar chart.
 
 The dashboard side of the metadata-key contract is shorter than
-the ETL side and uses no schema migration: `JSON_VALUE(metadata,
+the ETL side and needs NO schema migration: `JSON_VALUE(metadata,
 '$.your_key')` in a dataset SQL, an entry in the matching
-`DatasetContract`, and the visual reference picks it up. Because
+`DatasetContract` and the visual reference picks it up. Because
 every dataset is direct-query (not SPICE), a new column appears
 the moment your next deploy completes — no refresh step.
 
 This walkthrough covers the dashboard-side read pattern and the
-load-bearing decision: when to surface a metadata key as a
-column vs a filter vs a grouping dimension. The ETL-side write
+decision that actually drives the UX: when to surface a metadata
+key as a column vs a filter vs a grouping dimension. The ETL-side write
 pattern (what your ETL team does to get the key into `metadata`
 in the first place) is in the
 [Data Integration Handbook](../etl/how-do-i-add-a-metadata-key.md).
@@ -45,7 +45,7 @@ Three reference points:
   for the one you're adding. Grep for `JSON_VALUE(metadata` to
   see them.
 - **[Schema_v6.md → metadata text column contract](../../Schema_v6.md#metadata-json-columns)** —
-  the cataloged keys, their per-`rail_name` placement, and
+  the cataloged keys, their per-`rail_name` placement and
   the forbidden-syntax list (`->>`, `->`, `@>`, `?` are all
   out — only `JSON_VALUE` / `JSON_QUERY` / `JSON_EXISTS`).
 
@@ -125,17 +125,17 @@ SALES_CONTRACT = DatasetContract(columns=[
 ])
 ```
 
-Run `tests/test_dataset_contract.py` — the contract test verifies
-your SQL projection emits exactly the contract columns in the
-declared order. Green = the column shape is consistent. See
+Run `tests/json/test_dataset_contract.py` — the contract test
+verifies your SQL projection emits exactly the contract columns in
+the declared order. Pass = the column shape is consistent. See
 [How do I swap dataset SQL?](how-do-i-swap-dataset-sql.md) for the
 contract / projection relationship in detail.
 
 ### Part 3 — Decide how the visual surfaces the new column
 
-This is the load-bearing UX decision. The metadata key is the
-data; the visual treatment is what end users actually
-experience. Three patterns from the existing dashboards:
+This is the decision end users actually feel — the key is just
+data until a visual treatment exposes it. Three patterns from the
+existing dashboards:
 
 - **As a table column.** Drag `originating_branch` into a Table
   visual's Field Wells → Group By. Shows up as a sortable,
@@ -174,11 +174,11 @@ becomes friction:
 
 The promotion path is a schema migration: add the column to
 `{{ l2_instance_name }}_transactions` (or `{{ l2_instance_name }}_daily_balances`), update
-the ETL projection to write the new column directly, and update
+the ETL projection to write the new column directly and update
 dataset SQL to reference the column instead of `JSON_VALUE`. The
 `DatasetContract` doesn't change — same column name, same type,
 just a different upstream source. Don't pre-promote: keep keys
-in metadata until the friction is real.
+in metadata until the friction is REAL.
 
 ### When to surface a metadata key as a filter vs a column
 
@@ -224,14 +224,14 @@ preference:
 Once the new column is reading and rendering:
 
 1. **Run the contract test.**
-   `.venv/bin/pytest tests/test_dataset_contract.py -k <dataset_name>`.
-   Green = projection and contract agree on the column shape.
-   Red = something drifted; usually a typo in the column alias
+   `.venv/bin/pytest tests/json/test_dataset_contract.py -k <dataset_name>`.
+   Pass = projection and contract agree on the column shape.
+   Fail = something drifted, usually a typo in the column alias
    (`originating_branch` vs `originating_brnach`).
 2. **Deploy and verify the visual.** `recon-gen json apply
    -c config.yaml -o out/ --execute`. Open the dashboard,
    confirm the new column / filter / dimension renders with
-   non-blank values.
+   non-blank values. See it live: https://recon-gen-spec.hotchkiss.io/
 3. **Decide whether to document.** If the key is bank-specific
    (your own `originating_branch` schema), document in your
    internal customization README; if it's a candidate for
@@ -250,5 +250,5 @@ Once the new column is reading and rendering:
   why that's not free and what the test catches.
 - [Schema_v6 → metadata text column contract](../../Schema_v6.md#metadata-json-columns) —
   the canonical per-`rail_name` metadata key inventory and
-  the forbidden-syntax list (no `->>`, no JSONB, no
-  Postgres-specific operators).
+  the forbidden-syntax list (`->>` / JSONB / Postgres-specific
+  operators all out).

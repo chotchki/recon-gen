@@ -4,10 +4,10 @@
 
 ## The story
 
-You've stood up the demo, clicked through the dashboards, and
+You've stood up the demo, clicked through the dashboards and
 decided you want this product against your own data. Now you're
-sitting in front of your bank's production database and asking
-the load-bearing question: **how much work is this, actually?**
+in front of your bank's production database asking how much work
+this ACTUALLY is.
 
 The honest answer: the visual layer (32+ datasets across four
 L2-fed apps, the L1 invariant surface, drill-downs, filters,
@@ -18,22 +18,22 @@ name). If you can land your data into those two shapes — once, by
 your morning cut — every dashboard works without further plumbing
 on the dashboard side.
 
-The work that *isn't* trivial is the upstream ETL projection
+The work that ISN'T trivial is the upstream ETL projection
 itself: deciding which of your source tables map to a leg in
 `{{ l2_instance_name }}_transactions`, getting the sign convention right on
 `amount_money`, populating `transfer_parent_id` for chained
 transfers, tagging force-posts. That work belongs to your data
 integration team and lives in the
 [Data Integration Handbook](../../handbook/etl.md). This
-walkthrough is the *strategic* read for the product owner: what
-your source system needs to expose, what shape the contract takes,
-and the signals that you have a workable fit.
+walkthrough is the STRATEGIC read for the product owner — what
+your source system needs to expose, what shape the contract takes
+and the signals you have a workable fit.
 
 ## The question
 
 "My bank has a core banking system, a card processor feed, a
-Fed statement file, and an in-house sweep engine. Can I get
-**this product** running on **that data**, and what do I need
+Fed statement file and an in-house sweep engine. Can I get
+THIS product running on THAT data, and what do I need
 to know before I commit?"
 
 ## Where to look
@@ -44,10 +44,10 @@ Two reference points before you write a line of mapping code:
   the 11 mandatory columns on `{{ l2_instance_name }}_transactions` + 6 on
   `{{ l2_instance_name }}_daily_balances`. Read these first. Anything beyond
   the minimum is conditional and can wait for v2.
-- **`common/l2/schema.py::emit_schema(l2_instance)`** — the
+- **`common/l2/schema.py::emit_schema(instance, prefix=..., dialect=...)`** — the
   source of truth for the prefixed DDL. Call it from Python to
   see the full rendered output for your L2 instance, including
-  base tables, Current* views, computed-balance helpers, and L1
+  base tables, Current* views, computed-balance helpers and L1
   invariant views (or apply directly via `recon-gen
   schema apply -c run/config.yaml --execute`).
 
@@ -61,7 +61,7 @@ Executive scorecard — reads from these same two tables.
 After the demo flow (`recon-gen schema apply --execute &&
 recon-gen data apply --execute && recon-gen data
 refresh --execute`), your demo database (Postgres or Oracle,
-dispatched off `dialect:`) holds:
+dispatched off `db.dialect`) holds:
 
 - **`{{ l2_instance_name }}_transactions`** — every money-movement leg, one
   row per leg. Multiple legs of one financial event share a
@@ -80,6 +80,8 @@ That's it. No `pr_sales`, no `pr_settlements`, no
 dimension tables. Every exception check, every drill-down, every
 aging bucket reads from `{{ l2_instance_name }}_transactions` and
 `{{ l2_instance_name }}_daily_balances`.
+
+See it live: https://recon-gen-spec.hotchkiss.io/
 
 ## What it means
 
@@ -105,7 +107,7 @@ Your card processor sends a daily settlement file. Each row is
 the processor's view of money landing in your account. These
 become `{{ l2_instance_name }}_transactions` rows with
 `rail_name = 'external_txn'`,
-`origin = 'ExternalForcePosted'`, and a populated
+`origin = 'ExternalForcePosted'` and a populated
 `external_system` (e.g., `BankSync`, `PaymentHub`).
 
 You don't need a separate table for these. The L1 drift split
@@ -117,7 +119,7 @@ Money Trail walks them via `transfer_parent_id`.
 
 Your CMS sweep engine emits one record per sweep operation —
 "move $X from sub-ledger A to concentration master B". That
-single record becomes **two** `{{ l2_instance_name }}_transactions` rows (a
+single record becomes TWO `{{ l2_instance_name }}_transactions` rows (a
 debit leg on A, a credit leg on B) sharing one `transfer_id`. The
 legs must net to zero. The L1 drift checks read this directly.
 
@@ -137,12 +139,12 @@ you commit:
   the opposite convention (some core systems use bank's-
   bookkeeping where debits are positive on asset accounts and
   negative on liability accounts), you flip the sign in the
-  ETL projection — *not* in a downstream view. Every dashboard
+  ETL projection — NOT in a downstream view. Every dashboard
   check assumes our sign convention; flipping at the projection
   boundary keeps that assumption honest everywhere downstream.
 - **Money is integer cents.** `amount_money`,
-  `daily_balances.money`, and `daily_balances.expected_eod_balance`
-  are BIGINT integer cents on every dialect (Phase AO.1) — the
+  `daily_balances.money` and `daily_balances.expected_eod_balance`
+  are BIGINT integer cents on every dialect — the
   customer ETL feed contract is dollars-in / cents-stored. Your
   ETL multiplies dollar amounts by 100 (or uses the
   `recon_gen.common.money.Cents` Python helper) at the projection
@@ -178,21 +180,21 @@ you commit:
 Once you've decided this product fits your data:
 
 1. **Stand up the schema.** Call
-   `emit_schema(l2_instance, dialect=...)` from `common.l2.schema` to
+   `emit_schema(instance, prefix=..., dialect=...)` from `common.l2.schema` to
    render the per-prefix DDL — base tables
    (`{{ l2_instance_name }}_transactions` / `{{ l2_instance_name }}_daily_balances`), Current*
-   views, computed-balance helpers, and L1 invariant matviews.
+   views, computed-balance helpers and L1 invariant matviews.
    Apply it to a dev Postgres or Oracle instance directly, or chain
    `recon-gen schema apply -c run/config.yaml --execute &&
    recon-gen data apply -c run/config.yaml --execute &&
    recon-gen data refresh -c run/config.yaml --execute` to
    land the schema + seed + matviews (dispatches off the
-   `dialect:` field on `config.yaml`).
+   `db.dialect` field on `config.yaml`).
 2. **Hand the projection task to your data integration team.**
    The
    [Data Integration Handbook](../../handbook/etl.md) is
    their entry point. Walk them through the
-   minimum-viable-feed columns, the sign convention, and the
+   minimum-viable-feed columns, the sign convention and the
    pre-flight invariants. Their first deliverable is one
    day's load against `{{ l2_instance_name }}_transactions` +
    `{{ l2_instance_name }}_daily_balances`.

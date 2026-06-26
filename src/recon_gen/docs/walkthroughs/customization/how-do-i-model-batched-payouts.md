@@ -5,15 +5,14 @@ pattern where multiple parent firings share one child Transfer.*
 
 ## The story
 
-Your operations team has flagged that the merchant-payout cycle
-isn't 1:1 — every merchant receives N daily card-settlement
-contributions over the course of a week, and those N daily
-contributions aggregate into ONE weekly payout transfer at end of
-week. Today, you'd model this as N separate transfer cycles (one
-per day) with no L2-side hygiene check that the weekly batch
-actually pulled in every day's contribution — a missing daily
-settlement just silently doesn't show up in the batch, and a
-duplicate or cross-cycle contamination doesn't fire any alert.
+Your operations team flagged that the merchant-payout cycle isn't
+1:1 — every merchant receives N daily card-settlement contributions
+across a week, and those N daily contributions aggregate into ONE
+weekly payout transfer at end of week. Today you'd model this as N
+separate transfer cycles (one per day) with no L2-side hygiene check
+that the weekly batch actually pulled in every day's contribution — a
+missing daily settlement just silently doesn't show up in the batch,
+and a duplicate or cross-cycle contamination doesn't fire any alert.
 
 The institution wants:
 
@@ -25,14 +24,15 @@ The institution wants:
 - A demo dashboard surface where analysts can drill into the
   batch when either failure mode fires.
 
-This is exactly the AB.4
+This is the
 [fan-in chain](../../concepts/l2/chain.md#fan-in-chains-ab4-n-parents-one-child-transfer)
-feature. You declare a chain whose specific child carries
-``fan_in: true`` + a fixed ``expected_parent_count: N`` (per-child
-shape from AB.6 2026-05-19); the runtime aggregates N parent
-firings into one child Transfer; the L1
-``<prefix>_fan_in_disagreement`` matview flags batches whose actual
-parent set diverges from the declared count.
+feature. You declare the chain child carrying ``fan_in: true`` + a
+fixed ``expected_parent_count: N`` (both set per-child on the chain
+entry), and two things follow:
+
+- the runtime aggregates N parent firings into one child Transfer;
+- the L1 ``<prefix>_fan_in_disagreement`` matview flags any batch
+  whose actual parent set diverges from the declared count.
 
 ## The question
 
@@ -53,9 +53,8 @@ Three reference points:
   through the loader / validator / matview / seed / dashboard.
 - **`tests/l2/sasquatch_pr.yaml`** — the real-world example
   carries the 5-parent ``MerchantDailySettleAggregator →
-  MerchantWeeklyPayoutBatch`` chain (gap doc §2's
-  ``MerchantPayoutBatch`` shape). Search for ``fan_in: true`` to
-  find both.
+  MerchantWeeklyPayoutBatch`` chain. Search for ``fan_in: true``
+  to find both.
 
 ## The change
 
@@ -143,31 +142,39 @@ The validator will:
   ≥ 2).
 - Accept the chain entry; auto-derive the implicit
   ``parent_transfer_id`` metadata requirement on every leg_rail of
-  the child template (inherits AB.2's metadata-key auto-derivation).
+  the child template (inherits the chain's metadata-key auto-derivation).
 
 ## How to verify
 
-Re-emit the L2-derived schema and seed against your demo DB:
+Re-emit the L2-derived schema, re-seed and refresh the matviews
+against your demo DB:
 
 ```bash
-recon-gen schema apply -c run/config.yaml --execute
-recon-gen data apply -c run/config.yaml --execute
+recon-gen schema apply -c run/config.yaml --l2 run/<institution>.yaml --execute
+recon-gen data apply -c run/config.yaml --l2 run/<institution>.yaml --execute
+recon-gen data refresh -c run/config.yaml --l2 run/<institution>.yaml --execute
 ```
 
-The first command rewrites the ``<prefix>_transfer_parents`` matview
-(derives the multi-parent set per child Transfer) and the
+Pass ``--l2 run/<institution>.yaml`` on every command — without it
+the CLI falls back to the bundled spec_example and never sees your
+edits. The first command rewrites the ``<prefix>_transfer_parents``
+matview (derives the multi-parent set per child Transfer) and the
 ``<prefix>_fan_in_disagreement`` matview (flags batches with the
-wrong cardinality). The second command re-seeds the demo data —
-``auto_scenario.py`` plants three batches per fan-in chain:
+wrong cardinality). The second re-seeds the demo data —
+``auto_scenario.py`` plants three batches per fan-in chain (below).
+The third refreshes the matviews so they SEE the new rows (matviews
+don't auto-refresh — skip this and the dashboard looks empty).
 
-- **Healthy** (5 parents): the AB.4.7 matview reads
+The three planted batches:
+
+- **Healthy** (5 parents): the matview reads
   ``parent_count=5 == expected_parent_count=5`` → emits no row.
 - **Missing-parent** (4 parents): ``parent_count=4 < expected=5``
   → emits a row with ``disagreement_kind='missing'``.
 - **Extra-parent** (6 parents): ``parent_count=6 > expected=5``
   → emits a row with ``disagreement_kind='extra'``.
 
-Open the L1 L1 Exceptions sheet. You should see:
+Open the L1 Exceptions sheet. You should see:
 
 - One row with ``check_type='fan_in_disagreement'`` and ``magnitude=4``
   (the missing plant).
@@ -184,14 +191,16 @@ distinct visual treatment — a ``[fan-in 5→1]`` label annotation +
 double arrowhead — so the topology reader sees the N:1 shape
 without reading the yaml.
 
+See it live: https://recon-gen-spec.hotchkiss.io/
+
 ## What you should NOT do
 
 - **Don't make a non-TransferTemplate child the fan-in target.**
   Validator C8a rejects this. Rail-as-child fan-in is undefined —
-  a rail's per-Transfer parent is the canonical 1:1 shape; the
-  AB.4 gap doc §2 footnote closes that door explicitly. If you
-  need to fan multiple rails into one downstream rail, model it
-  with a template wrapping the downstream rail.
+  a rail's per-Transfer parent is the canonical 1:1 shape, and that
+  door is closed on purpose. If you need to fan multiple rails into
+  one downstream rail, model it with a template wrapping the
+  downstream rail.
 - **Don't set ``expected_parent_count`` on a non-fan-in child entry.**
   Validator C8b rejects this. The field carries no meaning under
   ``fan_in=false`` and would mislead operators reading the yaml.
@@ -203,15 +212,14 @@ without reading the yaml.
   batches.** The matview falls back to orphan-only detection
   (parent_count < 2), so missing/extra cases never surface. Set
   the count when you know it; leave it unset only when batch
-  size truly varies per firing (e.g., daily settlement counts
-  vary week-to-week based on the merchant's volume).
-- **Don't worry about the AB.2.3 chain_parent_disagreement
-  matview false-positiving on fan-in firings.** AB.4.4 wired in
-  a NOT IN filter that excludes fan_in template children from
-  the chain_parent_disagreement violation set — they're
-  legitimately multi-parent by design and shouldn't surface
-  there. The fan-in violations live in the dedicated
-  ``_fan_in_disagreement`` matview instead.
+  size truly varies per firing (e.g. daily settlement counts
+  vary week-to-week with the merchant's volume).
+- **Don't worry about the chain_parent_disagreement matview
+  false-positiving on fan-in firings.** A NOT IN filter excludes
+  fan_in template children from the chain_parent_disagreement
+  violation set — they're legitimately multi-parent by design and
+  shouldn't surface there. The fan-in violations live in the
+  dedicated ``_fan_in_disagreement`` matview instead.
 
 ## Related
 
@@ -227,5 +235,5 @@ without reading the yaml.
   / ``expected_parent_count`` / ``disagreement_kind`` /
   ``business_day``).
 - [How do I chain two templates?](how-do-i-chain-two-templates.md)
-  — the sibling AB.2 walkthrough for cascading 1:1 flows
+  — the sibling walkthrough for cascading 1:1 flows
   (template-as-chain-child, the OTHER chain-shape extension).

@@ -4,22 +4,21 @@
 
 ## The story
 
-Compliance asked you to surface aggregated inbound deposits that
-approach the federal currency-transaction-reporting threshold.
-The bank has a policy: any single customer DDA that takes in more
-than $20K of ACH credits in one business day gets flagged for AML
-review. You want that breach to land on the L1 Limit Breach sheet
-just like a per-rail send cap does — but it has to be
-distinguishable so the routing logic can fan it to the AML review
-queue instead of operations triage.
+Compliance wants aggregated inbound deposits that approach the
+federal currency-transaction-reporting threshold surfaced. The
+bank's policy: any single customer DDA that takes in more than $20K
+of ACH credits in one business day gets flagged for AML review.
+You want that breach on the L1 Limit Breach sheet just like a
+per-rail send cap — but DISTINGUISHABLE, so the routing logic fans
+it to the AML review queue instead of operations triage.
 
-This is exactly the AB.1 [LimitSchedule.direction](../../concepts/l2/limit-schedule.md)
-feature. You declare a second `LimitSchedule` on the same
-`(parent_role, rail_name)` pair as a hypothetical Outbound send
-cap (or a brand-new pair if there's no Outbound counterpart),
-but with `direction: Inbound`. The L1 `limit_breach` matview
-already UNIONs both directions, so the row surfaces with no
-schema migration or matview rewrite.
+[`LimitSchedule.direction`](../../concepts/l2/limit-schedule.md)
+already does exactly this. You declare a second `LimitSchedule` on
+the same `(parent_role, rail)` pair as a hypothetical Outbound send
+cap (or a brand-new pair if there's no Outbound counterpart) with
+`direction: Inbound`. The L1 `limit_breach` matview already UNIONs
+both directions, so the row surfaces with no schema migration or
+matview rewrite.
 
 ## The question
 
@@ -32,17 +31,18 @@ the AML review queue rather than ops triage?"
 Three reference points:
 
 - **[Limit schedule (concept)](../../concepts/l2/limit-schedule.md)**
-  — the field semantics: how Outbound vs Inbound differ, how the
-  triple-key uniqueness rule works, what the L1 matview does
-  with the row.
-- **`tests/l2/spec_example.yaml`** — the minimal fixture carries
-  one Outbound cap + one Inbound cap on the same `(parent, rail)`
-  pair, proving the per-direction shape is round-trippable through
-  the loader / validator / matview / dashboard.
+  — the field semantics: how Outbound and Inbound differ, the
+  triple-key uniqueness rule and what the L1 matview does with the
+  row.
+- **`tests/l2/spec_example.yaml`** — the minimal fixture carries one
+  Outbound cap plus one Inbound cap on the same parent
+  (`CustomerLedger`) but DIFFERENT rails (`ExternalRailOutbound`
+  Outbound, `ExternalRailInbound` Inbound), proving the per-direction
+  shape round-trips through loader → validator → matview → dashboard.
 - **`run/sasquatch_pr.yaml`** (or your own L2 yaml under `run/`)
   — the real-world example carries a $20K Inbound cap on
-  `(DDAControl, CustomerInboundACH)` modeled after the federal
-  CTR threshold. Search for `direction: Inbound` to find it.
+  `(DDAControl, CustomerInboundACH)` modeled after the federal CTR
+  threshold. Search for `direction: Inbound` to find it.
 
 ## The change
 
@@ -73,10 +73,9 @@ limit_schedules:
 ```
 
 If the Outbound + Inbound pair lives on the same rail name (rare,
-but allowed), the `(parent_role, rail_name)` pair appears twice
-in the list — the U5 uniqueness check broadens to the
-`(parent_role, rail_name, direction)` triple, so both rows are
-accepted.
+but allowed), the `(parent_role, rail)` pair appears twice in the
+list — the U5 uniqueness check broadens to the
+`(parent_role, rail, direction)` triple, so both rows are accepted.
 
 ## How to verify
 
@@ -89,9 +88,9 @@ recon-gen data apply -c run/config.yaml --execute
 
 The first command rewrites the `<prefix>_limit_breach` matview
 with the second UNION-ALL branch picking up your new cap. The
-second one re-seeds the demo data — `auto_scenario.py` will plant
-an `InboundCapBreachPlant` for the Inbound cap (cap × 1.5
-amount), so the dashboard has a row to surface immediately.
+second one re-seeds the demo data — `auto_scenario.py` plants an
+`InboundCapBreachPlant` for the Inbound cap (cap × 1.5 amount), so
+the dashboard has a row to surface immediately.
 
 Open the L1 Limit Breach sheet. You should see:
 
@@ -102,6 +101,9 @@ Open the L1 Limit Breach sheet. You should see:
 - L1 Exceptions inherits the new row automatically — its
   UNION-over-matviews already reads from `<prefix>_limit_breach`
   unchanged.
+
+See it live: https://recon-gen-spec.hotchkiss.io/ (the
+`spec_example` fixture carries the Inbound cap).
 
 ## What you should NOT do
 
@@ -129,5 +131,5 @@ Open the L1 Limit Breach sheet. You should see:
   — the SHOULD-constraint the matview encodes, with the
   Outbound / Inbound theorem split.
 - [Schema_v6 → LimitSchedule](../../Schema_v6.md) — the data
-  contract for the matview's column shape (including the
-  `direction` column added in AB.1).
+  contract for the matview's column shape, including the
+  `direction` column.
