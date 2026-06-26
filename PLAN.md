@@ -674,6 +674,25 @@ Gated on DQ.2 (typed column refs) so residuals reference typed columns and "dete
 - [ ] DS.5 - **Completeness gate at construction.** Every `MathInvariant` member has residual + matview ref + ≥1 generator + KAT; a missing edge raises at import (extends `[[feedback_invariants_in_types]]` / completeness-gate-fails-at-construction down to the invariant layer).
 - [ ] DS.6 - **Phase exit + release.** Sweep to PLAN_ARCHIVE.md.
 
+
+## Phase DT - Documentation voice pass — rewrite AI-voiced docs in chotchki's voice
+
+Rewrite the reader-facing prose so it reads as chotchki, not generic-AI. Source of truth: `/Users/chotchki/workspace/career-portfolio/voice_profile/chotchki-voice-profile.md`. The README + QS-quirks catalog are named IN that profile as Claude-written-under-his-guidance — exactly the AI-voice → raw-voice conversion this phase makes. His own SPECs / design-thoughts are voice SOURCES, leave them untouched.
+
+**Scope (operator-locked 2026-06-25):** everything reader-facing — README.md, the mkdocs handbook (`src/recon_gen/docs/**`), the 37 in-app per-sheet help snippets, CLI `--help`, the handbook vocabulary/invariant/diagram prose. OUT: `docs/audits/**` (dev-facing), `CLAUDE.md` (agent instructions), PLAN trackers, RELEASE_NOTES history (forward-style note only), any chotchki-authored SPEC.
+**Cadence (operator-locked):** README first as calibration → operator red-pen → fold corrections into the voice checklist → fan out the rest with his fixes baked in.
+**Hard constraints every rewrite honors:** preserve jinja / mkdocs-macros + HandbookVocabulary tokens; keep persona-neutrality (`test_docs_persona_neutral.py`); don't trip handbook drift / liveness / parity gates (`test_sheet_handbook_liveness.py`, `test_handbook_invariants.py`, `test_bu2b_registry_anti_drift.py`, `test_etl_examples.py`, App2↔QS parity); preserve technical meaning + every fact / number / link; NO Oxford commas; ALL-CAPS + parens for emphasis, never bold.
+
+- [x] DT.0 - Setup + voice-rewrite guide + provenance / drift-gate map. Branch `feature/dt-doc-voice` (off `feature/dr-supersession` HEAD — rebase onto main later). Write `docs/audits/dt_0_voice_rewrite_guide.md`: repo-specific lint distilled from the profile, the hard constraints above, the his-authored-vs-AI-authored provenance classification per in-scope file, and the doc-content test-gate map.
+- [ ] DT.1 - **README.md calibration rewrite** [CALIBRATION GATE]. Hand-draft against the guide, then run an adversarial perspective-diverse voice-lint workflow (one critic per anti-pattern lens — maxim-headers / triads / Oxford / marketing-adjectives / "load-bearing" / windup) plus a meaning-preservation checker vs the original; fold findings; present the diff for operator red-pen.
+- [ ] DT.2 - **Fold red-pen → voice checklist v2.** Run a voice-redpen analysis over chotchki's README edits; fold the surviving corrections into `dt_0_voice_rewrite_guide.md` so the fan-out inherits his fixes.
+- [ ] DT.3 - **Handbook core fan-out.** mkdocs prose: index, concepts/, for-your-role/, handbook/ app guides, reference/ (install, self-host, CLI, quirks log), scenario/. Workflow pipeline draft → voice-lint → correctness per file; operator review at the section boundary.
+- [ ] DT.4 - **Walkthroughs fan-out** (28 guides, ~6.6k lines — largest section). Same pipeline; operator review at boundary.
+- [ ] DT.5 - **In-app per-sheet help snippets** (37 files, ~3k lines — render LIVE in QS TextBoxes + App2). Pipeline + drift / liveness-gate guard (token preservation is the thing that breaks everything else if dropped); operator review.
+- [ ] DT.6 - **CLI `--help` + handbook vocabulary / invariant / diagram prose** (in-code: `cli/**`, `common/handbook/**`). Pipeline + App2↔QS parity / drift guard; operator review.
+- [ ] DT.7 - **RELEASE_NOTES forward style note.** Add a short "new entries in chotchki's voice" note; leave the 14.6.0 → 13.14.4 history untouched.
+- [ ] DT.8 - **Phase exit.** Full mkdocs build clean + all doc-content tests green + persona-neutrality + App2↔QS handbook parity + link check; operator final review; RELEASE_NOTES entry (ask before cut per [[feedback_always_ask_before_release_cut]]); sweep DT to PLAN_ARCHIVE.md.
+
 ## Backlog (not yet phased)
 
 - **Revert (or justify) the DP.5 trainer-apply timeout bump (120s→300s, commit `531dd020`, shipped v14.4.1)** — added 2026-06-16. The bump was a wrong-diagnosis fix: the Oracle `test_trainer_dogfood_per_kind[or-*]` failures' real cause was an 11h-stale Oracle container (DG-phase debris), not apply slowness — a fresh container ran 17/17 green. Confirm a fresh-Oracle `trainer_apply` finishes under 120s; if so revert to 120s, else keep 300s as legitimate headroom (the docstring already says "oracle ~few min"). Low-priority cleanup; harmless either way.
