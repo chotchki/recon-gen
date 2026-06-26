@@ -308,3 +308,15 @@ Lessons (these govern the DT.3+ fan-out):
 - **Verify each batch:** `recon-gen docs test` (link sweep + persona-neutral) +
   `recon-gen docs apply -o <tmp>` (build — catches broken macros) + `tests/docs/`.
   Commit per batch on `feature/dt-doc-voice`; do NOT push main (operator reviews).
+- **Triad handling (Batch B lesson — the #1 recurring defect):** break only a
+  BALANCED PROSE rule-of-three (a rhetorical triad inside a sentence), and break
+  it by RESTRUCTURING — inline → bullet list, or vary the clause shapes — KEEPING
+  every item. NEVER break a triad by DELETING a list item; that sheds handbook
+  depth (Batch B dropped "NSF", "funds availability", "partner bank", "race
+  condition" this way). And a parenthetical example list `(A, B, C)` or a real
+  N-item set is an ENUMERATION, not a triad — leave it intact. Also preserve
+  MEANING precision (a transfer nets to zero ON day three, not "by day three").
+- **Anchor-target headers:** a header like `## Fan-in chains (AB.4)` may carry an
+  internal tag a walkthrough links to via the derived anchor. Stripping the tag
+  breaks the link sweep — leave those headers and flag the coordinated rename for
+  the operator (a single-file rewrite can't fix both sides).
