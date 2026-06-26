@@ -18,10 +18,10 @@ four shapes into a ``DateInterval``:
 When omitted entirely, ``_resolve_period`` defaults to
 ``trailing:7`` (matches the v1 default behavior).
 
-Operators who want a non-default range pick the shape that reads best
-for their flow: the keyword forms (``trailing:7``, ``yesterday``) for
-common audit cadences; the explicit range when reproducing a specific
-period (re-running a prior report; matching a manual SQL pull).
+For a non-default range, pick the shape that fits: the keyword forms
+(``trailing:7``, ``yesterday``) for common audit cadences; the explicit
+range when reproducing a specific period (re-running a prior report;
+matching a manual SQL pull).
 """
 
 from __future__ import annotations
@@ -169,7 +169,7 @@ def period_option():  # type: ignore[no-untyped-def]: Click decorator strips the
             "Report period. Accepted shapes: ``trailing:N`` (N days "
             "ending yesterday; e.g. ``trailing:7``), ``today``, "
             "``yesterday``, ``YYYY-MM-DD..YYYY-MM-DD`` "
-            "(explicit closed-closed range), or single ``YYYY-MM-DD`` "
+            "(explicit closed-closed range) or single ``YYYY-MM-DD`` "
             "(one-day report). Default: ``trailing:7`` (a 7-day window "
             "ending yesterday — the audit-window convention)."
         ),

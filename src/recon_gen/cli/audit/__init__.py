@@ -8,29 +8,29 @@ Three operations:
            ``--execute`` to delete it.
   test   — pytest the audit module + pyright.
 
-The report is a regulator-ready PDF generated **directly from the
-database**, querying the per-prefix L1 invariant matviews + base
+The report is a regulator-ready PDF generated directly from the
+database, querying the per-prefix L1 invariant matviews + base
 tables. Same emit-vs-execute pattern as the other artifact groups —
 no ``--execute`` means the integrator can review the rendered
 Markdown / page outline before committing to a real PDF write.
 
-Phase U.2 ships the **executive summary page** on top of the U.1
+Phase U.2 ships the executive summary page on top of the U.1
 cover: per-period totals (transaction count, transfer count, dollar
 volume gross/net) + L1 invariant exception counts (drift, ledger
 drift, overdraft, limit breach, stuck pending, stuck unbundled,
 supersession). Real numbers when ``demo_database_url`` is configured;
-graceful "—" placeholders + a notice when it isn't, so the layout
+"—" placeholders + a notice when it isn't, so the layout
 stays previewable without a live DB.
 
 Page footer carries a provenance-fingerprint placeholder (real
 fingerprint lands in U.7). Per-invariant violation tables, the
-per-account-day Daily Statement walk, and the sign-off block land
+per-account-day Daily Statement walk and the sign-off block land
 in U.3+.
 
 Period default: ``trailing:7`` (a 7-day window ending yesterday).
 Override with ``--period <shape>`` — see ``--help`` for the full
 accepted-shapes list (``trailing:N``, ``today``, ``yesterday``,
-``YYYY-MM-DD..YYYY-MM-DD``, or single ``YYYY-MM-DD``).
+``YYYY-MM-DD..YYYY-MM-DD`` or single ``YYYY-MM-DD``).
 """
 
 from __future__ import annotations
@@ -1637,7 +1637,7 @@ def audit_test(pytest_args: str) -> None:
     """Run the audit test suite (pytest + pyright on the audit module).
 
     Targets ``tests/audit/`` for pytest — scenario expectations,
-    PDF/dashboard extractors, PDF-matches-scenario, persona-clean,
+    PDF/dashboard extractors, PDF-matches-scenario, persona-clean
     and smoke. Defers the browser matrix (the per-renderer agreement
     producers + validators under ``tests/e2e/qs_browser/``) to
     the e2e tier — not run here.
@@ -1678,7 +1678,7 @@ def audit_verify(
     Extracts the ``ProvenanceFingerprint`` JSON embedded in the
     PDF's ``/Subject`` metadata, recomputes each input from current
     sources (DB rows up to the embedded high-water-mark, L2 yaml
-    bytes on disk, current recon-gen code identity), and
+    bytes on disk, current recon-gen code identity) and
     reports per-source matches/diffs.
 
     Recomputes against the EMBEDDED hwm (not current ``MAX(entry)``)
@@ -1686,7 +1686,7 @@ def audit_verify(
     new rows added since report-generation time don't trigger a
     false diff. A diff fires only when bytes that the fingerprint
     actually covers have changed: a row at or below the embedded
-    hwm was modified, the L2 yaml was edited, or the code identity
+    hwm was modified, the L2 yaml was edited or the code identity
     changed.
 
     Exits 0 on full match, 1 with a per-source diff on mismatch.

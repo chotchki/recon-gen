@@ -10,8 +10,7 @@ Six operations:
   screenshot  — capture deployed dashboards to PNG (legacy ``export screenshots``).
 
 No ``--execute`` here — building a static site to a directory isn't
-a destructive side effect. The "emit" and the "do it" are the same
-operation.
+a destructive side effect.
 
 The ``--l2`` flag is honored via the ``RECON_GEN_DOCS_L2_INSTANCE`` env var
 that ``main.py`` reads at mkdocs-macros define-env time.
@@ -347,7 +346,7 @@ def docs_apply(
 
     With ``--portable``, emits a static-site that opens via ``file://``
     — handy for shipping the rendered handbook on a USB stick, in a
-    zip attachment, or to a wiki that doesn't run a web server.
+    zip attachment or to a wiki that doesn't run a web server.
 
     No ``--execute``: building a static site IS the operation.
     """

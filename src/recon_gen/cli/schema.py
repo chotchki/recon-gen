@@ -6,10 +6,10 @@ Three operations:
   clean  — emit the matching DROP statements (default), or ``--execute``.
   test   — pytest + pyright the schema-emitting library code.
 
-The default for apply/clean is **emit only** — print to stdout (or
+The default for apply/clean is EMIT ONLY — print to stdout (or
 ``-o FILE``) without touching the DB. Pass ``--execute`` to actually
-run the script. This makes the safe path the default; nothing
-accidentally drops a table.
+run the script. Safe path is the default; nothing drops a table by
+accident.
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def schema_apply(
     """Emit the schema DDL (or ``--execute`` to apply against the demo DB).
 
     Default behavior: print every CREATE statement for the L2 instance's
-    per-prefix tables, views, and materialized views to stdout (or to
+    per-prefix tables, views and materialized views to stdout (or to
     ``-o FILE``). Pipe it to your DB tool: ``recon-gen schema
     apply | psql ...``.
 

@@ -3,7 +3,7 @@
 Mounts everything ``dashboards`` mounts (the four real apps + ``/docs``
 when available) PLUS the Studio routes: the unified diagram (X.4.c),
 the editor (``/l2_shape/...`` X.4.e), the data-shaping panel
-(``/data/...`` X.4.h), and the orchestration endpoint (``POST /deploy``
+(``/data/...`` X.4.h) and the orchestration endpoint (``POST /deploy``
 X.4.g). All under one Starlette process; one in-memory ``L2InstanceCache``
 backs every Studio read/write.
 
@@ -124,16 +124,16 @@ def studio(
     tls_key: str | None,
 ) -> None:
     """Start Studio — the implementation-tools surface for the integrator,
-    trainer, and ETL engineer.
+    trainer and ETL engineer.
 
     Studio is a Starlette process that mounts the Dashboards routes
-    plus a Studio-side editor, unified diagram, data-shaping panel,
+    plus a Studio-side editor, unified diagram, data-shaping panel
     and Deploy-changes orchestration. One in-memory cache of the L2
     YAML backs every Studio request; the YAML on disk stays the
     source of truth (every save is an atomic write through Studio).
 
     X.4.a.4 ships only the landing placeholder; the unified diagram
-    (X.4.c), editor (X.4.e), and Deploy pipeline (X.4.g) land in
+    (X.4.c), editor (X.4.e) and Deploy pipeline (X.4.g) land in
     sub-phases. The CLI surface is stable from this commit forward.
     """
     import functools  # noqa: PLC0415

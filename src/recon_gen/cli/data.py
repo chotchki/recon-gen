@@ -1,13 +1,14 @@
 """``recon-gen data`` — per-prefix demo seed data.
 
-Five operations:
+Six operations:
 
-  apply    — emit the seed SQL (default), or ``--execute`` against the demo DB.
-  refresh  — emit the REFRESH MATERIALIZED VIEW SQL, or ``--execute``.
-  clean    — emit TRUNCATE statements, or ``--execute`` to wipe the rows.
-  lock     — write or verify the canonical-anchor seed SQL at
-             ``tests/data/_locked_seeds/<instance>.<dialect>.sql``.
-  test     — pytest the seed pipeline (locked-SQL byte check).
+  apply         — emit the seed SQL (default), or ``--execute`` against the demo DB.
+  refresh       — emit the REFRESH MATERIALIZED VIEW SQL, or ``--execute``.
+  clean         — emit TRUNCATE statements, or ``--execute`` to wipe the rows.
+  semantic-lock — write or verify the canonical-anchor violation-set lock at
+                  ``tests/data/_semantic_locks/<instance>.duckdb.json``.
+  etl-example   — emit canonical INSERT-pattern examples for ETL authors.
+  test          — pytest + pyright the seed pipeline.
 
 Same emit-vs-execute pattern as the schema group — default is
 print the script, ``--execute`` actually runs it.
@@ -76,7 +77,7 @@ def data() -> None:
     show_default=True,
     metavar="<float>",
     help=(
-        "Y.2.gate.c.13.1 — scalar multiplier on plant density "
+        "Scalar multiplier on plant density "
         "(densify factor / broken-rail count / fanout multiplier). "
         "1.0 = byte-identical to pre-c.13 behavior; 2.0 = double the "
         "plants; 0.5 = halve. Operator opt-in for heavier nightly "
@@ -423,11 +424,11 @@ def _build_fresh_semantic_lock(
 def data_semantic_lock(
     l2_instance_path: str | None, check_only: bool,
 ) -> None:
-    """AZ.1 — write or verify the canonical-anchor semantic lock.
+    """Write or verify the canonical-anchor semantic lock.
 
-    Mirrors `data lock` but gates on the VIOLATION SET (per AZ.0
-    design) rather than SQL bytes. The locked file lives at
-    ``tests/data/_semantic_locks/<instance>.sqlite.json`` and is
+    Gates on the VIOLATION SET rather than SQL bytes. The locked
+    file lives at
+    ``tests/data/_semantic_locks/<instance>.duckdb.json`` and is
     the record of what `semantic_lock(conn, ALL_INVARIANTS)`
     returns post-emit at canonical anchor (2030-01-01).
 
@@ -435,10 +436,8 @@ def data_semantic_lock(
     Pass ``--check`` to verify-only — exit non-zero on drift, with
     a unified diff to stderr showing the first ~50 changed lines.
 
-    Phase AZ scope: SQLite-only initial. The matview SQL differs
-    per dialect so PG / Oracle locks need real deployed DBs (the
-    deploy_pipeline path); AZ.1.b extension lands those if needed
-    before AZ.4's CI gate swap.
+    DuckDB-only. The matview SQL differs per dialect so PG / Oracle
+    locks need real deployed DBs (the deploy_pipeline path).
     """
     # Resolve the L2 instance. We don't need a full demo cfg here —
     # the lock is per (instance, dialect=sqlite) at canonical anchor.
@@ -529,7 +528,7 @@ def data_etl_example(output: str) -> None:
     header naming the business invariant and a ``-- Consumed by:``
     header naming the dashboard view that reads the resulting rows.
 
-    See src/recon_gen/docs/_handbook_per_sheet/etl.md for the walkthroughs that reference this
+    See src/recon_gen/docs/handbook/etl.md for the walkthroughs that reference this
     output.
     """
     from recon_gen.common.etl_examples import (

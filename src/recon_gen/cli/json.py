@@ -11,8 +11,8 @@ Four operations:
 
 The four bundled apps (investigation / executives / l1-dashboard /
 l2-flow-tracing) are always operated on as a set — there's no
-``--app`` filter. Per-app development was useful during M / N / O
-when each iterated independently; today they ship as a bundle.
+``--app`` filter. Per-app development was useful while each
+iterated independently; today they ship as a bundle.
 """
 
 from __future__ import annotations
@@ -240,7 +240,7 @@ def json_probe(config: str, output_dir: str) -> None:
     """Playwright sanity walk against every deployed dashboard.
 
     Opens each of the four deployed dashboards via an embed URL, walks
-    the sheets, and surfaces any visible 'failed to load' / spinner-
+    the sheets and surfaces any visible 'failed to load' / spinner-
     forever / dataset-error states. Catches the silent-fail mode
     where datasets describe-cleanly but visuals stay frozen.
 

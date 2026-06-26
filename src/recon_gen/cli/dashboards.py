@@ -78,7 +78,7 @@ from recon_gen.cli._html_serve import run_html_server
         "with no `--app`. Pass a single app name to narrow to one "
         "(faster startup when iterating). ``smoke`` is the DB-free "
         "spike fixture (the only one that works without a configured "
-        "database / and the only one `--stub` applies to)."
+        "database, and the only one `--stub` applies to)."
     ),
 )
 @click.option(

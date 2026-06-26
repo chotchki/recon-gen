@@ -2,19 +2,19 @@
 
 The CLI is organized around the artifacts the tool produces:
 
-  schema      apply | clean | test
-  data        apply | refresh | clean | hash | etl-example | test
+  schema      apply | clean | migrate-mark | test
+  data        apply | refresh | clean | semantic-lock | etl-example | test
   json        apply | clean | test | probe
   docs        apply | serve | clean | test | export | screenshot
-  audit       apply | clean | test                              # Phase U
+  audit       apply | clean | test | verify                    # Phase U
   dashboards                                                    # Phase X.2 (rename of `serve app2 apply`)
   studio                                                        # Phase X.4
 
-Every artifact's ``apply``/``clean`` defaults to *emit* (print SQL to
+Every artifact's ``apply``/``clean`` defaults to EMIT (print SQL to
 stdout, write JSON to ``out/``, build site to ``site/``, render
 Markdown source for the audit report). Pass ``--execute`` to actually
 run the destructive thing (connect to the DB, deploy to AWS, write
-the PDF). The ``docs``, ``dashboards``, and ``studio`` commands have
+the PDF). The ``docs``, ``dashboards`` and ``studio`` commands have
 no ``--execute`` because building a static site / running a server IS
 the operation.
 
