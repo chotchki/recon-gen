@@ -90,13 +90,13 @@ Row count: **26** kinds.
 
 ## fan_in_missing_parent
 
-**Short statement:** For every chain child entry declaring `fan_in: true` (AB.6 per-child shape), every child Transfer's contributing parent set SHOULD match the entry's `expected_parent_count` (when set), or have cardinality ≥2 (when unset).
+**Short statement:** For every chain child entry declaring `fan_in: true` (per-child shape), every child Transfer's contributing parent set SHOULD match the entry's `expected_parent_count` (when set), or have cardinality ≥2 (when unset).
 
 **What to do:** Identify which batch this is via the `business_day` + `child_template_name`. For 'missing': the upstream parent rail should have fired N times but one (or more) firings never landed — look at the parent rail's firing log for the batch period and find the missing date(s). For 'extra': a parent firing claimed membership in this batch it shouldn't have — could be a stale `transfer_parent_id` metadata value (ETL pulled from a wrong source) or a duplicate re-post. For 'orphan': only one parent contributed — either the chain shouldn't be `fan_in` (it's actually 1:1) OR the operator should set `expected_parent_count` so the matview can flag the missing siblings.
 
 ## fan_in_extra_parent
 
-**Short statement:** For every chain child entry declaring `fan_in: true` (AB.6 per-child shape), every child Transfer's contributing parent set SHOULD match the entry's `expected_parent_count` (when set), or have cardinality ≥2 (when unset).
+**Short statement:** For every chain child entry declaring `fan_in: true` (per-child shape), every child Transfer's contributing parent set SHOULD match the entry's `expected_parent_count` (when set), or have cardinality ≥2 (when unset).
 
 **What to do:** Identify which batch this is via the `business_day` + `child_template_name`. For 'missing': the upstream parent rail should have fired N times but one (or more) firings never landed — look at the parent rail's firing log for the batch period and find the missing date(s). For 'extra': a parent firing claimed membership in this batch it shouldn't have — could be a stale `transfer_parent_id` metadata value (ETL pulled from a wrong source) or a duplicate re-post. For 'orphan': only one parent contributed — either the chain shouldn't be `fan_in` (it's actually 1:1) OR the operator should set `expected_parent_count` so the matview can flag the missing siblings.
 
@@ -114,7 +114,7 @@ Row count: **26** kinds.
 
 ## supersession_audit
 
-**Short statement:** `_supersession_*` is **not** a SHOULD-constraint — it's a diagnostic view that surfaces logical keys with multiple `entry` versions (the audit trail for `TechnicalCorrection` / `BundleAssignment` / `Inflight` rewrites). Reads from BASE tables (not Current*) since Current* hides superseded entries by construction. See M.2b.12 dashboard for the visualization.
+**Short statement:** `_supersession_*` is **not** a SHOULD-constraint — it's a diagnostic view that surfaces logical keys with multiple `entry` versions (the audit trail for `TechnicalCorrection` / `BundleAssignment` / `Inflight` rewrites). Reads from BASE tables (not Current*) since Current* hides superseded entries by construction. See the dashboard for the visualization.
 
 **What to do:** Diagnostic only — supersession is expected for normal corrections. Investigate when `entry_count` is unusually high for the row's age, or when the rewrite reason is missing. Diff the entries to see what actually changed across versions.
 

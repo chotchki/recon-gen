@@ -235,7 +235,7 @@ Identify which template firing this is, then look at the upstream variant trigge
 
 ### Short statement
 
-For every chain child entry declaring `fan_in: true` (AB.6 per-child shape), every child Transfer's contributing parent set SHOULD match the entry's `expected_parent_count` (when set), or have cardinality ≥2 (when unset).
+For every chain child entry declaring `fan_in: true` (per-child shape), every child Transfer's contributing parent set SHOULD match the entry's `expected_parent_count` (when set), or have cardinality ≥2 (when unset).
 
 ### What to do
 
@@ -249,7 +249,7 @@ Identify which batch this is via the `business_day` + `child_template_name`. For
 
 ### Short statement
 
-For every chain child entry declaring `fan_in: true` (AB.6 per-child shape), every child Transfer's contributing parent set SHOULD match the entry's `expected_parent_count` (when set), or have cardinality ≥2 (when unset).
+For every chain child entry declaring `fan_in: true` (per-child shape), every child Transfer's contributing parent set SHOULD match the entry's `expected_parent_count` (when set), or have cardinality ≥2 (when unset).
 
 ### What to do
 
@@ -291,7 +291,7 @@ For 'missed': inspect the parent firing's `metadata` for clues about which alter
 
 ### Short statement
 
-`_supersession_*` is **not** a SHOULD-constraint — it's a diagnostic view that surfaces logical keys with multiple `entry` versions (the audit trail for `TechnicalCorrection` / `BundleAssignment` / `Inflight` rewrites). Reads from BASE tables (not Current*) since Current* hides superseded entries by construction. See M.2b.12 dashboard for the visualization.
+`_supersession_*` is **not** a SHOULD-constraint — it's a diagnostic view that surfaces logical keys with multiple `entry` versions (the audit trail for `TechnicalCorrection` / `BundleAssignment` / `Inflight` rewrites). Reads from BASE tables (not Current*) since Current* hides superseded entries by construction. See the dashboard for the visualization.
 
 ### What to do
 

@@ -5,6 +5,18 @@ Clear-cut fixes are applied in the commits; THIS file is the "your call" list +
 found bugs. Per-batch, appended as the autonomous run proceeds. Everything is
 staged on `feature/dt-doc-voice` (main untouched).
 
+## Small-flags sweep — DONE (2026-06-26, commits `6133403a` + `939afa0a`)
+
+All the mechanical flags below are now cleared:
+- **#1** `app.py` Transfer Templates sheet description: "net status (Balanced/Imbalanced)" → "completion status (Complete/Imbalanced/Orphaned)" (matches the real column).
+- **#2** orphan `how-do-i-brand-my-handbook-prose.md` added to mkdocs nav.
+- **#3** `run-my-first-deploy` drifty dataset counts → "one JSON per dataset" (count-free).
+- **#4** `populate-daily-balances` "8 mandatory columns" → "7 you write (`entry` auto)".
+- **#5** `L1_Invariants.md`: all inline phase-tag parentheticals stripped (kept the useful descriptions, dropped pure tags + change-history; parse contract + `{: #anchor}`s preserved).
+- **#6b** 5 concept headers de-tagged (chain / rail / transfer-template) + 10 coordinated walkthrough-link anchor updates (`test_docs_links` green).
+
+Left as-is (your call stands, low-value to churn): **6a** quirks "us-east-2" provenance note; **6c** `_glossary`'s `scope` as a domain concept. Everything below is historical / already-resolved context.
+
 ## DT.3 followup — bug fixed + flags researched/resolved (2026-06-25 night)
 
 Operator: "fix the bug and finish the research … v14 is out, everything is nested now config wise."
