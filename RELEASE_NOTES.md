@@ -6,10 +6,53 @@
 > AI, BK, BQ, BW, CK, BV close, snapshotter pattern, runner readiness).
 > v13.14.4 below resumes the convention.
 
-> **Voice note (Phase DT, 2026-06).** From here forward these notes are written in
-> my own voice — the same pass that rewrote and staleness-audited the reader-facing
-> prose (README, handbook, in-app sheet help, CLI `--help`) against the code. The
-> v14.6.0 → v13.14.4 entries below predate that pass and are left as written.
+> **Voice note (Phase DT, 2026-06).** This v14.7.0 entry and everything from here
+> forward is written in my own voice — the same pass that rewrote and staleness-
+> audited the reader-facing prose (README, handbook, in-app sheet help, CLI
+> `--help`) against the code. The v14.6.0 → v13.14.4 entries below predate that
+> pass and are left as written.
+
+## v14.7.0 — Reader-facing docs in the operator's voice + physical-column terminology
+
+Minor. Two big strokes plus the held-over Supersession Audit (drafted as the
+never-tagged v14.6.0, shipping here). The entire reader-facing surface — README,
+mkdocs handbook, walkthroughs, in-app sheet help, CLI `--help` — was rewritten in
+the operator's voice and staleness-audited against the code (Phase DT). The v3
+logical column hold-over was dropped for the v6 physical columns across the docs +
+CLAUDE.md (Phase DU). No product behavior change beyond the Supersession Audit.
+
+### Changed — reader-facing docs in the operator's voice (Phase DT)
+
+- README slimmed to a lean landing page (L1/L2/L3 architecture diagram, live-demo
+  links); the mkdocs handbook keeps the depth. Every page voice-rewritten AND
+  staleness-audited against the code — fixing real drift along the way (aging-band
+  cutoffs, the install extras table, sheet + column names, the L1 invariant count,
+  dialect-neutrality, a stale env var, more).
+- The 36 in-app per-sheet help snippets + the 3 parser-source docs (L1_Invariants /
+  L2FT_Exceptions / L2_Triage_Gaps) rewritten with their live-render parse contracts
+  intact (liveness + App2↔QS parity gates green). CLI `--help` polished; internal
+  phase tags stripped from reader prose.
+
+### Changed — physical-column terminology (Phase DU)
+
+- Dropped the v3 logical column names from the docs + CLAUDE.md for the v6 physical
+  columns: `signed_amount` → `amount_money` (+ `amount_direction`), `posted_at` →
+  `posting`, `balance_date` → `business_day_start`, `balance` → `money`,
+  `transfer_type` → `rail_name`, `account_type` → `account_role`,
+  `parent_transfer_id` → `transfer_parent_id`, `transaction_id` → `id`. Investigation
+  matview output aliases + the SPEC's conceptual model kept. CLAUDE.md's Domain Model
+  also shed a dead six-value account-type enum + a nonexistent `control_account_id` FK.
+
+### Fixed — local browser-test harness (macOS WebKit)
+
+- The qs_browser / app2 tier no longer crashes WindowServer on macOS. Playwright's
+  always-on trace screenshot filmstrip leaked GPU IOSurfaces — WebKit on macOS is
+  not off-WindowServer like the Linux/CI port, so each frame allocated a capture
+  surface until the tally guard SIGABRT'd the compositor. The filmstrip is now gated
+  behind `RECON_GEN_TRACE_ALL` (DOM snapshots stay on); Playwright bumped 1.59 → 1.60.
+- The app2 layer now auto-retries a flaky test once (`--reruns 1`), matching the
+  browser layer — a wild-driver timeout no longer halts the whole chain.
+- `recon-gen docs test` pointed `pyright` at a non-existent `main.py`; fixed.
 
 ## v14.6.0 — Supersession Audit: detection fix + transaction-id navigation
 
