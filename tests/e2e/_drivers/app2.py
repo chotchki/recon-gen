@@ -1158,7 +1158,41 @@ class App2Driver:
             # change fires, _wait_for_refetch times out at 30s.
             # This is the shape of the 3 CI failures on 2b9dee26.
             import time as _time
+            # CX.1 — the has-option probe, reused by the fast-path skip,
+            # the load poll, and the post-load assertion below.
+            _has_opt_js = """(s, q) => {
+                if (!s.tomselect) return false;
+                const opts = s.tomselect.options || {};
+                if (Object.prototype.hasOwnProperty.call(opts, q)) return true;
+                for (const k of Object.keys(opts)) {
+                    if (opts[k] && opts[k].text === q) return true;
+                }
+                return false;
+            }"""
+            # Budget the per-query load with the configurable page timeout
+            # (60s on the browser layer), NOT a guessed 5s. A slow CI
+            # dropdown-search fetch must not outrun the poll, because a miss
+            # here decays into a silent ``setValue`` no-op → opaque
+            # ``_wait_for_refetch`` hang. CONFIRMED shape of the
+            # ``test_cq_4_e[app2-Rails-Rail]`` CI failure (0c90595f): the
+            # picked option was never in the final ``<select>`` and every
+            # ``/visuals/.../data`` request carried an empty
+            # ``param_pL2ftRail`` — the pick fired no filtered refetch.
+            load_budget_s = (
+                RECON_E2E_PAGE_TIMEOUT.get_or_none() or 30_000
+            ) / 1000.0
             for v in vals:
+                # FAST PATH — the value is already in ``ts.options`` (the
+                # ``_assert_pickable`` pattern pre-loads + asserts it via
+                # ``typeahead_filter`` one call earlier). Use it directly;
+                # cache-busting + re-fetching it UNCONDITIONALLY is what
+                # raced under CI load (the re-fetch landing past the old 5s
+                # poll left ``setValue`` running against options WITHOUT the
+                # value → no-op → no ``change`` → no refetch).
+                if sel.evaluate(_has_opt_js, v):
+                    continue
+                # SLOW PATH — genuinely absent: force a per-query fetch, then
+                # wait (on the page-timeout budget) for the value to land.
                 sel.evaluate(
                     """(s, q) => {
                         if (!s.tomselect) return;
@@ -1169,25 +1203,24 @@ class App2Driver:
                     }""",
                     v,
                 )
-                deadline = _time.monotonic() + 5.0
+                deadline = _time.monotonic() + load_budget_s
                 while _time.monotonic() < deadline:
-                    has_v = sel.evaluate(
-                        """(s, q) => {
-                            if (!s.tomselect) return false;
-                            const opts = s.tomselect.options || {};
-                            if (Object.prototype.hasOwnProperty.call(opts, q)) {
-                                return true;
-                            }
-                            for (const k of Object.keys(opts)) {
-                                if (opts[k] && opts[k].text === q) return true;
-                            }
-                            return false;
-                        }""",
-                        v,
-                    )
-                    if has_v:
+                    if sel.evaluate(_has_opt_js, v):
                         break
                     self._page.wait_for_timeout(100)
+                # Observability (the client-side analog of a server overload
+                # signal): if the option STILL isn't loaded after its fetch
+                # budget, FAIL HERE naming the gap — never fall through to a
+                # ``setValue`` that silently no-ops into an opaque refetch
+                # timeout.
+                if not sel.evaluate(_has_opt_js, v):
+                    raise AssertionError(
+                        f"App2 pick_filter({label!r}): typeahead option "
+                        f"{v!r} did not land in ts.options within "
+                        f"{load_budget_s:.0f}s of its dropdown-search fetch "
+                        f"— setValue would no-op. Option-load failure, not a "
+                        f"refetch timeout."
+                    )
         # DM.5 — is THIS control a cascade SOURCE? A cascade TARGET
         # ``<select>`` (e.g. Daily Statement's Account picker) carries
         # ``data-cascade-source-param="<this control's param>"`` and an
