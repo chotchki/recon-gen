@@ -8,7 +8,10 @@
 
 Recon Generator is an independent validation tool for midsize financial institutions: it tells you whether your books balance day to day, and when they don't, where to look first.
 
-Accounting is standard. Your institution is not. Recon Generator layers the two: standard double-entry invariants on top of the unique shape you declare (your accounts, your rails, your multi-leg transfer templates, your bundling rules, your aging caps), so every way you actually move money is checked against the rules that govern it.
+- Accounting is standard. We call it L1, meaning layer 1 in this tool. 
+- Your institution is not. We call it L2, meaning layer 2 in this tool. 
+
+Recon Generator layers the two: standard double-entry invariants on top of the unique shape you declare (your accounts, your rails, your multi-leg transfer templates, your bundling rules, your aging caps), so every way you actually move money is checked against the rules that govern it.
 
 ## Who it's for
 
@@ -32,20 +35,20 @@ Both render straight from the bundled L2 YAMLs (`tests/l2/{spec_example,sasquatc
 
 Recon Generator validates data; it doesn't move it. Your transactions and daily-balance feeds land in `<prefix>_transactions` and `<prefix>_daily_balances` (the Data Integration handbook documents the column contract), and Recon Generator reads from there.
 
-Two ways it closes the loop:
+We help you implement in two ways:
 
 - **Wiring it in.** Mapping an upstream system into the L1 schema is real work (column mapping, type narrowing, metadata extraction, the supersession contract). The Data Integration handbook documents it column-by-column, and the Studio Deploy-changes pipeline carries an ETL hook so your existing extract plugs in without bolting code onto Recon Generator itself.
 - **Synthetic scenarios on your real data.** Once your data is flowing, the test-data generator plants extra scenarios on top (drift events, overdraft breaches, stuck-pending aging, supersession trails, fanout patterns, anomaly spikes) so you can validate every L1 invariant without delaying go-live. Trainer knobs (`scope: full / uncovered_rails / exceptions_only / only_template`, `derive_balances`) shape what gets generated.
 
 ## Where it runs
 
-Database backends — **PostgreSQL 17+** and **Oracle 19c+** for the on-prem / cloud-managed production targets, plus **DuckDB** as the zero-install integrator-laptop backend — a pure-Python wheel with an in-process vectorized executor and no server to stand up. The prior SQLite backend was dropped in v13.0.0 (Phase CB.8).
+Database backends — **PostgreSQL 17+** and **Oracle 19c+** for the on-prem / cloud-managed production targets, plus **DuckDB** as the zero-install integrator-laptop backend — a pure-Python wheel with an in-process vectorized executor and no server to stand up. The prior SQLite backend was dropped in v13.0.0 since it isn't optimized for analytics.
 
-Three runtime environments — pick what your auditors and analysts already trust:
+Multiple runtime environments — pick what your auditors and analysts already trust:
 
-- **AWS QuickSight** — managed BI you embed in your own portal; permissions follow the QS user.
+- **AWS QuickSight** — managed BI you embed in your own portal; permissions follow the QS user. **NOTE:** This WILL be deprecated in future releases as AWS continues to change their pricing.
 - **Self-hosted HTMX web app** — the same dashboards with NO AWS dependency, so it runs offline. For sensitive deployments that can't reach external SaaS.
-- **Regulator-ready PDF audit report** — printable and cryptographically fingerprinted (optionally pyHanko-signed). Same source data as the dashboards, and an end-of-pipeline 4-way agreement test gates that they stay in agreement.
+- **Regulator-ready PDF audit report** — printable and cryptographically fingerprinted (optionally pyHanko-signed). Same source data as the dashboards, and an end-of-pipeline 4-way agreement test (against the underlying sql) gates that they stay in agreement.
 
 ## How it's tested
 
@@ -54,8 +57,8 @@ You can't ship a reconciliation tool on "trust me." This tool ships with:
 - **Layered test gates** that run in order — unit → db → app2 → qs_api → qs_browser — so a regression at layer N short-circuits before burning minutes on layer N+1.
 - **Strong typing throughout** (Pyright strict on the core, NewType-wrapped identifiers and dataclass invariants), so an entire class of bug becomes a type error at the wiring site instead of a silent zero-row dashboard.
 - **Fuzz testing as a property axis** — every test variant runs against random L2 institution shapes (`fuzz:N` for N seeds, pinned via `f<seed>_..` for repro), so the same invariants check against shapes nobody hand-wrote.
-- **Deterministic, exhaustive test-data generation** — your L2 institution shape drives positive and negative scenarios that the harness plants automatically: drift, overdraft, limit breach, stuck-pending, stuck-unbundled, supersession audit, fanout, anomaly spikes, money-trail chains. Each scenario is hash-locked per `(L2 instance, dialect)`.
-- **Cross-runtime parity** — the same scenario fans out into the QuickSight cell, the self-hosted cell and the audit PDF, and a 4-way agreement test gates that all four agree on every L1 invariant violation set (the drift the dashboard shows is the drift the PDF prints).
+- **Deterministic, exhaustive test-data generation** — your L2 institution shape drives positive and negative scenarios that the harness plants automatically: drift, overdraft, limit breach, stuck-pending, stuck-unbundled, supersession audit, fanout, anomaly spikes, money-trail chains. Each scenario is shape-locked per `(L2 instance, dialect)`.
+- **Cross-runtime parity** — the same scenario fans out into the QuickSight cell, the self-hosted cell, the audit PDF, underlying SQL and are compared in a 4-way agreement test gates that all four agree on every L1 invariant violation set (the drift the dashboard shows is the drift the PDF prints).
 
 ---
 
