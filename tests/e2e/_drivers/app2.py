@@ -58,6 +58,7 @@ from recon_gen.common.html._smoke_app import (
     build_smoke_app,
     stub_money_trail_fetcher,
 )
+from recon_gen.common.env_keys import RECON_E2E_PAGE_TIMEOUT
 from recon_gen.common.html._tree_fetcher import OptionsSearchFetcher
 from recon_gen.common.html.render import FilterSpec
 from recon_gen.common.html.server import DataFetcher
@@ -71,10 +72,15 @@ from tests.e2e._harness_html2 import html2_server
 # Matches the per-visual data endpoint, e.g.
 # /dashboards/smoke/sheets/showcase/visuals/showcase-kpi/data?...
 _VISUAL_DATA_URL_RE = re.compile(r"/visuals/[^/]+/data")
-_REFETCH_TIMEOUT_MS = 30_000  # CR.x — bumped 15s→30s; CI's xdist=4 server load on the
-# Studio server can starve individual visual fetches beyond 15s, especially after
-# CQ.5's `clearOptions()` triggers an extra fetch cycle. Local single-worker runs
-# typically settle in 1-3s, so the bump only matters under high parallelism.
+# The refetch wait reads the SAME configurable page timeout the rest of the
+# browser tier uses (RECON_E2E_PAGE_TIMEOUT), so it inherits the runner's
+# browser-layer 60s bump on BOTH local and CI. A hardcoded 30s here did NOT —
+# the runner bumps the page timeout to 60s for the browser layer but this
+# refetch ceiling stayed 30s, and the slower CI box outran it on
+# test_bo_1[app2] (passed locally / failed CI = the POLICY-1 divergence).
+# Default 30s for a local single-worker run (1-3s typical); 60s under the
+# browser-layer bump. CR.x history: 15s→30s for xdist server-load starvation.
+_REFETCH_TIMEOUT_MS = RECON_E2E_PAGE_TIMEOUT.get_or_none() or 30_000
 
 # DD.4 — matches recon_gen.common.html.auth.SESSION_COOKIE_NAME (kept as a
 # local literal so the test driver doesn't import the production module
