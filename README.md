@@ -62,7 +62,7 @@ You can't ship a reconciliation tool on "trust me." This tool ships with:
 
 ---
 
-CLI is organized as five artifact groups: `recon-gen schema|data|json|docs|audit`. Each artifact has `apply`/`clean`/`test` (plus a few extras); destructive operations default to emit and require `--execute` to actually run. The `audit` group also exposes a `verify` subcommand for recomputing a generated PDF's provenance fingerprint. Change the Python (or ask Claude) and re-run `json apply --execute` — you get a new dashboard.
+The CLI is five artifact groups — `recon-gen schema | data | json | docs | audit` — plus two server commands, `studio` and `dashboards` (below). Each artifact group runs `apply` / `clean` / `test` (audit adds `verify`, which recomputes a generated PDF's provenance fingerprint); anything destructive defaults to emit and needs `--execute` before it touches the DB, AWS or disk. Change the Python (or ask Claude) and re-run `json apply --execute` — you get a new dashboard.
 
 ## Demo Docs
 
@@ -347,9 +347,11 @@ Two L2 institution YAMLs ship in `tests/l2/`:
 
 Pass `--l2 tests/l2/sasquatch_pr.yaml` (or your own) to switch the rendered handbook + demo data narrative without touching dashboard code.
 
-## Self-hosted renderer (Dashboards)
+## Self-hosted: Dashboards and Studio
 
-The four apps render two ways off the same L2 instance. The default is **AWS QuickSight** — `json apply --execute` pushes the JSON resource graph (above). The second is **Dashboards** (formerly "App 2"): a small self-hosted HTMX + d3 page server that reads the same database directly, with no AWS account involved.
+The four apps render off the same L2 instance two ways. **AWS QuickSight** is one — `json apply --execute` pushes the JSON resource graph (above). The other is the self-hosted stack: an HTMX + d3 server that reads the database directly, no AWS account in the loop. It comes at two depths.
+
+**Dashboards** is the lean read-only mount — one process serves all four apps plus the handbook at `/docs`:
 
 ```bash
 pip install 'recon-gen[serve]'
@@ -359,7 +361,9 @@ recon-gen dashboards -c config.yaml                # one process, all 4 apps + t
 
 It speaks all three SQL dialects (PostgreSQL / Oracle / DuckDB); point `db.url` at any of them. The schema + seed have to already be applied (`schema apply --execute`, `data apply --execute`, `data refresh --execute`) — Dashboards only reads. It's stateless: every GET re-runs the query, filter state round-trips as `?param_X=…` query params (so the URL is the cache key), no auth/sessions — put it behind your own auth front on a network. All browser-side assets (htmx, d3, the filter widgets) ship inside the wheel — it runs offline.
 
-Why two renderers: Dashboards is the offline-iteration loop (edit the L2 YAML / dataset SQL, refresh the page — no deploy cycle) and the renderer the in-progress Studio (`recon-gen studio`, the YAML editor + diagram + data-shaping orchestrator + ETL coverage) builds on. A 4-way cross-tool agreement test (`scenario plants ⊆ direct matview SELECT == QuickSight == Dashboards`, `== audit PDF` where it applies) gates the release, so "feature parity with QuickSight, minus the QuickSight bugs" is enforced, not just claimed. Full reference — what ships in the wheel, the maintainer recipes for bumping a vendored asset — in the handbook's *Self-hosting the dashboards* page.
+**Studio** (`recon-gen studio`) is everything Dashboards mounts plus the implementation surface we hand integrators, trainers and ETL engineers — the L2-YAML editor, the unified diagram (your accounts / rails / chains / templates as a graph you edit in place), the data-shaping panel (trainer knobs + scenario plants) and Deploy-changes orchestration with an ETL hook. The YAML on disk stays the source of truth; every save is an atomic write. This is the offline-iteration loop — edit the shape and refresh the page, no deploy cycle and no AWS round-trip.
+
+The self-hosted stack isn't a lesser copy of QuickSight. A 4-way agreement test (`scenario plants ⊆ direct matview SELECT == QuickSight == Dashboards`, `== audit PDF` where it applies) gates the release, so it matches QuickSight on every L1 invariant violation set — enforced, not just claimed. And with QuickSight on a deprecation path (AWS pricing, see above), this is where the tool is going. Full reference — what ships in the wheel, the maintainer recipes for bumping a vendored asset — in the handbook's *Self-hosting the dashboards* page.
 
 ## Theming
 
@@ -372,7 +376,7 @@ To customize the demo persona's brand: edit the `theme:` block on `tests/l2/sasq
 ```
 src/recon_gen/
     __main__.py         # python -m recon_gen entry point
-    cli/                # Click CLI shell — schema | data | json | docs groups
+    cli/                # Click CLI — schema | data | json | docs | audit groups + studio / dashboards servers
         __init__.py     # main + group registration
         schema.py / data.py / json.py / docs.py
         _helpers.py     # shared resolve_l2_for_demo / emit_to_target / connect_and_apply
