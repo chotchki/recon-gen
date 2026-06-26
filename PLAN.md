@@ -698,9 +698,9 @@ Rewrite the reader-facing prose so it reads as chotchki, not generic-AI. Source 
 Drop the v3 logical-name hold-over (`signed_amount` / `posted_at` / `balance_date` / `balance` / `transfer_type` / `account_type` / `parent_transfer_id` / `transaction_id` / `amount`-absolute) from reader-facing docs + CLAUDE.md; align to the v6 physical columns. Decisions (2026-06-26): SPEC.md stays the conceptual/logical layer (untouched); fix prose only — the Investigation matview `*_account_type` output aliases stay (no code/parity churn). Context-aware: base-table column refs → physical; matview OUTPUT columns + SPEC concepts → untouched.
 
 - [x] DU.0 - Mapping + scope + decisions. Authoritative map from the v6 DDL (`schema.py:1959`/`2022`) + rename comments (`transfer_type`→`rail_name` Z.B; `account_type`→`account_role` `:3984`; `posted_at`→`posting`; `balance_date`→`business_day_start`; `balance`→`money`; `signed_amount`→`amount_money`; `parent_transfer_id`→`transfer_parent_id`; `transaction_id`→`id`; `amount`-absolute → `ABS(amount_money)`).
-- [ ] DU.1 - Fan-out: align the ~30 reader-facing docs to physical base-table column names (context-aware; keep matview output aliases + SPEC). rewrite → verify → fix + the doc/handbook/parity gates.
+- [x] DU.1 - Fan-out: align the ~30 reader-facing docs to physical base-table column names (context-aware; keep matview output aliases + SPEC). rewrite → verify → fix + the doc/handbook/parity gates.
 - [x] DU.2 - CLAUDE.md Domain Model section align to physical (the source of the hold-over).
-- [ ] DU.3 - Verify (full unit + docs + build + parity gates) + commit; operator review.
+- [x] DU.3 - Verify (full unit + docs + build + parity gates) + commit; operator review.
 
 ## Backlog (not yet phased)
 
