@@ -1,8 +1,9 @@
 # {{ vocab.institution.name }} — Institution Tour
 
 *Generated from the L2 institution YAML (`{{ l2_instance_name }}.yaml`).
-Re-run the docs build (or point `QS_DOCS_L2_INSTANCE` at a different
-YAML) to regenerate this section against another institution.*
+Point `RECON_GEN_DOCS_L2_INSTANCE` at a different YAML
+and re-run the docs build to regenerate this tour against another
+institution.*
 
 {{ l2.description or "_(no institution description provided in the L2 YAML)_" }}
 
@@ -95,7 +96,7 @@ Pick a primitive to walk its full inventory + descriptions:
   unbundled (using the Rails' aging caps), supersession audit.
 - **L2 Flow Tracing** — walks the Rails / Chains / Transfer Templates
   diagrams above against runtime activity, surfacing
-  declared-but-never-fired rails, chain orphans, and unmatched
+  declared-but-never-fired rails, chain orphans and unmatched
   transfer types.
 - **Investigation** — questions over the leaf-account / external-
   counterparty graph above (recipient fanout, volume anomalies, money
@@ -105,3 +106,6 @@ Pick a primitive to walk its full inventory + descriptions:
 
 For a per-app sheet-by-sheet walkthrough, see the
 [Walkthroughs](../walkthroughs/index.md) section.
+
+See it live: https://recon-gen-spec.hotchkiss.io/ — the bundled
+`spec_example` institution rendered as the live HTMX dashboards.

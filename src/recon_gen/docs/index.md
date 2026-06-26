@@ -7,6 +7,8 @@ the live training-materials surface rendered against
 materials render against your own institution once you swap the L2
 YAML.*
 
+See it live: https://recon-gen-spec.hotchkiss.io/
+
 Accounting is standard. Your institution is not. Recon Generator
 layers the two — standard double-entry invariants on top of your
 unique shape (accounts, rails, multi-leg transfer templates,
@@ -26,7 +28,7 @@ the work across roles, all reading from the same shared base ledger.
 ## Pick your role
 
 The fastest way in. Each role page tells you which dashboard is
-yours, what to read first, what concepts to ground, and what *not*
+yours, what to read first, what concepts to ground and what not
 to spend time learning. Start here:
 
 - **[For the operator](for-your-role/operator.md)** — daily
@@ -56,7 +58,7 @@ when you know what you're after.
 
 - **[Concepts](concepts/index.md)** — banking primitives + L2
   model primitives. Every reader benefits from grounding in
-  double-entry, escrow / sweep / vouchering, and the L2 nouns
+  double-entry, escrow / sweep / vouchering and the L2 nouns
   (Account / Rail / Chain / TransferTemplate / LimitSchedule).
 - **[Walkthroughs](walkthroughs/index.md)** — task recipes.
   "How do I X?" / "Where does this row lead?" / "Which sheet
