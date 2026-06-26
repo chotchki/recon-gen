@@ -127,8 +127,8 @@ to v14; `signed_amount`→`amount_money`; `11→12` columns; `emit_schema(prefix
 - **Orphan page** — `customization/how-do-i-brand-my-handbook-prose.md` is on disk
   but NOT in `mkdocs.yml` nav (and was absent from the walkthroughs index). Either
   the nav is missing it or the file is dead. Your call (I rewrote it in place either way).
-- **CLAUDE.md domain-model is stale** (out of scope, flagging) — its `<prefix>_transactions`
-  section still uses `signed_amount`; v6 renamed it to `amount_money` + `amount_direction`.
+- **CLAUDE.md domain-model is stale** — **FIXED in DU.2** (`f5281a06`): the whole Domain
+  Model section moved to the v6 physical columns + 3 stale-fact corrections.
 - **`run-my-first-deploy` sample-output blocks** show drifted per-app dataset counts
   (~27 total; real is ~50). Left verbatim (inside code fences). Refresh the sample
   stream, or leave it illustrative?
@@ -137,7 +137,19 @@ to v14; `signed_amount`→`amount_money`; `11→12` columns; `emit_schema(prefix
 - **`populate-transactions`** has a surviving dangling cite to a Schema_v6 "Example
   1" that no longer exists (pre-existing, outside the diff; re-pointed the main ref).
 
-## Recurring flag — logical (CPA) vs physical (v6) column names [your call]
+## RESOLVED (Phase DU, 2026-06-26) — logical (CPA) vs physical (v6) column names
+
+**Decision: drop the v3 logical hold-over, move to the physical columns.** Executed in
+Phase DU — DU.1 aligned 44 reader-facing docs (context-aware: base-table column refs →
+physical; matview OUTPUT aliases like executives `account_type` / `inv_money_trail_edges.posted_at`,
+display labels, param identifiers, and SPEC's conceptual model KEPT), DU.2 rewrote the
+CLAUDE.md Domain Model (+ fixed 3 stale facts: the dead six-value enum, `control_account_id`,
+the drift invariant), DU.3 re-locked the two generated handbook artifacts the rename
+propagated into. Full suite green (5415 unit / 64 docs / 0 anchors). SPEC.md left as the
+conceptual layer (your call). One residual nuance: `_glossary.md`'s `scope` reads as a
+domain concept (physically `account_scope`) — left as concept-prose. Original flag below.
+
+---
 
 The fan-out kept hitting this across docs + snippets + CLAUDE.md: prose uses
 `signed_amount` / `amount` / `posted_at` / `balance_date` / `transfer_type` — the v3
