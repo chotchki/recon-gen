@@ -141,7 +141,7 @@ The validator will:
 - Check C8c — ``expected_parent_count >= 2`` when set (passes — 5
   ≥ 2).
 - Accept the chain entry; auto-derive the implicit
-  ``parent_transfer_id`` metadata requirement on every leg_rail of
+  ``transfer_parent_id`` metadata requirement on every leg_rail of
   the child template (inherits the chain's metadata-key auto-derivation).
 
 ## How to verify

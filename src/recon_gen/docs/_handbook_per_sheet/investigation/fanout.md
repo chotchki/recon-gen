@@ -41,7 +41,7 @@ One row at the top of the table with a very large "Senders Feeding This Recipien
 
 - **Date window.** If you've picked a very narrow range (e.g., a single day), a real fanout pattern may just fall outside it. Widen to the trailing 7 days.
 - **Threshold setting.** If your slider is at 10+ distinct senders and the institution's legitimate recipient count is small, zero is expected. Lower the threshold to 3–5 and re-examine.
-- **Freshness.** Cross to the *App Info* sheet and check the *Matview Status* table. The dataset reads `transactions` directly, not a [matview](../_glossary.md#matview--materialized-view) (materialized view), so stale matviews are not the issue here. But if `transactions` has no recent rows (e.g., `business_day_start` is 2 weeks old), the underlying data may simply be stale.
+- **Freshness.** Cross to the *App Info* sheet and check the *Matview Status* table. The dataset reads `transactions` directly, not a [matview](../_glossary.md#matview--materialized-view) (materialized view), so stale matviews are not the issue here. But if `transactions` has no recent rows (e.g., `posting` is 2 weeks old), the underlying data may simply be stale.
 
 ## Cross-sheet drills
 

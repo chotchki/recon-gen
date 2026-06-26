@@ -26,7 +26,7 @@ Example: a `WireDisbursement` template with two leg rails
 `disbursement_id` as a metadata key. The template declares
 `transfer_key = disbursement_id`. Two leg firings with matching
 `disbursement_id` values are one Transfer; the L1 conservation
-invariant checks their `signed_amount` sum equals
+invariant checks their `amount_money` sum equals
 `expected_net`.
 
 ## Constraints (validator R12)

@@ -556,7 +556,7 @@ Validator rules at L2 load time:
 
 - **V1a** — `min` strictly less than `max` (degenerate single-point
   ranges rejected).
-- **V1b** — both `min` and `max` `> 0`. The bound is on `abs(amount)`,
+- **V1b** — both `min` and `max` `> 0`. The bound is on `abs(amount_money)`,
   so signed and zero values have no meaning.
 - **V1c** — forbidden on rails with `aggregating: true`. Aggregator
   amounts derive from bundled children; set the range on the child

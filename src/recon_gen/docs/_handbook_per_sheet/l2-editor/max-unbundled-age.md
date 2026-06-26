@@ -17,7 +17,7 @@ The `<prefix>_stuck_unbundled` matview joins this rail's firings
 against the matching aggregating rail's firings via the
 `bundles_activity` membership. A firing is "unbundled" when no
 aggregating firing in the cadence window has claimed it; "stuck"
-when the current time minus the unbundled firing's `posted_at`
+when the current time minus the unbundled firing's `posting`
 exceeds `max_unbundled_age`.
 
 Stuck rows surface on the L1 Unbundled Aging sheet and roll up

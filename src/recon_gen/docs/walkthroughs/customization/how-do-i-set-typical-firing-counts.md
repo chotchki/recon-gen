@@ -105,7 +105,7 @@ heuristic produced.
 See it live: https://recon-gen-spec.hotchkiss.io/
 
 To confirm the count specifically, filter the L1 transactions view to
-``rail_name = MerchantCardSale`` and group by ``balance_date`` — the
+``rail_name = MerchantCardSale`` and group by the ``posting`` day — the
 per-day row count should land inside your declared band.
 
 ## What you should NOT do

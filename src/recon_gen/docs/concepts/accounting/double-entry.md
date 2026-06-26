@@ -15,8 +15,8 @@ of it.
 Move $100 from Account A to Account B and the transfer produces two
 rows:
 
-- Account A: `signed_amount = -100` (money out)
-- Account B: `signed_amount = +100` (money in)
+- Account A: `amount_money = -100` (money out)
+- Account B: `amount_money = +100` (money in)
 
 Sum across the whole transfer and you land on zero. That's L1
 Conservation. (Strictly the invariant is Σ legs = a declared
@@ -44,10 +44,10 @@ leg has posted, and that temporary imbalance is itself diagnostic.
 ## In the schema
 
 - The `transactions` table stores one row per posting leg.
-  `transfer_id` groups the legs of one transfer; `signed_amount`
+  `transfer_id` groups the legs of one transfer; `amount_money`
   carries the sign (`+` money in, `−` money out, from the
   account-holder's perspective).
-- Every L1 invariant works off sums of `signed_amount`:
+- Every L1 invariant works off sums of `amount_money`:
     - L1 Conservation — net-to-zero per transfer
     - L1 Drift — sum-of-postings vs the stored balance
     - L1 Limit Breach — sum-of-outbound vs the limit cap

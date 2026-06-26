@@ -56,7 +56,7 @@ SQL for `JSON_VALUE(metadata`:
 
 ```sql
 SELECT
-    transaction_id,
+    id AS transaction_id,
     transfer_id,
     posting,
     amount_money,

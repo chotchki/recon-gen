@@ -127,11 +127,12 @@ tables for each.
 
 ### Transaction
 
-A single money-movement leg with an `account_id`, an `amount` (in
-integer cents — never floats), a `signed_amount` (+ in, − out), a
-`status` (Pending / Posted / Failed), a `posted_at` timestamp, a
-`balance_date` (the business day the leg counts against) and JSON
-metadata that varies by rail.
+A single money-movement leg with an `account_id`, an `amount_money`
+(signed integer cents — never floats; + in, − out), an
+`amount_direction` ('Debit' / 'Credit'), a `status` (Pending /
+Posted / Failed), a `posting` timestamp, a `business_day_start` (the
+business day the leg counts against) and JSON metadata that varies by
+rail.
 
 ### Transfer
 

@@ -40,7 +40,7 @@ The columns are the same on both tables:
 - `stored_balance` — `effective_balances.effective_money` (shown in dollars;
   the matview stores it as cents, converted at the dataset read boundary)
 - `computed_balance` —
-  - For the leaf table: Σ `signed_amount` of every posted Money record whose
+  - For the leaf table: Σ `amount_money` of every posted Money record whose
     `account_id = sb.account_id` through `business_day_start`
   - For the parent table: Σ `stored_balance` of all children of this parent
     account on the same `business_day_start`

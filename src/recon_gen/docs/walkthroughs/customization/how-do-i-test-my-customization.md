@@ -254,12 +254,12 @@ parametrized over both renderers (`qs` + `app2`):
 
 ```python
 # tests/e2e/test_repo_exception_check.py
-def test_repo_transfers_appear_in_transfer_type_filter(l1_dashboard_driver):
-    # After your seed plants 'repo' transfers, the Transfer Type
+def test_repo_transfers_appear_in_rail_filter(l1_dashboard_driver):
+    # After your seed plants 'repo' transfers, the Rail
     # dropdown should advertise the new value as a pickable option.
     driver, dashboard_arg = l1_dashboard_driver
     driver.open(dashboard_arg)
-    options = driver.filter_options("Transfer Type")
+    options = driver.filter_options("Rail")
     assert "repo" in options
 ```
 

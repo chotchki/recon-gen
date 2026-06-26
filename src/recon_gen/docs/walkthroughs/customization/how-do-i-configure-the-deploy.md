@@ -161,7 +161,7 @@ datasource. Three modes:
 > `late_default_days` setting (it was removed). Each transaction row
 > carries an optional `expected_complete_at` timestamp and the generated
 > SQL surfaces an `is_late` column that flips when
-> `CURRENT_TIMESTAMP > COALESCE(expected_complete_at, posted_at +
+> `CURRENT_TIMESTAMP > COALESCE(expected_complete_at, posting +
 > INTERVAL '1 day')`. See the ETL handbook section on
 > `expected_complete_at` for the population contract.
 

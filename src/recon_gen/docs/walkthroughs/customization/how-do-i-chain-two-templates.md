@@ -28,7 +28,7 @@ The L2 grammar handles the rest:
 - the validator auto-derives the `parent_transfer_id` posted-metadata
   requirement on every leg_rail of the child template
 - the seed emits chain firings where all leg_rails share one Transfer
-  with one shared `parent_transfer_id`
+  with one shared `transfer_parent_id`
 - the L1 `chain_parent_disagreement` matview catches any leg that
   claims a different parent
 
@@ -72,7 +72,7 @@ chains:
       the customer's DDA to the fee revenue GL. All three leg_rails
       of the child template (InternalTransferDebit / Credit /
       SuspenseClose) share one child Transfer and one
-      `parent_transfer_id` (first-firing-wins). ETL bugs that
+      `transfer_parent_id` (first-firing-wins). ETL bugs that
       disagree on which parent the legs belong to surface on the L1
       Exceptions sheet under `check_type='chain_parent_disagreement'`.
 ```
@@ -100,7 +100,7 @@ matview against the new chain shape (the matview itself doesn't change
 templates exist). The second one re-seeds the demo data —
 `auto_scenario.py` plants a `TwoTemplateChainPlant` (healthy, no
 violation) AND a `ChainParentDisagreementPlant` (synthetic ETL bug
-with conflicting parent_transfer_ids).
+with conflicting transfer_parent_ids).
 
 Open the L1 Exceptions sheet. You should see:
 
@@ -108,7 +108,7 @@ Open the L1 Exceptions sheet. You should see:
   `rail_name` column showing `InternalTransferCycle` (the template
   name surfaces in the rail_name slot for this row category).
 - The `magnitude_count` column reads `2` (= cardinality of the
-  conflicting parent_transfer_id set).
+  conflicting transfer_parent_id set).
 - Drilling from the row leads you to the Transactions sheet
   filtered to the conflicting Transfer's id.
 

@@ -12,7 +12,7 @@ posted. A control-accounts reference table sits below for the GL-control
 view.
 
 Drift here = `closing_balance_stored − (opening_balance + Σ
-signed_amount of today's posted legs)`. On a healthy feed it's exactly
+amount_money of today's posted legs)`. On a healthy feed it's exactly
 zero. Non-zero drift is the one cue that the ledger doesn't reconcile
 for that account-day — a green ✓ next to the number means $0
 (reconciled), red ✗ means it doesn't.

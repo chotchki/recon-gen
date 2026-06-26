@@ -132,7 +132,7 @@ you want to know:
   inbound from outbound.
 - **"Where did this specific transfer come from?"** → Money Trail
   sheet. Pick the chain root (typically the spike transfer itself if
-  it's chain-rooted, or the parent_transfer_id chain it sits on).
+  it's chain-rooted, or the transfer_parent_id chain it sits on).
 - **"Show me the underlying posting rows."** → L1 Reconciliation
   Dashboard, Transactions sheet, filtered to the sender or
   recipient `account_id`.

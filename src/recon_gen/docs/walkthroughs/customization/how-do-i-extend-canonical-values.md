@@ -1,4 +1,4 @@
-# How do I add a new Rail or account_type?
+# How do I add a new Rail or account_role?
 
 *Customization walkthrough — Developer / Product Owner. Reskinning + extending.*
 
@@ -35,10 +35,10 @@ Three reference points:
   renders these declarations directly, and
   `common/l2/schema.py::emit_schema` inlines them into the
   prefixed L1 invariant views (limit caps, aging windows, etc.).
-- **[Schema_v6.md → canonical account_type values](../../Schema_v6.md#table-1-prefix_transactions)** —
-  the cataloged `account_type` set: `gl_control`, `dda`,
+- **[Schema_v6.md → canonical account_role values](../../Schema_v6.md#table-1-prefix_transactions)** —
+  the cataloged `account_role` set: `gl_control`, `dda`,
   `merchant_dda`, `external_counter`, `concentration_master`,
-  `funds_pool`. New `account_type` values are convention-only,
+  `funds_pool`. New `account_role` values are convention-only,
   not enforced by any CHECK constraint.
 - **`common/l2/schema.py`** — the source of truth for the
   prefixed DDL. Read this to see how the L2 vocabulary becomes
@@ -62,7 +62,7 @@ check) reads the `rail_name` column directly — no separate enum
 file in code, no per-value visual config. New rail names surface
 the moment they appear in `{{ l2_instance_name }}_transactions`.
 
-The `account_type` column is unconstrained at the schema level:
+The `account_role` column is unconstrained at the schema level:
 
 ```sql
 account_role VARCHAR(100) NOT NULL,
@@ -72,7 +72,7 @@ The canonical list (`gl_control`, `dda`, `merchant_dda`,
 `external_counter`, `concentration_master`, `funds_pool`) is
 documented in
 [Schema_v6.md](../../Schema_v6.md#table-1-prefix_transactions)
-but enforced only by convention. Adding a new account_type is
+but enforced only by convention. Adding a new account_role is
 zero-DDL.
 
 See it live: https://recon-gen-spec.hotchkiss.io/
@@ -105,16 +105,16 @@ invariant views know what to do with its rows.
    Your new rail should appear; if it doesn't, the L2 declaration
    has a hygiene issue (caught by the L2 Hygiene Exceptions sheet).
 
-### Adding a new `account_type` value
+### Adding a new `account_role` value
 
 Two steps, no L2 or schema change:
 
 1. **Document the new value.** Update
-   [Schema_v6.md → Canonical account_type values](../../Schema_v6.md#table-1-prefix_transactions)
+   [Schema_v6.md → Canonical account_role values](../../Schema_v6.md#table-1-prefix_transactions)
    with the new role and what it means. The list is the
    convention; without it, future-you will guess.
 2. **Wire your ETL to write the new value.** Whatever feed
-   creates the new account role writes `account_type =
+   creates the new account role writes `account_role =
    'broker_dealer'` (or whatever you named it). The dashboards
    surface it automatically.
 
@@ -233,6 +233,6 @@ Once your new rail is wired:
   for when you need to extend a rail-scoped exception check
   to fire on your new value via a dataset SQL change rather
   than (or in addition to) an L2 update.
-- [Schema_v6 → Canonical account_type values](../../Schema_v6.md#table-1-prefix_transactions) —
-  the documented convention for `account_type`. Update the
+- [Schema_v6 → Canonical account_role values](../../Schema_v6.md#table-1-prefix_transactions) —
+  the documented convention for `account_role`. Update the
   table when you add a new role.

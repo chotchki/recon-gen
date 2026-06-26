@@ -38,7 +38,7 @@ Three KPIs across the top, then two audit tables.
 - **Logical Keys (Transactions) with Supersession** (KPI) — count of
   distinct `transaction_id` values whose append-only `entry` column has
   more than one row. Unit is distinct KEYS.
-- **Supersession $ Exposure** (KPI) — sum of `|amount|` across superseded
+- **Supersession $ Exposure** (KPI) — sum of `|amount_money|` across superseded
   transaction entries. The dollar magnitude of the audit surface; counts
   alone leave "how much money do these revisions move?" open.
 - **Supersession Rows with No Reason** (KPI) — count of higher-`entry`

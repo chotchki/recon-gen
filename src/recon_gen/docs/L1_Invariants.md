@@ -247,7 +247,7 @@ days_ago=35` surfaces with `age_seconds > max_unbundled_age_seconds`
 > (first-firing-wins per gap doc §3).
 
 A child Transfer where leg_rail firings claim **different**
-`parent_transfer_id` values surfaces here. The pattern usually means
+`transfer_parent_id` values surfaces here. The pattern usually means
 an ETL bug: stale parent reference, cross-cycle contamination or a
 race where two parent firings both wrote into the same downstream
 template Transfer.
@@ -265,9 +265,9 @@ cardinality, ≥2 = violation), `parent_transfer_id_min` /
 without re-running the GROUP BY).
 
 **What to do:** Identify which leg_rails of the child template wrote
-the conflicting `parent_transfer_id` values — usually the bug is
+the conflicting `transfer_parent_id` values — usually the bug is
 upstream of the matview (in the ETL adapter that assigns
-`parent_transfer_id` from a stale reference). Compare the two parents
+`transfer_parent_id` from a stale reference). Compare the two parents
 by drilling into their respective transfer_ids on the Transactions
 sheet; one should be the correct first-firing parent and the other a
 contamination from an unrelated cycle. Fix the ETL's parent-resolution
@@ -277,7 +277,7 @@ logic and re-run the affected child Transfer.
 **the matview should surface:** a planted `ChainParentDisagreementPlant`
 on `InternalTransferCycle` (chain child of `CustomerFeeAccrual`) at
 days_ago=1 — two leg rows share one child_transfer_id but carry
-different parent_transfer_ids ("tr-cpd-parent-a-0001" vs
+different transfer_parent_ids ("tr-cpd-parent-a-0001" vs
 "tr-cpd-parent-b-0001").
 {% endif %}
 
@@ -376,7 +376,7 @@ unset), `disagreement_kind` ('orphan' / 'missing' / 'extra'),
 should have fired N times but one (or more) firings never landed —
 look at the parent rail's firing log for the batch period and find
 the missing date(s). For 'extra': a parent firing claimed membership
-in this batch it shouldn't have — could be a stale `parent_transfer_id`
+in this batch it shouldn't have — could be a stale `transfer_parent_id`
 metadata value (ETL pulled from a wrong source) or a duplicate
 re-post. For 'orphan': only one parent contributed — either the
 chain shouldn't be `fan_in` (it's actually 1:1) OR the operator

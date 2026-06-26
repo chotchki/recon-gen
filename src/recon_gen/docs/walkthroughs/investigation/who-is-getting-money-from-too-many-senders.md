@@ -24,7 +24,7 @@ See it live: https://recon-gen-spec.hotchkiss.io/
 
 The sheet has two controls in the top-right panel:
 
-- **Date range** — limits the analysis window via `posted_at`. Default
+- **Date range** — limits the analysis window via `posting`. Default
   is the trailing window the demo plants scenarios into; widen for
   longer-tail patterns, narrow to "this week" for a focused review.
 - **Min distinct senders** — the threshold a recipient must clear to

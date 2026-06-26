@@ -34,14 +34,14 @@ the legacy `emit_seed` plant SQL on top. Both halves target the same
 `{{ l2_instance_name }}_transactions` and `{{ l2_instance_name }}_daily_balances` tables. Plant
 account ids and baseline account ids live in disjoint pools
 (plants on `cust-0001`–`cust-0010`, baseline on `cust-0011`+) so the
-`(account_id, business_day)` PK on `daily_balances` never collides.
+`(account_id, business_day_start)` PK on `daily_balances` never collides.
 
 ## Window and anchor
 
 The baseline emits a 90-day rolling window ending on the
 `anchor` date (defaults to `datetime.now().date()` at call time — local
 time, not UTC).
-Every `posted_at` and `business_day` literal in the generated SQL is
+Every `posting` and `business_day_start` literal in the generated SQL is
 computed against this anchor, not against `now()` at apply time, so
 the SHA256 hash-lock stays deterministic for a fixed anchor. The
 canonical anchor for hash-lock tests is `date(2030, 1, 1)`.
@@ -206,7 +206,7 @@ side of a force-posted Fed leg has no `daily_balances` row).
 - **Single-leg rail.** One row per firing with the leg posted at the
   sampled time-of-day.
 - **Two-leg rail.** Two rows per firing with shared `transfer_id`,
-  `signed_amount` summing to zero, both posted at the same time-of-day
+  `amount_money` summing to zero, both posted at the same time-of-day
   (within ms).
 - **Aggregating rail (children-first).** Child legs accumulate
   throughout the day at sampled times-of-day. The EOD (or EOM) parent
@@ -224,11 +224,11 @@ side of a force-posted Fed leg has no `daily_balances` row).
 
 ## Daily-balance materialization
 
-For every `(account, business_day)` in the window, the
+For every `(account, business_day_start)` in the window, the
 `_emit_baseline_daily_balances` pass walks the per-account leg log
 (populated during the leg loop) and computes the EOD balance as
-`starting_balance + cumulative SUM(signed_amount)`. The drift matview
-computes `stored - SUM(signed_amount)` over the same data, so baseline
+`starting_balance + cumulative SUM(amount_money)`. The drift matview
+computes `stored - SUM(amount_money)` over the same data, so baseline
 rows must keep that at zero — `_BaselineState.eod_balances` is the
 single source of truth for both halves.
 

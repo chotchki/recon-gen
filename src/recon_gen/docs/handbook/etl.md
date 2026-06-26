@@ -36,12 +36,12 @@ Two tables feed everything:
 
 - **`transactions`** — one row per money-movement leg. 11 mandatory
   columns + conditional extras + a `metadata` JSON column.
-- **`daily_balances`** — one row per `(account_id, balance_date)`.
+- **`daily_balances`** — one row per `(account_id, business_day_start)`.
   Stored EOD balance + a `metadata` JSON column for per-day
   configuration (limit-schedule payloads live here).
 
 Every shipped dashboard (L1, L2 Flow Tracing, Investigation,
-Executives) reads from these two tables. `account_type` and
+Executives) reads from these two tables. `account_role` and
 `rail_name` discriminate which slice each app cares about;
 the schema itself is shared. Full column contract, per-column
 failure modes, metadata catalog and ETL examples:
@@ -56,7 +56,7 @@ failure modes, metadata catalog and ETL examples:
 column. Populate it when your ETL knows the rail's settlement
 window — instant rails (Fed wire, on-us internal) same-day, ACH
 T+2, cards T+3. When NULL, downstream views fall back to
-`posted_at + INTERVAL '1 day'` via COALESCE, so omitting the
+`posting + INTERVAL '1 day'` via COALESCE, so omitting the
 column is safe.
 
 Why bother populating it? The `is_late` predicate that the
@@ -86,7 +86,7 @@ invariant matviews (`{{ l2_instance_name }}_drift`, `{{ l2_instance_name }}_over
 the Investigation cluster (`{{ l2_instance_name }}_inv_pair_rolling_anomalies`
 feeds Volume Anomalies; `{{ l2_instance_name }}_inv_money_trail_edges` feeds
 Money Trail and Account Network — recursive walk over
-`parent_transfer_id`). None are auto-refreshed: every ETL load
+`transfer_parent_id`). None are auto-refreshed: every ETL load
 must run `REFRESH MATERIALIZED VIEW` on each, or the operator-
 facing aging / anomaly / chain columns will lag. The dependency-
 ordered statements come from
@@ -113,7 +113,7 @@ full refresh contract.
   </a>
   <a class="snb-card" href="../../walkthroughs/etl/how-do-i-validate-a-single-account-day/">
     <h3>How do I validate a single account-day after a load?</h3>
-    <p>Open the Daily Statement sheet on a specific `(account_id, balance_date)` to confirm opening, debits, credits, closing and zero drift — the per-row companion to the universal pre-flight invariants.</p>
+    <p>Open the Daily Statement sheet on a specific `(account_id, business_day_start)` to confirm opening, debits, credits, closing and zero drift — the per-row companion to the universal pre-flight invariants.</p>
   </a>
 </div>
 
@@ -124,7 +124,7 @@ full refresh contract.
 <div class="snb-card-grid">
   <a class="snb-card" href="../../walkthroughs/etl/how-do-i-tag-a-force-posted-transfer/">
     <h3>How do I tag a force-posted external transfer correctly?</h3>
-    <p>The `origin` column + `parent_transfer_id` chain mechanics for Fed-statement ingest. Why force-posted matters for L1 exception classification.</p>
+    <p>The `origin` column + `transfer_parent_id` chain mechanics for Fed-statement ingest. Why force-posted matters for L1 exception classification.</p>
   </a>
   <a class="snb-card" href="../../walkthroughs/etl/how-do-i-add-a-metadata-key/">
     <h3>How do I add a metadata key without breaking the dashboards?</h3>

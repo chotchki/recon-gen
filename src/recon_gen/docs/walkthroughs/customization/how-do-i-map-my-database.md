@@ -163,7 +163,7 @@ you commit:
   Structural level (control vs. sub-ledger) derives from
   `account_parent_role`. Don't pack the level into the role
   field — see
-  [Schema_v6.md → Canonical account_type values](../../Schema_v6.md#table-1-prefix_transactions).
+  [Schema_v6.md → Canonical account_role values](../../Schema_v6.md#table-1-prefix_transactions).
 - **`metadata` is the extension point, not a schema migration.**
   Your bank wants to surface a custom field (a transaction
   reference number, a regulatory flag, a per-merchant tier

@@ -42,19 +42,19 @@ When a chain row's ``children`` entry resolves to a TransferTemplate
 (rather than a Rail), the firing semantic shifts in two ways:
 
 1. **First-firing-wins.** The first leg_rail firing of the child
-   template establishes the shared Transfer's ``parent_transfer_id`` —
+   template establishes the shared Transfer's ``transfer_parent_id`` —
    subsequent leg_rail firings reuse that same value. All legs of the
    child template aggregate into ONE child Transfer per chain
    invocation.
 2. **Chain Parent Disagreement.** When subsequent leg_rail firings
-   claim a DIFFERENT ``parent_transfer_id`` than the first-firing
+   claim a DIFFERENT ``transfer_parent_id`` than the first-firing
    established (typically an ETL bug — a stale parent reference,
    cross-cycle contamination, or a race condition), the L1
    ``<prefix>_chain_parent_disagreement`` matview surfaces the
    conflict on L1 Exceptions under
    ``check_type='chain_parent_disagreement'``.
 
-The validator auto-derives the implicit ``parent_transfer_id`` posted
+The validator auto-derives the implicit ``transfer_parent_id`` posted
 metadata requirement for every leg_rail of a chain-child template — no
 operator-explicit YAML declaration needed (the chain relationship is
 the single source of truth, so duplicating it in YAML would just
@@ -74,7 +74,7 @@ receives N daily settlements; the institution aggregates them into
 ONE weekly payout transfer at the end of the week. Each daily
 settlement is a "parent firing"; the weekly payout is the shared
 "child Transfer". All N parent firings tag the child Transfer with
-their own ``parent_transfer_id`` — the L1
+their own ``transfer_parent_id`` — the L1
 ``<prefix>_transfer_parents`` matview derives the multi-parent set
 per child via DISTINCT, and the L1 ``<prefix>_fan_in_disagreement``
 matview flags batches whose actual parent count doesn't match the

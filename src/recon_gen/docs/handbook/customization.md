@@ -108,7 +108,7 @@ This is internal renderer architecture (a v9.0.0 change). It does NOT touch your
     <p>Reading metadata from dataset SQL, when to surface a key as a column vs. a filter, cross-link to the ETL-side walkthrough for the write path.</p>
   </a>
   <a class="snb-card" href="../../walkthroughs/customization/how-do-i-extend-canonical-values/">
-    <h3>How do I extend the schema with a new rail_name or account_type?</h3>
+    <h3>How do I extend the schema with a new rail_name or account_role?</h3>
     <p>Adding to the canonical value lists, downstream impact on filter dropdowns, why no new tables are needed.</p>
   </a>
   <a class="snb-card" href="../../walkthroughs/customization/how-do-i-brand-my-handbook-prose/">
@@ -138,7 +138,7 @@ them when you can give the dashboard rail-accurate signal:
   your ETL knows the rail's settlement window (instant: same-day;
   ACH: T+2; cards: T+3), set it per leg. The dashboard's
   data-driven `is_late` predicate fires off this column with a
-  `posted_at + INTERVAL '1 day'` fallback when it's NULL. Adopt
+  `posting + INTERVAL '1 day'` fallback when it's NULL. Adopt
   one rail at a time; until then, every row uses the one-day
   default. Full contract: [Lateness as data](../Schema_v6.md#lateness-as-data)
   in the schema doc, plus the
