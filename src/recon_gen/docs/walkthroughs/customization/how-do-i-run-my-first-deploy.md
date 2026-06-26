@@ -72,17 +72,17 @@ Generating JSON for all four apps into out/...
 Investigation: account=111122223333, region=us-east-2, l2_instance=spec_example
   wrote out/theme.json
   wrote out/datasets/recon-prod-inv-recipient-fanout-dataset.json
-  ... (~7 datasets)
+  ... (one JSON per dataset)
   wrote out/investigation-analysis.json
   wrote out/investigation-dashboard.json
 
 Generated 10 files in out/
 Executives: account=111122223333, region=us-east-2, l2_instance=spec_example
-  ... (~5 datasets + analysis + dashboard)
+  ... (one JSON per dataset, plus analysis + dashboard)
 L1 Dashboard: account=111122223333, region=us-east-2, l2_instance=spec_example
-  ... (~16 datasets + analysis + dashboard)
+  ... (one JSON per dataset, plus analysis + dashboard)
 L2 Flow Tracing: account=111122223333, region=us-east-2, l2_instance=spec_example
-  ... (~5 datasets + analysis + dashboard)
+  ... (one JSON per dataset, plus analysis + dashboard)
 ```
 
 Then, with `--execute`, the deploy:
@@ -103,7 +103,7 @@ Deploying QuickSight resources from out
 ==> Datasource: ...
 ==> Theme: recon-prod-theme
 ==> Dataset: recon-prod-l1-exceptions-dataset
-... (~27 datasets total across all four apps)
+... (one JSON per dataset, all four apps)
 ==> Analysis: recon-prod-l1-dashboard-analysis
 ... (one per app)
 ==> Dashboard: recon-prod-l1-dashboard

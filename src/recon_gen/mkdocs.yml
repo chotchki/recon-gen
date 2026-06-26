@@ -146,6 +146,7 @@ nav:
       - How do I author a new app on the tree?: walkthroughs/customization/how-do-i-author-a-new-app-on-the-tree.md
       - How do I test my customization?: walkthroughs/customization/how-do-i-test-my-customization.md
       - How do I publish docs against my L2?: walkthroughs/customization/how-do-i-publish-docs-against-my-l2.md
+      - How do I brand my handbook prose?: walkthroughs/customization/how-do-i-brand-my-handbook-prose.md
   - Reference:
     - Overview: reference/index.md
     # V.8 — 3-level nesting splits the previously-flat 11-item Reference

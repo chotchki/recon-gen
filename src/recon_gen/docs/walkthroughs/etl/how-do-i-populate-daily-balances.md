@@ -43,7 +43,7 @@ seeded rows.
 
 For every row your ETL writes, you're committing to a contract:
 
-1. **The 8 mandatory columns** (per [Schema_v6.md → ETL contract / minimum viable feed](../../Schema_v6.md#etl-contract-minimum-viable-feed))
+1. **The 7 mandatory columns you write** (per [Schema_v6.md → ETL contract / minimum viable feed](../../Schema_v6.md#etl-contract-minimum-viable-feed); `entry` is auto-assigned)
    get the row visible to the drift check at all.
 2. **`(account_id, business_day_start)`** is the supersession key.
    Re-inserting with the same pair creates a higher-`entry` row

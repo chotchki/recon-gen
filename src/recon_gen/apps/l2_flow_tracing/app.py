@@ -181,8 +181,9 @@ _TRANSFER_TEMPLATES_DESCRIPTION = (
     "Visualize the multi-leg flow of declared TransferTemplates: each "
     "shared Transfer's debit legs flow into the template (middle node), "
     "credit legs flow out to their destination accounts. Filter by date, "
-    "template, net status (Balanced / Imbalanced — checks the "
-    "ExpectedNet invariant), and (cascading) metadata key + value. The "
+    "template, completion status (Complete / Imbalanced / Orphaned — "
+    "Imbalanced flags the ExpectedNet break), and (cascading) metadata "
+    "key + value. The "
     "Sankey shows the flow shape; the Table below shows per-instance "
     "balance detail."
 )
