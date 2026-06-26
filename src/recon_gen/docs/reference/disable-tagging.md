@@ -4,9 +4,9 @@
 
 The deploy pipeline tags every QuickSight resource it creates with
 ``ManagedBy=recon-gen`` plus a ``Deployment={{ l2_instance_name }}``
-tag (Z.C — value comes from ``cfg.aws.deployment_name``). ``json clean``
-uses those tags to fail-CLOSED-scope deletion to resources we
-deployed — anything untagged or wrongly tagged stays safe.
+tag (value comes from ``cfg.aws.deployment_name``). ``json clean``
+fail-CLOSED-scopes deletion to those tags — anything untagged or
+wrongly tagged stays safe.
 
 The ``tagging_enabled: false`` config knob disables that path. Set
 it ONLY when the deploy IAM principal cannot be granted
@@ -25,7 +25,7 @@ machine-readable tags plus anything in ``extra_tags``:
 | ``Deployment`` | the cfg's ``deployment_name`` (e.g. ``recon-myorg-prod``) | Per-deploy isolation. Cleanup only sweeps resources whose tag matches this deployment. |
 
 Cleanup is fail-CLOSED: a resource without the right ``ManagedBy``
-+ ``Deployment`` tag combination is **never** swept, even when its
++ ``Deployment`` tag combination is NEVER swept, even when its
 ID happens to start with our deployment_name. Concurrent CI runs
 and local deploys with the same ID prefix coexist safely because
 each deploy stamps its own ``Deployment`` tag value.
@@ -50,14 +50,14 @@ What changes:
    counts as ours if its ``DashboardId`` / ``AnalysisId`` /
    ``DataSetId`` / ``ThemeId`` / ``DataSourceId`` starts with
    ``<deployment_name>-`` (note the trailing hyphen).
-3. **``deployment_name`` is already required (Z.C, no default), so
+3. **``deployment_name`` is already required (no default), so
    the cleaner always has a scope value** — no "missing prefix"
    pre-check is needed beyond the existing cfg-load loud-fail.
 
 ## Why this is unwise
 
-The fail-CLOSED tag check is the only protection against
-**ID-collision sweeps**. With tagging disabled:
+The fail-CLOSED tag check is the ONLY protection against
+ID-collision sweeps. With tagging disabled:
 
 - A QuickSight dashboard a colleague hand-built and named
   ``recon-myorg-prod-revenue`` would be eligible for deletion the
@@ -74,13 +74,12 @@ The fail-CLOSED tag check is the only protection against
 
 Mitigations:
 
-- Pick a ``deployment_name`` that is **highly unlikely to collide**
-  with anything else in your QS account. Embedding the team /
-  service / environment name (``recon-treasury-prod``) gives you a
-  meaningful, unambiguous namespace.
-- **Run ``json clean --dry-run`` first** every time. It prints the
-  full list of resources it would delete; visually verify before
-  passing ``--execute``.
+- Pick a ``deployment_name`` UNLIKELY to collide with anything else
+  in your QS account. Embedding the team / service / environment
+  name (``recon-treasury-prod``) gives you an unambiguous namespace.
+- **Run ``json clean`` first** every time (no ``--execute`` — dry-run
+  is the default). It prints the full list of resources it would
+  delete; visually verify before passing ``--execute``.
 - Treat the QS account as effectively single-tenant for this
   deployment_name. Don't deploy two ``tagging_enabled: false`` configs with
   overlapping ``deployment_name`` values into the same account.
@@ -109,14 +108,14 @@ absent ``ManagedBy`` tag).
 To migrate from a long-lived ``tagging_enabled: false`` deploy
 back to the tagged path, you have to either:
 
-1. ``json clean --execute`` once **before** flipping the flag,
+1. ``json clean --execute`` once BEFORE flipping the flag,
    while the ID-prefix matcher can still find the legacy
    resources. Then re-deploy with tagging on so the new resources
    land tagged.
 2. Or live with the legacy untagged resources permanently and
    periodically clean them via the AWS QS console manually.
 
-## Summary
+## The two modes side by side
 
 | Aspect | ``tagging_enabled: true`` (default) | ``tagging_enabled: false`` |
 | --- | --- | --- |

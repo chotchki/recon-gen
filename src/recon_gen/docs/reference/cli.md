@@ -1,15 +1,14 @@
 # CLI reference
 
-Auto-generated from the live Click command tree at docs build time.
-Every flag, default, and choice below is sourced from the same
-metadata `recon-gen --help` reads — when the CLI changes, this
-page changes with it on the next `docs apply` / Pages build.
+Generated from the live Click command tree at docs build time — every
+flag, default and choice below comes from the same metadata
+`recon-gen --help` reads. Change the CLI and this page changes with it
+on the next `docs apply` / Pages build (no hand-kept copy to drift).
 
-For the spirit-of-the-tool walkthrough (when to use each verb,
-typical sequences), start with the
-[For your role](../for-your-role/index.md) pages instead. This page
-is the lookup-shaped reference: "what does `--portable` do?",
-"which extras does `audit verify` need?", etc.
+This is the lookup-shaped reference: "what does `--portable` do?",
+"which extras does `audit verify` need?". For the spirit-of-the-tool
+walkthrough (when to use each verb, typical sequences) start with the
+[For your role](../for-your-role/index.md) pages instead.
 
 ::: mkdocs-click
     :module: recon_gen.cli

@@ -1,11 +1,11 @@
 # QuickSight quirks log
 
-Bugs, undocumented behaviors, and silent-failure modes we've hit
+Bugs, undocumented behaviors and silent-failure modes we've hit
 while building the four shipped dashboards. Each entry captures the
 observed behavior, the user-visible symptom, the workaround we
-ship, and the suggested fix on the QuickSight side.
+ship and the suggested fix on the QuickSight side.
 
-This page exists for two reasons:
+Two jobs:
 
 1. **Defect reports.** We've collected enough QS-side issues that
    filing them with the QuickSight team needs a single canonical
@@ -18,14 +18,14 @@ This page exists for two reasons:
 
 ---
 
-## ⚠️ Read this first — the worst footgun
+## Read this first — the worst footgun
 
-**URL-parameter writes don't reach the dataset substitution layer.
+URL-parameter writes don't reach the dataset substitution layer.
 Controls populate, analysis-level filters work, but
 `MappedDataSetParameters` bridges (which carry params from analysis
 into the dataset's `<<$paramName>>` SQL substitution) do NOT fire on
 initial URL-driven load. The data ignores the URL value until a
-manual widget interaction commits it.**
+manual widget interaction commits it.
 
 Every cross-app drill, every embedded deep link, every
 ``CustomActionURLOperation`` that targets a dataset-bridged
@@ -34,12 +34,12 @@ analyst thinks the filter is applied) but the dataset SQL runs with
 the parameter at its analysis-default sentinel. They see the
 unfiltered universe under a label that says it's filtered.
 
-**This was studied exhaustively in Y.1.k → Y.1.p. Three
-analysis-level reference shapes were tried — `CategoryFilter` using
-the param as match value, an echo column + tautological filter,
-and a calc field with `${param}` in its expression (LuisBorrego's
-community workaround). All three failed identically. The bug is
-QS-side; no JSON shape on our end works around it.**
+We studied this exhaustively in Y.1.k → Y.1.p. Three analysis-level
+reference shapes failed identically — `CategoryFilter` using the
+param as match value, an echo column + tautological filter and a
+calc field with `${param}` in its expression (LuisBorrego's
+community workaround). The bug is QS-side; no JSON shape on our end
+works around it.
 
 **What we've done to minimize the damage**
 
@@ -65,10 +65,10 @@ QS-side; no JSON shape on our end works around it.**
   "rolling 7 days" via a drill, so we write the widest possible
   window every time and accept that the picker visibly snaps to it.
 
-**If you're considering a new cross-sheet or embed-driven parameter
+If you're considering a new cross-sheet or embed-driven parameter
 write, assume the destination control will lie. Plan the UX around
-that.** The detailed entries on this defect class are **2.1**, **2.2**,
-and **2.3** below.
+that. The detailed entries on this defect class are 2.1, 2.2 and
+2.3 below.
 
 ---
 
@@ -175,14 +175,14 @@ with the dataset cascade pre-narrowed by URL params will not narrow
 on initial load.** The destination dashboard renders the unfiltered
 universe; the analyst then has to re-pick the values manually.
 
-**Mechanism, by way of pg_stat_statements.** Probe the deployed
-dataset SQL via `scripts/qs_substitution_probe.py inspect` (post-deploy
-the dataset has the right `<<$pKey>>` placeholders + DatasetParameters
-declared). Probe pg_stat_statements with `--filter <sheetId>` after a
-URL-stamp page load: the query fires with the placeholders bound to
-the analysis-level parameter's *default* value, not the URL value.
-After a manual widget interaction, the query re-fires with the URL
-value bound. Confirmed across PG; Oracle path same shape.
+**Mechanism, by way of pg_stat_statements.** Inspect the deployed
+dataset SQL (post-deploy the dataset has the right `<<$pKey>>`
+placeholders + DatasetParameters declared), then diff
+pg_stat_statements across a URL-stamp page load: the query fires
+with the placeholders bound to the analysis-level parameter's
+*default* value, not the URL value. After a manual widget
+interaction, the query re-fires with the URL value bound. Confirmed
+across PG; Oracle path same shape.
 
 **Workarounds attempted (Y.1.p, all failed):**
 
@@ -218,12 +218,13 @@ writes — not just on widget interaction events. Or expose a
 `setParameters` method on the embedding SDK that triggers the
 bridge synchronously.
 
-**Diagnostic harness.** `scripts/qs_substitution_probe.py` was built
-during Y.1.o specifically for this class of bug. `inspect` dumps the
-deployed dataset's CustomSQL + DataSetParameters. `snapshot` /
-`diff` capture pg_stat_statements deltas across user actions. Reach
-for it before manual screenshot debugging on any future
-parameter-binding issue.
+**Diagnostic approach.** `scripts/qs_substitution_probe.py` drove
+this during the Y.1.o spike — `inspect` dumped the deployed
+dataset's CustomSQL + DataSetParameters, `snapshot` / `diff`
+captured pg_stat_statements deltas across user actions. The script
+was swept in Y.2.gate.f as a stale standalone; the pg_stat_statements
+diff is the durable repro — reach for it before manual screenshot
+debugging on any parameter-binding issue.
 
 ---
 
@@ -650,7 +651,7 @@ inside `<li>`). Surfaces silently up to deploy: the JSON
 serialises cleanly and the dataset describes cleanly.
 
 **Workaround.** `common/rich_text.py::bullets()` post-processes
-each item to strip `<br>`, `<br/>`, and `<br />` (case-insensitive)
+each item to strip `<br>`, `<br/>` and `<br />` (case-insensitive)
 and emits a `UserWarning` per offender. Triggered by L2 YAML
 descriptions authored as `description: |` block scalars: the
 embedded `\n` from human-readable line wrapping reflowed to
@@ -670,7 +671,7 @@ deploying.
 ### 4.5 Chart axis `CustomLabel` silently ignored without `ApplyTo`
 
 **Observed.** ``BarChartConfiguration.CategoryLabelOptions``,
-``ValueLabelOptions``, and ``ColorLabelOptions`` (and the LineChart
+``ValueLabelOptions`` and ``ColorLabelOptions`` (and the LineChart
 equivalents ``XAxisLabelOptions`` / ``PrimaryYAxisLabelOptions``)
 each carry a ``ChartAxisLabelOptions`` block whose
 ``AxisLabelOptions[].CustomLabel`` *should* override the axis title.
@@ -776,7 +777,7 @@ the QuickSight identity region)
 a boto3 client constructed in the QS identity region (`us-east-1`)
 returns a URL that, when opened, errors with "We can't open that
 dashboard, another QuickSight account or it was deleted" — even
-though the dashboard, account, and permissions are all correct.
+though the dashboard, account and permissions are all correct.
 The error message is misleading: it implies an account/permission
 problem when the actual cause is region mismatch.
 
@@ -839,7 +840,7 @@ For each issue you want to file with the QuickSight team:
 2. Reproduce against a minimal hand-built analysis JSON — strip
    our generator's wrappers down to the smallest dict that
    triggers the behavior.
-3. Capture the JSON, the API response (if any), and a screen
+3. Capture the JSON, the API response (if any) and a screen
    recording of the misbehavior.
 4. Cross-reference this page in the report so the QS team can see
    the workaround context — sometimes the workaround clue helps

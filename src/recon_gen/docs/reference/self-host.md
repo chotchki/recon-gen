@@ -1,22 +1,24 @@
 # Self-hosting the dashboards
 
-The four bundled apps render two ways. The default is **QuickSight** — `recon-gen json apply --execute` pushes a JSON resource graph (theme, datasource, datasets, analyses, dashboards) to AWS. The second is **Dashboards**: a small self-hosted HTMX + d3 page server that reads the same L2 instance and the same database, with no AWS account involved. (Internally still called "App 2" in some module names; the user-facing CLI is `recon-gen dashboards`.) It's the offline-iteration path (edit the L2 YAML / dataset SQL, refresh the page) and the renderer **Studio** (`recon-gen studio` — X.4 implementation tools: unified diagram, L2 editor, data-shaping panel, Deploy-changes orchestration) builds on.
+The four bundled apps render two ways. QuickSight is the default — `recon-gen json apply --execute` pushes a JSON resource graph (theme, datasource, datasets, analyses, dashboards) to AWS. Dashboards is the other: a small self-hosted HTMX + d3 page server that reads the same L2 instance and the same database, no AWS account involved. (Some module names still call it "App 2"; the user-facing CLI is `recon-gen dashboards`.) It's the offline-iteration path — edit the L2 YAML / dataset SQL, refresh the page — and the renderer Studio (`recon-gen studio` — implementation tools: unified diagram, L2 editor, data-shaping panel, Deploy-changes orchestration) builds on.
 
 ## Running it
 
 ```bash
 pip install 'recon-gen[prod]'
 recon-gen dashboards -c config.yaml                # one process, all 4 apps
-# → http://127.0.0.1:8000/dashboards
+# → http://127.0.0.1:8765/dashboards
 ```
 
-`config.yaml` points at a database (`demo_database_url`) — PostgreSQL, Oracle, or a SQLite file; Dashboards supports all three (the same dialect-aware SQL the QuickSight datasets use). The schema + seed have to already be applied (`recon-gen schema apply --execute`, `data apply --execute`, `data refresh --execute`) — Dashboards only reads.
+`config.yaml` points at a database (`db.url`) — PostgreSQL, Oracle or a DuckDB file; Dashboards supports all three (the same dialect-aware SQL the QuickSight datasets use). The schema + seed have to already be applied (`recon-gen schema apply --execute`, `data apply --execute`, `data refresh --execute`) — Dashboards only reads.
 
-It's stateless on purpose: no auth, no sessions, no in-process cache. Every GET re-runs the query; the URL *is* the cache key (filter state round-trips as `?param_X=…` query params), so an edge / browser cache layer Just Works. Embed it behind your own auth front when you put it on a network.
+It's stateless on purpose: no auth or sessions, and no in-process cache. Every GET re-runs the query — the URL IS the cache key (filter state round-trips as `?param_X=…` query params), so an edge / browser cache layer Just Works. Embed it behind your own auth front when you put it on a network.
 
-## What gets bundled in the wheel — Dashboards runs offline
+See it live: https://recon-gen-spec.hotchkiss.io/
 
-Dashboards needs a few browser-side libraries (HTMX for the swaps, d3 + d3-sankey for the charts, the filter-widget libs, a context-menu lib for row drills). Rather than CDN-load them — which would break `pip install` + the dashboards/studio servers with no internet — the **pre-built minified dist files are committed inside the package** and served from `/static/vendor/…` off the package's own static mount. The wheel ships everything; nothing is fetched at runtime.
+## What gets bundled in the wheel (offline by design)
+
+Dashboards needs a few browser-side libraries (HTMX for the swaps, d3 + d3-sankey for the charts, the filter-widget libs, a context-menu lib for row drills). Rather than CDN-load them — which would break `pip install` plus the dashboards/studio servers with no internet — the pre-built minified dist files are committed inside the package and served from `/static/vendor/…` off the package's own static mount. The wheel ships everything; nothing is fetched at runtime.
 
 The full vendored set lives in `src/recon_gen/common/html/assets/vendor/` with provenance pinned in `assets/vendor/vendor.lock` (`{name, version, source_url, sha256, dest}` per dep). Today:
 
@@ -30,9 +32,9 @@ The full vendored set lives in `src/recon_gen/common/html/assets/vendor/` with p
 | noUiSlider | 15.7.1 | draggable threshold sliders + min/max range sliders | `js/nouislider.min.js` + `css/nouislider.min.css` |
 | ctxmenu | 2.1.0 | the "⋯" / right-click context menu on table rows that carry a `DATA_POINT_MENU` drill | `js/ctxmenu.min.js` (ships no CSS — it injects its own `<style>`; re-skinned via `widgets-theme.css`) |
 
-Alongside those, the wheel also ships the **compiled Tailwind stylesheet** (`assets/output.css`), the **filter-widget theme override sheet** (`assets/widgets-theme.css` — re-colours the Tom Select / Flatpickr / noUiSlider / ctxmenu chrome onto the L2's `--color-*` tokens), and the **inlined application JS** (`assets/js/bootstrap.js`, `assets/js/dev_log.js` — these get embedded into the page shell at render time, not served as separate files). None of these touch a CDN either.
+Alongside those, the wheel also ships the compiled Tailwind stylesheet (`assets/output.css`), the filter-widget theme override sheet (`assets/widgets-theme.css` — re-colours the Tom Select / Flatpickr / noUiSlider / ctxmenu chrome onto the L2's `--color-*` tokens) and the inlined application JS (`assets/js/bootstrap.js`, `assets/js/dev_log.js` — these get embedded into the page shell at render time, not served as separate files). None of these touch a CDN either.
 
-Two CI guards keep it that way: `tests/unit/test_vendor_assets.py` asserts each committed vendor file's SHA256 matches `vendor.lock` *and* that the rendered page shell carries zero external `<script>` / `<link>` URLs; the `release.yml::Smoke test wheel` job installs a non-editable wheel and runs `pytest tests/unit/`, so a missing `package-data` glob → `FileNotFoundError` at collection → the smoke job fails.
+Two CI guards keep it that way: `tests/unit/test_vendor_assets.py` asserts each committed vendor file's SHA256 matches `vendor.lock` AND that the rendered page shell carries zero external `<script>` / `<link>` URLs; the `release.yml::Smoke test wheel` job installs a non-editable wheel and runs `pytest tests/unit/`, so a missing `package-data` glob → `FileNotFoundError` at collection → the smoke job fails.
 
 ## Maintainer chores
 

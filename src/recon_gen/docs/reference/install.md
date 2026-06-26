@@ -1,27 +1,32 @@
 # Install
 
-`recon-gen` is a single PyPI package with **opt-in extras** — pick
-the extras matching what you actually run, since the CLI surface is
-broad (emit JSON, deploy to AWS, seed a demo DB, render audit PDFs,
-build the docs site) and the dependency footprint of each surface is
-unrelated.
+`recon-gen` is one PyPI package with opt-in extras. Pick the extra that
+matches what you actually run — the CLI surface is broad (emit JSON,
+deploy to AWS, seed a demo DB, render audit PDFs, build the docs site)
+and each of those surfaces drags an unrelated dependency footprint.
+There are exactly three extras: `[prod]`, `[dev]`, `[e2e]`.
 
-The bare install is intentionally tiny (Click + PyYAML + the Graphviz
-Python wrapper) so consumers who just want to emit JSON for their own
-deploy pipeline don't pull boto3 / reportlab / mkdocs / DB drivers.
+The bare install stays tiny on purpose — Click + PyYAML + the Graphviz
+Python wrapper + DuckDB — so anyone who just wants to emit JSON for
+their own deploy pipeline doesn't pull boto3 / reportlab / mkdocs / DB
+drivers. DuckDB rides along in the base because every `recon-gen`
+invocation imports it as the default local dialect.
+
+See it live: https://recon-gen-spec.hotchkiss.io/
 
 ## What each extra unlocks
 
 | Extra | Adds | Unlocks |
 |---|---|---|
-| *(none)* | `click`, `pyyaml`, `graphviz` | `recon-gen json apply` — emits JSON to disk for hand-off to your own pipeline |
-| `[deploy]` | `boto3`, `botocore[crt]` | `json apply --execute` (push to AWS QuickSight); `json clean --execute` (sweep `ManagedBy:recon-gen` resources). `botocore[crt]` is needed for AWS SSO (`aws sso login`) auth |
-| `[demo]` | `psycopg2-binary` | `schema apply --execute`, `data apply --execute`, `data refresh --execute` against PostgreSQL 17+ |
-| `[demo-oracle]` | `oracledb` (thin mode) | Same `--execute` verbs against Oracle 19c+. No Oracle Instant Client install needed |
-| `[audit]` | `reportlab`, `pypdf`, `pyhanko` | `audit apply --execute -o report.pdf` (regulator-ready PDF). `pyhanko` covers both auto-signing (when `config.yaml` carries a `signing:` block) and the empty reviewer-signature widgets that land on every render |
-| `[docs]` | `mkdocs`, `mkdocs-material`, `mkdocstrings`, `mkdocs-click`, `mkdocs-macros-plugin`, `graphviz` | `docs apply` / `docs serve` to build or live-preview this handbook |
-| `[dev]` | All of the above plus `pytest`, `pytest-cov`, `pyright`, `boto3-stubs`, `build`, `twine` | Full developer environment — runs every test suite + type-check |
-| `[e2e]` | `pytest`, `pytest-xdist`, `boto3`, `botocore[crt]`, `playwright` | End-to-end test suite (browser + API) against deployed dashboards. Also requires a one-time `playwright install webkit` to download the browser binary |
+| *(none)* | `click`, `pyyaml`, `graphviz`, `duckdb` | `recon-gen json apply` — emits JSON to disk for hand-off to your own pipeline. No AWS credentials or DB drivers needed |
+| `[prod]` | `boto3` + `botocore[crt]`; the App2 server stack (`starlette`, `uvicorn`, `httpx`, `python-multipart`); the auth libs (`authlib`, `pyjwt`, `itsdangerous`); `psycopg[binary,pool]` (PostgreSQL) + `oracledb` thin mode (Oracle); `reportlab` + `pypdf` + `pyhanko`; `mkdocs` + `mkdocs-material` + `mkdocs-click` + `mkdocs-macros-plugin` | Every operator verb. `json apply --execute` (push to AWS QuickSight) + `json clean --execute` (sweep `ManagedBy:recon-gen` resources); the self-hosted App2 server; `schema/data apply --execute` against PostgreSQL 17+ OR Oracle 19c+; `audit apply --execute` (regulator-ready PDF); `docs apply` (build this handbook) + `docs serve` (live-preview this handbook with reload). `botocore[crt]` is needed for AWS SSO (`aws sso login`) auth; `oracledb` thin mode needs no Oracle Instant Client install |
+| `[dev]` | The test + build tooling — `pytest`, `pytest-xdist`, `pyright`, `boto3-stubs`, `testcontainers`, `playwright`, `build`, `twine` — plus the prod runtime deps it tests against | Full developer environment — runs every test suite + type-check. Note: the docs-build deps (`mkdocs` + plugins) live in `[prod]`, not `[dev]`, so use `uv sync --all-extras` when you also want `docs apply` |
+| `[e2e]` | `pytest`, `pytest-xdist`, `boto3`, `botocore[crt]`, `playwright` + the App2 server stack | End-to-end test suite (browser + API) against deployed dashboards. Also requires a one-time `playwright install webkit` to download the browser binary |
+
+Pre-BS.6 the split was per-feature (`[deploy]` / `[demo]` /
+`[demo-oracle]` / `[audit]` / `[docs]` …). Operators always wanted one
+of "production run", "dev run" or "e2e run", so the granularity was
+confusion without payoff — collapsed to one knob per persona.
 
 ## Common shapes
 
@@ -49,11 +54,12 @@ SSO session, instance profile).
 ### "I want to seed the demo database"
 
 ```bash
-pip install "recon-gen[prod]"           # PostgreSQL 17+
-pip install "recon-gen[prod]"  # add Oracle 19c+
+pip install "recon-gen[prod]"
 ```
 
-Then:
+One install covers both backends — `[prod]` ships `psycopg[binary,pool]`
+(PostgreSQL 17+) and `oracledb` thin mode (Oracle 19c+, no Oracle
+Instant Client needed). Then:
 
 ```bash
 recon-gen schema apply -c config.yaml --execute
@@ -70,9 +76,11 @@ recon-gen audit apply -c config.yaml --execute -o report.pdf
 ```
 
 For digitally-signed PDFs, [add a `signing:` block to
-`config.yaml`](../handbook/audit.md) — the same `[audit]` extra
-covers it (no separate install step). pyHanko picks up the PEM key +
-cert at render time and stamps a CMS signature on the cover page.
+`config.yaml`](../handbook/audit.md) — `[prod]` already covers it (no
+separate install step). pyHanko picks up the PEM key + cert at render
+time and stamps a CMS signature on the cover page. Every render also
+lands empty reviewer-signature widgets on the page, whether or not a
+`signing:` block is present.
 
 ### "I want to hack on the source"
 
@@ -90,15 +98,15 @@ For a leaner dev install, pick only the extras you need:
 uv sync --frozen --extra dev --extra prod
 ```
 
-(`uv sync` always installs the `[dev]` group + any extras you ask
-for. `--frozen` fails if `uv.lock` is out of date — drop it locally if
-you're iterating on `pyproject.toml`.)
+`uv sync` always installs the `[dev]` dependency group + any extras you
+ask for. `--frozen` fails if `uv.lock` is out of date — drop it locally
+if you're iterating on `pyproject.toml`.
 
 Two non-Python tools the test session uses (the `pytest` sessionstart
 hook gates on both): `pyright` (a `[dev]` dep — `uv sync` brings it) and
-`biome` (the App 2 JS linter). Biome isn't pip-installable here — the
-`biome-js` PyPI wrapper ships only a linux-x86_64 wheel — so install it
-your platform's way:
+`biome` (the App2 JS linter). Biome isn't pip-installable here — the
+`biome-js` PyPI wrapper ships only a `manylinux_2_28_x86_64` wheel (no
+macOS / arm64 / sdist) — so install it your platform's way:
 
 ```bash
 brew install biome          # macOS / Linuxbrew
@@ -119,7 +127,7 @@ patterns:
 ```bash
 pip install "recon-gen[prod]"     # works in bash + zsh
 pip install 'recon-gen[prod]'     # also works
-pip install recon-gen\[demo,audit\]     # also works
+pip install recon-gen\[dev,e2e\]     # also works
 ```
 
 Without quoting you'll get `zsh: no matches found: recon-gen[prod]`
