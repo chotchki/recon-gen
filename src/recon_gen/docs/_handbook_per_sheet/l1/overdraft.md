@@ -96,10 +96,12 @@ steady-state expectation, not an edge case: overdraft is a SHOULD-constraint
 catcher, not a metric to be trended. If you see zero rows:
 
 - **Confirm the matview is fresh.** Cross to *App Info* and check the *Matview
-  Status* table's `overdraft` row. If `last_refresh_at` is more than a few
-  minutes old AND new postings landed since, the data may be clean *as of the
-  last refresh* but stale. The institution refreshes matviews on every ETL load;
-  ad-hoc dashboard hits don't trigger one.
+  Status* table's `overdraft` row against the base-table rows. The matview is
+  stale when its `latest_date` LAGS the base tables' `latest_date` — the base
+  tables moved forward on a new ETL load but `overdraft` didn't get refreshed
+  since, so it's clean *as of its own `latest_date`* but blind to everything
+  posted after. The institution refreshes matviews on every ETL load; ad-hoc
+  dashboard hits don't trigger one.
 - **Check the date filter.** A very narrow date window can show zero on a day
   with no postings. Widen to the trailing 7 days; if you still get zero, no
   internal account was overdrafted in that window.
@@ -107,9 +109,10 @@ catcher, not a metric to be trended. If you see zero rows:
   Overdraft sheet next to a populated *Drift* or *Limit Breach* sheet means
   THAT invariant has work — `?` those sheets next.
 
-If *App Info* shows `last_refresh_at` as null or the matview row count as zero
-across the board, the L1 invariant pipeline didn't run. That's an ops alert, not
-a "clean" signal.
+If *App Info* shows the matview row count as zero across the board, the L1
+invariant pipeline didn't run. That's an ops alert, not a "clean" signal. A NULL
+`latest_date` on its own isn't that signal — it just marks a matview with no
+natural date dimension, not staleness.
 
 ## Cross-sheet drills
 

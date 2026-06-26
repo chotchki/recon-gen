@@ -56,7 +56,7 @@ A clean Transfer Templates sheet means every declared transfer template's runtim
 - **Confirm matview freshness.** Cross to *App Info* and look for the transaction count on the *Matview Status* table. If it's zero, the ETL hasn't run yet. If it's positive, the SQL is dry — either no templates are declared in the L2 instance, or no postings carry a `template_name` matching a declared template.
 - **Check the L2 instance.** If you're seeing an empty sheet across a 30-day window, confirm the L2 instance has `transfer_templates` declared and that postings in the system carry matching `template_name` metadata.
 
-If *App Info* shows `last_refresh_at` as null or the matview row count as zero across the board, the L2 matview pipeline didn't run. That's an ops alert, not a "clean" signal.
+If *App Info*'s *Matview Status* table shows the L2 matview's `latest_date` lagging the base tables' `latest_date` (the two sit side-by-side on that table), the matview didn't get refreshed since the last ETL load — the base tables moved forward and the matview didn't. That's an ops alert, not a "clean" signal. A NULL `latest_date` just means a matview with no date dimension, NOT staleness.
 
 ## Cross-sheet drills
 

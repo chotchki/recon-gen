@@ -125,10 +125,11 @@ That is the steady-state expectation, not an edge case: drift is a violation cat
 not a metric to be trended. If you see zero rows:
 
 - **Confirm the matview is fresh.** Cross to *App Info* and check the *Matview Status*
-  table's `drift` and `ledger_drift` rows. If `last_refresh_at` is more than a few
-  minutes old AND new postings landed since, the data may be clean *as of the last
-  refresh* but stale. The institution refreshes matviews on every ETL load; ad-hoc
-  dashboard hits don't trigger one.
+  table's `drift` and `ledger_drift` rows against the base-table rows. If a matview's
+  `latest_date` LAGS the base tables' `latest_date`, the base tables moved forward but
+  the matview didn't get refreshed since the last ETL load — the data is clean *as of
+  the matview's `latest_date`* but stale relative to what landed after. The institution
+  refreshes matviews on every ETL load; ad-hoc dashboard hits don't trigger one.
 - **Check the date filter.** A very narrow date window can show zero on a day with no
   postings. Widen to the trailing 7 days; if you still get zero, the system is
   genuinely clean.
@@ -136,9 +137,10 @@ not a metric to be trended. If you see zero rows:
   next to a populated *Overdraft* or *Limit Breach* sheet means THAT invariant
   has work — check those sheets next.
 
-If *App Info* shows `last_refresh_at` as null or the matview row count as zero
-across the board, the L1 invariant pipeline didn't run. That's an ops alert, not
-a "clean" signal.
+If *App Info* shows the matview row count as zero across the board, the L1 invariant
+pipeline didn't run. That's an ops alert, not a "clean" signal. A NULL `latest_date`
+is NOT that signal — it just means a matview with no natural date dimension (or a
+custom matview added without a date column), so don't read it as staleness.
 
 ## Cross-sheet drills
 

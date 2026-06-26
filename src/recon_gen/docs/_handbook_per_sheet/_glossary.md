@@ -76,13 +76,15 @@ review meetings, not minute-by-minute ops.
 ### App Info — per-dashboard health canary
 
 Every dashboard has an *App Info* sheet at the end of its tab strip.
-It shows per-matview row counts + the last refresh timestamp + a
+It shows per-matview row counts + each view's `latest_date` + a
 deploy stamp (git SHA + ISO time). If a dashboard sheet renders blank
 and you don't know why, **App Info is the diagnostic ladder's first
 rung**: if the matview row count for the relevant invariant is zero,
 the SQL is dry; if it's positive but the sheet still shows nothing,
-the issue is in the visual binding. If `last_refresh_at` is older
-than the most recent ETL load, the matviews are stale.
+the issue is in the visual binding. If a matview's `latest_date` lags
+the base tables' `latest_date` on the same Matview Status table, the
+matview didn't get refreshed since the last ETL load and is STALE; a
+NULL `latest_date` just means that matview has no date dimension.
 
 ## Core data-model terms
 
@@ -167,8 +169,9 @@ A SQL view whose results are stored in a regular table and refreshed
 on demand. Every L1 invariant is a matview — the SQL computes the
 violation set, the dashboard reads from the table. Matviews refresh
 on every ETL load; ad-hoc dashboard hits do NOT trigger a refresh,
-so if a matview's `last_refresh_at` (visible on the App Info sheet)
-predates the most recent posting, the dashboard is showing yesterday's
+so if a matview's `latest_date` lags the base tables' `latest_date`
+(both visible side-by-side on the App Info Matview Status table) the
+matview missed the last load and the dashboard is showing yesterday's
 state.
 
 ## Cross-cutting concepts

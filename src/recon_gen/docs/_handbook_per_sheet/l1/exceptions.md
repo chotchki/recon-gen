@@ -56,11 +56,11 @@ Several rows with `check_type` in `('chain_parent_disagreement', 'xor_group_viol
 
 A clean L1 Exceptions sheet means *all twelve* SHOULD-constraints held true on every account and every transfer within your date window. This is the steady-state target, not an edge case — exceptions exist to catch violations, not to trend metrics. If you see zero rows:
 
-- **Confirm the matviews are fresh.** Cross to *App Info* and check the *Matview Status* table. If `l1_exceptions` shows `last_refresh_at` older than the most recent ETL load AND new postings landed since, the data may be clean *as of the last refresh* but stale. All L1 matviews refresh on every ETL load; ad-hoc dashboard hits don't trigger one.
+- **Confirm the matviews are fresh.** Cross to *App Info* and check the *Matview Status* table — it lists `view_name`, `row_count` and `latest_date` (the MAX data-date in that view) side by side. If `l1_exceptions` shows a `latest_date` that LAGS the base tables' `latest_date`, the matview never got refreshed since the last ETL load and is stale — clean only up to its own `latest_date`, blind to everything the base tables posted after. All L1 matviews refresh on every ETL load; ad-hoc dashboard hits don't trigger one.
 - **Check the date filter.** A very narrow window (e.g., a single hour on a quiet weekend) can legitimately show zero exceptions. Widen to the trailing 7 days; if you still get zero, the system is clean across that span.
 - **Don't assume all-clean.** Each of the twelve invariants has a dedicated sheet or roll-up in this view; a clean Exceptions view does NOT rule out edge cases in one branch. If you're investigating a specific account or rail, cross to its invariant sheet and apply a tighter filter.
 
-If *App Info* shows `last_refresh_at` as NULL across the board or the `l1_exceptions` row count as zero but you posted data recently, the ETL pipeline encountered an error. That's an ops alert, not a "system is clean" signal.
+A NULL `latest_date` is NOT a staleness signal — it just means that matview carries no natural date dimension (or, on *App Info*, a custom matview was added without a date column). But if the `l1_exceptions` row count reads zero while the base tables' `latest_date` moved forward on data you posted recently, the ETL pipeline encountered an error. That's an ops alert, not a "system is clean" signal.
 
 ## Cross-sheet drills
 

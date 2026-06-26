@@ -92,8 +92,10 @@ compliance rather than operations — loop in your AML team.
 The *Configured Caps* reference box shows active limit schedules but the detail
 table is empty. This is the **healthy state** — every account stayed within its
 cap on every day in the window. Don't celebrate yet; check the matview
-freshness on *App Info* to confirm `last_refresh_at` is recent (within the
-last few minutes of the most recent ETL load). If the matview is fresh and
+freshness on *App Info* to confirm `limit_breach`'s `latest_date` keeps pace
+with the base tables' `latest_date` (both columns sit side-by-side on the
+*Matview Status* table). A matview whose `latest_date` LAGS the base tables
+hasn't been refreshed since the last ETL load. If the matview is current and
 the caps are configured, zero rows means genuine compliance with the limits.
 
 ## What "no rows" means
@@ -103,10 +105,11 @@ within its configured daily cap throughout the window. That is the steady-state
 expectation, not an edge case:
 
 - **Confirm the matview is fresh.** Cross to *App Info* and check the
-  *Matview Status* table's `limit_breach` row. If `last_refresh_at` is more
-  than a few minutes old AND new postings landed since, the data may be clean
-  as of the last refresh but STALE. Matviews refresh on every ETL load;
-  ad-hoc dashboard hits do not trigger one.
+  *Matview Status* table's `limit_breach` row. Compare its `latest_date`
+  against the base tables' `latest_date` on the same table — if the matview's
+  `latest_date` LAGS the base tables, postings landed that the matview hasn't
+  picked up, so the data is clean as of the old refresh but STALE. Matviews
+  refresh on every ETL load; ad-hoc dashboard hits do not trigger one.
 - **Check the date filter.** A very narrow date window can show zero on a day
   with light traffic. Widen to the trailing 7 days; if you still get zero, the
   system is genuinely compliant.
@@ -114,9 +117,11 @@ expectation, not an edge case:
   section. If it lists no schedules or says "No limit schedules configured,"
   the matview returns zero rows by construction — there are no caps to breach.
 
-If *App Info* shows `last_refresh_at` as null or the matview row count as zero
-across the board, the L1 invariant pipeline didn't run. That's an ops alert,
-not a "clean" signal.
+If *App Info* shows the matview row count as zero across the board (and
+`latest_date` null on a matview that does carry a date dimension), the L1
+invariant pipeline didn't run. That's an ops alert, not a "clean" signal. A
+null `latest_date` on its own just means a matview with no natural date
+dimension — not staleness.
 
 ## Cross-sheet drills
 

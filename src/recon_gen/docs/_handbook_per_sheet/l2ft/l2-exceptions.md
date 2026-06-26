@@ -51,7 +51,7 @@ An empty L2 Exceptions sheet means every declared rail, chain, metadata key and 
 
 If you see zero rows:
 
-- **Confirm the matview is fresh.** Cross to *App Info* and check the *Matview Status* table. The L2 hygiene checks scan `<prefix>_current_transactions`, which is refreshed on every ETL load; if `last_refresh_at` is stale (older than the most recent posting batch), the dashboard may be clean as of the LAST refresh but not reflecting today's data.
+- **Confirm the matview is fresh.** Cross to *App Info* and check the *Matview Status* table — `view_name` / `row_count` / `latest_date` side by side. The L2 hygiene checks scan `<prefix>_current_transactions`, refreshed on every ETL load; a matview is STALE when its `latest_date` lags the base tables' `latest_date` (the base tables moved forward but the matview wasn't refreshed since the last load), so the sheet may be clean as of that lagging data-date but not reflecting today's postings. A NULL `latest_date` means a matview with no date dimension, not staleness.
 - **Check that the L2 instance has declarations.** If the L2 YAML is empty (no rails, no chains, no limits), every check produces zero rows trivially — there's nothing to violate. This is valid but uninformative; cross to *Getting Started* to confirm the L2 instance loaded.
 - **Don't celebrate yet.** L2 hygiene is one layer; L1 integrity (drift, overdraft, limit breach) is the ledger's health. An empty L2 Exceptions sheet next to violations on the *Drift* or *Overdraft* sheet (if exposed) means the declaration is sound but the ledger has problems — `?` those sheets next.
 

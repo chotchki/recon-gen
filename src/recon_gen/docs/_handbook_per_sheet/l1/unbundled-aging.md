@@ -43,11 +43,11 @@ The bar chart shows legs scattered across multiple rails in multiple age buckets
 
 An empty unbundled sheet means every posted leg has either been bundled (assigned a `bundle_id`) or hasn't yet aged past its rail's `max_unbundled_age` cap. This is the steady-state expectation. If you see zero rows:
 
-- **Confirm the matview is fresh.** Cross to *App Info* and check the *Matview Status* table's `stuck_unbundled` row. If `last_refresh_at` is more than a few minutes old AND new postings landed since, the matview may be stale. The institution refreshes matviews on every ETL load; ad-hoc dashboard hits don't trigger a refresh.
+- **Confirm the matview is fresh.** Cross to *App Info* and check the *Matview Status* table's `stuck_unbundled` row. Compare its `latest_date` against the base tables' `latest_date` on the same table — if the matview's `latest_date` LAGS the base tables', the base data moved forward but the matview wasn't refreshed since the last ETL load, so it's stale. The institution refreshes matviews on every ETL load; ad-hoc dashboard hits don't trigger a refresh.
 - **Check the date filter and drill state.** If you drilled here from another sheet, the account or rail filter may be too narrow. Widen to "All Accounts" and "All Rails" to see the universe.
 - **Don't celebrate yet.** Unbundled aging is one of twelve L1 invariants. A clean Unbundled Aging sheet next to a populated *Pending Aging* or *Overdraft* sheet means THAT invariant has work — `?` those sheets next.
 
-If *App Info* shows `last_refresh_at` as null or the matview row count as zero across the board, the L1 invariant pipeline didn't run. That's an ops alert, not a "clean" signal.
+If *App Info* shows the matview row count as zero across the board, the L1 invariant pipeline didn't run. That's an ops alert, not a "clean" signal. A NULL `latest_date` is NOT that signal — it just means a matview with no date dimension (or a custom matview added without a date column).
 
 ## Cross-sheet drills
 

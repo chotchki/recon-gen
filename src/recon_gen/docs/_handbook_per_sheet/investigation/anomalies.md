@@ -55,7 +55,7 @@ A clean anomalies sheet means every (sender, recipient) pair-window in the windo
 
 - **Check the sigma slider position.** The default is 2σ (the second bucket from the left). If the *Pair-Window σ Distribution* chart shows data up to 2–3σ but nothing beyond, and the slider is set to 3 or higher, you're outside the data tail — lower the slider to flag what exists.
 - **Check the date window filter.** A narrow date range may contain no flagged activity. Widen to trailing 7 or 30 days to see whether anomalies are recurring.
-- **Confirm the matview is fresh.** Cross to *App Info* and check the `inv_pair_rolling_anomalies` row in the matview-status table. If `last_refresh_at` is stale and new transfers have posted since, the matview may need a manual refresh.
+- **Confirm the matview is fresh.** Cross to *App Info* and check the `inv_pair_rolling_anomalies` row in the Matview Status table. The matview is stale when its `latest_date` lags the base tables' `latest_date` — both sit side by side on that table, so a matview whose `latest_date` trails the base tables means new transfers posted but the matview wasn't refreshed since the last ETL load. A NULL `latest_date` just means a matview with no date dimension NOT staleness.
 - **Verify the population has variance.** If the distribution chart shows zero rows at any sigma (the chart itself is empty), the matview may not have computed yet. App Info's matview-status table should show a positive row count for `inv_pair_rolling_anomalies` — if it shows zero, the ETL pipeline hasn't loaded the Investigation schema yet.
 
 ## Cross-sheet drills

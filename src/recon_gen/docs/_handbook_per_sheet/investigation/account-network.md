@@ -65,7 +65,7 @@ A clean empty sheet means one of the following:
 - **No anchor selected.** On first paint, the dropdown shows no default — you must pick an anchor to populate the Sankeys and table. The sheet is waiting for your choice.
 - **Anchor has no Posted legs.** The `inv_money_trail_edges` matview carries only Posted transactions (Pending legs don't render). If your anchor has only Pending or Failed legs, the sheet stays empty — use the Daily Statement sheet to see the Pending state for that account.
 - **All flow is below the min-amount threshold.** If the anchor's legs are all smaller than the *Min hop amount ($)* slider value, the table renders empty. Lower the slider to see the micro-transfers.
-- **Matview is stale.** Cross to *App Info* and check the *Matview Status* table's `inv_money_trail_edges` row. If `last_refresh_at` is older than the most recent posting and you've moved money through this anchor since, the dashboard is showing yesterday's state.
+- **Matview is stale.** Cross to *App Info* and check the *Matview Status* table's `inv_money_trail_edges` row. The matview is STALE when its `latest_date` lags the base `transactions` / `daily_balances` rows' `latest_date` shown side-by-side on that table — the base tables moved forward but the matview wasn't refreshed since the last ETL load, so the dashboard is showing yesterday's state. A NULL `latest_date` just means a matview with no date dimension, not staleness.
 
 If the matview row count shows zero on the App Info sheet, the SQL is dry — no transfers in the entire system. That's an ops alert, not an empty-state signal.
 

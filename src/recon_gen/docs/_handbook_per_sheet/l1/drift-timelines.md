@@ -100,9 +100,11 @@ agreed with its postings on every day in the current window. That is the
 steady-state expectation. If you see zero baseline across the window:
 
 - **Confirm the matviews are fresh.** Cross to *App Info* and check the
-  *Matview Status* table's `drift` and `ledger_drift` rows. If
-  `last_refresh_at` is older than the most recent posting + a few
-  minutes, the data may be clean *as of the last refresh* but stale.
+  *Matview Status* table's `drift` and `ledger_drift` rows. If their
+  `latest_date` lags the base tables' `latest_date` (both sit
+  side-by-side on that table), the base tables moved forward on the last
+  ETL load but the matviews never got refreshed — the data is clean *as
+  of the matview's latest_date* but stale relative to the books.
 - **Check the date filter and role filter.** A very narrow window or a
   single-role selection can show zero on days when that role had no
   violations. Widen the window and select *All* roles to confirm the
@@ -112,9 +114,11 @@ steady-state expectation. If you see zero baseline across the window:
   Breach* sheet means *that* invariant has work — `?` those sheets
   next.
 
-If *App Info* shows `last_refresh_at` as null or the matview row
-count as zero across the board, the L1 invariant pipeline didn't run.
-That's an ops alert, not a "clean" signal.
+If *App Info* shows the matview row count as zero across the board, the
+L1 invariant pipeline didn't run. That's an ops alert, not a "clean"
+signal. A NULL `latest_date` by itself is NOT staleness — it just flags
+a matview with no date dimension (or a custom matview added without a
+date column), so don't read it as a broken pipeline.
 
 ## Cross-sheet drills
 
