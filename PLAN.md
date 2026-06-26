@@ -687,7 +687,7 @@ Rewrite the reader-facing prose so it reads as chotchki, not generic-AI. Source 
 - [x] DT.1 - **README.md calibration rewrite** [CALIBRATION GATE]. Hand-draft against the guide, then run an adversarial perspective-diverse voice-lint workflow (one critic per anti-pattern lens — maxim-headers / triads / Oxford / marketing-adjectives / "load-bearing" / windup) plus a meaning-preservation checker vs the original; fold findings; present the diff for operator red-pen.
 - [x] DT.2 - **Fold red-pen → voice checklist v2.** Run a voice-redpen analysis over chotchki's README edits; fold the surviving corrections into `dt_0_voice_rewrite_guide.md` so the fan-out inherits his fixes.
 - [x] DT.3 - **Handbook core fan-out.** mkdocs prose: index, concepts/, for-your-role/, handbook/ app guides, reference/ (install, self-host, CLI, quirks log), scenario/. Workflow pipeline draft → voice-lint → correctness per file; operator review at the section boundary.
-- [ ] DT.4 - **Walkthroughs fan-out** (28 guides, ~6.6k lines — largest section). Same pipeline; operator review at boundary.
+- [x] DT.4 - **Walkthroughs fan-out** (28 guides, ~6.6k lines — largest section). Same pipeline; operator review at boundary.
 - [ ] DT.5 - **In-app per-sheet help snippets** (37 files, ~3k lines — render LIVE in QS TextBoxes + App2). Pipeline + drift / liveness-gate guard (token preservation is the thing that breaks everything else if dropped); operator review.
 - [ ] DT.6 - **CLI `--help` + handbook vocabulary / invariant / diagram prose** (in-code: `cli/**`, `common/handbook/**`). Pipeline + App2↔QS parity / drift guard; operator review.
 - [ ] DT.7 - **RELEASE_NOTES forward style note.** Add a short "new entries in chotchki's voice" note; leave the 14.6.0 → 13.14.4 history untouched.

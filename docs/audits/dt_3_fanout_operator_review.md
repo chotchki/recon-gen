@@ -118,6 +118,25 @@ fixes, a "sasquatch" persona leak neutralized. The uncertain calls:
 - **quicksight-quirks.md** — entry 3.2 (a sheet named "i" gets hidden by QS) notes
   "verified against `us-east-2`". Region / QS-version specific; may have changed.
 
+## DT.4 walkthroughs — commits `9959cae8` / `ea9cb1bd` / `dfe61024`
+
+Heavy staleness FIXED in-place (config recipes were v13-flat throughout → renested
+to v14; `signed_amount`→`amount_money`; `11→12` columns; `emit_schema(prefix=)`;
+"Four"→"Five" artifact groups; index↔nav resync added 9 pages). Uncertain calls:
+
+- **Orphan page** — `customization/how-do-i-brand-my-handbook-prose.md` is on disk
+  but NOT in `mkdocs.yml` nav (and was absent from the walkthroughs index). Either
+  the nav is missing it or the file is dead. Your call (I rewrote it in place either way).
+- **CLAUDE.md domain-model is stale** (out of scope, flagging) — its `<prefix>_transactions`
+  section still uses `signed_amount`; v6 renamed it to `amount_money` + `amount_direction`.
+- **`run-my-first-deploy` sample-output blocks** show drifted per-app dataset counts
+  (~27 total; real is ~50). Left verbatim (inside code fences). Refresh the sample
+  stream, or leave it illustrative?
+- **`populate-daily-balances`** says "8 mandatory columns" but `entry` is auto (a
+  reader writes 7). Minor — say 7?
+- **`populate-transactions`** has a surviving dangling cite to a Schema_v6 "Example
+  1" that no longer exists (pre-existing, outside the diff; re-pointed the main ref).
+
 ## Found bugs (not doc content — codebase staleness)
 
 - **`recon-gen docs test`** runs `pyright src/recon_gen/common/handbook/ main.py`,
