@@ -84,6 +84,26 @@ fixes, a "sasquatch" persona leak neutralized. The uncertain calls:
   batch green. Fully de-tagging all 5 needs a coordinated header + walkthrough-link
   rename across `concepts/` + `walkthroughs/` (your call — a clean follow-up).
 
+## handbook/ — commit `8c6d34a0`
+
+- **l1.md** — says "5 always-present L1 invariant views", but the card grid shows 4
+  non-aging (Drift, Overdraft, Limit Breach, Expected EOD Balance) + 2 aging, and
+  the registry rolls several more kinds (balance_cadence_gap, chain/xor/fan-in)
+  into L1 Exceptions. Confirm the "5" still matches the registry, or reword.
+- **l2_flow_tracing.md** — the Transfer Templates card says "Balanced / Imbalanced"
+  (that's the net-status FILTER, `app.py:184`), but the completion_status COLUMN
+  projects Complete / Imbalanced / Orphaned (`datasets.py:649`). Disambiguate the
+  filter-vs-column? Also "five sheets" omits the Info canary (deployed app has 6).
+
+## reference/ — commit `292d0b7a`
+
+- **install.md + handbook/audit.md** — both document a top-level `signing:` block,
+  but `config.py:556` migration maps `signing` → `audit.signing` (v14 nested cfg).
+  If the v14 nested shape is live, both docs need the `audit: signing:` form — a
+  coordinated two-file update (left consistent with each other for now).
+- **quicksight-quirks.md** — entry 3.2 (a sheet named "i" gets hidden by QS) notes
+  "verified against `us-east-2`". Region / QS-version specific; may have changed.
+
 ## Found bugs (not doc content — codebase staleness)
 
 - **`recon-gen docs test`** runs `pyright src/recon_gen/common/handbook/ main.py`,
