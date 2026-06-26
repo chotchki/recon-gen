@@ -6,7 +6,7 @@ source systems into the two shared base tables at
 
 ## What you do today
 
-You run a load — nightly batch, hourly micro-batch, or streaming
+You run a load — nightly batch, hourly micro-batch or streaming
 near-real-time, depending on the upstream system — and the data
 lands somewhere downstream that operators / executives /
 compliance look at. When something goes wrong, the symptom is
@@ -43,11 +43,12 @@ class of failure — and tells you which load step to audit:
 - Stuck Unbundled
 - Supersession
 
-**The first time you ship a load fix and watch the corresponding
-row disappear from L1 Exceptions on tomorrow's run — that's
-the proof your ETL is observable, not just running.**
+Ship a load fix and the matching row drops off L1 Exceptions on
+the next run. The ETL is OBSERVABLE — you watch the fix land
+instead of hoping the load ran clean. (See it on the
+[live spec_example dashboard](https://recon-gen-spec.hotchkiss.io/).)
 
-## What we are *not* asking you to learn
+## What we are NOT asking you to learn
 
 - **Not a new schema.** The two base tables are the contract; if
   you can write to them in the right shape, every dashboard
@@ -65,7 +66,7 @@ the proof your ETL is observable, not just running.**
 1. Read the
    [Data Integration handbook](../handbook/etl.md). It covers the
    two-table contract, the metadata keys, the matview refresh
-   sequence, and the idempotency / supersession rules that let
+   sequence and the idempotency / supersession rules that let
    you safely re-run a load.
 2. Read [Schema v6 — Data Feed Contract](../Schema_v6.md). It's
    the column-by-column reference for the two base tables. Treat
@@ -110,22 +111,24 @@ the proof your ETL is observable, not just running.**
 
 Per the
 [Data Integration handbook](../handbook/etl.md), the refresh
-sequence is dependency-ordered: base tables first, then
-`{{ l2_instance_name }}_drift` / `{{ l2_instance_name }}_overdraft` / `{{ l2_instance_name }}_limit_breach`
-/ `{{ l2_instance_name }}_stuck_pending` / `{{ l2_instance_name }}_stuck_unbundled`, then the
-Investigation matviews
-(`{{ l2_instance_name }}_inv_pair_rolling_anomalies`,
-`{{ l2_instance_name }}_inv_money_trail_edges`), then the daily-statement
-rollups. The CLI's `refresh_matviews_sql(l2_instance)` helper
-emits the right ordering for any L2 instance — call it from your
-load orchestrator after every transactions / daily_balances
-write.
+sequence is dependency-ordered: base tables first, then the L1
+invariant matviews (`{{ l2_instance_name }}_drift` / `{{ l2_instance_name }}_overdraft`
+/ `{{ l2_instance_name }}_limit_breach` / `{{ l2_instance_name }}_stuck_pending` /
+`{{ l2_instance_name }}_stuck_unbundled`, plus the chain / XOR / fan-in
+checks), then the daily-statement rollups, then the Investigation
+matviews (`{{ l2_instance_name }}_inv_pair_rolling_anomalies`,
+`{{ l2_instance_name }}_inv_money_trail_edges`) last — those read
+straight off the base tables so they don't depend on the L1 views,
+but the helper refreshes them at the end anyway. The CLI's
+`refresh_matviews_sql(l2_instance)` helper emits the right ordering
+for any L2 instance — call it from your load orchestrator after
+every transactions / daily_balances write.
 
 ## The concepts you'll want grounded
 
 - [Double-entry posting](../concepts/accounting/double-entry.md) — the
   conservation invariant your loads must preserve. Any leg you
-  drop, double-load, or sign-flip surfaces as drift.
+  drop, double-load or sign-flip surfaces as drift.
 - [Sweep / net / settle](../concepts/accounting/sweep-net-settle.md) — the
   daily cycle behind aggregating rails. Impacts how you batch
   your loads (you can't "load Monday's sweep on Wednesday"

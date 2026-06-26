@@ -5,27 +5,27 @@
 
 ## What you do today
 
-A model alert lands in your queue. Or a counterparty referral.
-Or a SAR you're drafting needs evidence. The shape of every case
-is the same: you have a question about a person, a pair, or a
-transfer, and you need to pull the rows that answer it — fast
-enough to keep the case from going stale, and with enough trail
-to defend your conclusion to the regulator later.
+The trigger varies (a model alert, a counterparty referral, a
+SAR you're drafting that needs evidence) but the work has one
+shape: a question about a person, a pair or a transfer, and you
+need the rows that answer it — fast enough the case doesn't go
+stale, with enough trail to defend the conclusion to a regulator
+later.
 
-Today, that means a query language (or a request to someone who
-speaks one), a spreadsheet, and a stack of CSV exports you stitch
+Today that means a query language (or a request to someone who
+speaks one), a spreadsheet and a stack of CSV exports you stitch
 together by hand. Each follow-up question — "OK but where did
 *that* counterparty get the money?" / "what does this account's
 broader network look like?" — is another query, another export,
-another stitch. By the time you've assembled the picture, the
+another hand-stitch. By the time the picture is assembled the
 case has aged a week.
 
 ## What this tool does differently
 
-The **Investigation Dashboard** is question-shaped — not data-
-shaped. Each of the four sheets answers a specific class of
-question that maps to the investigative posture you start a case
-in:
+The **Investigation Dashboard** is question-shaped, not data-
+shaped. Each of the four sheets answers one class of question
+that maps to the investigative posture you start a case in (see
+it live at <https://recon-gen-spec.hotchkiss.io/>):
 
 | Question shape | Sheet |
 |---|---|
@@ -34,18 +34,18 @@ in:
 | "Where did this transfer actually originate?" | Money Trail |
 | "What does this account's money network look like?" | Account Network |
 
-Pose the question; pick the sheet; the rows that answer it are
-already there, with drill-into-detail on every row. No SQL, no
-exports, no stitch.
+Pose the question, pick the sheet and the rows that answer it
+are already there with drill-into-detail on every row. You don't
+write SQL or hand-stitch CSV exports.
 
-**The first time you finish a SAR-evidence pull in 10 minutes
-that would have taken a half-day of queries — that's the proof
-this tool puts the investigative loop in your hands.**
+The first SAR-evidence pull you finish in 10 minutes instead of
+a half-day of queries is the proof — the investigative loop is
+now in YOUR hands, not the query-writer's.
 
 ## What we are *not* asking you to learn
 
 - **Not SQL.** The four matviews behind the four sheets do the
-  heavy lifting. You filter, drill, and export — you don't query.
+  heavy lifting. You filter, drill and export — you don't query.
 - **Not the L1 / L2 / Executives dashboards.** Those are
   operator / integrator / leadership surfaces. They share the
   same base ledger as Investigation, so the rows are mutually
@@ -60,7 +60,7 @@ this tool puts the investigative loop in your hands.**
 
 1. Read the
    [Investigation handbook](../handbook/investigation.md). It
-   covers the four sheets, the team posture each sheet supports,
+   covers the four sheets, the team posture each sheet supports
    and the demo scenarios you can practice on.
 2. Walk the four question-shape walkthroughs in order — they're
    designed as a graduated curriculum:
@@ -84,26 +84,25 @@ this tool puts the investigative loop in your hands.**
 
 Each sheet supports a different posture:
 
-- **Recipient Fanout** is *find-the-hub* — start with a
-  population of recipients, rank by distinct sender count, drag
-  the threshold slider until "too many" stops being noise. The
+- **Recipient Fanout** is find-the-hub — start with a population
+  of recipients, rank by distinct sender count, drag the
+  threshold slider until "too many" stops being noise. The
   fanout-cluster shape (many small inbounds → one account) is a
   classic structuring footprint.
-- **Volume Anomalies** is *find-the-spike* — the rolling 2-day
-  SUM per (sender, recipient) pair plus z-score buckets surfaces
-  pairs whose recent activity is meaningfully out-of-line with
-  their own baseline. The 5-band bucket is sortable; bands 4-5
-  warrant a look.
-- **Money Trail** is *trace-the-provenance* — `WITH RECURSIVE`
+- **Volume Anomalies** is find-the-spike — the rolling 2-day SUM
+  per (sender, recipient) pair plus z-score buckets surfaces
+  pairs whose recent activity is out-of-line with their own
+  baseline. The 5-band bucket is sortable; bands 4-5 warrant a
+  look.
+- **Money Trail** is trace-the-provenance — a `WITH RECURSIVE`
   walk over `transfer_parent_id` flattens to one row per
   multi-leg edge with chain root + depth. The most useful drill
-  shape for SAR-evidence narrative.
-- **Account Network** is *visualize-the-shape* — anchor an
-  account, see its inbound + outbound Sankeys, left-click any
-  node to walk-the-flow (the URL parameter overwrites the anchor
-  to the counterparty side). The chart you'd hand a regulator to
-  show "here's what this account's relationships actually look
-  like."
+  shape for a SAR-evidence narrative.
+- **Account Network** is visualize-the-shape — anchor an account,
+  see its inbound + outbound Sankeys, left-click any node to
+  walk the flow (the URL parameter overwrites the anchor to the
+  counterparty side). The chart you'd hand a regulator to show
+  "here's what this account's relationships actually look like".
 
 ## The audit report — your regulator handoff
 
@@ -143,7 +142,7 @@ recon-gen audit apply -c config.yaml \
 
 The `--period` flag accepts several shapes: `trailing:N` for "last N
 days ending yesterday" (default `trailing:7`), `yesterday`, `today`,
-`YYYY-MM-DD..YYYY-MM-DD` for an explicit closed-closed range, or a
+`YYYY-MM-DD..YYYY-MM-DD` for an explicit closed-closed range or a
 single `YYYY-MM-DD` for a one-day report.
 
 Verify a report's provenance against current source data:
@@ -159,14 +158,13 @@ empty signature widgets — your PDF reader can fill those in to
 add your countersignature.
 
 !!! note "For integrators — automate the daily report"
-    The audit report is intended to be **automatically generated
-    daily** by the same scheduled job that runs the matview
-    refresh after each ETL load. Wire `recon-gen audit apply
-    --execute` immediately after `recon-gen data refresh
-    --execute` in your cron / Airflow / Prefect pipeline, write
-    the PDF to a dated path, and the compliance team always has
-    yesterday's reconciliation snapshot ready to hand off without
-    a manual generate step.
+    The audit report is meant to be generated DAILY by the same
+    scheduled job that runs the matview refresh after each ETL
+    load. Wire `recon-gen audit apply --execute` immediately
+    after `recon-gen data refresh --execute` in your cron /
+    Airflow / Prefect pipeline and write the PDF to a dated path,
+    so the compliance team always has yesterday's reconciliation
+    snapshot ready to hand off with no manual generate step.
 
 For the full reference — what each section contains, the
 provenance recompute recipe, certificate creation instructions,

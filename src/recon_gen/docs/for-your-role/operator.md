@@ -8,29 +8,28 @@ Primary user of the L1 Reconciliation Dashboard.*
 You run an aggregated text report (or a spreadsheet, or a stack of
 emails) every morning and cross-check the numbers against the
 previous business day's bank statement. When something doesn't tie,
-the answers you actually need — *which* account drifted, *which*
-transfer didn't settle, *which* posting is missing its counterpart —
+the answers you actually need — WHICH account drifted, whether
+each transfer settled, where a posting's counterpart went —
 aren't on the report you're holding.
 
 So you escalate to whoever owns the data pipeline. They run a
 query, send back a CSV, sometimes within the hour, sometimes by
 end-of-day. By the time you hear back, the issue has often aged
 another day. If the answer leads to another question ("OK but where
-did *that* entry come from?"), it's another round-trip.
+did THAT entry come from?"), it's another round-trip.
 
 ## What this tool does differently
 
-The L1 Reconciliation Dashboard is the same underlying data, laid
-out so you can answer those follow-up questions yourself. Every
-KPI on the **L1 Exceptions** sheet is a single class of
-violation. Every row in the detail tables is the specific break.
-Every clickable cell drills to the underlying transactions.
+Same underlying data, laid out so you can answer those follow-up
+questions yourself. Every KPI on the **L1 Exceptions** sheet is one
+class of violation and every detail row is a specific break — click
+any cell and it drills straight to the underlying transactions.
 
-**The first time you finish a trace in under two minutes — the
-kind of trace you used to wait a day for — that's the proof that
-this tool has the answers your current process hides.**
+The first trace you finish in under two minutes is one you used to
+wait a day for. See it live on the
+[spec_example dashboards](https://recon-gen-spec.hotchkiss.io/).
 
-## What we are *not* asking you to learn
+## What we are NOT asking you to learn
 
 - **Not SQL.** You won't write queries. The L1 invariant matviews
   do the querying; you're reading the results.
@@ -41,11 +40,11 @@ this tool has the answers your current process hides.**
   to compliance / leadership and answer different questions. Skim
   them, don't study them.
 
-## What we *are* asking you to learn
+## What we ARE asking you to learn
 
 Two dashboards, not one. The L1 Reconciliation Dashboard is your
 day-to-day surface — but L1 violations are downstream symptoms.
-When the symptom is a real one and you need to know *why*, the
+When the symptom is a real one and you need to know WHY, the
 **L2 Flow Tracing dashboard** is the next stop.
 
 - **L1 answers "did the invariants hold?"** — drift, overdraft,
@@ -56,11 +55,11 @@ When the symptom is a real one and you need to know *why*, the
   alive?"** — every Rail, every Chain, every Transfer Template,
   every Limit Schedule the L2 instance declares should produce
   activity in the runtime data. The **L2 Exceptions** sheet
-  surfaces declarations that are dead, mismatched, or orphaned —
+  surfaces declarations that are dead, mismatched or orphaned —
   and these failures often manifest one layer down as the L1
   exceptions you saw on L1 Exceptions.
 
-When an L1 trace ends with "but why is this happening *every*
+When an L1 trace ends with "but why is this happening EVERY
 day?", flip to L2 Flow Tracing. A spike in *Dead Rails* or *Chain
 Orphans* under L2 Exceptions tells you the integrator's L2
 declaration has drifted from runtime — not a transient runtime

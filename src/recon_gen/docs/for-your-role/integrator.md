@@ -8,37 +8,38 @@ runtime reality.*
 
 You're the bridge between the institution's chart of accounts +
 operational rails and the L2 model that every dashboard reads off.
-You wrote the YAML once; now the question every audit, every
-quarterly review, every "we added a new rail / metadata key /
-limit schedule" change asks is: **does the YAML still describe
-what's actually happening?**
+You wrote the YAML once; now every audit, every quarterly review,
+every "we added a new rail / metadata key / limit schedule" change
+asks the same thing: does the YAML still describe what's ACTUALLY
+happening?
 
-Without a tool, that's a manual reconciliation: spread the YAML
-on one screen, the actual posting volumes on another, and check
-each declared Rail / Chain / TransferTemplate / LimitSchedule
-against runtime activity. Slow, error-prone, and something you
-fall behind on as soon as the model grows past a dozen entries.
+Without a tool that's a manual reconciliation — spread the YAML on
+one screen, the actual posting volumes on another, check each
+declared Rail / Chain / TransferTemplate / LimitSchedule against
+runtime activity. Slow, error-prone and something you fall behind
+on the moment the model grows past a dozen entries.
 
 ## What this tool does differently
 
 The **L2 Flow Tracing** dashboard is the YAML, projected onto the
 runtime data. Every Rail you declared shows up with its firing
-count, status mix, and last-fire timestamp. Every Chain shows the
+count, status mix and last-fire timestamp. Every Chain shows the
 parent / child completion rate. Every TransferTemplate has a
 Sankey of its multi-leg flow. Every LimitSchedule shows how close
 to its cap it ran in the date window.
 
 Where the projection finds nothing — a declared Rail with zero
 firings, a Chain with no children, a metadata key never set on
-any leg — those surface on the **L2 Hygiene Exceptions** sheet
-as concrete row-shaped findings, not free-text questions.
+any leg — those surface on the **L2 Exceptions** sheet as concrete
+row-shaped findings, not free-text questions.
 
-**The first time the dashboard shows you a Dead Rail you'd never
-have spotted by reading the YAML alone — that's the proof L2 Flow
-Tracing closes the declaration / runtime gap your manual
-process can't.**
+The first Dead Rail the dashboard catches — declared in the YAML,
+zero firings in the data — is one you'd never have spotted reading
+the model alone. That gap, between what you declared and what
+actually fired, is what a manual reconciliation can't keep current.
+See it live on the [spec_example demo](https://recon-gen-spec.hotchkiss.io/).
 
-## What we are *not* asking you to learn
+## What we are NOT asking you to learn
 
 - **Not new model semantics.** The L2 SPEC doesn't change because
   of the dashboard. You wrote the YAML against the SPEC; the
@@ -47,14 +48,14 @@ process can't.**
   the YAML in your editor, validate with `recon-gen` CLI,
   commit + redeploy. The dashboard is read-only.
 - **Not every other dashboard.** L1 (operator surface),
-  Investigation (compliance), and Executives (scorecard) are not
+  Investigation (compliance) and Executives (scorecard) are not
   your problem unless your L2 changes break them.
 
 ## How to start
 
 If you're new to the L2 model, ground the primitives first; the
 handbook + dashboards assume you know what a Rail / Chain /
-Transfer Template / Limit Schedule *is*. Five short reads:
+Transfer Template / Limit Schedule IS. Five short reads:
 
 - [Account](../concepts/l2/account.md) and
   [Account template](../concepts/l2/account-template.md) — the
@@ -84,15 +85,15 @@ Then:
    walks the 5 sheets and spells out how each one projects YAML
    declarations against runtime data.
 3. Open the dashboard against your current L2 instance + freshest
-   data. Tour the **Rails** sheet first; spot any rail with zero
-   firings — those are your dead declarations or your dead
-   runtime entries, depending on which side you trust.
+   data (or poke at the [spec_example demo](https://recon-gen-spec.hotchkiss.io/)
+   to see the shape first). Tour the **Rails** sheet first; spot
+   any rail with zero firings — those are your dead declarations
+   or your dead runtime entries, depending on which side you trust.
 4. Walk **Chains** + **Transfer Templates**. Required parents
    without children; templates whose legs don't sum to
    `expected_net`. Each is a class of integration bug.
-5. End on **L2 Hygiene Exceptions** — the UNION view across 6
-   hygiene checks. Treat any non-zero count here as a backlog
-   item.
+5. End on **L2 Exceptions** — the UNION view across 6 hygiene
+   checks. Treat any non-zero count here as a backlog item.
 6. Bookmark the
    [Customization handbook](../handbook/customization.md). It's
    the reference for editing the L2 + redeploying; you'll come
@@ -137,7 +138,7 @@ After a few weeks of using L2 Flow Tracing:
 
 - You're catching dead declarations within days of model changes,
   not at quarterly audit time.
-- L2 Hygiene Exceptions stays at zero or near-zero — open
+- L2 Exceptions stays at zero or near-zero — open
   findings have owners and ETAs.
 - When the operator team asks "is the rail for X working?" you
   answer from the dashboard in 10 seconds.
