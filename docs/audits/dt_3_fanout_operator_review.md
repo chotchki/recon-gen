@@ -137,6 +137,34 @@ to v14; `signed_amount`→`amount_money`; `11→12` columns; `emit_schema(prefix
 - **`populate-transactions`** has a surviving dangling cite to a Schema_v6 "Example
   1" that no longer exists (pre-existing, outside the diff; re-pointed the main ref).
 
+## Recurring flag — logical (CPA) vs physical (v6) column names [your call]
+
+The fan-out kept hitting this across docs + snippets + CLAUDE.md: prose uses
+`signed_amount` / `amount` / `posted_at` / `balance_date` / `transfer_type` — the v3
+LOGICAL names. v6 renamed the PHYSICAL columns to `amount_money` (signed cents) +
+`amount_direction`, `posting`, and derives business-day from `posting` (no
+`balance_date` column exists). The CONCEPTS are unchanged (integer cents, + in / − out,
+per-business-day). So either:
+
+- intentional CPA-readable VOCABULARY layer (logical names the reader thinks in,
+  decoupled from physical columns) — keep them, maybe document the mapping once, OR
+- stale v3 physical-column references that should be the v6 names.
+
+CLAUDE.md's domain-model section uses the logical names too, so this is a project-wide
+vocabulary decision — yours. The fan-out left them AS-IS (consistent with CLAUDE.md)
+rather than guess. The clear-cut physical-column slips (`signed_amount` in a literal
+`INSERT` projection in `populate-daily-balances`) WERE fixed to `amount_money`; only
+the conceptual/teaching uses were left for your call.
+
+## DT.5 snippets — commit `5e65cb13` + `e238d6a9`
+
+- **FIXED (`e238d6a9`):** `last_refresh_at` (nonexistent column) → `latest_date` across
+  11 live snippets, with the staleness mechanism corrected (matview `latest_date` lags
+  the base tables', not a refresh clock). All live-render gates green.
+- **App Info h1** is "App Info" but the sheet `name=` constant is "Info" (`app_info.py`).
+  The liveness gate keys on `handbook_path` (passes), so this is cosmetic — but the
+  `_template.md` contract says h1 should equal `name=`. Left verbatim; flagging.
+
 ## Found bugs (not doc content — codebase staleness)
 
 - **`recon-gen docs test`** runs `pyright src/recon_gen/common/handbook/ main.py`,
