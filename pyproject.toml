@@ -223,7 +223,7 @@ dev = [
     # is enough for stub resolution; ``playwright install`` (which
     # downloads browser binaries) is still only needed for the e2e
     # browser tests.
-    "playwright>=1.40",
+    "playwright>=1.60",
     # Phase X.2 spike — Starlette server + TestClient for HTML renderer
     # unit tests. Pulled into [dev] so the spike's tests run in the
     # default `uv sync --extra dev` developer setup without a separate
@@ -274,7 +274,7 @@ e2e = [
     "boto3>=1.34",
     # See [dev] — botocore[crt] adds awscrt for the SSO login path.
     "botocore[crt]>=1.34",
-    "playwright>=1.40",
+    "playwright>=1.60",
     # X.2.u.3 — the browser e2e suite is now parametrized over
     # [qs, app2]: App2Driver serves the bundled HTMX renderer in-process
     # (common/html/server.py imports starlette). So the App2 server stack
