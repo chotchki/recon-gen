@@ -1,13 +1,15 @@
 # Walkthroughs
 
-*If you arrived here directly, the [role pages](../for-your-role/index.md)
-curate which walkthroughs each role needs in which order.*
-
-Step-by-step task recipes — "I have X and want Y" or "I'm looking at
+Step-by-step task recipes — "I have X and want Y", or "I'm looking at
 this row, what do I do?" Each page is self-contained and assumes the
 reader already knows the relevant concept (see
 [Concepts](../concepts/index.md)) and where things live (see
 [Reference](../reference/index.md)).
+
+Landed here cold? The [role pages](../for-your-role/index.md) curate
+which walkthroughs each role needs, and in what order — start there.
+
+See it live: https://recon-gen-spec.hotchkiss.io/
 
 ## L1 sheets
 
@@ -35,6 +37,7 @@ The four question-shaped flows for compliance / AML triage.
 Recipes for the engineer wiring the two base tables.
 
 - [How do I populate transactions?](etl/how-do-i-populate-transactions.md)
+- [How do I populate daily_balances?](etl/how-do-i-populate-daily-balances.md)
 - [How do I validate a single account-day?](etl/how-do-i-validate-a-single-account-day.md)
 - [How do I prove my ETL is working?](etl/how-do-i-prove-my-etl-is-working.md)
 - [How do I tag a force-posted transfer?](etl/how-do-i-tag-a-force-posted-transfer.md)
@@ -44,7 +47,7 @@ Recipes for the engineer wiring the two base tables.
 ## Customization
 
 Recipes for the developer dropping the dashboards onto their own
-stack.
+stack and shaping the L2 to their own institution.
 
 - [How do I map my database to the two base tables?](customization/how-do-i-map-my-database.md)
 - [How do I swap the SQL behind a dataset?](customization/how-do-i-swap-dataset-sql.md)
@@ -53,5 +56,13 @@ stack.
 - [How do I run my first deploy?](customization/how-do-i-run-my-first-deploy.md)
 - [How do I add an app-specific metadata key?](customization/how-do-i-add-a-metadata-key.md)
 - [How do I extend canonical values?](customization/how-do-i-extend-canonical-values.md)
+- [How do I add an AML inbound-flow cap?](customization/how-do-i-add-an-aml-inbound-cap.md)
+- [How do I chain two templates?](customization/how-do-i-chain-two-templates.md)
+- [How do I add multi-mode settlement?](customization/how-do-i-add-multi-mode-settlement.md)
+- [How do I model batched payouts?](customization/how-do-i-model-batched-payouts.md)
+- [How do I mix cardinality children?](customization/how-do-i-mix-cardinality-children.md)
+- [How do I set typical amount ranges on a rail?](customization/how-do-i-set-typical-amount-ranges.md)
+- [How do I set typical firing counts on a rail?](customization/how-do-i-set-typical-firing-counts.md)
 - [How do I author a new app on the tree?](customization/how-do-i-author-a-new-app-on-the-tree.md)
 - [How do I test my customization?](customization/how-do-i-test-my-customization.md)
+- [How do I publish docs against my L2?](customization/how-do-i-publish-docs-against-my-l2.md)
