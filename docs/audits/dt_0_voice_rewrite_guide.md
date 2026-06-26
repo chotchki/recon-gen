@@ -217,11 +217,15 @@ under-reaches (the [[feedback-voice-rewrite-review-everything]] lesson, sharpene
 
 ---
 
-## 7. Doc-architecture: inline only the essential, link or generate the rest (DT, 2026-06-25)
+## 7. Doc-architecture is DRY: duplicates drift, link the single source (DT, 2026-06-25)
 
-A doc that REPRODUCES code-derived artifacts inline — directory trees, output /
-file listings, dataset counts, constraint tables, config dumps — drifts, because
-nothing regenerates them from the source. The DT staleness audit caught exactly
+**chotchki's framing, stated outright (2026-06-25): "think of it as the DRY
+principle, duplicates drift, use links."** That is the PARENT of this section and
+§8 — every rule below is just DRY applied to docs: the code (or the handbook) is
+the single source of truth; the doc links to it instead of copying it, because
+the copy is what rots. A doc that REPRODUCES code-derived artifacts inline —
+directory trees, output / file listings, dataset counts, constraint tables,
+config dumps — drifts, because nothing regenerates them from the source. The DT staleness audit caught exactly
 this on the README: the project-structure tree listed two deleted modules, the
 `out/` listing undercounted every app's datasets, the forbidden-SQL restatement
 had drifted from `Schema_v6.md`. Operator call (2026-06-25): de-drift by design.
@@ -240,3 +244,34 @@ Rules for the fan-out:
   (filename patterns, "3 per app" — true by construction), cut the hand-kept ints.
 - Mermaid renders on GitHub + mkdocs but shows RAW on PyPI — keep a one-line prose
   summary above the diagram as graceful degradation.
+
+---
+
+## 8. The README is a landing page, not the manual (DT.1 red-pen, 2026-06-25)
+
+chotchki's red-line of the calibrated README was **39 ins / 210 del** — he cut
+whole SECTIONS, not sentences. Deleted: the per-app tab tables (`## The four
+apps`), `## Customising` how-tos, the inline `config.yaml` dump, the per-command
+`--execute` explanations, the `out/` file listing, the inline forbidden-SQL
+restatement, and `## Why this exists`. Kept: a lean landing page that LINKS out.
+
+Lessons (these govern the DT.3+ fan-out):
+- **README = lean landing page + links; the handbook / RTD owns the detail.**
+  Anything a handbook page already covers (per-app sheets, how-to-extend, the
+  config field reference, command-by-command behavior) gets cut to a LINK.
+- **Delete-and-link, don't fix-in-place.** I FACT-FIXED sections (tab counts,
+  `out/` listing, config dump) the pass before — he DELETED them. When content is
+  handbook-territory or a code-reproduction, the move is delete + link, NOT
+  de-drift. Spot it BEFORE polishing: "does a handbook page own this? → cut it."
+  (Sharper than §7's inline-vs-link — this applies to whole sections.)
+- **Cut stale-generation framing.** `## Why this exists` (the QuickSight-console
+  origin story) went — it framed the tool by its earlier QS-first generation, and
+  QS is on the deprecation path now. When the product's direction has moved, the
+  framing that sold the old shape reads as not-him.
+- **Point to the TOOL, not the manual edit.** Theming detail → "launch studio and
+  use its built in editor". Studio is the way.
+- **The diagram belongs HIGH** — he moved `## Architecture` up near the intro.
+- **INVERSE for the fan-out:** the detail's HOME is the handbook, so DT.3 handbook
+  pages KEEP that depth — do NOT cut there. Audience-layered: README lean + links;
+  handbook deep + authoritative. What's noise in the README is the point in the
+  handbook.
