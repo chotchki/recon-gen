@@ -12,25 +12,29 @@ resolve flags empirically. Routes: `/dashboards/<app>/sheets/<sheet-id>` (shell)
 → `/visuals/<id>/data` (HTMX data fragments) + the `/l2_shape/*` editor.
 
 **RESOLVED (facts confirmed — the editorial call is still yours):**
-- **Inbound caps ARE real.** `/l2_shape/limit_schedule/` declares **6 Inbound + 24
-  Outbound** schedules. So the open-vs-closed-loop / limit-schedule gloss ("a daily
-  outbound-flow cap toward external counterparties") is genuinely too narrow —
-  inbound (AML / structuring) caps exist and are used. Broaden the concept page, or
-  keep the simplification?
+- **Limit Breach is genuinely OUTBOUND — but inbound caps exist for AML.** The L1
+  Limit Breach sheet (live title: "Outbound Transfer Limit Breaches") tracks
+  outbound-debit-over-cap, so the open-vs-closed-loop gloss is ACCURATE for that
+  sheet. AND `/l2_shape/limit_schedule/` declares **6 Inbound + 24 Outbound**
+  schedules — the inbound ones enforce AML / structuring thresholds that surface in
+  Investigation, not the L1 Limit Breach sheet. So: the concept page is fine on
+  Limit Breach; `limit-schedule.md` could note inbound (AML) schedules exist.
 - **etl-engineer's "6 check_types" is a subset.** The live L1 Exceptions sheet
   renders ~10+ kinds (drift, overdraft, pending, unbundled, limit-breach,
   supersession, **chain, xor, ledger, cadence**). Add "among others", or keep the
   six as the headline classes?
-- **Program Health renders as described** — the sheet shows green / amber / red +
-  "healthy" / "violation" / "systemic". The page's tripwire description is accurate.
-  (The separate QS-bookmarks / saved-views sub-claim is QS-specific and not in the
-  HTMX demo — stays unverified.)
+- **Program Health confirmed verbatim** — the live sheet reads "green when zero,
+  amber on any violation, red at the 20-violation systemic mark" over a 30-day
+  window. The exec page's tripwire description matches exactly. (The separate
+  QS-bookmarks sub-claim is QS-specific, not in the HTMX demo — stays unverified.)
 
-**Follow-up (needs a browser — flagged, not done):** confirming rendered KPI
-values + the inbound-breach row + pulling handbook screenshots needs Playwright
-(`uv sync --extra dev`, then an `App2Driver` session against the live URL). Route
-map above makes it a quick focused task — best paired with DT.4 (walkthroughs own
-the `screenshots/` dir).
+**Browser walk DONE.** Drove the live demo via Playwright **chromium** (this
+sandbox can't download the webkit binary playwright 1.59 wants — cached chromium
+works; `App2Driver.attached_to(base_url=…)` is the sanctioned driver path, used
+here as raw chromium in a scratch script since screenshots don't need the verbs).
+Captured **22 full-page screenshots** — all 4 dashboards, every content sheet —
+reproducible via `scratchpad/demo_walk.py`. Curating + placing them on the
+handbook pages is a DT.4 task (walkthroughs own `screenshots/`).
 
 ## for-your-role/ — commit `70e57847`
 
