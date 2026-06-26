@@ -320,3 +320,8 @@ Lessons (these govern the DT.3+ fan-out):
   internal tag a walkthrough links to via the derived anchor. Stripping the tag
   breaks the link sweep — leave those headers and flag the coordinated rename for
   the operator (a single-file rewrite can't fix both sides).
+- **Verifier guard (Batch E lesson):** removing an Oxford/serial comma is CORRECT
+  — chotchki STRIPS serial commas, he never retains them. The Batch-E verifier
+  inverted this (flagged the rewriter's correct removals as "house voice retains
+  the Oxford comma" faults) and the fixer re-added 3; caught by hand. Future
+  verifier prompts must state: a removed serial comma is never a fault.
