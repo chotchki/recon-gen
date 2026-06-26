@@ -6,50 +6,52 @@
 
 ## What it is
 
-Most money movement in a retail banking system doesn't settle
-instantaneously. A sale posts today; the settlement to the
-merchant's bank fires tomorrow; the card network clears the funds
-two days after that; the external bank confirms receipt on day
-four. At any moment, large amounts of money are **in flight** —
-legitimately posted on one side of a transfer but not yet on the
-other.
+Most money movement in a retail banking system doesn't settle the
+instant it posts. A sale posts today, the settlement to the
+merchant's bank fires tomorrow, the card network clears two days
+later, the external bank confirms receipt on day four. At any
+moment large amounts of money are IN FLIGHT — legitimately posted
+on one side of a transfer, not yet on the other.
 
-A system is **eventually consistent** when, given enough time and
-no new activity, all in-flight balances will clear and the books
-will agree across parties.
+A system is eventually consistent when, given enough time and no
+new activity, every in-flight balance clears and the books agree
+across parties.
 
 ## The problem it solves
 
 Non-instant settlement is a feature, not a bug. Batch processing
-is vastly more efficient than real-time for most retail volumes;
-external settlement calendars (ACH windows, Fed cutoffs, card
-network cycles) are fixed facts that every institution has to
-live with.
+beats real-time on cost for most retail volumes, and the external
+settlement calendars (ACH windows, Fed cutoffs) are fixed facts
+every institution lives with.
 
-The operator's job, in an eventually consistent system, splits
-into two:
+In an eventually consistent system the operator's job splits in
+two:
 
-1. **Distinguish in-flight from stuck.** A transfer that's one
-   day out isn't broken; a transfer that's been "pending" for
-   two weeks probably is. The threshold depends on the rail's
+1. **In-flight vs stuck.** A transfer one day out isn't broken; one
+   that's been "pending" for two weeks probably is. The threshold —
+   whether a leg even lands on the sheet — comes from the rail's
    declared `max_pending_age` / `max_unbundled_age`.
-2. **Watch aging.** Once something is stuck, how long has it
-   been stuck? Aging drives escalation — a three-day-old
-   exception is routine follow-up, a thirty-day-old exception
-   is a structural problem.
+2. **Aging.** Once something IS stuck, how long has it been stuck?
+   Aging drives escalation — a three-day-old exception is routine
+   follow-up, a thirty-day-old one is a structural problem.
 
 ## How L1 surfaces this
 
-The **Pending Aging** and **Unbundled Aging** sheets bucket
-violations into 5 bands (0-1 day, 2-3 days, 4-7 days, 8-30 days,
->30 days). The buckets ARE the eventual-consistency machinery
-made operational:
+The **Pending Aging** and **Unbundled Aging** sheets bucket each
+violation by age since posting. The two band sets DIFFER —
+Pending Aging is hour-grained at the low end (`0-6h`, `6-24h`,
+`1-3d`, `3-7d`, then a `>7d` overflow), Unbundled Aging stays
+day-grained (`<1d`, `1-2d`, `2-7d`, `>7d`) — because the rails
+feeding each clear on different cadences. The bands turn the
+eventual-consistency story into something an operator acts on:
 
-- **Bands 1-2 (0-3 days)** are usually in-flight; no action
-  yet unless it's a transfer type that should have cleared.
-- **Band 3 (4-7 days)** is starting to stick; escalate.
-- **Bands 4-5 (8-30+ days)** are structural; stop working rows and
-  ask why the automation hasn't cleared them.
+- **First band or two** (hours out, a day or two for unbundled) is
+  usually still in-flight; no action unless it's a transfer type
+  that should already have cleared.
+- **Middle bands** (a few days out) are starting to stick —
+  escalate.
+- **The `>7d` overflow** is structural; stop working rows and ask
+  why the automation hasn't cleared them.
 
 See [L1 Reconciliation Dashboard](../../handbook/l1.md) for the
 operator workflow, and the per-rail `max_pending_age` /

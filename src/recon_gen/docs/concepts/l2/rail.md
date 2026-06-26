@@ -8,19 +8,19 @@ A **rail** is the smallest indivisible money-movement primitive — one
   produces two Transaction rows that net to zero per the
   Conservation invariant.
 - **SingleLegRail** — posts a single leg. The other side comes
-  from elsewhere — either bundled into a multi-leg
-  [Transfer Template](transfer-template.md), aggregated into a
-  parent firing of an ``aggregating`` rail, or
+  from elsewhere: bundled into a multi-leg
+  [Transfer Template](transfer-template.md), picked up by a
+  parent firing of an ``aggregating`` rail or just
   ``ExternalForcePosted`` (the institution's view doesn't include
   the offsetting side at all, like a Fed-side credit on an inbound
   wire).
 
 Every Rail has:
 
-- ``name`` — the rail's identifier. Under Z.B (2026-05-15), the
-  rail's name IS the type identifier; posted Transactions carry the
-  rail's name in their ``rail_name`` column to bind back to it
-  (e.g. ``CustomerOutboundACH``, ``MerchantPayoutWire``).
+- ``name`` — the rail's identifier. The rail's name IS the type
+  identifier; posted Transactions carry it in their ``rail_name``
+  column to bind back (e.g. ``CustomerOutboundACH``,
+  ``MerchantPayoutWire``).
 - ``posted_requirements`` — optional list of metadata keys that MUST
   be populated on the Transaction (``card_brand``, ``cashier``, etc).
   L1 surfaces violations as posted-requirements drift.
@@ -48,15 +48,15 @@ constraint enforced at write time. Two ways it changes behavior:
   the per-kind lognormal would produce. Plants size to the range
   midpoint so they look like ordinary firings (just at the boundary
   that triggers the SHOULD-constraint). Cap-breach plants on rails
-  that *also* carry a ``LimitSchedule`` clamp to ``range.max × 3``
+  that ALSO carry a ``LimitSchedule`` clamp to ``range.max × 3``
   so the breach amount stays in a realistic ballpark relative to
   the rail's typical volume.
 
 - **Runtime SHOULD-constraint (follow-on).** A future
   ``<prefix>_magnitude_anomaly`` matview will surface posted
-  Transactions that fall outside the declared range. Deferred from
-  AB.5 per the gap doc's "generator-only first cut" — lands when an
-  integrator asks for runtime anomaly surfacing.
+  Transactions that fall outside the declared range. Generator-only
+  for now — the runtime matview lands when an integrator asks for
+  runtime anomaly surfacing.
 
 **Validator rules (V1a-c):**
 
@@ -86,8 +86,8 @@ queue, not landed yet.
 
 ## Optional: typical firing-count range (AF)
 
-Where ``amount_typical_range`` bounds *how much* each firing moves,
-``firings_typical_per_period`` bounds *how many times* the rail fires
+Where ``amount_typical_range`` bounds how MUCH each firing moves,
+``firings_typical_per_period`` bounds how MANY times the rail fires
 per period. The two compose: realistic per-firing amounts × realistic
 per-period counts = a realistic per-period aggregate — the
 daily/monthly top-line operators scan first when judging whether a
@@ -114,9 +114,10 @@ Two accepted YAML shapes:
   (``_pick_firings_count``) samples a per-period count uniform-randomly
   from the band and scales by the number of periods in the window
   (count-per-period × periods = total firings over the window). When
-  absent, it falls back to the per-kind firing-count heuristic —
-  *without consuming any RNG state*, so pre-AF L2 instances stay
-  byte-identical to their locked seeds. The per-day distribution is the
+  absent, it falls back to the per-kind firing-count heuristic
+  WITHOUT consuming any RNG state, so L2 instances that don't declare
+  the field stay byte-identical to their locked seeds. The per-day
+  distribution is the
   generator's existing Poisson spread, so the declared band shows up as
   the aggregate-per-period the operator intended. Composes with
   ``amount_typical_range`` — count, then per-firing amount, fully
@@ -125,13 +126,14 @@ Two accepted YAML shapes:
   ``<prefix>_volume_anomaly`` matview will surface periods whose actual
   firing count falls outside the declared band (early-warning
   surveillance: "today's transfer count is 10× yesterday — what
-  changed?"). Deferred per the gap doc's "generator-only first cut".
+  changed?"). Generator-only for now, same as the magnitude matview
+  above.
 
 **Validator rules (W1a-c):**
 
 - **W1a** — ``min`` MUST be ``<= max``. Equal endpoints ARE allowed
   (``[1, 1]`` = "exactly one per period" — a legitimate fixed count,
-  unlike AB.5's V1a which rejects degenerate amount ranges).
+  unlike V1a above which rejects degenerate amount ranges).
 - **W1b** — both ``min`` and ``max`` MUST be ``>= 0``. Zero is allowed
   (a rail that typically fires zero times in some periods). Negative
   counts are rejected.
@@ -145,22 +147,22 @@ Two accepted YAML shapes:
 explicit opt-in that drives a coupled **unit firing**: every firing emits
 all the template's leg_rails together as one balanced Transfer, at the
 declared per-period count, and those leg_rails do NOT also fire
-independently in the per-rail loop (that would double-emit + uncouple the
-legs, ignoring the band and tripping false drift — Gap J). Use it for a
+independently in the per-rail loop (firing both ways would double-emit and
+uncouple the legs, ignore the band and trip false drift). Use it for a
 genuinely atomic multi-leg flow — e.g. a card-load = cardholder-credit +
 clearing-debit pair that is ONE event with two legs.
 
 **Coupling is gated on this declaration ALONE — never inferred from
-chain-parenthood (Gap J follow-up).** A template referenced as a Chain
-``parent`` also unit-fires (once per business day, so the chain overlay
-has a parent firing to thread children onto — AG.1), but if it does NOT
-declare ``firings_typical_per_period`` its leg_rails ALSO keep firing
+chain-parenthood.** A template referenced as a Chain ``parent`` also
+unit-fires (once per business day, so the chain overlay has a parent
+firing to thread children onto), but if it does NOT declare
+``firings_typical_per_period`` its leg_rails ALSO keep firing
 independently in the per-rail loop. That's deliberate: chain-parenthood is
 a linkage property, not a claim that the legs are one balanced event. A
 settlement-cycle template whose legs are independent activities (high-
 volume sales vs. occasional adjustments, each at its own rail-level band)
-must keep those distinct per-leg volumes — collapsing them into one shared
-per-firing count is exactly the v11.9.2 regression v11.9.3 fixes.
+has to keep those per-leg volumes distinct — collapsing them into one
+shared per-firing count is the exact regression this gating prevents.
 
 Period-to-window conversion uses standard banking ratios: 5 business
 days/week, 10/pay-period (bi-weekly), 21/month. A window shorter than

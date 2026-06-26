@@ -1,12 +1,13 @@
 # Concepts — Accounting
 
-Banking primitives the L1 invariants, the L2 model, and the per-app
-sheets all assume the reader already understands.
+The banking vocabulary the rest of the handbook assumes you already
+know. The L1 invariants and the L2 model both lean on these terms, and
+so do the per-app sheets — none of them re-define the words.
 
-The intended user is anyone touching the dashboards for the first time
-— operators, integrators, ETL engineers, executives. Read these pages
-before the per-app reference material if a term ("invariant", "escrow",
-"sweep", "vouchering") is unfamiliar.
+Audience is anyone touching the dashboards for the first time —
+operators, integrators, ETL engineers, executives. Read these before the
+per-app reference material whenever a term ("invariant", "escrow",
+"sweep", "vouchering") doesn't land yet.
 
 ## Pages
 
