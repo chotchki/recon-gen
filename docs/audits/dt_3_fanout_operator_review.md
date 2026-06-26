@@ -167,7 +167,32 @@ the conceptual/teaching uses were left for your call.
 
 ## Found bugs (not doc content — codebase staleness)
 
-- **`recon-gen docs test`** runs `pyright src/recon_gen/common/handbook/ main.py`,
-  but there is no `main.py` at repo root → the verb errors on a stale path. The
-  pytest doc-gates (`tests/docs/`, 64) pass; only the pyright sub-step fails.
-  Likely meant `src/recon_gen/docs/_macros/main.py`. One-line fix in the docs CLI.
+- **`recon-gen docs test`** ran `pyright … main.py` (no `main.py` at repo root) →
+  the verb errored on a stale path. **FIXED (`f71e05b7`)** — corrected to
+  `src/recon_gen/main.py`; `docs test: OK` (pyright 0 errors).
+
+## DT.6 parser-source-doc flags — commit `133f990c`
+
+- **L1_Invariants.md** had major staleness FIXED (layering diagram + counts stuck
+  at the 7-constraint / 13-matview era → twelve SHOULD-constraints, 24 matviews,
+  48 refresh statements, "UNION over 12"; dead symbol names corrected). Two left
+  for you: (1) inline phase-tag parentheticals in the per-constraint body prose
+  (e.g. limit_breach's "(Z.B … keyed on rail_name … AB.1 … added direction)") are
+  dev-facing CHANGE-HISTORY — guide §6 says strip phase ids from reader prose, but
+  cutting these drops provenance; left intact. (2) The layering-diagram grouping of
+  the newer matviews (transfer_parents, drift_summary, data_anchor, the 2
+  Investigation matviews) is an interpretive layout of a flat dependency list.
+
+## Phase-exit (DT.8) status — 2026-06-26
+
+All 8 DT batches done + committed on `feature/dt-doc-voice` (main untouched at
+`fe106399`). Verification GREEN: full unit tier **5415 passed / 123 skipped**;
+`tests/docs/` 64 passed; mkdocs build clean, 0 dead anchors; `docs test: OK`.
+
+**Left for you (operator-gated, per the autonomous boundary):**
+- Final red-pen review of the voice + the flags in this file.
+- The RELEASE_NOTES v-cut (the forward note is in; the version bump + tag needs your
+  go-ahead per [[feedback_always_ask_before_release_cut]]).
+- Sweep DT → `PLAN_ARCHIVE.md` after you've signed off.
+- The recurring **logical-vs-physical column vocabulary** decision (top of this file)
+  — it also implies a CLAUDE.md domain-model refresh, which is yours.
