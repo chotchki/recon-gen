@@ -856,6 +856,13 @@ def _layer_command(
         # j.6 — see unit layer comment.
         cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
+        # Operator (2026-06-26) — app2 is a Playwright/WebKit browser tier too; a
+        # wild driver exhausting resources occasionally times out a cascade
+        # refetch (e.g. test_dm_cascade_and_day_availability's pick_filter
+        # expect_response). Match the browser layer's auto-retry so one flake
+        # retries instead of halting the whole chain; a genuinely-broken test
+        # still fails twice → halts. (`pytest-rerunfailures`, [dev] extra.)
+        cmd += ["--reruns", "1", "--reruns-delay", "15"]
         # BV.3.3 fix (2026-06-10) — re-enable `--dist=loadgroup` here ONLY.
         # The BV.3.3 trainer dogfood module pins its session-scope fixture
         # via `pytest.mark.xdist_group("trainer-<dialect>")` (see
